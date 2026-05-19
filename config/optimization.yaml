@@ -55,6 +55,24 @@ cost:
     per_agent:
       default_max_usd: 5.00
 
+# ─── LLM Call Leasing wallet (RFC 0023) ───────────────────
+# Server-side lease lifecycle tuning for the orchestrator's WalletService
+# (internal/wallet) — the in-line gate every LLM call acquires a lease
+# from before issuing. Top-level block (sibling of `cost:`), parsed by the
+# Go orchestrator. An absent block, or an absent key, falls back to the
+# defaults below. See RFC 0023 § B / § D and Open Question §2.
+wallet:
+  # Lease time-to-live, in seconds. The reaper settles a lease still
+  # unsettled this long after issue at its granted (worst-case) amount, so
+  # an agent crash mid-call neither leaks a provisional hold nor frees
+  # spend. Default 60 = 2× the 30 s default per-call timeout (OQ §2).
+  ttl_seconds: 60
+  # How often, in seconds, the reaper scans for expired leases.
+  reaper_interval_seconds: 5
+  # Per-agent cap on concurrently-held (unsettled) leases — a DoS ceiling
+  # (RFC 0023 Security Considerations), keyed on the lease-issuing agent.
+  max_active_leases: 16
+
 # ─── Conversation Window (RFC 0034 Phase 1) ───────────────
 # Top-level defaults for the persona conversation-window transcript
 # reconstruction. NOT a profile block — these apply regardless of

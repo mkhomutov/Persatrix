@@ -17,10 +17,14 @@ import (
 )
 
 // newAgentGRPCServer builds the agent-facing gRPC server — the listener
-// that hosts LogService and, since RFC 0023 PR 1, the WalletService
-// skeleton. Extracted from main() so the orchestrator entry point stays
-// within the file-size budget (cf. ISSUE-0008); the listener lifecycle
-// (net.Listen / Serve / GracefulStop) stays in main().
+// that hosts LogService and, when the cost config loaded, the RFC 0023
+// WalletService. Extracted from main() so the orchestrator entry point
+// stays within the file-size budget (cf. ISSUE-0008); the listener
+// lifecycle (net.Listen / Serve / GracefulStop) stays in main().
+//
+// walletSvc is nil when the cost config failed to load — the wallet
+// composes the budget enforcer, so without it budget enforcement is
+// disabled and no WalletService is registered.
 //
 // PR #173 review Should-Fix #3 — the per-stream + per-server resource
 // budget bounds a single misbehaving (or, until RFC 0009 auth lands,
@@ -58,6 +62,7 @@ func newAgentGRPCServer(
 	logBuf *logbuffer.Buffer,
 	rateLimiter *security.RateLimiter,
 	circuitBreaker *security.CircuitBreaker,
+	walletSvc *wallet.WalletService,
 	logger *zap.Logger,
 ) *grpc.Server {
 	srv := grpc.NewServer(
@@ -77,8 +82,11 @@ func newAgentGRPCServer(
 		),
 	)
 	logpb.RegisterLogServiceServer(srv, server.NewLogServiceServer(logBuf, logger))
-	// RFC 0023 PR 1 — the always-grant WalletService skeleton shares the
-	// agent-facing listener with LogService.
-	walletpb.RegisterWalletServiceServer(srv, wallet.NewWalletService(logger))
+	// RFC 0023 — the enforcing WalletService shares the agent-facing
+	// listener with LogService. Registered only when the cost config
+	// loaded; nil ⇒ budget enforcement is disabled and no wallet is served.
+	if walletSvc != nil {
+		walletpb.RegisterWalletServiceServer(srv, walletSvc)
+	}
 	return srv
 }

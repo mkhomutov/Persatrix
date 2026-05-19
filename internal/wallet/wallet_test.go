@@ -1,15 +1,22 @@
-// Tests for the WalletService gRPC skeleton (RFC 0023 PR 1).
+// Tests for the WalletService gRPC servicer (RFC 0023 PR 2 — real
+// enforcement + reaper).
 //
-// PR 1 is the proto-surface + always-grant skeleton: AcquireLease always
-// returns a LeaseGrant with a server-issued ULID lease_id, and SettleLease /
-// ReleaseLease always return SettlementAck{success: true}. Real budget
-// enforcement, provisional charges, and the reaper land in PR 2 — these tests
-// pin only the skeleton contract.
+// PR 1 landed the always-grant skeleton; PR 2 makes the wallet enforce:
+// AcquireLease composes BudgetEnforcer.CheckBudget under a coarse mutex and
+// records a provisional charge, SettleLease / ReleaseLease reconcile that
+// charge against actuals, and the reaper settles leases abandoned past TTL.
+// These tests pin the real contract — they replace the skeleton tests.
+//
+// This file covers construction and AcquireLease (grant / deny / mutex
+// atomicity / concurrency cap / collision) and holds the shared fixtures.
+// SettleLease / ReleaseLease live in wallet_settle_test.go; the reaper in
+// wallet_reaper_test.go.
 package wallet
 
 import (
 	"context"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,38 +25,39 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/generated/walletpb"
 )
 
-// startBufconnWalletService stands up an in-process gRPC server hosting the
-// WalletService skeleton over a bufconn listener. Returns a connected client
-// and a cleanup func. Mirrors startBufconnLogService in
-// internal/server/logs_service_test.go so registration is exercised the same
-// way the orchestrator exercises it.
-func startBufconnWalletService(t *testing.T) (walletpb.WalletServiceClient, func()) {
-	t.Helper()
-
-	lis := bufconn.Listen(1 << 16)
-	srv := grpc.NewServer()
-	walletpb.RegisterWalletServiceServer(srv, NewWalletService(zap.NewNop()))
-	go func() { _ = srv.Serve(lis) }()
-
-	conn, err := grpc.NewClient("passthrough:///bufnet",
-		grpc.WithContextDialer(func(_ context.Context, _ string) (net.Conn, error) {
-			return lis.Dial()
-		}),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	require.NoError(t, err)
-
-	cleanup := func() {
-		_ = conn.Close()
-		srv.Stop()
+// testCostConfig returns a CostConfig with known pricing and generous
+// budgets. Individual tests tighten a budget scope to exercise denial.
+func testCostConfig() *cost.CostConfig {
+	return &cost.CostConfig{
+		Pricing: map[string]cost.ModelPricing{
+			"claude-sonnet": {InputPer1MTokens: 3.0, OutputPer1MTokens: 15.0},
+			"claude-haiku":  {InputPer1MTokens: 0.8, OutputPer1MTokens: 4.0},
+		},
+		Budgets: cost.BudgetThresholds{
+			Global:      cost.GlobalBudget{MaxDailyUSD: 100.0, OnExceed: "fail"},
+			PerWorkflow: cost.PerWorkflowBudget{DefaultMaxUSD: 10.0},
+			PerAgent:    cost.PerAgentBudget{DefaultMaxUSD: 5.0},
+		},
 	}
-	return walletpb.NewWalletServiceClient(conn), cleanup
+}
+
+// newTestWallet builds a WalletService over a fresh TokenCounter +
+// BudgetEnforcer for the given cost and wallet config.
+func newTestWallet(t *testing.T, costCfg *cost.CostConfig, walletCfg Config, opts ...Option) (*WalletService, *cost.TokenCounter) {
+	t.Helper()
+	counter := cost.NewTokenCounter(costCfg, zap.NewNop())
+	enforcer := cost.NewBudgetEnforcer(counter, costCfg, zap.NewNop())
+	w := NewWalletService(counter, enforcer, walletCfg, zap.NewNop(), opts...)
+	return w, counter
 }
 
 func testContext(t *testing.T) context.Context {
@@ -59,161 +67,274 @@ func testContext(t *testing.T) context.Context {
 	return ctx
 }
 
-// TestNewWalletService_NilLoggerSafe pins the documented nil-logger contract:
-// NewWalletService(nil) substitutes a no-op logger rather than retaining a nil
-// *zap.Logger, so the RPC handlers — every one of which logs — cannot nil-panic.
-// Mirrors the NewLogServiceServer fallback (internal/server/logs_service.go).
-// Exercised directly: the constructor branch sits below the bufconn surface the
-// other tests use, and every gRPC caller (cmd/orchestrator/main.go, the test
-// harness) passes a non-nil logger, so without this the fallback is dead code
-// to the coverage tool.
-func TestNewWalletService_NilLoggerSafe(t *testing.T) {
-	w := NewWalletService(nil)
-	require.NotNil(t, w, "NewWalletService(nil) must return a usable servicer")
-
-	// AcquireLease logs via the (substituted) logger before returning; a
-	// retained nil *zap.Logger would panic here rather than grant.
-	resp, err := w.AcquireLease(context.Background(), &walletpb.LeaseRequest{
-		AgentId: "agent-1",
-		Model:   "claude-sonnet-4-6",
-		Cause:   walletpb.Cause_CAUSE_WORKFLOW_TASK,
-	})
-	require.NoError(t, err)
-	require.NotNil(t, resp.GetGrant(), "skeleton must still grant with the fallback logger")
+// leaseState reads a lease's settled flag and existence under w.mu so the
+// race detector stays quiet when a reaper goroutine is also touching the
+// map. It is a test-only accessor — production code never reads lease state
+// from outside the package.
+func leaseState(w *WalletService, leaseID string) (settled, exists bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	ls, ok := w.active[leaseID]
+	if !ok {
+		return false, false
+	}
+	return ls.settled, true
 }
 
-// TestAcquireLease_GrantsWithULIDLeaseID pins the always-grant contract: every
-// AcquireLease call returns the grant arm of the LeaseResponse oneof, never the
-// denied arm, with a server-issued ULID lease_id and a positive TTL.
-func TestAcquireLease_GrantsWithULIDLeaseID(t *testing.T) {
-	client, cleanup := startBufconnWalletService(t)
-	defer cleanup()
+// startBufconnWalletService stands up an in-process gRPC server hosting w
+// over a bufconn listener, returning a connected client and registering
+// cleanup. It proves the real servicer still satisfies the gRPC surface.
+func startBufconnWalletService(t *testing.T, w *WalletService) walletpb.WalletServiceClient {
+	t.Helper()
+	lis := bufconn.Listen(1 << 16)
+	srv := grpc.NewServer()
+	walletpb.RegisterWalletServiceServer(srv, w)
+	go func() { _ = srv.Serve(lis) }()
 
-	resp, err := client.AcquireLease(testContext(t), &walletpb.LeaseRequest{
-		WorkflowId:               "wf-1",
-		AgentId:                  "agent-1",
-		Model:                    "claude-sonnet-4-6",
-		EstimatedInputTokens:     1000,
-		EstimatedMaxOutputTokens: 2000,
-		Cause:                    walletpb.Cause_CAUSE_WORKFLOW_TASK,
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(_ context.Context, _ string) (net.Conn, error) {
+			return lis.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Close()
+		srv.Stop()
+	})
+	return walletpb.NewWalletServiceClient(conn)
+}
+
+// --- Constructor ---
+
+// TestNewWalletService_NilLoggerSafe pins the nil-logger fallback carried
+// over from the skeleton: NewWalletService(nil logger) substitutes a no-op
+// logger so the RPC handlers — all of which log — cannot nil-panic.
+func TestNewWalletService_NilLoggerSafe(t *testing.T) {
+	counter := cost.NewTokenCounter(testCostConfig(), zap.NewNop())
+	enforcer := cost.NewBudgetEnforcer(counter, testCostConfig(), zap.NewNop())
+	w := NewWalletService(counter, enforcer, DefaultConfig(), nil)
+	require.NotNil(t, w)
+
+	resp, err := w.AcquireLease(context.Background(), &walletpb.LeaseRequest{
+		AgentId: "agent-1", Model: "claude-sonnet",
+		EstimatedInputTokens: 100, EstimatedMaxOutputTokens: 100,
+		Cause: walletpb.Cause_CAUSE_WORKFLOW_TASK,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp.GetGrant(), "wallet must grant within budget even with the fallback logger")
+}
+
+// --- AcquireLease: grant ---
+
+// TestAcquireLease_GrantsWithinBudget pins the grant path: a request within
+// every budget scope returns the grant arm with a server-issued ULID
+// lease_id, the TTL from config, granted tokens echoing the estimates — and
+// the estimate is provisionally charged against the TokenCounter.
+func TestAcquireLease_GrantsWithinBudget(t *testing.T) {
+	walletCfg := Config{TTL: 90 * time.Second, ReaperInterval: time.Hour, MaxActiveLeases: 16}
+	w, counter := newTestWallet(t, testCostConfig(), walletCfg)
+
+	resp, err := w.AcquireLease(testContext(t), &walletpb.LeaseRequest{
+		WorkflowId: "wf-1", AgentId: "agent-a", Model: "claude-sonnet",
+		EstimatedInputTokens: 1000, EstimatedMaxOutputTokens: 2000,
+		Cause: walletpb.Cause_CAUSE_WORKFLOW_TASK,
 	})
 	require.NoError(t, err)
 
 	grant := resp.GetGrant()
-	require.NotNil(t, grant, "skeleton must always return the grant arm of the oneof")
-	assert.Nil(t, resp.GetDenied(), "skeleton must never return the denied arm")
+	require.NotNil(t, grant, "request within budget must return the grant arm")
+	assert.Nil(t, resp.GetDenied())
 
 	_, parseErr := ulid.Parse(grant.GetLeaseId())
 	assert.NoError(t, parseErr, "lease_id %q must parse as a ULID", grant.GetLeaseId())
-	assert.Positive(t, grant.GetTtlSeconds(), "grant must carry a positive ttl_seconds")
+	assert.Equal(t, int64(1000), grant.GetGrantedInputTokens())
+	assert.Equal(t, int64(2000), grant.GetGrantedOutputTokens())
+	assert.Equal(t, int32(90), grant.GetTtlSeconds(), "ttl_seconds must come from wallet config")
+
+	// The estimate is provisionally charged: claude-sonnet
+	// 1000/1M*3.00 + 2000/1M*15.00 = 0.033.
+	_, _, usd := counter.GlobalUsage()
+	assert.InDelta(t, 0.033, usd, 1e-9, "AcquireLease must record a provisional charge")
 }
 
-// TestAcquireLease_GrantedTokensEchoEstimates pins that the skeleton grant
-// echoes the request's token estimates verbatim (RFC 0023 § C — granted_*_tokens
-// == estimated_* in Phase 1).
-func TestAcquireLease_GrantedTokensEchoEstimates(t *testing.T) {
-	client, cleanup := startBufconnWalletService(t)
-	defer cleanup()
+// --- AcquireLease: deny across all three scopes ---
 
+func TestAcquireLease_DeniesAcrossScopes(t *testing.T) {
+	// estMaxOutput 8192 at claude-sonnet output rate: 8192/1M*15 = 0.12288,
+	// which exceeds the 0.01 limit set on whichever scope the case tightens.
 	tests := []struct {
-		name         string
-		estInput     int64
-		estMaxOutput int64
+		name      string
+		tighten   func(*cost.CostConfig)
+		wantScope string
 	}{
-		{name: "typical", estInput: 1500, estMaxOutput: 4096},
-		{name: "zero estimates", estInput: 0, estMaxOutput: 0},
-		{name: "large estimates", estInput: 200000, estMaxOutput: 8192},
+		{
+			name:      "global",
+			tighten:   func(c *cost.CostConfig) { c.Budgets.Global.MaxDailyUSD = 0.01 },
+			wantScope: "global",
+		},
+		{
+			name:      "per_workflow",
+			tighten:   func(c *cost.CostConfig) { c.Budgets.PerWorkflow.DefaultMaxUSD = 0.01 },
+			wantScope: "per_workflow",
+		},
+		{
+			name:      "per_agent",
+			tighten:   func(c *cost.CostConfig) { c.Budgets.PerAgent.DefaultMaxUSD = 0.01 },
+			wantScope: "per_agent",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			resp, err := client.AcquireLease(testContext(t), &walletpb.LeaseRequest{
-				AgentId:                  "agent-1",
-				Model:                    "claude-sonnet-4-6",
-				EstimatedInputTokens:     tc.estInput,
-				EstimatedMaxOutputTokens: tc.estMaxOutput,
-				Cause:                    walletpb.Cause_CAUSE_CHAT,
+			costCfg := testCostConfig()
+			tc.tighten(costCfg)
+			w, counter := newTestWallet(t, costCfg, DefaultConfig())
+
+			resp, err := w.AcquireLease(testContext(t), &walletpb.LeaseRequest{
+				WorkflowId: "wf-1", AgentId: "agent-a", Model: "claude-sonnet",
+				EstimatedInputTokens: 0, EstimatedMaxOutputTokens: 8192,
+				Cause: walletpb.Cause_CAUSE_CHAT,
+			})
+			require.NoError(t, err, "a budget denial is a normal response, not a gRPC error")
+
+			denied := resp.GetDenied()
+			require.NotNil(t, denied, "over-budget request must return the denied arm")
+			assert.Nil(t, resp.GetGrant())
+			assert.Equal(t, tc.wantScope, denied.GetScope())
+			assert.InDelta(t, 0.01, denied.GetLimitUsd(), 1e-9)
+			assert.Greater(t, denied.GetEstimatedUsd(), 0.0)
+			assert.NotEmpty(t, denied.GetMessage())
+
+			// A denied lease records no provisional charge.
+			_, _, usd := counter.GlobalUsage()
+			assert.InDelta(t, 0.0, usd, 1e-9, "denied lease must not be charged")
+		})
+	}
+}
+
+// --- AcquireLease: mutex atomicity ---
+
+// TestAcquireLease_ConcurrentAcquires_NoOverProvision pins the coarse-mutex
+// guarantee: with a budget that admits exactly one lease, two concurrent
+// AcquireLease calls cannot both pass CheckBudget and both provision past
+// the limit — exactly one grants, the other is denied.
+func TestAcquireLease_ConcurrentAcquires_NoOverProvision(t *testing.T) {
+	costCfg := testCostConfig()
+	// One claude-sonnet call of 100000 output tokens costs 1.50; the
+	// per-agent budget of 2.00 admits exactly one such lease.
+	costCfg.Budgets.PerAgent.DefaultMaxUSD = 2.00
+	w, _ := newTestWallet(t, costCfg, DefaultConfig())
+
+	const n = 2
+	results := make([]*walletpb.LeaseResponse, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := range n {
+		go func(i int) {
+			defer wg.Done()
+			resp, err := w.AcquireLease(context.Background(), &walletpb.LeaseRequest{
+				AgentId: "agent-a", Model: "claude-sonnet",
+				EstimatedInputTokens: 0, EstimatedMaxOutputTokens: 100000,
+				Cause: walletpb.Cause_CAUSE_CHAT,
 			})
 			require.NoError(t, err)
-			grant := resp.GetGrant()
-			require.NotNil(t, grant)
-			assert.Equal(t, tc.estInput, grant.GetGrantedInputTokens())
-			assert.Equal(t, tc.estMaxOutput, grant.GetGrantedOutputTokens())
-		})
+			results[i] = resp
+		}(i)
 	}
+	wg.Wait()
+
+	grants, denials := 0, 0
+	for _, r := range results {
+		if r.GetGrant() != nil {
+			grants++
+		}
+		if d := r.GetDenied(); d != nil {
+			denials++
+			assert.Equal(t, "per_agent", d.GetScope())
+		}
+	}
+	assert.Equal(t, 1, grants, "exactly one concurrent acquire may grant")
+	assert.Equal(t, 1, denials, "the second concurrent acquire must be denied")
 }
 
-// TestAcquireLease_IssuesUniqueLeaseIDs pins that each acquisition gets a
-// distinct lease_id — the skeleton's Settle/Release already exercise the real
-// server-issued ID shape, so collisions must not occur.
-func TestAcquireLease_IssuesUniqueLeaseIDs(t *testing.T) {
-	client, cleanup := startBufconnWalletService(t)
-	defer cleanup()
+// --- AcquireLease: per-agent concurrency cap ---
 
-	seen := make(map[string]struct{})
-	for i := 0; i < 50; i++ {
-		resp, err := client.AcquireLease(testContext(t), &walletpb.LeaseRequest{
-			AgentId: "agent-1",
-			Model:   "claude-sonnet-4-6",
-			Cause:   walletpb.Cause_CAUSE_AUTONOMOUS_TICK,
-		})
+// TestAcquireLease_MaxActiveLeasesCap pins the per-agent DoS ceiling: an
+// agent may hold at most MaxActiveLeases unsettled leases; the next
+// acquisition is rejected with codes.ResourceExhausted. Settling a lease
+// frees a slot.
+func TestAcquireLease_MaxActiveLeasesCap(t *testing.T) {
+	walletCfg := Config{TTL: time.Hour, ReaperInterval: time.Hour, MaxActiveLeases: 3}
+	w, _ := newTestWallet(t, testCostConfig(), walletCfg)
+
+	req := &walletpb.LeaseRequest{
+		AgentId: "agent-cap", Model: "claude-sonnet",
+		EstimatedInputTokens: 10, EstimatedMaxOutputTokens: 10,
+		Cause: walletpb.Cause_CAUSE_AUTONOMOUS_TICK,
+	}
+
+	var leaseIDs []string
+	for range 3 {
+		resp, err := w.AcquireLease(testContext(t), req)
 		require.NoError(t, err)
-		id := resp.GetGrant().GetLeaseId()
-		require.NotEmpty(t, id)
-		_, dup := seen[id]
-		require.False(t, dup, "lease_id %q issued twice", id)
-		seen[id] = struct{}{}
+		require.NotNil(t, resp.GetGrant())
+		leaseIDs = append(leaseIDs, resp.GetGrant().GetLeaseId())
 	}
-}
 
-// TestSettleLease_AlwaysSucceeds pins the skeleton SettleLease contract: any
-// lease_id settles successfully. PR 2 makes this reject unknown IDs.
-func TestSettleLease_AlwaysSucceeds(t *testing.T) {
-	client, cleanup := startBufconnWalletService(t)
-	defer cleanup()
+	// Fourth acquisition is over the cap.
+	_, err := w.AcquireLease(testContext(t), req)
+	require.Error(t, err, "acquisition over the cap must be rejected")
+	assert.Equal(t, codes.ResourceExhausted, status.Code(err))
 
-	for _, leaseID := range []string{ulid.Make().String(), "not-a-real-lease", ""} {
-		ack, err := client.SettleLease(testContext(t), &walletpb.SettlementRequest{
-			LeaseId:            leaseID,
-			ActualInputTokens:  900,
-			ActualOutputTokens: 1800,
-		})
-		require.NoError(t, err)
-		assert.True(t, ack.GetSuccess(), "skeleton SettleLease must succeed for lease_id %q", leaseID)
-	}
-}
-
-// TestReleaseLease_AlwaysSucceeds pins the skeleton ReleaseLease contract: any
-// lease_id releases successfully. PR 2 makes this reject unknown IDs.
-func TestReleaseLease_AlwaysSucceeds(t *testing.T) {
-	client, cleanup := startBufconnWalletService(t)
-	defer cleanup()
-
-	for _, leaseID := range []string{ulid.Make().String(), "not-a-real-lease", ""} {
-		ack, err := client.ReleaseLease(testContext(t), &walletpb.ReleaseRequest{
-			LeaseId: leaseID,
-			Reason:  "aborted",
-		})
-		require.NoError(t, err)
-		assert.True(t, ack.GetSuccess(), "skeleton ReleaseLease must succeed for lease_id %q", leaseID)
-	}
-}
-
-// TestAcquireLease_RoundTripsThroughSettle pins the end-to-end skeleton path:
-// a lease acquired from AcquireLease can be settled with its own lease_id.
-func TestAcquireLease_RoundTripsThroughSettle(t *testing.T) {
-	client, cleanup := startBufconnWalletService(t)
-	defer cleanup()
-
-	resp, err := client.AcquireLease(testContext(t), &walletpb.LeaseRequest{
-		AgentId: "agent-1",
-		Model:   "claude-sonnet-4-6",
-		Cause:   walletpb.Cause_CAUSE_SUB_AGENT,
+	// A different agent is unaffected by agent-cap's leases.
+	resp, err := w.AcquireLease(testContext(t), &walletpb.LeaseRequest{
+		AgentId: "agent-other", Model: "claude-sonnet",
+		EstimatedInputTokens: 10, EstimatedMaxOutputTokens: 10,
+		Cause: walletpb.Cause_CAUSE_AUTONOMOUS_TICK,
 	})
 	require.NoError(t, err)
-	leaseID := resp.GetGrant().GetLeaseId()
-	require.NotEmpty(t, leaseID)
+	assert.NotNil(t, resp.GetGrant(), "the cap is per-agent, not global")
 
-	ack, err := client.SettleLease(testContext(t), &walletpb.SettlementRequest{LeaseId: leaseID})
+	// Settling one of agent-cap's leases frees a slot.
+	ack, err := w.SettleLease(testContext(t), &walletpb.SettlementRequest{
+		LeaseId: leaseIDs[0], ActualInputTokens: 10, ActualOutputTokens: 10,
+	})
 	require.NoError(t, err)
-	assert.True(t, ack.GetSuccess())
+	require.True(t, ack.GetSuccess())
+
+	resp, err = w.AcquireLease(testContext(t), req)
+	require.NoError(t, err)
+	assert.NotNil(t, resp.GetGrant(), "settling a lease must free a cap slot")
+}
+
+// --- AcquireLease: lease-ID collision ---
+
+// TestAcquireLease_LeaseIDCollisionRejected pins that a server-issued
+// lease_id colliding with an in-flight lease is rejected with codes.Internal
+// rather than overwriting live lease state. The ID generator is injected so
+// the (astronomically unlikely) collision is deterministic.
+func TestAcquireLease_LeaseIDCollisionRejected(t *testing.T) {
+	w, counter := newTestWallet(t, testCostConfig(), DefaultConfig(),
+		WithIDGenerator(func() string { return "DUPLICATE-LEASE-ID" }))
+
+	req := &walletpb.LeaseRequest{
+		AgentId: "agent-a", Model: "claude-sonnet",
+		EstimatedInputTokens: 100, EstimatedMaxOutputTokens: 100,
+		Cause: walletpb.Cause_CAUSE_WORKFLOW_TASK,
+	}
+
+	resp, err := w.AcquireLease(testContext(t), req)
+	require.NoError(t, err)
+	require.Equal(t, "DUPLICATE-LEASE-ID", resp.GetGrant().GetLeaseId())
+
+	_, _, usdAfterFirst := counter.GlobalUsage()
+
+	_, err = w.AcquireLease(testContext(t), req)
+	require.Error(t, err, "a colliding lease_id must be rejected")
+	assert.Equal(t, codes.Internal, status.Code(err))
+
+	// The rejected acquisition must not have recorded a provisional charge.
+	_, _, usdAfterCollision := counter.GlobalUsage()
+	assert.InDelta(t, usdAfterFirst, usdAfterCollision, 1e-9,
+		"a collision-rejected acquire must not charge the counter")
 }

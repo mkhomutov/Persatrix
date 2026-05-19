@@ -1,62 +1,201 @@
 // Package wallet implements the orchestrator-side WalletService — the
 // in-line gatekeeper every LLM call acquires a lease from before issuing.
 //
-// RFC 0023 PR 1 lands the always-grant skeleton: it proves the proto
-// contract compiles, the stubs generate, and the servicer registers on the
-// orchestrator's gRPC listener. It carries no enforcement semantics —
-// AcquireLease always grants, SettleLease / ReleaseLease always succeed.
-// Real BudgetEnforcer wiring, provisional charges, and the TTL reaper land
-// in PR 2 (RFC 0023 § D); call-site wiring lands in PRs 3–6.
+// RFC 0023 PR 1 landed the always-grant skeleton. PR 2 makes the wallet
+// enforce: AcquireLease composes cost.BudgetEnforcer.CheckBudget under a
+// coarse mutex and records a provisional charge against cost.TokenCounter;
+// SettleLease / ReleaseLease reconcile that charge against the actual
+// usage; and a background reaper settles leases abandoned past their TTL
+// at the granted (worst-case) amount so an agent crash can neither leak a
+// provisional hold nor silently free spend.
 //
-// See docs/rfcs/0023-llm-call-leasing.md and docs/rfcs/0023-pr-plan.md.
+// Call-site wiring — the Python agent acquiring leases around its LLM
+// calls — lands in PRs 3–6. PR 2 leaves the wallet unit-tested in isolation.
+//
+// See docs/rfcs/0023-llm-call-leasing.md (§ B, § D, § F) and
+// docs/rfcs/0023-pr-plan.md.
 package wallet
 
 import (
 	"context"
+	"runtime/debug"
+	"sync"
+	"time"
 
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
+	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/generated/walletpb"
 )
-
-// skeletonTTLSeconds is the placeholder lease TTL the PR 1 skeleton stamps on
-// every grant. PR 2 replaces it with the configurable `wallet.ttl_seconds`
-// key (default 2× the max per-call timeout, capped at 120 s — RFC 0023 Open
-// Question §2). It is a positive constant here only so the skeleton already
-// exercises a non-zero TTL field on the wire.
-const skeletonTTLSeconds int32 = 60
 
 // WalletService is the gRPC WalletService implementation registered on the
 // orchestrator's agent-facing gRPC server (the listener that already hosts
 // LogService — RFC 0023 Open Question §1).
 //
-// PR 1 is the inert skeleton: it holds no lease state and composes no
-// BudgetEnforcer. PR 2 adds the in-flight lease map, the coarse mutex
-// guarding check-then-provision, and the reaper goroutine.
+// It composes cost.TokenCounter and cost.BudgetEnforcer rather than
+// replacing them: the lease ledger reuses today's per-workflow / per-agent
+// / global counters — only the enforcement point moves in-line.
 type WalletService struct {
 	walletpb.UnimplementedWalletServiceServer
 
-	logger *zap.Logger
+	counter  *cost.TokenCounter
+	enforcer *cost.BudgetEnforcer
+	cfg      Config
+	logger   *zap.Logger
+	// newID issues a server-side lease ID. It is a field so tests can force
+	// the (astronomically unlikely) ULID collision deterministically;
+	// production uses ulid.Make.
+	newID func() string
+
+	// mu guards active. AcquireLease holds it across CheckBudget +
+	// RecordProvisional so the read-then-write is atomic — two concurrent
+	// acquires cannot both pass the budget check and both provision past
+	// the limit. RFC 0023 § D documents this as the parallel-step optimism
+	// (scheduler/stage_runner.go) the wallet must not inherit.
+	mu     sync.Mutex
+	active map[string]*lease
 }
 
-// NewWalletService constructs a WalletService skeleton. A nil logger is
-// replaced with a no-op logger, matching NewLogServiceServer.
-func NewWalletService(logger *zap.Logger) *WalletService {
+// lease is an in-flight (or recently-closed) lease tracked for settlement
+// and reaping. A lease stays in WalletService.active — with settled set —
+// after it closes, so a late Settle racing the reaper resolves to a
+// monotone-safe no-op; the reaper purges it once the late-settle window has
+// elapsed.
+type lease struct {
+	workflowID, agentID, model  string
+	grantedInput, grantedOutput int64
+	cause                       walletpb.Cause
+	issuedAt                    time.Time
+	ttl                         time.Duration
+	settled                     bool
+}
+
+// Option customises a WalletService at construction.
+type Option func(*WalletService)
+
+// WithIDGenerator overrides the lease-ID generator. Intended for tests that
+// need a deterministic ID (e.g. to exercise the collision path); production
+// callers omit it and get ULIDs.
+func WithIDGenerator(fn func() string) Option {
+	return func(w *WalletService) {
+		if fn != nil {
+			w.newID = fn
+		}
+	}
+}
+
+// NewWalletService constructs an enforcing WalletService. counter and
+// enforcer must be non-nil — the orchestrator builds the wallet only when
+// the cost config loaded. A nil logger is replaced with a no-op logger,
+// matching NewLogServiceServer.
+func NewWalletService(
+	counter *cost.TokenCounter,
+	enforcer *cost.BudgetEnforcer,
+	cfg Config,
+	logger *zap.Logger,
+	opts ...Option,
+) *WalletService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &WalletService{logger: logger}
+	w := &WalletService{
+		counter:  counter,
+		enforcer: enforcer,
+		cfg:      cfg,
+		logger:   logger,
+		newID:    func() string { return ulid.Make().String() },
+		active:   make(map[string]*lease),
+	}
+	for _, opt := range opts {
+		opt(w)
+	}
+	return w
 }
 
-// AcquireLease issues a lease for an LLM call. The PR 1 skeleton always
-// grants: it returns a LeaseGrant with a server-issued ULID lease_id, echoes
-// the request's token estimates as the granted amounts, and stamps the
-// skeleton TTL. PR 2 composes BudgetEnforcer.CheckBudget here and may instead
-// return the LeaseDenied arm of the oneof.
+// AcquireLease issues a lease for an LLM call, or denies it. It enforces
+// the per-agent concurrency cap, then composes BudgetEnforcer.CheckBudget;
+// on a positive decision it records a provisional worst-case charge and
+// tracks the lease for settlement / reaping.
 func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseRequest) (*walletpb.LeaseResponse, error) {
-	leaseID := ulid.Make().String()
-	w.logger.Debug("wallet: lease granted (skeleton — no enforcement)",
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Per-agent concurrency cap — a DoS ceiling (RFC 0023 Security
+	// Considerations), keyed on the lease-issuing agent and surfaced as
+	// codes.ResourceExhausted, distinct from a budget denial.
+	if n := w.activeLeasesForLocked(req.GetAgentId()); n >= w.cfg.MaxActiveLeases {
+		w.logger.Warn("wallet: lease denied — per-agent active-lease cap reached",
+			zap.String("agent_id", req.GetAgentId()),
+			zap.Int("active", n),
+			zap.Int("max_active_leases", w.cfg.MaxActiveLeases),
+		)
+		return nil, status.Errorf(codes.ResourceExhausted,
+			"agent %q holds %d active leases, max is %d",
+			req.GetAgentId(), n, w.cfg.MaxActiveLeases)
+	}
+
+	// Budget check. CheckBudget prices the combined estimate as output
+	// tokens — its single-number API is intentionally pessimistic; the
+	// provisional charge below uses the honest input/output split.
+	estimatedTokens := req.GetEstimatedInputTokens() + req.GetEstimatedMaxOutputTokens()
+	decision := w.enforcer.CheckBudget(req.GetWorkflowId(), req.GetAgentId(), req.GetModel(), estimatedTokens)
+	if decision.Decision == cost.BudgetReject {
+		be := decision.Error
+		w.logger.Warn("wallet: lease denied — budget exceeded",
+			zap.String("scope", be.Scope),
+			zap.String("workflow_id", req.GetWorkflowId()),
+			zap.String("agent_id", req.GetAgentId()),
+			zap.String("cause", req.GetCause().String()),
+			zap.Float64("spent_usd", be.Spent),
+			zap.Float64("limit_usd", be.Limit),
+			zap.Float64("estimated_usd", be.Estimated),
+		)
+		return &walletpb.LeaseResponse{
+			Outcome: &walletpb.LeaseResponse_Denied{
+				Denied: &walletpb.LeaseDenied{
+					Scope:        be.Scope,
+					SpentUsd:     be.Spent,
+					LimitUsd:     be.Limit,
+					EstimatedUsd: be.Estimated,
+					Message:      be.Error(),
+				},
+			},
+		}, nil
+	}
+
+	// Server-issued lease ID. A collision with a live lease is a server
+	// bug; fail closed rather than overwrite in-flight lease state.
+	leaseID := w.newID()
+	if _, exists := w.active[leaseID]; exists {
+		w.logger.Error("wallet: lease-id collision — rejecting acquisition",
+			zap.String("lease_id", leaseID))
+		return nil, status.Errorf(codes.Internal, "lease-id collision: %q", leaseID)
+	}
+
+	// Provisional worst-case charge against all three scopes, held until
+	// SettleLease / ReleaseLease (or the reaper) reconciles it.
+	w.counter.RecordProvisional(leaseID, cost.UsageRecord{
+		WorkflowID:   req.GetWorkflowId(),
+		AgentID:      req.GetAgentId(),
+		Model:        req.GetModel(),
+		InputTokens:  req.GetEstimatedInputTokens(),
+		OutputTokens: req.GetEstimatedMaxOutputTokens(),
+	})
+	w.active[leaseID] = &lease{
+		workflowID:    req.GetWorkflowId(),
+		agentID:       req.GetAgentId(),
+		model:         req.GetModel(),
+		grantedInput:  req.GetEstimatedInputTokens(),
+		grantedOutput: req.GetEstimatedMaxOutputTokens(),
+		cause:         req.GetCause(),
+		issuedAt:      time.Now(),
+		ttl:           w.cfg.TTL,
+	}
+
+	w.logger.Debug("wallet: lease granted",
 		zap.String("lease_id", leaseID),
 		zap.String("workflow_id", req.GetWorkflowId()),
 		zap.String("agent_id", req.GetAgentId()),
@@ -69,31 +208,168 @@ func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseReque
 				LeaseId:             leaseID,
 				GrantedInputTokens:  req.GetEstimatedInputTokens(),
 				GrantedOutputTokens: req.GetEstimatedMaxOutputTokens(),
-				TtlSeconds:          skeletonTTLSeconds,
+				TtlSeconds:          int32(w.cfg.TTL.Seconds()),
 			},
 		},
 	}, nil
 }
 
-// SettleLease records actual usage for a lease. The PR 1 skeleton always
-// acknowledges success. PR 2 reconciles the provisional charge against the
-// reported actuals and rejects unknown lease IDs.
+// SettleLease records actual usage for a lease, reconciling the provisional
+// charge against the provider-reported actuals.
 func (w *WalletService) SettleLease(_ context.Context, req *walletpb.SettlementRequest) (*walletpb.SettlementAck, error) {
-	w.logger.Debug("wallet: lease settled (skeleton — no reconciliation)",
-		zap.String("lease_id", req.GetLeaseId()),
-		zap.Int64("actual_input_tokens", req.GetActualInputTokens()),
-		zap.Int64("actual_output_tokens", req.GetActualOutputTokens()),
-	)
-	return &walletpb.SettlementAck{Success: true}, nil
+	return w.finalize(req.GetLeaseId(), req.GetActualInputTokens(), req.GetActualOutputTokens(), "settle"), nil
 }
 
-// ReleaseLease reverses a lease whose call did not happen. The PR 1 skeleton
-// always acknowledges success. PR 2 reverses the provisional charge and
-// rejects unknown lease IDs.
+// ReleaseLease reverses a lease whose LLM call did not happen — it is a
+// SettleLease with zero actuals, fully reversing the provisional charge.
 func (w *WalletService) ReleaseLease(_ context.Context, req *walletpb.ReleaseRequest) (*walletpb.SettlementAck, error) {
-	w.logger.Debug("wallet: lease released (skeleton — no reversal)",
+	w.logger.Debug("wallet: release requested",
 		zap.String("lease_id", req.GetLeaseId()),
 		zap.String("reason", req.GetReason()),
 	)
-	return &walletpb.SettlementAck{Success: true}, nil
+	return w.finalize(req.GetLeaseId(), 0, 0, "release"), nil
+}
+
+// finalize is the shared body of SettleLease and ReleaseLease: it
+// reconciles a lease's provisional charge with the given actuals and marks
+// the lease settled. An unknown lease is rejected; an already-settled lease
+// resolves to a monotone-safe no-op (RFC 0023 § F — a late Settle racing
+// the reaper does not revise the granted charge).
+func (w *WalletService) finalize(leaseID string, actualInput, actualOutput int64, op string) *walletpb.SettlementAck {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	ls, ok := w.active[leaseID]
+	if !ok {
+		// Never issued, or purged after the late-settle window elapsed.
+		// The wallet rejects unknown IDs (RFC 0023 Security
+		// Considerations); there is no provisional charge to manipulate.
+		w.logger.Warn("wallet: "+op+" rejected — unknown lease",
+			zap.String("lease_id", leaseID))
+		return &walletpb.SettlementAck{Success: false, ErrorMessage: "unknown lease: " + leaseID}
+	}
+	if ls.settled {
+		// A Settle/Release/reap already closed this lease. Monotone-safe:
+		// the charge already applied stands; reconciling again is rejected.
+		w.logger.Debug("wallet: "+op+" is a no-op — lease already settled",
+			zap.String("lease_id", leaseID))
+		return &walletpb.SettlementAck{Success: true, ErrorMessage: "noop: lease already settled"}
+	}
+	if err := w.counter.Reconcile(leaseID, actualInput, actualOutput); err != nil {
+		// The lease was unsettled in w.active but carried no provisional
+		// charge — only ResetDaily clears one out from under a live lease.
+		// Treat as a benign no-op rather than a failure.
+		ls.settled = true
+		w.logger.Warn("wallet: "+op+" reconcile miss — provisional already cleared",
+			zap.String("lease_id", leaseID), zap.Error(err))
+		return &walletpb.SettlementAck{Success: true, ErrorMessage: "noop: provisional already cleared"}
+	}
+	ls.settled = true
+	w.logger.Debug("wallet: lease "+op+"d",
+		zap.String("lease_id", leaseID),
+		zap.Int64("actual_input_tokens", actualInput),
+		zap.Int64("actual_output_tokens", actualOutput),
+	)
+	return &walletpb.SettlementAck{Success: true}
+}
+
+// activeLeasesForLocked counts the in-flight (unsettled) leases held by
+// agentID. The caller must hold w.mu. The scan is O(len(active)); RFC 0023
+// § D accepts this — lease churn is rare relative to the LLM-call latency
+// it gates.
+func (w *WalletService) activeLeasesForLocked(agentID string) int {
+	n := 0
+	for _, ls := range w.active {
+		if ls.agentID == agentID && !ls.settled {
+			n++
+		}
+	}
+	return n
+}
+
+// RunReaper drives the TTL reaper until ctx is cancelled. It is the
+// background daemon of the wallet — run it in its own goroutine. Every
+// cfg.ReaperInterval it settles leases left unsettled past their TTL at the
+// granted, pessimistic amount, and purges leases closed long enough ago
+// that a retrying agent's late settle is no longer expected.
+func (w *WalletService) RunReaper(ctx context.Context) {
+	ticker := time.NewTicker(w.cfg.ReaperInterval)
+	defer ticker.Stop()
+	w.logger.Info("wallet: reaper started",
+		zap.Duration("interval", w.cfg.ReaperInterval),
+		zap.Duration("ttl", w.cfg.TTL),
+	)
+	for {
+		select {
+		case <-ctx.Done():
+			w.logger.Info("wallet: reaper stopped")
+			return
+		case <-ticker.C:
+			// guardReap recovers a panic in the pass so the next tick still
+			// fires — a gRPC server interceptor never wraps a background
+			// goroutine (ISSUE-0059 piece 2).
+			guardReap(w.logger, func() { w.reapExpired(time.Now()) })
+		}
+	}
+}
+
+// guardReap runs fn under a panic guard, recovering and logging any panic
+// so a single bad reaper pass cannot crash the orchestrator. The reaper
+// goroutine is not an RPC-handler frame, so the agent-facing gRPC server's
+// recovery interceptor cannot cover it — see ISSUE-0059 piece (2).
+func guardReap(logger *zap.Logger, fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("wallet: reaper pass panicked, recovered",
+				zap.Any("panic", r),
+				zap.ByteString("stack", debug.Stack()),
+			)
+		}
+	}()
+	fn()
+}
+
+// reapExpired runs one reaper pass against the wall-clock time now. It is
+// separated from RunReaper's ticker loop so the settle/purge logic is
+// unit-testable without sleeping.
+//
+//   - A lease unsettled past issuedAt+ttl is settled at the granted
+//     (worst-case) amount — pessimistic, so an agent crash mid-call cannot
+//     free budget that may have been spent on an in-flight provider request
+//     (RFC 0023 § F).
+//   - A lease closed before now-2*ttl is purged: the late-settle no-op
+//     window has elapsed, so dropping it bounds the in-flight map.
+func (w *WalletService) reapExpired(now time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	reaped, purged := 0, 0
+	for leaseID, ls := range w.active {
+		switch {
+		case !ls.settled && now.After(ls.issuedAt.Add(ls.ttl)):
+			// Settle at the granted amount. granted == the estimate the
+			// provisional was recorded with, so the delta is ~zero — the
+			// provisional charge becomes the lease's permanent charge.
+			if err := w.counter.Reconcile(leaseID, ls.grantedInput, ls.grantedOutput); err != nil {
+				w.logger.Warn("wallet: reaper reconcile miss",
+					zap.String("lease_id", leaseID), zap.Error(err))
+			}
+			ls.settled = true
+			reaped++
+			w.logger.Warn("wallet: lease reaped — settled at granted amount on TTL expiry",
+				zap.String("lease_id", leaseID),
+				zap.String("agent_id", ls.agentID),
+				zap.String("cause", ls.cause.String()),
+			)
+		case ls.settled && now.After(ls.issuedAt.Add(2*ls.ttl)):
+			delete(w.active, leaseID)
+			purged++
+		}
+	}
+	if reaped > 0 || purged > 0 {
+		w.logger.Debug("wallet: reaper pass complete",
+			zap.Int("reaped", reaped),
+			zap.Int("purged", purged),
+		)
+	}
 }
