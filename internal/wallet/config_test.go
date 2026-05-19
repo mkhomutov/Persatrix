@@ -91,23 +91,43 @@ func TestLoadConfig_InvalidYAML(t *testing.T) {
 	assert.Contains(t, err.Error(), "parse optimization config")
 }
 
-// TestLoadConfig_NegativeValues pins validation: a negative tuning value is
-// rejected with a message naming the offending key.
-func TestLoadConfig_NegativeValues(t *testing.T) {
+// TestLoadConfig_RejectsSubMinimumValues pins validation: a tuning value
+// below the schema's `minimum: 1` bound — zero or negative — is rejected
+// with a message naming the offending key, rather than silently falling
+// back to the default. An explicit `0` is a likely operator mistake;
+// schemas/optimization.schema.json rejects it at `make validate`, so the
+// loader rejects it too and the two enforcement layers agree (a present
+// key is honoured only when present, distinct from an omitted key).
+func TestLoadConfig_RejectsSubMinimumValues(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
 		want string
 	}{
 		{
+			name: "zero ttl",
+			body: "wallet:\n  ttl_seconds: 0\n",
+			want: "ttl_seconds",
+		},
+		{
 			name: "negative ttl",
 			body: "wallet:\n  ttl_seconds: -1\n",
 			want: "ttl_seconds",
 		},
 		{
+			name: "zero reaper interval",
+			body: "wallet:\n  reaper_interval_seconds: 0\n",
+			want: "reaper_interval_seconds",
+		},
+		{
 			name: "negative reaper interval",
 			body: "wallet:\n  reaper_interval_seconds: -5\n",
 			want: "reaper_interval_seconds",
+		},
+		{
+			name: "zero max active leases",
+			body: "wallet:\n  max_active_leases: 0\n",
+			want: "max_active_leases",
 		},
 		{
 			name: "negative max active leases",
@@ -123,4 +143,21 @@ func TestLoadConfig_NegativeValues(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.want)
 		})
 	}
+}
+
+// TestLoadConfig_OmittedKeyDistinctFromZero pins that an omitted key falls
+// back to the default while an explicit `0` is rejected — the two are
+// distinguishable, so a deployment that simply does not tune a key is not
+// punished for the same value an explicit `0` is rejected for.
+func TestLoadConfig_OmittedKeyDistinctFromZero(t *testing.T) {
+	// Omitted ttl_seconds: defaults, no error.
+	dir := writeOptimizationYAML(t, "wallet:\n  reaper_interval_seconds: 10\n")
+	c, err := LoadConfig(dir)
+	require.NoError(t, err)
+	assert.Equal(t, DefaultConfig().TTL, c.TTL, "an omitted key falls back to the default")
+
+	// Explicit ttl_seconds: 0: rejected.
+	dir = writeOptimizationYAML(t, "wallet:\n  ttl_seconds: 0\n")
+	_, err = LoadConfig(dir)
+	require.Error(t, err, "an explicit zero is rejected, not silently defaulted")
 }

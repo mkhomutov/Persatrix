@@ -237,19 +237,6 @@ func main() {
 		)
 	}
 
-	// RFC 0023 — LLM Call Leasing: wallet lease-lifecycle tuning (TTL,
-	// reaper interval, per-agent concurrency cap). An absent `wallet:`
-	// block falls back to defaults; a malformed block is non-fatal — the
-	// orchestrator logs and uses defaults rather than refusing to start.
-	walletCfg, err := wallet.LoadConfig(*configDir)
-	if err != nil {
-		logger.Warn("failed to load wallet config, using defaults",
-			zap.String("configDir", *configDir),
-			zap.Error(err),
-		)
-		walletCfg = wallet.DefaultConfig()
-	}
-
 	// TODO(v0.2): Wire reporter.ResetDaily() to a midnight timer so daily budget
 	// limits actually reset and the CostReporter.perWorkflowSteps map doesn't grow
 	// unboundedly in long-running processes. Until then, ResetDaily() is only
@@ -272,6 +259,19 @@ func main() {
 		// Initialize response cache from optimization.yaml caching config.
 		responseCache := cost.NewResponseCache(10000, time.Hour, logger)
 		execOpts = append(execOpts, executor.WithResponseCache(responseCache))
+
+		// RFC 0023 — LLM Call Leasing: wallet lease-lifecycle tuning. Loaded
+		// inside the cost-config guard — the wallet composes the budget
+		// enforcer, so with no cost config there is no WalletService to
+		// configure. A malformed block is non-fatal: log and use defaults.
+		walletCfg, err := wallet.LoadConfig(*configDir)
+		if err != nil {
+			logger.Warn("failed to load wallet config, using defaults",
+				zap.String("configDir", *configDir),
+				zap.Error(err),
+			)
+			walletCfg = wallet.DefaultConfig()
+		}
 
 		walletSvc = wallet.NewWalletService(tokenCounter, budgetEnforcer, walletCfg, logger)
 

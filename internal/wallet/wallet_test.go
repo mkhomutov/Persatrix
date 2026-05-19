@@ -125,6 +125,26 @@ func TestNewWalletService_NilLoggerSafe(t *testing.T) {
 	require.NotNil(t, resp.GetGrant(), "wallet must grant within budget even with the fallback logger")
 }
 
+// TestNewWalletService_PanicsOnNilDependency pins the nil-required-dependency
+// guard: counter and enforcer are load-bearing — AcquireLease nil-derefs both
+// on the first inbound lease — so a nil either is a programming error caught
+// at construction, not as an obscure panic on the first RPC. Matches the
+// NewCostReporter / NewLogServiceServer nil-guard convention.
+func TestNewWalletService_PanicsOnNilDependency(t *testing.T) {
+	counter := cost.NewTokenCounter(testCostConfig(), zap.NewNop())
+	enforcer := cost.NewBudgetEnforcer(counter, testCostConfig(), zap.NewNop())
+
+	assert.PanicsWithValue(t,
+		"wallet: NewWalletService requires a non-nil TokenCounter",
+		func() { NewWalletService(nil, enforcer, DefaultConfig(), zap.NewNop()) },
+		"a nil TokenCounter must panic at construction")
+
+	assert.PanicsWithValue(t,
+		"wallet: NewWalletService requires a non-nil BudgetEnforcer",
+		func() { NewWalletService(counter, nil, DefaultConfig(), zap.NewNop()) },
+		"a nil BudgetEnforcer must panic at construction")
+}
+
 // --- AcquireLease: grant ---
 
 // TestAcquireLease_GrantsWithinBudget pins the grant path: a request within

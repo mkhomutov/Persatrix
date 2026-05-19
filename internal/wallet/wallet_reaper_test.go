@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/mkhomutov/persatrix/internal/generated/walletpb"
 )
@@ -125,6 +127,43 @@ func TestReaper_PurgesLongClosedLeases(t *testing.T) {
 	w.reapExpired(time.Now().Add(2*walletCfg.TTL + time.Second))
 	_, exists = leaseState(w, leaseID)
 	assert.False(t, exists, "a long-closed lease must be purged from the in-flight map")
+}
+
+// TestReaper_FreesConcurrencyCapSlot pins that a reaped lease no longer
+// counts toward the per-agent concurrency cap: settling a lease on TTL
+// expiry marks it settled, and activeLeasesForLocked counts only unsettled
+// leases. Reaping keeps the spend (the granted charge stands) but must not
+// also permanently consume the agent's DoS-ceiling slots — an agent whose
+// leases were reaped after a crash is not locked out of acquiring again.
+func TestReaper_FreesConcurrencyCapSlot(t *testing.T) {
+	walletCfg := Config{TTL: 30 * time.Second, ReaperInterval: time.Hour, MaxActiveLeases: 2}
+	w, _ := newTestWallet(t, testCostConfig(), walletCfg)
+
+	req := &walletpb.LeaseRequest{
+		AgentId: "agent-crashed", Model: "claude-sonnet",
+		EstimatedInputTokens: 10, EstimatedMaxOutputTokens: 10,
+		Cause: walletpb.Cause_CAUSE_WORKFLOW_TASK,
+	}
+
+	// Fill the agent's cap with leases it then abandons.
+	for range walletCfg.MaxActiveLeases {
+		resp, err := w.AcquireLease(testContext(t), req)
+		require.NoError(t, err)
+		require.NotNil(t, resp.GetGrant())
+	}
+
+	// At the cap, the next acquisition is rejected.
+	_, err := w.AcquireLease(testContext(t), req)
+	require.Error(t, err, "acquisition at the cap must be rejected")
+	assert.Equal(t, codes.ResourceExhausted, status.Code(err))
+
+	// The reaper settles the abandoned leases past their TTL.
+	w.reapExpired(time.Now().Add(walletCfg.TTL + time.Second))
+
+	// Reaping freed the slots — the agent may acquire again.
+	resp, err := w.AcquireLease(testContext(t), req)
+	require.NoError(t, err, "a reaped lease must free a per-agent cap slot")
+	assert.NotNil(t, resp.GetGrant())
 }
 
 // --- Reaper goroutine ---

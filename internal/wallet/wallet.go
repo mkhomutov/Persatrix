@@ -88,9 +88,13 @@ func WithIDGenerator(fn func() string) Option {
 }
 
 // NewWalletService constructs an enforcing WalletService. counter and
-// enforcer must be non-nil — the orchestrator builds the wallet only when
-// the cost config loaded. A nil logger is replaced with a no-op logger,
-// matching NewLogServiceServer.
+// enforcer are required — the constructor panics on a nil either, since
+// AcquireLease nil-derefs both on the first inbound lease; failing at
+// construction surfaces the misuse at startup rather than as an obscure
+// panic on the first RPC (matching the NewCostReporter / NewLogServiceServer
+// nil-required-dependency convention). The orchestrator builds the wallet
+// only when the cost config loaded, so the sole production caller always
+// passes non-nil. A nil logger is replaced with a no-op logger.
 func NewWalletService(
 	counter *cost.TokenCounter,
 	enforcer *cost.BudgetEnforcer,
@@ -98,6 +102,12 @@ func NewWalletService(
 	logger *zap.Logger,
 	opts ...Option,
 ) *WalletService {
+	if counter == nil {
+		panic("wallet: NewWalletService requires a non-nil TokenCounter")
+	}
+	if enforcer == nil {
+		panic("wallet: NewWalletService requires a non-nil BudgetEnforcer")
+	}
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -337,8 +347,11 @@ func guardReap(logger *zap.Logger, fn func()) {
 //     (worst-case) amount — pessimistic, so an agent crash mid-call cannot
 //     free budget that may have been spent on an in-flight provider request
 //     (RFC 0023 § F).
-//   - A lease closed before now-2*ttl is purged: the late-settle no-op
-//     window has elapsed, so dropping it bounds the in-flight map.
+//   - A settled lease issued before now-2*ttl is purged. The purge horizon
+//     is keyed on issue time, not close time: a lease is settled or reaped
+//     by issuedAt+ttl at the latest, so issuedAt+2*ttl leaves at least ttl
+//     of late-settle no-op window past any close — ample for a retrying
+//     agent — while still bounding the in-flight map.
 func (w *WalletService) reapExpired(now time.Time) {
 	w.mu.Lock()
 	defer w.mu.Unlock()

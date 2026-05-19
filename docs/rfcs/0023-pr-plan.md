@@ -303,7 +303,7 @@ _PR 1 review surfaced no work deferred to this PR. The lone coverage gap — the
 
 ##### From PR 2 review
 
-_None recorded at plan-authoring time._
+_PR 2 review surfaced four findings, all addressed within PR 2 rather than deferred here. The wallet config loader (`internal/wallet/config.go`) now rejects an explicit zero or negative tuning value instead of silently substituting the default — its raw fields became `*int` so an omitted key (use the default) is distinguishable from an explicit `0` (rejected), aligning the loader with the `minimum: 1` bound `schemas/optimization.schema.json` already enforces at `make validate`. `NewWalletService` now panics on a nil `TokenCounter` / `BudgetEnforcer`, matching the `NewCostReporter` / `NewLogServiceServer` nil-required-dependency convention. `cmd/orchestrator/main.go` loads the wallet config only when the cost config loaded — a missing `optimization.yaml` no longer logs a misleading "wallet using defaults" line when no `WalletService` is constructed. The reaper's purge-window comment was corrected to describe the issue-time-keyed horizon the code actually applies. One noted non-issue — the `int32(TTL.Seconds())` narrowing in the lease grant — was left as-is: the TTL is always built from whole seconds, so the conversion is exact for every operator-reachable value._
 
 ##### From PR 3 review
 
