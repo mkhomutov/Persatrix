@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0055
 summary: Concurrent interaction idle-closes during a startup channel catch-up storm raise sqlite3.OperationalError "cannot commit transaction - SQL statements in progress" in _persist_closed_interaction; the affected episode fails to persist and the janitor backfills it to a summary sentinel. Surfaced repeatedly during the ISSUE-0054 live re-runs.
-status: open
+status: resolved
 severity: medium
 area: agents/persona_runtime
 created: 2026-05-17
+closed: 2026-05-19
+closed_pr: 380
 refs:
   - docs/issues/ISSUE-0054-rfc0026-facts-tier-extracts-no-facts.md
   - docs/rfcs/0020-interaction-lifecycle.md
@@ -91,3 +93,34 @@ busy deployment rather than in steady state.
 > whose live re-run notes flagged this adjacent close-path concurrency
 > bug twice as "worth its own ticket". Untouched by the ISSUE-0054 fix
 > chain.
+
+> 2026-05-19 — resolved in #380. The first fix attempt added an
+> `asyncio.Lock` serialising the two episode write paths; a deep review
+> showed that did not address the bug and it was dropped. The actual
+> mechanism: SQLite raises `cannot commit transaction - SQL statements
+> in progress` only when a `COMMIT` runs while another *write* statement
+> is still an active VDBE (`db->nVdbeWrite > 0`). A plain `INSERT` /
+> `UPDATE` / `DELETE` is stepped to completion inside its own
+> `execute()` and leaves none — so concurrent close-path writes
+> (`store_episode`, `update_episode_summary`) never actually raced. The
+> one statement that leaves a *write* VDBE suspended is
+> `increment_interaction_count`'s `INSERT … RETURNING`:
+> `aiosqlite.Connection.execute()` steps it only to its first result
+> row, so the write VDBE stays active across the `await` gap before the
+> `fetchone()` that drains it. In the persona runtime that increment
+> runs in the Phase-2 background task (`_tick_auto_reflect_counter`,
+> outside the agent lock); during a catch-up storm its suspended
+> `RETURNING` VDBE overlapped a close-path `store_episode` `COMMIT`,
+> which then raised — the close-path write was the innocent victim.
+> Fix: `increment_interaction_count` drains the `RETURNING` cursor in a
+> single `execute_fetchall` round-trip so the write VDBE is never
+> suspended across an `await`. Reproduced 25/25 against a real
+> `EpisodicMemory` before the fix, 0/40 after; regression test in
+> `tests/unit/python/test_episodic_memory_concurrent_writes.py`.
+
+> 2026-05-19 —
+> [ISSUE-0060](ISSUE-0060-shared-connection-commit-race-unguarded-writers.md)
+> (filed earlier in #380 to track "remaining unguarded writers" on the
+> shared connection) is resolved by the same fix: plain writers were
+> never hazards, and the sole `RETURNING` culprit is now drained in one
+> round-trip.

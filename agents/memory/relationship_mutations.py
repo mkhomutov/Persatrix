@@ -75,7 +75,17 @@ async def update_trust(
     with _tracer.start_as_current_span(RELATIONSHIP_UPDATE_SPAN, attributes=attrs) as span:
         # SQL-level arithmetic in ON CONFLICT avoids TOCTOU race.
         # RETURNING avoids a separate get_trust() round-trip (SQLite >= 3.35).
-        cursor = await db.execute(
+        #
+        # ISSUE-0061: drain the RETURNING row with ``execute_fetchall``
+        # (one aiosqlite round-trip), not ``execute()`` + a separate
+        # ``fetchone()``.  ``execute()`` steps a RETURNING statement only
+        # to its first row, leaving the *write* VDBE active across the
+        # ``await`` before ``fetchone()``; on RelationshipMemory's shared
+        # connection a concurrent ``COMMIT`` in that gap raised "cannot
+        # commit transaction - SQL statements in progress".  One
+        # round-trip never suspends it — same fix as ISSUE-0055's
+        # increment_interaction_count on the episodic connection.
+        rows = list(await db.execute_fetchall(
             """
             INSERT INTO relationships
                 (participant_id, participant_type,
@@ -99,9 +109,9 @@ async def update_trust(
                 delta,
                 reason,
             ),
-        )
-        row = await cursor.fetchone()
+        ))
         await db.commit()
+        row = rows[0] if rows else None
 
         # Set ``trust.new`` on every code path so the most diagnostic
         # attribute is always present.  When ``RETURNING`` yields no

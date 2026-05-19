@@ -16,6 +16,7 @@ import logging
 import re
 import sqlite3
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,6 +32,7 @@ __all__ = [
     "EPISODE_SELECT",
     "MAX_RECALL_LIMIT",
     "row_to_episode",
+    "insert_episode",
     "recall_fts5",
     "recall_like",
     "recall_recency",
@@ -312,9 +314,17 @@ async def increment_interaction_count(
     Uses RETURNING to get the post-upsert count in a single round-trip,
     eliminating a read-after-write race (F-3b-2).  Requires SQLite >= 3.35
     (Python 3.11+ ships >= 3.39).
+
+    ISSUE-0055: the RETURNING row is drained with ``execute_fetchall``
+    (one aiosqlite round-trip), not ``execute()`` + a separate
+    ``fetchone()``.  ``execute()`` steps a RETURNING statement only to
+    its first row, leaving the *write* VDBE active across the ``await``
+    before ``fetchone()``; on the shared connection a concurrent
+    ``COMMIT`` in that gap raised "cannot commit transaction - SQL
+    statements in progress".  One round-trip never suspends it.
     """
     now = time.time()
-    cursor = await db.execute(
+    rows = list(await db.execute_fetchall(
         """
         INSERT INTO agent_state (agent_id, interaction_count, updated_at)
         VALUES (?, 1, ?)
@@ -324,10 +334,9 @@ async def increment_interaction_count(
         RETURNING interaction_count
         """,
         (agent_id, now, now),
-    )
-    row = await cursor.fetchone()
+    ))
     await db.commit()
-    return row[0] if row else 0
+    return rows[0][0] if rows else 0
 
 
 async def reset_interaction_count(
@@ -392,6 +401,72 @@ async def load_agent_state(
         result: str = row[0]
         return result
     return None
+
+
+# ─── Episode write helpers ──────────────────────────────────
+
+
+async def insert_episode(
+    db: aiosqlite.Connection,
+    agent_id: str,
+    *,
+    summary: str,
+    context: dict[str, Any],
+    outcome: str | None,
+    importance: float,
+    tags: list[str] | None,
+    interaction_id: str | None,
+    started_at: float | None,
+    closed_at: float | None,
+    turn_count: int | None,
+    session_id: str,
+    scope: str | None,
+) -> str:
+    """INSERT one episode row and COMMIT; return the generated episode id.
+
+    Extracted from :meth:`EpisodicMemory.store_episode` so the episode
+    INSERT sits in :mod:`agents.memory.episodic_queries` beside the
+    sibling write helper :func:`update_episode_summary` that already
+    owns the episode SQL, keeping ``episodic.py`` within the 500-line
+    file-size cap.
+
+    The INSERT is plain DML — stepped to completion inside ``execute()``
+    with no VDBE left active — so a concurrent ``COMMIT`` on the shared
+    connection cannot race it (ISSUE-0055).
+    """
+    episode_id = str(uuid.uuid4())
+    now = time.time()
+    await db.execute(
+        """
+        INSERT INTO episodes
+            (id, agent_id, summary, context_json, outcome,
+             importance, access_count, last_accessed_at,
+             tags_json, created_at, compressed_at, compression_level,
+             interaction_id, started_at, closed_at, turn_count, scope,
+             session_id)
+        VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0,
+                ?, ?, ?, ?, ?,
+                ?)
+        """,
+        (
+            episode_id,
+            agent_id,
+            summary,
+            json.dumps(context),
+            outcome,
+            importance,
+            json.dumps(tags or []),
+            now,
+            interaction_id,
+            started_at,
+            closed_at,
+            turn_count,
+            scope,
+            session_id,
+        ),
+    )
+    await db.commit()
+    return episode_id
 
 
 async def update_episode_summary(

@@ -12,11 +12,9 @@ structured knowledge the agent chooses to persist, delegated to
 from __future__ import annotations
 
 import contextlib
-import json
 import logging
 import sqlite3
 import time
-import uuid
 from typing import TYPE_CHECKING, Any
 
 import aiosqlite
@@ -36,6 +34,7 @@ from .episodic_queries import (
     Episode,
     get_interaction_count,
     increment_interaction_count,
+    insert_episode,
     load_agent_state,
     persist_agent_state,
     recall_fts5,
@@ -232,38 +231,14 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                         "importance=%.4f out of [0.0, 1.0] range, clamping", importance,
                     )
                     importance = max(0.0, min(1.0, importance))
-                episode_id = str(uuid.uuid4())
-                now = time.time()
-                await db.execute(
-                    """
-                    INSERT INTO episodes
-                        (id, agent_id, summary, context_json, outcome,
-                         importance, access_count, last_accessed_at,
-                         tags_json, created_at, compressed_at, compression_level,
-                         interaction_id, started_at, closed_at, turn_count, scope,
-                         session_id)
-                    VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0,
-                            ?, ?, ?, ?, ?,
-                            ?)
-                    """,
-                    (
-                        episode_id,
-                        self._agent_id,
-                        summary,
-                        json.dumps(context),
-                        outcome,
-                        importance,
-                        json.dumps(tags or []),
-                        now,
-                        interaction_id,
-                        started_at,
-                        closed_at,
-                        turn_count,
-                        scope,
-                        session_id,
-                    ),
+                episode_id = await insert_episode(
+                    db, self._agent_id,
+                    summary=summary, context=context, outcome=outcome,
+                    importance=importance, tags=tags,
+                    interaction_id=interaction_id, started_at=started_at,
+                    closed_at=closed_at, turn_count=turn_count,
+                    session_id=session_id, scope=scope,
                 )
-                await db.commit()
             except Exception as exc:
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, str(exc)))
