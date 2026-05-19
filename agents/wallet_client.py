@@ -209,16 +209,32 @@ class WalletClient:
         try:
             yield lease
         except BaseException:
-            if not lease._call_started:
-                # The provider was never contacted — fully reverse the hold.
-                await self._release(lease.lease_id, "aborted")
-            elif not lease._settled:
-                # The call may have spent real budget — close pessimistically.
-                await self._settle(
-                    lease.lease_id,
-                    lease.granted_input_tokens,
-                    lease.granted_output_tokens,
-                    kind="settle-at-granted",
+            # Lease cleanup is best-effort and must never mask the exception
+            # the caller raised — the agent needs that to tell a budget
+            # rejection apart from a provider outage. _release / _settle
+            # already swallow transient gRPC failures; this guard catches an
+            # *unexpected* error in the cleanup path itself, which would
+            # otherwise replace the original exception (RFC 0023 § F). A
+            # swallowed cleanup error leaves the lease for the reaper to
+            # reconcile at TTL expiry. CancelledError (BaseException, not
+            # Exception) is intentionally left to propagate.
+            try:
+                if not lease._call_started:
+                    # The provider was never contacted — fully reverse the hold.
+                    await self._release(lease.lease_id, "aborted")
+                elif not lease._settled:
+                    # The call may have spent real budget — close pessimistically.
+                    await self._settle(
+                        lease.lease_id,
+                        lease.granted_input_tokens,
+                        lease.granted_output_tokens,
+                        kind="settle-at-granted",
+                    )
+            except Exception:
+                logger.warning(
+                    "wallet: lease %s cleanup failed on the exception exit "
+                    "path — the reaper will reconcile it at TTL expiry",
+                    lease.lease_id, exc_info=True,
                 )
             raise
         else:

@@ -110,9 +110,13 @@ def _estimate_input_tokens(kwargs: dict[str, Any]) -> int:
     Question §5 — a single tokeniser path system-wide). The estimate
     funds the lease's *provisional* charge only; ``SettleLease``
     reconciles it to the provider-reported actuals, so a best-effort
-    flatten of the system prompt + message text is sufficient. A
-    tokeniser import failure degrades to the chars/4 fallback rather
-    than blocking the call."""
+    flatten of the system prompt + message text is sufficient. Tool
+    definitions (``kwargs["tools"]``) are deliberately *not* counted:
+    serialising every tool schema would add complexity for no
+    enforcement benefit — settle reconciles to actuals, so an estimate
+    that under-counts only shrinks the provisional hold, never the
+    final charge. A tokeniser import failure degrades to the chars/4
+    fallback rather than blocking the call."""
     parts: list[str] = []
     system = kwargs.get("system")
     if isinstance(system, str) and system:

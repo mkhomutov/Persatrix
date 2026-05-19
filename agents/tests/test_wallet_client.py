@@ -223,6 +223,62 @@ async def test_lease_settles_at_granted_on_clean_exit_without_settle() -> None:
     assert settle_req.actual_output_tokens == 40
 
 
+# ─── exception-path cleanup must not mask the caller's exception ──────────────
+
+
+async def test_release_cleanup_failure_does_not_mask_original_exception() -> None:
+    """An unexpected error in the release cleanup must not replace the
+    exception the caller raised.
+
+    ``_release`` swallows ``AioRpcError`` but not arbitrary failures; an
+    unexpected error escaping it on the exception exit path would otherwise
+    replace the original error, hiding a budget-vs-provider failure the
+    agent needs to surface (RFC 0023 § F)."""
+    stub = _stub()
+    # ReleaseLease raises a plain RuntimeError — a stand-in for an
+    # unexpected bug in the cleanup path, which _release does not catch.
+    stub.ReleaseLease = AsyncMock(side_effect=RuntimeError("cleanup boom"))
+    client = _client(stub)
+
+    with pytest.raises(ValueError, match="caller error"):
+        async with client.lease(
+            agent_id="ember-owl",
+            model="m",
+            estimated_input_tokens=10,
+            estimated_max_output_tokens=20,
+            cause=walletpb.CAUSE_WORKFLOW_TASK,
+        ) as lease:
+            assert lease is not None
+            raise ValueError("caller error")  # before mark_call_started()
+
+    # Cleanup was attempted; its failure was swallowed, not propagated.
+    stub.ReleaseLease.assert_awaited_once()
+
+
+async def test_settle_at_granted_cleanup_failure_does_not_mask_original() -> None:
+    """Same guard on the settle-at-granted exit path: an unexpected error in
+    the settle cleanup must not replace the post-call exception the caller
+    raised."""
+    stub = _stub()
+    # SettleLease raises a plain RuntimeError — _settle catches AioRpcError
+    # only, so an unexpected error escapes its retry loop.
+    stub.SettleLease = AsyncMock(side_effect=RuntimeError("cleanup boom"))
+    client = _client(stub)
+
+    with pytest.raises(ValueError, match="caller error"):
+        async with client.lease(
+            agent_id="ember-owl",
+            model="m",
+            estimated_input_tokens=10,
+            estimated_max_output_tokens=20,
+            cause=walletpb.CAUSE_WORKFLOW_TASK,
+        ) as lease:
+            lease.mark_call_started()
+            raise ValueError("caller error")  # after the call started
+
+    stub.SettleLease.assert_awaited_once()
+
+
 # ─── lease() exit path 4: retry on a transient settle failure ─────────────────
 
 
