@@ -109,3 +109,11 @@ busy deployment rather than in steady state.
 > every write commits. Scope is close-vs-close, matching the diagnosis:
 > `recall`'s access-count bump and the notes/counter write paths were
 > not implicated in the storm and are left untouched.
+
+> 2026-05-19 — follow-up filed as
+> [ISSUE-0060](ISSUE-0060-shared-connection-commit-race-unguarded-writers.md):
+> the `_write_lock` serialises only the two episode write paths, so
+> `recall`'s access-count `UPDATE`, `delete_episode`, the counter /
+> agent-state helpers, and `NoteStore` writes can still race a
+> close-path write on the shared connection. The close-vs-close fix
+> here stands; ISSUE-0060 tracks the remaining unguarded writers.
