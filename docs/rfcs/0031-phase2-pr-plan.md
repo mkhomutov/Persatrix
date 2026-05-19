@@ -33,7 +33,7 @@ The [RFC §C storage-model table](0031-per-session-namespacing-channels.md#c-sto
 
 - **[OQ #1](0031-per-session-namespacing-channels.md#open-questions) — default-recall semantics: resolution 1a** (single-session default). Already locked at Phase 1 plan-authoring time ([0031-pr-plan.md §Open-question resolutions](0031-pr-plan.md#open-question-resolutions-locked-at-plan-authoring-time)). It is **load-bearing in this phase** — §D's `sessions = [active_session_id]` default is the 1a shape. PR 5's dementia-test bridge is the acceptance proof that 1a does not break long-arc continuity.
 - **[OQ #4](0031-per-session-namespacing-channels.md#open-questions) — sequencing against RFC 0029 Phase 1 facade.** RFC 0029 Phase 1 merged in v0.3.2 ([#370](https://github.com/mkhomutov/Persatrix/pull/370)–[#376](https://github.com/mkhomutov/Persatrix/pull/376)). The frozen `MemoryStore` facade carries `session_id` on **write** methods (`store_observation`, `store_procedure`, `publish_to_pool`) but **not on read** methods — RFC 0031 Phase 1 only added `session_id` to write APIs, so there was nothing for RFC 0029 to carry on the read side. OQ #4's cheap path ("facade has `session_id` on reads from day one") is therefore off the table; this plan takes OQ #4's explicitly-anticipated **back-compat-extension path** — PR 4 adds an optional `sessions` keyword to the frozen facade read signatures. The change is additive (a defaulted keyword-only parameter), but it amends a signature RFC 0029 declared frozen for v0.4.0; PR 4 coordinates the amendment with the RFC 0029 author and records it in [RFC 0029 §C](0029-personal-society-storage-split.md#c-memorystore-facade).
-- **[OQ #7](0031-per-session-namespacing-channels.md#open-questions) — `session_id` as an OTEL trace attribute.** The `sessions.writes` counter shipped both sides in Phase 1 ([`agents/observability/metrics.py`](../../agents/observability/metrics.py), [`channel_instruments.go`](../../internal/observability/metrics/channel_instruments.go)) but `session_id` is on **no** span attribute today. PR 2 folds `session_id` into the existing `EPISODIC_RECALL_SPAN` attributes ([`episodic.py:304`](../../agents/memory/episodic.py#L304)) as a low-cardinality attribute — confirm with the observability reviewer in the PR 2 thread, per OQ #7.
+- **[OQ #7](0031-per-session-namespacing-channels.md#open-questions) — `session_id` as an OTEL trace attribute.** The `sessions.writes` counter shipped both sides in Phase 1 ([`agents/observability/metrics.py`](../../agents/observability/metrics.py), [`channel_instruments.go`](../../internal/observability/metrics/channel_instruments.go)) but `session_id` is on **no** span attribute today. PR 2 folds `session_id` into the existing `EPISODIC_RECALL_SPAN` attributes ([`episodic.py:304`](../../agents/memory/episodic.py#L304)) as a span attribute — `session_id` cardinality grows unbounded over a deployment's lifetime, which is acceptable on a trace span (unlike a metric label) but should be confirmed with the observability reviewer in the PR 2 thread, per OQ #7.
 
 ---
 
@@ -45,7 +45,7 @@ Before PR 1 opens:
 
 1. **Amend [v0.3.x-sequencing.md](../v0.3.x-sequencing.md)** — move the `RFC 0031 Phases 2–4` row from `uncommitted` to the assigned patch.
 2. **Open the patch master plan** (`docs/v0.3.4-plan.md`, modeled on [v0.3.2-plan.md](../v0.3.2-plan.md)) — this Phase 2 PR plan becomes its implementation workstream.
-3. **Confirm the branch prefix** — `feature/v034-rfc0031p2-` resolves to the assigned patch number.
+3. **Confirm the branch prefix** — `feature/v034-rfc0031p2-` resolves to the assigned patch number. If the assigned patch is not v0.3.4, sweep the prefix across all six PR headings, the [Progress Overview](#progress-overview-phase-2) table, and the PR 6 anchor link before PR 1 opens.
 
 This plan stands as the implementation detail regardless of which patch absorbs it; only the version label and branch prefix depend on step 1.
 
@@ -296,7 +296,7 @@ No code changes; doc-only.
 
 Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-instructions.md):
 
-- **PR 1 opens** → RFC 0031 row → `🚧 Implementing`; the v0.3.4 master-plan progress row → 🔄 In progress.
+- **PR 1 opens** → RFC 0031 row → `🚧 Implementing` (resuming active implementation from the `⚠️ Partially Implemented` Phase 1 pause, per Status Hygiene rule 1 — not a status regression); the v0.3.4 master-plan progress row → 🔄 In progress.
 - **Each PR merges** → fill the [Progress Overview](#progress-overview-phase-2) row.
 - **PR 6 merges** → RFC 0031 stays `⚠️ Partially Implemented` (Phases 3–4 remain); target line updated; `Last updated` refresh.
 
