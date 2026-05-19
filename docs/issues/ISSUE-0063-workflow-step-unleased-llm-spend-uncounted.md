@@ -83,3 +83,25 @@ written to add does not cover the persona-as-workflow-step path.
 > 2026-05-19 — initial capture during PR #385 review. The PR-3 double-count
 > rationale in `docs/rfcs/0023-pr-plan.md` (PR 3 Key-implementation-detail
 > bullet) now carries a one-line caveat pointing here.
+
+> 2026-05-19 — investigation step 1 result. **The gap is latent, not active.**
+> No shipped workflow definition routes a step to a persona agent:
+> `workflows/feature-builder.yaml` and `workflows/budget-test.yaml` reference
+> only `planner` / `code-writer` / `code-reviewer`, all `type: "task"` in
+> `config/agents.yaml`. So the PR 3 `RecordUsage` retirement is correct for
+> every workflow that ships today — keeping the post-hoc record would instead
+> re-introduce the double-count it removed.
+>
+> However, there is **no code-level guard**: `internal/planner/planner.go`'s
+> `validate` checks only the step `agent` ID *format* regex; `executeStep`
+> (`internal/scheduler/stage_runner.go`), `ExecuteTask`
+> (`internal/executor/dispatch.go`) and the Python `AgentServiceServicer.
+> ExecuteTask` (`agents/server_servicers.py`) all dispatch by ID with no
+> agent-type check. An operator who authors a workflow whose step `agent` is a
+> persona ID (e.g. `ember-owl`) would activate the gap. The step-1 suggestion
+> to "add a regression assertion that workflow steps only dispatch to
+> `TaskAgent`" therefore is **not** a free assertion — it requires *adding* a
+> new constraint (planner-side rejection of persona-agent step targets, or
+> scheduler-side type enforcement). Folding the leasing fix into PR 5's persona
+> action-loop work (path 2) remains the alternative. Decision deferred to the
+> follow-up; PR 3 merges with the gap genuinely latent.

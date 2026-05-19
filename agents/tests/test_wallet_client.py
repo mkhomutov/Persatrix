@@ -177,6 +177,36 @@ async def test_lease_releases_on_exception_before_call() -> None:
     stub.SettleLease.assert_not_awaited()
 
 
+async def test_lease_releases_on_clean_exit_when_call_never_started() -> None:
+    """A clean exit *before* ``mark_call_started`` releases the hold.
+
+    The provider was never contacted, so no budget was spent — the
+    provisional charge must be fully reversed, not closed at the granted
+    worst case. This mirrors the exception exit path, which already
+    branches on ``_call_started``: a caller that acquires a lease and
+    then bails on a clean code path (an early ``return`` / fall-through,
+    no exception) must not be over-charged for a call that never ran.
+    """
+    stub = _stub()
+    client = _client(stub)
+
+    async with client.lease(
+        agent_id="ember-owl",
+        model="m",
+        estimated_input_tokens=10,
+        estimated_max_output_tokens=20,
+        cause=walletpb.CAUSE_WORKFLOW_TASK,
+    ) as lease:
+        # No mark_call_started(), no settle() — the body decided, on a
+        # clean path, not to issue the provider call after all.
+        assert lease is not None
+
+    stub.ReleaseLease.assert_awaited_once()
+    release_req = stub.ReleaseLease.await_args.args[0]
+    assert release_req.reason == "aborted"
+    stub.SettleLease.assert_not_awaited()
+
+
 # ─── lease() exit path 3: settle-at-granted (exception after the LLM call) ────
 
 
@@ -204,7 +234,10 @@ async def test_lease_settles_at_granted_on_exception_after_call() -> None:
 
 
 async def test_lease_settles_at_granted_on_clean_exit_without_settle() -> None:
-    """Defensive: a caller that forgets to settle still closes the lease."""
+    """Defensive: a caller that *started the call* but forgot to settle
+    still closes the lease — at the granted amount, since the provider
+    may have spent real budget. (The no-call clean exit releases instead
+    — see ``test_lease_releases_on_clean_exit_when_call_never_started``.)"""
     stub = _stub(acquire=_grant(granted_input_tokens=30, granted_output_tokens=40))
     client = _client(stub)
 

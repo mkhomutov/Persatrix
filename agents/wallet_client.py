@@ -14,13 +14,14 @@ charge one of four ways:
 
 * **settle** — the caller invoked :meth:`Lease.settle` with the
   provider-reported actuals on the normal path.
-* **release** — the block raised *before* the LLM call started
-  (:meth:`Lease.mark_call_started` was never reached): the provisional
-  charge is fully reversed.
-* **settle-at-granted** — the block raised *after* the call started, or
-  exited cleanly without an explicit settle: the lease closes at the
-  granted (worst-case) amount. Pessimistic — an in-flight provider
-  request may have completed and spent real budget.
+* **release** — the block exited *before* the LLM call started
+  (:meth:`Lease.mark_call_started` was never reached) — whether by
+  raising or by a clean return: the provider was never contacted, so
+  the provisional charge is fully reversed.
+* **settle-at-granted** — the block exited *after* the call started
+  without an explicit settle — whether by raising or by a clean return:
+  the lease closes at the granted (worst-case) amount. Pessimistic — an
+  in-flight provider request may have completed and spent real budget.
 * the orchestrator-side **reaper** is the backstop — a settle that never
   reaches the wallet is reconciled at the granted amount on TTL expiry,
   so a dropped settlement over-accounts but never loses spend.
@@ -45,6 +46,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -101,7 +103,8 @@ class Lease:
     Callers settle via :meth:`settle` on the success path; the context
     manager handles the release / settle-at-granted exit paths. The
     granted token counts are retained so the context manager can close
-    the lease pessimistically when an explicit settle did not happen.
+    the lease pessimistically when a call happened but an explicit
+    settle did not.
     """
 
     def __init__(
@@ -117,10 +120,12 @@ class Lease:
         self.granted_input_tokens = granted_input_tokens
         self.granted_output_tokens = granted_output_tokens
         self.ttl_seconds = ttl_seconds
-        # _call_started flips the exception exit path from release (the
-        # provider was never contacted) to settle-at-granted (it may have
-        # been). _settled makes settle idempotent and tells the context
-        # manager whether a clean exit still needs a defensive close.
+        # _call_started flips the exit path from release (the provider
+        # was never contacted) to settle-at-granted (it may have been) —
+        # the context manager makes this disambiguation on *both* the
+        # exception and the clean-exit-without-settle paths. _settled
+        # makes settle idempotent and tells the context manager whether
+        # a clean exit still needs a defensive close.
         self._call_started = False
         self._settled = False
 
@@ -129,7 +134,8 @@ class Lease:
 
         Call this immediately before the provider request. It selects the
         pessimistic *settle-at-granted* exit over *release* when the lease
-        block then raises — once the provider has been contacted, real
+        block then exits without an explicit settle — whether by raising
+        or by a clean return. Once the provider has been contacted, real
         spend may have occurred (RFC 0023 § F)."""
         self._call_started = True
 
@@ -174,8 +180,17 @@ class WalletClient:
         return cls(wallet_grpc.WalletServiceStub(channel), **kwargs)  # type: ignore[arg-type]
 
     def _backoff(self, attempt: int) -> float:
-        """Exponential backoff for retry *attempt* (1-indexed)."""
-        return self._backoff_base * 2.0 ** (attempt - 1)
+        """Backoff delay for retry *attempt* (1-indexed), with full jitter.
+
+        Draws a uniform random delay in ``[0, base * 2**(attempt-1)]``
+        (AWS-style *full jitter*). The jitter decorrelates retries when
+        several of an agent process's concurrent tasks hit the same
+        ``RESOURCE_EXHAUSTED`` active-lease cap and would otherwise back
+        off in lockstep, re-colliding on every attempt. A zero
+        ``backoff_base`` collapses the range to ``0.0`` — the fast-retry
+        tuning the test suite uses for determinism."""
+        ceiling = self._backoff_base * 2.0 ** (attempt - 1)
+        return random.uniform(0.0, ceiling)
 
     @asynccontextmanager
     async def lease(
@@ -239,13 +254,21 @@ class WalletClient:
             raise
         else:
             if not lease._settled:
-                # Clean exit with no explicit settle — defensive close.
-                await self._settle(
-                    lease.lease_id,
-                    lease.granted_input_tokens,
-                    lease.granted_output_tokens,
-                    kind="settle-at-granted",
-                )
+                # Clean exit with no explicit settle. Branch on whether the
+                # provider was contacted — the same disambiguation the
+                # exception path above makes: a body that exited cleanly
+                # before mark_call_started() (e.g. an early return that
+                # skipped the call) spent nothing, so reverse the hold;
+                # once the call started, close pessimistically.
+                if not lease._call_started:
+                    await self._release(lease.lease_id, "aborted")
+                else:
+                    await self._settle(
+                        lease.lease_id,
+                        lease.granted_input_tokens,
+                        lease.granted_output_tokens,
+                        kind="settle-at-granted",
+                    )
 
     # ── Internals ────────────────────────────────────────────────────
 
