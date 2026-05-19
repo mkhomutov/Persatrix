@@ -138,6 +138,11 @@ select = ["E", "F", "I", "N", "TID251", "W", "UP"]
 "participant.py" = ["TID251"]
 
 [tool.mypy]
+# ISSUE-0062: the repo-root `mypy.ini` duplicates these base settings to
+# type-check the `tests/` tree, because mypy has no config-inheritance
+# mechanism. Keep the two in sync — when changing a setting below, mirror it
+# in `mypy.ini`, which deliberately carries all of these EXCEPT
+# `warn_return_any` (test doubles return `Any` by design).
 python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
