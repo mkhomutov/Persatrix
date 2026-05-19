@@ -32,6 +32,14 @@ type TokenCounter struct {
 	// global tracks the daily total across all workflows and agents.
 	global *usageTotals
 
+	// provisional holds worst-case charges recorded at lease-acquire time
+	// (RFC 0023 — LLM Call Leasing), keyed by lease ID. An entry lives only
+	// between RecordProvisional and the matching Reconcile; Reconcile
+	// removes it. The scope totals above already include each provisional
+	// charge — this map exists so Reconcile can compute the estimate→actual
+	// delta and so a lease can be reconciled exactly once.
+	provisional map[string]*provisionalCharge
+
 	config *CostConfig
 	logger *zap.Logger
 }
@@ -43,6 +51,15 @@ type usageTotals struct {
 	EstimatedUSD float64
 }
 
+// provisionalCharge records the worst-case charge held against an
+// in-flight lease. It captures the scope keys and the amounts added so
+// Reconcile can apply the estimate→actual delta to the same three scopes.
+type provisionalCharge struct {
+	workflowID, agentID, model string
+	inputTokens, outputTokens  int64
+	estimatedUSD               float64
+}
+
 // NewTokenCounter creates a new TokenCounter with the given configuration.
 func NewTokenCounter(config *CostConfig, logger *zap.Logger) *TokenCounter {
 	if logger == nil {
@@ -52,9 +69,38 @@ func NewTokenCounter(config *CostConfig, logger *zap.Logger) *TokenCounter {
 		perWorkflow: make(map[string]*usageTotals),
 		perAgent:    make(map[string]*usageTotals),
 		global:      &usageTotals{},
+		provisional: make(map[string]*provisionalCharge),
 		config:      config,
 		logger:      logger,
 	}
+}
+
+// addToScopesLocked applies a token/cost delta to all three scopes. The
+// delta may be negative (Reconcile of an under-estimate, or a Release).
+// Callers must hold tc.mu. Map entries are created on first touch so a
+// provisional charge for a not-yet-seen workflow/agent still lands.
+func (tc *TokenCounter) addToScopesLocked(workflowID, agentID string, dInput, dOutput int64, dUSD float64) {
+	wf, ok := tc.perWorkflow[workflowID]
+	if !ok {
+		wf = &usageTotals{}
+		tc.perWorkflow[workflowID] = wf
+	}
+	wf.InputTokens += dInput
+	wf.OutputTokens += dOutput
+	wf.EstimatedUSD += dUSD
+
+	ag, ok := tc.perAgent[agentID]
+	if !ok {
+		ag = &usageTotals{}
+		tc.perAgent[agentID] = ag
+	}
+	ag.InputTokens += dInput
+	ag.OutputTokens += dOutput
+	ag.EstimatedUSD += dUSD
+
+	tc.global.InputTokens += dInput
+	tc.global.OutputTokens += dOutput
+	tc.global.EstimatedUSD += dUSD
 }
 
 // RecordUsage adds a token usage event to all three scopes and computes estimated cost.
@@ -64,30 +110,8 @@ func (tc *TokenCounter) RecordUsage(record UsageRecord) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
-	// Per-workflow.
-	wf, ok := tc.perWorkflow[record.WorkflowID]
-	if !ok {
-		wf = &usageTotals{}
-		tc.perWorkflow[record.WorkflowID] = wf
-	}
-	wf.InputTokens += record.InputTokens
-	wf.OutputTokens += record.OutputTokens
-	wf.EstimatedUSD += cost
-
-	// Per-agent.
-	ag, ok := tc.perAgent[record.AgentID]
-	if !ok {
-		ag = &usageTotals{}
-		tc.perAgent[record.AgentID] = ag
-	}
-	ag.InputTokens += record.InputTokens
-	ag.OutputTokens += record.OutputTokens
-	ag.EstimatedUSD += cost
-
-	// Global daily.
-	tc.global.InputTokens += record.InputTokens
-	tc.global.OutputTokens += record.OutputTokens
-	tc.global.EstimatedUSD += cost
+	tc.addToScopesLocked(record.WorkflowID, record.AgentID,
+		record.InputTokens, record.OutputTokens, cost)
 
 	tc.logger.Debug("token usage recorded",
 		zap.String("workflow_id", record.WorkflowID),
@@ -97,6 +121,88 @@ func (tc *TokenCounter) RecordUsage(record UsageRecord) {
 		zap.Int64("outputTokens", record.OutputTokens),
 		zap.Float64("estimatedUSD", cost),
 	)
+}
+
+// RecordProvisional adds a worst-case provisional charge to all three
+// scopes and records it under leaseID so a later Reconcile can replace it
+// with the actual usage (RFC 0023 — LLM Call Leasing). The token counts in
+// record are the agent's pre-call estimates; the charge is computed with
+// the same EstimateCost formula RecordUsage uses.
+//
+// The caller must record each leaseID at most once per outstanding charge.
+// The WalletService guarantees this: it generates leaseID, rejects any
+// collision with a lease still tracked in its in-flight map, and keeps that
+// map entry until the lease is reconciled — so this method is never reached
+// twice for an outstanding leaseID. The guarantee is load-bearing, not a
+// convenience: a second RecordProvisional for the same leaseID would add a
+// second charge to the scope totals but retain only the second
+// provisionalCharge, so the matching Reconcile would reverse only that one
+// and leak the first charge into the totals permanently.
+func (tc *TokenCounter) RecordProvisional(leaseID string, record UsageRecord) {
+	cost := tc.config.EstimateCost(record.Model, record.InputTokens, record.OutputTokens)
+
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	tc.addToScopesLocked(record.WorkflowID, record.AgentID,
+		record.InputTokens, record.OutputTokens, cost)
+	tc.provisional[leaseID] = &provisionalCharge{
+		workflowID:   record.WorkflowID,
+		agentID:      record.AgentID,
+		model:        record.Model,
+		inputTokens:  record.InputTokens,
+		outputTokens: record.OutputTokens,
+		estimatedUSD: cost,
+	}
+
+	tc.logger.Debug("provisional charge recorded",
+		zap.String("lease_id", leaseID),
+		zap.String("workflow_id", record.WorkflowID),
+		zap.String("agent_id", record.AgentID),
+		zap.String("model", record.Model),
+		zap.Int64("estimatedInputTokens", record.InputTokens),
+		zap.Int64("estimatedOutputTokens", record.OutputTokens),
+		zap.Float64("estimatedUSD", cost),
+	)
+}
+
+// Reconcile replaces the provisional charge held under leaseID with the
+// actual usage the provider reported. The estimate→actual delta (positive
+// or negative) is applied atomically to all three scopes, and the
+// provisional entry is removed so the lease cannot be reconciled twice.
+//
+// A SettleLease reconciles with the provider-reported actuals; a
+// ReleaseLease reconciles with (0, 0), fully reversing the provisional.
+// Reconcile returns an error when leaseID has no outstanding provisional
+// charge — an unknown lease, or one already settled / released / reaped.
+func (tc *TokenCounter) Reconcile(leaseID string, actualInputTokens, actualOutputTokens int64) error {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	pc, ok := tc.provisional[leaseID]
+	if !ok {
+		return fmt.Errorf("reconcile: no outstanding provisional charge for lease %q", leaseID)
+	}
+
+	actualUSD := tc.config.EstimateCost(pc.model, actualInputTokens, actualOutputTokens)
+	tc.addToScopesLocked(pc.workflowID, pc.agentID,
+		actualInputTokens-pc.inputTokens,
+		actualOutputTokens-pc.outputTokens,
+		actualUSD-pc.estimatedUSD,
+	)
+	delete(tc.provisional, leaseID)
+
+	tc.logger.Debug("provisional charge reconciled",
+		zap.String("lease_id", leaseID),
+		zap.String("workflow_id", pc.workflowID),
+		zap.String("agent_id", pc.agentID),
+		zap.String("model", pc.model),
+		zap.Int64("actualInputTokens", actualInputTokens),
+		zap.Int64("actualOutputTokens", actualOutputTokens),
+		zap.Float64("estimatedUSD", pc.estimatedUSD),
+		zap.Float64("actualUSD", actualUSD),
+	)
+	return nil
 }
 
 // WorkflowUsage returns the cumulative usage for a workflow.
@@ -170,12 +276,19 @@ func (tc *TokenCounter) usageSnapshot(workflowID, agentID string) (globalUSD, wo
 }
 
 // ResetDaily clears all counters. Intended to be called at midnight for daily budget resets.
+//
+// Outstanding provisional charges are dropped along with the scope totals:
+// a Reconcile for a lease that was in flight across the reset then surfaces
+// as an unknown lease rather than applying an estimate→actual delta against
+// a total that no longer holds the provisional. The WalletService treats
+// that reconcile miss as a benign no-op settlement.
 func (tc *TokenCounter) ResetDaily() {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	tc.perWorkflow = make(map[string]*usageTotals)
 	tc.perAgent = make(map[string]*usageTotals)
 	tc.global = &usageTotals{}
+	tc.provisional = make(map[string]*provisionalCharge)
 	tc.logger.Info("daily token counters reset", zap.Time("resetAt", time.Now()))
 }
 
@@ -257,6 +370,13 @@ func NewBudgetEnforcer(counter *TokenCounter, config *CostConfig, logger *zap.Lo
 //
 // All three scope totals (global, per-workflow, per-agent) are read in a single
 // atomic snapshot to prevent torn reads from concurrent RecordUsage calls.
+//
+// RFC 0023 — LLM Call Leasing: CheckBudget is composed by the orchestrator's
+// WalletService, which holds its own mutex across CheckBudget +
+// RecordProvisional so the read-then-write is atomic. The scheduler's
+// pre-dispatch CheckBudget call is retained only as an early-fail
+// optimisation; the per-call lease is the enforcement point. CheckBudget
+// itself is read-only and unchanged.
 func (be *BudgetEnforcer) CheckBudget(workflowID, agentID, model string, estimatedMaxTokens int64) BudgetCheckResult {
 	// Estimate the worst-case cost of this dispatch using output tokens as proxy.
 	// Input tokens for the estimate are unknown pre-dispatch; use output only.

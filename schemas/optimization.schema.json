@@ -2,9 +2,37 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://persatrix.dev/schemas/optimization.schema.json",
   "title": "Persatrix Optimization Configuration",
-  "description": "Schema for config/optimization.yaml. RFC 0034 Phase 1 PR 2 introduces this schema scoped to the top-level `conversation_window` defaults block only. The Go orchestrator owns the model-routing / caching / cost-budget surface end-to-end, so those keys are intentionally left unconstrained (top-level additionalProperties defaults to true) rather than duplicating the orchestrator's optimisation schema in two places. Future RFCs may grow this schema.",
+  "description": "Schema for config/optimization.yaml. RFC 0034 Phase 1 PR 2 introduced this schema scoped to the top-level `conversation_window` block; RFC 0023 PR 2 adds the top-level `wallet` block (LLM-call leasing lease-lifecycle tuning). The Go orchestrator owns the model-routing / caching / cost-budget surface end-to-end, so those keys are intentionally left unconstrained (top-level additionalProperties defaults to true) rather than duplicating the orchestrator's optimisation schema in two places. Future RFCs may grow this schema.",
   "type": "object",
   "properties": {
+    "wallet": {
+      "type": "object",
+      "description": "RFC 0023 — LLM Call Leasing: server-side lease-lifecycle tuning for the orchestrator's WalletService. Top-level block (sibling of `cost:`), parsed by the Go orchestrator. An absent block — or an absent key — falls back to the defaults below.",
+      "additionalProperties": false,
+      "properties": {
+        "ttl_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400,
+          "default": 60,
+          "description": "Lease time-to-live in seconds. The reaper settles a lease still unsettled this long after issue at its granted (worst-case) amount. Default 60 = 2× the 30 s default per-call timeout (RFC 0023 Open Question §2). The 86400 (1 day) maximum is a fat-finger guard and keeps the value within the int32 LeaseGrant.ttl_seconds advertised on the wire."
+        },
+        "reaper_interval_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600,
+          "default": 5,
+          "description": "How often, in seconds, the reaper scans for leases left unsettled past their TTL. The 3600 (1 hour) maximum is a fat-finger guard — a scan cadence slower than this cannot meaningfully bound the in-flight lease map."
+        },
+        "max_active_leases": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024,
+          "default": 16,
+          "description": "Per-agent cap on concurrently-held (unsettled) leases — a DoS ceiling (RFC 0023 Security Considerations), keyed on the lease-issuing agent. The 1024 (64× default) maximum is a fat-finger guard — a value beyond it defeats the ceiling's purpose."
+        }
+      }
+    },
     "conversation_window": {
       "type": "object",
       "description": "RFC 0034 Phase 1: top-level defaults for the persona conversation-window transcript reconstruction. NOT a profile block — these apply regardless of `active_profile`. Per-agent overrides live under each agent's `conversation_window` block in config/agents.yaml; an omitted per-agent block inherits these values.",

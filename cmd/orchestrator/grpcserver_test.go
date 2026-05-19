@@ -16,12 +16,34 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/observability/logbuffer"
+	"github.com/mkhomutov/persatrix/internal/wallet"
 )
 
+// testWalletService builds a minimal enforcing WalletService for the
+// agent-facing-server wiring tests. The cost surface is exercised in
+// internal/cost and internal/wallet; here it only needs to be a non-nil
+// registrable servicer.
+func testWalletService(t *testing.T) *wallet.WalletService {
+	t.Helper()
+	costCfg := &cost.CostConfig{
+		Pricing: map[string]cost.ModelPricing{},
+		Budgets: cost.BudgetThresholds{
+			Global:      cost.GlobalBudget{MaxDailyUSD: 100},
+			PerWorkflow: cost.PerWorkflowBudget{DefaultMaxUSD: 10},
+			PerAgent:    cost.PerAgentBudget{DefaultMaxUSD: 5},
+		},
+	}
+	counter := cost.NewTokenCounter(costCfg, zap.NewNop())
+	enforcer := cost.NewBudgetEnforcer(counter, costCfg, zap.NewNop())
+	return wallet.NewWalletService(counter, enforcer, wallet.DefaultConfig(), zap.NewNop())
+}
+
 // TestNewAgentGRPCServer confirms the extracted agent-facing gRPC server
-// builder returns a usable server with both agent-facing services
-// registered. The recovery + rate-limit interceptor behaviour itself is
+// builder registers the right services: LogService always, and the
+// RFC 0023 WalletService only when a wallet was built (i.e. the cost config
+// loaded). The recovery + rate-limit interceptor behaviour itself is
 // covered in internal/security; this test pins the wiring extracted from
 // main() (ISSUE-0059 / ISSUE-0008).
 func TestNewAgentGRPCServer(t *testing.T) {
@@ -29,15 +51,25 @@ func TestNewAgentGRPCServer(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = buf.Close() })
 
-	// nil rate limiter + breaker: GRPCRateLimitInterceptor is nil-safe,
-	// so the interceptor chain still composes.
-	srv := newAgentGRPCServer(buf, nil, nil, zap.NewNop())
-	require.NotNil(t, srv)
-	t.Cleanup(srv.Stop)
-
-	// LogService + WalletService are both registered on the listener.
-	assert.Len(t, srv.GetServiceInfo(), 2,
-		"both LogService and WalletService must be registered on the agent-facing server")
+	tests := []struct {
+		name       string
+		walletSvc  *wallet.WalletService
+		wantSvcLen int
+	}{
+		{"with wallet", testWalletService(t), 2},
+		{"without wallet (cost config absent)", nil, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// nil rate limiter + breaker: GRPCRateLimitInterceptor is
+			// nil-safe, so the interceptor chain still composes.
+			srv := newAgentGRPCServer(buf, nil, nil, tc.walletSvc, zap.NewNop())
+			require.NotNil(t, srv)
+			t.Cleanup(srv.Stop)
+			assert.Len(t, srv.GetServiceInfo(), tc.wantSvcLen,
+				"LogService is always registered; WalletService only with a wallet")
+		})
+	}
 }
 
 // panicService is a healthpb.HealthServer whose unary Check and
@@ -72,7 +104,9 @@ func TestNewAgentGRPCServer_RecoversHandlerPanic(t *testing.T) {
 	t.Cleanup(func() { _ = buf.Close() })
 
 	// nil rate limiter + breaker: GRPCRateLimitInterceptor is nil-safe.
-	srv := newAgentGRPCServer(buf, nil, nil, zap.NewNop())
+	// nil wallet: the interceptors are server-wide, so the panicService
+	// registered below exercises them regardless of the wallet.
+	srv := newAgentGRPCServer(buf, nil, nil, nil, zap.NewNop())
 	healthpb.RegisterHealthServer(srv, panicService{})
 
 	lis := bufconn.Listen(1 << 20)

@@ -30,6 +30,7 @@ import (
 	"github.com/mkhomutov/persatrix/internal/scheduler"
 	"github.com/mkhomutov/persatrix/internal/server"
 	"github.com/mkhomutov/persatrix/internal/state"
+	"github.com/mkhomutov/persatrix/internal/wallet"
 )
 
 const (
@@ -243,6 +244,11 @@ func main() {
 	// See RFC 0006 PR 5 review follow-ups for tracking.
 	var schedOpts []scheduler.Option
 	var srvOpts []server.ServerOption
+	// RFC 0023 — the WalletService, built only when the cost config loaded
+	// (it composes the budget enforcer + token counter). Registered on the
+	// agent-facing gRPC server below; its TTL reaper is started alongside
+	// that listener.
+	var walletSvc *wallet.WalletService
 	if costCfg != nil {
 		tokenCounter := cost.NewTokenCounter(costCfg, logger)
 		budgetEnforcer := cost.NewBudgetEnforcer(tokenCounter, costCfg, logger)
@@ -254,10 +260,30 @@ func main() {
 		responseCache := cost.NewResponseCache(10000, time.Hour, logger)
 		execOpts = append(execOpts, executor.WithResponseCache(responseCache))
 
+		// RFC 0023 — LLM Call Leasing: wallet lease-lifecycle tuning. Loaded
+		// inside the cost-config guard — the wallet composes the budget
+		// enforcer, so with no cost config there is no WalletService to
+		// configure. A malformed block is non-fatal: log and use defaults.
+		walletCfg, err := wallet.LoadConfig(*configDir)
+		if err != nil {
+			logger.Warn("failed to load wallet config, using defaults",
+				zap.String("configDir", *configDir),
+				zap.Error(err),
+			)
+			walletCfg = wallet.DefaultConfig()
+		}
+
+		walletSvc = wallet.NewWalletService(tokenCounter, budgetEnforcer, walletCfg, logger)
+
 		logger.Info("cost tracking initialized",
 			zap.Float64("globalDailyBudget", costCfg.Budgets.Global.MaxDailyUSD),
 			zap.Float64("perWorkflowBudget", costCfg.Budgets.PerWorkflow.DefaultMaxUSD),
 			zap.Float64("perAgentBudget", costCfg.Budgets.PerAgent.DefaultMaxUSD),
+		)
+		logger.Info("wallet lease enforcement initialized",
+			zap.Duration("leaseTTL", walletCfg.TTL),
+			zap.Duration("reaperInterval", walletCfg.ReaperInterval),
+			zap.Int("maxActiveLeases", walletCfg.MaxActiveLeases),
 		)
 	}
 
@@ -357,7 +383,7 @@ func main() {
 				zap.String("addr", grpcAddr), zap.Error(err))
 		}
 		grpcListener = lis
-		grpcServer = newAgentGRPCServer(logBuf, rateLimiter, circuitBreaker, logger)
+		grpcServer = newAgentGRPCServer(logBuf, rateLimiter, circuitBreaker, walletSvc, logger)
 		defer grpcServer.GracefulStop()
 	}
 
@@ -383,6 +409,16 @@ func main() {
 			}
 		}()
 		logger.Info("gRPC server listening", zap.String("addr", grpcListener.Addr().String()))
+
+		// RFC 0023 — run the wallet's TTL reaper alongside the listener
+		// that serves the WalletService. It drains on root-context cancel.
+		if walletSvc != nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				walletSvc.RunReaper(ctx)
+			}()
+		}
 	}
 
 	// TODO(v0.2): propagate Start error via errCh for non-zero exit code
