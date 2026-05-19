@@ -10,7 +10,8 @@
 // This file covers construction and AcquireLease (grant / deny / mutex
 // atomicity / concurrency cap / collision) and holds the shared fixtures.
 // SettleLease / ReleaseLease live in wallet_settle_test.go; the reaper in
-// wallet_reaper_test.go.
+// wallet_reaper_test.go; the AcquireLease / SettleLease token-count
+// validation in wallet_validation_test.go.
 package wallet
 
 import (

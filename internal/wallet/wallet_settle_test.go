@@ -1,6 +1,7 @@
 // SettleLease / ReleaseLease tests for the WalletService (RFC 0023 PR 2)
 // plus the end-to-end gRPC wire surface. Shared fixtures live in
-// wallet_test.go; the reaper lives in wallet_reaper_test.go.
+// wallet_test.go; the reaper lives in wallet_reaper_test.go; the
+// token-count validation in wallet_validation_test.go.
 package wallet
 
 import (

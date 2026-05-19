@@ -31,6 +31,18 @@ import (
 	"github.com/mkhomutov/persatrix/internal/generated/walletpb"
 )
 
+// maxTokenCount bounds every agent-supplied token-count field the wallet
+// accepts — estimated_input_tokens / estimated_max_output_tokens on a
+// LeaseRequest, actual_input_tokens / actual_output_tokens on a
+// SettlementRequest. It is a fat-finger / pre-auth guard, not a product
+// limit: at ~500× the largest production context window no legitimate call
+// approaches it. The bound also (a) keeps estimated_input_tokens +
+// estimated_max_output_tokens — summed for the budget check — far clear of
+// an int64 overflow, and (b) caps the worst-case provisional charge a single
+// malformed lease can record. RFC 0023 Security Considerations: agent inputs
+// are untrusted until RFC 0009 auth lands, so the wallet range-checks them.
+const maxTokenCount int64 = 1_000_000_000
+
 // WalletService is the gRPC WalletService implementation registered on the
 // orchestrator's agent-facing gRPC server (the listener that already hosts
 // LogService — RFC 0023 Open Question §1).
@@ -142,11 +154,49 @@ func NewWalletService(
 	return w
 }
 
-// AcquireLease issues a lease for an LLM call, or denies it. It enforces
-// the per-agent concurrency cap, then composes BudgetEnforcer.CheckBudget;
-// on a positive decision it records a provisional worst-case charge and
-// tracks the lease for settlement / reaping.
+// validateTokenCount range-checks an agent-supplied token-count field,
+// returning a codes.InvalidArgument status error when it falls outside
+// [0, maxTokenCount]. A negative count is the load-bearing case: cost
+// estimation is unclamped arithmetic (cost.EstimateCost), so a negative
+// count produces a negative charge that RecordProvisional / Reconcile would
+// subtract from the budget scope totals — silently freeing budget and
+// defeating the enforcement the wallet exists to apply. An oversized count
+// is the mirror DoS. The wallet rejects both at the RPC boundary rather than
+// feeding them into the cost counter; the cost primitives stay pure
+// arithmetic, shared unchanged with the trusted scheduler RecordUsage path.
+func (w *WalletService) validateTokenCount(field string, n int64) error {
+	if n < 0 || n > maxTokenCount {
+		w.logger.Warn("wallet: request rejected — token count out of range",
+			zap.String("field", field),
+			zap.Int64("value", n),
+			zap.Int64("max", maxTokenCount),
+		)
+		return status.Errorf(codes.InvalidArgument,
+			"%s must be in [0, %d], got %d", field, maxTokenCount, n)
+	}
+	return nil
+}
+
+// AcquireLease issues a lease for an LLM call, or denies it. It validates
+// the request's token estimates, enforces the per-agent concurrency cap,
+// then composes BudgetEnforcer.CheckBudget; on a positive decision it
+// records a provisional worst-case charge and tracks the lease for
+// settlement / reaping.
+//
+// A malformed request — a negative or out-of-range token estimate — is
+// rejected with a codes.InvalidArgument error, distinct from the in-band
+// LeaseDenied arm a budget denial returns.
 func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseRequest) (*walletpb.LeaseResponse, error) {
+	// Validate the agent-supplied token estimates before taking the lock or
+	// touching the cost counter — a negative estimate would record a
+	// negative provisional charge, freeing budget rather than holding it.
+	if err := w.validateTokenCount("estimated_input_tokens", req.GetEstimatedInputTokens()); err != nil {
+		return nil, err
+	}
+	if err := w.validateTokenCount("estimated_max_output_tokens", req.GetEstimatedMaxOutputTokens()); err != nil {
+		return nil, err
+	}
+
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -166,7 +216,9 @@ func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseReque
 
 	// Budget check. CheckBudget prices the combined estimate as output
 	// tokens — its single-number API is intentionally pessimistic; the
-	// provisional charge below uses the honest input/output split.
+	// provisional charge below uses the honest input/output split. Both
+	// estimates were range-checked to [0, maxTokenCount] above, so the sum
+	// here cannot overflow int64.
 	estimatedTokens := req.GetEstimatedInputTokens() + req.GetEstimatedMaxOutputTokens()
 	decision := w.enforcer.CheckBudget(req.GetWorkflowId(), req.GetAgentId(), req.GetModel(), estimatedTokens)
 	if decision.Decision == cost.BudgetReject {
@@ -245,8 +297,18 @@ func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseReque
 }
 
 // SettleLease records actual usage for a lease, reconciling the provisional
-// charge against the provider-reported actuals.
+// charge against the provider-reported actuals. A malformed request — a
+// negative or out-of-range actual token count, which Reconcile would apply
+// as a negative or runaway delta to the budget scope totals — is rejected
+// with codes.InvalidArgument; the lease is left unsettled so the agent may
+// retry with corrected values.
 func (w *WalletService) SettleLease(_ context.Context, req *walletpb.SettlementRequest) (*walletpb.SettlementAck, error) {
+	if err := w.validateTokenCount("actual_input_tokens", req.GetActualInputTokens()); err != nil {
+		return nil, err
+	}
+	if err := w.validateTokenCount("actual_output_tokens", req.GetActualOutputTokens()); err != nil {
+		return nil, err
+	}
 	return w.finalize(req.GetLeaseId(), req.GetActualInputTokens(), req.GetActualOutputTokens(), "settle"), nil
 }
 
@@ -372,6 +434,11 @@ func guardReap(logger *zap.Logger, fn func()) {
 //     by issuedAt+ttl at the latest, so issuedAt+2*ttl leaves at least ttl
 //     of late-settle no-op window past any close — ample for a retrying
 //     agent — while still bounding the in-flight map.
+//
+// The whole pass holds w.mu and is O(len(active)), reconciling each expired
+// lease under the lock. RFC 0023 § D accepts this: lease churn is rare
+// relative to the LLM-call latency the wallet gates, and the issue-time
+// purge horizon above keeps len(active) bounded.
 func (w *WalletService) reapExpired(now time.Time) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
