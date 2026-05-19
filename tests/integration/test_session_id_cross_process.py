@@ -39,7 +39,6 @@ from pathlib import Path
 
 import pytest
 
-
 # Worker that opens an in-memory persona stack pointed at a shared
 # SQLite file, writes one episode + one interaction, and exits.  Runs
 # as a child process so the ``PERSATRIX_SESSION_ID`` env var is read

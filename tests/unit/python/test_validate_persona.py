@@ -1,4 +1,8 @@
-"""Tests for persona-specific validation — behavior, autonomy, memory, additional properties, range constraints."""
+"""Tests for persona-specific validation.
+
+Covers behavior, autonomy, memory, additional properties, and range
+constraints.
+"""
 
 from __future__ import annotations
 
@@ -25,7 +29,9 @@ def schemas_dir(tmp_path: Path) -> Path:
     dest = tmp_path / "schemas"
     dest.mkdir()
     for schema_file in real_schemas.glob("*.json"):
-        (dest / schema_file.name).write_text(schema_file.read_text(encoding="utf-8"), encoding="utf-8")
+        (dest / schema_file.name).write_text(
+            schema_file.read_text(encoding="utf-8"), encoding="utf-8"
+        )
     return dest
 
 

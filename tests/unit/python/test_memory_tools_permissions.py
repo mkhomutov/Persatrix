@@ -15,7 +15,6 @@ from agents.tools.builtin import create_memory_tools
 from agents.tools.permissions import PermissionGate
 from agents.tools.registry import clear_registry, get_tool
 
-
 # ─── Fixtures ───────────────────────────────────────────────
 
 

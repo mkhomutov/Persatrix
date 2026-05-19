@@ -27,7 +27,6 @@ from agents.memory.working import WorkingMemory
 from agents.persona_runtime.memory_context import _MemoryContextMixin
 from agents.persona_types import EventType
 
-
 # ─── Fixture ──────────────────────────────────────────────────
 
 

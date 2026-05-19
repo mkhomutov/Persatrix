@@ -6,9 +6,7 @@ and query sanitization.
 
 from unittest.mock import AsyncMock, patch
 
-
 from agents.memory.episodic import EpisodicMemory
-
 
 # ─── FTS5 availability ──────────────────────────────────────
 

@@ -33,7 +33,6 @@ from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
 
-
 # ─── Pure helper: synthesize_channel_reply ────────────────
 
 

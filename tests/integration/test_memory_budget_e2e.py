@@ -31,7 +31,6 @@ from agents.persona_runtime.memory_budget import MEMORY_BUDGET_TOKENS as _MEMORY
 from agents.persona_runtime.memory_context import _MemoryContextMixin
 from agents.persona_types import EventType
 
-
 # ─── Shared fixture: in-memory DB seeded with realistic snapshot ──────────────
 
 

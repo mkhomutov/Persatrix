@@ -20,7 +20,6 @@ from agents.tools import builtin
 from agents.tools.registry import ToolResult, clear_registry, get_tool, tool
 from agents.tools.sandbox import PathValidator
 
-
 # ─── Fixtures ───────────────────────────────────────────────
 
 

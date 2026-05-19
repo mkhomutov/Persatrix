@@ -5,11 +5,10 @@ import pytest
 
 from agents.llm_client import LLMResponse, StopReason, ToolCall, Usage
 from agents.persona import create_persona_agent
-from agents.persona_runtime import _LLMPersonaAgent, _coerce_event_timeout, _truncate_with_ellipsis
+from agents.persona_runtime import _coerce_event_timeout, _LLMPersonaAgent, _truncate_with_ellipsis
 from agents.persona_types import ActionType, AgentEvent, EventType, PersonaState
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
-
 
 # ─── Factory Tests ──────────────────────────────────────────
 
@@ -268,7 +267,10 @@ class TestPersonaDefaultFallbackLimits:
         await agent.on_event(event)
         # Verify the LLM was called with max_tokens=4096 (the persona default)
         call_kwargs = client._provider.create_message.call_args
-        assert call_kwargs.kwargs.get("max_tokens") == 4096 or call_kwargs[1].get("max_tokens") == 4096
+        assert (
+            call_kwargs.kwargs.get("max_tokens") == 4096
+            or call_kwargs[1].get("max_tokens") == 4096
+        )
         await agent.close_memory()
 
 

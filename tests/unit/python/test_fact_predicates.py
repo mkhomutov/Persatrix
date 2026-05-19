@@ -28,7 +28,6 @@ from agents.memory.fact_predicates import (
     validate_predicate,
 )
 
-
 # ─── Predicate allowlist ────────────────────────────────────
 
 

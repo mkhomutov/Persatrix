@@ -13,7 +13,6 @@ from agents.persona_types import ActionType, AgentEvent, EventType, PersonaState
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client, _task
 
-
 # ─── PR #54 review: per-event timeout ───────────────────────
 
 

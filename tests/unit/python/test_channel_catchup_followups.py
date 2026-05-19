@@ -38,7 +38,7 @@ Second-pass deep-review fixes (commit on this branch following
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import aiohttp
 import pytest
@@ -49,7 +49,7 @@ from agents.channel_catchup import replay_channel_history
 # The ``orchestrator`` fixture is registered via ``conftest.py`` so
 # tests get it injected by name — no per-file import needed (which
 # would trigger ruff F811 on every fixture parameter).
-from ._catchup_test_helpers import _SpyAgent, _channel, _msg
+from ._catchup_test_helpers import _channel, _msg, _SpyAgent
 
 
 class TestReplayPreservesTimestamp:
@@ -79,7 +79,7 @@ class TestReplayPreservesTimestamp:
             {"id": "ember-owl", "respond": "when_mentioned",
              "joined_at": "2026-05-01T00:00:00+00:00"},
         ]
-        original_ts = datetime(2026, 5, 7, 9, 30, tzinfo=timezone.utc)
+        original_ts = datetime(2026, 5, 7, 9, 30, tzinfo=UTC)
         state["history"]["group:planning"] = [
             _msg(msg_id="m1", channel_id="group:planning",
                  sender_id="iron-fox", content="hello from earlier",

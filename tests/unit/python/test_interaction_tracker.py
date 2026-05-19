@@ -17,7 +17,6 @@ exercised here.
 from __future__ import annotations
 
 import pytest
-
 from _otel_test_helpers import counter_total
 
 from agents.memory.boundary_detectors import (
@@ -28,8 +27,8 @@ from agents.memory.boundary_detectors import (
     REASON_STRUCTURAL,
     REASON_TOPIC_SHIFT,
     IdleGapDetector,
-    StructuralCloseDetector,
     MaxTurnsDetector,
+    StructuralCloseDetector,
     TopicShiftDetector,
     default_detectors,
 )
@@ -40,7 +39,6 @@ from agents.memory.interactions import (
     scope_for_group,
     scope_for_thread,
 )
-
 
 # ─── Scope helpers ──────────────────────────────────────────
 

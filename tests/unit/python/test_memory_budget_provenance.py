@@ -34,7 +34,6 @@ import pytest
 
 from agents.persona_runtime.memory_budget import KNOWN_TIERS, MemoryBudget
 
-
 # ─── Registry shape ────────────────────────────────────────────
 
 

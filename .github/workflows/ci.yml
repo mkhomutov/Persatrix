@@ -87,6 +87,14 @@ jobs:
       - name: Lint with ruff
         run: cd agents && ruff check .
 
+      # ISSUE-0056: the step above runs `cd agents` first, so the repo-root
+      # tests/ tree is outside ruff's scope — test code under tests/ was
+      # never linted by CI. This second invocation closes that gap. It runs
+      # from the repo root and picks up the root ruff.toml, which `extend`s
+      # agents/pyproject.toml so both trees share one single-sourced rule set.
+      - name: Lint tests/ tree with ruff
+        run: ruff check tests/
+
       - name: Type check with mypy
         run: cd agents && mypy .
 

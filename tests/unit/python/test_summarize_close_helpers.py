@@ -27,7 +27,6 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from _otel_test_helpers import counter_total
 
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage

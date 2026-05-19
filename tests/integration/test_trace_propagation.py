@@ -13,9 +13,11 @@ The test uses an in-process gRPC server (grpc.aio) with an
 
 from __future__ import annotations
 
-import pytest
+from unittest.mock import AsyncMock, MagicMock
+
 import grpc
 import grpc.aio
+import pytest
 from opentelemetry import baggage, context, propagate, trace
 from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 from opentelemetry.sdk.trace import TracerProvider
@@ -23,12 +25,10 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from agents.generated import task_pb2, task_pb2_grpc
+from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.observability.tracing import init_tracing
 from agents.server_servicers import AgentServiceServicer
 from agents.task_agent import TaskAgent
-from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
-from unittest.mock import AsyncMock, MagicMock
-
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
 

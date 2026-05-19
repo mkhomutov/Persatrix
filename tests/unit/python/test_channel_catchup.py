@@ -24,7 +24,7 @@ trigger.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import aiohttp
 
@@ -38,8 +38,7 @@ from agents.persona_types import EventType
 # review cap. The ``orchestrator`` fixture itself is registered via
 # ``conftest.py`` so tests get it injected by name without an import
 # (avoids ruff F811 on every fixture parameter).
-from ._catchup_test_helpers import _SpyAgent, _channel, _msg
-
+from ._catchup_test_helpers import _channel, _msg, _SpyAgent
 
 # ─── Tests ─────────────────────────────────────────────────
 
@@ -120,11 +119,11 @@ class TestReplayChannelHistory:
         state["history"]["group:planning"] = [
             _msg(msg_id="m2", channel_id="group:planning",
                  sender_id="iron-fox", content="anyone here?",
-                 ts=datetime(2026, 5, 7, 10, 1, tzinfo=timezone.utc),
+                 ts=datetime(2026, 5, 7, 10, 1, tzinfo=UTC),
                  mentions=["ember-owl"]),
             _msg(msg_id="m1", channel_id="group:planning",
                  sender_id="iron-fox", content="hello",
-                 ts=datetime(2026, 5, 7, 10, 0, tzinfo=timezone.utc)),
+                 ts=datetime(2026, 5, 7, 10, 0, tzinfo=UTC)),
         ]
 
         agent = _SpyAgent("ember-owl")
@@ -162,13 +161,13 @@ class TestReplayChannelHistory:
         state["history"]["group:planning"] = [
             _msg(msg_id="m3", channel_id="group:planning",
                  sender_id="iron-fox", content="third",
-                 ts=datetime(2026, 5, 7, 10, 2, tzinfo=timezone.utc)),
+                 ts=datetime(2026, 5, 7, 10, 2, tzinfo=UTC)),
             _msg(msg_id="m2", channel_id="group:planning",
                  sender_id="iron-fox", content="second",
-                 ts=datetime(2026, 5, 7, 10, 1, tzinfo=timezone.utc)),
+                 ts=datetime(2026, 5, 7, 10, 1, tzinfo=UTC)),
             _msg(msg_id="m1", channel_id="group:planning",
                  sender_id="iron-fox", content="first",
-                 ts=datetime(2026, 5, 7, 10, 0, tzinfo=timezone.utc)),
+                 ts=datetime(2026, 5, 7, 10, 0, tzinfo=UTC)),
         ]
 
         agent = _SpyAgent("ember-owl")

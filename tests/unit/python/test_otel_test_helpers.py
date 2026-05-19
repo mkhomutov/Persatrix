@@ -14,7 +14,6 @@ rather than as a silent zero in every consumer's assertion.
 from __future__ import annotations
 
 import pytest
-
 from _otel_test_helpers import counter_total
 
 

@@ -35,7 +35,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import grpc
-
 import pytest
 
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus

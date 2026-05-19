@@ -27,7 +27,6 @@ from agents.sub_agents._log_safety import (
     _bounded,
 )
 
-
 # ─── Length cap (the volume defence) ──────────────────────────────
 
 

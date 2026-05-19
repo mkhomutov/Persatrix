@@ -27,7 +27,6 @@ from agents.memory.shared_pool import (
     build_registry_from_config,
 )
 
-
 # ─── Fixtures ────────────────────────────────────────────────────
 
 

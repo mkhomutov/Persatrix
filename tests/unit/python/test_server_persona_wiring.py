@@ -19,7 +19,6 @@ from agents.server import AgentServer
 from agents.server_persona import _resolve_agent_type
 from agents.tools.registry import clear_registry
 
-
 # ─── Fixtures ───────────────────────────────────────────────
 
 
@@ -321,7 +320,8 @@ class TestInitializePersonaAgents:
         await initialize_persona_agents(agents, dispatcher, schedulers)
 
         assert "worker" not in schedulers
-        # EventDispatcher has no public "has_agent" API; _agents is the only way to verify registration.
+        # EventDispatcher has no public "has_agent" API; _agents is the only
+        # way to verify registration.
         assert "worker" not in dispatcher._agents
 
     async def test_persona_agent_registered_with_dispatcher(self):

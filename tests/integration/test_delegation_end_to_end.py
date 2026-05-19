@@ -38,6 +38,8 @@ from agents.sub_agents.delegation import (
 
 from ._delegation_helpers import (
     MalformedSubAgent as _MalformedSubAgent,
+)
+from ._delegation_helpers import (
     ScriptedSubAgent as _ScriptedSubAgent,
 )
 
@@ -240,7 +242,7 @@ async def test_oversize_context_package_rejected_at_dispatch(
 async def test_oversize_output_schema_rejected_at_dispatch(
     parent_facade: MemoryFacade,
 ) -> None:
-    """Same trust-boundary rationale as ``context_package`` \u2014 see the
+    """Same trust-boundary rationale as ``context_package`` — see the
     S5 finding in the PR #222 deep review.
 
     PR #224 (RFC 0008 PR 3a) — N7: the per-field check on
@@ -248,7 +250,7 @@ async def test_oversize_output_schema_rejected_at_dispatch(
     cap (``output_schema`` is already a constituent of the
     serialised request).  The error message now references the
     request payload rather than the field, but the behaviour
-    \u2014 oversize requests rejected at the trust boundary \u2014 is
+    — oversize requests rejected at the trust boundary — is
     preserved."""
     canned = DelegationResult(summary="never reached", status="completed")
     child = _ScriptedSubAgent("noop2", canned)

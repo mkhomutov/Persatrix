@@ -26,7 +26,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from _otel_test_helpers import build_meter, counter_total
 
 pytestmark = pytest.mark.asyncio

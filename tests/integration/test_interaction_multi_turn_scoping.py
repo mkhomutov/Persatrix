@@ -44,11 +44,6 @@ import logging
 
 import pytest
 
-from ._interaction_multi_turn_helpers import (
-    all_episodes,
-    make_agent_with_clock,
-)
-
 from agents.clock import FrozenClock
 from agents.memory.interactions import (
     scope_for_dm,
@@ -57,6 +52,11 @@ from agents.memory.interactions import (
 )
 from agents.persona_types import AgentEvent, EventType
 from agents.tools.registry import clear_registry
+
+from ._interaction_multi_turn_helpers import (
+    all_episodes,
+    make_agent_with_clock,
+)
 
 
 @pytest.fixture(autouse=True)

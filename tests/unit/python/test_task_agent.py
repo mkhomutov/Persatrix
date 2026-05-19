@@ -20,7 +20,6 @@ from agents.llm_client import (
 from agents.task_agent import TaskAgent
 from agents.tools.registry import ToolResult, clear_registry, tool
 
-
 # ─── Fixtures ───────────────────────────────────────────────
 
 
@@ -71,7 +70,13 @@ def _task(payload: str = "do something") -> TaskInput:
 class TestTaskAgent:
     async def test_handle_returns_completed(self):
         client = _make_client(
-            responses=[LLMResponse(text="Here is the code:\n```python\nprint('hi')\n```", stop_reason=StopReason.END_TURN, usage=Usage(50, 100))]
+            responses=[
+                LLMResponse(
+                    text="Here is the code:\n```python\nprint('hi')\n```",
+                    stop_reason=StopReason.END_TURN,
+                    usage=Usage(50, 100),
+                )
+            ]
         )
         config = {**_DEFAULT_CONFIG, "instructions": "Write code."}
         agent = TaskAgent(agent_id="code-writer", config=config, llm_client=client)
@@ -84,10 +89,23 @@ class TestTaskAgent:
         async def file_write(path: str, content: str) -> ToolResult:
             return ToolResult(success=True, data=f"Wrote {path}")
 
-        tool_call = ToolCall(id="tc1", name="file_write", input={"path": "main.py", "content": "print('hi')"})
+        tool_call = ToolCall(
+            id="tc1",
+            name="file_write",
+            input={"path": "main.py", "content": "print('hi')"},
+        )
         responses = [
-            LLMResponse(text=None, tool_calls=[tool_call], stop_reason=StopReason.TOOL_USE, usage=Usage(30, 20)),
-            LLMResponse(text="Created main.py with hello world.", stop_reason=StopReason.END_TURN, usage=Usage(40, 30)),
+            LLMResponse(
+                text=None,
+                tool_calls=[tool_call],
+                stop_reason=StopReason.TOOL_USE,
+                usage=Usage(30, 20),
+            ),
+            LLMResponse(
+                text="Created main.py with hello world.",
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(40, 30),
+            ),
         ]
         config = {**_DEFAULT_CONFIG, "tools": ["file_write"], "instructions": "Write code."}
         client = _make_client(responses=responses)
@@ -97,7 +115,11 @@ class TestTaskAgent:
         assert output.metadata["tool_calls"] == "1"
 
     async def test_system_prompt_includes_role(self):
-        config = {**_DEFAULT_CONFIG, "role": "Senior Python developer", "instructions": "Write clean code."}
+        config = {
+            **_DEFAULT_CONFIG,
+            "role": "Senior Python developer",
+            "instructions": "Write clean code.",
+        }
         client = _make_client()
         agent = TaskAgent(agent_id="code-writer", config=config, llm_client=client)
         await agent.handle(_task())
@@ -194,10 +216,19 @@ class TestTaskAgentRoles:
         result_text = {
             "code-writer": "Here is the code:\n```python\nprint('hi')\n```",
             "code-reviewer": '{"approved": true, "issues": [], "summary": "Code looks good."}',
-            "planner": '{"steps": [{"id": 1, "description": "Set up project"}], "summary": "Simple plan"}',
+            "planner": (
+                '{"steps": [{"id": 1, "description": "Set up project"}], '
+                '"summary": "Simple plan"}'
+            ),
         }
         client = _make_client(
-            responses=[LLMResponse(text=result_text[agent_id], stop_reason=StopReason.END_TURN, usage=Usage(50, 100))]
+            responses=[
+                LLMResponse(
+                    text=result_text[agent_id],
+                    stop_reason=StopReason.END_TURN,
+                    usage=Usage(50, 100),
+                )
+            ]
         )
         config = {**_DEFAULT_CONFIG, "role": role, "instructions": instructions}
         agent = TaskAgent(agent_id=agent_id, config=config, llm_client=client)
@@ -265,7 +296,11 @@ class TestCrossAgent:
     )
     async def test_token_counting(self, agent_id):
         client = _make_client(
-            responses=[LLMResponse(text="done", stop_reason=StopReason.END_TURN, usage=Usage(100, 200))]
+            responses=[
+                LLMResponse(
+                    text="done", stop_reason=StopReason.END_TURN, usage=Usage(100, 200)
+                )
+            ]
         )
         config = {**_DEFAULT_CONFIG, "instructions": "Do your thing."}
         agent = TaskAgent(agent_id=agent_id, config=config, llm_client=client)

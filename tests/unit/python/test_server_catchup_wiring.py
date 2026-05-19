@@ -23,8 +23,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import aiohttp
-from aiohttp import web
 import pytest
+from aiohttp import web
 
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from agents.channel_catchup import replay_for_persona_agents

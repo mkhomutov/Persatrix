@@ -10,14 +10,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.dispatch import ActionExecutor
+from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_types import AgentEvent, EventType
 from agents.tick import TickScheduler
 from agents.tools.registry import clear_registry
-
 
 # ─── Helpers ─────────────────────────────────────────────────
 
@@ -222,12 +221,20 @@ class TestMemoryLifecycleIntegration:
         agent = _create_persona(
             responses=[
                 LLMResponse(
-                    text='```json\n[{"action_type": "complete_task", "payload": {"result": "First done"}}]\n```',
+                    text=(
+                        '```json\n'
+                        '[{"action_type": "complete_task", '
+                        '"payload": {"result": "First done"}}]\n```'
+                    ),
                     stop_reason=StopReason.END_TURN,
                     usage=Usage(30, 50),
                 ),
                 LLMResponse(
-                    text='```json\n[{"action_type": "complete_task", "payload": {"result": "Second done"}}]\n```',
+                    text=(
+                        '```json\n'
+                        '[{"action_type": "complete_task", '
+                        '"payload": {"result": "Second done"}}]\n```'
+                    ),
                     stop_reason=StopReason.END_TURN,
                     usage=Usage(30, 50),
                 ),
@@ -263,7 +270,11 @@ class TestMemoryLifecycleIntegration:
             config={**_PERSONA_CONFIG, "id": "iso-a"},
             responses=[
                 LLMResponse(
-                    text='```json\n[{"action_type": "complete_task", "payload": {"result": "A done"}}]\n```',
+                    text=(
+                        '```json\n'
+                        '[{"action_type": "complete_task", '
+                        '"payload": {"result": "A done"}}]\n```'
+                    ),
                     stop_reason=StopReason.END_TURN,
                     usage=Usage(30, 50),
                 ),
@@ -274,7 +285,11 @@ class TestMemoryLifecycleIntegration:
             config={**_PERSONA_CONFIG, "id": "iso-b"},
             responses=[
                 LLMResponse(
-                    text='```json\n[{"action_type": "complete_task", "payload": {"result": "B done"}}]\n```',
+                    text=(
+                        '```json\n'
+                        '[{"action_type": "complete_task", '
+                        '"payload": {"result": "B done"}}]\n```'
+                    ),
                     stop_reason=StopReason.END_TURN,
                     usage=Usage(30, 50),
                 ),

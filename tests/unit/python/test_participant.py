@@ -16,7 +16,6 @@ from agents.participant import (
     validate_participant_type,
 )
 
-
 # ─── Fixtures ───────────────────────────────────────────────
 
 

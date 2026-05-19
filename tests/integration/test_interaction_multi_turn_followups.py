@@ -37,6 +37,12 @@ import logging
 
 import pytest
 
+from agents.clock import FrozenClock
+from agents.memory.boundary_detectors import REASON_IDLE_GAP
+from agents.memory.interactions import scope_for_dm
+from agents.persona_types import AgentEvent, EventType
+from agents.tools.registry import clear_registry
+
 from ._interaction_multi_turn_helpers import (
     TEST_IDLE_TIMEOUT_SEC as _TEST_IDLE_TIMEOUT_SEC,
 )
@@ -46,12 +52,6 @@ from ._interaction_multi_turn_helpers import (
 from ._interaction_multi_turn_helpers import (
     make_agent_with_clock as _make_agent_with_clock,
 )
-
-from agents.clock import FrozenClock
-from agents.memory.boundary_detectors import REASON_IDLE_GAP
-from agents.memory.interactions import scope_for_dm
-from agents.persona_types import AgentEvent, EventType
-from agents.tools.registry import clear_registry
 
 
 @pytest.fixture(autouse=True)

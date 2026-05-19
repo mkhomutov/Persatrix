@@ -9,11 +9,10 @@ All tests use in-memory SQLite (:memory:) for isolation and speed.
 import pytest
 
 from agents.memory.episodic import EpisodicMemory
-from agents.memory.notes import Note, _MAX_NOTE_CONTENT_BYTES
+from agents.memory.notes import _MAX_NOTE_CONTENT_BYTES, Note
 from agents.tools.builtin import create_memory_tools
 from agents.tools.permissions import PermissionGate
 from agents.tools.registry import clear_registry
-
 
 # ─── Fixtures ───────────────────────────────────────────────
 

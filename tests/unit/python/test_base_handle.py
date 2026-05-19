@@ -24,7 +24,6 @@ from agents.llm_client import (
 )
 from agents.tools.registry import ToolResult, clear_registry, tool
 
-
 # ─── Concrete subclass for testing ──────────────────────────
 
 
@@ -85,7 +84,11 @@ def _task(payload: str = "do something", config: TaskInputConfig | None = None) 
 class TestRunLlmLoopEndTurn:
     async def test_simple_text_response(self):
         agent = _make_agent(
-            responses=[LLMResponse(text="Hello!", stop_reason=StopReason.END_TURN, usage=Usage(10, 20))]
+            responses=[
+                LLMResponse(
+                    text="Hello!", stop_reason=StopReason.END_TURN, usage=Usage(10, 20)
+                )
+            ]
         )
         output = await agent.handle(_task())
         assert output.status == TaskStatus.COMPLETED
@@ -105,7 +108,13 @@ class TestRunLlmLoopEndTurn:
 class TestRunLlmLoopMaxTokens:
     async def test_max_tokens_returns_failed(self):
         agent = _make_agent(
-            responses=[LLMResponse(text="truncated...", stop_reason=StopReason.MAX_TOKENS, usage=Usage(50, 50))]
+            responses=[
+                LLMResponse(
+                    text="truncated...",
+                    stop_reason=StopReason.MAX_TOKENS,
+                    usage=Usage(50, 50),
+                )
+            ]
         )
         output = await agent.handle(_task())
         assert output.status == TaskStatus.FAILED
@@ -166,8 +175,17 @@ class TestRunLlmLoopToolUse:
 
         tool_call = ToolCall(id="tc1", name="restricted_tool", input={})
         responses = [
-            LLMResponse(text=None, tool_calls=[tool_call], stop_reason=StopReason.TOOL_USE, usage=Usage(5, 5)),
-            LLMResponse(text="Permission denied.", stop_reason=StopReason.END_TURN, usage=Usage(10, 5)),
+            LLMResponse(
+                text=None,
+                tool_calls=[tool_call],
+                stop_reason=StopReason.TOOL_USE,
+                usage=Usage(5, 5),
+            ),
+            LLMResponse(
+                text="Permission denied.",
+                stop_reason=StopReason.END_TURN,
+                usage=Usage(10, 5),
+            ),
         ]
         agent = _make_agent(responses=responses)
         output = await agent.handle(_task())
@@ -180,7 +198,12 @@ class TestRunLlmLoopToolUse:
 
         tool_call = ToolCall(id="tc1", name="failing_tool", input={})
         responses = [
-            LLMResponse(text=None, tool_calls=[tool_call], stop_reason=StopReason.TOOL_USE, usage=Usage(5, 5)),
+            LLMResponse(
+                text=None,
+                tool_calls=[tool_call],
+                stop_reason=StopReason.TOOL_USE,
+                usage=Usage(5, 5),
+            ),
             LLMResponse(text="Tool failed.", stop_reason=StopReason.END_TURN, usage=Usage(10, 5)),
         ]
         agent = _make_agent(responses=responses)
@@ -193,7 +216,12 @@ class TestRunLlmLoopMaxIterations:
         tool_call = ToolCall(id="tc1", name="some_tool", input={})
         # Always returns TOOL_USE — will hit max iterations
         responses = [
-            LLMResponse(text=None, tool_calls=[tool_call], stop_reason=StopReason.TOOL_USE, usage=Usage(5, 5))
+            LLMResponse(
+                text=None,
+                tool_calls=[tool_call],
+                stop_reason=StopReason.TOOL_USE,
+                usage=Usage(5, 5),
+            )
             for _ in range(15)
         ]
         agent = _make_agent(
@@ -209,7 +237,12 @@ class TestTaskConfigOverride:
     async def test_per_task_max_llm_calls(self):
         tool_call = ToolCall(id="tc1", name="x", input={})
         responses = [
-            LLMResponse(text=None, tool_calls=[tool_call], stop_reason=StopReason.TOOL_USE, usage=Usage(5, 5))
+            LLMResponse(
+                text=None,
+                tool_calls=[tool_call],
+                stop_reason=StopReason.TOOL_USE,
+                usage=Usage(5, 5),
+            )
             for _ in range(10)
         ]
         agent = _make_agent(
@@ -298,8 +331,18 @@ class TestTokenAccumulation:
 
         tool_call = ToolCall(id="tc1", name="acc_tool", input={})
         responses = [
-            LLMResponse(text=None, tool_calls=[tool_call], stop_reason=StopReason.TOOL_USE, usage=Usage(100, 50)),
-            LLMResponse(text=None, tool_calls=[tool_call], stop_reason=StopReason.TOOL_USE, usage=Usage(200, 100)),
+            LLMResponse(
+                text=None,
+                tool_calls=[tool_call],
+                stop_reason=StopReason.TOOL_USE,
+                usage=Usage(100, 50),
+            ),
+            LLMResponse(
+                text=None,
+                tool_calls=[tool_call],
+                stop_reason=StopReason.TOOL_USE,
+                usage=Usage(200, 100),
+            ),
             LLMResponse(text="done", stop_reason=StopReason.END_TURN, usage=Usage(300, 150)),
         ]
         agent = _make_agent(responses=responses)

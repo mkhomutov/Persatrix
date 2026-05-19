@@ -7,11 +7,10 @@ All tests use in-memory SQLite (:memory:) for isolation and speed.
 import pytest
 
 from agents.memory.relationship import (
-    RelationshipMemory,
     _DEFAULT_TRUST,
     _MAX_RECENT_INTERACTIONS,
+    RelationshipMemory,
 )
-
 
 # ─── Fixtures ───────────────────────────────────────────────
 
@@ -147,7 +146,10 @@ class TestGetRelationshipSummary:
         assert len(summary.recent_interactions) == _MAX_RECENT_INTERACTIONS
         # Newest first: last recorded interaction is first in the list.
         assert summary.recent_interactions[0].interaction_type == f"chat-{total - 1}"
-        assert summary.recent_interactions[-1].interaction_type == f"chat-{total - _MAX_RECENT_INTERACTIONS}"
+        assert (
+            summary.recent_interactions[-1].interaction_type
+            == f"chat-{total - _MAX_RECENT_INTERACTIONS}"
+        )
 
     async def test_trust_only_relationship_has_null_last_interaction(self, memory):
         """update_trust() alone should NOT set last_interaction_at."""

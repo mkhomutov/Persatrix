@@ -42,7 +42,6 @@ from agents.channel_publisher import (
 )
 from agents.observability.spans import CHANNEL_PUBLISH_SPAN
 
-
 # ─── fixtures ────────────────────────────────────────────────────────────────
 
 

@@ -19,10 +19,9 @@ from agents.llm_client import (
     OpenAIProvider,
     StopReason,
     ToolCall,
-    create_provider,
     _infer_provider,
+    create_provider,
 )
-
 
 # ─── Helpers ────────────────────────────────────────────────
 
@@ -395,7 +394,9 @@ class TestLLMClient:
         mock_provider = MagicMock()
         mock_provider.format_tool_definitions.return_value = [{"name": "test"}]
         client = LLMClient(mock_provider)
-        result = client.format_tool_definitions([{"name": "test", "description": "", "parameters": {}}])
+        result = client.format_tool_definitions(
+            [{"name": "test", "description": "", "parameters": {}}]
+        )
         mock_provider.format_tool_definitions.assert_called_once()
         assert result == [{"name": "test"}]
 
@@ -443,7 +444,9 @@ class TestCreateProvider:
         mock_anthropic = MagicMock()
         mock_anthropic.AsyncAnthropic.return_value = AsyncMock()
         with patch.dict(sys.modules, {"anthropic": mock_anthropic}):
-            provider = create_provider({"model": "claude-sonnet-4-20250514", "provider": "anthropic"})
+            provider = create_provider(
+                {"model": "claude-sonnet-4-20250514", "provider": "anthropic"}
+            )
             assert isinstance(provider, AnthropicProvider)
 
     def test_explicit_openai_provider(self):

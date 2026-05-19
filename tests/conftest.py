@@ -107,10 +107,16 @@ def pytest_collection_modifyitems(config, items):
         reason="requires docker-compose observability stack — run with `pytest -m requires_compose`"
     )
     skip_orch = pytest.mark.skip(
-        reason="requires built orchestrator + CLI binaries — run with `pytest -m requires_orchestrator`"
+        reason=(
+            "requires built orchestrator + CLI binaries — run with "
+            "`pytest -m requires_orchestrator`"
+        )
     )
     skip_anthropic = pytest.mark.skip(
-        reason="requires a real Anthropic API call — run with `ANTHROPIC_API_KEY=... pytest -m requires_anthropic`"
+        reason=(
+            "requires a real Anthropic API call — run with "
+            "`ANTHROPIC_API_KEY=... pytest -m requires_anthropic`"
+        )
     )
     for item in items:
         if "requires_compose" in item.keywords and not compose_opted_in:

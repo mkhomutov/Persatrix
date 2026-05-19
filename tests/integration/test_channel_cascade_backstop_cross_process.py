@@ -82,7 +82,6 @@ from agents.persona_runtime import _LLMPersonaAgent
 from agents.server_servicers import AgentServiceServicer
 from agents.tools.registry import clear_registry
 
-
 # Mirrors ``internal/defaults/defaults.go::DefaultMaxCascadeDepth`` and
 # ``agents/dispatch.py::EventDispatcher.max_cascade_depth``. Inlined here
 # (rather than imported from one side) so a regression that desyncs the

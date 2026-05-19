@@ -22,7 +22,6 @@ from agents.persona_types import AgentEvent, EventType
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
 
-
 # ─── Constructor reads env var ──────────────────────────────
 
 

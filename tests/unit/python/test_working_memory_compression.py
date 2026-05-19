@@ -8,10 +8,8 @@ All tests use mock LLM client — no real API calls.
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-
 from agents.llm_client import LLMClient, LLMResponse, Usage
 from agents.memory.working import ContextSection, WorkingMemory
-
 
 # ─── Fixtures ───────────────────────────────────────────────
 
@@ -157,7 +155,13 @@ class TestCompression:
         """When LLM returns text=None, the original section is preserved."""
         wm = WorkingMemory(max_tokens=100)
         wm.add_section(
-            _make_section(name="a", priority=10, token_count=200, content="original", compressible=True)
+            _make_section(
+                name="a",
+                priority=10,
+                token_count=200,
+                content="original",
+                compressible=True,
+            )
         )
         client = _make_llm_client()
         client._provider.create_message = AsyncMock(
@@ -310,7 +314,9 @@ class TestCompressionSizeGuard:
     async def test_smaller_summary_accepted(self):
         """Summary that is genuinely smaller gets applied."""
         wm = WorkingMemory(max_tokens=100)
-        wm.add_section(_make_section(name="a", content="a" * 800, token_count=200, compressible=True))
+        wm.add_section(
+            _make_section(name="a", content="a" * 800, token_count=200, compressible=True)
+        )
 
         client = _make_llm_client(summary="tiny")  # ~1 token
         await wm.compress_if_needed(client)

@@ -169,6 +169,9 @@ lint-go:
 
 lint-python:
 	cd agents && $(PYTHON) -m ruff check . && $(PYTHON) -m mypy .
+	@# ISSUE-0056: the line above runs `cd agents`, leaving the repo-root
+	@# tests/ tree unlinted. Lint it from the repo root via the root ruff.toml.
+	$(PYTHON) -m ruff check tests/
 
 lint-rust:
 	cd cli && $(CARGO) clippy -- -D warnings

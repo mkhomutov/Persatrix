@@ -4,13 +4,11 @@ MAX_TOKENS stop reason, missing model config, and action payload validation."""
 import json
 from unittest.mock import AsyncMock
 
-
 from agents.llm_client import LLMResponse, StopReason, ToolCall
 from agents.persona import create_persona_agent
 from agents.persona_types import ActionType, AgentEvent, EventType, Mood
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client, _task
-
 
 # ─── PR #54 review: close_memory() partial tier failure ──────
 
@@ -268,7 +266,10 @@ class TestActionPayloadValidation:
     async def test_send_message_valid(self):
         agent = await self._make_agent()
         response = LLMResponse(text=json.dumps([
-            {"action_type": "send_channel_message", "payload": {"channel_id": "general", "content": "hello"}},
+            {
+                "action_type": "send_channel_message",
+                "payload": {"channel_id": "general", "content": "hello"},
+            },
         ]))
         actions = agent._parse_actions(response)
         assert actions[0].action_type == ActionType.SEND_CHANNEL_MESSAGE
@@ -292,7 +293,10 @@ class TestActionPayloadValidation:
     async def test_send_message_empty_content(self):
         agent = await self._make_agent()
         response = LLMResponse(text=json.dumps([
-            {"action_type": "send_channel_message", "payload": {"channel_id": "general", "content": ""}},
+            {
+                "action_type": "send_channel_message",
+                "payload": {"channel_id": "general", "content": ""},
+            },
         ]))
         actions = agent._parse_actions(response)
         assert actions[0].action_type == ActionType.DO_NOTHING
@@ -300,7 +304,10 @@ class TestActionPayloadValidation:
     async def test_spawn_sub_agent_valid(self):
         agent = await self._make_agent()
         response = LLMResponse(text=json.dumps([
-            {"action_type": "spawn_sub_agent", "payload": {"role": "researcher", "task": "find info"}},
+            {
+                "action_type": "spawn_sub_agent",
+                "payload": {"role": "researcher", "task": "find info"},
+            },
         ]))
         actions = agent._parse_actions(response)
         assert actions[0].action_type == ActionType.SPAWN_SUB_AGENT

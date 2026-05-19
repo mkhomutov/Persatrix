@@ -33,7 +33,6 @@ from agents.memory.facts import FactStore
 from agents.observability import logging as obs_logging
 from agents.observability.redact import NoopRedactor
 
-
 # ─── Fixtures ───────────────────────────────────────────────
 
 

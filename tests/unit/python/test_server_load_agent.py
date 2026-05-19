@@ -18,7 +18,6 @@ from agents.server_persona import _resolve_agent_type
 from agents.task_agent import TaskAgent
 from agents.tools import builtin
 
-
 # ─── Helpers ─────────────────────────────────────────────────
 
 
@@ -243,7 +242,7 @@ class TestToolDefinitionFiltering:
 
     def test_filters_to_configured_tools(self):
         """Agent with tools=['file_read'] only sees file_read, not other tools."""
-        from agents.tools.registry import clear_registry, tool, ToolResult
+        from agents.tools.registry import ToolResult, clear_registry, tool
 
         clear_registry()
 
@@ -268,7 +267,7 @@ class TestToolDefinitionFiltering:
 
     def test_empty_tools_list_returns_no_tools(self):
         """Agent with tools=[] (e.g. PlannerAgent) sees no tools."""
-        from agents.tools.registry import clear_registry, tool, ToolResult
+        from agents.tools.registry import ToolResult, clear_registry, tool
 
         clear_registry()
 

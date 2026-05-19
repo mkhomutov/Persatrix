@@ -16,7 +16,6 @@ from scripts.persona_nickname_generator import (
     generate_nicknames,
 )
 
-
 _ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)+$")
 
 

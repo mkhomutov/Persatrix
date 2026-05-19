@@ -16,7 +16,6 @@ from agents.tools.builtin import check_auto_reflect, create_memory_tools
 from agents.tools.permissions import PermissionGate
 from agents.tools.registry import clear_registry, get_tool
 
-
 # ─── Fixtures ───────────────────────────────────────────────
 
 
@@ -306,7 +305,10 @@ class TestFTS5QuerySanitization:
         assert _FTS5_SPECIAL.sub(" ", "hi, do you remember me?").strip() == "hi  do you remember me"
 
     def test_period_stripped(self):
-        assert _FTS5_SPECIAL.sub(" ", "Autonomous tick. Review goals.").strip() == "Autonomous tick  Review goals"
+        assert (
+            _FTS5_SPECIAL.sub(" ", "Autonomous tick. Review goals.").strip()
+            == "Autonomous tick  Review goals"
+        )
 
     def test_angle_brackets_stripped(self):
         result = _FTS5_SPECIAL.sub(" ", '<|user_message user_id="local"|>').strip()
@@ -320,7 +322,10 @@ class TestFTS5QuerySanitization:
         assert _FTS5_SPECIAL.sub(" ", "option|alternative").strip() == "option alternative"
 
     def test_mixed_punctuation_stripped(self):
-        assert _FTS5_SPECIAL.sub(" ", "I am Max, the creator of Persatrix.").strip() == "I am Max  the creator of Persatrix"
+        assert (
+            _FTS5_SPECIAL.sub(" ", "I am Max, the creator of Persatrix.").strip()
+            == "I am Max  the creator of Persatrix"
+        )
 
     def test_hyphen_stripped(self):
         """Hyphens are non-alphanumeric and should be stripped."""

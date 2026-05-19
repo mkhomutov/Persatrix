@@ -23,7 +23,6 @@ from agents.sub_agents.delegation import (
     MemoryWriteEntry,
 )
 
-
 # ─── BudgetEnvelope ─────────────────────────────────────────────
 
 

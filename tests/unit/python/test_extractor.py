@@ -29,7 +29,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from _otel_test_helpers import counter_total
 
 from agents.memory.fact_predicates import PREDICATE_ALLOWLIST
@@ -41,7 +40,6 @@ from agents.persona_runtime.fact_extractor import (
     split_combined_response,
     store_extracted_facts,
 )
-
 
 # ─── Fixtures ───────────────────────────────────────────────
 

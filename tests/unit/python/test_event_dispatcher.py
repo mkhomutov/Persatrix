@@ -17,7 +17,6 @@ from agents.persona_types import AgentEvent, EventType
 from agents.tick import TickScheduler
 from agents.tools.registry import clear_registry
 
-
 # ─── Fixtures ───────────────────────────────────────────────
 
 

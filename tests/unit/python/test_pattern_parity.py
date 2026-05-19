@@ -40,7 +40,7 @@ class TestGeneratedShape:
     def test_default_patterns_nonempty(self) -> None:
         assert len(DEFAULT_PATTERNS) >= 3, (
             "Expected at least one pattern per family (instruction_override / "
-            "role_injection / exfiltration); got %d" % len(DEFAULT_PATTERNS)
+            f"role_injection / exfiltration); got {len(DEFAULT_PATTERNS)}"
         )
 
     def test_every_family_present(self) -> None:

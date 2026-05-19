@@ -18,7 +18,6 @@ from agents.generated import task_pb2
 from agents.persona_types import ActionType, AgentAction
 from agents.server_servicers import AgentServiceServicer, _extract_chat_reply
 
-
 # ─── Helpers ─────────────────────────────────────────────────
 
 
@@ -70,8 +69,14 @@ class TestExtractChatReply:
     def test_user_targeted_send_message_wins(self):
         """SEND_CHANNEL_MESSAGE with user_id in mentions is highest priority."""
         actions = [
-            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "to other", "mentions": ["iron-fox"]}),
-            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "to user", "mentions": ["local"]}),
+            AgentAction(
+                ActionType.SEND_CHANNEL_MESSAGE,
+                {"content": "to other", "mentions": ["iron-fox"]},
+            ),
+            AgentAction(
+                ActionType.SEND_CHANNEL_MESSAGE,
+                {"content": "to user", "mentions": ["local"]},
+            ),
         ]
         reply, status = _extract_chat_reply(actions, "local")
         assert reply == "to user"
@@ -80,7 +85,10 @@ class TestExtractChatReply:
     def test_fallback_to_any_send_message(self):
         """Any SEND_CHANNEL_MESSAGE wins when no user-targeted one exists."""
         actions = [
-            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "general", "mentions": ["iron-fox"]}),
+            AgentAction(
+                ActionType.SEND_CHANNEL_MESSAGE,
+                {"content": "general", "mentions": ["iron-fox"]},
+            ),
         ]
         reply, status = _extract_chat_reply(actions, "local")
         assert reply == "general"
@@ -144,7 +152,12 @@ class TestChatServicerFollowUps:
         operator-namespace `session_id` (RFC 0031 OQ #8).
         (PR 6 review fix: PR 3 finding #1 / test gap #9.)
         """
-        actions = [AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "hi", "mentions": ["local"]})]
+        actions = [
+            AgentAction(
+                ActionType.SEND_CHANNEL_MESSAGE,
+                {"content": "hi", "mentions": ["local"]},
+            )
+        ]
         servicer = _make_servicer(actions)
         context = _mock_context()
 
@@ -253,7 +266,10 @@ class TestSanitizeReplyEdgeCases:
     def test_clean_text_unchanged(self):
         """Text without any delimiter tags passes through untouched."""
         actions = [
-            AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {"content": "Just a normal reply.", "mentions": []}),
+            AgentAction(
+                ActionType.SEND_CHANNEL_MESSAGE,
+                {"content": "Just a normal reply.", "mentions": []},
+            ),
         ]
         reply, status = _extract_chat_reply(actions, "local")
         assert reply == "Just a normal reply."

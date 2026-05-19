@@ -10,7 +10,6 @@ import pytest
 
 from agents.memory.episodic import EpisodicMemory
 
-
 # ─── recall(min_score=...) — FTS5 filtering (RFC 0017 §C) ──
 
 

@@ -25,9 +25,9 @@ from agents.persona_runtime.conversation_window import ConversationWindowConfig
 from ._conversation_window_test_helpers import (
     _AGENT_ID,
     _CURRENT,
-    _FakeChannelHistoryFetcher,
     _build,
     _event,
+    _FakeChannelHistoryFetcher,
     _row,
 )
 

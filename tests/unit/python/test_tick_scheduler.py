@@ -20,7 +20,6 @@ from agents.persona_types import ActionType, AgentAction
 from agents.tick import TickScheduler
 from agents.tools.registry import clear_registry
 
-
 # ─── Fixtures ───────────────────────────────────────────────
 
 

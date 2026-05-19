@@ -106,7 +106,10 @@ class TestGeneratedPyiFreshness:
         # compare equal to the ``protoc``-emitted LF bytes. CI runs
         # on Linux where the bytes already match; the normalisation
         # is purely for local-dev parity.
-        if committed.read_bytes().replace(b"\r\n", b"\n") != regenerated.read_bytes().replace(b"\r\n", b"\n"):
+        if (
+            committed.read_bytes().replace(b"\r\n", b"\n")
+            != regenerated.read_bytes().replace(b"\r\n", b"\n")
+        ):
             pytest.fail(
                 f"agents/generated/{pyi_name} is stale relative to "
                 f"proto/{proto_file.name}. Run:\n"

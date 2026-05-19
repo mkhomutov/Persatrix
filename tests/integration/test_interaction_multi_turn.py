@@ -1,14 +1,14 @@
 """
-RFC 0020 PR 3 \u2014 multi-turn aggregation integration tests.
+RFC 0020 PR 3 — multi-turn aggregation integration tests.
 
 Pins the PR 3 deliverables called out in
-``docs/rfcs/0020-pr-plan.md`` \u00a7PR 3:
+``docs/rfcs/0020-pr-plan.md`` §PR 3:
 
 * Ten turns from the same chat session collapse into one interaction
   and produce a single closed-interaction episode on session end.
 * Idle-gap closure: a clock-advance past the configured idle timeout
   produces a closed interaction; the next turn opens a fresh one.
-* DM scope keying is symmetric: A\u2192B and B\u2192A in a DM accumulate into
+* DM scope keying is symmetric: A→B and B→A in a DM accumulate into
   the same interaction.
 """
 
@@ -36,8 +36,8 @@ def _clean_registry():
     clear_registry()
 
 
-# Short idle timeout keeps the idle-gap test cheap \u2014 the production
-# default is 600s (RFC 0020 \u00a7B); tests use 5s so a fake clock-advance
+# Short idle timeout keeps the idle-gap test cheap — the production
+# default is 600s (RFC 0020 §B); tests use 5s so a fake clock-advance
 # of 10s is unambiguously past the threshold without making the test
 # wait for real wall-clock time.
 _TEST_IDLE_TIMEOUT_SEC: float = 5.0
@@ -83,8 +83,8 @@ def _do_nothing_client() -> LLMClient:
     DO_NOTHING, the close-path summariser call returns a valid combined
     ``{"summary": ..., "facts": []}`` envelope.
 
-    Multi-turn aggregation does not depend on action shape \u2014 only on
-    interaction-tracker state and the persisted episode column values \u2014
+    Multi-turn aggregation does not depend on action shape — only on
+    interaction-tracker state and the persisted episode column values —
     but the summariser call must still receive a *well-formed* envelope:
     ISSUE-0054 made the close path fall back to the unavailable-summary
     sentinel when the response is not a valid envelope, so a single
@@ -153,12 +153,12 @@ async def _all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
     ]
 
 
-# \u2500\u2500\u2500 Multi-turn aggregation \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# ─── Multi-turn aggregation ──────────────────────────────────────
 
 
 @pytest.mark.asyncio
 class TestMultiTurnAggregation:
-    """RFC 0020 PR 3 \u00a7\"Multi-Turn for Human-Chat + DM\"."""
+    """RFC 0020 PR 3 §"Multi-Turn for Human-Chat + DM"."""
 
     async def test_ten_turn_session_collapses_into_one_interaction(self):
         """Ten ``CHANNEL_MESSAGE`` turns from the same peer aggregate."""
@@ -172,7 +172,7 @@ class TestMultiTurnAggregation:
                 sender_id=peer,
             ))
 
-        # No episode persisted yet \u2014 the interaction is still open.
+        # No episode persisted yet — the interaction is still open.
         assert await _all_episodes(agent) == []
 
         # One open scope, keyed symmetrically on (agent, peer).
@@ -185,7 +185,7 @@ class TestMultiTurnAggregation:
         assert interaction.turn_count == 10
         assert interaction.is_open
 
-        # Session end \u2014 explicit ``chat_end`` metadata flag (RFC 0016
+        # Session end — explicit ``chat_end`` metadata flag (RFC 0016
         # surface lands in a follow-up; the runtime accepts the marker
         # today so PR 5 / channel hooks can emit it).
         await agent.on_event(AgentEvent(
@@ -218,8 +218,8 @@ class TestMultiTurnAggregation:
         assert ep["summary"]
         assert ep["summary"] != SUMMARY_UNAVAILABLE_TEXT
 
-        # Tracker is empty \u2014 the closed scope was popped per RFC 0020
-        # \u00a7C "do not reopen".
+        # Tracker is empty — the closed scope was popped per RFC 0020
+        # §C "do not reopen".
         assert agent._interaction_tracker.open_scopes() == []
 
     async def test_idle_gap_closes_interaction_and_next_turn_opens_new_one(self):
@@ -245,7 +245,7 @@ class TestMultiTurnAggregation:
         first_id = first.interaction_id
 
         # Advance the tracker's clock past the idle window and run
-        # idle_check explicitly \u2014 the production hot path runs this on
+        # idle_check explicitly — the production hot path runs this on
         # every event, but exercising it directly keeps the test free of
         # ``time.sleep`` and decouples the assertion from event ordering.
         future = first.last_turn_at + _TEST_IDLE_TIMEOUT_SEC + 1.0
@@ -254,7 +254,7 @@ class TestMultiTurnAggregation:
         assert closed_list[0].close_reason == REASON_IDLE_GAP
 
         # Persist the idle-closed interaction the way the runtime would
-        # on the next event \u2014 then verify the persisted row carries the
+        # on the next event — then verify the persisted row carries the
         # idle-gap reason.
         await agent._persist_closed_interaction(closed_list[0])  # type: ignore[attr-defined]
         # PR #229 review Must-Fix #1: drain the two-phase background
@@ -287,14 +287,15 @@ class TestMultiTurnAggregation:
         assert second.turn_count == 1
 
     async def test_dm_scope_is_symmetric_in_local_and_peer(self):
-        """A\u2192B and B\u2192A in a DM accumulate under the same scope key.
+        """A→B and B→A in a DM accumulate under the same scope key.
 
         The runtime stamps ``scope_for_dm(agent_id, sender_id)`` for an
         inbound turn; an outbound turn that the agent's own action loop
-        would later record (PR 4 \u2014 currently the runtime sees only the
+        would later record (PR 4 — currently the runtime sees only the
         inbound side, but the scope key must already be symmetric so PR
         4's outbound recording does not split the interaction).  This
-        test enforces symmetry directly on the helper rather than\n        relying on outbound-recording wiring that has not landed yet.
+        test enforces symmetry directly on the helper rather than
+        relying on outbound-recording wiring that has not landed yet.
         """
         from agents.memory.interactions import scope_for_dm as _s
 
@@ -317,7 +318,7 @@ class TestMultiTurnAggregation:
         assert agent._interaction_tracker.open_scopes() == [scope_inbound]
 
 
-# \u2500\u2500\u2500 Single-turn parity sanity (no regression on PR 2) \u2500\u2500\u2500\u2500\u2500\u2500
+# ─── Single-turn parity sanity (no regression on PR 2) ───────────
 
 
 @pytest.mark.asyncio

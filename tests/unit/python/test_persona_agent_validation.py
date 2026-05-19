@@ -9,7 +9,6 @@ from agents.persona_types import PersonaState, SubAgentRequest
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client, _task
 
-
 # ─── Review follow-up: from_dict clamping tests ─────────────
 
 
@@ -136,8 +135,8 @@ class TestBuildToolDefinitionsWithRegistry:
     """
 
     async def _make_agent(self) -> _LLMPersonaAgent:
-        from agents.tools.registry import tool
         from agents.tools.builtin import ToolResult
+        from agents.tools.registry import tool
 
         # Register a tool in the global registry with a unique name
         @tool(name="code_search", description="Search codebase")
@@ -163,8 +162,8 @@ class TestBuildToolDefinitionsWithRegistry:
 
     async def test_memory_tool_overrides_registry_tool(self):
         """If a registry tool has the same name as a memory tool, memory wins."""
-        from agents.tools.registry import tool
         from agents.tools.builtin import ToolResult
+        from agents.tools.registry import tool
 
         @tool(name="store_note", description="WRONG: registry version")
         async def store_note_fake(text: str) -> ToolResult:
@@ -187,8 +186,8 @@ class TestBuildToolDefinitionsWithRegistry:
         """F-5a-2: _execute_tools must not invoke a registry tool that is not
         in the agent's config['tools'] list, even if the tool exists in the
         global registry.  Defense-in-depth against LLM-hallucinated tool names."""
-        from agents.tools.registry import tool
         from agents.tools.builtin import ToolResult
+        from agents.tools.registry import tool
 
         @tool(name="secret_admin_tool", description="Should not be callable")
         async def secret_admin_tool() -> ToolResult:
@@ -211,8 +210,8 @@ class TestBuildToolDefinitionsWithRegistry:
 
     async def test_execute_tools_allows_listed_registry_tool(self):
         """F-5a-2: Registry tools that ARE in config['tools'] should execute normally."""
-        from agents.tools.registry import tool
         from agents.tools.builtin import ToolResult
+        from agents.tools.registry import tool
 
         @tool(name="allowed_tool", description="This one is allowed")
         async def allowed_tool() -> ToolResult:
@@ -280,11 +279,15 @@ class TestHandleWithoutCompleteTask:
 
     async def test_handle_no_complete_task_returns_failed(self):
         import json
+
         from agents.base import TaskStatus
         from agents.llm_client import LLMResponse
 
         response = LLMResponse(text=json.dumps([
-            {"action_type": "send_channel_message", "payload": {"content": "hi", "channel_id": "ch-1"}},
+            {
+                "action_type": "send_channel_message",
+                "payload": {"content": "hi", "channel_id": "ch-1"},
+            },
             {"action_type": "do_nothing", "payload": {}},
         ]))
         client = _make_client([response])

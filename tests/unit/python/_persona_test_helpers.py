@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 from agents.base import TaskInput
 from agents.llm_client import LLMClient, LLMResponse
 
-
 _PERSONA_CONFIG: dict = {
     "id": "ember-owl",
     "type": "persona",

@@ -50,7 +50,6 @@ import pytest
 
 from agents.memory.facts import FactStore
 
-
 pytestmark = pytest.mark.asyncio
 
 
