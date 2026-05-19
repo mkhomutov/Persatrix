@@ -80,3 +80,16 @@ first run may surface accumulated findings to clean up or baseline.
 > corrected to real glyphs. `test_observability_schema_parity.py` had a
 > Markdown link split mid-URL by a `line-too-long` fix, now a reference-style
 > link. Comments and docstrings only — no test logic changed.
+
+> 2026-05-19 — second review pass: the follow-up above scanned only `#`
+> comment lines, so it missed literal `\u….` escape text inside
+> *docstrings* and was wrong to call the corruption "localised to one
+> file". `test_interaction_multi_turn.py` still carried 10 escapes in its
+> module, class, and function docstrings (`—`, `§`, `→`);
+> `test_delegation_end_to_end.py` carried 3 more in a docstring. All 13
+> are now converted to real glyphs. Ruff cannot flag these (they sit
+> under the line cap, inside string literals), so the gate gives no
+> signal here — a `\uXXXX` scan of the whole `tests/` tree was used to
+> confirm the only remaining match is the legitimate `"␤"` string
+> literal in `test_delegation_rollback_edges.py`. Docstrings only — no
+> test logic changed.

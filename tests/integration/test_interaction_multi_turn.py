@@ -1,14 +1,14 @@
 """
-RFC 0020 PR 3 \u2014 multi-turn aggregation integration tests.
+RFC 0020 PR 3 — multi-turn aggregation integration tests.
 
 Pins the PR 3 deliverables called out in
-``docs/rfcs/0020-pr-plan.md`` \u00a7PR 3:
+``docs/rfcs/0020-pr-plan.md`` §PR 3:
 
 * Ten turns from the same chat session collapse into one interaction
   and produce a single closed-interaction episode on session end.
 * Idle-gap closure: a clock-advance past the configured idle timeout
   produces a closed interaction; the next turn opens a fresh one.
-* DM scope keying is symmetric: A\u2192B and B\u2192A in a DM accumulate into
+* DM scope keying is symmetric: A→B and B→A in a DM accumulate into
   the same interaction.
 """
 
@@ -83,8 +83,8 @@ def _do_nothing_client() -> LLMClient:
     DO_NOTHING, the close-path summariser call returns a valid combined
     ``{"summary": ..., "facts": []}`` envelope.
 
-    Multi-turn aggregation does not depend on action shape \u2014 only on
-    interaction-tracker state and the persisted episode column values \u2014
+    Multi-turn aggregation does not depend on action shape — only on
+    interaction-tracker state and the persisted episode column values —
     but the summariser call must still receive a *well-formed* envelope:
     ISSUE-0054 made the close path fall back to the unavailable-summary
     sentinel when the response is not a valid envelope, so a single
@@ -158,7 +158,7 @@ async def _all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
 
 @pytest.mark.asyncio
 class TestMultiTurnAggregation:
-    """RFC 0020 PR 3 \u00a7\"Multi-Turn for Human-Chat + DM\"."""
+    """RFC 0020 PR 3 §"Multi-Turn for Human-Chat + DM"."""
 
     async def test_ten_turn_session_collapses_into_one_interaction(self):
         """Ten ``CHANNEL_MESSAGE`` turns from the same peer aggregate."""
@@ -287,11 +287,11 @@ class TestMultiTurnAggregation:
         assert second.turn_count == 1
 
     async def test_dm_scope_is_symmetric_in_local_and_peer(self):
-        """A\u2192B and B\u2192A in a DM accumulate under the same scope key.
+        """A→B and B→A in a DM accumulate under the same scope key.
 
         The runtime stamps ``scope_for_dm(agent_id, sender_id)`` for an
         inbound turn; an outbound turn that the agent's own action loop
-        would later record (PR 4 \u2014 currently the runtime sees only the
+        would later record (PR 4 — currently the runtime sees only the
         inbound side, but the scope key must already be symmetric so PR
         4's outbound recording does not split the interaction).  This
         test enforces symmetry directly on the helper rather than
