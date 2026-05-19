@@ -87,10 +87,14 @@ func TestResolveAgentModel_RegistryError(t *testing.T) {
 	run := waitForRunStatus(t, store, "reg-error", state.RunCompleted, 5*time.Second)
 	assert.Equal(t, state.RunCompleted, run.Status)
 
-	// Tokens should still be recorded (model comes from response metadata, not registry).
-	input, output, _ := tc.GlobalUsage()
-	assert.Equal(t, int64(100), input)
-	assert.Equal(t, int64(50), output)
+	// RFC 0023 PR 3 — the scheduler records per-step cost to the CostReporter
+	// (the budget TokenCounter is wallet-owned). The model resolves from the
+	// response metadata even though the registry lookup errored.
+	summary := cr.WorkflowSummary("test-wf")
+	require.Len(t, summary.Steps, 1)
+	assert.Equal(t, int64(100), summary.Steps[0].InputTokens)
+	assert.Equal(t, int64(50), summary.Steps[0].OutputTokens)
+	assert.Equal(t, "claude-sonnet", summary.Steps[0].Model)
 }
 
 // TestMultiStepBudgetDepletion validates the full budget lifecycle:
@@ -117,6 +121,18 @@ func TestMultiStepBudgetDepletion(t *testing.T) {
 	exec := &mockExecutor{handler: func(_ context.Context, req executor.ExecuteRequest) (*executor.ExecuteResult, error) {
 		call := stepCalls.Add(1)
 		if call == 1 {
+			// RFC 0023 PR 3 — the scheduler no longer self-records spend
+			// post-dispatch; the agent-side wallet records every leased LLM
+			// call on the shared TokenCounter. The mock executor stands in
+			// for the agent process here, so it records step 1's spend so
+			// step 2's pre-dispatch CheckBudget sees the depletion.
+			tc.RecordUsage(cost.UsageRecord{
+				WorkflowID:   "budget-depletion",
+				AgentID:      "test-agent",
+				Model:        "claude-sonnet",
+				InputTokens:  10000,
+				OutputTokens: 100000,
+			})
 			// Step 1: return a large token count that exhausts the budget.
 			return &executor.ExecuteResult{
 				TaskID: "t1",

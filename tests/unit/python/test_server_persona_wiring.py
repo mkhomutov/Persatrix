@@ -305,6 +305,30 @@ class TestAgentServerPersonaLifecycle:
 # the in-place mutation contract on tick_schedulers.
 
 
+class TestWireWalletClient:
+    """RFC 0023 PR 3 — wire_wallet_client attaches the wallet post-construction."""
+
+    async def test_wallet_attached_to_every_hosted_agent(self):
+        from agents.server_persona import wire_wallet_client
+        from agents.wallet_client import WalletClient
+
+        client_a = _make_client()
+        client_b = _make_client()
+        agent_a = await _make_agent(config={**_PERSONA_CONFIG}, llm_client=client_a)
+        agent_b = await _make_agent(config={**_PERSONA_CONFIG_2}, llm_client=client_b)
+        try:
+            wallet = WalletClient(AsyncMock())
+            wire_wallet_client(
+                {"ember-owl": agent_a, "iron-fox": agent_b}, wallet,
+            )
+            # Both LLMClients now route through the wallet.
+            assert client_a._wallet is wallet
+            assert client_b._wallet is wallet
+        finally:
+            await agent_a.close_memory()
+            await agent_b.close_memory()
+
+
 class TestInitializePersonaAgents:
 
     async def test_task_agent_is_skipped(self):

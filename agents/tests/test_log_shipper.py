@@ -214,3 +214,43 @@ async def test_shipper_streams_and_acks_end_to_end() -> None:
     finally:
         await shipper.stop(timeout=2.0)
         await server.stop(grace=0.5)
+
+
+@pytest.mark.asyncio
+async def test_shipper_does_not_close_an_externally_owned_channel() -> None:
+    """RFC 0023 — when AgentServer shares one orchestrator channel between
+    LogService and WalletService, ``Shipper.stop()`` must leave it open;
+    its owner closes it once every stub over it is done."""
+    servicer = _RecordingServicer()
+    server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=4))
+    loggrpc.add_LogServiceServicer_to_server(servicer, server)
+    port = server.add_insecure_port("127.0.0.1:0")
+    await server.start()
+
+    channel = grpc.aio.insecure_channel(f"127.0.0.1:{port}")
+    shipper = Shipper(f"127.0.0.1:{port}", "agent-x", channel=channel)
+    assert shipper._external_channel is True
+
+    await shipper.start()
+    try:
+        shipper.enqueue({"schema_version": "0.1", "level": "INFO", "message": "m"})
+        for _ in range(40):
+            if shipper.last_ack_seq >= 1:
+                break
+            await asyncio.sleep(0.05)
+        assert shipper.last_ack_seq >= 1
+    finally:
+        await shipper.stop(timeout=2.0)
+
+    # The shipper released its reference but did NOT close the channel —
+    # it is still usable by its owner.
+    assert channel.get_state() is not grpc.ChannelConnectivity.SHUTDOWN
+    await channel.close()
+    await server.stop(grace=0.5)
+
+
+def test_shipper_opens_its_own_channel_by_default() -> None:
+    """Without an injected channel the shipper owns its connection."""
+    shipper = Shipper("127.0.0.1:9090", "agent-x")
+    assert shipper._external_channel is False
+    assert shipper._channel is None

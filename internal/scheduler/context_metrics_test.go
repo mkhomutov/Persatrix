@@ -162,6 +162,46 @@ func TestRecordStepUsage_NilPackageOmitsContextPackageMetrics(t *testing.T) {
 		"nil pkg → nil ContextPackage in cost record (pre-PR-1b shape preserved)")
 }
 
+// TestRecordStepUsage_DoesNotFeedTokenCounter pins RFC 0023 PR 3: the
+// agent-side wallet now records every workflow-task LLM call's spend on the
+// shared TokenCounter (RecordProvisional at acquire, Reconcile at settle), so
+// recordStepUsage must NOT also write to the counter — re-recording it
+// post-dispatch would double-count every leased call against all three
+// budget scopes. Per-step cost still reaches the CostReporter.
+func TestRecordStepUsage_DoesNotFeedTokenCounter(t *testing.T) {
+	cfg := &cost.CostConfig{}
+	counter := cost.NewTokenCounter(cfg, zap.NewNop())
+	reporter := cost.NewCostReporter(counter, cfg, zap.NewNop())
+	s := &WorkflowScheduler{
+		logger:       zap.NewNop(),
+		tokenCounter: counter,
+		costReporter: reporter,
+	}
+
+	step := planner.Step{ID: "s1", AgentID: "agent-1"}
+	result := &executor.ExecuteResult{
+		Output: "ok",
+		Metadata: map[string]string{
+			"input_tokens":  "1000",
+			"output_tokens": "500",
+			"model":         "claude-3",
+		},
+	}
+	s.recordStepUsage("wf-1", step, result, "claude-3", nil)
+
+	// The TokenCounter is the wallet's recording authority — recordStepUsage
+	// must leave it untouched (RFC 0023 § D / § G).
+	input, output, _ := counter.GlobalUsage()
+	assert.Equal(t, int64(0), input, "recordStepUsage must not feed the budget TokenCounter")
+	assert.Equal(t, int64(0), output, "recordStepUsage must not feed the budget TokenCounter")
+
+	// Per-step cost still reaches the CostReporter (the /cost endpoint).
+	summary := reporter.WorkflowSummary("wf-1")
+	require.Len(t, summary.Steps, 1)
+	assert.Equal(t, int64(1000), summary.Steps[0].InputTokens)
+	assert.Equal(t, int64(500), summary.Steps[0].OutputTokens)
+}
+
 // TestRemainingFromPackage covers the small clamp helper that computes
 // RemainingContextBudget = effective - TokensAfter, clamped to zero.
 // Negative remainders happen on the pinned-overflow path (the only known

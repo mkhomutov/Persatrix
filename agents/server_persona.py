@@ -28,6 +28,7 @@ from .tick import TickScheduler
 from .tools import builtin
 from .tools.permissions import PermissionGate
 from .tools.sandbox import PathValidator
+from .wallet_client import WalletClient
 
 if TYPE_CHECKING:
     from .dispatch import EventDispatcher
@@ -42,6 +43,7 @@ __all__ = [
     "initialize_persona_agents",
     "default_grpc_target",
     "wire_history_fetchers",
+    "wire_wallet_client",
 ]
 
 
@@ -425,3 +427,25 @@ def wire_history_fetchers(
     for agent in agents.values():
         if isinstance(agent, _LLMPersonaAgent):
             agent.set_history_fetcher(fetcher)
+
+
+def wire_wallet_client(
+    agents: dict[str, BaseAgent], wallet: WalletClient,
+) -> None:
+    """Attach the RFC 0023 wallet client to every hosted agent's LLMClient.
+
+    Called from :meth:`agents.server.AgentServer.start` once the shared
+    orchestrator gRPC channel is open.  An agent's :class:`LLMClient` is
+    constructed earlier, in :func:`load_agent`, before that channel
+    exists — so the wallet is wired here rather than at construction.
+    With the wallet attached, the workflow-task LLM call in
+    :meth:`BaseAgent._run_llm_loop` acquires a server-issued lease before
+    issuing (RFC 0023 PR 3).  Agents with no LLM client (none today) are
+    skipped.
+    """
+    for agent_id, agent in agents.items():
+        client = agent._llm_client
+        if client is None:
+            continue
+        client.set_wallet(wallet)
+        logger.info("Wired RFC 0023 wallet client onto agent %s", agent_id)

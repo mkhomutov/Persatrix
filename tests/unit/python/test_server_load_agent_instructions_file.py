@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from agents.server import load_agent
+from agents.server_persona import load_agent
 from agents.task_agent import TaskAgent
 
 

@@ -216,7 +216,7 @@ class TestHistogramExemplars:
 class TestAgentActiveLifecycle:
     """PR-170 M2 regression: ``agent.active`` must round-trip to zero.
 
-    The instrument is wired in :func:`agents.server.main` (``+1`` after
+    The instrument is wired in :func:`agents.server_cli.main` (``+1`` after
     ``load_agent``, ``-1`` in the teardown path of ``_run``).  This test
     drives the helper directly rather than spawning a real gRPC server so
     it stays a unit test; it asserts the only contract that matters for

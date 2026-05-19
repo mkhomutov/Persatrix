@@ -13,8 +13,7 @@ import pytest
 import yaml
 
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
-from agents.server import load_agent
-from agents.server_persona import _resolve_agent_type
+from agents.server_persona import _resolve_agent_type, load_agent
 from agents.task_agent import TaskAgent
 from agents.tools import builtin
 
