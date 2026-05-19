@@ -235,7 +235,10 @@ func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseReque
 				LeaseId:             leaseID,
 				GrantedInputTokens:  req.GetEstimatedInputTokens(),
 				GrantedOutputTokens: req.GetEstimatedMaxOutputTokens(),
-				TtlSeconds:          int32(w.cfg.TTL.Seconds()),
+				// TTL is whole seconds and LoadConfig caps ttl_seconds at
+				// maxTTLSeconds (1 day) — far below int32 — so this wire
+				// narrowing is both exact and non-overflowing.
+				TtlSeconds: int32(w.cfg.TTL.Seconds()),
 			},
 		},
 	}, nil

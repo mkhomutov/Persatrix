@@ -21,6 +21,20 @@ const (
 	// defaultMaxActiveLeases is the default per-agent concurrency ceiling
 	// — a DoS ceiling (RFC 0023 Security Considerations), not a budget.
 	defaultMaxActiveLeases = 16
+
+	// The per-key upper bounds. They are fat-finger guards — no legitimate
+	// deployment approaches them — kept in lockstep with the `maximum`
+	// values in schemas/optimization.schema.json so LoadConfig and
+	// `make validate` reject the same configs.
+	//
+	// maxTTLSeconds additionally bounds a wire narrowing: AcquireLease
+	// advertises the TTL in the proto's int32 LeaseGrant.ttl_seconds, and a
+	// one-day cap is far below int32's range, so that conversion cannot
+	// overflow. All three also keep `seconds × time.Second` well clear of
+	// the int64 time.Duration overflow an absurd value would otherwise hit.
+	maxTTLSeconds            = 86400 // 1 day
+	maxReaperIntervalSeconds = 3600  // 1 hour
+	maxMaxActiveLeases       = 1024  // 64× the default ceiling
 )
 
 // Config holds the WalletService lease-lifecycle tuning loaded from the
@@ -66,10 +80,12 @@ type rawWalletSection struct {
 
 // LoadConfig reads optimization.yaml from configDir and parses the optional
 // `wallet:` block. An absent block — or an absent key — falls back to the
-// DefaultConfig value for that field. A present key must be a positive
-// integer; zero and negative values are rejected, matching the `minimum: 1`
-// bound on every wallet key in schemas/optimization.schema.json so the
-// schema (`make validate`) and the loader agree.
+// DefaultConfig value for that field. A present key must fall within the
+// inclusive bounds schemas/optimization.schema.json sets on it — at least 1,
+// and at most the per-key maximum (a fat-finger guard; for ttl_seconds it
+// also keeps the value within the int32 the LeaseGrant advertises on the
+// wire). Out-of-range values are rejected, so the schema (`make validate`)
+// and the loader agree on both ends of the range.
 func LoadConfig(configDir string) (Config, error) {
 	path := filepath.Join(configDir, "optimization.yaml")
 	data, err := os.ReadFile(path)
@@ -85,20 +101,20 @@ func LoadConfig(configDir string) (Config, error) {
 	cfg := DefaultConfig()
 	w := raw.Wallet
 	if w.TTLSeconds != nil {
-		if *w.TTLSeconds < 1 {
-			return Config{}, fmt.Errorf("validate wallet config: ttl_seconds must be >= 1, got %d", *w.TTLSeconds)
+		if *w.TTLSeconds < 1 || *w.TTLSeconds > maxTTLSeconds {
+			return Config{}, fmt.Errorf("validate wallet config: ttl_seconds must be in [1, %d], got %d", maxTTLSeconds, *w.TTLSeconds)
 		}
 		cfg.TTL = time.Duration(*w.TTLSeconds) * time.Second
 	}
 	if w.ReaperIntervalSeconds != nil {
-		if *w.ReaperIntervalSeconds < 1 {
-			return Config{}, fmt.Errorf("validate wallet config: reaper_interval_seconds must be >= 1, got %d", *w.ReaperIntervalSeconds)
+		if *w.ReaperIntervalSeconds < 1 || *w.ReaperIntervalSeconds > maxReaperIntervalSeconds {
+			return Config{}, fmt.Errorf("validate wallet config: reaper_interval_seconds must be in [1, %d], got %d", maxReaperIntervalSeconds, *w.ReaperIntervalSeconds)
 		}
 		cfg.ReaperInterval = time.Duration(*w.ReaperIntervalSeconds) * time.Second
 	}
 	if w.MaxActiveLeases != nil {
-		if *w.MaxActiveLeases < 1 {
-			return Config{}, fmt.Errorf("validate wallet config: max_active_leases must be >= 1, got %d", *w.MaxActiveLeases)
+		if *w.MaxActiveLeases < 1 || *w.MaxActiveLeases > maxMaxActiveLeases {
+			return Config{}, fmt.Errorf("validate wallet config: max_active_leases must be in [1, %d], got %d", maxMaxActiveLeases, *w.MaxActiveLeases)
 		}
 		cfg.MaxActiveLeases = *w.MaxActiveLeases
 	}

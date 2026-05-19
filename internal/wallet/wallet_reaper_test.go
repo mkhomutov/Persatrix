@@ -194,6 +194,51 @@ func TestReaper_FreesConcurrencyCapSlot(t *testing.T) {
 	assert.NotNil(t, resp.GetGrant())
 }
 
+// TestReaper_ReconcileMissAfterResetDailyStillSettles pins the reaper's
+// reconcile-miss branch: a midnight ResetDaily clears a live lease's
+// provisional charge out from under it, so when the reaper later expires
+// that lease there is no provisional left to reconcile. The reaper must
+// still mark the lease settled — otherwise it would re-reap the same lease
+// on every pass forever — log the miss for the operator, and resurrect no
+// spend onto the freshly-reset counter.
+func TestReaper_ReconcileMissAfterResetDailyStillSettles(t *testing.T) {
+	walletCfg := Config{TTL: 30 * time.Second, ReaperInterval: time.Hour, MaxActiveLeases: 16}
+	core, logs := observer.New(zap.WarnLevel)
+	w, counter := newTestWalletWithLogger(t, testCostConfig(), walletCfg, zap.New(core))
+
+	resp, err := w.AcquireLease(testContext(t), &walletpb.LeaseRequest{
+		WorkflowId: "wf-1", AgentId: "agent-a", Model: "claude-sonnet",
+		EstimatedInputTokens: 1000, EstimatedMaxOutputTokens: 2000,
+		Cause: walletpb.Cause_CAUSE_WORKFLOW_TASK,
+	})
+	require.NoError(t, err)
+	leaseID := resp.GetGrant().GetLeaseId()
+
+	// A midnight reset drops the provisional while the lease is in flight.
+	counter.ResetDaily()
+
+	// The reaper expires the lease; its Reconcile finds no provisional.
+	w.reapExpired(time.Now().Add(walletCfg.TTL + time.Second))
+
+	settled, exists := leaseState(w, leaseID)
+	require.True(t, exists, "a reaped lease stays tracked until the purge horizon")
+	assert.True(t, settled,
+		"the reaper must mark the lease settled even when its provisional was already cleared")
+	assert.Equal(t, 1, logs.FilterMessage("wallet: reaper reconcile miss").Len(),
+		"a reconcile miss must be logged for the operator")
+
+	// The freshly-reset counter is not driven negative or otherwise perturbed.
+	in, out, usd := counter.GlobalUsage()
+	assert.Equal(t, int64(0), in)
+	assert.Equal(t, int64(0), out)
+	assert.InDelta(t, 0.0, usd, 1e-9, "a reconcile miss must resurrect no spend")
+
+	// A later pass is a no-op: the lease is settled, not re-reaped.
+	w.reapExpired(time.Now().Add(walletCfg.TTL + time.Second))
+	assert.Equal(t, 1, logs.FilterMessage("wallet: reaper reconcile miss").Len(),
+		"the settled lease must not be re-reaped on a later pass")
+}
+
 // --- Reaper goroutine ---
 
 // TestGuardReap_RecoversPanic pins ISSUE-0059 piece 2: a panic in a reaper

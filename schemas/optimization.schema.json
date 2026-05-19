@@ -13,20 +13,23 @@
         "ttl_seconds": {
           "type": "integer",
           "minimum": 1,
+          "maximum": 86400,
           "default": 60,
-          "description": "Lease time-to-live in seconds. The reaper settles a lease still unsettled this long after issue at its granted (worst-case) amount. Default 60 = 2× the 30 s default per-call timeout (RFC 0023 Open Question §2)."
+          "description": "Lease time-to-live in seconds. The reaper settles a lease still unsettled this long after issue at its granted (worst-case) amount. Default 60 = 2× the 30 s default per-call timeout (RFC 0023 Open Question §2). The 86400 (1 day) maximum is a fat-finger guard and keeps the value within the int32 LeaseGrant.ttl_seconds advertised on the wire."
         },
         "reaper_interval_seconds": {
           "type": "integer",
           "minimum": 1,
+          "maximum": 3600,
           "default": 5,
-          "description": "How often, in seconds, the reaper scans for leases left unsettled past their TTL."
+          "description": "How often, in seconds, the reaper scans for leases left unsettled past their TTL. The 3600 (1 hour) maximum is a fat-finger guard — a scan cadence slower than this cannot meaningfully bound the in-flight lease map."
         },
         "max_active_leases": {
           "type": "integer",
           "minimum": 1,
+          "maximum": 1024,
           "default": 16,
-          "description": "Per-agent cap on concurrently-held (unsettled) leases — a DoS ceiling (RFC 0023 Security Considerations), keyed on the lease-issuing agent."
+          "description": "Per-agent cap on concurrently-held (unsettled) leases — a DoS ceiling (RFC 0023 Security Considerations), keyed on the lease-issuing agent. The 1024 (64× default) maximum is a fat-finger guard — a value beyond it defeats the ceiling's purpose."
         }
       }
     },

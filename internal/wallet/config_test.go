@@ -161,3 +161,64 @@ func TestLoadConfig_OmittedKeyDistinctFromZero(t *testing.T) {
 	_, err = LoadConfig(dir)
 	require.Error(t, err, "an explicit zero is rejected, not silently defaulted")
 }
+
+// TestLoadConfig_RejectsAboveMaximumValues pins the upper-bound validation:
+// a tuning value above the schema's per-key `maximum` bound is rejected with
+// a message naming the offending key. The bound is a fat-finger guard — and,
+// for ttl_seconds, it also keeps the value within the int32 the LeaseGrant
+// advertises on the wire. The loader rejects the same values
+// schemas/optimization.schema.json rejects at `make validate`, so the two
+// enforcement layers agree on both ends of the range.
+func TestLoadConfig_RejectsAboveMaximumValues(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "ttl just over maximum",
+			body: "wallet:\n  ttl_seconds: 86401\n",
+			want: "ttl_seconds",
+		},
+		{
+			name: "ttl far above maximum",
+			body: "wallet:\n  ttl_seconds: 100000000\n",
+			want: "ttl_seconds",
+		},
+		{
+			name: "reaper interval over maximum",
+			body: "wallet:\n  reaper_interval_seconds: 3601\n",
+			want: "reaper_interval_seconds",
+		},
+		{
+			name: "max active leases over maximum",
+			body: "wallet:\n  max_active_leases: 1025\n",
+			want: "max_active_leases",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeOptimizationYAML(t, tc.body)
+			_, err := LoadConfig(dir)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// TestLoadConfig_AcceptsBoundaryValues pins that the inclusive bounds accept
+// their boundary values — a key set exactly to its per-key maximum loads
+// without error, the mirror of the minimum (1) accepted elsewhere.
+func TestLoadConfig_AcceptsBoundaryValues(t *testing.T) {
+	dir := writeOptimizationYAML(t, `
+wallet:
+  ttl_seconds: 86400
+  reaper_interval_seconds: 3600
+  max_active_leases: 1024
+`)
+	c, err := LoadConfig(dir)
+	require.NoError(t, err)
+	assert.Equal(t, 86400*time.Second, c.TTL)
+	assert.Equal(t, 3600*time.Second, c.ReaperInterval)
+	assert.Equal(t, 1024, c.MaxActiveLeases)
+}
