@@ -168,3 +168,52 @@ class TestCascadeDepthOnTheWire:
         body = captured[0]["body"]
         assert body["mentions"] == ["agent-b", "agent-c"]
         assert body["metadata"] == {"cascade_depth": 2}
+
+
+class TestCustomMetadataPassThrough:
+    """ISSUE-0065 — extra ``metadata`` rides the wire alongside ``cascade_depth``.
+
+    The chat-error reply published by
+    ``AgentServiceServicer._dispatch_channel_event`` under
+    :class:`BudgetExceededError` carries a ``metadata['reply_status']``
+    discriminator that the orchestrator's REST chat handler reads to
+    set ``reply_status='error'`` in the JSON envelope. The publisher
+    must therefore accept caller-supplied metadata and merge it with
+    the cascade_depth seat without dropping or overwriting either side.
+    """
+
+    async def test_custom_metadata_lands_in_wire_payload(self, captured_server):
+        base_url, captured = captured_server
+        async with aiohttp.ClientSession() as session:
+            pub = HTTPChannelPublisher(orchestrator_url=base_url, session=session)
+            await pub.publish(
+                channel_id="dm:alice:chat-agent",
+                sender_id="chat-agent",
+                content="per_agent budget exceeded",
+                mentions=["alice"],
+                cascade_depth=0,
+                metadata={"reply_status": "error", "error_reason": "budget_exceeded"},
+            )
+        body = captured[0]["body"]
+        assert body.get("metadata") is not None, (
+            "ISSUE-0065: caller-supplied metadata must land on the wire; "
+            f"got body={body!r}"
+        )
+        assert body["metadata"].get("reply_status") == "error"
+        assert body["metadata"].get("error_reason") == "budget_exceeded"
+
+    async def test_custom_metadata_coexists_with_cascade_depth(self, captured_server):
+        base_url, captured = captured_server
+        async with aiohttp.ClientSession() as session:
+            pub = HTTPChannelPublisher(orchestrator_url=base_url, session=session)
+            await pub.publish(
+                channel_id="group:planning",
+                sender_id="agent-a",
+                content="hi",
+                mentions=[],
+                cascade_depth=2,
+                metadata={"reply_status": "error"},
+            )
+        body = captured[0]["body"]
+        assert body["metadata"]["cascade_depth"] == 2
+        assert body["metadata"]["reply_status"] == "error"

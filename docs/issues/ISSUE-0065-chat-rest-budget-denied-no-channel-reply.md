@@ -1,15 +1,65 @@
 ---
 id: ISSUE-0065
 summary: "REST chat endpoint times out with HTTP 504 instead of returning HTTP 200 + reply_status=\"error\" when the wallet denies the lease. RFC 0023 PR 4 wired BudgetExceededError → reply_status=\"error\" on the gRPC SendChatMessage servicer, but the production REST chat path routes via ChannelRouter.PublishAndAwait → agent's ReceiveChannelMessage._dispatch_channel_event, which catches BudgetExceededError with a log line only — no error-reply is published on the channel, so the orchestrator's reply waiter times out."
-status: open
+status: resolved
 severity: high
 area: agents/persona_runtime
 created: 2026-05-20
+closed: 2026-05-20
 refs:
   - docs/rfcs/0023-llm-call-leasing.md
   - docs/rfcs/0023-pr-plan.md
   - docs/manual-tests/MT-COST-003.md
   - docs/manual-tests/v0.3.2-execution-report.md
+  - agents/server_servicers.py
+  - agents/channel_publisher.py
+  - agents/action_executor.py
+  - internal/server/chat_handler.go
+---
+
+## Resolution (2026-05-20) — Path A landed
+
+Fixed via Path A from the proposal below:
+
+1. `agents/server_servicers.py::_dispatch_channel_event` now catches
+   `BudgetExceededError` ahead of the generic `except Exception` arm and
+   publishes a structured-error reply on `event.channel_id` via a new
+   helper `_publish_chat_error_on_channel`. The reply carries
+   `sender_id=target_agent_id` (wakes the orchestrator's
+   `replyWaiter`), `content=exc.message`, and `metadata={"reply_status":
+   "error", "error_reason": exc.reason}` as the REST-handler
+   discriminator. Falls back to log-only when no channel publisher is
+   wired (test fixtures, session-less dispatch).
+2. `agents/channel_publisher.py::HTTPChannelPublisher.publish` (and the
+   `ChannelPublisher` Protocol) gained an optional `metadata:
+   dict[str, Any] | None` kwarg that merges into the wire payload's
+   metadata map alongside the reserved `cascade_depth` seat.
+3. `agents/action_executor.py::ActionExecutor` gained a public
+   `channel_publisher` property so the servicer can reach the publisher
+   without poking at the private `_channel_publisher`.
+4. `internal/server/chat_handler.go::handleChat` now reads
+   `reply.Metadata["reply_status"]` and surfaces `"error"` in the JSON
+   envelope; default remains `"ok"`.
+
+Tests pinning the contract:
+
+- Python — `agents/tests/test_chat_path_budget_denial.py`
+  `TestDispatchChannelEventBudgetDenial` (5 cases covering budget
+  denial, wallet-unreachable, generic-exception negative, happy-path
+  negative, no-publisher fallback).
+- Python — `tests/unit/python/test_channel_publisher_cascade_depth.py`
+  `TestCustomMetadataPassThrough` (2 cases pinning the wire metadata
+  pass-through).
+- Go — `internal/server/chat_handler_test.go`
+  `TestHandleChat_ReplyMetadataReplyStatusErrorSurfacedAs200` plus the
+  default-ok regression guard
+  `TestHandleChat_ReplyMetadataUnsetDefaultsToReplyStatusOK`.
+
+MT-COST-003 re-run is still required against a built artifact carrying
+the fix; the unit tests pin the contract but a live wallet-cap
+exhaustion against the orchestrator binary is the canonical
+acceptance.
+
 ---
 
 ## Summary

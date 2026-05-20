@@ -83,6 +83,17 @@ class ActionExecutor:
         """Inject the REST publisher post-construction."""
         self._channel_publisher = publisher
 
+    @property
+    def channel_publisher(self) -> ChannelPublisher | None:
+        """Public accessor for the configured REST publisher (may be ``None``).
+
+        ISSUE-0065 — exposed so :class:`AgentServiceServicer` can publish
+        a structured-error reply on the originating channel when
+        :meth:`_dispatch_channel_event` catches :class:`BudgetExceededError`,
+        without reaching into the executor's private attribute.
+        """
+        return self._channel_publisher
+
     async def execute(
         self,
         agent_id: str,
