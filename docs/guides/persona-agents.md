@@ -236,6 +236,21 @@ prompt
 > hatch is `conversation_window.enabled: false`. See
 > [RFC 0034](../rfcs/0034-persona-conversational-working-memory.md).
 
+> **v0.3.2 — the memory facade is frozen as `MemoryStore`.** The single
+> entry point to every memory tier above is the `MemoryStore` class
+> ([agents/memory/store.py](../../agents/memory/store.py)) — promoted
+> from the v0.3.1 `MemoryFacade` name as the **public read/write
+> surface** ahead of the v0.4.0 personal/society split
+> ([RFC 0029 Phase 1](../rfcs/0029-personal-society-storage-split.md)).
+> Direct construction of `EpisodicMemory` / `RelationshipMemory` /
+> `NotesStore` outside `agents/memory/` emits a `DeprecationWarning`;
+> direct `import aiosqlite` outside `agents/memory/` fails CI under a
+> new lint rule (personal-tier reads must go through the facade so the
+> Phase 2 backend swap stays a single-call-site change). `MemoryFacade`
+> remains as an alias re-export for one minor version — removal lands
+> in v0.3.3. Society-tier methods raise `SocietyBackendUnavailable` —
+> single-agent mode never opens Postgres.
+
 ### Episodic memory
 
 Episodes are ranked, searchable records of past interactions. The agent calls
@@ -429,15 +444,26 @@ Each completed step also records cost metadata (`EstimatedCostUSD`,
 is visible through the workflow-run APIs and OTEL spans
 ([internal/scheduler/budget.go:226–240](../../internal/scheduler/budget.go#L226-L240)).
 
-> **Chat is currently outside cost tracking.** The chat dispatch path
-> ([internal/server/chat_handler.go:30–155](../../internal/server/chat_handler.go#L30-L155) →
-> [internal/executor/chat.go:75–145](../../internal/executor/chat.go#L75-L145)) does not yet
-> call `BudgetEnforcer.CheckBudget` and chat replies are not recorded by the
-> cost reporter. Per-agent `max_llm_calls` and `max_tokens` from
-> `config/agents.yaml` still bound a single chat turn (the limits are
-> enforced inside the action loop), but daily / per-workflow USD caps do
-> **not** apply to `persatrix chat` traffic. Wiring chat into
-> `BudgetEnforcer` is a planned follow-up.
+> **v0.3.2 — cost is gated by a per-call wallet lease.** Every LLM call
+> the system issues — workflow task, `persatrix chat` turn, autonomous
+> TICK, sub-agent spawn, and channel-message reply — first acquires a
+> server-issued lease from the orchestrator-side `WalletService` and
+> settles the provider-reported actuals afterwards
+> ([RFC 0023](../rfcs/0023-llm-call-leasing.md)). The wallet refuses the
+> lease *before* the provider call when it would breach a configured
+> budget; on refusal the agent surfaces a `BudgetExceededError` — chat
+> replies as HTTP 200 with `reply_status="error"` carrying the wallet's
+> `LeaseDenied.message`, autonomous TICKs short-circuit to `DO_NOTHING`
+> with `agent.persona.tick.idle{idle_reason="budget_denied"}` instead of
+> contacting the provider, and workflow tasks fail with
+> `error_type=budget_exceeded`. This closes the v0.2.3 chat-bypass
+> known limitation: daily / per-workflow USD caps now apply uniformly
+> to `persatrix chat` traffic. The TTL reaper settles leases that the
+> agent never finalised (TTL default 60 s) so an agent crash mid-call
+> neither leaks a provisional hold nor frees spend. The operator-visible
+> `wallet:` block in `config/optimization.yaml` and the lifecycle log
+> shape are documented in [observability.md §10.5](../observability.md#105-persatrix-specific-attribute-namespace)
+> and the new [Wallet lease lifecycle](../observability.md#107-wallet-lease-lifecycle-rfc-0023) section.
 
 ---
 
@@ -603,7 +629,6 @@ deferred (matched against
 | Agent-initiated messages | No notification path; agents can only reply within an active session | future RFC |
 | Channel routing | Point-to-point user ↔ agent only | v0.3.0 (RFC 0011) |
 | Chat history API | No `GET /chat/history` endpoint; inspect via memory tools | v0.2.2 candidate |
-| Cost gating | Chat dispatch bypasses `BudgetEnforcer` (see callout in §3) | follow-up |
 | Rate limiting | No per-user rate limit on the chat endpoint | v0.3.0 (RFC 0009) |
 | Web / GUI | CLI only | future RFC |
 

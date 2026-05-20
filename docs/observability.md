@@ -352,6 +352,57 @@ The `agent.persona.event` → `agent.persona.tick` Link (§ 10.3) means an
 autonomous tick that produced the slow LLM call is already linked back to
 the originating user event without the operator having to follow timestamps.
 
+### 10.7 Wallet lease lifecycle (RFC 0023)
+
+The orchestrator-side `WalletService` is the cost gate every LLM call
+passes through. The operator-visible surface is one config block, one
+failure surface, and three lifecycle log messages keyed on a stable
+`lease_id`.
+
+**Configuration — `wallet:` block in [`config/optimization.yaml`](../config/optimization.yaml).**
+Top-level, sibling of `cost:`. An absent block (or absent key) falls
+back to the defaults below; no operator action is required.
+
+| Key | Default | What it controls |
+|-----|--------:|------------------|
+| `wallet.ttl_seconds` | `60` | Lease time-to-live. The reaper settles a lease still unsettled this long after issue at its granted (worst-case) amount, so an agent crash mid-call neither leaks a provisional hold nor frees spend. Default is 2× the 30 s per-call timeout ([RFC 0023 OQ §2](rfcs/0023-llm-call-leasing.md#open-questions)). |
+| `wallet.reaper_interval_seconds` | `5` | How often the reaper scans for expired leases. |
+| `wallet.max_active_leases` | `16` | Per-agent cap on concurrently-held (unsettled) leases — a DoS ceiling ([RFC 0023 Security Considerations](rfcs/0023-llm-call-leasing.md#security-considerations)), keyed on the lease-issuing agent. |
+
+**Failure surface — `BudgetExceededError`.** Raised by the Python
+`WalletClient` when `WalletService.AcquireLease` returns
+`LeaseResponse.Denied`. Five origins translate it to an
+operator-visible outcome:
+
+| Origin | Operator-visible surface on lease denial |
+|--------|------------------------------------------|
+| Chat (`SendChatMessage`) | HTTP 200 with `reply_status="error"` and `error_message=<LeaseDenied.message>`. Same envelope on the channel reply for the channel-event chat path. |
+| Autonomous TICK | Action loop short-circuits to `DO_NOTHING`; `agent.persona.tick.idle{idle_reason="budget_denied"}` counter increments. No `agent.llm.call` span is emitted. |
+| Workflow task | Step fails with `error_type=budget_exceeded`; the orchestrator surfaces it through the workflow-run APIs and OTEL spans. |
+| Sub-agent spawn | Spawn aborts; the parent persona observes the failure on its turn. |
+| Channel-message reply | Reply suppressed; the orchestrator publishes a chat-error envelope on the channel under the parent persona's `agent.id` ([ISSUE-0065](issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md), [ISSUE-0066](issues/ISSUE-0066-chat-rest-resource-exhausted-no-channel-reply.md)). |
+
+**Lifecycle log messages — finalised by [RFC 0023 PR 7](https://github.com/mkhomutov/Persatrix/pull/391).**
+Emitted by [`internal/wallet/wallet.go`](../internal/wallet/wallet.go);
+field set is stable so downstream log consumers can pin field names. All
+three messages key on the same `lease_id` so an operator can `grep
+lease_id=<ULID>` to follow one call end-to-end.
+
+| Event | Message | Level | Fields |
+|-------|---------|-------|--------|
+| Lease granted | `wallet: lease granted` | `Debug` | `lease_id`, `workflow_id`, `agent_id`, `model`, `cause` |
+| Lease denied — budget | `wallet: lease denied — budget exceeded` | `Warn` | `lease_id`-less; `workflow_id`, `agent_id`, `model`, `cause`, denial reason |
+| Lease denied — cap | `wallet: lease denied — per-agent active-lease cap reached` | `Warn` | `agent_id`, `active_leases`, `max_active_leases` |
+| Lease settled / released | `wallet: lease finalized` | `Debug` | `op` (`settle` / `release`), `lease_id`, `actual_input_tokens`, `actual_output_tokens` |
+| Lease reaped (TTL expiry) | `wallet: lease reaped — settled at granted amount on TTL expiry` | `Warn` | `lease_id`, `workflow_id`, `agent_id`, `model`, `cause` |
+| Reaper pass | `wallet: reaper pass complete` | `Debug` | `reaped`, `purged` (emitted only when one is non-zero) |
+
+The same `lease_id` rides on the `agent.llm.call` span as
+`persatrix.lease_id` (§ 10.5), so a span can be joined to its
+lifecycle logs without joining traces. A budget denial does **not**
+produce an `agent.llm.call` span — the wallet refuses *before* the
+provider call.
+
 ---
 
 ## 11. Operator pipeline (RFC 0019 PR 4)
