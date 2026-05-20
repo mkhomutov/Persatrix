@@ -1,8 +1,8 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-20 (RFC 0023 full closeout — PR 8 (`feature/v032-rfc0023-close`) opened; RFC 0023 status flipped 🚧 Implementing → ✅ Implemented; merged-PR history caught up through #391. All five LLM-call origins (workflow / chat / autonomous TICK / sub-agent / channel-message) now acquire a server-issued wallet lease before issuing — the v0.3.2 acceptance gate. Per-cause budget policies and the distributed wallet remain out of scope, deferred to RFC 0006 mesh territory.)
-> **Current phase**: v0.3.1 (Memory Quality + Session Plumbing + Conversational Working Memory — RFC 0026 full + RFC 0031 Phase 1 + RFC 0034 Phase 1) — ✅ Released
-> **Current milestone**: v0.3.1 released ([tag v0.3.1](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.1) pushed 2026-05-17, GitHub Release "Memory Quality" published the same day); v0.3.2 planning next (RFC 0029 Phase 1 `MemoryStore` facade refactor + RFC 0023 LLM-call leasing, sequenced per [v0.3.x-sequencing.md](docs/v0.3.x-sequencing.md)).
+> **Last updated**: 2026-05-20 (v0.3.2 release-prep PR 4 — final pre-tag verification. PRs 0–3 of release prep merged: plan ([#393](https://github.com/mkhomutov/Persatrix/pull/393)), MT execution report ([#394](https://github.com/mkhomutov/Persatrix/pull/394) → re-run [#397](https://github.com/mkhomutov/Persatrix/pull/397) with release gate met), docs refresh + release checklist ([#400](https://github.com/mkhomutov/Persatrix/pull/400)), version bump + curated changelog ([#401](https://github.com/mkhomutov/Persatrix/pull/401)). PR 4 (this PR) flips the Version Map v0.3.2 row 🚧 Release prep → ✅ Released; the `v0.3.2` git tag and GitHub Release follow post-merge per [release-prep plan Phase 5](docs/v0.3.2-release-prep-plan.md).)
+> **Current phase**: v0.3.2 (Cost Gate + Facade Freeze — RFC 0023 full + RFC 0029 Phase 1) — ✅ Released
+> **Current milestone**: v0.3.2 released. Every LLM call in the system passes through a server-issued wallet lease before it is issued (RFC 0023 Phases 1–6, all five origins wired — workflow / chat / autonomous TICK / sub-agent / channel-message — closing the v0.2.3 chat-bypass known limitation), and the `MemoryStore` facade is frozen as the single path to agent memory ahead of the v0.4.0 Postgres split (RFC 0029 Phase 1). Next phase is v0.3.3 (Idle, RFC 0024).
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.
 
@@ -21,7 +21,7 @@ A version is ready when a developer can do something meaningful they could not d
 | **v0.2.3** | Observability Foundation — logs + traces + metrics + correlation shipped together: structured JSON logs across Go/Python/CLI on a versioned schema, working `persatrix logs` CLI (with `--follow` and server-side filters), end-to-end OpenTelemetry traces from REST handler to LLM call (with OTEL Gen-AI semantic conventions), OTLP metrics with exemplars, W3C Baggage propagation, and a tail-sampling Collector pipeline. Combined deliverable of RFCs 0018 + 0019. | ✅ Complete — released |
 | **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | ✅ Complete — released |
 | **v0.3.1** | The persona remembers stated facts about you across interactions and follows the conversation it is currently having | ✅ Complete — released |
-| **v0.3.2** | Every LLM call in the system passes through a wallet lease before it is issued — cost is a structural gate, not a post-hoc accountant — and the memory facade is frozen as the single path to agent memory ahead of the v0.4.0 Postgres split | 🚧 Planning |
+| **v0.3.2** | Every LLM call in the system passes through a wallet lease before it is issued — cost is a structural gate, not a post-hoc accountant — and the memory facade is frozen as the single path to agent memory ahead of the v0.4.0 Postgres split | ✅ Complete — released |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
 | **v0.6.0** | Run agent societies across multiple nodes and networks | 📋 Planned |
