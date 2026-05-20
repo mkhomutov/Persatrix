@@ -31,7 +31,7 @@ from ..wallet_client import BudgetExceededError
 from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
 from .channel_reply import synthesize_channel_reply
-from .wallet_cause import cause_for_event
+from .wallet_cause import lease_attribution_for_event
 
 if TYPE_CHECKING:
     from .memory_context import MemoryInjectionResult
@@ -371,6 +371,10 @@ class _ActionLoopMixin:
 
         max_llm_calls = self.config.get("max_llm_calls", _PERSONA_DEFAULT_MAX_LLM_CALLS)
         max_tokens = self.config.get("max_tokens", _PERSONA_DEFAULT_MAX_TOKENS)
+        # RFC 0023 PR 4 base + ISSUE-0064 persona-as-sub-agent override.
+        lease_cause, lease_agent_id = lease_attribution_for_event(
+            event, agent_id=self.agent_id,
+        )
         response: LLMResponse | None = None
         for _ in range(max_llm_calls):
             try:
@@ -381,8 +385,8 @@ class _ActionLoopMixin:
                     tools=tool_defs,
                     max_tokens=max_tokens,
                     temperature=self.config.get("temperature", 0.7),
-                    cause=cause_for_event(event),  # RFC 0023 PR 4
-                    agent_id=self.agent_id,
+                    cause=lease_cause,
+                    agent_id=lease_agent_id,
                 )
             except BudgetExceededError as exc:
                 # RFC 0023 § F — most calling surfaces render the denial

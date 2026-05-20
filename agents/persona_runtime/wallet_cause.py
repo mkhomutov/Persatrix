@@ -1,6 +1,6 @@
 """RFC 0023 — wallet-lease ``cause`` derivation for the persona action loop.
 
-Free-function helper (no ``self`` access) split out of ``action_loop.py``
+Free-function helpers (no ``self`` access) split out of ``action_loop.py``
 so that file stays under the 500-line review limit, mirroring the
 ``channel_ingest`` / ``channel_reply`` split convention.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 from ..generated import wallet_pb2 as walletpb
 from ..persona_types import AgentEvent, EventType
 
-__all__ = ["cause_for_event"]
+__all__ = ["cause_for_event", "lease_attribution_for_event"]
 
 
 def cause_for_event(event: AgentEvent) -> walletpb.Cause.ValueType:
@@ -48,3 +48,32 @@ def cause_for_event(event: AgentEvent) -> walletpb.Cause.ValueType:
     if event.event_type is EventType.TASK_ASSIGNED:
         return walletpb.CAUSE_WORKFLOW_TASK
     return walletpb.CAUSE_UNSPECIFIED
+
+
+def lease_attribution_for_event(
+    event: AgentEvent,
+    *,
+    agent_id: str,
+) -> tuple[walletpb.Cause.ValueType, str]:
+    """Return ``(cause, lease_agent_id)`` for the action-loop LLM call.
+
+    Layers the ISSUE-0064 persona-as-sub-agent override on top of
+    :func:`cause_for_event`. When a ``TASK_ASSIGNED`` event carries a
+    :class:`~agents.task_types.TaskInput` whose
+    ``config.sub_agent_parent_id`` is non-empty, the spawner
+    (:class:`agents.sub_agents.spawner.SubAgentSpawner`) marked the
+    dispatch as a sub-agent invocation. The lease must then be tagged
+    ``CAUSE_SUB_AGENT`` and attributed to the parent's ``agent_id`` —
+    exact twin of the override RFC 0023 PR 5 added to
+    :meth:`agents.base.BaseAgent._run_llm_loop`. Otherwise the result is
+    ``(cause_for_event(event), agent_id)``.
+    """
+    cause = cause_for_event(event)
+    lease_agent_id = agent_id
+    if event.event_type is EventType.TASK_ASSIGNED:
+        task = event.payload.get("task") if isinstance(event.payload, dict) else None
+        parent = getattr(getattr(task, "config", None), "sub_agent_parent_id", "") or ""
+        if parent:
+            cause = walletpb.CAUSE_SUB_AGENT
+            lease_agent_id = parent
+    return cause, lease_agent_id

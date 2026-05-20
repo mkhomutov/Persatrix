@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0064
 summary: "RFC 0023 PR 5 wires CAUSE_SUB_AGENT + parent attribution in BaseAgent._run_llm_loop, but a PersonaAgent dispatched as a sub-agent child routes through the persona action loop (cause_for_event) instead, so its leased spend bills the child rather than the delegating parent. Latent today — SPAWN_SUB_AGENT is not_implemented in action_executor.py and SubAgentSpawner has no production caller."
-status: open
+status: resolved
 severity: low
 area: agents/persona_runtime
 created: 2026-05-20
+closed: 2026-05-20
 refs:
   - docs/rfcs/0023-llm-call-leasing.md
   - docs/rfcs/0023-pr-plan.md
@@ -102,3 +103,21 @@ gate at the boundary). Defer to whichever PR re-opens
 > LLM-call origin to `BaseAgent._run_llm_loop` that needs its own copy of
 > any lease-attribution overrides. Future RFC 0023 work that adds a new
 > cause should consider both call sites by construction.
+
+## Resolution
+
+> 2026-05-20 — resolved via path 1 (persona action-loop branch). A new free
+> function `lease_attribution_for_event(event, *, agent_id)` in
+> `agents/persona_runtime/wallet_cause.py` layers the `sub_agent_parent_id`
+> override on top of `cause_for_event`: a `TASK_ASSIGNED` event whose
+> `event.payload["task"].config.sub_agent_parent_id` is non-empty flips
+> the lease cause to `CAUSE_SUB_AGENT` and the lease `agent_id` to the
+> parent's id. The action loop calls the new helper instead of
+> `cause_for_event` directly. Exact twin of the override RFC 0023 PR 5
+> added to `BaseAgent._run_llm_loop` (`agents/base.py:407-410`).
+>
+> Pinned by `agents/tests/test_action_loop_subagent_lease.py` —
+> persona-as-sub-agent dispatch tags `CAUSE_SUB_AGENT` and bills the
+> parent; persona workflow-step dispatch without the marker still tags
+> `CAUSE_WORKFLOW_TASK` against the persona's own id (ISSUE-0063
+> invariant); explicit empty-string marker does not trip the override.
