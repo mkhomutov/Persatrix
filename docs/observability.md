@@ -277,7 +277,7 @@ Persatrix uses **two** attribute conventions side-by-side, mirroring
 | `persatrix.execution_id` | string | Set on spans inside a workflow execution (via Baggage from RFC 0019 PR 1) |
 | `persatrix.step_id` | string | Set on spans inside a workflow step |
 | `persatrix.workflow_id` | string | Workflow definition ID |
-| `persatrix.lease_id` | string | The server-issued ULID of the RFC 0023 wallet lease an LLM call holds. Set on the `agent.llm.call` span when the call was bracketed by a wallet lease (RFC 0023 PR 3 — workflow-task origin; PRs 4–6 add chat / TICK / sub-agent / channel-message). Absent on un-leased calls. |
+| `persatrix.lease_id` | string | The server-issued ULID of the RFC 0023 wallet lease an LLM call holds. Set on the `agent.llm.call` span when the call was bracketed by a wallet lease (RFC 0023 PR 3 — workflow-task origin; PRs 4–6 add chat / TICK / sub-agent / channel-message). Absent on un-leased calls **and on calls that were denied a lease** (the wallet refuses *before* the provider call, so no `agent.llm.call` span is emitted — see the prose block below). |
 
 > **RFC 0023 wallet leasing.** Every workflow-task LLM call acquires a
 > server-issued lease from the orchestrator-side `WalletService` before

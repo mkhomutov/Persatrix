@@ -40,6 +40,11 @@ Failure modes (RFC 0023 § F)
   distinct from a hard budget failure.
 * ``INTERNAL`` / ``INVALID_ARGUMENT`` indicate a server- or agent-side
   bug and are re-raised immediately, without retry.
+* an **unset or unknown ``LeaseResponse.outcome`` oneof** — a proto-
+  evolution mismatch or wire-level malformation — raises ``RuntimeError``
+  rather than silently yielding a zero-valued lease. The caller surfaces
+  it as a generic provider error (no retry — a malformed reply is a bug,
+  not a transient condition).
 """
 
 from __future__ import annotations
@@ -350,13 +355,30 @@ class WalletClient:
                     estimated_usd=d.estimated_usd,
                     reason="budget_exceeded",
                 )
-            grant = response.grant
-            return Lease(
-                self,
-                grant.lease_id,
-                grant.granted_input_tokens,
-                grant.granted_output_tokens,
-                grant.ttl_seconds,
+            if outcome == "grant":
+                grant = response.grant
+                return Lease(
+                    self,
+                    grant.lease_id,
+                    grant.granted_input_tokens,
+                    grant.granted_output_tokens,
+                    grant.ttl_seconds,
+                )
+            # An unset (proto default) or unknown ``outcome`` oneof arm is a
+            # wire-level malformation, a proto-evolution mismatch, or a server
+            # bug. Falling through to ``response.grant`` would silently build
+            # a zero-valued Lease (empty lease_id, zero ceilings) and
+            # propagate the empty id into settle/release — a silent budget
+            # bypass. Fail loudly instead; the caller surfaces it as a
+            # generic provider error (no retry — a malformed reply is a bug,
+            # not a transient condition).
+            logger.error(
+                "wallet: AcquireLease returned an unrecognised outcome "
+                "oneof %r — treating the reply as malformed", outcome,
+            )
+            raise RuntimeError(
+                "wallet: AcquireLease returned an unrecognised outcome "
+                f"oneof {outcome!r}",
             )
         # Unreachable: the loop either returns a Lease or raises.
         raise RuntimeError("wallet: AcquireLease retry loop exited unexpectedly")
