@@ -203,6 +203,8 @@ class CallbackResult:
 
 Each method has a default no-op implementation. A callback only overrides the hooks it cares about.
 
+`CallbackResult` mixes per-hook mutation fields (`mutate_messages` is meaningful only from `before_model`; `mutate_output` only from `after_model`). The dispatcher rejects off-hook fields with an `Error(kind="internal")` rather than silently ignoring them — i.e., a `before_tool` returning a non-`None` `mutate_messages` is a programming error, not a no-op. A future revision may split `CallbackResult` into per-hook subtypes; the current shared shape is chosen so the four hook methods have one return type, but the rejection rule preserves the per-hook contract.
+
 ### D. Veto semantics
 
 - A `before_model` veto emits an `Error` event with `kind` chosen by the callback (e.g., `wallet_denied`) and a `Control(kind="turn_aborted")`. The model is not called.
@@ -225,6 +227,7 @@ Each method has a default no-op implementation. A callback only overrides the ho
 - The agent loop's public Python API (`BaseAgent.run`, `BaseAgent.execute_task`) is unchanged. Events are an *additional* output channel, not a replacement.
 - Existing logging keys and OTEL span names are preserved by the adapter layer for the migration window. Removal of the legacy log-call sites is a follow-up after consumers are migrated.
 - Existing wallet-lease, recall-filter, and sanitizer code paths are wrapped as callbacks in Phase 1 with no semantic change; their inline call sites are removed in Phase 2.
+- `StateDelta.scope` ships as `str` in Phase 1 (see [§A](#a-event-taxonomy)). Re-typing it to the closed `Scope` enum from [RFC 0042](0042-state-namespacing-by-scope.md) §D is an explicit follow-up that lands once RFC 0042 Phase 1 ships; until then subscribers must accept any string value. This is tracked in [Open Q #2](#open-questions) and is a Phase-1 → Phase-2 deliverable, not a "maybe."
 
 ## Security Considerations
 

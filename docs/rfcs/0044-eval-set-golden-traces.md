@@ -159,6 +159,8 @@ The format is intentionally close to the manual-test prose it derives from, so t
 
 The vocabulary is closed: adding a new assertion type is an RFC amendment.
 
+**Co-dependency with RFC 0041.** The assertion grammar above references event-type names (`ModelOutput`, `ToolCall`, `Error`, `StateDelta`, `Control`) that [RFC 0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) §A introduces. The sequencing claim "0044 first" applies to the *format spec* — Phase 1 ships the file shape, the assertion grammar, and the replay runner without recording any goldens. Goldens against the seed scenarios in [§E](#e-seed-eval-sets) can only be recorded once [RFC 0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) Phase 1 emits the events they assert on. The two RFCs share an event-name vocabulary that lives in 0041; this RFC consumes it.
+
 ### C. Recording vs replay
 
 - **Record mode** (`make eval-record TARGET=EVAL-MEMORY-001`): runs the scenario with `llm_mode: live`, captures the event stream, terminal state, and final transcript, and writes them as a sidecar `<eval_id>.golden.yaml`. The eval-set file becomes the *recipe*; the golden file is the *expected output*.
@@ -178,18 +180,20 @@ LLM output is not byte-stable. The assertion vocabulary ([§B](#b-assertion-voca
 
 ### E. Seed eval-sets
 
-The initial set, all under [`evaluators/eval_sets/`](../../evaluators):
+The initial set, all under [`evaluators/eval_sets/`](../../evaluators). IDs follow a fixed shape `EVAL-<DOMAIN>-<NNN>` with `<DOMAIN>` drawn from a flat closed list (`MEMORY`, `RECALL`, `ERROR`, `WORKING`, `FACTS`); source references live in the table column, not encoded into the ID:
 
 | ID | Source | Asserts |
 |----|--------|---------|
 | `EVAL-MEMORY-001` | [MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md) | Dementia-test recall across five interactions |
-| `EVAL-RECALL-F3-001` | [RFC 0031](0031-per-session-namespacing-channels.md) Phase 2 | Cross-session memory does not leak into recall |
-| `EVAL-ERROR-0065-001` | [ISSUE-0065](../issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md) | Wallet denial publishes a typed chat-error on the channel |
-| `EVAL-ERROR-0066-001` | [ISSUE-0066](../issues/ISSUE-0066-chat-rest-resource-exhausted-no-channel-reply.md) | Lease-cap / rate-limit / `RESOURCE_EXHAUSTED` publish typed chat-errors |
-| `EVAL-WORKING-MEM-001` | [RFC 0034](0034-persona-conversational-working-memory.md) | Persona references its own prior question in the same interaction |
+| `EVAL-RECALL-001` | [RFC 0031](0031-per-session-namespacing-channels.md) Phase 2 (F-3) | Cross-session memory does not leak into recall |
+| `EVAL-ERROR-001` | [ISSUE-0065](../issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md) | Wallet denial publishes a typed chat-error on the channel |
+| `EVAL-ERROR-002` | [ISSUE-0066](../issues/ISSUE-0066-chat-rest-resource-exhausted-no-channel-reply.md) | Lease-cap / rate-limit / `RESOURCE_EXHAUSTED` publish typed chat-errors |
+| `EVAL-WORKING-001` | [RFC 0034](0034-persona-conversational-working-memory.md) | Persona references its own prior question in the same interaction |
 | `EVAL-FACTS-001` | [RFC 0026](0026-declarative-facts-tier.md) | Declarative facts surface in subsequent interactions without keyword overlap |
 
-`EVAL-ERROR-0065-001` and `EVAL-ERROR-0066-001` are the lever the channel-error work has been missing — once they exist, future "synthesized chat-error" regressions fail CI instead of leaking into v0.3.x release prep.
+`EVAL-ERROR-001` and `EVAL-ERROR-002` are the lever the channel-error work has been missing — once they exist, future "synthesized chat-error" regressions fail CI instead of leaking into v0.3.x release prep.
+
+Adding a new `<DOMAIN>` is an RFC amendment; sequential `<NNN>` within a domain is a routine addition.
 
 ### F. CI integration
 
@@ -202,7 +206,9 @@ The initial set, all under [`evaluators/eval_sets/`](../../evaluators):
 
 ### Phase 1 — format + replay-only
 
-Ship the eval-set file shape, the assertion vocabulary, and the replay runner. No CI gating yet. Seed evals' goldens are recorded by hand and committed. The runner produces a report; humans interpret it.
+Ship the eval-set file shape, the assertion vocabulary, and the replay runner. No CI gating yet. The runner produces a report; humans interpret it.
+
+Seed-eval golden recording is staged: the eval-set *recipes* (scenario YAMLs in [§E](#e-seed-eval-sets)) land in this phase, but their `.golden.yaml` sidecars can only be recorded once [RFC 0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) Phase 1 emits the events the assertions reference. Until then, the runner replays recipes against the pre-0041 surface using the subset of assertions that do not require typed events (`final_transcript`, `terminal_state`).
 
 ### Phase 2 — CI gating
 
@@ -229,7 +235,7 @@ Drift reports become actionable: a CI job opens an issue when drift exceeds thre
 - **Integration tests**: each seed eval runs in replay mode and passes; flipping one assertion to a wrong value fails as expected.
 - **E2E**: the eval runner under CI produces a structured artifact that matches the documented schema.
 - **Manual tests**: the seed evals' source manual tests ([MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md) and others) remain runnable by hand; the goldens are *additive*, not a replacement.
-- **Self-test**: an "intentional regression" PR (e.g., disabling the F-3 recall filter) must fail `EVAL-RECALL-F3-001` and be caught at CI before merge.
+- **Self-test**: an "intentional regression" PR (e.g., disabling the F-3 recall filter) must fail `EVAL-RECALL-001` and be caught at CI before merge.
 
 ## Open Questions
 

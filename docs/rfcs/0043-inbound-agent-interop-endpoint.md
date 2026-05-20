@@ -229,7 +229,10 @@ If real use cases demand it: more granular capability scopes (per-message-type, 
 
 ## Open Questions
 
-1. **Hosted on the REST server or a dedicated port?** Dedicated port (e.g., `/external/*` on a separate listener) makes a misconfigured reverse proxy less catastrophic, at the cost of operator ergonomics. Lean: same server, separate path prefix, with a clear deployment note that the path can be reverse-proxied to a separate hostname.
+1. **Hosted on the REST server or a dedicated port?** Two options with genuinely different threat profiles:
+   - *Same server, separate path prefix (`/external/*`).* Simpler ops, single TLS cert, single listener config. A reverse-proxy misconfiguration or a routing bug in the REST server can expose internal paths to external-agent traffic.
+   - *Dedicated listener on a separate port.* Process-level isolation between the internal REST surface and the external interop surface — a bug in one cannot route into the other. Costs an additional listener, additional cert management, and a more complex deployment story.
+   The lean depends on the threat-modeling pass scheduled for the dedicated security review ([§Test Strategy](#test-strategy)): if reverse-proxy misconfiguration is judged a realistic operator-error risk, the dedicated listener wins; if not, the path prefix is sufficient. Resolve as part of that review, not before.
 2. **Per-message-type capability scopes.** Initial scope is read/write per channel. Should there be "can post system events" or "can request a turn" sub-scopes? Defer to Phase 3 unless a real use case appears.
 3. **Outbound delivery guarantees.** At-least-once with idempotency on the consumer side, or at-most-once with no retries? Lean: at-least-once with an event_id the consumer dedupes on.
 4. **Channel-message *typed* events to external agents.** Internal subscribers see `TurnEvent`s from [RFC 0041](0041-typed-event-taxonomy-lifecycle-callbacks.md). External agents see channel messages only — they do not see `StateDelta`, `ToolCall`, `Error(kind=internal)`, etc. Confirm the projection is correct and complete.

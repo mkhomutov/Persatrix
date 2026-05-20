@@ -102,10 +102,10 @@ When a new RFC proposes "we'll store X here," the reviewer's first question is "
 
 | Scope | Owner | Lifetime | Example |
 |-------|-------|----------|---------|
-| `app:` | Process | Until restart (in-memory) or forever (config-backed) | `app:llm:default_alias`, `app:build:version` |
-| `persona:` | One persona, across sessions | Persistent in persona's memory store | `persona:ember-owl:trust:alice`, `persona:ember-owl:speaking_style` |
-| `channel:` | One channel, across sessions | Persistent in channels.db | `channel:#planning:topic`, `channel:#planning:members` |
-| `session:` | One session ([RFC 0031](0031-per-session-namespacing-channels.md)) | Persistent for the life of the session | `session:abc:active_personas`, `session:abc:wallet:budget_remaining` |
+| `app:` | Process | Until restart (in-memory) or forever (config-backed) | `app:llm:default_alias`, `app:llm:active_provider` |
+| `persona:` | One persona, across sessions | Persistent in persona's memory store | `persona:ember-owl:trust.scores.alice`, `persona:ember-owl:speaking_style` |
+| `channel:` | One channel, across sessions | Persistent in channels.db | `channel:#planning:topic.current`, `channel:#planning:members` |
+| `session:` | One session ([RFC 0031](0031-per-session-namespacing-channels.md)) | Persistent for the life of the session | `session:abc:active_personas`, `session:abc:wallet.ember-owl.budget_remaining` |
 | `interaction:` | One interaction ([RFC 0020](0020-interaction-lifecycle.md)) | Lives until interaction closes | `interaction:xyz:open_questions`, `interaction:xyz:working_summary` |
 | `temp:` | One turn | Discarded at `Control(turn_completed)` | `temp:tool_args:read_file:path`, `temp:retry_count` |
 
@@ -202,6 +202,15 @@ app::llm.default_alias                         # no owner for app
 
 Double colon on owner-less scopes is intentional — it keeps the parser uniform.
 
+**Multi-owner facts.** Some state belongs to a *pair* of owners — most prominently the wallet, which is per-session per-persona ([RFC 0023](0023-llm-call-leasing.md) §`WalletService`). The rule is: pick the *outer* owner as the scope owner_id and encode the *inner* owner inside the dotted key path. For the wallet:
+
+```
+session:S-abc123:wallet.ember-owl.budget_remaining_usd
+session:S-abc123:wallet.ember-owl.leases.outstanding
+```
+
+The scope (`session:`) is what determines lifetime and visibility — the wallet expires with the session, is visible to session participants. The inner owner (`ember-owl`) is part of the key path because it does not change the lifetime answer. Multi-owner keys are a documented pattern, not an exception to §F. Choose the outer owner by asking which owner's lifecycle the state lives and dies with.
+
 ## Security Considerations
 
 - **Cross-scope leakage.** A bug in a wrapper that misroutes a key from `persona:` to `channel:` exposes private state. The wrapper layer has table-driven tests asserting that every (scope, owner_id, key) tuple resolves to exactly one storage location, and that resolution is deterministic.
@@ -244,7 +253,7 @@ Persona runtime, channel publish, wallet client, F-3 recall filter, and working-
 
 1. **`channel:` storage layout.** Add a key-value column to the channel record, or a sidecar `channel_state` table? Sidecar is cleaner but adds a join. Decision deferred to Phase 1.
 2. **Are `interaction:` and the working-memory tier ([RFC 0034](0034-persona-conversational-working-memory.md)) the same store, or layered?** Lean: same store, this RFC names what RFC 0034 already built.
-3. **Does `wallet:budget_remaining` belong in `session:` or `persona:`?** Today the wallet is per-session per-persona ([RFC 0023](0023-llm-call-leasing.md) §`WalletService`). The composite suggests *both*: `session:S-abc:wallet:ember-owl:budget` — but two-owner keys break the single-owner key composition rule. Resolve by treating wallet keys as `session:` scope with a compound owner in the key path: `session:S-abc:wallet.ember-owl.budget`.
+3. **Wallet scope assignment.** §F resolves multi-owner facts (like the per-session per-persona wallet) by picking the outer-lifetime owner as the scope owner_id and encoding the inner owner in the dotted key path. Confirm this gives the right answer for wallet refunds across persona switches within a session — and that `RFC 0023` §`WalletService` does not encode logic that assumes wallet state survives session end.
 4. **`app:` write boundary.** Where exactly is "orchestrator init code"? Probably the bootstrap path in `cmd/orchestrator` and nothing else. Document explicitly.
 5. **Event subscriber visibility enforcement.** Where does the visibility filter live — in the event dispatcher (RFC 0041) or in each subscriber? Lean: dispatcher, as a privileged middleware, so subscribers cannot accidentally over-read.
 
