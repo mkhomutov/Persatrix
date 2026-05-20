@@ -7,16 +7,11 @@ ExecuteTaskStream, SendChatMessage, ReceiveChannelMessage) from the generated
 protobuf stubs.
 """
 
-import argparse
-import asyncio
 import logging
-import signal
-import sys
 
 import aiohttp
 import grpc
 import grpc.aio
-from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 
 from .base import BaseAgent
 from .channel_catchup import replay_for_persona_agents
@@ -30,25 +25,20 @@ from .observability.log_shipper import (
     queue_capacity_from_env,
     set_active_shipper,
 )
-from .observability.logging import configure_logging
-from .observability.metrics import init_metrics, try_get_instruments
-from .observability.metrics import shutdown as metrics_shutdown
-from .observability.tracing import init_tracing
-from .observability.tracing import shutdown as tracing_shutdown
 from .persona_runtime import _LLMPersonaAgent
 from .server_persona import (
     default_grpc_target,
     initialize_persona_agents,
-    load_agent,
-    setup_shared_pools,
     stop_shared_pools,
     wire_history_fetchers,
+    wire_wallet_client,
 )
 from .server_servicers import (  # noqa: F401
     AgentServiceServicer,
     _extract_chat_reply,
 )
 from .tick import TickScheduler
+from .wallet_client import WalletClient
 
 logger = logging.getLogger("Persatrix.agent.server")
 
@@ -89,6 +79,12 @@ class AgentServer:
         self._dispatcher = EventDispatcher()
         self._tick_schedulers: dict[str, TickScheduler] = {}
         self._log_shipper: Shipper | None = None
+        # RFC 0023 — one outbound gRPC channel to the orchestrator carries
+        # both the LogService log stream and the WalletService lease RPCs
+        # (HTTP/2 multiplexes; OQ #1 — outbound dial reusing the LogService
+        # channel). Owned here; opened in start(), closed in stop().
+        self._orchestrator_channel: grpc.aio.Channel | None = None
+        self._wallet_client: WalletClient | None = None
 
     def register_agent(self, agent: BaseAgent) -> None:
         """Register an agent instance with the server."""
@@ -190,13 +186,26 @@ class AgentServer:
         # single agent per process); a future multi-agent process would
         # set per-entry agent_id on the structlog contextvars.
         first_agent_id = next(iter(self.agents.keys()), "unknown")
+        # RFC 0023 — open one outbound channel to the orchestrator and
+        # share it between the LogService log stream and the WalletService
+        # lease RPCs (HTTP/2 multiplexes both stubs over one connection).
+        self._orchestrator_channel = grpc.aio.insecure_channel(self.orchestrator_grpc)
         self._log_shipper = Shipper(
             self.orchestrator_grpc,
             first_agent_id,
             max_queue=queue_capacity_from_env(),
+            channel=self._orchestrator_channel,
         )
         await self._log_shipper.start()
         set_active_shipper(self._log_shipper)
+
+        # RFC 0023 PR 3 — wire the wallet client onto every hosted agent's
+        # LLMClient so the workflow-task LLM call acquires a server-issued
+        # lease before issuing. A wallet RPC the agent cannot deliver fails
+        # the LLM call closed (RFC 0023 § F): enforcement does not lapse
+        # silently when the orchestrator is unreachable.
+        self._wallet_client = WalletClient.from_channel(self._orchestrator_channel)
+        wire_wallet_client(self.agents, self._wallet_client)
 
         # Self-register with orchestrator after gRPC server is listening.
         # PR #173 review fix: a duplicate self-register call was introduced
@@ -333,162 +342,32 @@ class AgentServer:
         if self._log_shipper is not None:
             await self._log_shipper.stop()
             self._log_shipper = None
+        # Close the shared orchestrator channel last — after the shipper
+        # has drained, both the LogService and WalletService stubs over it
+        # are done (RFC 0023).
+        if self._orchestrator_channel is not None:
+            await self._orchestrator_channel.close()
+            self._orchestrator_channel = None
         logger.info("Agent server stopped.")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Persatrix Agent Server")
-    parser.add_argument("--agent", required=True, help="Agent ID to run")
-    parser.add_argument("--port", type=int, default=50051, help="gRPC port")
-    parser.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Bind address (use 0.0.0.0 in containers)",
-    )
-    parser.add_argument(
-        "--config",
-        default="config/agents.yaml",
-        help="Agent config path",
-    )
-    parser.add_argument(
-        "--workspace",
-        default="/workspace",
-        help="Workspace root for path validation",
-    )
-    parser.add_argument(
-        "--orchestrator-url",
-        default="http://127.0.0.1:8080",
-        help="Orchestrator REST API URL for self-registration",
-    )
-    parser.add_argument(
-        "--orchestrator-grpc",
-        default=None,
-        help="Orchestrator gRPC target for the LogService stream (host:port). "
-             "Defaults to the orchestrator REST host on port 9090.",
-    )
-    parser.add_argument(
-        "--advertise-address",
-        default=None,
-        help="gRPC address advertised to the orchestrator (host:port). "
-             "Defaults to bind host:port. Set to Docker service name in containers.",
-    )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Logging level",
-    )
-    parser.add_argument(
-        "--shutdown-grace",
-        type=int,
-        default=30,
-        help="Graceful shutdown timeout in seconds",
-    )
-    args = parser.parse_args()
-
-    # RFC 0018 Phase 1 — structured logging via structlog + ProcessorFormatter
-    # bridge.  Replaces the prior ``logging.basicConfig`` call so all records
-    # (including those from third-party libs that still emit through stdlib
-    # ``logging``) flow through the schema chain documented in
-    # ``docs/observability.md``.  Existing call sites that use
-    # ``logging.getLogger(__name__)`` continue to work — they hit the
-    # ``foreign_pre_chain`` and are rendered with the same JSON schema.
-    # The mechanical ``getLogger`` -> ``get_logger`` swap and printf -> kwargs
-    # migration ship in a follow-up PR (RFC 0018 PR 1b).
-    configure_logging(
-        service_kind="agent",
-        service_instance=args.agent,
-        level=args.log_level,
-    )
-
-    # Initialise OTEL tracing before any gRPC or async code starts.
-    init_tracing()
-    # Initialise metrics alongside tracing so instrument handles exist before
-    # the first LLM / tool / event call site records.  Any failure here is
-    # tolerated — the recording helpers are nil-safe.
-    try:
-        init_metrics()
-    except Exception:  # pragma: no cover — startup resilience
-        logger.exception(
-            "failed to initialize OTEL metrics, continuing without metric recording",
-        )
-        # PR-170 N3: a partial init (provider constructed, ``_Instruments``
-        # ctor raised) leaves the module-level provider live and exporting
-        # empty payloads on its periodic interval.  Tear it down inline
-        # (sync — no event loop yet) so we do not leak a background
-        # exporter for the lifetime of the process.  Done via a direct
-        # provider-handle reset rather than ``metrics.shutdown()`` (which
-        # is async and requires an event loop) to keep this in the
-        # synchronous startup path.
-        from agents.observability import metrics as _pmetrics
-
-        if _pmetrics._provider is not None:
-            try:
-                _pmetrics._provider.force_flush()
-                _pmetrics._provider.shutdown()
-            except Exception:  # pragma: no cover — best-effort cleanup
-                logger.exception("failed to clean up partial metrics provider")
-            _pmetrics._provider = None
-            _pmetrics._instruments = None
-    GrpcAioInstrumentorServer().instrument()
-
-    agent = load_agent(args.agent, args.config, args.workspace)
-    server = AgentServer(
-        host=args.host,
-        port=args.port,
-        shutdown_grace=args.shutdown_grace,
-        orchestrator_url=args.orchestrator_url,
-        advertise_address=args.advertise_address,
-        orchestrator_grpc=args.orchestrator_grpc,
-    )
-    server.register_agent(agent)
-    setup_shared_pools(server, args.config, agent)  # RFC 0008 PR 4
-
-    # PR-170 M2: bump the ``agent.active`` UpDownCounter so dashboards built on
-    # the metric reflect the actual live agent population.  Paired with the
-    # ``-1`` decrement in ``_run()``'s teardown below.  Guarded by
-    # ``try_get_instruments()`` so a metrics-init failure (already swallowed
-    # above for startup resilience) does not break agent startup.
-    _inst = try_get_instruments()
-    if _inst is not None:
-        _inst.agent_active.add(1, attributes={"agent.id": agent.agent_id})
-
-    async def _run() -> None:
-        shutdown = asyncio.Event()
-
-        def request_shutdown():
-            shutdown.set()
-
-        # loop.add_signal_handler() is POSIX-only and raises NotImplementedError on Windows.
-        if sys.platform != "win32":
-            loop = asyncio.get_running_loop()
-            for sig in (signal.SIGTERM, signal.SIGINT):
-                loop.add_signal_handler(sig, request_shutdown)
-        else:
-            signal.signal(signal.SIGINT, lambda s, f: request_shutdown())
-            # MF-01: SIGTERM is available on Windows in Python; registering a
-            # handler makes os.kill(pid, SIGTERM) trigger graceful shutdown
-            # instead of immediate process termination.
-            signal.signal(signal.SIGTERM, lambda s, f: request_shutdown())
-
-        await server.start()
-        await shutdown.wait()
-        await server.stop()
-        # PR-170 M2: decrement ``agent.active`` before flushing so the final
-        # exported value reflects the agent leaving the live set.  Read the
-        # instruments bag again rather than capturing ``_inst`` from the
-        # enclosing scope — keeps the symmetry with the ``+1`` site explicit
-        # and tolerates any post-init mutation of module state.
-        _inst_shutdown = try_get_instruments()
-        if _inst_shutdown is not None:
-            _inst_shutdown.agent_active.add(
-                -1, attributes={"agent.id": agent.agent_id},
-            )
-        await tracing_shutdown()
-        await metrics_shutdown()
-
-    asyncio.run(_run())
-
-
+# ── Entry point ──────────────────────────────────────────────
+#
+# main() — argument parsing + process bootstrap — lives in
+# agents.server_cli, split out so this module stays the gRPC server
+# implementation only (repo file-size cap). The import is deferred into
+# the __main__ guard rather than placed at module level because
+# server_cli imports `from .server import AgentServer`: a top-level
+# import here would close a server.py <-> server_cli.py cycle.
+#
+# Note: `python -m persatrix_agents.server` runs this file as `__main__`,
+# then the guard imports server_cli, which imports `persatrix_agents.server`
+# under its real name — so this module's body executes a second time (the
+# classic __main__/qualified-name double import). It is harmless: the body
+# only defines classes and a module logger (no side effects), and main()
+# itself runs exactly once. The `Persatrix-agent` console script
+# (server_cli:main) does not hit this path.
 if __name__ == "__main__":
+    from .server_cli import main
+
     main()

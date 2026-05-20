@@ -90,7 +90,16 @@ func (s *WorkflowScheduler) resolveStepLimits(ctx context.Context, step planner.
 	return limits
 }
 
-// recordStepUsage records token usage from a completed step dispatch.
+// recordStepUsage records a completed step's per-step cost entry on the
+// CostReporter — the data source for the /cost endpoint.
+//
+// RFC 0023 PR 3 retired this function's former TokenCounter.RecordUsage
+// call: every workflow-task LLM call now acquires an agent-side wallet lease,
+// and the WalletService records that spend on the shared TokenCounter itself
+// (RecordProvisional at acquire, Reconcile at settle). A post-hoc record here
+// would double-count it against all three budget scopes. See the in-body
+// note and docs/rfcs/0023-llm-call-leasing.md § D / § G.
+//
 // Uses resolveStepTokenData to parse tokens and compute cost — the same helper
 // used by buildStepMetadata — ensuring parity between what's recorded in the
 // cost system and what's reported in step metadata. (PR 5a, M-01 fix)
@@ -128,19 +137,16 @@ func (s *WorkflowScheduler) recordStepUsage(workflowID string, step planner.Step
 		)
 	}
 
-	s.tokenCounter.RecordUsage(cost.UsageRecord{
-		WorkflowID:   workflowID,
-		AgentID:      step.AgentID,
-		Model:        data.model,
-		InputTokens:  data.inputTokens,
-		OutputTokens: data.outputTokens,
-	})
-
-	// NOTE (S-04): When costReporter is nil but tokenCounter is non-nil, the
-	// TokenCounter running totals include data that CostReporter step entries
-	// don't. This is expected — the counter tracks all usage for budget
-	// enforcement, while the reporter tracks per-step cost entries for the cost
-	// endpoint. Comparing counter totals vs reporter sums will show a discrepancy.
+	// RFC 0023 PR 3 — the post-hoc TokenCounter.RecordUsage call was retired
+	// here. Every workflow-task LLM call now acquires an agent-side wallet
+	// lease (BaseAgent._run_llm_loop), and the WalletService records that
+	// spend on the shared TokenCounter — RecordProvisional at acquire,
+	// Reconcile to the provider actuals at settle. Re-recording it post-
+	// dispatch would count every workflow-task call twice against all three
+	// budget scopes. The wallet's Reconcile is now the single recording
+	// authority for leased calls; the scheduler keeps only the per-step
+	// CostReporter entry below, which feeds the /cost endpoint, not the
+	// budget counter. See docs/rfcs/0023-llm-call-leasing.md § D / § G.
 	if s.costReporter != nil {
 		// PR #86 review S-04: Log when a non-empty model has no pricing entry,
 		// causing $0 cost despite non-zero tokens. Helps operators diagnose

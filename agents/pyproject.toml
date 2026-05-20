@@ -35,6 +35,14 @@ dependencies = [
     # for any non-UTC zone to resolve.  Pinned for every platform so
     # the install closure does not branch on host OS.
     "tzdata>=2024.1",
+    # RFC 0023 (LLM Call Leasing) Open Question §5 — promoted from the
+    # former ``accurate-tokens`` optional extra to a hard runtime
+    # dependency. The wallet client tokenises the prompt with
+    # ``tiktoken.cl100k_base`` to fund the lease's provisional charge
+    # (agents/wallet_client.py via agents/llm_client.py), so a single
+    # tokeniser path must exist on every runtime install — not just
+    # when an optional extra was selected.
+    "tiktoken>=0.7.0,<1",
 ]
 
 [project.optional-dependencies]
@@ -46,7 +54,6 @@ dev = [
     "types-PyYAML",
     "types-protobuf",
     "types-grpcio",
-    "tiktoken>=0.7.0,<1",
     "pip-licenses>=5.0.0,<6",
     # ISSUE-0017: protoc plugin that emits *_pb2.pyi stubs at `make
     # proto-python` time, replacing the previously hand-maintained
@@ -63,12 +70,9 @@ dev = [
     # *.pyi, and commit in the same change.
     "mypy-protobuf==3.6.0",
 ]
-accurate-tokens = [
-    "tiktoken>=0.7.0,<1",
-]
 
 [project.scripts]
-Persatrix-agent = "persatrix_agents.server:main"
+Persatrix-agent = "persatrix_agents.server_cli:main"
 
 [build-system]
 requires = ["setuptools>=75.0"]

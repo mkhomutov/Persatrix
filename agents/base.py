@@ -9,12 +9,12 @@ event-driven communication, sub-agent spawning, and autonomy.
 import json
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any
 
 from .defaults import DEFAULT_MAX_LLM_CALLS, DEFAULT_MAX_TOKENS
+from .generated import wallet_pb2 as walletpb
 from .llm_client import (
+    BudgetExceededError,
     LLMClient,
     LLMResponse,
     LLMToolResult,
@@ -25,51 +25,24 @@ from .memory import MemoryStore, SharedPoolRegistry, budget_to_limit
 from .memory.facade_procedural import procedural_kwargs_from_config
 from .prompt_loader import load_snippet
 from .security import maybe_wrap_tool_content
+
+# Task dataclasses live in the leaf module agents.task_types; re-exported
+# here to preserve the historical `from agents.base import TaskInput` paths.
+from .task_types import (
+    CONTEXT_PACKAGE_KEY,
+    TaskInput,
+    TaskInputConfig,
+    TaskOutput,
+    TaskStatus,
+)
 from .tools.registry import get_tool, list_tools
 
 logger = logging.getLogger(__name__)
 
-CONTEXT_PACKAGE_KEY = "_context_package"
-"""Reserved TaskInput.context key for the orchestrator's RFC 0008 _context_package
-JSON payload (mirrors `internal/scheduler/context_package.go::ContextPackageKey`)."""
-
-
-class TaskStatus(Enum):
-    """Status of a completed task. Prevents stringly-typed bugs across agents."""
-
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-@dataclass
-class TaskInputConfig:
-    """Per-task configuration overrides from TaskConfig proto message."""
-
-    max_llm_calls: int = 0  # 0 means "use agent default"
-    max_tokens: int = 0  # 0 means "use agent default"
-    # PR-review B2: carry allowed_tools from proto even though enforcement
-    # is deferred to v0.2, so the field is available to wire up later.
-    allowed_tools: list[str] = field(default_factory=list)  # TODO(v0.2): enforce
-
-
-@dataclass
-class TaskInput:
-    """Input to an agent for task execution."""
-
-    task_id: str
-    workflow_id: str
-    payload: str
-    context: dict[str, str] = field(default_factory=dict)
-    config: TaskInputConfig = field(default_factory=TaskInputConfig)
-
-
-@dataclass
-class TaskOutput:
-    """Result from an agent's task execution."""
-
-    status: TaskStatus
-    result: str
-    metadata: dict[str, Any] = field(default_factory=dict)
+__all__ = [
+    "CONTEXT_PACKAGE_KEY", "BaseAgent", "TaskInput",
+    "TaskInputConfig", "TaskOutput", "TaskStatus",
+]
 
 
 class BaseAgent(ABC):
@@ -443,6 +416,34 @@ class BaseAgent(ABC):
                     tools=tool_defs,
                     max_tokens=max_tokens,
                     temperature=self.config.get("temperature", 0.3),
+                    # RFC 0023 PR 3 — this is the workflow-task LLM-call
+                    # origin. When the agent's LLMClient carries a wallet
+                    # (wired by AgentServer.start()), the call acquires a
+                    # server-issued lease before issuing; without one it
+                    # behaves exactly as before.
+                    cause=walletpb.CAUSE_WORKFLOW_TASK,
+                    workflow_id=task.workflow_id,
+                    agent_id=self.agent_id,
+                )
+            except BudgetExceededError as exc:
+                # RFC 0023 § E — the wallet denied the lease (or could not
+                # be reached). Surface it as a structured task failure so
+                # the orchestrator can tell a budget rejection apart from a
+                # generic LLM-provider outage.
+                logger.warning(
+                    "LLM call denied by the wallet in agent %s: %s",
+                    self.agent_id, exc,
+                )
+                return TaskOutput(
+                    status=TaskStatus.FAILED,
+                    result=f"budget exceeded ({exc.scope or exc.reason}): {exc.message}",
+                    metadata={
+                        "error_type": "budget_exceeded",
+                        "budget_scope": exc.scope,
+                        "budget_reason": exc.reason,
+                        "tokens_used": str(total_tokens),
+                        "tool_calls": str(tool_calls_count),
+                    },
                 )
             except Exception as exc:
                 logger.error(

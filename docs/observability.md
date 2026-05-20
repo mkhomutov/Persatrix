@@ -203,7 +203,7 @@ querying for a specific channel id pivots from either span via the shared
 | `agent.memory.episodic.remember` | `EpisodicMemory.store_episode()` | `agent.id`, `episode.kind` |
 | `agent.memory.relationship.lookup` | `RelationshipMemory.get_trust()` | `agent.id`, `participant.id` |
 | `agent.memory.relationship.update` | `RelationshipMemory.update_trust()` | `agent.id`, `participant.id`, `delta.kind`, `delta.value`, `trust.new` |
-| `agent.llm.call` | `LLMClient.create_message()` | OTEL **Gen-AI semantic conventions**: `gen_ai.system`, `gen_ai.request.model`, `gen_ai.operation.name`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons` |
+| `agent.llm.call` | `LLMClient.create_message()` | OTEL **Gen-AI semantic conventions**: `gen_ai.system`, `gen_ai.request.model`, `gen_ai.operation.name`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`. Plus `persatrix.lease_id` when the call acquired an RFC 0023 wallet lease (see § 10.5). |
 | `agent.tool.execute` | `@tool` decorator wrapper in `tools/registry.py` | `tool.name`, `tool.success` (+ optional payload — see § 10.4) |
 | `agent.subagent.spawn` | `ActionExecutor` SPAWN_SUB_AGENT case (stub for RFC 0009) | `agent.id`, `subagent.role`, `subagent.status`. The sub-agent's root span will emit `Link(link.kind="spawn")` back here when the spawner ships in RFC 0009. |
 | `channel.publish` | `HTTPChannelPublisher.publish()` (Python REST publisher; ISSUE-0032) | `channel.id`, `channel.sender_id`, `channel.mentions_count`, `channel.message_id` (set from the orchestrator's 201 response). Joins the Go-side `channel.dispatch` span by `channel.message_id` for end-to-end publish-path traces. Status `UNSET` on the sticky `ChannelsDisabledError` (HTTP 503) branch — deployment signal, not an internal failure; mirrors the Go-side `channel.dispatch` discipline of leaving best-effort no-ops `Unset` so error-rate dashboards stay honest on channels-off runs. |
@@ -277,6 +277,21 @@ Persatrix uses **two** attribute conventions side-by-side, mirroring
 | `persatrix.execution_id` | string | Set on spans inside a workflow execution (via Baggage from RFC 0019 PR 1) |
 | `persatrix.step_id` | string | Set on spans inside a workflow step |
 | `persatrix.workflow_id` | string | Workflow definition ID |
+| `persatrix.lease_id` | string | The server-issued ULID of the RFC 0023 wallet lease an LLM call holds. Set on the `agent.llm.call` span when the call was bracketed by a wallet lease (RFC 0023 PR 3 — workflow-task origin; PRs 4–6 add chat / TICK / sub-agent / channel-message). Absent on un-leased calls **and on calls that were denied a lease** (the wallet refuses *before* the provider call, so no `agent.llm.call` span is emitted — see the prose block below). |
+
+> **RFC 0023 wallet leasing.** Every workflow-task LLM call acquires a
+> server-issued lease from the orchestrator-side `WalletService` before
+> issuing, and settles the provider-reported actual usage afterward
+> (`docs/rfcs/0023-llm-call-leasing.md`). The `agent.llm.call` span
+> carries `persatrix.lease_id` so a span can be joined to the wallet's
+> lease-lifecycle logs (lease granted / settled / reaped — keyed on the
+> same `lease_id`) and the `LeaseRequest.trace_id` the agent stamps from
+> the active trace. A budget denial does not produce an `agent.llm.call`
+> span at all — the lease is refused *before* the provider call, and the
+> agent surfaces it as a structured failure (`error_type=budget_exceeded`
+> on a workflow task). Wallet enforcement and the reaper run on the Go
+> side; the orchestrator-side wallet metrics are covered by RFC 0023's
+> server instrumentation.
 
 `gen_ai.*` attributes use the upstream OTEL Gen-AI semantic-convention
 namespace verbatim — no Persatrix-private renames — so vendor backends

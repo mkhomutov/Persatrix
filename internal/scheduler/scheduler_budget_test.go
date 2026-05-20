@@ -72,10 +72,13 @@ func TestBudgetCheck_UnderBudget_DispatchProceeds(t *testing.T) {
 	run := waitForRunStatus(t, store, "budget-ok", state.RunCompleted, 5*time.Second)
 	assert.Equal(t, state.RunCompleted, run.Status)
 
-	// Verify tokens were recorded.
-	input, output, _ := tc.GlobalUsage()
-	assert.Equal(t, int64(100), input)
-	assert.Equal(t, int64(50), output)
+	// RFC 0023 PR 3 — the scheduler no longer feeds the budget TokenCounter
+	// post-dispatch (the agent-side wallet owns counter recording); per-step
+	// usage still reaches the CostReporter.
+	summary := cr.WorkflowSummary("test-wf")
+	require.Len(t, summary.Steps, 1)
+	assert.Equal(t, int64(100), summary.Steps[0].InputTokens)
+	assert.Equal(t, int64(50), summary.Steps[0].OutputTokens)
 }
 
 func TestBudgetCheck_Rejected_StepFails(t *testing.T) {
@@ -243,9 +246,12 @@ func TestTokenRecording_TokensUsedFallback(t *testing.T) {
 	run := waitForRunStatus(t, store, "fallback-meta", state.RunCompleted, 5*time.Second)
 	assert.Equal(t, state.RunCompleted, run.Status)
 
-	// tokens_used should be recorded as output tokens (fallback path).
-	_, output, _ := tc.GlobalUsage()
-	assert.Equal(t, int64(500), output)
+	// tokens_used maps to output tokens (the resolveStepTokenData fallback).
+	// RFC 0023 PR 3 — that resolved usage reaches the CostReporter; the
+	// budget TokenCounter is fed by the agent-side wallet, not the scheduler.
+	summary := cr.WorkflowSummary("test-wf")
+	require.Len(t, summary.Steps, 1)
+	assert.Equal(t, int64(500), summary.Steps[0].OutputTokens)
 }
 
 // TestTokenRecording_StepFailed_WithPartialMetadata verifies that when a step
@@ -289,10 +295,15 @@ func TestTokenRecording_StepFailed_WithPartialMetadata(t *testing.T) {
 	run := waitForRunStatus(t, store, "partial-meta-run", state.RunFailed, 5*time.Second)
 	assert.Equal(t, state.RunFailed, run.Status)
 
-	// Tokens from the partial result must be recorded despite the step failure.
-	input, output, _ := tc.GlobalUsage()
-	assert.Equal(t, int64(200), input, "input tokens from failed step should be recorded")
-	assert.Equal(t, int64(80), output, "output tokens from failed step should be recorded")
+	// recordStepUsage still runs on the failure path (the MT-COST-002 fix).
+	// RFC 0023 PR 3 — the resolved usage now lands on the CostReporter; the
+	// budget TokenCounter is fed by the agent-side wallet.
+	summary := cr.WorkflowSummary("test-wf")
+	require.Len(t, summary.Steps, 1)
+	assert.Equal(t, int64(200), summary.Steps[0].InputTokens,
+		"input tokens from failed step should be recorded")
+	assert.Equal(t, int64(80), summary.Steps[0].OutputTokens,
+		"output tokens from failed step should be recorded")
 }
 
 // TestTokenRecording_StepFailed_NilResult verifies that when a step fails and

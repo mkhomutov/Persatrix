@@ -138,6 +138,16 @@ func (s *WorkflowScheduler) executeStep(
 	registryModel := s.resolveAgentModel(ctx, step.AgentID)
 
 	// Pre-dispatch budget check (RFC 0006 PR 3b).
+	//
+	// RFC 0023 § G — as of v0.3.2 this check is an *early-fail optimisation*,
+	// not the enforcement point. Every LLM call inside the dispatched task
+	// acquires a per-call wallet lease from the orchestrator-side
+	// WalletService before issuing (RFC 0023 PR 3 wires the workflow-task
+	// origin); that agent-side lease is the enforcement point. This
+	// pre-dispatch check is kept only because it fails a clearly over-budget
+	// workflow before paying the executor-dispatch + agent-startup cost — it
+	// is no longer load-bearing for cost correctness.
+	//
 	// NOTE: Budget check is optimistic — parallel steps within a stage may all
 	// pass budget checks simultaneously and collectively exceed the budget.
 	// Total potential overspend is bounded by (parallel_steps × max_token_cost).

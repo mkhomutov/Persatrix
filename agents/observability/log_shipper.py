@@ -146,11 +146,18 @@ class Shipper:
         *,
         max_queue: int = MAX_QUEUE,
         batch_max: int = BATCH_MAX,
+        channel: grpc.aio.Channel | None = None,
     ) -> None:
         self.target = orchestrator_grpc_target
         self.agent_id = agent_id
         self.max_queue = max_queue
         self.batch_max = batch_max
+        # RFC 0023 — when *channel* is supplied the shipper streams logs
+        # over a channel owned by the caller (AgentServer shares one
+        # orchestrator channel between LogService and WalletService).
+        # An externally-owned channel is NOT closed by stop(): its owner
+        # closes it once every stub over it is done.
+        self._external_channel = channel is not None
 
         # asyncio.Queue with maxsize would block put_nowait() rather
         # than evict; we want FIFO eviction so the hot path is
@@ -167,7 +174,7 @@ class Shipper:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stopping = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
-        self._channel: grpc.aio.Channel | None = None
+        self._channel: grpc.aio.Channel | None = channel
 
         # Counters surfaced for tests and (future) metric instruments.
         self.enqueued: int = 0
@@ -221,7 +228,9 @@ class Shipper:
         # Capture the loop so cross-thread enqueue() can route the
         # wake through call_soon_threadsafe (PR #173 review Must-Fix #3).
         self._loop = asyncio.get_running_loop()
-        self._channel = grpc.aio.insecure_channel(self.target)
+        # Open a channel only when the caller did not supply one (RFC 0023).
+        if self._channel is None:
+            self._channel = grpc.aio.insecure_channel(self.target)
         self._task = asyncio.create_task(self._run(), name="log-shipper")
 
     async def stop(self, *, timeout: float = 5.0) -> None:
@@ -241,9 +250,11 @@ class Shipper:
             with contextlib.suppress(BaseException):
                 await self._task
         self._task = None
-        if self._channel is not None:
+        # Close the channel only when the shipper opened it — an
+        # externally-supplied channel is closed by its owner (RFC 0023).
+        if self._channel is not None and not self._external_channel:
             await self._channel.close()
-            self._channel = None
+        self._channel = None
         set_active_shipper(None)
 
     # ── Internals ───────────────────────────────────────────────────
