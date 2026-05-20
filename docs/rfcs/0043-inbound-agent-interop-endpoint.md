@@ -119,14 +119,14 @@ class ExternalAgentParticipant(ChannelParticipant):
 
 ### B. Endpoint surface
 
-A new REST surface under `/api/v1/external/agents/` ([RFC 0002](0002-rest-api-server.md) host), distinct from the internal gRPC surface ([RFC 0040](0040-agent-orchestrator-transport-unification.md)):
+A new REST surface under `/api/v1/external/agents/` ([RFC 0002](0002-rest-api-server.md) host), distinct from the internal gRPC surface ([RFC 0040](0040-agent-orchestrator-transport-unification.md)). All paths in the table below are shown relative to the `/api/v1` prefix:
 
-| Method | Path | Purpose |
-|--------|------|---------|
+| Method | Path (under `/api/v1`) | Purpose |
+|--------|------------------------|---------|
 | `POST` | `/external/agents/channels/{channel}/messages` | Post a message to a channel |
 | `GET` | `/external/agents/channels/{channel}/messages?since={cursor}` | Long-poll for new messages |
 | `GET` | `/external/agents/channels/{channel}/stream` | Server-sent events stream (optional, Phase 2) |
-| `GET` | `/external/agents/channels` | List channels this participant is invited to |
+| `GET` | `/external/agents/channels` | List channels this participant is invited to (the explicit invitation set, not a directory) |
 | `GET` | `/external/agents/identity` | Return the participant's own ID and capability scope |
 
 That is the entire surface. There is no endpoint to create channels, invite other participants, mutate persona state, submit workflows, or call any tool. Operator actions (inviting an external agent, revoking it, changing capability scope) go through the existing CLI / admin REST path — *not* through this external endpoint.
@@ -238,10 +238,11 @@ If real use cases demand it: more granular capability scopes (per-message-type, 
 4. **Channel-message *typed* events to external agents.** Internal subscribers see `TurnEvent`s from [RFC 0041](0041-typed-event-taxonomy-lifecycle-callbacks.md). External agents see channel messages only — they do not see `StateDelta`, `ToolCall`, `Error(kind=internal)`, etc. Confirm the projection is correct and complete.
 5. **External-agent appearance to personas.** When a persona sees a message from an `ExternalAgentParticipant`, does it know the message is from an external (non-persona) source? Probably yes — the participant subtype is visible in the message envelope and the prompt formatter can surface it. But this is a behavior choice, not a privacy requirement.
 6. **Confidentiality default for new channels.** Today new channels are not classified. When external participants exist, should channel creation force an explicit classification choice? Coordinate with [RFC 0037](0037-memory-confidentiality-channel-classification.md).
+7. **Channel rename and deletion vs. `CapabilityScope`.** `channels_read` / `channels_write` name channels exactly (no wildcards per [§D](#d-capability-scope)). When a channel is renamed or deleted, what happens to in-flight external-agent scopes? Three options: (a) rewrite the scope to follow the rename / drop the entry on delete, silently; (b) leave the scope unchanged and let the now-stale entry no-op (access lost on rename, harmless on delete); (c) refuse rename/delete while any external scope references the channel. Lean: (a) for delete (drop the stale entry, audit-log it) and (b) for rename (channel renames are operator actions; the operator re-grants if intended), but worth confirming during the security review since (a)-on-rename is the friendlier UX and (b) is the safer default.
 
 ## Decision / Next Steps
 
-Draft. The dedicated security review (§Test Strategy) is the gate for Phase 1. Open questions 1, 4, and 6 must be resolved before that review. This RFC is intentionally the last of the four umbrella RFCs to land — the other three frame what an external participant can and cannot do.
+Draft. The dedicated security review (§Test Strategy) is the gate for Phase 1. Open questions 1, 4, 6, and 7 must be resolved before that review. This RFC is intentionally the last of the four umbrella RFCs to land — the other three frame what an external participant can and cannot do.
 
 ## Related Documentation
 

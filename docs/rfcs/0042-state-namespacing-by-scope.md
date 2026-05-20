@@ -102,12 +102,12 @@ When a new RFC proposes "we'll store X here," the reviewer's first question is "
 
 | Scope | Owner | Lifetime | Example |
 |-------|-------|----------|---------|
-| `app:` | Process | Until restart (in-memory) or forever (config-backed) | `app:llm:default_alias`, `app:llm:active_provider` |
+| `app:` | Process | Until restart (in-memory) or forever (config-backed) | `app::llm.default_alias`, `app::llm.active_provider` |
 | `persona:` | One persona, across sessions | Persistent in persona's memory store | `persona:ember-owl:trust.scores.alice`, `persona:ember-owl:speaking_style` |
 | `channel:` | One channel, across sessions | Persistent in channels.db | `channel:#planning:topic.current`, `channel:#planning:members` |
 | `session:` | One session ([RFC 0031](0031-per-session-namespacing-channels.md)) | Persistent for the life of the session | `session:abc:active_personas`, `session:abc:wallet.ember-owl.budget_remaining` |
 | `interaction:` | One interaction ([RFC 0020](0020-interaction-lifecycle.md)) | Lives until interaction closes | `interaction:xyz:open_questions`, `interaction:xyz:working_summary` |
-| `temp:` | One turn | Discarded at `Control(turn_completed)` | `temp:tool_args:read_file:path`, `temp:retry_count` |
+| `temp:` | One turn | Discarded at `Control(turn_completed)` or `turn_aborted` | `temp::tool_args.read_file.path`, `temp::retry_count` |
 
 The set is closed. Adding a scope requires an RFC amendment.
 
@@ -168,7 +168,7 @@ Every mutation emits a `StateDelta` event ([RFC 0041](0041-typed-event-taxonomy-
 
 | Scope | Backing store today | Change |
 |-------|--------------------|--------|
-| `app:` | `internal/config/` + process globals | Wrapper exposes config keys under `app:config:*` |
+| `app:` | `internal/config/` + process globals | Wrapper exposes config keys under `app::config.*` |
 | `persona:` | Per-persona `memory.db` ([RFC 0005](0005-persona-agent-memory.md)), `MemoryStore` facade ([RFC 0029](0029-personal-society-storage-split.md)) | Wrapper translates `persona:<id>:<key>` to the existing facade |
 | `channel:` | `channels.db` ([RFC 0011](0011-channels-bridges.md)) | Wrapper translates `channel:<name>:<key>` to a new key-value column on the channel record, or a sidecar table |
 | `session:` | Session-scoped namespace ([RFC 0031](0031-per-session-namespacing-channels.md)) | Wrapper translates `session:<id>:<key>` to the existing namespace |

@@ -6,7 +6,7 @@ type: process
 status: draft
 author: Maksim Khomutov
 created: 2026-05-20
-target: v0.3.x
+target: v0.3.x (Phase 1 format + replay) + v0.4.0+ (typed-event goldens)
 depends_on:
   - RFC-0008
   - RFC-0020
@@ -18,7 +18,7 @@ depends_on:
 **Status**: 🔨 Draft
 **Author**: Maksim Khomutov
 **Date**: 2026-05-20
-**Target**: v0.3.x
+**Target**: v0.3.x (Phase 1 format + replay) + v0.4.0+ (typed-event goldens, gated on [RFC 0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) Phase 1)
 **Depends on**: RFC 0008 (Memory & Context Optimization — the recall/scoring layer goldens are recorded against), RFC 0020 (Interaction Lifecycle — episode/turn boundaries the goldens use)
 **Relates to**: RFC 0041 (Typed Event Taxonomy — the events goldens assert sequences of; once 0041 lands, this RFC's surface becomes richer), RFC 0042 (State Namespacing — terminal state-per-scope assertions ride on this scope vocabulary), RFC 0043 (Inbound Agent-Interop Endpoint — external-agent scenarios become a new eval-set category)
 **Spawned from**: [agent-runtime-vocabulary-roadmap.md §Eval-set shape as the regression gate](../agent-runtime-vocabulary-roadmap.md#eval-set-shape-as-the-regression-gate); [memory-quality-roadmap.md §Quality bar — the dementia test](../memory-quality-roadmap.md#quality-bar--the-dementia-test)
@@ -191,7 +191,7 @@ The initial set, all under [`evaluators/eval_sets/`](../../evaluators). IDs foll
 | `EVAL-WORKING-001` | [RFC 0034](0034-persona-conversational-working-memory.md) | Persona references its own prior question in the same interaction |
 | `EVAL-FACTS-001` | [RFC 0026](0026-declarative-facts-tier.md) | Declarative facts surface in subsequent interactions without keyword overlap |
 
-`EVAL-ERROR-001` and `EVAL-ERROR-002` are the lever the channel-error work has been missing — once they exist, future "synthesized chat-error" regressions fail CI instead of leaking into v0.3.x release prep.
+`EVAL-ERROR-001` and `EVAL-ERROR-002` are the lever the channel-error work has been missing — once they exist, future "synthesized chat-error" regressions fail CI instead of leaking into release prep.
 
 Adding a new `<DOMAIN>` is an RFC amendment; sequential `<NNN>` within a domain is a routine addition.
 
