@@ -430,7 +430,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 3 | 3 | `WalletClient` + workflow-task wiring | `feature/v032-rfc0023-workflow-path` | 🔀 PR open | [#385](https://github.com/mkhomutov/Persatrix/pull/385) | — |
 | 4 | 4 | Chat-path wiring (closes the v0.2.3 bypass) | `feature/v032-rfc0023-chat-path` | 🔀 PR open | [#387](https://github.com/mkhomutov/Persatrix/pull/387) | — |
 | 5 | 5 | Autonomous TICK + sub-agent wiring | `feature/v032-rfc0023-tick-subagent` | 🔀 PR open | [#388](https://github.com/mkhomutov/Persatrix/pull/388) | — |
-| 6 | 6 | Channel-message origin wiring | `feature/v032-rfc0023-channel-message` | 🔀 PR open | — | — |
+| 6 | 6 | Channel-message origin wiring | `feature/v032-rfc0023-channel-message` | 🔀 PR open | [#389](https://github.com/mkhomutov/Persatrix/pull/389) | — |
 | 7 | — | Review follow-ups | `feature/v032-rfc0023-followups` | ⬜ Not started | — | — |
 | 8 | — | Full-RFC closeout | `feature/v032-rfc0023-close` | ⬜ Not started | — | — |
 
