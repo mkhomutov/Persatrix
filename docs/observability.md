@@ -391,7 +391,7 @@ lease_id=<ULID>` to follow one call end-to-end.
 | Event | Message | Level | Fields |
 |-------|---------|-------|--------|
 | Lease granted | `wallet: lease granted` | `Debug` | `lease_id`, `workflow_id`, `agent_id`, `model`, `cause` |
-| Lease denied — budget | `wallet: lease denied — budget exceeded` | `Warn` | `lease_id`-less; `workflow_id`, `agent_id`, `model`, `cause`, denial reason |
+| Lease denied — budget | `wallet: lease denied — budget exceeded` | `Warn` | `workflow_id`, `agent_id`, `model`, `cause`, denial reason (no `lease_id` — never granted) |
 | Lease denied — cap | `wallet: lease denied — per-agent active-lease cap reached` | `Warn` | `agent_id`, `active_leases`, `max_active_leases` |
 | Lease settled / released | `wallet: lease finalized` | `Debug` | `op` (`settle` / `release`), `lease_id`, `actual_input_tokens`, `actual_output_tokens` |
 | Lease reaped (TTL expiry) | `wallet: lease reaped — settled at granted amount on TTL expiry` | `Warn` | `lease_id`, `workflow_id`, `agent_id`, `model`, `cause` |
