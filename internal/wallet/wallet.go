@@ -327,6 +327,11 @@ func (w *WalletService) ReleaseLease(_ context.Context, req *walletpb.ReleaseReq
 // the lease settled. An unknown lease is rejected; an already-settled lease
 // resolves to a monotone-safe no-op (RFC 0023 § F — a late Settle racing
 // the reaper does not revise the granted charge).
+//
+// Log messages are constant — the settle / release discriminator rides on a
+// zap.String("op", op) field rather than being interpolated into the
+// message text, so log aggregators can group each finalize outcome under a
+// single message regardless of which entry point reached it.
 func (w *WalletService) finalize(leaseID string, actualInput, actualOutput int64, op string) *walletpb.SettlementAck {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -336,14 +341,16 @@ func (w *WalletService) finalize(leaseID string, actualInput, actualOutput int64
 		// Never issued, or purged after the late-settle window elapsed.
 		// The wallet rejects unknown IDs (RFC 0023 Security
 		// Considerations); there is no provisional charge to manipulate.
-		w.logger.Warn("wallet: "+op+" rejected — unknown lease",
+		w.logger.Warn("wallet: finalize rejected — unknown lease",
+			zap.String("op", op),
 			zap.String("lease_id", leaseID))
 		return &walletpb.SettlementAck{Success: false, ErrorMessage: "unknown lease: " + leaseID}
 	}
 	if ls.settled {
 		// A Settle/Release/reap already closed this lease. Monotone-safe:
 		// the charge already applied stands; reconciling again is rejected.
-		w.logger.Debug("wallet: "+op+" is a no-op — lease already settled",
+		w.logger.Debug("wallet: finalize is a no-op — lease already settled",
+			zap.String("op", op),
 			zap.String("lease_id", leaseID))
 		return &walletpb.SettlementAck{Success: true, ErrorMessage: "noop: lease already settled"}
 	}
@@ -352,12 +359,15 @@ func (w *WalletService) finalize(leaseID string, actualInput, actualOutput int64
 		// charge — only ResetDaily clears one out from under a live lease.
 		// Treat as a benign no-op rather than a failure.
 		ls.settled = true
-		w.logger.Warn("wallet: "+op+" reconcile miss — provisional already cleared",
-			zap.String("lease_id", leaseID), zap.Error(err))
+		w.logger.Warn("wallet: finalize reconcile miss — provisional already cleared",
+			zap.String("op", op),
+			zap.String("lease_id", leaseID),
+			zap.Error(err))
 		return &walletpb.SettlementAck{Success: true, ErrorMessage: "noop: provisional already cleared"}
 	}
 	ls.settled = true
-	w.logger.Debug("wallet: lease "+op+"d",
+	w.logger.Debug("wallet: lease finalized",
+		zap.String("op", op),
 		zap.String("lease_id", leaseID),
 		zap.Int64("actual_input_tokens", actualInput),
 		zap.Int64("actual_output_tokens", actualOutput),
