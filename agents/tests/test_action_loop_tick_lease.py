@@ -278,7 +278,7 @@ class TestTickIdleReasonMetric:
             ), patch.object(
                 agent, "_has_active_goal_payload", return_value=True,
             ), patch(
-                "agents.persona_runtime.action_loop.try_get_instruments",
+                "agents.persona_runtime.llm_call_errors.try_get_instruments",
                 return_value=inst,
             ):
                 await agent.on_event(_tick_event())

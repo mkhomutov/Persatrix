@@ -1,8 +1,8 @@
 ---
 id: ISSUE-0066
-summary: "REST chat endpoint returns HTTP 504 DEADLINE_EXCEEDED when the wallet's per-agent active-lease cap (gRPC RESOURCE_EXHAUSTED) trips, or when the orchestrator's gRPC rate-limit interceptor denies wallet calls. Same operator-visible surface bug as ISSUE-0065 fixed for BudgetExceededError, but for a different error class: AioRpcError(RESOURCE_EXHAUSTED) falls through _dispatch_channel_event's generic except Exception arm with a log line only, so the REST reply waiter times out instead of returning HTTP 200 + reply_status=\"error\"."
+summary: "REST chat endpoint returns HTTP 504 DEADLINE_EXCEEDED when the wallet's per-agent active-lease cap (gRPC RESOURCE_EXHAUSTED) trips, or when the orchestrator's gRPC rate-limit interceptor denies wallet calls. Same operator-visible surface bug as ISSUE-0065 fixed for BudgetExceededError, but for a different error class: AioRpcError(RESOURCE_EXHAUSTED) is swallowed by the persona action loop's generic except Exception arm before it can reach _dispatch_channel_event, so the REST reply waiter times out instead of returning HTTP 200 + reply_status=\"error\"."
 status: resolved
-severity: medium
+severity: high
 area: agents/persona_runtime
 created: 2026-05-20
 closed: 2026-05-20
@@ -10,13 +10,78 @@ refs:
   - docs/issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md
   - docs/rfcs/0023-llm-call-leasing.md
   - docs/manual-tests/MT-COST-003.md
+  - docs/manual-tests/v0.3.2-execution-report.md
+  - agents/persona_runtime/action_loop.py
   - agents/server_servicers.py
   - agents/wallet_client.py
   - internal/wallet/wallet.go
   - internal/security/middleware.go
 ---
 
-## Resolution (2026-05-20) — Path A landed
+## Resolution (2026-05-20 — second pass) — action-loop arm landed
+
+The first-pass dispatcher-level fix below (PR #396) did not catch live
+traffic. The MT-COST-003 re-run against the post-#396 tip on 2026-05-20
+([v0.3.2-execution-report.md §F-1](../manual-tests/v0.3.2-execution-report.md#follow-ups))
+confirmed the surface still returns HTTP 504 under transient
+RESOURCE_EXHAUSTED, because the persona action loop's generic
+`except Exception` arm at
+[`agents/persona_runtime/action_loop.py`](../../agents/persona_runtime/action_loop.py)
+catches the `AioRpcError` *before* it can reach the dispatcher's
+chat-error-recovery wrapper. The action loop converts it to a
+`COMPLETE_TASK` action with `payload={"result": "LLM provider error"}`,
+and `ActionExecutor.execute` for `COMPLETE_TASK` returns a metadata
+dict without publishing on the channel — so the orchestrator's
+`PublishAndAwait` reply waiter still times out at HTTP 504. The unit
+test in `agents/tests/test_chat_path_resource_exhausted.py` passes
+because it mocks `dispatcher.dispatch` to raise the `AioRpcError`
+directly, bypassing the action-loop layer.
+
+The action-loop arm fix shipped in the second-pass PR:
+
+1. [`agents/persona_runtime/action_loop.py`](../../agents/persona_runtime/action_loop.py)
+   now carries a dedicated `except grpc.aio.AioRpcError as exc` arm
+   between the existing `BudgetExceededError` and generic
+   `except Exception` arms. The new arm gates on
+   `exc.code() == grpc.StatusCode.RESOURCE_EXHAUSTED`: chat / channel
+   events re-raise (so the dispatcher's wrapper catches and publishes
+   the structured error reply with `error_reason="resource_exhausted"`,
+   identical first-pass contract); TICK events short-circuit to
+   `DO_NOTHING` with `idle_reason="resource_exhausted"` on the
+   `persona_tick_idle` counter (symmetric to the budget-denied TICK
+   arm). Other gRPC codes (INTERNAL / UNAVAILABLE / INVALID_ARGUMENT
+   / etc.) still degrade to the generic `COMPLETE_TASK("LLM provider
+   error")` surface so real provider-side problems aren't masked as
+   back-pressure.
+2. [`agents/observability/_metrics_persona_tick.py`](../../agents/observability/_metrics_persona_tick.py)
+   counter description and module docstring updated to enumerate
+   `resource_exhausted` alongside `empty_context_tick` /
+   `budget_denied`.
+3. The first-pass dispatcher-layer arm below is intentionally retained
+   as defense-in-depth — if any future code path raises
+   `AioRpcError(RESOURCE_EXHAUSTED)` from below the action-loop layer
+   (e.g. a wallet RPC made directly from the dispatcher), the
+   dispatcher arm still publishes the structured error reply.
+
+Tests pinning the action-loop contract:
+
+- `agents/tests/test_action_loop_resource_exhausted.py` — 7 cases:
+  chat-event propagates (vs swallowing to COMPLETE_TASK), channel-event
+  propagates, TICK short-circuits to DO_NOTHING with a WARN log, TICK
+  records `idle_reason` distinguishable from `empty_context_tick`,
+  INTERNAL and UNAVAILABLE still fall through to `COMPLETE_TASK`,
+  generic `RuntimeError` still falls through to `COMPLETE_TASK`.
+- Existing 29 regression guards in
+  `test_action_loop_chat_lease.py` / `test_action_loop_channel_lease.py`
+  / `test_action_loop_tick_lease.py` / `test_chat_path_budget_denial.py`
+  / `test_chat_path_resource_exhausted.py` still green.
+
+Live MT-COST-003 re-run against the second-pass tip is still required
+for literal release-gate acceptance.
+
+---
+
+## Resolution (2026-05-20 — first pass, dispatcher-layer only)
 
 Fixed via Path A from the proposal below — extend the existing
 published-error arm in `_dispatch_channel_event` with a gated
@@ -60,6 +125,14 @@ the fix to literally exercise the lease-cap or rate-limit interceptor
 path end-to-end; the unit tests pin the contract at
 `_dispatch_channel_event` but a live cap saturation against the
 orchestrator binary is the canonical acceptance.
+
+> **Update 2026-05-20** — the live MT-COST-003 re-run against the
+> post-#396 tip
+> ([v0.3.2-execution-report.md §F-1](../manual-tests/v0.3.2-execution-report.md#follow-ups))
+> showed the surface still returns HTTP 504, because the persona
+> action loop swallowed the exception before it reached this
+> dispatcher arm. See the second-pass resolution at the top of this
+> file for the action-loop arm fix.
 
 ---
 
