@@ -374,13 +374,30 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		replyTimestamp = time.Now().UTC()
 	}
 
+	// ISSUE-0065: the agent-side channel-receive arm
+	// (`agents/server_servicers.py::_dispatch_channel_event`) publishes
+	// a structured-error reply tagged with
+	// `Metadata["reply_status"]="error"` when the dispatch raised
+	// `BudgetExceededError`. The waiter delivers that reply here just
+	// like a successful one; honour the discriminator so the JSON
+	// envelope mirrors the gRPC `SendChatMessage` error shape (HTTP 200
+	// + `reply_status="error"` + denial message in `reply`) instead of
+	// the pre-fix HTTP 504 timeout under wallet budget pressure. See
+	// MT-COST-003 Step 2 for the acceptance contract.
+	replyStatus := "ok"
+	if reply.Metadata != nil {
+		if rs, ok := reply.Metadata["reply_status"].(string); ok && rs == "error" {
+			replyStatus = "error"
+		}
+	}
+
 	resp := chatResponse{
 		Reply:            reply.Content,
 		ChatSessionID:    sessionID,
 		AgentID:          agentID,
 		Timestamp:        replyTimestamp.Unix(),
 		AgentDisplayName: displayName,
-		ReplyStatus:      "ok",
+		ReplyStatus:      replyStatus,
 	}
 
 	writeJSON(w, resp, http.StatusOK)

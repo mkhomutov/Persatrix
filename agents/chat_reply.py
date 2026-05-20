@@ -4,6 +4,11 @@ Chat-reply extraction helper for ``AgentServiceServicer.SendChatMessage``.
 Extracted from ``agents/server_servicers.py`` (RFC 0011 PR 4a-i) so the
 servicer module stays under the 500-line review-friendly cap after the
 ``ReceiveChannelMessage`` real handler landed. No logic changes.
+
+ISSUE-0065 added ``publish_chat_error_on_channel`` — the channel-receive
+arm's equivalent of :func:`chat_error_response`, used by
+``AgentServiceServicer._dispatch_channel_event`` when the persona
+action loop raises :class:`BudgetExceededError`.
 """
 
 from __future__ import annotations
@@ -11,12 +16,17 @@ from __future__ import annotations
 import logging
 import re
 
+from .channel_publisher import ChannelPublisher
 from .generated import task_pb2
 from .persona_types import ActionType, AgentAction
 
 logger = logging.getLogger("Persatrix.agent.server")
 
-__all__ = ["chat_error_response", "extract_chat_reply"]
+__all__ = [
+    "chat_error_response",
+    "extract_chat_reply",
+    "publish_chat_error_on_channel",
+]
 
 
 def chat_error_response(
@@ -114,3 +124,61 @@ def extract_chat_reply(
     if actions:
         logger.warning("SendChatMessage: no reply action found in agent response")
     return "", "empty"
+
+
+async def publish_chat_error_on_channel(
+    publisher: ChannelPublisher | None,
+    *,
+    agent_id: str,
+    channel_id: str | None,
+    inbound_sender_id: str | None,
+    reply: str,
+    reason: str,
+) -> None:
+    """Publish a structured-error reply on a chat-bearing channel.
+
+    ISSUE-0065 — channel-receive arm's equivalent of
+    :func:`chat_error_response`. The published message carries
+    ``metadata["reply_status"]="error"`` as the discriminator the REST
+    chat handler reads to flip the JSON envelope from ``"ok"`` to
+    ``"error"``. ``sender_id=agent_id`` wakes the orchestrator's
+    ``replyWaiter`` (keyed on ``(channelID, awaitFromAgentID)``);
+    ``cascade_depth=0`` because this is a chat reply, not a fanout.
+
+    ``channel_id`` / ``inbound_sender_id`` are typed ``Optional`` to
+    match ``AgentEvent``'s declared shape; a ``None`` ``channel_id`` is
+    treated as a no-op (log only) because there is no channel to
+    publish on. In practice ``_dispatch_channel_event`` only invokes
+    this helper for ``EventType.CHANNEL_MESSAGE``, so the field is
+    populated — the guard is purely a type-system safety net.
+
+    Falls back to a log line when no publisher is wired so the caller
+    does not crash; in that configuration the REST surface times out at
+    504 as it did pre-fix.
+    """
+    if publisher is None:
+        logger.warning(
+            "channel chat-error: no publisher wired (agent=%s channel=%s)",
+            agent_id, channel_id,
+        )
+        return
+    if channel_id is None:
+        logger.warning(
+            "channel chat-error: event has no channel_id (agent=%s) — skipping publish",
+            agent_id,
+        )
+        return
+    try:
+        await publisher.publish(
+            channel_id=channel_id,
+            sender_id=agent_id,
+            content=reply,
+            mentions=[inbound_sender_id] if inbound_sender_id else [],
+            cascade_depth=0,
+            metadata={"reply_status": "error", "error_reason": reason},
+        )
+    except Exception:  # noqa: BLE001 — never let the error-publish raise
+        logger.exception(
+            "channel chat-error publish failed (agent=%s channel=%s)",
+            agent_id, channel_id,
+        )

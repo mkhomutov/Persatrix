@@ -93,6 +93,7 @@ class ChannelPublisher(Protocol):
         content: str,
         mentions: list[str],
         cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Publish a message; raises on transport / HTTP failures.
 
@@ -107,6 +108,29 @@ class ChannelPublisher(Protocol):
         chain-origin (chat surface, dispatcher's first hop) pass
         ``cascade_depth=0`` explicitly. See the contract pin in
         :mod:`tests.unit.python.test_tick_cascade_depth_default`.
+
+        ``metadata`` is an optional caller-supplied map merged into the
+        wire payload's ``metadata`` object alongside ``cascade_depth``.
+        ISSUE-0065: the chat-error reply published by
+        ``AgentServiceServicer._dispatch_channel_event`` under
+        :class:`BudgetExceededError` rides on this seat with
+        ``{"reply_status": "error"}`` so the orchestrator's REST chat
+        handler renders ``reply_status="error"`` in the JSON envelope
+        instead of the default ``"ok"``. Caller-supplied keys do not
+        overwrite ``cascade_depth`` — the publisher reserves that key.
+
+        Metadata keys with a contract meaning at the receiver side
+        (avoid colliding by accident in unrelated publishes):
+
+        * ``cascade_depth`` — reserved by *this* publisher; caller
+          values are dropped (use the kwarg). See
+          ``test_caller_cascade_depth_in_metadata_is_dropped_kwarg_wins``.
+        * ``reply_status`` — read by ``internal/server/chat_handler.go``
+          (``handleChat``) to flip the REST JSON envelope to
+          ``reply_status="error"`` when the value equals ``"error"``.
+        * ``error_reason`` — informational only; not consumed by the
+          chat handler today, but published alongside ``reply_status``
+          for log forensics on the underlying ``ChannelMessage``.
         """
         ...
 
@@ -157,6 +181,7 @@ class HTTPChannelPublisher:
         content: str,
         mentions: list[str],
         cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """POST a single channel message; raise on transport / non-2xx.
 
@@ -249,8 +274,24 @@ class HTTPChannelPublisher:
                 # previously-clean POST body shape (no ``"metadata": {}``
                 # on every publish — that would be operational noise
                 # without carrying a signal).
+                #
+                # ISSUE-0065: caller-supplied ``metadata`` (e.g. the
+                # chat-error envelope's ``{"reply_status": "error"}``
+                # discriminator) merges in alongside ``cascade_depth``.
+                # ``cascade_depth`` is reserved — caller keys named
+                # ``cascade_depth`` are ignored to preserve the
+                # publisher's invariant on that key. Build the map
+                # whenever there is *anything* to send so error envelopes
+                # at cascade-origin (depth=0) still reach the wire.
+                wire_metadata: dict[str, Any] = {}
+                if metadata:
+                    wire_metadata.update(
+                        {k: v for k, v in metadata.items() if k != "cascade_depth"},
+                    )
                 if cascade_depth:
-                    payload["metadata"] = {"cascade_depth": cascade_depth}
+                    wire_metadata["cascade_depth"] = cascade_depth
+                if wire_metadata:
+                    payload["metadata"] = wire_metadata
 
                 async with self._session.post(
                     url,
