@@ -425,14 +425,14 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | RFC Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-----------|-------|--------|--------|-----------|--------|
-| 1 | 1 | Proto surface + wallet skeleton | `feature/v032-rfc0023-proto-skeleton` | 🔀 PR open | [#378](https://github.com/mkhomutov/Persatrix/pull/378) | — |
-| 2 | 2 | Real enforcement + reaper | `feature/v032-rfc0023-wallet-enforcement` | 🔀 PR open | [#384](https://github.com/mkhomutov/Persatrix/pull/384) | — |
-| 3 | 3 | `WalletClient` + workflow-task wiring | `feature/v032-rfc0023-workflow-path` | 🔀 PR open | [#385](https://github.com/mkhomutov/Persatrix/pull/385) | — |
-| 4 | 4 | Chat-path wiring (closes the v0.2.3 bypass) | `feature/v032-rfc0023-chat-path` | 🔀 PR open | [#387](https://github.com/mkhomutov/Persatrix/pull/387) | — |
-| 5 | 5 | Autonomous TICK + sub-agent wiring | `feature/v032-rfc0023-tick-subagent` | 🔀 PR open | [#388](https://github.com/mkhomutov/Persatrix/pull/388) | — |
-| 6 | 6 | Channel-message origin wiring | `feature/v032-rfc0023-channel-message` | 🔀 PR open | [#389](https://github.com/mkhomutov/Persatrix/pull/389) | — |
-| 7 | — | Review follow-ups | `feature/v032-rfc0023-followups` | 🔀 PR open | [#391](https://github.com/mkhomutov/Persatrix/pull/391) | — |
-| 8 | — | Full-RFC closeout | `feature/v032-rfc0023-close` | ⬜ Not started | — | — |
+| 1 | 1 | Proto surface + wallet skeleton | `feature/v032-rfc0023-proto-skeleton` | ✅ Merged | [#378](https://github.com/mkhomutov/Persatrix/pull/378) | 2026-05-18 |
+| 2 | 2 | Real enforcement + reaper | `feature/v032-rfc0023-wallet-enforcement` | ✅ Merged | [#384](https://github.com/mkhomutov/Persatrix/pull/384) | 2026-05-19 |
+| 3 | 3 | `WalletClient` + workflow-task wiring | `feature/v032-rfc0023-workflow-path` | ✅ Merged | [#385](https://github.com/mkhomutov/Persatrix/pull/385) | 2026-05-20 |
+| 4 | 4 | Chat-path wiring (closes the v0.2.3 bypass) | `feature/v032-rfc0023-chat-path` | ✅ Merged | [#387](https://github.com/mkhomutov/Persatrix/pull/387) | 2026-05-20 |
+| 5 | 5 | Autonomous TICK + sub-agent wiring | `feature/v032-rfc0023-tick-subagent` | ✅ Merged | [#388](https://github.com/mkhomutov/Persatrix/pull/388) | 2026-05-20 |
+| 6 | 6 | Channel-message origin wiring | `feature/v032-rfc0023-channel-message` | ✅ Merged | [#389](https://github.com/mkhomutov/Persatrix/pull/389) | 2026-05-20 |
+| 7 | — | Review follow-ups | `feature/v032-rfc0023-followups` | ✅ Merged | [#391](https://github.com/mkhomutov/Persatrix/pull/391) | 2026-05-20 |
+| 8 | — | Full-RFC closeout | `feature/v032-rfc0023-close` | 🔀 PR open | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 

@@ -3,7 +3,7 @@ id: RFC-0023
 title: LLM Call Leasing
 summary: Lease-based concurrency control for LLM calls — bounds concurrent provider calls per agent/persona without serializing the whole orchestrator.
 type: architecture
-status: proposed
+status: implemented
 author: Maksim Khomutov
 created: 2026-05-09
 target: v0.3.2 — full (Phases 1–6); see docs/v0.3.2-plan.md and docs/rfcs/0023-pr-plan.md
@@ -15,7 +15,7 @@ depends_on:
 # RFC 0023 — LLM Call Leasing
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: ✅ Implemented (v0.3.2 — Phases 1–6)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-09
 **Target**: v0.3.2 — full (Phases 1–6); see [v0.3.2 plan](../v0.3.2-plan.md) and [PR plan](0023-pr-plan.md)
@@ -435,9 +435,11 @@ When RFC 0011 channels deliver a message and the recipient agent generates an LL
 
 ## Decision / Next Steps
 
-This RFC is in `📋 Proposed`. Next step: review and acceptance. On acceptance, file PR plan as `docs/rfcs/0023-pr-plan.md` per the project convention (mirroring [`0017-pr-plan.md`](0017-pr-plan.md), [`0018-pr-plan.md`](0018-pr-plan.md), etc.) and begin Phase 1.
+**Status**: ✅ Implemented — v0.3.2 (Phases 1–6 shipped via [RFC 0023 PR plan](0023-pr-plan.md) PRs 1–8). Per-cause budget policies ([§Open Questions](#open-questions) #4) and the distributed wallet ([§Non-Goals](#non-goals)) remain out of scope, deferred to RFC 0006 mesh territory (v0.6+ per [v0.3.x-sequencing.md §Out of scope](../v0.3.x-sequencing.md#out-of-scope-for-v03x)).
 
-**Phase 0 blockers** — both **resolved 2026-05-18** (see [§Open Questions](#open-questions)); the proto contract and the Python client now share settled assumptions and PR 1 may open:
+**Implemented in v0.3.2.** The wallet-lease gate landed across RFC 0023 PRs 1–8 ([PR plan](0023-pr-plan.md)): the `WalletService` proto contract + always-grant skeleton; real `BudgetEnforcer` enforcement, provisional/reconcile primitives, and the TTL reaper; the Python `WalletClient` and `LLMClient.create_message` lease wrap (workflow-task origin); the chat-path wiring that closes the v0.2.3 `BudgetEnforcer` bypass; the autonomous TICK + sub-agent wiring (with `idle_reason=budget_denied` discriminator and parent-agent attribution); and the RFC 0011 channel-message reply wiring. All five LLM-call origins listed in [§Goals #1](#goals) now acquire a server-issued lease before issuing. `MT-COST-003` (chat budget exceed) and `MT-COST-004` (TICK budget exhaustion → idle) ship green; the README chat-bypass known-limitation line is removed as part of the v0.3.2 release-prep deliverables.
+
+**Phase 0 blockers** — both **resolved 2026-05-18** (see [§Open Questions](#open-questions)); the proto contract and the Python client shared settled assumptions before PR 1 opened:
 - Open Question §1 (transport) — resolved: outbound dial, reusing the existing `LogService` channel.
 - Open Question §5 (tokeniser parity) — resolved: promote `tiktoken` to a hard runtime dependency, reuse the `cl100k_base` helper.
 
