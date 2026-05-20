@@ -12,19 +12,42 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import math
 import statistics
 import sys
 import time
+from pathlib import Path
 
 import grpc
 
-# Repo-root execution: agents is laid out as a real package, with
-# generated/*.py emitted with relative imports (`from . import …`),
-# so importing through the package works.
-sys.path.insert(0, ".")
+# agents is laid out as a real package with generated/*.py emitted using
+# relative imports (`from . import …`), so importing through the package
+# works once the repo root is on sys.path. Resolve from __file__ so the
+# script is robust to CWD (scripts/perf/, repo root, anywhere else).
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT))
 
 from agents.generated import wallet_pb2 as walletpb  # noqa: E402
 from agents.generated import wallet_pb2_grpc as walletgrpc  # noqa: E402
+
+# Per-RPC timeout. Picked generously vs. the 5 ms RFC target so a hung
+# orchestrator surfaces as a clean DEADLINE_EXCEEDED instead of blocking
+# the harness indefinitely.
+_RPC_TIMEOUT_S = 5.0
+
+
+def _nearest_rank(sorted_values: list[float], p: float) -> float:
+    """Nearest-rank percentile (1-indexed: ceil(p*N), 0-indexed: ceil(p*N)-1).
+
+    This matches the convention used by most observability tooling
+    (Prometheus `histogram_quantile`, NumPy `interpolation="lower"` on
+    integer ranks). Earlier revs of this harness used `int(p*N)` which is
+    one slot higher than nearest-rank for evenly-divisible n; baselines
+    captured under that convention are within tail-noise of these values.
+    """
+    n = len(sorted_values)
+    idx = max(0, math.ceil(p * n) - 1)
+    return sorted_values[idx]
 
 
 async def run(target: str, cycles: int, warmup: int) -> None:
@@ -33,16 +56,17 @@ async def run(target: str, cycles: int, warmup: int) -> None:
     latencies_ms: list[float] = []
 
     model = "claude-haiku-4-5-20251001"
-    counter = {"n": 0}
+    n = 0
     run_id = int(time.time())
 
     async def one_cycle() -> float:
+        nonlocal n
         # Rotate agent_id every 20 cycles so each agent stays well under the
         # orchestrator's 60-calls/60s rate-limiter bucket (acquire+settle = 2
         # calls per cycle, so 20 cycles = 40 calls per bucket). The run_id
         # prefix makes each harness invocation use fresh buckets.
-        agent_id = f"perf-{run_id}-{counter['n'] // 20}"
-        counter["n"] += 1
+        agent_id = f"perf-{run_id}-{n // 20}"
+        n += 1
         meta = (("x-agent-id", agent_id),)
         req = walletpb.LeaseRequest(
             agent_id=agent_id,
@@ -52,7 +76,7 @@ async def run(target: str, cycles: int, warmup: int) -> None:
             cause=walletpb.CAUSE_UNSPECIFIED,
         )
         t0 = time.perf_counter()
-        resp = await stub.AcquireLease(req, metadata=meta)
+        resp = await stub.AcquireLease(req, metadata=meta, timeout=_RPC_TIMEOUT_S)
         outcome = resp.WhichOneof("outcome")
         if outcome != "grant":
             raise RuntimeError(f"unexpected outcome: {outcome}")
@@ -61,36 +85,37 @@ async def run(target: str, cycles: int, warmup: int) -> None:
             lease_id=lease_id,
             actual_input_tokens=80,
             actual_output_tokens=50,
-        ), metadata=meta)
+        ), metadata=meta, timeout=_RPC_TIMEOUT_S)
         elapsed = (time.perf_counter() - t0) * 1000.0
         if not ack.success:
             raise RuntimeError(f"settle failed: {ack.error_message}")
         return elapsed
 
-    print(f"Warming up {warmup} cycles (untimed) ...", flush=True)
-    for i in range(warmup):
-        try:
-            await one_cycle()
-        except Exception as e:
-            print(f"warmup cycle {i} failed (n={counter['n']}): {e}", flush=True)
-            raise
+    try:
+        print(f"Warming up {warmup} cycles (untimed) ...", flush=True)
+        for i in range(warmup):
+            try:
+                await one_cycle()
+            except Exception as e:
+                print(f"warmup cycle {i} failed (n={n}): {e}", flush=True)
+                raise
 
-    print(f"Measuring {cycles} cycles ...", flush=True)
-    for i in range(cycles):
-        try:
-            latencies_ms.append(await one_cycle())
-        except Exception as e:
-            print(f"measure cycle {i} failed (n={counter['n']}): {e}", flush=True)
-            raise
-        if (i + 1) % 500 == 0:
-            print(f"  ... {i+1}/{cycles}", flush=True)
-
-    await channel.close()
+        print(f"Measuring {cycles} cycles ...", flush=True)
+        for i in range(cycles):
+            try:
+                latencies_ms.append(await one_cycle())
+            except Exception as e:
+                print(f"measure cycle {i} failed (n={n}): {e}", flush=True)
+                raise
+            if (i + 1) % 500 == 0:
+                print(f"  ... {i+1}/{cycles}", flush=True)
+    finally:
+        await channel.close()
 
     sorted_ms = sorted(latencies_ms)
-    p50 = sorted_ms[int(0.50 * len(sorted_ms))]
-    p95 = sorted_ms[int(0.95 * len(sorted_ms))]
-    p99 = sorted_ms[int(0.99 * len(sorted_ms))]
+    p50 = _nearest_rank(sorted_ms, 0.50)
+    p95 = _nearest_rank(sorted_ms, 0.95)
+    p99 = _nearest_rank(sorted_ms, 0.99)
     mean = statistics.fmean(sorted_ms)
     print()
     print(f"cycles:  {len(sorted_ms)}")
