@@ -43,7 +43,7 @@ graph TB
         PLANNER --> SCHEDULER
         SCHEDULER --> EXECUTOR
         SCHEDULER --> COST
-        WALLET -. composes (RFC 0023 PR 2) .-> COST
+        WALLET --> COST
         EXECUTOR --> REGISTRY
         EXECUTOR --> PROTOS
         EXECUTOR --> MCPG
@@ -104,7 +104,7 @@ graph TB
 | v0.1 | `planner/`, `scheduler/`, `executor/`, `registry/`, `state/`, `server/`, `mcp/`, `protocols/`, `agents/task_agent.py`, `agents/tools/` |
 | v0.2 | `cost/`, `telemetry/`, `agents/persona*`, `agents/persona_runtime/`, `agents/memory/`, `agents/sub_agents/` |
 | v0.2.1 | `agents/participant.py` (`UserParticipant`, `UserStore`), `internal/server/chat_handler.go` (`POST /api/v1/agents/{id}/chat`), `internal/executor/` chat path (`SendChatMessage` gRPC), `cli/src/commands/chat` (`persatrix chat`) |
-| v0.3.2 | `internal/wallet/` (RFC 0023 — LLM-call leasing `WalletService`; PR 1 ships the always-grant skeleton) |
+| v0.3.2 | `internal/wallet/` (RFC 0023 — LLM-call leasing `WalletService`; Phases 1–6 implemented: enforcement + TTL reaper + per-agent active-lease cap composed over `cost/`, with the Python `WalletClient` wired into all five LLM-call origins — workflow task, chat, autonomous TICK, sub-agent, channel-message) |
 | v0.3+ (stubs) | `a2a/`, `bridges/`, `channels/`, `resilience/`, `security/`, `mesh/` |
 
 The labeled `SERVER -->|chat dispatch| EXECUTOR` edge represents the chat
@@ -120,11 +120,14 @@ route chat traffic through `UserStore`. Only the pure validator
 `AGSVC -. planned .-> PART` treatment in [system-overview.md](system-overview.md)
 so the two diagrams agree about the v0.2.1 wiring gap.
 
-The `WALLET -. composes .-> COST` edge is dashed because `internal/wallet/`
-ships only the always-grant skeleton in RFC 0023 PR 1 — it registers on the
-orchestrator's agent-facing gRPC listener but composes no `cost/` component
-yet. PR 2 wires `cost.BudgetEnforcer` / `cost.TokenCounter` into the
-`WalletService`, at which point the edge becomes solid.
+The `WALLET --> COST` edge is solid: RFC 0023 PR 2 ([#384](https://github.com/mkhomutov/Persatrix/pull/384))
+composes `cost.BudgetEnforcer` and `cost.TokenCounter` into the
+`WalletService`, so every lease acquire/settle reads through `cost/` for
+budget enforcement and reconciles into the shared token counter. The
+Python `WalletClient` is wired into all five LLM-call origins (workflow
+task → PR 3 #385, chat → PR 4 #387, autonomous TICK + sub-agent → PR 5
+#388, channel-message → PR 6 #389); the chat-error publish path for
+budget denial + RESOURCE_EXHAUSTED is finalised by [#395](https://github.com/mkhomutov/Persatrix/pull/395) / [#396](https://github.com/mkhomutov/Persatrix/pull/396) / [#398](https://github.com/mkhomutov/Persatrix/pull/398).
 
 The stub packages are placeholders with `TODO` comments that compile but do not
 implement behaviour. They are intentional — removing them is a policy violation
