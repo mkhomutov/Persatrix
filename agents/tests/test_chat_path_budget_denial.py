@@ -315,8 +315,6 @@ class TestDispatchChannelEventBudgetDenial:
         servicer, publisher = _make_servicer_with_publisher(
             dispatch_side_effect=None,
         )
-        # Override to return an empty action list (success).
-        servicer._dispatcher.dispatch = AsyncMock(return_value=[])
         event = _make_channel_event()
 
         await servicer._dispatch_channel_event("chat-agent", event)

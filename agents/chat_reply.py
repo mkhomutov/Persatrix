@@ -130,8 +130,8 @@ async def publish_chat_error_on_channel(
     publisher: ChannelPublisher | None,
     *,
     agent_id: str,
-    channel_id: str,
-    inbound_sender_id: str,
+    channel_id: str | None,
+    inbound_sender_id: str | None,
     reply: str,
     reason: str,
 ) -> None:
@@ -145,6 +145,13 @@ async def publish_chat_error_on_channel(
     ``replyWaiter`` (keyed on ``(channelID, awaitFromAgentID)``);
     ``cascade_depth=0`` because this is a chat reply, not a fanout.
 
+    ``channel_id`` / ``inbound_sender_id`` are typed ``Optional`` to
+    match ``AgentEvent``'s declared shape; a ``None`` ``channel_id`` is
+    treated as a no-op (log only) because there is no channel to
+    publish on. In practice ``_dispatch_channel_event`` only invokes
+    this helper for ``EventType.CHANNEL_MESSAGE``, so the field is
+    populated — the guard is purely a type-system safety net.
+
     Falls back to a log line when no publisher is wired so the caller
     does not crash; in that configuration the REST surface times out at
     504 as it did pre-fix.
@@ -153,6 +160,12 @@ async def publish_chat_error_on_channel(
         logger.warning(
             "channel chat-error: no publisher wired (agent=%s channel=%s)",
             agent_id, channel_id,
+        )
+        return
+    if channel_id is None:
+        logger.warning(
+            "channel chat-error: event has no channel_id (agent=%s) — skipping publish",
+            agent_id,
         )
         return
     try:
