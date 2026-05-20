@@ -266,9 +266,7 @@ exit (RFC 0023 § F), so the provider outage does not silently leak free spend.
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-
-(Execution is deferred to the v0.3.2 release-prep Phase 4 PR 1 manual-test report per the
-v0.3.2 master plan.)
+| 2026-05-20 | mkhomutov | Windows 11 (Docker) | PASS | Run against PR #395 (ISSUE-0065 fix). Stack rebuilt from branch `fix/issue-0065-chat-rest-budget-denied-reply` @ 6d17d7c; `per_agent.default_max_usd=0.10` for the run, restored to 5.00 after. Step 1 baseline → HTTP 200 `reply_status=ok` "Hey there." Step 2 transitioned to denial on the 3rd post-baseline turn → HTTP 200 `reply_status=error` reply=`per_agent budget exceeded: spent=0.080739, limit=0.100000, estimated=0.076200`. Agent log carries the new ISSUE-0065 line `ReceiveChannelMessage budget-denied for agent ember-owl (channel dm:ember-owl:local): scope=per_agent reason=budget_exceeded` from `agents/server_servicers.py::_dispatch_channel_event`. Step 3 confirmed two post-deny turns stayed `reply_status=error` (HTTP 200). Step 4 cost summary advanced only with successful turns (`daily_estimated_usd=0.080739` matched the wallet's `spent`, denied turns added zero). Step 5 config restored, orchestrator restart logged `perAgentBudget:5`. One intermediate turn returned HTTP 504 from an unrelated `AioRpcError(RESOURCE_EXHAUSTED)` (wallet-gRPC active-lease-cap / rate-limit interceptor — not `BudgetExceededError`, falls through the dispatcher's generic-exception arm); out of scope for ISSUE-0065, tracked separately if reproducible. |
 
 ---
 
