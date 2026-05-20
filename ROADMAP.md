@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-20 (v0.3.2 release-prep PR 4 — final pre-tag verification. PRs 0–3 of release prep merged: plan ([#393](https://github.com/mkhomutov/Persatrix/pull/393)), MT execution report ([#394](https://github.com/mkhomutov/Persatrix/pull/394) → re-run [#397](https://github.com/mkhomutov/Persatrix/pull/397) with release gate met), docs refresh + release checklist ([#400](https://github.com/mkhomutov/Persatrix/pull/400)), version bump + curated changelog ([#401](https://github.com/mkhomutov/Persatrix/pull/401)). PR 4 (this PR) flips the Version Map v0.3.2 row 🚧 Release prep → ✅ Released; the `v0.3.2` git tag and GitHub Release follow post-merge per [release-prep plan Phase 5](docs/v0.3.2-release-prep-plan.md).)
+> **Last updated**: 2026-05-20 (v0.3.2 post-release follow-up — `v0.3.2` tagged and the [GitHub Release "Cost Gate + Facade Freeze"](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.2) published. README v0.3.2 roadmap row → ✅ Released; ROADMAP `Last updated` refresh; Merged PR History backfill for the full v0.3.2 cycle ([#367](https://github.com/mkhomutov/Persatrix/pull/367) through [#402](https://github.com/mkhomutov/Persatrix/pull/402) — the table had stopped at [#391](https://github.com/mkhomutov/Persatrix/pull/391)); master plan + release-prep plan + release checklist status hygiene.)
 > **Current phase**: v0.3.2 (Cost Gate + Facade Freeze — RFC 0023 full + RFC 0029 Phase 1) — ✅ Released
 > **Current milestone**: v0.3.2 released. Every LLM call in the system passes through a server-issued wallet lease before it is issued (RFC 0023 Phases 1–6, all five origins wired — workflow / chat / autonomous TICK / sub-agent / channel-message — closing the v0.2.3 chat-bypass known limitation), and the `MemoryStore` facade is frozen as the single path to agent memory ahead of the v0.4.0 Postgres split (RFC 0029 Phase 1). Next phase is v0.3.3 (Idle, RFC 0024).
 
@@ -993,6 +993,16 @@ v0.5.0 complete
 | [#389](https://github.com/mkhomutov/Persatrix/pull/389) | feat(v032): RFC 0023 PR 6 — channel-message origin lease wiring | 0023 (6/8) | 2026-05-20 |
 | [#390](https://github.com/mkhomutov/Persatrix/pull/390) | fix(v032): ISSUE-0064 — persona-as-sub-agent attribution gap | ISSUE-0064 fix | 2026-05-20 |
 | [#391](https://github.com/mkhomutov/Persatrix/pull/391) | feat(v032): RFC 0023 PR 7 — review follow-ups (finalize log shape) | 0023 (7/8) | 2026-05-20 |
+| [#392](https://github.com/mkhomutov/Persatrix/pull/392) | docs(v032): RFC 0023 PR 8 — full-RFC closeout | 0023 (8/8) | 2026-05-20 |
+| [#393](https://github.com/mkhomutov/Persatrix/pull/393) | docs(v032): release-prep plan (master-plan Phase 3) | v0.3.2 release prep | 2026-05-20 |
+| [#394](https://github.com/mkhomutov/Persatrix/pull/394) | docs(v032): release-prep PR 1 — manual test execution report (release gate not met) | v0.3.2 release prep | 2026-05-20 |
+| [#395](https://github.com/mkhomutov/Persatrix/pull/395) | fix(v032): ISSUE-0065 — publish chat-error reply on channel under wallet denial | ISSUE-0065 fix | 2026-05-20 |
+| [#396](https://github.com/mkhomutov/Persatrix/pull/396) | fix(v032): ISSUE-0066 — publish chat-error reply on channel under wallet lease-cap / rate-limit | ISSUE-0066 fix | 2026-05-20 |
+| [#397](https://github.com/mkhomutov/Persatrix/pull/397) | docs(v032): release-prep PR 1 — manual test re-execution report (release gate met) | v0.3.2 release prep | 2026-05-20 |
+| [#398](https://github.com/mkhomutov/Persatrix/pull/398) | fix(v032): ISSUE-0066 reopen — handle AioRpcError(RESOURCE_EXHAUSTED) in action_loop | ISSUE-0066 fix | 2026-05-20 |
+| [#400](https://github.com/mkhomutov/Persatrix/pull/400) | docs(v032): release-prep PR 2 — docs refresh + release checklist | v0.3.2 release prep | 2026-05-20 |
+| [#401](https://github.com/mkhomutov/Persatrix/pull/401) | chore(release): bump to v0.3.2 + curate changelog (PR 3) | v0.3.2 release prep | 2026-05-20 |
+| [#402](https://github.com/mkhomutov/Persatrix/pull/402) | docs(v032): v0.3.2 release-prep PR 4 — final pre-tag verification | v0.3.2 release prep | 2026-05-20 |
 
 ---
 
