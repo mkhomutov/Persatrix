@@ -2,6 +2,84 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2026-05-20
+
+> **Codename:** Cost Gate + Facade Freeze
+
+### Highlights
+
+- **Wallet lease — every LLM call is gated by a server-issued lease before issuing** (RFC 0023, Phases 1–6). A new `WalletService` (proto + Go) issues short-TTL leases against per-agent / per-cause / global budgets; an asynchronous reaper sweeps abandoned leases on a 5 s tick. `WalletClient` in the persona runtime wraps every LLM call with `AcquireLease` → call → `SettleLease`; five origins are now leased (workflow task, chat dispatch, autonomous TICK, sub-agent delegation, channel-message reply). A wallet denial surfaces as `reply_status="error"` on chat (carrying `LeaseDenied.message`) and as `idle_reason=budget_denied` on autonomous TICK — cost is a **structural gate**, not a post-hoc accountant. Closes the v0.2.3 chat-bypass known limitation.
+- **Memory facade freeze ahead of the v0.4.0 personal/society split** (RFC 0029 Phase 1). `MemoryFacade` is promoted to the single boundary for all agent-memory access and renamed to `MemoryStore`; `agents.memory.MemoryFacade` survives as a deprecation alias for one minor version. Society-tier methods raise `SocietyBackendUnavailable` in single-agent mode — no Postgres opened, no surprise dependency. A new ruff rule blocks direct `aiosqlite` imports outside `agents/memory/`, and direct `EpisodicMemory` / `RelationshipMemory` construction emits a `DeprecationWarning`. The personal-tier recall-latency regression gate (`tests/perf/personal_tier_latency.py`) ships green from Phase 1 closeout.
+
+### Upgrade Notes
+
+| Notable change | Detail |
+|----------------|--------|
+| **[Behaviour change — cost gate]** every LLM call acquires a wallet lease | All five origins (workflow task, chat dispatch, autonomous TICK, sub-agent, channel-message reply) now go through `WalletClient.AcquireLease` before issuing. A wallet outage surfaces as `reply_status="error"` on chat and `idle_reason=budget_denied` on TICK ([RFC 0023 §F](docs/rfcs/0023-llm-call-leasing.md#f-failure-modes)). Closes the v0.2.3 chat-bypass known limitation. |
+| New `wallet:` block in `config/optimization.yaml` | Top-level sibling of `cost:`. Keys: `ttl_seconds` (default `60`, = 2× the 30 s per-call timeout — [RFC 0023 OQ §2](docs/rfcs/0023-llm-call-leasing.md#open-questions)), `reaper_interval_seconds` (default `5`), `max_active_leases` (default `16`, per-agent DoS ceiling). Absent block / key falls back to defaults; no operator action required. |
+| New `BudgetExceededError` failure surface | `WalletClient` raises it on `LeaseDenied`. The chat path re-surfaces it as a structured `reply_status="error"` payload carrying `LeaseDenied.message` (HTTP 200, not 500); autonomous TICK short-circuits to idle with `idle_reason=budget_denied`. Sub-agent and channel-message origins propagate the same error envelope. |
+| `MemoryFacade` → `MemoryStore` rename (Phase 1 facade freeze) | `agents.memory.MemoryFacade` is preserved as a deprecation alias for one minor version (removal in v0.3.3 per [RFC 0029 §Phased Implementation Plan](docs/rfcs/0029-personal-society-storage-split.md#phased-implementation-plan)); new code must import `MemoryStore`. Society-tier methods raise `SocietyBackendUnavailable` — single-agent mode never opens Postgres. |
+| New direct-`aiosqlite` import lint rule | `import aiosqlite` outside `agents/memory/` fails CI (new ruff rule). Direct `EpisodicMemory` / `RelationshipMemory` construction emits a `DeprecationWarning`; route through `MemoryStore`. |
+| `tiktoken` promoted to a hard runtime dep | Per [RFC 0023 OQ #5](docs/rfcs/0023-llm-call-leasing.md#open-questions), the `accurate-tokens` extra is removed and `tiktoken` is now a required runtime dependency. Builds depending on `[accurate-tokens]` must drop the extra from their install command. The `cl100k_base` encoding is what `LLMClient` already used — no behaviour change. |
+| Wallet lease log shape finalised | `lease_acquire` / `lease_settle` / `lease_reap` events carry a stable field set ([RFC 0023 PR 7](https://github.com/mkhomutov/Persatrix/pull/391)); downstream log consumers can pin field names. |
+| gRPC server panic-recovery interceptor | A server-side recovery interceptor ([ISSUE-0059](https://github.com/mkhomutov/Persatrix/pull/379)) converts an unhandled handler panic into a structured `Internal` status with a redacted message instead of tearing the connection down. Operator-visible: panics now show up as gRPC errors in client logs, not socket resets. |
+| Repo-root `tests/` tree under lint/type gates | `ruff` ([ISSUE-0056](https://github.com/mkhomutov/Persatrix/pull/381)) and `mypy` ([ISSUE-0062](https://github.com/mkhomutov/Persatrix/pull/382)) now cover the top-level `tests/` tree, closing a CI blind spot. Out-of-tree forks carrying patches under `tests/` may see new lint/type findings. |
+
+### 🚀 Features
+
+- *(v032)* RFC 0029 Phase 1 PR 1 — `MemoryStore` facade promotion (#370)
+- *(v032)* RFC 0029 Phase 1 PR 2 — lint rule + deprecation warnings (#372)
+- *(v032)* RFC 0029 Phase 1 PR 3 — downstream call-site refactor (#373)
+- *(v032)* RFC 0029 Phase 1 PR 4 — review follow-ups (#375)
+- *(v032)* RFC 0029 Phase 1 PR 5 — closeout + perf gate (#376)
+- *(v032)* RFC 0023 PR 1 — proto surface + `WalletService` skeleton (#378)
+- *(v032)* RFC 0023 PR 2 — wallet enforcement + TTL reaper (#384)
+- *(v032)* RFC 0023 PR 3 — `WalletClient` + workflow-task lease wiring (#385)
+- *(v032)* RFC 0023 PR 4 — chat-path wallet lease wiring (closes v0.2.3 bypass) (#387)
+- *(v032)* RFC 0023 PR 5 — autonomous TICK + sub-agent lease wiring (#388)
+- *(v032)* RFC 0023 PR 6 — channel-message origin lease wiring (#389)
+- *(v032)* RFC 0023 PR 7 — review follow-ups (finalize log shape) (#391)
+
+### 🐛 Bug Fixes
+
+- *(tests)* Isolate fact-store audit redactor-warning test from global log state (#374)
+- *(v032)* ISSUE-0059 — add gRPC server panic-recovery interceptor (#379)
+- *(v032)* ISSUE-0055 — drain the RETURNING cursor racing close-path COMMIT (#380)
+- *(v032)* ISSUE-0056 — ruff-gate the repo-root tests/ tree (#381)
+- *(v032)* ISSUE-0062 — mypy-gate the repo-root tests/ tree (#382)
+- *(v032)* ISSUE-0064 — persona-as-sub-agent attribution gap (#390)
+- *(v032)* ISSUE-0065 — publish chat-error reply on channel under wallet denial (#395)
+- *(v032)* ISSUE-0066 — publish chat-error reply on channel under wallet lease-cap / rate-limit (#396)
+- *(v032)* ISSUE-0066 reopen — handle `AioRpcError(RESOURCE_EXHAUSTED)` in `action_loop` (#398)
+
+### 📚 Documentation
+
+- *(release)* Post-release follow-up for v0.3.1 (#366)
+- *(v032)* Open v0.3.2 master plan — Cost Gate + Facade Freeze (#367)
+- *(rfcs)* RFC 0040 — agent–orchestrator transport unification (#368)
+- *(v032)* RFC 0023 + RFC 0029 PR plans (Phase 1 combined scaffold) (#369)
+- *(v032)* Resolve RFC 0023 open questions + v0.3.2 tracking hygiene (#371)
+- Note full-suite runtime + long-command guidance in CLAUDE.md (#377)
+- *(rfcs)* RFC 0031 Phase 2 PR plan — recall filtering + dementia-test bridge (#383)
+- *(v032)* RFC 0023 PR 8 — full-RFC closeout (#392)
+- *(v032)* Release-prep plan (master-plan Phase 3) (#393)
+- *(v032)* Release-prep PR 1 — manual test execution report (release gate not met) (#394)
+- *(v032)* Release-prep PR 1 — manual test re-execution report (release gate met) (#397)
+- *(v032)* Release-prep PR 2 — docs refresh + release checklist (#400)
+
+### 🧪 Testing
+
+- New manual tests [`MT-COST-003`](docs/manual-tests/MT-COST-003.md) (chat budget exceed surfaces as `reply_status="error"`, RFC 0023 Phase 4) and [`MT-COST-004`](docs/manual-tests/MT-COST-004.md) (TICK budget exhaustion records idle with `idle_reason=budget_denied` and no provider spend, RFC 0023 Phase 5).
+- Wallet acquire+settle p99 loopback measurement added to the v0.3.2 execution report as an informational target (RFC 0023 §Goal #6 — ≤ 5 ms p99). Regression is a release-review finding, not a build gate.
+- Personal-tier recall-latency regression gate (`tests/perf/personal_tier_latency.py`) shipped from RFC 0029 PR 5 ([#376](https://github.com/mkhomutov/Persatrix/pull/376)) to lock in the facade-freeze baseline ahead of the v0.4.0 personal/society split.
+- Full 32-test manual-test surface (30 v0.3.1 carry-forward + 2 new MTs) re-executed against the v0.3.2 release-candidate tip; release gate met ([#397](https://github.com/mkhomutov/Persatrix/pull/397)).
+
+### 🏗️ Build
+
+- *(deps)* Bump openssl from 0.10.79 to 0.10.80 in /cli (#386)
+
+[0.3.2]: https://github.com/mkhomutov/Persatrix/compare/v0.3.1...v0.3.2
+
 ## [0.3.1] - 2026-05-17
 
 > **Codename:** Memory Quality
