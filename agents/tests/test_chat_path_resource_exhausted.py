@@ -205,7 +205,9 @@ class TestDispatchChannelEventResourceExhausted:
             f"got {content!r}"
         )
 
-    async def test_other_grpc_codes_fall_through_to_generic_arm(self) -> None:
+    async def test_other_grpc_codes_fall_through_to_generic_arm(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
         """Only ``RESOURCE_EXHAUSTED`` is converted to a published reply.
 
         Other gRPC codes (``INTERNAL``, ``UNAVAILABLE``, ``DEADLINE_EXCEEDED``,
@@ -215,6 +217,15 @@ class TestDispatchChannelEventResourceExhausted:
         reply would mask the very bugs that arm is there to surface — same
         rationale as the ``test_generic_exception_does_not_publish_error_reply``
         guard in test_chat_path_budget_denial.py.
+
+        Also pins the generic-arm log line as the observable surface for
+        these errors: a regression that dropped the
+        ``logger.exception("ReceiveChannelMessage dispatch failed …")``
+        call while keeping the ``except Exception`` block would still pass
+        the publish-count check alone, leaving non-RESOURCE_EXHAUSTED gRPC
+        failures silently swallowed — the exact opposite of what the
+        generic arm exists to do. Mirrors the caplog discipline of the
+        ``no_publisher_fallback`` test below.
         """
         for code in (
             grpc.StatusCode.INTERNAL,
@@ -226,14 +237,26 @@ class TestDispatchChannelEventResourceExhausted:
                 dispatch_side_effect=_rpc_error(code),
             )
 
-            await servicer._dispatch_channel_event(
-                "chat-agent", _make_channel_event(),
-            )
+            caplog.clear()
+            with caplog.at_level("WARNING", logger="Persatrix.agent.server"):
+                await servicer._dispatch_channel_event(
+                    "chat-agent", _make_channel_event(),
+                )
 
             assert publisher.publish.await_count == 0, (
                 f"AioRpcError({code}) must NOT trigger a published reply — "
                 f"only RESOURCE_EXHAUSTED is converted; the 504 surface "
                 f"remains for everything else"
+            )
+            assert any(
+                "ReceiveChannelMessage dispatch failed" in rec.getMessage()
+                for rec in caplog.records
+            ), (
+                f"AioRpcError({code}) must surface via the generic "
+                f"'ReceiveChannelMessage dispatch failed' logger.exception "
+                f"line — without it, non-RESOURCE_EXHAUSTED gRPC failures "
+                f"are silently swallowed. got records="
+                f"{[rec.getMessage() for rec in caplog.records]!r}"
             )
 
     async def test_resource_exhausted_with_no_publisher_falls_back_to_log_only(
