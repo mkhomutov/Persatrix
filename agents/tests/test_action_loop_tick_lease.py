@@ -228,9 +228,8 @@ class TestTickPathBudgetDenialIdle:
             ):
                 # Must NOT raise — the contract is "swallow on TICK".
                 actions = await agent.on_event(_tick_event())
-            assert actions == [
-                actions[0],
-            ] and actions[0].action_type == ActionType.DO_NOTHING
+            assert len(actions) == 1
+            assert actions[0].action_type == ActionType.DO_NOTHING
         finally:
             await agent.close_memory()
 
@@ -319,7 +318,8 @@ class TestTickIdleReasonMetric:
             ):
                 actions = await agent.on_event(_tick_event())
 
-            assert actions == [actions[0]] and actions[0].action_type == ActionType.DO_NOTHING
+            assert len(actions) == 1
+            assert actions[0].action_type == ActionType.DO_NOTHING
             assert inst.persona_tick_idle.add.called, (
                 "PR 5: empty-context TICK must increment persona_tick_idle "
                 "(the dashboard counterpart of the existing DEBUG log)"
