@@ -223,8 +223,12 @@ async def dispatch_channel_event_with_chat_error_recovery(
     ``agents/tests/test_chat_path_budget_denial.py``).
 
     Log-message prefix is hard-coded to ``"ReceiveChannelMessage"`` —
-    this helper exists for exactly that surface and operator dashboards
-    key on the prefix.
+    this helper exists for exactly that surface, so the prefix is fixed
+    rather than parameterised to keep log-line shapes stable for any
+    downstream log search / alerting that grew on top of them. (No repo
+    dashboard config currently selects on this prefix, but the field
+    deliberately stays uniform across the BudgetExceededError /
+    AioRpcError / generic arms so it can be relied on later.)
     """
     try:
         try:

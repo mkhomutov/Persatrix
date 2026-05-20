@@ -33,6 +33,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import grpc
 import grpc.aio
+import pytest
 
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
 from agents.dispatch import EventDispatcher
@@ -236,13 +237,19 @@ class TestDispatchChannelEventResourceExhausted:
             )
 
     async def test_resource_exhausted_with_no_publisher_falls_back_to_log_only(
-        self,
+        self, caplog: pytest.LogCaptureFixture,
     ) -> None:
         """When no channel publisher is wired, log-only is the safe fallback.
 
         Mirrors the equivalent guard for the ``BudgetExceededError`` arm —
         test fixtures and session-less ``EventDispatcher`` instances do
-        not always inject a publisher.  The wrapper must not crash.
+        not always inject a publisher.  The wrapper must not crash and
+        must take the explicit no-publisher branch in
+        :func:`publish_chat_error_on_channel`; the caplog assertion below
+        distinguishes that branch from the outer generic-Exception
+        boundary (which would also "not crash") so a regression that
+        routed the no-publisher case into the generic logger would be
+        caught.
         """
         agent = _StubAgent(agent_id="chat-agent", config={"model": "test"})
         dispatcher = MagicMock(spec=EventDispatcher)
@@ -254,7 +261,18 @@ class TestDispatchChannelEventResourceExhausted:
         dispatcher.executor = executor
         servicer = AgentServiceServicer({"chat-agent": agent}, dispatcher)
 
-        # Must not raise.
-        await servicer._dispatch_channel_event(
-            "chat-agent", _make_channel_event(),
+        with caplog.at_level("WARNING", logger="Persatrix.agent.server"):
+            # Must not raise.
+            await servicer._dispatch_channel_event(
+                "chat-agent", _make_channel_event(),
+            )
+
+        assert any(
+            "no publisher wired" in rec.getMessage() for rec in caplog.records
+        ), (
+            "no-publisher fallback must emit the explicit "
+            "'channel chat-error: no publisher wired' log line so a "
+            "regression that routed this case into the generic-Exception "
+            "boundary is caught; got records="
+            f"{[rec.getMessage() for rec in caplog.records]!r}"
         )
