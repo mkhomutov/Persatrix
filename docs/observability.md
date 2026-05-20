@@ -277,7 +277,7 @@ Persatrix uses **two** attribute conventions side-by-side, mirroring
 | `persatrix.execution_id` | string | Set on spans inside a workflow execution (via Baggage from RFC 0019 PR 1) |
 | `persatrix.step_id` | string | Set on spans inside a workflow step |
 | `persatrix.workflow_id` | string | Workflow definition ID |
-| `persatrix.lease_id` | string | The server-issued ULID of the RFC 0023 wallet lease an LLM call holds. Set on the `agent.llm.call` span when the call was bracketed by a wallet lease (RFC 0023 PR 3 — workflow-task origin; PRs 4–6 add chat / TICK / sub-agent / channel-message). Absent on un-leased calls **and on calls that were denied a lease** (the wallet refuses *before* the provider call, so no `agent.llm.call` span is emitted — see the prose block below). |
+| `persatrix.lease_id` | string | The server-issued ULID of the RFC 0023 wallet lease an LLM call holds. Set on the `agent.llm.call` span when the call was bracketed by a wallet lease (PR 3 wired workflow-task; PR 4 chat; PR 5 autonomous-TICK and sub-agent; PR 6 channel-message). Absent on un-leased calls **and on calls that were denied a lease** (the wallet refuses *before* the provider call, so no `agent.llm.call` span is emitted — see the prose block below). |
 
 > **RFC 0023 wallet leasing.** Every workflow-task LLM call acquires a
 > server-issued lease from the orchestrator-side `WalletService` before
@@ -292,6 +292,32 @@ Persatrix uses **two** attribute conventions side-by-side, mirroring
 > on a workflow task). Wallet enforcement and the reaper run on the Go
 > side; the orchestrator-side wallet metrics are covered by RFC 0023's
 > server instrumentation.
+
+> **Autonomous TICK idle reasons (RFC 0023 PR 5).** An autonomous
+> persona TICK has no caller to render a budget denial to, so the
+> action loop *short-circuits* a denied `cause=CAUSE_AUTONOMOUS_TICK`
+> lease to `DO_NOTHING` instead of propagating
+> `BudgetExceededError` (chat and workflow-task callers continue to
+> see the error). To keep that suppression visible on dashboards, the
+> Python agent emits the `agent.persona.tick.idle` counter on *every*
+> TICK that returns `DO_NOTHING` via a known short-circuit, attributed
+> by `idle_reason`:
+>
+> * `idle_reason=empty_context_tick` — the RFC 0017 §F empty-context
+>   short-circuit fired (no memory admitted, no active goal, no
+>   pending turn); no provider call was attempted.
+> * `idle_reason=budget_denied` — the wallet refused the
+>   `CAUSE_AUTONOMOUS_TICK` lease (or was unreachable, failing
+>   closed); the provider was *not* contacted.
+>
+> The two reasons are disjoint by construction — the empty-context
+> branch fires before lease acquisition. Filtering on
+> `idle_reason=budget_denied` separates budget-throttled idle from
+> organic quiet periods without joining traces. Sub-agent leases ride
+> the `CAUSE_SUB_AGENT` cause attributed to the *parent* persona's
+> `agent.id` so per-persona cost dashboards bill the originating
+> persona for delegated work — the active-lease cap stays per-process
+> per [RFC 0023 OQ §7](rfcs/0023-llm-call-leasing.md#open-questions).
 
 `gen_ai.*` attributes use the upstream OTEL Gen-AI semantic-convention
 namespace verbatim — no Persatrix-private renames — so vendor backends

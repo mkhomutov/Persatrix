@@ -331,7 +331,35 @@ _None recorded at plan-authoring time._
 
 ##### From PR 5 review
 
-_None recorded at plan-authoring time._
+_PR 5 review surfaced one finding deferred here as a tracked issue, plus one
+test-readability cleanup applied inline within PR 5._
+
+_**Deferred — persona-as-sub-agent attribution gap.** The
+`CAUSE_SUB_AGENT` cause / parent-agent attribution PR 5 wires lives only in
+`BaseAgent._run_llm_loop` (`agents/base.py`). A `PersonaAgent` dispatched as a
+sub-agent child does not use that path — `PersonaAgent.handle` wraps the task
+as a `TASK_ASSIGNED` event and routes through
+`agents/persona_runtime/action_loop.py`, whose `cause_for_event` returns
+`CAUSE_WORKFLOW_TASK` and uses `self.agent_id` for lease attribution. The
+`task.config.sub_agent_parent_id` field the spawner threads is silently
+ignored on the persona path, so the child's spend would bill the child rather
+than the delegating parent. Structural twin of [ISSUE-0063](../issues/ISSUE-0063-workflow-step-unleased-llm-spend-uncounted.md)
+(persona action loop being a parallel LLM-call origin to `_run_llm_loop` that
+needs its own copy of any lease-attribution overrides). **Latent today** —
+`SPAWN_SUB_AGENT` returns `{"status": "not_implemented"}` in
+`agents/action_executor.py:170-189` and `SubAgentSpawner` has no production
+caller (integration-test fixtures only). Tracked under
+[ISSUE-0064](../issues/ISSUE-0064-persona-as-sub-agent-attribution-gap.md);
+recommended resolution path is the same lease-in-the-action-loop route
+ISSUE-0063 took, folded into whichever PR re-opens the persona action loop
+next (RFC 0023 PR 6's channel-message wiring is the natural candidate)._
+
+_**Applied inline — test-readability cleanup.** Two assertions in
+`agents/tests/test_action_loop_tick_lease.py` used
+`actions == [actions[0]] and actions[0].action_type == DO_NOTHING` to assert
+"exactly one DO_NOTHING action". The comparison is correct (true iff
+`len(actions) == 1`) but awkward; replaced with the idiomatic
+`len(actions) == 1` + per-element assertion. No behavior change._
 
 ##### From PR 6 review
 
@@ -401,7 +429,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 2 | 2 | Real enforcement + reaper | `feature/v032-rfc0023-wallet-enforcement` | 🔀 PR open | [#384](https://github.com/mkhomutov/Persatrix/pull/384) | — |
 | 3 | 3 | `WalletClient` + workflow-task wiring | `feature/v032-rfc0023-workflow-path` | 🔀 PR open | [#385](https://github.com/mkhomutov/Persatrix/pull/385) | — |
 | 4 | 4 | Chat-path wiring (closes the v0.2.3 bypass) | `feature/v032-rfc0023-chat-path` | 🔀 PR open | [#387](https://github.com/mkhomutov/Persatrix/pull/387) | — |
-| 5 | 5 | Autonomous TICK + sub-agent wiring | `feature/v032-rfc0023-tick-subagent` | ⬜ Not started | — | — |
+| 5 | 5 | Autonomous TICK + sub-agent wiring | `feature/v032-rfc0023-tick-subagent` | 🔀 PR open | — | — |
 | 6 | 6 | Channel-message origin wiring | `feature/v032-rfc0023-channel-message` | ⬜ Not started | — | — |
 | 7 | — | Review follow-ups | `feature/v032-rfc0023-followups` | ⬜ Not started | — | — |
 | 8 | — | Full-RFC closeout | `feature/v032-rfc0023-close` | ⬜ Not started | — | — |

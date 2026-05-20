@@ -404,6 +404,11 @@ class BaseAgent(ABC):
         )
         max_tokens = task.config.max_tokens or self.config.get("max_tokens", DEFAULT_MAX_TOKENS)
 
+        # RFC 0023 PR 3 lease; PR 5 sub-agent override (parent attribution; OQ §7).
+        parent = task.config.sub_agent_parent_id
+        lease_cause = walletpb.CAUSE_SUB_AGENT if parent else walletpb.CAUSE_WORKFLOW_TASK
+        lease_agent_id = parent or self.agent_id
+
         for _ in range(max_llm_calls):
             # review-fix S1: catch provider SDK exceptions (rate limits, auth
             # errors, network failures) so handle() always returns TaskOutput
@@ -416,14 +421,9 @@ class BaseAgent(ABC):
                     tools=tool_defs,
                     max_tokens=max_tokens,
                     temperature=self.config.get("temperature", 0.3),
-                    # RFC 0023 PR 3 — this is the workflow-task LLM-call
-                    # origin. When the agent's LLMClient carries a wallet
-                    # (wired by AgentServer.start()), the call acquires a
-                    # server-issued lease before issuing; without one it
-                    # behaves exactly as before.
-                    cause=walletpb.CAUSE_WORKFLOW_TASK,
+                    cause=lease_cause,
                     workflow_id=task.workflow_id,
-                    agent_id=self.agent_id,
+                    agent_id=lease_agent_id,
                 )
             except BudgetExceededError as exc:
                 # RFC 0023 § E — the wallet denied the lease (or could not
