@@ -25,8 +25,11 @@ def cause_for_event(event: AgentEvent) -> walletpb.Cause.ValueType:
     * ``CHANNEL_MESSAGE`` with ``metadata["chat_session_id"]`` set is
       the chat servicer's shape (RFC 0016 OQ 9) → ``CAUSE_CHAT``.
     * ``CHANNEL_MESSAGE`` without that key is the receiver-side
-      delivery → still ``CAUSE_UNSPECIFIED`` here; PR 6 flips it to
-      ``CAUSE_CHANNEL_MESSAGE``.
+      ``ReceiveChannelMessage`` delivery → ``CAUSE_CHANNEL_MESSAGE``
+      (PR 6). The RFC 0011 response gate runs ahead of the LLM call in
+      :meth:`_ActionLoopMixin._on_event_inner`, so a gated-out event
+      returns ``DO_NOTHING`` before this discriminator is reached and
+      the wallet never sees a lease for a suppressed message.
     * ``TICK`` → ``CAUSE_AUTONOMOUS_TICK`` (PR 5).
     * ``TASK_ASSIGNED`` → ``CAUSE_WORKFLOW_TASK`` (PR 5; ISSUE-0063).
       The scheduler's post-hoc ``recordStepUsage`` counter feed was
@@ -41,8 +44,7 @@ def cause_for_event(event: AgentEvent) -> walletpb.Cause.ValueType:
     if event.event_type is EventType.CHANNEL_MESSAGE:
         if "chat_session_id" in event.metadata:
             return walletpb.CAUSE_CHAT
-        # PR 6 will flip this arm to CAUSE_CHANNEL_MESSAGE.
-        return walletpb.CAUSE_UNSPECIFIED
+        return walletpb.CAUSE_CHANNEL_MESSAGE
     if event.event_type is EventType.TICK:
         return walletpb.CAUSE_AUTONOMOUS_TICK
     if event.event_type is EventType.TASK_ASSIGNED:

@@ -11,9 +11,12 @@ absent on receiver-side channel events), and must let
 as ``ChatResponse.reply_status="error"`` instead of swallowing it into a
 generic ``COMPLETE_TASK("LLM provider error")``.
 
-The real channel-message origin (PR 6) stays on ``CAUSE_UNSPECIFIED`` for
-now — :meth:`LLMClient.create_message` then skips the wallet bracket and
-behaves exactly as in v0.2.3. PR 6 flips that to ``CAUSE_CHANNEL_MESSAGE``.
+The receiver-side channel-message origin flips to
+``CAUSE_CHANNEL_MESSAGE`` in PR 6 — dedicated coverage lives in
+``agents/tests/test_action_loop_channel_lease.py``. This file retains a
+regression check that the chat discriminator (``chat_session_id``
+metadata) still selects ``CAUSE_CHAT`` rather than collapsing to one
+``CHANNEL_MESSAGE``-shaped event class.
 """
 
 from __future__ import annotations
@@ -123,7 +126,7 @@ def _channel_event(*, content: str = "hi from channel") -> AgentEvent:
     """An ``AgentEvent`` shaped like ``ReceiveChannelMessage`` builds.
 
     No ``chat_session_id``; carries a ``channel_id`` and ``message_id``.
-    PR 4 must leave this path on ``CAUSE_UNSPECIFIED`` — PR 6 flips it.
+    PR 6 wires this path through ``CAUSE_CHANNEL_MESSAGE``.
     """
     return AgentEvent(
         event_type=EventType.CHANNEL_MESSAGE,
@@ -173,8 +176,17 @@ class TestChatPathCauseTagging:
         )
 
     @pytest.mark.asyncio
-    async def test_channel_event_stays_unspecified_until_pr6(self) -> None:
-        """Receiver-side channel events stay ``CAUSE_UNSPECIFIED`` (PR 6 flips this)."""
+    async def test_channel_event_tagged_channel_message_post_pr6(self) -> None:
+        """Receiver-side channel events tagged ``CAUSE_CHANNEL_MESSAGE`` (PR 6).
+
+        Kept in this file as the negative-of-the-positive: PR 4's chat
+        discriminator (``chat_session_id`` metadata) must select
+        ``CAUSE_CHAT`` rather than ``CAUSE_CHANNEL_MESSAGE``; without
+        this regression check a refactor that erases the discriminator
+        would silently route all channel-shaped events to one cause.
+        The dedicated PR 6 coverage lives in
+        ``agents/tests/test_action_loop_channel_lease.py``.
+        """
         client = _make_client_with_recording_create()
         agent = await _make_agent(client)
 
@@ -186,15 +198,10 @@ class TestChatPathCauseTagging:
         calls: list[dict[str, Any]] = client._recorded_calls  # type: ignore[attr-defined]
         assert calls, "create_message must be invoked for a channel event"
         first = calls[0]
-        # CAUSE_UNSPECIFIED short-circuits the wallet inside LLMClient.
-        # PR 6 will replace this assertion with ``CAUSE_CHANNEL_MESSAGE``.
-        # Strict equality (no default) so dropping the kwarg entirely is also a failure —
-        # the action loop must *pass* a cause for every create_message call, even if it's
-        # the un-tagged default.
-        assert first.get("cause") == walletpb.CAUSE_UNSPECIFIED, (
-            "PR 4: receiver-side channel events must not yet acquire a lease "
-            "(PR 6 wires CAUSE_CHANNEL_MESSAGE — flip this assertion then). "
-            f"Got cause={first.get('cause')!r}"
+        assert first.get("cause") == walletpb.CAUSE_CHANNEL_MESSAGE, (
+            "PR 6: receiver-side channel events must tag the lease with "
+            "CAUSE_CHANNEL_MESSAGE (the chat discriminator must not select "
+            f"this arm). Got cause={first.get('cause')!r}"
         )
 
 
