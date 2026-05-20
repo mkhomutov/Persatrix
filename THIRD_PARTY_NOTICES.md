@@ -241,10 +241,10 @@ Collected via `cargo license --json` inside `cli/` (206 crates).
 | `objc2-encode` | 4.1.0 | MIT | [link](https://github.com/madsmtm/objc2) |
 | `once_cell` | 1.21.4 | Apache-2.0 OR MIT | [link](https://github.com/matklad/once_cell) |
 | `once_cell_polyfill` | 1.70.2 | Apache-2.0 OR MIT | [link](https://github.com/polyfill-rs/once_cell_polyfill) |
-| `openssl` | 0.10.79 | Apache-2.0 | [link](https://github.com/rust-openssl/rust-openssl) |
+| `openssl` | 0.10.80 | Apache-2.0 | [link](https://github.com/rust-openssl/rust-openssl) |
 | `openssl-macros` | 0.1.1 | Apache-2.0 OR MIT |  |
 | `openssl-probe` | 0.2.1 | Apache-2.0 OR MIT | [link](https://github.com/rustls/openssl-probe) |
-| `openssl-sys` | 0.9.115 | MIT | [link](https://github.com/rust-openssl/rust-openssl) |
+| `openssl-sys` | 0.9.116 | MIT | [link](https://github.com/rust-openssl/rust-openssl) |
 | `papergrid` | 0.17.0 | MIT | [link](https://github.com/zhiburt/tabled) |
 | `percent-encoding` | 2.3.2 | Apache-2.0 OR MIT | [link](https://github.com/servo/rust-url/) |
 | `pin-project-lite` | 0.2.17 | Apache-2.0 OR MIT | [link](https://github.com/taiki-e/pin-project-lite) |
