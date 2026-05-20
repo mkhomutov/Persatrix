@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import TYPE_CHECKING, Any
 
 from ..llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
@@ -27,9 +26,11 @@ from ..persona_types import (
 from ..response_gate import POLICY_DEFENSE_IN_DEPTH, evaluate_response_gate
 from ..security import maybe_wrap_tool_content
 from ..tools.registry import ToolDefinition, get_tool, list_tools
-from .action_validation import validate_action_payload
+from ..wallet_client import BudgetExceededError
+from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
 from .channel_reply import synthesize_channel_reply
+from .wallet_cause import cause_for_event
 
 if TYPE_CHECKING:
     from .memory_context import MemoryInjectionResult
@@ -176,63 +177,13 @@ class _ActionLoopMixin:
         return results
 
     def _parse_actions(self, response: LLMResponse) -> list[AgentAction]:
-        """Parse LLM response text into AgentAction list.
+        """Delegate to :func:`action_parser.parse_actions`.
 
-        The LLM is expected to return a JSON array of actions. Falls back
-        to a single COMPLETE_TASK with the raw text if parsing fails.
-        Parsed actions are validated per action type before returning.
+        Free function (no ``self`` access); see ``action_parser.py``. The
+        mixin keeps the bound-method form because tests and historic call
+        sites invoke it as ``agent._parse_actions(response)``.
         """
-        text = response.text or ""
-        # Try to extract JSON action array from the response
-        try:
-            # Look for a JSON array in the response
-            stripped = text.strip()
-            if stripped.startswith("["):
-                raw_actions = json.loads(stripped)
-            elif "```json" in stripped:
-                # Use regex to extract the first JSON code block — more robust
-                # than str.index() against nested fences (review finding P-1).
-                # Newline anchors (not \s*) to avoid polynomial backtracking on
-                # pathological input with many backtick sequences (PR #54 review).
-                m = re.search(r"```json\n(.*?)\n```", stripped, re.DOTALL)
-                if m is None:
-                    return [AgentAction(
-                        action_type=ActionType.COMPLETE_TASK,
-                        payload={"result": text},
-                    )]
-                raw_actions = json.loads(m.group(1))
-            else:
-                # Treat the whole response as a COMPLETE_TASK result
-                return [AgentAction(
-                    action_type=ActionType.COMPLETE_TASK,
-                    payload={"result": text},
-                )]
-
-            actions: list[AgentAction] = []
-            for raw in raw_actions:
-                try:
-                    action_type = ActionType(raw.get("action_type", "do_nothing"))
-                except ValueError:
-                    logger.warning("Unknown action_type %r, skipping", raw.get("action_type"))
-                    continue
-                # Validate payload per action type (PR #54 review: unvalidated
-                # LLM output). Full ActionExecutor validation deferred to PR 5b;
-                # this enforces required-field constraints at parse time.
-                validated = validate_action_payload(AgentAction(
-                    action_type=action_type,
-                    payload=raw.get("payload", {}),
-                ))
-                actions.append(validated)
-            return actions if actions else [AgentAction(
-                action_type=ActionType.COMPLETE_TASK,
-                payload={"result": text},
-            )]
-
-        except (json.JSONDecodeError, ValueError):
-            return [AgentAction(
-                action_type=ActionType.COMPLETE_TASK,
-                payload={"result": text},
-            )]
+        return parse_actions(response)
 
     # ─── Inbound sanitization (RFC 0011 PR 5) ──────────
 
@@ -409,7 +360,6 @@ class _ActionLoopMixin:
 
         max_llm_calls = self.config.get("max_llm_calls", _PERSONA_DEFAULT_MAX_LLM_CALLS)
         max_tokens = self.config.get("max_tokens", _PERSONA_DEFAULT_MAX_TOKENS)
-
         response: LLMResponse | None = None
         for _ in range(max_llm_calls):
             try:
@@ -420,7 +370,11 @@ class _ActionLoopMixin:
                     tools=tool_defs,
                     max_tokens=max_tokens,
                     temperature=self.config.get("temperature", 0.7),
+                    cause=cause_for_event(event),  # RFC 0023 PR 4
+                    agent_id=self.agent_id,
                 )
+            except BudgetExceededError:
+                raise  # RFC 0023 § F — calling surface renders the denial.
             except Exception as exc:
                 logger.error("LLM provider error in agent %s: %s", self.agent_id, exc)
                 return [AgentAction(

@@ -400,7 +400,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 1 | 1 | Proto surface + wallet skeleton | `feature/v032-rfc0023-proto-skeleton` | 🔀 PR open | [#378](https://github.com/mkhomutov/Persatrix/pull/378) | — |
 | 2 | 2 | Real enforcement + reaper | `feature/v032-rfc0023-wallet-enforcement` | 🔀 PR open | [#384](https://github.com/mkhomutov/Persatrix/pull/384) | — |
 | 3 | 3 | `WalletClient` + workflow-task wiring | `feature/v032-rfc0023-workflow-path` | 🔀 PR open | [#385](https://github.com/mkhomutov/Persatrix/pull/385) | — |
-| 4 | 4 | Chat-path wiring (closes the v0.2.3 bypass) | `feature/v032-rfc0023-chat-path` | ⬜ Not started | — | — |
+| 4 | 4 | Chat-path wiring (closes the v0.2.3 bypass) | `feature/v032-rfc0023-chat-path` | 🔀 PR open | — | — |
 | 5 | 5 | Autonomous TICK + sub-agent wiring | `feature/v032-rfc0023-tick-subagent` | ⬜ Not started | — | — |
 | 6 | 6 | Channel-message origin wiring | `feature/v032-rfc0023-channel-message` | ⬜ Not started | — | — |
 | 7 | — | Review follow-ups | `feature/v032-rfc0023-followups` | ⬜ Not started | — | — |

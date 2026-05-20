@@ -24,11 +24,13 @@ import grpc.aio
 
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 from .channel_validation import validate_channel_message_event
+from .chat_reply import chat_error_response as _chat_error_response
 from .chat_reply import extract_chat_reply as _extract_chat_reply
 from .dispatch import EventDispatcher
 from .generated import task_pb2, task_pb2_grpc
 from .participant import validate_participant_type
 from .persona_types import AgentEvent, EventType
+from .wallet_client import BudgetExceededError
 
 logger = logging.getLogger("Persatrix.agent.server")
 
@@ -189,21 +191,13 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         if not agent_id:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details("agent_id is required")
-            return task_pb2.ChatResponse(
-                agent_id=agent_id,
-                reply="",
-                reply_status="error",
-            )
+            return _chat_error_response(agent_id)
 
         agent = self._agents.get(agent_id)
         if agent is None:
             context.set_code(grpc.StatusCode.NOT_FOUND)
             context.set_details(f"Agent not found: {agent_id}")
-            return task_pb2.ChatResponse(
-                agent_id=agent_id,
-                reply="",
-                reply_status="error",
-            )
+            return _chat_error_response(agent_id)
 
         # Validate participant_type — default to "user" when empty (OQ 3).
         participant_type = request.participant_type or "user"
@@ -212,11 +206,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         except ValueError as exc:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details(str(exc))
-            return task_pb2.ChatResponse(
-                agent_id=agent_id,
-                reply="",
-                reply_status="error",
-            )
+            return _chat_error_response(agent_id)
 
         # Generate or reuse the chat-session id (RFC 0016, OQ 9). Wire field
         # was `session_id` pre-v0.3.1; renamed for RFC 0031 OQ #8. Cap
@@ -224,11 +214,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         if request.chat_session_id and len(request.chat_session_id) > 128:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details("chat_session_id exceeds 128 characters")
-            return task_pb2.ChatResponse(
-                agent_id=agent_id,
-                reply="",
-                reply_status="error",
-            )
+            return _chat_error_response(agent_id)
         session_id = request.chat_session_id or str(uuid.uuid4())
 
         # Clamp timeout: at least 1s, at most 300s, default 30s (OQ 6/13).
@@ -245,11 +231,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         if len(request.message) > 32768:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details("message exceeds 32768 characters")
-            return task_pb2.ChatResponse(
-                agent_id=agent_id,
-                reply="",
-                reply_status="error",
-            )
+            return _chat_error_response(agent_id)
 
         user_id = request.user_id
 
@@ -258,11 +240,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         if len(user_id) > 256:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details("user_id exceeds 256 characters")
-            return task_pb2.ChatResponse(
-                agent_id=agent_id,
-                reply="",
-                reply_status="error",
-            )
+            return _chat_error_response(agent_id)
 
         event = AgentEvent(
             event_type=EventType.CHANNEL_MESSAGE,
@@ -288,22 +266,22 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         except TimeoutError:
             context.set_code(grpc.StatusCode.DEADLINE_EXCEEDED)
             context.set_details("Chat dispatch timed out")
-            return task_pb2.ChatResponse(
-                agent_id=agent_id,
-                chat_session_id=session_id,
-                reply="",
-                reply_status="error",
+            return _chat_error_response(agent_id, chat_session_id=session_id)
+        except BudgetExceededError as exc:
+            # RFC 0023 § F — wallet denied (or unreachable). gRPC status
+            # stays OK; the structured denial rides in reply_status/reply.
+            logger.warning(
+                "SendChatMessage budget-denied for agent %s (%s): %s",
+                agent_id, exc.scope or exc.reason, exc.message,
+            )
+            return _chat_error_response(
+                agent_id, chat_session_id=session_id, reply=exc.message,
             )
         except Exception:
             logger.exception("SendChatMessage failed for agent %s", agent_id)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details("Internal error")
-            return task_pb2.ChatResponse(
-                agent_id=agent_id,
-                chat_session_id=session_id,
-                reply="",
-                reply_status="error",
-            )
+            return _chat_error_response(agent_id, chat_session_id=session_id)
 
         # Extract reply with priority: user-targeted SEND_CHANNEL_MESSAGE → any
         # SEND_CHANNEL_MESSAGE → COMPLETE_TASK → empty (OQ 5).

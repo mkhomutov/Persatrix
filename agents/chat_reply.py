@@ -11,11 +11,27 @@ from __future__ import annotations
 import logging
 import re
 
+from .generated import task_pb2
 from .persona_types import ActionType, AgentAction
 
 logger = logging.getLogger("Persatrix.agent.server")
 
-__all__ = ["extract_chat_reply"]
+__all__ = ["chat_error_response", "extract_chat_reply"]
+
+
+def chat_error_response(
+    agent_id: str, *, chat_session_id: str = "", reply: str = "",
+) -> task_pb2.ChatResponse:
+    """Build the ``reply_status='error'`` ChatResponse for an error path.
+
+    Centralises the v0.3.2 shape so the validation arms and the RFC 0023
+    PR 4 ``BudgetExceededError`` handler agree on what an error reply
+    looks like on the wire.
+    """
+    return task_pb2.ChatResponse(
+        agent_id=agent_id, chat_session_id=chat_session_id,
+        reply=reply, reply_status="error",
+    )
 
 
 def extract_chat_reply(
