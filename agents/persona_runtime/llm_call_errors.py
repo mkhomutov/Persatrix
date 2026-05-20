@@ -55,6 +55,14 @@ from ..wallet_client import BudgetExceededError
 
 __all__ = ["handle_llm_call_exception"]
 
+# Deliberately pinned to the caller's logger name (``action_loop``)
+# rather than ``__name__`` — operator dashboards and the
+# ``caplog.at_level(logger="agents.persona_runtime.action_loop")``
+# filter in ``test_action_loop_resource_exhausted.py`` /
+# ``test_action_loop_tick_lease.py`` key on the action-loop logger.
+# The extraction to this helper is a file-size convenience (RFC 0011
+# 500-line cap); the log records must continue to surface as the
+# action loop's own.
 logger = logging.getLogger("agents.persona_runtime.action_loop")
 
 

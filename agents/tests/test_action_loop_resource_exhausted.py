@@ -307,13 +307,19 @@ class TestResourceExhaustedTickShortCircuit:
                 call.args[1] if len(call.args) > 1 else {}
             )
             idle_reason = attrs.get("idle_reason")
-            # Either ``resource_exhausted`` (matching the dispatcher's
-            # ``error_reason``) or ``budget_denied`` (the existing
-            # wallet-back-pressure label).  Pin to a wallet-back-pressure
-            # value either way so empty-context ticks are separable.
-            assert idle_reason in ("resource_exhausted", "budget_denied"), (
-                "ISSUE-0066: RESOURCE_EXHAUSTED TICK must record an "
-                "idle_reason distinguishable from empty_context_tick; "
+            # Pin to ``resource_exhausted`` (matching the dispatcher's
+            # ``error_reason`` vocabulary at
+            # ``agents/chat_reply.py``). A fall-back to
+            # ``budget_denied`` would still satisfy "separable from
+            # empty_context_tick" but would silently mask a
+            # RESOURCE_EXHAUSTED → BudgetExceededError relabel —
+            # dashboards split on this attribute and lose the
+            # back-pressure-vs-wallet-denial distinction if the
+            # action loop maps both to one bucket.
+            assert idle_reason == "resource_exhausted", (
+                "ISSUE-0066: RESOURCE_EXHAUSTED TICK must record "
+                "idle_reason='resource_exhausted' (matching the "
+                "dispatcher's error_reason vocabulary); "
                 f"got idle_reason={idle_reason!r}"
             )
             assert attrs.get("agent.id") == "stress-agent"
