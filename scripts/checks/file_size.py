@@ -172,6 +172,15 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # findings (F-1 facts-tier gap). Written against the v0.3.1 release;
     # archive once the tag ships.
     "docs/manual-tests/v0.3.1-execution-report.md",
+    # docs/manual-tests/v0.3.2-execution-report.md is the v0.3.2 sibling of
+    # the v0.3.0 / v0.3.1 reports above — identical per-release accumulator
+    # pattern. The release-prep PR 1 sweep (32 tests + wallet acquire+settle
+    # p99 measurement) brought the report past the 3 000-word prose cap:
+    # every test row carries inline outcome + evidence + the F-1 chat-REST
+    # surface failure root-cause trace cross-linked to ISSUE-0065 (the only
+    # ❌ Fail on this pass). Written against the v0.3.2 release; archive
+    # once the tag ships.
+    "docs/manual-tests/v0.3.2-execution-report.md",
     # docs/guides/persona-agents.md was at 2 867 words on the v0.3.0
     # release-candidate tip; release-prep PR 2 added three §2 callouts
     # (interactions-not-messages per RFC 0020, now-anchor per RFC 0021,
