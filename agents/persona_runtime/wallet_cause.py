@@ -7,6 +7,7 @@ so that file stays under the 500-line review limit, mirroring the
 
 from __future__ import annotations
 
+from ..base import TaskInput
 from ..generated import wallet_pb2 as walletpb
 from ..persona_types import AgentEvent, EventType
 
@@ -73,9 +74,14 @@ def lease_attribution_for_event(
     cause = cause_for_event(event)
     lease_agent_id = agent_id
     if event.event_type is EventType.TASK_ASSIGNED:
-        task = event.payload.get("task") if isinstance(event.payload, dict) else None
-        parent = getattr(getattr(task, "config", None), "sub_agent_parent_id", "") or ""
-        if parent:
+        # AgentEvent.payload is dataclass-typed ``dict[str, Any]`` and
+        # PersonaAgent.handle wraps the task as ``payload={"task": task}``
+        # (agents/persona.py), so .get() is contract-safe. The
+        # ``isinstance(task, TaskInput)`` guard mirrors prompt_assembly.py's
+        # convention for narrowing the ``Any``-typed value before reaching
+        # into ``.config.sub_agent_parent_id``.
+        task = event.payload.get("task")
+        if isinstance(task, TaskInput) and task.config.sub_agent_parent_id:
             cause = walletpb.CAUSE_SUB_AGENT
-            lease_agent_id = parent
+            lease_agent_id = task.config.sub_agent_parent_id
     return cause, lease_agent_id
