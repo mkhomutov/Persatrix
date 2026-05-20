@@ -188,9 +188,13 @@ class TestChatPathCauseTagging:
         first = calls[0]
         # CAUSE_UNSPECIFIED short-circuits the wallet inside LLMClient.
         # PR 6 will replace this assertion with ``CAUSE_CHANNEL_MESSAGE``.
-        assert first.get("cause", walletpb.CAUSE_UNSPECIFIED) == walletpb.CAUSE_UNSPECIFIED, (
+        # Strict equality (no default) so dropping the kwarg entirely is also a failure —
+        # the action loop must *pass* a cause for every create_message call, even if it's
+        # the un-tagged default.
+        assert first.get("cause") == walletpb.CAUSE_UNSPECIFIED, (
             "PR 4: receiver-side channel events must not yet acquire a lease "
-            "(PR 6 wires CAUSE_CHANNEL_MESSAGE — flip this assertion then)"
+            "(PR 6 wires CAUSE_CHANNEL_MESSAGE — flip this assertion then). "
+            f"Got cause={first.get('cause')!r}"
         )
 
 

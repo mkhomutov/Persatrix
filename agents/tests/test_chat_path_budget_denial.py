@@ -69,9 +69,8 @@ class TestChatHandlerBudgetDenialSurface:
         task_pb2_grpc.add_AgentServiceServicer_to_server(servicer, server)
         port = server.add_insecure_port("127.0.0.1:0")
         await server.start()
-
+        channel = grpc.aio.insecure_channel(f"127.0.0.1:{port}")
         try:
-            channel = grpc.aio.insecure_channel(f"127.0.0.1:{port}")
             stub = task_pb2_grpc.AgentServiceStub(channel)
 
             # The chat *call* must succeed at the gRPC layer (OK status);
@@ -97,9 +96,8 @@ class TestChatHandlerBudgetDenialSurface:
             assert resp.agent_id == "chat-agent"
             # Server still echoes the session id so the client can correlate.
             assert resp.chat_session_id
-
-            await channel.close()
         finally:
+            await channel.close()
             await server.stop(grace=0)
 
     async def test_wallet_unreachable_returns_reply_status_error_with_message(self) -> None:
@@ -121,9 +119,8 @@ class TestChatHandlerBudgetDenialSurface:
         task_pb2_grpc.add_AgentServiceServicer_to_server(servicer, server)
         port = server.add_insecure_port("127.0.0.1:0")
         await server.start()
-
+        channel = grpc.aio.insecure_channel(f"127.0.0.1:{port}")
         try:
-            channel = grpc.aio.insecure_channel(f"127.0.0.1:{port}")
             stub = task_pb2_grpc.AgentServiceStub(channel)
 
             resp = await stub.SendChatMessage(
@@ -137,7 +134,6 @@ class TestChatHandlerBudgetDenialSurface:
             assert resp.reply_status == "error"
             assert resp.reply == unreachable.message
             assert "wallet unreachable" in resp.reply
-
-            await channel.close()
         finally:
+            await channel.close()
             await server.stop(grace=0)

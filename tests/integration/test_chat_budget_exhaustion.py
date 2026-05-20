@@ -207,8 +207,8 @@ async def test_chat_budget_exhaustion_mid_conversation(
         task_pb2_grpc.add_AgentServiceServicer_to_server(servicer, server)
         port = server.add_insecure_port("127.0.0.1:0")
         await server.start()
+        channel = grpc.aio.insecure_channel(f"127.0.0.1:{port}")
         try:
-            channel = grpc.aio.insecure_channel(f"127.0.0.1:{port}")
             stub = task_pb2_grpc.AgentServiceStub(channel)
 
             # ── Turn 1: budget admits the call ─────────────────
@@ -256,9 +256,8 @@ async def test_chat_budget_exhaustion_mid_conversation(
             assert wallet_servicer.acquired == 3
             assert wallet_servicer.denied == 2
             assert wallet_servicer.settled == 1
-
-            await channel.close()
         finally:
+            await channel.close()
             await server.stop(grace=0)
     finally:
         await agent.close_memory()

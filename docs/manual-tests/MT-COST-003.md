@@ -34,8 +34,10 @@ with the structured-error body.
   integration), §F (failure modes).
 - [docs/rfcs/0023-pr-plan.md](../rfcs/0023-pr-plan.md) — PR 4 (this test).
 - [agents/server_servicers.py](../../agents/server_servicers.py) — `AgentServiceServicer.SendChatMessage`.
-- [agents/persona_runtime/action_loop.py](../../agents/persona_runtime/action_loop.py) — chat
-  cause derivation (`_cause_for_event`).
+- [agents/persona_runtime/wallet_cause.py](../../agents/persona_runtime/wallet_cause.py) — chat
+  cause derivation (`cause_for_event`).
+- [agents/persona_runtime/action_loop.py](../../agents/persona_runtime/action_loop.py) — call
+  site that passes `cause=cause_for_event(event)` into `LLMClient.create_message`.
 - [agents/wallet_client.py](../../agents/wallet_client.py) — `BudgetExceededError`.
 
 **Related Automated Tests**:
@@ -77,16 +79,22 @@ with the structured-error body.
 The orchestrator's wallet must enforce a `per_agent` budget low enough to deny on the second
 or third chat turn. Edit `config/optimization.yaml` so the persona agent's `per_agent` budget
 is small (e.g. `0.02` USD), then restart the orchestrator. Note the pre-edit value so Step 5
-can restore it.
+can restore it. The schema below matches the live keys (`cost.budgets.*` for budgets, top-level
+`wallet:` for lease tuning); see `schemas/optimization.schema.json` for the authoritative shape.
 
 ```yaml
-budget:
-  per_agent_usd: 0.02      # tight cap — denies after ~1 chat turn
-  per_workflow_usd: 10.0
-  global_daily_usd: 100.0
+cost:
+  budgets:
+    global:
+      max_daily_usd: 100.00
+    per_workflow:
+      default_max_usd: 10.00
+    per_agent:
+      default_max_usd: 0.02      # tight cap — denies after ~1 chat turn
 
+# Top-level — sibling of `cost:`. RFC 0023 wallet lease lifecycle tuning.
 wallet:
-  ttl_seconds: 30
+  ttl_seconds: 60
   reaper_interval_seconds: 5
   max_active_leases: 16
 ```
