@@ -27,10 +27,10 @@ from ..persona_types import (
 from ..response_gate import POLICY_DEFENSE_IN_DEPTH, evaluate_response_gate
 from ..security import maybe_wrap_tool_content
 from ..tools.registry import ToolDefinition, get_tool, list_tools
-from ..wallet_client import BudgetExceededError
 from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
 from .channel_reply import synthesize_channel_reply
+from .llm_call_errors import handle_llm_call_exception
 from .wallet_cause import lease_attribution_for_event
 
 if TYPE_CHECKING:
@@ -388,44 +388,20 @@ class _ActionLoopMixin:
                     cause=lease_cause,
                     agent_id=lease_agent_id,
                 )
-            except BudgetExceededError as exc:
-                # RFC 0023 § F — most calling surfaces render the denial
-                # to the caller (chat → ``reply_status="error"``;
-                # workflow task → ``TaskStatus.FAILED``), so the action
-                # loop re-raises. An autonomous TICK has no caller to
-                # notify: re-raising would surface as ``Tick error`` in
-                # :meth:`TickScheduler._run` and lose the tick instead
-                # of reflecting it as idle, blinding dashboards to the
-                # budget pressure the wallet is actually suppressing.
-                # PR 5 short-circuits TICK to ``DO_NOTHING`` — same shape
-                # as the RFC 0017 §F empty-context branch above — with a
-                # WARN log and the ``idle_reason=budget_denied`` counter
-                # so the throttling is visible.
-                if event.event_type == EventType.TICK:
-                    logger.warning(
-                        "Agent %s: autonomous tick denied by wallet "
-                        "(%s) — treating as idle",
-                        self.agent_id, exc,
-                    )
-                    inst = try_get_instruments()
-                    if inst is not None:
-                        inst.persona_tick_idle.add(
-                            1,
-                            attributes=tick_idle_attrs(
-                                agent_id=self.agent_id,
-                                idle_reason="budget_denied",
-                            ),
-                        )
-                    return [AgentAction(
-                        action_type=ActionType.DO_NOTHING, payload={},
-                    )]
-                raise
             except Exception as exc:
-                logger.error("LLM provider error in agent %s: %s", self.agent_id, exc)
-                return [AgentAction(
-                    action_type=ActionType.COMPLETE_TASK,
-                    payload={"result": "LLM provider error"},
-                )]
+                # Wallet back-pressure (``BudgetExceededError`` /
+                # ``AioRpcError(RESOURCE_EXHAUSTED)``) and provider-side
+                # failures (other gRPC codes, network, etc.) — dispatch
+                # to :func:`handle_llm_call_exception` (extracted to
+                # ``llm_call_errors.py`` to keep this module under the
+                # 500-line review cap; see that module's docstring for
+                # the per-class contract).
+                result = handle_llm_call_exception(
+                    exc, event=event, agent_id=self.agent_id,
+                )
+                if result is None:
+                    raise
+                return result
 
             if response.stop_reason == StopReason.TOOL_USE:
                 tool_results = await self._execute_tools(response.tool_calls)

@@ -12,9 +12,11 @@ without any rename.
 ``persona_tick_idle`` is incremented on every autonomous TICK that
 returns ``DO_NOTHING`` via a known short-circuit. The
 ``idle_reason`` attribute is the dashboard discriminator:
-``empty_context_tick`` (RFC 0017 §F) and ``budget_denied``
-(RFC 0023 § F). Low cardinality by construction — the two values
-are enumerated at the call sites in
+``empty_context_tick`` (RFC 0017 §F), ``budget_denied`` (RFC 0023 § F
+``BudgetExceededError`` arm), and ``resource_exhausted`` (ISSUE-0066
+``AioRpcError(RESOURCE_EXHAUSTED)`` arm — back-pressure from the
+per-agent active-lease cap or the gRPC rate-limiter). Low cardinality
+by construction — the three values are enumerated at the call sites in
 ``persona_runtime/action_loop.py``.
 """
 
@@ -36,7 +38,7 @@ def register(inst: _Instruments, meter: Meter) -> None:
         description=(
             "Autonomous TICKs that short-circuited to DO_NOTHING. "
             "Attributes: agent.id, idle_reason "
-            "(empty_context_tick | budget_denied)."
+            "(empty_context_tick | budget_denied | resource_exhausted)."
         ),
     )
 
