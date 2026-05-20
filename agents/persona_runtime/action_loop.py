@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from ..llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, ToolCall
 from ..memory.episodic import EpisodicMemory
 from ..memory.working import WorkingMemory
+from ..observability._metrics_persona_tick import tick_idle_attrs
 from ..observability.metrics import gate_attrs, replay_attrs, try_get_instruments
 from ..persona_types import (
     ActionType,
@@ -329,6 +330,16 @@ class _ActionLoopMixin:
                 self.agent_id,
                 extra={"reason": "empty_context_tick", "agent_id": self.agent_id},
             )
+            # RFC 0023 PR 5: dashboard counterpart of the DEBUG log.
+            inst = try_get_instruments()
+            if inst is not None:
+                inst.persona_tick_idle.add(
+                    1,
+                    attributes=tick_idle_attrs(
+                        agent_id=self.agent_id,
+                        idle_reason="empty_context_tick",
+                    ),
+                )
             return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
 
         # 1. Build system prompt and append working memory context.
@@ -373,8 +384,38 @@ class _ActionLoopMixin:
                     cause=cause_for_event(event),  # RFC 0023 PR 4
                     agent_id=self.agent_id,
                 )
-            except BudgetExceededError:
-                raise  # RFC 0023 § F — calling surface renders the denial.
+            except BudgetExceededError as exc:
+                # RFC 0023 § F — most calling surfaces render the denial
+                # to the caller (chat → ``reply_status="error"``;
+                # workflow task → ``TaskStatus.FAILED``), so the action
+                # loop re-raises. An autonomous TICK has no caller to
+                # notify: re-raising would surface as ``Tick error`` in
+                # :meth:`TickScheduler._run` and lose the tick instead
+                # of reflecting it as idle, blinding dashboards to the
+                # budget pressure the wallet is actually suppressing.
+                # PR 5 short-circuits TICK to ``DO_NOTHING`` — same shape
+                # as the RFC 0017 §F empty-context branch above — with a
+                # WARN log and the ``idle_reason=budget_denied`` counter
+                # so the throttling is visible.
+                if event.event_type == EventType.TICK:
+                    logger.warning(
+                        "Agent %s: autonomous tick denied by wallet "
+                        "(%s) — treating as idle",
+                        self.agent_id, exc,
+                    )
+                    inst = try_get_instruments()
+                    if inst is not None:
+                        inst.persona_tick_idle.add(
+                            1,
+                            attributes=tick_idle_attrs(
+                                agent_id=self.agent_id,
+                                idle_reason="budget_denied",
+                            ),
+                        )
+                    return [AgentAction(
+                        action_type=ActionType.DO_NOTHING, payload={},
+                    )]
+                raise
             except Exception as exc:
                 logger.error("LLM provider error in agent %s: %s", self.agent_id, exc)
                 return [AgentAction(

@@ -108,6 +108,7 @@ class _Instruments:
     facts_extraction_failed: Counter
     facts_envelope_parse_failed: Counter
     facts_injected: Counter
+    persona_tick_idle: Counter
 
     def __init__(self, meter: Meter) -> None:
         # ─── Counters ────────────────────────────────────────────────
@@ -175,12 +176,10 @@ class _Instruments:
             ),
         )
 
-        # RFC 0020 interaction-lifecycle + RFC 0026 facts counters are
-        # registered in helper modules so this file stays under the
-        # 500-line cap; public attribute surface is unchanged.
-        from . import _metrics_facts, _metrics_interactions
-        _metrics_interactions.register(self, meter)
-        _metrics_facts.register(self, meter)
+        # Helper-module counter registrations (file-size cap; surface unchanged).
+        from . import _metrics_facts, _metrics_interactions, _metrics_persona_tick
+        for mod in (_metrics_interactions, _metrics_facts, _metrics_persona_tick):
+            mod.register(self, meter)
 
         # ─── Temporal awareness (RFC 0021 Phase 1 — PR 2) ────────────
         # Two counters: now-anchor emissions (one per system-prompt build,

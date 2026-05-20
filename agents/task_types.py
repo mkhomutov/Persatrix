@@ -44,6 +44,13 @@ class TaskInputConfig:
     # PR-review B2: carry allowed_tools from proto even though enforcement
     # is deferred to v0.2, so the field is available to wire up later.
     allowed_tools: list[str] = field(default_factory=list)  # TODO(v0.2): enforce
+    # RFC 0023 PR 5 — sub-agent invocation marker. When non-empty, the
+    # child's leased LLM call is tagged ``CAUSE_SUB_AGENT`` and the
+    # lease is acquired against this parent ``agent_id`` so per-persona
+    # cost dashboards bill the originating persona for delegated work.
+    # Set by ``SubAgentSpawner.dispatch``; never carried over the
+    # ``TaskConfig`` proto (sub-agent dispatch is in-process today).
+    sub_agent_parent_id: str = ""
 
 
 @dataclass

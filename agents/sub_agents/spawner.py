@@ -161,6 +161,13 @@ class SubAgentSpawner:
                 max_llm_calls=request.budget.max_llm_calls,
                 max_tokens=request.budget.tokens,
                 allowed_tools=sorted(request.allowed_tools),
+                # RFC 0023 PR 5 — mark this dispatch as a sub-agent
+                # invocation. The child's leased LLM call reads this
+                # field in :meth:`BaseAgent._run_llm_loop` and flips
+                # the lease cause to ``CAUSE_SUB_AGENT`` against the
+                # parent's ``agent_id`` so per-persona cost dashboards
+                # bill the delegating persona.
+                sub_agent_parent_id=self._parent_agent_id,
             ),
         )
 
