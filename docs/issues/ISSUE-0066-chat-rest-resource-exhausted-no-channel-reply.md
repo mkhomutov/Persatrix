@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0066
 summary: "REST chat endpoint returns HTTP 504 DEADLINE_EXCEEDED when the wallet's per-agent active-lease cap (gRPC RESOURCE_EXHAUSTED) trips, or when the orchestrator's gRPC rate-limit interceptor denies wallet calls. Same operator-visible surface bug as ISSUE-0065 fixed for BudgetExceededError, but for a different error class: AioRpcError(RESOURCE_EXHAUSTED) falls through _dispatch_channel_event's generic except Exception arm with a log line only, so the REST reply waiter times out instead of returning HTTP 200 + reply_status=\"error\"."
-status: open
+status: resolved
 severity: medium
 area: agents/persona_runtime
 created: 2026-05-20
+closed: 2026-05-20
 refs:
   - docs/issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md
   - docs/rfcs/0023-llm-call-leasing.md
@@ -13,6 +14,53 @@ refs:
   - agents/wallet_client.py
   - internal/wallet/wallet.go
   - internal/security/middleware.go
+---
+
+## Resolution (2026-05-20) — Path A landed
+
+Fixed via Path A from the proposal below — extend the existing
+published-error arm in `_dispatch_channel_event` with a gated
+`grpc.aio.AioRpcError` handler ahead of the generic `except Exception`:
+
+1. `agents/server_servicers.py::_dispatch_channel_event` now nests its
+   error handling.  The inner `try` models the two error classes that
+   must publish a structured-error reply on the originating channel
+   (`BudgetExceededError` from ISSUE-0065; `AioRpcError` with
+   `code == RESOURCE_EXHAUSTED` from this issue).  Any other gRPC code
+   re-raises from the inner arm and falls through to the outer generic
+   `except Exception` logger — silently turning every gRPC error into a
+   fake chat reply would mask genuine agent bugs.
+2. The `RESOURCE_EXHAUSTED` arm publishes via the same
+   `publish_chat_error_on_channel` helper used by the budget-denial arm,
+   so the Go-side discriminator (`metadata["reply_status"]="error"`,
+   handled in `internal/server/chat_handler.go::handleChat`) needs no
+   change.  Distinct `error_reason="resource_exhausted"` keeps the value
+   separable from `budget_exceeded` / `wallet_unreachable` on operator
+   dashboards.
+3. The user-facing reply text is a fixed, friendly retry message
+   (`"Agent is at capacity — please retry in a moment."`) rather than
+   `exc.details()` — the lease-cap message
+   (`"agent already holds the maximum 3 active leases"`) and the
+   rate-limit interceptor message (`"rate limit exceeded"`) both leak
+   internal-mechanics jargon the end user does not need.
+
+Tests pinning the contract:
+
+- `agents/tests/test_chat_path_resource_exhausted.py`
+  `TestDispatchChannelEventResourceExhausted` — 5 cases:
+  publish-on-channel, distinct `error_reason`, user-facing reply text
+  (no raw `exc.details()` leak), other gRPC codes fall through to the
+  generic arm, no-publisher fallback.
+- Existing ISSUE-0065 regression guards in
+  `agents/tests/test_chat_path_budget_denial.py` still green (12 tests
+  total across the two files).
+
+MT-COST-003 re-run is still required against a built artifact carrying
+the fix to literally exercise the lease-cap or rate-limit interceptor
+path end-to-end; the unit tests pin the contract at
+`_dispatch_channel_event` but a live cap saturation against the
+orchestrator binary is the canonical acceptance.
+
 ---
 
 ## Summary

@@ -9,21 +9,35 @@ ISSUE-0065 added ``publish_chat_error_on_channel`` — the channel-receive
 arm's equivalent of :func:`chat_error_response`, used by
 ``AgentServiceServicer._dispatch_channel_event`` when the persona
 action loop raises :class:`BudgetExceededError`.
+
+ISSUE-0066 added ``dispatch_channel_event_with_chat_error_recovery`` —
+the full chat-error-recovery wrapper around the persona action-loop
+dispatch, hosting both the ``BudgetExceededError`` arm (ISSUE-0065) and
+the gated ``AioRpcError(RESOURCE_EXHAUSTED)`` arm (ISSUE-0066) plus the
+generic final-boundary logger. Extracted to keep ``server_servicers.py``
+under the same line cap.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Awaitable
+from typing import Any
+
+import grpc
+import grpc.aio
 
 from .channel_publisher import ChannelPublisher
 from .generated import task_pb2
 from .persona_types import ActionType, AgentAction
+from .wallet_client import BudgetExceededError
 
 logger = logging.getLogger("Persatrix.agent.server")
 
 __all__ = [
     "chat_error_response",
+    "dispatch_channel_event_with_chat_error_recovery",
     "extract_chat_reply",
     "publish_chat_error_on_channel",
 ]
@@ -181,4 +195,71 @@ async def publish_chat_error_on_channel(
         logger.exception(
             "channel chat-error publish failed (agent=%s channel=%s)",
             agent_id, channel_id,
+        )
+
+
+async def dispatch_channel_event_with_chat_error_recovery(
+    dispatch_coro: Awaitable[Any],
+    *,
+    publisher: ChannelPublisher | None,
+    agent_id: str,
+    channel_id: str | None,
+    inbound_sender_id: str | None,
+) -> None:
+    """ISSUE-0065 / ISSUE-0066 — chat-error recovery wrapper for the
+    persona action-loop dispatch fired from
+    ``AgentServiceServicer.ReceiveChannelMessage``.
+
+    Awaits ``dispatch_coro`` (typically ``EventDispatcher.dispatch(...)``)
+    and converts the two known back-pressure exception classes —
+    :class:`BudgetExceededError` (ISSUE-0065) and
+    :class:`grpc.aio.AioRpcError` with ``code == RESOURCE_EXHAUSTED``
+    (ISSUE-0066) — to a structured-error reply published on the
+    originating channel via :func:`publish_chat_error_on_channel`. Other
+    failures fall through to the generic final-boundary logger; silently
+    turning every dispatch crash into a fake chat reply would mask
+    genuine agent bugs (see the regression-guard
+    ``test_generic_exception_does_not_publish_error_reply`` in
+    ``agents/tests/test_chat_path_budget_denial.py``).
+
+    Log-message prefix is hard-coded to ``"ReceiveChannelMessage"`` —
+    this helper exists for exactly that surface and operator dashboards
+    key on the prefix.
+    """
+    try:
+        try:
+            await dispatch_coro
+        except BudgetExceededError as exc:
+            logger.warning(
+                "ReceiveChannelMessage budget-denied for agent %s "
+                "(channel %s): scope=%s reason=%s message=%s",
+                agent_id, channel_id,
+                exc.scope or "<none>", exc.reason, exc.message,
+            )
+            await publish_chat_error_on_channel(
+                publisher, agent_id=agent_id, channel_id=channel_id,
+                inbound_sender_id=inbound_sender_id,
+                reply=exc.message, reason=exc.reason,
+            )
+        except grpc.aio.AioRpcError as exc:
+            if exc.code() != grpc.StatusCode.RESOURCE_EXHAUSTED:
+                raise
+            logger.warning(
+                "ReceiveChannelMessage resource-exhausted for agent %s "
+                "(channel %s): %s",
+                agent_id, channel_id, exc.details(),
+            )
+            # Fixed reply — ``exc.details()`` leaks internal jargon
+            # ("agent already holds the maximum 3 active leases").
+            await publish_chat_error_on_channel(
+                publisher, agent_id=agent_id, channel_id=channel_id,
+                inbound_sender_id=inbound_sender_id,
+                reply="Agent is at capacity — please retry in a moment.",
+                reason="resource_exhausted",
+            )
+    except Exception as exc:  # noqa: BLE001 — final boundary
+        logger.exception(
+            "ReceiveChannelMessage dispatch failed for agent %s "
+            "(channel %s): %s",
+            agent_id, channel_id, type(exc).__name__,
         )

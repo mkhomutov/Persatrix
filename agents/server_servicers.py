@@ -25,8 +25,10 @@ import grpc.aio
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 from .channel_validation import validate_channel_message_event
 from .chat_reply import chat_error_response as _chat_error_response
+from .chat_reply import (
+    dispatch_channel_event_with_chat_error_recovery as _dispatch_with_chat_error,
+)
 from .chat_reply import extract_chat_reply as _extract_chat_reply
-from .chat_reply import publish_chat_error_on_channel as _publish_chat_error_on_channel
 from .dispatch import EventDispatcher
 from .generated import task_pb2, task_pb2_grpc
 from .participant import validate_participant_type
@@ -455,40 +457,21 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
     async def _dispatch_channel_event(
         self, target_agent_id: str, event: AgentEvent,
     ) -> None:
-        """Run dispatch and log any exception (no retry in v0.3.0).
+        """Run dispatch with chat-error recovery for the fire-and-forget task.
 
-        Wrapped so the fire-and-forget task never propagates a bare
-        exception into the asyncio event loop's default handler.
-        ISSUE-0065: :class:`BudgetExceededError` is caught ahead of the
-        generic arm and converted via :func:`publish_chat_error_on_channel`
-        so the REST chat surface sees HTTP 200 + ``reply_status="error"``
-        instead of timing out at HTTP 504.
+        Thin wrapper over
+        :func:`dispatch_channel_event_with_chat_error_recovery`, which
+        hosts the ISSUE-0065 ``BudgetExceededError`` arm, the ISSUE-0066
+        ``AioRpcError(RESOURCE_EXHAUSTED)`` arm, and the generic
+        final-boundary logger.
         """
-        try:
-            await self._dispatcher.dispatch(target_agent_id, event)
-        except BudgetExceededError as exc:
-            logger.warning(
-                "ReceiveChannelMessage budget-denied for agent %s (channel %s): "
-                "scope=%s reason=%s message=%s",
-                target_agent_id, event.channel_id,
-                exc.scope or "<none>", exc.reason, exc.message,
-            )
-            await _publish_chat_error_on_channel(
-                self._dispatcher.executor.channel_publisher,
-                agent_id=target_agent_id,
-                channel_id=event.channel_id,
-                inbound_sender_id=event.sender_id,
-                reply=exc.message,
-                reason=exc.reason,
-            )
-        except Exception as exc:  # noqa: BLE001 — final boundary; logged with traceback
-            # Include ``type(exc).__name__`` so SLO dashboards can break
-            # error classes down without parsing raw tracebacks. PR #248
-            # deep review L finding.
-            logger.exception(
-                "ReceiveChannelMessage dispatch failed for agent %s (channel %s): %s",
-                target_agent_id, event.channel_id, type(exc).__name__,
-            )
+        await _dispatch_with_chat_error(
+            self._dispatcher.dispatch(target_agent_id, event),
+            publisher=self._dispatcher.executor.channel_publisher,
+            agent_id=target_agent_id,
+            channel_id=event.channel_id,
+            inbound_sender_id=event.sender_id,
+        )
 
 
 # ``_extract_chat_reply`` is re-exported (PR 4a-i) for back-compat with
