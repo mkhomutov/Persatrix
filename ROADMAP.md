@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-18 (RFC 0023 implementation start — PR 1 [#378](https://github.com/mkhomutov/Persatrix/pull/378) (`proto/wallet.proto` surface + `WalletService` always-grant skeleton) opened; RFC 0023 RFC Master Index status flipped 📋 Proposed → 🚧 Implementing per the [RFC 0023 PR plan](docs/rfcs/0023-pr-plan.md). Earlier today: RFC 0029 Phase 1 closeout — PR 5 (`MemoryStore` facade freeze + personal-tier recall-latency gate) opened; RFC 0029 status flipped 🚧 Implementing → ⚠️ Partially Implemented (Phase 1); merged-PR history caught up to #375.)
+> **Last updated**: 2026-05-20 (RFC 0023 full closeout — PR 8 (`feature/v032-rfc0023-close`) opened; RFC 0023 status flipped 🚧 Implementing → ✅ Implemented; merged-PR history caught up through #391. All five LLM-call origins (workflow / chat / autonomous TICK / sub-agent / channel-message) now acquire a server-issued wallet lease before issuing — the v0.3.2 acceptance gate. Per-cause budget policies and the distributed wallet remain out of scope, deferred to RFC 0006 mesh territory.)
 > **Current phase**: v0.3.1 (Memory Quality + Session Plumbing + Conversational Working Memory — RFC 0026 full + RFC 0031 Phase 1 + RFC 0034 Phase 1) — ✅ Released
 > **Current milestone**: v0.3.1 released ([tag v0.3.1](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.1) pushed 2026-05-17, GitHub Release "Memory Quality" published the same day); v0.3.2 planning next (RFC 0029 Phase 1 `MemoryStore` facade refactor + RFC 0023 LLM-call leasing, sequenced per [v0.3.x-sequencing.md](docs/v0.3.x-sequencing.md)).
 
@@ -56,7 +56,7 @@ Internal RFCs are the engineering planning tool. They do not drive version numbe
 | [0020](docs/rfcs/0020-interaction-lifecycle.md) | Interaction Lifecycle: Dialogue Boundaries & Episode Granularity | v0.3.0 | ✅ Implemented |
 | [0021](docs/rfcs/0021-persona-temporal-awareness.md) | Persona Temporal Awareness | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | ⚠️ Partially Implemented (Phase 1) |
 | [0022](docs/rfcs/0022-persona-prompt-section-templating.md) | Persona Prompt Section Templating | v0.3.0 | ✅ Implemented |
-| [0023](docs/rfcs/0023-llm-call-leasing.md) | LLM Call Leasing — per-call wallet lease gating every LLM invocation (workflow / chat / autonomous TICK / sub-agent / channel-message) so cost enforcement is an in-line gate, not a post-hoc accountant; closes the v0.2.3 chat-bypass known limitation. (Slot 0023's original "Episodic Memory Quality" reservation was narrowed into [memory-quality-roadmap.md](docs/memory-quality-roadmap.md); the slot was reused for this RFC — see the [RFC 0029 numbering note](docs/rfcs/0029-personal-society-storage-split.md).) | v0.3.2 | 🚧 Implementing (8-PR plan — [0023-pr-plan.md](docs/rfcs/0023-pr-plan.md); PR 1 [#378](https://github.com/mkhomutov/Persatrix/pull/378) — `proto/wallet.proto` surface + `WalletService` always-grant skeleton — open) |
+| [0023](docs/rfcs/0023-llm-call-leasing.md) | LLM Call Leasing — per-call wallet lease gating every LLM invocation (workflow / chat / autonomous TICK / sub-agent / channel-message) so cost enforcement is an in-line gate, not a post-hoc accountant; closes the v0.2.3 chat-bypass known limitation. (Slot 0023's original "Episodic Memory Quality" reservation was narrowed into [memory-quality-roadmap.md](docs/memory-quality-roadmap.md); the slot was reused for this RFC — see the [RFC 0029 numbering note](docs/rfcs/0029-personal-society-storage-split.md).) | v0.3.2 | ✅ Implemented (Phases 1–6; PRs 1 [#378](https://github.com/mkhomutov/Persatrix/pull/378), 2 [#384](https://github.com/mkhomutov/Persatrix/pull/384), 3 [#385](https://github.com/mkhomutov/Persatrix/pull/385), 4 [#387](https://github.com/mkhomutov/Persatrix/pull/387), 5 [#388](https://github.com/mkhomutov/Persatrix/pull/388), 6 [#389](https://github.com/mkhomutov/Persatrix/pull/389), 7 [#391](https://github.com/mkhomutov/Persatrix/pull/391), 8 (this PR) merged — proto/wallet.proto surface + `WalletService` skeleton; `BudgetEnforcer` enforcement + TTL reaper; Python `WalletClient` + workflow-task lease wiring; chat-path wiring (closes v0.2.3 bypass); autonomous TICK + sub-agent wiring; channel-message origin wiring; review follow-ups; RFC closeout. All five LLM-call origins now acquire a server-issued lease.) |
 | 0024 | Episodic Vector Recall — deferred, gated on [MT-MEMORY-005](docs/manual-tests/MT-MEMORY-005-dementia-test.md) data | v0.3.x or v0.4.0 | Reserved (deferred) |
 | 0025 | Thematic Episode Clustering — superseded by RFC 0027 per [memory-quality-roadmap.md](docs/memory-quality-roadmap.md) | superseded | Reserved (superseded by 0027) |
 | [0026](docs/rfcs/0026-declarative-facts-tier.md) | Declarative Facts Tier | v0.3.1 | ✅ Implemented |
@@ -977,6 +977,22 @@ v0.5.0 complete
 | [#373](https://github.com/mkhomutov/Persatrix/pull/373) | feat(v032): RFC 0029 Phase 1 PR 3 — downstream call-site refactor | 0029 (3/5) | 2026-05-18 |
 | [#374](https://github.com/mkhomutov/Persatrix/pull/374) | fix(tests): isolate fact-store audit redactor-warning test from global log state | test isolation fix | 2026-05-18 |
 | [#375](https://github.com/mkhomutov/Persatrix/pull/375) | feat(v032): RFC 0029 Phase 1 PR 4 — review follow-ups | 0029 (4/5) | 2026-05-18 |
+| [#376](https://github.com/mkhomutov/Persatrix/pull/376) | feat(v032): RFC 0029 Phase 1 PR 5 — closeout + perf gate | 0029 (5/5) | 2026-05-18 |
+| [#377](https://github.com/mkhomutov/Persatrix/pull/377) | docs: note full-suite runtime + long-command guidance in CLAUDE.md | docs | 2026-05-18 |
+| [#378](https://github.com/mkhomutov/Persatrix/pull/378) | feat(v032): RFC 0023 PR 1 — proto surface + WalletService skeleton | 0023 (1/8) | 2026-05-18 |
+| [#379](https://github.com/mkhomutov/Persatrix/pull/379) | fix(v032): ISSUE-0059 — add gRPC server panic-recovery interceptor | ISSUE-0059 fix | 2026-05-18 |
+| [#380](https://github.com/mkhomutov/Persatrix/pull/380) | fix(v032): ISSUE-0055 — drain the RETURNING cursor racing close-path COMMIT | ISSUE-0055 fix | 2026-05-19 |
+| [#381](https://github.com/mkhomutov/Persatrix/pull/381) | fix(v032): ISSUE-0056 — ruff-gate the repo-root tests/ tree | ISSUE-0056 fix | 2026-05-19 |
+| [#382](https://github.com/mkhomutov/Persatrix/pull/382) | fix(v032): ISSUE-0062 — mypy-gate the repo-root tests/ tree | ISSUE-0062 fix | 2026-05-19 |
+| [#383](https://github.com/mkhomutov/Persatrix/pull/383) | docs(rfcs): RFC 0031 Phase 2 PR plan — recall filtering + dementia-test bridge | 0031 Phase 2 (PR plan) | 2026-05-19 |
+| [#384](https://github.com/mkhomutov/Persatrix/pull/384) | feat(v032): RFC 0023 PR 2 — wallet enforcement + TTL reaper | 0023 (2/8) | 2026-05-19 |
+| [#385](https://github.com/mkhomutov/Persatrix/pull/385) | feat(v032): RFC 0023 PR 3 — WalletClient + workflow-task lease wiring | 0023 (3/8) | 2026-05-20 |
+| [#386](https://github.com/mkhomutov/Persatrix/pull/386) | build(deps): bump openssl from 0.10.79 to 0.10.80 in /cli | dependabot | 2026-05-20 |
+| [#387](https://github.com/mkhomutov/Persatrix/pull/387) | feat(v032): RFC 0023 PR 4 — chat-path wallet lease wiring | 0023 (4/8) | 2026-05-20 |
+| [#388](https://github.com/mkhomutov/Persatrix/pull/388) | feat(v032): RFC 0023 PR 5 — autonomous TICK + sub-agent lease wiring | 0023 (5/8) | 2026-05-20 |
+| [#389](https://github.com/mkhomutov/Persatrix/pull/389) | feat(v032): RFC 0023 PR 6 — channel-message origin lease wiring | 0023 (6/8) | 2026-05-20 |
+| [#390](https://github.com/mkhomutov/Persatrix/pull/390) | fix(v032): ISSUE-0064 — persona-as-sub-agent attribution gap | ISSUE-0064 fix | 2026-05-20 |
+| [#391](https://github.com/mkhomutov/Persatrix/pull/391) | feat(v032): RFC 0023 PR 7 — review follow-ups (finalize log shape) | 0023 (7/8) | 2026-05-20 |
 
 ---
 
