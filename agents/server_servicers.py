@@ -471,7 +471,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
                 "ReceiveChannelMessage budget-denied for agent %s (channel %s): "
                 "scope=%s reason=%s message=%s",
                 target_agent_id, event.channel_id,
-                exc.scope or "", exc.reason, exc.message,
+                exc.scope or "<none>", exc.reason, exc.message,
             )
             await _publish_chat_error_on_channel(
                 self._dispatcher.executor.channel_publisher,

@@ -118,6 +118,19 @@ class ChannelPublisher(Protocol):
         handler renders ``reply_status="error"`` in the JSON envelope
         instead of the default ``"ok"``. Caller-supplied keys do not
         overwrite ``cascade_depth`` — the publisher reserves that key.
+
+        Metadata keys with a contract meaning at the receiver side
+        (avoid colliding by accident in unrelated publishes):
+
+        * ``cascade_depth`` — reserved by *this* publisher; caller
+          values are dropped (use the kwarg). See
+          ``test_caller_cascade_depth_in_metadata_is_dropped_kwarg_wins``.
+        * ``reply_status`` — read by ``internal/server/chat_handler.go``
+          (``handleChat``) to flip the REST JSON envelope to
+          ``reply_status="error"`` when the value equals ``"error"``.
+        * ``error_reason`` — informational only; not consumed by the
+          chat handler today, but published alongside ``reply_status``
+          for log forensics on the underlying ``ChannelMessage``.
         """
         ...
 
