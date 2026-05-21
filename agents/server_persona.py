@@ -393,8 +393,6 @@ async def initialize_persona_agents(
                 executor=dispatcher.executor,
                 register_legacy_timer=timers is None,
             )
-            tick_schedulers[agent_id] = scheduler
-            dispatcher.register_tick_scheduler(agent_id, scheduler)
             # Cost-safety notice — emitted *before* scheduler.start() so the
             # warning is guaranteed to reach the log before any LLM spend can
             # begin.  Placing it after start() would invert the semantic order
@@ -431,7 +429,10 @@ async def initialize_persona_agents(
             # previously-registered timers do not dangle in the running
             # event loop — without this, a partial bring-up leaks an
             # orphaned ``EventLoop`` whose ``call_later`` handles outlive
-            # the failed init.  Pinned by
+            # the failed init.  Both registries (``tick_schedulers`` and
+            # ``dispatcher._tick_schedulers``) are published *after* this
+            # loop succeeds so a partial failure never exposes a stopped
+            # scheduler to the dispatch path — pinned by
             # ``tests/unit/python/test_server_persona_wiring_timers.py
             # ::test_partial_register_failure_stops_scheduler``.
             if timers is not None:
@@ -447,8 +448,9 @@ async def initialize_persona_agents(
                         )
                 except Exception:
                     await scheduler.stop()
-                    tick_schedulers.pop(agent_id, None)
                     raise
+            tick_schedulers[agent_id] = scheduler
+            dispatcher.register_tick_scheduler(agent_id, scheduler)
             logger.info("Started tick scheduler for %s (%s)", agent_id, cadence)
 
 

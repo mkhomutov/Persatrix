@@ -370,11 +370,15 @@ class TestAutonomyTimersWiring:
         """A misconfigured timer in the middle of ``autonomy.timers`` causes
         ``register_timer`` to raise after the scheduler is already started.
 
-        The wiring path must stop the scheduler and drop it from
-        ``tick_schedulers`` before propagating the error — otherwise the
-        supervisor task and any earlier-registered timer's ``call_later``
-        handles outlive the failed init, leaving an orphan ``EventLoop``
-        attached to the asyncio loop.
+        The wiring path must stop the scheduler and leave **both** registries
+        — the caller's local ``tick_schedulers`` dict *and*
+        ``EventDispatcher._tick_schedulers`` — free of the half-initialised
+        entry before propagating the error.  Without the dispatcher
+        cleanup, a stopped scheduler stays addressable via
+        :meth:`EventDispatcher.dispatch` (see ``dispatch.py`` where
+        ``self._tick_schedulers.get(target_id)`` is the only filter); any
+        subsequent caller that reuses the dispatcher would route wakes to
+        a dead ``EventLoop``.
 
         Failure mode the cross-field jitter cap surfaces: schema validates
         each timer's fields independently, so an ``interval_seconds: 1.0,
@@ -413,8 +417,13 @@ class TestAutonomyTimersWiring:
                 {"ember-owl": agent}, dispatcher, schedulers,
             )
 
-        # Scheduler was popped from the local registry — caller's view is
-        # clean, no half-bring-up entry to confuse subsequent dispatches.
+        # Scheduler was never published to the caller's local registry —
+        # no half-bring-up entry to confuse subsequent dispatches.
         assert "ember-owl" not in schedulers
+        # Symmetric guarantee for the dispatcher: a failed init must not
+        # leave a stopped scheduler routable.  Accessing ``_tick_schedulers``
+        # directly is the only inspection surface today (no public getter);
+        # the leading underscore is acknowledged.
+        assert "ember-owl" not in dispatcher._tick_schedulers
 
         await agent.close_memory()
