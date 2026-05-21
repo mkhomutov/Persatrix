@@ -24,6 +24,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from opentelemetry import trace
+
 from .redact import NoopRedactor, Redactor
 
 # ─── Span names ──────────────────────────────────────────────────────────────
@@ -112,6 +114,27 @@ def apply_redaction(attributes: dict[str, Any]) -> dict[str, Any]:
 # ─── Gen-AI semantic-convention helpers ─────────────────────────────────────
 
 
+# ─── Current-span id helper (RFC 0024 Phase 3) ──────────────────────────────
+
+
+def current_llm_span_id() -> str | None:
+    """Return the active OTEL span id as 16-char lowercase hex, or ``None``.
+
+    Used by :mod:`agents.memory._events` to populate
+    :attr:`MemoryWriteEvent.source_span_id` so PR 3b's loop-back guard can
+    suppress a :class:`SalienceWake` whose triggering write happened inside
+    the agent's own LLM-call span.  The "LLM" in the name reflects the
+    *load-bearing* caller (writes that fire inside the action loop carry the
+    LLM-call span as their context parent) — the helper itself is a pure
+    read of the current span and does not check the span's name or kind.
+    Returns ``None`` when no valid span is active (INVALID_SPAN_ID = 0).
+    """
+    ctx = trace.get_current_span().get_span_context()
+    if not ctx.is_valid:
+        return None
+    return f"{ctx.span_id:016x}"
+
+
 def gen_ai_attributes(
     *,
     system: str,
@@ -157,6 +180,7 @@ __all__ = [
     "SUBAGENT_SPAWN_SPAN",
     "TOOL_EXECUTE_SPAN",
     "apply_redaction",
+    "current_llm_span_id",
     "gen_ai_attributes",
     "get_redactor",
     "set_redactor",

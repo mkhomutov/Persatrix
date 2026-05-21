@@ -533,7 +533,91 @@ refactor._
 
 ##### From PR 3a review
 
-_None recorded at plan-authoring time._
+_Applied: defence-in-depth NaN/±inf clamp in
+``MemoryWriteEvent.__post_init__`` (NaN slipped past ``max``/``min``
+because every comparison with NaN is ``False``, leaving a NaN salience
+in flight that would silently land in PR 3b's "below threshold"
+branch); WARNING on the ``_emit_audit("fact.store", …)`` piggyback's
+missing-or-non-string ``agent_id`` branch (the silent-drop path was
+unobservable before — a future caller forgetting ``agent_id=`` would
+break facts-tier salience-wake coverage with zero log signal);
+coverage-scope comment in :mod:`._facts_audit` calling out that only
+``fact.store`` carries the piggyback (``fact.recalled`` and
+``fact.supersede`` are intentionally NOT lifted as memory-write
+events); cross-agent fan-out comment near the ``_global_bus`` singleton
+naming the agent_id filter PR 3b's subscriber must apply; outer-span
+``source_span_id``-capture tests for notes, facts (through the audit
+piggyback), and relationship tiers — pinning that no inner span
+swallows the parent on those three tiers today, so a future refactor
+that wraps any of them in a span surfaces in CI rather than silently
+regressing PR 3b's loop-back guard input; ``pytest.raises``
+consistency fix in the relationship-tier failure test (was
+``contextlib.suppress(ValueError)`` — the suppress form would have
+passed even if production validation were removed AND the emit then
+silently failed to fire for an unrelated reason; the stricter form
+pins both halves of the contract, matching the other three tiers);
+``emit_for_tier`` docstring corrected to name the actual failure modes
+the ``contextlib.suppress`` defends against (the prior text named
+"subscriber bug" — but :meth:`MemoryWriteBus.publish` already swallows
+those; the suppress is the safety net for *upstream* failures: a
+future :meth:`MemoryWriteEvent.__post_init__` validation that raises,
+an OTEL API change in :func:`current_llm_span_id`, or a type-system
+gap that lets a bad ``tier`` reach this shim). Three deferred:_
+
+_(1) **``current_llm_span_id`` neutral rename.** The helper at
+[agents/observability/spans.py](../../agents/observability/spans.py)
+is a pure read of the current OTEL span — its docstring acknowledges
+this, but the ``_llm_`` infix invites future call sites to second-guess
+whether the helper is LLM-specific (it is not; the LLM-call contract
+lives at the *call site*, not in the helper).  Rename to
+``current_span_id_hex`` (or similar neutral form) so PR 3b and later
+consumers do not propagate the misleading name.  Touches the
+``__all__`` export and one call site in :mod:`agents.memory._salience`
+plus the test class name; bundle with the first PR 3b follow-up that
+edits :mod:`agents.observability.spans` to keep the diff localised._
+
+_(2) **Self-superseded ``fact.store`` still emits one
+``MemoryWriteEvent``.** When
+[`FactStore.store`](../../agents/memory/facts.py) inserts a row whose
+``asserted_at`` is older than an existing row, the
+[`_apply_supersession`](../../agents/memory/_facts_supersede.py)
+branch marks the just-inserted row as ``superseded_by`` the existing
+newer fact (``result.self_superseded_by is not None``).  The row IS
+persisted, so the ``fact.store`` audit (and its piggyback memory-write
+event) fires once — consistent with the "exactly one event per write"
+contract this PR pins.  At PR 3a's ``salience=0.0`` this is benign,
+but once PR 3b's threshold is calibrated, an immediately-self-
+superseded fact should not drive a salience wake (the fact is already
+retracted by the time the wake would run).  PR 3b can address this by
+either (a) gating the piggyback on ``result.self_superseded_by is
+None`` — which means moving the emit out of
+:mod:`agents.memory._facts_audit` and back into
+:meth:`FactStore.store` after the supersession check, accepting the
+500-line review-cap re-budget on ``facts.py``; or (b) carrying a
+``superseded_on_write: bool`` flag on
+:class:`MemoryWriteEvent` so PR 3b's subscriber can suppress the wake
+explicitly without changing the write-path emission contract.  Option
+(b) is the smaller diff and keeps PR 3a's "every write emits exactly
+one event" invariant intact for observability; option (a) is cleaner
+semantically.  Decision belongs in the PR 3b implementation review._
+
+_(3) **``_global_bus`` mutation is not thread-safe.**
+:func:`agents.memory._events.set_memory_write_bus` reassigns the
+module global with no lock; :meth:`MemoryWriteBus.subscribe` /
+:meth:`MemoryWriteBus.unsubscribe` likewise mutate the underlying list
+with no lock.  :meth:`MemoryWriteBus.publish` already snapshots via
+``tuple(self._subscribers)`` for iteration safety, which doubles as
+concurrent-publish safety — the missing piece is lock-protected
+mutation.  PR 3a's in-process / single-loop assumption makes this fine
+today; PR 3b inherits the same assumption because the ``EventLoop``
+subscribes once at start.  If PR 3b or PR 4 ever introduces a
+background-thread subscriber (e.g. a channel-message receiver that
+subscribes from outside the loop's thread), the bus needs a
+``threading.Lock`` around subscribe/unsubscribe.  Either add the lock
+in PR 3b alongside the ``EventLoop`` subscription wiring, or document
+the single-thread invariant explicitly in
+:mod:`agents.memory._events`' module docstring; PR 3b's PR description
+records the choice._
 
 ##### From PR 3b review
 
@@ -623,7 +707,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 1 | 1 | EventLoop + WakeEvent + `SyncDispatchHandle` (TickScheduler thin adapter) | `feature/v033-rfc0024-event-loop` | ✅ Merged | [#406](https://github.com/mkhomutov/Persatrix/pull/406) | 2026-05-21 |
 | 2 | 2 | `autonomy.timers` config + per-agent SQLite `scheduled_wakes` (table + cache class shipped, **not wired** into `initialize_persona_agents`) | `feature/v033-rfc0024-timer-registry` | 🔀 PR open | this PR | — |
 | 2.1 | 2 | Wire `ScheduledWakesCache` into `initialize_persona_agents` — rebuild from config on startup; restore `next_fire_at_ms` so restart mid-jitter-window does not fire immediately | `feature/v033-rfc0024-scheduled-wakes-wiring` | ⬜ Not started | — | — |
-| 3a | 3 (prereq) | Write-side `salience` + `source_span_id` (no wake yet) | `feature/v033-rfc0024-salience-prereqs` | ⬜ Not started | — | — |
+| 3a | 3 (prereq) | Write-side `salience` + `source_span_id` (no wake yet) | `feature/v033-rfc0024-salience-prereqs` | 🔀 PR open | this PR | — |
 | 3b | 3 | `SalienceWake` + threshold + loop-back guard + rate-limit | `feature/v033-rfc0024-salience-wake` | ⬜ Not started | — | — |
 | 4 | 4 | Channel-message dispatch + cost-regression CI gate | `feature/v033-rfc0024-channel-dispatch` | ⬜ Not started | — | — |
 | 5 | — | Review follow-ups | `feature/v033-rfc0024-followups` | ⬜ Not started | — | — |
