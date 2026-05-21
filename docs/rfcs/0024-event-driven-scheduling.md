@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-09
-target: v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6); see docs/v0.3.3-plan.md and docs/rfcs/0024-pr-plan.md
+target: v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6)
 depends_on:
   - RFC-0005
   - RFC-0011

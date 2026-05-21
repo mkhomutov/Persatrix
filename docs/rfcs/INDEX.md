@@ -12,7 +12,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0013](0013-legal-ethical-compliance.md) | 📋 Proposed | architecture | v0.5.0 | 2026-04-16 | Legal, Ethical & Regulatory Compliance Framework |
 | [RFC-0014](0014-agent-skill-registry-lifecycle.md) | 📋 Proposed | architecture | v0.4.0 | 2026-04-16 | Agent Skill Registry & Lifecycle |
 | [RFC-0015](0015-process-automation-pattern-extraction.md) | 📋 Proposed | feature | v0.5.0 | 2026-04-19 | Process Automation & Pattern Extraction |
-| [RFC-0024](0024-event-driven-scheduling.md) | 📋 Proposed | architecture | v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6); see docs/v0.3.3-plan.md and docs/rfcs/0024-pr-plan.md | 2026-05-09 | Event-Driven Agent Scheduling |
+| [RFC-0024](0024-event-driven-scheduling.md) | 📋 Proposed | architecture | v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6) | 2026-05-09 | Event-Driven Agent Scheduling |
 | [RFC-0027](0027-reflection-driven-consolidation.md) | 📋 Proposed | feature | v0.4.0 | 2026-05-01 | Reflection-Driven Consolidation |
 | [RFC-0028](0028-agent-decision-policy-engine.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension) | 2026-05-02 | Agent Decision Policy Engine |
 | [RFC-0030](0030-multi-agent-conversation-governance.md) | 📋 Proposed | architecture | v0.3.x (Phase 1); v0.4.0 (Phase 2); v0.5.0+ (Phase 3) | 2026-05-11 | Multi-Agent Conversation Governance |
