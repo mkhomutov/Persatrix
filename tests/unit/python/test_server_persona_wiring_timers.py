@@ -427,3 +427,71 @@ class TestAutonomyTimersWiring:
         assert "ember-owl" not in dispatcher._tick_schedulers
 
         await agent.close_memory()
+
+    async def test_partial_register_failure_preserves_original_exception_when_stop_raises(
+        self, monkeypatch, caplog,
+    ):
+        """When ``scheduler.stop()`` itself raises during partial-init
+        cleanup, the original ``register_timer`` ``ValueError`` must still
+        propagate (not be masked by the cleanup error) so operators see
+        the actionable misconfiguration. The cleanup error is surfaced
+        via ``logger.exception`` rather than silently swallowed. Without
+        the inner ``try/except``, callers (``pytest.raises``, ops
+        dashboards) see "stop failed" instead of "timer X is misconfigured"
+        — exactly the diagnostic that pinpoints the YAML line to fix.
+        """
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {
+                "level": "autonomous",
+                "timers": [{
+                    "id": "bad_jitter", "interval_seconds": 1.0,
+                    "kind": "any", "jitter_max_seconds": 0.5,
+                }],
+            },
+        }
+
+        # Monkeypatch the class method — the test body never calls stop().
+        from agents.tick import TickScheduler
+
+        stop_calls = 0
+
+        async def _stop_raises(self, timeout: float = 10.0) -> None:
+            nonlocal stop_calls
+            stop_calls += 1
+            raise RuntimeError("simulated cleanup failure")
+
+        monkeypatch.setattr(TickScheduler, "stop", _stop_raises)
+
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+
+        with caplog.at_level(logging.ERROR, logger="Persatrix.agent.server_persona"):
+            with pytest.raises(ValueError, match="jitter_max"):
+                await initialize_persona_agents(
+                    {"ember-owl": agent}, dispatcher, schedulers,
+                )
+
+        assert stop_calls == 1, f"expected stop() called once, got {stop_calls}"
+
+        # Cleanup failure surfaced via logger.exception (ERROR + exc_info).
+        cleanup_errors = [
+            r for r in caplog.records
+            if r.levelname == "ERROR"
+            and r.exc_info is not None
+            and isinstance(r.exc_info[1], RuntimeError)
+            and "simulated cleanup failure" in str(r.exc_info[1])
+        ]
+        assert cleanup_errors, (
+            f"expected the cleanup RuntimeError to be logged via logger.exception; "
+            f"records: {[(r.levelname, r.message) for r in caplog.records]}"
+        )
+
+        # Partial-init invariants from the sibling test still hold.
+        assert "ember-owl" not in schedulers
+        assert "ember-owl" not in dispatcher._tick_schedulers
+
+        await agent.close_memory()

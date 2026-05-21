@@ -76,6 +76,36 @@ def _summarize_autonomy_cadence(timers: list[dict] | None, interval: int) -> str
     return f"timers=[{body}]"
 
 
+async def _register_configured_timers(
+    scheduler: TickScheduler,
+    timers: list[dict],
+    agent_id: str,
+) -> None:
+    """Register each ``autonomy.timers`` entry on ``scheduler.event_loop``.
+
+    On failure, stops the (already-started) scheduler then re-raises the
+    original error; a failure inside ``stop()`` is logged but must not
+    replace the active exception (operators need the YAML diagnostic).
+    Pinned by the two ``test_partial_register_failure_*`` wiring tests.
+    """
+    try:
+        for cfg in timers:
+            scheduler.event_loop.register_timer(
+                timer_id=cfg["id"], callback_kind=cfg["kind"],
+                interval=float(cfg["interval_seconds"]),
+                jitter_max=float(cfg.get("jitter_max_seconds", 0.0)),
+            )
+    except Exception:
+        try:
+            await scheduler.stop()
+        except Exception:
+            logger.exception(
+                "Agent %s: scheduler.stop() failed during partial-init "
+                "cleanup; original timer-registration error follows.", agent_id,
+            )
+        raise
+
+
 # ─── Agent type resolution ───────────────────────────────────
 
 
@@ -417,38 +447,9 @@ async def initialize_persona_agents(
                 agent_id,
             )
             scheduler.start()
-            # RFC 0024 PR 2: register each ``autonomy.timers`` entry on the
-            # underlying EventLoop after start so the supervisor task is
-            # already running.  The schema enforces ``interval_seconds >=
-            # 1.0`` and ``register_timer`` rejects again at the API
-            # boundary; a misconfigured persona surfaces ValueError on
-            # startup, not at first fire.
-            #
-            # If validation rejects any timer, stop the already-started
-            # scheduler before re-raising so the supervisor task and any
-            # previously-registered timers do not dangle in the running
-            # event loop — without this, a partial bring-up leaks an
-            # orphaned ``EventLoop`` whose ``call_later`` handles outlive
-            # the failed init.  Both registries (``tick_schedulers`` and
-            # ``dispatcher._tick_schedulers``) are published *after* this
-            # loop succeeds so a partial failure never exposes a stopped
-            # scheduler to the dispatch path — pinned by
-            # ``tests/unit/python/test_server_persona_wiring_timers.py
-            # ::test_partial_register_failure_stops_scheduler``.
+            # Register before publishing — partial failure must not expose a stopped scheduler.
             if timers is not None:
-                try:
-                    for timer_cfg in timers:
-                        scheduler.event_loop.register_timer(
-                            timer_id=timer_cfg["id"],
-                            callback_kind=timer_cfg["kind"],
-                            interval=float(timer_cfg["interval_seconds"]),
-                            jitter_max=float(
-                                timer_cfg.get("jitter_max_seconds", 0.0),
-                            ),
-                        )
-                except Exception:
-                    await scheduler.stop()
-                    raise
+                await _register_configured_timers(scheduler, timers, agent_id)
             tick_schedulers[agent_id] = scheduler
             dispatcher.register_tick_scheduler(agent_id, scheduler)
             logger.info("Started tick scheduler for %s (%s)", agent_id, cadence)
