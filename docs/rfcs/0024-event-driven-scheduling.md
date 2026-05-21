@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-09
-target: v0.3.x (TBD)
+target: v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6)
 depends_on:
   - RFC-0005
   - RFC-0011
@@ -19,7 +19,7 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-09
-**Target**: v0.3.x (TBD)
+**Target**: v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6) — PR plan: [`0024-pr-plan.md`](0024-pr-plan.md)
 **Depends on**: RFC 0005 (Persona Agent + Memory), RFC 0011 (Channels & Bridges), RFC 0017 (Memory Injection Budget)
 **Soft-depends on (Phase 2+)**: SA-1 (Personal/Society Storage Split) — tracked as a v0.4.0 RFC in [storage-architecture-roadmap.md](../storage-architecture-roadmap.md) (📋 Pending RFC at SA-1); see Open Question §1. Phase 2 ships in v0.3.x and therefore *before* SA-1; the soft-dependency is forward-only — once SA-1 lands, Phase 2's timer-persistence backend migrates as a follow-up.
 **Relates to**: RFC 0023 (LLM Call Leasing), RFC 0027 (Reflection-Driven Consolidation) — see §D for salience-signal ownership.
