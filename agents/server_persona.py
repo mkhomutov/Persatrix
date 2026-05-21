@@ -68,6 +68,14 @@ def default_grpc_target(orchestrator_url: str) -> str:
 _AGENT_ID_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 
 
+def _summarize_autonomy_cadence(timers: list[dict] | None, interval: int) -> str:
+    """Cadence summary for COST/Started logs (RFC 0024 PR 2)."""
+    if timers is None:
+        return f"tick_interval={interval}s"
+    body = ", ".join(f"{t['id']}@{t['interval_seconds']}s" for t in timers)
+    return f"timers=[{body}]"
+
+
 # ─── Agent type resolution ───────────────────────────────────
 
 
@@ -394,18 +402,15 @@ async def initialize_persona_agents(
             # and mislead future maintainers.
             # See README.md "Cost Warning" and SECURITY.md "Responsible Use".
             max_llm_calls = agent.config.get("max_llm_calls", "unset")
+            cadence = _summarize_autonomy_cadence(timers, interval)
             logger.warning(
                 "COST: persona '%s' is about to start an autonomous tick loop "
                 "and will consume LLM tokens continuously.",
                 agent_id,
             )
             logger.warning(
-                "COST: tick_interval=%ss, max_actions_per_tick=%s, "
-                "idle_after_ticks=%s, max_llm_calls=%s.",
-                interval,
-                max_actions,
-                idle_after,
-                max_llm_calls,
+                "COST: %s, max_actions_per_tick=%s, idle_after_ticks=%s, max_llm_calls=%s.",
+                cadence, max_actions, idle_after, max_llm_calls,
             )
             logger.warning(
                 "COST: stop agent '%s' explicitly when done — do not rely "
@@ -444,11 +449,7 @@ async def initialize_persona_agents(
                     await scheduler.stop()
                     tick_schedulers.pop(agent_id, None)
                     raise
-            logger.info(
-                "Started tick scheduler for %s (interval=%ds)",
-                agent_id,
-                interval,
-            )
+            logger.info("Started tick scheduler for %s (%s)", agent_id, cadence)
 
 
 def wire_history_fetchers(

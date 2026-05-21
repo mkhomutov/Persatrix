@@ -227,6 +227,49 @@ class TestTimersSchemaRejected:
             str(config_dir), str(schemas_dir), str(workflow_dir),
         )
 
+    def test_invalid_id_pattern_rejected(
+        self,
+        config_dir: Path,
+        schemas_dir: Path,
+        workflow_dir: Path,
+    ) -> None:
+        """Timer ``id`` must match ``^[a-z0-9][a-z0-9_-]*[a-z0-9]$``.
+
+        Why: the id is the public dashboard/log attribution key for every
+        :class:`ScheduledWake` this timer produces.  Restricting it to
+        kebab/snake-case ASCII keeps log greps and metric labels portable
+        across the agent fleet, and the leading/trailing ``[a-z0-9]``
+        anchor blocks single-char ids (too ambiguous to grep) and
+        leading/trailing separators (commonly produced by accidental
+        trimming).  Pinning here so a future schema relaxation has to
+        surface deliberately rather than silently widening the accepted
+        set.
+        """
+        bad_ids = [
+            "BadID",        # uppercase
+            "-leading",     # leading dash
+            "trailing-",    # trailing dash
+            "trailing_",    # trailing underscore
+            "a",            # single char (pattern requires ≥2)
+        ]
+        for bad_id in bad_ids:
+            _write(
+                config_dir,
+                _wrap({
+                    "level": "semi-autonomous",
+                    "timers": [
+                        {
+                            "id": bad_id,
+                            "interval_seconds": 60,
+                            "kind": "any",
+                        },
+                    ],
+                }),
+            )
+            assert not _validate_passes(
+                str(config_dir), str(schemas_dir), str(workflow_dir),
+            ), f"id={bad_id!r} should be rejected by the pattern but passed"
+
     def test_additional_properties_rejected(
         self,
         config_dir: Path,
