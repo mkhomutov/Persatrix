@@ -305,7 +305,52 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("L
 
 ##### From PR 1 review
 
-_None recorded at plan-authoring time._
+_Applied: `get_event_loop()` → `get_running_loop()`; public
+`EventLoop.has_timer` / `.task`; `monkeypatch`-fixture test patching;
+`SyncDispatchHandle.__await__` return narrowing;
+`EventDispatcher.dispatch` acts on `enqueue`'s boolean — queue-full
+returns `[]` instead of hanging on an unresolvable handle
+(`test_dispatch_returns_empty_on_queue_full`); reentrant deadlock
+pinned by `xfail(strict=True)` (fix in (1)); cancellation comment in
+`_handle_wake` (see (4)); stop-drops-pending-handles pinned by
+`xfail(strict=True)` (fix in (5)). Five deferred:_
+
+_(1) **Reentrant-dispatch deadlock fix.** `on_event(A)` re-dispatching
+to A awaits a handle the blocked supervisor cannot resolve.
+Pre-existing via non-reentrant `agent._lock`. Test landed; fix
+(own-supervisor guard or reentrancy escape hatch) is the follow-up.
+(2) **Queue-full `WARNING` spam.** Per-drop log in
+`EventLoop.enqueue` + companion on `dispatch` return-`[]`. Fine in
+Phase 1; PR 4 makes drops a steady state — rate-limit or `DEBUG`
+once `agent.wake.dropped` is the surface. (3) **`_wake_kind` vs.
+`dropped` label.** Helper emits `inbound/scheduled/salience/unknown`;
+`dropped` never reaches it. Before PR 4 wires the counter, decide
+shared vs. separate — pin in PR 4's RFC 0019 convention.
+(4) **Cancellation does not abort in-flight `on_event`.** When the
+caller's `wait_for` fires, the supervisor keeps running `on_event` to
+completion; `handle.resolve` no-ops. Timed-out chats still pay LLM +
+tool round on the wallet lease. Pre-existing v0.3.2 lock shape;
+substrate broadens it. Fix outside RFC 0024 —
+`LLMClient.create_message` cancellation + wallet-lease
+release-on-cancel. (5) **Stop drops pending handles silently.**
+``EventLoop.stop`` sets ``_stopped`` and enqueues ``_StopSentinel``;
+the supervisor's ``while not _stopped.is_set()`` guard exits the
+loop body before draining items the producer enqueued before stop.
+Any ``InboundEventWake.handle`` left in the queue stays pending
+forever — chat-style callers hang on their external ``wait_for``
+deadline (chat path: clamped timeout; in-process cascade: 60 s
+default). Same TOCTOU shape covers a producer that checks
+``scheduler.is_running`` and ``enqueue``-s while ``stop()`` races
+in between. Test landed
+(`test_stop_settles_pending_handles`, xfail strict=True raises
+``TimeoutError``); fix is to drain residual queue items after task
+exit and reject any ``InboundEventWake.handle`` with a shutdown
+exception, plus guard ``enqueue`` against accepting wakes once
+``_stopped`` is set so the TOCTOU race rejects immediately. Not a
+regression (v0.3.2 ``task.cancel()`` dropped pending wakes the same
+way), but the substrate broadens the window. Pre-condition for
+graceful-shutdown semantics in PR 4's cost-regression CI gate
+work — drops there are a steady state, not a teardown corner._
 
 ##### From PR 2 review
 
@@ -400,7 +445,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | RFC Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-----------|-------|--------|--------|-----------|--------|
-| 1 | 1 | EventLoop + WakeEvent + `SyncDispatchHandle` (TickScheduler thin adapter) | `feature/v033-rfc0024-event-loop` | ⬜ Not started | — | — |
+| 1 | 1 | EventLoop + WakeEvent + `SyncDispatchHandle` (TickScheduler thin adapter) | `feature/v033-rfc0024-event-loop` | 🔀 PR open | this PR | — |
 | 2 | 2 | `autonomy.timers` config + per-agent SQLite `scheduled_wakes` | `feature/v033-rfc0024-timer-registry` | ⬜ Not started | — | — |
 | 3a | 3 (prereq) | Write-side `salience` + `source_span_id` (no wake yet) | `feature/v033-rfc0024-salience-prereqs` | ⬜ Not started | — | — |
 | 3b | 3 | `SalienceWake` + threshold + loop-back guard + rate-limit | `feature/v033-rfc0024-salience-wake` | ⬜ Not started | — | — |

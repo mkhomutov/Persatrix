@@ -1,49 +1,68 @@
 """
-Persatrix Tick Scheduler.
+Persatrix Tick Scheduler — thin adapter over :class:`agents.event_loop.EventLoop`.
 
-Autonomous tick loop for persona agents with idle detection.
-Extracted from ``persona.py`` for modularity — no logic changes.
+RFC 0024 Phase 1: the autonomous polling loop is gone. ``TickScheduler``
+now constructs an :class:`EventLoop` and registers a single periodic timer
+(``ScheduledWake(timer_id="legacy_tick", callback_kind="tick")``) at the
+configured ``interval``. Idle accounting, energy recovery, and executor
+wiring live in the adapter's ``on_tick`` callback so existing tests
+(``tests/unit/python/test_tick_scheduler.py``) keep their assertions.
+
+Back-compat contract:
+
+* ``tick_interval_seconds`` in ``agents.yaml`` continues to work — Phase 2
+  introduces ``autonomy.timers`` and Phase 5 / v0.4.0 emits the deprecation
+  warning.
+* ``wake()`` resets ``idle_count`` and enqueues a single ``ScheduledWake``
+  so woken agents fire on_tick immediately instead of waiting the rest of
+  the interval — preserves the v0.3.2 "event arrived, tick now" semantics
+  for fire-and-forget callers.
+* ``EventDispatcher.dispatch()`` no longer calls ``wake()``; it goes through
+  ``event_loop.enqueue(InboundEventWake(..., handle=...))`` directly. The
+  ``wake()`` method stays as a public API for any external fire-and-forget
+  caller (currently none in tree).
 
 Lock protocol
 ~~~~~~~~~~~~~
-The tick loop has two branches with different locking strategies:
+Unchanged from v0.3.2:
 
 - **Idle branch** (``is_idle`` is True): acquires ``agent.exclusive()``
-  explicitly because ``recover_idle_energy()`` does *not* acquire the
-  lock internally.
+  explicitly because ``recover_idle_energy()`` does *not* acquire the lock
+  internally.
 - **Non-idle branch**: calls ``agent.on_tick()`` which acquires the
   per-agent lock *internally*.  Wrapping in ``exclusive()`` here would
   deadlock because ``asyncio.Lock`` is not reentrant.
-
-This asymmetry is intentional and must be preserved if the lock
-strategy changes.
-(F-64-DR2-13: document lock protocol in module docstring.)
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING
 
 from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
+from .event_loop import EventLoop, ScheduledWake
 from .persona_types import ActionType
 
 if TYPE_CHECKING:
     from .dispatch import ActionExecutor
+    from .event_loop import InboundEventWake  # noqa: F401 — typing context only
     from .persona_runtime import _LLMPersonaAgent
+    from .persona_types import AgentAction, AgentEvent
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["TickScheduler"]
 
 
-class TickScheduler:
-    """Autonomous tick loop for persona agents.
+_LEGACY_TIMER_ID = "legacy_tick"
 
-    Fires ``on_tick()`` at configurable intervals. Tracks idle ticks
-    (consecutive ``DO_NOTHING`` actions) and skips LLM calls when idle.
-    Supports ``wake()`` to reset idle state on incoming events.
+
+class TickScheduler:
+    """Thin adapter over :class:`EventLoop` for autonomous persona agents.
+
+    Registers a single legacy timer that synthesises ``ScheduledWake`` at
+    ``interval``. The adapter's ``on_tick`` callback runs the idle-detection
+    + energy-recovery + executor logic that lived inline in v0.3.2.
     """
 
     # Minimum tick interval to prevent accidental busy loops from
@@ -76,9 +95,20 @@ class TickScheduler:
         self._idle_after_ticks = idle_after_ticks
         self._executor = executor
         self._idle_count = 0
-        self._task: asyncio.Task[None] | None = None
-        self._stopped = asyncio.Event()
-        self._wake_event = asyncio.Event()
+        self._event_loop = EventLoop(
+            agent_id=agent.agent_id,
+            on_event=self._handle_event_wake,
+            on_tick=self._handle_scheduled_wake,
+        )
+
+    # ─── public surface (preserved from v0.3.2) ────────────────────────
+
+    @property
+    def event_loop(self) -> EventLoop:
+        """The underlying :class:`EventLoop` — exposed to
+        :class:`EventDispatcher` so it can enqueue
+        :class:`InboundEventWake` with a :class:`SyncDispatchHandle`."""
+        return self._event_loop
 
     @property
     def idle_count(self) -> int:
@@ -92,186 +122,122 @@ class TickScheduler:
 
     @property
     def is_running(self) -> bool:
-        """Whether the tick loop task is active."""
-        return self._task is not None and not self._task.done()
+        """Whether the underlying :class:`EventLoop` task is active."""
+        return self._event_loop.is_running
+
+    @property
+    def _task(self) -> object | None:
+        """v0.3.2 back-compat shim — pre-refactor tests reach into ``_task``
+        directly to verify start-idempotency.  Returns the underlying
+        :class:`EventLoop`'s supervisor task via its public ``task``
+        property (or ``None`` when the loop has not been started yet)."""
+        return self._event_loop.task
 
     def wake(self) -> None:
-        """Reset idle state and wake the tick loop.
+        """Reset idle state and fire ``on_tick`` immediately.
 
-        Called by EventDispatcher when an event arrives for this agent.
+        v0.3.2 semantics preserved: external fire-and-forget callers that
+        signal "you have new work" get an immediate tick.
+        ``EventDispatcher.dispatch`` no longer calls this on the hot path
+        — it enqueues an :class:`InboundEventWake` with a handle directly
+        — but the dispatcher still falls back to ``wake()`` when a
+        scheduler is registered without being started (test fixtures).
+
+        Only enqueues a ScheduledWake when the underlying :class:`EventLoop`
+        is running; otherwise the wake's only observable effect is the
+        idle-counter reset (the test-fixture path).
         """
         self._idle_count = 0
-        self._wake_event.set()
+        if self._event_loop.is_running:
+            self._event_loop.enqueue(
+                ScheduledWake(timer_id=_LEGACY_TIMER_ID, callback_kind="tick"),
+            )
 
     def start(self) -> None:
-        """Start the tick loop as an asyncio task."""
-        if self._task is not None and not self._task.done():
+        """Start the underlying :class:`EventLoop` and register the legacy timer."""
+        if self._event_loop.is_running:
             return
-        self._stopped.clear()
-        self._task = asyncio.create_task(self._run(), name=f"tick-{self._agent.agent_id}")
+        self._event_loop.start()
+        # Register only once across start/stop/start cycles — _MIN_INTERVAL
+        # has already clamped the interval at __init__ time.  Uses the
+        # public ``has_timer`` API so this adapter does not reach into
+        # ``EventLoop._timers`` private state.
+        if not self._event_loop.has_timer(_LEGACY_TIMER_ID):
+            self._event_loop.register_timer(
+                timer_id=_LEGACY_TIMER_ID,
+                callback_kind="tick",
+                interval=self._interval,
+            )
 
     async def stop(self, timeout: float = 10.0) -> None:
-        """Stop the tick loop, waiting for in-flight operations.
+        """Stop the underlying :class:`EventLoop` and cancel the legacy timer."""
+        await self._event_loop.stop(timeout=timeout)
 
-        Args:
-            timeout: Maximum seconds to wait for the current tick to complete.
+    # ─── callbacks (the v0.3.2 _run() body lives here now) ─────────────
+
+    async def _handle_scheduled_wake(self, wake: ScheduledWake) -> None:
+        """Handle one ``ScheduledWake`` — preserves the v0.3.2 tick semantics.
+
+        Idle branch acquires ``agent.exclusive()`` explicitly because
+        ``recover_idle_energy()`` does NOT acquire the lock internally.
+        Non-idle branch calls ``on_tick()`` which acquires the per-agent
+        lock internally — wrapping here would deadlock (asyncio.Lock is
+        not reentrant).
         """
-        self._stopped.set()
-        self._wake_event.set()  # Unblock any wait
-        if self._task is not None and not self._task.done():
-            try:
-                # shield() prevents wait_for's cancellation from killing
-                # the task — _stopped + _wake_event already signal _run()
-                # to exit cleanly.  If it doesn't exit within `timeout`,
-                # we cancel the task explicitly in the TimeoutError branch.
-                await asyncio.wait_for(asyncio.shield(self._task), timeout=timeout)
-            except TimeoutError:
-                logger.warning(
-                    "Tick scheduler for %s did not stop within %.0fs, cancelling",
-                    self._agent.agent_id,
-                    timeout,
-                )
-                self._task.cancel()
-                try:
-                    await self._task
-                except asyncio.CancelledError:
-                    pass
-            except asyncio.CancelledError:
-                pass
-        self._task = None
-
-    async def _run(self) -> None:
-        """Main tick loop."""
-        logger.info(
-            "Tick scheduler started for %s (interval=%.0fs, idle_after=%d)",
-            self._agent.agent_id,
-            self._interval,
-            self._idle_after_ticks,
-        )
-        while not self._stopped.is_set():
-            # Wait for interval or wake signal
-            self._wake_event.clear()
-            try:
-                await asyncio.wait_for(
-                    self._wait_for_stop_or_wake(),
-                    timeout=self._interval,
-                )
-                # _stopped or _wake_event was set
-                if self._stopped.is_set():
-                    break
-                # Woken up — fall through to tick immediately
-            except TimeoutError:
-                # Normal interval elapsed
-                pass
-
-            if self._stopped.is_set():
-                break
-
-            # Skip LLM calls when idle, but still recover energy so
-            # woken agents aren't energy-depleted after long idle periods.
-            # Brief lock acquire ensures consistency with concurrent
-            # on_event() which may drain_energy().
-            # (Review finding: idle energy starvation.)
-            if self.is_idle:
-                logger.debug(
-                    "Agent %s idle (%d ticks), skipping LLM tick",
-                    self._agent.agent_id,
-                    self._idle_count,
-                )
-                # Use public API instead of reaching into private
-                # attributes (PR #55 review: TickScheduler should use
-                # public API for agent lock and state).
-                async with self._agent.exclusive():
-                    self._agent.recover_idle_energy()
-                continue
-
-            try:
-                # on_tick() acquires self._agent._lock internally — do NOT
-                # wrap this call in self._agent.exclusive().  asyncio.Lock
-                # is not reentrant: acquiring here + inside on_tick() would
-                # deadlock.  The idle-recovery branch above acquires the
-                # lock explicitly because recover_idle_energy() does NOT
-                # acquire it internally.
-                # (PR #64 review F-64-DR-12: document lock asymmetry.)
-                actions = await self._agent.on_tick()
-                # Limit actions per tick
-                actions = actions[: self._max_actions_per_tick]
-
-                # Track idle state
-                all_do_nothing = all(
-                    a.action_type == ActionType.DO_NOTHING for a in actions
-                )
-                if all_do_nothing:
-                    self._idle_count += 1
-                else:
-                    self._idle_count = 0
-
-                # Execute actions.
-                #
-                # Pass ``cascade_depth=DEFAULT_MAX_CASCADE_DEPTH`` explicitly:
-                # the tick loop has no inbound event to derive depth from
-                # (unlike :meth:`EventDispatcher.dispatch`, which forwards
-                # ``inbound_depth + 1``), so any ``SEND_CHANNEL_MESSAGE`` an
-                # on_tick produces must publish at the cap so the
-                # orchestrator's
-                # ``cascade_depth >= max_cascade_depth`` clamp drops fanout.
-                # Without this, an inbound channel message that wakes the
-                # scheduler via :meth:`EventDispatcher.dispatch`'s
-                # ``scheduler.wake()`` would have its woken-tick reply
-                # publish at depth 0 and reset the cascade in flight —
-                # the v0.3.0 demo runaway. Explicit kwarg (rather than
-                # relying on the executor's default) so the intent is
-                # readable at the call site.
-                if self._executor is not None:
-                    await self._executor.execute(
-                        self._agent.agent_id, actions,
-                        cascade_depth=DEFAULT_MAX_CASCADE_DEPTH,
-                    )
-                elif not all_do_nothing:
-                    # No executor configured but agent produced actionable
-                    # output — likely a wiring bug.  Log so operators can
-                    # diagnose why actions are silently discarded.
-                    # (PR #64 review F-64-DR-14: silent action discard.)
-                    logger.warning(
-                        "Agent %s produced %d non-idle action(s) but no "
-                        "executor is configured — actions discarded",
-                        self._agent.agent_id,
-                        len(actions),
-                    )
-
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception(
-                    "Tick error for agent %s", self._agent.agent_id,
-                )
-
-        logger.info("Tick scheduler stopped for %s", self._agent.agent_id)
-
-    async def _wait_for_stop_or_wake(self) -> None:
-        """Wait until either ``_stopped`` or ``_wake_event`` is set.
-
-        Creates two ``asyncio.Task`` objects — one for each event — and
-        uses ``asyncio.wait(return_when=FIRST_COMPLETED)`` to unblock as
-        soon as either fires.  The losing task is cancelled in the
-        ``finally`` block to avoid leaked coroutines.
-
-        This dual-event pattern avoids race conditions that would arise
-        from sequential ``await`` calls (missing the other signal while
-        waiting on the first).
-        """
-        stop_task = asyncio.create_task(self._stopped.wait())
-        wake_task = asyncio.create_task(self._wake_event.wait())
-        try:
-            await asyncio.wait(
-                {stop_task, wake_task},
-                return_when=asyncio.FIRST_COMPLETED,
+        if self.is_idle:
+            logger.debug(
+                "Agent %s idle (%d ticks), skipping LLM tick",
+                self._agent.agent_id,
+                self._idle_count,
             )
-        finally:
-            for t in (stop_task, wake_task):
-                if not t.done():
-                    t.cancel()
-                    try:
-                        await t
-                    except asyncio.CancelledError:
-                        pass
+            async with self._agent.exclusive():
+                self._agent.recover_idle_energy()
+            return
+
+        # on_tick() acquires self._agent._lock internally — do NOT wrap
+        # in self._agent.exclusive() (asyncio.Lock is not reentrant).
+        actions = await self._agent.on_tick()
+        actions = actions[: self._max_actions_per_tick]
+
+        all_do_nothing = all(
+            a.action_type == ActionType.DO_NOTHING for a in actions
+        )
+        if all_do_nothing:
+            self._idle_count += 1
+        else:
+            self._idle_count = 0
+
+        # cascade_depth=DEFAULT_MAX_CASCADE_DEPTH explicitly: the tick loop
+        # has no inbound event to derive depth from (unlike
+        # EventDispatcher.dispatch which forwards inbound_depth + 1), so any
+        # SEND_CHANNEL_MESSAGE an on_tick produces must publish at the cap so
+        # the orchestrator's cascade_depth >= max_cascade_depth clamp drops
+        # fan-out. The v0.3.0 demo runaway cascade was the consequence of
+        # the previous publish-at-depth-0 default.
+        if self._executor is not None:
+            await self._executor.execute(
+                self._agent.agent_id, actions,
+                cascade_depth=DEFAULT_MAX_CASCADE_DEPTH,
+            )
+        elif not all_do_nothing:
+            # No executor configured but agent produced actionable output —
+            # likely a wiring bug.  Log so operators can diagnose silent
+            # action discard (F-64-DR-14).
+            logger.warning(
+                "Agent %s produced %d non-idle action(s) but no executor "
+                "is configured — actions discarded",
+                self._agent.agent_id,
+                len(actions),
+            )
+
+    async def _handle_event_wake(self, event: AgentEvent) -> list[AgentAction]:
+        """Dispatch an inbound event — reached when
+        :class:`EventDispatcher` enqueues an :class:`InboundEventWake` on
+        this agent's loop.
+
+        Resets ``idle_count`` so a woken autonomous agent does not stay in
+        the idle branch.  Returns the agent's actions so the dispatch
+        handle resolves with the right ``list[AgentAction]``.
+        """
+        self._idle_count = 0
+        return await self._agent.on_event(event)

@@ -303,6 +303,15 @@ class _ActionLoopMixin:
         injection_result = await self._inject_memory_context(event, query=memory_query)
 
         # RFC 0017 §F: empty-context TICK short-circuit.
+        #
+        # RFC 0024 vestigial-on-arrival: this guard remains load-bearing
+        # through v0.3.3 (TICKs still fire via the ``legacy_tick`` timer
+        # under the ``EventLoop`` adapter) and v0.4.0 (Phase 5 ships only
+        # the ``tick_interval_seconds`` deprecation warning).  RFC 0024
+        # Phase 6 (v0.5+) deletes the guard once ``EventType.TICK`` is
+        # removed; see ``docs/rfcs/0024-event-driven-scheduling.md``
+        # §Phased Implementation Plan rows Phase 5 / Phase 6.
+        #
         # Suppress the LLM call when all four conditions hold:
         #   1. This is an autonomous TICK event (not a user/task event).
         #   2. No memory was admitted (zero relevant episodes, notes, or

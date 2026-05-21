@@ -137,6 +137,21 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # entry when the remaining 2-PR sequence (PR 5 / PR 6) closes out
     # and the plan is sealed at v0.3.1 release tag.
     "docs/rfcs/0026-pr-plan.md",
+    # Same per-PR review residual accumulator pattern as 0008-pr-plan.md,
+    # 0019-pr-plan.md, and 0026-pr-plan.md above. The plan exited PR 1's
+    # first review window with ~7 983 words (1 word under the cap); the
+    # PR 1 follow-up review captured a fifth deferred item — stop()
+    # orphans pending ``InboundEventWake`` handles via the supervisor's
+    # ``_stopped`` guard short-circuiting before the queue drains, plus
+    # the same TOCTOU shape on ``enqueue`` racing ``stop()``. The item
+    # text co-locates the symptom, fix sketch, and the pinning xfail
+    # test name so the next reader sees the residual alongside the
+    # remaining four. Trimming would defeat the co-location; same
+    # disposition as the prior PR plans. Remove this entry once the
+    # remaining 4-PR sequence (PR 2 / PR 3a / PR 3b / PR 4) plus the
+    # review-follow-ups PR closes out and the plan is sealed at the
+    # v0.3.3 release tag.
+    "docs/rfcs/0024-pr-plan.md",
     # docs/observability.md tipped over the 3 000-word prose limit when
     # RFC 0009 PR 1c added the audit-logger metric inventory + SLO alert
     # templates to §13. The new content is already trimmed (a one-line

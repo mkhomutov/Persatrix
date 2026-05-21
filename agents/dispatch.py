@@ -19,6 +19,7 @@ from opentelemetry.trace import Link
 from .action_executor import ActionExecutor
 from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .channel_publisher import ChannelPublisher
+from .event_loop import InboundEventWake, SyncDispatchHandle
 from .persona_types import AgentAction, AgentEvent
 
 if TYPE_CHECKING:
@@ -149,10 +150,13 @@ class EventDispatcher:
 
         scheduler = self._tick_schedulers.get(target_id)
         if scheduler is not None:
-            scheduler.wake()
             # RFC 0019 § I: record event→tick causality as a Span Link the
             # next on_tick() consumes. Captured here because the dispatcher
             # is the only call site that runs inside the active event span.
+            # Preserves the v0.3.2 pending-link contract even though
+            # ``scheduler.wake()`` is no longer called from this path —
+            # the dispatch enqueue below reaches the agent via the
+            # ``EventLoop`` substrate instead.
             current_span = trace.get_current_span()
             ctx = current_span.get_span_context()
             if ctx.is_valid:
@@ -165,7 +169,48 @@ class EventDispatcher:
                         Link(ctx, attributes={"link.kind": "trigger"}),
                     )
 
-        actions = await agent.on_event(event)
+        # RFC 0024 Phase 1: when a TickScheduler is registered *and started*
+        # the agent owns a per-agent ``EventLoop``; route through
+        # ``event_loop.enqueue`` so inbound events drain the same FIFO as
+        # scheduled timer wakes.  The ``SyncDispatchHandle`` preserves the
+        # three v0.3.2 contracts: return value (``list[AgentAction]`` for
+        # SendChatMessage), await serialisation (``ActionExecutor.dispatch``
+        # wraps this in ``asyncio.wait_for``), and queue-mediated ordering.
+        #
+        # Two fallback cases keep using the direct ``on_event`` call:
+        # 1. No scheduler registered — non-autonomous agents under the
+        #    v0.3.3 transitional shape.
+        # 2. Scheduler registered but not started — test fixtures that
+        #    construct a scheduler purely to verify the idle-reset
+        #    semantics without booting the event loop.  Calling
+        #    ``scheduler.wake()`` preserves the v0.3.2 idle-counter reset
+        #    that those tests assert on.
+        if scheduler is not None and scheduler.is_running:
+            handle = SyncDispatchHandle()
+            # RFC 0024 Decided §1 — discard, not block.  ``enqueue`` returns
+            # ``False`` when the queue is full; the wake is dropped and the
+            # supervisor never resolves the handle.  Awaiting it would hang
+            # until the caller's external ``wait_for`` deadline fires
+            # (SendChatMessage: clamped timeout; in-process cascade: 60 s
+            # default).  Return ``[]`` synchronously so the discard contract
+            # holds for chat-style callers too — same shape as the cascade-
+            # depth-exceeded / target-not-found drops above.  (PR 1 review
+            # finding #1.)
+            if not scheduler.event_loop.enqueue(
+                InboundEventWake(event=event, handle=handle),
+            ):
+                logger.warning(
+                    "Dispatch dropped (event loop queue full): "
+                    "agent=%s event=%s dropped_total=%d",
+                    target_id, event.event_type.value,
+                    scheduler.event_loop.dropped_count,
+                )
+                return []
+            actions = await handle
+        else:
+            if scheduler is not None:
+                scheduler.wake()
+            actions = await agent.on_event(event)
 
         # Propagate cascade depth into action execution so that
         # SEND_CHANNEL_MESSAGE child dispatches inherit the current depth.

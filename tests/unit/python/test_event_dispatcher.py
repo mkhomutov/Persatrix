@@ -5,6 +5,7 @@ payload isolation, and tick scheduler wiring.
 All tests use mock LLM client — no real API calls.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -365,4 +366,52 @@ class TestEventDispatcher:
             f"executor must receive inbound depth+1 as kwarg; "
             f"got {call.kwargs!r}"
         )
+        await agent.close_memory()
+
+    async def test_dispatch_returns_empty_on_queue_full(self):
+        """RFC 0024 PR 1 review finding #1 — when the per-agent EventLoop
+        queue is full, ``dispatch`` must return ``[]`` synchronously
+        instead of awaiting an unresolvable ``SyncDispatchHandle``.
+
+        Pre-fix shape: the dispatcher created a handle, called
+        ``event_loop.enqueue(...)`` ignoring its boolean return value, and
+        then ``await handle``-ed.  When ``enqueue`` returned ``False`` (queue
+        full, dropped per RFC 0024 Decided §1), the supervisor never saw the
+        wake and the handle stayed pending forever — chat-style callers
+        hung until their external ``asyncio.wait_for`` deadline fired (chat
+        path: clamped timeout; in-process cascade: 60 s default).  This
+        test fails fast (``asyncio.wait_for`` at 1.0 s) under the pre-fix
+        shape and passes once the dispatcher checks the return value.
+
+        Fake-scheduler approach: ``EventLoop.enqueue``'s queue-full path
+        under real conditions is already pinned by
+        ``TestQueueFullDiscard.test_queue_full_discards_and_increments_dropped``
+        in ``agents/tests/test_event_loop.py``.  This test pins the
+        *dispatcher-side* contract: act on the return value.  A
+        ``MagicMock`` whose ``enqueue`` always returns ``False`` isolates
+        the contract from the EventLoop's queueing machinery.
+        """
+        agent = await _make_agent()
+        dispatcher = EventDispatcher(agents={"ember-owl": agent})
+
+        # Fake scheduler: ``is_running`` True so dispatch takes the
+        # event-loop branch; ``event_loop.enqueue`` always reports queue-full.
+        fake_scheduler = MagicMock()
+        fake_scheduler.is_running = True
+        fake_scheduler.event_loop = MagicMock()
+        fake_scheduler.event_loop.enqueue = MagicMock(return_value=False)
+        dispatcher.register_tick_scheduler("ember-owl", fake_scheduler)
+
+        event = AgentEvent(
+            event_type=EventType.CHANNEL_MESSAGE,
+            payload={"content": "queue-full"},
+        )
+        # Under the pre-fix shape this hangs forever; the tight timeout
+        # converts the hang into a TimeoutError so the test surfaces it.
+        actions = await asyncio.wait_for(
+            dispatcher.dispatch("ember-owl", event), timeout=1.0,
+        )
+
+        assert actions == []
+        fake_scheduler.event_loop.enqueue.assert_called_once()
         await agent.close_memory()
