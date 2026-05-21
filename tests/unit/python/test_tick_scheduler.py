@@ -17,6 +17,7 @@ from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_runtime.memory_context import MemoryInjectionResult
 from agents.persona_types import ActionType, AgentAction
+from agents.event_loop import EventLoop
 from agents.tick import TickScheduler
 from agents.tools.registry import clear_registry
 
@@ -102,16 +103,19 @@ async def _make_agent(
 class TestTickScheduler:
 
     @pytest.fixture(autouse=True)
-    def _lower_min_interval(self):
+    def _lower_min_interval(self, monkeypatch):
         """Allow sub-second intervals in tests.
 
         Production _MIN_INTERVAL is 1.0s to prevent cost bursts
         (F-64-DR2-11).  Tests need fast intervals to avoid multi-second waits.
+
+        RFC 0024 PR 2: ``EventLoop._MIN_INTERVAL`` is an independent
+        floor on the underlying substrate (defense-in-depth at the
+        ``register_timer`` API boundary), so both layers must be lowered
+        for the sub-second TickScheduler cadence to register.
         """
-        original = TickScheduler._MIN_INTERVAL
-        TickScheduler._MIN_INTERVAL = 0.01
-        yield
-        TickScheduler._MIN_INTERVAL = original
+        monkeypatch.setattr(TickScheduler, "_MIN_INTERVAL", 0.01)
+        monkeypatch.setattr(EventLoop, "_MIN_INTERVAL", 0.01)
 
     async def test_start_stop(self):
         agent = await _make_agent()
