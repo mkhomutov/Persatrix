@@ -8,6 +8,7 @@ contracts:
 - ``tick_interval_seconds`` only → PR 1 back-compat synthesised legacy timer.
 - ``timers`` only → no legacy timer; configured timers register on EventLoop.
 - ``timers: []`` (v0.3.3 default) → zero timers; substrate exists but quiet.
+- Partial timer-registration failure → scheduler stopped, raise propagates.
 """
 
 from __future__ import annotations
@@ -187,4 +188,57 @@ class TestAutonomyTimersWiring:
         assert scheduler.event_loop.is_running
 
         await scheduler.stop()
+        await agent.close_memory()
+
+    async def test_partial_register_failure_stops_scheduler(self):
+        """A misconfigured timer in the middle of ``autonomy.timers`` causes
+        ``register_timer`` to raise after the scheduler is already started.
+
+        The wiring path must stop the scheduler and drop it from
+        ``tick_schedulers`` before propagating the error — otherwise the
+        supervisor task and any earlier-registered timer's ``call_later``
+        handles outlive the failed init, leaving an orphan ``EventLoop``
+        attached to the asyncio loop.
+
+        Failure mode the cross-field jitter cap surfaces: schema validates
+        each timer's fields independently, so an ``interval_seconds: 1.0,
+        jitter_max_seconds: 0.5`` combination is schema-valid but rejected
+        at the ``register_timer`` API boundary.
+        """
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {
+                "level": "autonomous",
+                "timers": [
+                    {
+                        "id": "valid_timer",
+                        "interval_seconds": 30,
+                        "kind": "memory_consolidation",
+                    },
+                    {
+                        # interval=1.0 leaves zero slack for jitter — the
+                        # cross-field cap rejects this at API boundary.
+                        "id": "bad_jitter",
+                        "interval_seconds": 1.0,
+                        "kind": "any",
+                        "jitter_max_seconds": 0.5,
+                    },
+                ],
+            },
+        }
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+
+        with pytest.raises(ValueError, match="jitter_max"):
+            await initialize_persona_agents(
+                {"ember-owl": agent}, dispatcher, schedulers,
+            )
+
+        # Scheduler was popped from the local registry — caller's view is
+        # clean, no half-bring-up entry to confuse subsequent dispatches.
+        assert "ember-owl" not in schedulers
+
         await agent.close_memory()

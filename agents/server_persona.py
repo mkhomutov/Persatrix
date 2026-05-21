@@ -420,16 +420,30 @@ async def initialize_persona_agents(
             # 1.0`` and ``register_timer`` rejects again at the API
             # boundary; a misconfigured persona surfaces ValueError on
             # startup, not at first fire.
+            #
+            # If validation rejects any timer, stop the already-started
+            # scheduler before re-raising so the supervisor task and any
+            # previously-registered timers do not dangle in the running
+            # event loop — without this, a partial bring-up leaks an
+            # orphaned ``EventLoop`` whose ``call_later`` handles outlive
+            # the failed init.  Pinned by
+            # ``tests/unit/python/test_server_persona_wiring_timers.py
+            # ::test_partial_register_failure_stops_scheduler``.
             if timers is not None:
-                for timer_cfg in timers:
-                    scheduler.event_loop.register_timer(
-                        timer_id=timer_cfg["id"],
-                        callback_kind=timer_cfg["kind"],
-                        interval=float(timer_cfg["interval_seconds"]),
-                        jitter_max=float(
-                            timer_cfg.get("jitter_max_seconds", 0.0),
-                        ),
-                    )
+                try:
+                    for timer_cfg in timers:
+                        scheduler.event_loop.register_timer(
+                            timer_id=timer_cfg["id"],
+                            callback_kind=timer_cfg["kind"],
+                            interval=float(timer_cfg["interval_seconds"]),
+                            jitter_max=float(
+                                timer_cfg.get("jitter_max_seconds", 0.0),
+                            ),
+                        )
+                except Exception:
+                    await scheduler.stop()
+                    tick_schedulers.pop(agent_id, None)
+                    raise
             logger.info(
                 "Started tick scheduler for %s (interval=%ds)",
                 agent_id,
