@@ -435,7 +435,15 @@ platform-stable cross-process on Linux/macOS/Windows today, bounded
 by the loader's ``[_MIN_INTERVAL, interval + jitter_max]`` clamp on
 read so a meaningless post-reboot anchor degrades to a fresh-first-
 fire-shaped delay — pinned by
-``test_scheduled_wakes_cache_wiring_anchors.TestStaleAnchorClamp``.
+``test_scheduled_wakes_cache_wiring_anchors.TestStaleAnchorClamp``;
+cache-setup partial-init cleanup symmetry — ``init_persona_timers``
+now closes the freshly-opened cache *and* stops the started scheduler
+when ``initialize`` / ``list_timers`` / ``rebuild_from_config`` raises
+(previously only ``_register_configured_timers`` failures triggered
+cleanup, so a SQL fault would leak the ``aiosqlite`` connection plus
+the supervisor task that ``initialize_persona_agents`` had already
+started but not yet handed to ``tick_schedulers``).  Pinned by
+``test_scheduled_wakes_cache_wiring.TestCacheLifecycleOnSetupFailure``.
 Six deferred:_
 
 _(1) **``next_fire_at_ms`` is refreshed only at init, not on each

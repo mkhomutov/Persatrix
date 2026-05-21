@@ -157,11 +157,28 @@ async def init_persona_timers(
     rebuild it from ``timers``, register every timer on the event loop,
     and store the cache for later shutdown.
 
-    The partial-init cleanup contract is: a ``register_timer`` failure
-    stops the scheduler *and* closes the freshly-opened cache before
-    the original exception propagates, so the caller sees the actionable
-    YAML diagnostic rather than a "stop failed" / "cache close failed"
-    chain that masks it.
+    Partial-init cleanup contract — both failure modes converge:
+
+    * ``register_timer`` failure: ``_register_configured_timers`` stops
+      the scheduler internally; this function closes the freshly-opened
+      cache before re-raising.
+    * Cache-setup failure (``initialize`` / ``list_timers`` /
+      ``rebuild_from_config``): this function closes the cache (no-op
+      if ``_conn`` was never set) *and* stops the scheduler so the
+      caller does not observe a running scheduler whose entry never
+      reaches ``tick_schedulers``.  Pinned by
+      ``test_scheduled_wakes_cache_wiring.TestCacheLifecycleOnSetupFailure``.
+
+    Why both branches stop the scheduler: ``initialize_persona_agents``
+    calls ``scheduler.start()`` *before* invoking this function (see
+    the call site in :func:`agents.server_persona.initialize_persona_agents`).
+    A failure here therefore leaves an orphan supervisor task unless we
+    actively stop it — the caller's ``tick_schedulers`` dict won't
+    contain it, so ``AgentServer.stop()`` can't.
+
+    Either cleanup error (cache or scheduler) is surfaced via
+    ``logger.exception`` but must not mask the original exception —
+    operators need the actionable root cause, not the cleanup chain.
 
     See :mod:`agents.memory.scheduled_wakes` module docstring for the
     ``next_fire_at_ms`` clock contract — monotonic on write, bounded
@@ -181,18 +198,42 @@ async def init_persona_timers(
         memory_cfg = agent.config.get("memory") or {}
         db_path = memory_cfg.get("db_path", "data/memory.db")
         cache = ScheduledWakesCache(db_path=db_path, agent_id=agent_id)
-        await cache.initialize()
-        existing = await cache.list_timers()
-        saved_anchors_ms = {
-            row.timer_id: row.next_fire_at_ms
-            for row in existing
-            if row.next_fire_at_ms > 0
-        }
-        now_ms = time.monotonic_ns() // 1_000_000
-        rebuilt_rows = _build_scheduled_wake_rows(
-            timers, now_ms=now_ms, saved_anchors_ms=saved_anchors_ms,
-        )
-        await cache.rebuild_from_config(rebuilt_rows)
+        try:
+            await cache.initialize()
+            existing = await cache.list_timers()
+            saved_anchors_ms = {
+                row.timer_id: row.next_fire_at_ms
+                for row in existing
+                if row.next_fire_at_ms > 0
+            }
+            now_ms = time.monotonic_ns() // 1_000_000
+            rebuilt_rows = _build_scheduled_wake_rows(
+                timers, now_ms=now_ms, saved_anchors_ms=saved_anchors_ms,
+            )
+            await cache.rebuild_from_config(rebuilt_rows)
+        except Exception:
+            # Cache-setup failed before ``_register_configured_timers``
+            # ran, so the scheduler's own self-stop path never fires.
+            # Mirror the register-failure contract here: close the
+            # (possibly half-opened) cache and stop the started
+            # scheduler before the original error propagates.
+            try:
+                await cache.close()
+            except Exception:
+                logger.exception(
+                    "Agent %s: cache.close() failed during cache-setup "
+                    "cleanup; original cache-setup error follows.",
+                    agent_id,
+                )
+            try:
+                await scheduler.stop()
+            except Exception:
+                logger.exception(
+                    "Agent %s: scheduler.stop() failed during cache-setup "
+                    "cleanup; original cache-setup error follows.",
+                    agent_id,
+                )
+            raise
     try:
         await _register_configured_timers(
             scheduler, timers, agent_id,

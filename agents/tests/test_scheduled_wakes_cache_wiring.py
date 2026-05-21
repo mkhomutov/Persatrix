@@ -268,3 +268,161 @@ class TestIntervalMsRounding:
         await schedulers["ember-owl"].stop()
         await caches["ember-owl"].close()
         await agent.close_memory()
+
+
+class TestCacheLifecycleOnSetupFailure:
+    """Cache-setup failures (``initialize`` / ``list_timers`` /
+    ``rebuild_from_config``) must close the cache *and* stop the scheduler
+    before re-raising — mirroring the existing
+    ``_register_configured_timers`` partial-init contract.  Without this,
+    a SQL fault leaks the ``aiosqlite`` connection *and* leaves the
+    started scheduler running with no entry in ``tick_schedulers`` for
+    the server's shutdown path to find.
+
+    Why: the original PR 2.1 only caught ``_register_configured_timers``
+    failures, leaving an asymmetry — a register failure cleaned up both
+    cache and scheduler; an earlier cache-setup failure cleaned up
+    neither.  RFC 0024 PR 2.1 review follow-up.
+    """
+
+    async def test_rebuild_failure_closes_cache_and_stops_scheduler(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        """``rebuild_from_config`` is the most stateful cache-setup step
+        — the connection is fully open by the time it runs.  A failure
+        here is the canonical resource-leak risk; pin that ``close()``
+        is called on the cache (doing real work, not the
+        ``_conn is None`` short-circuit) and that ``stop()`` is called
+        on the scheduler.
+        """
+        db_path = str(tmp_path / "memory.db")
+        config = persona_config(
+            db_path=db_path,
+            timers=[{
+                "id": "memory_consolidation",
+                "interval_seconds": 30,
+                "kind": "memory_consolidation",
+            }],
+        )
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+        caches: dict[str, ScheduledWakesCache] = {}
+
+        close_calls = 0
+        original_close = ScheduledWakesCache.close
+
+        async def _tracking_close(self):
+            nonlocal close_calls
+            close_calls += 1
+            await original_close(self)
+
+        async def _explode_rebuild(self, rows):
+            raise RuntimeError("simulated rebuild failure")
+
+        monkeypatch.setattr(ScheduledWakesCache, "close", _tracking_close)
+        monkeypatch.setattr(
+            ScheduledWakesCache, "rebuild_from_config", _explode_rebuild,
+        )
+
+        from agents.tick import TickScheduler
+        stop_calls = 0
+        original_stop = TickScheduler.stop
+
+        async def _tracking_stop(self, *args, **kwargs):
+            nonlocal stop_calls
+            stop_calls += 1
+            await original_stop(self, *args, **kwargs)
+
+        monkeypatch.setattr(TickScheduler, "stop", _tracking_stop)
+
+        with pytest.raises(RuntimeError, match="simulated rebuild failure"):
+            await initialize_persona_agents(
+                {"ember-owl": agent}, dispatcher, schedulers,
+                scheduled_wakes_caches=caches,
+            )
+
+        # The connection was open when rebuild raised, so close() did
+        # real work — exactly the leak the cleanup branch prevents.
+        assert close_calls == 1, (
+            f"expected exactly one cache.close() during cleanup; "
+            f"got {close_calls}"
+        )
+        # Scheduler was started before init_persona_timers ran; without
+        # the cleanup it stays alive with no entry in tick_schedulers
+        # for the server's stop() to find.
+        assert stop_calls == 1, (
+            f"expected exactly one scheduler.stop() during cleanup; "
+            f"got {stop_calls}"
+        )
+        # And no half-state leaks downstream into the caller's dicts.
+        assert caches == {}
+        assert schedulers == {}
+
+        await agent.close_memory()
+
+    async def test_initialize_failure_closes_cache_and_stops_scheduler(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        """``initialize`` is the earliest cache-setup step.  Even when
+        it raises before ``_conn`` is set, the cleanup branch must call
+        ``close()`` (no-op in that case — but the call itself proves the
+        branch executed) and must stop the scheduler.  Pinned separately
+        from the ``rebuild`` case because the two failure modes hit
+        different points in the cache's own state machine.
+        """
+        db_path = str(tmp_path / "memory.db")
+        config = persona_config(
+            db_path=db_path,
+            timers=[{
+                "id": "memory_consolidation",
+                "interval_seconds": 30,
+                "kind": "memory_consolidation",
+            }],
+        )
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+        caches: dict[str, ScheduledWakesCache] = {}
+
+        close_calls = 0
+        original_close = ScheduledWakesCache.close
+
+        async def _tracking_close(self):
+            nonlocal close_calls
+            close_calls += 1
+            await original_close(self)
+
+        async def _explode_init(self):
+            raise RuntimeError("simulated initialize failure")
+
+        monkeypatch.setattr(ScheduledWakesCache, "close", _tracking_close)
+        monkeypatch.setattr(ScheduledWakesCache, "initialize", _explode_init)
+
+        from agents.tick import TickScheduler
+        stop_calls = 0
+        original_stop = TickScheduler.stop
+
+        async def _tracking_stop(self, *args, **kwargs):
+            nonlocal stop_calls
+            stop_calls += 1
+            await original_stop(self, *args, **kwargs)
+
+        monkeypatch.setattr(TickScheduler, "stop", _tracking_stop)
+
+        with pytest.raises(RuntimeError, match="simulated initialize failure"):
+            await initialize_persona_agents(
+                {"ember-owl": agent}, dispatcher, schedulers,
+                scheduled_wakes_caches=caches,
+            )
+
+        assert close_calls == 1
+        assert stop_calls == 1
+        assert caches == {}
+        assert schedulers == {}
+
+        await agent.close_memory()
