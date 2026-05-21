@@ -187,9 +187,25 @@ class EventDispatcher:
         #    that those tests assert on.
         if scheduler is not None and scheduler.is_running:
             handle = SyncDispatchHandle()
-            scheduler.event_loop.enqueue(
+            # RFC 0024 Decided §1 — discard, not block.  ``enqueue`` returns
+            # ``False`` when the queue is full; the wake is dropped and the
+            # supervisor never resolves the handle.  Awaiting it would hang
+            # until the caller's external ``wait_for`` deadline fires
+            # (SendChatMessage: clamped timeout; in-process cascade: 60 s
+            # default).  Return ``[]`` synchronously so the discard contract
+            # holds for chat-style callers too — same shape as the cascade-
+            # depth-exceeded / target-not-found drops above.  (PR 1 review
+            # finding #1.)
+            if not scheduler.event_loop.enqueue(
                 InboundEventWake(event=event, handle=handle),
-            )
+            ):
+                logger.warning(
+                    "Dispatch dropped (event loop queue full): "
+                    "agent=%s event=%s dropped_total=%d",
+                    target_id, event.event_type.value,
+                    scheduler.event_loop.dropped_count,
+                )
+                return []
             actions = await handle
         else:
             if scheduler is not None:

@@ -145,12 +145,12 @@ class SyncDispatchHandle:
         return self._future.done()
 
     def __await__(self) -> Generator[Any, None, list[AgentAction]]:
-        # Annotated return shape so callers (``EventDispatcher.dispatch``)
-        # do not widen ``actions`` to ``Any`` — otherwise the dispatch
-        # function's ``list[AgentAction]`` return type silently leaks ``Any``
-        # through the await-resolved handle path.  ``Generator[Any, None, T]``
-        # is the standard ``__await__`` shape (matches
-        # ``asyncio.Future.__await__``).
+        # Annotated return shape pins the awaited result type to
+        # ``list[AgentAction]`` so callers (``EventDispatcher.dispatch``)
+        # do not widen ``actions`` to ``Any``.  Only the third type
+        # parameter is load-bearing for call-site typing; the yielded
+        # ``Any`` matches the standard ``Future.__await__`` shape and is
+        # not part of the contract.  (PR 1 review finding #5.)
         return self._future.__await__()
 
 
@@ -383,6 +383,19 @@ class EventLoop:
 
     async def _handle_wake(self, wake: WakeEvent) -> None:
         if isinstance(wake, InboundEventWake):
+            # Cancellation note (PR 1 review finding #2): when a chat-style
+            # caller does ``asyncio.wait_for(handle, timeout=…)`` and the
+            # deadline fires, ``wait_for`` cancels the handle's underlying
+            # future but the supervisor task is unaware — it keeps running
+            # ``self._on_event`` (and any LLM/tool-use round in flight)
+            # to completion, after which ``handle.resolve`` no-ops because
+            # the future is already done.  Net effect: timed-out chat
+            # requests still pay for the full LLM call + tool round on the
+            # wallet lease they were supposed to abort.  Pre-existing
+            # shape (the non-reentrant agent lock had the same property in
+            # v0.3.2), tracked as a deferred finding in
+            # ``docs/rfcs/0024-pr-plan.md`` for a future "abort the
+            # in-flight LLM call on caller cancellation" PR.
             actions = await self._on_event(wake.event)
             if wake.handle is not None:
                 wake.handle.resolve(actions)

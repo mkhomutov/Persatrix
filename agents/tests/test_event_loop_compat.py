@@ -89,7 +89,9 @@ class TestLegacyTickCadence:
         assert ticks, "legacy timer must fire at least once"
         assert ticks[0].timer_id == "legacy_tick"
 
-    async def test_tick_scheduler_synthesises_legacy_timer(self):
+    async def test_tick_scheduler_synthesises_legacy_timer(
+        self, monkeypatch: Any,
+    ):
         """The :class:`agents.tick.TickScheduler` adapter must register
         exactly one timer (``legacy_tick``) on ``start()`` so the dispatch
         path's ``scheduler.event_loop`` exposes a single periodic producer
@@ -114,27 +116,26 @@ class TestLegacyTickCadence:
             async def on_event(self, event: Any) -> list[Any]:  # pragma: no cover
                 return []
 
-        # Save/restore the original ``_MIN_INTERVAL`` instead of restoring a
-        # hardcoded constant — guards against the class default drifting in
-        # a later refactor and silently leaking a sub-second interval into
-        # neighbouring tests via the patched class attribute.
-        original_min_interval = TickScheduler._MIN_INTERVAL  # type: ignore[attr-defined]
-        TickScheduler._MIN_INTERVAL = 0.01  # type: ignore[assignment]
+        # PR 1 review finding #7 — use pytest's ``monkeypatch`` fixture
+        # instead of a try/finally save/restore of the class attribute.
+        # A test crash between the manual patch and the ``finally`` would
+        # leak the sub-second ``_MIN_INTERVAL`` into subsequent tests
+        # that share the same class object; ``monkeypatch.setattr`` is
+        # crash-safe — pytest restores the original value on test
+        # teardown regardless of how the body exits.
+        monkeypatch.setattr(TickScheduler, "_MIN_INTERVAL", 0.01)
+        scheduler = TickScheduler(
+            _MinimalAgent(),  # type: ignore[arg-type]
+            interval=0.05,
+        )
+        scheduler.start()
         try:
-            scheduler = TickScheduler(
-                _MinimalAgent(),  # type: ignore[arg-type]
-                interval=0.05,
-            )
-            scheduler.start()
-            try:
-                # Legacy timer is registered.  "Exactly one timer" is
-                # enforced structurally: ``TickScheduler.start`` has the
-                # single ``register_timer`` call site for ``_LEGACY_TIMER_ID``,
-                # so the legacy back-compat path cannot leak additional
-                # timers.  Use the public ``has_timer`` API instead of
-                # reaching into ``EventLoop._timers``.
-                assert scheduler.event_loop.has_timer("legacy_tick")
-            finally:
-                await scheduler.stop(timeout=1.0)
+            # Legacy timer is registered.  "Exactly one timer" is
+            # enforced structurally: ``TickScheduler.start`` has the
+            # single ``register_timer`` call site for ``_LEGACY_TIMER_ID``,
+            # so the legacy back-compat path cannot leak additional
+            # timers.  Use the public ``has_timer`` API instead of
+            # reaching into ``EventLoop._timers``.
+            assert scheduler.event_loop.has_timer("legacy_tick")
         finally:
-            TickScheduler._MIN_INTERVAL = original_min_interval  # type: ignore[assignment]
+            await scheduler.stop(timeout=1.0)

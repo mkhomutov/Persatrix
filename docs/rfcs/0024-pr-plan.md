@@ -305,27 +305,33 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("L
 
 ##### From PR 1 review
 
-_PR 1 review applied four findings inline (`get_event_loop()` →
-`get_running_loop()`; public `EventLoop.has_timer` / `EventLoop.task`;
-test monkey-patch save/restore; `SyncDispatchHandle.__await__` typing
-to close a `dispatch.py` `Any`-return leak). Three deferred:_
+_Applied: `get_event_loop()` → `get_running_loop()`; public
+`EventLoop.has_timer` / `.task`; `monkeypatch`-fixture test patching;
+`SyncDispatchHandle.__await__` return narrowing;
+`EventDispatcher.dispatch` acts on `enqueue`'s boolean — queue-full
+returns `[]` instead of hanging on an unresolvable handle
+(`test_dispatch_returns_empty_on_queue_full`); reentrant deadlock
+pinned by `xfail(strict=True)` (fix in (1)); cancellation comment in
+`_handle_wake` (see (4)). Four deferred:_
 
-_(1) **Reentrant-dispatch deadlock.** `on_event(A)` re-dispatching to A
-enqueues on A's own queue and awaits a handle the blocked supervisor
-cannot resolve. Pre-existing via non-reentrant `agent._lock`; queue
-reshapes but does not create. Add a regression test pinning the
-contract or a producer-side "enqueue-from-own-supervisor" guard.
-Tracked here (not PR 2) — `autonomy.timers` does not change dispatch
-shape. (2) **Queue-full `WARNING` spam.** Per-drop log in
-`EventLoop.enqueue`. Fine in Phase 1; PR 4's channel-dispatch makes
-drops a foreseeable steady state. Rate-limit or downgrade to `DEBUG`
-once `agent.wake.dropped` is the observability surface — pin in PR 4.
-(3) **`_wake_kind` vs. `dropped` label.** Helper returns
-`inbound / scheduled / salience / unknown`; `dropped` never reaches it.
-Before PR 4 wires `agent.wake.dropped`, decide whether the counter
-shares the `wake.kind` attribute (add a `dropped` label the helper
-never emits) or is a separate counter — pin in PR 4's RFC 0019
-convention section._
+_(1) **Reentrant-dispatch deadlock fix.** `on_event(A)` re-dispatching
+to A awaits a handle the blocked supervisor cannot resolve.
+Pre-existing via non-reentrant `agent._lock`. Test landed; fix
+(own-supervisor guard or reentrancy escape hatch) is the follow-up.
+(2) **Queue-full `WARNING` spam.** Per-drop log in
+`EventLoop.enqueue` + companion on `dispatch` return-`[]`. Fine in
+Phase 1; PR 4 makes drops a steady state — rate-limit or `DEBUG`
+once `agent.wake.dropped` is the surface. (3) **`_wake_kind` vs.
+`dropped` label.** Helper emits `inbound/scheduled/salience/unknown`;
+`dropped` never reaches it. Before PR 4 wires the counter, decide
+shared vs. separate — pin in PR 4's RFC 0019 convention.
+(4) **Cancellation does not abort in-flight `on_event`.** When the
+caller's `wait_for` fires, the supervisor keeps running `on_event` to
+completion; `handle.resolve` no-ops. Timed-out chats still pay LLM +
+tool round on the wallet lease. Pre-existing v0.3.2 lock shape;
+substrate broadens it. Fix outside RFC 0024 —
+`LLMClient.create_message` cancellation + wallet-lease
+release-on-cancel._
 
 ##### From PR 2 review
 
