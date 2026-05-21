@@ -19,6 +19,7 @@ from .channel_publisher import HTTPChannelPublisher
 from .dispatch import EventDispatcher
 from .generated import task_pb2_grpc
 from .memory import SharedPoolRegistry
+from .memory.scheduled_wakes import ScheduledWakesCache
 from .observability.grpc_logging import LoggingMetadataInterceptor
 from .observability.log_shipper import (
     Shipper,
@@ -78,6 +79,11 @@ class AgentServer:
         self._session: aiohttp.ClientSession | None = None
         self._dispatcher = EventDispatcher()
         self._tick_schedulers: dict[str, TickScheduler] = {}
+        # RFC 0024 PR 2.1 — one ``ScheduledWakesCache`` per persona that
+        # declares ``autonomy.timers``.  Opened in start() via
+        # ``initialize_persona_agents``, closed in stop() so the cache
+        # connections release before the gRPC server tears down.
+        self._scheduled_wakes_caches: dict[str, ScheduledWakesCache] = {}
         self._log_shipper: Shipper | None = None
         # RFC 0023 — one outbound gRPC channel to the orchestrator carries
         # both the LogService log stream and the WalletService lease RPCs
@@ -153,7 +159,9 @@ class AgentServer:
         # schedulers for persona agents in a single pass.
         # (F-5b-9: consolidated three separate agent-iteration loops.)
         await initialize_persona_agents(
-            self.agents, self._dispatcher, self._tick_schedulers, shared_pools=self._shared_pools,
+            self.agents, self._dispatcher, self._tick_schedulers,
+            shared_pools=self._shared_pools,
+            scheduled_wakes_caches=self._scheduled_wakes_caches,
         )
 
         # RFC 0008 PR 2: open MemoryFacade for opt-in non-persona task agents.
@@ -312,6 +320,18 @@ class AgentServer:
             except Exception:
                 logger.exception("Error stopping tick scheduler for %s", agent_id)
         self._tick_schedulers.clear()
+        # RFC 0024 PR 2.1 — close scheduled-wakes caches after the
+        # schedulers have stopped (no more timer-registry mutations) but
+        # before the gRPC server teardown so any I/O the cache flushes
+        # has the asyncio loop available.  Per-agent failures are isolated.
+        for agent_id, cache in self._scheduled_wakes_caches.items():
+            try:
+                await cache.close()
+            except Exception:
+                logger.exception(
+                    "Error closing scheduled_wakes cache for %s", agent_id,
+                )
+        self._scheduled_wakes_caches.clear()
         # De-register from orchestrator before stopping gRPC server.
         await self._self_deregister()
         if self._server:

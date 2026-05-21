@@ -22,17 +22,41 @@ so every read/write filters on ``agent_id`` and the primary key is
 per-agent and own their cursor over the shared file.
 
 .. note::
-   **Wiring status (PR 2):** this module ships the cache class and the
-   ``scheduled_wakes`` table schema, but ``initialize_persona_agents``
-   does *not* yet instantiate :class:`ScheduledWakesCache` nor call
-   :meth:`ScheduledWakesCache.rebuild_from_config` — the
-   restart-mid-jitter-window guarantee named above is not delivered
-   in PR 2.  The integration (rebuild on startup, ``next_fire_at_ms``
-   restoration, ``ScheduledWakesCache`` lifecycle inside the
-   persona-agents init path) lands in a dedicated follow-up PR; see
-   :doc:`docs/rfcs/0024-pr-plan.md <../../docs/rfcs/0024-pr-plan>`
-   "PR 2.1" row.  Until then this module is dormant production code —
-   imports must not break, but no execution path touches it.
+   **``next_fire_at_ms`` clock contract.** The column stores
+   ``time.monotonic_ns() // 1_000_000`` per
+   :doc:`RFC 0024 §C <../../docs/rfcs/0024-event-driven-scheduling>`
+   (monotonic, to avoid wall-clock-jump drift over long uptime).
+   Python guarantees monotonicity *within a single process*; cross-
+   process stability is a *platform* property — current CPython on
+   Linux uses ``clock_gettime(CLOCK_MONOTONIC)`` (system uptime),
+   macOS uses ``mach_absolute_time`` (system uptime), Windows uses
+   ``QueryPerformanceCounter`` (typically session/system uptime).
+   Anchors therefore survive an agent-process restart on all three
+   platforms today, which is what the "restart-mid-jitter-window"
+   guarantee in the persona-init wiring relies on.
+
+   **Failure mode on system reboot.** A reboot resets the monotonic
+   epoch, so anchors written by the previous boot become meaningless
+   (typically appear "far in the future" relative to the new boot's
+   ``now``).  The loader in
+   :mod:`agents.server_persona_timers` clamps the restored
+   ``initial_delay`` into ``[_MIN_INTERVAL, interval + jitter_max]``
+   so a meaningless anchor degrades to "fires within
+   ``interval + jitter_max`` of restart" — indistinguishable from a
+   fresh first-fire's maximum.  Bounded silent degradation, not
+   correctness loss; pinned by
+   ``test_scheduled_wakes_cache_wiring_anchors.TestStaleAnchorClamp``.
+
+.. note::
+   **Wiring status (PR 2.1):** this module's schema + class is wired
+   into ``initialize_persona_agents`` via
+   :mod:`agents.server_persona_timers`.  Persona agents declaring
+   ``autonomy.timers`` open one cache per agent at start, rebuild
+   from config (orphan cleanup), and pass saved anchors as
+   ``initial_delay`` overrides downstream.  Caches are closed in
+   :meth:`agents.server.AgentServer.stop` after the schedulers stop
+   and before the gRPC server tears down.  PR 2 shipped this module
+   dormant; PR 2.1 turned it on.
 """
 
 from __future__ import annotations
