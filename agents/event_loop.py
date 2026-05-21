@@ -399,10 +399,12 @@ class EventLoop:
         entry.handle = asyncio.get_running_loop().call_later(first_delay, _fire)
 
     def _next_delay(self, entry: _TimerEntry) -> float:
-        """Periodic re-arm delay; ``jitter_max=0.0`` returns exactly
-        ``entry.interval`` and skips ``random.uniform`` for deterministic
-        legacy-adapter cadence (pinned by ``test_jitter_zero_default``)."""
-        assert entry.interval is not None  # noqa: S101
+        """Periodic re-arm delay; ``jitter_max=0.0`` returns ``entry.interval``
+        and skips ``random.uniform`` for deterministic legacy-adapter cadence
+        (pinned by ``test_jitter_zero_default``). Explicit raise on one-shot
+        entries survives ``python -O`` where ``assert`` would be stripped."""
+        if entry.interval is None:
+            raise RuntimeError("_next_delay called on a one-shot timer entry")
         if entry.jitter_max <= 0.0:
             return entry.interval
         return entry.interval + random.uniform(-entry.jitter_max, entry.jitter_max)

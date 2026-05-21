@@ -19,6 +19,7 @@ Tests pin the four contract pieces named in :doc:`RFC 0024 §OQ §1
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -201,3 +202,49 @@ class TestSourceColumnReservation:
         ])
         loaded = await cache.list_timers()
         assert loaded[0].source == "config"
+
+    async def test_check_constraint_rejects_unknown_source(
+        self, cache: ScheduledWakesCache,
+    ):
+        """Schema-level guard: ``CHECK(source IN ('config','runtime'))``
+        rejects any out-of-band value at the storage boundary.
+
+        The public API only writes ``source='config'`` today, and the
+        future runtime-mutation hook will write ``source='runtime'`` —
+        the constraint codifies that the two-state enum is the
+        permanent contract.  Pinning it here means a future PR that
+        wants to add a third state must surface the change deliberately
+        (drop+recreate the table or `ALTER`), not silently.
+        """
+        assert cache._conn is not None
+        with pytest.raises(sqlite3.IntegrityError):
+            await cache._conn.execute(
+                """
+                INSERT INTO scheduled_wakes
+                    (agent_id, timer_id, kind, interval_ms,
+                     jitter_ms, next_fire_at_ms, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("ember-owl", "bad", "any", 60_000, 0, 0, "banana"),
+            )
+
+    async def test_check_constraint_allows_runtime_source(
+        self, cache: ScheduledWakesCache,
+    ):
+        """``source='runtime'`` is the reserved second state — the
+        constraint accepts it so a future runtime-mutation PR does not
+        need a schema migration."""
+        assert cache._conn is not None
+        await cache._conn.execute(
+            """
+            INSERT INTO scheduled_wakes
+                (agent_id, timer_id, kind, interval_ms,
+                 jitter_ms, next_fire_at_ms, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("ember-owl", "runtime-row", "any", 60_000, 0, 0, "runtime"),
+        )
+        await cache._conn.commit()
+        loaded = await cache.list_timers()
+        assert any(r.timer_id == "runtime-row" and r.source == "runtime"
+                   for r in loaded)

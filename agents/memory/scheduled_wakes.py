@@ -12,12 +12,27 @@ The ``source`` column reserves the runtime-mutation hook (a future
 row written through :meth:`rebuild_from_config` is marked
 ``source='config'``; no API to insert a ``source='runtime'`` row exists
 yet, and PR 2's tests pin that fact so a Phase 3+ change has to surface
-the hook deliberately.
+the hook deliberately.  The schema-level ``CHECK (source IN ('config',
+'runtime'))`` constraint codifies the two-state enum as the permanent
+contract.
 
 Multiple agents share the same ``data/memory.db`` (v0.3.x convention),
 so every read/write filters on ``agent_id`` and the primary key is
 ``(agent_id, timer_id)``.  ``ScheduledWakesCache`` instances are
 per-agent and own their cursor over the shared file.
+
+.. note::
+   **Wiring status (PR 2):** this module ships the cache class and the
+   ``scheduled_wakes`` table schema, but ``initialize_persona_agents``
+   does *not* yet instantiate :class:`ScheduledWakesCache` nor call
+   :meth:`ScheduledWakesCache.rebuild_from_config` — the
+   restart-mid-jitter-window guarantee named above is not delivered
+   in PR 2.  The integration (rebuild on startup, ``next_fire_at_ms``
+   restoration, ``ScheduledWakesCache`` lifecycle inside the
+   persona-agents init path) lands in a dedicated follow-up PR; see
+   :doc:`docs/rfcs/0024-pr-plan.md <../../docs/rfcs/0024-pr-plan>`
+   "PR 2.1" row.  Until then this module is dormant production code —
+   imports must not break, but no execution path touches it.
 """
 
 from __future__ import annotations
@@ -40,7 +55,8 @@ CREATE TABLE IF NOT EXISTS scheduled_wakes (
     interval_ms     INTEGER,
     jitter_ms       INTEGER NOT NULL DEFAULT 0,
     next_fire_at_ms INTEGER NOT NULL DEFAULT 0,
-    source          TEXT NOT NULL DEFAULT 'config',
+    source          TEXT NOT NULL DEFAULT 'config'
+                    CHECK (source IN ('config', 'runtime')),
     PRIMARY KEY (agent_id, timer_id)
 )
 """
