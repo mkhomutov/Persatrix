@@ -533,7 +533,36 @@ refactor._
 
 ##### From PR 3a review
 
-_None recorded at plan-authoring time._
+_Applied: defence-in-depth NaN/±inf clamp in
+``MemoryWriteEvent.__post_init__`` (NaN slipped past ``max``/``min``
+because every comparison with NaN is ``False``, leaving a NaN salience
+in flight that would silently land in PR 3b's "below threshold"
+branch); WARNING on the ``_emit_audit("fact.store", …)`` piggyback's
+missing-or-non-string ``agent_id`` branch (the silent-drop path was
+unobservable before — a future caller forgetting ``agent_id=`` would
+break facts-tier salience-wake coverage with zero log signal);
+coverage-scope comment in :mod:`._facts_audit` calling out that only
+``fact.store`` carries the piggyback (``fact.recalled`` and
+``fact.supersede`` are intentionally NOT lifted as memory-write
+events); cross-agent fan-out comment near the ``_global_bus`` singleton
+naming the agent_id filter PR 3b's subscriber must apply; outer-span
+``source_span_id``-capture tests for notes, facts (through the audit
+piggyback), and relationship tiers — pinning that no inner span
+swallows the parent on those three tiers today, so a future refactor
+that wraps any of them in a span surfaces in CI rather than silently
+regressing PR 3b's loop-back guard input. One deferred:_
+
+_(1) **``current_llm_span_id`` neutral rename.** The helper at
+[agents/observability/spans.py](../../agents/observability/spans.py)
+is a pure read of the current OTEL span — its docstring acknowledges
+this, but the ``_llm_`` infix invites future call sites to second-guess
+whether the helper is LLM-specific (it is not; the LLM-call contract
+lives at the *call site*, not in the helper).  Rename to
+``current_span_id_hex`` (or similar neutral form) so PR 3b and later
+consumers do not propagate the misleading name.  Touches the
+``__all__`` export and one call site in :mod:`agents.memory._salience`
+plus the test class name; bundle with the first PR 3b follow-up that
+edits :mod:`agents.observability.spans` to keep the diff localised._
 
 ##### From PR 3b review
 

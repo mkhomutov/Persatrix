@@ -29,6 +29,7 @@ the primary validator.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -78,6 +79,13 @@ class MemoryWriteEvent:
     written_at: float
 
     def __post_init__(self) -> None:
+        # NaN sneaks past ``max``/``min`` (every comparison with NaN is
+        # ``False``), so route it explicitly to 0.0 — otherwise a NaN
+        # would silently fail PR 3b's threshold comparison and the
+        # event would land in the "below threshold" branch by accident.
+        if not math.isfinite(self.salience):
+            self.salience = 0.0 if math.isnan(self.salience) or self.salience < 0 else 1.0
+            return
         clipped = max(0.0, min(1.0, self.salience))
         if clipped != self.salience:
             self.salience = clipped
@@ -123,6 +131,13 @@ class MemoryWriteBus:
 # ─── Module-level singleton + accessors ─────────────────────────────────────
 
 
+# A single process-global bus means every subscriber sees events from
+# **every agent** running in the process — there is no per-agent
+# partitioning here.  PR 3b's :class:`EventLoop` subscriber MUST filter
+# by :attr:`MemoryWriteEvent.agent_id` to route a wake only to its own
+# loop; otherwise persona A's write would enqueue a :class:`SalienceWake`
+# on persona B's loop.  The :attr:`MemoryWriteEvent.agent_id` field
+# exists specifically to support that subscriber-side fan-out filter.
 _global_bus: MemoryWriteBus = MemoryWriteBus()
 
 

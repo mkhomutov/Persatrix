@@ -19,6 +19,7 @@ These tests install a transient subscriber via the global bus accessor.
 from __future__ import annotations
 
 import contextlib
+import logging
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
@@ -31,6 +32,7 @@ from agents.memory._events import (
     get_memory_write_bus,
     set_memory_write_bus,
 )
+from agents.memory._facts_audit import emit_audit
 from agents.memory._salience import REFLECTION_CONTRADICTION_SALIENCE
 from agents.memory.episodic import EpisodicMemory
 from agents.memory.facts import FactStore
@@ -229,6 +231,26 @@ class TestNotesEmission:
 
         assert seen == []
 
+    async def test_store_note_captures_outer_span_id(
+        self, episodic: EpisodicMemory, fresh_bus: MemoryWriteBus,
+    ) -> None:
+        """Notes have no inner span (unlike episodic's
+        ``EPISODIC_REMEMBER_SPAN``), so the captured ``source_span_id``
+        is just the outer span.  Pinning it here so a future refactor
+        that wraps :meth:`store_note` in an inner span surfaces in CI —
+        otherwise PR 3b's loop-back guard would see a child span id
+        instead of the LLM-call ancestor."""
+        seen: list[MemoryWriteEvent] = []
+        fresh_bus.subscribe(seen.append)
+
+        tracer = trace.get_tracer("test")
+        with tracer.start_as_current_span("outer-llm-like-span") as outer:
+            await episodic.store_note(topic="t", content="c")
+            outer_sid_hex = f"{outer.get_span_context().span_id:016x}"
+
+        assert len(seen) == 1
+        assert seen[0].source_span_id == outer_sid_hex
+
 
 # ─── Facts tier ─────────────────────────────────────────────────────────────
 
@@ -271,6 +293,123 @@ class TestFactsEmission:
 
         assert seen == []
 
+    async def test_store_captures_outer_span_id_through_audit_piggyback(
+        self, facts: FactStore, fresh_bus: MemoryWriteBus,
+    ) -> None:
+        """The facts tier emits via the ``_emit_audit("fact.store", …)``
+        piggyback in :mod:`._facts_audit` rather than a direct
+        ``emit_for_tier`` call.  Pin that the piggyback path still
+        captures the outer-span id correctly — otherwise the indirection
+        could mask a regression where PR 3b's loop-back guard receives
+        ``None`` for fact-tier writes performed inside an LLM-call span.
+        """
+        seen: list[MemoryWriteEvent] = []
+        fresh_bus.subscribe(seen.append)
+
+        tracer = trace.get_tracer("test")
+        with tracer.start_as_current_span("outer-llm-like-span") as outer:
+            await facts.store(
+                subject="bob", predicate="prefers", object="tea",
+                source_interaction_id=None, asserted_at=1000.0,
+            )
+            outer_sid_hex = f"{outer.get_span_context().span_id:016x}"
+
+        assert len(seen) == 1
+        assert seen[0].source_span_id == outer_sid_hex
+
+
+# ─── Facts piggyback contract (observability of the silent-drop branch) ────
+
+
+class TestFactsAuditPiggybackContract:
+    """The facts tier piggybacks ``MemoryWriteEvent`` emission on the
+    ``_emit_audit("fact.store", …)`` call inside :mod:`._facts_audit`.
+
+    The current production caller (``FactStore.store``) always passes
+    ``agent_id=self._agent_id``; the piggyback gate is
+    ``isinstance(fields.get("agent_id"), str)``.  Without observability
+    on the gate's miss branch, a future caller that forgets ``agent_id=``
+    would silently break PR 3b's salience-wake coverage for the facts
+    tier with no signal in the logs.  These tests pin a WARNING at the
+    miss branch so the contract violation is loud, while keeping the
+    write-path failure-isolation contract intact (we still must NOT
+    raise — the row is already committed by the time we get here).
+    """
+
+    def test_fact_store_audit_without_agent_id_logs_warning(
+        self, fresh_bus: MemoryWriteBus, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        seen: list[MemoryWriteEvent] = []
+        fresh_bus.subscribe(seen.append)
+
+        with caplog.at_level(logging.WARNING, logger="agents.memory.facts"):
+            # Programmer error: ``agent_id`` missing entirely.
+            emit_audit("fact.store", fact_id="f1", subject="s")
+
+        assert seen == [], (
+            "Memory-write event must not fire without a valid agent_id"
+        )
+        assert any(
+            "agent_id" in rec.message and rec.levelno == logging.WARNING
+            for rec in caplog.records
+        ), "Missing agent_id on fact.store must surface as a WARNING"
+
+    def test_fact_store_audit_with_non_string_agent_id_logs_warning(
+        self, fresh_bus: MemoryWriteBus, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        seen: list[MemoryWriteEvent] = []
+        fresh_bus.subscribe(seen.append)
+
+        with caplog.at_level(logging.WARNING, logger="agents.memory.facts"):
+            emit_audit("fact.store", agent_id=42, fact_id="f1")
+
+        assert seen == []
+        assert any(
+            "agent_id" in rec.message and rec.levelno == logging.WARNING
+            for rec in caplog.records
+        )
+
+    def test_fact_store_audit_with_valid_agent_id_emits_no_warning(
+        self, fresh_bus: MemoryWriteBus, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Happy path regression guard: a well-formed fact.store audit
+        must NOT produce the missing-agent_id warning and MUST emit
+        exactly one memory-write event."""
+        seen: list[MemoryWriteEvent] = []
+        fresh_bus.subscribe(seen.append)
+
+        with caplog.at_level(logging.WARNING, logger="agents.memory.facts"):
+            emit_audit("fact.store", agent_id="agent-a", fact_id="f1")
+
+        assert len(seen) == 1
+        assert seen[0].tier == "facts"
+        assert seen[0].agent_id == "agent-a"
+        assert not any(
+            "agent_id" in rec.message and rec.levelno == logging.WARNING
+            for rec in caplog.records
+        ), "Valid agent_id must not trigger the missing-agent_id warning"
+
+    def test_non_fact_store_audit_does_not_warn_on_missing_agent_id(
+        self, fresh_bus: MemoryWriteBus, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Only ``fact.store`` piggybacks emission; other audit events
+        (``fact.recalled``, ``fact.supersede``, …) intentionally do not
+        emit ``MemoryWriteEvent`` and therefore must not warn on
+        missing ``agent_id`` either — the gate applies only to the one
+        event that carries the piggyback contract."""
+        seen: list[MemoryWriteEvent] = []
+        fresh_bus.subscribe(seen.append)
+
+        with caplog.at_level(logging.WARNING, logger="agents.memory.facts"):
+            emit_audit("fact.recalled", fact_ids=["f1"])
+            emit_audit("fact.supersede", superseded_fact_id="f1", by_fact_id="f2")
+
+        assert seen == [], "Non-fact.store audit must not emit MemoryWriteEvent"
+        assert not any(
+            "agent_id" in rec.message and rec.levelno == logging.WARNING
+            for rec in caplog.records
+        )
+
 
 # ─── Relationship tier ──────────────────────────────────────────────────────
 
@@ -304,3 +443,23 @@ class TestRelationshipEmission:
             )
 
         assert seen == []
+
+    async def test_record_interaction_captures_outer_span_id(
+        self, relationship: RelationshipMemory, fresh_bus: MemoryWriteBus,
+    ) -> None:
+        """Relationship has no inner span at v0.3.3; pin the captured
+        ``source_span_id`` so a future refactor that adds one to
+        :meth:`record_interaction` surfaces in CI rather than silently
+        regressing PR 3b's loop-back guard input."""
+        seen: list[MemoryWriteEvent] = []
+        fresh_bus.subscribe(seen.append)
+
+        tracer = trace.get_tracer("test")
+        with tracer.start_as_current_span("outer-llm-like-span") as outer:
+            await relationship.record_interaction(
+                other_id="bob", interaction_type="chat",
+            )
+            outer_sid_hex = f"{outer.get_span_context().span_id:016x}"
+
+        assert len(seen) == 1
+        assert seen[0].source_span_id == outer_sid_hex

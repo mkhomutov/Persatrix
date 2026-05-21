@@ -13,6 +13,7 @@ the historical event and PR 3b's wake-enqueue path would fire for backlog.
 
 from __future__ import annotations
 
+import math
 import time
 
 from agents.memory._events import MemoryWriteBus, MemoryWriteEvent
@@ -107,3 +108,35 @@ class TestDataclassDefensiveClipping:
             source_span_id=None, written_at=0.0,
         )
         assert ev.salience == 0.6
+
+    def test_salience_nan_clipped_to_zero(self) -> None:
+        # NaN is the one value ``max(0.0, min(1.0, x))`` does NOT clip
+        # (every comparison with NaN is False).  Defence-in-depth: PR 3b's
+        # subscriber will compare salience to a threshold — a NaN slipping
+        # through would silently fail every comparison and route the
+        # event through the "below threshold" branch by accident.  Clip
+        # to 0.0 explicitly so the contract is "every constructed event
+        # carries a salience in [0.0, 1.0]".
+        ev = MemoryWriteEvent(
+            agent_id="a", tier="episodic", salience=float("nan"),
+            source_span_id=None, written_at=0.0,
+        )
+        assert ev.salience == 0.0
+        assert math.isfinite(ev.salience)
+
+    def test_salience_positive_infinity_clipped_to_one(self) -> None:
+        # ``min(1.0, +inf)`` already returns 1.0 so this passes today —
+        # pinned alongside the NaN case so the "every event in [0.0, 1.0]"
+        # contract holds for the full IEEE-754 corner-set.
+        ev = MemoryWriteEvent(
+            agent_id="a", tier="episodic", salience=float("inf"),
+            source_span_id=None, written_at=0.0,
+        )
+        assert ev.salience == 1.0
+
+    def test_salience_negative_infinity_clipped_to_zero(self) -> None:
+        ev = MemoryWriteEvent(
+            agent_id="a", tier="episodic", salience=float("-inf"),
+            source_span_id=None, written_at=0.0,
+        )
+        assert ev.salience == 0.0
