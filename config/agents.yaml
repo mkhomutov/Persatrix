@@ -133,7 +133,17 @@ agents:
         write: true
     autonomy:
       level: "semi-autonomous"
+      # RFC 0024 PR 2: ``tick_interval_seconds`` kept for v0.3.3 back-compat
+      # (Phase 5 / v0.4.0 emits the deprecation warning; v0.5+ removes it).
+      # ``timers: []`` is the v0.3.3 default — stock personas pay no idle
+      # cost.  When the RFC 0027 memory-consolidation policy lands, add an
+      # entry like:
+      #   timers:
+      #     - id: memory_consolidation
+      #       interval_seconds: 300
+      #       kind: memory_consolidation
       tick_interval_seconds: 60
+      timers: []
       max_actions_per_tick: 3
       idle_after_ticks: 10
       # The following boolean flags are defined in agent.schema.json
@@ -242,6 +252,7 @@ agents:
     autonomy:
       level: "reactive"
       tick_interval_seconds: 300
+      timers: []  # RFC 0024 PR 2 — reactive persona, no timers needed.
       max_actions_per_tick: 1
       idle_after_ticks: 5
     memory:
@@ -304,6 +315,7 @@ agents:
     autonomy:
       level: "reactive"
       tick_interval_seconds: 300
+      timers: []  # RFC 0024 PR 2 — reactive persona, no timers needed.
       max_actions_per_tick: 1
       idle_after_ticks: 5
     memory:

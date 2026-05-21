@@ -363,12 +363,27 @@ async def initialize_persona_agents(
             interval = autonomy.get("tick_interval_seconds", 60)
             max_actions = autonomy.get("max_actions_per_tick", 3)
             idle_after = autonomy.get("idle_after_ticks", 10)
+            timers = autonomy.get("timers")
+            # RFC 0024 PR 2 precedence: ``timers`` wins when both knobs
+            # are set.  Pass ``register_legacy_timer=False`` to suppress
+            # the PR 1 synthesised back-compat timer, then register every
+            # configured timer onto the EventLoop directly.  Phase 5
+            # (v0.4.0) emits the deprecation warning on
+            # ``tick_interval_seconds``; Phase 2 stays quiet beyond the
+            # one-time INFO breadcrumb below.
+            if timers is not None and "tick_interval_seconds" in autonomy:
+                logger.info(
+                    "Agent %s: autonomy.timers takes precedence over "
+                    "tick_interval_seconds (configured: %ds, ignored)",
+                    agent_id, interval,
+                )
             scheduler = TickScheduler(
                 agent,
                 interval=float(interval),
                 max_actions_per_tick=max_actions,
                 idle_after_ticks=idle_after,
                 executor=dispatcher.executor,
+                register_legacy_timer=timers is None,
             )
             tick_schedulers[agent_id] = scheduler
             dispatcher.register_tick_scheduler(agent_id, scheduler)
@@ -399,6 +414,22 @@ async def initialize_persona_agents(
                 agent_id,
             )
             scheduler.start()
+            # RFC 0024 PR 2: register each ``autonomy.timers`` entry on the
+            # underlying EventLoop after start so the supervisor task is
+            # already running.  The schema enforces ``interval_seconds >=
+            # 1.0`` and ``register_timer`` rejects again at the API
+            # boundary; a misconfigured persona surfaces ValueError on
+            # startup, not at first fire.
+            if timers is not None:
+                for timer_cfg in timers:
+                    scheduler.event_loop.register_timer(
+                        timer_id=timer_cfg["id"],
+                        callback_kind=timer_cfg["kind"],
+                        interval=float(timer_cfg["interval_seconds"]),
+                        jitter_max=float(
+                            timer_cfg.get("jitter_max_seconds", 0.0),
+                        ),
+                    )
             logger.info(
                 "Started tick scheduler for %s (interval=%ds)",
                 agent_id,

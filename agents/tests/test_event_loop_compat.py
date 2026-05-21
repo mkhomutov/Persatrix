@@ -19,9 +19,13 @@ from agents.event_loop import EventLoop, ScheduledWake
 
 
 class TestLegacyTickCadence:
-    async def test_one_wake_per_interval_over_window(self):
+    async def test_one_wake_per_interval_over_window(self, monkeypatch):
         """A single legacy timer at ``interval`` produces exactly N wakes
         over ``N * interval`` seconds (±1 for race against stop)."""
+        # PR 2 added ``EventLoop._MIN_INTERVAL`` busy-loop guard; lower
+        # it for the sub-second cadence test (see ``test_event_loop.py``
+        # for the same monkeypatch pattern).
+        monkeypatch.setattr(EventLoop, "_MIN_INTERVAL", 0.01)
         ticks: list[ScheduledWake] = []
 
         async def _on_tick(wake: ScheduledWake) -> None:
@@ -54,11 +58,12 @@ class TestLegacyTickCadence:
             assert wake.timer_id == "legacy_tick"
             assert wake.callback_kind == "tick"
 
-    async def test_legacy_timer_carries_legacy_id(self):
+    async def test_legacy_timer_carries_legacy_id(self, monkeypatch):
         """The legacy back-compat path uses ``timer_id='legacy_tick'`` per
         RFC 0024 §B — Phase 2 ``autonomy.timers`` will use the operator's
         chosen ids; Phase 1's synthesised back-compat path is the only one
         named ``legacy_tick``."""
+        monkeypatch.setattr(EventLoop, "_MIN_INTERVAL", 0.01)
         ticks: list[ScheduledWake] = []
 
         async def _on_tick(wake: ScheduledWake) -> None:
@@ -124,6 +129,10 @@ class TestLegacyTickCadence:
         # crash-safe — pytest restores the original value on test
         # teardown regardless of how the body exits.
         monkeypatch.setattr(TickScheduler, "_MIN_INTERVAL", 0.01)
+        # PR 2 added an independent ``_MIN_INTERVAL`` floor on
+        # ``EventLoop.register_timer`` itself — both layers must be
+        # lowered for the sub-second TickScheduler cadence to register.
+        monkeypatch.setattr(EventLoop, "_MIN_INTERVAL", 0.01)
         scheduler = TickScheduler(
             _MinimalAgent(),  # type: ignore[arg-type]
             interval=0.05,

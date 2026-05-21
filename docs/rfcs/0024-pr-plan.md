@@ -445,8 +445,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | RFC Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-----------|-------|--------|--------|-----------|--------|
-| 1 | 1 | EventLoop + WakeEvent + `SyncDispatchHandle` (TickScheduler thin adapter) | `feature/v033-rfc0024-event-loop` | 🔀 PR open | this PR | — |
-| 2 | 2 | `autonomy.timers` config + per-agent SQLite `scheduled_wakes` | `feature/v033-rfc0024-timer-registry` | ⬜ Not started | — | — |
+| 1 | 1 | EventLoop + WakeEvent + `SyncDispatchHandle` (TickScheduler thin adapter) | `feature/v033-rfc0024-event-loop` | ✅ Merged | [#406](https://github.com/mkhomutov/Persatrix/pull/406) | 2026-05-21 |
+| 2 | 2 | `autonomy.timers` config + per-agent SQLite `scheduled_wakes` | `feature/v033-rfc0024-timer-registry` | 🔀 PR open | this PR | — |
 | 3a | 3 (prereq) | Write-side `salience` + `source_span_id` (no wake yet) | `feature/v033-rfc0024-salience-prereqs` | ⬜ Not started | — | — |
 | 3b | 3 | `SalienceWake` + threshold + loop-back guard + rate-limit | `feature/v033-rfc0024-salience-wake` | ⬜ Not started | — | — |
 | 4 | 4 | Channel-message dispatch + cost-regression CI gate | `feature/v033-rfc0024-channel-dispatch` | ⬜ Not started | — | — |

@@ -249,7 +249,38 @@
           "type": "integer",
           "minimum": 1,
           "default": 60,
-          "description": "Seconds between autonomous tick cycles"
+          "description": "Seconds between autonomous tick cycles. RFC 0024 PR 2 introduces `autonomy.timers` as the per-agent replacement; both knobs are accepted side-by-side through v0.3.3 — `timers` wins when both are present. Phase 5 (v0.4.0) emits a deprecation warning on this field; Phase 6 (v0.5+) removes it."
+        },
+        "timers": {
+          "type": "array",
+          "description": "RFC 0024 PR 2: per-agent scheduled wake timers. Each entry registers a periodic `ScheduledWake(timer_id, callback_kind)` producer with the agent's EventLoop. Empty list (`timers: []`) is the v0.3.3 default — stock personas ship with no timers so an idle persona pays nothing. When both `timers` and the legacy `tick_interval_seconds` are present, `timers` wins and the loader emits an INFO log. The cache `scheduled_wakes` (per RFC 0024 §OQ §1) is a derived store rebuilt from this list on every restart — `agents.yaml` stays canonical.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "interval_seconds", "kind"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]*[a-z0-9]$",
+                "description": "Stable identifier for this timer. Unique within the persona. Carried on every `ScheduledWake(timer_id=...)` so dashboards can attribute wakes per timer."
+              },
+              "interval_seconds": {
+                "type": "number",
+                "minimum": 1.0,
+                "description": "Period in seconds. Floor of 1.0s mirrors `EventLoop._MIN_INTERVAL` and `TickScheduler._MIN_INTERVAL` — per RFC 0024 §Security Considerations, sub-second intervals are a busy-loop class (one LLM call per fire) and are rejected at schema validation; `EventLoop.register_timer` rejects at the API boundary as defense-in-depth."
+              },
+              "kind": {
+                "type": "string",
+                "description": "Callback identifier carried on the synthesised `ScheduledWake(callback_kind=...)`. Operator-visible string — chosen examples include `memory_consolidation` (RFC 0027) and `reflection`. Phase 2 ships the mechanism; the policy (which kinds trigger what) is owned by the RFC that introduces the consumer."
+              },
+              "jitter_max_seconds": {
+                "type": "number",
+                "minimum": 0.0,
+                "default": 0.0,
+                "description": "Re-arm jitter envelope: each fire's next delay is drawn from `[interval_seconds - jitter_max_seconds, interval_seconds + jitter_max_seconds]`. Spreads fan-out when many identically-configured personas restart together (per RFC 0024 §C). Default 0.0 reproduces the PR 1 no-jitter cadence."
+              }
+            }
+          }
         },
         "max_actions_per_tick": {
           "type": "integer",

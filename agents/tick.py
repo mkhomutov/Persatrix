@@ -81,6 +81,7 @@ class TickScheduler:
         max_actions_per_tick: int = 3,
         idle_after_ticks: int = 10,
         executor: ActionExecutor | None = None,
+        register_legacy_timer: bool = True,
     ) -> None:
         self._agent = agent
         if interval < self._MIN_INTERVAL:
@@ -95,6 +96,13 @@ class TickScheduler:
         self._idle_after_ticks = idle_after_ticks
         self._executor = executor
         self._idle_count = 0
+        # RFC 0024 PR 2: when ``autonomy.timers`` is configured the
+        # caller registers timers directly on the EventLoop and the
+        # synthesised legacy timer is skipped — ``start()`` checks this
+        # flag.  Default ``True`` preserves PR 1 back-compat for any
+        # call site (tests, external callers) that constructs a
+        # TickScheduler without going through ``initialize_persona_agents``.
+        self._register_legacy_timer = register_legacy_timer
         self._event_loop = EventLoop(
             agent_id=agent.agent_id,
             on_event=self._handle_event_wake,
@@ -154,10 +162,19 @@ class TickScheduler:
             )
 
     def start(self) -> None:
-        """Start the underlying :class:`EventLoop` and register the legacy timer."""
+        """Start the underlying :class:`EventLoop` and register the legacy timer.
+
+        When ``register_legacy_timer=False`` (RFC 0024 PR 2: caller is
+        using ``autonomy.timers``), only the supervisor is started —
+        the synthesised back-compat timer is suppressed and the caller
+        is responsible for registering any timers it needs via
+        :attr:`event_loop`.
+        """
         if self._event_loop.is_running:
             return
         self._event_loop.start()
+        if not self._register_legacy_timer:
+            return
         # Register only once across start/stop/start cycles — _MIN_INTERVAL
         # has already clamped the interval at __init__ time.  Uses the
         # public ``has_timer`` API so this adapter does not reach into

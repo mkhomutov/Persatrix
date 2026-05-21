@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from collections.abc import Awaitable, Callable, Generator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -159,10 +160,20 @@ class SyncDispatchHandle:
 
 @dataclass
 class _TimerEntry:
-    interval: float
+    """Periodic or one-shot timer registry entry.
+
+    ``interval=None`` and ``one_shot=True`` marks a one-shot — fires once
+    at the initial delay then self-removes.  ``jitter_max=0.0`` skips
+    ``random.uniform`` entirely so the legacy adapter cadence stays
+    deterministic (pinned by ``test_jitter_zero_default``).
+    """
+
+    interval: float | None
     callback_kind: str
+    jitter_max: float = 0.0
     handle: asyncio.TimerHandle | None = None
     cancelled: bool = False
+    one_shot: bool = False
 
 
 class EventLoop:
@@ -179,6 +190,12 @@ class EventLoop:
     """
 
     _DEFAULT_QUEUE_SIZE = 1024
+
+    # RFC 0024 §Security Considerations busy-loop guard floor; mirrors
+    # ``TickScheduler._MIN_INTERVAL`` and the schema's ``minimum: 1.0``
+    # on ``autonomy.timers[*].interval_seconds``.  Defense-in-depth for
+    # any programmatic caller bypassing schema validation.
+    _MIN_INTERVAL: float = 1.0
 
     def __init__(
         self,
@@ -301,20 +318,44 @@ class EventLoop:
         *,
         timer_id: str,
         callback_kind: str,
-        interval: float,
+        interval: float | None = None,
+        jitter_max: float = 0.0,
+        fire_after: float | None = None,
     ) -> None:
-        """Register a periodic :class:`ScheduledWake` producer.
+        """Register a periodic or one-shot :class:`ScheduledWake` producer.
 
-        Uses :meth:`asyncio.AbstractEventLoop.call_later` so timer drift over
-        long uptime is bounded by the monotonic clock (RFC 0024 §C).  Each
-        fire re-arms via the same ``call_later`` chain; cancelling on
-        :meth:`stop` keeps no dangling handles.
+        Periodic timers pass ``interval`` (re-arms via ``call_later`` each
+        fire, monotonic per RFC 0024 §C); one-shot timers pass
+        ``fire_after`` (fires once at delay, then unregisters).
+        ``jitter_max`` randomises each re-arm by ``±jitter_max`` seconds;
+        ``0.0`` (default) skips the ``random.uniform`` call entirely.
+
+        Raises ``ValueError`` if ``interval < _MIN_INTERVAL`` (busy-loop
+        guard) or neither/both of ``interval`` and ``fire_after`` are set.
         """
         if timer_id in self._timers:
             raise ValueError(f"Timer {timer_id!r} already registered")
-        entry = _TimerEntry(interval=interval, callback_kind=callback_kind)
+        if (interval is None) == (fire_after is None):
+            raise ValueError(
+                "register_timer requires exactly one of interval (periodic) "
+                "or fire_after (one-shot)",
+            )
+        if interval is not None and interval < self._MIN_INTERVAL:
+            raise ValueError(
+                f"interval {interval}s below _MIN_INTERVAL "
+                f"({self._MIN_INTERVAL}s) — busy-loop guard",
+            )
+        if fire_after is not None and fire_after <= 0.0:
+            raise ValueError(f"fire_after {fire_after}s must be positive")
+
+        entry = _TimerEntry(
+            interval=interval,
+            callback_kind=callback_kind,
+            jitter_max=jitter_max,
+            one_shot=fire_after is not None,
+        )
         self._timers[timer_id] = entry
-        self._arm_timer(timer_id, entry)
+        self._arm_timer(timer_id, entry, initial_delay=fire_after)
 
     def unregister_timer(self, timer_id: str) -> None:
         entry = self._timers.pop(timer_id, None)
@@ -324,7 +365,13 @@ class EventLoop:
         if entry.handle is not None:
             entry.handle.cancel()
 
-    def _arm_timer(self, timer_id: str, entry: _TimerEntry) -> None:
+    def _arm_timer(
+        self,
+        timer_id: str,
+        entry: _TimerEntry,
+        *,
+        initial_delay: float | None = None,
+    ) -> None:
         # ``get_running_loop()`` (not ``get_event_loop()``): preempts the
         # 3.10+ deprecation.  Both ``register_timer`` (initial arm) and
         # ``_fire`` (re-arm) run inside the supervisor task, so a running
@@ -335,13 +382,30 @@ class EventLoop:
             self.enqueue(
                 ScheduledWake(timer_id=timer_id, callback_kind=entry.callback_kind),
             )
-            # Re-arm only if we're still alive.
+            if entry.one_shot:
+                # One-shot timers self-clean so a subsequent register_timer
+                # with the same id is not a conflict — pinned by
+                # ``test_event_loop_timers.test_one_shot_fires_exactly_once``.
+                self._timers.pop(timer_id, None)
+                return
             if not entry.cancelled:
                 entry.handle = asyncio.get_running_loop().call_later(
-                    entry.interval, _fire,
+                    self._next_delay(entry), _fire,
                 )
 
-        entry.handle = asyncio.get_running_loop().call_later(entry.interval, _fire)
+        first_delay = (
+            initial_delay if initial_delay is not None else self._next_delay(entry)
+        )
+        entry.handle = asyncio.get_running_loop().call_later(first_delay, _fire)
+
+    def _next_delay(self, entry: _TimerEntry) -> float:
+        """Periodic re-arm delay; ``jitter_max=0.0`` returns exactly
+        ``entry.interval`` and skips ``random.uniform`` for deterministic
+        legacy-adapter cadence (pinned by ``test_jitter_zero_default``)."""
+        assert entry.interval is not None  # noqa: S101
+        if entry.jitter_max <= 0.0:
+            return entry.interval
+        return entry.interval + random.uniform(-entry.jitter_max, entry.jitter_max)
 
     # ─── supervisor ────────────────────────────────────────────────────
 
