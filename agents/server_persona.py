@@ -68,6 +68,44 @@ def default_grpc_target(orchestrator_url: str) -> str:
 _AGENT_ID_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 
 
+def _summarize_autonomy_cadence(timers: list[dict] | None, interval: int) -> str:
+    """Cadence summary for COST/Started logs (RFC 0024 PR 2)."""
+    if timers is None:
+        return f"tick_interval={interval}s"
+    body = ", ".join(f"{t['id']}@{t['interval_seconds']}s" for t in timers)
+    return f"timers=[{body}]"
+
+
+async def _register_configured_timers(
+    scheduler: TickScheduler,
+    timers: list[dict],
+    agent_id: str,
+) -> None:
+    """Register each ``autonomy.timers`` entry on ``scheduler.event_loop``.
+
+    On failure, stops the (already-started) scheduler then re-raises the
+    original error; a failure inside ``stop()`` is logged but must not
+    replace the active exception (operators need the YAML diagnostic).
+    Pinned by the two ``test_partial_register_failure_*`` wiring tests.
+    """
+    try:
+        for cfg in timers:
+            scheduler.event_loop.register_timer(
+                timer_id=cfg["id"], callback_kind=cfg["kind"],
+                interval=float(cfg["interval_seconds"]),
+                jitter_max=float(cfg.get("jitter_max_seconds", 0.0)),
+            )
+    except Exception:
+        try:
+            await scheduler.stop()
+        except Exception:
+            logger.exception(
+                "Agent %s: scheduler.stop() failed during partial-init "
+                "cleanup; original timer-registration error follows.", agent_id,
+            )
+        raise
+
+
 # ─── Agent type resolution ───────────────────────────────────
 
 
@@ -363,15 +401,28 @@ async def initialize_persona_agents(
             interval = autonomy.get("tick_interval_seconds", 60)
             max_actions = autonomy.get("max_actions_per_tick", 3)
             idle_after = autonomy.get("idle_after_ticks", 10)
+            timers = autonomy.get("timers")
+            # RFC 0024 PR 2 precedence: ``timers`` wins when both knobs
+            # are set.  Pass ``register_legacy_timer=False`` to suppress
+            # the PR 1 synthesised back-compat timer, then register every
+            # configured timer onto the EventLoop directly.  Phase 5
+            # (v0.4.0) emits the deprecation warning on
+            # ``tick_interval_seconds``; Phase 2 stays quiet beyond the
+            # one-time INFO breadcrumb below.
+            if timers is not None and "tick_interval_seconds" in autonomy:
+                logger.info(
+                    "Agent %s: autonomy.timers takes precedence over "
+                    "tick_interval_seconds (configured: %ds, ignored)",
+                    agent_id, interval,
+                )
             scheduler = TickScheduler(
                 agent,
                 interval=float(interval),
                 max_actions_per_tick=max_actions,
                 idle_after_ticks=idle_after,
                 executor=dispatcher.executor,
+                register_legacy_timer=timers is None,
             )
-            tick_schedulers[agent_id] = scheduler
-            dispatcher.register_tick_scheduler(agent_id, scheduler)
             # Cost-safety notice — emitted *before* scheduler.start() so the
             # warning is guaranteed to reach the log before any LLM spend can
             # begin.  Placing it after start() would invert the semantic order
@@ -379,18 +430,15 @@ async def initialize_persona_agents(
             # and mislead future maintainers.
             # See README.md "Cost Warning" and SECURITY.md "Responsible Use".
             max_llm_calls = agent.config.get("max_llm_calls", "unset")
+            cadence = _summarize_autonomy_cadence(timers, interval)
             logger.warning(
                 "COST: persona '%s' is about to start an autonomous tick loop "
                 "and will consume LLM tokens continuously.",
                 agent_id,
             )
             logger.warning(
-                "COST: tick_interval=%ss, max_actions_per_tick=%s, "
-                "idle_after_ticks=%s, max_llm_calls=%s.",
-                interval,
-                max_actions,
-                idle_after,
-                max_llm_calls,
+                "COST: %s, max_actions_per_tick=%s, idle_after_ticks=%s, max_llm_calls=%s.",
+                cadence, max_actions, idle_after, max_llm_calls,
             )
             logger.warning(
                 "COST: stop agent '%s' explicitly when done — do not rely "
@@ -399,11 +447,12 @@ async def initialize_persona_agents(
                 agent_id,
             )
             scheduler.start()
-            logger.info(
-                "Started tick scheduler for %s (interval=%ds)",
-                agent_id,
-                interval,
-            )
+            # Register before publishing — partial failure must not expose a stopped scheduler.
+            if timers is not None:
+                await _register_configured_timers(scheduler, timers, agent_id)
+            tick_schedulers[agent_id] = scheduler
+            dispatcher.register_tick_scheduler(agent_id, scheduler)
+            logger.info("Started tick scheduler for %s (%s)", agent_id, cadence)
 
 
 def wire_history_fetchers(

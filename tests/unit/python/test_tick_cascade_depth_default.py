@@ -48,6 +48,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agents.dispatch import ActionExecutor, EventDispatcher
+from agents.event_loop import EventLoop
 from agents.llm_client import LLMClient, LLMResponse
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
@@ -64,14 +65,16 @@ def _clean_registry():
 
 
 @pytest.fixture(autouse=True)
-def _lower_min_interval():
+def _lower_min_interval(monkeypatch):
     """Production ``TickScheduler._MIN_INTERVAL`` is 1.0s to prevent cost
     bursts; tests need fast intervals to avoid multi-second waits.
+
+    RFC 0024 PR 2 added an independent ``EventLoop._MIN_INTERVAL`` floor
+    at the ``register_timer`` API boundary — both layers must be lowered
+    for the sub-second TickScheduler cadence to register.
     """
-    original = TickScheduler._MIN_INTERVAL
-    TickScheduler._MIN_INTERVAL = 0.01
-    yield
-    TickScheduler._MIN_INTERVAL = original
+    monkeypatch.setattr(TickScheduler, "_MIN_INTERVAL", 0.01)
+    monkeypatch.setattr(EventLoop, "_MIN_INTERVAL", 0.01)
 
 
 _PERSONA_CONFIG: dict = {

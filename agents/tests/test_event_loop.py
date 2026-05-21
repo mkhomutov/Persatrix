@@ -330,7 +330,14 @@ class TestScheduledWake:
         assert ticks[0].timer_id == "legacy_tick"
         assert ticks[0].callback_kind == "tick"
 
-    async def test_register_timer_fires_periodically(self):
+    async def test_register_timer_fires_periodically(self, monkeypatch):
+        # PR 2 added the busy-loop guard to ``EventLoop.register_timer``;
+        # the 50ms interval is sub-second so the test must lower
+        # ``_MIN_INTERVAL`` to exercise the periodic-firing contract
+        # without paying real wall-clock time.  ``monkeypatch.setattr`` is
+        # crash-safe — pytest restores the original on teardown.
+        monkeypatch.setattr(EventLoop, "_MIN_INTERVAL", 0.01)
+
         ticks: list[float] = []
         seen_event = asyncio.Event()
 
@@ -363,7 +370,9 @@ class TestScheduledWake:
         for span in spans:
             assert 0.04 <= span <= 0.5, f"interval drift outside bounds: {span}"
 
-    async def test_unregister_timer_stops_firing(self):
+    async def test_unregister_timer_stops_firing(self, monkeypatch):
+        monkeypatch.setattr(EventLoop, "_MIN_INTERVAL", 0.01)
+
         ticks: list[ScheduledWake] = []
 
         async def _on_tick(wake: ScheduledWake) -> None:
@@ -432,7 +441,10 @@ class TestPublicTimerAndTaskAPI:
         loop = _build_loop()
         assert loop.has_timer("anything") is False
 
-    async def test_has_timer_true_after_register_false_after_unregister(self):
+    async def test_has_timer_true_after_register_false_after_unregister(
+        self, monkeypatch,
+    ):
+        monkeypatch.setattr(EventLoop, "_MIN_INTERVAL", 0.01)
         loop = _build_loop()
         loop.start()
         try:

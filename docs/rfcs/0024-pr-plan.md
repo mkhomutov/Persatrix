@@ -15,7 +15,7 @@ RFC 0024 inverts the persona autonomy loop from fixed-interval polling to event-
 
 This plan covers **Phases 1–4** of the [RFC §Phased Implementation Plan](0024-event-driven-scheduling.md#phased-implementation-plan), which is the v0.3.3 contract. Phase 5 (`tick_interval_seconds` deprecation warning) is v0.4.0; Phase 6 (`tick_interval_seconds` removal, §F guard deletion, `EventType.TICK` removal) is v0.5+, gated on the [Phase 6 entrance criteria](0024-event-driven-scheduling.md#phased-implementation-plan). Both are scoped under [§Future Phases](#future-phases) here without PR rows.
 
-The work splits into **7 PRs**: five implementation PRs (Phase 3 split into 3a/3b so the write-side salience plumbing and the wake-enqueue path are reviewable in isolation), one review-follow-ups PR, and one Phases-1–4 closeout PR. The closeout shape mirrors the [RFC 0017 PR plan](0017-pr-plan.md) precedent — partial-RFC closeout because Phases 5–6 ship in later versions, not full-RFC closeout. Each PR leaves the repo in a passing-tests, lint-clean state and stays within the [BRANCHING.md](../BRANCHING.md) review surface.
+The work splits into **8 PRs**: six implementation PRs (Phase 2 split into PR 2 and PR 2.1 so the `scheduled_wakes` substrate ships before the startup wiring; Phase 3 split into 3a/3b so the write-side salience plumbing and the wake-enqueue path are reviewable in isolation), one review-follow-ups PR, and one Phases-1–4 closeout PR. The closeout shape mirrors the [RFC 0017 PR plan](0017-pr-plan.md) precedent — partial-RFC closeout because Phases 5–6 ship in later versions, not full-RFC closeout. Each PR leaves the repo in a passing-tests, lint-clean state and stays within the [BRANCHING.md](../BRANCHING.md) review surface.
 
 **Prerequisites**:
 - [RFC 0023](0023-llm-call-leasing.md) (LLM Call Leasing) — shipped in v0.3.2; PR 1 emits `wake.kind` as an OTEL span attribute on the LLM-call span alongside the existing `LeaseRequest.cause` ([proto/wallet.proto](../../proto/wallet.proto)) origin attribution. The `Cause` enum is unchanged; `wake.kind` is a new observability dimension, not a proto-surface change.
@@ -27,7 +27,7 @@ The work splits into **7 PRs**: five implementation PRs (Phase 3 split into 3a/3
 - **[RFC 0024 OQ §1](0024-event-driven-scheduling.md#open-questions) (timer persistence)** is **already resolved** in the RFC body: timer storage is per-agent SQLite (`scheduled_wakes` table), source of truth is `agents.yaml`, the table is a derived cache rebuilt on startup. Recorded here as a non-blocking gate so PR 2 has a single named resolution to link in its scope. SA-1 (Personal/Society Storage Split) re-shape risk is acknowledged and accepted in the RFC; the table is a one-time migration if SA-1 lands a society-store partition for timers in v0.4.0+. See [PR 2: Hard-gate confirmation](#pr-2-featurev033-rfc0024-timer-registry--autonomytimers-config--scheduled_wakes-table).
 - **[Phase 3 prerequisite — `source_span_id`](0024-event-driven-scheduling.md#f-failure-modes)**: today `agents/memory/` writes do not carry `source_span_id` (verified by `grep` at RFC authoring time). PR 3a lands the attribute on the write path *before* PR 3b enqueues `SalienceWake`. The coarser fallback ("no `SalienceWake` while the agent's `on_event` lock is held") is named in the RFC as the alternative; PR 3a names which path Phase 3 takes — see [PR 3a Key implementation details](#pr-3a-featurev033-rfc0024-salience-prereqs--write-side-salience--source_span_id).
 
-**Recommended merge order**: **PR 1 → PR 2 → PR 3a → PR 3b → PR 4 → PR 5 → PR 6**. The order tracks the RFC's phase boundaries: PR 1 (Phase 1) is the structural foundation — every later PR builds on `EventLoop` and `SyncDispatchHandle`. PRs 3a/3b (Phase 3) are reviewable in isolation only after PR 1's wake taxonomy exists. PR 4 (Phase 4) requires PR 1's `event_loop.enqueue` API. PR 4 (Phase 4 channel dispatch) is the closing implementation PR and carries the cost-regression CI gate as its acceptance, not a follow-up.
+**Recommended merge order**: **PR 1 → PR 2 → PR 2.1 → PR 3a → PR 3b → PR 4 → PR 5 → PR 6**. The order tracks the RFC's phase boundaries: PR 1 (Phase 1) is the structural foundation — every later PR builds on `EventLoop` and `SyncDispatchHandle`. PRs 3a/3b (Phase 3) are reviewable in isolation only after PR 1's wake taxonomy exists. PR 4 (Phase 4) requires PR 1's `event_loop.enqueue` API. PR 4 (Phase 4 channel dispatch) is the closing implementation PR and carries the cost-regression CI gate as its acceptance, not a follow-up.
 
 ---
 
@@ -40,7 +40,9 @@ The work splits into **7 PRs**: five implementation PRs (Phase 3 split into 3a/3
   ↓
 PR 1 (agents/event_loop.py + WakeEvent + SyncDispatchHandle; TickScheduler thin adapter)   [RFC Phase 1]
   ↓
-PR 2 (autonomy.timers config + per-agent SQLite scheduled_wakes; cache-from-agents.yaml)    [RFC Phase 2]
+PR 2 (autonomy.timers config + per-agent SQLite scheduled_wakes substrate; cache unwired)   [RFC Phase 2]
+  ↓
+PR 2.1 (wire ScheduledWakesCache into initialize_persona_agents; next_fire_at_ms restore)   [RFC Phase 2]
   ↓
 PR 3a (MemoryWriteEvent + write-side salience: float + source_span_id; no SalienceWake yet) [RFC Phase 3 prereq]
   ↓
@@ -155,6 +157,36 @@ PR 1 lands the structural foundation with no behaviour change — `TickScheduler
 - [ ] Both `autonomy.timers` and `tick_interval_seconds` accepted; latter still works; INFO log emitted when both are set.
 - [ ] Stock personas in [`config/agents.yaml`](../../config/agents.yaml) migrated to `timers: []` (no-timers default; back-compat synthesised legacy timer continues to handle any remaining `tick_interval_seconds` entry).
 - [ ] [Progress Overview](#progress-overview) row 2 filled.
+
+---
+
+### PR 2.1: `feature/v033-rfc0024-scheduled-wakes-wiring` — Wire `ScheduledWakesCache` into Startup
+
+**Depends on**: PR 2 merged.
+**Purpose**: PR 2 shipped the `scheduled_wakes` table schema and the `ScheduledWakesCache` class but did **not** wire either into the persona-agents init path — the restart-mid-jitter-window guarantee the [PR 2 module docstring](../../agents/memory/scheduled_wakes.py) names is therefore not yet delivered. This follow-up closes the gap: `initialize_persona_agents` opens one `ScheduledWakesCache` per persona, calls `rebuild_from_config(...)` from the parsed `autonomy.timers` list on startup (so orphan rows clear and the cache stays canonical to `agents.yaml`), and restores `next_fire_at_ms` per row so a persona restarted mid-jitter-window resumes its schedule instead of firing immediately. Implementation review surface stays inside `agents/server_persona.py` + the cache module — no schema or RFC-text change.
+
+**Why split out of PR 2.** Two reasons. First, PR 2's review surface is already 1,300 LOC across 17 files; folding in the wiring would push past the [BRANCHING.md](../BRANCHING.md) review-friendliness threshold. Second, the `next_fire_at_ms` restoration touches `EventLoop._arm_timer` (the initial-delay path) — a behaviour change distinct from PR 2's "ship the substrate" goal, and worth a focused PR.
+
+#### Key implementation details
+
+| Path | What changes |
+| --- | --- |
+| `agents/server_persona.py` | `initialize_persona_agents` constructs one `ScheduledWakesCache(db_path=memory_db_path, agent_id=agent_id)` per persona alongside the `MemoryStore` open. Calls `await cache.initialize()` then `await cache.rebuild_from_config(rows)` with the parsed `autonomy.timers` list converted into `ScheduledWakeRow` (`interval_seconds * 1000 → interval_ms`; rounding rule TBD — see scope decision below). For each row whose `next_fire_at_ms` is in the future, the call into `EventLoop.register_timer` uses the new `initial_delay` kwarg so re-arm honours the saved monotonic anchor. The cache lifecycle is registered with the existing shutdown path so `cache.close()` runs on graceful stop. |
+| `agents/event_loop.py` | `register_timer` gains an optional `initial_delay: float \| None` kwarg that overrides the first-fire delay (today's value is `_next_delay(entry)` for periodic or `fire_after` for one-shot). When the cache restores a row mid-jitter-window, the loader passes `initial_delay = (saved_next_fire_at_ms - now_ms) / 1000` clamped to `[_MIN_INTERVAL, interval + jitter_max]`. |
+| `agents/tests/test_scheduled_wakes_cache_wiring.py` | **New** — end-to-end: write a persona config with one timer, instantiate via `initialize_persona_agents`, verify the cache row exists; stop and re-init with a mutated config, verify orphan deleted and new timer present; mid-jitter-window restart simulated by freezing monotonic time + writing a `next_fire_at_ms` in the future, asserting first fire happens at the restored anchor. |
+
+#### Scope decisions to record in the PR description
+
+- **`interval_ms` rounding.** The schema permits `interval_seconds: 1.5` (float). The cache column is `INTEGER`. Decide between `int(seconds * 1000)` (truncate, surprising at 1.5001 → 1500), `round(seconds * 1000)` (banker's, surprising at 1.0005 → 1000 vs 1001), or rejecting non-integer-millisecond values at the loader. Recommended: `round(...)` with a one-line note in `_to_row()` and the same rule used by the future runtime-mutation API.
+- **`next_fire_at_ms` clock.** Must be monotonic (RFC 0024 §C). Cache writes use `time.monotonic_ns() // 1_000_000`; restoration converts back the same way. Record the choice in the PR so a future "wall-clock drift" bug report has a name to grep for.
+
+#### Acceptance
+
+- [ ] `pytest agents/tests/test_scheduled_wakes_cache_wiring.py -q` passes.
+- [ ] Existing `agents/tests/test_scheduled_wakes_cache.py` still green (no behaviour change at the cache class boundary).
+- [ ] `ruff check agents/`, `mypy agents/`, `make validate`, `make test` all clean.
+- [ ] PR description records the two scope decisions above.
+- [ ] [Progress Overview](#progress-overview) row 2.1 flipped to ✅ Merged.
 
 ---
 
@@ -354,7 +386,36 @@ work — drops there are a steady state, not a teardown corner._
 
 ##### From PR 2 review
 
-_None recorded at plan-authoring time._
+_(1) **Shared `_MIN_INTERVAL` test fixture.** PR 2 added an independent
+``EventLoop._MIN_INTERVAL`` floor at the ``register_timer`` API
+boundary (defense-in-depth alongside ``TickScheduler._MIN_INTERVAL``).
+Every test file that lowers ``TickScheduler._MIN_INTERVAL`` for
+sub-second cadence now has to lower both — six call sites today
+(`tests/integration/test_persona_e2e_scheduling_memory.py`,
+`tests/unit/python/test_tick_cascade_depth_default.py`,
+`tests/unit/python/test_tick_scheduler.py`,
+`agents/tests/test_event_loop.py` ×3,
+`agents/tests/test_event_loop_compat.py` ×3). Extract a shared
+``lower_min_intervals`` pytest fixture (likely in a
+`conftest.py` under each test root) so a future ``_MIN_INTERVAL`` move
+or a third floor surface is a one-line change instead of a
+six-file ripple. Not blocking; pure scaffolding cleanup. Defer
+until after PR 2.1's wiring stabilises which files actually need the
+lowered floor._
+
+_(2) **`agents/event_loop.py` line-count.** PR 2 lands the file at ≈540 lines after the jitter-cap review follow-up, past the [BRANCHING.md](../BRANCHING.md) 500-line review-friendliness threshold that the PR plan cites elsewhere. PR 2.1 already touches `_arm_timer` for the `initial_delay` restore path — bundle a split there: lift the timer-registry surface (`_TimerEntry`, `register_timer`, `unregister_timer`, `_arm_timer`, `_next_delay`) into `agents/event_loop_timers.py` and re-export from `agents/event_loop.py`. Public surface stays unchanged; `EventLoop._timers` remains the single owner of timer state. Not blocking PR 2; bundle with PR 2.1 to keep the diff small._
+
+_(3) **PR 2 description test-count drift.** The four PR-scope files now carry **39 tests** (12 in `test_event_loop_timers.py`, 9 in `test_scheduled_wakes_cache.py`, 9 in `test_validate_agent_schema_timers.py`, 9 in `test_server_persona_wiring_timers.py` after the sixth review follow-up added the `scheduler.stop()` cleanup-error preservation test). The PR description still claims "All 34 PR-scope tests pass" and lists the per-file breakdown as `12 + 9 + 8 + 5`, which doesn't add to 34 either — the description has been one revision behind on each of the last two follow-up bumps. Cosmetic — PR-body edit only, no code change. Update the description before merging the squash so the historical record matches reality._
+
+_(4) **Jitter-cap operator UX.** The new cap (`jitter_max_seconds <= interval_seconds - _MIN_INTERVAL`) is enforced as a `ValueError` at startup inside `EventLoop.register_timer` rather than at schema validation, because JSON Schema cannot natively express the cross-field constraint. An operator who writes `interval_seconds: 1.0, jitter_max_seconds: 0.5` sees a clear error message but only after the process starts loading personas. If misconfigured-jitter becomes a recurring support burden, lift the check into a `validate_config_dir` post-schema pass (we already have one for `additionalProperties` / required-field semantics). Defer until evidence of operator confusion._
+
+_(5) **`ScheduledWakesCache.rebuild_from_config` transaction idiom.** PR 2 lands the rebuild path with an explicit `await cur.execute("BEGIN")` paired with manual `commit`/`rollback` ([agents/memory/scheduled_wakes.py](../../agents/memory/scheduled_wakes.py)). The pattern works under `aiosqlite`'s default `isolation_level=""` because no DML precedes the `BEGIN`, but it's fragile — any future code path that issues a DML on the same connection before `rebuild_from_config` runs will cause `OperationalError: cannot start a transaction within a transaction`. The idiomatic replacement is `async with self._conn: …` which delegates commit/rollback to the connection's `__aenter__`/`__aexit__`. No behaviour change today; pure cleanup. PR 2.1 already touches this module (adds `next_fire_at_ms` restore wiring), so bundle the swap there to keep the diff localised. Defer until PR 2.1._
+
+_(6) **Cadence-summary float rendering.** [`_summarize_autonomy_cadence`](../../agents/server_persona.py) interpolates `interval_seconds` verbatim into the COST WARNING and "Started" INFO logs: a YAML config of `interval_seconds: 60` renders as `name@60s`, while `interval_seconds: 60.0` renders as `name@60.0s` and `interval_seconds: 60.5` as `name@60.5s`. All stock personas use integer intervals today so the inconsistency is latent, but the schema declares `type: number` so a float-valued config is fully legal. Switch the interpolation to `f"{t['id']}@{float(t['interval_seconds']):g}s"` to normalise integer-valued floats (`60.0 → 60`) while preserving fractional precision (`60.5 → 60.5`). Not blocking; pure operator-log polish. Defer until an operator reports the inconsistency or until the next touch on this function — bundling with PR 2.1's `_summarize_autonomy_cadence` updates (if PR 2.1 adds a `next_fire_at_ms` breadcrumb to the same line) is the natural home._
+
+_(7) **`EventDispatcher.has_tick_scheduler` public surface.** The partial-init cleanup tests in `tests/unit/python/test_server_persona_wiring_timers.py` (`test_partial_register_failure_stops_scheduler` and the new `test_partial_register_failure_preserves_original_exception_when_stop_raises`) inspect `dispatcher._tick_schedulers` directly because there is no public getter for "is this agent's scheduler registered?". Reaching into a leading-underscore attribute is acknowledged in the test comments but couples the tests to dispatcher internals. Add a `has_tick_scheduler(agent_id: str) -> bool` (or `get_tick_scheduler`) method on `EventDispatcher` and switch both test assertions to the public surface. The dispatcher already exposes `register_tick_scheduler` — adding the symmetric query is the smallest public-API additive change. Not blocking; pure test-coupling cleanup. Bundle with any future dispatch-API touch (e.g. PR 4's channel-dispatch work) so the new method ships alongside a real production caller rather than as a test-only widget._
+
+_(8) **`timers: []` + `tick_interval_seconds` precedence-regression test.** The wiring tests cover `timers` non-empty + `tick_interval_seconds` (`test_timers_wins_when_both_set`) and `timers: []` alone (`test_empty_timers_list_no_timers_registered`), but no test pins the corner case of `timers: []` *with* `tick_interval_seconds` set — the precedence rule applies on `timers is not None`, not truthiness, so an empty list still suppresses the synthesised legacy timer and the operator gets zero wakes. Without the regression test a future refactor flipping the gate to `if timers:` would silently restore the legacy fallback. Drafted during the seventh review pass; not landed in PR 2 because the test file is already at 497 lines and a meaningful integration-style wiring test takes ~50 lines (would push past the [BRANCHING.md](../BRANCHING.md) 500-line review-friendliness limit). PR 2.1 already touches `agents/server_persona.py`'s timer wiring for the `ScheduledWakesCache` integration and will likely need to split this test file anyway — bundle the new test there. Test outline preserved verbatim in [the PR 407 review thread](https://github.com/mkhomutov/Persatrix/pull/407) so the assertion shape (precedence INFO log fires, `has_timer("legacy_tick")` is False) doesn't have to be re-derived._
 
 ##### From PR 3a review
 
@@ -445,8 +506,9 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | RFC Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-----------|-------|--------|--------|-----------|--------|
-| 1 | 1 | EventLoop + WakeEvent + `SyncDispatchHandle` (TickScheduler thin adapter) | `feature/v033-rfc0024-event-loop` | 🔀 PR open | this PR | — |
-| 2 | 2 | `autonomy.timers` config + per-agent SQLite `scheduled_wakes` | `feature/v033-rfc0024-timer-registry` | ⬜ Not started | — | — |
+| 1 | 1 | EventLoop + WakeEvent + `SyncDispatchHandle` (TickScheduler thin adapter) | `feature/v033-rfc0024-event-loop` | ✅ Merged | [#406](https://github.com/mkhomutov/Persatrix/pull/406) | 2026-05-21 |
+| 2 | 2 | `autonomy.timers` config + per-agent SQLite `scheduled_wakes` (table + cache class shipped, **not wired** into `initialize_persona_agents`) | `feature/v033-rfc0024-timer-registry` | 🔀 PR open | this PR | — |
+| 2.1 | 2 | Wire `ScheduledWakesCache` into `initialize_persona_agents` — rebuild from config on startup; restore `next_fire_at_ms` so restart mid-jitter-window does not fire immediately | `feature/v033-rfc0024-scheduled-wakes-wiring` | ⬜ Not started | — | — |
 | 3a | 3 (prereq) | Write-side `salience` + `source_span_id` (no wake yet) | `feature/v033-rfc0024-salience-prereqs` | ⬜ Not started | — | — |
 | 3b | 3 | `SalienceWake` + threshold + loop-back guard + rate-limit | `feature/v033-rfc0024-salience-wake` | ⬜ Not started | — | — |
 | 4 | 4 | Channel-message dispatch + cost-regression CI gate | `feature/v033-rfc0024-channel-dispatch` | ⬜ Not started | — | — |

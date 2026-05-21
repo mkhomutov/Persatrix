@@ -1,0 +1,497 @@
+"""Server persona wiring tests for RFC 0024 PR 2 — autonomy.timers.
+
+Split out from test_server_persona_wiring.py to keep that file under the
+500-line review-friendly limit. Pins the precedence/back-compat
+contracts:
+
+- Both ``timers`` and ``tick_interval_seconds`` set → ``timers`` wins, INFO log.
+- ``tick_interval_seconds`` only → PR 1 back-compat synthesised legacy timer.
+- ``timers`` only → no legacy timer; configured timers register on EventLoop.
+- ``timers: []`` (v0.3.3 default) → zero timers; substrate exists but quiet.
+- ``timers`` set → "Started" INFO log names ``timers=N`` instead of the
+  dead legacy ``interval=60s``; legacy path keeps the interval text.
+- ``timers`` set → COST cadence WARNING enumerates configured timers
+  instead of the dead legacy ``tick_interval=60s`` value.
+- Partial timer-registration failure → scheduler stopped, raise propagates.
+"""
+
+from __future__ import annotations
+
+import logging
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from agents.dispatch import EventDispatcher
+from agents.llm_client import LLMClient, LLMResponse
+from agents.persona import create_persona_agent
+from agents.server_persona import initialize_persona_agents
+from agents.tools.registry import clear_registry
+
+
+@pytest.fixture(autouse=True)
+def _clean_registry():
+    clear_registry()
+    yield
+    clear_registry()
+
+
+def _make_client() -> LLMClient:
+    mock_provider = AsyncMock()
+    mock_provider.create_message = AsyncMock(
+        return_value=LLMResponse(text="ok"),
+    )
+    mock_provider.format_tool_definitions = MagicMock(return_value=[])
+    mock_provider.append_tool_round = MagicMock(
+        side_effect=lambda msgs, resp, results: msgs,
+    )
+    return LLMClient(mock_provider)
+
+
+_PERSONA_CONFIG: dict = {
+    "id": "ember-owl",
+    "type": "persona",
+    "name": "Ember Owl",
+    "role": "Engineering leadership",
+    "model": "test-model",
+    "temperature": 0.7,
+    "max_llm_calls": 10,
+    "max_tokens": 4096,
+    "persona": {
+        "title": "VP of Engineering",
+        "background": "15 years.",
+        "behavior": {},
+    },
+    "permissions": {"memory": {"read": True, "write": True}},
+    "memory": {"db_path": ":memory:", "notes": {"max_notes": 100}},
+}
+
+
+class TestAutonomyTimersWiring:
+    async def test_timers_wins_when_both_set(self, caplog):
+        """``timers`` and ``tick_interval_seconds`` both present — ``timers``
+        wins and the loader emits one INFO line naming the precedence."""
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {
+                "level": "semi-autonomous",
+                "tick_interval_seconds": 60,
+                "timers": [
+                    {
+                        "id": "memory_consolidation",
+                        "interval_seconds": 30,
+                        "kind": "memory_consolidation",
+                    },
+                ],
+            },
+        }
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+
+        with caplog.at_level(logging.INFO, logger="Persatrix.agent.server_persona"):
+            await initialize_persona_agents(
+                {"ember-owl": agent}, dispatcher, schedulers,
+            )
+
+        scheduler = schedulers["ember-owl"]
+        assert scheduler.event_loop.has_timer("memory_consolidation")
+        assert not scheduler.event_loop.has_timer("legacy_tick")
+        precedence_logs = [
+            r for r in caplog.records
+            if "autonomy.timers" in r.message
+            and "tick_interval_seconds" in r.message
+        ]
+        assert len(precedence_logs) >= 1
+
+        await scheduler.stop()
+        await agent.close_memory()
+
+    async def test_tick_interval_only_synthesises_legacy_timer(self):
+        """``timers`` absent → PR 1 back-compat synthesised legacy timer.
+
+        Phase 5 / v0.4.0 emits the deprecation warning on
+        ``tick_interval_seconds``; Phase 2 stays silent.
+        """
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {
+                "level": "semi-autonomous",
+                "tick_interval_seconds": 60,
+            },
+        }
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+        await initialize_persona_agents(
+            {"ember-owl": agent}, dispatcher, schedulers,
+        )
+
+        scheduler = schedulers["ember-owl"]
+        assert scheduler.event_loop.has_timer("legacy_tick")
+
+        await scheduler.stop()
+        await agent.close_memory()
+
+    async def test_timers_only_no_legacy_timer(self):
+        """``timers`` set, ``tick_interval_seconds`` absent — only configured
+        timers register; no synthesised legacy timer."""
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {
+                "level": "autonomous",
+                "timers": [
+                    {
+                        "id": "memory_consolidation",
+                        "interval_seconds": 30,
+                        "kind": "memory_consolidation",
+                    },
+                ],
+            },
+        }
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+        await initialize_persona_agents(
+            {"ember-owl": agent}, dispatcher, schedulers,
+        )
+
+        scheduler = schedulers["ember-owl"]
+        assert scheduler.event_loop.has_timer("memory_consolidation")
+        assert not scheduler.event_loop.has_timer("legacy_tick")
+
+        await scheduler.stop()
+        await agent.close_memory()
+
+    async def test_empty_timers_list_no_timers_registered(self):
+        """v0.3.3 default — stock personas ship ``timers: []`` so an
+        autonomous persona registers *zero* timers. Substrate is alive but
+        nothing produces a wake. This is the bored-persona idle-cost
+        contract at the timer-registry level."""
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {"level": "autonomous", "timers": []},
+        }
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+        await initialize_persona_agents(
+            {"ember-owl": agent}, dispatcher, schedulers,
+        )
+
+        scheduler = schedulers["ember-owl"]
+        assert not scheduler.event_loop.has_timer("legacy_tick")
+        assert scheduler.event_loop.is_running
+
+        await scheduler.stop()
+        await agent.close_memory()
+
+    async def test_cost_warning_names_timers_when_timers_set(self, caplog):
+        """The COST WARNING must not advertise the dead
+        ``tick_interval=60s`` when ``timers`` is configured.
+
+        Why: the COST warning is the loudest operator-facing signal
+        about what the persona will spend on LLM tokens — it is
+        emitted at the exact moment autonomous spend can begin (per
+        the inline comment on the surrounding block).  Reporting a
+        legacy ``tick_interval`` value that the runtime ignores
+        actively misleads cost reasoning ("but I set the interval to
+        60!").  The fix mirrors the "Started" log: when ``timers``
+        is set, the warning enumerates the configured timers'
+        ``interval_seconds`` so operators see the real cadence(s).
+        Defense-in-depth alongside [test_started_log_names_timers_when_timers_set].
+        """
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {
+                "level": "autonomous",
+                "timers": [
+                    {
+                        "id": "memory_consolidation",
+                        "interval_seconds": 30,
+                        "kind": "memory_consolidation",
+                    },
+                    {
+                        "id": "reflection",
+                        "interval_seconds": 300,
+                        "kind": "reflection",
+                    },
+                ],
+            },
+        }
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+
+        with caplog.at_level(logging.WARNING, logger="Persatrix.agent.server_persona"):
+            await initialize_persona_agents(
+                {"ember-owl": agent}, dispatcher, schedulers,
+            )
+
+        cost_cadence_logs = [
+            r for r in caplog.records
+            if r.levelname == "WARNING"
+            and "COST:" in r.message
+            and ("tick_interval" in r.message or "timers=" in r.message)
+        ]
+        assert len(cost_cadence_logs) == 1, (
+            "expected exactly one COST cadence warning, got "
+            f"{[r.message for r in cost_cadence_logs]}"
+        )
+        msg = cost_cadence_logs[0].getMessage()
+        # The new branch reports the actual configured timer intervals …
+        assert "timers=" in msg, (
+            f"expected 'timers=' enumeration in COST warning when "
+            f"timers is set; got {msg!r}"
+        )
+        # … and does not advertise the dead legacy interval.
+        assert "tick_interval=" not in msg, (
+            f"COST warning must not name the dead legacy interval "
+            f"when timers is set; got {msg!r}"
+        )
+
+        await schedulers["ember-owl"].stop()
+        await agent.close_memory()
+
+    async def test_started_log_names_timers_when_timers_set(self, caplog):
+        """The "Started tick scheduler" INFO log must NOT advertise the
+        dead ``interval=60s`` value when ``timers`` is configured.
+
+        Why: ``interval`` is the legacy ``tick_interval_seconds`` (default
+        60) and is only meaningful when ``register_legacy_timer=True``.
+        When ``timers`` is set the synthesised legacy timer is suppressed,
+        so logging "interval=60s" on startup misleads an operator into
+        believing the persona ticks every 60s — the actual cadence is
+        whatever the configured timers carry.  This test pins the
+        branch: ``timers`` set → log names the timer count; legacy path
+        → log keeps the interval text.
+        """
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {
+                "level": "autonomous",
+                "timers": [
+                    {
+                        "id": "memory_consolidation",
+                        "interval_seconds": 30,
+                        "kind": "memory_consolidation",
+                    },
+                    {
+                        "id": "reflection",
+                        "interval_seconds": 300,
+                        "kind": "reflection",
+                    },
+                ],
+            },
+        }
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+
+        with caplog.at_level(logging.INFO, logger="Persatrix.agent.server_persona"):
+            await initialize_persona_agents(
+                {"ember-owl": agent}, dispatcher, schedulers,
+            )
+
+        started_logs = [
+            r for r in caplog.records if "Started tick scheduler" in r.message
+        ]
+        assert len(started_logs) == 1, (
+            f"expected exactly one 'Started tick scheduler' log, "
+            f"got {len(started_logs)}: {[r.message for r in started_logs]}"
+        )
+        msg = started_logs[0].getMessage()
+        # The new branch enumerates the configured timers (id@interval) …
+        assert "timers=[" in msg, (
+            f"expected 'timers=[…]' enumeration in started-log for "
+            f"timers-set branch, got {msg!r}"
+        )
+        assert "memory_consolidation@30s" in msg
+        assert "reflection@300s" in msg
+        # … and does not mislead the operator with the dead legacy
+        # ``tick_interval`` token (which would carry the unused default 60).
+        assert "tick_interval=" not in msg, (
+            f"started-log must not name the dead legacy interval when "
+            f"timers is set; got {msg!r}"
+        )
+
+        await schedulers["ember-owl"].stop()
+        await agent.close_memory()
+
+    async def test_started_log_names_interval_for_legacy_path(self, caplog):
+        """The legacy ``tick_interval_seconds``-only path still logs the
+        interval text — preserves PR 1 back-compat operator UX so no
+        log scraping breaks for personas that haven't migrated to
+        ``autonomy.timers`` yet."""
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {
+                "level": "semi-autonomous",
+                "tick_interval_seconds": 45,
+            },
+        }
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+
+        with caplog.at_level(logging.INFO, logger="Persatrix.agent.server_persona"):
+            await initialize_persona_agents(
+                {"ember-owl": agent}, dispatcher, schedulers,
+            )
+
+        started_logs = [
+            r for r in caplog.records if "Started tick scheduler" in r.message
+        ]
+        assert len(started_logs) == 1
+        msg = started_logs[0].getMessage()
+        assert "tick_interval=45s" in msg, (
+            f"legacy path must still report the configured interval; "
+            f"got {msg!r}"
+        )
+
+        await schedulers["ember-owl"].stop()
+        await agent.close_memory()
+
+    async def test_partial_register_failure_stops_scheduler(self):
+        """A misconfigured timer in the middle of ``autonomy.timers`` causes
+        ``register_timer`` to raise after the scheduler is already started.
+
+        The wiring path must stop the scheduler and leave **both** registries
+        — the caller's local ``tick_schedulers`` dict *and*
+        ``EventDispatcher._tick_schedulers`` — free of the half-initialised
+        entry before propagating the error.  Without the dispatcher
+        cleanup, a stopped scheduler stays addressable via
+        :meth:`EventDispatcher.dispatch` (see ``dispatch.py`` where
+        ``self._tick_schedulers.get(target_id)`` is the only filter); any
+        subsequent caller that reuses the dispatcher would route wakes to
+        a dead ``EventLoop``.
+
+        Failure mode the cross-field jitter cap surfaces: schema validates
+        each timer's fields independently, so an ``interval_seconds: 1.0,
+        jitter_max_seconds: 0.5`` combination is schema-valid but rejected
+        at the ``register_timer`` API boundary.
+        """
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {
+                "level": "autonomous",
+                "timers": [
+                    {
+                        "id": "valid_timer",
+                        "interval_seconds": 30,
+                        "kind": "memory_consolidation",
+                    },
+                    {
+                        # interval=1.0 leaves zero slack for jitter — the
+                        # cross-field cap rejects this at API boundary.
+                        "id": "bad_jitter",
+                        "interval_seconds": 1.0,
+                        "kind": "any",
+                        "jitter_max_seconds": 0.5,
+                    },
+                ],
+            },
+        }
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+
+        with pytest.raises(ValueError, match="jitter_max"):
+            await initialize_persona_agents(
+                {"ember-owl": agent}, dispatcher, schedulers,
+            )
+
+        # Scheduler was never published to the caller's local registry —
+        # no half-bring-up entry to confuse subsequent dispatches.
+        assert "ember-owl" not in schedulers
+        # Symmetric guarantee for the dispatcher: a failed init must not
+        # leave a stopped scheduler routable.  Accessing ``_tick_schedulers``
+        # directly is the only inspection surface today (no public getter);
+        # the leading underscore is acknowledged.
+        assert "ember-owl" not in dispatcher._tick_schedulers
+
+        await agent.close_memory()
+
+    async def test_partial_register_failure_preserves_original_exception_when_stop_raises(
+        self, monkeypatch, caplog,
+    ):
+        """When ``scheduler.stop()`` itself raises during partial-init
+        cleanup, the original ``register_timer`` ``ValueError`` must still
+        propagate (not be masked by the cleanup error) so operators see
+        the actionable misconfiguration. The cleanup error is surfaced
+        via ``logger.exception`` rather than silently swallowed. Without
+        the inner ``try/except``, callers (``pytest.raises``, ops
+        dashboards) see "stop failed" instead of "timer X is misconfigured"
+        — exactly the diagnostic that pinpoints the YAML line to fix.
+        """
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {
+                "level": "autonomous",
+                "timers": [{
+                    "id": "bad_jitter", "interval_seconds": 1.0,
+                    "kind": "any", "jitter_max_seconds": 0.5,
+                }],
+            },
+        }
+
+        # Monkeypatch the class method — the test body never calls stop().
+        from agents.tick import TickScheduler
+
+        stop_calls = 0
+
+        async def _stop_raises(self, timeout: float = 10.0) -> None:
+            nonlocal stop_calls
+            stop_calls += 1
+            raise RuntimeError("simulated cleanup failure")
+
+        monkeypatch.setattr(TickScheduler, "stop", _stop_raises)
+
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+
+        with caplog.at_level(logging.ERROR, logger="Persatrix.agent.server_persona"):
+            with pytest.raises(ValueError, match="jitter_max"):
+                await initialize_persona_agents(
+                    {"ember-owl": agent}, dispatcher, schedulers,
+                )
+
+        assert stop_calls == 1, f"expected stop() called once, got {stop_calls}"
+
+        # Cleanup failure surfaced via logger.exception (ERROR + exc_info).
+        cleanup_errors = [
+            r for r in caplog.records
+            if r.levelname == "ERROR"
+            and r.exc_info is not None
+            and isinstance(r.exc_info[1], RuntimeError)
+            and "simulated cleanup failure" in str(r.exc_info[1])
+        ]
+        assert cleanup_errors, (
+            f"expected the cleanup RuntimeError to be logged via logger.exception; "
+            f"records: {[(r.levelname, r.message) for r in caplog.records]}"
+        )
+
+        # Partial-init invariants from the sibling test still hold.
+        assert "ember-owl" not in schedulers
+        assert "ember-owl" not in dispatcher._tick_schedulers
+
+        await agent.close_memory()
