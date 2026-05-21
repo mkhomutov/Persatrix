@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 
 import aiosqlite
 
+from ._salience import NOTES_APPEND_SALIENCE, emit_for_tier
 from .episodic_queries import resolve_min_score
 
 logger = logging.getLogger(__name__)
@@ -139,6 +140,11 @@ class NoteStore:
             ),
         )
         await self._db.commit()
+        emit_for_tier(
+            agent_id=self._agent_id,
+            tier="notes",
+            salience=NOTES_APPEND_SALIENCE,
+        )
         return note_id
 
     async def recall_notes(

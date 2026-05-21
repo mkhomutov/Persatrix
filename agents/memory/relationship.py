@@ -16,6 +16,7 @@ import logging
 import aiosqlite
 
 from ._boundary import warn_external_construction
+from ._salience import RELATIONSHIP_APPEND_SALIENCE, emit_for_tier
 from .migrations import _apply_migrations
 from .relationship_mutations import (
     apply_decay as _apply_decay,
@@ -218,13 +219,19 @@ class RelationshipMemory:
 
         Returns the generated interaction ID.
         """
-        return await _record_interaction(
+        interaction_id = await _record_interaction(
             self._ensure_db(), self._agent_id, other_id, interaction_type,
             outcome, sentiment,
             participant_type=participant_type,
             other_participant_type=other_participant_type,
             session_id=session_id,
         )
+        emit_for_tier(
+            agent_id=self._agent_id,
+            tier="relationship",
+            salience=RELATIONSHIP_APPEND_SALIENCE,
+        )
+        return interaction_id
 
     # ─── Queries ────────────────────────────────────────────
 

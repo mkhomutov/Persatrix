@@ -27,6 +27,7 @@ from ..observability.spans import (
     EPISODIC_REMEMBER_SPAN,
 )
 from ._boundary import warn_external_construction
+from ._salience import EPISODIC_APPEND_SALIENCE, emit_for_tier
 from .episodic_notes_api import _EpisodicNotesAPIMixin
 from .episodic_queries import (
     EPISODE_SELECT,
@@ -258,7 +259,16 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                             "surface": surface,
                         },
                     )
-            return episode_id
+        # Emit *after* the EPISODIC_REMEMBER_SPAN closes so ``source_span_id``
+        # captures the parent span (the LLM-call span when the write
+        # originates inside the action loop) rather than the inner episodic
+        # span — PR 3b's loop-back guard input (RFC 0024 §F).
+        emit_for_tier(
+            agent_id=self._agent_id,
+            tier="episodic",
+            salience=EPISODIC_APPEND_SALIENCE,
+        )
+        return episode_id
 
     async def update_episode_summary(self, interaction_id: str, summary: str) -> bool:
         return await _update_episode_summary(

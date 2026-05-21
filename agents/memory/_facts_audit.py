@@ -47,6 +47,7 @@ import logging
 from typing import Any
 
 from ..observability.logging import get_redactor
+from ._salience import FACTS_APPEND_SALIENCE, emit_for_tier
 
 __all__ = ["emit_audit"]
 
@@ -90,3 +91,12 @@ def emit_audit(event: str, **fields: Any) -> None:
                 _in_redactor_fallback.reset(token)
     with contextlib.suppress(Exception):
         _logger.info(event, extra=payload)
+    # RFC 0024 PR 3a — every successful fact-store commit routes through
+    # ``_emit_audit("fact.store", ...)`` exactly once.  Piggyback the
+    # memory-write event here so :mod:`agents.memory.facts` does not need
+    # its own emit call (keeps it under the 500-line review cap).
+    if event == "fact.store":
+        agent_id = fields.get("agent_id")
+        if isinstance(agent_id, str):
+            emit_for_tier(agent_id=agent_id, tier="facts",
+                          salience=FACTS_APPEND_SALIENCE)
