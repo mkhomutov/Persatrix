@@ -162,6 +162,13 @@ async def init_persona_timers(
     the original exception propagates, so the caller sees the actionable
     YAML diagnostic rather than a "stop failed" / "cache close failed"
     chain that masks it.
+
+    See :mod:`agents.memory.scheduled_wakes` module docstring for the
+    ``next_fire_at_ms`` clock contract — monotonic on write, bounded
+    by the loader's ``[_MIN_INTERVAL, interval + jitter_max]`` clamp
+    on read so a cross-process-meaningless anchor (post-reboot)
+    degrades to a fresh-first-fire-shaped delay rather than firing
+    immediately or at some arbitrary far-future time.
     """
     saved_anchors_ms: dict[str, int] = {}
     now_ms: int | None = None

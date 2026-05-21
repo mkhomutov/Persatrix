@@ -428,7 +428,15 @@ MRO accident could pin), pinned by
 comment added in ``_register_configured_timers`` naming the
 ``now_ms is not None`` check as type-narrowing kept for mypy under the
 ``init_persona_timers`` invariant that ``saved_anchors_ms`` is
-populated iff ``now_ms`` was captured.  Four deferred:_
+populated iff ``now_ms`` was captured;
+``agents/memory/scheduled_wakes.py`` module docstring extended with the
+``next_fire_at_ms`` clock contract — process-monotonic on write,
+platform-stable cross-process on Linux/macOS/Windows today, bounded
+by the loader's ``[_MIN_INTERVAL, interval + jitter_max]`` clamp on
+read so a meaningless post-reboot anchor degrades to a fresh-first-
+fire-shaped delay — pinned by
+``test_scheduled_wakes_cache_wiring_anchors.TestStaleAnchorClamp``.
+Six deferred:_
 
 _(1) **``next_fire_at_ms`` is refreshed only at init, not on each
 fire.** PR 2.1 writes ``now_ms + interval_ms`` (no jitter) into the
@@ -483,6 +491,37 @@ operators change the storage default in one place.  Out of scope for
 PR 2.1 because every fallback predates the RFC; defer to a dedicated
 cleanup PR (or bundle with the next RFC that touches the memory-init
 path).  Not blocking; pure refactor scaffolding._
+
+_(5) **Local import of ``ScheduledWake`` inside ``_arm_timer``.**
+[`agents/event_loop_timers.py`](../../agents/event_loop_timers.py)'s
+``_arm_timer._fire`` carries a function-body ``from .event_loop import
+ScheduledWake`` to dodge the import cycle (``event_loop`` imports the
+mixin from ``event_loop_timers``; ``event_loop_timers`` would import
+``ScheduledWake`` back from ``event_loop``).  The import is cached after
+the first call so there is no per-fire perf cost, but the pattern is a
+code smell that invites repetition.  Cleanest fix: lift
+``ScheduledWake`` and ``WakeEvent`` into a third
+``agents/wake_events.py`` module that both ``event_loop.py`` and
+``event_loop_timers.py`` import.  Defer until either (a) a third
+``event_loop_*`` sibling needs the same local-import workaround, or
+(b) a touch on ``WakeEvent`` / ``ScheduledWake`` makes the lift
+incidental.  Not blocking; pure import-graph hygiene._
+
+_(6) **``_register_configured_timers`` dual responsibility.**
+[`agents/server_persona_timers.py`](../../agents/server_persona_timers.py)'s
+``_register_configured_timers`` both registers timers on the event loop
+**and** computes the per-timer ``initial_delay`` clamp; the
+``saved_anchors_ms``/``now_ms`` parameters are an external invariant
+("populated iff anchors were captured") that required the type-narrow
+``now_ms is not None`` check + clarifying comment.  Cleaner factoring:
+pre-compute a ``dict[str, float | None]`` of ``initial_delay`` values
+inside ``init_persona_timers`` and pass that single dict to
+``_register_configured_timers``.  Single source of clamp arithmetic;
+the registration loop reduces to a thin ``register_timer`` shim; the
+type-narrow comment goes away.  Defer until the next touch on either
+function (e.g. the deferred-item-(1) per-fire anchor refresh has to
+share the clamp logic).  Not blocking; pure separation-of-concerns
+refactor._
 
 ##### From PR 3a review
 
