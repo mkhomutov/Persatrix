@@ -417,6 +417,73 @@ _(7) **`EventDispatcher.has_tick_scheduler` public surface.** The partial-init c
 
 _(8) **`timers: []` + `tick_interval_seconds` precedence-regression test.** The wiring tests cover `timers` non-empty + `tick_interval_seconds` (`test_timers_wins_when_both_set`) and `timers: []` alone (`test_empty_timers_list_no_timers_registered`), but no test pins the corner case of `timers: []` *with* `tick_interval_seconds` set — the precedence rule applies on `timers is not None`, not truthiness, so an empty list still suppresses the synthesised legacy timer and the operator gets zero wakes. Without the regression test a future refactor flipping the gate to `if timers:` would silently restore the legacy fallback. Drafted during the seventh review pass; not landed in PR 2 because the test file is already at 497 lines and a meaningful integration-style wiring test takes ~50 lines (would push past the [BRANCHING.md](../BRANCHING.md) 500-line review-friendliness limit). PR 2.1 already touches `agents/server_persona.py`'s timer wiring for the `ScheduledWakesCache` integration and will likely need to split this test file anyway — bundle the new test there. Test outline preserved verbatim in [the PR 407 review thread](https://github.com/mkhomutov/Persatrix/pull/407) so the assertion shape (precedence INFO log fires, `has_timer("legacy_tick")` is False) doesn't have to be re-derived._
 
+##### From PR 2.1 review
+
+_Applied: ``_EventLoopTimersMixin.enqueue`` runtime stub moved under
+``TYPE_CHECKING`` (no behaviour change — the stub was dead at runtime
+because MRO routes ``self.enqueue`` to :class:`EventLoop.enqueue`;
+``raise NotImplementedError`` body removed the dead-code cliff a future
+MRO accident could pin), pinned by
+``test_event_loop_timers.TestMixinEnqueueIsTypeOnly``; clarifying
+comment added in ``_register_configured_timers`` naming the
+``now_ms is not None`` check as type-narrowing kept for mypy under the
+``init_persona_timers`` invariant that ``saved_anchors_ms`` is
+populated iff ``now_ms`` was captured.  Four deferred:_
+
+_(1) **``next_fire_at_ms`` is refreshed only at init, not on each
+fire.** PR 2.1 writes ``now_ms + interval_ms`` (no jitter) into the
+cache once at startup; subsequent jittered re-arms in
+``_arm_timer._fire`` never update the row, so a long-running persona's
+cached anchor lags reality by up to ``jitter_max`` seconds.  The
+restart-mid-jitter-window guarantee still holds because
+``_register_configured_timers`` clamps the restored ``initial_delay``
+into ``[_MIN_INTERVAL, interval + jitter_max]`` — the bounded error is
+acceptable for v0.3.3.  The proper fix is to update the row on each
+fire (one extra SQL write per timer firing — within budget for the
+RFC 0024 §C wake cadence) so the saved anchor tracks the real
+``call_later`` schedule.  Bundle with whichever follow-up next touches
+``_arm_timer`` or ``ScheduledWakesCache`` so the diff is localised;
+not blocking because the current bound is correct, just loose._
+
+_(2) **``EventLoop._MIN_INTERVAL`` underscore prefix vs. cross-module
+caller.** PR 2.1's ``server_persona_timers._register_configured_timers``
+reaches into ``EventLoop._MIN_INTERVAL`` for the lower-bound clamp.
+The constant is documented as a stable RFC 0024 §C value but the
+leading underscore advertises "internal" — every cross-module call site
+that needs the floor (PR 2.1 is the second after PR 2's
+``register_timer`` itself) re-asserts the visibility coupling.  Lift to
+either ``EventLoop.MIN_INTERVAL`` (public class attribute) or a module-
+level ``EVENT_LOOP_MIN_INTERVAL`` constant; the existing internal
+references rename in lockstep.  Pure naming hygiene; defer until a
+third cross-module caller appears._
+
+_(3) **Test the banker's-rounding edge case for ``interval_ms``.**
+``test_fractional_seconds_rounds_to_nearest_ms`` pins ``1.501 → 1501``,
+which works because ``1.501 * 1000`` evaluates to ``1500.999…`` in
+IEEE 754 and Python's ``round`` returns ``1501``.  But the rule the
+PR description names is "round to nearest"; Python's ``round`` is
+banker's (half-to-even), so ``0.0005 → 0`` and ``0.0015 → 2`` — the
+test never visits the half-case branch.  Add one test that pins the
+banker's-rounding behaviour explicitly (e.g. ``interval_seconds: 0.0005
+→ interval_ms: 0`` *and* a paired assertion that this is below the
+busy-loop floor so registration would fail anyway, or pick a half-case
+value above ``_MIN_INTERVAL`` such as ``1.5005 → 1500``) so a future
+refactor flipping to ``math.floor`` or ``decimal`` surfaces the rule
+change in CI.  Not blocking; the contract is already tested for the
+common case._
+
+_(4) **Hardcoded ``"data/memory.db"`` fallback duplicated across
+modules.** ``server_persona_timers.init_persona_timers`` mirrors the
+fallback pattern from ``base.py``, ``persona.py``,
+``memory/episodic.py``, ``memory/relationship.py``, ``memory/facts.py``,
+and ``memory/personal_tiers.py`` (six call sites pre-PR-2.1; seven
+after).  Centralising into a single constant — likely on
+``agents.memory`` or wherever the schema default lives — would let
+operators change the storage default in one place.  Out of scope for
+PR 2.1 because every fallback predates the RFC; defer to a dedicated
+cleanup PR (or bundle with the next RFC that touches the memory-init
+path).  Not blocking; pure refactor scaffolding._
+
 ##### From PR 3a review
 
 _None recorded at plan-authoring time._

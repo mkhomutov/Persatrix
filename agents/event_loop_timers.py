@@ -65,16 +65,18 @@ class _EventLoopTimersMixin:
     _timers: dict[str, _TimerEntry]
     _MIN_INTERVAL: float
 
-    def enqueue(self, wake: WakeEvent) -> bool:  # noqa: D401 — declared on EventLoop
-        """Forward declaration so the mixin's ``_fire`` can call
-        ``self.enqueue`` without mypy flagging it as missing.  The real
-        implementation lives on :class:`agents.event_loop.EventLoop`.
-        """
-        # Method body is overridden by ``EventLoop.enqueue``; this is
-        # a structural-typing placeholder so the mixin type-checks on
-        # its own.  A direct call here would mean ``EventLoop`` did not
-        # override — fail loud.
-        raise NotImplementedError
+    if TYPE_CHECKING:
+        # ``self.enqueue`` is called inside ``_arm_timer._fire``; the
+        # real implementation lives on :class:`agents.event_loop.EventLoop`.
+        # This declaration exists only for static analysis so mypy can
+        # resolve the attribute on the mixin's own surface — kept under
+        # ``TYPE_CHECKING`` so no runtime method shadows the MRO lookup.
+        # (RFC 0024 PR 2.1 review follow-up: an earlier
+        # ``raise NotImplementedError`` body added a failure cliff for any
+        # future MRO accident that pinned the stub instead of
+        # :meth:`EventLoop.enqueue`; pinned by
+        # ``test_event_loop_timers.TestMixinEnqueueIsTypeOnly``.)
+        def enqueue(self, wake: WakeEvent) -> bool: ...
 
     def has_timer(self, timer_id: str) -> bool:
         """Whether ``timer_id`` is currently registered.

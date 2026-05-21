@@ -307,3 +307,30 @@ class TestOneShot:
                 callback_kind="any",
                 interval=None,
             )
+
+
+class TestMixinEnqueueIsTypeOnly:
+    """RFC 0024 PR 2.1 review follow-up: the mixin's ``enqueue`` is a
+    ``TYPE_CHECKING``-only declaration, not a runtime stub.  The previous
+    ``raise NotImplementedError`` body was dead at runtime (MRO always
+    routes ``self.enqueue`` to :class:`EventLoop.enqueue`) but added a
+    failure cliff if an MRO accident ever pinned the stub.  These tests
+    pin the no-runtime-stub contract so a re-introduction surfaces in CI.
+    """
+
+    def test_mixin_has_no_runtime_enqueue_attribute(self):
+        """``_EventLoopTimersMixin.__dict__`` must not carry an
+        ``enqueue`` entry — that would re-introduce the dead runtime
+        stub the review flagged."""
+        from agents.event_loop_timers import _EventLoopTimersMixin
+        assert "enqueue" not in _EventLoopTimersMixin.__dict__, (
+            "the mixin must not define ``enqueue`` at runtime; the "
+            "single implementor is ``EventLoop.enqueue``"
+        )
+
+    def test_event_loop_enqueue_resolves_to_concrete_class(self):
+        """``EventLoop.enqueue`` is the sole runtime implementation —
+        ``self.enqueue`` inside the mixin's ``_arm_timer`` resolves
+        here.  Pin via ``__qualname__`` so a future rename surfaces."""
+        loop = _build_loop()
+        assert loop.enqueue.__qualname__ == "EventLoop.enqueue"

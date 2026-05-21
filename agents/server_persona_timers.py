@@ -114,6 +114,12 @@ async def _register_configured_timers(
             jitter_max = float(cfg.get("jitter_max_seconds", 0.0))
             initial_delay: float | None = None
             saved_anchor = saved.get(cfg["id"])
+            # ``init_persona_timers`` invariant: ``saved_anchors_ms`` is
+            # populated iff ``now_ms`` was captured; so at runtime
+            # ``saved_anchor is not None`` already implies
+            # ``now_ms is not None``.  The second check is kept for mypy
+            # type-narrowing — without it the subtraction below sees
+            # ``now_ms: int | None``.  (RFC 0024 PR 2.1 review follow-up.)
             if (
                 saved_anchor is not None
                 and now_ms is not None
