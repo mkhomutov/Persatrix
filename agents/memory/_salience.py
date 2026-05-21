@@ -47,9 +47,17 @@ def emit_for_tier(
     """Publish a :class:`MemoryWriteEvent` for ``tier`` after a successful write.
 
     Captures the active OTEL span id at call time as ``source_span_id`` (PR 3b's
-    loop-back guard input).  Wraps the publish in ``contextlib.suppress`` so a
-    bus-subscriber bug cannot surface as a write failure — the row is already
-    persisted by the time the caller invokes this shim.
+    loop-back guard input).
+
+    The ``contextlib.suppress`` is defence-in-depth against *non-subscriber*
+    failure modes — subscriber exceptions are already swallowed inside
+    :meth:`MemoryWriteBus.publish`.  The suppress here catches anything
+    upstream of the fan-out: a future :meth:`MemoryWriteEvent.__post_init__`
+    validation that raises, an OTEL API change in :func:`current_llm_span_id`,
+    or a type-system gap that lets a bad ``tier`` reach this shim.  The row
+    is already persisted by the time the caller invokes this shim, so a
+    raise here would surface as a write failure for a row that did, in fact,
+    write — the suppress preserves the failure-isolation contract.
     """
     with contextlib.suppress(Exception):
         emit_memory_write(

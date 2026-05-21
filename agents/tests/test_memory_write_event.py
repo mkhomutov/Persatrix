@@ -18,7 +18,6 @@ These tests install a transient subscriber via the global bus accessor.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from collections.abc import AsyncIterator, Iterator
 
@@ -434,10 +433,16 @@ class TestRelationshipEmission:
     async def test_failed_record_interaction_emits_nothing(
         self, relationship: RelationshipMemory, fresh_bus: MemoryWriteBus,
     ) -> None:
+        # ``pytest.raises`` (not ``contextlib.suppress``) so the test also
+        # pins that the production code DOES validate empty
+        # ``interaction_type``; the silent-suppress form would pass even
+        # if validation were removed AND the emit then never fired for
+        # some unrelated reason.  Aligns with the failure-path pattern
+        # used by the other three tier classes in this file.
         seen: list[MemoryWriteEvent] = []
         fresh_bus.subscribe(seen.append)
 
-        with contextlib.suppress(ValueError):
+        with pytest.raises(ValueError):
             await relationship.record_interaction(
                 other_id="bob", interaction_type="",  # empty type fails
             )
