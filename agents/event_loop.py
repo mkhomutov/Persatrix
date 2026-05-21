@@ -322,16 +322,13 @@ class EventLoop:
         jitter_max: float = 0.0,
         fire_after: float | None = None,
     ) -> None:
-        """Register a periodic or one-shot :class:`ScheduledWake` producer.
-
-        Periodic timers pass ``interval`` (re-arms via ``call_later`` each
-        fire, monotonic per RFC 0024 §C); one-shot timers pass
-        ``fire_after`` (fires once at delay, then unregisters).
-        ``jitter_max`` randomises each re-arm by ``±jitter_max`` seconds;
-        ``0.0`` (default) skips the ``random.uniform`` call entirely.
-
-        Raises ``ValueError`` if ``interval < _MIN_INTERVAL`` (busy-loop
-        guard) or neither/both of ``interval`` and ``fire_after`` are set.
+        """Register a periodic (``interval``) or one-shot (``fire_after``)
+        :class:`ScheduledWake` producer.  Periodic re-arm is monotonic via
+        ``call_later`` (RFC 0024 §C); one-shot self-cleans after firing
+        (no ``_MIN_INTERVAL`` floor — cannot busy-loop).  ``jitter_max``
+        randomises each re-arm by ``±jitter_max`` seconds, capped at
+        ``interval - _MIN_INTERVAL`` so draws stay above the busy-loop
+        floor.  Raises ``ValueError`` on any constraint violation.
         """
         if timer_id in self._timers:
             raise ValueError(f"Timer {timer_id!r} already registered")
@@ -347,6 +344,10 @@ class EventLoop:
             )
         if fire_after is not None and fire_after <= 0.0:
             raise ValueError(f"fire_after {fire_after}s must be positive")
+        if jitter_max < 0.0:
+            raise ValueError(f"jitter_max {jitter_max}s must be non-negative")
+        if interval is not None and jitter_max > (slack := interval - self._MIN_INTERVAL):
+            raise ValueError(f"jitter_max {jitter_max}s exceeds slack {slack}s")
 
         entry = _TimerEntry(
             interval=interval,
@@ -399,10 +400,10 @@ class EventLoop:
         entry.handle = asyncio.get_running_loop().call_later(first_delay, _fire)
 
     def _next_delay(self, entry: _TimerEntry) -> float:
-        """Periodic re-arm delay; ``jitter_max=0.0`` returns ``entry.interval``
-        and skips ``random.uniform`` for deterministic legacy-adapter cadence
-        (pinned by ``test_jitter_zero_default``). Explicit raise on one-shot
-        entries survives ``python -O`` where ``assert`` would be stripped."""
+        """Periodic re-arm delay in ``[interval-jitter_max, interval+jitter_max]``
+        (``jitter_max=0.0`` returns ``entry.interval`` deterministically).
+        :meth:`register_timer` caps ``jitter_max`` so the lower bound stays
+        at/above ``_MIN_INTERVAL``.  Explicit raise survives ``python -O``."""
         if entry.interval is None:
             raise RuntimeError("_next_delay called on a one-shot timer entry")
         if entry.jitter_max <= 0.0:

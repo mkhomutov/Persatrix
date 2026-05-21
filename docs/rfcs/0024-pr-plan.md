@@ -403,6 +403,12 @@ six-file ripple. Not blocking; pure scaffolding cleanup. Defer
 until after PR 2.1's wiring stabilises which files actually need the
 lowered floor._
 
+_(2) **`agents/event_loop.py` line-count.** PR 2 lands the file at ≈540 lines after the jitter-cap review follow-up, past the [BRANCHING.md](../BRANCHING.md) 500-line review-friendliness threshold that the PR plan cites elsewhere. PR 2.1 already touches `_arm_timer` for the `initial_delay` restore path — bundle a split there: lift the timer-registry surface (`_TimerEntry`, `register_timer`, `unregister_timer`, `_arm_timer`, `_next_delay`) into `agents/event_loop_timers.py` and re-export from `agents/event_loop.py`. Public surface stays unchanged; `EventLoop._timers` remains the single owner of timer state. Not blocking PR 2; bundle with PR 2.1 to keep the diff small._
+
+_(3) **PR 2 description test-count typo.** The PR description claims "All 63 PR-scope tests pass"; the four PR-scope files carry 8 + 7 + 8 + 4 = 27 tests at the initial commit, 29 after the first review follow-ups (added two `CHECK`-constraint tests), and 33 after the jitter-cap follow-up adds four tests to `TestBusyLoopGuard`. Cosmetic — PR-body edit only, no code change. Update the description before merging the squash so the historical record matches reality._
+
+_(4) **Jitter-cap operator UX.** The new cap (`jitter_max_seconds <= interval_seconds - _MIN_INTERVAL`) is enforced as a `ValueError` at startup inside `EventLoop.register_timer` rather than at schema validation, because JSON Schema cannot natively express the cross-field constraint. An operator who writes `interval_seconds: 1.0, jitter_max_seconds: 0.5` sees a clear error message but only after the process starts loading personas. If misconfigured-jitter becomes a recurring support burden, lift the check into a `validate_config_dir` post-schema pass (we already have one for `additionalProperties` / required-field semantics). Defer until evidence of operator confusion._
+
 ##### From PR 3a review
 
 _None recorded at plan-authoring time._

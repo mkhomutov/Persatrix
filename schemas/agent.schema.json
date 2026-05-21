@@ -253,7 +253,7 @@
         },
         "timers": {
           "type": "array",
-          "description": "RFC 0024 PR 2: per-agent scheduled wake timers. Each entry registers a periodic `ScheduledWake(timer_id, callback_kind)` producer with the agent's EventLoop. Empty list (`timers: []`) is the v0.3.3 default — stock personas ship with no timers so an idle persona pays nothing. When both `timers` and the legacy `tick_interval_seconds` are present, `timers` wins and the loader emits an INFO log. The cache `scheduled_wakes` (per RFC 0024 §OQ §1) is a derived store rebuilt from this list on every restart — `agents.yaml` stays canonical.",
+          "description": "RFC 0024 PR 2: per-agent scheduled wake timers. Each entry registers a periodic `ScheduledWake(timer_id, callback_kind)` producer with the agent's EventLoop. Empty list (`timers: []`) is the v0.3.3 default — stock personas ship with no timers so an idle persona pays nothing. When both `timers` and the legacy `tick_interval_seconds` are present, `timers` wins and the loader emits an INFO log. The `scheduled_wakes` SQLite table (per RFC 0024 §OQ §1) is the persistence target for this list; PR 2 ships the table + cache class, and the startup-rebuild wiring (so a restart mid-jitter-window does not fire immediately) lands in the PR 2.1 follow-up — `agents.yaml` stays canonical regardless.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -277,7 +277,7 @@
                 "type": "number",
                 "minimum": 0.0,
                 "default": 0.0,
-                "description": "Re-arm jitter envelope: each fire's next delay is drawn from `[interval_seconds - jitter_max_seconds, interval_seconds + jitter_max_seconds]`. Spreads fan-out when many identically-configured personas restart together (per RFC 0024 §C). Default 0.0 reproduces the PR 1 no-jitter cadence."
+                "description": "Re-arm jitter envelope: each fire's next delay is drawn from `[interval_seconds - jitter_max_seconds, interval_seconds + jitter_max_seconds]`. Spreads fan-out when many identically-configured personas restart together (per RFC 0024 §C). Default 0.0 reproduces the PR 1 no-jitter cadence. `EventLoop.register_timer` enforces `jitter_max_seconds <= interval_seconds - 1.0` (the busy-loop floor) so the lowest possible draw never crosses `_MIN_INTERVAL`; configurations that exceed this slack are rejected at startup."
               }
             }
           }

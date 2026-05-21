@@ -133,16 +133,17 @@ agents:
         write: true
     autonomy:
       level: "semi-autonomous"
-      # RFC 0024 PR 2: ``tick_interval_seconds`` kept for v0.3.3 back-compat
-      # (Phase 5 / v0.4.0 emits the deprecation warning; v0.5+ removes it).
-      # ``timers: []`` is the v0.3.3 default — stock personas pay no idle
-      # cost.  When the RFC 0027 memory-consolidation policy lands, add an
-      # entry like:
+      # RFC 0024 PR 2: ``timers: []`` is the v0.3.3 stock-persona default —
+      # idle personas pay nothing.  ``tick_interval_seconds`` is still
+      # accepted by the schema (Phase 5 / v0.4.0 emits the deprecation
+      # warning; v0.5+ removes it) but is intentionally omitted here so
+      # the stock config does not trigger the precedence INFO log on
+      # every startup.  When the RFC 0027 memory-consolidation policy
+      # lands, add an entry like:
       #   timers:
       #     - id: memory_consolidation
       #       interval_seconds: 300
       #       kind: memory_consolidation
-      tick_interval_seconds: 60
       timers: []
       max_actions_per_tick: 3
       idle_after_ticks: 10
@@ -251,8 +252,10 @@ agents:
         write: true
     autonomy:
       level: "reactive"
-      tick_interval_seconds: 300
-      timers: []  # RFC 0024 PR 2 — reactive persona, no timers needed.
+      # RFC 0024 PR 2: reactive personas never enter the tick-scheduler
+      # branch, so ``tick_interval_seconds`` is dead config here.  Listed
+      # only as ``timers: []`` to keep the v0.3.3 default uniform.
+      timers: []
       max_actions_per_tick: 1
       idle_after_ticks: 5
     memory:
@@ -314,8 +317,9 @@ agents:
         write: true
     autonomy:
       level: "reactive"
-      tick_interval_seconds: 300
-      timers: []  # RFC 0024 PR 2 — reactive persona, no timers needed.
+      # RFC 0024 PR 2: reactive persona — ``tick_interval_seconds`` is
+      # dead config here; only ``timers: []`` is listed for uniformity.
+      timers: []
       max_actions_per_tick: 1
       idle_after_ticks: 5
     memory:

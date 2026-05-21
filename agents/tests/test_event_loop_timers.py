@@ -94,6 +94,75 @@ class TestBusyLoopGuard:
         finally:
             await loop.stop(timeout=1.0)
 
+    async def test_rejects_negative_jitter_max(self):
+        """``jitter_max < 0`` is rejected at the API boundary.
+
+        Defense-in-depth parity with the schema's ``minimum: 0.0`` on
+        ``jitter_max_seconds`` — without this check a negative value
+        silently passes through to ``random.uniform`` (which swaps
+        endpoints), shrinking the effective interval below ``_MIN_INTERVAL``.
+        """
+        loop = _build_loop()
+        with pytest.raises(ValueError, match="jitter_max"):
+            loop.register_timer(
+                timer_id="neg-jitter",
+                callback_kind="any",
+                interval=10.0,
+                jitter_max=-0.1,
+            )
+
+    async def test_rejects_jitter_max_exceeding_interval_floor_slack(self):
+        """``jitter_max`` must leave at least ``_MIN_INTERVAL`` of slack
+        below ``interval`` — otherwise ``random.uniform(-jitter, +jitter)``
+        can draw a re-arm delay below the busy-loop floor (or even
+        negative, which asyncio treats as fire-on-next-iteration).
+
+        Boundary: ``jitter_max == interval - _MIN_INTERVAL`` is the
+        largest legal value; anything strictly larger is rejected.
+        """
+        loop = _build_loop()
+        # _MIN_INTERVAL defaults to 1.0; interval=2.0 → max legal jitter 1.0.
+        with pytest.raises(ValueError, match="jitter_max"):
+            loop.register_timer(
+                timer_id="busy-jitter",
+                callback_kind="any",
+                interval=2.0,
+                jitter_max=1.5,
+            )
+
+    async def test_rejects_jitter_max_at_minimum_interval(self):
+        """At ``interval == _MIN_INTERVAL`` the only legal ``jitter_max`` is
+        ``0`` — any positive jitter would push some draws below the floor.
+
+        Corollary of the cap above; pins the corner case explicitly so a
+        future relaxation of the cap surfaces here first.
+        """
+        loop = _build_loop()
+        with pytest.raises(ValueError, match="jitter_max"):
+            loop.register_timer(
+                timer_id="floor-jitter",
+                callback_kind="any",
+                interval=1.0,
+                jitter_max=0.5,
+            )
+
+    async def test_accepts_jitter_max_at_floor_slack_boundary(self):
+        """``jitter_max == interval - _MIN_INTERVAL`` is the exact
+        boundary — accepted because the lowest possible draw lands on
+        ``_MIN_INTERVAL`` itself, which the floor admits."""
+        loop = _build_loop()
+        loop.start()
+        try:
+            loop.register_timer(
+                timer_id="boundary-jitter",
+                callback_kind="any",
+                interval=2.0,
+                jitter_max=1.0,  # 2.0 - 1.0 == _MIN_INTERVAL
+            )
+            assert loop.has_timer("boundary-jitter")
+        finally:
+            await loop.stop(timeout=1.0)
+
 
 class TestJitter:
     """``jitter_max`` randomises each re-arm by up to ``±jitter_max`` seconds.
