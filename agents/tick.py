@@ -129,9 +129,9 @@ class TickScheduler:
     def _task(self) -> object | None:
         """v0.3.2 back-compat shim — pre-refactor tests reach into ``_task``
         directly to verify start-idempotency.  Returns the underlying
-        :class:`EventLoop`'s :class:`asyncio.Task` (or ``None`` when the
-        loop has not been started yet)."""
-        return self._event_loop._task
+        :class:`EventLoop`'s supervisor task via its public ``task``
+        property (or ``None`` when the loop has not been started yet)."""
+        return self._event_loop.task
 
     def wake(self) -> None:
         """Reset idle state and fire ``on_tick`` immediately.
@@ -159,8 +159,10 @@ class TickScheduler:
             return
         self._event_loop.start()
         # Register only once across start/stop/start cycles — _MIN_INTERVAL
-        # has already clamped the interval at __init__ time.
-        if _LEGACY_TIMER_ID not in self._event_loop._timers:
+        # has already clamped the interval at __init__ time.  Uses the
+        # public ``has_timer`` API so this adapter does not reach into
+        # ``EventLoop._timers`` private state.
+        if not self._event_loop.has_timer(_LEGACY_TIMER_ID):
             self._event_loop.register_timer(
                 timer_id=_LEGACY_TIMER_ID,
                 callback_kind="tick",

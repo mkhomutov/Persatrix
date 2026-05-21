@@ -279,10 +279,14 @@ class TestScheduledWake:
 
         # All three fires carry the same id.
         assert len(ticks) >= 3
-        # Intervals should be ~0.05s apart (allow generous slack on CI).
+        # Intervals should be ~0.05s apart.  Lower bound 0.04 (interval - 20%
+        # slack) catches a regression where re-arm fires faster than
+        # ``interval`` — the original 0.02 bound was below interval and would
+        # not have surfaced a too-fast-rearm bug.  Upper bound 0.5 keeps slack
+        # for CI scheduling jitter.
         spans = [b - a for a, b in zip(ticks, ticks[1:], strict=False)]
         for span in spans:
-            assert 0.02 <= span <= 0.5
+            assert 0.04 <= span <= 0.5, f"interval drift outside bounds: {span}"
 
     async def test_unregister_timer_stops_firing(self):
         ticks: list[ScheduledWake] = []
@@ -337,3 +341,57 @@ class TestSyncDispatchHandle:
         handle = SyncDispatchHandle()
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(handle, timeout=0.05)
+
+
+class TestPublicTimerAndTaskAPI:
+    """Pins the public encapsulation boundary so adapters and tests do not
+    reach into ``EventLoop._timers`` / ``EventLoop._task``.
+
+    ``TickScheduler.start`` used to gate timer registration on
+    ``_LEGACY_TIMER_ID not in self._event_loop._timers`` — same private
+    access that ``test_event_loop_compat.test_tick_scheduler_synthesises_legacy_timer``
+    asserts on.  These tests pin the public surface that replaces both.
+    """
+
+    async def test_has_timer_false_before_register(self):
+        loop = _build_loop()
+        assert loop.has_timer("anything") is False
+
+    async def test_has_timer_true_after_register_false_after_unregister(self):
+        loop = _build_loop()
+        loop.start()
+        try:
+            loop.register_timer(
+                timer_id="legacy_tick", callback_kind="tick", interval=0.05,
+            )
+            assert loop.has_timer("legacy_tick") is True
+            assert loop.has_timer("other") is False
+            loop.unregister_timer("legacy_tick")
+            assert loop.has_timer("legacy_tick") is False
+        finally:
+            await loop.stop(timeout=1.0)
+
+    async def test_task_property_none_before_start(self):
+        loop = _build_loop()
+        assert loop.task is None
+
+    async def test_task_property_returns_supervisor_task_after_start(self):
+        loop = _build_loop()
+        loop.start()
+        try:
+            task = loop.task
+            assert task is not None
+            assert isinstance(task, asyncio.Task)
+            assert not task.done()
+            # Idempotent: a second start() does NOT replace the task —
+            # pins the v0.3.2 ``test_start_idempotent`` invariant.
+            loop.start()
+            assert loop.task is task
+        finally:
+            await loop.stop(timeout=1.0)
+
+    async def test_task_property_none_after_stop(self):
+        loop = _build_loop()
+        loop.start()
+        await loop.stop(timeout=1.0)
+        assert loop.task is None

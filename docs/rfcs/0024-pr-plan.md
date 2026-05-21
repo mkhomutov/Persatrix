@@ -305,7 +305,27 @@ Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("L
 
 ##### From PR 1 review
 
-_None recorded at plan-authoring time._
+_PR 1 review applied four findings inline (`get_event_loop()` →
+`get_running_loop()`; public `EventLoop.has_timer` / `EventLoop.task`;
+test monkey-patch save/restore; `SyncDispatchHandle.__await__` typing
+to close a `dispatch.py` `Any`-return leak). Three deferred:_
+
+_(1) **Reentrant-dispatch deadlock.** `on_event(A)` re-dispatching to A
+enqueues on A's own queue and awaits a handle the blocked supervisor
+cannot resolve. Pre-existing via non-reentrant `agent._lock`; queue
+reshapes but does not create. Add a regression test pinning the
+contract or a producer-side "enqueue-from-own-supervisor" guard.
+Tracked here (not PR 2) — `autonomy.timers` does not change dispatch
+shape. (2) **Queue-full `WARNING` spam.** Per-drop log in
+`EventLoop.enqueue`. Fine in Phase 1; PR 4's channel-dispatch makes
+drops a foreseeable steady state. Rate-limit or downgrade to `DEBUG`
+once `agent.wake.dropped` is the observability surface — pin in PR 4.
+(3) **`_wake_kind` vs. `dropped` label.** Helper returns
+`inbound / scheduled / salience / unknown`; `dropped` never reaches it.
+Before PR 4 wires `agent.wake.dropped`, decide whether the counter
+shares the `wake.kind` attribute (add a `dropped` label the helper
+never emits) or is a separate counter — pin in PR 4's RFC 0019
+convention section._
 
 ##### From PR 2 review
 

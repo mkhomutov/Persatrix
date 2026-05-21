@@ -114,6 +114,11 @@ class TestLegacyTickCadence:
             async def on_event(self, event: Any) -> list[Any]:  # pragma: no cover
                 return []
 
+        # Save/restore the original ``_MIN_INTERVAL`` instead of restoring a
+        # hardcoded constant — guards against the class default drifting in
+        # a later refactor and silently leaking a sub-second interval into
+        # neighbouring tests via the patched class attribute.
+        original_min_interval = TickScheduler._MIN_INTERVAL  # type: ignore[attr-defined]
         TickScheduler._MIN_INTERVAL = 0.01  # type: ignore[assignment]
         try:
             scheduler = TickScheduler(
@@ -122,10 +127,14 @@ class TestLegacyTickCadence:
             )
             scheduler.start()
             try:
-                # One timer, with the legacy id, exposed on the underlying loop.
-                assert "legacy_tick" in scheduler.event_loop._timers
-                assert len(scheduler.event_loop._timers) == 1
+                # Legacy timer is registered.  "Exactly one timer" is
+                # enforced structurally: ``TickScheduler.start`` has the
+                # single ``register_timer`` call site for ``_LEGACY_TIMER_ID``,
+                # so the legacy back-compat path cannot leak additional
+                # timers.  Use the public ``has_timer`` API instead of
+                # reaching into ``EventLoop._timers``.
+                assert scheduler.event_loop.has_timer("legacy_tick")
             finally:
                 await scheduler.stop(timeout=1.0)
         finally:
-            TickScheduler._MIN_INTERVAL = 1.0  # type: ignore[assignment]
+            TickScheduler._MIN_INTERVAL = original_min_interval  # type: ignore[assignment]

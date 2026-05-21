@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Generator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -101,6 +101,10 @@ class SalienceWake(WakeEvent):
     (``MemoryWriteBus`` subscriber) and the consumer.
     """
 
+    # TODO(Phase 3b — RFC 0024 PR 3b): tighten the type once the
+    # ``MemoryWriteEvent`` (write-side salience producer) lands.  Kept as
+    # ``Any`` here so Phase 1 does not import a type that does not yet
+    # exist; PR 3b will introduce the concrete class and replace this.
     write_event: Any = field(default=None)
 
 
@@ -120,8 +124,13 @@ class SyncDispatchHandle:
     __slots__ = ("_future",)
 
     def __init__(self) -> None:
+        # ``get_running_loop()`` (not ``get_event_loop()``): the latter is
+        # deprecated since 3.10 when no running loop exists and is set to
+        # be removed in 3.12+.  This class is only ever instantiated from
+        # inside an ``async def`` (``EventDispatcher.dispatch`` and the
+        # EventLoop supervisor body), so a running loop is guaranteed.
         self._future: asyncio.Future[list[AgentAction]] = (
-            asyncio.get_event_loop().create_future()
+            asyncio.get_running_loop().create_future()
         )
 
     def resolve(self, value: list[AgentAction]) -> None:
@@ -135,7 +144,13 @@ class SyncDispatchHandle:
     def done(self) -> bool:
         return self._future.done()
 
-    def __await__(self):  # type: ignore[no-untyped-def]
+    def __await__(self) -> Generator[Any, None, list[AgentAction]]:
+        # Annotated return shape so callers (``EventDispatcher.dispatch``)
+        # do not widen ``actions`` to ``Any`` — otherwise the dispatch
+        # function's ``list[AgentAction]`` return type silently leaks ``Any``
+        # through the await-resolved handle path.  ``Generator[Any, None, T]``
+        # is the standard ``__await__`` shape (matches
+        # ``asyncio.Future.__await__``).
         return self._future.__await__()
 
 
@@ -194,6 +209,27 @@ class EventLoop:
     @property
     def is_running(self) -> bool:
         return self._task is not None and not self._task.done()
+
+    @property
+    def task(self) -> asyncio.Task[None] | None:
+        """The supervisor :class:`asyncio.Task` (or ``None`` before
+        :meth:`start` and after :meth:`stop`).
+
+        Exposed so adapters / tests do not reach into the private
+        ``_task`` attribute — :class:`agents.tick.TickScheduler` keeps a
+        ``_task`` back-compat shim that reads through this property for
+        the pre-refactor ``test_start_idempotent`` assertion shape.
+        """
+        return self._task
+
+    def has_timer(self, timer_id: str) -> bool:
+        """Whether ``timer_id`` is currently registered.
+
+        Public encapsulation boundary for :class:`agents.tick.TickScheduler`
+        and adapters that need idempotent re-registration without reaching
+        into :attr:`_timers`.
+        """
+        return timer_id in self._timers
 
     # ─── enqueue / drain ───────────────────────────────────────────────
 
@@ -289,6 +325,10 @@ class EventLoop:
             entry.handle.cancel()
 
     def _arm_timer(self, timer_id: str, entry: _TimerEntry) -> None:
+        # ``get_running_loop()`` (not ``get_event_loop()``): preempts the
+        # 3.10+ deprecation.  Both ``register_timer`` (initial arm) and
+        # ``_fire`` (re-arm) run inside the supervisor task, so a running
+        # loop is guaranteed.
         def _fire() -> None:
             if entry.cancelled:
                 return
@@ -297,11 +337,11 @@ class EventLoop:
             )
             # Re-arm only if we're still alive.
             if not entry.cancelled:
-                entry.handle = asyncio.get_event_loop().call_later(
+                entry.handle = asyncio.get_running_loop().call_later(
                     entry.interval, _fire,
                 )
 
-        entry.handle = asyncio.get_event_loop().call_later(entry.interval, _fire)
+        entry.handle = asyncio.get_running_loop().call_later(entry.interval, _fire)
 
     # ─── supervisor ────────────────────────────────────────────────────
 
