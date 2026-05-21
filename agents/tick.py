@@ -82,6 +82,8 @@ class TickScheduler:
         idle_after_ticks: int = 10,
         executor: ActionExecutor | None = None,
         register_legacy_timer: bool = True,
+        salience_threshold: float | None = None,
+        salience_rate_max_per_sec: int | None = None,
     ) -> None:
         self._agent = agent
         if interval < self._MIN_INTERVAL:
@@ -103,10 +105,18 @@ class TickScheduler:
         # call site (tests, external callers) that constructs a
         # TickScheduler without going through ``initialize_persona_agents``.
         self._register_legacy_timer = register_legacy_timer
+        # RFC 0024 PR 3b: forward the salience knobs onto the EventLoop
+        # ctor so a deployed persona's ``autonomy.salience_threshold`` /
+        # ``autonomy.salience_rate_max_per_sec`` override the class-level
+        # defaults.  ``None`` leaves the EventLoop's documented defaults
+        # in place (threshold ``0.95`` strictly above PR 3a's max
+        # scoring; rate cap ``10/sec`` per RFC §Security Considerations).
         self._event_loop = EventLoop(
             agent_id=agent.agent_id,
             on_event=self._handle_event_wake,
             on_tick=self._handle_scheduled_wake,
+            salience_threshold=salience_threshold,
+            salience_rate_max_per_sec=salience_rate_max_per_sec,
         )
 
     # ─── public surface (preserved from v0.3.2) ────────────────────────

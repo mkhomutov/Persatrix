@@ -282,6 +282,19 @@
             }
           }
         },
+        "salience_threshold": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.95,
+          "description": "RFC 0024 PR 3b: minimum write-side salience for the EventLoop's MemoryWriteBus subscriber to enqueue a SalienceWake. Strict `>` — a value at exactly this threshold is suppressed. Default 0.95 is strictly above PR 3a's conservative-scoring maximum (`REFLECTION_CONTRADICTION_SALIENCE = 0.6`), keeping salience wakes off under stock scoring; the inequality is the v0.3.3 'Idle Truly Idle' release-gate invariant, asserted from both sides in `agents.tests.test_event_loop_salience_default_off`. The calibration follow-up flips this default after the v0.3.x sequencing §OQ §3 salience-distribution data sample is collected."
+        },
+        "salience_rate_max_per_sec": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 10,
+          "description": "RFC 0024 PR 3b: per-agent rolling-1-second cap on SalienceWake enqueues. DoS guard per RFC 0024 §Security Considerations — a malicious or buggy memory write with `salience: 1.0` on a high-frequency loop must not DoS the agent. Default 10/sec matches the RFC's named value; configurable downward by deployments that want a tighter cap."
+        },
         "max_actions_per_tick": {
           "type": "integer",
           "minimum": 1,

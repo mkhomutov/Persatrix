@@ -327,6 +327,53 @@ vocabulary (`stop` / `length` / `tool_calls` / `content_filter` /
 `error`); Persatrix's internal `StopReason` enum is translated at the
 span emission site (see `agents.observability.spans.STOP_REASON_TO_GEN_AI`).
 
+> **Wake counters (RFC 0024 PR 3b).** The four `agent.wake.*` counters
+> track every wake the `EventLoop` substrate observes, partitioned by
+> the `wake.kind` attribute (`inbound` / `scheduled` / `salience` /
+> `dropped`). PR 4's "bored persona" cost-regression CI gate asserts
+> all four read zero over a 60-second observation window — that is the
+> v0.3.3 "Idle Truly Idle" acceptance gate ([v0.3.3-plan
+> Acceptance](v0.3.3-plan.md#acceptance-for-v033)).
+>
+> * `agent.wake.inbound{agent.id, wake.kind=inbound}` — every
+>   `InboundEventWake` the supervisor dispatches (RPC, channel
+>   message, chat). PR 4's channel-message dispatch is the dominant
+>   producer once wired.
+> * `agent.wake.scheduled{agent.id, wake.kind=scheduled, timer_id}` —
+>   every `ScheduledWake` (the legacy `tick_interval_seconds` cadence
+>   carries `timer_id="legacy_tick"`; `autonomy.timers` entries carry
+>   their configured id).
+> * `agent.wake.salience{agent.id, wake.kind=salience, tier,
+>   suppressed_reason}` — every `MemoryWriteEvent` this agent's
+>   subscriber observes. The `suppressed_reason` attribute is the
+>   dashboard discriminator: `below_threshold`, `loopback`,
+>   `rate_limit`, or `none` (the not-suppressed branch). Without this
+>   attribute "no salience wakes" is indistinguishable from "wakes
+>   are working and the agent is quiet" — every same-agent write
+>   increments exactly one data point so a dashboard can attribute
+>   every write to one of the four outcomes.
+> * `agent.wake.dropped{agent.id, wake.kind=dropped}` — incremented
+>   when `EventLoop.enqueue` rejects a wake because the queue is full
+>   (discard-not-block per RFC 0024 Decided §1). The substrate's
+>   `EventLoop.dropped_count` and this OTEL counter agree by
+>   construction.
+>
+> Two configuration knobs control the salience subscriber, both on the
+> `autonomy` block (`schemas/agent.schema.json`):
+>
+> * `autonomy.salience_threshold` (default `0.95`) — strict `>`
+>   comparison; a write at exactly the threshold is suppressed. The
+>   default is strictly above PR 3a's conservative-scoring maximum
+>   (`REFLECTION_CONTRADICTION_SALIENCE = 0.6` in
+>   `agents/memory/_salience.py`) so salience wakes stay off by
+>   inequality under stock scoring. The calibration follow-up named in
+>   [v0.3.x sequencing §OQ §3](v0.3.x-sequencing.md#open-questions)
+>   flips this default after a salience-distribution data sample
+>   exists.
+> * `autonomy.salience_rate_max_per_sec` (default `10`) — the rolling
+>   1-second cap on `SalienceWake` enqueues per agent. DoS guard per
+>   RFC 0024 §Security Considerations.
+
 > **Span-vs-metric key divergence (by design).** Spans use the
 > `persatrix.workflow_id` Baggage key (round-trips via the Baggage
 > propagator); metrics use bare `workflow.id` (matches OTEL semconv

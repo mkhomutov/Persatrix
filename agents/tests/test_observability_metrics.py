@@ -45,6 +45,21 @@ def metric_reader() -> Iterator[InMemoryMetricReader]:
         asyncio.run(pmetrics.shutdown())
 
 
+_WAKE_INBOUND_A: dict[str, Any] = {"agent.id": "t", "wake.kind": "inbound"}
+_WAKE_SCHEDULED_A: dict[str, Any] = {
+    "agent.id": "t",
+    "wake.kind": "scheduled",
+    "timer_id": "legacy_tick",
+}
+_WAKE_SALIENCE_A: dict[str, Any] = {
+    "agent.id": "t",
+    "wake.kind": "salience",
+    "tier": "episodic",
+    "suppressed_reason": "none",
+}
+_WAKE_DROPPED_A: dict[str, Any] = {"agent.id": "t", "wake.kind": "dropped"}
+
+
 def _touch_all(inst: pmetrics._Instruments) -> None:
     inst.tool_invocations.add(1, attributes=_TOOL_A)
     inst.tool_duration.record(1.0, attributes=_TOOL_A)
@@ -53,6 +68,16 @@ def _touch_all(inst: pmetrics._Instruments) -> None:
     inst.llm_duration.record(1.0, attributes=_LLM_DUR_A)
     inst.event_dispatched.add(1, attributes=_EVENT_A)
     inst.persona_tick_interval.record(1.0, attributes=_TICK_A)
+    # RFC 0024 PR 3b — the four ``agent.wake.*`` counters land here as
+    # the formal home (PR 1 referenced them in logs but did not register
+    # the OTEL instruments).  PR 4's bored-persona cost-regression CI
+    # gate asserts all four read zero over a 60-second window — touching
+    # them here means a future rename or unit drift trips the inventory
+    # test before it surfaces in the gate.
+    inst.wake_inbound.add(1, attributes=_WAKE_INBOUND_A)
+    inst.wake_scheduled.add(1, attributes=_WAKE_SCHEDULED_A)
+    inst.wake_salience.add(1, attributes=_WAKE_SALIENCE_A)
+    inst.wake_dropped.add(1, attributes=_WAKE_DROPPED_A)
     # PR-170 M2: ``agent.active`` is exercised with a real ``+1 / -1``
     # round-trip in :class:`TestAgentActiveLifecycle` below, not a no-op
     # ``add(0)`` here.  The previous touch-with-zero existed solely to
@@ -137,6 +162,17 @@ class TestInstrumentInventory:
             "agent.facts.superseded",
             "agent.facts.extraction_failed",
             "agent.facts.envelope_parse_failed",
+            # RFC 0024 PR 3b — ``agent.wake.*`` counter family.  All
+            # four ship in PR 3b even though PR 1 wires
+            # ``agent.wake.dropped`` (substrate-level) and PR 4's
+            # channel-dispatch path adds ``agent.wake.inbound`` /
+            # ``scheduled`` at meaningful production volume.  Registering
+            # all four here means PR 4's cost-regression CI gate is a
+            # zero-counter assertion, not a metrics-API change.
+            "agent.wake.inbound",
+            "agent.wake.scheduled",
+            "agent.wake.salience",
+            "agent.wake.dropped",
         }
         missing = expected - names
         assert not missing, f"Missing instruments: {missing}"
@@ -159,6 +195,10 @@ class TestInstrumentInventory:
             "agent.facts.superseded": "{fact}",
             "agent.facts.extraction_failed": "{failure}",
             "agent.facts.envelope_parse_failed": "{failure}",
+            "agent.wake.inbound": "{wake}",
+            "agent.wake.scheduled": "{wake}",
+            "agent.wake.salience": "{wake}",
+            "agent.wake.dropped": "{wake}",
         }
         for name, unit in expected_units.items():
             assert seen.get(name) == unit, f"{name} unit={seen.get(name)!r} expected={unit!r}"

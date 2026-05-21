@@ -705,10 +705,10 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | # | RFC Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-----------|-------|--------|--------|-----------|--------|
 | 1 | 1 | EventLoop + WakeEvent + `SyncDispatchHandle` (TickScheduler thin adapter) | `feature/v033-rfc0024-event-loop` | ✅ Merged | [#406](https://github.com/mkhomutov/Persatrix/pull/406) | 2026-05-21 |
-| 2 | 2 | `autonomy.timers` config + per-agent SQLite `scheduled_wakes` (table + cache class shipped, **not wired** into `initialize_persona_agents`) | `feature/v033-rfc0024-timer-registry` | 🔀 PR open | this PR | — |
-| 2.1 | 2 | Wire `ScheduledWakesCache` into `initialize_persona_agents` — rebuild from config on startup; restore `next_fire_at_ms` so restart mid-jitter-window does not fire immediately | `feature/v033-rfc0024-scheduled-wakes-wiring` | ⬜ Not started | — | — |
-| 3a | 3 (prereq) | Write-side `salience` + `source_span_id` (no wake yet) | `feature/v033-rfc0024-salience-prereqs` | 🔀 PR open | this PR | — |
-| 3b | 3 | `SalienceWake` + threshold + loop-back guard + rate-limit | `feature/v033-rfc0024-salience-wake` | ⬜ Not started | — | — |
+| 2 | 2 | `autonomy.timers` config + per-agent SQLite `scheduled_wakes` (table + cache class shipped, **not wired** into `initialize_persona_agents`) | `feature/v033-rfc0024-timer-registry` | ✅ Merged | [#407](https://github.com/mkhomutov/Persatrix/pull/407) | 2026-05-21 |
+| 2.1 | 2 | Wire `ScheduledWakesCache` into `initialize_persona_agents` — rebuild from config on startup; restore `next_fire_at_ms` so restart mid-jitter-window does not fire immediately | `feature/v033-rfc0024-scheduled-wakes-wiring` | ✅ Merged | [#408](https://github.com/mkhomutov/Persatrix/pull/408) | 2026-05-21 |
+| 3a | 3 (prereq) | Write-side `salience` + `source_span_id` (no wake yet) | `feature/v033-rfc0024-salience-prereqs` | ✅ Merged | [#409](https://github.com/mkhomutov/Persatrix/pull/409) | 2026-05-21 |
+| 3b | 3 | `SalienceWake` + threshold + loop-back guard + rate-limit | `feature/v033-rfc0024-salience-wake` | 🔀 PR open | this PR | — |
 | 4 | 4 | Channel-message dispatch + cost-regression CI gate | `feature/v033-rfc0024-channel-dispatch` | ⬜ Not started | — | — |
 | 5 | — | Review follow-ups | `feature/v033-rfc0024-followups` | ⬜ Not started | — | — |
 | 6 | — | Phases-1–4 closeout | `feature/v033-rfc0024-close` | ⬜ Not started | — | — |
