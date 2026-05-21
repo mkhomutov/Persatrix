@@ -36,10 +36,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 from collections.abc import Awaitable, Callable, Generator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+from .event_loop_timers import _EventLoopTimersMixin, _TimerEntry
 
 if TYPE_CHECKING:
     from .persona_types import AgentAction, AgentEvent
@@ -158,25 +159,7 @@ class SyncDispatchHandle:
 # ─── EventLoop ──────────────────────────────────────────────────────────────
 
 
-@dataclass
-class _TimerEntry:
-    """Periodic or one-shot timer registry entry.
-
-    ``interval=None`` and ``one_shot=True`` marks a one-shot — fires once
-    at the initial delay then self-removes.  ``jitter_max=0.0`` skips
-    ``random.uniform`` entirely so the legacy adapter cadence stays
-    deterministic (pinned by ``test_jitter_zero_default``).
-    """
-
-    interval: float | None
-    callback_kind: str
-    jitter_max: float = 0.0
-    handle: asyncio.TimerHandle | None = None
-    cancelled: bool = False
-    one_shot: bool = False
-
-
-class EventLoop:
+class EventLoop(_EventLoopTimersMixin):
     """Per-agent wake queue + supervisor.
 
     Callback-driven so :class:`agents.tick.TickScheduler` can wire its idle
@@ -238,15 +221,6 @@ class EventLoop:
         the pre-refactor ``test_start_idempotent`` assertion shape.
         """
         return self._task
-
-    def has_timer(self, timer_id: str) -> bool:
-        """Whether ``timer_id`` is currently registered.
-
-        Public encapsulation boundary for :class:`agents.tick.TickScheduler`
-        and adapters that need idempotent re-registration without reaching
-        into :attr:`_timers`.
-        """
-        return timer_id in self._timers
 
     # ─── enqueue / drain ───────────────────────────────────────────────
 
@@ -311,104 +285,12 @@ class EventLoop:
                 pass
         self._task = None
 
-    # ─── timer registry ────────────────────────────────────────────────
-
-    def register_timer(
-        self,
-        *,
-        timer_id: str,
-        callback_kind: str,
-        interval: float | None = None,
-        jitter_max: float = 0.0,
-        fire_after: float | None = None,
-    ) -> None:
-        """Register a periodic (``interval``) or one-shot (``fire_after``)
-        :class:`ScheduledWake` producer.  Periodic re-arm is monotonic via
-        ``call_later`` (RFC 0024 §C); one-shot self-cleans after firing
-        (no ``_MIN_INTERVAL`` floor — cannot busy-loop).  ``jitter_max``
-        randomises each re-arm by ``±jitter_max`` seconds, capped at
-        ``interval - _MIN_INTERVAL`` so draws stay above the busy-loop
-        floor.  Raises ``ValueError`` on any constraint violation.
-        """
-        if timer_id in self._timers:
-            raise ValueError(f"Timer {timer_id!r} already registered")
-        if (interval is None) == (fire_after is None):
-            raise ValueError(
-                "register_timer requires exactly one of interval (periodic) "
-                "or fire_after (one-shot)",
-            )
-        if interval is not None and interval < self._MIN_INTERVAL:
-            raise ValueError(
-                f"interval {interval}s below _MIN_INTERVAL "
-                f"({self._MIN_INTERVAL}s) — busy-loop guard",
-            )
-        if fire_after is not None and fire_after <= 0.0:
-            raise ValueError(f"fire_after {fire_after}s must be positive")
-        if jitter_max < 0.0:
-            raise ValueError(f"jitter_max {jitter_max}s must be non-negative")
-        if interval is not None and jitter_max > (slack := interval - self._MIN_INTERVAL):
-            raise ValueError(f"jitter_max {jitter_max}s exceeds slack {slack}s")
-
-        entry = _TimerEntry(
-            interval=interval,
-            callback_kind=callback_kind,
-            jitter_max=jitter_max,
-            one_shot=fire_after is not None,
-        )
-        self._timers[timer_id] = entry
-        self._arm_timer(timer_id, entry, initial_delay=fire_after)
-
-    def unregister_timer(self, timer_id: str) -> None:
-        entry = self._timers.pop(timer_id, None)
-        if entry is None:
-            return
-        entry.cancelled = True
-        if entry.handle is not None:
-            entry.handle.cancel()
-
-    def _arm_timer(
-        self,
-        timer_id: str,
-        entry: _TimerEntry,
-        *,
-        initial_delay: float | None = None,
-    ) -> None:
-        # ``get_running_loop()`` (not ``get_event_loop()``): preempts the
-        # 3.10+ deprecation.  Both ``register_timer`` (initial arm) and
-        # ``_fire`` (re-arm) run inside the supervisor task, so a running
-        # loop is guaranteed.
-        def _fire() -> None:
-            if entry.cancelled:
-                return
-            self.enqueue(
-                ScheduledWake(timer_id=timer_id, callback_kind=entry.callback_kind),
-            )
-            if entry.one_shot:
-                # One-shot timers self-clean so a subsequent register_timer
-                # with the same id is not a conflict — pinned by
-                # ``test_event_loop_timers.test_one_shot_fires_exactly_once``.
-                self._timers.pop(timer_id, None)
-                return
-            if not entry.cancelled:
-                entry.handle = asyncio.get_running_loop().call_later(
-                    self._next_delay(entry), _fire,
-                )
-
-        first_delay = (
-            initial_delay if initial_delay is not None else self._next_delay(entry)
-        )
-        entry.handle = asyncio.get_running_loop().call_later(first_delay, _fire)
-
-    def _next_delay(self, entry: _TimerEntry) -> float:
-        """Periodic re-arm delay in ``[interval-jitter_max, interval+jitter_max]``
-        (``jitter_max=0.0`` returns ``entry.interval`` deterministically).
-        :meth:`register_timer` caps ``jitter_max`` so the lower bound stays
-        at/above ``_MIN_INTERVAL``.  Explicit raise survives ``python -O``."""
-        if entry.interval is None:
-            raise RuntimeError("_next_delay called on a one-shot timer entry")
-        if entry.jitter_max <= 0.0:
-            return entry.interval
-        return entry.interval + random.uniform(-entry.jitter_max, entry.jitter_max)
+    # Timer registry methods (``register_timer``, ``unregister_timer``,
+    # ``has_timer``, ``_arm_timer``, ``_next_delay``) and the
+    # ``_TimerEntry`` dataclass live on :class:`_EventLoopTimersMixin`
+    # in :mod:`agents.event_loop_timers` — split for file-size review-
+    # friendliness (RFC 0024 PR 2.1, deferred PR 2 review item 2).
+    # ``_timers`` remains owned here; the mixin reads it via ``self``.
 
     # ─── supervisor ────────────────────────────────────────────────────
 

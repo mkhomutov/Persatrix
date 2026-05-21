@@ -189,7 +189,7 @@ class TestJitter:
             uniform_args.append((lo, hi))
             return 0.0  # deterministic — no actual jitter applied
 
-        monkeypatch.setattr("agents.event_loop.random.uniform", _spy)
+        monkeypatch.setattr("agents.event_loop_timers.random.uniform", _spy)
 
         seen = asyncio.Event()
         fires = 0
@@ -231,7 +231,7 @@ class TestJitter:
             uniform_calls += 1
             return real_uniform(lo, hi)
 
-        monkeypatch.setattr("agents.event_loop.random.uniform", _spy)
+        monkeypatch.setattr("agents.event_loop_timers.random.uniform", _spy)
 
         async def _on_tick(wake: ScheduledWake) -> None:
             pass

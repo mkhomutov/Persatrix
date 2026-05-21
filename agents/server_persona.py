@@ -20,9 +20,11 @@ import yaml
 from .base import BaseAgent
 from .channel_history_fetcher import HttpChannelHistoryFetcher
 from .llm_client import LLMClient, create_provider
+from .memory.scheduled_wakes import ScheduledWakesCache
 from .persona import create_persona_agent
 from .persona_runtime import _LLMPersonaAgent
 from .prompt_loader import PromptLoadError, resolve_instructions
+from .server_persona_timers import init_persona_timers, summarize_autonomy_cadence
 from .task_agent import TaskAgent
 from .tick import TickScheduler
 from .tools import builtin
@@ -69,41 +71,11 @@ _AGENT_ID_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 
 
 def _summarize_autonomy_cadence(timers: list[dict] | None, interval: int) -> str:
-    """Cadence summary for COST/Started logs (RFC 0024 PR 2)."""
-    if timers is None:
-        return f"tick_interval={interval}s"
-    body = ", ".join(f"{t['id']}@{t['interval_seconds']}s" for t in timers)
-    return f"timers=[{body}]"
-
-
-async def _register_configured_timers(
-    scheduler: TickScheduler,
-    timers: list[dict],
-    agent_id: str,
-) -> None:
-    """Register each ``autonomy.timers`` entry on ``scheduler.event_loop``.
-
-    On failure, stops the (already-started) scheduler then re-raises the
-    original error; a failure inside ``stop()`` is logged but must not
-    replace the active exception (operators need the YAML diagnostic).
-    Pinned by the two ``test_partial_register_failure_*`` wiring tests.
-    """
-    try:
-        for cfg in timers:
-            scheduler.event_loop.register_timer(
-                timer_id=cfg["id"], callback_kind=cfg["kind"],
-                interval=float(cfg["interval_seconds"]),
-                jitter_max=float(cfg.get("jitter_max_seconds", 0.0)),
-            )
-    except Exception:
-        try:
-            await scheduler.stop()
-        except Exception:
-            logger.exception(
-                "Agent %s: scheduler.stop() failed during partial-init "
-                "cleanup; original timer-registration error follows.", agent_id,
-            )
-        raise
+    """Back-compat alias for :func:`summarize_autonomy_cadence` — the
+    helper moved to :mod:`agents.server_persona_timers` for file-size
+    review-friendliness.  Existing tests import the underscore-prefixed
+    name; kept here as a thin forwarder."""
+    return summarize_autonomy_cadence(timers, interval)
 
 
 # ─── Agent type resolution ───────────────────────────────────
@@ -359,6 +331,7 @@ async def initialize_persona_agents(
     tick_schedulers: dict[str, TickScheduler],
     *,
     shared_pools=None,  # type: ignore[no-untyped-def]
+    scheduled_wakes_caches: dict[str, ScheduledWakesCache] | None = None,
 ) -> None:
     """Initialize memory, dispatcher, and tick schedulers for persona agents.
 
@@ -449,7 +422,11 @@ async def initialize_persona_agents(
             scheduler.start()
             # Register before publishing — partial failure must not expose a stopped scheduler.
             if timers is not None:
-                await _register_configured_timers(scheduler, timers, agent_id)
+                await init_persona_timers(
+                    scheduler, agent, agent_id,
+                    timers=timers,
+                    scheduled_wakes_caches=scheduled_wakes_caches,
+                )
             tick_schedulers[agent_id] = scheduler
             dispatcher.register_tick_scheduler(agent_id, scheduler)
             logger.info("Started tick scheduler for %s (%s)", agent_id, cadence)
