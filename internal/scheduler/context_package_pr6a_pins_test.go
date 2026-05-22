@@ -66,7 +66,7 @@ func TestAttachContextPackage_DeterministicCandidateOrder(t *testing.T) {
 // TestPackager_BuildClampsNegativeBudgetToZero pins the L9 contract:
 // `Packager.Build`'s `remaining < 0 → 0` clamp covers a negative
 // `budgetTokens` argument too. The allocator never emits negatives today,
-// but PR 2's `MemoryFacade` may compute `B_step − B_memory_reservation`
+// but PR 2's `MemoryStore` may compute `B_step − B_memory_reservation`
 // and underflow.
 func TestPackager_BuildClampsNegativeBudgetToZero(t *testing.T) {
 	p := packaging.NewPackager(nil)

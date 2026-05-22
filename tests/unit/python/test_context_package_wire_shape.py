@@ -3,7 +3,7 @@
 This test fulfils the PR-plan integration requirement that an agent receiving
 the orchestrator's `_context_package` JSON payload (Open Question 2 — additive,
 no proto changes) parses it without errors and that agents *without*
-packaging-awareness ignore the key. PR 2 (`MemoryFacade`) and PR 3 (delegation
+packaging-awareness ignore the key. PR 2 (`MemoryStore`) and PR 3 (delegation
 contract) rely on this wire-shape contract; without a producer/consumer
 round-trip, a future renaming of any JSON tag would only break at integration
 time.
@@ -150,7 +150,7 @@ def test_task_input_with_context_package_preserves_payload() -> None:
     )
 
     # The key is preserved verbatim — downstream packaging-aware consumers
-    # (PR 2's MemoryFacade) will read it without re-parsing.
+    # (PR 2's MemoryStore) will read it without re-parsing.
     assert task.context[CONTEXT_PACKAGE_KEY] == encoded
     redecoded = json.loads(task.context[CONTEXT_PACKAGE_KEY])
     assert redecoded["version"] == 1

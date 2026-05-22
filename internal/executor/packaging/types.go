@@ -98,7 +98,7 @@ type Metrics struct {
 // content embedded inside StepOutputs[].Content. A packaging-unaware agent
 // reading raw outputs bypasses the budget entirely. v1 packaging is therefore
 // advisory ordering — actual budget enforcement requires the agent to consume
-// StepOutputs in lieu of raw outputs (e.g. via MemoryFacade in RFC 0008 PR 2).
+// StepOutputs in lieu of raw outputs (e.g. via MemoryStore in RFC 0008 PR 2).
 type Package struct {
 	Version        int               `json:"version"`
 	PinnedSections []AdmittedSection `json:"pinned_sections"`
