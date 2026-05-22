@@ -201,7 +201,11 @@ class EventDispatcher:
             if not scheduler.event_loop.enqueue(
                 InboundEventWake(event=event, handle=handle),
             ):
-                logger.warning(
+                # DEBUG, not WARNING: ``EventLoop.enqueue`` already emits a
+                # rate-limited queue-full WARNING (agent_id + cumulative
+                # dropped_total). A per-drop WARNING here would re-flood the
+                # logs PR 5 throttled. (PR 1 review finding #2.)
+                logger.debug(
                     "Dispatch dropped (event loop queue full): "
                     "agent=%s event=%s dropped_total=%d",
                     target_id, event.event_type.value,
@@ -271,7 +275,11 @@ class EventDispatcher:
             self._capture_pending_tick_link(agent)
             accepted = scheduler.event_loop.enqueue(InboundEventWake(event=event))
             if not accepted:
-                logger.warning(
+                # DEBUG, not WARNING: the rate-limited queue-full WARNING in
+                # ``EventLoop.enqueue`` is the canonical operator signal —
+                # channel-message drops are a steady state under RFC 0024
+                # Phase 4 backpressure. (PR 1 review finding #2.)
+                logger.debug(
                     "Inbound dispatch dropped (event loop queue full): "
                     "agent=%s event=%s dropped_total=%d",
                     target_id, event.event_type.value,
