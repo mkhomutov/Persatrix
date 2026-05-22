@@ -2,37 +2,70 @@
 
 **Test ID**: `MT-CHAT-003`
 **Feature Area**: Chat
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-04-20
-**Last Updated**: 2026-04-20
+**Last Updated**: 2026-05-22
 **Status**: Active
 
 ---
 
 ## Overview
 
-**Purpose**: Verify that chat messages are persisted in episodic memory so that a conversation
-can survive an agent restart. After restarting the agent process, a new chat session with the
-same `--user` should be able to reference prior conversation content via the agent's memory.
+**Purpose**: Verify that a chat conversation is persisted to episodic memory and survives an
+agent restart. A new chat session with the same `user_id` should be able to reference prior
+conversation content via the agent's recalled memory.
 
-**Scope**: Episodic memory persistence (SQLite), conversation recall after agent restart,
-`UserStore` persistence.
+**Scope**: The RFC 0020 interaction lifecycle — a conversation is persisted as **one episodic
+episode written at interaction *close***, not per turn. Close, the two-phase summary write,
+cross-restart persistence (SQLite named volume), and post-restart recall.
 
 **Out of Scope**: REST endpoint shape validation (MT-CHAT-001); CLI REPL mechanics (MT-CHAT-002);
-relationship memory trust evolution (MT-CHAT-004).
+relationship memory / trust evolution (MT-CHAT-004).
+
+> **v1.1 rewrite (RFC 0020 interaction-close model).** The v1.0 recipe queried episodic memory
+> *immediately after sending turns* and expected an episode to exist. Under [RFC 0020](../rfcs/0020-interaction-lifecycle.md)
+> episodic episodes are written **at interaction close**, not per turn — so a query mid-conversation
+> finds nothing. This version closes the interaction first, then verifies.
+
+---
+
+## How an interaction closes (read first)
+
+Per [RFC 0020](../rfcs/0020-interaction-lifecycle.md), a conversation is an *interaction*: a
+bounded sequence of turns in one scope (for human chat, a `dm:<agent>:<user>` scope). One
+**closed** interaction produces exactly one episode (the conversation summary).
+
+**There is no explicit "end chat" endpoint on the live stack.** The gRPC/REST chat path never
+emits `chat_end`/`session_end` metadata, so an interaction closes only via the **idle-gap
+timeout** (`memory.interaction_idle_timeout_sec`, default **600 s**;
+[`agents/memory/boundary_detectors.py`](../../agents/memory/boundary_detectors.py)). The close is
+materialized **lazily** — `idle_check` runs when the *next* event arrives (or the on-tick
+janitor fires). A `timers: []` persona never ticks, so on the live stack **the close is
+triggered by sending one more "nudge" turn after the timeout elapses**.
+
+The write is **two-phase** ([`agents/persona_runtime/episode_routing.py`](../../agents/persona_runtime/episode_routing.py),
+[`summarize_close.py`](../../agents/persona_runtime/summarize_close.py)): a `closing` episode row
+with `summary = '[summary pending]'` is inserted synchronously, then a background task replaces
+the summary with the LLM text. A query immediately after close may briefly show `[summary pending]`
+— re-query.
 
 ---
 
 ## Related Documentation
 
 **Feature Documentation**:
-- [agents/memory/episodic.py](../../agents/memory/episodic.py) — episodic memory (SQLite)
-- [agents/participant.py](../../agents/participant.py) — `UserStore` persistence
-- [agents/server_servicers.py](../../agents/server_servicers.py) — `SendChatMessage` servicer
-- [agents/persona_runtime/](../../agents/persona_runtime/) — persona event handling
+- [docs/rfcs/0020-interaction-lifecycle.md](../rfcs/0020-interaction-lifecycle.md) — interaction model.
+- [agents/memory/interactions.py](../../agents/memory/interactions.py) — `InteractionTracker`, open/close.
+- [agents/memory/boundary_detectors.py](../../agents/memory/boundary_detectors.py) — idle-gap close + `interaction_idle_timeout_sec`.
+- [agents/persona_runtime/episode_routing.py](../../agents/persona_runtime/episode_routing.py) — `_persist_closed_interaction` (Phase 1).
+- [agents/persona_runtime/summarize_close.py](../../agents/persona_runtime/summarize_close.py) — `finalize_closed_interaction` (Phase 2).
+- [agents/memory/episodic.py](../../agents/memory/episodic.py) — episodic memory store.
 
 **Related Automated Tests**:
-- Unit tests: `tests/unit/python/test_agents.py`
+- Integration: `tests/integration/test_summarize_on_close.py`, `test_summarize_on_close_phases.py`, `test_interaction_multi_turn.py`.
+
+**Related Manual Tests**:
+- [MT-CHAT-004](MT-CHAT-004.md) — relationship interaction recorded at close.
 
 ---
 
@@ -41,195 +74,220 @@ relationship memory trust evolution (MT-CHAT-004).
 ### System Requirements
 
 **Operating Systems**:
-- ☐ Windows 10/11 (x64)
-- ☐ macOS 12.0+ (Intel/Apple Silicon)
-- ☐ Linux (Ubuntu 22.04+)
+- ☐ Windows 10/11 (x64) · macOS 12.0+ · Linux (Ubuntu 22.04+)
 
 **Dependencies Installed**:
-- Go 1.24+: `go version`
-- Python 3.11+: `python3 --version`
-- Rust CLI built: `make build-cli`
-- `curl` available in PATH
+- Docker Desktop (the documented stack), or a local `make run` + `make run-agent`.
+- `curl` + `jq` available in PATH.
+- `ANTHROPIC_API_KEY` available (via `.env` for Docker, or the shell for a local run).
 
 ### Application State
 
-- ☐ Orchestrator running: `make run`
-- ☐ At least one persona agent registered and healthy (e.g. `ember-owl`): `make run-agent`
-- ☐ Config files valid: `make validate`
-- ☐ `ANTHROPIC_API_KEY` set in environment
-- ☐ Clean memory state: remove any pre-existing agent memory databases if needed to isolate this
-  test (check `data/` or the agent's configured data directory for `.db` files)
+- ☐ Orchestrator + at least one persona agent (e.g. `ember-owl`) running and healthy
+  (`GET /api/v1/agents` lists it `healthy`).
+- ☐ Config files valid: `make validate` exits 0.
 
-### Test Data
+### Test Data — shorten the idle timeout
 
-No external fixtures. All interaction is via `curl` and CLI commands.
+The default 600 s idle timeout is impractical for a manual run. Lower it for the persona under
+test by adding `interaction_idle_timeout_sec` to its `memory:` block in `config/agents.yaml`:
+
+```yaml
+    memory:
+      db_path: "data/memory.db"
+      interaction_idle_timeout_sec: 15   # TEMPORARY for MT-CHAT-003 — restore after (default 600)
+      # ... existing notes / facts / procedural_memory blocks unchanged ...
+```
+
+Run `make validate`, then restart the persona so it reloads config:
+
+```bash
+# Docker stack:
+docker compose restart agent-ember-owl
+# Local run: stop and re-run `make run-agent`.
+```
+
+> **Docker + `ANTHROPIC_API_KEY` note**: if an empty `ANTHROPIC_API_KEY` is exported in your
+> shell, `docker compose` fails interpolation. Either unset it (so Compose reads `.env`) or use
+> the plain container name: `docker restart persatrix-agent-ember-owl-1`.
+
+Use `USER_ID="mt-chat-003-user"` throughout.
 
 ---
 
 ## Test Procedure
 
-### Step 1: Establish a Chat Conversation (Pre-Restart)
+### Step 1: Establish a Chat Conversation
 
-**Action**: Send 2–3 chat messages with a distinctive topic so the agent stores them in episodic
-memory. Use a consistent `user_id`:
+**Action**: Send 2–3 turns on a distinctive topic, reusing the `chat_session_id` from turn 1:
 
 ```bash
-# Message 1
-curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
+USER_ID="mt-chat-003-user"
+R=$(curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "I have a pet turtle named Archimedes who loves swimming in circles.", "user_id": "mt-chat-003-user"}'
+  -d "{\"message\": \"I have a pet turtle named Archimedes who loves swimming in circles.\", \"user_id\": \"$USER_ID\"}")
+echo "$R"; SID=$(echo "$R" | jq -r .chat_session_id)
 
-# Message 2 (use chat_session_id from Message 1 response)
 curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "Archimedes is 12 years old and his shell has a small crack on the left side.", "user_id": "mt-chat-003-user", "chat_session_id": "<CHAT_SESSION_ID_FROM_MSG_1>"}'
+  -d "{\"message\": \"Archimedes is 12 and his shell has a small crack on the left side.\", \"user_id\": \"$USER_ID\", \"chat_session_id\": \"$SID\"}"
 
-# Message 3
 curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "What do you think I should do about the crack in his shell?", "user_id": "mt-chat-003-user", "chat_session_id": "<CHAT_SESSION_ID_FROM_MSG_1>"}'
+  -d "{\"message\": \"What should I do about the crack in his shell?\", \"user_id\": \"$USER_ID\", \"chat_session_id\": \"$SID\"}"
 ```
 
-**Expected Result**: All three requests return HTTP 200 with `reply_status: "ok"`. The agent
-provides relevant replies.
+**Expected Result**: All requests HTTP 200 with `reply_status: "ok"`.
 
 **Verification**:
-- [ ] All three responses are HTTP 200
-- [ ] Each response has `reply_status: "ok"`
-- [ ] The agent's replies acknowledge the turtle topic
-- [ ] Note the `chat_session_id` for reference
+- [ ] All responses HTTP 200 with `reply_status: "ok"`
+- [ ] Replies acknowledge the turtle topic; note the `chat_session_id`
 
 ---
 
-### Step 2: Verify Episodic Memory Contains the Conversation
+### Step 2: Confirm Nothing Is Persisted Yet (interaction still open)
 
-**Action**: Use a Python script to query the agent's episodic memory for the conversation content:
+**Action**: Query the agent's episodic store *before* closing the interaction:
 
 ```bash
-python3 - <<'EOF'
-import asyncio
-from persatrix_agents.memory.episodic import EpisodicMemory
-
-async def main():
-    # Use the same agent_id and db_path that the running agent uses
-    mem = EpisodicMemory("ember-owl")
-    await mem.initialize()
-
-    episodes = await mem.recall("turtle Archimedes", limit=5)
-    print(f"Episodes found: {len(episodes)}")
-    for ep in episodes:
-        print(f"  [{ep.id[:8]}] {ep.summary[:80]}...")
-
-    count = await mem.count_episodes()
-    print(f"Total episodes for agent: {count}")
-
-    await mem.close()
-
-asyncio.run(main())
-EOF
+docker exec -i persatrix-agent-ember-owl-1 python - <<'PY'
+import sqlite3
+c = sqlite3.connect("/app/data/memory.db")
+# Scope the count to *this* conversation (open interactions are in-memory
+# only, so no episode row — pending or finalized — exists yet for this
+# scope). Counting globally would be non-zero on a re-used DB and falsely
+# look like a failure.
+rows = c.execute(
+    "select count(*) from episodes where scope like '%mt-chat-003-user%'"
+).fetchone()[0]
+print("episode rows for this conversation:", rows)
+PY
 ```
 
-> **Note**: The `db_path` defaults to the agent's standard location. If the agent uses a custom
-> path, adjust accordingly.
-
-**Expected Result**: At least one episode related to the turtle conversation is found.
+**Expected Result**: The turtle conversation is **not yet** an episode — the interaction is
+still open (this is the RFC 0020 behaviour the v1.0 recipe got wrong). The count is `0`.
 
 **Verification**:
-- [ ] `Episodes found` is ≥ 1
-- [ ] At least one episode summary references the conversation topic (turtle, Archimedes, shell)
-- [ ] `Total episodes` is > 0
+- [ ] No episode row for this conversation's scope exists yet (open interactions are in-memory only)
 
 ---
 
-### Step 3: Stop and Restart the Agent
+### Step 3: Close the Interaction (idle-gap timeout + nudge)
 
-**Action**: Stop the running agent process (Ctrl-C in its terminal or `kill`), then restart it:
+**Action**: Wait past the idle timeout, then send **one nudge turn** to materialize the close
+of the turtle interaction (a `timers: []` persona will not self-close):
 
 ```bash
-# Stop the agent (Ctrl-C in the agent terminal)
-# Then restart:
-make run-agent
+sleep 20                      # > interaction_idle_timeout_sec (15)
+curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"message\": \"(nudge)\", \"user_id\": \"$USER_ID\"}" >/dev/null
+sleep 3                       # let the Phase-2 background summary land
 ```
 
-Wait for the agent to register as healthy with the orchestrator (check orchestrator logs for
-the agent health check passing).
+Confirm a close fired via the OTEL counter:
 
-**Expected Result**: The agent process restarts and re-registers with the orchestrator. The
-SQLite database files in the agent's data directory are preserved (not deleted on restart).
+```bash
+curl -s "http://127.0.0.1:9091/api/v1/query?query=agent_interactions_closed_total" \
+  | jq '.data.result[] | select(.metric.agent_id=="ember-owl") | .value[1]'
+```
+
+**Expected Result**: `agent_interactions_closed_total{agent_id="ember-owl"}` is ≥ 1 (and
+`agent_interactions_closed_by_idle_gap_total` rises) — the turtle interaction closed by idle gap.
 
 **Verification**:
-- [ ] Agent process starts without errors
-- [ ] Orchestrator logs show the agent re-registering as healthy
-- [ ] Agent's SQLite database files still exist on disk
+- [ ] `agent_interactions_closed_total` for ember-owl ≥ 1 after the nudge
+- [ ] Close reason is idle-gap (`agent_interactions_closed_by_idle_gap_total` increments)
 
 ---
 
-### Step 4: Send a Recall Message (Post-Restart)
+### Step 4: Verify the Conversation Episode Was Written at Close
 
-**Action**: Send a new chat message asking the agent to recall the pre-restart conversation:
+**Action**:
+
+```bash
+docker exec -i persatrix-agent-ember-owl-1 python - <<'PY'
+import sqlite3
+c = sqlite3.connect("/app/data/memory.db")
+rows = c.execute(
+    "select interaction_id, turn_count, scope, closed_at, substr(summary,1,80) "
+    "from episodes where summary != '[summary pending]' "
+    "order by closed_at desc limit 5"
+).fetchall()
+print("finalized episodes:", len(rows))
+for r in rows:
+    print(" ", r)
+PY
+```
+
+**Expected Result**: At least one episode with `scope` like `dm:ember-owl:mt-chat-003-user`,
+`closed_at` set, `turn_count` ≈ the turns sent, and a `summary` that references the conversation
+(turtle / Archimedes / shell). If the summary still shows `[summary pending]`, wait a few seconds
+and re-query (Phase-2 is async).
+
+**Verification**:
+- [ ] ≥ 1 finalized episode for the `dm:ember-owl:mt-chat-003-user` scope
+- [ ] `turn_count` reflects the conversation; `closed_at` is set
+- [ ] `summary` is non-pending and references the topic
+
+---
+
+### Step 5: Restart the Agent and Confirm Persistence
+
+**Action**: Restart the agent and confirm the episode survives:
+
+```bash
+docker compose restart agent-ember-owl   # or: docker restart persatrix-agent-ember-owl-1
+# wait for healthy, then re-query:
+docker exec -i persatrix-agent-ember-owl-1 python - <<'PY'
+import sqlite3
+c = sqlite3.connect("/app/data/memory.db")
+print("episodes after restart:",
+      c.execute("select count(*) from episodes where summary != '[summary pending]'").fetchone()[0])
+PY
+```
+
+**Expected Result**: The agent re-registers `healthy`; the episode count is unchanged (the
+SQLite named volume persists across restart).
+
+**Verification**:
+- [ ] Agent re-registers as healthy
+- [ ] The closed-interaction episode still present after restart
+
+---
+
+### Step 6: Post-Restart Recall (user-facing proof)
+
+**Action**: Send a new chat turn (new session) asking the agent to recall the prior topic:
 
 ```bash
 curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "Do you remember the pet I told you about? What was its name?", "user_id": "mt-chat-003-user"}'
+  -d "{\"message\": \"Do you remember the pet I told you about? What was its name?\", \"user_id\": \"mt-chat-003-user\"}" \
+  | jq '{reply_status, reply}'
 ```
 
-> **Note**: This uses a new `chat_session_id` (server-generated) since the original session was
-> tied to the pre-restart process. The agent relies on episodic memory recall, not in-process
-> session state.
+**Expected Result**: HTTP 200, `reply_status: "ok"`, and the reply references the pre-restart
+conversation (Archimedes / turtle / shell crack), recalled from the persisted episode.
 
-**Expected Result**: HTTP 200. The agent's reply demonstrates recall of the turtle conversation
-from episodic memory — it should reference "Archimedes", "turtle", or the shell crack topic.
+> **Acceptable partial pass**: if the LLM reply does not name "Archimedes" but Step 4 confirmed
+> the episode persisted, the test passes for the *persistence* requirement. LLM recall quality
+> is model-dependent and not the primary target.
 
 **Verification**:
-- [ ] HTTP status is `200`
-- [ ] `reply_status` is `"ok"`
-- [ ] Agent's reply references the pre-restart conversation (Archimedes, turtle, or shell)
-
-> **Acceptable partial pass**: If the LLM reply does not explicitly name "Archimedes" but the
-> episodic memory query in Step 2 confirmed persistence, the test passes for the *persistence*
-> requirement. LLM recall quality is model-dependent and not the primary test target.
+- [ ] HTTP 200, `reply_status: "ok"`
+- [ ] Reply references the pre-restart conversation (or persistence confirmed in Step 4)
 
 ---
 
-### Step 5: Verify UserStore Persistence
+### Step 7: Restore Config
 
-**Action**: Check that the user record survived the restart:
-
-```bash
-python3 - <<'EOF'
-import asyncio
-from persatrix_agents.participant import UserStore
-
-async def main():
-    # UserStore takes db_path, not agent_id — use the default path
-    # (same as the running agent) so the query hits the right database.
-    store = UserStore()
-    await store.initialize()
-
-    user = await store.get("mt-chat-003-user")
-    if user:
-        print(f"User found: {user.participant_id}")
-        print(f"  display_name: {user.display_name}")
-        print(f"  participant_type: {user.participant_type}")
-        print(f"  created_at: {user.created_at}")
-        print(f"  last_seen_at: {user.last_seen_at}")
-    else:
-        print("User NOT found — persistence failed")
-
-    await store.close()
-
-asyncio.run(main())
-EOF
-```
-
-**Expected Result**: The user record `mt-chat-003-user` is present in the store with a valid
-`created_at` timestamp from Step 1 and a `last_seen_at` updated in Step 4.
+**Action**: Remove the temporary `interaction_idle_timeout_sec` line from `config/agents.yaml`
+(restore the 600 s default), `make validate`, and restart the persona.
 
 **Verification**:
-- [ ] `User found: mt-chat-003-user` printed
-- [ ] `participant_type` is `"user"`
-- [ ] `last_seen_at` is a recent timestamp (from Step 4)
+- [ ] `config/agents.yaml` restored (`git diff` clean); `make validate` exits 0
+- [ ] Persona restarts cleanly
 
 ---
 
@@ -237,29 +295,32 @@ EOF
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | Three HTTP 200 responses with agent replies | ☐ |
-| 2 | Episodic memory contains turtle conversation episodes | ☐ |
-| 3 | Agent restarts and re-registers as healthy | ☐ |
-| 4 | Post-restart reply references pre-restart conversation | ☐ |
-| 5 | UserStore record persisted across restart | ☐ |
+| 1 | 2–3 chat turns return HTTP 200 / `reply_status: ok` | ☐ |
+| 2 | No finalized episode yet (interaction open) | ☐ |
+| 3 | Idle-gap timeout + nudge closes the interaction (`agent_interactions_closed_total` ≥ 1) | ☐ |
+| 4 | One episode written at close, scope `dm:…`, summary references the topic | ☐ |
+| 5 | Episode survives agent restart | ☐ |
+| 6 | Post-restart recall references the prior conversation (or persistence confirmed) | ☐ |
+| 7 | Config restored | ☐ |
 
 ---
 
 ## Edge Cases & Error Scenarios
 
 ### Edge Case 1: Agent Database Deleted Before Restart
+Delete the persona's data volume, then restart and recall. Expected: no episode; the reply does
+not reference the turtle — confirming persistence is on disk, not in-process state.
 
-**Scenario**: Delete the agent's SQLite files, then restart. Send a recall message.
+### Edge Case 2: Query During the Two-Phase Window
+If Step 4 is run immediately after close, the episode may show `summary = '[summary pending]'`
+(Phase-1 row before the Phase-2 background summary lands). Re-query after a few seconds; the
+summary upgrades to the LLM text (or to `[interaction summary unavailable]` if summarisation
+failed — still a valid closed episode).
 
-**Expected**: Agent has no memory of the conversation. Reply does not reference the turtle.
-This confirms memory is stored in the database, not in-process state.
-
-### Edge Case 2: Different User ID Post-Restart
-
-**Scenario**: Send the recall message with a different `user_id` (e.g. `"different-user"`).
-
-**Expected**: The agent may still recall the topic (episodic memory is per-agent, not per-user),
-but relationship context will differ.
+### Edge Case 3: No Nudge Sent
+If the conversation is left idle past the timeout but **no** subsequent event arrives and the
+persona has `timers: []`, the close is never materialized (the episode stays unwritten). This is
+expected — the idle close is lazy. Send any further event to trigger it.
 
 ---
 
@@ -268,7 +329,9 @@ but relationship context will differ.
 | Step | Requires `ANTHROPIC_API_KEY` |
 |------|------------------------------|
 | 1 | Yes (agent calls LLM) |
-| 2 | No (direct memory query) |
-| 3 | No (process restart) |
-| 4 | Yes (agent calls LLM) |
-| 5 | No (direct store query) |
+| 2 | No (direct DB query) |
+| 3 | Yes (nudge turn) + the close summary (Phase-2) calls the LLM |
+| 4 | No (direct DB query) |
+| 5 | No (restart + DB query) |
+| 6 | Yes (agent calls LLM) |
+| 7 | No (config restore) |

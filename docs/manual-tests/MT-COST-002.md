@@ -20,6 +20,13 @@ status endpoint — exercising the RFC 0006 budget-enforcement path.
 
 **Out of Scope**: Token pricing accuracy; cost-summary aggregation (see MT-COST-001).
 
+> **Known gap ([ISSUE-0067](../issues/ISSUE-0067-workflow-budget-abort-no-attributable-reason.md))**:
+> this test carries ⚠️ Accepted-with-known-gap. Budget enforcement itself works (per-call wallet
+> leases deny over-budget LLM calls — RFC 0023), but a budget-driven workflow abort does not surface
+> a *budget-attributable* terminal reason (the fixture trips agent-side `max_tokens` truncation
+> first), and the scheduler pre-dispatch `ErrBudgetExceeded` check is an optimistic early-fail, not
+> the enforcement point. See the issue for the fixture-rewrite + reason-attribution follow-up.
+
 ---
 
 ## Related Documentation
