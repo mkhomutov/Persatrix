@@ -34,10 +34,21 @@ __all__ = ["init_persona_timers", "summarize_autonomy_cadence"]
 
 
 def summarize_autonomy_cadence(timers: list[dict] | None, interval: int) -> str:
-    """Cadence summary for COST/Started logs (RFC 0024 PR 2)."""
+    """Cadence summary for COST/Started logs (RFC 0024 PR 2).
+
+    ``interval_seconds`` is rendered with ``{:g}`` so an integer-valued
+    float (``60.0``) reads identically to its integer spelling (``60``)
+    while a genuinely fractional value (``60.5``) keeps its precision.
+    The schema declares ``interval_seconds`` as ``type: number``, so both
+    spellings are legal config; normalising here keeps the COST log
+    consistent regardless of how the operator wrote the value
+    (PR 2 review (6)).
+    """
     if timers is None:
         return f"tick_interval={interval}s"
-    body = ", ".join(f"{t['id']}@{t['interval_seconds']}s" for t in timers)
+    body = ", ".join(
+        f"{t['id']}@{float(t['interval_seconds']):g}s" for t in timers
+    )
     return f"timers=[{body}]"
 
 

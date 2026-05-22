@@ -39,6 +39,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
+from .event_loop_types import InboundEventWake
 from .observability._metrics_wakes import wake_attrs
 from .observability.metrics import try_get_instruments
 
@@ -182,8 +183,6 @@ class _EventLoopLifecycleMixin:
         orphan its handle and the awaiting caller would hang to its external
         ``wait_for`` deadline. (PR 1 review finding #5.)
         """
-        from .event_loop_types import InboundEventWake  # local: avoid import cycle
-
         while True:
             try:
                 wake = self._queue.get_nowait()

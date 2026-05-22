@@ -139,6 +139,45 @@ class TestRebuildFromConfig:
         await cache.rebuild_from_config([])
         assert await cache.list_timers() == []
 
+    async def test_rebuild_is_atomic_on_mid_insert_failure(
+        self, cache: ScheduledWakesCache,
+    ):
+        """A failure partway through the rebuild rolls back the whole
+        operation — the prior cached rows survive intact.
+
+        ``rebuild_from_config`` deletes every row then re-inserts; if an
+        insert fails after the delete, a non-atomic implementation would
+        leave the cache empty (config wiped, nothing written back). The
+        delete and the inserts run in one transaction, so a failure rolls
+        the delete back too. Pins that contract (PR 2 review (5)) so the
+        transaction-handling idiom in ``scheduled_wakes.py`` can be
+        refactored without silently dropping atomicity.
+
+        The failure is forced with a ``source`` value the CHECK constraint
+        rejects, so the second INSERT raises mid-``executemany``.
+        """
+        good = ScheduledWakeRow(
+            timer_id="keep_me", kind="any", interval_ms=60_000,
+        )
+        await cache.rebuild_from_config([good])
+        assert {r.timer_id for r in await cache.list_timers()} == {"keep_me"}
+
+        bad_batch = [
+            ScheduledWakeRow(timer_id="new_a", kind="any", interval_ms=30_000),
+            # CHECK (source IN ('config','runtime')) rejects this row, so
+            # the executemany raises after the leading DELETE has run.
+            ScheduledWakeRow(
+                timer_id="new_b", kind="any", interval_ms=30_000,
+                source="banana",
+            ),
+        ]
+        with pytest.raises(sqlite3.IntegrityError):
+            await cache.rebuild_from_config(bad_batch)
+
+        # Rolled back: the original row is still present, and neither of the
+        # bad-batch rows partially landed.
+        assert {r.timer_id for r in await cache.list_timers()} == {"keep_me"}
+
 
 class TestPerAgentIsolation:
     """The same SQLite file can host multiple agents' caches without rows

@@ -12,7 +12,10 @@ contracts:
   dead legacy ``interval=60s``; legacy path keeps the interval text.
 - ``timers`` set → COST cadence WARNING enumerates configured timers
   instead of the dead legacy ``tick_interval=60s`` value.
-- Partial timer-registration failure → scheduler stopped, raise propagates.
+
+Partial-init failure-cleanup tests live in the sibling file
+``test_server_persona_wiring_timers_failures.py`` — split (PR 5.1) to keep
+both files under the 500-line review-friendly cap.
 """
 
 from __future__ import annotations
@@ -194,6 +197,59 @@ class TestAutonomyTimersWiring:
         await scheduler.stop()
         await agent.close_memory()
 
+    async def test_empty_timers_with_tick_interval_still_suppresses_legacy(
+        self, caplog,
+    ):
+        """``timers: []`` *with* ``tick_interval_seconds`` set — the empty
+        list still wins.
+
+        The precedence gate keys on ``timers is not None``, not truthiness
+        (see ``server_persona.py``: ``register_legacy_timer=timers is None``
+        and the ``timers is not None and "tick_interval_seconds" in autonomy``
+        INFO branch). So an operator who writes ``timers: []`` alongside a
+        leftover ``tick_interval_seconds`` gets *zero* wakes, not the
+        synthesised legacy timer — and the precedence INFO line still fires.
+
+        Regression backstop for PR 2 review (8): a future refactor flipping
+        the gate to ``if timers:`` would silently restore the legacy
+        fallback for the empty-list case (the operator would start paying
+        the dead ``tick_interval`` cadence again). This test fails the
+        moment that happens.
+        """
+        config = {
+            **_PERSONA_CONFIG,
+            "autonomy": {
+                "level": "semi-autonomous",
+                "tick_interval_seconds": 60,
+                "timers": [],
+            },
+        }
+        agent = create_persona_agent(
+            agent_id="ember-owl", config=config, llm_client=_make_client(),
+        )
+        dispatcher = EventDispatcher()
+        schedulers: dict = {}
+
+        with caplog.at_level(logging.INFO, logger="Persatrix.agent.server_persona"):
+            await initialize_persona_agents(
+                {"ember-owl": agent}, dispatcher, schedulers,
+            )
+
+        scheduler = schedulers["ember-owl"]
+        # Empty list suppressed the back-compat legacy timer ...
+        assert not scheduler.event_loop.has_timer("legacy_tick")
+        assert scheduler.event_loop.is_running
+        # ... and the precedence INFO line still names the override.
+        precedence_logs = [
+            r for r in caplog.records
+            if "autonomy.timers" in r.message
+            and "tick_interval_seconds" in r.message
+        ]
+        assert len(precedence_logs) >= 1
+
+        await scheduler.stop()
+        await agent.close_memory()
+
     async def test_cost_warning_names_timers_when_timers_set(self, caplog):
         """The COST WARNING must not advertise the dead
         ``tick_interval=60s`` when ``timers`` is configured.
@@ -364,134 +420,4 @@ class TestAutonomyTimersWiring:
         )
 
         await schedulers["ember-owl"].stop()
-        await agent.close_memory()
-
-    async def test_partial_register_failure_stops_scheduler(self):
-        """A misconfigured timer in the middle of ``autonomy.timers`` causes
-        ``register_timer`` to raise after the scheduler is already started.
-
-        The wiring path must stop the scheduler and leave **both** registries
-        — the caller's local ``tick_schedulers`` dict *and*
-        ``EventDispatcher._tick_schedulers`` — free of the half-initialised
-        entry before propagating the error.  Without the dispatcher
-        cleanup, a stopped scheduler stays addressable via
-        :meth:`EventDispatcher.dispatch` (see ``dispatch.py`` where
-        ``self._tick_schedulers.get(target_id)`` is the only filter); any
-        subsequent caller that reuses the dispatcher would route wakes to
-        a dead ``EventLoop``.
-
-        Failure mode the cross-field jitter cap surfaces: schema validates
-        each timer's fields independently, so an ``interval_seconds: 1.0,
-        jitter_max_seconds: 0.5`` combination is schema-valid but rejected
-        at the ``register_timer`` API boundary.
-        """
-        config = {
-            **_PERSONA_CONFIG,
-            "autonomy": {
-                "level": "autonomous",
-                "timers": [
-                    {
-                        "id": "valid_timer",
-                        "interval_seconds": 30,
-                        "kind": "memory_consolidation",
-                    },
-                    {
-                        # interval=1.0 leaves zero slack for jitter — the
-                        # cross-field cap rejects this at API boundary.
-                        "id": "bad_jitter",
-                        "interval_seconds": 1.0,
-                        "kind": "any",
-                        "jitter_max_seconds": 0.5,
-                    },
-                ],
-            },
-        }
-        agent = create_persona_agent(
-            agent_id="ember-owl", config=config, llm_client=_make_client(),
-        )
-        dispatcher = EventDispatcher()
-        schedulers: dict = {}
-
-        with pytest.raises(ValueError, match="jitter_max"):
-            await initialize_persona_agents(
-                {"ember-owl": agent}, dispatcher, schedulers,
-            )
-
-        # Scheduler was never published to the caller's local registry —
-        # no half-bring-up entry to confuse subsequent dispatches.
-        assert "ember-owl" not in schedulers
-        # Symmetric guarantee for the dispatcher: a failed init must not
-        # leave a stopped scheduler routable.  Accessing ``_tick_schedulers``
-        # directly is the only inspection surface today (no public getter);
-        # the leading underscore is acknowledged.
-        assert "ember-owl" not in dispatcher._tick_schedulers
-
-        await agent.close_memory()
-
-    async def test_partial_register_failure_preserves_original_exception_when_stop_raises(
-        self, monkeypatch, caplog,
-    ):
-        """When ``scheduler.stop()`` itself raises during partial-init
-        cleanup, the original ``register_timer`` ``ValueError`` must still
-        propagate (not be masked by the cleanup error) so operators see
-        the actionable misconfiguration. The cleanup error is surfaced
-        via ``logger.exception`` rather than silently swallowed. Without
-        the inner ``try/except``, callers (``pytest.raises``, ops
-        dashboards) see "stop failed" instead of "timer X is misconfigured"
-        — exactly the diagnostic that pinpoints the YAML line to fix.
-        """
-        config = {
-            **_PERSONA_CONFIG,
-            "autonomy": {
-                "level": "autonomous",
-                "timers": [{
-                    "id": "bad_jitter", "interval_seconds": 1.0,
-                    "kind": "any", "jitter_max_seconds": 0.5,
-                }],
-            },
-        }
-
-        # Monkeypatch the class method — the test body never calls stop().
-        from agents.tick import TickScheduler
-
-        stop_calls = 0
-
-        async def _stop_raises(self, timeout: float = 10.0) -> None:
-            nonlocal stop_calls
-            stop_calls += 1
-            raise RuntimeError("simulated cleanup failure")
-
-        monkeypatch.setattr(TickScheduler, "stop", _stop_raises)
-
-        agent = create_persona_agent(
-            agent_id="ember-owl", config=config, llm_client=_make_client(),
-        )
-        dispatcher = EventDispatcher()
-        schedulers: dict = {}
-
-        with caplog.at_level(logging.ERROR, logger="Persatrix.agent.server_persona"):
-            with pytest.raises(ValueError, match="jitter_max"):
-                await initialize_persona_agents(
-                    {"ember-owl": agent}, dispatcher, schedulers,
-                )
-
-        assert stop_calls == 1, f"expected stop() called once, got {stop_calls}"
-
-        # Cleanup failure surfaced via logger.exception (ERROR + exc_info).
-        cleanup_errors = [
-            r for r in caplog.records
-            if r.levelname == "ERROR"
-            and r.exc_info is not None
-            and isinstance(r.exc_info[1], RuntimeError)
-            and "simulated cleanup failure" in str(r.exc_info[1])
-        ]
-        assert cleanup_errors, (
-            f"expected the cleanup RuntimeError to be logged via logger.exception; "
-            f"records: {[(r.levelname, r.message) for r in caplog.records]}"
-        )
-
-        # Partial-init invariants from the sibling test still hold.
-        assert "ember-owl" not in schedulers
-        assert "ember-owl" not in dispatcher._tick_schedulers
-
         await agent.close_memory()

@@ -96,6 +96,18 @@ class ActionExecutor:
         """
         return self._channel_publisher
 
+    @property
+    def dispatcher(self) -> EventDispatcher | None:
+        """Public accessor for the owning :class:`EventDispatcher` (may be
+        ``None`` for session-less fixtures).
+
+        Lets the running-loop inbound path
+        (:meth:`agents.tick.TickScheduler._handle_inbound_event`) read the
+        dispatcher's configured ``max_cascade_depth`` instead of hardcoding
+        the default — so all three inbound paths share one ceiling
+        (PR 4 review (1))."""
+        return self._dispatcher
+
     async def execute(
         self,
         agent_id: str,

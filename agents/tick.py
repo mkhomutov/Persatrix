@@ -304,9 +304,23 @@ class TickScheduler:
         # surface; keep it out of this adapter's module-load graph.
         from .chat_reply import process_inbound_channel_event
 
+        # Honour the dispatcher's *configured* ceiling so the running-loop
+        # inbound path agrees with ``EventDispatcher.dispatch`` and the
+        # no-loop fallback — a deployment that sets
+        # ``EventDispatcher(max_cascade_depth=X)`` must not have its
+        # override silently ignored on the dominant channel path
+        # (PR 4 review (1)).  Fall back to the default when no dispatcher is
+        # wired (session-less fixtures construct a bare ``ActionExecutor``).
+        dispatcher = self._executor.dispatcher
+        max_cascade_depth = (
+            dispatcher.max_cascade_depth
+            if dispatcher is not None
+            else DEFAULT_MAX_CASCADE_DEPTH
+        )
+
         await process_inbound_channel_event(
             agent=self._agent,
             executor=self._executor,
             event=event,
-            max_cascade_depth=DEFAULT_MAX_CASCADE_DEPTH,
+            max_cascade_depth=max_cascade_depth,
         )
