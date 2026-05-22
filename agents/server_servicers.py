@@ -17,7 +17,6 @@ import json
 import logging
 import time
 import uuid
-from typing import Any
 
 import grpc
 import grpc.aio
@@ -25,9 +24,6 @@ import grpc.aio
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 from .channel_validation import validate_channel_message_event
 from .chat_reply import chat_error_response as _chat_error_response
-from .chat_reply import (
-    dispatch_channel_event_with_chat_error_recovery as _dispatch_with_chat_error,
-)
 from .chat_reply import extract_chat_reply as _extract_chat_reply
 from .dispatch import EventDispatcher
 from .generated import task_pb2, task_pb2_grpc
@@ -36,10 +32,6 @@ from .persona_types import AgentEvent, EventType
 from .wallet_client import BudgetExceededError
 
 logger = logging.getLogger("Persatrix.agent.server")
-
-
-# Cap on in-flight ``ReceiveChannelMessage`` dispatches. PR #248 review Low.
-_MAX_PENDING_DISPATCHES: int = 1000
 
 
 # ─── AgentServiceServicer ───────────────────────────────────
@@ -57,14 +49,6 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
     def __init__(self, agents: dict[str, BaseAgent], dispatcher: EventDispatcher | None = None):
         self._agents = agents
         self._dispatcher = dispatcher or EventDispatcher()
-        # RFC 0011 PR 4a — strong-ref anchor for fire-and-forget channel
-        # dispatch tasks. Python 3.11+ garbage-collects asyncio tasks held
-        # only by weak references in the event loop, so a bare
-        # ``asyncio.create_task(...)`` without a strong-ref anchor can be
-        # collected mid-flight, dropping the dispatch silently. Tasks add
-        # themselves to this set on creation and a done_callback discards
-        # them on completion. PR #246 deep review Should-Fix #2.
-        self._pending_dispatches: set[asyncio.Task[Any]] = set()
 
     async def ExecuteTask(
         self,
@@ -327,34 +311,33 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         request: task_pb2.ChannelMessageEvent,
         context: grpc.aio.ServicerContext,
     ) -> task_pb2.TaskAck:
-        """Receive a channel message and dispatch it to the local agent.
+        """Receive a channel message and enqueue it for the local agent.
 
-        RFC 0011 PR 4a — replaces the PR 3 ``success=False`` stub with the
-        real receiver-side handler. Validates the wire-side
+        RFC 0011 PR 4a shipped the receiver-side handler; RFC 0024 Phase 4
+        inverts its dispatch shape. Validates the wire-side
         ``ChannelMessageEvent`` (mentions cap, content size, channel-type
         prefix agreement, thread_id length, sender_id pattern, RFC 3339
         timestamp, channel/message id length), resolves the target agent
         on the single-agent-per-process server (``agents/server.py``
         does not enforce single-agent today; ``register_agent`` only
         warns and overwrites — this handler enforces it for the channels
-        surface), constructs an
-        ``AgentEvent(event_type=CHANNEL_MESSAGE)``, and schedules dispatch
-        via ``asyncio.create_task`` with a strong-ref task set
-        (``self._pending_dispatches``) so the orchestrator gets the
-        at-most-once ``TaskAck`` on enqueue rather than after
-        agent processing completes.
+        surface), constructs an ``AgentEvent(event_type=CHANNEL_MESSAGE)``,
+        and enqueues it **fire-and-forget** onto the agent's per-agent
+        :class:`~agents.event_loop.EventLoop` via
+        ``EventDispatcher.enqueue_inbound``. The loop owns processing
+        (decide → execute → recover, incl. the ISSUE-0065/0066 chat-error
+        recovery) when it drains; the handler returns ``TaskAck`` as soon
+        as the wake is accepted. No ``scheduler.wake()`` call and no
+        ``SyncDispatchHandle`` on the channel path — the orchestrator's
+        only consumer of the return value (the ``TaskAck``) does not need
+        the agent's actions (RFC 0024 §E).
 
         Validation failures return ``TaskAck(success=False, error_message=...)``
         with a taxonomised reason so operators reading the wire trace can
-        locate the failure class. The orchestrator does not retry in v0.3.0
-        per ``TaskAck`` semantics.
-
-        The response gate (``respond: when_mentioned``/``always``/``never``)
-        lands in PR 4b. The hard renames
-        ``EventType.CHANNEL_MESSAGE`` → ``CHANNEL_MESSAGE`` and
-        ``ActionType.SEND_CHANNEL_MESSAGE`` → ``SEND_CHANNEL_MESSAGE`` landed in
-        PR 4a-ii-α along with the chat-path migration; PR 4a only added
-        the new enum members additively.
+        locate the failure class. A full event-loop queue likewise returns
+        ``success=False`` (discard-not-block backpressure, RFC 0024
+        Decided §1). The orchestrator does not retry per ``TaskAck``
+        semantics.
         """
         # ─── Validation (defence-in-depth; mirrors proto/task.proto bounds) ──
         # Validator returns ``(error, parsed_timestamp)`` so the RFC 3339
@@ -396,18 +379,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             )
         target_agent_id = next(iter(self._agents))
 
-        # Backpressure: bounded queue, after validation + agent resolution
-        # so cheap rejects run first. PR #248 deep review Low finding.
-        if len(self._pending_dispatches) >= _MAX_PENDING_DISPATCHES:
-            return task_pb2.TaskAck(
-                success=False,
-                error_message=(
-                    f"receiver overloaded: {_MAX_PENDING_DISPATCHES} "
-                    f"dispatches pending (cleartext-port backpressure)"
-                ),
-            )
-
-        # ─── Build AgentEvent and schedule fire-and-forget dispatch ──────
+        # ─── Build AgentEvent and enqueue fire-and-forget ───────────────
         # Propagate the orchestrator-authored RFC 3339 ``timestamp`` rather
         # than re-stamping with ``time.time()`` — preserves publish-time
         # ordering for cross-agent correlation and replay. ``publish_ts``
@@ -439,39 +411,25 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             metadata={"cascade_depth": request.cascade_depth},
         )
 
-        task = asyncio.create_task(
-            self._dispatch_channel_event(target_agent_id, event),
-            name=f"channel-dispatch:{request.message_id}",
-        )
-        # Strong-ref anchor (PR #246 deep review Should-Fix #2): without
-        # this the task can be GC'd mid-flight on Python 3.11+.
-        self._pending_dispatches.add(task)
-        task.add_done_callback(self._pending_dispatches.discard)
+        # Fire-and-forget: enqueue onto the agent's EventLoop and return
+        # immediately. The loop owns decide → execute → recover when it
+        # drains (RFC 0024 Phase 4). ``enqueue_inbound`` returns ``False``
+        # only when the loop's bounded queue is full (discard-not-block).
+        accepted = self._dispatcher.enqueue_inbound(target_agent_id, event)
 
-        # ``context`` is intentionally unused: the at-most-once ack is
-        # unconditional once the dispatch task is enqueued. Other
-        # rejection branches above also do not touch ``context``.
+        # ``context`` is intentionally unused: the ack is conveyed in the
+        # ``TaskAck`` body, never via a gRPC status code. Other rejection
+        # branches above also do not touch ``context``.
         _ = context
+        if not accepted:
+            return task_pb2.TaskAck(
+                success=False,
+                error_message=(
+                    "receiver overloaded: agent event-loop queue full "
+                    "(discard-not-block backpressure)"
+                ),
+            )
         return task_pb2.TaskAck(success=True)
-
-    async def _dispatch_channel_event(
-        self, target_agent_id: str, event: AgentEvent,
-    ) -> None:
-        """Run dispatch with chat-error recovery for the fire-and-forget task.
-
-        Thin wrapper over
-        :func:`dispatch_channel_event_with_chat_error_recovery`, which
-        hosts the ISSUE-0065 ``BudgetExceededError`` arm, the ISSUE-0066
-        ``AioRpcError(RESOURCE_EXHAUSTED)`` arm, and the generic
-        final-boundary logger.
-        """
-        await _dispatch_with_chat_error(
-            self._dispatcher.dispatch(target_agent_id, event),
-            publisher=self._dispatcher.executor.channel_publisher,
-            agent_id=target_agent_id,
-            channel_id=event.channel_id,
-            inbound_sender_id=event.sender_id,
-        )
 
 
 # ``_extract_chat_reply`` is re-exported (PR 4a-i) for back-compat with

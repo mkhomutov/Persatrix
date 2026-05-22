@@ -6,8 +6,7 @@ servicer module stays under the 500-line review-friendly cap after the
 ``ReceiveChannelMessage`` real handler landed. No logic changes.
 
 ISSUE-0065 added ``publish_chat_error_on_channel`` — the channel-receive
-arm's equivalent of :func:`chat_error_response`, used by
-``AgentServiceServicer._dispatch_channel_event`` when the persona
+arm's equivalent of :func:`chat_error_response`, used when the persona
 action loop raises :class:`BudgetExceededError`.
 
 ISSUE-0066 added ``dispatch_channel_event_with_chat_error_recovery`` —
@@ -16,6 +15,13 @@ dispatch, hosting both the ``BudgetExceededError`` arm (ISSUE-0065) and
 the gated ``AioRpcError(RESOURCE_EXHAUSTED)`` arm (ISSUE-0066) plus the
 generic final-boundary logger. Extracted to keep ``server_servicers.py``
 under the same line cap.
+
+RFC 0024 Phase 4 added ``process_inbound_channel_event`` — the
+fire-and-forget inbound processing body the per-agent ``EventLoop`` runs
+via its ``on_inbound`` callback (and the ``EventDispatcher.enqueue_inbound``
+no-loop fallback). It wraps the persona action loop in the recovery arm
+above, which is why that arm now lives here rather than on the gRPC
+servicer.
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Awaitable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import grpc
 import grpc.aio
@@ -33,12 +39,18 @@ from .generated import task_pb2
 from .persona_types import ActionType, AgentAction
 from .wallet_client import BudgetExceededError
 
+if TYPE_CHECKING:
+    from .action_executor import ActionExecutor
+    from .persona_runtime import _LLMPersonaAgent
+    from .persona_types import AgentEvent
+
 logger = logging.getLogger("Persatrix.agent.server")
 
 __all__ = [
     "chat_error_response",
     "dispatch_channel_event_with_chat_error_recovery",
     "extract_chat_reply",
+    "process_inbound_channel_event",
     "publish_chat_error_on_channel",
 ]
 
@@ -162,9 +174,9 @@ async def publish_chat_error_on_channel(
     ``channel_id`` / ``inbound_sender_id`` are typed ``Optional`` to
     match ``AgentEvent``'s declared shape; a ``None`` ``channel_id`` is
     treated as a no-op (log only) because there is no channel to
-    publish on. In practice ``_dispatch_channel_event`` only invokes
-    this helper for ``EventType.CHANNEL_MESSAGE``, so the field is
-    populated — the guard is purely a type-system safety net.
+    publish on. In practice the channel-event processing path only
+    invokes this helper for ``EventType.CHANNEL_MESSAGE``, so the field
+    is populated — the guard is purely a type-system safety net.
 
     Falls back to a log line when no publisher is wired so the caller
     does not crash; in that configuration the REST surface times out at
@@ -267,3 +279,63 @@ async def dispatch_channel_event_with_chat_error_recovery(
             "(channel %s): %s",
             agent_id, channel_id, type(exc).__name__,
         )
+
+
+async def process_inbound_channel_event(
+    *,
+    agent: _LLMPersonaAgent,
+    executor: ActionExecutor,
+    event: AgentEvent,
+    max_cascade_depth: int,
+) -> None:
+    """Process one fire-and-forget inbound channel event end-to-end.
+
+    RFC 0024 Phase 4 inverts inbound dispatch: the per-agent
+    :class:`agents.event_loop.EventLoop` owns the inbound-wake lifecycle
+    — *decide → execute → recover* — instead of the gRPC handler awaiting
+    a :class:`agents.event_loop.SyncDispatchHandle`. This is the single
+    processing body shared by both fire-and-forget entry points:
+
+    * the running-loop path — ``TickScheduler._handle_inbound_event``,
+      wired as the loop's ``on_inbound`` callback; and
+    * the no-running-loop fallback — ``EventDispatcher.enqueue_inbound``
+      for an agent without a live supervisor (non-autonomous agents,
+      test fixtures).
+
+    The cascade-depth guard mirrors ``EventDispatcher.dispatch``: an event
+    whose inbound depth already meets the ceiling is dropped *before* the
+    agent runs, so a channel-message hop cannot re-arm a runaway cascade.
+    The agent's actions execute at ``depth + 1`` so any
+    ``SEND_CHANNEL_MESSAGE`` they produce publishes one hop deeper — the
+    same increment the synchronous ``dispatch()`` path applied.
+
+    The whole decide+execute span is wrapped in
+    :func:`dispatch_channel_event_with_chat_error_recovery` so a
+    :class:`BudgetExceededError` (ISSUE-0065) or an
+    ``AioRpcError(RESOURCE_EXHAUSTED)`` (ISSUE-0066) raised inside the
+    persona action loop still publishes a structured-error reply on the
+    originating channel, rather than being swallowed by the event-loop
+    supervisor's generic exception handler (which has no handle to reject
+    on the fire-and-forget path).
+    """
+    depth = event.metadata.get("cascade_depth", 0)
+    if depth >= max_cascade_depth:
+        logger.warning(
+            "Inbound cascade depth %d reached for agent %s, dropping event %s",
+            depth, agent.agent_id, event.event_type.value,
+        )
+        return
+
+    async def _decide_and_execute() -> None:
+        actions = await agent.on_event(event)
+        await executor.execute(
+            agent.agent_id, actions, cascade_depth=depth + 1,
+        )
+
+    await dispatch_channel_event_with_chat_error_recovery(
+        _decide_and_execute(),
+        publisher=executor.channel_publisher,
+        agent_id=agent.agent_id,
+        channel_id=event.channel_id,
+        inbound_sender_id=event.sender_id,
+    )

@@ -111,8 +111,9 @@ class ChannelPublisher(Protocol):
 
         ``metadata`` is an optional caller-supplied map merged into the
         wire payload's ``metadata`` object alongside ``cascade_depth``.
-        ISSUE-0065: the chat-error reply published by
-        ``AgentServiceServicer._dispatch_channel_event`` under
+        ISSUE-0065: the chat-error reply published by the inbound
+        channel-event processing path
+        (``agents.chat_reply.process_inbound_channel_event``) under
         :class:`BudgetExceededError` rides on this seat with
         ``{"reply_status": "error"}`` so the orchestrator's REST chat
         handler renders ``reply_status="error"`` in the JSON envelope

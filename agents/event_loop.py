@@ -26,10 +26,13 @@ Sub-agents do **not** inherit an :class:`EventLoop` per
 synchronously and never enqueues an :class:`InboundEventWake`.
 
 Backpressure is **discard, not block** per RFC 0024 Decided §1: a full
-queue rejects new wakes via :meth:`EventLoop.enqueue` returning ``False``
-and increments :attr:`EventLoop.dropped_count`. Phase 4 wires the
-``agent.wake.dropped`` OTEL counter once channel-message dispatch is the
-dominant producer.
+queue rejects new wakes via :meth:`EventLoop.enqueue` returning ``False``,
+increments :attr:`EventLoop.dropped_count`, and records the
+``agent.wake.dropped`` OTEL counter. As of RFC 0024 Phase 4
+channel-message dispatch enqueues fire-and-forget
+:class:`InboundEventWake`\\ s directly (``EventDispatcher.enqueue_inbound``
+→ this queue), making the channel surface the dominant producer the
+discard policy defends against.
 """
 
 from __future__ import annotations
@@ -169,10 +172,14 @@ class EventLoop(_EventLoopTimersMixin):
     accounting and the existing ``ActionExecutor`` plumbing without the
     loop importing the persona surface.
 
-    ``on_event`` is called for every :class:`InboundEventWake`; its return
-    value resolves the wake's handle when one is attached.  ``on_tick`` is
-    called for every :class:`ScheduledWake` — return value is ignored
-    (scheduled wakes have no caller awaiting actions).
+    Inbound wakes split on handle presence (RFC 0024 Phase 4): a
+    handle-bearing wake (chat / cascade) runs ``on_event`` and resolves
+    the handle with its actions — the synchronous caller owns execution.
+    A handle-less wake (channel message) runs ``on_inbound``, which owns
+    the whole lifecycle (decide → execute → recover); the loop falls back
+    to ``on_event`` (discarding actions) when ``on_inbound`` is not wired.
+    ``on_tick`` (for :class:`ScheduledWake`) returns nothing — scheduled
+    wakes are fire-and-forget and the adapter executes its own actions.
     """
 
     _DEFAULT_QUEUE_SIZE = 1024
@@ -199,6 +206,7 @@ class EventLoop(_EventLoopTimersMixin):
         agent_id: str,
         on_event: Callable[[AgentEvent], Awaitable[list[AgentAction]]],
         on_tick: Callable[[ScheduledWake], Awaitable[None]],
+        on_inbound: Callable[[AgentEvent], Awaitable[None]] | None = None,
         queue_size: int = _DEFAULT_QUEUE_SIZE,
         salience_threshold: float | None = None,
         salience_rate_max_per_sec: int | None = None,
@@ -207,6 +215,7 @@ class EventLoop(_EventLoopTimersMixin):
         self._agent_id = agent_id
         self._on_event = on_event
         self._on_tick = on_tick
+        self._on_inbound = on_inbound
         self._queue: asyncio.Queue[WakeEvent] = asyncio.Queue(maxsize=queue_size)
         self._task: asyncio.Task[None] | None = None
         self._stopped = asyncio.Event()
@@ -415,9 +424,23 @@ class EventLoop(_EventLoopTimersMixin):
                         agent_id=self._agent_id, wake_kind="inbound",
                     ),
                 )
-            actions = await self._on_event(wake.event)
             if wake.handle is not None:
+                # Synchronous-reply path (chat / in-process cascade): the
+                # caller awaits the handle and owns execution.
+                actions = await self._on_event(wake.event)
                 wake.handle.resolve(actions)
+                return
+            if self._on_inbound is not None:
+                # Fire-and-forget path (channel messages): the loop owns
+                # decide → execute → recover.  ``on_inbound`` recovers the
+                # modelled wallet/rate-limit classes internally; anything
+                # else falls to ``_handle_wake_supervised`` (no handle to
+                # reject).
+                await self._on_inbound(wake.event)
+                return
+            # No fire-and-forget handler wired (generic test loops): run
+            # the agent and discard the actions.
+            await self._on_event(wake.event)
             return
         if isinstance(wake, ScheduledWake):
             inst = try_get_instruments()

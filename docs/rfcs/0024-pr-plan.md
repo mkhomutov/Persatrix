@@ -314,15 +314,15 @@ PR 1 lands the structural foundation with no behaviour change — `TickScheduler
 
 #### PR checklist
 
-- [ ] `pytest tests/integration/test_channel_*.py tests/integration/test_bored_persona_cost.py tests/integration/test_action_loop_resource_exhausted.py -q` passes.
-- [ ] `ruff check agents/` clean; `mypy agents/` clean.
-- [ ] `make test` clean.
-- [ ] `cost-regression-gate` CI job wired to the wake-path file set; triggers on PR; fails the build on a non-zero counter.
-- [ ] `docs/manual-tests/MT-IDLE-001.md` authored; execution deferred to [v0.3.3-plan Phase 4 PR 1](../v0.3.3-plan.md#phase-4--v033-release-prep-execution).
-- [ ] `MT-COST-004` (RFC 0023) passes unchanged under the event-driven model — `idle_reason=budget_denied` still emitted.
-- [ ] Channel-message dispatch goes through `event_loop.enqueue(InboundEventWake(event))` directly, not through `scheduler.wake()` ([v0.3.3-plan Acceptance row 2](../v0.3.3-plan.md#acceptance-for-v033)).
-- [ ] [README Cost Warning](../../README.md#%EF%B8%8F-cost-warning--read-before-running) forward-pointer added.
-- [ ] [Progress Overview](#progress-overview) row 4 filled.
+- [x] `pytest tests/integration/test_channel_*.py tests/integration/test_bored_persona_cost.py tests/integration/test_channel_fanout_backpressure.py agents/tests/test_action_loop_resource_exhausted.py -q` passes.
+- [x] `ruff check agents/` + `ruff check tests/` clean; `mypy agents/` + `mypy tests/` clean.
+- [x] Full Python suite clean (`tests/unit/python/`: 2383 passed; `agents/tests/`: 375 passed). No Go/Rust files touched.
+- [x] `cost-regression-gate` CI job wired to the wake-path file set; triggers on PR; fails the build on a non-zero counter.
+- [x] `docs/manual-tests/MT-IDLE-001.md` authored; execution deferred to [v0.3.3-plan Phase 4 PR 1](../v0.3.3-plan.md#phase-4--v033-release-prep-execution).
+- [x] `MT-COST-004` (RFC 0023) automated surface passes unchanged under the event-driven model — the legacy-adapter TICK path is untouched, so `idle_reason=budget_denied` is still emitted (`test_action_loop_resource_exhausted`, `test_tick_budget_denied_idle`).
+- [x] Channel-message dispatch goes through `event_loop.enqueue(InboundEventWake(event))` directly (fire-and-forget, no handle), not through `scheduler.wake()` ([v0.3.3-plan Acceptance row 2](../v0.3.3-plan.md#acceptance-for-v033)).
+- [x] [README Cost Warning](../../README.md#%EF%B8%8F-cost-warning--read-before-running) forward-pointer added.
+- [x] [Progress Overview](#progress-overview) row 4 filled.
 
 ---
 
@@ -645,7 +645,14 @@ _Carry to PR 4:_
 
 ##### From PR 4 review
 
-_None recorded at plan-authoring time._
+_Addressed inline in PR 4 (no PR 5 carry):_
+
+- _**No-running-loop inbound fallback is now bounded.** RFC 0024 Phase 4 moved the running-loop channel path onto the EventLoop's bounded queue (discard-not-block) but left the no-loop fallback (`EventDispatcher.enqueue_inbound` → `_inbound_fallback_tasks`) uncapped. That fallback is reachable in production, not just from fixtures: a **reactive** persona (`autonomy.level` defaults to `reactive`) is registered for dispatch but starts no `TickScheduler` ([`agents/server_persona.py`](../../agents/server_persona.py) only starts one for semi-autonomous / autonomous agents), so its channel messages take the fallback. Without a cap a chatty or abusive producer on the cleartext gRPC port grows the in-flight task set without bound — the same slow-burn DoS the now-removed servicer `_MAX_PENDING_DISPATCHES` cap (PR #248 deep review **Low**) defended against, unconditionally, for every channel dispatch. Restored as `_MAX_INBOUND_FALLBACK_TASKS` (1000, parity with the old value): `enqueue_inbound` returns `False` once full → `TaskAck(success=False)`, symmetric with the queue-full path. Pinned by `tests/unit/python/test_event_dispatcher.py::TestEnqueueInboundNoLoopBackpressure` (reject-when-full; accept-and-process-below-cap; unknown-agent reject)._
+
+_Deferred:_
+
+- _(1) **Cascade-depth ceiling has two sources of truth on the inbound paths.** [`agents/tick.py`](../../agents/tick.py)'s `_handle_inbound_event` (the running-loop fire-and-forget path) hardcodes `DEFAULT_MAX_CASCADE_DEPTH`, while `EventDispatcher.dispatch` and the no-loop fallback both use the configurable `self._max_cascade_depth`. They are equal today because production constructs `EventDispatcher()` with no override, so this is latent — but the constructor parameter (and [`agents/response_gate.py`](../../agents/response_gate.py)'s `max_cascade_depth=5` reference) advertise it as a tunable, and a future `EventDispatcher(max_cascade_depth=X)` would be silently ignored on the dominant channel path. `TickScheduler` has no handle to the dispatcher's value. Fix: thread the dispatcher's configured ceiling through to the scheduler (e.g. an `EventDispatcher.max_cascade_depth` accessor surfaced via the executor the scheduler already holds) so all three inbound paths agree. Not blocking; deferred to keep PR 4's diff scoped, and the wiring touch is a natural bundle with the other PR 5 dispatch-surface cleanup (PR 2 review (7))._
+- _(2) **Pending tick-link captured before the cascade-depth drop (minor observability).** `enqueue_inbound` calls `_capture_pending_tick_link` before enqueue, but the cascade guard runs later inside `process_inbound_channel_event` when the loop drains — so a channel event dropped at the cascade ceiling still records a `link.kind=trigger` Span Link that attaches to the next `on_tick`. `dispatch()` captures the link *after* its cascade check, so the two paths differ in span-link fidelity. Only fires when an inbound event is dropped at max depth (already a runaway-cascade scenario), so the misattributed link is rare and harmless. Fix would duplicate the depth check into `enqueue_inbound` (or move the link capture past it); low priority. Bundle with whichever PR 5 item next touches `enqueue_inbound`._
 
 #### PR checklist
 
@@ -728,8 +735,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 2 | 2 | `autonomy.timers` config + per-agent SQLite `scheduled_wakes` (table + cache class shipped, **not wired** into `initialize_persona_agents`) | `feature/v033-rfc0024-timer-registry` | ✅ Merged | [#407](https://github.com/mkhomutov/Persatrix/pull/407) | 2026-05-21 |
 | 2.1 | 2 | Wire `ScheduledWakesCache` into `initialize_persona_agents` — rebuild from config on startup; restore `next_fire_at_ms` so restart mid-jitter-window does not fire immediately | `feature/v033-rfc0024-scheduled-wakes-wiring` | ✅ Merged | [#408](https://github.com/mkhomutov/Persatrix/pull/408) | 2026-05-21 |
 | 3a | 3 (prereq) | Write-side `salience` + `source_span_id` (no wake yet) | `feature/v033-rfc0024-salience-prereqs` | ✅ Merged | [#409](https://github.com/mkhomutov/Persatrix/pull/409) | 2026-05-21 |
-| 3b | 3 | `SalienceWake` + threshold + loop-back guard + rate-limit | `feature/v033-rfc0024-salience-wake` | 🔀 PR open | this PR | — |
-| 4 | 4 | Channel-message dispatch + cost-regression CI gate | `feature/v033-rfc0024-channel-dispatch` | ⬜ Not started | — | — |
+| 3b | 3 | `SalienceWake` + threshold + loop-back guard + rate-limit | `feature/v033-rfc0024-salience-wake` | ✅ Merged | [#410](https://github.com/mkhomutov/Persatrix/pull/410) | 2026-05-21 |
+| 4 | 4 | Channel-message dispatch + cost-regression CI gate | `feature/v033-rfc0024-channel-dispatch` | 🔀 PR open | this PR | — |
 | 5 | — | Review follow-ups | `feature/v033-rfc0024-followups` | ⬜ Not started | — | — |
 | 6 | — | Phases-1–4 closeout | `feature/v033-rfc0024-close` | ⬜ Not started | — | — |
 

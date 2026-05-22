@@ -115,6 +115,7 @@ class TickScheduler:
             agent_id=agent.agent_id,
             on_event=self._handle_event_wake,
             on_tick=self._handle_scheduled_wake,
+            on_inbound=self._handle_inbound_event,
             salience_threshold=salience_threshold,
             salience_rate_max_per_sec=salience_rate_max_per_sec,
         )
@@ -258,13 +259,54 @@ class TickScheduler:
             )
 
     async def _handle_event_wake(self, event: AgentEvent) -> list[AgentAction]:
-        """Dispatch an inbound event — reached when
-        :class:`EventDispatcher` enqueues an :class:`InboundEventWake` on
-        this agent's loop.
+        """Synchronous-reply inbound path — wired as the loop's ``on_event``.
+
+        Reached when :class:`EventDispatcher` enqueues an
+        :class:`InboundEventWake` *with* a :class:`SyncDispatchHandle`
+        (chat and in-process cascade).  The caller awaits the handle for
+        the action list and owns execution; this callback only runs the
+        agent and returns its ``list[AgentAction]``.
 
         Resets ``idle_count`` so a woken autonomous agent does not stay in
-        the idle branch.  Returns the agent's actions so the dispatch
-        handle resolves with the right ``list[AgentAction]``.
+        the idle branch.
         """
         self._idle_count = 0
         return await self._agent.on_event(event)
+
+    async def _handle_inbound_event(self, event: AgentEvent) -> None:
+        """Fire-and-forget inbound path — wired as the loop's ``on_inbound``
+        (RFC 0024 Phase 4).
+
+        Reached when a channel message enqueues an
+        :class:`InboundEventWake` *without* a handle
+        (``EventDispatcher.enqueue_inbound``).  No caller is awaiting a
+        return value, so the loop owns the whole lifecycle: decide →
+        execute → recover.  Resets ``idle_count`` (an inbound message is
+        activity) and delegates to
+        :func:`agents.chat_reply.process_inbound_channel_event`, which
+        runs the agent, executes its actions at ``cascade_depth + 1``, and
+        carries the ISSUE-0065 / ISSUE-0066 chat-error recovery.
+        """
+        self._idle_count = 0
+        if self._executor is None:
+            # Session-less fixtures wire no executor.  Run the agent so the
+            # message is still processed, but its actions cannot be carried
+            # out — mirror ``_handle_scheduled_wake``'s no-executor warning.
+            actions = await self._agent.on_event(event)
+            if actions:
+                logger.warning(
+                    "Agent %s produced %d inbound action(s) but no executor "
+                    "is configured — actions discarded",
+                    self._agent.agent_id, len(actions),
+                )
+            return
+        # Local import: ``chat_reply`` pulls in the gRPC error-recovery
+        # surface; keep it out of this adapter's module-load graph.
+        from .chat_reply import process_inbound_channel_event
+
+        await process_inbound_channel_event(
+            agent=self._agent,
+            executor=self._executor,
+            event=event,
+            max_cascade_depth=DEFAULT_MAX_CASCADE_DEPTH,
+        )

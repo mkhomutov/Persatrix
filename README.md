@@ -140,6 +140,16 @@ Before running anything:
    conservative limits (`max_llm_calls`, `tick_interval_seconds`,
    `max_daily_usd`).
 
+> **v0.3.3 (in progress) closes the polling-loop cost class structurally.**
+> Under [RFC 0024](docs/rfcs/0024-event-driven-scheduling.md) (Event-Driven
+> Agent Scheduling), a persona with **no scheduled timers and no inbound
+> traffic costs nothing** — its event loop parks until something wakes it,
+> so there is no continuous tick spend to leak. `tick_interval_seconds`
+> continues to work as a configured timer; "consume LLM tokens
+> continuously" applies only to personas you deliberately schedule. The
+> guidance above still holds: provider-side spending limits remain your
+> authoritative backstop.
+
 Persatrix is BUSL-1.1 licensed with no warranty. Use at your own risk
 — see [SECURITY.md § Responsible Use](SECURITY.md#responsible-use).
 

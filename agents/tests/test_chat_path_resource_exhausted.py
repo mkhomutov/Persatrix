@@ -11,7 +11,7 @@ raw :class:`grpc.aio.AioRpcError` (see
 than wrapping it in :class:`BudgetExceededError` — these are transient
 infra signals, not budget violations.
 
-Pre-fix the exception fell through ``_dispatch_channel_event``'s generic
+Pre-fix the exception fell through the channel-dispatch generic
 ``except Exception`` arm with a log line only: no reply was published on
 the originating channel, the orchestrator's ``replyWaiter`` timed out,
 and the REST chat caller saw HTTP 504 ``DEADLINE_EXCEEDED`` instead of
@@ -19,11 +19,22 @@ the MT-COST-003 contract HTTP 200 + ``reply_status="error"`` (same
 operator-visible surface bug ISSUE-0065 fixed for ``BudgetExceededError``,
 different error class).
 
-This module pins the new gated ``grpc.aio.AioRpcError`` arm: only
+RFC 0024 Phase 4 moved channel-message processing onto the per-agent
+:class:`~agents.event_loop.EventLoop`: ``ReceiveChannelMessage`` enqueues
+fire-and-forget and the loop runs
+:func:`agents.chat_reply.process_inbound_channel_event`, which wraps the
+persona action loop in
+:func:`~agents.chat_reply.dispatch_channel_event_with_chat_error_recovery`.
+The modelled back-pressure / denial classes are therefore raised inside
+``agent.on_event`` now (the leased ``create_message`` call), not by the
+dispatcher; these tests drive the processing coroutine directly. The
+recovery arm itself is unchanged from the v0.3.2 wiring.
+
+This module pins the gated ``grpc.aio.AioRpcError`` arm: only
 ``RESOURCE_EXHAUSTED`` is converted to a published error reply (other
-gRPC codes still fall through to the generic arm so genuine agent bugs
-are not masked as fake chat replies — same rationale as
-``test_generic_exception_does_not_publish_error_reply`` in
+gRPC codes still fall through to the generic ``except Exception`` arm so
+genuine agent bugs are not masked as fake chat replies — same rationale
+as ``test_generic_exception_does_not_publish_error_reply`` in
 [test_chat_path_budget_denial.py](test_chat_path_budget_denial.py)).
 """
 
@@ -35,15 +46,9 @@ import grpc
 import grpc.aio
 import pytest
 
-from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
-from agents.dispatch import EventDispatcher
+from agents.cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
+from agents.chat_reply import process_inbound_channel_event
 from agents.persona_types import AgentEvent, EventType
-from agents.server_servicers import AgentServiceServicer
-
-
-class _StubAgent(BaseAgent):
-    async def handle(self, task: TaskInput) -> TaskOutput:
-        return TaskOutput(status=TaskStatus.COMPLETED, result="ok")
 
 
 def _rpc_error(
@@ -79,24 +84,45 @@ def _make_channel_event(
     )
 
 
-def _make_servicer_with_publisher(
-    *, dispatch_side_effect: Exception | None = None,
-) -> tuple[AgentServiceServicer, AsyncMock]:
-    agent = _StubAgent(agent_id="chat-agent", config={"model": "test"})
-    dispatcher = MagicMock(spec=EventDispatcher)
-    dispatcher.dispatch = AsyncMock(side_effect=dispatch_side_effect)
-    publisher = AsyncMock()
-    publisher.publish = AsyncMock(return_value=None)
+def _make_agent_executor(
+    *,
+    on_event_side_effect: Exception | None = None,
+    publisher: AsyncMock | None = None,
+) -> tuple[MagicMock, MagicMock, AsyncMock]:
+    """Build ``(agent, executor, publisher)`` for the processing coroutine.
+
+    The back-pressure / denial classes are raised by the persona action
+    loop *inside* ``agent.on_event`` (the wallet-leased ``create_message``
+    call); the executor's ``channel_publisher`` is where the
+    structured-error reply lands. Passing ``publisher=None`` exercises the
+    no-publisher fallback branch.
+    """
+    agent = MagicMock()
+    agent.agent_id = "chat-agent"
+    agent.on_event = AsyncMock(side_effect=on_event_side_effect, return_value=[])
+    if publisher is None:
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
     executor = MagicMock()
     executor.channel_publisher = publisher
-    dispatcher.executor = executor
-    return AgentServiceServicer({"chat-agent": agent}, dispatcher), publisher
+    executor.execute = AsyncMock(return_value=[])
+    return agent, executor, publisher
 
 
-class TestDispatchChannelEventResourceExhausted:
-    """ISSUE-0066 — ``_dispatch_channel_event`` must publish a structured-error
-    reply on the originating channel when dispatch raises
-    :class:`grpc.aio.AioRpcError` with ``code == RESOURCE_EXHAUSTED``.
+async def _process(agent: MagicMock, executor: MagicMock, event: AgentEvent) -> None:
+    await process_inbound_channel_event(
+        agent=agent,
+        executor=executor,
+        event=event,
+        max_cascade_depth=DEFAULT_MAX_CASCADE_DEPTH,
+    )
+
+
+class TestProcessInboundResourceExhausted:
+    """ISSUE-0066 — fire-and-forget inbound processing must publish a
+    structured-error reply on the originating channel when the persona
+    action loop raises :class:`grpc.aio.AioRpcError` with
+    ``code == RESOURCE_EXHAUSTED``.
 
     Same publish shape as the ISSUE-0065 ``BudgetExceededError`` arm so the
     Go-side discriminator (``metadata["reply_status"]="error"``, see
@@ -112,12 +138,12 @@ class TestDispatchChannelEventResourceExhausted:
             grpc.StatusCode.RESOURCE_EXHAUSTED,
             details="agent already holds the maximum 3 active leases",
         )
-        servicer, publisher = _make_servicer_with_publisher(
-            dispatch_side_effect=exhausted,
+        agent, executor, publisher = _make_agent_executor(
+            on_event_side_effect=exhausted,
         )
         event = _make_channel_event()
 
-        await servicer._dispatch_channel_event("chat-agent", event)
+        await _process(agent, executor, event)
 
         assert publisher.publish.await_count == 1, (
             f"ISSUE-0066: AioRpcError(RESOURCE_EXHAUSTED) must trigger a "
@@ -155,13 +181,11 @@ class TestDispatchChannelEventResourceExhausted:
         value so a future refactor cannot collapse the two.
         """
         exhausted = _rpc_error(grpc.StatusCode.RESOURCE_EXHAUSTED)
-        servicer, publisher = _make_servicer_with_publisher(
-            dispatch_side_effect=exhausted,
+        agent, executor, publisher = _make_agent_executor(
+            on_event_side_effect=exhausted,
         )
 
-        await servicer._dispatch_channel_event(
-            "chat-agent", _make_channel_event(),
-        )
+        await _process(agent, executor, _make_channel_event())
 
         metadata = publisher.publish.await_args.kwargs.get("metadata") or {}
         assert metadata.get("error_reason") == "resource_exhausted", (
@@ -186,13 +210,11 @@ class TestDispatchChannelEventResourceExhausted:
             grpc.StatusCode.RESOURCE_EXHAUSTED,
             details="agent already holds the maximum 3 active leases",
         )
-        servicer, publisher = _make_servicer_with_publisher(
-            dispatch_side_effect=exhausted,
+        agent, executor, publisher = _make_agent_executor(
+            on_event_side_effect=exhausted,
         )
 
-        await servicer._dispatch_channel_event(
-            "chat-agent", _make_channel_event(),
-        )
+        await _process(agent, executor, _make_channel_event())
 
         content = publisher.publish.await_args.kwargs["content"]
         # The reply must NOT be the raw gRPC details string.
@@ -233,15 +255,13 @@ class TestDispatchChannelEventResourceExhausted:
             grpc.StatusCode.DEADLINE_EXCEEDED,
             grpc.StatusCode.UNAUTHENTICATED,
         ):
-            servicer, publisher = _make_servicer_with_publisher(
-                dispatch_side_effect=_rpc_error(code),
+            agent, executor, publisher = _make_agent_executor(
+                on_event_side_effect=_rpc_error(code),
             )
 
             caplog.clear()
             with caplog.at_level("WARNING", logger="Persatrix.agent.server"):
-                await servicer._dispatch_channel_event(
-                    "chat-agent", _make_channel_event(),
-                )
+                await _process(agent, executor, _make_channel_event())
 
             assert publisher.publish.await_count == 0, (
                 f"AioRpcError({code}) must NOT trigger a published reply — "
@@ -274,21 +294,15 @@ class TestDispatchChannelEventResourceExhausted:
         routed the no-publisher case into the generic logger would be
         caught.
         """
-        agent = _StubAgent(agent_id="chat-agent", config={"model": "test"})
-        dispatcher = MagicMock(spec=EventDispatcher)
-        dispatcher.dispatch = AsyncMock(
-            side_effect=_rpc_error(grpc.StatusCode.RESOURCE_EXHAUSTED),
+        agent, executor, _ = _make_agent_executor(
+            on_event_side_effect=_rpc_error(grpc.StatusCode.RESOURCE_EXHAUSTED),
+            publisher=None,
         )
-        executor = MagicMock()
         executor.channel_publisher = None
-        dispatcher.executor = executor
-        servicer = AgentServiceServicer({"chat-agent": agent}, dispatcher)
 
         with caplog.at_level("WARNING", logger="Persatrix.agent.server"):
             # Must not raise.
-            await servicer._dispatch_channel_event(
-                "chat-agent", _make_channel_event(),
-            )
+            await _process(agent, executor, _make_channel_event())
 
         assert any(
             "no publisher wired" in rec.getMessage() for rec in caplog.records

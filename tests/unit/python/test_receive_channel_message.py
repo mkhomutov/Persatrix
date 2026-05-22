@@ -1,8 +1,8 @@
 """
-Tests for the AgentService.ReceiveChannelMessage handler (RFC 0011 PR 4a).
+Tests for the AgentService.ReceiveChannelMessage handler.
 
-PR 3 (#246) shipped the proto + RPC surface with a ``TaskAck(success=False)``
-stub. PR 4a (this slice) replaces the stub with a real handler that:
+RFC 0011 PR 4a shipped the real receiver-side handler; RFC 0024 Phase 4
+inverted its dispatch shape. The handler now:
 
 1. Validates the wire-side ``ChannelMessageEvent`` (mentions cap, content
    size, channel_type/channel_id prefix agreement, thread_id length).
@@ -12,27 +12,23 @@ stub. PR 4a (this slice) replaces the stub with a real handler that:
 3. Constructs an ``AgentEvent(event_type=CHANNEL_MESSAGE)`` populated
    from the proto fields plus the additive top-level ``thread_id``
    per RFC 0011 §D.
-4. Schedules dispatch via ``asyncio.create_task`` with a strong-ref task
-   set (``self._pending_dispatches``) per PR #246 deep review Should-Fix
-   #2 — Python 3.11+ GCs weakly-held tasks mid-flight.
-5. Returns ``TaskAck(success=True)`` on enqueue (at-most-once contract;
-   the response gate / executor lands in PR 4b).
+4. Enqueues it **fire-and-forget** onto the agent's per-agent
+   ``EventLoop`` via ``EventDispatcher.enqueue_inbound`` (no
+   ``SyncDispatchHandle``); the loop owns processing (decide → execute →
+   recover) when it drains.
+5. Returns ``TaskAck(success=True)`` once the wake is accepted, or
+   ``TaskAck(success=False)`` when the loop's bounded queue is full
+   (discard-not-block backpressure, RFC 0024 Decided §1).
 
 Validation failures return ``TaskAck(success=False, error_message=...)``
 and DO NOT enqueue; ``error_message`` is taxonomised so operators reading
 wire traces can locate the failure class.
-
-Hard renames of ``EventType.MESSAGE_RECEIVED`` → ``CHANNEL_MESSAGE`` and
-``ActionType.SEND_MESSAGE`` → ``SEND_CHANNEL_MESSAGE`` landed in PR 4a-ii-α
-(RFC 0011, v0.3.0). PR 4a added the new enum members additively; PR 4a-ii-α
-removed the old names atomically with the chat-path migration.
 """
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import grpc
 import pytest
@@ -52,11 +48,18 @@ class _StubAgent(BaseAgent):
 def _make_servicer(
     *,
     agents: dict[str, BaseAgent] | None = None,
+    enqueue_accepts: bool = True,
 ) -> tuple[AgentServiceServicer, MagicMock]:
+    """Build a servicer over a mock dispatcher.
+
+    ``enqueue_inbound`` is a *synchronous* method returning a bool
+    (accepted / dropped); model it with a plain ``MagicMock`` so tests
+    can assert call args and toggle the backpressure outcome.
+    """
     if agents is None:
         agents = {"ember-owl": _StubAgent(agent_id="ember-owl", config={"model": "test"})}
     dispatcher = MagicMock(spec=EventDispatcher)
-    dispatcher.dispatch = AsyncMock(return_value=[])
+    dispatcher.enqueue_inbound = MagicMock(return_value=enqueue_accepts)
     return AgentServiceServicer(agents, dispatcher), dispatcher
 
 
@@ -81,12 +84,10 @@ def _channel_event(**overrides: Any) -> task_pb2.ChannelMessageEvent:
     return task_pb2.ChannelMessageEvent(**fields)
 
 
-async def _drain(servicer: AgentServiceServicer) -> None:
-    """Wait for any fire-and-forget dispatch tasks to complete."""
-    pending = getattr(servicer, "_pending_dispatches", None)
-    if pending:
-        # Snapshot — the done_callback mutates the set as tasks finish.
-        await asyncio.gather(*list(pending), return_exceptions=True)
+def _enqueued_event(dispatcher: MagicMock) -> AgentEvent:
+    """The ``AgentEvent`` the handler passed to ``enqueue_inbound``."""
+    dispatcher.enqueue_inbound.assert_called_once()
+    return dispatcher.enqueue_inbound.call_args.args[1]
 
 
 # ─── Happy path ────────────────────────────────────────────
@@ -98,12 +99,11 @@ class TestReceiveChannelMessageHappyPath:
         ack = await servicer.ReceiveChannelMessage(
             _channel_event(), MagicMock(spec=grpc.aio.ServicerContext)
         )
-        await _drain(servicer)
         assert isinstance(ack, task_pb2.TaskAck)
         assert ack.success is True
         assert ack.error_message == ""
 
-    async def test_dispatches_channel_message_event(self):
+    async def test_enqueues_channel_message_event(self):
         servicer, dispatcher = _make_servicer()
         await servicer.ReceiveChannelMessage(
             _channel_event(
@@ -116,10 +116,9 @@ class TestReceiveChannelMessageHappyPath:
             ),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
 
-        dispatcher.dispatch.assert_awaited_once()
-        call = dispatcher.dispatch.await_args
+        dispatcher.enqueue_inbound.assert_called_once()
+        call = dispatcher.enqueue_inbound.call_args
         assert call.args[0] == "ember-owl"
         event = call.args[1]
         assert isinstance(event, AgentEvent)
@@ -133,7 +132,26 @@ class TestReceiveChannelMessageHappyPath:
         assert event.payload["mentions"] == ["ember-owl", "iron-fox"]
 
 
-# ─── Validation: invalid inputs are rejected without dispatch ──
+# ─── Backpressure: full event-loop queue rejects with success=False ──
+
+
+class TestReceiveChannelMessageBackpressure:
+    async def test_queue_full_returns_success_false(self):
+        """A full event-loop queue (``enqueue_inbound`` -> False) surfaces as
+        ``TaskAck(success=False)`` with a taxonomised overload reason —
+        discard-not-block, RFC 0024 Decided §1."""
+        servicer, dispatcher = _make_servicer(enqueue_accepts=False)
+        ack = await servicer.ReceiveChannelMessage(
+            _channel_event(), MagicMock(spec=grpc.aio.ServicerContext)
+        )
+        assert ack.success is False
+        assert "overloaded" in ack.error_message or "queue full" in ack.error_message
+        # The event was still *offered* to the loop (the drop happens at
+        # enqueue time, not before).
+        dispatcher.enqueue_inbound.assert_called_once()
+
+
+# ─── Validation: invalid inputs are rejected without enqueue ──
 
 
 class TestReceiveChannelMessageValidation:
@@ -143,10 +161,9 @@ class TestReceiveChannelMessageValidation:
             _channel_event(content="x" * 4001),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
         assert ack.success is False
         assert "content" in ack.error_message
-        dispatcher.dispatch.assert_not_awaited()
+        dispatcher.enqueue_inbound.assert_not_called()
 
     async def test_rejects_too_many_mentions(self):
         servicer, dispatcher = _make_servicer()
@@ -154,10 +171,9 @@ class TestReceiveChannelMessageValidation:
             _channel_event(mentions=[f"agent-{i}" for i in range(11)]),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
         assert ack.success is False
         assert "mentions" in ack.error_message
-        dispatcher.dispatch.assert_not_awaited()
+        dispatcher.enqueue_inbound.assert_not_called()
 
     async def test_rejects_invalid_mention_id(self):
         servicer, dispatcher = _make_servicer()
@@ -165,10 +181,9 @@ class TestReceiveChannelMessageValidation:
             _channel_event(mentions=["BAD_ID"]),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
         assert ack.success is False
         assert "mention" in ack.error_message
-        dispatcher.dispatch.assert_not_awaited()
+        dispatcher.enqueue_inbound.assert_not_called()
 
     async def test_rejects_oversized_thread_id(self):
         servicer, dispatcher = _make_servicer()
@@ -176,10 +191,9 @@ class TestReceiveChannelMessageValidation:
             _channel_event(thread_id="x" * 129),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
         assert ack.success is False
         assert "thread_id" in ack.error_message
-        dispatcher.dispatch.assert_not_awaited()
+        dispatcher.enqueue_inbound.assert_not_called()
 
     @pytest.mark.parametrize(
         ("channel_id", "channel_type"),
@@ -199,10 +213,9 @@ class TestReceiveChannelMessageValidation:
             _channel_event(channel_id=channel_id, channel_type=channel_type),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
         assert ack.success is False
         assert "channel_type" in ack.error_message or "channel_id" in ack.error_message
-        dispatcher.dispatch.assert_not_awaited()
+        dispatcher.enqueue_inbound.assert_not_called()
 
 
 # ─── Agent resolution ──────────────────────────────────────
@@ -214,10 +227,9 @@ class TestReceiveChannelMessageAgentResolution:
         ack = await servicer.ReceiveChannelMessage(
             _channel_event(), MagicMock(spec=grpc.aio.ServicerContext)
         )
-        await _drain(servicer)
         assert ack.success is False
         assert "no agents" in ack.error_message.lower()
-        dispatcher.dispatch.assert_not_awaited()
+        dispatcher.enqueue_inbound.assert_not_called()
 
     async def test_multi_agent_server_returns_failure(self):
         # v0.3.0 server is single-agent-per-process; multi-agent
@@ -231,7 +243,6 @@ class TestReceiveChannelMessageAgentResolution:
         ack = await servicer.ReceiveChannelMessage(
             _channel_event(), MagicMock(spec=grpc.aio.ServicerContext)
         )
-        await _drain(servicer)
         assert ack.success is False
         assert "multi" in ack.error_message.lower() or "recipient" in ack.error_message.lower()
         # PR #248 deep review Low: the rejection message is a wire-trace
@@ -245,90 +256,7 @@ class TestReceiveChannelMessageAgentResolution:
         assert "4a-ii" in ack.error_message
         # Negative-pin: the obsolete pointer must NOT reappear.
         assert "PR 4 chat-path" not in ack.error_message
-        dispatcher.dispatch.assert_not_awaited()
-
-
-# ─── Strong-ref pattern (PR #246 Should-Fix #2) ────────────
-
-
-class TestReceiveChannelMessageStrongRef:
-    async def test_pending_dispatch_strongly_referenced(self):
-        """Fire-and-forget task must be held in a strong-ref set until done."""
-        servicer, dispatcher = _make_servicer()
-
-        # Block the dispatch so the task is observable mid-flight.
-        gate = asyncio.Event()
-
-        async def slow_dispatch(*_args: Any, **_kwargs: Any) -> list[Any]:
-            await gate.wait()
-            return []
-
-        dispatcher.dispatch = AsyncMock(side_effect=slow_dispatch)
-
-        ack = await servicer.ReceiveChannelMessage(
-            _channel_event(), MagicMock(spec=grpc.aio.ServicerContext)
-        )
-        assert ack.success is True
-
-        # While the dispatch is parked in `slow_dispatch`, the task must be
-        # held in the servicer's strong-ref set.
-        pending = getattr(servicer, "_pending_dispatches")
-        assert len(pending) == 1
-        task = next(iter(pending))
-        assert not task.done()
-
-        # Release and verify the done_callback discards from the set.
-        gate.set()
-        await asyncio.wait_for(task, timeout=1.0)
-        assert len(pending) == 0
-
-    async def test_dispatch_exception_does_not_crash_loop(
-        self, caplog: pytest.LogCaptureFixture
-    ):
-        """`# noqa: BLE001` boundary handler must swallow + log dispatch errors.
-
-        Without this guard, a ``RuntimeError`` raised by ``dispatcher.dispatch``
-        would bubble into the asyncio loop's default exception handler as an
-        unstructured traceback. PR #248 deep review L finding (uncovered
-        boundary).
-
-        ``caplog`` assertion pins the docstring promise that exceptions are
-        "logged with traceback" and that the exception class is included in
-        the log message for SLO/error-class breakdown queries (PR #248
-        deep review L finding on exception-type annotation).
-        """
-        import logging
-
-        servicer, dispatcher = _make_servicer()
-        dispatcher.dispatch = AsyncMock(side_effect=RuntimeError("boom"))
-
-        with caplog.at_level(logging.ERROR, logger="Persatrix.agent.server"):
-            ack = await servicer.ReceiveChannelMessage(
-                _channel_event(), MagicMock(spec=grpc.aio.ServicerContext)
-            )
-            # At-most-once ack on enqueue, regardless of downstream outcome.
-            assert ack.success is True
-
-            # Drain — exception must be swallowed inside the wrapper, the task
-            # must complete (not raise), and the strong-ref set must drain.
-            await _drain(servicer)
-            assert len(servicer._pending_dispatches) == 0
-
-        # Exactly one ERROR record from the boundary handler. Asserting on
-        # the agent_id, channel_id, and exception class makes the docstring
-        # contract testable.
-        error_records = [
-            r for r in caplog.records
-            if r.levelno == logging.ERROR
-            and r.name == "Persatrix.agent.server"
-        ]
-        assert len(error_records) == 1
-        msg = error_records[0].getMessage()
-        assert "ember-owl" in msg
-        assert "group:general" in msg
-        assert "RuntimeError" in msg
-        # ``logger.exception`` attaches traceback via exc_info.
-        assert error_records[0].exc_info is not None
+        dispatcher.enqueue_inbound.assert_not_called()
 
 
 # ─── Timestamp propagation + thread_id coercion ────────────
@@ -346,8 +274,7 @@ class TestReceiveChannelMessageEventConstruction:
             _channel_event(timestamp="2026-05-04T12:34:56Z"),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
-        event = dispatcher.dispatch.await_args.args[1]
+        event = _enqueued_event(dispatcher)
         # 2026-05-04T12:34:56Z = 1777898096.0 Unix seconds (UTC).
         assert event.timestamp == pytest.approx(1777898096.0, abs=1.0)
 
@@ -358,10 +285,9 @@ class TestReceiveChannelMessageEventConstruction:
             _channel_event(timestamp="not-a-timestamp"),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
         assert ack.success is False
         assert "timestamp" in ack.error_message
-        dispatcher.dispatch.assert_not_awaited()
+        dispatcher.enqueue_inbound.assert_not_called()
 
     async def test_rejects_empty_timestamp(self):
         servicer, dispatcher = _make_servicer()
@@ -369,10 +295,9 @@ class TestReceiveChannelMessageEventConstruction:
             _channel_event(timestamp=""),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
         assert ack.success is False
         assert "timestamp" in ack.error_message
-        dispatcher.dispatch.assert_not_awaited()
+        dispatcher.enqueue_inbound.assert_not_called()
 
     async def test_empty_thread_id_coerced_to_none(self):
         """Empty wire ``thread_id`` MUST become ``event.thread_id is None``.
@@ -386,8 +311,7 @@ class TestReceiveChannelMessageEventConstruction:
             _channel_event(thread_id=""),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
-        event = dispatcher.dispatch.await_args.args[1]
+        event = _enqueued_event(dispatcher)
         assert event.thread_id is None
 
 
@@ -405,10 +329,9 @@ class TestReceiveChannelMessageIdValidation:
             _channel_event(sender_id=bad_sender),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
         assert ack.success is False
         assert "sender_id" in ack.error_message
-        dispatcher.dispatch.assert_not_awaited()
+        dispatcher.enqueue_inbound.assert_not_called()
 
     async def test_rejects_oversized_channel_id(self):
         servicer, dispatcher = _make_servicer()
@@ -416,10 +339,9 @@ class TestReceiveChannelMessageIdValidation:
             _channel_event(channel_id="group:" + "x" * 300),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
         assert ack.success is False
         assert "channel_id" in ack.error_message
-        dispatcher.dispatch.assert_not_awaited()
+        dispatcher.enqueue_inbound.assert_not_called()
 
     async def test_rejects_oversized_message_id(self):
         servicer, dispatcher = _make_servicer()
@@ -427,10 +349,9 @@ class TestReceiveChannelMessageIdValidation:
             _channel_event(message_id="m" * 65),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
         assert ack.success is False
         assert "message_id" in ack.error_message
-        dispatcher.dispatch.assert_not_awaited()
+        dispatcher.enqueue_inbound.assert_not_called()
 
 
 # ─── Cascade-depth wire propagation (PR 3 of v0.3.0 test-findings) ─
@@ -442,10 +363,10 @@ class TestReceiveChannelMessageCascadeDepth:
     The gRPC receive path reads ``request.cascade_depth`` (typed proto
     field added in PR 1 of the v0.3.0 channel test-findings plan) and
     seeds the resulting ``AgentEvent.metadata["cascade_depth"]`` so the
-    downstream :class:`EventDispatcher` sees the wire value instead of
-    defaulting to zero. Without this seed the Python dispatcher's
-    backstop would be permanently armed at depth=0 on every inbound
-    cross-process hop — the original F-1 failure mode.
+    downstream processing path (now the per-agent ``EventLoop``) sees the
+    wire value instead of defaulting to zero. Without this seed the
+    receiver-side cascade guard would be permanently armed at depth=0 on
+    every inbound cross-process hop — the original F-1 failure mode.
     """
 
     async def test_wire_cascade_depth_seeds_event_metadata(self):
@@ -454,8 +375,7 @@ class TestReceiveChannelMessageCascadeDepth:
             _channel_event(cascade_depth=4),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
-        event = dispatcher.dispatch.await_args.args[1]
+        event = _enqueued_event(dispatcher)
         assert event.metadata.get("cascade_depth") == 4, (
             f"servicer must seed metadata.cascade_depth from the typed "
             f"proto field; got metadata={event.metadata!r}"
@@ -465,15 +385,13 @@ class TestReceiveChannelMessageCascadeDepth:
         """Proto3 implicit presence: unset == zero, and zero is cascade-origin.
 
         The servicer MUST still seed the metadata key explicitly so the
-        dispatcher's ``event.metadata.get("cascade_depth", 0)`` and the
-        eventual `+1` increment have a deterministic starting point.
+        loop's cascade guard (``event.metadata.get("cascade_depth", 0)``)
+        and the eventual `+1` increment have a deterministic starting point.
         """
         servicer, dispatcher = _make_servicer()
         await servicer.ReceiveChannelMessage(
             _channel_event(cascade_depth=0),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
-        event = dispatcher.dispatch.await_args.args[1]
+        event = _enqueued_event(dispatcher)
         assert event.metadata.get("cascade_depth") == 0
-
