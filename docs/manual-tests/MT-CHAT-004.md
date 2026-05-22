@@ -1,38 +1,69 @@
-# Manual Test MT-CHAT-004: User-Agent Relationship — Trust Score Evolves After Chat Exchanges
+# Manual Test MT-CHAT-004: User-Agent Relationship — Interaction Recorded at Conversation Close
 
 **Test ID**: `MT-CHAT-004`
 **Feature Area**: Chat
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-04-20
-**Last Updated**: 2026-04-20
+**Last Updated**: 2026-05-22
 **Status**: Active
 
 ---
 
 ## Overview
 
-**Purpose**: Verify that chatting with a persona agent via the REST chat endpoint causes the
-agent's relationship memory to record interactions and that trust scores and interaction counts
-are updated accordingly for the user participant.
+**Purpose**: Verify that chatting with a persona agent records a relationship interaction for the
+user participant, and that the interaction count and trust score behave per the RFC 0020 model:
+**one relationship interaction is recorded per *closed conversation*, not per turn**, with the
+trust score left at its neutral default.
 
-**Scope**: `RelationshipMemory.record_interaction()` called during `SendChatMessage`, interaction
-count tracking, trust score persistence, and `get_relationship_summary()` for user participants.
+**Scope**: `RelationshipMemory.record_interaction()` called **once at interaction close** (via
+[`agents/persona_runtime/record_close.py`](../../agents/persona_runtime/record_close.py)),
+`interaction_count` semantics (closed conversations, not messages), `interaction_type="conversation"`,
+`other_participant_type="user"`, and trust remaining at the `0.5` default.
 
-**Out of Scope**: REST endpoint shape validation (MT-CHAT-001); CLI mechanics (MT-CHAT-002);
-session continuity (MT-CHAT-003); trust decay (`apply_decay`) — covered by MT-MEMORY-002.
+**Out of Scope**: REST endpoint shape (MT-CHAT-001); CLI mechanics (MT-CHAT-002); session
+continuity (MT-CHAT-003); trust decay `apply_decay` (MT-MEMORY-002).
+
+> **v1.1 rewrite (RFC 0020 PR 4 interaction-close model).** The v1.0 recipe expected
+> `interaction_count >= 5` after 5 chat turns and `interaction_type == "chat"`. RFC 0020 PR 4
+> **removed the per-turn `record_interaction` call from `SendChatMessage`**
+> ([`agents/server_servicers.py`](../../agents/server_servicers.py) carries the explicit comment).
+> The relationship row is now bumped **once per closed interaction**, with
+> `interaction_type="conversation"`. A 5-turn conversation that closes once yields
+> `interaction_count == 1`, not 5.
+
+---
+
+## How relationship interactions are recorded now (read first)
+
+Per [RFC 0020](../rfcs/0020-interaction-lifecycle.md), `RelationshipMemory.record_interaction()`
+is called **once, at interaction close**, in the background finalize path
+([`record_close.py`](../../agents/persona_runtime/record_close.py)): `interaction_type="conversation"`,
+`outcome` = the conversation summary, for `dm:` scopes only (human chat is a `dm:<agent>:<user>`
+scope, so it fires). It increments `interaction_count` by 1 and updates `last_interaction_at`.
+
+It does **not** change `trust_score` — trust moves only via the separate `update_trust()` /
+`apply_decay()` paths. RFC 0020's "trust delta from interaction outcome" is deferred (post-RFC
+MQ-1), so a closed chat leaves `trust_score` at the `0.5` default for a fresh peer.
+
+Close itself is **idle-gap-timeout only** on the live stack (no explicit end-chat endpoint),
+materialized by the next event — see [MT-CHAT-003 § How an interaction closes](MT-CHAT-003.md#how-an-interaction-closes-read-first).
 
 ---
 
 ## Related Documentation
 
 **Feature Documentation**:
-- [agents/memory/relationship.py](../../agents/memory/relationship.py) — relationship memory
-- [agents/server_servicers.py](../../agents/server_servicers.py) — `SendChatMessage` records interaction
-- [agents/participant.py](../../agents/participant.py) — `UserParticipant`, `UserStore`
-- [docs/rfcs/0005-persona-agent-memory.md](../rfcs/0005-persona-agent-memory.md)
+- [docs/rfcs/0020-interaction-lifecycle.md](../rfcs/0020-interaction-lifecycle.md) — interaction model + migration notes.
+- [agents/persona_runtime/record_close.py](../../agents/persona_runtime/record_close.py) — `record_closed_interaction` (the single per-close bump).
+- [agents/server_servicers.py](../../agents/server_servicers.py) — `SendChatMessage` (per-turn `record_interaction` **removed**, RFC 0020 PR 4).
+- [agents/memory/relationship.py](../../agents/memory/relationship.py) — `RelationshipMemory`, `get_relationship_summary`, `update_trust`.
 
 **Related Automated Tests**:
-- Unit tests: `tests/unit/python/test_agents.py`
+- Integration: `tests/integration/test_summarize_on_close.py` (`TestRecordInteractionMove`: 11 turns → `interaction_count == 1`).
+
+**Related Manual Tests**:
+- [MT-CHAT-003](MT-CHAT-003.md) — episodic episode written at close (same lifecycle).
 
 ---
 
@@ -41,244 +72,169 @@ session continuity (MT-CHAT-003); trust decay (`apply_decay`) — covered by MT-
 ### System Requirements
 
 **Operating Systems**:
-- ☐ Windows 10/11 (x64)
-- ☐ macOS 12.0+ (Intel/Apple Silicon)
-- ☐ Linux (Ubuntu 22.04+)
+- ☐ Windows 10/11 (x64) · macOS 12.0+ · Linux (Ubuntu 22.04+)
 
 **Dependencies Installed**:
-- Go 1.24+: `go version`
-- Python 3.11+: `python3 --version`
-- `curl` available in PATH
+- Docker Desktop (the documented stack), or a local `make run` + `make run-agent`.
+- `curl` + `jq` available in PATH.
+- `ANTHROPIC_API_KEY` available (via `.env` for Docker, or the shell for a local run).
 
 ### Application State
 
-- ☐ Orchestrator running: `make run`
-- ☐ At least one persona agent registered and healthy (e.g. `ember-owl`): `make run-agent`
-- ☐ Config files valid: `make validate`
-- ☐ `ANTHROPIC_API_KEY` set in environment
-- ☐ Clean relationship state: remove any pre-existing relationship memory for the test user
-  (or use a fresh `user_id` not used in other tests):
+- ☐ Orchestrator + persona agent (e.g. `ember-owl`) running and healthy.
+- ☐ Config valid: `make validate` exits 0.
 
-```bash
-# Option A: use a unique user_id for this test
-# user_id = "mt-chat-004-user" (used throughout this test)
+### Test Data — short idle timeout + fresh user
 
-# Option B: remove stale DB files if re-running
-rm -f data/mt-chat-004-rel.db data/mt-chat-004-rel.db-shm data/mt-chat-004-rel.db-wal
-```
-
-### Test Data
-
-No external fixtures. All interaction is via `curl` and inline Python scripts.
+As in [MT-CHAT-003](MT-CHAT-003.md#test-data--shorten-the-idle-timeout), temporarily set
+`interaction_idle_timeout_sec: 15` under the persona's `memory:` block in `config/agents.yaml`,
+`make validate`, and restart the persona. Use a fresh `USER_ID="mt-chat-004-user"` so the baseline
+is clean.
 
 ---
 
 ## Test Procedure
 
-### Step 1: Verify Baseline — No Prior Interactions
+### Step 1: Baseline — No Prior Relationship
 
-**Action**: Query the agent's relationship memory for the test user before any chat:
+**Action**:
 
 ```bash
-python3 - <<'EOF'
-import asyncio
-from persatrix_agents.memory.relationship import RelationshipMemory
-
-async def main():
-    mem = RelationshipMemory("ember-owl")
-    await mem.initialize()
-
-    summary = await mem.get_relationship_summary(
-        "mt-chat-004-user",
-        participant_type="agent",
-        other_participant_type="user",
-    )
-
-    if summary is None:
-        print("No prior relationship — baseline clean")
-        print("Trust: 0.5 (default)")
-        print("Interactions: 0")
-    else:
-        print(f"Pre-existing relationship found:")
-        print(f"  Trust: {summary.trust_score}")
-        print(f"  Interactions: {summary.interaction_count}")
-
-    await mem.close()
-
-asyncio.run(main())
-EOF
+docker exec -i persatrix-agent-ember-owl-1 python - <<'PY'
+import sqlite3
+c = sqlite3.connect("/app/data/memory.db")
+rows = c.execute(
+    "select trust_score, interaction_count from relationships "
+    "where other_participant_id='mt-chat-004-user'"
+).fetchall()
+print("baseline relationship rows:", rows or "none (clean)")
+PY
 ```
 
-**Expected Result**: No prior relationship exists, or if the agent's database already has
-entries, record the baseline interaction count for comparison in later steps.
+**Expected Result**: No prior relationship for `mt-chat-004-user` (or a recorded baseline count
+to subtract later).
 
 **Verification**:
-- [ ] Baseline recorded: trust score and interaction count noted
-- [ ] If clean: `"No prior relationship — baseline clean"` printed
+- [ ] Baseline clean (no row) or baseline `interaction_count` noted
 
 ---
 
-### Step 2: Send 5 Chat Messages
+### Step 2: Send One Conversation (5 turns, one session)
 
-**Action**: Send 5 messages to the agent with the test user. Capture the `chat_session_id` from the
-first response and reuse it:
+**Action**: Send 5 turns reusing one `chat_session_id` — this is **one** conversation:
 
 ```bash
-# Message 1
-RESP=$(curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
+USER_ID="mt-chat-004-user"
+R=$(curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "Hello! I am starting a new project today.", "user_id": "mt-chat-004-user"}')
-echo "$RESP"
-CHAT_SESSION_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['chat_session_id'])")
-
-# Messages 2–5
+  -d "{\"message\": \"Hello! I am starting a new project today.\", \"user_id\": \"$USER_ID\"}")
+echo "$R"; SID=$(echo "$R" | jq -r .chat_session_id)
 for i in 2 3 4 5; do
   curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
     -H "Content-Type: application/json" \
-    -d "{\"message\": \"This is test message number $i for the relationship memory test.\", \"user_id\": \"mt-chat-004-user\", \"chat_session_id\": \"$CHAT_SESSION_ID\"}"
-  echo ""
+    -d "{\"message\": \"Test message number $i for the relationship test.\", \"user_id\": \"$USER_ID\", \"chat_session_id\": \"$SID\"}" >/dev/null
 done
+echo "5 turns sent"
 ```
 
-**Expected Result**: All 5 requests return HTTP 200 with `reply_status: "ok"`.
+**Expected Result**: All 5 requests HTTP 200 (`reply_status: "ok"`, or `"empty"` occasionally —
+acceptable). The interaction is still **open** — no relationship row yet.
 
 **Verification**:
-- [ ] All 5 responses are HTTP 200
-- [ ] All 5 responses have `reply_status: "ok"` (or `"empty"` is acceptable if the agent
-  occasionally produces no reply)
-- [ ] Agent replies are coherent (not error messages)
+- [ ] 5 responses HTTP 200
+- [ ] (Optional) re-run Step 1's query — still no relationship row (interaction open)
 
 ---
 
-### Step 3: Verify Interaction Count Increased
+### Step 3: Close the Conversation (idle-gap + nudge)
 
-**Action**: Query the relationship memory and confirm the interaction count reflects the
-5 chat exchanges:
+**Action**: Wait past the timeout, then nudge to materialize the close:
 
 ```bash
-python3 - <<'EOF'
-import asyncio
-from persatrix_agents.memory.relationship import RelationshipMemory
-
-async def main():
-    mem = RelationshipMemory("ember-owl")
-    await mem.initialize()
-
-    summary = await mem.get_relationship_summary(
-        "mt-chat-004-user",
-        participant_type="agent",
-        other_participant_type="user",
-    )
-
-    if summary is None:
-        print("FAIL — no relationship record found after 5 chat messages")
-    else:
-        print(f"Trust score: {summary.trust_score}")
-        print(f"Interaction count: {summary.interaction_count}")
-        print(f"Last interaction at: {summary.last_interaction_at}")
-        print(f"Other participant type: {summary.other_participant_type}")
-        print(f"Recent interactions: {len(summary.recent_interactions)}")
-
-        for ix in summary.recent_interactions:
-            print(f"  [{ix.id[:8]}] type={ix.interaction_type} "
-                  f"other_type={ix.other_participant_type}")
-
-        assert summary.interaction_count >= 5, (
-            f"Expected >= 5 interactions, got {summary.interaction_count}"
-        )
-        assert summary.other_participant_type == "user", (
-            f"Expected other_participant_type='user', got '{summary.other_participant_type}'"
-        )
-        print("PASS")
-
-    await mem.close()
-
-asyncio.run(main())
-EOF
+sleep 20
+curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"message\": \"(nudge)\", \"user_id\": \"$USER_ID\"}" >/dev/null
+sleep 3   # let the Phase-2 finalize (summary + record_interaction) land
 ```
 
-**Expected Result**: Interaction count is ≥ 5. Each interaction has `interaction_type="chat"`
-and `other_participant_type="user"`.
+> The nudge turn closes the 5-turn conversation **and** opens a new (1-turn) interaction in the
+> same DM scope. We measure the *closed* conversation.
 
 **Verification**:
-- [ ] `Interaction count` is ≥ 5
+- [ ] `agent_interactions_closed_total{agent_id="ember-owl"}` increased by 1 (see MT-CHAT-003 Step 3)
+
+---
+
+### Step 4: Verify ONE Interaction Recorded (not five)
+
+**Action**:
+
+```bash
+docker exec -i persatrix-agent-ember-owl-1 python - <<'PY'
+import sqlite3
+c = sqlite3.connect("/app/data/memory.db")
+u = "mt-chat-004-user"
+rel = c.execute(
+    "select trust_score, interaction_count, other_participant_type, last_interaction_at "
+    "from relationships where other_participant_id=?", (u,)
+).fetchone()
+print("relationship:", rel)
+ix = c.execute(
+    "select interaction_type, substr(outcome,1,50) from interactions "
+    "where other_participant_id=?", (u,)
+).fetchall()
+print("interaction rows:", len(ix))
+for r in ix:
+    print("  ", r)
+PY
+```
+
+**Expected Result**: A relationship row exists with **`interaction_count == 1`** (the *one*
+closed conversation — NOT 5), `other_participant_type == "user"`, and a recent
+`last_interaction_at`. The `interactions` table shows **one** row with
+`interaction_type == "conversation"` and an `outcome` carrying the conversation summary.
+
+**Verification**:
+- [ ] `interaction_count` increased by exactly **1** over the Step 1 baseline
 - [ ] `other_participant_type` is `"user"`
-- [ ] `last_interaction_at` is a recent timestamp
-- [ ] Recent interactions show `type=chat` and `other_type=user`
-- [ ] Script prints `"PASS"`
+- [ ] Exactly one new `interactions` row, `interaction_type == "conversation"`
+- [ ] That interaction's `outcome` is non-empty (the summary)
 
 ---
 
-### Step 4: Verify Trust Score Remains at Default (0.5)
+### Step 5: Verify Trust Score Unchanged (default 0.5)
 
-**Action**: The trust score is checked in the output from Step 3.
+**Action**: Read `trust_score` from the Step 4 output.
 
-**Expected Result**: Trust score is at the default `0.5` (neutral). The `SendChatMessage`
-servicer calls `record_interaction()` which records the interaction but does not automatically
-adjust trust — trust changes require explicit `update_trust()` calls (e.g. from agent
-decision-making). A score of `0.5` confirms no erroneous drift.
+**Expected Result**: `trust_score == 0.5`. `record_interaction` (the close-path call) records the
+interaction but does **not** adjust trust — trust changes only via explicit `update_trust()` /
+`apply_decay()`. RFC 0020's outcome→trust delta is deferred, so `0.5` is correct.
 
 **Verification**:
-- [ ] Trust score is `0.5` (default neutral) — this is correct
-- [ ] If trust is not `0.5`, verify whether the persona agent's decision-making explicitly
-  called `update_trust()` during the chat (this is model-dependent behaviour, not a test failure)
+- [ ] `trust_score` is `0.5` (default neutral)
 
 ---
 
-### Step 5: Verify Interaction Details
+### Step 6: (Optional) A Second Conversation → `interaction_count == 2`
 
-**Action**: Inspect individual interaction records:
+**Action**: To confirm the count tracks *closed conversations*, run a second session for the
+same user (new `chat_session_id`), then close it (Step 3). Re-query Step 4.
 
-```bash
-python3 - <<'EOF'
-import asyncio
-from persatrix_agents.memory.relationship import RelationshipMemory
-
-async def main():
-    mem = RelationshipMemory("ember-owl")
-    await mem.initialize()
-
-    summary = await mem.get_relationship_summary(
-        "mt-chat-004-user",
-        participant_type="agent",
-        other_participant_type="user",
-    )
-
-    if summary is None or not summary.recent_interactions:
-        print("FAIL — no interactions to inspect")
-        await mem.close()
-        return
-
-    # Check that at least one interaction has an outcome (the agent's reply)
-    has_outcome = any(ix.outcome for ix in summary.recent_interactions)
-    print(f"Any interaction has outcome (agent reply): {has_outcome}")
-
-    # Check interaction types are all "chat"
-    types = {ix.interaction_type for ix in summary.recent_interactions}
-    print(f"Interaction types: {types}")
-    assert types == {"chat"}, f"Expected only 'chat' type, got {types}"
-
-    # Check participant types
-    other_types = {ix.other_participant_type for ix in summary.recent_interactions}
-    print(f"Other participant types: {other_types}")
-    assert other_types == {"user"}, f"Expected only 'user', got {other_types}"
-
-    print("PASS")
-    await mem.close()
-
-asyncio.run(main())
-EOF
-```
-
-**Expected Result**: All interactions have `interaction_type="chat"` and
-`other_participant_type="user"`. At least one interaction has a non-empty `outcome` (the agent's
-reply text).
+**Expected Result**: `interaction_count == 2` — one per closed conversation, regardless of how
+many turns each contained.
 
 **Verification**:
-- [ ] All interaction types are `"chat"`
-- [ ] All other participant types are `"user"`
-- [ ] At least one interaction has an outcome
-- [ ] Script prints `"PASS"`
+- [ ] After a second closed conversation, `interaction_count == 2`
+
+---
+
+### Step 7: Restore Config
+
+Remove the temporary `interaction_idle_timeout_sec` line, `make validate`, restart the persona.
+
+**Verification**:
+- [ ] `config/agents.yaml` restored (`git diff` clean); `make validate` exits 0
 
 ---
 
@@ -286,38 +242,32 @@ reply text).
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | Baseline recorded (no prior relationship or count noted) | ☐ |
-| 2 | All 5 chat messages return HTTP 200 | ☐ |
-| 3 | Interaction count ≥ 5, other_participant_type is "user" | ☐ |
-| 4 | Trust score is 0.5 (default neutral) | ☐ |
-| 5 | All interactions are type "chat" with "user" participant | ☐ |
+| 1 | Baseline recorded (no prior relationship, or count noted) | ☐ |
+| 2 | 5 turns return HTTP 200; no relationship row yet (interaction open) | ☐ |
+| 3 | Idle-gap + nudge closes the conversation | ☐ |
+| 4 | `interaction_count` += 1 (one conversation), type `"conversation"`, participant `"user"` | ☐ |
+| 5 | Trust score is `0.5` (default neutral) | ☐ |
+| 6 | (Optional) second closed conversation → count 2 | ☐ |
+| 7 | Config restored | ☐ |
 
 ---
 
 ## Edge Cases & Error Scenarios
 
-### Edge Case 1: Agent Reply is Empty
+### Edge Case 1: Interaction Still Open
+If you query before the conversation closes (no nudge after the timeout), there is **no**
+relationship row yet and `interaction_count == 0`. The bump happens only at close — this is the
+RFC 0020 behaviour (the v1.0 recipe's per-turn assumption was wrong).
 
-**Scenario**: One or more of the 5 messages returns `reply_status: "empty"`.
+### Edge Case 2: Summarisation Failed at Close
+If the Phase-2 summary fails (timeout / empty / janitor backfill to
+`[interaction summary unavailable]`), `record_closed_interaction` is **skipped** — the relationship
+bump and auto-reflect tick do not fire for that interaction (`interaction_count` stays unchanged).
+A successful close with a real or unavailable-but-finalized summary records the interaction.
 
-**Expected**: The interaction is still recorded in relationship memory (the servicer calls
-`record_interaction()` even when the reply is empty). The interaction count should still
-increment.
-
-### Edge Case 2: Multiple Users Chatting
-
-**Scenario**: Send messages from two different `user_id` values, then check that each user has
-a separate relationship record.
-
-**Expected**: `get_relationship_summary("user-a", other_participant_type="user")` and
-`get_relationship_summary("user-b", other_participant_type="user")` return independent records.
-
-### Edge Case 3: Rapid-Fire Messages
-
-**Scenario**: Send 5 messages in quick succession (no wait between requests).
-
-**Expected**: All interactions are recorded. No race condition causes missing records (SQLite
-WAL mode handles concurrent writes).
+### Edge Case 3: Self-DM Scope
+A `dm:<id>:<id>` self-conversation has no peer, so no relationship row is created (peer extraction
+returns none). Human chat (`dm:<agent>:<user>`) always has a distinct peer and records normally.
 
 ---
 
@@ -325,8 +275,10 @@ WAL mode handles concurrent writes).
 
 | Step | Requires `ANTHROPIC_API_KEY` |
 |------|------------------------------|
-| 1 | No (direct memory query) |
+| 1 | No (direct DB query) |
 | 2 | Yes (agent calls LLM) |
-| 3 | No (direct memory query) |
-| 4 | No (checked in Step 3 output) |
-| 5 | No (direct memory query) |
+| 3 | Yes (nudge turn + Phase-2 close summary) |
+| 4 | No (direct DB query) |
+| 5 | No (read from Step 4) |
+| 6 | Yes (second conversation) |
+| 7 | No (config restore) |
