@@ -19,7 +19,8 @@ trust score left at its neutral default.
 **Scope**: `RelationshipMemory.record_interaction()` called **once at interaction close** (via
 [`agents/persona_runtime/record_close.py`](../../agents/persona_runtime/record_close.py)),
 `interaction_count` semantics (closed conversations, not messages), `interaction_type="conversation"`,
-`other_participant_type="user"`, and trust remaining at the `0.5` default.
+peer typing (`other_participant_type` — intended `"user"`; see [ISSUE-0068](../issues/ISSUE-0068-chat-peer-recorded-as-agent-participant-type.md)),
+and trust remaining at the `0.5` default.
 
 **Out of Scope**: REST endpoint shape (MT-CHAT-001); CLI mechanics (MT-CHAT-002); session
 continuity (MT-CHAT-003); trust decay `apply_decay` (MT-MEMORY-002).
@@ -191,15 +192,23 @@ PY
 ```
 
 **Expected Result**: A relationship row exists with **`interaction_count == 1`** (the *one*
-closed conversation — NOT 5), `other_participant_type == "user"`, and a recent
-`last_interaction_at`. The `interactions` table shows **one** row with
-`interaction_type == "conversation"` and an `outcome` carrying the conversation summary.
+closed conversation — NOT 5) and a recent `last_interaction_at`. The `interactions` table shows
+**one** row with `interaction_type == "conversation"` and an `outcome` carrying the conversation
+summary.
+
+> **⚠️ Known gap — `other_participant_type` ([ISSUE-0068](../issues/ISSUE-0068-chat-peer-recorded-as-agent-participant-type.md))**:
+> the *intended* value is `"user"`, but REST chat currently records `"agent"`. The REST
+> `participant_type` is dropped because `ChannelMessageEvent` (the proto delivering chat to the
+> agent) has no field to carry it, so the agent defaults the peer type to `"agent"`. This
+> reproduces with and without an explicit `participant_type: "user"` request field. Record the
+> `other_participant_type` row as ⚠️ Accepted-with-known-gap until ISSUE-0068 lands; it flips to
+> `"user"` once the proto carries peer type.
 
 **Verification**:
 - [ ] `interaction_count` increased by exactly **1** over the Step 1 baseline
-- [ ] `other_participant_type` is `"user"`
 - [ ] Exactly one new `interactions` row, `interaction_type == "conversation"`
 - [ ] That interaction's `outcome` is non-empty (the summary)
+- [ ] `other_participant_type` is `"agent"` today (⚠️ ISSUE-0068; intended `"user"`)
 
 ---
 
@@ -245,7 +254,7 @@ Remove the temporary `interaction_idle_timeout_sec` line, `make validate`, resta
 | 1 | Baseline recorded (no prior relationship, or count noted) | ☐ |
 | 2 | 5 turns return HTTP 200; no relationship row yet (interaction open) | ☐ |
 | 3 | Idle-gap + nudge closes the conversation | ☐ |
-| 4 | `interaction_count` += 1 (one conversation), type `"conversation"`, participant `"user"` | ☐ |
+| 4 | `interaction_count` += 1 (one conversation), type `"conversation"`; `other_participant_type` = `"agent"` today (⚠️ [ISSUE-0068](../issues/ISSUE-0068-chat-peer-recorded-as-agent-participant-type.md), intended `"user"`) | ☐ |
 | 5 | Trust score is `0.5` (default neutral) | ☐ |
 | 6 | (Optional) second closed conversation → count 2 | ☐ |
 | 7 | Config restored | ☐ |
