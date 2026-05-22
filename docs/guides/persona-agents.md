@@ -138,13 +138,66 @@ values for each dimension are enumerated in
 the natural-language descriptions rendered into the prompt live in
 [prompts/runtime/persona/sections/behavior-dimensions.yaml](../../prompts/runtime/persona/sections/behavior-dimensions.yaml).
 
-**`autonomy`** controls the tick loop. Only three of the five enum levels are
-wired today — `passive`, `reactive`, and `semi-autonomous`. `autonomous` and
-`supervisor` parse but are deferred to a v0.2 follow-up RFC
-([config/agents.yaml:174–177](../../config/agents.yaml#L174-L177)). The
-remaining fields in the block govern cadence
-(`tick_interval_seconds`), parallelism (`max_actions_per_tick`), and
-back-off after inactivity (`idle_after_ticks`).
+**`autonomy`** controls when and how the persona wakes. Only three of the
+five enum `level` values are wired today — `passive`, `reactive`, and
+`semi-autonomous`. `autonomous` and `supervisor` parse but are deferred to a
+later RFC ([config/agents.yaml:174–177](../../config/agents.yaml#L174-L177)).
+The remaining fields govern the wake schedule (`timers`, or the legacy
+`tick_interval_seconds`), parallelism (`max_actions_per_tick`), and back-off
+after inactivity (`idle_after_ticks`).
+
+> **v0.3.3 — the autonomy loop is event-driven, not polled.** Under
+> [RFC 0024](../rfcs/0024-event-driven-scheduling.md) the persona runtime no
+> longer spins a fixed-interval poll. Each agent owns an `asyncio.Queue` of
+> wake events ([agents/event_loop.py](../../agents/event_loop.py)) and parks
+> on `queue.get()` until something wakes it: an **inbound** event — an RPC, a
+> `persatrix chat` turn, or a channel-message delivery (`InboundEventWake`);
+> a **scheduled** timer firing on its configured cadence (`ScheduledWake`);
+> or a **salience-triggered** memory write that crosses the salience
+> threshold (`SalienceWake`, default-off — see §2). A persona with
+> `autonomy.timers: []` and no inbound traffic parks indefinitely: no SQLite
+> recall, no `_inject_memory_context`, no provider call, no wallet lease.
+> That is the v0.3.3 "idle is truly idle" promise, enforced by the
+> bored-persona cost-regression CI gate.
+>
+> **`autonomy.timers`** replaces the single `tick_interval_seconds` cadence
+> with an explicit per-agent list. Each entry is `id` (stable name, unique
+> within the persona, surfaced as `timer_id` on the `agent.wake.scheduled`
+> counter) plus `interval_seconds` (period in seconds, floor `1.0`) plus
+> `kind` (an operator-chosen callback label such as `reflection` or
+> `memory_consolidation`, carried as `callback_kind` on the wake), with an
+> optional `jitter_max_seconds` that draws each fire's delay from
+> `[interval − jitter, interval + jitter]` to de-synchronise fleets of
+> identically-configured personas that restart together:
+>
+> ```yaml
+> autonomy:
+>   level: "semi-autonomous"
+>   timers:
+>     - id: "reflect"
+>       interval_seconds: 300
+>       kind: "reflection"
+>       jitter_max_seconds: 30
+>   max_actions_per_tick: 3
+>   idle_after_ticks: 10
+> ```
+>
+> `agents.yaml` is the source of truth; on startup the list is rebuilt into a
+> per-agent SQLite `scheduled_wakes` cache that restores each timer's
+> `next_fire_at_ms`, so a persona restarted mid-jitter-window resumes its
+> schedule instead of re-randomising. Orphaned rows are pruned on the next
+> startup — no operator action.
+>
+> **Back-compat.** `tick_interval_seconds` continues to work: it is
+> synthesised into a single `ScheduledWake(timer_id="legacy_tick",
+> callback_kind="tick")` at the same cadence. If both `tick_interval_seconds`
+> and `timers` are set, **`timers` wins** — the legacy field is ignored with
+> a one-time INFO log. An absent block means `timers: []`. The
+> `tick_interval_seconds` deprecation **warning** is RFC 0024 Phase 5
+> (v0.4.0); its removal is Phase 6 (v0.5+). The `agent.wake.*` counters and
+> the two salience knobs (`autonomy.salience_threshold`,
+> `autonomy.salience_rate_max_per_sec`) are documented in
+> [observability.md §10.5](../observability.md#105-persatrix-specific-attribute-namespace).
 
 **`memory`** configures per-agent memory behaviour — see §2. Omit the block
 entirely to accept every default.
@@ -326,10 +379,12 @@ separate `messages` list and are likewise outside working memory.
 
 ### A minimal walkthrough
 
-A single tick of `ember-owl` after receiving a pull-request event from
+A single wake of `ember-owl` after receiving a pull-request event from
 `iron-fox`:
 
-1. **Tick fires** at `tick_interval_seconds: 60`.
+1. **Wake fires** — the inbound pull-request event is enqueued as an
+   `InboundEventWake` and the parked event loop dequeues it (a configured
+   `timers` entry firing on cadence would instead enqueue a `ScheduledWake`).
 2. **Episodic recall** — `_inject_memory_context` queries
    `episodic_memory.recall("code review iron-fox", limit=10)`.
    BM25 returns the top matches; their `access_count` is incremented so

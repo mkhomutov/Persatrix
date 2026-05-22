@@ -140,15 +140,16 @@ Before running anything:
    conservative limits (`max_llm_calls`, `tick_interval_seconds`,
    `max_daily_usd`).
 
-> **v0.3.3 (in progress) closes the polling-loop cost class structurally.**
-> Under [RFC 0024](docs/rfcs/0024-event-driven-scheduling.md) (Event-Driven
-> Agent Scheduling), a persona with **no scheduled timers and no inbound
-> traffic costs nothing** — its event loop parks until something wakes it,
-> so there is no continuous tick spend to leak. `tick_interval_seconds`
-> continues to work as a configured timer; "consume LLM tokens
-> continuously" applies only to personas you deliberately schedule. The
-> guidance above still holds: provider-side spending limits remain your
-> authoritative backstop.
+> **v0.3.3 closes the polling-loop cost class structurally.** Under
+> [RFC 0024](docs/rfcs/0024-event-driven-scheduling.md) (Event-Driven
+> Agent Scheduling), the persona autonomy loop is event-driven: a persona
+> with **no scheduled timers and no inbound traffic costs nothing** — its
+> event loop parks on `queue.get()` until something wakes it (an inbound
+> RPC, a scheduled timer, or a salience-triggered memory write), so there
+> is no continuous tick spend to leak. `tick_interval_seconds` continues
+> to work as a configured timer; "consume LLM tokens continuously" applies
+> only to personas you deliberately schedule. The guidance above still
+> holds: provider-side spending limits remain your authoritative backstop.
 
 Persatrix is BUSL-1.1 licensed with no warranty. Use at your own risk
 — see [SECURITY.md § Responsible Use](SECURITY.md#responsible-use).
@@ -163,6 +164,7 @@ Persatrix is BUSL-1.1 licensed with no warranty. Use at your own risk
 | **v0.3.0** | Give agents a shared channel and watch them talk, negotiate, and form opinions over time | ✅ Released |
 | **v0.3.1** | Chat with a persona that remembers stated facts about you across interactions and follows the conversation it's currently having | ✅ Released |
 | **v0.3.2** | Every LLM call passes through a wallet lease before it's issued — cost becomes a structural gate, not a post-hoc accountant — and the memory facade is frozen as the single path to agent memory ahead of the v0.4.0 Postgres split | ✅ Released |
+| **v0.3.3** | A persona with no scheduled work and no inbound traffic costs nothing — its event loop parks until something wakes it (an inbound message, a scheduled timer, or a salience-triggered memory write) instead of polling on a fixed tick | 🚧 Release prep |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
 | **v0.6.0** | Run agent societies across multiple nodes and networks | 📋 Planned |
@@ -172,9 +174,12 @@ For per-release upgrade notes and operator-visible changes, see
 [CHANGELOG.md](CHANGELOG.md). For known limitations and deferred scope in
 the current release (channels are internal-only and unauthenticated,
 per-session recall filtering and conversational memory for group channels
-deferred, RFC 0029 Phases 2–6 and the Postgres society backend deferred
-to v0.4.0, RFC 0009 Phases 3–4 deferred to v0.4.0), see the
-[v0.3.2 release checklist § Known Gaps](docs/v0.3.2-release-checklist.md#6-known-gaps-to-document-in-release-notes).
+deferred, the RFC 0024 `tick_interval_seconds` deprecation warning deferred
+to v0.4.0 and its removal to v0.5+, salience-triggered wakes shipping
+disabled by default until calibrated, RFC 0029 Phases 2–6 and the Postgres
+society backend deferred to v0.4.0, RFC 0009 Phases 3–4 deferred to v0.4.0),
+see the
+[v0.3.3 release checklist § Known Gaps](docs/v0.3.3-release-checklist.md#6-known-gaps-to-document-in-release-notes).
 
 ---
 
