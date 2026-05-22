@@ -227,6 +227,7 @@ Executed in v0.3.3 release-prep PR 1 — see [`v0.3.3-execution-report.md`](v0.3
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-05-22 | Claude (Opus 4.7) | Windows 11 + Docker Desktop | ✅ Pass | `ea2b86d` RC tip, live stack. ember-owl (`timers: []`): event-driven start (no cadence); 60 s idle window → 0 tokens / $0, no `agent.wake.*`, no LLM/memory/wallet activity; cost unchanged; chat turn woke it (`reply_status="ok"`, cost advanced, `agent_wake_inbound_total` 0→1). |
+| 2026-05-22 | Claude (Opus 4.7) | Windows 11 + Docker Desktop | ✅ Pass | Release-prep PR 4 re-run on the **post-version-bump tip** (post-[#419](https://github.com/mkhomutov/Persatrix/pull/419), rebuilt images). ember-owl (`timers: []`): `Started tick scheduler … (timers=[])`, `scheduled_wakes.rebuild count=0`; 60 s idle window → `cost/summary` flat at `0/0/$0`, **zero** `agent.wake.*` series, zero LLM/memory/wallet/dispatch log lines; an inbound channel message then woke the loop (`agent_wake_inbound_total` absent→1). See [v0.3.3-execution-report.md § Re-Execution](v0.3.3-execution-report.md#re-execution--release-prep-pr-4-post-version-bump-rc-tip). |
 
 ---
 
