@@ -19,8 +19,11 @@ other without re-pinning the invariant breaks the v0.3.3 release-gate
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
+from typing import Any
 
 import pytest
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
@@ -125,6 +128,42 @@ class TestDefaultThresholdConstant:
         on under stock config.
         """
         assert REFLECTION_CONTRADICTION_SALIENCE < _DEFAULT_THRESHOLD
+
+
+class TestSchemaDefaultMatchesCode:
+    """The schema ``default`` and the ``EventLoop`` class constant are two
+    sources of truth for the same value.
+
+    ``jsonschema`` does not inject defaults, and
+    :func:`agents.server_persona.initialize_persona_agents` reads
+    ``autonomy.get("salience_threshold")`` / ``...rate_max_per_sec`` and
+    falls back to the class constant when the key is absent — so the class
+    constant is the *effective* runtime default and the schema ``default``
+    is documentation.  Pin the two equal so a change to one without the
+    other is caught here rather than silently diverging the documented
+    schema from runtime behaviour.
+    """
+
+    @staticmethod
+    def _autonomy_props() -> dict[str, Any]:
+        schema = json.loads(
+            Path("schemas/agent.schema.json").read_text(encoding="utf-8"),
+        )
+        return schema["definitions"]["autonomy"]["properties"]
+
+    def test_schema_threshold_default_matches_event_loop_constant(self) -> None:
+        props = self._autonomy_props()
+        assert (
+            props["salience_threshold"]["default"]
+            == EventLoop.DEFAULT_SALIENCE_THRESHOLD
+        )
+
+    def test_schema_rate_max_default_matches_event_loop_constant(self) -> None:
+        props = self._autonomy_props()
+        assert (
+            props["salience_rate_max_per_sec"]["default"]
+            == EventLoop.DEFAULT_SALIENCE_RATE_MAX_PER_SEC
+        )
 
 
 class TestDefaultOffInvariant:

@@ -165,6 +165,11 @@ class _SalienceSubscriber:
         # enqueue *attempts* (this slot is consumed even if the enqueue
         # below is rejected by a full queue) — intentional, so the cap
         # bounds the DoS-relevant attempt rate, not just successes.
+        # The check returns before the enqueue, so the suppression reasons
+        # take precedence over the substrate outcome: a write that would
+        # both exceed the cap and hit a full queue records ``rate_limit``,
+        # never ``queue_full`` (``queue_full`` is reachable only for a
+        # write that passed threshold, loop-back, and the rate cap).
         now = self._time_fn()
         cutoff = now - 1.0
         while self._recent and self._recent[0] < cutoff:

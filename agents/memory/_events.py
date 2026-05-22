@@ -57,7 +57,9 @@ logger = logging.getLogger(__name__)
 # The five Persatrix memory tiers (RFC 0024 PR plan §PR 3a).  ``reflection``
 # has no production write site at v0.3.3 — it is reserved for the future
 # RFC 0027 reflection-driven consolidation work — but lives in the literal
-# so PR 3b's subscriber's ``match`` over tiers is exhaustive from day one.
+# so PR 3b's subscriber can carry it as the ``tier`` attribute on
+# ``agent.wake.salience`` from day one (the subscriber treats ``tier``
+# opaquely — it records the value, it does not branch on it).
 MemoryTier = Literal[
     "episodic",
     "notes",
