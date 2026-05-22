@@ -278,7 +278,16 @@ class EventLoop(_EventLoopTimersMixin, _EventLoopLifecycleMixin):
         )
 
     async def stop(self, timeout: float = 10.0) -> None:
-        """Cancel timers and wait for the loop to drain in-flight wakes."""
+        """Cancel timers and wait for the loop to drain in-flight wakes.
+
+        ``timeout`` bounds two *sequential* waits independently: first the
+        in-flight reentrant-resolver cancellations (below), then the
+        supervisor drain. Worst-case wall time is therefore up to ~2×
+        ``timeout`` — but only if both phases hit their bound, which requires
+        a handler that swallows ``CancelledError``. A well-behaved
+        ``on_event`` settles on cancellation at once, so each phase returns
+        promptly and the doubled bound never materialises in practice.
+        """
         self._stopped.set()
         # Unsubscribe first so further publishes do not enqueue wakes
         # onto a queue we are about to drain.  ``unsubscribe`` is
@@ -394,6 +403,19 @@ class EventLoop(_EventLoopTimersMixin, _EventLoopLifecycleMixin):
         try:
             await self._handle_wake(wake)
         except asyncio.CancelledError:
+            # Supervisor cancelled mid-wake — only ``stop()`` cancels this
+            # task (hard-cancel after the stop timeout, or the queue-full
+            # sentinel-poison fallback), and a cancelled supervisor will
+            # never resolve this handle. Settle a handle-bearing wake with
+            # the empty discard result so the awaiting caller resolves at
+            # once instead of hanging to its external ``wait_for`` deadline.
+            # This is the in-flight counterpart to ``_drain_pending_handles``
+            # (which only reaches *queued* wakes) — parity with the reentrant
+            # resolver's cancellation path. ``resolve`` is idempotent, so a
+            # wake that already resolved before the cancel is unaffected.
+            # (PR 1 review #5 / PR 5 re-review.)
+            if isinstance(wake, InboundEventWake) and wake.handle is not None:
+                wake.handle.resolve([])
             raise
         except Exception as exc:  # noqa: BLE001 — supervisor must not propagate
             wake_kind = _wake_kind(wake)
