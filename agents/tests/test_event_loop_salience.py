@@ -1,6 +1,7 @@
 """RFC 0024 PR 3b — SalienceWake enqueue, threshold, loop-back guard, rate-limit.
 
-Pins the four branches of the salience subscriber's enqueue decision tree:
+Pins the salience subscriber's enqueue decision tree — three suppression
+branches plus the admit branch's two substrate outcomes:
 
 * **Above threshold + no loopback + under rate cap** → enqueue ``SalienceWake``
   and record ``agent.wake.salience{suppressed_reason="none"}``.
@@ -14,6 +15,9 @@ Pins the four branches of the salience subscriber's enqueue decision tree:
 * **Per-agent rate above ``autonomy.salience_rate_max_per_sec``** → suppress;
   record ``suppressed_reason="rate_limit"``.  Default cap is 10/sec per
   RFC §Security Considerations.
+* **Admitted but the substrate queue is full** → record
+  ``suppressed_reason="queue_full"`` (not ``none``), so the salience-side
+  outcome agrees with the ``agent.wake.dropped`` counter.
 
 Cross-agent filtering (the ``_global_bus`` fan-out → per-agent
 subscriber-side filter recorded in :mod:`agents.memory._events`' module
@@ -107,8 +111,14 @@ async def _default_on_tick(_wake: ScheduledWake) -> None:
 
 
 @pytest.fixture
-async def loop_above_threshold() -> AsyncIterator[EventLoop]:
-    """EventLoop with threshold 0.5 + rate cap 100 + subscribed to the bus."""
+async def loop_above_threshold(fresh_bus: MemoryWriteBus) -> AsyncIterator[EventLoop]:
+    """EventLoop with threshold 0.5 + rate cap 100 + subscribed to the bus.
+
+    Depends on ``fresh_bus`` explicitly so the per-test bus is installed as
+    the process global *before* ``loop.start()`` subscribes — otherwise the
+    loop would subscribe to whichever bus the global happened to hold,
+    leaving correctness hostage to fixture parameter ordering.
+    """
     loop = EventLoop(
         agent_id=_AGENT_ID,
         on_event=_default_on_event,
@@ -352,6 +362,42 @@ class TestRateLimit:
         reasons = _salience_points_by_reason(metric_reader)
         assert reasons.get("none", 0) == 3
         assert reasons.get("rate_limit", 0) == 1
+
+
+# ─── Queue-full outcome (substrate rejection of a salience-admitted write) ───
+
+
+class TestQueueFullOutcome:
+    def test_queue_full_records_distinct_reason_not_none(
+        self,
+        metric_reader: InMemoryMetricReader,
+    ) -> None:
+        """A salience-admitted write the substrate queue rejects records
+        ``suppressed_reason="queue_full"`` — never ``none``.
+
+        ``none`` is reserved for writes that actually enqueued; a dashboard
+        reading ``none`` as the true-enqueue count would otherwise over-count
+        by the number of queue-full drops. The drop is *also* recorded on
+        ``agent.wake.dropped`` at the ``EventLoop.enqueue`` call site, so the
+        two counters now agree that the write did not enqueue.
+
+        Constructed against the subscriber directly with a stub ``enqueue``
+        that returns ``False``: filling a real ``asyncio.Queue`` to capacity
+        is racy because the ``SalienceWake`` drain path is near-instant, so a
+        focused unit test of the decision branch is the deterministic seam.
+        """
+        from agents.event_loop_salience import _SalienceSubscriber
+
+        subscriber = _SalienceSubscriber(
+            agent_id=_AGENT_ID,
+            enqueue=lambda _wake: False,  # substrate queue full
+            threshold=0.5,
+            rate_max_per_sec=100,
+        )
+        subscriber(_write_event(salience=0.9, source_span_id=None))
+        reasons = _salience_points_by_reason(metric_reader)
+        assert reasons.get("queue_full", 0) == 1
+        assert reasons.get("none", 0) == 0
 
 
 # ─── Cross-agent filtering (per-agent subscriber routing) ───────────────────

@@ -346,12 +346,15 @@ span emission site (see `agents.observability.spans.STOP_REASON_TO_GEN_AI`).
 > * `agent.wake.salience{agent.id, wake.kind=salience, tier,
 >   suppressed_reason}` — every `MemoryWriteEvent` this agent's
 >   subscriber observes. The `suppressed_reason` attribute is the
->   dashboard discriminator: `below_threshold`, `loopback`,
->   `rate_limit`, or `none` (the not-suppressed branch). Without this
->   attribute "no salience wakes" is indistinguishable from "wakes
->   are working and the agent is quiet" — every same-agent write
->   increments exactly one data point so a dashboard can attribute
->   every write to one of the four outcomes.
+>   dashboard discriminator: the three suppression branches
+>   (`below_threshold`, `loopback`, `rate_limit`) plus the admit
+>   branch's substrate result — `none` (enqueued) or `queue_full`
+>   (admitted by salience policy but the queue was full, so also
+>   counted on `agent.wake.dropped`). `none` alone is the true-enqueue
+>   count. Without this attribute "no salience wakes" is
+>   indistinguishable from "wakes are working and the agent is quiet"
+>   — every same-agent write increments exactly one data point so a
+>   dashboard can attribute every write to one of these outcomes.
 > * `agent.wake.dropped{agent.id, wake.kind=dropped}` — incremented
 >   when `EventLoop.enqueue` rejects a wake because the queue is full
 >   (discard-not-block per RFC 0024 Decided §1). The substrate's

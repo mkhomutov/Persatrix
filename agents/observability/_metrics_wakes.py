@@ -12,11 +12,13 @@ PR 3b is the formal home for all four ``agent.wake.*`` counters named in
   subscriber the ``EventLoop`` installs at :meth:`EventLoop.start`. Every
   ``MemoryWriteEvent`` for this agent increments exactly one data point
   on this counter; the ``suppressed_reason`` attribute discriminates the
-  four branches of the enqueue decision tree
-  (``below_threshold`` | ``loopback`` | ``rate_limit`` | ``none``).
-  Without this attribute "no salience wakes" is indistinguishable from
-  "wakes are working and the agent is quiet" — the dashboard cannot
-  attribute the silence.
+  outcome — the three suppression branches
+  (``below_threshold`` | ``loopback`` | ``rate_limit``) plus the admit
+  branch's substrate result (``none`` = enqueued | ``queue_full`` =
+  admitted but the queue was full, also counted on ``agent.wake.dropped``).
+  ``none`` alone is the true-enqueue count.  Without this attribute "no
+  salience wakes" is indistinguishable from "wakes are working and the
+  agent is quiet" — the dashboard cannot attribute the silence.
 * ``agent.wake.inbound`` / ``agent.wake.scheduled`` — recorded by the
   ``EventLoop`` supervisor when it dispatches the matching wake variant.
   PR 1 declared the ``wake.kind`` taxonomy (`_wake_kind`) in
@@ -63,8 +65,10 @@ def register(inst: _Instruments, meter: Meter) -> None:
         description=(
             "MemoryWriteEvent observed by this agent's EventLoop subscriber. "
             "Recorded exactly once per same-agent write — the "
-            "suppressed_reason attribute discriminates the four enqueue "
-            "branches (below_threshold | loopback | rate_limit | none). "
+            "suppressed_reason attribute discriminates the outcome: the three "
+            "suppression branches (below_threshold | loopback | rate_limit) "
+            "plus the admit branch's substrate result (none = enqueued | "
+            "queue_full = admitted but queue full, also on agent.wake.dropped). "
             "Attributes: agent.id, wake.kind=salience, tier, "
             "suppressed_reason."
         ),

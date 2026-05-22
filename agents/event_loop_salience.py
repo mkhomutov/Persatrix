@@ -44,10 +44,14 @@ The subscriber owns four pieces of suppression policy:
    :func:`time.monotonic`.
 
 Every same-agent write records *exactly one* data point on
-``agent.wake.salience`` with a ``suppressed_reason`` attribute of
-``below_threshold`` | ``loopback`` | ``rate_limit`` | ``none``.  Four
-reasons cover every branch of the decision tree; dashboards can
-attribute every ``MemoryWriteEvent`` to exactly one outcome.
+``agent.wake.salience`` with a ``suppressed_reason`` attribute.  The
+three-branch suppression tree yields ``below_threshold`` | ``loopback``
+| ``rate_limit``; the admit branch then resolves at the substrate to
+``none`` (enqueued) or ``queue_full`` (admitted by salience policy but
+the ``EventLoop`` queue was full — also counted on ``agent.wake.dropped``).
+Five reason values cover every outcome; dashboards can attribute every
+``MemoryWriteEvent`` to exactly one of them, and ``none`` alone is the
+true-enqueue count.
 """
 
 from __future__ import annotations
@@ -78,6 +82,7 @@ _REASON_BELOW = "below_threshold"
 _REASON_LOOPBACK = "loopback"
 _REASON_RATE_LIMIT = "rate_limit"
 _REASON_NONE = "none"
+_REASON_QUEUE_FULL = "queue_full"
 
 
 class _SalienceSubscriber:
@@ -138,7 +143,10 @@ class _SalienceSubscriber:
             if active is not None and event.source_span_id == active:
                 return _REASON_LOOPBACK
 
-        # Rate-limit: sliding 1s window per agent.
+        # Rate-limit: sliding 1s window per agent.  The window counts
+        # enqueue *attempts* (this slot is consumed even if the enqueue
+        # below is rejected by a full queue) — intentional, so the cap
+        # bounds the DoS-relevant attempt rate, not just successes.
         now = self._time_fn()
         cutoff = now - 1.0
         while self._recent and self._recent[0] < cutoff:
@@ -152,12 +160,14 @@ class _SalienceSubscriber:
 
         accepted = self._enqueue(SalienceWake(write_event=event))
         if not accepted:
-            # Queue-full discards have their own counter
-            # (``agent.wake.dropped``) wired at the enqueue call-site —
-            # record the salience-side outcome as "none" because the
-            # salience decision was "enqueue"; the drop is a substrate
-            # event, not a salience-policy event.
-            return _REASON_NONE
+            # Salience policy admitted this write, but the substrate queue
+            # was full so it never enqueued.  Record ``queue_full`` (not
+            # ``none``) so the salience-side reason agrees with the
+            # ``agent.wake.dropped`` counter the enqueue call-site bumps —
+            # ``none`` is reserved for writes that actually enqueued, so a
+            # dashboard does not over-count true enqueues by the number of
+            # queue-full drops.
+            return _REASON_QUEUE_FULL
         return _REASON_NONE
 
     def _record(self, *, tier: str, reason: str) -> None:

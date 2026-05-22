@@ -19,6 +19,19 @@ The bus is intentionally:
 * **Failure-isolating** — a subscriber that raises does not break the
   write path.  Exceptions are logged at WARNING and swallowed; a buggy PR
   3b subscriber must not cascade into a write failure.
+* **Single-threaded** — subscribe / unsubscribe / :func:`set_memory_write_bus`
+  and :meth:`MemoryWriteBus.publish` mutate / iterate the subscriber list
+  with **no lock**.  The invariant that makes this safe: PR 3b's
+  :class:`agents.event_loop.EventLoop` subscribes once at start from the
+  main asyncio loop's thread, and every memory-tier write site calls
+  ``publish`` from that same loop thread (the writes are ``await`` ed on
+  the event loop, so the synchronous fan-out runs on it too).  ``publish``
+  already snapshots via ``tuple(self._subscribers)`` so a subscriber that
+  (un)subscribes during dispatch cannot corrupt iteration.  A future
+  background-thread subscriber — e.g. a Phase-4 channel-message receiver
+  subscribing from outside the loop's thread — would break this invariant
+  and require a ``threading.Lock`` around subscribe/unsubscribe (RFC 0024
+  PR-plan deferred finding (3)).
 
 Salience is clipped to ``[0.0, 1.0]`` defensively at :class:`MemoryWriteEvent`
 construction time per RFC §Security Considerations.  Write sites should

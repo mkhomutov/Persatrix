@@ -253,7 +253,7 @@ PR 1 lands the structural foundation with no behaviour change — `TickScheduler
 #### Key implementation details
 
 - **The threshold default keeps salience wakes off by construction.** PR 3a ships conservative scoring with a max of `0.6` (reflection contradictions); PR 3b ships a threshold default of `0.95`. The two land in different PRs but the constants must agree by inequality. PR 3b's `test_event_loop_salience_default_off.py` is a regression backstop against either being changed in isolation.
-- **`suppressed_reason` is the dashboard discriminator.** Without it, "no salience wakes" is indistinguishable from "salience wakes are working and the agent is quiet." The four reasons (`below_threshold`, `loopback`, `rate_limit`, plus the not-suppressed case) cover every branch in the enqueue decision tree; a dashboard can attribute every `MemoryWriteEvent` to exactly one outcome.
+- **`suppressed_reason` is the dashboard discriminator.** Without it, "no salience wakes" is indistinguishable from "salience wakes are working and the agent is quiet." The reasons cover every outcome: the three suppression branches (`below_threshold`, `loopback`, `rate_limit`) plus the admit branch's substrate result — `none` (enqueued) or `queue_full` (admitted by salience policy but the queue was full, also counted on `agent.wake.dropped`). `none` alone is the true-enqueue count; a dashboard can attribute every `MemoryWriteEvent` to exactly one outcome.
 - **Loop-back guard is the v0.2.1 leak in a new costume.** [RFC §F row 3](0024-event-driven-scheduling.md#f-failure-modes) frames it explicitly: a memory write inside an LLM response that triggers a wake that triggers another LLM response that triggers another memory write is the same unbounded cost path the polling loop opened. PR 3b's tests must exercise this directly — a fake write with `source_span_id` matching an active LLM span MUST NOT enqueue a wake.
 - **Rate-limit is a DoS guard, not a calibration knob.** [RFC §Security Considerations](0024-event-driven-scheduling.md#security-considerations) — a malicious or buggy memory write with `salience: 1.0` on a high-frequency loop must not DoS the agent. Default `10/sec` is the [RFC §Security Considerations](0024-event-driven-scheduling.md#security-considerations) value; configurable so a deployed persona can tighten it.
 - **No `_inject_memory_context` invocation here.** A `SalienceWake` triggers the agent's `on_event` for the triggering write — which loads memory via the existing recall path with the *write* as the query (per [RFC §G](0024-event-driven-scheduling.md#g-migration-of-existing-tick-logic)). PR 3b does not edit `_inject_memory_context`; that surface is untouched through the entire v0.3.3 work.
@@ -621,7 +621,16 @@ records the choice._
 
 ##### From PR 3b review
 
-_None recorded at plan-authoring time._
+_Addressed inline in PR 3b (no PR 5 carry):_
+
+- _**`queue_full` outcome split out of `none`.** The salience subscriber recorded `suppressed_reason="none"` both when a wake enqueued and when the substrate queue rejected it, so `none` over-counted true enqueues by the number of queue-full drops. Now records a distinct `queue_full` reason that agrees with the `agent.wake.dropped` counter; `none` is the true-enqueue count. Pinned by `test_event_loop_salience.py::TestQueueFullOutcome`._
+- _**Single-thread bus invariant documented at the requested location.** Deferred finding (3) below asked the invariant be recorded in `agents.memory._events`' module docstring (PR 3b had documented it in `event_loop_salience.py` instead). Now stated in both: the `EventLoop` subscribes once at start from the main loop thread and every write site publishes from that thread, so the lock-free subscribe/unsubscribe/publish are safe today._
+- _**Dead `memory_write_bus` ctor seam removed.** `EventLoop.__init__` carried an unused `memory_write_bus` override (no caller; tests use the `set_memory_write_bus` global swap). Removed per YAGNI; `salience_time_fn` (exercised by the rate-limit tests) kept._
+- _**Minor:** `SalienceWake.write_event` typed `MemoryWriteEvent | None` (was `Any`); `salience_time_fn` typed `Callable[[], float] | None`._
+
+_Carry to PR 4:_
+
+- _**Thread-safety obligation.** Deferred finding (3)'s single-thread invariant holds only while every subscriber lives on the main asyncio loop thread. PR 4's channel-message dispatch must keep subscription on that thread, or add a `threading.Lock` around `MemoryWriteBus.subscribe`/`unsubscribe` if it introduces an out-of-loop subscriber._
 
 ##### From PR 4 review
 

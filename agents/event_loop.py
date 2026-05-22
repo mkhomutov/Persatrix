@@ -47,6 +47,7 @@ from .observability._metrics_wakes import wake_attrs
 from .observability.metrics import try_get_instruments
 
 if TYPE_CHECKING:
+    from .memory._events import MemoryWriteEvent
     from .persona_types import AgentAction, AgentEvent
 
 logger = logging.getLogger(__name__)
@@ -107,11 +108,9 @@ class SalienceWake(WakeEvent):
     (``MemoryWriteBus`` subscriber) and the consumer.
     """
 
-    # TODO(Phase 3b — RFC 0024 PR 3b): tighten the type once the
-    # ``MemoryWriteEvent`` (write-side salience producer) lands.  Kept as
-    # ``Any`` here so Phase 1 does not import a type that does not yet
-    # exist; PR 3b will introduce the concrete class and replace this.
-    write_event: Any = field(default=None)
+    # ``None`` only for the Phase-1 placeholder construction path; PR 3b's
+    # subscriber always builds this with a concrete ``MemoryWriteEvent``.
+    write_event: MemoryWriteEvent | None = field(default=None)
 
 
 # ─── SyncDispatchHandle ─────────────────────────────────────────────────────
@@ -203,8 +202,7 @@ class EventLoop(_EventLoopTimersMixin):
         queue_size: int = _DEFAULT_QUEUE_SIZE,
         salience_threshold: float | None = None,
         salience_rate_max_per_sec: int | None = None,
-        salience_time_fn: Any = None,
-        memory_write_bus: MemoryWriteBus | None = None,
+        salience_time_fn: Callable[[], float] | None = None,
     ) -> None:
         self._agent_id = agent_id
         self._on_event = on_event
@@ -228,7 +226,6 @@ class EventLoop(_EventLoopTimersMixin):
             if salience_rate_max_per_sec is not None
             else self.DEFAULT_SALIENCE_RATE_MAX_PER_SEC
         )
-        self._bus = memory_write_bus
         subscriber_kwargs: dict[str, Any] = {
             "agent_id": agent_id,
             "enqueue": self.enqueue,
@@ -303,7 +300,7 @@ class EventLoop(_EventLoopTimersMixin):
         # in between), skip the re-subscribe so the bus subscriber list
         # cannot accumulate duplicates.
         if self._subscribed_bus is None:
-            bus = self._bus if self._bus is not None else get_memory_write_bus()
+            bus = get_memory_write_bus()
             bus.subscribe(self._salience_subscriber)
             self._subscribed_bus = bus
         self._task = asyncio.create_task(
