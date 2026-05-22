@@ -400,6 +400,11 @@ _**Resolved in PR 5** (lifecycle hardening): (1), (2), (5) fixed._
 - _(3) **`_wake_kind` vs `dropped` label** — `resolved (no code)`: PR 4 shipped `dropped` as a first-class `wake.kind` recorded at the `enqueue` site, distinct from the `_wake_kind` dispatch helper (which only labels drained variants). That is the shared-vs-separate decision the finding asked PR 4 to pin._
 - _(4) **Cancellation does not abort in-flight `on_event`** — `deferred (rationale)`: out of RFC 0024 scope — aborting requires `LLMClient.create_message` cancellation + wallet-lease release-on-cancel. The deferred-finding comment in `agents/event_loop.py` `_handle_wake` is its tracked home; revisit in the PR that lands LLM-call cancellation._
 
+_**From the PR 5 re-review** (follow-ups on the lifecycle-hardening diff itself — fixed in PR 5):_
+- _**(r1) Reentrant resolver observability parity.** The detached `_spawn_reentrant` resolver bypassed `_handle_wake`, so a reentrant `InboundEventWake` was invisible to the `agent.wake.inbound` counter and a raising reentrant `on_event` was rejected silently (the supervised FIFO path logs `agent.event_loop.wake_failed` with a traceback). `_spawn_reentrant` now records `agent.wake.inbound` and logs `wake_failed` with `exc_info` before rejecting. Pinned by `TestReentrantDispatchObservability` (metric + log+reject)._
+- _**(r2) `stop()` ordering — reentrant resolvers cancelled and awaited first.** The original `stop()` cancelled in-flight reentrant resolvers *after* the supervisor wait and never awaited them, so (a) a supervisor parked on a reentrant handle waited out the full `timeout` and was hard-cancelled — which cascaded into the awaited future and left the handle *cancelled* rather than resolved — and (b) the handle settled only on a later tick, not before `stop()` returns. The cancel + `await asyncio.gather(..., return_exceptions=True)` now runs before the supervisor wait; the already-set `_stopped` guard prevents any new reentrant spawn, so the snapshot is complete. Pinned by `test_stop_settles_in_flight_reentrant_handle`._
+- _**(r3) Single-level-reentrancy invariant documented.** `_spawn_reentrant` runs `on_event` (decide-only), which does not itself re-dispatch; a reentrant enqueue from *inside* the detached resolver would fail the `current_task() is self._task` check and land on the FIFO the blocked supervisor cannot drain. The escape hatch is correct only while the detached body stays decide-only — now stated in the `_spawn_reentrant` docstring so a future change cannot silently reintroduce the deadlock. `resolved (docstring only)`._
+
 ##### From PR 2 review
 
 _(1) **Shared `_MIN_INTERVAL` test fixture.** PR 2 added an independent
@@ -680,6 +685,7 @@ _Deferred:_
 
 **PR 5.1 (cleanups + test gaps):**
 - [ ] Remaining *needed* findings addressed; conditional-defer findings confirmed downgraded with rationale.
+- [ ] Hoist the runtime `from .event_loop_types import …` imports inside `event_loop_lifecycle._drain_pending_handles` and `event_loop_timers._arm_timer` to module scope. The "local: avoid import cycle" comments predate the PR 5 split: now that the wake taxonomy lives in `event_loop_types` (which imports neither sibling), the cycle is gone and the lazy imports are dead defensiveness (PR 5 re-review nit). `→ PR 5.1`.
 - [ ] `make test` + `make lint` clean.
 - [ ] Deferred test gaps from PRs 1–4 reviews filled (PR 2 (8) precedence regression; PR 2.1 (3) banker's-rounding).
 - [ ] [Progress Overview](#progress-overview) row 5.1 filled.

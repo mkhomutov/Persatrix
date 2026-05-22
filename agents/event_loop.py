@@ -293,6 +293,40 @@ class EventLoop(_EventLoopTimersMixin, _EventLoopLifecycleMixin):
                 entry.handle.cancel()
         self._timers.clear()
 
+        # Abort in-flight reentrant resolvers *before* awaiting the
+        # supervisor, and await the cancellations to settle. Two reasons
+        # (PR 1 review #5; PR 5 re-review #2):
+        #   1. The resolver's cancellation path resolves its handle with the
+        #      empty discard result. A supervisor parked on that handle (the
+        #      ``on_inbound`` cascade case) then unblocks and drains
+        #      gracefully on the next loop iteration instead of waiting out
+        #      ``timeout`` and being hard-cancelled — a hard cancel would
+        #      cascade into the awaited future and leave the handle
+        #      *cancelled* rather than resolved.
+        #   2. Awaiting the cancelled tasks means every reentrant handle is
+        #      settled by the time ``stop()`` returns, not on a later tick.
+        # ``_stopped`` is already set above, so :meth:`enqueue` rejects any
+        # further reentrant spawn — this snapshot is complete. The wait is
+        # bounded by ``timeout`` (mirroring the supervisor wait below): a
+        # well-behaved ``on_event`` settles on cancellation at once, so this
+        # returns immediately; the bound only guards a handler that swallows
+        # ``CancelledError`` so a pathological resolver cannot wedge stop().
+        reentrant = list(self._reentrant_tasks)
+        for task in reentrant:
+            task.cancel()
+        if reentrant:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*reentrant, return_exceptions=True),
+                    timeout=timeout,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "agent.event_loop.stop_reentrant_timeout: "
+                    "agent_id=%s timeout=%.1fs pending=%d",
+                    self._agent_id, timeout, len(reentrant),
+                )
+
         if self._task is not None and not self._task.done():
             # Poison the queue so the blocking ``get()`` returns and the
             # loop notices ``_stopped`` on its next iteration.
@@ -315,12 +349,10 @@ class EventLoop(_EventLoopTimersMixin, _EventLoopLifecycleMixin):
                     pass
             except asyncio.CancelledError:
                 pass
-        # Abort in-flight reentrant resolvers and settle wakes orphaned in
-        # the queue so no handle-bearing caller hangs past shutdown. The
-        # ``_stopped`` guard in :meth:`enqueue` closes the producer-side
-        # window; this closes the already-queued side. (PR 1 review #5.)
-        for task in list(self._reentrant_tasks):
-            task.cancel()
+        # Settle handle-bearing wakes still queued behind the in-flight one
+        # when ``stop()`` fired; the ``_stopped`` guard in :meth:`enqueue`
+        # closes the producer-side window, this closes the already-queued
+        # side. (PR 1 review #5.)
         self._drain_pending_handles()
         self._task = None
 

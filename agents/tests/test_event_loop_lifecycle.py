@@ -1,6 +1,6 @@
 """Tests for RFC 0024 PR 5 lifecycle-safety fixes.
 
-Pins the three contracts added in PR 5:
+Pins the contracts added in PR 5:
 
 * **Reentrant-dispatch escape hatch** (:class:`TestReentrantDispatchDeadlock`)
   — ``on_event`` re-dispatching to the same agent via a handle-bearing
@@ -8,11 +8,17 @@ Pins the three contracts added in PR 5:
 
 * **Stop-time handle drain** (:class:`TestStopSettlesPendingHandles`) —
   wakes queued behind the in-flight one when ``stop()`` fires have their
-  handles resolved with the empty discard result.
+  handles resolved with the empty discard result; an in-flight reentrant
+  resolver's handle is settled with ``[]`` *before* ``stop()`` returns.
 
 * **Queue-full WARNING throttle** (:class:`TestQueueFullLogThrottle`) —
   the per-drop WARNING is emitted at most once per
   ``_QUEUE_FULL_LOG_INTERVAL_S``.
+
+* **Reentrant resolver observability parity**
+  (:class:`TestReentrantDispatchObservability`) — the detached resolver
+  records ``agent.wake.inbound`` and logs ``wake_failed`` on a raising
+  ``on_event``, matching the supervised FIFO path (PR 5 re-review).
 
 Split out of ``test_event_loop.py`` for file-size review-friendliness
 (RFC 0024 PR 5 — both files exceeded the 500-line limit).
@@ -22,6 +28,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Iterator
+from typing import Any
+
+import pytest
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from agents.event_loop import (
     EventLoop,
@@ -29,12 +40,42 @@ from agents.event_loop import (
     ScheduledWake,
     SyncDispatchHandle,
 )
+from agents.observability import metrics as pmetrics
 from agents.persona_types import (
     ActionType,
     AgentAction,
     AgentEvent,
     EventType,
 )
+
+
+@pytest.fixture
+def metric_reader() -> Iterator[InMemoryMetricReader]:
+    """An in-memory OTEL reader wired into the process-global instruments.
+
+    Mirrors the fixture in ``test_observability_metrics.py`` — the
+    EventLoop records the ``agent.wake.*`` counters via the module-global
+    instruments, so a test that asserts on them must initialise the
+    metrics provider and tear it down afterwards.
+    """
+    reader = InMemoryMetricReader()
+    pmetrics.init_metrics(reader=reader)
+    try:
+        yield reader
+    finally:
+        asyncio.run(pmetrics.shutdown())
+
+
+def _collect(reader: InMemoryMetricReader) -> dict[str, Any]:
+    data = reader.get_metrics_data()
+    out: dict[str, Any] = {}
+    if data is None:
+        return out
+    for rm in data.resource_metrics:
+        for sm in rm.scope_metrics:
+            for m in sm.metrics:
+                out[m.name] = m
+    return out
 
 
 def _evt(payload: dict | None = None) -> AgentEvent:
@@ -253,3 +294,179 @@ class TestStopSettlesPendingHandles:
         accepted = loop.enqueue(InboundEventWake(event=_evt(), handle=handle))
         assert accepted is False
         assert await asyncio.wait_for(handle, timeout=0.5) == []
+
+    async def test_stop_settles_in_flight_reentrant_handle(self):
+        """A reentrant resolver still running ``on_event`` at ``stop()`` has
+        its handle settled with the empty discard result *before* ``stop()``
+        returns — not orphaned, and not settled only on a later tick.
+
+        ``stop()`` cancels the detached resolver task and **awaits** it, so
+        the resolver's cancellation handler (which resolves the handle with
+        ``[]``) has run by the time ``stop()`` returns.  Cancelling the
+        resolver also settles the inner handle the blocked supervisor is
+        awaiting, letting the supervisor drain gracefully instead of being
+        hard-cancelled at the stop timeout. (PR 5 re-review — review #2/#4.)
+        """
+        inner_started = asyncio.Event()
+        block = asyncio.Event()
+        inner_handle_ref: list[SyncDispatchHandle] = []
+        outer_handle_ref: list[SyncDispatchHandle] = []
+        loop_ref: list[EventLoop] = []
+
+        async def _on_event(event: AgentEvent) -> list[AgentAction]:
+            if event.payload.get("level") == "outer":
+                # Reentrant: enqueue an inner handle-bearing wake and await
+                # it.  The escape hatch runs the inner ``on_event`` on a
+                # detached resolver task while this outer body (and thus the
+                # supervisor) blocks here.
+                inner_handle = SyncDispatchHandle()
+                inner_handle_ref.append(inner_handle)
+                loop_ref[0].enqueue(
+                    InboundEventWake(
+                        event=_evt({"level": "inner"}), handle=inner_handle,
+                    ),
+                )
+                return await inner_handle
+            # Inner: park so the resolver task is still in flight at stop().
+            inner_started.set()
+            await block.wait()
+            return [AgentAction(ActionType.DO_NOTHING, {})]
+
+        loop = _build_loop(on_event=_on_event)
+        loop_ref.append(loop)
+        loop.start()
+        try:
+            outer_handle = SyncDispatchHandle()
+            outer_handle_ref.append(outer_handle)
+            loop.enqueue(
+                InboundEventWake(
+                    event=_evt({"level": "outer"}), handle=outer_handle,
+                ),
+            )
+            # Wait until the reentrant resolver is parked inside the inner
+            # ``on_event`` so it is genuinely in flight when stop() fires.
+            await asyncio.wait_for(inner_started.wait(), timeout=2.0)
+
+            await loop.stop(timeout=2.0)
+
+            # The contract: the resolver's handle is settled by the time
+            # stop() returns (it is already done — no further await needed).
+            assert inner_handle_ref[0].done()
+            assert await asyncio.wait_for(inner_handle_ref[0], timeout=0.5) == []
+            # The outer body resumes with the inner ``[]`` and the supervisor
+            # resolves the outer handle, so it settles too rather than orphan.
+            assert await asyncio.wait_for(outer_handle_ref[0], timeout=0.5) == []
+        finally:
+            if not block.is_set():
+                block.set()
+
+
+class TestReentrantDispatchObservability:
+    """RFC 0024 PR 5 re-review (review finding #1) — the reentrant resolver
+    must have observability parity with the supervised FIFO path.
+
+    The FIFO path records the ``agent.wake.inbound`` counter for every
+    inbound wake and logs ``agent.event_loop.wake_failed`` (with a
+    traceback) when ``on_event`` raises.  The reentrant escape hatch runs
+    ``on_event`` on a detached resolver task that bypasses both, so a
+    reentrant inbound wake was invisible to the inbound counter and a
+    reentrant failure was rejected silently.  These tests pin the parity.
+    """
+
+    async def test_reentrant_inbound_wake_records_inbound_metric(
+        self, metric_reader: InMemoryMetricReader,
+    ):
+        """A reentrant inbound wake increments ``agent.wake.inbound`` just
+        like a FIFO-drained one.  The reentrant wake is triggered from a
+        ``ScheduledWake`` (which records ``agent.wake.scheduled``, not
+        inbound), so the *only* contributor to this agent's inbound counter
+        is the reentrant resolver — isolating the behaviour under test.
+        """
+        done = asyncio.Event()
+        loop_ref: list[EventLoop] = []
+
+        async def _on_tick(wake: ScheduledWake) -> None:
+            # Reentrant handle-bearing inbound enqueue from inside on_tick.
+            handle = SyncDispatchHandle()
+            loop_ref[0].enqueue(
+                InboundEventWake(event=_evt({"level": "inner"}), handle=handle),
+            )
+            await handle
+            done.set()
+
+        loop = _build_loop(on_tick=_on_tick, agent_id="reentrant-metric")
+        loop_ref.append(loop)
+        loop.start()
+        try:
+            loop.enqueue(ScheduledWake(timer_id="t", callback_kind="tick"))
+            await asyncio.wait_for(done.wait(), timeout=2.0)
+        finally:
+            await loop.stop(timeout=1.0)
+
+        m = _collect(metric_reader).get("agent.wake.inbound")
+        assert m is not None, (
+            "reentrant inbound wake must record agent.wake.inbound"
+        )
+        total = sum(
+            getattr(dp, "value", 0)
+            for dp in m.data.data_points
+            if dict(dp.attributes).get("agent.id") == "reentrant-metric"
+        )
+        assert total == 1
+
+    async def test_reentrant_on_event_failure_logs_and_rejects(self, caplog):
+        """A reentrant resolver whose ``on_event`` raises rejects the handle
+        *and* logs ``wake_failed`` with a traceback — parity with the
+        supervised FIFO path.  The outer body swallows the rejection so the
+        only ``wake_failed`` record can come from the reentrant resolver.
+        """
+        boom = RuntimeError("reentrant boom")
+        inner_handle_ref: list[SyncDispatchHandle] = []
+        loop_ref: list[EventLoop] = []
+
+        async def _on_event(event: AgentEvent) -> list[AgentAction]:
+            if event.payload.get("level") == "outer":
+                inner_handle = SyncDispatchHandle()
+                inner_handle_ref.append(inner_handle)
+                loop_ref[0].enqueue(
+                    InboundEventWake(
+                        event=_evt({"level": "inner"}), handle=inner_handle,
+                    ),
+                )
+                try:
+                    return await inner_handle
+                except RuntimeError:
+                    # Swallow so the supervised path does not also log a
+                    # wake_failed for the outer wake — isolates the resolver.
+                    return [AgentAction(ActionType.DO_NOTHING, {})]
+            raise boom
+
+        loop = _build_loop(on_event=_on_event)
+        loop_ref.append(loop)
+        loop.start()
+        try:
+            outer_handle = SyncDispatchHandle()
+            with caplog.at_level(logging.ERROR, logger="agents.event_loop"):
+                loop.enqueue(
+                    InboundEventWake(
+                        event=_evt({"level": "outer"}), handle=outer_handle,
+                    ),
+                )
+                # Outer resolves with the swallowed result once the inner
+                # rejection has propagated through the resolver.
+                assert await asyncio.wait_for(outer_handle, timeout=0.5) == [
+                    AgentAction(ActionType.DO_NOTHING, {}),
+                ]
+            # Resolver rejected the inner handle...
+            assert inner_handle_ref[0].done()
+            with pytest.raises(RuntimeError, match="reentrant boom"):
+                await inner_handle_ref[0]
+            # ...and logged the failure with a traceback (parity with the
+            # supervised FIFO path). Without the fix the rejection is silent.
+            failed = [
+                r for r in caplog.records if "wake_failed" in r.getMessage()
+            ]
+            assert len(failed) == 1
+            assert failed[0].exc_info is not None
+        finally:
+            await loop.stop(timeout=1.0)

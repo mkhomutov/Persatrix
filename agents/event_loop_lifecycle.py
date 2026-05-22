@@ -39,6 +39,9 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
+from .observability._metrics_wakes import wake_attrs
+from .observability.metrics import try_get_instruments
+
 if TYPE_CHECKING:
     from .event_loop_types import SyncDispatchHandle, WakeEvent
     from .persona_types import AgentAction, AgentEvent
@@ -98,7 +101,31 @@ class _EventLoopLifecycleMixin:
         the lock; recursion is bounded by the caller's cascade-depth guard.
         On cancellation (loop stopping mid-dispatch) the handle is settled
         with the discard-contract empty result so the awaiter never hangs.
+
+        Observability parity with the FIFO ``_handle_wake`` path: the
+        ``agent.wake.inbound`` counter is recorded here (the reentrant wake
+        never reaches ``_handle_wake``), and a raising ``on_event`` is logged
+        as ``agent.event_loop.wake_failed`` with a traceback before the
+        handle is rejected — without it a reentrant failure would be rejected
+        silently, unlike the supervised path.
+
+        Single-level only: the detached task runs ``on_event`` (decide), not
+        ``on_inbound`` (decide → execute), so it does not itself re-dispatch.
+        A reentrant enqueue raised from *inside* this detached task would see
+        ``current_task() is not self._task`` (:meth:`_in_supervisor` returns
+        ``False``) and land on the FIFO the blocked supervisor cannot drain —
+        a deadlock the cascade-depth guard does not prevent. The escape hatch
+        is therefore correct only while the detached body stays decide-only.
         """
+        inst = try_get_instruments()
+        if inst is not None:
+            inst.wake_inbound.add(
+                1,
+                attributes=wake_attrs(
+                    agent_id=self._agent_id, wake_kind="inbound",
+                ),
+            )
+
         async def _resolve() -> None:
             try:
                 actions = await self._on_event(event)
@@ -106,6 +133,13 @@ class _EventLoopLifecycleMixin:
                 handle.resolve([])
                 raise
             except Exception as exc:  # noqa: BLE001 — mirror supervisor reject
+                # Mirror ``_handle_wake_supervised``: log with a traceback so
+                # a reentrant cascade failure is not swallowed, then reject.
+                logger.error(
+                    "agent.event_loop.wake_failed: agent_id=%s wake_kind=%s err=%r",
+                    self._agent_id, "inbound", exc,
+                    exc_info=True,
+                )
                 handle.reject(exc)
             else:
                 handle.resolve(actions)
