@@ -10,7 +10,7 @@ Covers the round-trip:
 4. :class:`MergeEngine` admits / rejects entries per the deterministic
    6-step pipeline.
 5. :class:`FacadeBoundSpawner` persists admitted entries through the
-   parent's :class:`agents.memory.facade.MemoryFacade` and they round-
+   parent's :class:`agents.memory.facade.MemoryStore` and they round-
    trip via ``retrieve_relevant``.
 """
 
@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
-from agents.memory import MemoryFacade
+from agents.memory import MemoryStore
 from agents.sub_agents import (
     BudgetEnvelope,
     DelegationFailure,
@@ -45,8 +45,8 @@ from ._delegation_helpers import (
 
 
 @pytest.fixture
-async def parent_facade(tmp_path: Any) -> AsyncGenerator[MemoryFacade, None]:
-    facade = MemoryFacade(
+async def parent_facade(tmp_path: Any) -> AsyncGenerator[MemoryStore, None]:
+    facade = MemoryStore(
         agent_id="parent-coordinator", db_path=str(tmp_path / "parent.db"),
     )
     await facade.initialize()
@@ -61,7 +61,7 @@ async def parent_facade(tmp_path: Any) -> AsyncGenerator[MemoryFacade, None]:
 
 @pytest.mark.asyncio
 async def test_dispatch_round_trip_persists_admitted_entries(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
 ) -> None:
     canned = DelegationResult(
         summary="Reviewed module X",
@@ -127,7 +127,7 @@ async def test_dispatch_round_trip_persists_admitted_entries(
 
 @pytest.mark.asyncio
 async def test_trust_ceiling_downscales_persisted_importance(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
 ) -> None:
     canned = DelegationResult(
         summary="overconfident result",
@@ -157,7 +157,7 @@ async def test_trust_ceiling_downscales_persisted_importance(
 
 @pytest.mark.asyncio
 async def test_max_memory_writes_cap_drops_overflow(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
 ) -> None:
     entries = tuple(
         MemoryWriteEntry(tier="episodic", key=f"k{i}", content=f"c{i}")
@@ -182,7 +182,7 @@ async def test_max_memory_writes_cap_drops_overflow(
 
 @pytest.mark.asyncio
 async def test_missing_metadata_key_raises_delegation_failure(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
 ) -> None:
     spawner = FacadeBoundSpawner(
         parent_agent_id="coordinator", memory_facade=parent_facade,
@@ -194,7 +194,7 @@ async def test_missing_metadata_key_raises_delegation_failure(
 
 @pytest.mark.asyncio
 async def test_failed_sub_agent_raises_delegation_failure(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
 ) -> None:
     class _Failing(BaseAgent):
         def __init__(self) -> None:
@@ -215,7 +215,7 @@ async def test_failed_sub_agent_raises_delegation_failure(
 
 @pytest.mark.asyncio
 async def test_oversize_context_package_rejected_at_dispatch(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
 ) -> None:
     """A hostile or buggy caller cannot push an arbitrarily large
     ``context_package`` into the sub-agent's ``task.context``: the
@@ -240,7 +240,7 @@ async def test_oversize_context_package_rejected_at_dispatch(
 
 @pytest.mark.asyncio
 async def test_oversize_output_schema_rejected_at_dispatch(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
 ) -> None:
     """Same trust-boundary rationale as ``context_package`` — see the
     S5 finding in the PR #222 deep review.
@@ -271,7 +271,7 @@ async def test_oversize_output_schema_rejected_at_dispatch(
 
 @pytest.mark.asyncio
 async def test_output_schema_enforced_against_artifacts(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
 ) -> None:
     """S1: ``output_schema`` is no longer advisory.  The spawner runs
     Draft-7 validation against ``DelegationResult.artifacts`` *before*
@@ -301,7 +301,7 @@ async def test_output_schema_enforced_against_artifacts(
 
 @pytest.mark.asyncio
 async def test_output_schema_pass_persists_admitted(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
 ) -> None:
     """S1 happy path: artifacts that conform to ``output_schema`` flow
     through the merge engine and persist normally."""
@@ -333,7 +333,7 @@ async def test_output_schema_pass_persists_admitted(
 
 @pytest.mark.asyncio
 async def test_malformed_output_schema_rejected(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
 ) -> None:
     """S1 caller-bug path: a malformed ``output_schema`` (does not pass
     the Draft-7 meta-schema) surfaces as :class:`DelegationFailure` so
@@ -356,7 +356,7 @@ async def test_malformed_output_schema_rejected(
 
 @pytest.mark.asyncio
 async def test_partial_persist_failure_rolls_back_admitted(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """N5: when ``store_observation`` fails part-way through a batch,

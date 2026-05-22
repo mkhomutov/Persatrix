@@ -1,10 +1,10 @@
 """PR 5 R2 M1 procedural-key validation pins (RFC 0008 PR 6b).
 
-The :meth:`MemoryFacade.store_procedure` boundary rejects keys whose
+The :meth:`MemoryStore.store_procedure` boundary rejects keys whose
 characters fall outside ``^[A-Za-z0-9._-]+$`` so a future SQL or
 log-pipeline change cannot be blindsided by an exotic Unicode key.
 
-(Note: :meth:`MemoryFacade.retrieve_procedures` takes a free-text
+(Note: :meth:`MemoryStore.retrieve_procedures` takes a free-text
 ``query``, not a key — that path is escaped for ``LIKE`` semantics by
 :func:`agents.memory.episodic_procedural._escape_like` and is not
 covered by the regex validator.  PR 6b deep review Should-Fix #2.)
@@ -23,12 +23,12 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from agents.memory.facade import MemoryFacade
+from agents.memory.facade import MemoryStore
 
 
 @pytest.fixture
-async def facade() -> AsyncGenerator[MemoryFacade, None]:
-    fac = MemoryFacade(agent_id="proc-key-test", db_path=":memory:")
+async def facade() -> AsyncGenerator[MemoryStore, None]:
+    fac = MemoryStore(agent_id="proc-key-test", db_path=":memory:")
     await fac.initialize()
     try:
         yield fac
@@ -48,7 +48,7 @@ async def facade() -> AsyncGenerator[MemoryFacade, None]:
     ],
 )
 async def test_store_procedure_rejects_invalid_keys(
-    facade: MemoryFacade, bad_key: str,
+    facade: MemoryStore, bad_key: str,
 ) -> None:
     """Every invalid-shape key must surface as ``ValueError`` at the
     facade boundary (PR 5 R2 M1 — breaking change vs v0.2.x)."""
@@ -67,7 +67,7 @@ async def test_store_procedure_rejects_invalid_keys(
     ],
 )
 async def test_store_procedure_accepts_canonical_keys(
-    facade: MemoryFacade, good_key: str,
+    facade: MemoryStore, good_key: str,
 ) -> None:
     """The accept-set covers the canonical alphabet plus boundary lengths."""
     await facade.store_procedure(good_key, "body", confidence=0.9)
@@ -79,7 +79,7 @@ async def test_store_procedure_accepts_canonical_keys(
 
 
 async def test_store_procedure_refresh_path_revalidates_key(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
     """A re-store of an existing key still validates the key on the
     refresh path — a regression that bypassed the regex on the
@@ -93,7 +93,7 @@ async def test_store_procedure_refresh_path_revalidates_key(
 
 
 async def test_store_procedure_idempotent_re_store_for_canonical_key(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
     """Re-storing a canonical key hits the refresh path without
     raising.  Pins that key validation does not break the documented

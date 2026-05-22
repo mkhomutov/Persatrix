@@ -1,7 +1,7 @@
 """Unit tests for ``agents.memory.scope_recall.recall_with_scope_filter``.
 
 The helper is the single implementation of recall + Python-side scope/tags
-filtering.  Both :class:`agents.memory.facade.MemoryFacade.retrieve_relevant`
+filtering.  Both :class:`agents.memory.MemoryStore.retrieve_relevant`
 and the persona-runtime channel-history tier
 (:meth:`agents.persona_runtime.memory_context._MemoryContextMixin._inject_memory_context`)
 delegate here, so the contract is pinned in one place rather than forked
@@ -156,7 +156,7 @@ async def test_recall_with_scope_filter_column_wins_over_context(
     """When the column scope is set, the context fallback is ignored.
 
     Pins the precedence rule from
-    :meth:`MemoryFacade.retrieve_relevant`: ``column`` is authoritative;
+    :meth:`MemoryStore.retrieve_relevant`: ``column`` is authoritative;
     ``context["scope"]`` is only a fallback for legacy NULL-column rows.
     """
     # Column says "planning"; context says "other" — the column wins.

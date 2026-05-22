@@ -1,4 +1,4 @@
-"""Unit tests for ``agents.memory.facade.MemoryFacade`` (RFC 0008 PR plan PR 2).
+"""Unit tests for ``agents.memory.facade.MemoryStore`` (RFC 0008 PR plan PR 2).
 
 Covers the pinned API surface that downstream RFCs rely on:
 
@@ -22,15 +22,15 @@ from agents.memory.facade import (
     CompressedView,
     MemoryDisabledError,
     MemoryEntry,
-    MemoryFacade,
+    MemoryStore,
     budget_to_limit,
 )
 
 
 @pytest.fixture
-async def facade() -> AsyncGenerator[MemoryFacade, None]:
-    """An initialised in-memory ``MemoryFacade`` for a synthetic agent."""
-    fac = MemoryFacade(agent_id="facade-test", db_path=":memory:")
+async def facade() -> AsyncGenerator[MemoryStore, None]:
+    """An initialised in-memory ``MemoryStore`` for a synthetic agent."""
+    fac = MemoryStore(agent_id="facade-test", db_path=":memory:")
     await fac.initialize()
     try:
         yield fac
@@ -42,7 +42,7 @@ async def facade() -> AsyncGenerator[MemoryFacade, None]:
 
 
 async def test_initialize_is_idempotent() -> None:
-    fac = MemoryFacade(agent_id="idem", db_path=":memory:")
+    fac = MemoryStore(agent_id="idem", db_path=":memory:")
     await fac.initialize()
     # A second call must not raise; it logs a warning and no-ops.
     await fac.initialize()
@@ -50,13 +50,13 @@ async def test_initialize_is_idempotent() -> None:
 
 
 async def test_close_before_initialize_is_noop() -> None:
-    fac = MemoryFacade(agent_id="noop", db_path=":memory:")
+    fac = MemoryStore(agent_id="noop", db_path=":memory:")
     # Calling close() without initialize() must be safe.
     await fac.close()
 
 
 async def test_use_before_initialize_raises() -> None:
-    fac = MemoryFacade(agent_id="cold", db_path=":memory:")
+    fac = MemoryStore(agent_id="cold", db_path=":memory:")
     # PR 2a follow-up L1/L2: facade raises the memory-specific error type
     # (still a RuntimeError subclass for backward compat).
     with pytest.raises(MemoryDisabledError, match="not initialised"):
@@ -64,7 +64,7 @@ async def test_use_before_initialize_raises() -> None:
 
 
 async def test_close_then_reuse_raises() -> None:
-    fac = MemoryFacade(agent_id="reuse", db_path=":memory:")
+    fac = MemoryStore(agent_id="reuse", db_path=":memory:")
     await fac.initialize()
     await fac.close()
     with pytest.raises(MemoryDisabledError, match="not initialised"):
@@ -73,7 +73,7 @@ async def test_close_then_reuse_raises() -> None:
 
 async def test_episodic_property_raises_memory_disabled() -> None:
     """L1: ``episodic`` property uses the same error contract as writes."""
-    fac = MemoryFacade(agent_id="ep", db_path=":memory:")
+    fac = MemoryStore(agent_id="ep", db_path=":memory:")
     with pytest.raises(MemoryDisabledError, match="not initialised"):
         _ = fac.episodic
 
@@ -81,7 +81,7 @@ async def test_episodic_property_raises_memory_disabled() -> None:
 # ─── store_observation + retrieve_relevant ───────────────────
 
 
-async def test_store_observation_returns_id(facade: MemoryFacade) -> None:
+async def test_store_observation_returns_id(facade: MemoryStore) -> None:
     entry_id = await facade.store_observation(
         "the user prefers tabs over spaces",
         importance=0.8,
@@ -91,17 +91,17 @@ async def test_store_observation_returns_id(facade: MemoryFacade) -> None:
     assert entry_id  # non-empty
 
 
-async def test_store_observation_rejects_empty_content(facade: MemoryFacade) -> None:
+async def test_store_observation_rejects_empty_content(facade: MemoryStore) -> None:
     with pytest.raises(ValueError, match="must not be empty"):
         await facade.store_observation("   ")
 
 
-async def test_store_observation_rejects_non_positive_ttl(facade: MemoryFacade) -> None:
+async def test_store_observation_rejects_non_positive_ttl(facade: MemoryStore) -> None:
     with pytest.raises(ValueError, match="ttl_seconds"):
         await facade.store_observation("hello", ttl_seconds=0)
 
 
-async def test_retrieve_relevant_finds_stored_observation(facade: MemoryFacade) -> None:
+async def test_retrieve_relevant_finds_stored_observation(facade: MemoryStore) -> None:
     await facade.store_observation(
         "the user uses Python type hints in 3.12 syntax",
         importance=0.9,
@@ -112,7 +112,7 @@ async def test_retrieve_relevant_finds_stored_observation(facade: MemoryFacade) 
     assert any("type hints" in entry.content for entry in results)
 
 
-async def test_retrieve_relevant_tags_and_semantics(facade: MemoryFacade) -> None:
+async def test_retrieve_relevant_tags_and_semantics(facade: MemoryStore) -> None:
     """RFC 0011 PR plan PR 5 contract: tags filter is AND, not OR."""
     await facade.store_observation(
         "alpha entry",
@@ -146,7 +146,7 @@ async def test_retrieve_relevant_tags_and_semantics(facade: MemoryFacade) -> Non
     )
 
 
-async def test_retrieve_relevant_scope_filter(facade: MemoryFacade) -> None:
+async def test_retrieve_relevant_scope_filter(facade: MemoryStore) -> None:
     await facade.store_observation(
         "observation in slack-dev",
         importance=0.9,
@@ -165,13 +165,13 @@ async def test_retrieve_relevant_scope_filter(facade: MemoryFacade) -> None:
     assert "observation in slack-general" not in contents
 
 
-async def test_retrieve_relevant_min_score_validation(facade: MemoryFacade) -> None:
+async def test_retrieve_relevant_min_score_validation(facade: MemoryStore) -> None:
     with pytest.raises(ValueError, match="min_score"):
         await facade.retrieve_relevant("q", min_score=1.5)
 
 
 async def test_retrieve_relevant_drops_pending_summary_rows(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
     """RFC 0020 PR 5 — defense-in-depth: ``[summary pending]`` rows are hidden.
 
@@ -235,7 +235,7 @@ async def test_retrieve_relevant_drops_pending_summary_rows(
 
 
 async def test_retrieve_relevant_returns_memory_entry_shape(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
     await facade.store_observation(
         "shape-check entry",
@@ -257,14 +257,14 @@ async def test_retrieve_relevant_returns_memory_entry_shape(
 # ─── store_procedure ─────────────────────────────────────────
 
 
-async def test_store_procedure_validates_inputs(facade: MemoryFacade) -> None:
+async def test_store_procedure_validates_inputs(facade: MemoryStore) -> None:
     with pytest.raises(ValueError, match="key"):
         await facade.store_procedure("", "body", confidence=0.9)
     with pytest.raises(ValueError, match="confidence"):
         await facade.store_procedure("k", "body", confidence=1.5)
 
 
-async def test_store_procedure_round_trip(facade: MemoryFacade) -> None:
+async def test_store_procedure_round_trip(facade: MemoryStore) -> None:
     await facade.store_procedure(
         "deploy-checklist",
         "Run tests, then bump version, then tag.",
@@ -291,7 +291,7 @@ def _entry(content: str, importance: float) -> MemoryEntry:
 
 
 def test_compress_under_budget_admits_all() -> None:
-    fac = MemoryFacade(agent_id="c", db_path=":memory:")
+    fac = MemoryStore(agent_id="c", db_path=":memory:")
     entries = [_entry("short one", 0.9), _entry("short two", 0.5)]
     view = fac.compress(entries, target_tokens=1000)
     assert isinstance(view, CompressedView)
@@ -302,7 +302,7 @@ def test_compress_under_budget_admits_all() -> None:
 
 
 def test_compress_drops_lowest_importance_when_over_budget() -> None:
-    fac = MemoryFacade(agent_id="c", db_path=":memory:")
+    fac = MemoryStore(agent_id="c", db_path=":memory:")
     # Each ~25 chars → ~6 tokens via the chars/4 estimator.
     high = _entry("x" * 100, importance=0.9)  # ~25 tokens
     low = _entry("y" * 100, importance=0.1)   # ~25 tokens
@@ -316,7 +316,7 @@ def test_compress_drops_lowest_importance_when_over_budget() -> None:
 
 
 def test_compress_zero_budget_drops_everything() -> None:
-    fac = MemoryFacade(agent_id="c", db_path=":memory:")
+    fac = MemoryStore(agent_id="c", db_path=":memory:")
     view = fac.compress([_entry("anything", 0.9)], target_tokens=0)
     assert view.summary == ""
     assert view.entries_dropped == 1
@@ -324,13 +324,13 @@ def test_compress_zero_budget_drops_everything() -> None:
 
 
 def test_compress_negative_budget_raises() -> None:
-    fac = MemoryFacade(agent_id="c", db_path=":memory:")
+    fac = MemoryStore(agent_id="c", db_path=":memory:")
     with pytest.raises(ValueError, match="target_tokens"):
         fac.compress([], target_tokens=-1)
 
 
 def test_compress_idempotent_on_already_fitting_view() -> None:
-    fac = MemoryFacade(agent_id="c", db_path=":memory:")
+    fac = MemoryStore(agent_id="c", db_path=":memory:")
     entries = [_entry("alpha", 0.9), _entry("beta", 0.5)]
     first = fac.compress(entries, target_tokens=100)
     # Re-compressing the admitted entries (synthesised from the summary)
@@ -343,7 +343,7 @@ def test_compress_idempotent_on_already_fitting_view() -> None:
 # ─── list_candidates (Phase 2 stub) ──────────────────────────
 
 
-async def test_list_candidates_returns_empty_in_phase_2(facade: MemoryFacade) -> None:
+async def test_list_candidates_returns_empty_in_phase_2(facade: MemoryStore) -> None:
     candidates = await facade.list_candidates({"step_id": "anything"})
     assert candidates == []
 

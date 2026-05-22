@@ -4,7 +4,7 @@ A true leaf inside the :mod:`agents` package: imports only the Python
 standard library and exposes the env-var name, the legacy carve-out
 constant, and the silent reader.  Two call sites depend on it:
 
-* :class:`agents.memory.facade.MemoryFacade` — reads the env value at
+* :class:`agents.memory.facade.MemoryStore` — reads the env value at
   construction time so the task-agent / sub-agent write path inherits
   the operator-namespace tag without an explicit kwarg at every site.
 * :mod:`agents.persona_runtime.session_id` — wraps the silent reader

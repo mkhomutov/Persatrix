@@ -21,7 +21,7 @@ import (
 // TestContextPackage_EndToEnd verifies that when a workflow declares a
 // context_budget_total, the scheduler builds a packaging.Package and attaches
 // it under the reserved key on every dispatch's context map. This is the
-// integration-level contract that v0.3.0 RFC 0008 PR 2 (MemoryFacade) and
+// integration-level contract that v0.3.0 RFC 0008 PR 2 (MemoryStore) and
 // downstream consumers will rely on.
 func TestContextPackage_EndToEnd_BudgetedWorkflow(t *testing.T) {
 	const yaml = `schema_version: "0.1"

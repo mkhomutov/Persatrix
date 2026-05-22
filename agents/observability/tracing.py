@@ -16,7 +16,7 @@ Environment variables (all optional; defaults match the Go side):
     PERSATRIX_AGENT_ID             sets ``service.instance.id``
     PERSATRIX_SERVICE_ROLE         sets ``service.role`` (optional free-text)
     PERSATRIX_SERVICE_VERSION      sets ``service.version``
-                                    (default: "0.3.2")
+                                    (default: "0.3.3")
 
 Baggage key naming convention
 -----------------------------
@@ -69,7 +69,7 @@ _SCHEMA_URL = "https://persatrix.dev/schemas/observability/1.0.0"
 
 _DEFAULT_SERVICE_NAME = "persatrix-agent"
 _DEFAULT_OTLP_ENDPOINT = "http://localhost:4318"
-_DEFAULT_SERVICE_VERSION = "0.3.2"
+_DEFAULT_SERVICE_VERSION = "0.3.3"
 
 # BatchSpanProcessor tuning — deterministic across environments.
 _BSP_MAX_QUEUE_SIZE = 2048

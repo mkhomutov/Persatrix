@@ -9,7 +9,6 @@ from .facade import (
     CompressedView,
     MemoryDisabledError,
     MemoryEntry,
-    MemoryFacade,
     budget_to_limit,
 )
 from .facts import Fact, FactStore
@@ -61,7 +60,6 @@ __all__ = [
     "Interaction",
     "MemoryDisabledError",
     "MemoryEntry",
-    "MemoryFacade",
     "MemoryLifecycle",
     "MemoryStore",
     "Note",

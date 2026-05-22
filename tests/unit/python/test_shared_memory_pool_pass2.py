@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents.memory.facade import MemoryFacade
+from agents.memory.facade import MemoryStore
 from agents.memory.shared_pool import (
     SharedMemoryPool,
     SharedPoolConfig,
@@ -44,7 +44,7 @@ async def test_tag_filter_overfetches_under_limit(tmp_path: Any) -> None:
     pool_inst = SharedMemoryPool(cfg, db_path=db)
     await pool_inst.initialize()
     registry = SharedPoolRegistry({"overfetch": pool_inst})
-    facade = MemoryFacade(
+    facade = MemoryStore(
         agent_id="alice", db_path=db, shared_pools=registry,
     )
     await facade.initialize()

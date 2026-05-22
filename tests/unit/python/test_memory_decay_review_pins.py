@@ -42,13 +42,13 @@ from agents.memory.episodic_procedural import (
     refresh_confidence,
 )
 from agents.memory.eviction import EvictionPass
-from agents.memory.facade import MemoryFacade
+from agents.memory.facade import MemoryStore
 
 
 @pytest.fixture
-async def facade() -> AsyncGenerator[MemoryFacade, None]:
+async def facade() -> AsyncGenerator[MemoryStore, None]:
     """Fresh in-memory facade per test (mirrors the ``test_memory_decay`` fixture)."""
-    fac = MemoryFacade(agent_id="proc-test", db_path=":memory:")
+    fac = MemoryStore(agent_id="proc-test", db_path=":memory:")
     await fac.initialize()
     try:
         yield fac
@@ -60,7 +60,7 @@ async def facade() -> AsyncGenerator[MemoryFacade, None]:
 
 
 async def test_store_procedure_refresh_silently_discards_confidence_arg(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
     """PR #225 review S4 regression pin.
 
@@ -110,7 +110,7 @@ def test_escape_like_escapes_backslash_before_meta_chars() -> None:
 
 
 async def test_refresh_confidence_does_not_widen_match_on_percent_in_key(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
     """A key containing ``%`` must not refresh sibling rows.
 
@@ -179,7 +179,7 @@ async def test_refresh_confidence_does_not_widen_match_on_percent_in_key(
 
 
 async def test_recall_procedures_does_not_widen_match_on_percent_in_query(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
     """A ``query`` containing ``%`` must match literally, not as a wildcard.
 
@@ -212,7 +212,7 @@ async def test_eviction_uses_legacy_base_confidence_shim() -> None:
     decay the row from a fresh ``1.0`` baseline and a row that
     recall correctly drops would silently survive eviction.
     """
-    fac = MemoryFacade(agent_id="legacy-evict", db_path=":memory:")
+    fac = MemoryStore(agent_id="legacy-evict", db_path=":memory:")
     await fac.initialize()
     try:
         db = fac.episodic._ensure_db()  # noqa: SLF001
@@ -252,7 +252,7 @@ async def test_eviction_uses_legacy_base_confidence_shim() -> None:
 
 
 async def test_recall_procedures_sql_cutoff_filters_stale_rows_and_appears_in_sql(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
     """Pin the new SQL-side ``t_max`` pre-filter clause introduced in PR 6b.
 
@@ -338,9 +338,9 @@ async def test_recall_procedures_sql_cutoff_filters_stale_rows_and_appears_in_sq
 
 
 async def test_retrieve_procedures_honours_now_override(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
-    """Pin the new ``now`` parameter on ``MemoryFacade.retrieve_procedures``.
+    """Pin the new ``now`` parameter on ``MemoryStore.retrieve_procedures``.
 
     PR 6b deep-review Should-Fix #5: the ``now: float | None``
     parameter (PR 5 R1 L4) is plumbed through the facade so tests can

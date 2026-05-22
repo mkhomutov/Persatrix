@@ -3,7 +3,7 @@
 Single implementation of "recall episodes from
 :class:`~agents.memory.episodic.EpisodicMemory`, then keep only those
 matching an optional scope and/or AND-tag filter".  Both
-:meth:`~agents.memory.facade.MemoryFacade.retrieve_relevant` and the
+:meth:`~agents.memory.facade.MemoryStore.retrieve_relevant` and the
 persona-runtime channel-history tier in
 :meth:`~agents.persona_runtime.memory_context._MemoryContextMixin._inject_memory_context`
 delegate here, so the contract — over-fetch factor, scope precedence,

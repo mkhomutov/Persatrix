@@ -2,9 +2,9 @@
 Regression test for the autouse ``_isolate_session_env`` fixture
 (see :file:`conftest.py`).
 
-RFC 0031 Phase 1 makes :class:`agents.memory.facade.MemoryFacade` read
+RFC 0031 Phase 1 makes :class:`agents.memory.facade.MemoryStore` read
 ``PERSATRIX_SESSION_ID`` at construction.  Before this autouse fixture
-existed, any test that constructed a ``MemoryFacade`` and assumed
+existed, any test that constructed a ``MemoryStore`` and assumed
 ``_session_id == "legacy"`` would silently pick up a shell-inherited
 value if the developer happened to have ``PERSATRIX_SESSION_ID``
 exported (or if CI ever exported it globally for any reason).
@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from agents.memory.facade import MemoryFacade
+from agents.memory.facade import MemoryStore
 
 
 def test_autouse_fixture_removes_env_var_before_test() -> None:
@@ -51,10 +51,10 @@ async def test_facade_default_is_legacy_under_autouse_fixture(
     # PR #337 review L6: use the public ``session_id`` property
     # rather than reaching for ``_session_id`` so the test pins the
     # public contract.
-    fac = MemoryFacade(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))
+    fac = MemoryStore(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))
     try:
         assert fac.session_id == "legacy", (
-            "MemoryFacade construction-time default must be 'legacy' when "
+            "MemoryStore construction-time default must be 'legacy' when "
             "PERSATRIX_SESSION_ID is unset; the autouse "
             "_isolate_session_env fixture (conftest.py) is responsible "
             f"for that pre-condition. Got: {fac.session_id!r}"
@@ -85,14 +85,14 @@ class TestEnvLeakIsBlocked:
         # writes with the prior test's polluted value.  PR #337 L6:
         # use the public ``session_id`` property.
         assert "PERSATRIX_SESSION_ID" not in os.environ
-        fac = MemoryFacade(
+        fac = MemoryStore(
             agent_id="x", db_path=str(tmp_path / "m.db"),
         )
         assert fac.session_id == "legacy"
 
 
 class TestSessionIdPropertyContract:
-    """PR #337 review L6 — :attr:`MemoryFacade.session_id` is the
+    """PR #337 review L6 — :attr:`MemoryStore.session_id` is the
     public read-only contract for the construction-time env snapshot.
     Tests that previously poked ``_session_id`` directly with
     ``noqa: SLF001`` now use this property; pin the contract here so
@@ -103,11 +103,11 @@ class TestSessionIdPropertyContract:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("PERSATRIX_SESSION_ID", "run-x")
-        fac = MemoryFacade(agent_id="x", db_path=str(tmp_path / "m.db"))
+        fac = MemoryStore(agent_id="x", db_path=str(tmp_path / "m.db"))
         assert fac.session_id == "run-x"
 
     def test_property_is_read_only(self, tmp_path: Path) -> None:
-        fac = MemoryFacade(agent_id="x", db_path=str(tmp_path / "m.db"))
+        fac = MemoryStore(agent_id="x", db_path=str(tmp_path / "m.db"))
         with pytest.raises(AttributeError):
             fac.session_id = "tampered"  # type: ignore[misc]
 
@@ -116,5 +116,5 @@ class TestSessionIdPropertyContract:
         # property is a true view onto the same value (not a divergent
         # cache or copy).  If the private attribute is eventually
         # removed, this test should be deleted.
-        fac = MemoryFacade(agent_id="x", db_path=str(tmp_path / "m.db"))
+        fac = MemoryStore(agent_id="x", db_path=str(tmp_path / "m.db"))
         assert fac.session_id == fac._session_id  # noqa: SLF001 — transition guard

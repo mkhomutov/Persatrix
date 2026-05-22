@@ -164,7 +164,7 @@ class AgentServer:
             scheduled_wakes_caches=self._scheduled_wakes_caches,
         )
 
-        # RFC 0008 PR 2: open MemoryFacade for opt-in non-persona task agents.
+        # RFC 0008 PR 2: open MemoryStore for opt-in non-persona task agents.
         for agent_id, agent in self.agents.items():
             if isinstance(agent, _LLMPersonaAgent):
                 continue
@@ -341,7 +341,7 @@ class AgentServer:
         for agent_id, agent in self.agents.items():
             try:
                 # Close persona-agent three-tier memory or task-agent
-                # MemoryFacade (RFC 0008 PR plan PR 2).  ``close_memory``
+                # MemoryStore (RFC 0008 PR plan PR 2).  ``close_memory``
                 # is a no-op when no facade was opened.  PR 2a follow-up
                 # L3: single call site \u2014 the persona/task distinction is
                 # only relevant for logging.

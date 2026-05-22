@@ -1,22 +1,23 @@
-"""``MemoryFacade`` — backward-compat alias for ``MemoryStore`` (RFC 0029 Phase 1).
+""":mod:`agents.memory.facade` — ``budget_to_limit`` + store re-exports.
 
-RFC 0029 Phase 1 promotes the RFC 0008 ``MemoryFacade`` to the typed
-:class:`~agents.memory.store.MemoryStore` facade.  The facade *home* is
-now :mod:`agents.memory.store`; this module survives as a thin
-compatibility shim for one minor version (removed in v0.3.3):
+RFC 0029 Phase 1 promoted the RFC 0008 ``MemoryFacade`` to the typed
+:class:`~agents.memory.store.MemoryStore`; the facade *home* is now
+:mod:`agents.memory.store`.  The one-minor-version ``MemoryFacade``
+compatibility alias the v0.3.2 Upgrade Notes committed to removing in
+v0.3.3 has been removed — every call site imports ``MemoryStore``
+directly (the RFC 0029 Phase 1 PR 3 sweep migrated production code; the
+v0.3.3 release-prep migrated the test suite).
 
-- ``MemoryFacade`` is re-bound to ``MemoryStore`` — the **same class
-  object**, so every existing ``MemoryFacade()`` construction,
-  ``isinstance(x, MemoryFacade)`` check, and ``MemoryFacade.compress``
-  call keeps working unchanged until the RFC 0029 Phase 1 PR 3 call-site
-  sweep migrates them.
-- The facade-level dataclasses (``MemoryEntry`` / ``CompressedView`` /
-  ``Candidate``) and ``MemoryDisabledError`` are re-exported so existing
-  ``from agents.memory.facade import ...`` imports keep resolving.
+This module survives because it owns work the store class does not:
 
-``budget_to_limit`` lives here: it translates the orchestrator's RFC 0008
-``_context_package.budget_memory_tokens`` into a recall ``limit`` and has
-no dependency on the ``MemoryStore`` class.
+- ``budget_to_limit`` translates the orchestrator's RFC 0008
+  ``_context_package.budget_memory_tokens`` into a recall ``limit`` and
+  has no dependency on the ``MemoryStore`` class.
+- The store surface (``MemoryStore`` / ``StoreConfig`` / the society
+  errors) and the facade-level dataclasses (``MemoryEntry`` /
+  ``CompressedView`` / ``Candidate``) and ``MemoryDisabledError`` are
+  re-exported so existing ``from agents.memory.facade import ...``
+  imports keep resolving.
 """
 
 from __future__ import annotations
@@ -34,12 +35,6 @@ from .store_types import (
     MemoryDisabledError,
     MemoryEntry,
 )
-
-#: Backward-compat alias.  ``MemoryFacade`` *is* ``MemoryStore`` — the same
-#: class object, not a subclass — so identity and ``isinstance`` checks
-#: hold across the rename.
-MemoryFacade = MemoryStore
-
 
 # ─── Budget translation helper ─────────────────────────────────
 
@@ -79,7 +74,6 @@ __all__ = [
     "DEFAULT_AVG_ENTRY_TOKENS",
     "MemoryDisabledError",
     "MemoryEntry",
-    "MemoryFacade",
     "MemoryStore",
     "SocietyBackendUnavailable",
     "SocietyDisabled",

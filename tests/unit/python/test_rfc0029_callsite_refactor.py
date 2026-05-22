@@ -13,7 +13,7 @@ PR 3 routes the persona-runtime / sub-agent memory call sites — and the
   builds them through the facade, closing the deprecation window.
 - No ``MemoryFacade`` reference survives in the migrated call sites
   (``persona_runtime/``, ``sub_agents/``, ``persona.py``) — the alias
-  lives on only as the documented one-minor-version compat shim.
+  was a documented one-minor-version compat shim, removed in v0.3.3.
 - ``tests/perf/personal_tier_latency.py`` ships and *runs* (the baseline
   capture + enforcing gate are RFC 0029 Phase 1 PR 5).
 """
@@ -174,8 +174,10 @@ def _agents_dir() -> Path:
 
 def test_no_memoryfacade_reference_in_migrated_call_sites() -> None:
     """RFC 0029 Phase 1 PR 3: no ``MemoryFacade`` reference survives in
-    ``persona_runtime/``, ``sub_agents/`` or ``persona.py`` — the alias
-    lives on only as the documented compat shim in ``agents/memory/``.
+    ``persona_runtime/``, ``sub_agents/`` or ``persona.py``. The alias was
+    a documented compat shim in ``agents/memory/``, removed in v0.3.3;
+    that the symbol itself stays gone is pinned separately by
+    ``test_memoryfacade_alias_is_removed_from_package_and_module``.
     """
     agents_dir = _agents_dir()
     targets: list[Path] = [
@@ -202,6 +204,41 @@ def test_summarize_close_routes_compress_through_memory_store() -> None:
 
     assert summarize_close.MemoryStore is MemoryStore
     assert not hasattr(summarize_close, "MemoryFacade")
+
+
+def test_memoryfacade_alias_is_removed_from_package_and_module() -> None:
+    """v0.3.3: the ``MemoryFacade`` compat alias is gone for good.
+
+    Replaces the deleted ``test_memory_facade_is_an_alias_of_memory_store``
+    identity pin (``test_memory_store.py``).  The v0.3.2 Upgrade Notes
+    committed to removing the alias "in v0.3.3"; this pins that the symbol
+    stays gone from both the ``agents.memory`` package facade and the
+    ``agents.memory.facade`` module that defined it, so a re-introduced
+    ``MemoryFacade = MemoryStore`` trips here rather than silently
+    re-opening the deprecation window.
+    """
+    import agents.memory as memory_pkg
+    import agents.memory.facade as facade_mod
+
+    assert not hasattr(memory_pkg, "MemoryFacade")
+    assert "MemoryFacade" not in memory_pkg.__all__
+    assert not hasattr(facade_mod, "MemoryFacade")
+    assert "MemoryFacade" not in facade_mod.__all__
+
+    # The user-facing import must fail cleanly — not resolve via a stray
+    # submodule or a module ``__getattr__`` shim.  ``MemoryFacade`` is
+    # intentionally gone, so mypy's ``attr-defined`` error on this line is
+    # expected and suppressed; the runtime ``except``/``else`` below is the
+    # actual assertion.
+    try:
+        from agents.memory import MemoryFacade  # type: ignore[attr-defined]  # noqa: F401
+    except ImportError:
+        pass
+    else:  # pragma: no cover — regression tripwire
+        raise AssertionError(
+            "agents.memory.MemoryFacade is importable again; the v0.3.3 "
+            "alias removal regressed",
+        )
 
 
 # ─── perf harness ships and runs (gate enforcement is PR 5) ───

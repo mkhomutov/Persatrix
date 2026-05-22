@@ -3,10 +3,10 @@
 Three agents — writer A, reader B, denied C — share one
 SharedMemoryPool.  Verifies:
 
-* A publishes 3 entries via :meth:`MemoryFacade.publish_to_pool`.
-* B retrieves all 3 via :meth:`MemoryFacade.read_from_pool`.
+* A publishes 3 entries via :meth:`MemoryStore.publish_to_pool`.
+* B retrieves all 3 via :meth:`MemoryStore.read_from_pool`.
 * C is denied on both read and write paths.
-* The original isolated entry on A's MemoryFacade survives the publish
+* The original isolated entry on A's MemoryStore survives the publish
   (the publish path is *additive* — RFC 0008 §H "curated").
 """
 
@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from agents.memory.facade import MemoryFacade
+from agents.memory.facade import MemoryStore
 from agents.memory.shared_pool import (
     SharedMemoryPermissionError,
     SharedMemoryPool,
@@ -30,7 +30,7 @@ from agents.memory.shared_pool import (
 async def world(
     tmp_path: Any,
 ) -> AsyncGenerator[
-    tuple[MemoryFacade, MemoryFacade, MemoryFacade, SharedMemoryPool], None,
+    tuple[MemoryStore, MemoryStore, MemoryStore, SharedMemoryPool], None,
 ]:
     db = str(tmp_path / "world.db")
     cfg = SharedPoolConfig(
@@ -43,8 +43,8 @@ async def world(
     await pool.initialize()
     registry = SharedPoolRegistry({"team-knowledge": pool})
 
-    async def _facade(agent_id: str) -> MemoryFacade:
-        f = MemoryFacade(
+    async def _facade(agent_id: str) -> MemoryStore:
+        f = MemoryStore(
             agent_id=agent_id, db_path=db, shared_pools=registry,
         )
         await f.initialize()
@@ -63,7 +63,7 @@ async def world(
 
 
 async def test_publish_then_read_three_agents(
-    world: tuple[MemoryFacade, MemoryFacade, MemoryFacade, SharedMemoryPool],
+    world: tuple[MemoryStore, MemoryStore, MemoryStore, SharedMemoryPool],
 ) -> None:
     a, b, c, _pool = world
 
@@ -102,7 +102,7 @@ async def test_publish_then_read_three_agents(
 
 
 async def test_publish_does_not_consume_isolated_entry(
-    world: tuple[MemoryFacade, MemoryFacade, MemoryFacade, SharedMemoryPool],
+    world: tuple[MemoryStore, MemoryStore, MemoryStore, SharedMemoryPool],
 ) -> None:
     a, _b, _c, _pool = world
 
@@ -121,7 +121,7 @@ async def test_publish_does_not_consume_isolated_entry(
 
 
 async def test_min_confidence_filter_at_facade(
-    world: tuple[MemoryFacade, MemoryFacade, MemoryFacade, SharedMemoryPool],
+    world: tuple[MemoryStore, MemoryStore, MemoryStore, SharedMemoryPool],
 ) -> None:
     a, b, _c, _pool = world
 

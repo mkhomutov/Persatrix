@@ -8,7 +8,7 @@ Covers:
 - Size-cap eviction: lowest-scoring excess entries are deleted; deterministic
   tie-break by ``created_at ASC``.
 - Eviction loop: failures log a warning and the loop survives.
-- ``MemoryFacade`` lifecycle: the eviction task is started by
+- ``MemoryStore`` lifecycle: the eviction task is started by
   ``initialize()`` and cancelled by ``close()``.
 """
 
@@ -27,7 +27,7 @@ from agents.memory.eviction import (
     EvictionStats,
     eviction_loop,
 )
-from agents.memory.facade import MemoryFacade
+from agents.memory.facade import MemoryStore
 
 # ─── Fixtures ─────────────────────────────────────────────────
 
@@ -306,11 +306,11 @@ async def test_eviction_loop_startup_pass_before_full_cadence(
     )
 
 
-# ─── MemoryFacade integration ─────────────────────────────────
+# ─── MemoryStore integration ─────────────────────────────────
 
 
 async def test_facade_starts_and_cancels_eviction_task() -> None:
-    fac = MemoryFacade(
+    fac = MemoryStore(
         agent_id="lifecycle",
         db_path=":memory:",
         eviction_cadence_seconds=3600,  # never fires during the test
@@ -327,7 +327,7 @@ async def test_facade_starts_and_cancels_eviction_task() -> None:
 
 async def test_facade_scope_filter_finds_non_facade_writer() -> None:
     """PR 2a follow-up M1: column-level ``scope`` is honoured by recall."""
-    fac = MemoryFacade(agent_id="scope-test", db_path=":memory:")
+    fac = MemoryStore(agent_id="scope-test", db_path=":memory:")
     await fac.initialize()
     try:
         # Bypass ``store_observation`` and write the scope only via the
@@ -371,27 +371,27 @@ def test_eviction_stats_procedural_evicted_is_required() -> None:
         )
 
 
-# ─── MemoryFacade __init__ validation (PR #221 deep-review M1) ────────
+# ─── MemoryStore __init__ validation (PR #221 deep-review M1) ────────
 
 
 def test_facade_rejects_invalid_episodic_cap() -> None:
-    """MemoryFacade.__init__ must reject episodic_cap < 1 immediately."""
+    """MemoryStore.__init__ must reject episodic_cap < 1 immediately."""
     with pytest.raises(ValueError, match="episodic_cap"):
-        MemoryFacade(agent_id="a", db_path=":memory:", episodic_cap=0)
+        MemoryStore(agent_id="a", db_path=":memory:", episodic_cap=0)
 
 
 def test_facade_rejects_invalid_ttl() -> None:
-    """MemoryFacade.__init__ must reject ttl_low_importance_days < 1 immediately."""
+    """MemoryStore.__init__ must reject ttl_low_importance_days < 1 immediately."""
     with pytest.raises(ValueError, match="ttl_low_importance_days"):
-        MemoryFacade(
+        MemoryStore(
             agent_id="a", db_path=":memory:", ttl_low_importance_days=0,
         )
 
 
 def test_facade_rejects_non_positive_cadence() -> None:
-    """MemoryFacade.__init__ must reject eviction_cadence_seconds <= 0 immediately."""
+    """MemoryStore.__init__ must reject eviction_cadence_seconds <= 0 immediately."""
     with pytest.raises(ValueError, match="eviction_cadence_seconds"):
-        MemoryFacade(
+        MemoryStore(
             agent_id="a", db_path=":memory:", eviction_cadence_seconds=0,
         )
 
@@ -403,7 +403,7 @@ async def test_ttl_skips_procedure_rows(episodic: EpisodicMemory) -> None:
     """Low-confidence procedure rows are NOT TTL-evicted.
 
     RFC 0008 §G separates episodic eviction from procedural confidence
-    decay (the latter lands in PR 5).  ``MemoryFacade.store_procedure``
+    decay (the latter lands in PR 5).  ``MemoryStore.store_procedure``
     persists procedures as episode rows tagged ``procedure:{key}`` with
     ``confidence`` mapped onto ``importance``; without the procedure
     guard in :mod:`agents.memory.eviction`, a stale low-confidence
@@ -412,7 +412,7 @@ async def test_ttl_skips_procedure_rows(episodic: EpisodicMemory) -> None:
     db = episodic._ensure_db()  # noqa: SLF001
     old_ts = time.time() - 31 * 86400.0
     # An old, low-importance procedure (would otherwise satisfy the TTL
-    # predicate).  Tag format mirrors ``MemoryFacade.store_procedure``.
+    # predicate).  Tag format mirrors ``MemoryStore.store_procedure``.
     await db.execute(
         "INSERT INTO episodes (id, agent_id, summary, importance, "
         "tags_json, created_at, compression_level) "

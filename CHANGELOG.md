@@ -2,6 +2,60 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.3] - 2026-05-22
+
+> **Codename:** Idle Truly Idle
+
+### Highlights
+
+- **Idle is truly idle — a persona with no scheduled work and no inbound traffic now costs nothing** (RFC 0024, Phases 1–4). The persona autonomy loop is event-driven: it parks on `queue.get()` and wakes only on an inbound RPC, a scheduled `autonomy.timers` entry, or a salience memory write. A persona with `autonomy.timers: []` and no inbound traffic does no SQLite recall, no `_inject_memory_context`, no provider call, and no wallet lease — the polling-loop cost-leak class is closed **structurally**, not patched per release. The promise is guarded on every PR by the bored-persona `cost-regression-gate` CI job ([`tests/integration/test_bored_persona_cost.py`](tests/integration/test_bored_persona_cost.py)), a release-blocker.
+- **`tick_interval_seconds` keeps working unchanged.** The legacy field is synthesised into a single `ScheduledWake(timer_id="legacy_tick")` through a back-compat adapter, so existing configs need no edit. The deprecation *warning* is RFC 0024 Phase 5 (v0.4.0); removal is Phase 6 (v0.5+).
+
+### Upgrade Notes
+
+| Notable change | Detail |
+|----------------|--------|
+| **[Behaviour change — idle is truly idle]** Event-driven autonomy loop | The persona autonomy loop is now event-driven ([RFC 0024](docs/rfcs/0024-event-driven-scheduling.md) Phases 1–4). A persona with `autonomy.timers: []` and no inbound traffic parks on `queue.get()` and pays nothing — no SQLite recall, no `_inject_memory_context`, no provider activity, no wallet lease. The polling-loop cost-leak class is closed structurally, guarded by `cost-regression-gate`. |
+| **[Behaviour change — channel dispatch]** Fire-and-forget channel messages | `ReceiveChannelMessage` now enqueues `InboundEventWake(event)` fire-and-forget via `event_loop.enqueue` (not `scheduler.wake()`) and returns `TaskAck` immediately. Chat, sub-agent, and workflow-task paths are unchanged — they keep their synchronous-return contract via `SyncDispatchHandle`. |
+| New `autonomy.timers` config block | Per-agent timer list in `agents.yaml` / [`schemas/agent.schema.json`](schemas/agent.schema.json): `id`, `interval_seconds` (≥ `1.0`), `kind` (a `callback_kind` label), optional `jitter_max_seconds`. `tick_interval_seconds` **continues to work** — synthesised as one `ScheduledWake(timer_id="legacy_tick", callback_kind="tick")`; if both are set, `timers` wins (one-time INFO log). Absent block → `timers: []`. Deprecation **warning** is Phase 5 (v0.4.0); removal is Phase 6 (v0.5+). |
+| New per-agent SQLite `scheduled_wakes` cache | Derived from `agents.yaml` (source of truth), rebuilt on startup; restores `next_fire_at_ms` so a persona restarted mid-jitter-window resumes its schedule instead of re-randomising. Orphan rows deleted on next startup. No operator action. |
+| New `autonomy.salience_threshold` (default `0.95`) + `autonomy.salience_rate_max_per_sec` (default `10`) | Salience-triggered wakes from the memory-write path. **Ships disabled by default** — the threshold is strictly above stock conservative scoring (`REFLECTION_CONTRADICTION_SALIENCE = 0.6`). Calibration is a data-gated follow-up ([RFC 0024 §OQ §2](docs/rfcs/0024-event-driven-scheduling.md#open-questions)). The rate-limit is a DoS guard, not a calibration knob. |
+| New `agent.wake.{inbound,scheduled,salience,dropped}` metric counters | Carry `wake.kind` (plus `timer_id` on scheduled, `tier` + `suppressed_reason` on salience). `wake.kind` is an **OTEL/metric dimension only** — *not* a new `LeaseRequest` proto field; [`proto/wallet.proto`](proto/wallet.proto)'s `Cause cause` is unchanged, so v0.3.2 cost-attribution dashboards keep working (`trace_id` already links the lease to the wake span). See [observability.md §10.5](docs/observability.md#105-persatrix-specific-attribute-namespace). |
+| RFC 0017 §F empty-context TICK guard is now structurally unreachable but stays in place | Documented as vestigial via an [`action_loop.py`](agents/persona_runtime/action_loop.py) cross-link naming Phase 5/6 as the deletion path. No behaviour change. |
+| **[Breaking]** `agents.memory.MemoryFacade` alias removed | The `MemoryFacade` deprecation alias introduced in v0.3.2 (RFC 0029 Phase 1 facade freeze) is **removed**, honouring its published one-minor-version horizon ("removal in v0.3.3"). Import `agents.memory.MemoryStore` (or `agents.memory.store.MemoryStore`) directly — `MemoryStore` is the same class object the alias pointed at, so only the import name changes. Production call sites migrated in v0.3.2 (RFC 0029 Phase 1 PR 3); the v0.3.3 release-prep migrated the test suite and removed the symbol. |
+
+### 🚀 Features
+
+- *(v033)* RFC 0024 PR 1 — `EventLoop` + `WakeEvent` + `SyncDispatchHandle` (Phase 1) (#406)
+- *(v033)* RFC 0024 PR 2 — `autonomy.timers` + `scheduled_wakes` table (Phase 2) (#407)
+- *(v033)* RFC 0024 PR 2.1 — wire `ScheduledWakesCache` into persona init (Phase 2) (#408)
+- *(v033)* RFC 0024 PR 3a — write-side `salience` + `source_span_id` (Phase 3 prereq) (#409)
+- *(v033)* RFC 0024 PR 3b — `SalienceWake` enqueue + threshold + loop-back guard (Phase 3) (#410)
+- *(v033)* RFC 0024 PR 4 — channel-message fire-and-forget dispatch + cost-regression CI gate (Phase 4) (#411)
+- *(v033)* RFC 0024 PR 5 — `EventLoop` lifecycle hardening (#412)
+- *(v033)* RFC 0024 PR 5.1 — review-follow-up cleanups + deferred test-gap fills (Phases 1–4) (#413)
+
+### 📚 Documentation
+
+- *(release)* Post-release follow-up for v0.3.2 (#403)
+- *(rfcs)* RFC 0041–0044 drafts + agent-runtime vocabulary roadmap — all `🔨 Draft`, RFC-tracking only (#399)
+- *(v033)* Open v0.3.3 master plan — Idle Truly Idle (#404)
+- *(v033)* RFC 0024 PR plan — Phases 1–4 (#405)
+- *(v033)* RFC 0024 PR 6 — Phases 1–4 closeout (#414)
+- *(v033)* Release-prep plan (master-plan Phase 3) (#415)
+- Refresh MT-CHAT-003/004 for RFC 0020 interaction-close; file ISSUE-0067/0068 (#417)
+- *(v033)* Release-prep PR 1 — manual-test execution report (#416)
+- *(v033)* Release-prep PR 2 — docs refresh + release checklist (#418)
+
+### 🧪 Testing
+
+- New manual test [`MT-IDLE-001`](docs/manual-tests/MT-IDLE-001.md) — *idle persona costs nothing*: an `autonomy.timers: []` persona with no inbound traffic shows zero provider/wallet/`agent.wake.*` activity over a 60 s window, then a single inbound event wakes the parked loop. This is the **primary v0.3.3 release gate**.
+- The bored-persona [`cost-regression-gate`](.github/workflows/ci.yml) CI job ([`tests/integration/test_bored_persona_cost.py`](tests/integration/test_bored_persona_cost.py)) is a **release-blocker** (a PR trigger on the wake-path file set, not a nightly) — it fails any change that re-introduces an LLM call, `_inject_memory_context`, `LeaseRequest`, or `agent.wake.*` activity from an idle persona.
+- New `EventLoop` / `scheduled_wakes` / salience / wake-counter suites cover the event-driven loop, the cache rebuild + `next_fire_at_ms` restore, the `legacy_tick` adapter, and the four `agent.wake.*` counters.
+- Full 34-row manual-test surface (1 new gate + 33 carried-forward) re-executed against the `ea2b86d` release-candidate tip; release gate met ([#416](https://github.com/mkhomutov/Persatrix/pull/416)).
+
+[0.3.3]: https://github.com/mkhomutov/Persatrix/compare/v0.3.2...v0.3.3
+
 ## [0.3.2] - 2026-05-20
 
 > **Codename:** Cost Gate + Facade Freeze

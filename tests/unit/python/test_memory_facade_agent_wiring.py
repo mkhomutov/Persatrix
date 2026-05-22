@@ -1,7 +1,7 @@
-"""Unit tests for BaseAgent ↔ MemoryFacade wiring (RFC 0008 PR plan PR 2).
+"""Unit tests for BaseAgent ↔ MemoryStore wiring (RFC 0008 PR plan PR 2).
 
 Verifies that:
-- ``BaseAgent.initialize_memory`` creates a ``MemoryFacade`` only when
+- ``BaseAgent.initialize_memory`` creates a ``MemoryStore`` only when
   ``memory.enabled=true`` (deny-by-default).
 - ``BaseAgent.close_memory`` releases the facade idempotently.
 - ``_inject_memories`` augments the system prompt when relevant entries exist

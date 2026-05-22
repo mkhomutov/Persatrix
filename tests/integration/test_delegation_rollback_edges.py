@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from agents.memory import MemoryFacade
+from agents.memory import MemoryStore
 from agents.sub_agents import (
     DelegationFailure,
     DelegationRequest,
@@ -42,8 +42,8 @@ from ._delegation_helpers import (
 
 
 @pytest.fixture
-async def parent_facade(tmp_path: Any) -> AsyncGenerator[MemoryFacade, None]:
-    facade = MemoryFacade(
+async def parent_facade(tmp_path: Any) -> AsyncGenerator[MemoryStore, None]:
+    facade = MemoryStore(
         agent_id="parent-coordinator", db_path=str(tmp_path / "parent.db"),
     )
     await facade.initialize()
@@ -55,7 +55,7 @@ async def parent_facade(tmp_path: Any) -> AsyncGenerator[MemoryFacade, None]:
 
 @pytest.mark.asyncio
 async def test_rollback_failure_does_not_mask_original_cause(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """N5 coverage: when ``delete_episode`` itself raises during
@@ -159,7 +159,7 @@ async def test_rollback_skipped_when_facade_lacks_episodic_accessor(
 
 @pytest.mark.asyncio
 async def test_failed_status_payload_is_truncated_in_failure_message(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
 ) -> None:
     """S2-mirror: when a sub-agent returns FAILED, the spawner's
     :class:`DelegationFailure` message must funnel ``output.result``
@@ -204,7 +204,7 @@ async def test_failed_status_payload_is_truncated_in_failure_message(
 
 @pytest.mark.asyncio
 async def test_failed_status_payload_control_chars_are_stripped(
-    parent_facade: MemoryFacade,
+    parent_facade: MemoryStore,
 ) -> None:
     """PR #224 review round-4 (Should #1): pin the CWE-117 control-char
     strip in ``_bounded``.
