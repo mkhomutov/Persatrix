@@ -13,7 +13,7 @@ PR 3 routes the persona-runtime / sub-agent memory call sites — and the
   builds them through the facade, closing the deprecation window.
 - No ``MemoryFacade`` reference survives in the migrated call sites
   (``persona_runtime/``, ``sub_agents/``, ``persona.py``) — the alias
-  lives on only as the documented one-minor-version compat shim.
+  was a documented one-minor-version compat shim, removed in v0.3.3.
 - ``tests/perf/personal_tier_latency.py`` ships and *runs* (the baseline
   capture + enforcing gate are RFC 0029 Phase 1 PR 5).
 """
@@ -174,8 +174,9 @@ def _agents_dir() -> Path:
 
 def test_no_memoryfacade_reference_in_migrated_call_sites() -> None:
     """RFC 0029 Phase 1 PR 3: no ``MemoryFacade`` reference survives in
-    ``persona_runtime/``, ``sub_agents/`` or ``persona.py`` — the alias
-    lives on only as the documented compat shim in ``agents/memory/``.
+    ``persona_runtime/``, ``sub_agents/`` or ``persona.py``. The alias was
+    a documented compat shim in ``agents/memory/``, removed in v0.3.3 — so
+    this guard now also pins that the symbol stays gone.
     """
     agents_dir = _agents_dir()
     targets: list[Path] = [

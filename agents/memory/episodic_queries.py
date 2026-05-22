@@ -75,7 +75,7 @@ class Episode:
     compression_level: int  # 0=raw, 1=summarized, 2=distilled
     # RFC 0020 §D column-level scope, projected onto the dataclass in
     # PR 2a so non-facade writers (``InteractionTracker``) are visible to
-    # ``MemoryFacade.retrieve_relevant(scope=...)`` filtering.  Defaults
+    # ``MemoryStore.retrieve_relevant(scope=...)`` filtering.  Defaults
     # to ``None`` so legacy rows without a scope value round-trip cleanly.
     scope: str | None = None
     # RFC 0021 PR 2 (this PR): expose the RFC 0020 §D interaction columns

@@ -5,7 +5,7 @@ write surfaces beyond the direct ``store_episode`` /
 
 The surfaces:
 
-* :meth:`MemoryFacade.store_observation` (RFC 0008 §B write path; the
+* :meth:`MemoryStore.store_observation` (RFC 0008 §B write path; the
   task-agent + sub-agent surface — ``facade.py:361`` reaches the
   underlying ``store_episode``).
 * :meth:`ProceduralFacadeMixin.store_procedure` (RFC 0008 PR 5
@@ -31,7 +31,7 @@ from pathlib import Path
 
 import pytest
 
-from agents.memory.facade import MemoryFacade
+from agents.memory.facade import MemoryStore
 from agents.memory.shared_pool import (
     SharedMemoryPool,
     SharedPoolConfig,
@@ -42,7 +42,7 @@ from agents.memory.shared_pool_facade import publish_via_facade
 @pytest.fixture
 async def facade(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("PERSATRIX_SESSION_ID", raising=False)
-    fac = MemoryFacade(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))
+    fac = MemoryStore(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))
     await fac.initialize()
     try:
         yield fac
@@ -54,7 +54,7 @@ async def facade(tmp_path: Path, monkeypatch):
 
 
 class TestStoreObservationSessionID:
-    async def test_default_writes_legacy(self, facade: MemoryFacade) -> None:
+    async def test_default_writes_legacy(self, facade: MemoryStore) -> None:
         ep_id = await facade.store_observation("hello")
         db = facade.episodic._ensure_db()  # noqa: SLF001 — test inspection
         async with db.execute(
@@ -65,7 +65,7 @@ class TestStoreObservationSessionID:
         assert row[0] == "legacy"
 
     async def test_explicit_kwarg_round_trips(
-        self, facade: MemoryFacade,
+        self, facade: MemoryStore,
     ) -> None:
         ep_id = await facade.store_observation("hi", session_id="run-a")
         db = facade.episodic._ensure_db()  # noqa: SLF001
@@ -79,13 +79,13 @@ class TestStoreObservationSessionID:
     async def test_env_var_is_facade_default(
         self, tmp_path: Path, monkeypatch,
     ) -> None:
-        # The task-agent / sub-agent path constructs MemoryFacade without
+        # The task-agent / sub-agent path constructs MemoryStore without
         # threading session_id at every call site; instead the facade
         # resolves PERSATRIX_SESSION_ID once at construction so every
         # subsequent write inherits it.  This mirrors how the persona
         # constructor reads the env var once.
         monkeypatch.setenv("PERSATRIX_SESSION_ID", "run-a")
-        fac = MemoryFacade(
+        fac = MemoryStore(
             agent_id="task-agent", db_path=str(tmp_path / "tm.db"),
         )
         await fac.initialize()
@@ -113,7 +113,7 @@ class TestStoreObservationSessionID:
         # default.  This is the path persona-reachable code uses when
         # it routes through the facade rather than the tiers directly.
         monkeypatch.setenv("PERSATRIX_SESSION_ID", "run-a")
-        fac = MemoryFacade(
+        fac = MemoryStore(
             agent_id="ember-owl", db_path=str(tmp_path / "tm.db"),
         )
         await fac.initialize()
@@ -134,7 +134,7 @@ class TestStoreObservationSessionID:
 
 
 class TestStoreProcedureSessionID:
-    async def test_default_writes_legacy(self, facade: MemoryFacade) -> None:
+    async def test_default_writes_legacy(self, facade: MemoryStore) -> None:
         await facade.store_procedure(
             "deploy.rollback", "run `make rollback`", confidence=0.9,
         )
@@ -149,7 +149,7 @@ class TestStoreProcedureSessionID:
         assert row[0] == "legacy"
 
     async def test_explicit_kwarg_round_trips(
-        self, facade: MemoryFacade,
+        self, facade: MemoryStore,
     ) -> None:
         await facade.store_procedure(
             "deploy.smoke", "curl health", confidence=0.9,

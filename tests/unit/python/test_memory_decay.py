@@ -11,7 +11,7 @@ Covers:
   to ``1.0`` + ``last_validated_at`` stamping.
 - :class:`agents.memory.eviction.EvictionPass` — procedural eviction
   via the new ``_evict_procedural_decay`` pass.
-- :class:`agents.memory.facade.MemoryFacade` — ``store_procedure``
+- :class:`agents.memory.facade.MemoryStore` — ``store_procedure``
   refresh-on-existing-key, ``retrieve_procedures`` stale alert, and
   decay-knob construction validation.
 - Migration v6 — applies idempotently and leaves a v0.2.x schema
@@ -41,7 +41,7 @@ from agents.memory.episodic_procedural import (
     refresh_confidence,
 )
 from agents.memory.eviction import EvictionPass
-from agents.memory.facade import MemoryFacade
+from agents.memory.facade import MemoryStore
 
 # ─── Pure-math: compute_decayed_confidence ────────────────────
 
@@ -107,9 +107,9 @@ def test_extract_procedure_key_returns_none_when_absent() -> None:
 
 
 @pytest.fixture
-async def facade() -> AsyncGenerator[MemoryFacade, None]:
+async def facade() -> AsyncGenerator[MemoryStore, None]:
     """Fresh in-memory facade per test."""
-    fac = MemoryFacade(agent_id="proc-test", db_path=":memory:")
+    fac = MemoryStore(agent_id="proc-test", db_path=":memory:")
     await fac.initialize()
     try:
         yield fac
@@ -117,7 +117,7 @@ async def facade() -> AsyncGenerator[MemoryFacade, None]:
         await fac.close()
 
 
-async def test_recall_procedures_filters_below_c_min(facade: MemoryFacade) -> None:
+async def test_recall_procedures_filters_below_c_min(facade: MemoryStore) -> None:
     """Entries whose decayed confidence < c_min are filtered before limit slice."""
     await facade.store_procedure("fresh", "still good", confidence=0.9)
     await facade.store_procedure("stale", "old habit", confidence=0.05)  # < 0.1
@@ -128,7 +128,7 @@ async def test_recall_procedures_filters_below_c_min(facade: MemoryFacade) -> No
 
 
 async def test_recall_procedures_applies_decay_at_read_time(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
     """The decay multiplier is applied to the stored ``c_0`` at read time."""
     await facade.store_procedure("k1", "body", confidence=0.8)
@@ -150,7 +150,7 @@ async def test_recall_procedures_applies_decay_at_read_time(
     assert results[0].base_confidence == pytest.approx(0.8)
 
 
-async def test_recall_procedures_query_filter(facade: MemoryFacade) -> None:
+async def test_recall_procedures_query_filter(facade: MemoryStore) -> None:
     await facade.store_procedure("a", "ship widget alpha", confidence=0.9)
     await facade.store_procedure("b", "ship gadget beta", confidence=0.9)
     results = await facade.retrieve_procedures(query="widget")
@@ -162,7 +162,7 @@ async def test_recall_procedures_query_filter(facade: MemoryFacade) -> None:
 
 
 async def test_refresh_confidence_resets_to_one_and_stamps_now(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
     await facade.store_procedure("k", "body", confidence=0.4)
     db = facade.episodic._ensure_db()  # noqa: SLF001
@@ -190,14 +190,14 @@ async def test_refresh_confidence_resets_to_one_and_stamps_now(
 
 
 async def test_refresh_confidence_returns_false_when_no_match(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
     db = facade.episodic._ensure_db()  # noqa: SLF001
     assert await refresh_confidence(db, "proc-test", "nonexistent") is False
 
 
 async def test_refresh_confidence_rejects_empty_key(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
     db = facade.episodic._ensure_db()  # noqa: SLF001
     with pytest.raises(ValueError, match="key"):
@@ -208,7 +208,7 @@ async def test_refresh_confidence_rejects_empty_key(
 
 
 async def test_store_procedure_refreshes_existing_key(
-    facade: MemoryFacade,
+    facade: MemoryStore,
 ) -> None:
     """Storing under an existing key updates confidence/last_validated, no duplicate row."""
     await facade.store_procedure("dup", "v1", confidence=0.5)
@@ -244,7 +244,7 @@ async def test_store_procedure_refreshes_existing_key(
 
 
 async def test_retrieve_procedures_emits_stale_alert(
-    facade: MemoryFacade,
+    facade: MemoryStore,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Entries in ``[c_min, stale_threshold)`` log ``stale_memory_injection``."""
@@ -267,7 +267,7 @@ async def test_retrieve_procedures_emits_stale_alert(
 
 
 async def test_retrieve_procedures_no_alert_above_threshold(
-    facade: MemoryFacade,
+    facade: MemoryStore,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Entries with decayed >= stale_threshold do not log the alert."""
@@ -285,7 +285,7 @@ async def test_retrieve_procedures_no_alert_above_threshold(
 
 async def test_eviction_pass_evicts_below_c_min() -> None:
     """The procedural pass deletes rows whose decayed confidence < c_min."""
-    fac = MemoryFacade(agent_id="evict-proc", db_path=":memory:")
+    fac = MemoryStore(agent_id="evict-proc", db_path=":memory:")
     await fac.initialize()
     try:
         await fac.store_procedure("keep", "fresh", confidence=0.9)
@@ -325,18 +325,18 @@ async def test_eviction_pass_evicts_below_c_min() -> None:
 
 def test_facade_rejects_negative_lambda() -> None:
     with pytest.raises(ValueError, match="lambda_per_day"):
-        MemoryFacade(agent_id="x", db_path=":memory:", lambda_per_day=-0.1)
+        MemoryStore(agent_id="x", db_path=":memory:", lambda_per_day=-0.1)
 
 
 def test_facade_rejects_c_min_out_of_range() -> None:
     with pytest.raises(ValueError, match="c_min"):
-        MemoryFacade(agent_id="x", db_path=":memory:", c_min=1.5)
+        MemoryStore(agent_id="x", db_path=":memory:", c_min=1.5)
 
 
 def test_facade_rejects_inverted_threshold_pair() -> None:
     """``stale_threshold < c_min`` would silently disable the alert window."""
     with pytest.raises(ValueError, match="stale_confidence_alert_threshold"):
-        MemoryFacade(
+        MemoryStore(
             agent_id="x", db_path=":memory:",
             c_min=0.4, stale_confidence_alert_threshold=0.2,
         )
@@ -344,7 +344,7 @@ def test_facade_rejects_inverted_threshold_pair() -> None:
 
 def test_facade_accepts_default_decay_knobs() -> None:
     """Default constructor uses ``agents.memory.decay`` constants."""
-    fac = MemoryFacade(agent_id="x", db_path=":memory:")
+    fac = MemoryStore(agent_id="x", db_path=":memory:")
     assert fac._lambda_per_day == DEFAULT_LAMBDA_PER_DAY  # noqa: SLF001
     assert fac._c_min == DEFAULT_C_MIN  # noqa: SLF001
     assert fac._stale_alert_threshold == DEFAULT_STALE_CONFIDENCE_ALERT_THRESHOLD  # noqa: SLF001

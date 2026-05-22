@@ -19,13 +19,13 @@ Confidence decay for the procedural tier is **out of scope** for this PR
 and lands in PR 5 (RFC 0008 PR plan Phase 4b).  To keep the two policies
 cleanly separated, every query in this module excludes rows whose
 ``tags_json`` carries the ``procedure:`` prefix written by
-:meth:`MemoryFacade.store_procedure` — see ``_NOT_PROCEDURE_PREDICATE``
+:meth:`MemoryStore.store_procedure` — see ``_NOT_PROCEDURE_PREDICATE``
 below and PR #221 deep-review finding M-1.
 
 The :class:`EvictionPass` class is intentionally stateless across runs —
 :meth:`EvictionPass.run` opens fresh queries against the agent's database
 and returns an :class:`EvictionStats` report so the caller (the
-:class:`~agents.memory.facade.MemoryFacade` background loop) can log /
+:class:`~agents.memory.facade.MemoryStore` background loop) can log /
 trace each pass.  ``EvictionStats.total_after`` therefore reports the
 *evictable* (episodic) row count — procedure rows are intentionally
 excluded so the figure matches what the size-cap budget enforces.
@@ -65,7 +65,7 @@ _W_RECENCY: float = 0.3
 _W_ACCESS: float = 0.1
 
 # RFC 0008 §G separates episodic eviction from procedural confidence
-# decay (the latter lands in PR 5).  ``MemoryFacade.store_procedure``
+# decay (the latter lands in PR 5).  ``MemoryStore.store_procedure``
 # persists procedures as episode rows tagged ``procedure:{key}`` with
 # ``confidence`` mapped onto ``importance``; without this guard a
 # low-confidence procedure would be silently TTL- or cap-evicted by the
@@ -101,7 +101,7 @@ class EvictionPass:
     """Single eviction run against an open ``aiosqlite`` connection.
 
     Stateless — does not retain rows across runs.  The
-    :class:`~agents.memory.facade.MemoryFacade` schedules one instance
+    :class:`~agents.memory.facade.MemoryStore` schedules one instance
     per cadence tick.
     """
 
@@ -333,12 +333,12 @@ async def eviction_loop(
     lambda_per_day: float = DEFAULT_LAMBDA_PER_DAY,
     c_min: float = DEFAULT_C_MIN,
 ) -> None:
-    """Periodic eviction loop scheduled by ``MemoryFacade.initialize()``.
+    """Periodic eviction loop scheduled by ``MemoryStore.initialize()``.
 
     Runs one :class:`EvictionPass` every ``cadence_seconds``.  Failures
     log a warning and the loop continues — eviction is best-effort
     (mirrors RFC 0005 working-memory async-flush pattern).  The loop
-    exits cleanly when cancelled by ``MemoryFacade.close()``.
+    exits cleanly when cancelled by ``MemoryStore.close()``.
     """
     if cadence_seconds <= 0:
         raise ValueError(

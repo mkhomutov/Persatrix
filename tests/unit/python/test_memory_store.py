@@ -1,13 +1,14 @@
 """Unit tests for ``agents.memory.store.MemoryStore`` (RFC 0029 Phase 1).
 
-Phase 1 promotes today's ``MemoryFacade`` to the typed ``MemoryStore``
-facade.  The promotion is a pure refactor — personal-tier behaviour is
-identical and the existing ``test_memory_facade*.py`` suites pin the API
-surface through the ``MemoryFacade`` alias.  This file covers the new
-surface Phase 1 adds:
+Phase 1 promoted the RFC 0008 ``MemoryFacade`` to the typed
+``MemoryStore`` facade.  The promotion was a pure refactor — personal-tier
+behaviour is identical and the ``test_memory_facade*.py`` suites pin the
+API surface.  The one-minor-version ``MemoryFacade`` compatibility alias
+was removed in v0.3.3; every suite imports ``MemoryStore`` directly.  This
+file covers the new surface Phase 1 added:
 
-- ``MemoryStore`` is the canonical class; ``MemoryFacade`` is a thin
-  alias of it (same class object) for one minor version.
+- ``MemoryStore`` is the canonical class, exported from both
+  :mod:`agents.memory` and :mod:`agents.memory.store`.
 - Personal-tier calls (``store_observation`` → ``retrieve_relevant``,
   ``compress``) behave identically on ``MemoryStore``.
 - Society-tier methods raise the ``SocietyBackendUnavailable`` hierarchy:
@@ -48,18 +49,7 @@ async def store() -> AsyncGenerator[MemoryStore, None]:
         await st.close()
 
 
-# ─── MemoryFacade alias identity ──────────────────────────────
-
-
-def test_memory_facade_is_an_alias_of_memory_store() -> None:
-    """RFC 0029 Phase 1: ``MemoryFacade`` is a thin alias of ``MemoryStore``.
-
-    Same class object — every existing ``MemoryFacade`` caller keeps
-    working unchanged until the PR 3 call-site sweep migrates them.
-    """
-    from agents.memory.facade import MemoryFacade
-
-    assert MemoryFacade is MemoryStore
+# ─── MemoryStore package export ───────────────────────────────
 
 
 def test_memory_store_exported_from_package() -> None:

@@ -1,7 +1,7 @@
 """
 PR #337 deep review finding **M2** — the env-var read logic for
 ``PERSATRIX_SESSION_ID`` must live in a single leaf module so the
-``MemoryFacade`` constructor and the persona-runtime logger wrapper
+``MemoryStore`` constructor and the persona-runtime logger wrapper
 cannot drift.
 
 Before this fix, two modules each inlined the silent
@@ -28,7 +28,7 @@ the log line.  This file pins:
 1. The leaf module has zero ``logging`` / observability dependencies
    (otherwise a future log line at construction-time would
    double-emit alongside :func:`agents.persona_runtime.session_id.resolve_session_id_and_log`).
-2. ``MemoryFacade``'s construction-time session id matches the leaf's
+2. ``MemoryStore``'s construction-time session id matches the leaf's
    :func:`resolve_session_id_silent` output exactly.
 3. The persona-runtime wrapper re-exports the leaf's constants so
    existing imports of ``SESSION_ID_ENV_VAR`` / ``LEGACY_SESSION_ID``
@@ -102,7 +102,7 @@ def test_leaf_has_no_logging_dependency() -> None:
     If a future contributor adds ``import logging`` and a
     ``logger.info`` call at construction-time, the operator would see
     two INFO lines for the same env-resolution decision: one from the
-    facade's :class:`MemoryFacade.__init__` (every task agent) and one
+    facade's :class:`MemoryStore.__init__` (every task agent) and one
     from :func:`agents.persona_runtime.session_id.resolve_session_id_and_log`
     (the persona-runtime boot path).  The original PR 4 fix-up
     explicitly cited "silent by design" as the rationale for inlining
@@ -165,13 +165,13 @@ def test_leaf_has_no_logging_dependency() -> None:
 def test_facade_session_id_matches_leaf_resolver(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The construction-time read in :class:`MemoryFacade` must
+    """The construction-time read in :class:`MemoryStore` must
     delegate to :func:`resolve_session_id_silent` (or behave identically
     to it).  This pins the dedup contract: as the carve-out semantics
     evolve in Phase 3 (tighter validation), the two read paths cannot
     drift.
     """
-    from agents.memory.facade import MemoryFacade
+    from agents.memory.facade import MemoryStore
     from agents.session_id import resolve_session_id_silent
 
     for env_value, label in [
@@ -187,11 +187,11 @@ def test_facade_session_id_matches_leaf_resolver(
             monkeypatch.setenv("PERSATRIX_SESSION_ID", env_value)
 
         expected = resolve_session_id_silent()
-        fac = MemoryFacade(
+        fac = MemoryStore(
             agent_id="x", db_path=str(tmp_path / f"m-{label.split()[0]}.db"),
         )
         assert fac._session_id == expected, (  # noqa: SLF001 — dedup contract
-            f"MemoryFacade._session_id must equal resolve_session_id_silent() "
+            f"MemoryStore._session_id must equal resolve_session_id_silent() "
             f"for env={env_value!r} ({label}); got "
             f"{fac._session_id!r} vs {expected!r}"  # noqa: SLF001
         )

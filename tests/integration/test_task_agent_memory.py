@@ -1,10 +1,10 @@
-"""Integration tests for the task-agent MemoryFacade wiring (RFC 0008 PR 2).
+"""Integration tests for the task-agent MemoryStore wiring (RFC 0008 PR 2).
 
 Covers the end-to-end opt-in flow described in
 ``docs/rfcs/0008-pr-plan.md`` PR 2:
 
 * When ``memory.enabled: true`` is set in the agent's config, the
-  agent-server lifecycle opens a :class:`MemoryFacade` on startup,
+  agent-server lifecycle opens a :class:`MemoryStore` on startup,
   ``BaseAgent._inject_memories`` injects retrieved entries into the
   system prompt, and the budget knob carried via the
   ``_context_package`` clamps the recall ``limit``.
@@ -27,7 +27,7 @@ from typing import Any
 import pytest
 
 from agents.base import CONTEXT_PACKAGE_KEY, BaseAgent, TaskInput, TaskOutput, TaskStatus
-from agents.memory import MemoryFacade
+from agents.memory import MemoryStore
 
 
 class _TaskAgentStub(BaseAgent):
@@ -74,7 +74,7 @@ class TestMemoryEnabledTaskAgent:
     async def test_facade_opened_on_initialize(
         self, enabled_agent: _TaskAgentStub,
     ) -> None:
-        assert isinstance(enabled_agent.memory, MemoryFacade)
+        assert isinstance(enabled_agent.memory, MemoryStore)
 
     async def test_store_then_retrieve_round_trip(
         self, enabled_agent: _TaskAgentStub,

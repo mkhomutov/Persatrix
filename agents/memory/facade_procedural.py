@@ -1,4 +1,4 @@
-"""Procedural-tier mixin for :class:`agents.memory.facade.MemoryFacade`.
+"""Procedural-tier mixin for :class:`agents.memory.facade.MemoryStore`.
 
 Extracted from ``facade.py`` to keep that file under the 500-line repo
 cap once the RFC 0008 PR 5 procedural-tier surface (decay knobs +
@@ -83,7 +83,7 @@ def validate_decay_params(
 
 
 class ProceduralFacadeMixin:
-    """Procedural-tier methods for :class:`MemoryFacade`.
+    """Procedural-tier methods for :class:`MemoryStore`.
 
     Expects the host class to provide ``self._agent_id``,
     ``self._episodic`` (an initialised :class:`EpisodicMemory`),
@@ -97,7 +97,7 @@ class ProceduralFacadeMixin:
     _c_min: float
     _stale_alert_threshold: float
     # RFC 0031 Phase 1: facade-level construction-time default for the
-    # operator-namespace tag (see :class:`agents.memory.facade.MemoryFacade`).
+    # operator-namespace tag (see :class:`agents.memory.facade.MemoryStore`).
     _session_id: str
 
     def _require_initialised(self) -> None: ...  # pragma: no cover — host
@@ -158,7 +158,7 @@ class ProceduralFacadeMixin:
             context["expires_at"] = expires_at
         # RFC 0031 Phase 1: thread session_id; caller passes ``None`` to
         # inherit the facade's construction-time default (see
-        # ``MemoryFacade.__init__``).  Procedural rows live in the same
+        # ``MemoryStore.__init__``).  Procedural rows live in the same
         # ``episodes`` table as observations, so the session-tag column
         # is shared.
         episode_id = await self._episodic.store_episode(
@@ -251,7 +251,7 @@ __all__ = [
 
 
 def procedural_kwargs_from_config(memory_cfg: dict) -> dict:
-    """Project ``memory.procedural_memory`` config into MemoryFacade kwargs.
+    """Project ``memory.procedural_memory`` config into MemoryStore kwargs.
 
     Extracted so :class:`agents.base.BaseAgent.initialize_memory` can
     fan the optional config block into the facade constructor in one

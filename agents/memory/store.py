@@ -8,12 +8,13 @@ facade.  Society-tier methods (shared pools, inbound trust) hit Postgres
 when a ``society_dsn`` is configured; Phase 1 ships single-agent mode
 only, so they raise the :class:`SocietyBackendUnavailable` hierarchy.
 
-The promotion is a **pure refactor**: ``MemoryStore`` keeps the legacy
-``MemoryFacade`` construction signature, and
-:mod:`agents.memory.facade` keeps ``MemoryFacade`` as a thin alias of
-this class for one minor version so downstream callers migrate
-incrementally.  The frozen facade is the v0.4.0 prerequisite — RFC 0028
-pins its ``DecisionRecord`` schema against this surface.
+The promotion was a **pure refactor**: ``MemoryStore`` kept the legacy
+``MemoryFacade`` construction signature, and :mod:`agents.memory.facade`
+carried a thin ``MemoryFacade`` alias of this class for one minor version
+so downstream callers migrated incrementally.  That alias was removed in
+v0.3.3 — all call sites import ``MemoryStore`` directly.  The frozen
+facade is the v0.4.0 prerequisite — RFC 0028 pins its ``DecisionRecord``
+schema against this surface.
 """
 
 from __future__ import annotations

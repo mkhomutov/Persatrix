@@ -113,7 +113,7 @@ def extract_procedure_key(tags: list[str]) -> str | None:
     """Return the first ``procedure:KEY`` tag's KEY suffix, or ``None``.
 
     Procedural rows are always written with a single ``procedure:KEY``
-    tag by :meth:`MemoryFacade.store_procedure`, but the helper is
+    tag by :meth:`MemoryStore.store_procedure`, but the helper is
     defensive about extra tags so a future change adding decoration
     tags (e.g. ``"category:tools"``) does not break recall.
     """
@@ -141,7 +141,7 @@ async def recall_procedures(
     ``episodic.py``.
 
     Procedural rows are identified by the ``procedure:`` tag prefix
-    written by :meth:`MemoryFacade.store_procedure`.  Each row's decayed
+    written by :meth:`MemoryStore.store_procedure`.  Each row's decayed
     confidence is computed via
     :func:`~agents.memory.decay.compute_decayed_confidence` against the
     row's ``last_validated_at`` (or ``created_at`` when never
@@ -183,7 +183,7 @@ async def recall_procedures(
         # cutoff in seconds is ``-ln(c_min)/lambda_per_day * 86400``.
         sql_cutoff_seconds = -math.log(c_min) / lambda_per_day * 86400.0
     # Procedural rows carry a tag formatted ``procedure:{key}`` — see
-    # ``MemoryFacade.store_procedure``.  ``tags_json`` stores the tag
+    # ``MemoryStore.store_procedure``.  ``tags_json`` stores the tag
     # list as a JSON array, so the LIKE pattern matches the tag
     # substring verbatim regardless of array position.  Phase 5 uses
     # ``LIKE`` rather than FTS5 so a procedure key with punctuation
@@ -292,7 +292,7 @@ async def refresh_confidence(
     one row was updated.
 
     Implements the "Confidence refresh on successful reuse" contract
-    from RFC 0008 §G — :meth:`MemoryFacade.store_procedure` invokes it
+    from RFC 0008 §G — :meth:`MemoryStore.store_procedure` invokes it
     automatically when a re-store hits an existing key.
     """
     if not key or not key.strip():

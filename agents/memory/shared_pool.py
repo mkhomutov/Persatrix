@@ -2,7 +2,7 @@
 
 Implements the *hybrid* memory model from `RFC 0008 §H`_ (see
 ``docs/rfcs/0008-agent-memory-context-optimization.md``):
-each agent keeps an isolated ``MemoryFacade``, and curated entries are
+each agent keeps an isolated ``MemoryStore``, and curated entries are
 *published* to a named shared pool whose ACL is declared in
 ``config/agents.yaml``.
 
@@ -15,7 +15,7 @@ Per `RFC 0008 PR plan PR 4
   are framework-injected on write — callers cannot spoof ``source_agent``.
 * Consumer-side ``min_confidence`` filter on read; ``None`` admits all.
 * Sensitive pools (``sensitive: true``) cannot be published into via
-  :meth:`MemoryFacade.publish_to_pool` regardless of writer ACL — RFC 0008
+  :meth:`MemoryStore.publish_to_pool` regardless of writer ACL — RFC 0008
   §H safety constraint #3.
 * Eviction is FIFO on ``created_at`` (not §G hybrid score) because pool
   entries lack the per-agent ``access_count`` series required by §G.
@@ -375,7 +375,7 @@ class SharedPoolRegistry:
     """Lifecycle owner for the named pools declared in ``agents.yaml``.
 
     Built once per agent process from the parsed ``shared_memory_pools``
-    section, then handed to :class:`MemoryFacade` so per-agent
+    section, then handed to :class:`MemoryStore` so per-agent
     ``publish_to_pool`` / ``read_from_pool`` calls resolve by pool name.
     """
 

@@ -16,7 +16,7 @@ everything else.
 The fix promotes ``surface`` to a kwarg on ``store_episode`` so each
 calling layer pins it:
 
-* ``MemoryFacade.store_observation``       → ``surface="observation"``
+* ``MemoryStore.store_observation``       → ``surface="observation"``
 * ``ProceduralFacadeMixin.store_procedure`` → ``surface="procedure"``
 * ``SharedMemoryPool.write``               → ``surface="shared_pool"``
 * direct ``EpisodicMemory.store_episode`` call (no facade) → ``"episode"``
@@ -38,7 +38,7 @@ import pytest_asyncio
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from agents.memory.episodic import EpisodicMemory
-from agents.memory.facade import MemoryFacade
+from agents.memory.facade import MemoryStore
 from agents.memory.shared_pool import (
     SharedMemoryPool,
     SharedPoolConfig,
@@ -81,7 +81,7 @@ async def test_store_observation_emits_surface_observation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("PERSATRIX_SESSION_ID", raising=False)
-    fac = MemoryFacade(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))
+    fac = MemoryStore(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))
     await fac.initialize()
     try:
         await fac.store_observation("hello", session_id="run-a")
@@ -105,7 +105,7 @@ async def test_store_procedure_emits_surface_procedure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("PERSATRIX_SESSION_ID", raising=False)
-    fac = MemoryFacade(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))
+    fac = MemoryStore(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))
     await fac.initialize()
     try:
         await fac.store_procedure(

@@ -1,5 +1,5 @@
 """Free-function helpers + mixin backing
-:meth:`MemoryFacade.publish_to_pool` and :meth:`MemoryFacade.read_from_pool`.
+:meth:`MemoryStore.publish_to_pool` and :meth:`MemoryStore.read_from_pool`.
 
 Kept in a separate module so ``agents/memory/facade.py`` and
 ``agents/memory/shared_pool.py`` both stay under the repo line cap.
@@ -112,14 +112,14 @@ class SharedPoolFacadeMixin:
     Expects the host class to provide ``_shared_pools``, ``_agent_id``,
     ``_session_id`` (RFC 0031 Phase 1 facade-level default), and
     ``_require_initialised()``.  Lives here (not on
-    :class:`MemoryFacade` directly) to keep ``facade.py`` under the
+    :class:`MemoryStore` directly) to keep ``facade.py`` under the
     repo line cap.
     """
 
     _shared_pools: SharedPoolRegistry | None
     _agent_id: str
     # RFC 0031 Phase 1: facade-level default for the operator-namespace
-    # tag (see :class:`agents.memory.facade.MemoryFacade`).
+    # tag (see :class:`agents.memory.facade.MemoryStore`).
     _session_id: str
 
     def _require_initialised(self) -> None: ...  # provided by host

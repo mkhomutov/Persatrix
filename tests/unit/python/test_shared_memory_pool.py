@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from agents.memory.facade import MemoryFacade
+from agents.memory.facade import MemoryStore
 from agents.memory.shared_pool import (
     SharedMemoryPermissionError,
     SharedMemoryPool,
@@ -88,7 +88,7 @@ async def test_source_agent_is_framework_injected(pool: SharedMemoryPool) -> Non
 
 
 async def test_publish_rejects_caller_provenance_spoof(tmp_path: Any) -> None:
-    """``MemoryFacade.publish_to_pool`` must not let callers spoof source_agent.
+    """``MemoryStore.publish_to_pool`` must not let callers spoof source_agent.
 
     The facade enforces this by *always* passing
     ``source_agent_override=self.agent_id`` and exposing no parameter for
@@ -105,7 +105,7 @@ async def test_publish_rejects_caller_provenance_spoof(tmp_path: Any) -> None:
     pool_inst = SharedMemoryPool(cfg, db_path=db)
     await pool_inst.initialize()
     registry = SharedPoolRegistry({"pool": pool_inst})
-    facade = MemoryFacade(
+    facade = MemoryStore(
         agent_id="alice", db_path=db, shared_pools=registry,
     )
     await facade.initialize()
@@ -116,7 +116,7 @@ async def test_publish_rejects_caller_provenance_spoof(tmp_path: Any) -> None:
         # The facade has no source_agent kwarg — confirm the only path
         # in is the framework-injected one.
         import inspect
-        sig = inspect.signature(MemoryFacade.publish_to_pool)
+        sig = inspect.signature(MemoryStore.publish_to_pool)
         assert "source_agent" not in sig.parameters
         assert "source_agent_override" not in sig.parameters
     finally:
@@ -174,7 +174,7 @@ async def test_sensitive_pool_blocks_publish(tmp_path: Any) -> None:
     pool_inst = SharedMemoryPool(cfg, db_path=db)
     await pool_inst.initialize()
     registry = SharedPoolRegistry({"secrets": pool_inst})
-    facade = MemoryFacade(
+    facade = MemoryStore(
         agent_id="alice", db_path=db, shared_pools=registry,
     )
     await facade.initialize()
@@ -223,7 +223,7 @@ async def test_fifo_eviction_at_cap(tmp_path: Any) -> None:
 
 async def test_registry_unknown_pool_raises(tmp_path: Any) -> None:
     db = str(tmp_path / "r.db")
-    facade = MemoryFacade(
+    facade = MemoryStore(
         agent_id="alice",
         db_path=db,
         shared_pools=SharedPoolRegistry({}),
@@ -241,7 +241,7 @@ async def test_registry_unknown_pool_raises(tmp_path: Any) -> None:
 
 
 async def test_facade_without_registry_denies_pool_calls(tmp_path: Any) -> None:
-    facade = MemoryFacade(
+    facade = MemoryStore(
         agent_id="alice", db_path=str(tmp_path / "n.db"),
     )
     await facade.initialize()
@@ -401,7 +401,7 @@ async def test_read_from_pool_and_tag_filter(tmp_path: Any) -> None:
     """PR #223 review N4: end-to-end AND-tag contract through the facade.
 
     ``SharedMemoryPool.read`` does not filter by tags itself —
-    ``read_via_facade`` (and therefore ``MemoryFacade.read_from_pool``)
+    ``read_via_facade`` (and therefore ``MemoryStore.read_from_pool``)
     applies AND-set semantics on top.  Pin the end-to-end behaviour so
     a future refactor cannot turn it into OR semantics silently.
     """
@@ -414,7 +414,7 @@ async def test_read_from_pool_and_tag_filter(tmp_path: Any) -> None:
     pool_inst = SharedMemoryPool(cfg, db_path=db)
     await pool_inst.initialize()
     registry = SharedPoolRegistry({"tagged": pool_inst})
-    facade = MemoryFacade(
+    facade = MemoryStore(
         agent_id="alice", db_path=db, shared_pools=registry,
     )
     await facade.initialize()
