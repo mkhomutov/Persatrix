@@ -153,18 +153,22 @@ curl -s -X POST http://localhost:8080/api/v1/agents/ember-owl/chat \
 docker exec -i persatrix-agent-ember-owl-1 python - <<'PY'
 import sqlite3
 c = sqlite3.connect("/app/data/memory.db")
+# Scope the count to *this* conversation (open interactions are in-memory
+# only, so no episode row — pending or finalized — exists yet for this
+# scope). Counting globally would be non-zero on a re-used DB and falsely
+# look like a failure.
 rows = c.execute(
-    "select count(*) from episodes where summary != '[summary pending]'"
+    "select count(*) from episodes where scope like '%mt-chat-003-user%'"
 ).fetchone()[0]
-print("finalized episodes so far:", rows)
+print("episode rows for this conversation:", rows)
 PY
 ```
 
 **Expected Result**: The turtle conversation is **not yet** an episode — the interaction is
-still open (this is the RFC 0020 behaviour the v1.0 recipe got wrong).
+still open (this is the RFC 0020 behaviour the v1.0 recipe got wrong). The count is `0`.
 
 **Verification**:
-- [ ] No finalized episode for this conversation exists yet (open interactions are in-memory only)
+- [ ] No episode row for this conversation's scope exists yet (open interactions are in-memory only)
 
 ---
 
