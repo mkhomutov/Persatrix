@@ -40,9 +40,14 @@ from collections.abc import Awaitable, Callable, Generator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .event_loop_salience import _SalienceSubscriber
 from .event_loop_timers import _EventLoopTimersMixin, _TimerEntry
+from .memory._events import MemoryWriteBus, get_memory_write_bus
+from .observability._metrics_wakes import wake_attrs
+from .observability.metrics import try_get_instruments
 
 if TYPE_CHECKING:
+    from .memory._events import MemoryWriteEvent
     from .persona_types import AgentAction, AgentEvent
 
 logger = logging.getLogger(__name__)
@@ -103,11 +108,9 @@ class SalienceWake(WakeEvent):
     (``MemoryWriteBus`` subscriber) and the consumer.
     """
 
-    # TODO(Phase 3b — RFC 0024 PR 3b): tighten the type once the
-    # ``MemoryWriteEvent`` (write-side salience producer) lands.  Kept as
-    # ``Any`` here so Phase 1 does not import a type that does not yet
-    # exist; PR 3b will introduce the concrete class and replace this.
-    write_event: Any = field(default=None)
+    # ``None`` only for the Phase-1 placeholder construction path; PR 3b's
+    # subscriber always builds this with a concrete ``MemoryWriteEvent``.
+    write_event: MemoryWriteEvent | None = field(default=None)
 
 
 # ─── SyncDispatchHandle ─────────────────────────────────────────────────────
@@ -180,6 +183,16 @@ class EventLoop(_EventLoopTimersMixin):
     # any programmatic caller bypassing schema validation.
     _MIN_INTERVAL: float = 1.0
 
+    # RFC 0024 PR 3b: default ``autonomy.salience_threshold`` and
+    # ``autonomy.salience_rate_max_per_sec``.  The threshold default is
+    # strictly above PR 3a's :data:`REFLECTION_CONTRADICTION_SALIENCE`
+    # (``0.6``) so salience wakes stay off by inequality under stock
+    # scoring — the inequality is the v0.3.3 "Idle Truly Idle"
+    # release-gate invariant, pinned by
+    # ``test_event_loop_salience_default_off``.
+    DEFAULT_SALIENCE_THRESHOLD: float = 0.95
+    DEFAULT_SALIENCE_RATE_MAX_PER_SEC: int = 10
+
     def __init__(
         self,
         *,
@@ -187,6 +200,9 @@ class EventLoop(_EventLoopTimersMixin):
         on_event: Callable[[AgentEvent], Awaitable[list[AgentAction]]],
         on_tick: Callable[[ScheduledWake], Awaitable[None]],
         queue_size: int = _DEFAULT_QUEUE_SIZE,
+        salience_threshold: float | None = None,
+        salience_rate_max_per_sec: int | None = None,
+        salience_time_fn: Callable[[], float] | None = None,
     ) -> None:
         self._agent_id = agent_id
         self._on_event = on_event
@@ -196,6 +212,30 @@ class EventLoop(_EventLoopTimersMixin):
         self._stopped = asyncio.Event()
         self._timers: dict[str, _TimerEntry] = {}
         self._dropped_count = 0
+        # RFC 0024 PR 3b: salience-subscriber wiring.  Constructed here so
+        # the threshold + rate cap are immutable for the loop's lifetime;
+        # subscribed at :meth:`start`, unsubscribed at :meth:`stop` so the
+        # global bus does not retain a reference to a stopped loop.
+        threshold = (
+            salience_threshold
+            if salience_threshold is not None
+            else self.DEFAULT_SALIENCE_THRESHOLD
+        )
+        rate_max = (
+            salience_rate_max_per_sec
+            if salience_rate_max_per_sec is not None
+            else self.DEFAULT_SALIENCE_RATE_MAX_PER_SEC
+        )
+        subscriber_kwargs: dict[str, Any] = {
+            "agent_id": agent_id,
+            "enqueue": self.enqueue,
+            "threshold": threshold,
+            "rate_max_per_sec": rate_max,
+        }
+        if salience_time_fn is not None:
+            subscriber_kwargs["time_fn"] = salience_time_fn
+        self._salience_subscriber = _SalienceSubscriber(**subscriber_kwargs)
+        self._subscribed_bus: MemoryWriteBus | None = None
 
     @property
     def agent_id(self) -> str:
@@ -227,9 +267,9 @@ class EventLoop(_EventLoopTimersMixin):
     def enqueue(self, wake: WakeEvent) -> bool:
         """Enqueue a wake event. Returns ``True`` if accepted, ``False`` if dropped.
 
-        Discard-not-block per RFC 0024 Decided §1. The dropped-count is
-        observable via :attr:`dropped_count` for the ``agent.wake.dropped``
-        counter Phase 4 wires.
+        Discard-not-block per RFC 0024 Decided §1. PR 3b wires the
+        ``agent.wake.dropped`` OTEL counter alongside :attr:`dropped_count`
+        so dashboards and the substrate's internal counter agree.
         """
         try:
             self._queue.put_nowait(wake)
@@ -240,6 +280,14 @@ class EventLoop(_EventLoopTimersMixin):
                 self._agent_id,
                 self._dropped_count,
             )
+            inst = try_get_instruments()
+            if inst is not None:
+                inst.wake_dropped.add(
+                    1,
+                    attributes=wake_attrs(
+                        agent_id=self._agent_id, wake_kind="dropped",
+                    ),
+                )
             return False
         return True
 
@@ -247,6 +295,14 @@ class EventLoop(_EventLoopTimersMixin):
         if self._task is not None and not self._task.done():
             return
         self._stopped.clear()
+        # Subscribe to the memory-write bus exactly once per
+        # start/stop cycle.  Idempotent: if already subscribed (no stop
+        # in between), skip the re-subscribe so the bus subscriber list
+        # cannot accumulate duplicates.
+        if self._subscribed_bus is None:
+            bus = get_memory_write_bus()
+            bus.subscribe(self._salience_subscriber)
+            self._subscribed_bus = bus
         self._task = asyncio.create_task(
             self._run(), name=f"event-loop-{self._agent_id}",
         )
@@ -254,6 +310,12 @@ class EventLoop(_EventLoopTimersMixin):
     async def stop(self, timeout: float = 10.0) -> None:
         """Cancel timers and wait for the loop to drain in-flight wakes."""
         self._stopped.set()
+        # Unsubscribe first so further publishes do not enqueue wakes
+        # onto a queue we are about to drain.  ``unsubscribe`` is
+        # idempotent — safe to call without a matching subscribe.
+        if self._subscribed_bus is not None:
+            self._subscribed_bus.unsubscribe(self._salience_subscriber)
+            self._subscribed_bus = None
         # Cancel all registered timers first so no new wakes are produced.
         for entry in list(self._timers.values()):
             entry.cancelled = True
@@ -345,18 +407,45 @@ class EventLoop(_EventLoopTimersMixin):
             # v0.3.2), tracked as a deferred finding in
             # ``docs/rfcs/0024-pr-plan.md`` for a future "abort the
             # in-flight LLM call on caller cancellation" PR.
+            inst = try_get_instruments()
+            if inst is not None:
+                inst.wake_inbound.add(
+                    1,
+                    attributes=wake_attrs(
+                        agent_id=self._agent_id, wake_kind="inbound",
+                    ),
+                )
             actions = await self._on_event(wake.event)
             if wake.handle is not None:
                 wake.handle.resolve(actions)
             return
         if isinstance(wake, ScheduledWake):
+            inst = try_get_instruments()
+            if inst is not None:
+                inst.wake_scheduled.add(
+                    1,
+                    attributes=wake_attrs(
+                        agent_id=self._agent_id,
+                        wake_kind="scheduled",
+                        timer_id=wake.timer_id,
+                    ),
+                )
             await self._on_tick(wake)
             return
         if isinstance(wake, SalienceWake):
-            # Declared but unused in Phase 1. PR 3b wires the consumer.
-            logger.debug(
-                "agent.event_loop.salience_wake_ignored: agent_id=%s",
+            # PR 3b: the salience-wake counter is recorded at the
+            # subscriber call site (with ``suppressed_reason``).  The
+            # consumer (a wake that successfully enqueued and is now
+            # draining) is intentionally a structured-log breadcrumb;
+            # the "on_event for the triggering write" behaviour the
+            # RFC §G text names is a v0.4.0+ consumer (RFC 0027
+            # reflection-driven consolidation).  v0.3.3's default-off
+            # invariant means this branch never runs under stock config.
+            logger.info(
+                "agent.event_loop.salience_wake: agent_id=%s tier=%s salience=%.3f",
                 self._agent_id,
+                getattr(wake.write_event, "tier", "<unknown>"),
+                getattr(wake.write_event, "salience", -1.0),
             )
             return
         logger.warning(

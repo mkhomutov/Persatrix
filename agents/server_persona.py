@@ -375,6 +375,11 @@ async def initialize_persona_agents(
             max_actions = autonomy.get("max_actions_per_tick", 3)
             idle_after = autonomy.get("idle_after_ticks", 10)
             timers = autonomy.get("timers")
+            # RFC 0024 PR 3b salience knobs — both ``None`` when unset so
+            # the EventLoop ctor falls back to its documented class-level
+            # defaults (threshold ``0.95`` / rate cap ``10/sec``).
+            salience_threshold = autonomy.get("salience_threshold")
+            salience_rate_max = autonomy.get("salience_rate_max_per_sec")
             # RFC 0024 PR 2 precedence: ``timers`` wins when both knobs
             # are set.  Pass ``register_legacy_timer=False`` to suppress
             # the PR 1 synthesised back-compat timer, then register every
@@ -395,6 +400,8 @@ async def initialize_persona_agents(
                 idle_after_ticks=idle_after,
                 executor=dispatcher.executor,
                 register_legacy_timer=timers is None,
+                salience_threshold=salience_threshold,
+                salience_rate_max_per_sec=salience_rate_max,
             )
             # Cost-safety notice — emitted *before* scheduler.start() so the
             # warning is guaranteed to reach the log before any LLM spend can

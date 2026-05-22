@@ -109,6 +109,14 @@ class _Instruments:
     facts_envelope_parse_failed: Counter
     facts_injected: Counter
     persona_tick_idle: Counter
+    # RFC 0024 PR 3b — registered by :mod:`._metrics_wakes`.
+    wake_inbound: Counter
+    wake_scheduled: Counter
+    wake_salience: Counter
+    wake_dropped: Counter
+    # RFC 0021 Phase 1 — registered by :mod:`._metrics_temporal`.
+    temporal_now_anchor_emitted: Counter
+    temporal_recency_rendered: Counter
 
     def __init__(self, meter: Meter) -> None:
         # ─── Counters ────────────────────────────────────────────────
@@ -177,34 +185,13 @@ class _Instruments:
         )
 
         # Helper-module counter registrations (file-size cap; surface unchanged).
-        from . import _metrics_facts, _metrics_interactions, _metrics_persona_tick
-        for mod in (_metrics_interactions, _metrics_facts, _metrics_persona_tick):
+        from . import _metrics_facts as _mf
+        from . import _metrics_interactions as _mi
+        from . import _metrics_persona_tick as _mp
+        from . import _metrics_temporal as _mt
+        from . import _metrics_wakes as _mw
+        for mod in (_mi, _mf, _mp, _mw, _mt):
             mod.register(self, meter)
-
-        # ─── Temporal awareness (RFC 0021 Phase 1 — PR 2) ────────────
-        # Two counters: now-anchor emissions (one per system-prompt build,
-        # bounded by the per-event prompt-assembly call rate) and recency
-        # tag renders (one per episode/relationship line; ``source``
-        # attribute distinguishes the two surfaces so dashboards can
-        # show drift between recall volume and prompt-line volume).
-        self.temporal_now_anchor_emitted: Counter = meter.create_counter(
-            name="agent.temporal.now_anchor.emitted",
-            unit="{prompt}",
-            description=(
-                "Persona system prompts that included the RFC 0021 §C "
-                "now-anchor block."
-            ),
-        )
-        self.temporal_recency_rendered: Counter = meter.create_counter(
-            name="agent.temporal.recency.rendered",
-            unit="{render}",
-            description=(
-                "Recency tags rendered onto recalled episodes, "
-                "relationship summaries, or channel-history turns "
-                "(RFC 0021 §D / §E + RFC 0011 §E).  Attributes: "
-                "agent.id, source (episode|relationship|channel_history)."
-            ),
-        )
 
         # ─── Shared memory pools (RFC 0008 PR plan PR 4) ─────────────
         # Recorded by ``agents.memory.shared_pool`` ACL gates.  ``denied``
