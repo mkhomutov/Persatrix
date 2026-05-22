@@ -3,7 +3,7 @@ id: RFC-0024
 title: Event-Driven Agent Scheduling
 summary: Shifts agent activation from poll-driven dispatch to event-driven scheduling with persistable timers — enables proactive personas and scheduled reminders.
 type: architecture
-status: proposed
+status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-09
 target: v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6)
@@ -16,7 +16,7 @@ depends_on:
 # RFC 0024 — Event-Driven Agent Scheduling
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: ⚠️ Partially Implemented (Phases 1–4)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-09
 **Target**: v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6) — PR plan: [`0024-pr-plan.md`](0024-pr-plan.md)
@@ -350,6 +350,12 @@ If accepted:
 2. Resolve Open Question §1 (timer persistence) before Phase 1 lands. (Backpressure was OQ §6 in the draft and is now in [Decided §1](#decided-backpressure).)
 3. Cross-link from RFC 0017 §F (guard becomes vestigial in Phase 5) and RFC 0011 (channel dispatch becomes an event source, not a tick consumer).
 4. Sequence after [RFC 0023](0023-llm-call-leasing.md) lands at least Phase 1 — the leasing protocol gives the new wake sources structured cost attribution from day one, and `wake.kind` as a lease attribute is the cheapest moment to add.
+
+### Implemented in v0.3.3 (Phases 1–4)
+
+Phases 1–4 shipped under the v0.3.3 umbrella per [`0024-pr-plan.md`](0024-pr-plan.md) — PRs 1 ([#406](https://github.com/mkhomutov/Persatrix/pull/406)), 2 ([#407](https://github.com/mkhomutov/Persatrix/pull/407)), 2.1 ([#408](https://github.com/mkhomutov/Persatrix/pull/408)), 3a ([#409](https://github.com/mkhomutov/Persatrix/pull/409)), 3b ([#410](https://github.com/mkhomutov/Persatrix/pull/410)), 4 ([#411](https://github.com/mkhomutov/Persatrix/pull/411)), 5 ([#412](https://github.com/mkhomutov/Persatrix/pull/412)), 5.1 ([#413](https://github.com/mkhomutov/Persatrix/pull/413)). The agent autonomy loop is now structurally event-driven: `agents/event_loop.py` owns a per-agent `asyncio.Queue[WakeEvent]`; `TickScheduler` is a thin adapter that synthesises `ScheduledWake(timer_id="legacy_tick")` from the legacy `tick_interval_seconds`; `EventDispatcher.dispatch()` preserves its synchronous-return contract via `SyncDispatchHandle`. `autonomy.timers` config + a per-agent SQLite `scheduled_wakes` cache (wired into `initialize_persona_agents`) back scheduled wakes; write-side `salience` + `source_span_id` back the `SalienceWake` path (default-off at threshold `0.95`, above the conservative `0.6` scoring max, with a loop-back guard and per-agent rate-limit); the channel-message dispatch path enqueues `InboundEventWake` fire-and-forget; and the "bored persona costs nothing" cost-regression CI gate is wired as a release-blocker on the wake-path file set. [RFC 0017 §F](0017-persona-memory-injection-budget.md#f-empty-context-tick-short-circuit) is now structurally unreachable but stays in place — an inline cross-link in `agents/persona_runtime/action_loop.py` names this RFC's Phase 5/6 as its deletion path.
+
+**Still scheduled**: Phase 5 (`tick_interval_seconds` deprecation warning at config load; the RFC 0017 §F file amendment) ships in v0.4.0; Phase 6 (`tick_interval_seconds` removal, §F guard deletion, `TickScheduler` adapter removal, `EventType.TICK` removal — breaking, minor bump pre-1.0) ships in v0.5+, gated on the [Phase 6 entrance criteria](#phased-implementation-plan). This is a partial-RFC closeout; the full-RFC closeout waits for Phase 6.
 
 ## Related Documentation
 
