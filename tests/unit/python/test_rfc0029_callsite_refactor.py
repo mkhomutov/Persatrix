@@ -226,9 +226,12 @@ def test_memoryfacade_alias_is_removed_from_package_and_module() -> None:
     assert "MemoryFacade" not in facade_mod.__all__
 
     # The user-facing import must fail cleanly — not resolve via a stray
-    # submodule or a module ``__getattr__`` shim.
+    # submodule or a module ``__getattr__`` shim.  ``MemoryFacade`` is
+    # intentionally gone, so mypy's ``attr-defined`` error on this line is
+    # expected and suppressed; the runtime ``except``/``else`` below is the
+    # actual assertion.
     try:
-        from agents.memory import MemoryFacade  # noqa: F401
+        from agents.memory import MemoryFacade  # type: ignore[attr-defined]  # noqa: F401
     except ImportError:
         pass
     else:  # pragma: no cover — regression tripwire
