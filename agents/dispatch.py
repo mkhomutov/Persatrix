@@ -9,6 +9,7 @@ working unchanged.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 from typing import TYPE_CHECKING
@@ -62,6 +63,11 @@ class EventDispatcher:
         self._executor: ActionExecutor = ActionExecutor(
             dispatcher=self, channel_publisher=channel_publisher,
         )
+        # Strong-ref anchor for the no-running-loop fire-and-forget
+        # fallback in :meth:`enqueue_inbound` — Python 3.11+ GCs
+        # weakly-held tasks mid-flight. Tasks add themselves on creation
+        # and a done-callback discards them on completion.
+        self._inbound_fallback_tasks: set[asyncio.Task[None]] = set()
 
     def set_channel_publisher(self, publisher: ChannelPublisher | None) -> None:
         """Inject the REST publisher post-construction.
@@ -150,24 +156,7 @@ class EventDispatcher:
 
         scheduler = self._tick_schedulers.get(target_id)
         if scheduler is not None:
-            # RFC 0019 § I: record event→tick causality as a Span Link the
-            # next on_tick() consumes. Captured here because the dispatcher
-            # is the only call site that runs inside the active event span.
-            # Preserves the v0.3.2 pending-link contract even though
-            # ``scheduler.wake()`` is no longer called from this path —
-            # the dispatch enqueue below reaches the agent via the
-            # ``EventLoop`` substrate instead.
-            current_span = trace.get_current_span()
-            ctx = current_span.get_span_context()
-            if ctx.is_valid:
-                # Lazy import keeps this module free of a hard runtime dep
-                # on the persona subpackage (PR #167 review nice-to-have).
-                from .persona_runtime import Linkable
-
-                if isinstance(agent, Linkable):
-                    agent.add_pending_tick_link(
-                        Link(ctx, attributes={"link.kind": "trigger"}),
-                    )
+            self._capture_pending_tick_link(agent)
 
         # RFC 0024 Phase 1: when a TickScheduler is registered *and started*
         # the agent owns a per-agent ``EventLoop``; route through
@@ -220,3 +209,95 @@ class EventDispatcher:
             )
 
         return actions
+
+    def _capture_pending_tick_link(self, agent: _LLMPersonaAgent | None) -> None:
+        """Record event→tick causality as a pending Span Link (RFC 0019 §I).
+
+        Captured at the dispatch / enqueue call site because that is the
+        only place running inside the active inbound-event span; the
+        agent's next ``on_tick`` consumes the link. Shared by
+        :meth:`dispatch` and :meth:`enqueue_inbound`.
+        """
+        if agent is None:
+            return
+        current_span = trace.get_current_span()
+        ctx = current_span.get_span_context()
+        if not ctx.is_valid:
+            return
+        # Lazy import keeps this module free of a hard runtime dep on the
+        # persona subpackage (PR #167 review nice-to-have).
+        from .persona_runtime import Linkable
+
+        if isinstance(agent, Linkable):
+            agent.add_pending_tick_link(
+                Link(ctx, attributes={"link.kind": "trigger"}),
+            )
+
+    def enqueue_inbound(self, target_id: str, event: AgentEvent) -> bool:
+        """Fire-and-forget inbound dispatch (RFC 0024 Phase 4).
+
+        Channel messages enqueue an :class:`InboundEventWake` *without* a
+        :class:`SyncDispatchHandle` directly onto the target agent's
+        running :class:`~agents.event_loop.EventLoop`; the loop owns
+        processing (decide → execute → recover) via its ``on_inbound``
+        callback. The gRPC ``ReceiveChannelMessage`` handler returns its
+        ``TaskAck`` as soon as this returns — the agent processes when the
+        loop drains its queue. No ``SyncDispatchHandle`` is created on the
+        channel path: the handler's only consumer of a return value (the
+        ``TaskAck``) does not need the agent's actions (RFC 0024 §E).
+
+        Returns ``True`` if the event was accepted (enqueued, or scheduled
+        on the no-running-loop fallback), ``False`` if it was dropped —
+        either the loop's queue is full (discard-not-block, RFC 0024
+        Decided §1) or the target agent is unknown.
+        """
+        agent = self._agents.get(target_id)
+        scheduler = self._tick_schedulers.get(target_id)
+        if scheduler is not None and scheduler.is_running:
+            self._capture_pending_tick_link(agent)
+            accepted = scheduler.event_loop.enqueue(InboundEventWake(event=event))
+            if not accepted:
+                logger.warning(
+                    "Inbound dispatch dropped (event loop queue full): "
+                    "agent=%s event=%s dropped_total=%d",
+                    target_id, event.event_type.value,
+                    scheduler.event_loop.dropped_count,
+                )
+            return accepted
+        # No running loop (non-autonomous agent / session-less fixture):
+        # there is no supervisor to drain a fire-and-forget wake, so
+        # process inline as a detached task. The gRPC caller still returns
+        # immediately; the strong-ref anchor keeps the task alive to
+        # completion (Python 3.11+ GCs weakly-held tasks).
+        if agent is None:
+            logger.warning(
+                "Inbound dispatch target %s not found (event: %s)",
+                target_id, event.event_type.value,
+            )
+            return False
+        task = asyncio.create_task(
+            self._process_inbound_no_loop(agent, event),
+            name=f"inbound-no-loop:{target_id}",
+        )
+        self._inbound_fallback_tasks.add(task)
+        task.add_done_callback(self._inbound_fallback_tasks.discard)
+        return True
+
+    async def _process_inbound_no_loop(
+        self, agent: _LLMPersonaAgent, event: AgentEvent,
+    ) -> None:
+        """No-running-loop fallback body for :meth:`enqueue_inbound`.
+
+        Reuses the same processing coroutine the loop's ``on_inbound``
+        callback runs, so the ISSUE-0065/0066 chat-error recovery and the
+        cascade-depth guard behave identically whether or not a live
+        ``EventLoop`` is draining.
+        """
+        from .chat_reply import process_inbound_channel_event
+
+        await process_inbound_channel_event(
+            agent=agent,
+            executor=self._executor,
+            event=event,
+            max_cascade_depth=self._max_cascade_depth,
+        )

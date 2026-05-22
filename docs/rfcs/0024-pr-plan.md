@@ -314,15 +314,15 @@ PR 1 lands the structural foundation with no behaviour change — `TickScheduler
 
 #### PR checklist
 
-- [ ] `pytest tests/integration/test_channel_*.py tests/integration/test_bored_persona_cost.py tests/integration/test_action_loop_resource_exhausted.py -q` passes.
-- [ ] `ruff check agents/` clean; `mypy agents/` clean.
-- [ ] `make test` clean.
-- [ ] `cost-regression-gate` CI job wired to the wake-path file set; triggers on PR; fails the build on a non-zero counter.
-- [ ] `docs/manual-tests/MT-IDLE-001.md` authored; execution deferred to [v0.3.3-plan Phase 4 PR 1](../v0.3.3-plan.md#phase-4--v033-release-prep-execution).
-- [ ] `MT-COST-004` (RFC 0023) passes unchanged under the event-driven model — `idle_reason=budget_denied` still emitted.
-- [ ] Channel-message dispatch goes through `event_loop.enqueue(InboundEventWake(event))` directly, not through `scheduler.wake()` ([v0.3.3-plan Acceptance row 2](../v0.3.3-plan.md#acceptance-for-v033)).
-- [ ] [README Cost Warning](../../README.md#%EF%B8%8F-cost-warning--read-before-running) forward-pointer added.
-- [ ] [Progress Overview](#progress-overview) row 4 filled.
+- [x] `pytest tests/integration/test_channel_*.py tests/integration/test_bored_persona_cost.py tests/integration/test_channel_fanout_backpressure.py agents/tests/test_action_loop_resource_exhausted.py -q` passes.
+- [x] `ruff check agents/` + `ruff check tests/` clean; `mypy agents/` + `mypy tests/` clean.
+- [x] Full Python suite clean (`tests/unit/python/`: 2383 passed; `agents/tests/`: 375 passed). No Go/Rust files touched.
+- [x] `cost-regression-gate` CI job wired to the wake-path file set; triggers on PR; fails the build on a non-zero counter.
+- [x] `docs/manual-tests/MT-IDLE-001.md` authored; execution deferred to [v0.3.3-plan Phase 4 PR 1](../v0.3.3-plan.md#phase-4--v033-release-prep-execution).
+- [x] `MT-COST-004` (RFC 0023) automated surface passes unchanged under the event-driven model — the legacy-adapter TICK path is untouched, so `idle_reason=budget_denied` is still emitted (`test_action_loop_resource_exhausted`, `test_tick_budget_denied_idle`).
+- [x] Channel-message dispatch goes through `event_loop.enqueue(InboundEventWake(event))` directly (fire-and-forget, no handle), not through `scheduler.wake()` ([v0.3.3-plan Acceptance row 2](../v0.3.3-plan.md#acceptance-for-v033)).
+- [x] [README Cost Warning](../../README.md#%EF%B8%8F-cost-warning--read-before-running) forward-pointer added.
+- [x] [Progress Overview](#progress-overview) row 4 filled.
 
 ---
 
@@ -728,8 +728,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 2 | 2 | `autonomy.timers` config + per-agent SQLite `scheduled_wakes` (table + cache class shipped, **not wired** into `initialize_persona_agents`) | `feature/v033-rfc0024-timer-registry` | ✅ Merged | [#407](https://github.com/mkhomutov/Persatrix/pull/407) | 2026-05-21 |
 | 2.1 | 2 | Wire `ScheduledWakesCache` into `initialize_persona_agents` — rebuild from config on startup; restore `next_fire_at_ms` so restart mid-jitter-window does not fire immediately | `feature/v033-rfc0024-scheduled-wakes-wiring` | ✅ Merged | [#408](https://github.com/mkhomutov/Persatrix/pull/408) | 2026-05-21 |
 | 3a | 3 (prereq) | Write-side `salience` + `source_span_id` (no wake yet) | `feature/v033-rfc0024-salience-prereqs` | ✅ Merged | [#409](https://github.com/mkhomutov/Persatrix/pull/409) | 2026-05-21 |
-| 3b | 3 | `SalienceWake` + threshold + loop-back guard + rate-limit | `feature/v033-rfc0024-salience-wake` | 🔀 PR open | this PR | — |
-| 4 | 4 | Channel-message dispatch + cost-regression CI gate | `feature/v033-rfc0024-channel-dispatch` | ⬜ Not started | — | — |
+| 3b | 3 | `SalienceWake` + threshold + loop-back guard + rate-limit | `feature/v033-rfc0024-salience-wake` | ✅ Merged | [#410](https://github.com/mkhomutov/Persatrix/pull/410) | 2026-05-21 |
+| 4 | 4 | Channel-message dispatch + cost-regression CI gate | `feature/v033-rfc0024-channel-dispatch` | 🔀 PR open | this PR | — |
 | 5 | — | Review follow-ups | `feature/v033-rfc0024-followups` | ⬜ Not started | — | — |
 | 6 | — | Phases-1–4 closeout | `feature/v033-rfc0024-close` | ⬜ Not started | — | — |
 

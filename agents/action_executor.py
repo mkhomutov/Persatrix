@@ -87,10 +87,12 @@ class ActionExecutor:
     def channel_publisher(self) -> ChannelPublisher | None:
         """Public accessor for the configured REST publisher (may be ``None``).
 
-        ISSUE-0065 — exposed so :class:`AgentServiceServicer` can publish
-        a structured-error reply on the originating channel when
-        :meth:`_dispatch_channel_event` catches :class:`BudgetExceededError`,
-        without reaching into the executor's private attribute.
+        ISSUE-0065 — exposed so the inbound channel-event processing path
+        (:func:`agents.chat_reply.process_inbound_channel_event`, run by the
+        event loop's ``on_inbound`` callback) can publish a structured-error
+        reply on the originating channel when the persona action loop raises
+        :class:`BudgetExceededError`, without reaching into the executor's
+        private attribute.
         """
         return self._channel_publisher
 

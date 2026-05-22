@@ -173,9 +173,9 @@ class TestCascadeDepthOnTheWire:
 class TestCustomMetadataPassThrough:
     """ISSUE-0065 — extra ``metadata`` rides the wire alongside ``cascade_depth``.
 
-    The chat-error reply published by
-    ``AgentServiceServicer._dispatch_channel_event`` under
-    :class:`BudgetExceededError` carries a ``metadata['reply_status']``
+    The chat-error reply published by the inbound channel-event
+    processing path (``agents.chat_reply.process_inbound_channel_event``)
+    under :class:`BudgetExceededError` carries a ``metadata['reply_status']``
     discriminator that the orchestrator's REST chat handler reads to
     set ``reply_status='error'`` in the JSON envelope. The publisher
     must therefore accept caller-supplied metadata and merge it with

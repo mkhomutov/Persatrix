@@ -2,14 +2,16 @@
 
 Split from ``test_receive_channel_message.py`` to keep both files under
 the project's 500-line code-file cap. Shared fixtures (``_make_servicer``,
-``_channel_event``, ``_drain``) are intentionally re-declared here rather
-than imported, so the file remains self-contained and matches the
-in-house test-style conventions used elsewhere in the suite.
+``_channel_event``) are intentionally re-declared here rather than
+imported, so the file remains self-contained and matches the in-house
+test-style conventions used elsewhere in the suite.
 
 Covers:
 
-- ``TestReceiveChannelMessageBackpressure`` — pinning the bounded
-  ``_pending_dispatches`` cap (PR #248 deep review **Low** finding).
+- ``TestReceiveChannelMessageBackpressure`` — pinning discard-not-block
+  backpressure. RFC 0024 Phase 4 moved in-flight backpressure from the
+  servicer's ``_pending_dispatches`` cap (PR #248 deep review **Low**
+  finding) onto the per-agent ``EventLoop``'s bounded queue.
 - ``TestReceiveChannelMessageUnicodeBoundary`` — pinning that the
   4000-character content cap is measured in **codepoints**, not wire
   bytes (PR #248 deep review **NTH** finding).
@@ -17,9 +19,8 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import grpc
 
@@ -39,7 +40,9 @@ def _make_servicer() -> tuple[AgentServiceServicer, MagicMock]:
         "ember-owl": _StubAgent(agent_id="ember-owl", config={"model": "test"}),
     }
     dispatcher = MagicMock(spec=EventDispatcher)
-    dispatcher.dispatch = AsyncMock(return_value=[])
+    # ``enqueue_inbound`` is a synchronous bool-returning method (accepted
+    # / dropped) under the RFC 0024 Phase 4 fire-and-forget model.
+    dispatcher.enqueue_inbound = MagicMock(return_value=True)
     return AgentServiceServicer(agents, dispatcher), dispatcher
 
 
@@ -61,102 +64,48 @@ def _channel_event(**overrides: Any) -> task_pb2.ChannelMessageEvent:
     return task_pb2.ChannelMessageEvent(**fields)
 
 
-async def _drain(servicer: AgentServiceServicer) -> None:
-    pending = getattr(servicer, "_pending_dispatches", None)
-    if pending:
-        await asyncio.gather(*list(pending), return_exceptions=True)
-
-
-# ─── Pending-dispatch backpressure (PR #248 deep review Low) ──
+# ─── Discard-not-block backpressure (RFC 0024 Decided §1) ──
 
 
 class TestReceiveChannelMessageBackpressure:
-    """``_pending_dispatches`` was unbounded prior to this fix.
+    """RFC 0024 Phase 4 moved in-flight backpressure onto the EventLoop.
 
-    A stalled :meth:`EventDispatcher.dispatch` plus a chatty publisher
-    on the cleartext gRPC port would grow the set without bound — a
-    slow-burn DoS surface symmetric with the validator's other bounds
-    work. The cap returns ``TaskAck(success=False)`` once the in-flight
-    queue is full so the orchestrator's existing per-ack failure path
-    becomes the natural backpressure signal.
+    The servicer's old ``_pending_dispatches`` cap (PR #248 deep review
+    **Low**) is gone: the per-agent ``EventLoop``'s bounded queue now
+    rejects wakes when full. ``EventDispatcher.enqueue_inbound`` returns
+    ``False`` in that case and the handler surfaces ``TaskAck(success=
+    False)`` — the orchestrator's existing per-ack failure path is the
+    natural backpressure signal, symmetric with the validator's bounds.
     """
 
-    async def test_rejects_when_pending_queue_full(self):
-        from agents.server_servicers import _MAX_PENDING_DISPATCHES
-
+    async def test_rejects_when_event_loop_queue_full(self):
         servicer, dispatcher = _make_servicer()
-        gate = asyncio.Event()
-
-        async def stalled_dispatch(*_args: Any, **_kwargs: Any) -> list[Any]:
-            await gate.wait()
-            return []
-
-        dispatcher.dispatch = AsyncMock(side_effect=stalled_dispatch)
-        ctx = MagicMock(spec=grpc.aio.ServicerContext)
-
-        for i in range(_MAX_PENDING_DISPATCHES):
-            ack = await servicer.ReceiveChannelMessage(
-                _channel_event(message_id=f"msg-{i:04d}"), ctx
-            )
-            assert ack.success is True, f"unexpected reject at i={i}"
-        assert len(servicer._pending_dispatches) == _MAX_PENDING_DISPATCHES
-
+        dispatcher.enqueue_inbound = MagicMock(return_value=False)
         ack = await servicer.ReceiveChannelMessage(
-            _channel_event(message_id="msg-overflow"), ctx
+            _channel_event(), MagicMock(spec=grpc.aio.ServicerContext),
         )
         assert ack.success is False
         assert (
             "overload" in ack.error_message.lower()
-            or "pending" in ack.error_message.lower()
+            or "queue full" in ack.error_message.lower()
         )
-        # Strong-ref set length is the load-bearing observable: the
-        # overflow ack did not enqueue a new task. (We deliberately do
-        # NOT assert ``dispatcher.dispatch.call_count`` here — the
-        # ``create_task``-scheduled coroutines do not run until the
-        # event loop yields, and ``ReceiveChannelMessage`` returns
-        # synchronously.)
-        assert len(servicer._pending_dispatches) == _MAX_PENDING_DISPATCHES
-
-        gate.set()
-        await _drain(servicer)
-        assert len(servicer._pending_dispatches) == 0
 
     async def test_capacity_recovers_after_drain(self):
-        """A request that arrives after the queue drains MUST succeed."""
-        from agents.server_servicers import _MAX_PENDING_DISPATCHES
-
+        """Once the loop drains (enqueue accepts again), requests succeed."""
         servicer, dispatcher = _make_servicer()
-        gate = asyncio.Event()
-
-        async def stalled_dispatch(*_args: Any, **_kwargs: Any) -> list[Any]:
-            await gate.wait()
-            return []
-
-        dispatcher.dispatch = AsyncMock(side_effect=stalled_dispatch)
-        ctx = MagicMock(spec=grpc.aio.ServicerContext)
-
-        for i in range(_MAX_PENDING_DISPATCHES):
-            await servicer.ReceiveChannelMessage(
-                _channel_event(message_id=f"msg-{i:04d}"), ctx
-            )
-
-        gate.set()
-        await _drain(servicer)
-        assert len(servicer._pending_dispatches) == 0
-
-        gate2 = asyncio.Event()
-
-        async def stalled2(*_args: Any, **_kwargs: Any) -> list[Any]:
-            await gate2.wait()
-            return []
-
-        dispatcher.dispatch = AsyncMock(side_effect=stalled2)
-        ack = await servicer.ReceiveChannelMessage(
-            _channel_event(message_id="msg-after"), ctx
+        dispatcher.enqueue_inbound = MagicMock(return_value=False)
+        rejected = await servicer.ReceiveChannelMessage(
+            _channel_event(message_id="msg-full"),
+            MagicMock(spec=grpc.aio.ServicerContext),
         )
-        assert ack.success is True
-        gate2.set()
-        await _drain(servicer)
+        assert rejected.success is False
+
+        dispatcher.enqueue_inbound = MagicMock(return_value=True)
+        accepted = await servicer.ReceiveChannelMessage(
+            _channel_event(message_id="msg-after"),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        assert accepted.success is True
 
 
 # ─── Unicode content boundary (PR #248 deep review NTH) ──
@@ -182,7 +131,6 @@ class TestReceiveChannelMessageUnicodeBoundary:
             _channel_event(content="🦊" * 4000),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
         assert ack.success is True
 
     async def test_rejects_4001_codepoints_of_multibyte(self):
@@ -191,6 +139,5 @@ class TestReceiveChannelMessageUnicodeBoundary:
             _channel_event(content="🦊" * 4001),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
-        await _drain(servicer)
         assert ack.success is False
         assert "content" in ack.error_message

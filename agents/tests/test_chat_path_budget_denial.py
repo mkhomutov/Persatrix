@@ -14,14 +14,16 @@ it was *denied*), the ``reply_status`` carries the structured ``"error"``,
 and ``reply`` carries the wallet's ``LeaseDenied.message`` so an operator
 reading the chat log can see *why* the call was refused.
 
-ISSUE-0065 also pins the *channel-receive* arm of the chat path: under
-v0.3.2 the production REST chat handler routes via
-``ChannelRouter.PublishAndAwait`` → ``ReceiveChannelMessage`` →
-``_dispatch_channel_event``, NOT ``SendChatMessage``. The
-``_dispatch_channel_event`` wrapper must catch :class:`BudgetExceededError`
-and publish a structured-error reply back on the originating channel so
-the orchestrator's reply waiter resolves, the REST chat handler returns
-HTTP 200 + ``reply_status="error"`` instead of HTTP 504 ``DEADLINE_EXCEEDED``.
+ISSUE-0065 also pins the *channel-receive* arm of the chat path: the
+production REST chat handler routes via
+``ChannelRouter.PublishAndAwait`` → ``ReceiveChannelMessage``, NOT
+``SendChatMessage``. Under RFC 0024 Phase 4 that handler enqueues
+fire-and-forget and the event loop runs
+``process_inbound_channel_event``, whose recovery arm must catch
+:class:`BudgetExceededError` and publish a structured-error reply back on
+the originating channel so the orchestrator's reply waiter resolves and
+the REST chat handler returns HTTP 200 + ``reply_status="error"`` instead
+of HTTP 504 ``DEADLINE_EXCEEDED``.
 """
 
 from __future__ import annotations
@@ -33,6 +35,8 @@ import grpc.aio
 import pytest
 
 from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
+from agents.cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
+from agents.chat_reply import process_inbound_channel_event
 from agents.dispatch import EventDispatcher
 from agents.generated import task_pb2, task_pb2_grpc
 from agents.persona_types import AgentEvent, EventType
@@ -176,30 +180,47 @@ def _make_channel_event(
     )
 
 
-def _make_servicer_with_publisher(
+def _make_agent_executor(
     *,
-    dispatch_side_effect: Exception | None = None,
-) -> tuple[AgentServiceServicer, AsyncMock]:
-    """Build a servicer with a mock channel_publisher attached to the dispatcher.
+    on_event_side_effect: Exception | None = None,
+    publisher: AsyncMock | None = None,
+) -> tuple[MagicMock, MagicMock, AsyncMock]:
+    """Build ``(agent, executor, publisher)`` for the processing coroutine.
 
-    Returns ``(servicer, publisher_mock)`` so tests can drive
-    ``_dispatch_channel_event`` directly and inspect what was published.
+    RFC 0024 Phase 4 moved channel-message processing onto the per-agent
+    ``EventLoop``: the loop runs
+    :func:`agents.chat_reply.process_inbound_channel_event`, which wraps
+    the persona action loop in the ISSUE-0065/0066 recovery arm. A budget
+    denial is therefore raised inside ``agent.on_event`` (the
+    wallet-leased ``create_message`` call), not by the dispatcher; the
+    executor's ``channel_publisher`` is where the structured-error reply
+    lands. Passing ``publisher=None`` exercises the no-publisher fallback.
     """
-    agent = _StubAgent(agent_id="chat-agent", config={"model": "test"})
-    dispatcher = MagicMock(spec=EventDispatcher)
-    dispatcher.dispatch = AsyncMock(side_effect=dispatch_side_effect)
-    publisher = AsyncMock()
-    publisher.publish = AsyncMock(return_value=None)
+    agent = MagicMock()
+    agent.agent_id = "chat-agent"
+    agent.on_event = AsyncMock(side_effect=on_event_side_effect, return_value=[])
+    if publisher is None:
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
     executor = MagicMock()
     executor.channel_publisher = publisher
-    dispatcher.executor = executor
-    return AgentServiceServicer({"chat-agent": agent}, dispatcher), publisher
+    executor.execute = AsyncMock(return_value=[])
+    return agent, executor, publisher
 
 
-class TestDispatchChannelEventBudgetDenial:
-    """ISSUE-0065 — ``_dispatch_channel_event`` must publish a structured-error
-    reply on the originating channel when dispatch raises
-    :class:`BudgetExceededError`.
+async def _process(agent: MagicMock, executor: MagicMock, event: AgentEvent) -> None:
+    await process_inbound_channel_event(
+        agent=agent,
+        executor=executor,
+        event=event,
+        max_cascade_depth=DEFAULT_MAX_CASCADE_DEPTH,
+    )
+
+
+class TestProcessInboundBudgetDenial:
+    """ISSUE-0065 — fire-and-forget inbound processing must publish a
+    structured-error reply on the originating channel when the persona
+    action loop raises :class:`BudgetExceededError`.
 
     The orchestrator's :class:`PublishAndAwait` reply waiter keys on
     ``(channelID, awaitFromAgentID)`` (see
@@ -209,10 +230,10 @@ class TestDispatchChannelEventBudgetDenial:
     ``metadata["reply_status"]`` and surfaces it in the JSON envelope —
     so the published reply must carry that discriminator.
 
-    Without this arm, ``_dispatch_channel_event``'s generic
-    ``except Exception`` branch only logs the denial; the waiter never
-    sees a reply and times out → HTTP 504 instead of MT-COST-003's
-    contracted HTTP 200 + ``reply_status="error"``.
+    Without this arm, the channel-processing generic ``except Exception``
+    branch only logs the denial; the waiter never sees a reply and times
+    out → HTTP 504 instead of MT-COST-003's contracted HTTP 200 +
+    ``reply_status="error"``.
     """
 
     async def test_budget_denied_publishes_error_reply_on_channel(self) -> None:
@@ -224,12 +245,12 @@ class TestDispatchChannelEventBudgetDenial:
             estimated_usd=0.0846,
             reason="budget_exceeded",
         )
-        servicer, publisher = _make_servicer_with_publisher(
-            dispatch_side_effect=denial,
+        agent, executor, publisher = _make_agent_executor(
+            on_event_side_effect=denial,
         )
         event = _make_channel_event()
 
-        await servicer._dispatch_channel_event("chat-agent", event)
+        await _process(agent, executor, event)
 
         # The wrapper must have published *exactly one* reply on the
         # originating channel — the wallet denial envelope.
@@ -275,12 +296,12 @@ class TestDispatchChannelEventBudgetDenial:
             "wallet unreachable — LLM call failing closed",
             reason="wallet_unreachable",
         )
-        servicer, publisher = _make_servicer_with_publisher(
-            dispatch_side_effect=unreachable,
+        agent, executor, publisher = _make_agent_executor(
+            on_event_side_effect=unreachable,
         )
         event = _make_channel_event()
 
-        await servicer._dispatch_channel_event("chat-agent", event)
+        await _process(agent, executor, event)
 
         assert publisher.publish.await_count == 1
         call_kwargs = publisher.publish.await_args.kwargs
@@ -291,33 +312,33 @@ class TestDispatchChannelEventBudgetDenial:
     async def test_generic_exception_does_not_publish_error_reply(self) -> None:
         """Only :class:`BudgetExceededError` triggers the published-error path.
 
-        A bare :class:`RuntimeError` from the dispatcher is still logged
+        A bare :class:`RuntimeError` from the action loop is still logged
         via the generic ``except Exception`` arm but does NOT publish a
-        reply — silently turning every dispatch crash into a fake chat
+        reply — silently turning every processing crash into a fake chat
         response would mask agent bugs. The 504 surface is the correct
         one for unexpected errors today; only the explicitly-modelled
         wallet denial gets the structured envelope.
         """
-        servicer, publisher = _make_servicer_with_publisher(
-            dispatch_side_effect=RuntimeError("boom"),
+        agent, executor, publisher = _make_agent_executor(
+            on_event_side_effect=RuntimeError("boom"),
         )
         event = _make_channel_event()
 
-        await servicer._dispatch_channel_event("chat-agent", event)
+        await _process(agent, executor, event)
 
         assert publisher.publish.await_count == 0, (
             "Generic exceptions must NOT trigger a published reply — only "
             "BudgetExceededError does; the 504 surface remains for crashes."
         )
 
-    async def test_happy_path_dispatch_does_not_publish_error_reply(self) -> None:
-        """Successful dispatch must not trigger the error-reply path."""
-        servicer, publisher = _make_servicer_with_publisher(
-            dispatch_side_effect=None,
+    async def test_happy_path_does_not_publish_error_reply(self) -> None:
+        """Successful processing must not trigger the error-reply path."""
+        agent, executor, publisher = _make_agent_executor(
+            on_event_side_effect=None,
         )
         event = _make_channel_event()
 
-        await servicer._dispatch_channel_event("chat-agent", event)
+        await _process(agent, executor, event)
 
         assert publisher.publish.await_count == 0
 
@@ -333,14 +354,11 @@ class TestDispatchChannelEventBudgetDenial:
         denial = BudgetExceededError(
             "per_agent budget exceeded", scope="per_agent",
         )
-        agent = _StubAgent(agent_id="chat-agent", config={"model": "test"})
-        dispatcher = MagicMock(spec=EventDispatcher)
-        dispatcher.dispatch = AsyncMock(side_effect=denial)
-        executor = MagicMock()
+        agent, executor, _ = _make_agent_executor(
+            on_event_side_effect=denial, publisher=None,
+        )
         executor.channel_publisher = None
-        dispatcher.executor = executor
-        servicer = AgentServiceServicer({"chat-agent": agent}, dispatcher)
         event = _make_channel_event()
 
         # Must not raise.
-        await servicer._dispatch_channel_event("chat-agent", event)
+        await _process(agent, executor, event)

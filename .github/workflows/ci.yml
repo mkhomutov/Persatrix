@@ -136,6 +136,70 @@ jobs:
       - name: Personal-tier recall latency gate
         run: python tests/perf/personal_tier_latency.py
 
+  cost-regression-gate:
+    # RFC 0024 §Test Strategy — the "bored persona" cost-regression gate is
+    # *the* v0.3.3 "Idle Truly Idle" acceptance. It is a release-blocker, not
+    # a nightly: a regression that re-introduces the polling-cost class
+    # (v0.2.1 leak) re-enters via any file in the trigger set below, so the
+    # gate runs on every PR that touches one of them. The job is always
+    # present (so it can be a required status check); the heavy steps run
+    # only when a wake-path file changed.
+    #
+    # Maintenance: the trigger set is the RFC's named wake-path file set plus
+    # the modules that carry wake-path behaviour as of RFC 0024 Phase 4. A
+    # future PR introducing a new wake-path module MUST extend this list in
+    # the same PR (RFC 0024 §Test Strategy; v0.3.3-plan Risk row 4).
+    name: Cost regression gate (bored persona)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # paths-filter needs history for push-event diffs
+
+      - name: Detect wake-path changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            wake_path:
+              - 'agents/event_loop.py'
+              - 'agents/event_loop_salience.py'
+              - 'agents/event_loop_timers.py'
+              - 'agents/tick.py'
+              - 'agents/dispatch.py'
+              - 'agents/action_executor.py'
+              - 'agents/chat_reply.py'
+              - 'agents/persona.py'
+              - 'agents/persona_runtime/**'
+              - 'agents/memory/**'
+              - 'agents/server_persona.py'
+              - 'agents/server_servicers.py'
+              - 'agents/observability/metrics.py'
+              - 'agents/observability/_metrics_wakes.py'
+              - 'tests/integration/test_bored_persona_cost.py'
+
+      - uses: actions/setup-python@v5
+        if: steps.changes.outputs.wake_path == 'true'
+        with:
+          python-version: "3.11"
+
+      - name: Install protoc
+        if: steps.changes.outputs.wake_path == 'true'
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "34.1"  # pin to exact version to match committed stubs
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        if: steps.changes.outputs.wake_path == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          cd agents && pip install -e ".[dev]"
+
+      - name: Bored-persona cost-regression gate
+        if: steps.changes.outputs.wake_path == 'true'
+        run: python -m pytest tests/integration/test_bored_persona_cost.py -v --tb=short
+
   rust:
     name: Rust (build + clippy)
     runs-on: ubuntu-latest
