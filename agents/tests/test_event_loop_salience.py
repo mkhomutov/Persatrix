@@ -160,14 +160,13 @@ class TestThreshold:
         metric_reader: InMemoryMetricReader,
     ) -> None:
         """Salience strictly above threshold enqueues a ``SalienceWake``."""
-        # The not-suppressed branch records ``suppressed_reason="none"``;
-        # the supervisor's draining is observable on the counter so we do
-        # not need to monkey-patch the wake dispatch path.
+        # The admit branch records ``suppressed_reason="none"`` synchronously
+        # inside the subscriber during ``publish()``: ``enqueue`` is a
+        # non-blocking ``put_nowait``, and ``_record`` runs in the same
+        # frame — the counter is already set when ``publish()`` returns, so
+        # no wait on the supervisor drain path is needed (matches the
+        # suppression-branch tests above).
         fresh_bus.publish(_write_event(salience=0.9))
-        for _ in range(50):
-            if _salience_points_by_reason(metric_reader).get("none", 0) >= 1:
-                break
-            await asyncio.sleep(0.01)
         assert _salience_points_by_reason(metric_reader).get("none", 0) == 1
 
     async def test_at_threshold_does_not_enqueue(
@@ -202,11 +201,9 @@ class TestThreshold:
         metric_reader: InMemoryMetricReader,
     ) -> None:
         """The not-suppressed branch increments with ``suppressed_reason="none"``."""
+        # Recorded synchronously during ``publish()`` — see
+        # ``test_above_threshold_enqueues_salience_wake``.
         fresh_bus.publish(_write_event(salience=0.6))
-        for _ in range(50):
-            if _salience_points_by_reason(metric_reader).get("none", 0) >= 1:
-                break
-            await asyncio.sleep(0.01)
         reasons = _salience_points_by_reason(metric_reader)
         assert reasons.get("none", 0) == 1
 
@@ -232,6 +229,36 @@ class TestLoopbackGuard:
         assert reasons.get("loopback", 0) == 1
         assert reasons.get("none", 0) == 0
 
+    async def test_loopback_suppresses_for_any_active_span_not_only_llm(
+        self,
+        fresh_bus: MemoryWriteBus,
+        loop_above_threshold: EventLoop,
+        metric_reader: InMemoryMetricReader,
+    ) -> None:
+        """The guard matches by span *id* alone — span name/kind is irrelevant.
+
+        ``current_llm_span_id()`` reads whatever span is active, not only
+        ``agent.llm.call`` spans (its name reflects the load-bearing caller,
+        not a filter). Because every write site captures ``source_span_id``
+        and publishes synchronously in the same frame, the practical contract
+        is broader than "inside an LLM call": *any* write that fires inside an
+        active span is suppressed as ``loopback``; only span-less writes
+        (``source_span_id is None``) can enqueue a wake. This test pins a
+        deliberately non-LLM span name so a future change that narrows the
+        guard to LLM-call spans (a calibration-PR decision — see
+        ``agents.event_loop_salience`` module docstring §3) trips here rather
+        than silently flipping the trigger population.
+        """
+        tracer = trace.get_tracer("test")
+        with tracer.start_as_current_span("agent.persona.tick") as span:
+            sid_hex = f"{span.get_span_context().span_id:016x}"
+            fresh_bus.publish(
+                _write_event(salience=0.9, source_span_id=sid_hex),
+            )
+        reasons = _salience_points_by_reason(metric_reader)
+        assert reasons.get("loopback", 0) == 1
+        assert reasons.get("none", 0) == 0
+
     async def test_loopback_does_not_suppress_when_no_active_span(
         self,
         fresh_bus: MemoryWriteBus,
@@ -241,14 +268,10 @@ class TestLoopbackGuard:
         """A write with a captured span_id but no active span at publish time fires."""
         # The write captured some past span; by publish time no span is
         # active. ``current_llm_span_id()`` returns ``None`` so the guard
-        # cannot match — the wake enqueues.
+        # cannot match — the wake enqueues (recorded synchronously).
         fresh_bus.publish(
             _write_event(salience=0.9, source_span_id="abcd1234abcd1234"),
         )
-        for _ in range(50):
-            if _salience_points_by_reason(metric_reader).get("none", 0) >= 1:
-                break
-            await asyncio.sleep(0.01)
         reasons = _salience_points_by_reason(metric_reader)
         assert reasons.get("none", 0) == 1
         assert reasons.get("loopback", 0) == 0
@@ -270,10 +293,6 @@ class TestLoopbackGuard:
         # No active span at publish time either.
         del tracer
         fresh_bus.publish(_write_event(salience=0.9, source_span_id=None))
-        for _ in range(50):
-            if _salience_points_by_reason(metric_reader).get("none", 0) >= 1:
-                break
-            await asyncio.sleep(0.01)
         reasons = _salience_points_by_reason(metric_reader)
         assert reasons.get("loopback", 0) == 0
         assert reasons.get("none", 0) == 1
@@ -306,15 +325,13 @@ class TestRateLimit:
         )
         loop.start()
         try:
+            # Each publish records its outcome synchronously in the
+            # subscriber: the first 3 admit (``none``), the remaining 17 hit
+            # the frozen-window cap (``rate_limit``).  No supervisor-drain
+            # wait is involved — the counter is complete once the publish
+            # loop returns.
             for _ in range(20):
                 fresh_bus.publish(_write_event(salience=0.9))
-            # Give the supervisor time to drain the queue (the three enqueued
-            # wakes increment ``suppressed_reason=none`` via the supervisor
-            # path).
-            for _ in range(50):
-                if _salience_points_by_reason(metric_reader).get("none", 0) >= 3:
-                    break
-                await asyncio.sleep(0.01)
         finally:
             await loop.stop(timeout=1.0)
 
@@ -352,13 +369,11 @@ class TestRateLimit:
             # Advance the clock past the window — the next fire is allowed.
             clock[0] = 1002.0
             fresh_bus.publish(_write_event(salience=0.9))
-            for _ in range(50):
-                if _salience_points_by_reason(metric_reader).get("none", 0) >= 3:
-                    break
-                await asyncio.sleep(0.01)
         finally:
             await loop.stop(timeout=1.0)
 
+        # Outcomes recorded synchronously per publish: t=1000 admits 2 then
+        # caps 1; t=1002 admits 1 after the window slides → none=3, rate=1.
         reasons = _salience_points_by_reason(metric_reader)
         assert reasons.get("none", 0) == 3
         assert reasons.get("rate_limit", 0) == 1
@@ -438,21 +453,15 @@ class TestSubscriptionLifecycle:
             salience_rate_max_per_sec=100,
         )
         loop.start()
-        # Subscribed: a write records on the counter.
+        # Subscribed: a write records on the counter synchronously.
         fresh_bus.publish(_write_event(salience=0.9))
-        for _ in range(50):
-            if _salience_points_by_reason(metric_reader).get("none", 0) >= 1:
-                break
-            await asyncio.sleep(0.01)
         assert _salience_points_by_reason(metric_reader).get("none", 0) == 1
 
+        # ``stop()`` unsubscribes synchronously (before its first await), so
+        # once it returns a further publish reaches no subscriber and cannot
+        # increment the counter.
         await loop.stop(timeout=1.0)
-        # After stop, the subscriber must be gone — a further publish must
-        # NOT increment the counter.
         fresh_bus.publish(_write_event(salience=0.9))
-        # Give the (now-stopped) supervisor a small grace period; no record
-        # should appear.
-        await asyncio.sleep(0.05)
         assert _salience_points_by_reason(metric_reader).get("none", 0) == 1
 
     async def test_no_subscription_until_start(

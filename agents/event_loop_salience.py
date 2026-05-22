@@ -37,6 +37,20 @@ The subscriber owns four pieces of suppression policy:
    The explicit ``is not None`` guard prevents the
    ``None == None`` vacuous match for background-task writes with no
    captured span.
+
+   The guard matches by span **id** alone: :func:`current_llm_span_id`
+   reads whatever span is active, *not* only ``agent.llm.call`` spans
+   (the "llm" in the name reflects the load-bearing caller, not a
+   filter on span name or kind).  Combined with the synchronous
+   capture-and-publish, the practical contract is broader than "inside
+   an LLM call" — *any* write that fires inside an active span is
+   suppressed; only writes with no active span at capture time
+   (``source_span_id is None``) can ever enqueue a wake.  This errs
+   cost-safe (over-suppression cannot reintroduce the v0.2.1 leak);
+   whether to narrow it to LLM-call spans specifically is a
+   calibration-PR decision deferred until the v0.4.0+ consumer lands
+   (RFC 0024 PR plan §"From PR 3b review").  Pinned span-agnostic by
+   ``test_loopback_suppresses_for_any_active_span_not_only_llm``.
 4. **Rate-limit.** A sliding 1-second window with a configurable cap
    (default ``10`` per RFC §Security Considerations) keeps a malicious
    or buggy write storm from DoS-ing the agent.  ``time_fn`` is injected
@@ -135,9 +149,13 @@ class _SalienceSubscriber:
             return _REASON_BELOW
 
         # Loop-back guard: the write's captured span vs the span active
-        # in this call stack right now.  Both ``None`` is the
-        # background-task case and must NOT match (it would suppress
-        # every legitimate non-LLM write).
+        # in this call stack right now.  Matches by span id alone —
+        # ``current_llm_span_id()`` reads whatever span is active, not
+        # only LLM-call spans, so any write that fires inside an active
+        # span is suppressed (cost-safe over-suppression; see module
+        # docstring §3).  Both ``None`` is the background-task case and
+        # must NOT match (it would suppress every legitimate span-less
+        # write).
         if event.source_span_id is not None:
             active = current_llm_span_id()
             if active is not None and event.source_span_id == active:
