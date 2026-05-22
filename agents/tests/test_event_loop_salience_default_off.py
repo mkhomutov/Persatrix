@@ -149,7 +149,10 @@ class TestSchemaDefaultMatchesCode:
         schema = json.loads(
             Path("schemas/agent.schema.json").read_text(encoding="utf-8"),
         )
-        return schema["definitions"]["autonomy"]["properties"]
+        # ``json.loads`` is typed ``Any``; pin the return through a typed
+        # local so mypy's ``no-any-return`` (whole-package check) is satisfied.
+        props: dict[str, Any] = schema["definitions"]["autonomy"]["properties"]
+        return props
 
     def test_schema_threshold_default_matches_event_loop_constant(self) -> None:
         props = self._autonomy_props()
