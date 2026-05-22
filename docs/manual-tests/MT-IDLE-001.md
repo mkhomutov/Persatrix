@@ -222,11 +222,11 @@ channel traffic during the window.
 
 ## Test Results
 
-> Execution deferred to v0.3.3 release-prep ([v0.3.3-plan Phase 4 PR 1](../v0.3.3-plan.md#phase-4--v033-release-prep-execution)).
+Executed in v0.3.3 release-prep PR 1 — see [`v0.3.3-execution-report.md`](v0.3.3-execution-report.md#mt-idle-001--primary-gate-evidence-live) for per-step evidence.
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| _pending_ | | | | |
+| 2026-05-22 | Claude (Opus 4.7) | Windows 11 + Docker Desktop | ✅ Pass | `ea2b86d` RC tip, live stack. ember-owl (`timers: []`): event-driven start (no cadence); 60 s idle window → 0 tokens / $0, no `agent.wake.*`, no LLM/memory/wallet activity; cost unchanged; chat turn woke it (`reply_status="ok"`, cost advanced, `agent_wake_inbound_total` 0→1). |
 
 ---
 
