@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-05-22 (v0.3.3 release-prep PR 4 — final pre-tag verification. PRs 0–3 of release prep merged: plan ([#415](https://github.com/mkhomutov/Persatrix/pull/415)), MT execution report ([#416](https://github.com/mkhomutov/Persatrix/pull/416)), docs refresh + release checklist ([#418](https://github.com/mkhomutov/Persatrix/pull/418)), version bump + curated changelog + `MemoryFacade` alias removal ([#419](https://github.com/mkhomutov/Persatrix/pull/419)). PR 4 (this PR) re-ran the full gate sweep on the post-bump tip — all green, incl. a live Docker smoke covering the four release behaviours — and flips the Version Map v0.3.3 row `🚧 Release prep` → `✅ Released`; the `v0.3.3` git tag and GitHub Release follow post-merge per [release-prep plan Phase 5](docs/v0.3.3-release-prep-plan.md).)
+> **Last updated**: 2026-05-22 (v0.3.3 post-release follow-up — `v0.3.3` tagged and the [GitHub Release "Idle Truly Idle"](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.3) published. README v0.3.3 roadmap row → ✅ Released; ROADMAP `Last updated` refresh; Merged PR History backfill for the full v0.3.3 cycle ([#415](https://github.com/mkhomutov/Persatrix/pull/415) through [#420](https://github.com/mkhomutov/Persatrix/pull/420) — the table had stopped at [#414](https://github.com/mkhomutov/Persatrix/pull/414)); master plan + release-prep plan + release checklist status hygiene. The Version Map v0.3.3 row and "Current phase" / "Current milestone" already flipped to ✅ Released in release-prep PR 4 ([#420](https://github.com/mkhomutov/Persatrix/pull/420)).)
 > **Current phase**: v0.3.3 (Idle Truly Idle — RFC 0024 Phases 1–4) — ✅ Released
 > **Current milestone**: v0.3.3 released. The persona autonomy loop is now structurally event-driven (RFC 0024 Phases 1–4): a persona with `autonomy.timers: []` and no inbound traffic parks on `queue.get()` and pays nothing — no SQLite recall, no `_inject_memory_context`, no provider activity, no wallet lease — and wakes only on an inbound RPC, a scheduled timer, or a salience memory write. The polling-loop cost-leak class is closed structurally, guarded by the bored-persona `cost-regression-gate` CI job. Next phase is v0.4.0 (team/hierarchy) with the v0.3.4 patch (RFC 0031 Phases 2–4) sequenced first.
 
@@ -1015,6 +1015,12 @@ v0.5.0 complete
 | [#412](https://github.com/mkhomutov/Persatrix/pull/412) | feat(v033): RFC 0024 PR 5 — EventLoop lifecycle hardening | 0024 (5) | 2026-05-22 |
 | [#413](https://github.com/mkhomutov/Persatrix/pull/413) | feat(v033): RFC 0024 PR 5.1 — review-follow-up cleanups + deferred test-gap fills (Phase 1–4) | 0024 (5.1) | 2026-05-22 |
 | [#414](https://github.com/mkhomutov/Persatrix/pull/414) | docs(v033): RFC 0024 PR 6 — Phases 1–4 closeout | 0024 (6/close) | 2026-05-22 |
+| [#415](https://github.com/mkhomutov/Persatrix/pull/415) | docs(v033): v0.3.3 release-prep plan (master-plan Phase 3) | v0.3.3 release prep | 2026-05-22 |
+| [#416](https://github.com/mkhomutov/Persatrix/pull/416) | docs(v033): release-prep PR 1 — manual-test execution report | v0.3.3 release prep | 2026-05-22 |
+| [#417](https://github.com/mkhomutov/Persatrix/pull/417) | docs: refresh MT-CHAT-003/004 for RFC 0020 interaction-close; file ISSUE-0067/0068 | MT / docs | 2026-05-22 |
+| [#418](https://github.com/mkhomutov/Persatrix/pull/418) | docs(v033): release-prep PR 2 — docs refresh + release checklist | v0.3.3 release prep | 2026-05-22 |
+| [#419](https://github.com/mkhomutov/Persatrix/pull/419) | chore(v033): release-prep PR 3 — version bump + changelog + MemoryFacade alias removal | v0.3.3 release prep | 2026-05-22 |
+| [#420](https://github.com/mkhomutov/Persatrix/pull/420) | docs(v033): release-prep PR 4 — final pre-tag verification | v0.3.3 release prep | 2026-05-22 |
 
 ---
 
