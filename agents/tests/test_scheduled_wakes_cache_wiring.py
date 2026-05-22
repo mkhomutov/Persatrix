@@ -30,6 +30,7 @@ from agents.dispatch import EventDispatcher
 from agents.memory.scheduled_wakes import ScheduledWakeRow, ScheduledWakesCache
 from agents.persona import create_persona_agent
 from agents.server_persona import initialize_persona_agents
+from agents.server_persona_timers import _build_scheduled_wake_rows
 from agents.tests._scheduled_wakes_wiring_helpers import (
     make_client,
     persona_config,
@@ -268,6 +269,43 @@ class TestIntervalMsRounding:
         await schedulers["ember-owl"].stop()
         await caches["ember-owl"].close()
         await agent.close_memory()
+
+    def test_half_millisecond_uses_bankers_rounding(self):
+        """``round()`` is round-half-to-even, *not* round-half-up.
+
+        PR 2.1 review (3): ``test_fractional_seconds_rounds_to_nearest_ms``
+        deliberately picks ``1.501`` (an unambiguous fractional value) and
+        so never visits the half-case branch. This test pins the actual
+        ``round(seconds * 1000)`` semantics on values whose product with
+        1000 is *exactly* ``N.5`` (verified exactly representable in IEEE-754),
+        so a future refactor to ``math.floor`` / ``int`` / a manual
+        round-half-up surfaces in CI:
+
+        * ``1.5005s`` → ``1500.5`` → ``1500`` — the half rounds *down* to the
+          even neighbour. Round-half-up would give ``1501``.
+        * ``1.5015s`` → ``1501.5`` → ``1502`` — the half rounds *up* to the
+          even neighbour. Truncation / ``math.floor`` would give ``1501``.
+
+        Only round-half-to-even yields the pair ``(1500, 1502)``:
+        round-half-up gives ``(1501, 1502)``; truncation gives ``(1500, 1501)``.
+        Asserting both halves uniquely identifies banker's rounding.
+        """
+        # Guard the premise: both products must be exact halves, else the
+        # test would be pinning float-representation noise, not the rule.
+        assert 1.5005 * 1000 == 1500.5
+        assert 1.5015 * 1000 == 1501.5
+
+        rows = _build_scheduled_wake_rows(
+            [
+                {"id": "down", "interval_seconds": 1.5005, "kind": "any"},
+                {"id": "up", "interval_seconds": 1.5015, "kind": "any"},
+            ],
+            now_ms=0,
+            saved_anchors_ms={},
+        )
+        by_id = {r.timer_id: r for r in rows}
+        assert by_id["down"].interval_ms == 1500  # half-to-even rounds down
+        assert by_id["up"].interval_ms == 1502    # half-to-even rounds up
 
 
 class TestCacheLifecycleOnSetupFailure:

@@ -98,6 +98,31 @@ class EventDispatcher:
         """Register a tick scheduler to wake on incoming events."""
         self._tick_schedulers[agent_id] = scheduler
 
+    def has_tick_scheduler(self, agent_id: str) -> bool:
+        """Whether ``agent_id`` has a tick scheduler registered.
+
+        Public counterpart to :meth:`register_tick_scheduler` so callers
+        (and the partial-init wiring tests) can query registration without
+        reaching into the private ``_tick_schedulers`` dict.
+        (PR 2 review (7): test-coupling cleanup.)
+        """
+        return agent_id in self._tick_schedulers
+
+    @property
+    def max_cascade_depth(self) -> int:
+        """The configured cascade-depth ceiling.
+
+        ``dispatch()`` and the no-running-loop fallback already read the
+        backing ``self._max_cascade_depth``; surfacing it lets the
+        running-loop inbound path
+        (:meth:`agents.tick.TickScheduler._handle_inbound_event`, reached
+        via the executor it holds) honour the same configured ceiling
+        instead of hardcoding :data:`DEFAULT_MAX_CASCADE_DEPTH` — one
+        source of truth across all three inbound paths.
+        (PR 4 review (1): cascade-depth ceiling drift.)
+        """
+        return self._max_cascade_depth
+
     @property
     def executor(self) -> ActionExecutor:
         """Public access to the action executor.

@@ -159,15 +159,26 @@ class ScheduledWakesCache:
         """Replace this agent's cached rows with ``rows`` atomically.
 
         Per RFC 0024 §OQ §1 — ``agents.yaml`` is canonical, so any row
-        not present in ``rows`` is deleted ("orphan cleanup").  Performed
-        in a single transaction so a partial rebuild cannot leave the
-        cache in a half-config state.
+        not present in ``rows`` is deleted ("orphan cleanup").  The DELETE
+        and the re-INSERT run in a single transaction so a partial rebuild
+        cannot leave the cache in a half-config state (pinned by
+        ``test_scheduled_wakes_cache.test_rebuild_is_atomic_on_mid_insert_failure``).
+
+        Transaction handling note (PR 2 review (5)): we rely on
+        ``aiosqlite``'s implicit transaction under the default
+        ``isolation_level=""`` — the first DML (the DELETE below) opens the
+        transaction, the INSERT joins it, and :meth:`commit` finalises both
+        atomically.  We deliberately do *not* issue an explicit ``BEGIN``
+        (it raises "cannot start a transaction within a transaction" if a
+        prior DML on this connection already opened an implicit one), nor
+        use ``async with self._conn:`` — unlike stdlib ``sqlite3``,
+        ``aiosqlite.Connection.__aexit__`` *closes* the connection rather
+        than committing, which would break the next rebuild.
         """
         if self._conn is None:
             raise RuntimeError("ScheduledWakesCache used before initialize()")
 
         async with self._conn.cursor() as cur:
-            await cur.execute("BEGIN")
             try:
                 await cur.execute(
                     "DELETE FROM scheduled_wakes WHERE agent_id = ?",

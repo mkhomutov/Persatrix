@@ -76,13 +76,14 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from .event_loop_types import SalienceWake
 from .memory._events import MemoryWriteEvent
 from .observability._metrics_wakes import wake_attrs
 from .observability.metrics import try_get_instruments
 from .observability.spans import current_llm_span_id
 
 if TYPE_CHECKING:
-    from .event_loop import WakeEvent
+    from .event_loop_types import WakeEvent
 
 logger = logging.getLogger(__name__)
 
@@ -177,9 +178,6 @@ class _SalienceSubscriber:
         if len(self._recent) >= self._rate_max:
             return _REASON_RATE_LIMIT
         self._recent.append(now)
-
-        # Local import to avoid the substrate <-> subscriber cycle.
-        from .event_loop import SalienceWake
 
         accepted = self._enqueue(SalienceWake(write_event=event))
         if not accepted:

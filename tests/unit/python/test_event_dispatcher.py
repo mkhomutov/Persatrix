@@ -214,6 +214,29 @@ class TestEventDispatcher:
         assert scheduler.idle_count == 0
         await agent.close_memory()
 
+    async def test_has_tick_scheduler_reflects_registration(self):
+        """Public ``has_tick_scheduler`` getter (PR 2 review (7)) — True only
+        after registration, so the partial-init wiring tests can assert
+        cleanup without reaching into ``_tick_schedulers``."""
+        agent = await _make_agent()
+        dispatcher = EventDispatcher(agents={"ember-owl": agent})
+        assert not dispatcher.has_tick_scheduler("ember-owl")
+
+        scheduler = TickScheduler(agent, interval=999.0)
+        dispatcher.register_tick_scheduler("ember-owl", scheduler)
+        assert dispatcher.has_tick_scheduler("ember-owl")
+        assert not dispatcher.has_tick_scheduler("nobody")
+        await agent.close_memory()
+
+    def test_max_cascade_depth_exposes_configured_ceiling(self):
+        """The public ``max_cascade_depth`` getter (PR 4 review (1)) returns
+        the configured value so the inbound tick path can share one ceiling
+        with ``dispatch()``."""
+        assert EventDispatcher(max_cascade_depth=2).max_cascade_depth == 2
+        # Default matches the dispatch-time guard's documented default.
+        from agents.cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
+        assert EventDispatcher().max_cascade_depth == DEFAULT_MAX_CASCADE_DEPTH
+
     async def test_self_dispatch_no_deadlock(self):
         """Agent mentioning itself does not deadlock.
 
