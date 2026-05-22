@@ -196,6 +196,24 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # ❌ Fail on this pass). Written against the v0.3.2 release; archive
     # once the tag ships.
     "docs/manual-tests/v0.3.2-execution-report.md",
+    # docs/manual-tests/v0.3.3-execution-report.md is the v0.3.3 sibling of
+    # the v0.3.0 / v0.3.1 / v0.3.2 reports above — identical per-release
+    # accumulator pattern. The PR 1 sweep (34 rows + automated suites) plus
+    # the release-prep PR 4 § Re-Execution section (full-suite rerun + the
+    # four-behaviour live Docker smoke on the post-version-bump tip) bring
+    # the report past the 3 000-word prose cap. Written against the v0.3.3
+    # release; archive once the tag ships.
+    "docs/manual-tests/v0.3.3-execution-report.md",
+    # docs/v0.3.3-release-checklist.md crossed the 3 000-word prose cap as a
+    # release-cycle record: the §3.1 Upgrade Notes table (8 rows — event-driven
+    # loop, fire-and-forget channel dispatch, autonomy.timers, scheduled_wakes
+    # cache, salience knobs, wake counters, the vestigial §F guard, and the
+    # breaking MemoryFacade alias removal) and the §6 Known Gaps inventory are
+    # inherently longer for this feature-rich release than the v0.3.2 sibling
+    # (which fit at ~2 900 words); the PR 4 gate evidence is already condensed,
+    # with full detail deferred to the grandfathered execution report. Written
+    # against the v0.3.3 release; archive once the tag ships.
+    "docs/v0.3.3-release-checklist.md",
     # docs/guides/persona-agents.md was at 2 867 words on the v0.3.0
     # release-candidate tip; release-prep PR 2 added three §2 callouts
     # (interactions-not-messages per RFC 0020, now-anchor per RFC 0021,
