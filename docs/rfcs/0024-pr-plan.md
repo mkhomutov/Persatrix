@@ -15,7 +15,7 @@ RFC 0024 inverts the persona autonomy loop from fixed-interval polling to event-
 
 This plan covers **Phases 1–4** of the [RFC §Phased Implementation Plan](0024-event-driven-scheduling.md#phased-implementation-plan), which is the v0.3.3 contract. Phase 5 (`tick_interval_seconds` deprecation warning) is v0.4.0; Phase 6 (`tick_interval_seconds` removal, §F guard deletion, `EventType.TICK` removal) is v0.5+, gated on the [Phase 6 entrance criteria](0024-event-driven-scheduling.md#phased-implementation-plan). Both are scoped under [§Future Phases](#future-phases) here without PR rows.
 
-The work splits into **8 PRs**: six implementation PRs (Phase 2 split into PR 2 and PR 2.1 so the `scheduled_wakes` substrate ships before the startup wiring; Phase 3 split into 3a/3b so the write-side salience plumbing and the wake-enqueue path are reviewable in isolation), one review-follow-ups PR, and one Phases-1–4 closeout PR. The closeout shape mirrors the [RFC 0017 PR plan](0017-pr-plan.md) precedent — partial-RFC closeout because Phases 5–6 ship in later versions, not full-RFC closeout. Each PR leaves the repo in a passing-tests, lint-clean state and stays within the [BRANCHING.md](../BRANCHING.md) review surface.
+The work splits into **9 PRs**: six implementation PRs (Phase 2 split into PR 2 and PR 2.1 so the `scheduled_wakes` substrate ships before the startup wiring; Phase 3 split into 3a/3b so the write-side salience plumbing and the wake-enqueue path are reviewable in isolation), two review-follow-ups PRs (PR 5 lifecycle hardening + PR 5.1 cleanups, split for review-friendliness), and one Phases-1–4 closeout PR. The closeout shape mirrors the [RFC 0017 PR plan](0017-pr-plan.md) precedent — partial-RFC closeout because Phases 5–6 ship in later versions, not full-RFC closeout. Each PR leaves the repo in a passing-tests, lint-clean state and stays within the [BRANCHING.md](../BRANCHING.md) review surface.
 
 **Prerequisites**:
 - [RFC 0023](0023-llm-call-leasing.md) (LLM Call Leasing) — shipped in v0.3.2; PR 1 emits `wake.kind` as an OTEL span attribute on the LLM-call span alongside the existing `LeaseRequest.cause` ([proto/wallet.proto](../../proto/wallet.proto)) origin attribution. The `Cause` enum is unchanged; `wake.kind` is a new observability dimension, not a proto-surface change.
@@ -27,7 +27,7 @@ The work splits into **8 PRs**: six implementation PRs (Phase 2 split into PR 2 
 - **[RFC 0024 OQ §1](0024-event-driven-scheduling.md#open-questions) (timer persistence)** is **already resolved** in the RFC body: timer storage is per-agent SQLite (`scheduled_wakes` table), source of truth is `agents.yaml`, the table is a derived cache rebuilt on startup. Recorded here as a non-blocking gate so PR 2 has a single named resolution to link in its scope. SA-1 (Personal/Society Storage Split) re-shape risk is acknowledged and accepted in the RFC; the table is a one-time migration if SA-1 lands a society-store partition for timers in v0.4.0+. See [PR 2: Hard-gate confirmation](#pr-2-featurev033-rfc0024-timer-registry--autonomytimers-config--scheduled_wakes-table).
 - **[Phase 3 prerequisite — `source_span_id`](0024-event-driven-scheduling.md#f-failure-modes)**: today `agents/memory/` writes do not carry `source_span_id` (verified by `grep` at RFC authoring time). PR 3a lands the attribute on the write path *before* PR 3b enqueues `SalienceWake`. The coarser fallback ("no `SalienceWake` while the agent's `on_event` lock is held") is named in the RFC as the alternative; PR 3a names which path Phase 3 takes — see [PR 3a Key implementation details](#pr-3a-featurev033-rfc0024-salience-prereqs--write-side-salience--source_span_id).
 
-**Recommended merge order**: **PR 1 → PR 2 → PR 2.1 → PR 3a → PR 3b → PR 4 → PR 5 → PR 6**. The order tracks the RFC's phase boundaries: PR 1 (Phase 1) is the structural foundation — every later PR builds on `EventLoop` and `SyncDispatchHandle`. PRs 3a/3b (Phase 3) are reviewable in isolation only after PR 1's wake taxonomy exists. PR 4 (Phase 4) requires PR 1's `event_loop.enqueue` API. PR 4 (Phase 4 channel dispatch) is the closing implementation PR and carries the cost-regression CI gate as its acceptance, not a follow-up.
+**Recommended merge order**: **PR 1 → PR 2 → PR 2.1 → PR 3a → PR 3b → PR 4 → PR 5 → PR 5.1 → PR 6**. The order tracks the RFC's phase boundaries: PR 1 (Phase 1) is the structural foundation — every later PR builds on `EventLoop` and `SyncDispatchHandle`. PRs 3a/3b (Phase 3) are reviewable in isolation only after PR 1's wake taxonomy exists. PR 4 (Phase 4) requires PR 1's `event_loop.enqueue` API. PR 4 (Phase 4 channel dispatch) is the closing implementation PR and carries the cost-regression CI gate as its acceptance, not a follow-up.
 
 ---
 
@@ -50,7 +50,9 @@ PR 3b (SalienceWake enqueue + threshold + rate-limit + loop-back guard + metrics
   ↓
 PR 4 (channel-message dispatch routed through event_loop.enqueue; cost-regression CI gate)  [RFC Phase 4]
   ↓
-PR 5 (review follow-ups)
+PR 5 (review follow-ups — EventLoop lifecycle hardening: PR 1 findings 1/2/5)
+  ↓
+PR 5.1 (review follow-ups — dispatch/config/memory cleanups + deferred test-gap fills)
   ↓
 PR 6 (Phases-1–4 closeout — status: ⚠️ Partially Implemented (Phases 1–4))
 ```
@@ -331,6 +333,13 @@ PR 1 lands the structural foundation with no behaviour change — `TickScheduler
 **Depends on**: PR 4 merged (all five implementation PRs complete).
 **Purpose**: Address review findings surfaced during PRs 1–4. Follows the [RFC 0017 PR 6](0017-pr-plan.md) and [RFC 0023 PR 7](0023-pr-plan.md) precedent — "From PR N review" subsections, each finding paraphrased inline.
 
+**Split (PR 5 / PR 5.1)**: the follow-up surface spans event-loop lifecycle correctness, dispatch-surface and config cleanups, and deferred test-gap fills. To keep each diff within the [BRANCHING.md](../BRANCHING.md) review-friendliness budget it ships as two PRs:
+
+- **PR 5** (`feature/v033-rfc0024-followups`) — **EventLoop lifecycle hardening**: PR 1 review findings (1) reentrant-dispatch deadlock, (2) queue-full WARNING throttle, and (5) `stop()` settles pending handles + the post-stop TOCTOU `enqueue` guard. All three live in the `event_loop.py` supervisor / `enqueue` / `stop` path plus the `dispatch.py` companion log sites — one coherent correctness story, two `xfail(strict=True)` regression pins flipped to passing.
+- **PR 5.1** (`feature/v033-rfc0024-followups-cleanup`) — the remaining **needed** cleanups and deferred test-gap fills (dispatch-surface + config + memory-idiom polish; the two deferred test gaps). Each per-review subsection below carries a disposition: `→ PR 5.1`, `resolved (no code)`, or `deferred (rationale)`.
+
+Findings whose own text defers them until a future trigger ("until a third caller appears", "until evidence of operator confusion", calibration / v0.4.0+) are **not** re-opened — that conditional-defer *is* the "downgraded to a tracked issue with rationale" disposition the PR 6 closeout checklist asks for. Per the user scoping decision (full sweep, split allowed, each declared follow-up verified as genuinely needed before implementing), three findings that the plan listed as actionable are confirmed **not needed for v0.3.3** and stay deferred: PR 1 (4) (out of RFC 0024 scope), PR 2.1 (1) (the RFC's own text calls the current bound correct, and a per-fire SQL write cuts against the idle-cost goal), and PR 3a (2) (salience is default-off in v0.3.3, so the self-superseded emit is moot until the v0.4.0+ calibration consumer).
+
 #### Scope
 
 Per [.github/copilot-instructions.md](../../.github/copilot-instructions.md) ("Local-only files MUST NEVER be referenced in any committed file"), each entry paraphrases the finding inline and does **not** reference or link any local PR review report.
@@ -383,6 +392,13 @@ regression (v0.3.2 ``task.cancel()`` dropped pending wakes the same
 way), but the substrate broadens the window. Pre-condition for
 graceful-shutdown semantics in PR 4's cost-regression CI gate
 work — drops there are a steady state, not a teardown corner._
+
+_**Resolved in PR 5** (lifecycle hardening): (1), (2), (5) fixed._
+- _(1) **Reentrant deadlock** — `EventLoop.enqueue` gained a reentrancy escape hatch: a handle-bearing `InboundEventWake` enqueued from inside the loop's own supervisor task (detected via `asyncio.current_task() is self._task`) runs `on_event` on a detached resolver task (`_spawn_reentrant`) that resolves the handle, instead of FIFO-starving until the caller's dispatch-timeout. The reachable production path is `on_inbound`'s `execute()` legacy-cascading back to the same agent (self-mention, no REST publisher); the per-agent lock is free there because the outer `on_event` already returned. `test_reentrant_dispatch_completes` un-`xfail`ed._
+- _(2) **Queue-full WARNING spam** — `EventLoop._log_queue_full` rate-limits the WARNING to once per `_QUEUE_FULL_LOG_INTERVAL_S` (default 60 s), each line carrying cumulative `dropped_count`; the per-drop signal stays on `dropped_count` + the `agent.wake.dropped` OTEL counter. The two `dispatch.py` companion logs (`dispatch`, `enqueue_inbound`) dropped to DEBUG so they no longer re-flood. Pinned by `TestQueueFullLogThrottle`._
+- _(5) **Stop drops pending handles** — `EventLoop._drain_pending_handles` settles queued `InboundEventWake` handles on `stop()` by resolving them with the empty action list (the same discard-contract result a queue-full drop yields), and in-flight reentrant resolvers are cancelled (settling their handle on the way out). A `_stopped` guard in `enqueue` rejects + settles a wake racing in after `stop()` (TOCTOU). `test_stop_settles_pending_handles` moved to the green-path file and un-`xfail`ed; `test_event_loop_deferred.py` removed (it held only this pin)._
+- _(3) **`_wake_kind` vs `dropped` label** — `resolved (no code)`: PR 4 shipped `dropped` as a first-class `wake.kind` recorded at the `enqueue` site, distinct from the `_wake_kind` dispatch helper (which only labels drained variants). That is the shared-vs-separate decision the finding asked PR 4 to pin._
+- _(4) **Cancellation does not abort in-flight `on_event`** — `deferred (rationale)`: out of RFC 0024 scope — aborting requires `LLMClient.create_message` cancellation + wallet-lease release-on-cancel. The deferred-finding comment in `agents/event_loop.py` `_handle_wake` is its tracked home; revisit in the PR that lands LLM-call cancellation._
 
 ##### From PR 2 review
 
@@ -656,16 +672,23 @@ _Deferred:_
 
 #### PR checklist
 
-- [ ] All deferred review findings addressed or downgraded to tracked issues with rationale.
+**PR 5 (lifecycle hardening — this split):**
+- [x] PR 1 review findings (1) reentrant-dispatch deadlock, (2) queue-full WARNING throttle, (5) stop() settles pending handles + TOCTOU guard — fixed; both `xfail(strict=True)` pins flipped to passing.
+- [x] PR 1 review (3) resolved (no code) and (4) deferred-with-rationale, recorded above.
+- [x] `event_loop.py` + `dispatch.py` slice: `ruff` + `mypy` clean; `agents/tests/test_event_loop*.py`, `test_event_dispatcher.py`, tick/wiring unit slice pass.
+- [x] [Progress Overview](#progress-overview) row 5 filled.
+
+**PR 5.1 (cleanups + test gaps):**
+- [ ] Remaining *needed* findings addressed; conditional-defer findings confirmed downgraded with rationale.
 - [ ] `make test` + `make lint` clean.
-- [ ] Deferred test gaps from PRs 1–4 reviews filled.
-- [ ] [Progress Overview](#progress-overview) row 5 filled.
+- [ ] Deferred test gaps from PRs 1–4 reviews filled (PR 2 (8) precedence regression; PR 2.1 (3) banker's-rounding).
+- [ ] [Progress Overview](#progress-overview) row 5.1 filled.
 
 ---
 
 ### PR 6: `feature/v033-rfc0024-close` — Phases 1–4 Closeout
 
-**Depends on**: PR 5 merged.
+**Depends on**: PR 5 **and PR 5.1** merged.
 **Purpose**: Mark RFC 0024 as partially implemented through Phase 4. Phases 5–6 stay open with explicit version targets per the [RFC 0017 PR 7](0017-pr-plan.md) and [RFC 0021 closeout shape](0021-persona-temporal-awareness.md) precedent — a partial-RFC closeout, since the full-RFC closeout waits for Phase 6 in v0.5+.
 
 #### Scope
@@ -736,8 +759,9 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 2.1 | 2 | Wire `ScheduledWakesCache` into `initialize_persona_agents` — rebuild from config on startup; restore `next_fire_at_ms` so restart mid-jitter-window does not fire immediately | `feature/v033-rfc0024-scheduled-wakes-wiring` | ✅ Merged | [#408](https://github.com/mkhomutov/Persatrix/pull/408) | 2026-05-21 |
 | 3a | 3 (prereq) | Write-side `salience` + `source_span_id` (no wake yet) | `feature/v033-rfc0024-salience-prereqs` | ✅ Merged | [#409](https://github.com/mkhomutov/Persatrix/pull/409) | 2026-05-21 |
 | 3b | 3 | `SalienceWake` + threshold + loop-back guard + rate-limit | `feature/v033-rfc0024-salience-wake` | ✅ Merged | [#410](https://github.com/mkhomutov/Persatrix/pull/410) | 2026-05-21 |
-| 4 | 4 | Channel-message dispatch + cost-regression CI gate | `feature/v033-rfc0024-channel-dispatch` | 🔀 PR open | this PR | — |
-| 5 | — | Review follow-ups | `feature/v033-rfc0024-followups` | ⬜ Not started | — | — |
+| 4 | 4 | Channel-message dispatch + cost-regression CI gate | `feature/v033-rfc0024-channel-dispatch` | ✅ Merged | [#411](https://github.com/mkhomutov/Persatrix/pull/411) | 2026-05-22 |
+| 5 | — | Review follow-ups (lifecycle hardening) — PR 1 findings (1)/(2)/(5) | `feature/v033-rfc0024-followups` | 🔀 PR open | this PR | — |
+| 5.1 | — | Review follow-ups (cleanups + test-gap fills) | `feature/v033-rfc0024-followups-cleanup` | ⬜ Not started | — | — |
 | 6 | — | Phases-1–4 closeout | `feature/v033-rfc0024-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred

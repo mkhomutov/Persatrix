@@ -33,24 +33,41 @@ channel-message dispatch enqueues fire-and-forget
 :class:`InboundEventWake`\\ s directly (``EventDispatcher.enqueue_inbound``
 → this queue), making the channel surface the dominant producer the
 discard policy defends against.
+
+Wake taxonomy, :class:`SyncDispatchHandle`, and the lifecycle-safety
+helpers live in sibling modules split for file-size review-friendliness
+(RFC 0024 PR 5):
+
+* :mod:`agents.event_loop_types` — :class:`WakeEvent`, :class:`InboundEventWake`,
+  :class:`ScheduledWake`, :class:`SalienceWake`, :class:`SyncDispatchHandle`.
+* :mod:`agents.event_loop_lifecycle` — reentrancy escape hatch,
+  stop-drain, queue-full log throttle.
+* :mod:`agents.event_loop_timers` — periodic/one-shot timer registry.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Generator
-from dataclasses import dataclass, field
+import time
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
+from .event_loop_lifecycle import _EventLoopLifecycleMixin
 from .event_loop_salience import _SalienceSubscriber
 from .event_loop_timers import _EventLoopTimersMixin, _TimerEntry
+from .event_loop_types import (
+    InboundEventWake,
+    SalienceWake,
+    ScheduledWake,
+    SyncDispatchHandle,
+    WakeEvent,
+)
 from .memory._events import MemoryWriteBus, get_memory_write_bus
 from .observability._metrics_wakes import wake_attrs
 from .observability.metrics import try_get_instruments
 
 if TYPE_CHECKING:
-    from .memory._events import MemoryWriteEvent
     from .persona_types import AgentAction, AgentEvent
 
 logger = logging.getLogger(__name__)
@@ -65,107 +82,7 @@ __all__ = [
 ]
 
 
-# ─── Wake taxonomy ──────────────────────────────────────────────────────────
-
-
-class WakeEvent:
-    """Marker base for the three wake variants drained by :class:`EventLoop`.
-
-    Variants are dataclasses below; :class:`SalienceWake` is *declared* on
-    the taxonomy so the loop's ``isinstance`` dispatch is exhaustive from
-    Phase 1, but no producer enqueues it. PR 3b (RFC 0024 Phase 3) wires
-    the producer.
-    """
-
-
-@dataclass
-class InboundEventWake(WakeEvent):
-    """Inbound RPC / channel-message wake carrying an :class:`AgentEvent`.
-
-    ``handle`` is ``None`` for fire-and-forget wakes (the producer does not
-    need the agent's action list).  When set, the loop resolves the handle
-    with the agent's ``list[AgentAction]`` after ``on_event`` completes —
-    this is the load-bearing path for chat-style callers that extract the
-    reply text from the returned actions.
-    """
-
-    event: AgentEvent
-    handle: SyncDispatchHandle | None = None
-
-
-@dataclass
-class ScheduledWake(WakeEvent):
-    """Scheduled-timer fire — ``ScheduledWake(timer_id="legacy_tick", callback_kind="tick")``
-    is the v0.3.2 ``tick_interval_seconds`` cadence under the adapter."""
-
-    timer_id: str
-    callback_kind: str
-
-
-@dataclass
-class SalienceWake(WakeEvent):
-    """Memory-write-triggered wake (RFC 0024 Phase 3 / PR 3b).
-
-    Declared so the ``isinstance`` dispatch in :meth:`EventLoop._handle_wake`
-    is exhaustive from Phase 1.  PR 3b wires the producer
-    (``MemoryWriteBus`` subscriber) and the consumer.
-    """
-
-    # ``None`` only for the Phase-1 placeholder construction path; PR 3b's
-    # subscriber always builds this with a concrete ``MemoryWriteEvent``.
-    write_event: MemoryWriteEvent | None = field(default=None)
-
-
-# ─── SyncDispatchHandle ─────────────────────────────────────────────────────
-
-
-class SyncDispatchHandle:
-    """``asyncio.Future``-shaped helper the loop resolves after ``on_event``.
-
-    Idempotent: a second :meth:`resolve` / :meth:`reject` call is silently
-    ignored so the supervisor can safely reject on exception even if the
-    handler already resolved. ``__await__`` returns the underlying
-    future's iterator, so :func:`asyncio.wait_for` cancellation propagates
-    correctly.
-    """
-
-    __slots__ = ("_future",)
-
-    def __init__(self) -> None:
-        # ``get_running_loop()`` (not ``get_event_loop()``): the latter is
-        # deprecated since 3.10 when no running loop exists and is set to
-        # be removed in 3.12+.  This class is only ever instantiated from
-        # inside an ``async def`` (``EventDispatcher.dispatch`` and the
-        # EventLoop supervisor body), so a running loop is guaranteed.
-        self._future: asyncio.Future[list[AgentAction]] = (
-            asyncio.get_running_loop().create_future()
-        )
-
-    def resolve(self, value: list[AgentAction]) -> None:
-        if not self._future.done():
-            self._future.set_result(value)
-
-    def reject(self, exc: BaseException) -> None:
-        if not self._future.done():
-            self._future.set_exception(exc)
-
-    def done(self) -> bool:
-        return self._future.done()
-
-    def __await__(self) -> Generator[Any, None, list[AgentAction]]:
-        # Annotated return shape pins the awaited result type to
-        # ``list[AgentAction]`` so callers (``EventDispatcher.dispatch``)
-        # do not widen ``actions`` to ``Any``.  Only the third type
-        # parameter is load-bearing for call-site typing; the yielded
-        # ``Any`` matches the standard ``Future.__await__`` shape and is
-        # not part of the contract.  (PR 1 review finding #5.)
-        return self._future.__await__()
-
-
-# ─── EventLoop ──────────────────────────────────────────────────────────────
-
-
-class EventLoop(_EventLoopTimersMixin):
+class EventLoop(_EventLoopTimersMixin, _EventLoopLifecycleMixin):
     """Per-agent wake queue + supervisor.
 
     Callback-driven so :class:`agents.tick.TickScheduler` can wire its idle
@@ -189,6 +106,13 @@ class EventLoop(_EventLoopTimersMixin):
     # on ``autonomy.timers[*].interval_seconds``.  Defense-in-depth for
     # any programmatic caller bypassing schema validation.
     _MIN_INTERVAL: float = 1.0
+
+    # Rate-limit window for the queue-full WARNING. The per-drop signal
+    # lives on the ``agent.wake.dropped`` OTEL counter + :attr:`dropped_count`;
+    # the log line is throttled so steady-state channel backpressure
+    # (RFC 0024 Phase 4, where channel-message drops are a normal
+    # backpressure outcome) cannot flood operator logs. (PR 1 review #2.)
+    _QUEUE_FULL_LOG_INTERVAL_S: float = 60.0
 
     # RFC 0024 PR 3b: default ``autonomy.salience_threshold`` and
     # ``autonomy.salience_rate_max_per_sec``.  The threshold default is
@@ -221,6 +145,16 @@ class EventLoop(_EventLoopTimersMixin):
         self._stopped = asyncio.Event()
         self._timers: dict[str, _TimerEntry] = {}
         self._dropped_count = 0
+        # Strong-ref anchor for detached resolver tasks that run reentrant
+        # handle-bearing inbound wakes (PR 1 review finding #1) — Python
+        # 3.11+ GCs weakly-held tasks mid-flight. Tasks add themselves on
+        # creation and a done-callback discards them on completion.
+        self._reentrant_tasks: set[asyncio.Task[None]] = set()
+        # Rate-limit state for the queue-full WARNING (PR 1 review finding
+        # #2). ``_monotonic`` is an injectable seam so tests can drive the
+        # throttle window without real wall-clock sleeps.
+        self._last_queue_full_log: float | None = None
+        self._monotonic: Callable[[], float] = time.monotonic
         # RFC 0024 PR 3b: salience-subscriber wiring.  Constructed here so
         # the threshold + rate cap are immutable for the loop's lifetime;
         # subscribed at :meth:`start`, unsubscribed at :meth:`stop` so the
@@ -279,16 +213,43 @@ class EventLoop(_EventLoopTimersMixin):
         Discard-not-block per RFC 0024 Decided §1. PR 3b wires the
         ``agent.wake.dropped`` OTEL counter alongside :attr:`dropped_count`
         so dashboards and the substrate's internal counter agree.
+
+        Two correctness guards ride on this method (RFC 0024 PR 5):
+
+        * **Post-stop TOCTOU** — once :meth:`stop` has set ``_stopped`` no
+          producer's wake can ever drain, so reject immediately and settle
+          any handle with the empty-action discard result rather than let
+          the caller hang on its external ``wait_for`` deadline. Closes the
+          window where a producer checks :attr:`is_running` and ``enqueue``\\ s
+          while ``stop()`` races in between. (PR 1 review finding #5.)
+        * **Reentrancy** — a handle-bearing :class:`InboundEventWake`
+          enqueued from inside this loop's own supervisor task (e.g.
+          ``on_inbound``'s ``execute()`` cascading back to the same agent)
+          cannot be drained by the FIFO — the single supervisor is blocked
+          awaiting the handle. Run ``on_event`` on a detached resolver task
+          instead, so the awaiter resolves instead of FIFO-starving until
+          its dispatch-timeout. (PR 1 review finding #1.)
         """
+        if self._stopped.is_set():
+            if isinstance(wake, InboundEventWake) and wake.handle is not None:
+                # Same discard-contract result EventDispatcher.dispatch
+                # returns for a queue-full / cascade / unknown-target drop.
+                wake.handle.resolve([])
+            return False
+
+        if (
+            isinstance(wake, InboundEventWake)
+            and wake.handle is not None
+            and self._in_supervisor()
+        ):
+            self._spawn_reentrant(wake.event, wake.handle)
+            return True
+
         try:
             self._queue.put_nowait(wake)
         except asyncio.QueueFull:
             self._dropped_count += 1
-            logger.warning(
-                "agent.event_loop.queue_full: agent_id=%s dropped_total=%d",
-                self._agent_id,
-                self._dropped_count,
-            )
+            self._log_queue_full()
             inst = try_get_instruments()
             if inst is not None:
                 inst.wake_dropped.add(
@@ -354,6 +315,13 @@ class EventLoop(_EventLoopTimersMixin):
                     pass
             except asyncio.CancelledError:
                 pass
+        # Abort in-flight reentrant resolvers and settle wakes orphaned in
+        # the queue so no handle-bearing caller hangs past shutdown. The
+        # ``_stopped`` guard in :meth:`enqueue` closes the producer-side
+        # window; this closes the already-queued side. (PR 1 review #5.)
+        for task in list(self._reentrant_tasks):
+            task.cancel()
+        self._drain_pending_handles()
         self._task = None
 
     # Timer registry methods (``register_timer``, ``unregister_timer``,
@@ -362,6 +330,11 @@ class EventLoop(_EventLoopTimersMixin):
     # in :mod:`agents.event_loop_timers` — split for file-size review-
     # friendliness (RFC 0024 PR 2.1, deferred PR 2 review item 2).
     # ``_timers`` remains owned here; the mixin reads it via ``self``.
+    #
+    # Lifecycle-safety helpers (``_in_supervisor``, ``_spawn_reentrant``,
+    # ``_log_queue_full``, ``_drain_pending_handles``) live on
+    # :class:`_EventLoopLifecycleMixin` in :mod:`agents.event_loop_lifecycle`
+    # — split for file-size review-friendliness (RFC 0024 PR 5).
 
     # ─── supervisor ────────────────────────────────────────────────────
 
@@ -403,19 +376,6 @@ class EventLoop(_EventLoopTimersMixin):
 
     async def _handle_wake(self, wake: WakeEvent) -> None:
         if isinstance(wake, InboundEventWake):
-            # Cancellation note (PR 1 review finding #2): when a chat-style
-            # caller does ``asyncio.wait_for(handle, timeout=…)`` and the
-            # deadline fires, ``wait_for`` cancels the handle's underlying
-            # future but the supervisor task is unaware — it keeps running
-            # ``self._on_event`` (and any LLM/tool-use round in flight)
-            # to completion, after which ``handle.resolve`` no-ops because
-            # the future is already done.  Net effect: timed-out chat
-            # requests still pay for the full LLM call + tool round on the
-            # wallet lease they were supposed to abort.  Pre-existing
-            # shape (the non-reentrant agent lock had the same property in
-            # v0.3.2), tracked as a deferred finding in
-            # ``docs/rfcs/0024-pr-plan.md`` for a future "abort the
-            # in-flight LLM call on caller cancellation" PR.
             inst = try_get_instruments()
             if inst is not None:
                 inst.wake_inbound.add(
@@ -432,10 +392,7 @@ class EventLoop(_EventLoopTimersMixin):
                 return
             if self._on_inbound is not None:
                 # Fire-and-forget path (channel messages): the loop owns
-                # decide → execute → recover.  ``on_inbound`` recovers the
-                # modelled wallet/rate-limit classes internally; anything
-                # else falls to ``_handle_wake_supervised`` (no handle to
-                # reject).
+                # decide → execute → recover.
                 await self._on_inbound(wake.event)
                 return
             # No fire-and-forget handler wired (generic test loops): run
@@ -456,14 +413,8 @@ class EventLoop(_EventLoopTimersMixin):
             await self._on_tick(wake)
             return
         if isinstance(wake, SalienceWake):
-            # PR 3b: the salience-wake counter is recorded at the
-            # subscriber call site (with ``suppressed_reason``).  The
-            # consumer (a wake that successfully enqueued and is now
-            # draining) is intentionally a structured-log breadcrumb;
-            # the "on_event for the triggering write" behaviour the
-            # RFC §G text names is a v0.4.0+ consumer (RFC 0027
-            # reflection-driven consolidation).  v0.3.3's default-off
-            # invariant means this branch never runs under stock config.
+            # v0.3.3's default-off invariant means this branch never runs
+            # under stock config.  v0.4.0+ consumer tracked separately.
             logger.info(
                 "agent.event_loop.salience_wake: agent_id=%s tier=%s salience=%.3f",
                 self._agent_id,

@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .event_loop import WakeEvent
+    from .event_loop_types import WakeEvent
 
 __all__ = ["_EventLoopTimersMixin", "_TimerEntry"]
 
@@ -176,7 +176,7 @@ class _EventLoopTimersMixin:
         # 3.10+ deprecation.  Both ``register_timer`` (initial arm) and
         # ``_fire`` (re-arm) run inside the supervisor task, so a running
         # loop is guaranteed.
-        from .event_loop import ScheduledWake  # local: avoid import cycle
+        from .event_loop_types import ScheduledWake  # local: avoid import cycle
 
         def _fire() -> None:
             if entry.cancelled:
