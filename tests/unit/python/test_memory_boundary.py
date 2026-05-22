@@ -13,8 +13,7 @@ with two halves of one guard rail (RFC 0029 PR plan PR 2):
 
 Construction *inside* ``agents/memory/`` (the ``MemoryStore`` facade, the
 shared-pool wrapper, the tier modules themselves) stays silent: the
-facade is the supported builder, and the ``MemoryFacade`` alias is the
-warning-free one-minor-version compatibility path.
+facade is the supported builder.
 """
 
 from __future__ import annotations

@@ -6,7 +6,7 @@ Pins the PR 4 deliverables called out in
 ``docs/rfcs/0020-pr-plan.md`` §PR 4:
 
 * Multi-turn close runs the LLM summariser through
-  :func:`MemoryFacade.compress` and writes the LLM text to the episode
+  :func:`MemoryStore.compress` and writes the LLM text to the episode
   ``summary`` column.
 * LLM failure / timeout / empty-text paths fall back to
   :data:`SUMMARY_UNAVAILABLE_TEXT` and increment the

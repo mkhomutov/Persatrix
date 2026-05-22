@@ -80,7 +80,7 @@ class MalformedSubAgent(BaseAgent):
 
 
 async def boom_delete(*_args: Any, **_kwargs: Any) -> bool:
-    """Test double for :meth:`MemoryFacade.episodic.delete_episode`
+    """Test double for :meth:`MemoryStore.episodic.delete_episode`
     that always raises — used to exercise the rollback-failure path.
 
     PR 3a R2 L3: takes ``*_args, **_kwargs`` for forward-compat with any

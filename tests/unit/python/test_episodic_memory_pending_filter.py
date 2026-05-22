@@ -2,7 +2,7 @@
 Regression test for the RFC 0020 PR 5 "summary pending" recall filter.
 
 PR 5 originally placed the ``[summary pending]`` skip filter inside
-:func:`MemoryFacade.retrieve_relevant`. PR-262 deep-review finding **M1**
+:func:`MemoryStore.retrieve_relevant`. PR-262 deep-review finding **M1**
 identified that the persona prompt-assembly path
 (:mod:`agents.persona_runtime.memory_context`) calls
 ``EpisodicMemory.recall`` directly, bypassing the facade, and therefore
