@@ -29,6 +29,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Cap on in-flight no-running-loop fire-and-forget inbound tasks
+# (:meth:`EventDispatcher.enqueue_inbound`). Reactive personas have no
+# per-agent ``EventLoop`` to bound channel-message dispatch, so without
+# this cap a chatty/abusive producer on the cleartext gRPC port could
+# grow ``_inbound_fallback_tasks`` without bound — the same slow-burn DoS
+# the RFC 0011 servicer's ``_MAX_PENDING_DISPATCHES`` cap (PR #248 deep
+# review Low) defended against for *every* channel dispatch before RFC
+# 0024 Phase 4 moved the running-loop path onto the EventLoop's bounded
+# queue. Kept at the same value for behavioural parity.
+_MAX_INBOUND_FALLBACK_TASKS: int = 1000
+
 # ``DEFAULT_MAX_CASCADE_DEPTH`` is sourced from
 # :mod:`agents.cascade_depth_defaults` so the publish-path leaf modules
 # (``action_executor``, ``channel_publisher``) can depend on it without
@@ -66,7 +77,9 @@ class EventDispatcher:
         # Strong-ref anchor for the no-running-loop fire-and-forget
         # fallback in :meth:`enqueue_inbound` — Python 3.11+ GCs
         # weakly-held tasks mid-flight. Tasks add themselves on creation
-        # and a done-callback discards them on completion.
+        # and a done-callback discards them on completion. Bounded by
+        # :data:`_MAX_INBOUND_FALLBACK_TASKS` so the set cannot grow
+        # without bound on the path the EventLoop queue does not cover.
         self._inbound_fallback_tasks: set[asyncio.Task[None]] = set()
 
     def set_channel_publisher(self, publisher: ChannelPublisher | None) -> None:
@@ -248,8 +261,9 @@ class EventDispatcher:
 
         Returns ``True`` if the event was accepted (enqueued, or scheduled
         on the no-running-loop fallback), ``False`` if it was dropped —
-        either the loop's queue is full (discard-not-block, RFC 0024
-        Decided §1) or the target agent is unknown.
+        the target agent is unknown, the loop's queue is full
+        (discard-not-block, RFC 0024 Decided §1), or — on the no-loop
+        fallback — the in-flight task set is at :data:`_MAX_INBOUND_FALLBACK_TASKS`.
         """
         agent = self._agents.get(target_id)
         scheduler = self._tick_schedulers.get(target_id)
@@ -273,6 +287,19 @@ class EventDispatcher:
             logger.warning(
                 "Inbound dispatch target %s not found (event: %s)",
                 target_id, event.event_type.value,
+            )
+            return False
+        # Discard-not-block, symmetric with the EventLoop queue-full path:
+        # the running-loop branch above is bounded by the loop's queue, but
+        # this fallback (reactive personas: no running loop) has no such
+        # backstop, so cap the in-flight task set here. Checked after agent
+        # resolution so cheap rejects run first (PR #248 ordering).
+        if len(self._inbound_fallback_tasks) >= _MAX_INBOUND_FALLBACK_TASKS:
+            logger.warning(
+                "Inbound dispatch dropped (no-loop fallback at capacity): "
+                "agent=%s event=%s in_flight=%d",
+                target_id, event.event_type.value,
+                len(self._inbound_fallback_tasks),
             )
             return False
         task = asyncio.create_task(
