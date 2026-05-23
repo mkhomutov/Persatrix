@@ -1,0 +1,94 @@
+# Curated offline replies for Persatrix offline / demo mode.
+#
+# Consumed by agents.llm_offline.MockProvider when PERSATRIX_OFFLINE=1 (or an
+# agent sets `provider: mock`). No API key, no network, no cost — the whole
+# society runs on these scripted replies plus a persona-flavoured fallback.
+#
+# Shape:
+#   responses:
+#     <agent_id>:
+#       - match: [keyword, ...]   # ALL keywords must be case-insensitive
+#                                 # substrings of the latest user message.
+#                                 # [] is a catch-all — list it LAST.
+#         reply: |
+#           Multi-line persona reply text.
+#
+# Entries are tried in file order; the first whose keywords all match wins.
+# Path override: PERSATRIX_OFFLINE_RESPONSES=/path/to/file.yaml
+#
+# The agent IDs below match the demo personas in config/agents.yaml. Edit
+# freely — unmatched turns degrade gracefully to a generated placeholder.
+
+responses:
+  # ─── Ember Owl — VP of Engineering (direct, big-picture) ───────────
+  ember-owl:
+    - match: ["flaky"]
+      reply: |
+        First question: is it actually flaky, or is the underlying system
+        flaky and the test just surfaced it? Run it 50 times in a loop on the
+        latest main. If it fails non-deterministically there, you have a real
+        race or ordering bug — that's a P1, not a test problem, and I don't
+        want it quarantined and forgotten.
+
+        If it only fails in CI, suspect the environment: shared fixtures,
+        clock assumptions, a port collision, test-ordering coupling. Quarantine
+        it with a linked ticket and an owner — never a silent skip. A skipped
+        test with no owner is just a bug you've agreed to stop looking at.
+    - match: ["q3"]
+      reply: |
+        The dependency on the auth migration is the long pole. Until that
+        lands, half the Q3 roadmap is blocked behind it, so that's where I want
+        the focus — not spread across six parallel tracks that all stall at the
+        same gate. Iron Fox, what's the reliability risk if we push it? Nova,
+        which customer commitments actually ride on this?
+    - match: []
+      reply: |
+        Give me the short version — what's the decision you need from me, and
+        what's the blast radius if we get it wrong? I'd rather unblock you in
+        two minutes than schedule a meeting about it.
+
+  # ─── Iron Fox — Staff Engineer / Reliability (cautious, detailed) ──
+  iron-fox:
+    - match: ["q3"]
+      reply: |
+        Agreed on the auth migration being the long pole — and the staging env
+        still doesn't have the new identity provider wired, so we can't
+        rehearse the cutover yet. I'm not signing off on a production migration
+        we've never run end-to-end in staging. What does this look like at 3am
+        on a Saturday when it half-fails? Give me a rollback path and a staging
+        dry-run first, then I'm in.
+    - match: ["incident"]
+      reply: |
+        Before we talk fixes: do we have the timeline, the blast radius, and the
+        detection gap written down? Every postmortem I've kept from the last two
+        years says the expensive part isn't the bug — it's that we found out
+        from a customer instead of from a monitor. Let's close the detection gap
+        first.
+    - match: []
+      reply: |
+        I want to understand the failure mode before the happy path. What
+        breaks, who gets paged, and how do we roll it back? If we can't answer
+        those three, it's not ready — it's just not broken yet.
+
+  # ─── Nova Sparrow — Senior Product Manager (customer-first) ────────
+  nova-sparrow:
+    - match: ["q3"]
+      reply: |
+        Before we sequence this purely around the migration: two of our top
+        accounts (R.K. and the Meridian team) renewed on the promise of the
+        pricing-tier work, and that's also gated behind auth. So "infra first"
+        and "customer commitments" aren't in tension here — they're the same
+        critical path. What does the customer actually get the day after the
+        migration ships?
+    - match: ["pricing"]
+      reply: |
+        I'll push back on shipping pricing tiers we can't explain in one
+        sentence to a customer. If R.K. can't look at the plan and know which
+        tier they're on and why, we'll lose the upgrade in the support queue.
+        Let's validate the packaging with three real accounts before we build
+        the billing plumbing.
+    - match: []
+      reply: |
+        What does the customer get out of this, and which customer asked? If we
+        can't name one, I'd rather spend the sprint on something they'll
+        actually pay for.

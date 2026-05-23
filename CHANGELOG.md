@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### 🚀 Features
+
+- **Offline / demo mode — run the whole society for $0 with no API key.** A third LLM provider, `MockProvider` ([`agents/llm_offline.py`](agents/llm_offline.py)), joins `AnthropicProvider` / `OpenAIProvider` behind the existing `LLMProvider` protocol. Set `PERSATRIX_OFFLINE=1` (or `provider: mock` on an agent) and every agent returns scripted, persona-accurate replies with **zero provider calls, zero network, and zero spend**. The provider only emits plain text with `stop_reason=END_TURN`, so the runtime's `synthesize_channel_reply` seam routes it through both the chat-as-DM and channel paths unchanged; synthetic token usage keeps the OTel `gen_ai.*` spans, token metrics, and the RFC 0023 wallet-lease settle path populated at $0. Curated replies live in [`config/offline_responses.yaml`](config/offline_responses.yaml) (override via `PERSATRIX_OFFLINE_RESPONSES`); unmatched turns degrade to a deterministic in-character fallback.
+- **`make demo-offline`** brings the full stack up in offline mode via the new [`docker-compose.offline.yaml`](docker-compose.offline.yaml) overlay — no `ANTHROPIC_API_KEY` required. See the README "Try it free" section.
+
+### 📝 Config / Schema
+
+- [`schemas/agent.schema.json`](schemas/agent.schema.json) now documents the previously undocumented `provider` field (`anthropic` / `openai` / `mock`) and `provider_config.base_url`, so an explicit `provider: mock` (and the existing OpenAI-compatible `base_url` for local models) validate instead of being rejected by `additionalProperties: false`.
+
 ## [0.3.3] - 2026-05-22
 
 > **Codename:** Idle Truly Idle

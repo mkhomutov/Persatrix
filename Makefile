@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run validate help generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check
+.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run validate help demo-offline generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -244,6 +244,21 @@ docker-down: ## Stop all services
 
 docker-logs: ## Tail logs
 	docker compose logs -f
+
+demo-offline: ## Run the demo society with ZERO cost — no API key, no network (PERSATRIX_OFFLINE)
+	@echo "→ Starting Persatrix in offline mode (MockProvider — no API calls, no spend)..."
+	@# ANTHROPIC_API_KEY is a throwaway value: it only satisfies the base
+	@# compose file's startup `:?` key-guard, which Compose evaluates before
+	@# the overlay merges. PERSATRIX_OFFLINE=1 routes every agent to the
+	@# MockProvider, so the value is never used. See docker-compose.offline.yaml.
+	@# --build so the agent image always bakes the current source (the
+	@# Dockerfile COPYs + pip-installs agents/, so `up` alone would reuse a
+	@# stale image and miss MockProvider). Layer caching keeps it fast when
+	@# nothing changed.
+	ANTHROPIC_API_KEY=offline-not-used PERSATRIX_OFFLINE=1 \
+	  docker compose -f docker-compose.yaml -f docker-compose.offline.yaml up -d --build
+	@echo "✓ Offline society up. Try:  ./bin/persatrix chat ember-owl"
+	@echo "  Stop with: make docker-down"
 
 reset: ## Stop the stack and purge ALL named volumes (channels DB / orchestrator-data, persona memory / ember-owl-data + iron-fox-data + nova-sparrow-data, agent scratch / workspace) — operator workaround for F-3 cross-run state bleed; see docs/issues/ISSUE-0051
 	@echo "→ Stopping stack and removing named volumes..."

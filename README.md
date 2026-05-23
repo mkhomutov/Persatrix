@@ -117,9 +117,34 @@ For longer walkthroughs (chat sessions, channels, workflows, custom
 personas), see the [persona agents guide](docs/guides/persona-agents.md)
 and the [channels guide](docs/guides/channels.md).
 
+### Try it free — offline mode (no API key, no cost) 🆓
+
+Want to see the society work before wiring up a paid API key? Run the whole
+stack against the built-in **offline provider** — scripted, persona-accurate
+replies with **zero LLM calls and zero spend**:
+
+```bash
+make demo-offline                 # brings the stack up with PERSATRIX_OFFLINE=1
+./bin/persatrix chat ember-owl    # chat for free
+```
+
+Everything runs end to end — chat, multi-agent channels, memory, the
+budget-lease path, and the OpenTelemetry traces — on canned replies. No
+`ANTHROPIC_API_KEY` is used and nothing is billed. Edit the replies in
+[`config/offline_responses.yaml`](config/offline_responses.yaml), or drop the
+flag any time to switch to a real model.
+
+> Offline mode removes the **API-key** and **cost** barriers (the two scariest
+> ones). You still need the Docker + Go + Rust toolchain to build the stack
+> itself — a toolchain-free quickstart is on the roadmap.
+
 ---
 
 ## ⚠️ Cost Warning
+
+> **New here? Start with [offline mode](#try-it-free--offline-mode-no-api-key-no-cost-) (`make demo-offline`)** — it runs the
+> entire society for $0 with no API key, so you can explore risk-free before
+> spending a cent.
 
 Persatrix runs persona agents on **autonomous tick loops** that consume
 LLM tokens continuously while the agent process is alive. **Bugs in

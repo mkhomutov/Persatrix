@@ -15,6 +15,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from .generated import wallet_pb2 as walletpb
+from .llm_offline import MockProvider, offline_mode_enabled
 from .llm_providers import AnthropicProvider, OpenAIProvider
 from .llm_types import (
     LLMProvider,
@@ -59,6 +60,7 @@ __all__ = [
     "LLMProvider",
     "LLMResponse",
     "LLMToolResult",
+    "MockProvider",
     "OpenAIProvider",
     "StopReason",
     "ToolCall",
@@ -365,8 +367,24 @@ def _infer_provider(model: str) -> str:
 def create_provider(agent_config: dict[str, Any]) -> LLMProvider:
     """Create an LLM provider from agent config.
 
-    Supports explicit ``provider`` field or inference from model prefix.
+    Offline mode takes precedence: when ``PERSATRIX_OFFLINE`` is truthy, or
+    the agent declares ``provider: mock``, the zero-cost
+    :class:`agents.llm_offline.MockProvider` is returned regardless of the
+    configured ``model`` — no API key or network is required. Otherwise the
+    explicit ``provider`` field or model-prefix inference selects the
+    Anthropic / OpenAI SDK provider.
     """
+    # Offline / mock override — checked before the model field so a demo
+    # config can carry a real model id (or a placeholder) without needing
+    # a key. The env var is the global "make the whole society free" knob.
+    if offline_mode_enabled() or agent_config.get("provider") == "mock":
+        logger.info(
+            "LLM offline mode active for agent %r — using MockProvider "
+            "(no API calls, no cost)",
+            agent_config.get("id", "<unknown>"),
+        )
+        return MockProvider.from_config(agent_config)
+
     model = agent_config["model"]
     # S-18: guard against empty model string — "" falls through
     # _infer_provider() to "openai" fallback, causing a confusing error.
