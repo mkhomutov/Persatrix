@@ -106,6 +106,14 @@ def resolve_ollama_base_url(provider_config: dict[str, Any] | None = None) -> st
     escape hatch) → the ``PERSATRIX_OLLAMA_BASE_URL`` env (the deployment-wide
     knob the compose overlay sets to reach the ``ollama`` service) → the
     localhost default for a stock ``ollama serve``.
+
+    This precedence is unconditional: it holds even under *forced global*
+    mode (``PERSATRIX_OLLAMA=1``). A per-agent ``provider_config.base_url``
+    therefore still wins over the deployment-wide env there, so an agent that
+    carries a stray ``base_url`` in ``agents.yaml`` is routed to it rather
+    than to the forced deployment endpoint — the per-agent override is always
+    the most specific source. Leave ``provider_config.base_url`` unset on
+    agents you want a global force to point uniformly.
     """
     if provider_config:
         configured = provider_config.get("base_url")

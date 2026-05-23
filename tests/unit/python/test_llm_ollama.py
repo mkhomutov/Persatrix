@@ -212,6 +212,49 @@ def test_create_provider_ollama_env_forces_provider(
     assert provider._force_model == "qwen2.5"
 
 
+def test_create_provider_forced_mode_uses_base_url_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Forced mode reaches the daemon at PERSATRIX_OLLAMA_BASE_URL.
+
+    The compose overlay sets this env to the bridge endpoint, so the forced
+    path must thread it into the constructed client (not the localhost default).
+    """
+    monkeypatch.setenv("PERSATRIX_OLLAMA", "1")
+    monkeypatch.setenv("PERSATRIX_OLLAMA_BASE_URL", "http://ollama:11434/v1")
+    mod, _client = _mock_openai_module()
+    with patch.dict(sys.modules, {"openai": mod}):
+        create_provider({"id": "ember-owl", "model": "claude-sonnet-4-6"})
+    mod.AsyncOpenAI.assert_called_once_with(
+        api_key="ollama", base_url="http://ollama:11434/v1"
+    )
+
+
+def test_create_provider_forced_mode_provider_config_still_wins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Even forced, a per-agent provider_config.base_url beats the env.
+
+    Pins the documented precedence (resolve_ollama_base_url): the per-agent
+    override is the most specific source unconditionally, so an agent carrying
+    a stray base_url is routed to it rather than the forced deployment endpoint.
+    """
+    monkeypatch.setenv("PERSATRIX_OLLAMA", "1")
+    monkeypatch.setenv("PERSATRIX_OLLAMA_BASE_URL", "http://ollama:11434/v1")
+    mod, _client = _mock_openai_module()
+    with patch.dict(sys.modules, {"openai": mod}):
+        create_provider(
+            {
+                "id": "x",
+                "model": "claude-sonnet-4-6",
+                "provider_config": {"base_url": "http://agent-host:11434/v1"},
+            }
+        )
+    mod.AsyncOpenAI.assert_called_once_with(
+        api_key="ollama", base_url="http://agent-host:11434/v1"
+    )
+
+
 def test_create_provider_explicit_ollama_without_env() -> None:
     mod, _client = _mock_openai_module()
     with patch.dict(sys.modules, {"openai": mod}):
