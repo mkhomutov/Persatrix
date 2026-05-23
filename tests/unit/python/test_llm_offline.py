@@ -7,6 +7,7 @@ create_provider routes to it under PERSATRIX_OFFLINE / provider: mock.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -31,7 +32,7 @@ responses:
 @pytest.fixture(autouse=True)
 def _offline_env_baseline(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-) -> None:
+) -> Iterator[None]:
     """Deterministic baseline: env off, fixtures pointed at a temp file.
 
     Mirrors conftest's autouse env-isolation idiom so PERSATRIX_OFFLINE /
