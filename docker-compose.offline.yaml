@@ -1,0 +1,49 @@
+# Offline / demo overlay for docker-compose.yaml — runs the whole society
+# with the zero-cost MockProvider: no API key, no network, no spend.
+#
+#   make demo-offline
+#       — or —
+#   ANTHROPIC_API_KEY=offline PERSATRIX_OFFLINE=1 \
+#     docker compose -f docker-compose.yaml -f docker-compose.offline.yaml up
+#
+# Why a throwaway ANTHROPIC_API_KEY is still passed: the base compose file
+# guards the key with `${ANTHROPIC_API_KEY:?...}`, which Compose evaluates
+# when it parses that file — before this overlay is merged. Supplying any
+# non-empty value satisfies that startup check; the value is never used,
+# because PERSATRIX_OFFLINE=1 routes every agent to the MockProvider in
+# agents.llm_client.create_provider before any provider SDK is constructed.
+#
+# Each agent also gets PERSATRIX_OFFLINE_RESPONSES pointed at the config
+# volume (mounted read-only at /app/config) so curated replies load
+# regardless of where the package is installed inside the image.
+
+services:
+  agent-planner:
+    environment:
+      PERSATRIX_OFFLINE: "1"
+      PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"
+
+  agent-coder:
+    environment:
+      PERSATRIX_OFFLINE: "1"
+      PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"
+
+  agent-reviewer:
+    environment:
+      PERSATRIX_OFFLINE: "1"
+      PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"
+
+  agent-ember-owl:
+    environment:
+      PERSATRIX_OFFLINE: "1"
+      PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"
+
+  agent-iron-fox:
+    environment:
+      PERSATRIX_OFFLINE: "1"
+      PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"
+
+  agent-nova-sparrow:
+    environment:
+      PERSATRIX_OFFLINE: "1"
+      PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"

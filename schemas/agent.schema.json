@@ -40,6 +40,19 @@
         "name": { "type": "string" },
         "role": { "type": "string" },
         "model": { "type": "string" },
+        "provider": {
+          "type": "string",
+          "enum": ["anthropic", "openai", "mock"],
+          "description": "Explicit LLM provider override. When omitted, the provider is inferred from the model prefix (agents.llm_client._infer_provider). 'mock' selects the zero-cost offline provider (agents.llm_offline.MockProvider) — no API key, no network, no spend. The PERSATRIX_OFFLINE=1 env var force-enables the mock for ALL agents regardless of this field."
+        },
+        "provider_config": {
+          "type": "object",
+          "description": "Provider-specific options. For the OpenAI-compatible provider, 'base_url' targets a local or compatible endpoint (Ollama, vLLM, LM Studio, etc.).",
+          "additionalProperties": false,
+          "properties": {
+            "base_url": { "type": "string" }
+          }
+        },
         "instructions": {
           "type": "string",
           "description": "Inline system prompt instructions for task agents. Mutually exclusive with 'instructions_file'. Either field is required when type=task."
