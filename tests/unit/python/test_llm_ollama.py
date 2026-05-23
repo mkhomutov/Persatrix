@@ -13,6 +13,7 @@ same way :mod:`tests.unit.python.test_llm_client` does for OpenAIProvider.
 
 from __future__ import annotations
 
+import logging
 import sys
 from collections.abc import Iterator
 from types import SimpleNamespace
@@ -253,6 +254,48 @@ def test_create_provider_forced_mode_provider_config_still_wins(
     mod.AsyncOpenAI.assert_called_once_with(
         api_key="ollama", base_url="http://agent-host:11434/v1"
     )
+
+
+def test_create_provider_forced_mode_warns_on_overriding_base_url(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Forced mode logs a WARN when a per-agent base_url beats the deployment env.
+
+    The override is intentional (provider_config is the most specific source),
+    but under a global force it is a likely-accidental mis-route, so it must be
+    visible in the logs rather than silent.
+    """
+    monkeypatch.setenv("PERSATRIX_OLLAMA", "1")
+    monkeypatch.setenv("PERSATRIX_OLLAMA_BASE_URL", "http://ollama:11434/v1")
+    mod, _client = _mock_openai_module()
+    with patch.dict(sys.modules, {"openai": mod}), caplog.at_level(
+        logging.WARNING, logger="agents.llm_ollama"
+    ):
+        create_provider(
+            {
+                "id": "stray",
+                "model": "claude-sonnet-4-6",
+                "provider_config": {"base_url": "http://agent-host:11434/v1"},
+            }
+        )
+    assert any(
+        "overrides" in r.getMessage() and "http://agent-host:11434/v1" in r.getMessage()
+        for r in caplog.records
+    ), f"expected an override WARN, got: {[r.getMessage() for r in caplog.records]!r}"
+
+
+def test_create_provider_forced_mode_no_warn_without_per_agent_base_url(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """No false-positive WARN when forced mode routes via the env alone."""
+    monkeypatch.setenv("PERSATRIX_OLLAMA", "1")
+    monkeypatch.setenv("PERSATRIX_OLLAMA_BASE_URL", "http://ollama:11434/v1")
+    mod, _client = _mock_openai_module()
+    with patch.dict(sys.modules, {"openai": mod}), caplog.at_level(
+        logging.WARNING, logger="agents.llm_ollama"
+    ):
+        create_provider({"id": "x", "model": "claude-sonnet-4-6"})
+    assert not any("overrides" in r.getMessage() for r in caplog.records)
 
 
 def test_create_provider_explicit_ollama_without_env() -> None:

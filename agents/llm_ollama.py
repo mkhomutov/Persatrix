@@ -68,6 +68,7 @@ __all__ = [
     "ollama_mode_enabled",
     "resolve_ollama_base_url",
     "resolve_ollama_model",
+    "warn_if_forced_base_url_override",
 ]
 
 _OLLAMA_ENV = "PERSATRIX_OLLAMA"
@@ -173,4 +174,29 @@ class OllamaProvider(OpenAIProvider):
             tools=tools,
             max_tokens=max_tokens,
             temperature=temperature,
+        )
+
+
+def warn_if_forced_base_url_override(
+    agent_id: str, provider_config: dict[str, Any] | None
+) -> None:
+    """Warn when a per-agent base_url silently overrides the deployment env in forced mode.
+
+    Under ``PERSATRIX_OLLAMA=1`` the compose overlay sets
+    ``PERSATRIX_OLLAMA_BASE_URL`` so every agent reaches the bundled daemon.
+    A per-agent ``provider_config.base_url`` is more specific and wins, but
+    that override is a likely-accidental mis-route (e.g. a stale entry in
+    ``agents.yaml``) that would fail silently without this warning.
+    """
+    if not isinstance(provider_config, dict):
+        return
+    candidate = provider_config.get("base_url")
+    if isinstance(candidate, str) and candidate.strip():
+        logger.warning(
+            "Agent %r sets provider_config.base_url=%r; under forced "
+            "PERSATRIX_OLLAMA mode this per-agent value overrides "
+            "PERSATRIX_OLLAMA_BASE_URL, so the agent is routed to it "
+            "rather than the deployment-wide endpoint.",
+            agent_id,
+            candidate.strip(),
         )

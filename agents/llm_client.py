@@ -24,6 +24,7 @@ from .llm_ollama import (
     ollama_mode_enabled,
     resolve_ollama_base_url,
     resolve_ollama_model,
+    warn_if_forced_base_url_override,
 )
 from .llm_providers import AnthropicProvider, OpenAIProvider
 from .llm_types import (
@@ -420,6 +421,9 @@ def create_provider(agent_config: dict[str, Any]) -> LLMProvider:
     if ollama_mode_enabled():
         base_url = resolve_ollama_base_url(agent_config.get("provider_config"))
         force_model = resolve_ollama_model()
+        warn_if_forced_base_url_override(
+            agent_config.get("id", "<unknown>"), agent_config.get("provider_config")
+        )
         logger.info(
             "LLM Ollama mode active for agent %r — using OllamaProvider at %s "
             "(local model %r, no cloud calls)",
