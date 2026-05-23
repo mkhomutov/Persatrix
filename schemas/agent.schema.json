@@ -42,12 +42,12 @@
         "model": { "type": "string" },
         "provider": {
           "type": "string",
-          "enum": ["anthropic", "openai", "mock"],
-          "description": "Explicit LLM provider override. When omitted, the provider is inferred from the model prefix (agents.llm_client._infer_provider). 'mock' selects the zero-cost offline provider (agents.llm_offline.MockProvider) — no API key, no network, no spend. The PERSATRIX_OFFLINE=1 env var force-enables the mock for ALL agents regardless of this field."
+          "enum": ["anthropic", "openai", "ollama", "mock"],
+          "description": "Explicit LLM provider override. When omitted, the provider is inferred from the model prefix (agents.llm_client._infer_provider). 'ollama' selects the first-class local-model provider (agents.llm_ollama.OllamaProvider, a thin OpenAI-compatible subclass) — the agent's 'model' is a real Ollama tag (e.g. 'llama3.2') and 'provider_config.base_url' defaults to http://localhost:11434/v1; no API key. 'mock' selects the zero-cost offline provider (agents.llm_offline.MockProvider) — no API key, no network, no spend. Two env force-flags override this field for ALL agents: PERSATRIX_OFFLINE=1 forces the mock; PERSATRIX_OLLAMA=1 forces Ollama (offline wins if both are set)."
         },
         "provider_config": {
           "type": "object",
-          "description": "Provider-specific options. For the OpenAI-compatible provider, 'base_url' targets a local or compatible endpoint (Ollama, vLLM, LM Studio, etc.).",
+          "description": "Provider-specific options. For the OpenAI-compatible and 'ollama' providers, 'base_url' targets a local or compatible endpoint (Ollama, vLLM, LM Studio, etc.). The 'ollama' provider defaults base_url to http://localhost:11434/v1 when this is omitted.",
           "additionalProperties": false,
           "properties": {
             "base_url": { "type": "string" }

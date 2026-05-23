@@ -1,0 +1,116 @@
+# Local-model overlay for docker-compose.yaml — runs the whole society on a
+# REAL model served locally by Ollama: no API key, no cloud, no per-token spend.
+#
+#   make demo-ollama
+#       — or —
+#   ANTHROPIC_API_KEY=ollama-not-used \
+#     docker compose -f docker-compose.yaml -f docker-compose.ollama.yaml up -d --build
+#
+# Why a throwaway ANTHROPIC_API_KEY is still passed: the base compose file
+# guards the key with `${ANTHROPIC_API_KEY:?...}`, which Compose evaluates when
+# it parses that file — before this overlay is merged. Supplying any non-empty
+# value satisfies that startup check; the value is never used, because
+# PERSATRIX_OLLAMA=1 (set per agent below) routes every agent to
+# agents.llm_ollama.OllamaProvider — pointed at the bundled `ollama` service's
+# OpenAI-compatible /v1 endpoint — before any cloud SDK is constructed.
+#
+# Pick the model with PERSATRIX_OLLAMA_MODEL (default: llama3.2). The one-shot
+# `ollama-pull` service pulls it into a named volume on first `up`; each agent
+# waits for that pull to finish (service_completed_successfully) so the first
+# chat turn never races a missing model. First pull downloads a few GB and can
+# take minutes; subsequent runs reuse the `ollama-models` volume.
+#
+# CPU by default. For NVIDIA GPU acceleration, uncomment the `deploy` block on
+# the `ollama` service (requires the NVIDIA Container Toolkit on the host).
+
+x-ollama-agent-env: &ollama-agent-env
+  PERSATRIX_OLLAMA: "1"
+  PERSATRIX_OLLAMA_MODEL: "${PERSATRIX_OLLAMA_MODEL:-llama3.2}"
+  # The agents reach the daemon over the compose bridge, not localhost.
+  PERSATRIX_OLLAMA_BASE_URL: "http://ollama:11434/v1"
+
+x-ollama-pull-gate: &ollama-pull-gate
+  # Don't start the agent until the model is actually present.
+  ollama-pull:
+    condition: service_completed_successfully
+
+services:
+  # ─── Local model server (Ollama) ────────────────
+  ollama:
+    image: ollama/ollama:0.24.0
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    # Reached by agents on the compose bridge at ollama:11434 — not published
+    # on the host by default. Uncomment to poke it from the host with
+    # `curl localhost:11434/api/tags` (loopback-only, mirrors the orchestrator
+    # gRPC publish hardening in docker-compose.yaml):
+    # ports:
+    #   - "127.0.0.1:11434:11434"
+    healthcheck:
+      # `ollama list` talks to the local `ollama serve` (the image's default
+      # entrypoint) and exits 0 once it is accepting connections, even with no
+      # models pulled yet — a valid readiness probe for the pull gate below.
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # NVIDIA GPU (optional) — needs the NVIDIA Container Toolkit on the host:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: ["gpu"]
+
+  # ─── One-shot model pull ─────────────────────────
+  # Reuses the same image but overrides the entrypoint to pull the model
+  # against the `ollama` service (OLLAMA_HOST), then exits. `restart: "no"` so
+  # it does not loop; the agents gate on its successful completion.
+  ollama-pull:
+    image: ollama/ollama:0.24.0
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+      PERSATRIX_OLLAMA_MODEL: "${PERSATRIX_OLLAMA_MODEL:-llama3.2}"
+    entrypoint: ["/bin/sh", "-c", "ollama pull \"$${PERSATRIX_OLLAMA_MODEL:-llama3.2}\""]
+    restart: "no"
+
+  # ─── Agents routed to the local model ────────────
+  agent-planner:
+    environment: *ollama-agent-env
+    depends_on: *ollama-pull-gate
+
+  agent-coder:
+    environment: *ollama-agent-env
+    depends_on: *ollama-pull-gate
+
+  agent-reviewer:
+    environment: *ollama-agent-env
+    depends_on: *ollama-pull-gate
+
+  agent-ember-owl:
+    environment: *ollama-agent-env
+    depends_on: *ollama-pull-gate
+
+  agent-iron-fox:
+    environment: *ollama-agent-env
+    depends_on: *ollama-pull-gate
+
+  agent-nova-sparrow:
+    environment: *ollama-agent-env
+    depends_on: *ollama-pull-gate
+
+volumes:
+  # Persisted model blobs — survives `docker compose down` so the multi-GB
+  # pull happens once. NOTE: `make reset` / `make docker-down` operate on the
+  # base compose project and do NOT see this overlay-only volume, so it is
+  # intentionally left intact across resets (you rarely want to re-download
+  # gigabytes). To reclaim the space, pass the overlay explicitly:
+  #   docker compose -f docker-compose.yaml -f docker-compose.ollama.yaml down -v
+  ollama-models:
+    driver: local
