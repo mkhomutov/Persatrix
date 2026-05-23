@@ -148,6 +148,39 @@ simulated wallet.
 > ones). You still need the Docker + Go + Rust toolchain to build the stack
 > itself — a toolchain-free quickstart is on the roadmap.
 
+### Run a real local model — Ollama (no API key, no cloud cost) 🦙
+
+Want **real** inference — not canned replies — without a cloud API key or
+per-token spend? Run the whole society on a model served locally by
+[Ollama](https://ollama.com):
+
+```bash
+make demo-ollama                  # pulls the model + brings the stack up (PERSATRIX_OLLAMA=1)
+./bin/persatrix chat ember-owl    # chat against your local model
+```
+
+`make demo-ollama` bundles an `ollama` container, pulls a model into a
+persistent volume (default `llama3.2` — override with
+`PERSATRIX_OLLAMA_MODEL=qwen2.5 make demo-ollama`), and routes every agent to
+it. The first pull downloads a few GB and can take a few minutes; later runs
+reuse the volume. CPU works out of the box; uncomment the `deploy` block in
+[`docker-compose.ollama.yaml`](docker-compose.ollama.yaml) for NVIDIA GPU.
+
+Under the hood, `ollama` is a **first-class provider**
+([`agents/llm_ollama.py`](agents/llm_ollama.py)) — a thin subclass of the
+OpenAI-compatible provider, because Ollama speaks that wire format verbatim at
+`/v1`. To point a **single** agent at Ollama instead of the whole society, set
+`provider: ollama` on its [`config/agents.yaml`](config/agents.yaml) entry (its
+`model:` is then a real Ollama tag like `llama3.2`, and
+`provider_config.base_url` defaults to `http://localhost:11434/v1`).
+
+> **Real model, $0 of real money** — inference runs on your own hardware, so
+> there is no cloud bill. The *in-app* [RFC 0023 wallet](docs/rfcs/0023-llm-call-leasing.md)
+> still simulates a per-agent budget at the configured model's price, exactly
+> as in offline mode above. Already running Ollama yourself? `PERSATRIX_OLLAMA=1`
+> (plus `PERSATRIX_OLLAMA_BASE_URL` if it's not on the default port) routes the
+> society to it without the bundled container.
+
 ---
 
 ## ⚠️ Cost Warning

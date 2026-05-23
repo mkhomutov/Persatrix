@@ -2,8 +2,11 @@
 Multi-provider LLM client with normalized response types.
 
 Supports Anthropic and OpenAI (including OpenAI-compatible APIs like
-Ollama, vLLM, Together, Groq, LM Studio) via a common LLMProvider protocol.
-Provider-specific message formats are encapsulated behind the protocol boundary.
+vLLM, Together, Groq, LM Studio) via a common LLMProvider protocol, plus a
+first-class local-model provider for Ollama (a thin OpenAI-compatible
+subclass, see :mod:`agents.llm_ollama`) and a zero-cost offline mock
+(:mod:`agents.llm_offline`). Provider-specific message formats are
+encapsulated behind the protocol boundary.
 """
 
 import logging
@@ -16,6 +19,12 @@ from opentelemetry.trace import Status, StatusCode
 
 from .generated import wallet_pb2 as walletpb
 from .llm_offline import MockProvider, offline_mode_enabled
+from .llm_ollama import (
+    OllamaProvider,
+    ollama_mode_enabled,
+    resolve_ollama_base_url,
+    resolve_ollama_model,
+)
 from .llm_providers import AnthropicProvider, OpenAIProvider
 from .llm_types import (
     LLMProvider,
@@ -61,6 +70,7 @@ __all__ = [
     "LLMResponse",
     "LLMToolResult",
     "MockProvider",
+    "OllamaProvider",
     "OpenAIProvider",
     "StopReason",
     "ToolCall",
@@ -348,6 +358,14 @@ class LLMClient:
 _OPENAI_EXACT_MODELS: frozenset[str] = frozenset({"o1", "o3", "o4"})
 _OPENAI_PREFIX_MODELS: tuple[str, ...] = ("gpt-", "o1-", "o3-", "o4-")
 
+# Ollama speaks the OpenAI-compatible wire format, so OllamaProvider is a thin
+# subclass of OpenAIProvider and shares its only hard dependency (the openai
+# SDK). Surface the same actionable install hint on both Ollama entry points.
+_OLLAMA_IMPORT_ERROR = (
+    "Provider 'ollama' requires package 'openai' (Ollama speaks the "
+    "OpenAI-compatible API). Install with: pip install 'openai>=1.50.0'"
+)
+
 
 def _infer_provider(model: str) -> str:
     rules = provider_inference()
@@ -367,12 +385,19 @@ def _infer_provider(model: str) -> str:
 def create_provider(agent_config: dict[str, Any]) -> LLMProvider:
     """Create an LLM provider from agent config.
 
-    Offline mode takes precedence: when ``PERSATRIX_OFFLINE`` is truthy, or
-    the agent declares ``provider: mock``, the zero-cost
-    :class:`agents.llm_offline.MockProvider` is returned regardless of the
-    configured ``model`` — no API key or network is required. Otherwise the
-    explicit ``provider`` field or model-prefix inference selects the
-    Anthropic / OpenAI SDK provider.
+    Two global env force-flags are checked before the ``model`` field, in
+    order of precedence:
+
+    1. ``PERSATRIX_OFFLINE`` (or ``provider: mock``) → the zero-cost
+       :class:`agents.llm_offline.MockProvider` — no API key, no network.
+    2. ``PERSATRIX_OLLAMA`` → :class:`agents.llm_ollama.OllamaProvider`
+       pointed at a locally-served model, with the configured model
+       force-substituted for the single pulled one — no API key, no cloud
+       spend. Offline wins if both are set (it needs no running daemon).
+
+    Otherwise the explicit ``provider`` field or model-prefix inference
+    selects the provider: Anthropic / OpenAI SDK, or ``provider: ollama`` for
+    a single agent on a local model (its ``model`` used verbatim).
     """
     # Offline / mock override — checked before the model field so a demo
     # config can carry a real model id (or a placeholder) without needing
@@ -384,6 +409,28 @@ def create_provider(agent_config: dict[str, Any]) -> LLMProvider:
             agent_config.get("id", "<unknown>"),
         )
         return MockProvider.from_config(agent_config)
+
+    # Local-model override — Ollama runs a real model on the operator's own
+    # machine with no API key and no cloud spend. PERSATRIX_OLLAMA=1 forces
+    # EVERY agent onto the local daemon (the `make demo-ollama` knob) and
+    # substitutes the single pulled model for the configured one; a per-agent
+    # `provider: ollama` (handled below) opts a single agent in instead.
+    # Checked after offline mode, which wins if both are set — the mock needs
+    # neither a network nor a running daemon.
+    if ollama_mode_enabled():
+        base_url = resolve_ollama_base_url(agent_config.get("provider_config"))
+        force_model = resolve_ollama_model()
+        logger.info(
+            "LLM Ollama mode active for agent %r — using OllamaProvider at %s "
+            "(local model %r, no cloud calls)",
+            agent_config.get("id", "<unknown>"),
+            base_url,
+            force_model,
+        )
+        try:
+            return OllamaProvider(base_url=base_url, force_model=force_model)
+        except ImportError:
+            raise SystemExit(_OLLAMA_IMPORT_ERROR)
 
     model = agent_config["model"]
     # S-18: guard against empty model string — "" falls through
@@ -429,4 +476,16 @@ def create_provider(agent_config: dict[str, Any]) -> LLMProvider:
                 "Provider 'openai' requires package 'openai'. "
                 "Install with: pip install 'openai>=1.50.0'"
             )
+    elif provider == "ollama":
+        # Per-agent local model over Ollama's OpenAI-compatible API. No API
+        # key needed (Ollama ignores auth); base_url resolves provider_config
+        # first, then the PERSATRIX_OLLAMA_BASE_URL env, then the localhost
+        # default. The agent's configured `model` is a real Ollama tag, used
+        # verbatim — no force-substitution on this opt-in path.
+        try:
+            return OllamaProvider(
+                base_url=resolve_ollama_base_url(provider_config),
+            )
+        except ImportError:
+            raise SystemExit(_OLLAMA_IMPORT_ERROR)
     raise SystemExit(f"Unknown LLM provider: {provider!r}")

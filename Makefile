@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run validate help demo-offline generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check
+.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run validate help demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -259,6 +259,20 @@ demo-offline: ## Run the demo society with ZERO cost — no API key, no network 
 	  docker compose -f docker-compose.yaml -f docker-compose.offline.yaml up -d --build
 	@echo "✓ Offline society up. Try:  ./bin/persatrix chat ember-owl"
 	@echo "  Stop with: make docker-down"
+
+demo-ollama: ## Run the demo society on a REAL local model via Ollama — no API key, no cloud spend (PERSATRIX_OLLAMA; set PERSATRIX_OLLAMA_MODEL to change the model)
+	@echo "→ Starting Persatrix on a local Ollama model ($(or $(PERSATRIX_OLLAMA_MODEL),llama3.2)) — no cloud calls, no per-token spend..."
+	@echo "  First run pulls the model into the ollama-models volume — a few GB; this can take minutes."
+	@# ANTHROPIC_API_KEY is a throwaway value: it only satisfies the base
+	@# compose file's startup `:?` key-guard, which Compose evaluates before
+	@# the overlay merges. The overlay sets PERSATRIX_OLLAMA=1 per agent, which
+	@# routes every agent to the local OllamaProvider, so the value is never
+	@# used. See docker-compose.ollama.yaml.
+	@# --build so the agent image bakes the current source (matches demo-offline).
+	ANTHROPIC_API_KEY=ollama-not-used \
+	  docker compose -f docker-compose.yaml -f docker-compose.ollama.yaml up -d --build
+	@echo "✓ Local-model society up. Try:  ./bin/persatrix chat ember-owl"
+	@echo "  Stop with: make docker-down  (the pulled model persists in the ollama-models volume)"
 
 reset: ## Stop the stack and purge ALL named volumes (channels DB / orchestrator-data, persona memory / ember-owl-data + iron-fox-data + nova-sparrow-data, agent scratch / workspace) — operator workaround for F-3 cross-run state bleed; see docs/issues/ISSUE-0051
 	@echo "→ Stopping stack and removing named volumes..."
