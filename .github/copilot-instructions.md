@@ -16,11 +16,8 @@ Be brief by default. Expand only when asked.
 
 ## Writing docs & comments
 
-Every new or changed doc and code comment must be readable by a non-programmer:
-plain English, as short as possible, leading with what it does in the real world
-and why it matters. Define jargon on first use or link the
-[glossary](../docs/ai-glossary.md). Full rules:
-[Documentation Guide § Writing Style](../docs/documentation-guide.md#writing-style).
+Plain English a non-programmer can follow — short, real-world purpose first.
+Full rules: [Documentation Guide § Writing Style](../docs/documentation-guide.md#writing-style).
 
 ## Architecture
 
