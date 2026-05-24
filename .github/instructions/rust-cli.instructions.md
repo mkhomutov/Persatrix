@@ -11,6 +11,7 @@ description: "Rust CLI conventions: clap v4 derive, exhaustive match, tokio asyn
 - **Thin client:** CLI is a REST client to the orchestrator at `--server` (default `http://localhost:8080`). All business logic lives server-side.
 - **Output:** `tabled` for tables, `indicatif` for progress bars, `colored` for terminal colors.
 - **YAML:** `serde_yml` (maintained successor to `serde_yaml`).
+- **Comments in plain English.** Write comments a non-programmer could follow — say what the code does and why it matters, briefly. Full rules: [Documentation Guide § Writing Style](../../docs/documentation-guide.md#writing-style).
 
 ## TDD (from v0.3.0 onward)
 

@@ -72,6 +72,7 @@ Use only the [standard status markers](./documentation-guide.md#status-markers):
 
 Before approving documentation changes:
 
+- [ ] Plain English — readable by a non-programmer; jargon defined or linked (see [Writing Style](./documentation-guide.md#writing-style))
 - [ ] Content is accurate and reflects current implementation
 - [ ] No single-source-of-truth violations (duplicate content)
 - [ ] Status markers are current

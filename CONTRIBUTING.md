@@ -121,6 +121,14 @@ For changes that affect architecture, cross-component interfaces, or introduce n
 - Exhaustive `match` on command enums (no catch-all `_`)
 - `tokio` async runtime
 
+### Documentation & Comments
+
+Write docs and comments so anyone can follow them — a developer new to the
+project, a founder evaluating it for their business, or a researcher using it
+for their work. Use plain English, keep it short, and lead with what the thing
+does in the real world and why it matters. Full rules:
+[Documentation Guide § Writing Style](docs/documentation-guide.md#writing-style).
+
 ### Commit Messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/):

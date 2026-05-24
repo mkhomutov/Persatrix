@@ -14,6 +14,14 @@ Be brief by default. Expand only when asked.
 - Status updates: 1–2 sentences.
 - Never add `Co-Authored-By: Claude` trailers or Claude attribution in PRs/commits.
 
+## Writing docs & comments
+
+Every new or changed doc and code comment must be readable by a non-programmer:
+plain English, as short as possible, leading with what it does in the real world
+and why it matters. Define jargon on first use or link the
+[glossary](../docs/ai-glossary.md). Full rules:
+[Documentation Guide § Writing Style](../docs/documentation-guide.md#writing-style).
+
 ## What is Persatrix
 
 Polyglot AI agent orchestration: **Go** orchestrator, **Python** agent runtime, **Rust** CLI, connected by protobuf/gRPC. DAG-based YAML workflows with Jinja2-like templating.

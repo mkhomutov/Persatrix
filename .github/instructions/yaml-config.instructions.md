@@ -14,3 +14,4 @@ description: "YAML config conventions: JSON Schema validation, agent ID patterns
 - **Template references:** `extends: "templates/personas.yaml#anchor"` to inherit persona/sub-agent definitions.
 - **Environment overrides:** `config/environments/{development,staging,production}.yaml` for env-specific settings.
 - **Optimization profiles:** `cost_optimized`, `speed_optimized`, `quality_optimized`, `simulation_optimized` in `config/optimization.yaml`.
+- **Comments in plain English.** Write `#` comments a non-programmer could follow — say what the setting does and why it matters, briefly. Full rules: [Documentation Guide § Writing Style](../../docs/documentation-guide.md#writing-style).
