@@ -17,6 +17,7 @@ description: "Python agent conventions: async-first, 3.11+ type hints, ruff lint
 - **Sub-agents** are ephemeral: spawned by parent agents via `orchestrator_client.spawn_sub_agent()` with inherited permissions.
 - **Platform awareness:** Guard `loop.add_signal_handler()` with `sys.platform != "win32"`.
 - **Dataclasses:** Use `field(default_factory=...)` for mutable defaults.
+- **Comments in plain English.** Write comments a non-programmer could follow — say what the code does and why it matters, briefly. Full rules: [Documentation Guide § Writing Style](../../docs/documentation-guide.md#writing-style).
 
 ## TDD (from v0.3.0 onward)
 

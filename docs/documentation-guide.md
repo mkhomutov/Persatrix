@@ -4,6 +4,25 @@
 
 You are updating documentation for **Persatrix** — a polyglot AI agent orchestration framework built with Go (orchestrator), Python (agents), and Rust (CLI). The project maintains documentation across architecture, specs, and configuration.
 
+## Writing Style
+
+**Applies to every doc and every code comment — new or changed.**
+
+Persatrix is read by people who are not all programmers: developers at any
+level, founders sizing it up for a business, researchers using it for a study,
+and brand-new teammates on day one. Write so any of them can follow along.
+
+- **Plain English.** Short sentences, everyday words. Spell out a technical
+  term the first time you use it, or link the [glossary](ai-glossary.md).
+- **Lead with the point.** Say what the thing does and why it matters in the
+  real world before explaining how it works inside.
+- **Cut everything optional.** If a sentence still makes sense without a word,
+  delete the word. Drop filler like "simply", "just", "of course".
+- **Show it.** One real example or command beats a paragraph describing it.
+
+One test before you commit: *could someone who has never seen this code tell
+what it's for and why it's useful?* If not, rewrite.
+
 ## Core Principles
 
 When updating documentation:

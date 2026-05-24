@@ -14,6 +14,11 @@ Be brief by default. Expand only when asked.
 - Status updates: 1–2 sentences.
 - Prefer links to existing docs over embedding large guidance text.
 
+## Writing docs & comments
+
+Plain English a non-programmer can follow — short, real-world purpose first.
+Full rules: [Documentation Guide § Writing Style](../docs/documentation-guide.md#writing-style).
+
 ## Architecture
 
 ```
