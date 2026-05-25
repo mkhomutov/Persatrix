@@ -456,3 +456,45 @@ class TestSingleTurnInteractionFactExtraction:
             f"first[{single}] last[{single}]"
         )
         assert (summary, failed, facts_raw) == (expected, False, None)
+
+
+@pytest.mark.asyncio
+class TestUnresolvableSummarizationModelFallsBack:
+    """RFC 0033 PR 2 — an unresolvable summarisation model must degrade to
+    the fallback, not escape as an uncaught SystemExit past the caller."""
+
+    async def test_unresolvable_model_returns_fallback_not_systemexit(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ):
+        import agents.persona_runtime.summarize_close as sc
+
+        monkeypatch.setattr(
+            sc, "summarization_model", lambda: "totally-unknown-model-xyz",
+        )
+        result = await summarize_closed_interaction(
+            _make_envelope_client('{"summary": "x", "facts": []}'),
+            "test-agent",
+            _multi_turn_interaction(),
+        )
+        assert result == (SUMMARY_UNAVAILABLE_TEXT, True, None)
+
+    async def test_unresolvable_model_bumps_failed_counter(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ):
+        import agents.persona_runtime.summarize_close as sc
+
+        monkeypatch.setattr(
+            sc, "summarization_model", lambda: "totally-unknown-model-xyz",
+        )
+        reader, metrics_mod = _build_meter()
+        try:
+            await summarize_closed_interaction(
+                _make_envelope_client('{"summary": "x", "facts": []}'),
+                "test-agent",
+                _multi_turn_interaction(),
+            )
+            assert counter_total(
+                reader, "agent.interactions.summary.failed",
+            ) == 1
+        finally:
+            await metrics_mod.shutdown()

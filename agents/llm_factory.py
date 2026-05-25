@@ -55,6 +55,19 @@ _OLLAMA_IMPORT_ERROR = (
 # signal — the gate that authorises removing the pass-through and
 # ``_infer_provider``. Both are de-duplicated so re-creating an agent's
 # provider within a process does not double-count.
+#
+# Scope caveat (Phase 3 gate): this counter covers only the create_provider
+# (agent) surface. The summarisation-model surface
+# (``persona_runtime.summarize_close``) resolves its own model and is NOT
+# counted here, so a raw summarisation model is invisible to the gate. PR 3
+# migrates *both* the agent configs and the summarisation field to aliases,
+# so a clean zero reading is authoritative only once that migration lands.
+#
+# The dedup is best-effort, not synchronized: concurrent create_provider
+# calls could in principle double-warn or double-count a raw agent. That is
+# harmless for a deprecation signal (worst case a duplicate log line / an
+# over-count by one) and agents are loaded sequentially at startup today, so
+# a lock would be over-engineering.
 _raw_id_warning_emitted = False
 _raw_id_counted_agents: set[str] = set()
 
