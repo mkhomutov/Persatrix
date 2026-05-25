@@ -114,7 +114,7 @@ The **one genuine seam-cut** is in the prompt kit: the leaf loader (`prompt_load
 |------------|-----------|-----------------|-----------|
 | **`persatrix-prompts`** | `prompt_loader.py`, `persona_behavior.py`, `prompts/runtime/safety/**`, `prompts/runtime/persona/sections/**`, a thin context-dict composer | `prompt_assembly.py` (the persona-state-coupled mixin) + the rest of `persona_runtime` | **Yes** — the one real cut |
 | **`persatrix-mock-llm`** | `llm_types.py` (the `LLMProvider` protocol + response types), `llm_offline.py` (`MockProvider`) | `llm_providers.py`, `llm_ollama.py`, `create_provider` factory | No — already leaf |
-| **`persatrix-schemas`** | `schemas/*.json`, `blueprints/*.yaml`, `templates/*.yaml`, `validate.py` (reference validator) | the Go planner, Python callers, Rust CLI that consume the schemas in-tree | No — declarative data |
+| **`persatrix-schemas`** | `schemas/*.json`, `blueprints/*/blueprint.yaml`, `templates/*.yaml`, `validate.py` (reference validator) | the Go planner, Python callers, Rust CLI that consume the schemas in-tree | No — declarative data |
 
 ### B. `persatrix-prompts` — the prompt kit (the one real seam-cut)
 
@@ -171,8 +171,8 @@ The schemas are declarative draft-07 JSON with zero code coupling and a `$id` al
 ```
 persatrix-schemas/               # MIT, language-neutral data + reference validator
   schemas/{agent,channel,workflow,optimization}.schema.json
-  blueprints/{software-team,social-experiment}.yaml   # examples
-  templates/{personas,sub_agents}.yaml                # examples
+  blueprints/{software-team,social-experiment}/blueprint.yaml   # examples
+  templates/{personas,sub_agents}.yaml                          # examples
   validator/validate.py          # from validate.py — thin reference validator (convenience)
   LICENSE  NOTICE  CHANGELOG  CONTRIBUTING(DCO)  README
 ```
@@ -261,7 +261,7 @@ Considered per repo, gated on each API stabilizing + real external contribution 
 |-----------|-------|--------|
 | `persatrix-prompts` (MIT, mirrored) | `persatrix_prompts/loader.py`, `behavior.py`, `compose.py`, `data/safety/**`, `data/persona/sections/**`, scaffolding, CI | Created; `loader`/`behavior` recast from `agents/prompt_loader.py` + `agents/persona_behavior.py`; data from `prompts/runtime/` |
 | `persatrix-mock-llm` (MIT, mirrored) | `persatrix_mock_llm/types.py`, `mock.py`, `adapters/adk.py`, scaffolding, CI | Created; recast from `agents/llm_types.py` + `agents/llm_offline.py` |
-| `persatrix-schemas` (MIT, mirrored) | `schemas/*.json`, `blueprints/*.yaml`, `templates/*.yaml`, `validator/validate.py`, scaffolding | Created; data from `schemas/`, `blueprints/`, `templates/`; validator from `agents/validate.py` |
+| `persatrix-schemas` (MIT, mirrored) | `schemas/*.json`, `blueprints/*/blueprint.yaml`, `templates/*.yaml`, `validator/validate.py`, scaffolding | Created; data from `schemas/`, `blueprints/`, `templates/`; validator from `agents/validate.py` |
 | Persona runtime (BUSL) | `agents/persona_runtime/prompt_assembly.py` and import sites | Re-point `load_persona_section`/`load_snippet`/`render_behavior` at `persatrix_prompts`; mixin stays BUSL |
 | LLM layer (BUSL) | `agents/llm_client.py`, `agents/llm_ollama.py` | Consume `persatrix_mock_llm` types + `MockProvider`; real providers + factory stay BUSL |
 | Config validation (BUSL) | callers of `agents/validate.py`; Go `internal/planner`; Rust `cli/src/validation.rs` | Consume the in-tree canonical schemas (unchanged under Option A) |
