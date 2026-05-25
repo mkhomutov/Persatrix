@@ -33,7 +33,7 @@ class TestInstructionsFileLoading:
 
     @patch("agents.server_persona.create_provider")
     def test_instructions_file_resolves_to_file_contents(self, mock_create):
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
         with tempfile.TemporaryDirectory() as tmp:
             root = self._layout(tmp)
             (root / "prompts" / "runtime" / "task-agents" / "planner.md").write_text(
@@ -71,7 +71,7 @@ class TestInstructionsFileLoading:
 
     @patch("agents.server_persona.create_provider")
     def test_instructions_file_missing_fails_clearly(self, mock_create):
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
         with tempfile.TemporaryDirectory() as tmp:
             root = self._layout(tmp)
             config_path = root / "config" / "agents.yaml"
@@ -103,7 +103,7 @@ class TestInstructionsFileLoading:
     @patch("agents.server_persona.create_provider")
     def test_inline_instructions_still_work(self, mock_create):
         """Backward compat: agents using the inline ``instructions`` field load unchanged."""
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
         with tempfile.TemporaryDirectory() as tmp:
             root = self._layout(tmp)
             config_path = root / "config" / "agents.yaml"
@@ -129,7 +129,7 @@ class TestInstructionsFileLoading:
 
     @patch("agents.server_persona.create_provider")
     def test_both_inline_and_file_rejected(self, mock_create):
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
         with tempfile.TemporaryDirectory() as tmp:
             root = self._layout(tmp)
             (root / "prompts" / "runtime" / "task-agents" / "p.md").write_text(

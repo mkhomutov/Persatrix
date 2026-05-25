@@ -45,7 +45,7 @@ class TestLoadAgent:
 
     @patch("agents.server_persona.create_provider")
     def test_load_planner(self, mock_create):
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             config_path = _write_agent_config(tmp_path, [
@@ -66,7 +66,7 @@ class TestLoadAgent:
 
     @patch("agents.server_persona.create_provider")
     def test_load_coder(self, mock_create):
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             config_path = _write_agent_config(tmp_path, [
@@ -86,7 +86,7 @@ class TestLoadAgent:
 
     @patch("agents.server_persona.create_provider")
     def test_load_reviewer(self, mock_create):
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             config_path = _write_agent_config(tmp_path, [
@@ -127,7 +127,7 @@ class TestLoadAgent:
     @patch("agents.server_persona.create_provider")
     def test_unknown_type_raises_system_exit(self, mock_create):
         """Unknown agent type in config raises SystemExit (not ValueError)."""
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             config_path = _write_agent_config(tmp_path, [
@@ -299,7 +299,7 @@ class TestPermissionWiring:
     @patch("agents.server_persona.create_provider")
     def test_permissions_wired_after_load(self, mock_create):
         """After load_agent(), builtin.permission_gate and builtin.path_validator are set."""
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
 
         original_gate = builtin.permission_gate
         original_validator = builtin.path_validator

@@ -157,13 +157,24 @@ def _infer_raw_provider(model: str) -> str:
     )
 
 
-def resolve(alias_or_model: str) -> ResolvedModel:
+def resolve(
+    alias_or_model: str, *, explicit_provider: str | None = None,
+) -> ResolvedModel:
     """Resolve ``alias_or_model`` to a :class:`ResolvedModel`.
 
     * A declared alias returns its configured record (``raw=False``).
+      ``explicit_provider`` is ignored here — the alias entry is the joint
+      declaration of provider + model + pricing and stays authoritative
+      (RFC 0033 §D rule 1; a *disagreeing* explicit provider is caught by
+      the factory, not silently overridden here).
     * A recognised raw vendor ID falls through with ``alias=None,
-      raw=True`` and provider inferred from the prefix table (§E); it
-      carries no pricing (the Go cost path keys off telemetry, §F).
+      raw=True``. When ``explicit_provider`` is given it wins over prefix
+      inference (§D rule 1, raw path — preserves today's
+      ``agent_config.get("provider") or _infer_provider(model)`` so a
+      per-agent ``provider: ollama`` on a local tag like ``llama3.2`` that
+      no prefix rule recognises still resolves). Otherwise the provider is
+      inferred from the prefix table (§E). The raw record carries no
+      pricing (the Go cost path keys off telemetry, §F).
     * Anything else is a loud :class:`SystemExit` naming the string.
     """
     if not alias_or_model or not alias_or_model.strip():
@@ -173,7 +184,7 @@ def resolve(alias_or_model: str) -> ResolvedModel:
     if entry is not None:
         return _from_alias_entry(alias_or_model, entry)
 
-    provider = _infer_raw_provider(alias_or_model)
+    provider = explicit_provider or _infer_raw_provider(alias_or_model)
     return ResolvedModel(
         alias=None,
         provider=provider,

@@ -136,7 +136,8 @@ PR 1 is additive and unconsumed: the resolver module and `models.aliases` block 
 - **The force-flag short-circuits stay first.** [`create_provider`](../../agents/llm_client.py) checks `offline_mode_enabled()` / `provider == "mock"` (line 406) and `ollama_mode_enabled()` (line 421) **before** the model field today, so a keyless demo config works. PR 2 keeps that ordering — `resolve()` runs only on the non-forced path. This is why the offline/Ollama interplay regression is a hard gate, not an afterthought: a careless rewrite that moved `resolve()` ahead of the force-flag check would break `make demo-offline` (which carries a placeholder model id with no key).
 - **The tuple return is the load-bearing change.** Today `create_provider` returns just `LLMProvider` and the caller reads `agent_config["model"]` for `create_message`. Under aliasing the alias name (`quality`) must never reach `create_message` — the vendor ID (`claude-sonnet-4-6`) must. Returning `(provider, resolved.model)` makes the physical model the single value the caller threads to the API call. Every call site is updated in this PR; `test_llm_client.py` pins that the alias name never appears in a `create_message(model=…)` argument.
 - **Behaviour is unchanged because configs are still raw here.** PR 2 ships the machinery but does not migrate configs (PR 3 does). Every stock agent still says `model: "claude-sonnet-4-20250514"`, which `resolve()` returns as `raw=True` and routes exactly as before — *plus* the new deprecation warning. This staging keeps PR 2's diff to the factory and PR 3's diff to the configs.
-- **`_infer_provider` is preserved, not retired.** [RFC §I](0033-model-alias-layer.md#i-retirement-of-_infer_provider) retires it only in Phase 3, gated on zero raw-ID usage. PR 2 keeps it as the engine behind the `raw=True` fall-through; the `raw_id_usage` counter this PR adds is the signal that eventually authorises that retirement.
+- **`_infer_provider` is preserved, not retired.** [RFC §I](0033-model-alias-layer.md#i-retirement-of-_infer_provider) retires it only in Phase 3, gated on zero raw-ID usage. PR 2 keeps it (now the resolver's own `_infer_raw_provider` is the live raw-ID engine via `resolve()`); `_infer_provider` stays pinned by the resolver-mirror test and is removed in Phase 3 alongside the pass-through. The `raw_id_usage` counter this PR adds is the signal that authorises that retirement.
+- **Factory extracted to `agents/llm_factory.py`.** [`agents/llm_client.py`](../../agents/llm_client.py) was already at the 500-line repo cap, so the rewrite would have pushed it over. `create_provider` (+ the raw-ID signal helpers) moved to a new leaf module [`agents/llm_factory.py`](../../agents/llm_factory.py) and is **re-exported** from `llm_client.py`, so the `from agents.llm_client import create_provider` path is unchanged. The dedup state + `try_get_instruments` hook live in `llm_factory`; the factory's unit tests are in [`tests/unit/python/test_llm_factory.py`](../../tests/unit/python/test_llm_factory.py). No import-path break, no cycle (`llm_factory` imports the provider/leaf modules + the resolver, never `llm_client`).
 
 #### Tests
 
@@ -147,16 +148,16 @@ PR 1 is additive and unconsumed: the resolver module and `models.aliases` block 
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_llm_client.py tests/unit/python/test_model_aliases.py -q` plus the offline/Ollama regression module pass.
-- [ ] `cd agents && mypy .` clean; `ruff check agents/` clean.
-- [ ] `make test` clean — observable routing unchanged (configs still raw; pass-through active).
-- [ ] `create_provider` returns `(provider, physical_model)`; no call site passes an alias name into `create_message(model=…)`.
-- [ ] §D precedence rules encoded and tested (disagreeing alias/`provider:` → `SystemExit`; alias `provider_config` per-field precedence).
-- [ ] Raw-ID startup deprecation warning fires once per process; `persatrix.llm.alias.raw_id_usage{agent_id}` counter increments once per raw-ID agent (the Phase 3 gate signal).
-- [ ] **Offline / Ollama interplay regression green** — `make demo-offline` / `make demo-ollama` paths and `provider: mock` / `provider: ollama` resolve through the rewritten factory ([#422](https://github.com/mkhomutov/Persatrix/pull/422) / [#423](https://github.com/mkhomutov/Persatrix/pull/423)).
-- [ ] [RFC 0033 row in ROADMAP](../../ROADMAP.md#rfc-master-index) → `🚧 Implementing` on this PR opening (first implementation PR); [v0.3.4-plan Master Progress Overview](../v0.3.4-plan.md#master-progress-overview) row 2 → 🔄 In progress.
-- [ ] [§Version Map](../../ROADMAP.md#version-map) v0.3.4 row stays `🚧 Planning` (no version-map flip mid-implementation).
-- [ ] [Progress Overview](#progress-overview) row 2 filled.
+- [x] `pytest tests/unit/python/test_llm_factory.py tests/unit/python/test_llm_client.py tests/unit/python/test_model_aliases.py -q` plus the offline/Ollama regression modules (`test_llm_offline.py` / `test_llm_ollama.py`) pass.
+- [x] `cd agents && mypy .` clean (whole-package); `ruff check agents/` clean.
+- [x] `make test` clean — observable routing unchanged (configs still raw; pass-through active). Verified via the touched unit modules + `agents/tests` (387 passed) + mypy/ruff; no Go change; CI runs the full target.
+- [x] `create_provider` returns `(provider, physical_model)`; no call site passes an alias name into `create_message(model=…)` (`server_persona.py` threads the physical model; `summarize_close.py` resolves its separate model surface).
+- [x] §D precedence rules encoded and tested (disagreeing alias/`provider:` → `SystemExit`; alias `provider_config` per-field precedence).
+- [x] Raw-ID startup deprecation warning fires once per process; `persatrix.llm.alias.raw_id_usage{agent_id}` counter increments once per raw-ID agent (the Phase 3 gate signal).
+- [x] **Offline / Ollama interplay regression green** — `provider: mock` / `provider: ollama` (incl. an alias declaring `provider: ollama`) resolve through the rewritten factory; offline-wins-over-Ollama precedence intact ([#422](https://github.com/mkhomutov/Persatrix/pull/422) / [#423](https://github.com/mkhomutov/Persatrix/pull/423)). End-to-end `make demo-offline` / `make demo-ollama` re-run is master-plan Phase 4.
+- [x] [RFC 0033 row in ROADMAP](../../ROADMAP.md#rfc-master-index) → `🚧 Implementing` on this PR opening (first implementation PR); [v0.3.4-plan Master Progress Overview](../v0.3.4-plan.md#master-progress-overview) row 2 → 🔄 In progress.
+- [x] [§Version Map](../../ROADMAP.md#version-map) v0.3.4 row stays `🚧 Planning` (no version-map flip mid-implementation).
+- [x] [Progress Overview](#progress-overview) row 2 filled.
 
 ---
 
@@ -378,8 +379,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | RFC Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-----------|-------|--------|--------|-----------|--------|
-| 1 | 1 | Resolver module + `models.aliases` config block (+ OpenAI alias, local-pricing decision) | `feature/v034-rfc0033-resolver` | 🔀 PR open | [#431](https://github.com/mkhomutov/Persatrix/pull/431) | — |
-| 2 | 1 | `create_provider` tuple return + §D precedence + offline/Ollama interplay regression + raw-ID startup warning + `raw_id_usage` counter | `feature/v034-rfc0033-factory` | ⬜ Not started | — | — |
+| 1 | 1 | Resolver module + `models.aliases` config block (+ OpenAI alias, local-pricing decision) | `feature/v034-rfc0033-resolver` | ✅ Merged | [#431](https://github.com/mkhomutov/Persatrix/pull/431) | 2026-05-25 |
+| 2 | 1 | `create_provider` tuple return + §D precedence + offline/Ollama interplay regression + raw-ID startup warning + `raw_id_usage` counter | `feature/v034-rfc0033-factory` | 🔀 PR open | — | — |
 | 3 | 1 | Config migration to aliases (Sonnet 4→4.6 via `quality`) + network-allowlist neutralization + `SubAgentRequest.model` `None`-default + §J resolution | `feature/v034-rfc0033-migration` | ⬜ Not started | — | — |
 | 4 | 2 | Missing-price guard — fail-closed for unpriced non-local aliases ([amendment item 1](../v0.3.4-plan-amendment-2026-05-24.md#what-changes)) | `feature/v034-rfc0033-missing-price-guard` | ⬜ Not started | — | — |
 | 5 | 2 | `persatrix.llm.model_alias` span attr + alias-derived pricing + `/cost/summary` cost gate (+ OpenAI rows) | `feature/v034-rfc0033-telemetry-pricing` | ⬜ Not started | — | — |

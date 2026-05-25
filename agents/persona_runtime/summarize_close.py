@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 
 from ..memory.interactions import SUMMARY_UNAVAILABLE_TEXT
 from ..memory.store import CompressedView, MemoryEntry, MemoryStore
+from ..model_aliases import resolve as resolve_model
 from ..observability.metrics import current_agent_id, try_get_instruments
 from ..optimization import summarization_model
 from ..prompt_loader import load_snippet
@@ -145,7 +146,13 @@ async def summarize_closed_interaction(
     try:
         response = await asyncio.wait_for(
             llm_client.create_message(
-                model=summarization_model(),
+                # Summarisation picks its model on a surface separate from
+                # create_provider; resolve it here too (RFC 0033 §D) so the
+                # alias name never reaches the vendor API. While the config
+                # field is still a raw Haiku ID, resolve() returns it
+                # unchanged; PR 3's flip to the ``summarizer`` alias resolves
+                # to the physical model the same way the factory path does.
+                model=resolve_model(summarization_model()).model,
                 messages=[{"role": "user", "content": prompt}],
                 system=load_snippet("episode-summarizer"),
                 tools=[],

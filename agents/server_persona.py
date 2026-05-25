@@ -208,8 +208,15 @@ def load_agent(
         if resolved is not None:
             agent_config["instructions"] = resolved
 
-    # Create LLM client
-    provider = create_provider(agent_config)
+    # Create LLM client. create_provider resolves the configured ``model``
+    # (which may be a models.aliases name) to the physical vendor ID (RFC
+    # 0033 §D); thread that physical model back into the config the agent
+    # reads, so create_message(model=…) calls the vendor ID, never the
+    # alias name. On raw configs physical_model == agent_config["model"], so
+    # this is a no-op until the config migration (PR 3) introduces aliases.
+    provider, physical_model = create_provider(agent_config)
+    if physical_model and physical_model != agent_config.get("model"):
+        agent_config = {**agent_config, "model": physical_model}
     llm_client = LLMClient(provider)
 
     # Create agent based on type

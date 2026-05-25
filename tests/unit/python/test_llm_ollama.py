@@ -33,6 +33,7 @@ from agents.llm_ollama import (
     resolve_ollama_model,
 )
 from agents.llm_types import StopReason
+from agents.model_aliases import use_alias_map
 
 
 @pytest.fixture(autouse=True)
@@ -206,11 +207,15 @@ def test_create_provider_ollama_env_forces_provider(
     mod, _client = _mock_openai_module()
     with patch.dict(sys.modules, {"openai": mod}):
         # A real cloud model id — forced Ollama mode must override it anyway.
-        provider = create_provider({"id": "ember-owl", "model": "claude-sonnet-4-6"})
+        provider, model = create_provider(
+            {"id": "ember-owl", "model": "claude-sonnet-4-6"}
+        )
     assert isinstance(provider, OllamaProvider)
     assert provider.name == "ollama"
     # Forced mode threads the env model through as the substitution target.
     assert provider._force_model == "qwen2.5"
+    # ...and returns it as the physical model the call site will use.
+    assert model == "qwen2.5"
 
 
 def test_create_provider_forced_mode_uses_base_url_env(
@@ -301,12 +306,13 @@ def test_create_provider_forced_mode_no_warn_without_per_agent_base_url(
 def test_create_provider_explicit_ollama_without_env() -> None:
     mod, _client = _mock_openai_module()
     with patch.dict(sys.modules, {"openai": mod}):
-        provider = create_provider(
+        provider, model = create_provider(
             {"id": "x", "model": "llama3.2", "provider": "ollama"}
         )
     assert isinstance(provider, OllamaProvider)
     # Per-agent opt-in: the configured model is used verbatim, no force.
     assert provider._force_model is None
+    assert model == "llama3.2"
 
 
 def test_create_provider_ollama_respects_provider_config_base_url() -> None:
@@ -329,9 +335,37 @@ def test_offline_wins_when_both_flags_set(monkeypatch: pytest.MonkeyPatch) -> No
     """Offline mode is checked first — it needs no network or daemon."""
     monkeypatch.setenv("PERSATRIX_OFFLINE", "1")
     monkeypatch.setenv("PERSATRIX_OLLAMA", "1")
-    provider = create_provider({"id": "x", "model": "claude-sonnet-4-6"})
+    provider, _model = create_provider({"id": "x", "model": "claude-sonnet-4-6"})
     assert isinstance(provider, MockProvider)
 
 
 def test_ollama_provider_reexported_from_llm_client() -> None:
     assert OllamaProviderReexport is OllamaProvider
+
+
+def test_alias_declaring_ollama_resolves_through_same_branch() -> None:
+    """RFC 0033 PR 2 regression — an alias whose entry declares
+    ``provider: ollama`` routes through the per-agent Ollama branch, with
+    the alias's ``provider_config.base_url`` honoured (#423 stays green
+    after the resolver lands). No force flag is set: this is the opt-in
+    per-agent path, not the global ``PERSATRIX_OLLAMA`` override.
+    """
+    alias_map = {
+        "local": {
+            "provider": "ollama",
+            "model": "llama3.2",
+            "input_per_1m_tokens": 0,
+            "output_per_1m_tokens": 0,
+            "provider_config": {"base_url": "http://gpu-box:11434/v1"},
+        },
+    }
+    mod, _client = _mock_openai_module()
+    with use_alias_map(alias_map), patch.dict(sys.modules, {"openai": mod}):
+        provider, model = create_provider({"id": "x", "model": "local"})
+    assert isinstance(provider, OllamaProvider)
+    # The alias's physical model reaches the call site, not the alias name.
+    assert model == "llama3.2"
+    assert provider._force_model is None
+    mod.AsyncOpenAI.assert_called_once_with(
+        api_key="ollama", base_url="http://gpu-box:11434/v1"
+    )

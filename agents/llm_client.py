@@ -10,7 +10,6 @@ encapsulated behind the protocol boundary.
 """
 
 import logging
-import os
 import time
 from typing import Any
 
@@ -18,14 +17,9 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from .generated import wallet_pb2 as walletpb
-from .llm_offline import MockProvider, offline_mode_enabled
-from .llm_ollama import (
-    OllamaProvider,
-    ollama_mode_enabled,
-    resolve_ollama_base_url,
-    resolve_ollama_model,
-    warn_if_forced_base_url_override,
-)
+from .llm_factory import create_provider
+from .llm_offline import MockProvider
+from .llm_ollama import OllamaProvider
 from .llm_providers import AnthropicProvider, OpenAIProvider
 from .llm_types import (
     LLMProvider,
@@ -359,15 +353,13 @@ class LLMClient:
 _OPENAI_EXACT_MODELS: frozenset[str] = frozenset({"o1", "o3", "o4"})
 _OPENAI_PREFIX_MODELS: tuple[str, ...] = ("gpt-", "o1-", "o3-", "o4-")
 
-# Ollama speaks the OpenAI-compatible wire format, so OllamaProvider is a thin
-# subclass of OpenAIProvider and shares its only hard dependency (the openai
-# SDK). Surface the same actionable install hint on both Ollama entry points.
-_OLLAMA_IMPORT_ERROR = (
-    "Provider 'ollama' requires package 'openai' (Ollama speaks the "
-    "OpenAI-compatible API). Install with: pip install 'openai>=1.50.0'"
-)
 
-
+# ``_infer_provider`` is the raw-ID prefix-routing heuristic. It is no longer
+# on the ``create_provider`` path (the RFC 0033 resolver — see
+# :mod:`agents.llm_factory` — owns provider selection now), but is retained
+# through Phase 2 as the documented raw-ID fall-through engine and is pinned
+# by ``tests/unit/python/test_model_aliases.py`` against the resolver's own
+# copy. RFC 0033 §I retires it in Phase 3, gated on zero raw-ID usage.
 def _infer_provider(model: str) -> str:
     rules = provider_inference()
     anthropic_prefixes = tuple(rules.get("anthropic_prefixes", ("claude",)))
@@ -383,113 +375,6 @@ def _infer_provider(model: str) -> str:
     return "openai"
 
 
-def create_provider(agent_config: dict[str, Any]) -> LLMProvider:
-    """Create an LLM provider from agent config.
-
-    Two global env force-flags are checked before the ``model`` field, in
-    order of precedence:
-
-    1. ``PERSATRIX_OFFLINE`` (or ``provider: mock``) → the zero-cost
-       :class:`agents.llm_offline.MockProvider` — no API key, no network.
-    2. ``PERSATRIX_OLLAMA`` → :class:`agents.llm_ollama.OllamaProvider`
-       pointed at a locally-served model, with the configured model
-       force-substituted for the single pulled one — no API key, no cloud
-       spend. Offline wins if both are set (it needs no running daemon).
-
-    Otherwise the explicit ``provider`` field or model-prefix inference
-    selects the provider: Anthropic / OpenAI SDK, or ``provider: ollama`` for
-    a single agent on a local model (its ``model`` used verbatim).
-    """
-    # Offline / mock override — checked before the model field so a demo
-    # config can carry a real model id (or a placeholder) without needing
-    # a key. The env var is the global "make the whole society free" knob.
-    if offline_mode_enabled() or agent_config.get("provider") == "mock":
-        logger.info(
-            "LLM offline mode active for agent %r — using MockProvider "
-            "(no API calls, no cost)",
-            agent_config.get("id", "<unknown>"),
-        )
-        return MockProvider.from_config(agent_config)
-
-    # Local-model override — Ollama runs a real model on the operator's own
-    # machine with no API key and no cloud spend. PERSATRIX_OLLAMA=1 forces
-    # EVERY agent onto the local daemon (the `make demo-ollama` knob) and
-    # substitutes the single pulled model for the configured one; a per-agent
-    # `provider: ollama` (handled below) opts a single agent in instead.
-    # Checked after offline mode, which wins if both are set — the mock needs
-    # neither a network nor a running daemon.
-    if ollama_mode_enabled():
-        base_url = resolve_ollama_base_url(agent_config.get("provider_config"))
-        force_model = resolve_ollama_model()
-        warn_if_forced_base_url_override(
-            agent_config.get("id", "<unknown>"), agent_config.get("provider_config")
-        )
-        logger.info(
-            "LLM Ollama mode active for agent %r — using OllamaProvider at %s "
-            "(local model %r, no cloud calls)",
-            agent_config.get("id", "<unknown>"),
-            base_url,
-            force_model,
-        )
-        try:
-            return OllamaProvider(base_url=base_url, force_model=force_model)
-        except ImportError:
-            raise SystemExit(_OLLAMA_IMPORT_ERROR)
-
-    model = agent_config["model"]
-    # S-18: guard against empty model string — "" falls through
-    # _infer_provider() to "openai" fallback, causing a confusing error.
-    if not model:
-        raise SystemExit("Agent config 'model' field is empty")
-    provider = agent_config.get("provider") or _infer_provider(model)
-    provider_config = agent_config.get("provider_config", {})
-
-    if provider == "anthropic":
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        # S-09: Warn at startup if API key is unset for non-local providers
-        # so operators get a clear message instead of a confusing auth error
-        # on the first task.
-        if not api_key:
-            logger.warning(
-                "ANTHROPIC_API_KEY not set — Anthropic provider will fail on first request"
-            )
-        # PR-review SF1: Surface a clear install instruction instead of a
-        # raw ImportError traceback when the SDK package is missing.
-        try:
-            return AnthropicProvider(api_key=api_key)
-        except ImportError:
-            raise SystemExit(
-                "Provider 'anthropic' requires package 'anthropic'. "
-                "Install with: pip install 'anthropic>=0.40.0'"
-            )
-    elif provider == "openai":
-        base_url = provider_config.get("base_url")
-        api_key = os.environ.get("OPENAI_API_KEY")
-        # S-09: Only warn for non-local providers (base_url implies local/custom).
-        if not api_key and not base_url:
-            logger.warning(
-                "OPENAI_API_KEY not set — OpenAI provider will fail on first request"
-            )
-        try:
-            return OpenAIProvider(
-                api_key=api_key,
-                base_url=base_url,
-            )
-        except ImportError:
-            raise SystemExit(
-                "Provider 'openai' requires package 'openai'. "
-                "Install with: pip install 'openai>=1.50.0'"
-            )
-    elif provider == "ollama":
-        # Per-agent local model over Ollama's OpenAI-compatible API. No API
-        # key needed (Ollama ignores auth); base_url resolves provider_config
-        # first, then the PERSATRIX_OLLAMA_BASE_URL env, then the localhost
-        # default. The agent's configured `model` is a real Ollama tag, used
-        # verbatim — no force-substitution on this opt-in path.
-        try:
-            return OllamaProvider(
-                base_url=resolve_ollama_base_url(provider_config),
-            )
-        except ImportError:
-            raise SystemExit(_OLLAMA_IMPORT_ERROR)
-    raise SystemExit(f"Unknown LLM provider: {provider!r}")
+# ``create_provider`` lives in :mod:`agents.llm_factory` and is re-exported
+# here (and in ``__all__``) so the historical
+# ``from agents.llm_client import create_provider`` import path is preserved.
