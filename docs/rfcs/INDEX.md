@@ -22,7 +22,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0038](0038-concurrent-context-awareness-relay.md) | 📋 Proposed | architecture | v0.3.x | 2026-05-16 | Persona Concurrent-Context Awareness & Cross-Channel Relay |
 | [RFC-0039](0039-user-accounts-authentication.md) | 📋 Proposed | architecture | v0.3.x (Phases 1–2) + v0.4.0 (Phase 3) | 2026-05-16 | User Accounts & Authentication |
 | [RFC-0045](0045-open-core-extraction-policy.md) | 📋 Proposed | process | v0.3.x (policy + dependency-direction CI gate) + v0.4.0+ (per-extraction RFCs) | 2026-05-24 | Open-Core Library Extraction Policy |
-| [RFC-0046](0046-budget-lease-extraction.md) | 📋 Proposed | architecture | v0.4.0+ (gated on RFC-0045 acceptance + dependency-direction CI gate) | 2026-05-25 | Budget-Lease Library Extraction (persatrix-budget) |
+| [RFC-0046](0046-budget-lease-extraction.md) | 📋 Proposed | architecture | v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate) | 2026-05-25 | Budget-Lease Library Extraction (persatrix-budget) |
 | [RFC-0032](0032-channel-interaction-layer.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-12 | Wire-Level Channel Interaction Layer and Chat-Façade Unification |
 | [RFC-0040](0040-agent-orchestrator-transport-unification.md) | 🔨 Draft | protocol | v0.3.x (Phase 1) + v0.4.0 (Phases 2–4) | 2026-05-17 | Agent–Orchestrator Transport Unification |
 | [RFC-0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-20 | Typed Event Taxonomy and Lifecycle Callbacks |
