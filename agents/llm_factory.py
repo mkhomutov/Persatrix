@@ -54,7 +54,10 @@ _OLLAMA_IMPORT_ERROR = (
 # reading zero across the dogfood window is the RFC 0033 Phase 3 entrance
 # signal — the gate that authorises removing the pass-through and
 # ``_infer_provider``. Both are de-duplicated so re-creating an agent's
-# provider within a process does not double-count.
+# provider within a process does not double-count; the counter dedup
+# records an agent only once it has actually been counted, so a
+# create_provider call that runs before metrics init (instruments
+# unavailable) is retried rather than silently marked counted.
 #
 # Scope caveat (Phase 3 gate): this counter covers only the create_provider
 # (agent) surface. The summarisation-model surface
@@ -87,10 +90,15 @@ def _note_raw_id_usage(agent_id: str, model: str) -> None:
         )
         _raw_id_warning_emitted = True
     if agent_id not in _raw_id_counted_agents:
-        _raw_id_counted_agents.add(agent_id)
+        # Record the agent as counted only *after* a successful emit. If the
+        # first create_provider for an agent runs before metrics init
+        # (instruments unavailable), leaving the set untouched lets a later
+        # call count it once instruments exist, rather than silently marking
+        # it counted-forever and under-reading the Phase 3 gate.
         inst = try_get_instruments()
         if inst is not None:
             inst.alias_raw_id_usage.add(1, attributes={"agent.id": agent_id})
+            _raw_id_counted_agents.add(agent_id)
 
 
 def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:

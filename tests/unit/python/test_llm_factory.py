@@ -147,6 +147,31 @@ class TestCreateProviderRawIdSignal:
             1, attributes={"agent.id": "raw-x"}
         )
 
+    def test_raw_id_counter_retries_when_instruments_unavailable_first(
+        self, _reset_raw_id_signal: None
+    ) -> None:
+        """The Phase 3 gate counter must not silently under-read.
+
+        The counter de-dup records an agent only *after* a successful emit:
+        if the first ``create_provider`` runs before metrics init
+        (``try_get_instruments()`` returns ``None``), a later call once
+        instruments exist must still count the agent — otherwise the gate
+        counter under-reads and could falsely open. ``side_effect=[None,
+        fake_inst]`` simulates instruments coming up between the two calls.
+        """
+        fake_inst = MagicMock()
+        with use_alias_map(_ALIAS_MAP), patch.dict(
+            sys.modules, {"anthropic": _mock_anthropic_module()}
+        ), patch(
+            "agents.llm_factory.try_get_instruments",
+            side_effect=[None, fake_inst],
+        ):
+            create_provider({"id": "raw-late", "model": "claude-sonnet-4-20250514"})
+            create_provider({"id": "raw-late", "model": "claude-sonnet-4-20250514"})
+        fake_inst.alias_raw_id_usage.add.assert_called_once_with(
+            1, attributes={"agent.id": "raw-late"}
+        )
+
     def test_alias_path_emits_no_raw_id_signal(
         self, _reset_raw_id_signal: None, caplog: pytest.LogCaptureFixture
     ) -> None:
