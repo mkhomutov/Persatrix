@@ -16,14 +16,18 @@ All tests use mocked SDK modules — no real API calls.
 from __future__ import annotations
 
 import logging
+import os
 import sys
+from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import yaml
 
-from agents import llm_factory
+from agents import llm_factory, optimization
 from agents.llm_client import AnthropicProvider, OpenAIProvider, create_provider
-from agents.model_aliases import use_alias_map
+from agents.model_aliases import resolve, use_alias_map
 
 # A seeded alias map exercised through the resolver's ``use_alias_map`` test
 # seam, so these tests never depend on the shipped config/optimization.yaml.
@@ -184,3 +188,53 @@ class TestCreateProviderRawIdSignal:
             create_provider({"id": "q", "model": "quality"})
         assert not any("RFC 0033" in r.getMessage() for r in caplog.records)
         fake_inst.alias_raw_id_usage.add.assert_not_called()
+
+
+class TestStockConfigMigration:
+    """RFC 0033 PR 3 — after the config migration, a clean checkout starts
+    its default agents through the ``quality`` alias (physical model
+    ``claude-sonnet-4-6``), so no stock agent carries a raw vendor ID and
+    ``create_provider`` fires no RFC 0033 deprecation warning for them.
+
+    These tests read the *shipped* ``config/optimization.yaml`` (the alias
+    map) and ``config/agents.yaml`` (the migrated entries), so they fail
+    until both migrations land.
+    """
+
+    @staticmethod
+    def _shipped_agents() -> list[dict[str, Any]]:
+        repo_root = Path(__file__).resolve().parents[3]
+        with (repo_root / "config" / "agents.yaml").open(encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        return list(data["agents"])
+
+    def test_every_stock_agent_resolves_to_quality_physical_model(self) -> None:
+        os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
+        optimization.reset_cache()
+        try:
+            for agent in self._shipped_agents():
+                resolved = resolve(agent["model"])
+                assert resolved.raw is False, f"{agent['id']} still uses a raw vendor ID"
+                assert resolved.alias == "quality", agent["id"]
+                assert resolved.provider == "anthropic", agent["id"]
+                assert resolved.model == "claude-sonnet-4-6", agent["id"]
+        finally:
+            optimization.reset_cache()
+
+    def test_create_provider_for_stock_agents_emits_no_raw_id_warning(
+        self, _reset_raw_id_signal: None, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
+        optimization.reset_cache()
+        try:
+            agents = self._shipped_agents()
+            with patch.dict(
+                sys.modules, {"anthropic": _mock_anthropic_module()}
+            ), caplog.at_level(logging.WARNING, logger="agents.llm_factory"):
+                for agent in agents:
+                    create_provider(agent)
+            assert not any(
+                "RFC 0033" in r.getMessage() for r in caplog.records
+            ), "a stock agent still trips the raw-ID deprecation warning"
+        finally:
+            optimization.reset_cache()

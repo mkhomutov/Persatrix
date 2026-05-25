@@ -115,13 +115,29 @@ class SubAgentRequest:
     tools: list[str] = field(default_factory=list)
     context: dict[str, Any] = field(default_factory=dict)
     output_schema: dict | None = None
-    model: str = "claude-sonnet-4-20250514"
+    # RFC 0033 §J.3 — the ``None`` sentinel is resolved at construction time
+    # (``__post_init__``) to the ``sub_agents`` routing-default alias, so this
+    # is no longer a code-level vendor model literal. A caller may still pass
+    # an explicit alias (e.g. ``model="fast"``); only ``None`` is resolved.
+    model: str | None = None
     temperature: float = 0.2
     max_llm_calls: int = 10
     max_tokens: int = 50000
     timeout_seconds: int = 120
     inherit_permissions: bool = True
     restricted_permissions: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Resolve the model default from config rather than hardcoding a
+        # vendor ID (RFC 0033 §J.3). The import is deferred so this leaf
+        # data module stays free of a module-load dependency on the config
+        # accessor; ``sub_agent_default_model`` returns the ``sub_agents``
+        # routing alias (today ``quality``), or its ``quality`` fallback in
+        # a config-less checkout — never ``None``.
+        if self.model is None:
+            from .optimization import sub_agent_default_model
+
+            self.model = sub_agent_default_model()
 
 
 class SubAgentStatus(Enum):

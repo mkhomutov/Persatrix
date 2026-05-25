@@ -8,7 +8,7 @@ agents:
     type: "task"
     name: "Planner"
     role: "Decomposes high-level goals into actionable step-by-step plans"
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.3
     instructions_file: "prompts/runtime/task-agents/planner.md"
     capabilities:
@@ -20,14 +20,19 @@ agents:
     timeout_seconds: 120
     permissions:
       network:
-        allow: ["api.anthropic.com"]
+        # RFC 0033 — "Any Provider": this example egress allowlist covers the
+        # cloud providers the shipped model aliases can resolve to, not a
+        # single vendor. Unenforced today; kept provider-neutral so the
+        # example config does not advertise an Anthropic-only assumption.
+        # Local providers (Ollama) reach localhost and need no entry here.
+        allow: ["api.anthropic.com", "api.openai.com"]
         deny: ["*"]
 
   - id: "code-writer"
     type: "task"
     name: "Code Writer"
     role: "Writes clean, tested code from specifications"
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.3
     max_llm_calls: 15
     instructions_file: "prompts/runtime/task-agents/code-writer.md"
@@ -62,14 +67,19 @@ agents:
         allowed_commands: ["python", "pytest", "ruff", "git diff"]
         max_execution_seconds: 30
       network:
-        allow: ["api.anthropic.com"]
+        # RFC 0033 — "Any Provider": this example egress allowlist covers the
+        # cloud providers the shipped model aliases can resolve to, not a
+        # single vendor. Unenforced today; kept provider-neutral so the
+        # example config does not advertise an Anthropic-only assumption.
+        # Local providers (Ollama) reach localhost and need no entry here.
+        allow: ["api.anthropic.com", "api.openai.com"]
         deny: ["*"]
 
   - id: "code-reviewer"
     type: "task"
     name: "Code Reviewer"
     role: "Reviews code for correctness, style, and security"
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.2
     instructions_file: "prompts/runtime/task-agents/code-reviewer.md"
     capabilities:
@@ -85,7 +95,12 @@ agents:
         read: ["/workspace", "/workspace/**"]
         write: []
       network:
-        allow: ["api.anthropic.com"]
+        # RFC 0033 — "Any Provider": this example egress allowlist covers the
+        # cloud providers the shipped model aliases can resolve to, not a
+        # single vendor. Unenforced today; kept provider-neutral so the
+        # example config does not advertise an Anthropic-only assumption.
+        # Local providers (Ollama) reach localhost and need no entry here.
+        allow: ["api.anthropic.com", "api.openai.com"]
         deny: ["*"]
 
   # ─── Persona Agent (v0.2+, commented out for v0.1) ────
@@ -95,7 +110,7 @@ agents:
     type: "persona"
     name: "Ember Owl"
     role: "Engineering leadership and technical oversight"
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.7
     capabilities:
       - architecture_review
@@ -212,7 +227,7 @@ agents:
     type: "persona"
     name: "Iron Fox"
     role: "Staff engineering and production reliability"
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.6
     capabilities:
       - reliability_review
@@ -277,7 +292,7 @@ agents:
     type: "persona"
     name: "Nova Sparrow"
     role: "Product management and customer advocacy"
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.7
     capabilities:
       - product_strategy

@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 # the same behaviour as the on-disk default.
 _DEFAULT_SUMMARIZATION_MODEL: str = "claude-haiku-4-5-20251001"
 
+# Fallback alias a code-spawned sub-agent routes to when its
+# ``SubAgentRequest`` carries no model and the config is absent / partial
+# (RFC 0033 §J.3). Matches the ``sub_agents`` routing default shipped in
+# ``config/optimization.yaml`` so a config-less dev checkout still resolves
+# somewhere sensible rather than leaving the request unrouted.
+_DEFAULT_SUB_AGENT_MODEL: str = "quality"
+
 # Repo-relative default location.  ``PERSATRIX_OPTIMIZATION_CONFIG`` env
 # var overrides for tests / non-standard deployments.
 _DEFAULT_CONFIG_PATH: Path = (
@@ -130,6 +137,55 @@ def provider_inference() -> dict[str, list[str]]:
     return {}
 
 
+def model_routing_defaults() -> dict[str, str]:
+    """Return ``<profile>.model_routing.defaults`` — the alias each agent
+    *role* (``task_agents`` / ``sub_agents`` / ``evaluators``) routes to
+    when it does not name a model explicitly.
+
+    Resolution order mirrors :func:`provider_inference`:
+
+    1. ``<active_profile>.model_routing.defaults``
+    2. ``default.model_routing.defaults``
+    3. Empty dict (caller falls back to its own default).
+
+    Values that are not strings are dropped — the resolver only ever
+    resolves string references, so a list/scalar typo is defensive noise
+    rather than a runtime ``TypeError`` at the first sub-agent spawn.
+    """
+    cfg = _load_config()
+    active = cfg.get("active_profile") or "default"
+    profiles = (active, "default") if active != "default" else ("default",)
+    for profile in profiles:
+        section = cfg.get(profile)
+        if not isinstance(section, dict):
+            continue
+        routing = section.get("model_routing")
+        if not isinstance(routing, dict):
+            continue
+        defaults = routing.get("defaults")
+        if isinstance(defaults, dict):
+            return {
+                k: v
+                for k, v in defaults.items()
+                if isinstance(k, str) and isinstance(v, str)
+            }
+    return {}
+
+
+def sub_agent_default_model() -> str:
+    """Return the alias a code-spawned sub-agent defaults to (RFC 0033 §J.3).
+
+    Reads ``default.model_routing.defaults.sub_agents`` via
+    :func:`model_routing_defaults`; falls back to
+    :data:`_DEFAULT_SUB_AGENT_MODEL` (the shipped ``quality`` alias) when
+    the config is absent or does not declare a ``sub_agents`` default. A
+    :class:`~agents.persona_types.SubAgentRequest` constructed with no
+    explicit ``model`` resolves to this value at construction time, so no
+    Python runtime code carries a literal vendor model ID.
+    """
+    return model_routing_defaults().get("sub_agents") or _DEFAULT_SUB_AGENT_MODEL
+
+
 def model_aliases() -> dict[str, dict[str, Any]]:
     """Return the ``models.aliases`` block from optimization.yaml.
 
@@ -164,7 +220,9 @@ def model_aliases() -> dict[str, dict[str, Any]]:
 
 __all__ = [
     "model_aliases",
+    "model_routing_defaults",
     "provider_inference",
     "reset_cache",
+    "sub_agent_default_model",
     "summarization_model",
 ]
