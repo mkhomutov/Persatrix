@@ -24,9 +24,18 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-# Default summarisation model — matches the value shipped in
-# ``config/optimization.yaml`` so missing / unreadable config produces
-# the same behaviour as the on-disk default.
+# Config-absent fallback for ``summarization_model()`` (resolution step 3).
+# Deliberately a *raw vendor ID*, not the ``summarizer`` alias the shipped
+# config references since RFC 0033 PR 3. This value is returned only when
+# config/optimization.yaml is missing / unreadable — and in that state there
+# is no ``models.aliases`` block either. The summarise-on-close surface
+# resolve()s this value on the spot (agents/persona_runtime/summarize_close.py),
+# so it must pass through the raw-ID fall-through standalone; the alias name
+# would SystemExit against an empty map. It is the same physical model the
+# ``summarizer`` alias points at, so the degraded path matches normal
+# behaviour. (Contrast ``_DEFAULT_SUB_AGENT_MODEL`` below, which is a
+# *stored* default for a config key and so mirrors that key's alias value,
+# not a physical ID — it is not resolved at the point the fallback fires.)
 _DEFAULT_SUMMARIZATION_MODEL: str = "claude-haiku-4-5-20251001"
 
 # Fallback alias a code-spawned sub-agent routes to when its
