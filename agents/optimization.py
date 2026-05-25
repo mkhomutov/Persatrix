@@ -130,4 +130,41 @@ def provider_inference() -> dict[str, list[str]]:
     return {}
 
 
-__all__ = ["provider_inference", "reset_cache", "summarization_model"]
+def model_aliases() -> dict[str, dict[str, Any]]:
+    """Return the ``models.aliases`` block from optimization.yaml.
+
+    The RFC 0033 alias map is the single source of truth for model
+    identity: each entry maps a logical alias (``quality`` / ``fast`` /
+    ``summarizer``) to a concrete ``(provider, model, pricing)`` record.
+    Unlike :func:`provider_inference`, the block is **not** profile-scoped
+    — it sits at the top level alongside ``default`` / ``cost`` (RFC 0033
+    §B), so resolution does not consult ``active_profile``.
+
+    Returns a fresh copy of the block (outer dict + each entry) so a
+    caller mutating the result cannot poison the :func:`_load_config`
+    lru_cache.  Non-dict entries are dropped — a scalar where an alias
+    entry should be is a config typo the resolver should not choke on.
+    Missing / malformed config yields an empty dict; the consumer
+    (:mod:`agents.model_aliases`) treats an absent map as "no aliases
+    declared, every reference is a raw vendor ID".
+    """
+    cfg = _load_config()
+    models = cfg.get("models")
+    if not isinstance(models, dict):
+        return {}
+    aliases = models.get("aliases")
+    if not isinstance(aliases, dict):
+        return {}
+    return {
+        name: dict(entry)
+        for name, entry in aliases.items()
+        if isinstance(entry, dict)
+    }
+
+
+__all__ = [
+    "model_aliases",
+    "provider_inference",
+    "reset_cache",
+    "summarization_model",
+]

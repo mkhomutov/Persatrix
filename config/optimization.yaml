@@ -1,8 +1,78 @@
 # Persatrix Optimization Configuration
-schema_version: "0.1"
+schema_version: "0.2"
 
 # Active profile: cost_optimized | speed_optimized | quality_optimized | simulation_optimized | custom
 active_profile: "default"
+
+# ─── Model Aliases (RFC 0033 Phase 1) ─────────────────────
+# Single source of truth for model identity. Agents (config/agents.yaml),
+# the routing defaults below, and the summarization model reference a
+# logical alias — quality / fast / summarizer — instead of a concrete
+# vendor model ID. A vendor retirement or a provider swap is then a
+# one-line edit to the entry here, not a sweep across agents.yaml, the
+# routing defaults, the pricing table, agents/persona_types.py, and the
+# docs. Each entry resolves to a concrete (provider, model, pricing)
+# record via agents/model_aliases.py resolve(). Schema:
+# schemas/optimization.schema.json (models.aliases).
+#
+# SUBSTRATE ONLY in this PR (RFC 0033 PR 1): no consumer reads this block
+# yet — create_provider is rewired to call resolve() in the next PR
+# (RFC 0033 PR 2), and the agents.yaml / routing-defaults / summarization
+# references flip to aliases in PR 3. Until then every model reference
+# still flows through the raw-ID path, so this block changes no behaviour.
+#
+# Local-pricing decision (RFC 0033 amendment item 6): local providers
+# (ollama / mock) run at $0 real cost, so their entries carry an explicit
+# 0 price and are documented $0-real — never an absent price. The RFC 0023
+# wallet-cap demo, which needs simulated spend to trip, pins to a priced
+# cloud alias (quality), not a local one. PR 4's missing-price guard
+# treats a local provider as $0-by-design (never the fail-closed error)
+# and reserves fail-closed for an *unpriced non-local* alias.
+models:
+  aliases:
+    # Default for task agents, personas, and sub-agents. The Anthropic
+    # Sonnet 4 → 4.6 retirement migration is absorbed by editing only the
+    # `model:` field on this one entry (see RFC 0033 §Motivation).
+    quality:
+      provider: anthropic
+      model: claude-sonnet-4-6
+      input_per_1m_tokens: 3.00
+      output_per_1m_tokens: 15.00
+    # Cheaper / faster model for evaluators and similar low-stakes calls.
+    fast:
+      provider: anthropic
+      model: claude-haiku-4-5-20251001
+      input_per_1m_tokens: 0.80
+      output_per_1m_tokens: 4.00
+    # The summarization-on-close path (RFC 0020) selects this alias on a
+    # surface separate from the provider factory; kept distinct from
+    # `fast` so the two can pivot independently.
+    summarizer:
+      provider: anthropic
+      model: claude-haiku-4-5-20251001
+      input_per_1m_tokens: 0.80
+      output_per_1m_tokens: 4.00
+    # OpenAI peer (RFC 0033 amendment item 2) — a priced cloud
+    # alternative so the release ships "Any Provider", and the master-plan
+    # Phase 4 one-line provider-swap test resolves to a priced target
+    # rather than tripping PR 4's missing-price guard. gpt-4o list pricing.
+    quality-openai:
+      provider: openai
+      model: gpt-4o
+      input_per_1m_tokens: 2.50
+      output_per_1m_tokens: 10.00
+    # Local model (RFC 0033 amendment item 6) — $0 real cost; see the
+    # local-pricing decision in the block comment above.
+    local-fast:
+      provider: ollama
+      model: llama3.1
+      input_per_1m_tokens: 0
+      output_per_1m_tokens: 0
+      notes: >-
+        Local Ollama model — $0 real cost. Carries an explicit 0 price
+        (documented $0-real, not absent) so PR 4's missing-price guard
+        reads it as $0-by-design. The wallet-cap demo pins to a priced
+        cloud alias (quality), not this one.
 
 default:
   model_routing:
