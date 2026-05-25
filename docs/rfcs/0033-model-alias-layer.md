@@ -3,7 +3,7 @@ id: RFC-0033
 title: Provider-Agnostic Model Alias Layer
 summary: Decouple agent configs from vendor-specific model IDs by routing every model reference through a single alias map, so vendor deprecations and multi-provider expansion change one file instead of dozens.
 type: architecture
-status: proposed
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-15
 target: v0.3.4 (Phases 1–2) + v0.3.5+ (Phase 3)
@@ -15,7 +15,7 @@ depends_on:
 # RFC 0033 — Provider-Agnostic Model Alias Layer
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: 🚧 Implementing (Phases 1–2) — PR 1 merged ([#431](https://github.com/mkhomutov/Persatrix/pull/431)); PR 2 factory integration open ([#432](https://github.com/mkhomutov/Persatrix/pull/432)). Tracking plan: [0033-pr-plan.md](0033-pr-plan.md). Phase 3 stays observed-traffic gated.
 **Author**: Maksim Khomutov
 **Date**: 2026-05-15
 **Target**: v0.3.4 (Phases 1–2) + v0.3.5+ (Phase 3)

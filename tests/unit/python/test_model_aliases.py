@@ -172,6 +172,42 @@ class TestRawFallThrough:
         assert resolved.output_per_1m_tokens == 0.0
 
 
+class TestExplicitProviderHint:
+    """RFC 0033 §D rule 1 — on the raw pass-through an explicit ``provider``
+    field wins over prefix inference. PR 2's factory needs this so a
+    per-agent ``provider: ollama`` on a local model id like ``llama3.2``
+    — which no prefix rule recognises — resolves without a spurious
+    ``SystemExit``. On the alias path the entry stays authoritative; the
+    hint is ignored there (the factory raises on a *disagreeing* field)."""
+
+    def test_explicit_provider_used_on_raw_fall_through(
+        self, isolated_config: None,
+    ) -> None:
+        with use_alias_map(_SAMPLE_ALIASES):
+            resolved = resolve("llama3.2", explicit_provider="ollama")
+        assert resolved.raw is True
+        assert resolved.alias is None
+        assert resolved.provider == "ollama"
+        assert resolved.model == "llama3.2"
+
+    def test_explicit_provider_skips_unknown_model_systemexit(
+        self, isolated_config: None,
+    ) -> None:
+        # Without the hint an unrecognised id is a loud SystemExit; the hint
+        # short-circuits inference so the raw local model passes through.
+        with use_alias_map(_SAMPLE_ALIASES), pytest.raises(SystemExit):
+            resolve("llama3.2")
+        with use_alias_map(_SAMPLE_ALIASES):
+            assert resolve("llama3.2", explicit_provider="ollama").provider == "ollama"
+
+    def test_explicit_provider_ignored_for_declared_alias(self) -> None:
+        with use_alias_map(_SAMPLE_ALIASES):
+            resolved = resolve("quality", explicit_provider="openai")
+        # The alias entry's provider is authoritative, not the hint.
+        assert resolved.provider == "anthropic"
+        assert resolved.raw is False
+
+
 class TestUnknownString:
     def test_unknown_string_raises_systemexit(self, isolated_config: None) -> None:
         with use_alias_map(_SAMPLE_ALIASES), pytest.raises(SystemExit) as exc:

@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 
 from ..memory.interactions import SUMMARY_UNAVAILABLE_TEXT
 from ..memory.store import CompressedView, MemoryEntry, MemoryStore
+from ..model_aliases import resolve as resolve_model
 from ..observability.metrics import current_agent_id, try_get_instruments
 from ..optimization import summarization_model
 from ..prompt_loader import load_snippet
@@ -142,10 +143,38 @@ async def summarize_closed_interaction(
         target_tokens=SUMMARIZATION_TARGET_TOKENS,
     )
     prompt = _build_summarization_prompt(interaction, view)
+    # Summarisation picks its model on a surface separate from
+    # create_provider; resolve it here too (RFC 0033 §D) so the alias name
+    # never reaches the vendor API. While the config field is still a raw
+    # Haiku ID, resolve() returns it unchanged; PR 3's flip to the
+    # ``summarizer`` alias resolves to the physical model the same way the
+    # factory path does.
+    #
+    # resolve() is a *startup* validator — it raises SystemExit (a
+    # BaseException) on an unknown reference. This surface runs per-close on
+    # a background task whose caller (finalize_closed_interaction) guards
+    # only ``except Exception``, so an unresolvable summarisation model must
+    # degrade to the deterministic fallback like every other failure here
+    # rather than escape as an uncaught task exception that also skips the
+    # failure metric. NOTE: this surface is *not* counted by
+    # persatrix.llm.alias.raw_id_usage (that counter covers only the
+    # create_provider/agent surface), so a raw summarisation model is
+    # invisible to the RFC 0033 Phase 3 gate until PR 3 migrates it.
+    summarization_model_ref = summarization_model()
+    try:
+        physical_summarization_model = resolve_model(summarization_model_ref).model
+    except SystemExit as exc:
+        logger.warning(
+            "Summarisation model %r is not resolvable for agent %s "
+            "(scope=%s): %s; using fallback",
+            summarization_model_ref, agent_id, interaction.scope, exc,
+        )
+        _emit_summary_failed("model_unresolvable")
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
     try:
         response = await asyncio.wait_for(
             llm_client.create_message(
-                model=summarization_model(),
+                model=physical_summarization_model,
                 messages=[{"role": "user", "content": prompt}],
                 system=load_snippet("episode-summarizer"),
                 tools=[],

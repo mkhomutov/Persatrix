@@ -444,28 +444,31 @@ class TestCreateProvider:
         mock_anthropic = MagicMock()
         mock_anthropic.AsyncAnthropic.return_value = AsyncMock()
         with patch.dict(sys.modules, {"anthropic": mock_anthropic}):
-            provider = create_provider(
+            provider, model = create_provider(
                 {"model": "claude-sonnet-4-20250514", "provider": "anthropic"}
             )
             assert isinstance(provider, AnthropicProvider)
+            assert model == "claude-sonnet-4-20250514"
 
     def test_explicit_openai_provider(self):
         mock_openai = MagicMock()
         mock_openai.AsyncOpenAI.return_value = AsyncMock()
         with patch.dict(sys.modules, {"openai": mock_openai}):
-            provider = create_provider({"model": "gpt-4o", "provider": "openai"})
+            provider, model = create_provider({"model": "gpt-4o", "provider": "openai"})
             assert isinstance(provider, OpenAIProvider)
+            assert model == "gpt-4o"
 
     def test_openai_with_base_url(self):
         mock_openai = MagicMock()
         mock_openai.AsyncOpenAI.return_value = AsyncMock()
         with patch.dict(sys.modules, {"openai": mock_openai}):
-            provider = create_provider({
+            provider, model = create_provider({
                 "model": "qwen2.5-coder:32b",
                 "provider": "openai",
                 "provider_config": {"base_url": "http://localhost:11434/v1"},
             })
             assert isinstance(provider, OpenAIProvider)
+            assert model == "qwen2.5-coder:32b"
 
     def test_unknown_provider_exits(self):
         with pytest.raises(SystemExit, match="Unknown LLM provider"):
@@ -475,5 +478,6 @@ class TestCreateProvider:
         mock_anthropic = MagicMock()
         mock_anthropic.AsyncAnthropic.return_value = AsyncMock()
         with patch.dict(sys.modules, {"anthropic": mock_anthropic}):
-            provider = create_provider({"model": "claude-sonnet-4-20250514"})
+            provider, model = create_provider({"model": "claude-sonnet-4-20250514"})
             assert isinstance(provider, AnthropicProvider)
+            assert model == "claude-sonnet-4-20250514"

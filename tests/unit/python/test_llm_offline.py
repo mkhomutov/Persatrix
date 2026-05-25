@@ -161,13 +161,17 @@ async def test_synthetic_usage_is_populated_but_no_real_call() -> None:
 def test_create_provider_offline_env_forces_mock(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PERSATRIX_OFFLINE", "1")
     # A real Anthropic model id — offline mode must override it anyway.
-    provider = create_provider({"id": "ember-owl", "model": "claude-sonnet-4-20250514"})
+    provider, _model = create_provider(
+        {"id": "ember-owl", "model": "claude-sonnet-4-20250514"}
+    )
     assert isinstance(provider, MockProvider)
     assert provider.name == "mock"
 
 
 def test_create_provider_explicit_mock_without_env() -> None:
-    provider = create_provider({"id": "x", "model": "claude-sonnet-4-20250514", "provider": "mock"})
+    provider, _model = create_provider(
+        {"id": "x", "model": "claude-sonnet-4-20250514", "provider": "mock"}
+    )
     assert isinstance(provider, MockProvider)
 
 
@@ -176,15 +180,17 @@ def test_create_provider_offline_tolerates_placeholder_model(
 ) -> None:
     """Offline override is checked before the model field is read/validated."""
     monkeypatch.setenv("PERSATRIX_OFFLINE", "1")
-    provider = create_provider({"id": "x", "model": ""})
+    provider, _model = create_provider({"id": "x", "model": ""})
     assert isinstance(provider, MockProvider)
 
 
 def test_create_provider_normal_path_unaffected() -> None:
     """With env off and no provider override, the real SDK provider is used."""
-    provider = create_provider({"id": "x", "model": "claude-sonnet-4-20250514"})
+    provider, model = create_provider({"id": "x", "model": "claude-sonnet-4-20250514"})
     assert not isinstance(provider, MockProvider)
     assert provider.name == "anthropic"
+    # The raw vendor id passes through unchanged (RFC 0033 §E).
+    assert model == "claude-sonnet-4-20250514"
 
 
 def test_mock_provider_reexported_from_llm_client() -> None:

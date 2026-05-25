@@ -66,6 +66,8 @@ def _touch_all(inst: pmetrics._Instruments) -> None:
     inst.llm_calls.add(1, attributes=_LLM_CALL_A)
     inst.llm_tokens.add(1, attributes=_LLM_TOK_A)
     inst.llm_duration.record(1.0, attributes=_LLM_DUR_A)
+    # RFC 0033 PR 2 — raw-ID usage counter (Phase 3 gate signal).
+    inst.alias_raw_id_usage.add(1, attributes={"agent.id": "t"})
     inst.event_dispatched.add(1, attributes=_EVENT_A)
     inst.persona_tick_interval.record(1.0, attributes=_TICK_A)
     # RFC 0024 PR 3b — the four ``agent.wake.*`` counters land here as
@@ -136,6 +138,10 @@ class TestInstrumentInventory:
             "agent.llm.calls",
             "agent.llm.tokens",
             "agent.llm.duration",
+            # RFC 0033 PR 2 — raw-ID usage counter. Uses the ``persatrix.``
+            # prefix (not ``agent.``) to match the RFC 0033 §G metric name;
+            # the per-agent ``agent.id`` attribute bounds its cardinality.
+            "persatrix.llm.alias.raw_id_usage",
             "agent.event.dispatched",
             "agent.persona.tick.interval",
             "agent.active",
@@ -186,6 +192,7 @@ class TestInstrumentInventory:
             "agent.llm.calls": "{call}",
             "agent.llm.tokens": "{token}",
             "agent.llm.duration": "ms",
+            "persatrix.llm.alias.raw_id_usage": "{usage}",
             "agent.event.dispatched": "{event}",
             "agent.persona.tick.interval": "ms",
             "agent.observability.spans.dropped": "{span}",

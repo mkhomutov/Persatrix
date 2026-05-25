@@ -45,7 +45,7 @@ class TestLoadAgent:
 
     @patch("agents.server_persona.create_provider")
     def test_load_planner(self, mock_create):
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             config_path = _write_agent_config(tmp_path, [
@@ -66,7 +66,7 @@ class TestLoadAgent:
 
     @patch("agents.server_persona.create_provider")
     def test_load_coder(self, mock_create):
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             config_path = _write_agent_config(tmp_path, [
@@ -86,7 +86,7 @@ class TestLoadAgent:
 
     @patch("agents.server_persona.create_provider")
     def test_load_reviewer(self, mock_create):
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             config_path = _write_agent_config(tmp_path, [
@@ -127,7 +127,7 @@ class TestLoadAgent:
     @patch("agents.server_persona.create_provider")
     def test_unknown_type_raises_system_exit(self, mock_create):
         """Unknown agent type in config raises SystemExit (not ValueError)."""
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             config_path = _write_agent_config(tmp_path, [
@@ -299,7 +299,7 @@ class TestPermissionWiring:
     @patch("agents.server_persona.create_provider")
     def test_permissions_wired_after_load(self, mock_create):
         """After load_agent(), builtin.permission_gate and builtin.path_validator are set."""
-        mock_create.return_value = MagicMock()
+        mock_create.return_value = (MagicMock(), "test-model")
 
         original_gate = builtin.permission_gate
         original_validator = builtin.path_validator
@@ -363,3 +363,60 @@ class TestDuplicateAgentId:
             ])
             with pytest.raises(SystemExit, match="Duplicate agent ID"):
                 load_agent("code-writer", config_path, tmp)
+
+
+class TestPhysicalModelThreading:
+    """RFC 0033 PR 2 — ``load_agent`` threads the resolver's *physical*
+    model (the second element of the ``create_provider`` tuple) into the
+    agent config the agent reads, so ``create_message(model=…)`` calls the
+    vendor ID, never the alias name.
+
+    ``BaseAgent`` reads ``self.config["model"]`` for the LLM call
+    ([agents/base.py]), so asserting on the constructed agent's
+    ``config["model"]`` pins what the agent will actually send. On raw
+    configs ``physical == configured`` and the write-back is a no-op (the
+    state until the PR 3 config migration introduces aliases)."""
+
+    @patch("agents.server_persona.create_provider")
+    def test_resolved_physical_model_written_into_agent_config(self, mock_create):
+        # Config names an alias; the resolver returns a *different* physical
+        # vendor id. The alias name must never survive into agent.config.
+        mock_create.return_value = (MagicMock(), "claude-sonnet-4-6")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = _write_agent_config(tmp_path, [
+                {
+                    "id": "planner",
+                    "name": "Planner",
+                    "role": "Plans things",
+                    "model": "quality",  # alias name — must not reach the API
+                    "type": "task",
+                    "capabilities": ["planning"],
+                    "tools": [],
+                    "permissions": {},
+                },
+            ])
+            agent = load_agent("planner", config_path, tmp)
+        assert agent.config["model"] == "claude-sonnet-4-6"
+
+    @patch("agents.server_persona.create_provider")
+    def test_raw_model_threading_is_noop(self, mock_create):
+        # Raw path: physical == configured, so the write-back leaves the
+        # config model untouched.
+        mock_create.return_value = (MagicMock(), "claude-sonnet-4-20250514")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = _write_agent_config(tmp_path, [
+                {
+                    "id": "planner",
+                    "name": "Planner",
+                    "role": "Plans things",
+                    "model": "claude-sonnet-4-20250514",
+                    "type": "task",
+                    "capabilities": ["planning"],
+                    "tools": [],
+                    "permissions": {},
+                },
+            ])
+            agent = load_agent("planner", config_path, tmp)
+        assert agent.config["model"] == "claude-sonnet-4-20250514"
