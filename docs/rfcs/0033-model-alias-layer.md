@@ -15,7 +15,7 @@ depends_on:
 # RFC 0033 — Provider-Agnostic Model Alias Layer
 
 **Type**: architecture
-**Status**: 🚧 Implementing (Phases 1–2) — PR 1 merged ([#431](https://github.com/mkhomutov/Persatrix/pull/431)); PR 2 (factory integration) open. Tracking plan: [0033-pr-plan.md](0033-pr-plan.md). Phase 3 stays observed-traffic gated.
+**Status**: 🚧 Implementing (Phases 1–2) — PR 1 merged ([#431](https://github.com/mkhomutov/Persatrix/pull/431)); PR 2 factory integration open ([#432](https://github.com/mkhomutov/Persatrix/pull/432)). Tracking plan: [0033-pr-plan.md](0033-pr-plan.md). Phase 3 stays observed-traffic gated.
 **Author**: Maksim Khomutov
 **Date**: 2026-05-15
 **Target**: v0.3.4 (Phases 1–2) + v0.3.5+ (Phase 3)

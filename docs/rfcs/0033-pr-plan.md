@@ -380,7 +380,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | # | RFC Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-----------|-------|--------|--------|-----------|--------|
 | 1 | 1 | Resolver module + `models.aliases` config block (+ OpenAI alias, local-pricing decision) | `feature/v034-rfc0033-resolver` | ✅ Merged | [#431](https://github.com/mkhomutov/Persatrix/pull/431) | 2026-05-25 |
-| 2 | 1 | `create_provider` tuple return + §D precedence + offline/Ollama interplay regression + raw-ID startup warning + `raw_id_usage` counter | `feature/v034-rfc0033-factory` | 🔀 PR open | — | — |
+| 2 | 1 | `create_provider` tuple return + §D precedence + offline/Ollama interplay regression + raw-ID startup warning + `raw_id_usage` counter | `feature/v034-rfc0033-factory` | 🔀 PR open | [#432](https://github.com/mkhomutov/Persatrix/pull/432) | — |
 | 3 | 1 | Config migration to aliases (Sonnet 4→4.6 via `quality`) + network-allowlist neutralization + `SubAgentRequest.model` `None`-default + §J resolution | `feature/v034-rfc0033-migration` | ⬜ Not started | — | — |
 | 4 | 2 | Missing-price guard — fail-closed for unpriced non-local aliases ([amendment item 1](../v0.3.4-plan-amendment-2026-05-24.md#what-changes)) | `feature/v034-rfc0033-missing-price-guard` | ⬜ Not started | — | — |
 | 5 | 2 | `persatrix.llm.model_alias` span attr + alias-derived pricing + `/cost/summary` cost gate (+ OpenAI rows) | `feature/v034-rfc0033-telemetry-pricing` | ⬜ Not started | — | — |
