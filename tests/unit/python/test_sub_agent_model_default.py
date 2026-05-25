@@ -55,11 +55,16 @@ class TestNoneDefaultResolution:
         req = SubAgentRequest(role="helper", task="do a thing")
         assert req.model == "persona-default"
 
-    def test_none_model_falls_back_when_config_absent(self, config_path: Path) -> None:
-        # No on-disk file → the shipped `quality` alias is the documented
-        # fallback; the request must never be left with model=None.
-        req = SubAgentRequest(role="helper", task="do a thing")
-        assert req.model == "quality"
+    def test_none_model_raises_loud_when_routing_default_absent(
+        self, config_path: Path,
+    ) -> None:
+        # No on-disk file → no `sub_agents` routing default. There is no
+        # hardcoded model fallback (RFC 0033 — config owns model identity),
+        # so construction fails loud naming the missing key rather than
+        # routing the sub-agent to a code-baked default.
+        with pytest.raises(SystemExit) as exc:
+            SubAgentRequest(role="helper", task="do a thing")
+        assert "sub_agents" in str(exc.value)
 
 
 class TestExplicitModelHonoured:

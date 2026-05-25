@@ -106,8 +106,11 @@ class TestModelRoutingDefaults:
 
 class TestSubAgentDefaultModel:
     """``sub_agent_default_model()`` is the alias a code-spawned sub-agent
-    falls back to when its ``SubAgentRequest`` carries no explicit model
-    (RFC 0033 §J.3) — the ``sub_agents`` routing default."""
+    routes to when its ``SubAgentRequest`` carries no explicit model
+    (RFC 0033 §J.3) — the ``sub_agents`` routing default.
+
+    There is **no hardcoded fallback**: an absent routing default is a loud
+    ``SystemExit``, not a code-baked model the operator never chose."""
 
     def test_reads_sub_agents_routing_default(self, config_path: Path) -> None:
         _write_yaml(
@@ -116,19 +119,23 @@ class TestSubAgentDefaultModel:
         )
         assert sub_agent_default_model() == "some-alias"
 
-    def test_missing_config_falls_back_to_quality(self, config_path: Path) -> None:
-        # No config → the shipped `quality` alias is the documented default,
-        # so a sub-agent in a config-less dev checkout still routes somewhere.
-        assert sub_agent_default_model() == "quality"
+    def test_missing_config_raises_loud(self, config_path: Path) -> None:
+        # No config → no routing default → fail loud naming the missing key,
+        # rather than silently routing to a code-baked default.
+        with pytest.raises(SystemExit) as exc:
+            sub_agent_default_model()
+        assert "sub_agents" in str(exc.value)
 
-    def test_defaults_without_sub_agents_falls_back_to_quality(
+    def test_defaults_without_sub_agents_raises_loud(
         self, config_path: Path,
     ) -> None:
         _write_yaml(
             config_path,
             "default:\n  model_routing:\n    defaults:\n      task_agents: quality\n",
         )
-        assert sub_agent_default_model() == "quality"
+        with pytest.raises(SystemExit) as exc:
+            sub_agent_default_model()
+        assert "sub_agents" in str(exc.value)
 
 
 class TestShippedYamlRoutingMigration:
@@ -160,9 +167,9 @@ class TestShippedYamlRoutingMigration:
             model = summarization_model()
         finally:
             reset_cache()
-        # In a config-less checkout the accessor returns its raw-ID fallback;
-        # with the shipped file it must be the migrated alias.
-        if model == optimization._DEFAULT_SUMMARIZATION_MODEL:
+        # No hardcoded fallback: a config-less checkout yields "" (the close
+        # path then degrades). With the shipped file it must be the alias.
+        if not model:
             pytest.skip("config/optimization.yaml absent in this checkout")
         assert model == "summarizer"
 

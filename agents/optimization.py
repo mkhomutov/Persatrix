@@ -24,26 +24,15 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-# Config-absent fallback for ``summarization_model()`` (resolution step 3).
-# Deliberately a *raw vendor ID*, not the ``summarizer`` alias the shipped
-# config references since RFC 0033 PR 3. This value is returned only when
-# config/optimization.yaml is missing / unreadable — and in that state there
-# is no ``models.aliases`` block either. The summarise-on-close surface
-# resolve()s this value on the spot (agents/persona_runtime/summarize_close.py),
-# so it must pass through the raw-ID fall-through standalone; the alias name
-# would SystemExit against an empty map. It is the same physical model the
-# ``summarizer`` alias points at, so the degraded path matches normal
-# behaviour. (Contrast ``_DEFAULT_SUB_AGENT_MODEL`` below, which is a
-# *stored* default for a config key and so mirrors that key's alias value,
-# not a physical ID — it is not resolved at the point the fallback fires.)
-_DEFAULT_SUMMARIZATION_MODEL: str = "claude-haiku-4-5-20251001"
-
-# Fallback alias a code-spawned sub-agent routes to when its
-# ``SubAgentRequest`` carries no model and the config is absent / partial
-# (RFC 0033 §J.3). Matches the ``sub_agents`` routing default shipped in
-# ``config/optimization.yaml`` so a config-less dev checkout still resolves
-# somewhere sensible rather than leaving the request unrouted.
-_DEFAULT_SUB_AGENT_MODEL: str = "quality"
+# No hardcoded model defaults live in this module: model identity is owned
+# end-to-end by config/optimization.yaml (RFC 0033 — the alias map is the
+# single source of truth). A code-baked default would silently re-route to
+# a model the operator never chose — the exact behaviour the resolver's
+# loud-fail-on-unknown design replaced. When config does not declare a
+# routing key, the accessors below either return "" (summarisation — the
+# best-effort close path degrades to its deterministic fallback summary) or
+# fail loud (sub-agent — there is no downstream resolver to catch a bad
+# value yet, so the misconfiguration must surface at construction).
 
 # Repo-relative default location.  ``PERSATRIX_OPTIMIZATION_CONFIG`` env
 # var overrides for tests / non-standard deployments.
@@ -91,13 +80,20 @@ def reset_cache() -> None:
 
 
 def summarization_model() -> str:
-    """Return the model used by the RFC 0020 PR 4 summarisation-on-close hook.
+    """Return the model reference for the RFC 0020 PR 4 summarisation-on-close hook.
 
     Resolution order:
 
     1. ``<active_profile>.context_management.summarization.model``
     2. ``default.context_management.summarization.model``
-    3. :data:`_DEFAULT_SUMMARIZATION_MODEL` fallback.
+    3. ``""`` when neither is configured.
+
+    There is **no hardcoded model fallback** (RFC 0033 — config owns model
+    identity). The shipped config references the ``summarizer`` alias; when
+    no model is configured the empty string flows into ``resolve()`` at the
+    call site, which raises and the best-effort close path degrades to its
+    deterministic fallback summary — rather than silently summarising with a
+    code-baked model the operator never chose.
     """
     cfg = _load_config()
     active = cfg.get("active_profile") or "default"
@@ -115,7 +111,7 @@ def summarization_model() -> str:
         model = summ.get("model")
         if isinstance(model, str) and model.strip():
             return model
-    return _DEFAULT_SUMMARIZATION_MODEL
+    return ""
 
 
 def provider_inference() -> dict[str, list[str]]:
@@ -185,14 +181,28 @@ def sub_agent_default_model() -> str:
     """Return the alias a code-spawned sub-agent defaults to (RFC 0033 §J.3).
 
     Reads ``default.model_routing.defaults.sub_agents`` via
-    :func:`model_routing_defaults`; falls back to
-    :data:`_DEFAULT_SUB_AGENT_MODEL` (the shipped ``quality`` alias) when
-    the config is absent or does not declare a ``sub_agents`` default. A
+    :func:`model_routing_defaults`. A
     :class:`~agents.persona_types.SubAgentRequest` constructed with no
     explicit ``model`` resolves to this value at construction time, so no
     Python runtime code carries a literal vendor model ID.
+
+    There is **no hardcoded fallback** (RFC 0033 — config owns model
+    identity). When the routing default is absent this raises a loud
+    :class:`SystemExit` naming the missing key: a sub-agent cannot run
+    without a model, and unlike the summarisation surface there is no
+    downstream resolver to catch a placeholder value, so the
+    misconfiguration must surface at construction rather than route to a
+    code-baked default.
     """
-    return model_routing_defaults().get("sub_agents") or _DEFAULT_SUB_AGENT_MODEL
+    alias = model_routing_defaults().get("sub_agents")
+    if not alias:
+        raise SystemExit(
+            "config/optimization.yaml: default.model_routing.defaults.sub_agents "
+            "is not set — a code-spawned sub-agent with no explicit model has no "
+            "alias to route to. Declare it in the routing defaults (e.g. "
+            "sub_agents: quality)."
+        )
+    return alias
 
 
 def model_aliases() -> dict[str, dict[str, Any]]:
