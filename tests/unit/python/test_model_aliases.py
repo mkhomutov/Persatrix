@@ -121,6 +121,22 @@ class TestAliasHit:
         assert resolved.input_per_1m_tokens == 0.0
         assert isinstance(resolved.input_per_1m_tokens, float)
 
+    def test_bool_pricing_coerced_to_zero(self) -> None:
+        # bool is an int subclass; the coercion deliberately excludes it so
+        # a stray YAML ``true`` / ``false`` in a pricing field reads as $0
+        # rather than leaking through as 1.0 / 0.0. Exercised through the
+        # public resolver, not _coerce_price directly.
+        with use_alias_map({"booly": {
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "input_per_1m_tokens": True,
+            "output_per_1m_tokens": False,
+        }}):
+            resolved = resolve("booly")
+        assert resolved.input_per_1m_tokens == 0.0
+        assert resolved.output_per_1m_tokens == 0.0
+        assert isinstance(resolved.input_per_1m_tokens, float)
+
 
 class TestRawFallThrough:
     def test_raw_anthropic_id_falls_through(self, isolated_config: None) -> None:
@@ -174,6 +190,63 @@ class TestUnknownString:
     def test_empty_string_raises_systemexit(self, isolated_config: None) -> None:
         with use_alias_map(_SAMPLE_ALIASES), pytest.raises(SystemExit):
             resolve("")
+
+
+class TestMalformedAliasEntry:
+    """A *declared* alias whose entry is structurally broken is a loud
+    ``SystemExit`` naming the alias — not a silently degraded record.
+
+    The accessor (:func:`optimization.model_aliases`) drops non-dict
+    *entries*, but a dict entry that is missing a required field or carries
+    the wrong type reaches the resolver, where ``_from_alias_entry``'s
+    guards catch it. These feed such entries straight through the seam
+    (which bypasses the accessor's dict filter) to pin those guards.
+    """
+
+    def test_entry_missing_provider_raises(self) -> None:
+        with use_alias_map({"broken": {
+            "model": "claude-sonnet-4-6",
+            "input_per_1m_tokens": 3.0,
+            "output_per_1m_tokens": 15.0,
+        }}), pytest.raises(SystemExit) as exc:
+            resolve("broken")
+        assert "broken" in str(exc.value)
+        assert "provider" in str(exc.value)
+
+    def test_entry_empty_provider_raises(self) -> None:
+        # Present-but-falsy (empty string) is still a missing provider.
+        with use_alias_map({"broken": {
+            "provider": "",
+            "model": "claude-sonnet-4-6",
+            "input_per_1m_tokens": 3.0,
+            "output_per_1m_tokens": 15.0,
+        }}), pytest.raises(SystemExit) as exc:
+            resolve("broken")
+        assert "provider" in str(exc.value)
+
+    def test_entry_missing_model_raises(self) -> None:
+        with use_alias_map({"broken": {
+            "provider": "anthropic",
+            "input_per_1m_tokens": 3.0,
+            "output_per_1m_tokens": 15.0,
+        }}), pytest.raises(SystemExit) as exc:
+            resolve("broken")
+        assert "broken" in str(exc.value)
+        assert "model" in str(exc.value)
+
+    def test_entry_provider_config_not_mapping_raises(self) -> None:
+        # A non-empty, non-dict provider_config is a config type error. The
+        # value must be truthy to reach the guard — ``entry.get(...) or {}``
+        # coerces an empty list/None to {} first; a string trips it.
+        with use_alias_map({"broken": {
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "provider_config": "not-a-mapping",
+            "input_per_1m_tokens": 3.0,
+            "output_per_1m_tokens": 15.0,
+        }}), pytest.raises(SystemExit) as exc:
+            resolve("broken")
+        assert "provider_config" in str(exc.value)
 
 
 class TestTestSeam:
@@ -239,3 +312,23 @@ def test_module_exports_public_surface() -> None:
 
     for name in ("ResolvedModel", "resolve", "use_alias_map"):
         assert name in mod.__all__
+
+
+def test_raw_fallback_constants_mirror_llm_client() -> None:
+    """The raw-ID fall-through fallback prefixes are duplicated from
+    ``agents.llm_client`` — they cannot be imported, because that module
+    imports *this* one once the factory is rewired (RFC 0033 PR 2, a
+    cycle). The module comment claims they mirror llm_client's constants;
+    pin that here so the two cannot silently drift. They only bind in a
+    config-less checkout (the shipped ``provider_inference`` block, pinned
+    by test_optimization.py, otherwise overrides them), but in that path
+    they — not the YAML — drive provider inference, so a drift would route
+    raw IDs differently between the resolver and the legacy factory.
+    """
+    from agents import llm_client, model_aliases
+
+    assert model_aliases._DEFAULT_OPENAI_EXACT == llm_client._OPENAI_EXACT_MODELS
+    assert model_aliases._DEFAULT_OPENAI_PREFIXES == llm_client._OPENAI_PREFIX_MODELS
+    # llm_client uses an inline ("claude",) literal for the anthropic
+    # default (no named constant to pin against); lock ours to that value.
+    assert model_aliases._DEFAULT_ANTHROPIC_PREFIXES == ("claude",)
