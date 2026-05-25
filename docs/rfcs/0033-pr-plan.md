@@ -197,13 +197,13 @@ PR 1 is additive and unconsumed: the resolver module and `models.aliases` block 
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_llm_client.py tests/unit/python/test_model_aliases.py tests/unit/python/test_optimization.py -q` plus sub-agent factory tests pass.
-- [ ] `cd agents && mypy .` clean; `ruff check agents/` clean.
-- [ ] `make validate` + `make test` clean.
-- [ ] All six `agents.yaml` `model:` fields + the three `default.model_routing.defaults` entries + `summarization.model` reference aliases; **Sonnet 4 → 4.6 done by editing only the `quality` alias** — no per-agent sweep.
-- [ ] `SubAgentRequest.model` default is `None`; sub-agent factory resolves it to the `sub_agents` alias — **no runtime path carries a literal vendor model ID**.
-- [ ] Anthropic-only example `network.allow` blocks generalized or dropped ([amendment item 5](../v0.3.4-plan-amendment-2026-05-24.md#phase-2-additions)).
-- [ ] [Progress Overview](#progress-overview) row 3 filled.
+- [x] `pytest tests/unit/python/test_optimization_routing.py tests/unit/python/test_sub_agent_model_default.py tests/unit/python/test_llm_factory.py tests/unit/python/test_model_aliases.py tests/unit/python/test_optimization.py -q` pass; full unit suite green (the §J.3 sub-agent-default tests live in `test_sub_agent_model_default.py`, the routing-accessor tests in `test_optimization_routing.py` — split out of `test_optimization.py` to stay under the file-size cap).
+- [x] `cd agents && mypy .` clean (whole-package, as CI runs it); `ruff check` clean (agents + tests).
+- [x] `make validate` passes against the alias-referencing `agents.yaml` + neutralized network blocks; `make test` clean (Python; Go untouched — no Go test reads the shipped config).
+- [x] All six `agents.yaml` `model:` fields + the three `default.model_routing.defaults` entries + `summarization.model` reference aliases; **Sonnet 4 → 4.6 done by editing only the `quality` alias** — no per-agent sweep.
+- [x] `SubAgentRequest.model` default is `None`; `__post_init__` resolves it to the `sub_agents` alias — **no runtime path carries a literal vendor model ID**.
+- [x] Anthropic-only example `network.allow` blocks generalized to a provider-neutral allowlist ([amendment item 5](../v0.3.4-plan-amendment-2026-05-24.md#phase-2-additions)).
+- [x] [Progress Overview](#progress-overview) row 3 filled.
 
 ---
 
@@ -384,8 +384,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | # | RFC Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-----------|-------|--------|--------|-----------|--------|
 | 1 | 1 | Resolver module + `models.aliases` config block (+ OpenAI alias, local-pricing decision) | `feature/v034-rfc0033-resolver` | ✅ Merged | [#431](https://github.com/mkhomutov/Persatrix/pull/431) | 2026-05-25 |
-| 2 | 1 | `create_provider` tuple return + §D precedence + offline/Ollama interplay regression + raw-ID startup warning + `raw_id_usage` counter | `feature/v034-rfc0033-factory` | 🔀 PR open | [#432](https://github.com/mkhomutov/Persatrix/pull/432) | — |
-| 3 | 1 | Config migration to aliases (Sonnet 4→4.6 via `quality`) + network-allowlist neutralization + `SubAgentRequest.model` `None`-default + §J resolution | `feature/v034-rfc0033-migration` | ⬜ Not started | — | — |
+| 2 | 1 | `create_provider` tuple return + §D precedence + offline/Ollama interplay regression + raw-ID startup warning + `raw_id_usage` counter | `feature/v034-rfc0033-factory` | ✅ Merged | [#432](https://github.com/mkhomutov/Persatrix/pull/432) | 2026-05-25 |
+| 3 | 1 | Config migration to aliases (Sonnet 4→4.6 via `quality`) + network-allowlist neutralization + `SubAgentRequest.model` `None`-default + §J resolution | `feature/v034-rfc0033-migration` | 🔀 PR open | [#433](https://github.com/mkhomutov/Persatrix/pull/433) | — |
 | 4 | 2 | Missing-price guard — fail-closed for unpriced non-local aliases ([amendment item 1](../v0.3.4-plan-amendment-2026-05-24.md#what-changes)) | `feature/v034-rfc0033-missing-price-guard` | ⬜ Not started | — | — |
 | 5 | 2 | `persatrix.llm.model_alias` span attr + alias-derived pricing + `/cost/summary` cost gate (+ OpenAI rows) | `feature/v034-rfc0033-telemetry-pricing` | ⬜ Not started | — | — |
 | 6 | 2 | Documentation sweep — replace literal vendor IDs with alias examples | `feature/v034-rfc0033-docs-sweep` | ⬜ Not started | — | — |
