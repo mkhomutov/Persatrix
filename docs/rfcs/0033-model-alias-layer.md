@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-15
-target: v0.3.x
+target: v0.3.4 (Phases 1–2) + v0.3.5+ (Phase 3)
 depends_on:
   - RFC-0004
   - RFC-0008
@@ -18,7 +18,8 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-15
-**Target**: v0.3.x
+**Target**: v0.3.4 (Phases 1–2) + v0.3.5+ (Phase 3)
+**PR plan**: [0033-pr-plan.md](0033-pr-plan.md) (Phases 1–2 — the v0.3.4 contract)
 **Depends on**: RFC 0004 (Python Agent gRPC Server — established the `LLMProvider` Protocol), RFC 0008 (Memory & Context Optimization — established `optimization.yaml` as the cost/routing config home)
 **Relates to**: RFC 0006 (Efficiency & Execution Limits — cost pricing tables)
 
@@ -416,12 +417,14 @@ This RFC is in 📋 Proposed state pending:
 
 1. Review of the alias-naming convention (Open Question 1).
 2. Confirmation that Phase 1 sits cleanly between in-flight RFC 0026 PRs without file conflicts.
-3. Author of a companion PR plan (`0033-pr-plan.md`) once accepted, mirroring the shape of [`0026-pr-plan.md`](0026-pr-plan.md) / [`0031-pr-plan.md`](0031-pr-plan.md).
+3. ~~Author of a companion PR plan (`0033-pr-plan.md`) once accepted~~ — **done**: the companion [PR plan](0033-pr-plan.md) covers Phases 1–2 (the v0.3.4 contract), modeled on [`0024-pr-plan.md`](0024-pr-plan.md). It carries the [v0.3.4 provider-parity amendment](../v0.3.4-plan-amendment-2026-05-24.md)'s Phase 2 additions (missing-price guard, OpenAI peer alias + pricing, network-allowlist neutralization, local-pricing decision) alongside the RFC's original Phase 2.
 
 The proximate motivator (Sonnet 4 retirement on 2026-06-15) provides a natural deadline for Phase 1 — but the *RFC itself* does not gate on that date. If Phase 1 doesn't land in time, the fallback is a one-off mechanical sweep replacing `claude-sonnet-4-20250514` → `claude-sonnet-4-6`; the alias work then proceeds afterward at normal cadence, dogfooded against a different (and lower-pressure) future migration.
 
 ## Related Documentation
 
+- [0033-pr-plan.md](0033-pr-plan.md) — companion PR plan (Phases 1–2; the v0.3.4 contract).
+- [v0.3.4-plan.md](../v0.3.4-plan.md) — master plan this RFC's Phases 1–2 implement; [provider-parity amendment](../v0.3.4-plan-amendment-2026-05-24.md) the PR plan folds in.
 - [Architecture Spec](../ai-agents-orchestration-spec.md) — references `claude-sonnet-4-20250514` in fallback-chain examples (Phase 2 doc sweep).
 - [Extension Spec](../persatrix-extension-spec.md) — extensive use of literal vendor IDs (Phase 2 doc sweep).
 - [Persona Agents Guide](../guides/persona-agents.md) — references both `claude-sonnet-4-20250514` and `claude-haiku-4-5` in pricing examples (Phase 2 doc sweep).

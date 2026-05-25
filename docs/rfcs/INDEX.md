@@ -15,7 +15,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0027](0027-reflection-driven-consolidation.md) | 📋 Proposed | feature | v0.4.0 | 2026-05-01 | Reflection-Driven Consolidation |
 | [RFC-0028](0028-agent-decision-policy-engine.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension) | 2026-05-02 | Agent Decision Policy Engine |
 | [RFC-0030](0030-multi-agent-conversation-governance.md) | 📋 Proposed | architecture | v0.3.x (Phase 1); v0.4.0 (Phase 2); v0.5.0+ (Phase 3) | 2026-05-11 | Multi-Agent Conversation Governance |
-| [RFC-0033](0033-model-alias-layer.md) | 📋 Proposed | architecture | v0.3.x | 2026-05-15 | Provider-Agnostic Model Alias Layer |
+| [RFC-0033](0033-model-alias-layer.md) | 📋 Proposed | architecture | v0.3.4 (Phases 1–2) + v0.3.5+ (Phase 3) | 2026-05-15 | Provider-Agnostic Model Alias Layer |
 | [RFC-0035](0035-channel-membership-interval-ledger.md) | 📋 Proposed | architecture | v0.3.x | 2026-05-16 | Channel Membership Interval Ledger |
 | [RFC-0036](0036-persona-message-recall.md) | 📋 Proposed | feature | v0.3.x | 2026-05-16 | Persona Verbatim Message Recall |
 | [RFC-0037](0037-memory-confidentiality-channel-classification.md) | 📋 Proposed | feature | v0.3.x | 2026-05-16 | Memory Confidentiality & Channel Classification |
