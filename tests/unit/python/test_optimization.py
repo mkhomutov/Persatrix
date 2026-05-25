@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from agents import optimization
-from agents.optimization import provider_inference, reset_cache
+from agents.optimization import model_aliases, provider_inference, reset_cache
 
 
 @pytest.fixture()
@@ -267,3 +267,155 @@ def test_module_exports_provider_inference() -> None:
     accessor from ``__all__`` — call sites in ``agents.llm_client``
     rely on the import path."""
     assert "provider_inference" in optimization.__all__
+
+
+# ─── models.aliases accessor (RFC 0033 Phase 1 PR 1) ──────────
+
+
+class TestModelAliasesAccessor:
+    """``model_aliases()`` exposes the top-level ``models.aliases`` block.
+
+    Unlike ``provider_inference()`` the block is NOT profile-scoped — it
+    sits at the top level alongside ``default`` / ``cost`` (RFC 0033 §B),
+    so resolution does not consult ``active_profile``.
+    """
+
+    def test_missing_file_returns_empty_dict(self, config_path: Path) -> None:
+        assert model_aliases() == {}
+
+    def test_no_models_block_returns_empty_dict(self, config_path: Path) -> None:
+        _write_yaml(config_path, "active_profile: default\n")
+        assert model_aliases() == {}
+
+    def test_models_without_aliases_returns_empty_dict(
+        self, config_path: Path,
+    ) -> None:
+        _write_yaml(config_path, "models:\n  something_else: {}\n")
+        assert model_aliases() == {}
+
+    def test_aliases_block_parses(self, config_path: Path) -> None:
+        _write_yaml(
+            config_path,
+            'schema_version: "0.2"\n'
+            "models:\n"
+            "  aliases:\n"
+            "    quality:\n"
+            "      provider: anthropic\n"
+            "      model: claude-sonnet-4-6\n"
+            "      input_per_1m_tokens: 3.00\n"
+            "      output_per_1m_tokens: 15.00\n",
+        )
+        assert model_aliases() == {
+            "quality": {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "input_per_1m_tokens": 3.00,
+                "output_per_1m_tokens": 15.00,
+            },
+        }
+
+    def test_openai_alias_round_trips(self, config_path: Path) -> None:
+        _write_yaml(
+            config_path,
+            "models:\n"
+            "  aliases:\n"
+            "    quality-openai:\n"
+            "      provider: openai\n"
+            "      model: gpt-4o\n"
+            "      input_per_1m_tokens: 2.50\n"
+            "      output_per_1m_tokens: 10.00\n"
+            "      provider_config:\n"
+            "        base_url: https://api.openai.com/v1\n",
+        )
+        result = model_aliases()
+        assert result["quality-openai"]["provider"] == "openai"
+        assert result["quality-openai"]["provider_config"] == {
+            "base_url": "https://api.openai.com/v1",
+        }
+
+    def test_non_dict_entries_are_filtered(self, config_path: Path) -> None:
+        # A scalar where an alias entry should be is dropped rather than
+        # surfaced as a malformed record the resolver would choke on.
+        _write_yaml(
+            config_path,
+            "models:\n"
+            "  aliases:\n"
+            "    quality:\n"
+            "      provider: anthropic\n"
+            "      model: claude-sonnet-4-6\n"
+            "      input_per_1m_tokens: 3.0\n"
+            "      output_per_1m_tokens: 15.0\n"
+            "    bogus: not-a-mapping\n",
+        )
+        assert set(model_aliases()) == {"quality"}
+
+    def test_returned_map_is_fresh_per_call(self, config_path: Path) -> None:
+        # The accessor copies the outer dict and each inner entry so a
+        # caller mutating the result cannot poison the lru_cache.
+        _write_yaml(
+            config_path,
+            "models:\n"
+            "  aliases:\n"
+            "    quality:\n"
+            "      provider: anthropic\n"
+            "      model: claude-sonnet-4-6\n"
+            "      input_per_1m_tokens: 3.0\n"
+            "      output_per_1m_tokens: 15.0\n",
+        )
+        a = model_aliases()
+        a["quality"]["model"] = "tampered"
+        a["injected"] = {}
+        b = model_aliases()
+        assert b == {
+            "quality": {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "input_per_1m_tokens": 3.0,
+                "output_per_1m_tokens": 15.0,
+            },
+        }
+
+
+class TestShippedYamlModelAliases:
+    """Pin the alias block PR 1 ships in ``config/optimization.yaml``.
+
+    Mirrors :class:`TestShippedYamlMatchesHardcodedDefaults`: the on-disk
+    file is the single source of truth, so a drift between this PR's
+    promised aliases and the shipped block surfaces here.
+    """
+
+    def test_shipped_yaml_carries_core_aliases(self) -> None:
+        import os
+
+        os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
+        reset_cache()
+        try:
+            aliases = model_aliases()
+        finally:
+            reset_cache()
+
+        if not aliases:
+            pytest.skip("config/optimization.yaml absent in this checkout")
+
+        # quality migrates Sonnet 4 → 4.6 by editing only this entry.
+        assert aliases["quality"]["provider"] == "anthropic"
+        assert aliases["quality"]["model"] == "claude-sonnet-4-6"
+        # fast / summarizer route to Haiku.
+        for alias in ("fast", "summarizer"):
+            assert aliases[alias]["provider"] == "anthropic"
+            assert aliases[alias]["model"] == "claude-haiku-4-5-20251001"
+        # OpenAI peer ships priced (amendment item 2).
+        openai_aliases = [
+            name for name, entry in aliases.items()
+            if entry.get("provider") == "openai"
+        ]
+        assert openai_aliases, "expected at least one priced OpenAI alias"
+        for name in openai_aliases:
+            assert float(aliases[name]["input_per_1m_tokens"]) > 0
+            assert float(aliases[name]["output_per_1m_tokens"]) > 0
+
+
+def test_module_exports_model_aliases() -> None:
+    """Pin ``model_aliases`` on the public surface — the resolver in
+    ``agents.model_aliases`` imports it."""
+    assert "model_aliases" in optimization.__all__

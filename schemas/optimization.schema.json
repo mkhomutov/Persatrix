@@ -2,9 +2,66 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://persatrix.dev/schemas/optimization.schema.json",
   "title": "Persatrix Optimization Configuration",
-  "description": "Schema for config/optimization.yaml. RFC 0034 Phase 1 PR 2 introduced this schema scoped to the top-level `conversation_window` block; RFC 0023 PR 2 adds the top-level `wallet` block (LLM-call leasing lease-lifecycle tuning). The Go orchestrator owns the model-routing / caching / cost-budget surface end-to-end, so those keys are intentionally left unconstrained (top-level additionalProperties defaults to true) rather than duplicating the orchestrator's optimisation schema in two places. Future RFCs may grow this schema.",
+  "description": "Schema for config/optimization.yaml. RFC 0034 Phase 1 PR 2 introduced this schema scoped to the top-level `conversation_window` block; RFC 0023 PR 2 adds the top-level `wallet` block (LLM-call leasing lease-lifecycle tuning); RFC 0033 Phase 1 PR 1 adds the top-level `models.aliases` block (provider-agnostic model alias map). The Go orchestrator owns the model-routing / caching / cost-budget surface end-to-end, so those keys are intentionally left unconstrained (top-level additionalProperties defaults to true) rather than duplicating the orchestrator's optimisation schema in two places. Future RFCs may grow this schema.",
   "type": "object",
   "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Optimization-config schema version. RFC 0033 Phase 1 bumped this from \"0.1\" to \"0.2\" when the `models.aliases` block landed; Phase 3 (raw-ID rejection) will bump it to \"0.3\"."
+    },
+    "models": {
+      "type": "object",
+      "description": "RFC 0033 — Provider-Agnostic Model Alias Layer. Houses the alias map: the single source of truth for model identity, sitting at the top level alongside `default` / `cost` (not profile-scoped). A vendor retirement or provider swap is a one-line edit to one alias entry.",
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "type": "object",
+          "description": "Logical alias (`quality` / `fast` / `summarizer`) → concrete (provider, model, pricing) record. Agents and routing defaults reference these names instead of vendor model IDs. Resolved by agents/model_aliases.py.",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "description": "One alias entry. Pricing is required on every entry so the alias-derived cost table (RFC 0033 §F, PR 5) stays complete; a local ($0-real) model carries an explicit 0 rather than omitting the fields.",
+            "additionalProperties": false,
+            "required": [
+              "provider",
+              "model",
+              "input_per_1m_tokens",
+              "output_per_1m_tokens"
+            ],
+            "properties": {
+              "provider": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Provider routing key — e.g. `anthropic`, `openai`, `ollama`, `mock`. The alias entry's `provider` is authoritative; provider is data, not inferred (RFC 0033 §H)."
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Physical vendor model ID used in the API call — the value the alias name resolves to."
+              },
+              "input_per_1m_tokens": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Input-token price per 1M tokens (USD). 0 for a $0-real local model (documented $0, not absent)."
+              },
+              "output_per_1m_tokens": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Output-token price per 1M tokens (USD). 0 for a $0-real local model."
+              },
+              "provider_config": {
+                "type": "object",
+                "description": "Provider-specific passthrough settings — e.g. `base_url` for an OpenAI-compatible local endpoint. Alias-level values are authoritative; an agent entry's provider_config fills only the gaps (RFC 0033 §D precedence rule 2)."
+              },
+              "notes": {
+                "type": "string",
+                "description": "Free-text annotation — e.g. the local-pricing decision for a $0-real entry. Documentation only."
+              }
+            }
+          }
+        }
+      }
+    },
     "wallet": {
       "type": "object",
       "description": "RFC 0023 — LLM Call Leasing: server-side lease-lifecycle tuning for the orchestrator's WalletService. Top-level block (sibling of `cost:`), parsed by the Go orchestrator. An absent block — or an absent key — falls back to the defaults below.",
