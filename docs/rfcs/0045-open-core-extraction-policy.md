@@ -3,7 +3,7 @@ id: RFC-0045
 title: Open-Core Library Extraction Policy
 summary: Foundational three-tier open-core policy and governance — MIT funnel libraries below, the self-hostable BUSL-1.1 product in the middle, a never-published Private moat above. Fixes the license boundary, the MIT ← BUSL ← Private dependency-direction invariant and its CI enforcement, the source-of-truth/sync model, contribution governance, the reserved proprietary seams and a no-retraction rule, and the naming/versioning conventions every per-extraction RFC inherits. Moves no code and stands up no private track.
 type: process
-status: draft
+status: proposed
 author: Maksim Khomutov
 created: 2026-05-24
 target: v0.3.x (policy + dependency-direction CI gate) + v0.4.0+ (per-extraction RFCs)
@@ -16,7 +16,7 @@ depends_on:
 # RFC 0045 — Open-Core Library Extraction Policy
 
 **Type**: process
-**Status**: 🔨 Draft
+**Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-24
 **Target**: v0.3.x (policy doc + dependency-direction CI gate) + v0.4.0+ (per-extraction RFCs)
@@ -169,6 +169,7 @@ The discipline here is **reserve the seam, defer the track.** Pre-1.0, with a sm
 - The memory tiers as they exist today — including **relationship/trust** — stay BUSL and self-hostable. They are not clawed back onto a closed tier.
 - The Private differentiation is the **managed, scaled society backend** (operated, not shipped) plus **future, more-advanced** capabilities that ship straight to Private and were never public.
 - Corollary: do not ship a destined-for-private capability under BUSL "for now" and reclaim it later. If a capability is intended to be private, it stays out of the public tree from the start.
+- **Ambiguous future capabilities default to BUSL.** When it is genuinely unclear whether a *new* capability belongs in BUSL or Private, it ships to BUSL — the default tier — and the line is drawn explicitly in that capability's own RFC. Defaulting open is safe precisely because the moat is operational, not source-secrecy ([M-5](#m-5-exclusivity-runs-in-both-directions)): shipping the source to BUSL does not weaken a moat that lives in the *managed, scaled* operation. The asymmetry only cuts one way under the no-retraction rule — a capability shipped to BUSL can always stay or be opened further, but one wrongly withheld can still be released later, whereas a published one can never be pulled back.
 
 **Reserve, then stop.** Define the seams above as stable interfaces, keep the three-tier import discipline ([§B](#b-the-dependency-direction-invariant)) in mind when shaping them, and do not populate or parallel-develop a private repo. **Flip from reserved seam to active private track only on a forcing function:** a paying design partner, a hosted offering actually committed to ship, or a feature that is inherently managed (multi-tenant control plane, shared abuse/safety infrastructure). Until then the Private layer is a *thin overlay on stable interfaces*, not a forked codebase.
 
@@ -184,7 +185,9 @@ Two viable models for the MIT repos; the choice is per-library and may change ov
 - *Pro:* genuine library ergonomics; first-class external contribution; forces a clean public API.
 - *Con:* cross-repo change coordination, version bumps, and release overhead — costly while the API is still moving.
 
-**Recommendation.** Default to **Option A** while pre-1.0 and seams are still moving. Flip an individual library to **Option B** once its public API has stabilized *and* external contribution demand is real. The flip is itself a documented step inside that library's extraction RFC, not a blanket switch. This is the [evolvable-over-back-compat](../development-workflow.md) stance: do not pay cross-repo coordination cost before the API has earned it.
+**Decision.** Default to **Option A** while pre-1.0 and seams are still moving. Flip an individual library to **Option B** once its public API has stabilized *and* external contribution demand is real. The flip is itself a documented step inside that library's extraction RFC, not a blanket switch. This is the [evolvable-over-back-compat](../development-workflow.md) stance: do not pay cross-repo coordination cost before the API has earned it.
+
+**Dogfooding follows the sync model.** While a library is on Option A it remains an in-tree copy and the BUSL core does not take a dependency on its mirror — there is no second source of truth to depend on. When a library flips to Option B, the core consumes it back as a versioned dependency. That flip is what makes dogfooding meaningful: depending on the published artifact is what actually proves the dependency-direction boundary ([§B](#b-the-dependency-direction-invariant)) and exercises the public API against a real consumer. So dogfooding is not a separate decision — it is the Option-B side of the per-library flip above.
 
 ### E. Contribution governance
 
@@ -194,13 +197,14 @@ Extracted repos accept outside contributions; the core must stay able to consume
 - **A Developer Certificate of Origin (DCO)** — a `Signed-off-by` line asserting the contributor has the right to submit the code under the repo's license — is the lightweight, standard control. It defends against contributors injecting code they do not own (which would contaminate both the MIT library *and* the BUSL product that consumes it).
 - **A CLA** is heavier but grants explicit relicensing rights. It is only needed if a future scenario requires relicensing an extracted library away from MIT — not anticipated.
 
-**Recommendation.** **DCO on every extracted repo**; reserve a CLA only if a concrete relicensing need appears. Pair this with provenance criterion 5 in [§A](#a-the-three-tier-boundary): before a file is extracted, confirm it is owner-authored or already covered. Legal confirmation is flagged in [Open Questions](#open-questions).
+**Decision.** **DCO on every extracted repo**; reserve a CLA only if a concrete relicensing need appears. Pair this with provenance criterion 5 in [§A](#a-the-three-tier-boundary): before a file is extracted, confirm it is owner-authored or already covered. One belt-and-suspenders confirmation remains before the first repo accepts outside contributions — a brief legal read that MIT-with-DCO inbound is cleanly consumable inside the BUSL product — carried as the single residual [Open Question](#open-questions). It is expected to confirm, not overturn, the DCO choice (MIT is permissive and downstream-compatible), so it does not gate ratifying this policy.
 
 ### F. Naming, versioning, and release conventions
 
-- **Naming.** Either branded `persatrix-<area>` (e.g. `persatrix-budget`) or a neutral brand. Branding aids the funnel (every repo points home); neutral naming can lower adoption friction for developers wary of product-coupled libraries. The trade-off is unresolved — see [Open Questions](#open-questions) — but the *convention* (one short, area-scoped name per repo) is fixed here.
+- **Naming.** Branded `persatrix-<area>` (e.g. `persatrix-budget`) — one short, area-scoped name per repo. The funnel is the stated purpose of the MIT tier ([M-1](#m-1-reusable-infrastructure-is-locked-inside-a-non-permissive-repo), [§G](#g-repo-structure-core-plus-adapters)), and a branded name makes every repo a pointer back to the product, which is the discoverability the funnel relies on. The friction cost of product-coupled naming is real but secondary; a specific library may argue for a neutral name in its own extraction RFC if it can show that adoption friction dominates the funnel benefit for that primitive.
 - **Versioning.** [SemVer](https://semver.org/), independent per repo, `0.x` while pre-1.0. A wire contract — notably the budget-lease `.proto` — is versioned as **public API in its own right**: a breaking proto change is a major bump, independent of the implementation's version.
 - **Release hygiene, per repo.** MIT `LICENSE`; a `NOTICE`/attribution file; third-party license inventory equivalent to the repo's [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md); a `CHANGELOG`; its own CI (build + test + the dependency-direction check); and published-artifact signing once a library moves to Option B.
+- **Third-party inventory is per-repo, not partitioned.** The monorepo's [`make notices`](../../Makefile) output is **not** sliced up across extracted repos. Each repo regenerates its own inventory from *its own* dependency closure — an extracted MIT primitive depends on a small, different set than the monorepo, so a fresh per-repo `notices` run is both simpler and more accurate than carving the monorepo's. The mechanic (which generator each repo runs) is a per-extraction-RFC detail; the principle — independent, self-scoped inventory per repo — is fixed here.
 
 ### G. Repo structure: core plus adapters
 
@@ -266,17 +270,26 @@ Ordered, condition-gated steps — no calendar commitments. Each step gates the 
 
 ## Open Questions
 
-1. **Sync model default.** Confirm **Option A** (monorepo-canonical, subtree mirror) as the starting default for all candidates, or prefer **Option B** (repo-canonical dependency) from day one for any specific library? ([§D](#d-source-of-truth-and-sync-model))
-2. **Governance instrument.** Is **DCO** sufficient for the MIT repos, or is a **CLA** wanted up front? Needs a brief legal read on whether consuming MIT-with-DCO contributions inside the BUSL product is fully clean. ([§E](#e-contribution-governance))
-3. **Naming.** Branded `persatrix-*` (funnel value) vs a neutral brand (lower adoption friction)? ([§F](#f-naming-versioning-and-release-conventions))
-4. **Dogfooding.** Should the BUSL core consume the extracted MIT libraries back as real dependencies (which proves the boundary and exercises the public API), or keep in-tree copies while pre-1.0? Recommendation: dogfood once a library reaches Option B.
-5. **Event-loop placement.** Does the idle loop ([RFC 0024](0024-event-driven-scheduling.md)) ship folded into the budget-lease repo (one "$0-when-idle, gated-when-active" story), as its own repo, or stay internal? Resolve in the flagship extraction RFC, not here.
-6. **The BUSL/Private line for relationship modeling.** This RFC fixes that the *current* relationship/trust tier stays BUSL and the *managed/scaled* backend plus *future* advanced modeling are Private. Is there any forthcoming capability for which that line is genuinely ambiguous — and if so, does it ship to BUSL (default) or wait for the Private tier? Resolve case-by-case, defaulting to BUSL.
-7. **`NOTICE` / third-party inventory mechanics** across the split — how [`make notices`](../../Makefile) output is partitioned per extracted repo.
+The policy questions raised in earlier drafts are now resolved in-section:
+
+- **Sync model default → Option A** (monorepo-canonical, mirror-out), with a per-library flip to Option B documented inside each extraction RFC ([§D](#d-source-of-truth-and-sync-model)).
+- **Dogfooding → in-tree under Option A, real versioned dependency under Option B** — the Option-B side of the same per-library flip, not a separate decision ([§D](#d-source-of-truth-and-sync-model)).
+- **Governance → DCO** on every extracted repo, paired with provenance criterion 5; a CLA is reserved only for a concrete future relicensing need ([§E](#e-contribution-governance)).
+- **Naming → branded `persatrix-<area>`**, one short area-scoped name per repo, with a per-extraction override path for a primitive that can show neutral naming wins ([§F](#f-naming-versioning-and-release-conventions)).
+- **Third-party inventory → per-repo, independently regenerated** from each repo's own dependency closure; the monorepo's `make notices` is not partitioned ([§F](#f-naming-versioning-and-release-conventions)).
+- **BUSL/Private line for an ambiguous future capability → default to BUSL**, drawn explicitly in that capability's own RFC ([§C](#c-the-private-tier-reserved-seams-and-the-no-retraction-rule)).
+
+**Genuinely open:**
+
+1. **Legal confirmation of the DCO path.** A brief legal read that MIT-with-DCO inbound contributions are cleanly consumable inside the BUSL product. It is expected to confirm — not overturn — the [§E](#e-contribution-governance) DCO decision, since MIT is permissive and downstream-compatible, but it should be obtained before the first extracted repo accepts outside contributions. It does **not** gate ratifying this policy.
+
+**Deferred to successor RFCs (not open for this policy):**
+
+- **Event-loop placement.** Whether the idle loop ([RFC 0024](0024-event-driven-scheduling.md)) folds into the budget-lease repo (one "$0-when-idle, gated-when-active" story), ships as its own repo, or stays internal is a seam-cut decided in the flagship extraction RFC ([§H](#h-the-candidate-set-and-the-per-extraction-rfc-requirement)) — a question for that RFC, not a policy choice here.
 
 ## Decision / Next Steps
 
-**Proposed decision:** adopt the three-tier open-core policy as specified — the [§A](#a-the-three-tier-boundary) boundary and eligibility test, the [§B](#b-the-dependency-direction-invariant) `MIT ← BUSL ← Private` invariant as a hard CI gate, the [§C](#c-the-private-tier-reserved-seams-and-the-no-retraction-rule) reserved seams and no-retraction rule (reserve, don't staff), Option A as the default sync model with per-library flips, DCO governance, and the [§G](#g-repo-structure-core-plus-adapters) core-plus-adapters structure — and keep the current memory tiers (including relationship/trust) BUSL, with the managed society backend reserved for a deferred Private tier.
+**Proposed decision:** adopt the three-tier open-core policy as specified — the [§A](#a-the-three-tier-boundary) boundary and eligibility test, the [§B](#b-the-dependency-direction-invariant) `MIT ← BUSL ← Private` invariant as a hard CI gate, the [§C](#c-the-private-tier-reserved-seams-and-the-no-retraction-rule) reserved seams and no-retraction rule (reserve, don't staff), Option A as the default sync model with per-library flips (dogfooding on the Option-B side), DCO governance, branded `persatrix-<area>` naming, and the [§G](#g-repo-structure-core-plus-adapters) core-plus-adapters structure — and keep the current memory tiers (including relationship/trust) BUSL, with the managed society backend reserved for a deferred Private tier. One non-blocking item remains open — a legal read confirming the DCO path ([Open Questions](#open-questions)).
 
 **On acceptance:**
 
