@@ -152,6 +152,16 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # review-follow-ups PR closes out and the plan is sealed at the
     # v0.3.3 release tag.
     "docs/rfcs/0024-pr-plan.md",
+    # Same per-PR review residual accumulator pattern as 0008-pr-plan.md,
+    # 0019-pr-plan.md, 0026-pr-plan.md, and 0024-pr-plan.md above. The plan
+    # was at ~7 854 words after PR 3 merged; the PR #433 deep-review findings
+    # table (cost-regression/$0 caps, ISSUE-0070 SystemExit footgun, two
+    # in-PR doc fixes, templates info) pushed it to ~8 070 words. The finding
+    # rows co-locate rationale with the plan so the next reader sees why each
+    # item is deferred or fixed; trimming would erase that context. Remove
+    # this entry once the remaining PR 4–7 sequence closes out and the plan
+    # is sealed at the v0.3.4 release tag.
+    "docs/rfcs/0033-pr-plan.md",
     # docs/observability.md tipped over the 3 000-word prose limit when
     # RFC 0009 PR 1c added the audit-logger metric inventory + SLO alert
     # templates to §13. The new content is already trimmed (a one-line

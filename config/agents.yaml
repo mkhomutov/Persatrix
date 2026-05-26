@@ -20,11 +20,13 @@ agents:
     timeout_seconds: 120
     permissions:
       network:
-        # RFC 0033 — "Any Provider": this example egress allowlist covers the
-        # cloud providers the shipped model aliases can resolve to, not a
-        # single vendor. Unenforced today; kept provider-neutral so the
-        # example config does not advertise an Anthropic-only assumption.
-        # Local providers (Ollama) reach localhost and need no entry here.
+        # RFC 0033 — "Any Provider": provider-neutral so the example does
+        # not read as Anthropic-only. NB this list is the `http_request`
+        # tool's domain allowlist (PermissionGate.is_domain_allowed), NOT
+        # LLM-provider egress (the SDKs call out directly, ungated here).
+        # Inert for these agents (none carry `http_request`); a future
+        # http_request-bearing agent copying this block gets both domains.
+        # Ollama is local (localhost) and needs no entry.
         allow: ["api.anthropic.com", "api.openai.com"]
         deny: ["*"]
 
@@ -67,11 +69,13 @@ agents:
         allowed_commands: ["python", "pytest", "ruff", "git diff"]
         max_execution_seconds: 30
       network:
-        # RFC 0033 — "Any Provider": this example egress allowlist covers the
-        # cloud providers the shipped model aliases can resolve to, not a
-        # single vendor. Unenforced today; kept provider-neutral so the
-        # example config does not advertise an Anthropic-only assumption.
-        # Local providers (Ollama) reach localhost and need no entry here.
+        # RFC 0033 — "Any Provider": provider-neutral so the example does
+        # not read as Anthropic-only. NB this list is the `http_request`
+        # tool's domain allowlist (PermissionGate.is_domain_allowed), NOT
+        # LLM-provider egress (the SDKs call out directly, ungated here).
+        # Inert for these agents (none carry `http_request`); a future
+        # http_request-bearing agent copying this block gets both domains.
+        # Ollama is local (localhost) and needs no entry.
         allow: ["api.anthropic.com", "api.openai.com"]
         deny: ["*"]
 
@@ -95,11 +99,13 @@ agents:
         read: ["/workspace", "/workspace/**"]
         write: []
       network:
-        # RFC 0033 — "Any Provider": this example egress allowlist covers the
-        # cloud providers the shipped model aliases can resolve to, not a
-        # single vendor. Unenforced today; kept provider-neutral so the
-        # example config does not advertise an Anthropic-only assumption.
-        # Local providers (Ollama) reach localhost and need no entry here.
+        # RFC 0033 — "Any Provider": provider-neutral so the example does
+        # not read as Anthropic-only. NB this list is the `http_request`
+        # tool's domain allowlist (PermissionGate.is_domain_allowed), NOT
+        # LLM-provider egress (the SDKs call out directly, ungated here).
+        # Inert for these agents (none carry `http_request`); a future
+        # http_request-bearing agent copying this block gets both domains.
+        # Ollama is local (localhost) and needs no entry.
         allow: ["api.anthropic.com", "api.openai.com"]
         deny: ["*"]
 

@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0069
-summary: "model_routing.defaults.task_agents / .evaluators are migrated to aliases and surfaced by model_routing_defaults() but consumed by no runtime path — only sub_agents is wired; a task agent that omits model: gets SystemExit, not the routing default"
+summary: "model_routing.defaults.task_agents / .evaluators are migrated to aliases and surfaced by model_routing_defaults() but consumed by no runtime path — only sub_agents is wired; an agent with no usable model: is hard-stopped (schema-rejected if absent, SystemExit if empty), never falling back to the routing default"
 status: open
 severity: low
 area: agents/optimization
@@ -32,10 +32,15 @@ Found during the #433 review.
 - Task agents take their model from the explicit `model:` field in
   `config/agents.yaml` (now `quality`), resolved by
   `agents/llm_factory.py:create_provider`. There is no read of the
-  `task_agents` routing default anywhere; `create_provider` raises
+  `task_agents` routing default anywhere. `model` is schema-`required`
+  (`agents[].required` in [schemas/agent.schema.json](../../schemas/agent.schema.json)),
+  so an agent that **omits** `model:` is rejected by `make validate` before it
+  reaches the runtime; if validation is bypassed, `model = agent_config["model"]`
+  ([agents/llm_factory.py:170](../../agents/llm_factory.py)) raises `KeyError`, and
+  an explicit empty `model: ""` raises
   `SystemExit("Agent config 'model' field is empty")`
-  ([agents/llm_factory.py:174](../../agents/llm_factory.py)) when `model:` is
-  absent — it does **not** fall back to `defaults.task_agents`.
+  ([agents/llm_factory.py:174](../../agents/llm_factory.py)). None of these paths
+  falls back to `defaults.task_agents`.
 - No runtime path reads `defaults.evaluators` either.
 
 This pre-dates #433 — the `defaults` block existed with raw vendor IDs and was
@@ -45,10 +50,12 @@ three roles. Hence a follow-up, not a #433 blocker.
 
 ## Impact
 
-Low. Latent footgun: a maintainer who removes the explicit `model:` from a
-task agent — reasonably expecting `defaults.task_agents` to apply, since it is
-right there in config and `model_routing_defaults()` returns it — instead gets
-a `SystemExit` at provider construction. The config surface promises a
+Low. Config-surface footgun: a maintainer who drops the explicit `model:` from
+a task agent — reasonably expecting `defaults.task_agents` to apply, since it is
+right there in config and `model_routing_defaults()` returns it — instead hits a
+hard stop. `make validate` rejects the agent (`model` is schema-`required`); or,
+if an empty `model: ""` slips past validation, `create_provider` `SystemExit`s.
+Neither falls back to the routing default. The config surface promises a
 fallback that two of its three roles do not implement.
 
 ## Proposed fix / investigation path
