@@ -13,6 +13,7 @@ migration and closes the PR 3 cost regression (``quality`` →
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -180,14 +181,38 @@ class TestShippedCostPricingDerivedFromAliases:
     def _shipped(
         accessor: Callable[[], dict[str, dict[str, float]]],
     ) -> dict[str, dict[str, float]]:
-        import os
-
-        os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
+        # Read the *real* shipped config: drop any test override so the
+        # accessor re-reads config/optimization.yaml from disk, and reset the
+        # lru_cache on both sides. Restore the prior override in the finally so
+        # this helper does not leak env state into sibling tests that read the
+        # config without the ``config_path`` fixture (whose monkeypatch only
+        # restores vars it set itself).
+        prior = os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
         reset_cache()
         try:
             return accessor()
         finally:
+            if prior is not None:
+                os.environ["PERSATRIX_OPTIMIZATION_CONFIG"] = prior
             reset_cache()
+
+    def test_shipped_does_not_clobber_existing_env_override(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``_shipped`` drops the ``PERSATRIX_OPTIMIZATION_CONFIG`` override to
+        read the shipped config, but must *restore* it — otherwise it leaks env
+        state into sibling tests that read the config without the
+        ``config_path`` fixture (whose monkeypatch only restores vars it set).
+        Regression guard for the env-pop that did not restore.
+        """
+        monkeypatch.setenv(
+            "PERSATRIX_OPTIMIZATION_CONFIG", "/nonexistent/override.yaml",
+        )
+        self._shipped(optimization.cost_pricing_models)
+        assert (
+            os.environ.get("PERSATRIX_OPTIMIZATION_CONFIG")
+            == "/nonexistent/override.yaml"
+        )
 
     def test_committed_block_matches_derived(self) -> None:
         committed = self._shipped(optimization.cost_pricing_models)

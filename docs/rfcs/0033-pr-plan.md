@@ -291,6 +291,10 @@ PR 1 is additive and unconsumed: the resolver module and `models.aliases` block 
 - [x] **Cost-attribution gate green** — an alias-routed agent (usage keyed by the physical `claude-sonnet-4-6` the `quality` alias resolves to) reports correctly-keyed, non-zero cost via `GET /api/v1/cost/summary`, loading the real shipped config ([master-plan §Acceptance](../v0.3.4-plan.md#acceptance-for-v034)). This closes the PR 3 cost-regression row.
 - [x] [Progress Overview](#progress-overview) row 5 filled.
 
+#### Review findings
+
+- [ISSUE-0072](../issues/ISSUE-0072-memory-compression-hardcoded-model-literals.md) — spun out of the PR 5 review. The three memory-compression LLM surfaces (`agents/memory/working.py:63`, `episodic_retention.py:45`, `episodic.py:413`) still hardcode raw vendor model IDs as parameter defaults (`claude-haiku-4` / `claude-haiku-4-5`) rather than routing through the alias layer — the last model-identity literals in production Python, and stale (the shipped Haiku id is `claude-haiku-4-5-20251001`). Out of scope here (those surfaces are on the §E raw-ID path, so PR 5 correctly emits no `model_alias` for them); a candidate fold-in for the RFC 0023 PRs 4–6 cost-path migration of these un-leased origins, since the re-keying only bites once the calls are counted ([ISSUE-0063](../issues/ISSUE-0063-workflow-step-unleased-llm-spend-uncounted.md)).
+
 ---
 
 ### PR 6: `feature/v034-rfc0033-docs-sweep` — Documentation Sweep
