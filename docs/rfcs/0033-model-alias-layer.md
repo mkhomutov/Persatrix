@@ -3,7 +3,7 @@ id: RFC-0033
 title: Provider-Agnostic Model Alias Layer
 summary: Decouple agent configs from vendor-specific model IDs by routing every model reference through a single alias map, so vendor deprecations and multi-provider expansion change one file instead of dozens.
 type: architecture
-status: implementing
+status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-15
 target: v0.3.4 (Phases 1–2) + v0.3.5+ (Phase 3)
@@ -15,7 +15,7 @@ depends_on:
 # RFC 0033 — Provider-Agnostic Model Alias Layer
 
 **Type**: architecture
-**Status**: 🚧 Implementing (Phases 1–2) — PR 1 merged ([#431](https://github.com/mkhomutov/Persatrix/pull/431)); PR 2 factory integration open ([#432](https://github.com/mkhomutov/Persatrix/pull/432)). Tracking plan: [0033-pr-plan.md](0033-pr-plan.md). Phase 3 stays observed-traffic gated.
+**Status**: ⚠️ Partially Implemented (Phases 1–2) — all seven Phases-1–2 PRs merged ([#431](https://github.com/mkhomutov/Persatrix/pull/431)–[#436](https://github.com/mkhomutov/Persatrix/pull/436) + closeout). Tracking plan: [0033-pr-plan.md](0033-pr-plan.md). Phase 3 (raw-ID pass-through removal + `_infer_provider` retirement) stays observed-traffic gated for v0.3.5+.
 **Author**: Maksim Khomutov
 **Date**: 2026-05-15
 **Target**: v0.3.4 (Phases 1–2) + v0.3.5+ (Phase 3)
@@ -413,13 +413,19 @@ Protos: **no change** — wire format unchanged.
 
 ## Decision / Next Steps
 
-This RFC is in 📋 Proposed state pending:
+This RFC was accepted and its Phases 1–2 implemented in v0.3.4. The original proposal gated on:
 
-1. Review of the alias-naming convention (Open Question 1).
-2. Confirmation that Phase 1 sits cleanly between in-flight RFC 0026 PRs without file conflicts.
+1. Review of the alias-naming convention (Open Question 1) — resolved; `quality` / `fast` / `summarizer` shipped.
+2. Confirmation that Phase 1 sits cleanly between in-flight RFC 0026 PRs without file conflicts — confirmed; the work landed without conflict.
 3. ~~Author of a companion PR plan (`0033-pr-plan.md`) once accepted~~ — **done**: the companion [PR plan](0033-pr-plan.md) covers Phases 1–2 (the v0.3.4 contract), modeled on [`0024-pr-plan.md`](0024-pr-plan.md). It carries the [v0.3.4 provider-parity amendment](../v0.3.4-plan-amendment-2026-05-24.md)'s Phase 2 additions (missing-price guard, OpenAI peer alias + pricing, network-allowlist neutralization, local-pricing decision) alongside the RFC's original Phase 2.
 
-The proximate motivator (Sonnet 4 retirement on 2026-06-15) provides a natural deadline for Phase 1 — but the *RFC itself* does not gate on that date. If Phase 1 doesn't land in time, the fallback is a one-off mechanical sweep replacing `claude-sonnet-4-20250514` → `claude-sonnet-4-6`; the alias work then proceeds afterward at normal cadence, dogfooded against a different (and lower-pressure) future migration.
+The proximate motivator (Sonnet 4 retirement on 2026-06-15) provided a natural deadline for Phase 1 — but the *RFC itself* did not gate on that date. The migration was absorbed as a single `quality` alias edit (PR 1) plus pointing the agents at it (PR 3), so the deadline is met as a side effect of the abstraction rather than a one-off mechanical sweep.
+
+### Implemented in v0.3.4 (Phases 1–2)
+
+Phases 1–2 shipped under the v0.3.4 umbrella per [`0033-pr-plan.md`](0033-pr-plan.md) — PRs 1 ([#431](https://github.com/mkhomutov/Persatrix/pull/431)), 2 ([#432](https://github.com/mkhomutov/Persatrix/pull/432)), 3 ([#433](https://github.com/mkhomutov/Persatrix/pull/433)), 4 ([#434](https://github.com/mkhomutov/Persatrix/pull/434)), 5 ([#435](https://github.com/mkhomutov/Persatrix/pull/435)), 6 ([#436](https://github.com/mkhomutov/Persatrix/pull/436)). Every model reference now routes through the `models.aliases` map: `agents/model_aliases.py` `resolve()` maps a logical alias to a `(provider, model_id, pricing)` record; `create_provider` returns `(provider, physical_model)` so the alias name never reaches `create_message`; the Anthropic Sonnet 4 → 4.6 migration was absorbed by editing only the `quality` alias entry. No runtime path carries a literal vendor model ID (the `SubAgentRequest.model` default became `None`, resolved at construction per [§J](#j-persona-and-sub-agent-model-selection)). A missing-price guard fails closed for unpriced non-local aliases ([§E](#e-backwards-compatibility) raw-ID fall-through untouched); the legacy `cost.pricing.models` block is derived from the alias map and the `persatrix.llm.model_alias` span attribute is emitted, so the v0.3.2 cost surface reports correctly-keyed, non-zero cost across the re-keying. A priced OpenAI peer alias ships so the release is genuinely *Any Provider*. The raw-ID pass-through ([§E](#e-backwards-compatibility)) still works but fires a one-shot startup deprecation warning per agent and increments the `persatrix.llm.alias.raw_id_usage` counter.
+
+**Still scheduled**: Phase 3 (remove the raw-ID fall-through, retire `_infer_provider` and the `provider_inference` block, schema bump to `"0.3"`, loader rejection of raw vendor IDs in `agents.yaml`) ships in v0.3.5+, **gated on observed traffic** — the `raw_id_usage` counter reading zero across the dogfood window, not a calendar date — per the [Phased Implementation Plan](#phased-implementation-plan). This is a partial-RFC closeout; the full-RFC closeout waits for Phase 3.
 
 ## Related Documentation
 
