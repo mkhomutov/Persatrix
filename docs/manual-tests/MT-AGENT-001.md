@@ -32,7 +32,7 @@ and `AgentServiceServicer` in `agents/server.py`.
 - `tests/integration/test_agent_server.py::TestEndToEndExecution::test_task_with_tool_use`
 
 ---
-
+ 
 ## Preconditions
 
 ### System Requirements
