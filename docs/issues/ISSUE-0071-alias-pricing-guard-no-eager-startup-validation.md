@@ -40,17 +40,30 @@ same review).
   resolves a priced/local alias, so a normal cloud deployment **does** fail
   closed at first agent creation. The gap is narrow: an *unused* misconfigured
   cloud alias, or an all-local/offline deployment.
+- The JSON schema ([schemas/optimization.schema.json](../../schemas/optimization.schema.json))
+  marks `input_per_1m_tokens` / `output_per_1m_tokens` **required** on every
+  alias entry, and `make validate` ([agents/validate.py](../../agents/validate.py))
+  enforces it — so an unpriced alias (used or not, local or not) already fails
+  the static `make validate` / CI sweep *before it can ship*. The gap below is
+  therefore **runtime-only**: a config that bypassed that sweep (a hand-edited
+  deployment, a dev checkout that never ran `make validate`) whose bad alias is
+  then never resolved.
 
 ## Impact
 
-Low. The safety property holds for every alias that is actually used (it fails
-closed before that alias's first LLM call). The residue is config hygiene:
+Low, and narrower than "no startup check" suggests — the static layer already
+covers the pre-ship case (see Context: `make validate` rejects an unpriced
+alias). The runtime guard's safety property holds for every alias actually used
+(it fails closed before that alias's first LLM call). The residue is a
+runtime-only config-hygiene gap, reachable only when `make validate` was
+skipped:
 
-1. **Unused misconfigured aliases are not surfaced at boot.** An operator who
-   adds a cloud alias and forgets its price gets no signal until something
-   resolves it — which, for an alias nothing uses, is never.
-2. **All-local/offline societies never validate cloud aliases.** No live budget
-   hole (nothing non-local runs), but a latent config error stays invisible.
+1. **An unused misconfigured alias is not surfaced at *runtime* boot.** It is
+   caught by `make validate` / CI; what is missing is a runtime signal if that
+   check was skipped *and* nothing ever resolves the alias.
+2. **All-local/offline societies never validate cloud aliases at runtime.** No
+   live budget hole (nothing non-local runs), and `make validate` still flags
+   the latent config error statically.
 
 This is the gap the PR docstrings originally over-claimed as "fail closed at
 startup" (corrected to "per-resolve, scoped to the resolved alias" in #434).
@@ -64,13 +77,19 @@ Decide whether to add a deliberate, loud whole-config check at process startup:
    provider mode is active. Smallest change; restores the stronger
    "whole-config at startup" guarantee as an explicit, intentional check rather
    than an emergent side effect of the first resolve.
-2. **Or fold it into the existing config-validation sweep** (`make validate` /
-   the optimization-config loader) so CI and `make validate` reject an unpriced
-   non-local alias before it can ship.
+2. **Fold a runtime check into the optimization-config loader** so a
+   misconfigured alias fails *boot* loudly, not only `make validate`. NB the
+   *static* half of this already exists — the schema marks pricing required and
+   `make validate` enforces it (see Context) — so what is genuinely missing is
+   the *runtime* (loader / bootstrap) enforcement, which only matters for a
+   config that skipped the static sweep.
 
 Weigh against the policy question: should an *unused* misconfigured alias block
 boot at all? Option 1 says yes (strict hygiene); the current per-resolve
-behaviour says no (fail only on use). Pick one and document it.
+behaviour says no (fail only on use). Given `make validate` already blocks it
+pre-ship, the marginal value of either runtime option is the bypassed-CI case
+only — pick one and document it, or close as won't-fix if the static sweep is
+deemed sufficient.
 
 ## Notes
 

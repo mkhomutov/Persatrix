@@ -184,9 +184,21 @@ def _provider_is_local(entry: dict[str, Any]) -> bool:
     """Whether an alias entry routes to a local ($0-real) provider.
 
     Local by provider name (``mock`` / ``ollama``) or by endpoint — an
-    OpenAI-compatible ``provider_config.base_url`` resolving to a loopback
-    host. A local model legitimately runs at $0, so the missing-price
-    guard treats it as $0-by-design rather than as a forgotten price.
+    OpenAI-compatible ``provider_config.base_url`` resolving to a *loopback*
+    host (``_LOCALHOST_HOSTS``). A local model legitimately runs at $0, so the
+    missing-price guard treats it as $0-by-design rather than as a forgotten
+    price.
+
+    Locality is **loopback-only** by design. A self-hosted model reached over
+    a LAN/remote address (a private IP or a hostname) is *not* auto-detected
+    here — the operator marks such a box local with an explicit ``0`` price
+    (the fail-closed message documents that escape hatch). This guard is also
+    deliberately *more lenient* than the JSON schema, which requires explicit
+    pricing (a ``0`` for a local model) on **every** entry so PR 5's cost-table
+    derivation stays complete: the schema is the static ``make validate`` / CI
+    check, this guard is the runtime backstop for the non-local budget hole,
+    and they converge on any schema-valid config (a local entry then carries
+    its explicit 0, which this function never needs to inspect).
     """
     provider = entry.get("provider")
     if isinstance(provider, str) and provider.lower() in _LOCAL_PROVIDERS:
@@ -219,16 +231,26 @@ def _has_numeric_price(entry: dict[str, Any], key: str) -> bool:
 def _check_entry_pricing(alias: str, entry: dict[str, Any]) -> None:
     """Fail closed on a single unpriced **non-local** alias entry (RFC 0033 PR 4).
 
-    The Go cost path's ``EstimateCost`` returns ``$0`` for any model absent
-    from the pricing table (``internal/cost/config.go``), so an alias whose
-    non-local provider carries no price would silently disable the RFC 0023
-    pre-call lease / budget gate for that agent. This guard raises a loud
-    :class:`SystemExit` when ``entry`` is such an alias, naming it and its
-    provider. A local ($0-by-design) entry is exempt (see
-    :func:`_provider_is_local`), so an explicit-0 simulation price and a
-    forgotten cloud price are distinguishable. The guard is **scoped to the
-    alias surface** — the raw-ID fall-through in :func:`resolve` keeps its
-    deliberate §E graceful-degradation behaviour, which Phase 3 closes.
+    The RFC 0023 budget gate goes silent when a *physical model* is absent
+    from the Go cost table: ``EstimateCost`` returns ``$0`` for any model it
+    does not know (``cost.pricing.models``, ``internal/cost/config.go``), and
+    the pre-call lease keys off that $0, so the cap never accrues. PR 5
+    (RFC 0033 §F) makes that table *derived from this alias map* — so a
+    non-local alias with no inline price would derive an absent row → $0 → a
+    silently-disabled gate. This guard enforces the precondition PR 5 relies
+    on, **ahead of that consumer**: an unpriced non-local entry is a loud
+    :class:`SystemExit` naming the alias and provider. It guarantees the
+    inline price is *present*; it does **not** itself re-key the Go cost table
+    — deriving that table from the alias map is PR 5's job (RFC 0033 §F). So a
+    priced alias passing this guard is necessary, but not yet sufficient, for a
+    live budget gate until PR 5 lands: in the interim the stock cost table is
+    still keyed to the retired physical ID, so the gate reads $0 even for a
+    priced alias (the PR 3 cost-regression row in the RFC 0033 PR plan). A
+    local ($0-by-design) entry is exempt (:func:`_provider_is_local`),
+    so an explicit-0 simulation price and a forgotten cloud price are
+    distinguishable. The guard is **scoped to the alias surface** — the raw-ID
+    fall-through in :func:`resolve` keeps its deliberate §E graceful-
+    degradation behaviour, which Phase 3 closes.
     """
     if _provider_is_local(entry):
         return
@@ -284,7 +306,7 @@ def validate_alias_pricing(
     returns ``None``. See :func:`_check_alias_pricing`.
     """
     if mapping is None:
-        mapping = _override_map if _override_map is not None else _load_alias_block()
+        mapping = _current_alias_map()
     _check_alias_pricing(mapping)
 
 
@@ -300,7 +322,9 @@ def resolve(
       the factory, not silently overridden here). A config-backed alias is
       run through the missing-price guard (RFC 0033 PR 4), scoped to *this*
       entry: an unpriced non-local alias fails closed with a loud
-      :class:`SystemExit` before it can disable the RFC 0023 budget gate.
+      :class:`SystemExit`, enforcing the inline-price invariant PR 5's cost-
+      table derivation keys the RFC 0023 budget gate from (see
+      :func:`_check_entry_pricing`).
     * A recognised raw vendor ID falls through with ``alias=None,
       raw=True``. When ``explicit_provider`` is given it wins over prefix
       inference (§D rule 1, raw path — preserves today's

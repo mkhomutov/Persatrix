@@ -188,6 +188,27 @@ class TestMissingPriceGuard:
         }}), pytest.raises(SystemExit):
             validate_alias_pricing()
 
+    def test_non_loopback_host_is_not_local_must_be_explicit(self) -> None:
+        # Locality is loopback-only by design: a self-hosted model reached
+        # over a LAN/remote address (a private IP or a hostname) is NOT
+        # auto-detected as local — only the loopback hosts in _LOCALHOST_HOSTS
+        # are. The operator must be explicit on a non-loopback endpoint: carry
+        # real pricing, or an explicit 0 for a $0-real box (the SystemExit
+        # message documents that escape hatch). An unpriced non-loopback alias
+        # therefore fails closed, like any other non-local alias. Pinning this
+        # guards against a future change quietly auto-exempting RFC 1918 /
+        # hostname endpoints without revisiting the escape-hatch story.
+        for base_url in (
+            "http://192.168.1.50:8000/v1",  # private LAN IP (vLLM / LM Studio)
+            "http://10.0.0.5:11434/v1",     # private LAN IP (OpenAI-compatible)
+            "http://gpu-box.local:8000/v1",  # LAN hostname
+        ):
+            with use_alias_map({"selfhosted": {
+                "provider": "openai", "model": "local-model",
+                "provider_config": {"base_url": base_url},
+            }}), pytest.raises(SystemExit):
+                validate_alias_pricing()
+
     def test_empty_map_passes(self) -> None:
         with use_alias_map({}):
             validate_alias_pricing()
@@ -204,13 +225,15 @@ class TestMissingPriceGuard:
         assert resolved.raw is True
         assert resolved.input_per_1m_tokens == 0.0
 
-    # ── the guard runs at config-backed map load (startup) ──
-    def test_guard_fires_at_config_load(
+    # ── the guard runs on the first config-backed resolve (not at load) ──
+    def test_guard_fires_on_first_resolve_from_config(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # Resolving an unpriced non-local alias from the on-disk config must
         # fail closed — proving the guard is wired into the config-backed
-        # resolve path, not just reachable as an explicit validator.
+        # resolve path, not just reachable as an explicit validator. The guard
+        # fires per-resolve, the first time the alias is resolved (there is no
+        # eager load-time hook — that whole-config gap is ISSUE-0071).
         config = tmp_path / "optimization.yaml"
         config.write_text(
             'schema_version: "0.2"\n'

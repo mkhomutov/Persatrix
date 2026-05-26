@@ -27,12 +27,18 @@ active_profile: "default"
 # wallet-cap demo, which needs simulated spend to trip, pins to a priced
 # cloud alias (quality), not a local one. The PR 4 missing-price guard
 # (agents/model_aliases.py) keys locality on the provider name
-# (ollama / mock) or a loopback provider_config.base_url, so a local entry
+# (ollama / mock) or a *loopback* provider_config.base_url, so a local entry
 # is $0-by-design and exempt; it reserves the loud fail-closed (SystemExit)
-# for an *unpriced non-local* alias — the case that would make EstimateCost
-# silently return $0 and disable the RFC 0023 budget gate for that agent.
-# The guard fires per-resolve, scoped to the alias being resolved (so an
-# unused misconfigured entry never breaks an unrelated resolve);
+# for an *unpriced non-local* alias. Locality is loopback-only: a self-hosted
+# model on a LAN/remote address (private IP or hostname) is not auto-detected
+# as local — mark such a box $0-real with an explicit 0 price. The inline
+# price the guard enforces is what PR 5 derives the Go cost table
+# (cost.pricing.models) from; without it that derived table would omit the
+# model, EstimateCost would return $0, and the RFC 0023 budget gate would be
+# silently disabled. (PR 4 enforces the price is present; PR 5 wires it into
+# the Go table — until then the inline price is not yet consumed there.) The
+# guard fires per-resolve, scoped to the alias being resolved (so an unused
+# misconfigured entry never breaks an unrelated resolve);
 # validate_alias_pricing() checks the whole block for an explicit startup /
 # CI sweep.
 models:
