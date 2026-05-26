@@ -267,9 +267,16 @@ def derived_cost_pricing() -> dict[str, dict[str, float]]:
     silently mis-attributing cost.
 
     Several aliases may resolve to the same physical model (e.g. ``fast`` and
-    ``summarizer`` → Haiku); they collapse to one key with their (identical)
-    price. An entry missing ``model:`` cannot be keyed and is skipped — the
-    resolver and JSON schema reject it elsewhere; this stays defensive.
+    ``summarizer`` → Haiku); when their prices are *identical* they collapse to
+    one key. Two aliases sharing a physical model but declaring *different*
+    prices is a config error this projection cannot represent — the Go table
+    keys by physical model id and telemetry carries only that id, not the alias,
+    so the table holds exactly one price per model. Rather than silently keep
+    whichever entry comes last in YAML order (discarding the other alias's price
+    and mis-attributing its cost), that fails loud with a :class:`SystemExit`
+    naming both aliases — the same fail-closed discipline as the PR 4 missing-
+    price guard. An entry missing ``model:`` cannot be keyed and is skipped —
+    the resolver and JSON schema reject it elsewhere; this stays defensive.
 
     The committed ``cost.pricing.models`` block in ``config/optimization.yaml``
     is this projection — :func:`cost_pricing_models` reads the committed block
@@ -278,14 +285,28 @@ def derived_cost_pricing() -> dict[str, dict[str, float]]:
     changes, rather than hand-maintained.
     """
     pricing: dict[str, dict[str, float]] = {}
-    for entry in model_aliases().values():
+    source_alias: dict[str, str] = {}  # physical model → first alias that priced it
+    for alias, entry in model_aliases().items():
         model = entry.get("model")
         if not isinstance(model, str) or not model:
             continue
-        pricing[model] = {
+        priced = {
             "input_per_1m_tokens": _as_price(entry.get("input_per_1m_tokens")),
             "output_per_1m_tokens": _as_price(entry.get("output_per_1m_tokens")),
         }
+        existing = pricing.get(model)
+        if existing is not None and existing != priced:
+            raise SystemExit(
+                f"Model aliases {source_alias[model]!r} and {alias!r} both "
+                f"resolve to physical model {model!r} but declare different "
+                f"pricing ({existing} vs {priced}). The Go cost table keys by "
+                f"physical model id — telemetry carries only the physical id, "
+                f"not the alias — so it cannot hold two prices for one model. "
+                f"Give both aliases the same price, or point them at distinct "
+                f"models. See RFC 0033 §F.",
+            )
+        pricing[model] = priced
+        source_alias.setdefault(model, alias)
     return pricing
 
 

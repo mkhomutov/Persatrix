@@ -140,6 +140,37 @@ class TestDerivedCostPricing:
         )
         assert optimization.derived_cost_pricing() == {}
 
+    def test_conflicting_prices_for_shared_model_fail_loud(
+        self, config_path: Path,
+    ) -> None:
+        # Two aliases resolving to the SAME physical model but declaring
+        # DIFFERENT prices cannot both be represented in the Go cost table: it
+        # keys by physical model id and telemetry carries only that id (not the
+        # alias), so the table holds one price per model. Silently keeping the
+        # last YAML entry (the pre-guard behaviour) would discard one alias's
+        # declared price and mis-attribute its cost. The projection must fail
+        # loud instead — same fail-closed discipline as the PR 4 missing-price
+        # guard (RFC 0033 §F). Contrast `test_aliases_sharing_a_physical_model
+        # _collapse`, where the shared prices are IDENTICAL and legitimately
+        # collapse to one key.
+        _write_yaml(
+            config_path,
+            "models:\n"
+            "  aliases:\n"
+            "    fast:\n"
+            "      provider: anthropic\n"
+            "      model: claude-haiku-4-5-20251001\n"
+            "      input_per_1m_tokens: 0.80\n"
+            "      output_per_1m_tokens: 4.00\n"
+            "    summarizer:\n"
+            "      provider: anthropic\n"
+            "      model: claude-haiku-4-5-20251001\n"
+            "      input_per_1m_tokens: 0.90\n"  # conflicting input price
+            "      output_per_1m_tokens: 4.50\n",
+        )
+        with pytest.raises(SystemExit, match="different pricing"):
+            optimization.derived_cost_pricing()
+
 
 class TestCostPricingModelsAccessor:
     """``cost_pricing_models()`` reads the committed ``cost.pricing.models``
