@@ -416,6 +416,7 @@ class BaseAgent(ABC):
             try:
                 response: LLMResponse = await self._llm_client.create_message(
                     model=self.config["model"],
+                    model_alias=self.config.get("model_alias"),
                     messages=messages,
                     system=system_prompt,
                     tools=tool_defs,

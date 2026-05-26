@@ -21,6 +21,7 @@ from .base import BaseAgent
 from .channel_history_fetcher import HttpChannelHistoryFetcher
 from .llm_client import LLMClient, create_provider
 from .memory.scheduled_wakes import ScheduledWakesCache
+from .optimization import model_aliases
 from .persona import create_persona_agent
 from .persona_runtime import _LLMPersonaAgent
 from .prompt_loader import PromptLoadError, resolve_instructions
@@ -208,15 +209,22 @@ def load_agent(
         if resolved is not None:
             agent_config["instructions"] = resolved
 
-    # Create LLM client. create_provider resolves the configured ``model``
-    # (which may be a models.aliases name) to the physical vendor ID (RFC
-    # 0033 §D); thread that physical model back into the config the agent
-    # reads, so create_message(model=…) calls the vendor ID, never the
-    # alias name. On raw configs physical_model == agent_config["model"], so
-    # this is a no-op until the config migration (PR 3) introduces aliases.
+    # create_provider resolves the configured ``model`` (maybe a models.aliases
+    # name) to the physical vendor ID (RFC 0033 §D); thread that back so
+    # create_message(model=…) calls the vendor ID, not the alias. A declared
+    # alias is also stashed as ``model_alias`` for the RFC 0033 §G span
+    # attribute, keyed on alias-map membership so a raw vendor ID (§E
+    # pass-through) is never mislabelled. On raw configs the model threading
+    # is a no-op (physical == configured).
+    configured_model = agent_config.get("model")
     provider, physical_model = create_provider(agent_config)
-    if physical_model and physical_model != agent_config.get("model"):
-        agent_config = {**agent_config, "model": physical_model}
+    config_overrides: dict[str, Any] = {}
+    if physical_model and physical_model != configured_model:
+        config_overrides["model"] = physical_model
+    if isinstance(configured_model, str) and configured_model in model_aliases():
+        config_overrides["model_alias"] = configured_model
+    if config_overrides:
+        agent_config = {**agent_config, **config_overrides}
     llm_client = LLMClient(provider)
 
     # Create agent based on type

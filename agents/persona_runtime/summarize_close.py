@@ -162,7 +162,7 @@ async def summarize_closed_interaction(
     # invisible to the RFC 0033 Phase 3 gate until PR 3 migrates it.
     summarization_model_ref = summarization_model()
     try:
-        physical_summarization_model = resolve_model(summarization_model_ref).model
+        resolved_summarization = resolve_model(summarization_model_ref)
     except SystemExit as exc:
         logger.warning(
             "Summarisation model %r is not resolvable for agent %s "
@@ -174,7 +174,10 @@ async def summarize_closed_interaction(
     try:
         response = await asyncio.wait_for(
             llm_client.create_message(
-                model=physical_summarization_model,
+                model=resolved_summarization.model,
+                # RFC 0033 §G — emit the alias the summariser model came in via
+                # (e.g. ``summarizer``) on the span; None on the raw-ID path.
+                model_alias=resolved_summarization.alias,
                 messages=[{"role": "user", "content": prompt}],
                 system=load_snippet("episode-summarizer"),
                 tools=[],

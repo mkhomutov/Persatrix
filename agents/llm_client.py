@@ -38,6 +38,7 @@ from .observability.metrics import (
 )
 from .observability.spans import (
     LLM_CALL_SPAN,
+    LLM_MODEL_ALIAS_ATTR,
     STOP_REASON_TO_GEN_AI,
     gen_ai_attributes,
 )
@@ -175,6 +176,7 @@ class LLMClient:
         cause: walletpb.Cause.ValueType = walletpb.CAUSE_UNSPECIFIED,
         workflow_id: str = "",
         agent_id: str = "",
+        model_alias: str | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
         """Invoke the provider, optionally bracketed by an RFC 0023 wallet lease.
@@ -189,9 +191,15 @@ class LLMClient:
         Without a wallet, or with no *cause*, the provider is invoked
         directly: that is the un-migrated v0.2.3 path PRs 4–6 wire for the
         chat / autonomous-TICK / sub-agent / channel-message origins.
+
+        *model_alias* (RFC 0033 §G) is the logical alias the caller resolved
+        ``model`` from, when it came in via one. It is emitted as the
+        ``persatrix.llm.model_alias`` span attribute (alongside the physical
+        ``model``) and is a telemetry-only concern — it is **never** forwarded
+        to the provider, so the vendor API receives the physical id only.
         """
         if self._wallet is None or cause == walletpb.CAUSE_UNSPECIFIED:
-            return await self._invoke_provider(kwargs)
+            return await self._invoke_provider(kwargs, model_alias=model_alias)
         async with self._wallet.lease(
             agent_id=agent_id,
             model=str(kwargs.get("model", "")),
@@ -201,7 +209,9 @@ class LLMClient:
             workflow_id=workflow_id,
             trace_id=_current_trace_id(),
         ) as lease:
-            response = await self._invoke_provider(kwargs, lease=lease)
+            response = await self._invoke_provider(
+                kwargs, lease=lease, model_alias=model_alias,
+            )
             await lease.settle(
                 input_tokens=response.usage.input_tokens,
                 output_tokens=response.usage.output_tokens,
@@ -209,7 +219,11 @@ class LLMClient:
             return response
 
     async def _invoke_provider(
-        self, kwargs: dict[str, Any], *, lease: Lease | None = None,
+        self,
+        kwargs: dict[str, Any],
+        *,
+        lease: Lease | None = None,
+        model_alias: str | None = None,
     ) -> LLMResponse:
         """Invoke the underlying provider, wrapped in an ``agent.llm.call`` span.
 
@@ -221,6 +235,13 @@ class LLMClient:
         (RFC 0019 § D / § E). When *lease* is set, the lease ID is emitted
         as the ``persatrix.lease_id`` span attribute for correlation with
         the wallet-side lease logs (RFC 0023 § E).
+
+        When *model_alias* is set (the request came in via a models.aliases
+        name), it is emitted as the ``persatrix.llm.model_alias`` attribute
+        (RFC 0033 §G) — added alongside the physical ``gen_ai.request.model``,
+        not substituted for it, and omitted entirely on the raw-ID path.
+        ``model_alias`` is not part of *kwargs*, so it never reaches the
+        provider call below.
         """
         model = str(kwargs.get("model", ""))
         # Prefer the provider's declared ``name`` attribute (Protocol
@@ -244,6 +265,8 @@ class LLMClient:
         ) as span:
             if lease is not None:
                 span.set_attribute("persatrix.lease_id", lease.lease_id)
+            if model_alias:
+                span.set_attribute(LLM_MODEL_ALIAS_ATTR, model_alias)
             call_started = time.monotonic()
             agent_id = current_agent_id()
             inst = try_get_instruments()

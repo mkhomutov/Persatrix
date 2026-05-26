@@ -237,7 +237,93 @@ def model_aliases() -> dict[str, dict[str, Any]]:
     }
 
 
+def _as_price(value: Any) -> float:
+    """Coerce a pricing field to ``float``.
+
+    Mirrors :func:`agents.model_aliases._coerce_price`: a ``bool`` (an int
+    subclass — a stray YAML ``true`` / ``false`` is not a price) and any
+    non-numeric value read as ``0.0``. An explicit ``0`` is a real (local /
+    simulation) price and survives. The PR 4 missing-price guard already
+    fails closed on an unpriced *non-local* alias, so this is the defensive
+    floor below that.
+    """
+    if isinstance(value, bool):
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    return 0.0
+
+
+def derived_cost_pricing() -> dict[str, dict[str, float]]:
+    """Project the alias map into the legacy ``cost.pricing.models`` shape
+    the Go cost pipeline reads (RFC 0033 §F, PR 5).
+
+    Each alias entry's *physical* ``model`` becomes a pricing key, mapping to
+    its ``input_per_1m_tokens`` / ``output_per_1m_tokens``. Because the Go
+    orchestrator keys ``EstimateCost`` (``internal/cost/config.go``) by the
+    physical model id it reads off telemetry, generating that table from the
+    alias map keeps pricing in lock-step automatically: a vendor swap on an
+    alias re-keys the cost table with no separate edit and no missed entry
+    silently mis-attributing cost.
+
+    Several aliases may resolve to the same physical model (e.g. ``fast`` and
+    ``summarizer`` → Haiku); they collapse to one key with their (identical)
+    price. An entry missing ``model:`` cannot be keyed and is skipped — the
+    resolver and JSON schema reject it elsewhere; this stays defensive.
+
+    The committed ``cost.pricing.models`` block in ``config/optimization.yaml``
+    is this projection — :func:`cost_pricing_models` reads the committed block
+    and the optimization test suite asserts the two are equal (the §F drift
+    guard). The block is regenerated from here when an alias's model or price
+    changes, rather than hand-maintained.
+    """
+    pricing: dict[str, dict[str, float]] = {}
+    for entry in model_aliases().values():
+        model = entry.get("model")
+        if not isinstance(model, str) or not model:
+            continue
+        pricing[model] = {
+            "input_per_1m_tokens": _as_price(entry.get("input_per_1m_tokens")),
+            "output_per_1m_tokens": _as_price(entry.get("output_per_1m_tokens")),
+        }
+    return pricing
+
+
+def cost_pricing_models() -> dict[str, dict[str, float]]:
+    """Return the committed ``cost.pricing.models`` block from optimization.yaml.
+
+    This is the legacy pricing table the Go cost pipeline consumes (keyed by
+    physical model id). Under RFC 0033 §F it is the projection of the alias
+    map — see :func:`derived_cost_pricing` — and the optimization test suite
+    pins the two equal so a drift between an alias's pricing and the cost
+    block fails loudly. Unlike :func:`model_aliases` this is not profile-
+    scoped: ``cost`` sits at the top level. Missing / malformed config yields
+    an empty dict.
+    """
+    cfg = _load_config()
+    cost = cfg.get("cost")
+    if not isinstance(cost, dict):
+        return {}
+    pricing = cost.get("pricing")
+    if not isinstance(pricing, dict):
+        return {}
+    models = pricing.get("models")
+    if not isinstance(models, dict):
+        return {}
+    result: dict[str, dict[str, float]] = {}
+    for model, entry in models.items():
+        if not isinstance(model, str) or not isinstance(entry, dict):
+            continue
+        result[model] = {
+            "input_per_1m_tokens": _as_price(entry.get("input_per_1m_tokens")),
+            "output_per_1m_tokens": _as_price(entry.get("output_per_1m_tokens")),
+        }
+    return result
+
+
 __all__ = [
+    "cost_pricing_models",
+    "derived_cost_pricing",
     "model_aliases",
     "model_routing_defaults",
     "provider_inference",

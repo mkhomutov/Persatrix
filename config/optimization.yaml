@@ -128,13 +128,35 @@ default:
 
 cost:
   pricing:
+    # RFC 0033 §F (PR 5): DERIVED from models.aliases (above) — one entry per
+    # physical `model:` an alias resolves to, keyed for the Go cost pipeline
+    # (internal/cost/config.go EstimateCost, which keys by the physical model
+    # id it reads off telemetry). This is no longer hand-maintained: it is the
+    # projection of the alias map produced by agents/optimization.py
+    # derived_cost_pricing(). Keep it in lock-step — when an alias's model or
+    # price changes, regenerate this block from the alias map. The optimization
+    # test suite (TestShippedCostPricingDerivedFromAliases) fails if this block
+    # diverges from the projection, so a stale hand-edit cannot merge.
+    #
+    # Deriving it is what re-keys cost on a migration: PR 3 routed every stock
+    # agent to `quality` → claude-sonnet-4-6, and pricing that physical id here
+    # (not the retired claude-sonnet-4-20250514) is what keeps EstimateCost
+    # non-zero and the RFC 0023 budget/lease gate live for alias-routed calls.
+    # A $0-real local model (llama3.1) carries its explicit 0 — EstimateCost
+    # then reads $0 for it, which is correct.
     models:
-      "claude-sonnet-4-20250514":
+      "claude-sonnet-4-6":
         input_per_1m_tokens: 3.00
         output_per_1m_tokens: 15.00
       "claude-haiku-4-5-20251001":
         input_per_1m_tokens: 0.80
         output_per_1m_tokens: 4.00
+      "gpt-4o":
+        input_per_1m_tokens: 2.50
+        output_per_1m_tokens: 10.00
+      "llama3.1":
+        input_per_1m_tokens: 0
+        output_per_1m_tokens: 0
 
   budgets:
     global:

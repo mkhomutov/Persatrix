@@ -283,13 +283,13 @@ PR 1 is additive and unconsumed: the resolver module and `models.aliases` block 
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_optimization.py tests/unit/python/test_llm_client.py -q` passes; the cost-attribution integration test passes.
-- [ ] `cd agents && mypy .` clean; `ruff check agents/` clean.
-- [ ] `make test` clean (Python + Go — the Go cost pipeline consumes the derived block unchanged).
-- [ ] `persatrix.llm.model_alias` emitted on alias-routed requests only; `gen_ai.request.model` stays the physical ID ([RFC §G](0033-model-alias-layer.md#g-telemetry) / [RFC 0019](0019-opentelemetry-completion.md)).
-- [ ] `cost.pricing.models` derived from the alias map (Anthropic + OpenAI rows); duplicated literal pricing dropped ([RFC §F](0033-model-alias-layer.md#f-pricing-keyed-by-alias)).
-- [ ] **Cost-attribution gate green** — an alias-routed agent reports correctly-keyed, non-zero cost via `GET /api/v1/cost/summary` ([master-plan §Acceptance](../v0.3.4-plan.md#acceptance-for-v034)).
-- [ ] [Progress Overview](#progress-overview) row 5 filled.
+- [x] `pytest tests/unit/python/test_optimization.py tests/unit/python/test_llm_client.py -q` passes; the cost-attribution gate (`internal/server` + `internal/cost`) passes.
+- [x] `cd agents && mypy .` clean (whole-package, as CI runs it); `ruff check .` clean (agents + tests).
+- [x] `make test` clean — verified via the touched/adjacent Python modules + every `create_message` call-arg-asserting module + the offline/Ollama regression (no leaked `model_alias` kwarg) + `go test ./internal/cost/... ./internal/server/...` (the Go cost pipeline consumes the derived `cost.pricing.models` block unchanged — no Go source change) + `make validate`; CI runs the full target.
+- [x] `persatrix.llm.model_alias` emitted on alias-routed requests only (the span attribute is set from the resolved alias, omitted on the §E raw-ID path); `gen_ai.request.model` stays the physical ID ([RFC §G](0033-model-alias-layer.md#g-telemetry) / [RFC 0019](0019-opentelemetry-completion.md)). The alias is telemetry-only and never forwarded to the provider call.
+- [x] `cost.pricing.models` derived from the alias map (`agents/optimization.py` `derived_cost_pricing()`); the hand-maintained literal block is replaced by the projection (Anthropic `claude-sonnet-4-6` + Haiku + OpenAI `gpt-4o` rows; retired `claude-sonnet-4-20250514` dropped), pinned in lock-step by a drift guard ([RFC §F](0033-model-alias-layer.md#f-pricing-keyed-by-alias)).
+- [x] **Cost-attribution gate green** — an alias-routed agent (usage keyed by the physical `claude-sonnet-4-6` the `quality` alias resolves to) reports correctly-keyed, non-zero cost via `GET /api/v1/cost/summary`, loading the real shipped config ([master-plan §Acceptance](../v0.3.4-plan.md#acceptance-for-v034)). This closes the PR 3 cost-regression row.
+- [x] [Progress Overview](#progress-overview) row 5 filled.
 
 ---
 
@@ -398,8 +398,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 1 | 1 | Resolver module + `models.aliases` config block (+ OpenAI alias, local-pricing decision) | `feature/v034-rfc0033-resolver` | ✅ Merged | [#431](https://github.com/mkhomutov/Persatrix/pull/431) | 2026-05-25 |
 | 2 | 1 | `create_provider` tuple return + §D precedence + offline/Ollama interplay regression + raw-ID startup warning + `raw_id_usage` counter | `feature/v034-rfc0033-factory` | ✅ Merged | [#432](https://github.com/mkhomutov/Persatrix/pull/432) | 2026-05-25 |
 | 3 | 1 | Config migration to aliases (Sonnet 4→4.6 via `quality`) + network-allowlist neutralization + `SubAgentRequest.model` `None`-default + §J resolution | `feature/v034-rfc0033-migration` | ✅ Merged | [#433](https://github.com/mkhomutov/Persatrix/pull/433) | 2026-05-26 |
-| 4 | 2 | Missing-price guard — fail-closed for unpriced non-local aliases ([amendment item 1](../v0.3.4-plan-amendment-2026-05-24.md#what-changes)) | `feature/v034-rfc0033-missing-price-guard` | 🔀 PR open | [#434](https://github.com/mkhomutov/Persatrix/pull/434) | — |
-| 5 | 2 | `persatrix.llm.model_alias` span attr + alias-derived pricing + `/cost/summary` cost gate (+ OpenAI rows) | `feature/v034-rfc0033-telemetry-pricing` | ⬜ Not started | — | — |
+| 4 | 2 | Missing-price guard — fail-closed for unpriced non-local aliases ([amendment item 1](../v0.3.4-plan-amendment-2026-05-24.md#what-changes)) | `feature/v034-rfc0033-missing-price-guard` | ✅ Merged | [#434](https://github.com/mkhomutov/Persatrix/pull/434) | 2026-05-26 |
+| 5 | 2 | `persatrix.llm.model_alias` span attr + alias-derived pricing + `/cost/summary` cost gate (+ OpenAI rows) | `feature/v034-rfc0033-telemetry-pricing` | 🔀 PR open | [#435](https://github.com/mkhomutov/Persatrix/pull/435) | — |
 | 6 | 2 | Documentation sweep — replace literal vendor IDs with alias examples | `feature/v034-rfc0033-docs-sweep` | ⬜ Not started | — | — |
 | 7 | — | Phases-1–2 closeout | `feature/v034-rfc0033-close` | ⬜ Not started | — | — |
 
