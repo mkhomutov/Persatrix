@@ -309,12 +309,14 @@ PR 1 is additive and unconsumed: the resolver module and `models.aliases` block 
 | [`docs/persatrix-extension-spec.md`](../persatrix-extension-spec.md) | Replace literal vendor IDs with alias examples ([RFC §Related Documentation](0033-model-alias-layer.md#related-documentation) — "extensive use of literal vendor IDs"). |
 | [`docs/guides/persona-agents.md`](../guides/persona-agents.md) | Replace the `claude-sonnet-4-20250514` / `claude-haiku-4-5` pricing examples with alias references. |
 | [`docs/ai-agents-orchestration-spec.md`](../ai-agents-orchestration-spec.md) | Replace the fallback-chain literal-vendor-ID examples with alias references. |
-| RFC examples carrying literal vendor IDs | Sweep the remaining RFC examples that show literal vendor IDs to alias form, per [RFC Phase 2 deliverable #3](0033-model-alias-layer.md#phase-2--telemetry--pricing-table-derivation). |
-| Manual-test surface | Existing MTs that reference raw vendor IDs (e.g. the `claude-haiku-4-5` references named in [RFC §Test Strategy](0033-model-alias-layer.md#test-strategy)) are swept to aliases. (The *new* alias-routing MT is authored in the master-plan Phase 4, not here.) |
+| RFC examples carrying literal vendor IDs | Sweep the RFC *config-coupling* examples (agent `model:` fields a reader copies) to alias form: [`0005-persona-agent-memory.md`](0005-persona-agent-memory.md) (×4 → `quality`), per [RFC Phase 2 deliverable #3](0033-model-alias-layer.md#phase-2--telemetry--pricing-table-derivation). **Not** swept — examples where the physical id *is* the subject (deliberate physical-ID discussion, per the §Tests carve-out): [`0004-python-agent-grpc-server.md`](0004-python-agent-grpc-server.md) / [`0004-pr-plan.md`](0004-pr-plan.md) `_create_provider` raw-ID→provider *inference* demos (the [§E](0033-model-alias-layer.md#e-backwards-compatibility) fall-through they show is preserved through Phase 2; an alias would void the demo), and [`0013-legal-ethical-compliance.md`](0013-legal-ethical-compliance.md) `ContentProvenance.model` (records the *actual* physical model, not a logical role). |
+| Manual-test surface | [`MT-CHANNEL-004.md`](../manual-tests/MT-CHANNEL-004.md) prose claiming `ember-owl` "runs on `claude-sonnet-4-20250514`" → the `quality` alias (was stale; the shipped config flipped to `quality` in PR 3). **Not** swept — [`MT-MEMORY-003.md`](../manual-tests/MT-MEMORY-003.md) / [`manual-tests/README.md`](../manual-tests/README.md): see the deviation note below. (The *new* alias-routing MT is authored in the master-plan Phase 4, not here.) |
 
 #### Key implementation details
 
 - **Doc-only; no code or config change.** This PR touches prose and examples. The alias machinery and the migrated configs already shipped (PRs 1–3); this PR removes the *documentation* coupling so a reader copying an example gets an alias, not a soon-to-retire vendor ID.
+- **Sweep vs. de-stale, by surface.** Config-coupling examples (agent `model:`, routing defaults, fallback chains, optimization profiles, sub-agent templates) → alias (`quality` / `fast` / `summarizer`). Surfaces where the physical id is the RFC-mandated value — the telemetry span ([RFC 0019](0019-opentelemetry-completion.md): `gen_ai.request.model` stays physical) and the `cost.pricing.models` keys ([RFC §F](0033-model-alias-layer.md#f-pricing-keyed-by-alias): keyed by physical id, derived from the alias map) — keep a physical id but the **retired** `claude-sonnet-4-20250514` is de-staled to the current `claude-sonnet-4-6`, and the extension-spec span gains the new `persatrix.llm.model_alias` attribute to show the §G rollup. The `SubAgentRequest.model` dataclass default in the specs is aligned to the shipped `str | None = None` (PR 3 / [RFC §J.3](0033-model-alias-layer.md#j-persona-and-sub-agent-model-selection)).
+- **MT-MEMORY-003 / README deviation — deliberately NOT swept (deviates from [RFC §Test Strategy](0033-model-alias-layer.md#test-strategy)).** The RFC's Phase-2 plan to sweep `MT-MEMORY-003`'s `claude-haiku-4-5` references assumed the memory-compression model would be aliased by now. It is not: [ISSUE-0072](../issues/ISSUE-0072-memory-compression-hardcoded-model-literals.md) (deferred to the RFC 0023 cost-path migration) records that `agents/memory/working.py`'s `compression_model` default is **still a raw vendor id**. Those MT references are (a) dated execution-result logs (frozen historical records) and (b) accurate descriptions of that un-migrated code — sweeping them to `fast` would assert the code uses an alias, which is false. They sweep when ISSUE-0072 lands. Same rationale for the `manual-tests/README.md` result-table rows.
 - **The new alias-routing manual test is master-plan Phase 4, not here.** [Master-plan Phase 4 PR 1](../v0.3.4-plan.md#phase-4--v034-release-prep-execution) authors and executes the MT that exercises an alias-routed agent (plus offline / Ollama / the one-line swap). This PR only sweeps *existing* doc/MT references off literal IDs.
 
 #### Tests
@@ -324,10 +326,10 @@ PR 1 is additive and unconsumed: the resolver module and `models.aliases` block 
 
 #### PR checklist
 
-- [ ] Swept docs reference aliases, not literal vendor IDs (except deliberate physical-ID discussion).
-- [ ] `make rfcs-check` + doc-link integrity pass; `make test` clean (doc-only — confirms no regression).
-- [ ] The new alias-routing MT is **not** authored here (deferred to [master-plan Phase 4 PR 1](../v0.3.4-plan.md#phase-4--v034-release-prep-execution)).
-- [ ] [Progress Overview](#progress-overview) row 6 filled.
+- [x] Swept docs reference aliases, not literal vendor IDs (except deliberate physical-ID discussion — telemetry/pricing keys keep the *current* physical id; closed-RFC inference/provenance demos and the un-migrated MT-MEMORY-003 surface keep theirs, see Key implementation details).
+- [x] `make rfcs-check` + doc-link integrity pass (`doc_links.py`: 5293 links across 287 files OK; `issues-check`, `doc_status_markers.py`, `doc_audit.py`, `file_size.py --strict` all clean); `make test` not re-run — doc-only, no code or config touched, so the suite is unaffected.
+- [x] The new alias-routing MT is **not** authored here (deferred to [master-plan Phase 4 PR 1](../v0.3.4-plan.md#phase-4--v034-release-prep-execution)).
+- [x] [Progress Overview](#progress-overview) row 6 filled.
 
 ---
 
@@ -403,8 +405,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 2 | 1 | `create_provider` tuple return + §D precedence + offline/Ollama interplay regression + raw-ID startup warning + `raw_id_usage` counter | `feature/v034-rfc0033-factory` | ✅ Merged | [#432](https://github.com/mkhomutov/Persatrix/pull/432) | 2026-05-25 |
 | 3 | 1 | Config migration to aliases (Sonnet 4→4.6 via `quality`) + network-allowlist neutralization + `SubAgentRequest.model` `None`-default + §J resolution | `feature/v034-rfc0033-migration` | ✅ Merged | [#433](https://github.com/mkhomutov/Persatrix/pull/433) | 2026-05-26 |
 | 4 | 2 | Missing-price guard — fail-closed for unpriced non-local aliases ([amendment item 1](../v0.3.4-plan-amendment-2026-05-24.md#what-changes)) | `feature/v034-rfc0033-missing-price-guard` | ✅ Merged | [#434](https://github.com/mkhomutov/Persatrix/pull/434) | 2026-05-26 |
-| 5 | 2 | `persatrix.llm.model_alias` span attr + alias-derived pricing + `/cost/summary` cost gate (+ OpenAI rows) | `feature/v034-rfc0033-telemetry-pricing` | 🔀 PR open | [#435](https://github.com/mkhomutov/Persatrix/pull/435) | — |
-| 6 | 2 | Documentation sweep — replace literal vendor IDs with alias examples | `feature/v034-rfc0033-docs-sweep` | ⬜ Not started | — | — |
+| 5 | 2 | `persatrix.llm.model_alias` span attr + alias-derived pricing + `/cost/summary` cost gate (+ OpenAI rows) | `feature/v034-rfc0033-telemetry-pricing` | ✅ Merged | [#435](https://github.com/mkhomutov/Persatrix/pull/435) | 2026-05-26 |
+| 6 | 2 | Documentation sweep — replace literal vendor IDs with alias examples | `feature/v034-rfc0033-docs-sweep` | 🔀 PR open | [#436](https://github.com/mkhomutov/Persatrix/pull/436) | — |
 | 7 | — | Phases-1–2 closeout | `feature/v034-rfc0033-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred

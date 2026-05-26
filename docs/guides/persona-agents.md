@@ -72,7 +72,7 @@ The repository ships with `ember-owl`, a "VP of Engineering" persona
   type: "persona"
   name: "Ember Owl"
   role: "Engineering leadership and technical oversight"
-  model: "claude-sonnet-4-20250514"
+  model: "quality"
   temperature: 0.7
   capabilities: [architecture_review, sprint_planning, team_management]
   tools: [file_read, mcp:github]
@@ -444,11 +444,18 @@ Daily, per-workflow, and per-agent USD caps are declared in
 [config/optimization.yaml](../../config/optimization.yaml):
 
 ```yaml
+# Per-token prices live on the model-alias entries (RFC 0033). The Go cost
+# pipeline's pricing table (cost.pricing.models, keyed by physical id) is a
+# checked-in projection of these entries: when an alias's model or price
+# changes, regenerate that block from the alias map — a lock-step test
+# (TestShippedCostPricingDerivedFromAliases) rejects drift. Agents and
+# budgets reference the alias, not a vendor id.
+models:
+  aliases:
+    quality: { provider: anthropic, model: claude-sonnet-4-6,         input_per_1m_tokens: 3.00, output_per_1m_tokens: 15.00 }
+    fast:    { provider: anthropic, model: claude-haiku-4-5-20251001, input_per_1m_tokens: 0.80, output_per_1m_tokens:  4.00 }
+
 cost:
-  pricing:
-    models:
-      claude-sonnet-4-20250514: { input_per_1m_tokens: 3.00, output_per_1m_tokens: 15.00 }
-      claude-haiku-4-5:         { input_per_1m_tokens: 0.80, output_per_1m_tokens:  4.00 }
   budgets:
     global:
       max_daily_usd: 100.00

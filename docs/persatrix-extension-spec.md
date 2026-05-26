@@ -97,7 +97,7 @@ agent:
       - "external_communications"
 
   # ─── Existing fields (unchanged) ─────────────────────
-  model: "claude-sonnet-4-20250514"
+  model: "quality"                     # alias (RFC 0033), not a vendor ID
   temperature: 0.7                     # higher for personality variance
   tools: [...]
   permissions: {... }
@@ -253,7 +253,7 @@ different — they involve **LLM reasoning** for a scoped task. The distinction:
 │    constraints: {                                    │
 │      max_llm_calls: 10,                              │
 │      timeout: 120,                                   │
-│      model: "claude-sonnet-4-20250514"               │
+│      model: "quality"                                │
 │    }                                                 │
 │  )                                                   │
 │                                                      │
@@ -294,7 +294,7 @@ class SubAgentRequest:
     output_schema: dict | None = None  # expected output shape (optional)
 
     # ─── Constraints ────────────────────────────────
-    model: str = "claude-sonnet-4-20250514"  # can use cheaper/faster model
+    model: str | None = None           # None → sub_agents routing-default alias (RFC 0033 §J); or an explicit alias, e.g. "fast"
     temperature: float = 0.2           # sub-agents are typically low-temp
     max_llm_calls: int = 10            # hard limit
     max_tokens: int = 50000            # budget cap
@@ -374,7 +374,7 @@ sub_agent_templates:
   researcher:
     role: "research analyst"
     tools: [http_request, mcp:search, file_write]
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.3
     output_schema:
       findings: "list[str]"
@@ -386,7 +386,7 @@ sub_agent_templates:
   coder:
     role: "implementation specialist"
     tools: [file_read, file_write, shell_exec]
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.2
     output_schema:
       files_modified: "list[str]"
@@ -396,7 +396,7 @@ sub_agent_templates:
   code_reviewer:
     role: "code quality analyst"
     tools: [file_read, git_diff, mcp:github]
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.1
     restricted_permissions: [filesystem:write, shell:*]
     output_schema:
@@ -408,7 +408,7 @@ sub_agent_templates:
   data_analyst:
     role: "data analysis specialist"
     tools: [file_read, shell_exec, store_get]
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.1
     output_schema:
       findings: "list[str]"
@@ -419,7 +419,7 @@ sub_agent_templates:
   writer:
     role: "content writer"
     tools: [file_read, file_write]
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.7
     output_schema:
       document: "str"
@@ -429,7 +429,7 @@ sub_agent_templates:
   translator:
     role: "professional translator"
     tools: []                          # pure LLM, no tools needed
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     temperature: 0.3
     output_schema:
       translated_text: "str"
@@ -1499,8 +1499,9 @@ Trace: workflow execution "feature-builder-run-42"
 │  │  Persatrix.agent.persona.title: "VP of Engineering"
 │  │  Persatrix.agent.autonomy_level: "semi-autonomous"
 │  │
-│  ├─ Span: gen_ai.chat "claude-sonnet-4" (kind: CLIENT)
-│  │  │  gen_ai.request.model: "claude-sonnet-4-20250514"
+│  ├─ Span: gen_ai.chat "claude-sonnet-4-6" (kind: CLIENT)
+│  │  │  gen_ai.request.model: "claude-sonnet-4-6"   # physical id (RFC 0019 contract)
+│  │  │  persatrix.llm.model_alias: "quality"        # logical alias (RFC 0033 §G), added not substituted
 │  │  │  gen_ai.usage.input_tokens: 2340
 │  │  │  gen_ai.usage.output_tokens: 890
 │  │  │  gen_ai.response.finish_reason: "tool_use"
@@ -1701,14 +1702,14 @@ evaluations:
     - id: "safety_check"
       trigger: "on_bridge_outbound"
       type: "llm_judge"
-      model: "claude-haiku-4-5-20251001"
+      model: "fast"
       prompt: "Is this message safe and appropriate to send externally?"
       on_fail: "block_and_alert"
 
     - id: "hallucination_check"
       trigger: "on_agent_output"
       type: "llm_judge"
-      model: "claude-haiku-4-5-20251001"
+      model: "fast"
       prompt: "Does this response contain claims not supported by the provided context?"
       on_fail: "warn"
 
@@ -1716,7 +1717,7 @@ evaluations:
   offline:
     - id: "task_quality"
       type: "llm_judge"
-      model: "claude-sonnet-4-20250514"
+      model: "quality"
       criteria:
         - "correctness"
         - "completeness"
@@ -1940,12 +1941,17 @@ every level and supports budget enforcement.
 cost:
   # ─── Price table (auto-updated or manual) ──────
   pricing:
-    source: "manual"                         # manual | auto (fetch from provider APIs)
+    # Keyed by physical model id (what the cost pipeline reads off telemetry).
+    # Under RFC 0033 §F this block is a checked-in PROJECTION of models.aliases
+    # — e.g. the `quality` alias's model + price produces the row below. When a
+    # migration re-points an alias, regenerate this block from the alias map; a
+    # lock-step test rejects drift, so it stays a faithful mirror of the aliases.
+    source: "derived"                        # derived (projection of models.aliases) | manual | auto
     models:
-      "claude-sonnet-4-20250514":
+      "claude-sonnet-4-6":                   # ← models.aliases.quality
         input_per_1m_tokens: 3.00
         output_per_1m_tokens: 15.00
-      "claude-haiku-4-5-20251001":
+      "claude-haiku-4-5-20251001":           # ← models.aliases.fast / summarizer
         input_per_1m_tokens: 0.80
         output_per_1m_tokens: 4.00
 
@@ -2110,50 +2116,53 @@ each specific task.
 ```yaml
 model_routing:
   # ─── Default model per agent ───────────────────
+  # Roles reference model aliases (RFC 0033), not vendor IDs — each
+  # resolves to a concrete (provider, model, pricing) record via the
+  # models.aliases map, so a retirement or provider swap is a one-line edit.
   defaults:
-    persona_agents: "claude-sonnet-4-20250514"     # rich reasoning for personas
-    sub_agents: "claude-sonnet-4-20250514"          # default for sub-agents
-    evaluators: "claude-haiku-4-5-20251001"         # cheap, fast evaluation
+    persona_agents: "quality"     # rich reasoning for personas
+    sub_agents: "quality"         # default for sub-agents
+    evaluators: "fast"            # cheap, fast evaluation
 
   # ─── Task-based routing ────────────────────────
   # Override model based on what the agent is doing
   routing_rules:
     - match:
         task_type: "classification"                # triage, routing, tagging
-      model: "claude-haiku-4-5-20251001"
+      model: "fast"
       reason: "Classification doesn't need deep reasoning"
 
     - match:
         task_type: "summarization"
-      model: "claude-haiku-4-5-20251001"
+      model: "fast"
       reason: "Summarization is well-handled by smaller models"
 
     - match:
         task_type: "code_generation"
         complexity: "high"                          # inferred from input length/context
-      model: "claude-sonnet-4-20250514"
+      model: "quality"
       reason: "Complex code needs strong reasoning"
 
     - match:
         task_type: "code_generation"
         complexity: "low"                           # simple functions, boilerplate
-      model: "claude-haiku-4-5-20251001"
+      model: "fast"
       reason: "Simple code doesn't justify premium model cost"
 
     - match:
         sub_agent_template: "translator"
-      model: "claude-haiku-4-5-20251001"
+      model: "fast"
       reason: "Translation is reliable on smaller models"
 
     - match:
         message_type: "SOCIAL"                     # small talk, acknowledgments
-      model: "claude-haiku-4-5-20251001"
+      model: "fast"
       reason: "Casual messages don't need premium reasoning"
 
   # ─── Fallback chain ────────────────────────────
   fallback:
-    - model: "claude-sonnet-4-20250514"
-    - model: "claude-haiku-4-5-20251001"            # if primary is rate-limited
+    - model: "quality"
+    - model: "fast"                                 # if primary is rate-limited
     # Post-MVP: local models as ultimate fallback
 ```
 
@@ -2211,7 +2220,7 @@ simply truncating it:
 context_management:
   summarization:
     enabled: true
-    model: "claude-haiku-4-5-20251001"       # use cheap model for summarization
+    model: "summarizer"                      # summarizer alias (RFC 0033) — a cheap model
     triggers:
       - when: "channel_history > 15000 tokens"
         action: "summarize oldest 50% into ~2000 token summary"
@@ -2275,7 +2284,7 @@ prompt_compression:
     #  She was formerly a tech lead at a Series B startup..."
     # becomes:
     # "Ember Owl: 15yr SW eng, ex-tech-lead Series B startup..."
-    compression_model: "claude-haiku-4-5-20251001"
+    compression_model: "fast"
     target_ratio: 0.5                       # reduce to ~50% of original tokens
 
   # ─── Dynamic compression (at runtime) ─────────
@@ -2324,7 +2333,7 @@ communication_optimization:
     #   summarized     — inject rolling summary + last N messages (recommended)
 
     summarized:
-      summary_model: "claude-haiku-4-5-20251001"
+      summary_model: "fast"
       summary_update_interval: 10          # re-summarize every 10 new messages
       keep_recent_messages: 5              # always include last 5 verbatim
       summary_max_tokens: 2000
@@ -2370,7 +2379,7 @@ memory_optimization:
     - age: "1 hour – 24 hours"
       compression: "summarize"
       detail: "key_points"                  # summarized to bullet points
-      model: "claude-haiku-4-5-20251001"
+      model: "fast"
 
     - age: "1 day – 7 days"
       compression: "distill"
@@ -2505,8 +2514,8 @@ optimization_profiles:
   cost_optimized:
     description: "Minimize spend at the expense of some quality and speed"
     model_routing:
-      persona_agents: "claude-haiku-4-5-20251001"
-      sub_agents: "claude-haiku-4-5-20251001"
+      persona_agents: "fast"
+      sub_agents: "fast"
     context_management:
       max_context_tokens: 30000
       summarization: { enabled: true, aggressive: true }
@@ -2522,8 +2531,8 @@ optimization_profiles:
   speed_optimized:
     description: "Minimize latency at the expense of some cost"
     model_routing:
-      persona_agents: "claude-sonnet-4-20250514"
-      sub_agents: "claude-haiku-4-5-20251001"       # fast sub-agents
+      persona_agents: "quality"
+      sub_agents: "fast"                            # fast sub-agents
     execution_optimization:
       parallelism: { max_concurrent_agents: 20 }
       parallel_tool_calls: true
@@ -2538,8 +2547,8 @@ optimization_profiles:
   quality_optimized:
     description: "Maximize output quality regardless of cost"
     model_routing:
-      persona_agents: "claude-sonnet-4-20250514"
-      sub_agents: "claude-sonnet-4-20250514"
+      persona_agents: "quality"
+      sub_agents: "quality"
     context_management:
       max_context_tokens: 150000                    # requires 200k-context model
       # NOTE: max_context_tokens must not exceed the selected model's context
@@ -2557,8 +2566,8 @@ optimization_profiles:
   simulation_optimized:
     description: "Optimized for long-running multi-agent simulations"
     model_routing:
-      persona_agents: "claude-sonnet-4-20250514"
-      sub_agents: "claude-haiku-4-5-20251001"
+      persona_agents: "quality"
+      sub_agents: "fast"
     context_management:
       max_context_tokens: 60000
       summarization: { enabled: true }
