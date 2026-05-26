@@ -205,6 +205,13 @@ PR 1 is additive and unconsumed: the resolver module and `models.aliases` block 
 - [x] Anthropic-only example `network.allow` blocks generalized to a provider-neutral allowlist ([amendment item 5](../v0.3.4-plan-amendment-2026-05-24.md#phase-2-additions)).
 - [x] [Progress Overview](#progress-overview) row 3 filled.
 
+#### Review findings (PR #433)
+
+| Finding | Severity | Disposition |
+|---------|----------|-------------|
+| `SubAgentRequest.__post_init__` comment claimed `sub_agent_default_model` has a `quality` fallback in a config-less checkout — it has none (it `SystemExit`s), contradicting the implementation, the accessor docstring, and the no-hardcoded-defaults principle. | Low (doc) | **Fixed in-PR** — comment corrected to describe the loud-fail behaviour; existing `test_sub_agent_model_default.py::test_none_model_raises_loud_when_routing_default_absent` already pins it. |
+| `default.model_routing.defaults.task_agents` / `.evaluators` are migrated to aliases and surfaced by `model_routing_defaults()`, but no runtime path consumes them — only `sub_agents` is wired (via `sub_agent_default_model`). A task agent that omits `model:` gets `SystemExit`, not the routing default. Pre-dates this PR; the new accessor only makes it more visible. | Low | **Deferred** → [ISSUE-0069](../issues/ISSUE-0069-task-agent-evaluator-routing-defaults-unconsumed.md) (wire the two roles, or document the keys as reserved). |
+
 ---
 
 ### PR 4: `feature/v034-rfc0033-missing-price-guard` — Missing-Price Guard (Fail-Closed for Unpriced Non-Local Aliases)

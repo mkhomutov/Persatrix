@@ -131,9 +131,12 @@ class SubAgentRequest:
         # Resolve the model default from config rather than hardcoding a
         # vendor ID (RFC 0033 §J.3). The import is deferred so this leaf
         # data module stays free of a module-load dependency on the config
-        # accessor; ``sub_agent_default_model`` returns the ``sub_agents``
-        # routing alias (today ``quality``), or its ``quality`` fallback in
-        # a config-less checkout — never ``None``.
+        # accessor. ``sub_agent_default_model`` returns the ``sub_agents``
+        # routing-default alias (today ``quality``); there is **no** code-baked
+        # fallback (RFC 0033 — config owns model identity), so a checkout whose
+        # config declares no ``sub_agents`` routing default fails loud with
+        # ``SystemExit`` at construction rather than silently routing to a
+        # model the operator never chose.
         if self.model is None:
             from .optimization import sub_agent_default_model
 
