@@ -76,10 +76,14 @@ models:
 
 default:
   model_routing:
+    # RFC 0033 PR 3: routing defaults reference model aliases, not raw
+    # vendor IDs. Each role resolves through models.aliases (above) at call
+    # time — so the Anthropic Sonnet 4 → 4.6 retirement, or any provider
+    # swap, is a one-line edit to the `quality` entry, not a sweep here.
     defaults:
-      task_agents: "claude-sonnet-4-20250514"
-      sub_agents: "claude-sonnet-4-20250514"
-      evaluators: "claude-haiku-4-5-20251001"
+      task_agents: "quality"
+      sub_agents: "quality"
+      evaluators: "fast"
     provider_inference:
       anthropic_prefixes:
         - "claude"
@@ -103,7 +107,11 @@ default:
     max_context_tokens: 80000
     summarization:
       enabled: true
-      model: "claude-haiku-4-5-20251001"
+      # RFC 0033 PR 3: the summarisation-on-close surface (RFC 0020) picks
+      # its model here, separate from the provider factory. It references
+      # the `summarizer` alias so a Haiku swap is also a one-alias edit;
+      # agents/persona_runtime/summarize_close.py resolves it via resolve().
+      model: "summarizer"
 
 cost:
   pricing:
