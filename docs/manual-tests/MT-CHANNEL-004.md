@@ -117,8 +117,8 @@ $body = @'
 
 The persona's reply travels through the action loop → `SEND_CHANNEL_MESSAGE`
 action → `POST /api/v1/channels/{id}/messages` and lands in the same channel
-within a few seconds (LLM round-trip dominated; `ember-owl` runs on
-`claude-sonnet-4-20250514` by default — see
+within a few seconds (LLM round-trip dominated; `ember-owl` runs on the
+`quality` alias by default — see
 [config/agents.yaml](../../config/agents.yaml)).
 
 **Action**:

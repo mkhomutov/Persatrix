@@ -245,7 +245,7 @@ agents:
   - id: "coder-01"
     type: "task"                    # task agent — responds to assigned work
     instructions: "You are a code generation specialist..."
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     tools: [file_read, file_write, shell_exec]
 
   - id: "ember-owl"
@@ -1263,7 +1263,7 @@ agents:
     instructions: |
       You are a code generation specialist. Write clean, well-tested code
       following the project's conventions. Include error handling and type hints.
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     tools: [file_read, file_write, shell_exec]
 
   - id: "reviewer-01"
@@ -1271,7 +1271,7 @@ agents:
     instructions: |
       You are a code review specialist. Analyze code for bugs, performance,
       security, and style issues. Provide actionable feedback.
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     tools: [file_read]
 
   - id: "planner-01"
@@ -1279,7 +1279,7 @@ agents:
     instructions: |
       You are a task decomposition specialist. Break complex requests into
       ordered subtasks with clear deliverables and dependencies.
-    model: "claude-sonnet-4-20250514"
+    model: "quality"
     tools: []
 ```
 

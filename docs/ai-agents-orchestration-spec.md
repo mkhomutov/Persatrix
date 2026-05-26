@@ -133,7 +133,7 @@ agent:
   id: "code-writer"
   name: "Code Writer"
   role: "Writes clean, tested code from specifications"
-  model: "claude-sonnet-4-20250514"
+  model: "quality"                     # alias (RFC 0033), not a vendor id
   temperature: 0.3
   capabilities:
     - code_generation
@@ -153,7 +153,7 @@ agent:
   id: "ember-owl"
   name: "Ember Owl"
   role: "Engineering leadership and technical oversight"
-  model: "claude-sonnet-4-20250514"
+  model: "quality"
   temperature: 0.7                     # higher for personality variance
   capabilities:
     - architecture_review
@@ -559,7 +559,7 @@ resilience:
       action: "backoff_and_retry"
       max_retries: 5
       backoff: "exponential"              # 1s, 2s, 4s, 8s, 16s
-      fallback_model: "claude-haiku-4-5-20251001"  # downgrade if primary exhausted
+      fallback_model: "fast"              # downgrade if primary exhausted
     on_server_error:                       # 5xx responses
       action: "retry_then_fail"
       max_retries: 3
@@ -568,7 +568,7 @@ resilience:
       fallback: "fail_with_detail"
     on_model_unavailable:
       action: "failover"
-      fallback_chain: ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001"]
+      fallback_chain: ["quality", "fast"]
 
   # ─── Agent Process Failures ───────────────────
   agent:
@@ -814,7 +814,7 @@ class SubAgentRequest:
     tools: list[str]                        # tools the sub-agent can use
     context: dict[str, Any] = field(default_factory=dict)
     output_schema: dict | None = None       # expected output shape
-    model: str = "claude-sonnet-4-20250514"
+    model: str | None = None                 # None → sub_agents routing-default alias (RFC 0033 §J)
     temperature: float = 0.2
     max_llm_calls: int = 10
     max_tokens: int = 50000
