@@ -43,6 +43,15 @@ LLM_CALL_SPAN = "agent.llm.call"
 TOOL_EXECUTE_SPAN = "agent.tool.execute"
 SUBAGENT_SPAWN_SPAN = "agent.subagent.spawn"
 
+# RFC 0033 §G — the logical alias (`quality` / `fast` / `summarizer`) a request
+# resolved via, added to the LLM-call span *alongside* (never replacing) the
+# physical `gen_ai.request.model`. RFC 0019 §Attribute Schema mandates the
+# reserved `persatrix.*` prefix for Persatrix-specific attributes (alias is not
+# part of the upstream OTel Gen-AI conventions); the `persatrix.llm.*` sub-
+# namespace has the `persatrix.llm.cache.hit` precedent. Populated only on the
+# alias path — omitted on the §E raw-vendor-ID pass-through.
+LLM_MODEL_ALIAS_ATTR = "persatrix.llm.model_alias"
+
 # ISSUE-0032 — Python-side companion to the Go-side `channel.dispatch`
 # span on [internal/channels/grpc_dispatcher.go]. Both names sit at the
 # bare `channel.*` namespace (not `agent.*` or `orchestrator.*`) because
@@ -172,6 +181,7 @@ __all__ = [
     "EPISODIC_RECALL_SPAN",
     "EPISODIC_REMEMBER_SPAN",
     "LLM_CALL_SPAN",
+    "LLM_MODEL_ALIAS_ATTR",
     "PERSONA_EVENT_SPAN",
     "PERSONA_TICK_SPAN",
     "RELATIONSHIP_LOOKUP_SPAN",

@@ -420,3 +420,57 @@ class TestPhysicalModelThreading:
             ])
             agent = load_agent("planner", config_path, tmp)
         assert agent.config["model"] == "claude-sonnet-4-20250514"
+
+
+class TestModelAliasStash:
+    """RFC 0033 PR 5 §G — when an agent's configured ``model`` is a declared
+    alias, ``load_agent`` records the alias name on the agent config as
+    ``model_alias`` so ``create_message`` can emit the
+    ``persatrix.llm.model_alias`` span attribute. A raw vendor ID is not a
+    declared alias, so no ``model_alias`` is stashed (the attribute is omitted
+    on the §E pass-through path).
+
+    These exercise the *real* shipped alias map (``model_aliases()``), so
+    ``quality`` is a known alias and the retired raw Sonnet id is not.
+    """
+
+    @patch("agents.server_persona.create_provider")
+    def test_alias_config_stashes_model_alias(self, mock_create):
+        mock_create.return_value = (MagicMock(), "claude-sonnet-4-6")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = _write_agent_config(tmp_path, [
+                {
+                    "id": "planner",
+                    "name": "Planner",
+                    "role": "Plans things",
+                    "model": "quality",  # declared alias
+                    "type": "task",
+                    "capabilities": ["planning"],
+                    "tools": [],
+                    "permissions": {},
+                },
+            ])
+            agent = load_agent("planner", config_path, tmp)
+        assert agent.config["model"] == "claude-sonnet-4-6"
+        assert agent.config["model_alias"] == "quality"
+
+    @patch("agents.server_persona.create_provider")
+    def test_raw_config_stashes_no_model_alias(self, mock_create):
+        mock_create.return_value = (MagicMock(), "claude-sonnet-4-20250514")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_path = _write_agent_config(tmp_path, [
+                {
+                    "id": "planner",
+                    "name": "Planner",
+                    "role": "Plans things",
+                    "model": "claude-sonnet-4-20250514",  # raw vendor id
+                    "type": "task",
+                    "capabilities": ["planning"],
+                    "tools": [],
+                    "permissions": {},
+                },
+            ])
+            agent = load_agent("planner", config_path, tmp)
+        assert "model_alias" not in agent.config
