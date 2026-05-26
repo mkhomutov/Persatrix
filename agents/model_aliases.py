@@ -109,19 +109,19 @@ def _current_alias_map() -> dict[str, dict[str, Any]]:
     """Return the active alias map — the seam override if one is set,
     otherwise the config-backed block from :mod:`agents.optimization`.
 
-    The config-backed block is run through the missing-price guard
-    (:func:`_check_alias_pricing`, RFC 0033 PR 4) on load, so the first
-    alias-routed :func:`resolve` at startup fails closed on an unpriced
-    non-local alias rather than silently disabling the RFC 0023 budget
-    gate. The seam override is exempt — tests drive the guard explicitly
-    via :func:`validate_alias_pricing`, so a deliberately-broken fixture
-    cannot derail unrelated resolver tests.
+    The missing-price guard (RFC 0033 PR 4) is applied **per resolve**, in
+    :func:`resolve`, scoped to the entry actually being resolved — *not*
+    here over the whole map. Validating the whole map on every access would
+    make resolving a well-formed alias fail closed because of an unrelated,
+    unused misconfigured alias elsewhere (and, via
+    :func:`~agents.persona_runtime.summarize_close`'s ``except SystemExit``
+    safety net, silently degrade that surface). The RFC acceptance is scoped
+    to the *resolved* alias; :func:`validate_alias_pricing` stays available
+    for an explicit whole-map (startup / CI) check.
     """
     if _override_map is not None:
         return _override_map
-    block = _load_alias_block()
-    _check_alias_pricing(block)
-    return block
+    return _load_alias_block()
 
 
 def _coerce_price(value: Any) -> float:
@@ -216,46 +216,59 @@ def _has_numeric_price(entry: dict[str, Any], key: str) -> bool:
     return isinstance(value, (int, float))
 
 
-def _check_alias_pricing(mapping: dict[str, dict[str, Any]]) -> None:
-    """Fail closed on an unpriced **non-local** alias entry (RFC 0033 PR 4).
+def _check_entry_pricing(alias: str, entry: dict[str, Any]) -> None:
+    """Fail closed on a single unpriced **non-local** alias entry (RFC 0033 PR 4).
 
     The Go cost path's ``EstimateCost`` returns ``$0`` for any model absent
     from the pricing table (``internal/cost/config.go``), so an alias whose
     non-local provider carries no price would silently disable the RFC 0023
     pre-call lease / budget gate for that agent. This guard raises a loud
-    :class:`SystemExit` for the first such entry, naming the alias and
+    :class:`SystemExit` when ``entry`` is such an alias, naming it and its
     provider. A local ($0-by-design) entry is exempt (see
     :func:`_provider_is_local`), so an explicit-0 simulation price and a
     forgotten cloud price are distinguishable. The guard is **scoped to the
     alias surface** — the raw-ID fall-through in :func:`resolve` keeps its
     deliberate §E graceful-degradation behaviour, which Phase 3 closes.
     """
+    if _provider_is_local(entry):
+        return
+    if _has_numeric_price(entry, "input_per_1m_tokens") and _has_numeric_price(
+        entry, "output_per_1m_tokens",
+    ):
+        return
+    provider = entry.get("provider")
+    logger.error(
+        "Model alias %r (provider %r) has no usable pricing — a non-local "
+        "provider with no price makes cost estimation return $0, silently "
+        "disabling the RFC 0023 budget/lease gate for that agent.",
+        alias,
+        provider,
+    )
+    raise SystemExit(
+        f"Model alias {alias!r} (provider {provider!r}) is missing pricing "
+        f"(input_per_1m_tokens / output_per_1m_tokens). A non-local provider "
+        f"with no price would make cost estimation return $0, silently "
+        f"disabling the RFC 0023 budget/lease gate. Add explicit pricing "
+        f"(use 0 only for a $0-real local model). See RFC 0033 §F / "
+        f"the v0.3.4 provider-parity amendment (item 1).",
+    )
+
+
+def _check_alias_pricing(mapping: dict[str, dict[str, Any]]) -> None:
+    """Run :func:`_check_entry_pricing` over **every** entry in ``mapping``.
+
+    The whole-map validator behind :func:`validate_alias_pricing` — used for
+    an explicit startup / CI check that the *entire* config is priced. Raises
+    :class:`SystemExit` on the first unpriced non-local entry. Per-resolve
+    fail-closed (the runtime safety property) is enforced separately in
+    :func:`resolve`, scoped to the resolved alias, so an unused misconfigured
+    entry here cannot break resolution of a well-formed one.
+    """
     for alias, entry in mapping.items():
         if not isinstance(entry, dict):
             # The accessor drops non-dict entries; a seam map might not.
             continue
-        if _provider_is_local(entry):
-            continue
-        if _has_numeric_price(entry, "input_per_1m_tokens") and _has_numeric_price(
-            entry, "output_per_1m_tokens",
-        ):
-            continue
-        provider = entry.get("provider")
-        logger.error(
-            "Model alias %r (provider %r) has no usable pricing — a non-local "
-            "provider with no price makes cost estimation return $0, silently "
-            "disabling the RFC 0023 budget/lease gate for that agent.",
-            alias,
-            provider,
-        )
-        raise SystemExit(
-            f"Model alias {alias!r} (provider {provider!r}) is missing pricing "
-            f"(input_per_1m_tokens / output_per_1m_tokens). A non-local provider "
-            f"with no price would make cost estimation return $0, silently "
-            f"disabling the RFC 0023 budget/lease gate. Add explicit pricing "
-            f"(use 0 only for a $0-real local model). See RFC 0033 §F / "
-            f"the v0.3.4 provider-parity amendment (item 1).",
-        )
+        _check_entry_pricing(alias, entry)
 
 
 def validate_alias_pricing(
@@ -284,7 +297,10 @@ def resolve(
       ``explicit_provider`` is ignored here — the alias entry is the joint
       declaration of provider + model + pricing and stays authoritative
       (RFC 0033 §D rule 1; a *disagreeing* explicit provider is caught by
-      the factory, not silently overridden here).
+      the factory, not silently overridden here). A config-backed alias is
+      run through the missing-price guard (RFC 0033 PR 4), scoped to *this*
+      entry: an unpriced non-local alias fails closed with a loud
+      :class:`SystemExit` before it can disable the RFC 0023 budget gate.
     * A recognised raw vendor ID falls through with ``alias=None,
       raw=True``. When ``explicit_provider`` is given it wins over prefix
       inference (§D rule 1, raw path — preserves today's
@@ -300,6 +316,15 @@ def resolve(
 
     entry = _current_alias_map().get(alias_or_model)
     if entry is not None:
+        # RFC 0033 PR 4 — fail closed if *this* resolved alias is an unpriced
+        # non-local entry (a silent $0 budget gate). Scoped to the resolved
+        # alias: an unrelated misconfigured alias elsewhere in the map must not
+        # break this resolve. The seam override is exempt (``_override_map``
+        # set ⇒ the map above is the override) — tests drive the guard
+        # explicitly via :func:`validate_alias_pricing`, so a deliberately
+        # broken fixture cannot derail unrelated resolver tests.
+        if _override_map is None:
+            _check_entry_pricing(alias_or_model, entry)
         return _from_alias_entry(alias_or_model, entry)
 
     provider = explicit_provider or _infer_raw_provider(alias_or_model)

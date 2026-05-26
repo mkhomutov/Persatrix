@@ -208,9 +208,9 @@ class TestMissingPriceGuard:
     def test_guard_fires_at_config_load(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # An unpriced non-local alias in the on-disk config must fail the
-        # first config-backed resolve — proving the guard is wired into the
-        # load path, not just an unused function.
+        # Resolving an unpriced non-local alias from the on-disk config must
+        # fail closed — proving the guard is wired into the config-backed
+        # resolve path, not just reachable as an explicit validator.
         config = tmp_path / "optimization.yaml"
         config.write_text(
             'schema_version: "0.2"\n'
@@ -249,6 +249,46 @@ class TestMissingPriceGuard:
         optimization.reset_cache()
         try:
             assert resolve("quality").model == "claude-sonnet-4-6"
+        finally:
+            optimization.reset_cache()
+
+    def test_unrelated_unpriced_alias_does_not_break_a_good_resolve(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # RFC 0033 acceptance is scoped to the *resolved* alias ("a resolved
+        # non-local alias with no price fails closed"). The per-resolve guard
+        # must therefore check only the alias being resolved — an unrelated,
+        # unused misconfigured alias elsewhere in the config must NOT break a
+        # well-formed resolve. Whole-map validation stays available via
+        # validate_alias_pricing() for an explicit startup/CI check. Without
+        # scoping, resolving the good 'quality' alias trips on the unpriced
+        # 'quality-openai' and — via summarize_close's `except SystemExit`
+        # (ISSUE-0070's "correct handling" precedent) — silently, permanently
+        # degrades summarisation for an all-local society over an unused typo.
+        config = tmp_path / "optimization.yaml"
+        config.write_text(
+            'schema_version: "0.2"\n'
+            "models:\n"
+            "  aliases:\n"
+            "    quality:\n"
+            "      provider: anthropic\n"
+            "      model: claude-sonnet-4-6\n"
+            "      input_per_1m_tokens: 3.00\n"
+            "      output_per_1m_tokens: 15.00\n"
+            "    quality-openai:\n"  # unused; operator forgot pricing
+            "      provider: openai\n"
+            "      model: gpt-4o\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("PERSATRIX_OPTIMIZATION_CONFIG", str(config))
+        optimization.reset_cache()
+        try:
+            # The well-priced alias resolves despite the unrelated bad entry.
+            assert resolve("quality").model == "claude-sonnet-4-6"
+            # The misconfigured alias still fails closed when actually used.
+            with pytest.raises(SystemExit) as exc:
+                resolve("quality-openai")
+            assert "quality-openai" in str(exc.value)
         finally:
             optimization.reset_cache()
 
