@@ -445,9 +445,11 @@ Daily, per-workflow, and per-agent USD caps are declared in
 
 ```yaml
 # Per-token prices live on the model-alias entries (RFC 0033). The Go cost
-# pipeline's pricing table (cost.pricing.models, keyed by physical id) is
-# derived from these at load, so re-pointing an alias re-keys pricing — no
-# separate edit. Agents and budgets reference the alias, not a vendor id.
+# pipeline's pricing table (cost.pricing.models, keyed by physical id) is a
+# checked-in projection of these entries: when an alias's model or price
+# changes, regenerate that block from the alias map — a lock-step test
+# (TestShippedCostPricingDerivedFromAliases) rejects drift. Agents and
+# budgets reference the alias, not a vendor id.
 models:
   aliases:
     quality: { provider: anthropic, model: claude-sonnet-4-6,         input_per_1m_tokens: 3.00, output_per_1m_tokens: 15.00 }

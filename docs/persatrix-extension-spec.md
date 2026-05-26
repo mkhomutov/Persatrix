@@ -1942,10 +1942,11 @@ cost:
   # ─── Price table (auto-updated or manual) ──────
   pricing:
     # Keyed by physical model id (what the cost pipeline reads off telemetry).
-    # Under RFC 0033 §F this block is DERIVED from models.aliases at config
-    # load — e.g. the `quality` alias's model + price produces the row below —
-    # so a migration that re-points an alias re-keys pricing automatically.
-    source: "derived"                        # derived (from models.aliases) | manual | auto
+    # Under RFC 0033 §F this block is a checked-in PROJECTION of models.aliases
+    # — e.g. the `quality` alias's model + price produces the row below. When a
+    # migration re-points an alias, regenerate this block from the alias map; a
+    # lock-step test rejects drift, so it stays a faithful mirror of the aliases.
+    source: "derived"                        # derived (projection of models.aliases) | manual | auto
     models:
       "claude-sonnet-4-6":                   # ← models.aliases.quality
         input_per_1m_tokens: 3.00

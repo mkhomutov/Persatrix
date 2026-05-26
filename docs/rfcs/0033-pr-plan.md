@@ -327,7 +327,7 @@ PR 1 is additive and unconsumed: the resolver module and `models.aliases` block 
 #### PR checklist
 
 - [x] Swept docs reference aliases, not literal vendor IDs (except deliberate physical-ID discussion — telemetry/pricing keys keep the *current* physical id; closed-RFC inference/provenance demos and the un-migrated MT-MEMORY-003 surface keep theirs, see Key implementation details).
-- [x] `make rfcs-check` + doc-link integrity pass (`doc_links.py`: 5281 links across 287 files OK; `issues-check`, `doc_status_markers.py`, `doc_audit.py`, `file_size.py --strict` all clean); `make test` not re-run — doc-only, no code or config touched, so the suite is unaffected.
+- [x] `make rfcs-check` + doc-link integrity pass (`doc_links.py`: 5293 links across 287 files OK; `issues-check`, `doc_status_markers.py`, `doc_audit.py`, `file_size.py --strict` all clean); `make test` not re-run — doc-only, no code or config touched, so the suite is unaffected.
 - [x] The new alias-routing MT is **not** authored here (deferred to [master-plan Phase 4 PR 1](../v0.3.4-plan.md#phase-4--v034-release-prep-execution)).
 - [x] [Progress Overview](#progress-overview) row 6 filled.
 
