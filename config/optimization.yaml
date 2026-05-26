@@ -25,9 +25,13 @@ active_profile: "default"
 # (ollama / mock) run at $0 real cost, so their entries carry an explicit
 # 0 price and are documented $0-real — never an absent price. The RFC 0023
 # wallet-cap demo, which needs simulated spend to trip, pins to a priced
-# cloud alias (quality), not a local one. PR 4's missing-price guard
-# treats a local provider as $0-by-design (never the fail-closed error)
-# and reserves fail-closed for an *unpriced non-local* alias.
+# cloud alias (quality), not a local one. The PR 4 missing-price guard
+# (agents/model_aliases.py validate_alias_pricing) keys locality on the
+# provider name (ollama / mock) or a loopback provider_config.base_url, so
+# a local entry is $0-by-design and exempt; it reserves the loud
+# fail-closed (SystemExit at startup) for an *unpriced non-local* alias —
+# the case that would make EstimateCost silently return $0 and disable the
+# RFC 0023 budget gate for that agent.
 models:
   aliases:
     # Default for task agents, personas, and sub-agents. The Anthropic

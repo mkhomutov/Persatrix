@@ -245,12 +245,12 @@ PR 1 is additive and unconsumed: the resolver module and `models.aliases` block 
 
 #### PR checklist
 
-- [ ] `pytest tests/unit/python/test_model_aliases.py -q` passes (guard fires on unpriced non-local; local $0 distinguishable; raw-ID path untouched).
-- [ ] `cd agents && mypy .` clean; `ruff check agents/` clean.
-- [ ] `make test` clean.
-- [ ] Guard is scoped to the alias surface — `resolve()`'s raw-ID fall-through ([§E](0033-model-alias-layer.md#e-backwards-compatibility)) is **not** failed closed.
-- [ ] A resolved non-local alias with no price warns loudly + fails closed; a local ($0-by-design) alias is distinguishable from an unpriced one ([amendment §Acceptance additions](../v0.3.4-plan-amendment-2026-05-24.md#acceptance-additions)).
-- [ ] [Progress Overview](#progress-overview) row 4 filled.
+- [x] `pytest tests/unit/python/test_missing_price_guard.py tests/unit/python/test_model_aliases.py -q` passes (the guard tests are split into their own module to keep `test_model_aliases.py` under the file-size cap — guard fires on unpriced non-local; local $0 distinguishable; raw-ID path untouched).
+- [x] `cd agents && mypy .` clean (whole-package, as CI runs it); `ruff check .` clean.
+- [x] `make test` clean — verified via the touched/adjacent unit modules (`test_missing_price_guard.py`, `test_model_aliases.py`, `test_llm_factory.py`, `test_llm_client.py`, `test_optimization.py`, `test_optimization_routing.py`, `test_sub_agent_model_default.py`, `test_llm_ollama.py`, `test_llm_offline.py` — 179 passed) + mypy/ruff + `make validate`; no Go change (the guard lands at the Python alias-resolution boundary, not the Go cost path); CI runs the full target.
+- [x] Guard is scoped to the alias surface — `resolve()`'s raw-ID fall-through ([§E](0033-model-alias-layer.md#e-backwards-compatibility)) is **not** failed closed (`test_raw_id_fall_through_not_failed_closed`).
+- [x] A resolved non-local alias with no price warns loudly + fails closed; a local ($0-by-design) alias is distinguishable from an unpriced one ([amendment §Acceptance additions](../v0.3.4-plan-amendment-2026-05-24.md#acceptance-additions)). Locality keys on the provider name (`mock` / `ollama`) **or** a loopback `provider_config.base_url`; the guard runs at config-backed map load so the first alias-routed `resolve` at startup fails closed.
+- [x] [Progress Overview](#progress-overview) row 4 filled.
 
 ---
 
@@ -397,8 +397,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 |---|-----------|-------|--------|--------|-----------|--------|
 | 1 | 1 | Resolver module + `models.aliases` config block (+ OpenAI alias, local-pricing decision) | `feature/v034-rfc0033-resolver` | ✅ Merged | [#431](https://github.com/mkhomutov/Persatrix/pull/431) | 2026-05-25 |
 | 2 | 1 | `create_provider` tuple return + §D precedence + offline/Ollama interplay regression + raw-ID startup warning + `raw_id_usage` counter | `feature/v034-rfc0033-factory` | ✅ Merged | [#432](https://github.com/mkhomutov/Persatrix/pull/432) | 2026-05-25 |
-| 3 | 1 | Config migration to aliases (Sonnet 4→4.6 via `quality`) + network-allowlist neutralization + `SubAgentRequest.model` `None`-default + §J resolution | `feature/v034-rfc0033-migration` | 🔀 PR open | [#433](https://github.com/mkhomutov/Persatrix/pull/433) | — |
-| 4 | 2 | Missing-price guard — fail-closed for unpriced non-local aliases ([amendment item 1](../v0.3.4-plan-amendment-2026-05-24.md#what-changes)) | `feature/v034-rfc0033-missing-price-guard` | ⬜ Not started | — | — |
+| 3 | 1 | Config migration to aliases (Sonnet 4→4.6 via `quality`) + network-allowlist neutralization + `SubAgentRequest.model` `None`-default + §J resolution | `feature/v034-rfc0033-migration` | ✅ Merged | [#433](https://github.com/mkhomutov/Persatrix/pull/433) | 2026-05-26 |
+| 4 | 2 | Missing-price guard — fail-closed for unpriced non-local aliases ([amendment item 1](../v0.3.4-plan-amendment-2026-05-24.md#what-changes)) | `feature/v034-rfc0033-missing-price-guard` | 🔀 PR open | — | — |
 | 5 | 2 | `persatrix.llm.model_alias` span attr + alias-derived pricing + `/cost/summary` cost gate (+ OpenAI rows) | `feature/v034-rfc0033-telemetry-pricing` | ⬜ Not started | — | — |
 | 6 | 2 | Documentation sweep — replace literal vendor IDs with alias examples | `feature/v034-rfc0033-docs-sweep` | ⬜ Not started | — | — |
 | 7 | — | Phases-1–2 closeout | `feature/v034-rfc0033-close` | ⬜ Not started | — | — |
