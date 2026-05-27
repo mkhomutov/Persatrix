@@ -134,10 +134,6 @@ and the [channels guide](docs/guides/channels.md).
 
 ### Try it free — offline mode (no API key, no cost) 🆓
 
-> **New in v0.3.4 — not in v0.3.3 (the latest tagged release).** Offline mode
-> is already in the source tree, so the `git clone` Quick start above includes
-> it today; a downloaded v0.3.3 release artifact does not.
-
 Want to see the society work before wiring up a paid API key? Run the whole
 stack against the built-in **offline provider** — scripted, persona-accurate
 replies with **zero LLM calls and zero spend**:
@@ -169,10 +165,6 @@ accrues against the `$5`/agent simulated budget. See [§ Cost Warning](#-cost-wa
 > itself — a toolchain-free quickstart is on the roadmap.
 
 ### Run a real local model — Ollama (no API key, no cloud cost) 🦙
-
-> **New in v0.3.4 — not in v0.3.3 (the latest tagged release),** like offline
-> mode above. It's already in the source tree, so the `git clone` Quick start
-> above includes it today; a downloaded v0.3.3 release artifact does not.
 
 Want **real** inference — not canned replies — without a cloud API key or
 per-token spend? Run the whole society on a model served locally by
