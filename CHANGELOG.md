@@ -2,10 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.3.4] - 2026-05-27
+
+> **Codename:** Any Model, Any Provider
+
+### Highlights
+
+- **Any Model, Any Provider — the same agents run on Anthropic, OpenAI, a free local model (Ollama), or a `$0` offline mock, selected the one standard way** (RFC 0033, Phases 1–2). Every agent, routing default, and the summarisation path references a logical model alias (`quality` / `fast` / `summarizer`) that resolves to a `(provider, model_id, pricing)` record in [`config/optimization.yaml`](config/optimization.yaml). A vendor retirement or a provider swap is a **one-line config edit** to one alias entry — not a code change, not a config sweep. All four providers (`anthropic` / `openai` / `ollama` / `mock`) are peers dispatched through the same factory path; there is no env force-knob and no special-cased provider.
+- **No default provider — nothing privileges a vendor or can spend money by default.** The shipped config ships its role aliases **unconfigured**, so a plain `docker compose up` fails loud at agent startup with an actionable message until you pick a provider. Each provider is an equal one-command demo (`make demo-anthropic` / `demo-openai` / `demo-ollama` / `demo-offline`), each mounting a per-provider alias config via a Compose overlay. The offline `MockProvider` and the Ollama local-model provider both run the whole society at **`$0` cloud spend**, with the OTel `gen_ai.*` spans, token metrics, and the RFC 0023 wallet-lease path fully populated.
+
+### Upgrade Notes
+
+| Notable change | Detail |
+|----------------|--------|
+| **[Feature]** Provider-agnostic model aliases | Agents, routing defaults, and the summarisation path reference a logical alias (`quality` / `fast` / `summarizer`) resolved to a `(provider, model, pricing)` record in [`config/optimization.yaml`](config/optimization.yaml) `models.aliases` (RFC 0033). A vendor retirement or provider swap is a one-line edit to one alias entry. `schema_version` bumped `0.1` → `0.2`. A priced OpenAI peer alias ships. |
+| **[Behaviour change — no default provider]** Explicit, config-driven provider choice | The shipped `config/optimization.yaml` ships its `quality` / `fast` / `summarizer` role aliases **unconfigured** (`provider: unconfigured`) — there is **no default provider**. A plain `docker compose up` fails loud at agent startup (an actionable `SystemExit`) until you pick one: run a `make demo-*`, or set `provider`/`model`/pricing on the alias. Nothing privileges a vendor or can spend money by default. See [amendment 2026-05-27](docs/v0.3.4-plan-amendment-2026-05-27.md). |
+| **[Behaviour change — provider selection]** Config-driven, no env force-knob | All four providers (`anthropic` / `openai` / `ollama` / `mock`) are selected the same standard way — by the resolved alias `provider` field. The `PERSATRIX_OFFLINE` / `PERSATRIX_OLLAMA` global force-knobs are **removed** (they were never in a tagged release — added and removed within the v0.3.4 window). `make demo-anthropic` / `demo-openai` / `demo-ollama` / `demo-offline` each select their provider by mounting a per-provider alias config (`config/demo/<provider>/optimization.yaml`) via a Compose overlay. `PERSATRIX_OLLAMA_MODEL` / `PERSATRIX_OLLAMA_BASE_URL` / `PERSATRIX_OFFLINE_RESPONSES` survive as provider *configuration* (not selection). |
+| **[Behaviour change — onboarding]** Provider-neutral compose + `.env` | [`docker-compose.yaml`](docker-compose.yaml) plumbs every provider key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`) into each agent optionally and drops the single-vendor `:?` startup guard, so a config-only swap to a cloud-OpenAI alias authenticates in stock Docker and first-run privileges no vendor; an agent routed to a provider whose key is unset logs a clear startup warning. [`.env.example`](.env.example) is reframed "pick one provider." |
+| **[Safety]** Missing-price guard | A resolved alias with no pricing fails closed (loud `SystemExit`) for non-local providers, rather than a silent `$0` estimate that would disable the RFC 0023 budget/lease gate. Local providers (`ollama` / `mock`, or a loopback `base_url`) are exempt — they carry an explicit `0` ($0-real). |
+| **[Cost]** Alias-derived pricing + `model_alias` span | `cost.pricing.models` (the Go cost table) is now a checked-in *projection* of the alias map (lock-step test `TestShippedCostPricingDerivedFromAliases`). The `agent.llm.call` span carries `persatrix.llm.model_alias` alongside the physical `gen_ai.request.model` (telemetry-only). |
+| Raw-ID back-compat | A raw vendor model ID still resolves (the §E fall-through) but fires a one-shot deprecation warning + increments `persatrix.llm.alias.raw_id_usage`. Phase 3 (raw-ID rejection, `_infer_provider` retirement, schema `"0.3"`) is **observed-traffic gated** — it opens when that counter reads zero across dogfood, → v0.3.5+. |
+| `$0`-local vs. the wallet cap | A genuinely-$0 local alias (offline / Ollama) never trips the simulated wallet, so the README's "agent pauses itself at the cap" behaviour shows only on a priced (cloud) alias. The offline / Ollama demos are $0 by design; use `make demo-openai` (or an Anthropic alias) to watch the cap trip. |
 
 ### 🚀 Features
 
+- *(RFC 0033 — provider-agnostic model alias layer, Phases 1–2)* Landed across #431 (alias resolver + `models.aliases` block + OpenAI peer alias) → #432 (factory alias resolution + raw-ID deprecation signal) → #433 (config migration to aliases + drop the last model literal) → #434 (missing-price guard) → #435 (`model_alias` span + alias-derived pricing + cost gate) → #436 (documentation sweep) → #437 (Phases-1–2 closeout); PR plan #430. The offline (#422) and Ollama (#423) providers and the knob-free, config-driven provider selection (#440) ship alongside.
 - **Any provider, selected the same way — no force-knobs.** All four providers — `anthropic`, `openai`, `ollama`, and the offline `mock` — are now chosen by one mechanism: the resolved `provider` field on a model alias (RFC 0033). Routing the whole society to a local, mock, or OpenAI provider is a one-line edit to the `quality` alias in [`config/optimization.yaml`](config/optimization.yaml), exactly as the release headlines. `mock` and `ollama` are first-class alias providers, dispatched through the same factory path ([`agents/llm_factory.py`](agents/llm_factory.py)) as the cloud providers.
 - **Offline / demo mode — run the whole society for $0 with no API key.** The `MockProvider` ([`agents/llm_offline.py`](agents/llm_offline.py)) joins `AnthropicProvider` / `OpenAIProvider` / `OllamaProvider` behind the `LLMProvider` protocol. Point an alias at `provider: mock` and every agent returns scripted, persona-accurate replies with **zero provider calls, zero network, and zero spend**. The provider only emits plain text with `stop_reason=END_TURN`, so the runtime's `synthesize_channel_reply` seam routes it through both the chat-as-DM and channel paths unchanged; synthetic token usage keeps the OTel `gen_ai.*` spans, token metrics, and the RFC 0023 wallet-lease settle path populated at $0. Curated replies live in [`config/offline_responses.yaml`](config/offline_responses.yaml) (override via `PERSATRIX_OFFLINE_RESPONSES`); unmatched turns degrade to a deterministic in-character fallback.
 - **Ollama mode — run the whole society on a real local model, no API key, no cloud spend.** A first-class `ollama` provider ([`agents/llm_ollama.py`](agents/llm_ollama.py)) — a thin subclass of `OpenAIProvider`, since Ollama serves the OpenAI-compatible API verbatim at `/v1` — reuses the cloud provider's message/tool translation and overrides only the `gen_ai.system` name (`ollama`) and a localhost-default `base_url`. Point an alias at `provider: ollama` (with a real Ollama tag as `model:`). Unlike offline mode this is **real inference** — usage carries the model's actual token counts — but it runs on your own hardware, so cloud spend is `$0`.
@@ -21,6 +42,30 @@ All notable changes to this project will be documented in this file.
 
 - [`schemas/agent.schema.json`](schemas/agent.schema.json) documents the `provider` field (`anthropic` / `openai` / `ollama` / `mock`) and `provider_config.base_url`, so an explicit `provider: mock` / `provider: ollama` (and the OpenAI-compatible `base_url` for local models) validate instead of being rejected by `additionalProperties: false`. The `ollama` provider defaults `base_url` to `http://localhost:11434/v1`; the `PERSATRIX_OFFLINE_RESPONSES` / `PERSATRIX_OLLAMA_MODEL` / `PERSATRIX_OLLAMA_BASE_URL` provider-configuration env vars are documented in [`.env.example`](.env.example).
 - New per-provider demo alias configs under [`config/demo/`](config/demo/) (`anthropic` / `offline` / `ollama` / `openai`, each a `<provider>/optimization.yaml`) — each points the `quality` / `fast` / `summarizer` aliases at one provider with a matching derived `cost.pricing.models`. The shipped base `cost.pricing.models` projects the `unconfigured` placeholder; the alias cost-attribution gate (`internal/server/cost_alias_gate_test.go`, `internal/cost/cost_alias_pricing_test.go`) now pins the configured `config/demo/anthropic` artifact.
+
+### 📚 Documentation
+
+- *(release)* Post-release follow-up for v0.3.3 (#421)
+- *(v034)* Open v0.3.4 master plan — Any Model, Any Provider (#424)
+- *(v034)* Harden the v0.3.4 plan for provider parity (#425)
+- Require plain-English docs and comments (#426)
+- *(v034)* RFC 0033 PR plan — Phases 1–2 (#430)
+- *(v034)* RFC 0033 PR 6 — documentation sweep (literal vendor IDs → aliases) (#436)
+- *(v034)* RFC 0033 PR 7 — Phases-1–2 closeout (#437)
+- *(v034)* Release-prep plan — master-plan Phase 3 (#438)
+- *(v034)* Release-prep PR 1 — manual-test execution report (alias routing + provider swap + offline + Ollama) (#439)
+- *(v034)* New [model-providers guide](docs/guides/model-providers.md) + provider-neutral onboarding, shipped with the knob-free provider-selection refactor (#440)
+- *(v034)* Refresh the four MT recipes to config-driven form + live re-run on HEAD (#441)
+- *(RFC drafts — tracking only, all `🔨 Draft`)* RFC 0045 — open-core library-extraction policy (#427); RFC 0046 — budget-lease library extraction `persatrix-budget` (#428); RFC 0047 — low-coupling batch library extraction, prompt kit / mock LLM / schemas (#429)
+
+### 🧪 Testing
+
+- Four new manual tests — [`MT-ALIAS-001`](docs/manual-tests/MT-ALIAS-001.md) *alias routing, live* (the **primary v0.3.4 release gate**: an alias-routed agent reports correctly-keyed **non-zero** `/api/v1/cost/summary` priced at the physical model, with `persatrix.llm.model_alias` on the `agent.llm.call` span while `gen_ai.request.model` stays the physical ID); [`MT-ALIAS-002`](docs/manual-tests/MT-ALIAS-002.md) *one-line provider swap* (the headline claim — a single alias edit re-routes the same agent); [`MT-OFFLINE-001`](docs/manual-tests/MT-OFFLINE-001.md) *offline, $0, zero network*; [`MT-OLLAMA-001`](docs/manual-tests/MT-OLLAMA-001.md) *Ollama local model, real tokens, $0 cloud*.
+- New **alias cost-attribution gate** — [`internal/server/cost_alias_gate_test.go`](internal/server/cost_alias_gate_test.go) + [`internal/cost/cost_alias_pricing_test.go`](internal/cost/cost_alias_pricing_test.go) — the automated release-blocker counterpart to `MT-ALIAS-001`; with no default provider it pins the configured `config/demo/anthropic` artifact (plus `config/demo/openai` for the priced peer). The carried-forward bored-persona [`cost-regression-gate`](tests/integration/test_bored_persona_cost.py) stays a release-blocker.
+- The offline / Ollama factory-interplay regression ([`test_llm_offline.py`](tests/unit/python/test_llm_offline.py) / [`test_llm_ollama.py`](tests/unit/python/test_llm_ollama.py)) and the `unconfigured`-sentinel fail-loud ([`test_model_aliases.py`](tests/unit/python/test_model_aliases.py) / [`test_llm_factory.py`](tests/unit/python/test_llm_factory.py)) keep provider selection config-driven after the force-knob removal.
+- Full **38-row** manual-test surface (4 new + 34 carried-forward) executed against the `7e74873` RC tip and re-run in config-driven form on HEAD `6ce23cd`; the release gate is met (#439, #441).
+
+[0.3.4]: https://github.com/mkhomutov/Persatrix/compare/v0.3.3...v0.3.4
 
 ## [0.3.3] - 2026-05-22
 
