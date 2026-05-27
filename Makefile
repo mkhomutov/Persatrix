@@ -245,6 +245,17 @@ docker-down: ## Stop all services
 docker-logs: ## Tail logs
 	docker compose logs -f
 
+demo-anthropic: ## Run the demo society on Anthropic (Claude) — needs ANTHROPIC_API_KEY; spends real money
+	@echo "→ Starting Persatrix on Anthropic (Claude) — REAL cloud calls, REAL spend."
+	@echo "  Needs ANTHROPIC_API_KEY in your environment or .env. Set a hard cap at https://console.anthropic.com/ first."
+	@# Provider selection is config-driven (RFC 0033 — no force-knob, no default
+	@# provider): the base config ships UNCONFIGURED, so this overlay mounts an
+	@# alias config pointing every agent at `provider: anthropic`. Anthropic is a
+	@# peer of openai / ollama / offline. --build matches the other demos.
+	docker compose -f docker-compose.yaml -f docker-compose.anthropic.yaml up -d --build
+	@echo "✓ Anthropic society up. Try:  ./bin/persatrix chat ember-owl"
+	@echo "  Stop with: make docker-down"
+
 demo-offline: ## Run the demo society with ZERO cost — no API key, no network (mock provider)
 	@echo "→ Starting Persatrix in offline mode (mock provider — no API calls, no spend)..."
 	@# Provider selection is config-driven (RFC 0033 — no force-knob): the

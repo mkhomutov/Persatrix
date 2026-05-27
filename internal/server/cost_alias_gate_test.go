@@ -17,14 +17,16 @@ import (
 // cost-attribution gate (master-plan §Acceptance): an alias-routed agent
 // reports correctly-keyed, NON-ZERO cost via GET /api/v1/cost/summary.
 //
-// It loads the real shipped config so the alias-derived cost.pricing.models
-// block (RFC 0033 §F) is exercised end to end. The usage is keyed by the
-// physical model the `quality` alias resolves to (claude-sonnet-4-6) — the
-// value the Python agent sends on LeaseRequest.model for an alias-routed agent.
-// Before PR 5 this read $0 because the pricing table still keyed the retired
-// claude-sonnet-4-20250514.
+// It loads a configured artifact — the anthropic demo config — so the
+// alias-derived cost.pricing.models block (RFC 0033 §F) is exercised end to
+// end. (v0.3.4 "no default provider": the base config/optimization.yaml ships
+// aliases UNCONFIGURED, so the configured config lives under config/demo/.) The
+// usage is keyed by the physical model the `quality` alias resolves to
+// (claude-sonnet-4-6) — the value the Python agent sends on LeaseRequest.model
+// for an alias-routed agent. Before PR 5 this read $0 because the pricing table
+// still keyed the retired claude-sonnet-4-20250514.
 func TestCostSummary_AliasRoutedAgent_ReportsNonZeroCost(t *testing.T) {
-	cfg, err := cost.LoadCostConfig(filepath.Join("..", "..", "config"))
+	cfg, err := cost.LoadCostConfig(filepath.Join("..", "..", "config", "demo", "anthropic"))
 	require.NoError(t, err)
 
 	counter := cost.NewTokenCounter(cfg, zap.NewNop())

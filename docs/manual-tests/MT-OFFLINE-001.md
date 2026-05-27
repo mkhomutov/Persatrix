@@ -11,7 +11,7 @@
 > purely config/alias-driven — the `PERSATRIX_OFFLINE` force-knob is **removed**
 > ([amendment 2026-05-27](../v0.3.4-plan-amendment-2026-05-27.md)). `make demo-offline`
 > still works, but it now selects the mock provider by mounting an alias config
-> ([`config/demo/optimization.offline.yaml`](../../config/demo/optimization.offline.yaml))
+> ([`config/demo/offline/optimization.yaml`](../../config/demo/offline/optimization.yaml))
 > rather than setting an env flag — so the `PERSATRIX_OFFLINE=1` / throwaway-key
 > prose below is superseded. The recipe is refreshed with fresh live evidence in
 > the [release-prep PR 4 Docker smoke](../v0.3.4-release-checklist.md#1-pre-release-verification).

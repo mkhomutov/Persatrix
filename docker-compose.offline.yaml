@@ -6,7 +6,7 @@
 #   docker compose -f docker-compose.yaml -f docker-compose.offline.yaml up -d --build
 #
 # Provider selection is config-driven (RFC 0033 — there is no force-knob): this
-# overlay mounts config/demo/optimization.offline.yaml over the stack's
+# overlay mounts config/demo/offline/optimization.yaml over the stack's
 # optimization.yaml, which points the quality / fast / summarizer aliases at
 # `provider: mock`. The factory (agents/llm_factory.py) then routes every agent
 # to the in-process MockProvider in agents.llm_offline before any provider SDK
@@ -21,7 +21,7 @@
 # The alias config is mounted into the orchestrator (it prices the mock model
 # at $0 in its cost table) and every agent (they resolve the aliases).
 x-offline-config: &offline-config
-  - ./config/demo/optimization.offline.yaml:/app/config/optimization.yaml:ro
+  - ./config/demo/offline/optimization.yaml:/app/config/optimization.yaml:ro
 
 x-offline-agent-env: &offline-agent-env
   PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"

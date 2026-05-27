@@ -30,7 +30,7 @@ where it resolves to a concrete `(provider, model, pricing)` record:
 models:
   aliases:
     quality:
-      provider: anthropic
+      provider: anthropic          # ← you choose this
       model: claude-sonnet-4-6
       input_per_1m_tokens: 3.00
       output_per_1m_tokens: 15.00
@@ -40,6 +40,13 @@ Because every agent, the routing defaults, and the summarisation path all
 reference the alias **name**, a vendor retirement or a provider swap is a
 single edit to that one entry — not a sweep across `agents.yaml`, the routing
 defaults, the pricing table, and the docs.
+
+> **No default provider.** The shipped `config/optimization.yaml` ships these
+> role aliases **unconfigured** (`provider: unconfigured`), so provider choice
+> is always explicit. A plain `docker compose up` fails loud at agent startup
+> with an actionable message until you pick one — run a [demo](#zero-config-demos)
+> (which mounts a configured alias config) or set `provider`/`model`/pricing on
+> the alias yourself. Nothing privileges a vendor or can spend money by default.
 
 ---
 
@@ -51,7 +58,7 @@ There are no per-provider force-knobs.
 
 | Provider | `provider:` | Needs | Cost | Notes |
 |----------|-------------|-------|------|-------|
-| **Anthropic** | `anthropic` | `ANTHROPIC_API_KEY` | per-token | The shipped default alias target (Claude). |
+| **Anthropic** | `anthropic` | `ANTHROPIC_API_KEY` | per-token | Claude. A peer, not a default — no provider is configured out of the box. |
 | **OpenAI** | `openai` | `OPENAI_API_KEY` | per-token | Also any OpenAI-compatible API (vLLM, Together, Groq, LM Studio) via `provider_config.base_url`. |
 | **Ollama** | `ollama` | a local `ollama serve` | **$0** (local) | A real model on your machine; a thin OpenAI-compatible subclass ([`agents/llm_ollama.py`](../../agents/llm_ollama.py)). `provider_config.base_url` defaults to `http://localhost:11434/v1`. |
 | **Mock (offline)** | `mock` | nothing | **$0** | Scripted persona replies, no network, no key ([`agents/llm_offline.py`](../../agents/llm_offline.py)). For demos, CI smoke, and risk-free exploration. |
@@ -98,14 +105,16 @@ the config reverted clean.
 
 ## Zero-config demos
 
-Each demo selects its provider the same config-driven way — by mounting an
-alias config ([`config/demo/`](../../config/demo/)) over the stack's
-`optimization.yaml`. There is no env force-knob; a demo is just an alias
-config that points `quality` / `fast` / `summarizer` at one provider.
+Each demo selects its provider the same config-driven way — by mounting a
+per-provider alias config ([`config/demo/<provider>/optimization.yaml`](../../config/demo/))
+over the stack's `optimization.yaml`. There is no env force-knob and no default;
+a demo is just an alias config that points `quality` / `fast` / `summarizer` at
+one provider. (The base config ships them `unconfigured` — see above.)
 
 ```bash
 make demo-offline   # mock provider: scripted replies, $0, no key, no network
 make demo-ollama    # a REAL local model via Ollama: no key, no cloud spend
+make demo-anthropic # the Anthropic (Claude) cloud peer (needs ANTHROPIC_API_KEY; spends real money)
 make demo-openai    # the OpenAI cloud peer (needs OPENAI_API_KEY; spends real money)
 ```
 

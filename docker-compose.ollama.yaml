@@ -6,7 +6,7 @@
 #   docker compose -f docker-compose.yaml -f docker-compose.ollama.yaml up -d --build
 #
 # Provider selection is config-driven (RFC 0033 — there is no force-knob): this
-# overlay mounts config/demo/optimization.ollama.yaml over the stack's
+# overlay mounts config/demo/ollama/optimization.yaml over the stack's
 # optimization.yaml, which points the quality / fast / summarizer aliases at
 # `provider: ollama` with base_url http://ollama:11434/v1 (the bundled daemon
 # on the compose bridge). The factory routes every agent to
@@ -25,7 +25,7 @@
 # The alias config is mounted into the orchestrator (cost table) and every
 # agent (alias resolution).
 x-ollama-config: &ollama-config
-  - ./config/demo/optimization.ollama.yaml:/app/config/optimization.yaml:ro
+  - ./config/demo/ollama/optimization.yaml:/app/config/optimization.yaml:ro
 
 # Pass the model override through to the agents so the factory swaps the alias
 # model in lock-step with the pull. Empty (unset) ⇒ the agents use the alias's

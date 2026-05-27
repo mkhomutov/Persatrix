@@ -6,7 +6,7 @@
 #   docker compose -f docker-compose.yaml -f docker-compose.openai.yaml up -d --build
 #
 # Provider selection is config-driven (RFC 0033 — there is no force-knob): this
-# overlay mounts config/demo/optimization.openai.yaml over the stack's
+# overlay mounts config/demo/openai/optimization.yaml over the stack's
 # optimization.yaml, which points the quality / fast / summarizer aliases at
 # `provider: openai` (gpt-4o / gpt-4o-mini). It is the release's one-line
 # provider swap applied as a demo — the same agents, unchanged, route to a
@@ -22,7 +22,7 @@
 # The alias config is mounted into the orchestrator (cost table) and every
 # agent (alias resolution).
 x-openai-config: &openai-config
-  - ./config/demo/optimization.openai.yaml:/app/config/optimization.yaml:ro
+  - ./config/demo/openai/optimization.yaml:/app/config/optimization.yaml:ro
 
 services:
   orchestrator:

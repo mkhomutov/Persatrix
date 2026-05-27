@@ -1,0 +1,85 @@
+# Demo optimization overlay — ANTHROPIC (cloud peer).
+#
+# Mounted over /app/config/optimization.yaml by docker-compose.anthropic.yaml
+# (`make demo-anthropic`). Points the three aliases the society references
+# (quality / fast / summarizer) at Anthropic (Claude). Needs ANTHROPIC_API_KEY
+# (the base compose plumbs it into every agent).
+#
+# Anthropic is a peer of OpenAI / Ollama / offline — not a baked-in default. The
+# shipped base config/optimization.yaml ships these aliases UNCONFIGURED (no
+# provider), so `docker compose up` with no demo fails loud until you pick a
+# provider. This demo is the "configure Anthropic" choice, applied as a config.
+#
+# This is also the configured artifact the alias cost-attribution gate pins
+# against (internal/server/cost_alias_gate_test.go +
+# internal/cost/cost_alias_pricing_test.go load config/demo/anthropic), since
+# the base config no longer carries a priced provider.
+#
+# Derived from the v0.3.3 shipped config — keep the non-alias blocks in step.
+schema_version: "0.2"
+active_profile: "default"
+
+models:
+  aliases:
+    quality:
+      provider: anthropic
+      model: claude-sonnet-4-6
+      input_per_1m_tokens: 3.00
+      output_per_1m_tokens: 15.00
+    fast:
+      provider: anthropic
+      model: claude-haiku-4-5-20251001
+      input_per_1m_tokens: 0.80
+      output_per_1m_tokens: 4.00
+    summarizer:
+      provider: anthropic
+      model: claude-haiku-4-5-20251001
+      input_per_1m_tokens: 0.80
+      output_per_1m_tokens: 4.00
+
+default:
+  model_routing:
+    defaults:
+      task_agents: "quality"
+      sub_agents: "quality"
+      evaluators: "fast"
+  caching:
+    exact:
+      enabled: true
+      max_entries: 10000
+      ttl_seconds: 3600
+  context_management:
+    max_context_tokens: 80000
+    summarization:
+      enabled: true
+      model: "summarizer"
+
+cost:
+  pricing:
+    # Derived from the aliases above (RFC 0033 §F) — one row per physical model.
+    models:
+      "claude-sonnet-4-6":
+        input_per_1m_tokens: 3.00
+        output_per_1m_tokens: 15.00
+      "claude-haiku-4-5-20251001":
+        input_per_1m_tokens: 0.80
+        output_per_1m_tokens: 4.00
+  budgets:
+    global:
+      max_daily_usd: 100.00
+      alert_at_percent: [50, 80, 95]
+      on_exceed: "pause_and_alert"
+    per_workflow:
+      default_max_usd: 10.00
+    per_agent:
+      default_max_usd: 5.00
+
+wallet:
+  ttl_seconds: 60
+  reaper_interval_seconds: 5
+  max_active_leases: 16
+
+conversation_window:
+  enabled: true
+  max_turns: 20
+  max_tokens: 2048

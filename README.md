@@ -88,11 +88,10 @@ agents) interact with over time.
 
 You'll need: **Docker Desktop**, **Go 1.24+**, **Python 3.11+**,
 **Rust 1.80+**, and **an LLM provider**. Persatrix is provider-agnostic
-([RFC 0033](docs/rfcs/0033-model-alias-layer.md)) — pick whichever you have a
-key for (Anthropic or OpenAI), or run a **free** local / offline model with no
-key at all (see [below](#try-it-free--offline-mode-no-api-key-no-cost-)). The
-example below uses an Anthropic key from <https://console.anthropic.com/>; swap
-the provider with a one-line edit (see the
+([RFC 0033](docs/rfcs/0033-model-alias-layer.md)) with **no default provider** —
+you pick one explicitly. Run a **free** local / offline model with no key at all,
+or use a cloud key you have (Anthropic or OpenAI). Each provider is selected the
+same way: a one-command demo that points the model aliases at it (see the
 [model providers guide](docs/guides/model-providers.md)).
 
 ```bash
@@ -100,18 +99,28 @@ the provider with a one-line edit (see the
 git clone https://github.com/mkhomutov/Persatrix.git
 cd Persatrix
 cp .env.example .env
-# Edit .env and paste the API key for your provider (e.g. ANTHROPIC_API_KEY
-# or OPENAI_API_KEY) — or skip the key entirely and use `make demo-offline`.
+# Put the API key for the provider you'll use in .env (e.g. ANTHROPIC_API_KEY
+# or OPENAI_API_KEY) — or skip keys entirely and use the free demos below.
 
 # Build everything
 make all && make build-agents
 
-# Bring up the stack (orchestrator + agents + observability)
-docker compose up -d
+# Bring the stack up ON A PROVIDER — pick one (each mounts an alias config):
+make demo-offline     # free: scripted mock, no key, no network  ← start here
+#   make demo-ollama    # free: a real local model via Ollama, no cloud spend
+#   make demo-anthropic # Claude  (needs ANTHROPIC_API_KEY; spends real money)
+#   make demo-openai    # GPT-4o  (needs OPENAI_API_KEY; spends real money)
 
 # Chat with the example "VP of Engineering" persona
 ./bin/persatrix chat ember-owl
 ```
+
+> **No default provider.** A bare `docker compose up` ships with the model
+> aliases **unconfigured**, so agents fail loud at startup until you pick a
+> provider — run a `make demo-*` above, or set `provider`/`model` on the
+> `quality` alias in [`config/optimization.yaml`](config/optimization.yaml).
+> This is deliberate: provider choice is always explicit, never an accidental
+> default that could spend money.
 
 Once the stack is up:
 
@@ -202,19 +211,20 @@ real Ollama tag like `llama3.2`, and `provider_config.base_url` defaults to
 
 ### Run on OpenAI — or any other provider 🔀
 
-Anthropic, OpenAI, Ollama, and the offline mock are **peers**: switching the
-whole society between them is a one-line edit to the `quality` alias in
-[`config/optimization.yaml`](config/optimization.yaml), not a code change. For
-the OpenAI cloud peer:
+Anthropic, OpenAI, Ollama, and the offline mock are **peers** — none is the
+default. Switching the whole society between them is a one-line edit to the
+`quality` alias in [`config/optimization.yaml`](config/optimization.yaml), not a
+code change, and each has a one-command demo:
 
 ```bash
-make demo-openai                  # routes every agent to OpenAI (gpt-4o / gpt-4o-mini)
+make demo-anthropic               # Claude  (needs ANTHROPIC_API_KEY)
+make demo-openai                  # GPT-4o / gpt-4o-mini (needs OPENAI_API_KEY)
 ```
 
-`make demo-openai` needs `OPENAI_API_KEY` in your `.env` (it spends real money
-— set a cap first). See the **[model providers & aliases guide](docs/guides/model-providers.md)**
-for how aliases resolve to a `(provider, model, pricing)` record, the one-line
-swap, and adding a brand-new provider.
+The cloud demos spend real money — set a cap first. See the
+**[model providers & aliases guide](docs/guides/model-providers.md)** for how
+aliases resolve to a `(provider, model, pricing)` record, the one-line swap, and
+adding a brand-new provider.
 
 ---
 

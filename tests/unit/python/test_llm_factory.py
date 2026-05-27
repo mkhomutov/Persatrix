@@ -191,15 +191,19 @@ class TestCreateProviderRawIdSignal:
 
 
 class TestStockConfigMigration:
-    """RFC 0033 PR 3 — after the config migration, a clean checkout starts
-    its default agents through the ``quality`` alias (physical model
-    ``claude-sonnet-4-6``), so no stock agent carries a raw vendor ID and
-    ``create_provider`` fires no RFC 0033 deprecation warning for them.
+    """RFC 0033 PR 3 + the v0.3.4 "no default provider" amendment.
 
-    These tests read the *shipped* ``config/optimization.yaml`` (the alias
-    map) and ``config/agents.yaml`` (the migrated entries), so they fail
-    until both migrations land.
+    After the config migration every stock agent routes through a logical
+    alias (``quality`` / ``fast`` / ``summarizer``), never a raw vendor ID. The
+    shipped base ``config/optimization.yaml`` ships those aliases UNCONFIGURED
+    (no default provider), so a stock agent fails loud against it until a
+    provider is configured; against a *configured* artifact (the anthropic demo
+    config) the same agents resolve to the physical model and fire no RFC 0033
+    raw-ID deprecation warning. These read ``config/agents.yaml`` (the migrated
+    entries) and the on-disk alias maps, so they fail until both land.
     """
+
+    _ANTHROPIC_DEMO = "config/demo/anthropic/optimization.yaml"
 
     @staticmethod
     def _shipped_agents() -> list[dict[str, Any]]:
@@ -208,23 +212,57 @@ class TestStockConfigMigration:
             data = yaml.safe_load(f)
         return list(data["agents"])
 
-    def test_every_stock_agent_resolves_to_quality_physical_model(self) -> None:
+    def test_stock_agents_reference_aliases_not_raw_ids(self) -> None:
+        # Migration invariant, provider-independent: every stock agent's model
+        # is a declared role alias, never a raw vendor ID. (The base map is
+        # unconfigured, but the *names* are still declared.)
         os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
+        optimization.reset_cache()
+        try:
+            alias_names = set(optimization.model_aliases())
+            if not alias_names:
+                pytest.skip("config/optimization.yaml absent in this checkout")
+            for agent in self._shipped_agents():
+                assert agent["model"] in alias_names, (
+                    f"{agent['id']} references {agent['model']!r}, not a declared alias"
+                )
+        finally:
+            optimization.reset_cache()
+
+    def test_stock_agents_fail_loud_against_unconfigured_base(self) -> None:
+        # v0.3.4 "no default provider": resolving a stock agent's alias against
+        # the shipped (unconfigured) base config is a loud, actionable error —
+        # `docker compose up` with no demo/config does not silently route.
+        os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
+        optimization.reset_cache()
+        try:
+            if not optimization.model_aliases():
+                pytest.skip("config/optimization.yaml absent in this checkout")
+            agent = self._shipped_agents()[0]
+            with pytest.raises(SystemExit, match="not configured"):
+                resolve(agent["model"])
+        finally:
+            optimization.reset_cache()
+
+    def test_every_stock_agent_resolves_against_configured_anthropic_demo(self) -> None:
+        # Against the configured anthropic demo, the same alias-routed agents
+        # resolve to the physical model (claude-sonnet-4-6) with no raw IDs.
+        os.environ["PERSATRIX_OPTIMIZATION_CONFIG"] = self._ANTHROPIC_DEMO
         optimization.reset_cache()
         try:
             for agent in self._shipped_agents():
                 resolved = resolve(agent["model"])
                 assert resolved.raw is False, f"{agent['id']} still uses a raw vendor ID"
-                assert resolved.alias == "quality", agent["id"]
+                assert resolved.alias in {"quality", "fast", "summarizer"}, agent["id"]
                 assert resolved.provider == "anthropic", agent["id"]
-                assert resolved.model == "claude-sonnet-4-6", agent["id"]
         finally:
+            os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
             optimization.reset_cache()
 
     def test_create_provider_for_stock_agents_emits_no_raw_id_warning(
         self, _reset_raw_id_signal: None, caplog: pytest.LogCaptureFixture
     ) -> None:
-        os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
+        os.environ["PERSATRIX_OPTIMIZATION_CONFIG"] = self._ANTHROPIC_DEMO
         optimization.reset_cache()
         try:
             agents = self._shipped_agents()
@@ -237,4 +275,5 @@ class TestStockConfigMigration:
                 "RFC 0033" in r.getMessage() for r in caplog.records
             ), "a stock agent still trips the raw-ID deprecation warning"
         finally:
+            os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
             optimization.reset_cache()

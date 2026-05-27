@@ -11,7 +11,7 @@
 > purely config/alias-driven — the `PERSATRIX_OLLAMA` force-knob is **removed**
 > ([amendment 2026-05-27](../v0.3.4-plan-amendment-2026-05-27.md)). `make demo-ollama`
 > still works, but it now selects the Ollama provider by mounting an alias config
-> ([`config/demo/optimization.ollama.yaml`](../../config/demo/optimization.ollama.yaml))
+> ([`config/demo/ollama/optimization.yaml`](../../config/demo/ollama/optimization.yaml))
 > rather than setting an env flag — so the `PERSATRIX_OLLAMA=1` / throwaway-key
 > prose below is superseded (`PERSATRIX_OLLAMA_MODEL` / `PERSATRIX_OLLAMA_BASE_URL`
 > survive as provider configuration). The recipe is refreshed with fresh live

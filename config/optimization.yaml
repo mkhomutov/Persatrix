@@ -4,88 +4,57 @@ schema_version: "0.2"
 # Active profile: cost_optimized | speed_optimized | quality_optimized | simulation_optimized | custom
 active_profile: "default"
 
-# ─── Model Aliases (RFC 0033 Phase 1) ─────────────────────
+# ─── Model Aliases (RFC 0033) ─────────────────────────────
 # Single source of truth for model identity. Agents (config/agents.yaml),
 # the routing defaults below, and the summarization model reference a
 # logical alias — quality / fast / summarizer — instead of a concrete
-# vendor model ID. A vendor retirement or a provider swap is then a
-# one-line edit to the entry here, not a sweep across agents.yaml, the
-# routing defaults, the pricing table, agents/persona_types.py, and the
-# docs. Each entry resolves to a concrete (provider, model, pricing)
+# vendor model ID. Each resolves to a concrete (provider, model, pricing)
 # record via agents/model_aliases.py resolve(). Schema:
 # schemas/optimization.schema.json (models.aliases).
 #
-# SUBSTRATE ONLY in this PR (RFC 0033 PR 1): no consumer reads this block
-# yet — create_provider is rewired to call resolve() in the next PR
-# (RFC 0033 PR 2), and the agents.yaml / routing-defaults / summarization
-# references flip to aliases in PR 3. Until then every model reference
-# still flows through the raw-ID path, so this block changes no behaviour.
+# NO DEFAULT PROVIDER (v0.3.4). These role aliases ship UNCONFIGURED:
+# provider selection is always an explicit choice, never a baked-in default.
+# A plain `docker compose up` therefore fails loud at agent startup until you
+# pick a provider — either run a one-command demo (each mounts a per-provider
+# alias config from config/demo/<provider>/optimization.yaml):
 #
-# Local-pricing decision (RFC 0033 amendment item 6): local providers
-# (ollama / mock) run at $0 real cost, so their entries carry an explicit
-# 0 price and are documented $0-real — never an absent price. The RFC 0023
-# wallet-cap demo, which needs simulated spend to trip, pins to a priced
-# cloud alias (quality), not a local one. The PR 4 missing-price guard
-# (agents/model_aliases.py) keys locality on the provider name
-# (ollama / mock) or a *loopback* provider_config.base_url, so a local entry
-# is $0-by-design and exempt; it reserves the loud fail-closed (SystemExit)
-# for an *unpriced non-local* alias. Locality is loopback-only: a self-hosted
-# model on a LAN/remote address (private IP or hostname) is not auto-detected
-# as local — mark such a box $0-real with an explicit 0 price. The inline
-# price the guard enforces is what PR 5 derives the Go cost table
-# (cost.pricing.models) from; without it that derived table would omit the
-# model, EstimateCost would return $0, and the RFC 0023 budget gate would be
-# silently disabled. (PR 4 enforces the price is present; PR 5 wires it into
-# the Go table — until then the inline price is not yet consumed there.) The
-# guard fires per-resolve, scoped to the alias being resolved (so an unused
-# misconfigured entry never breaks an unrelated resolve);
-# validate_alias_pricing() checks the whole block for an explicit startup /
-# CI sweep.
+#   make demo-anthropic   # Claude  (needs ANTHROPIC_API_KEY)
+#   make demo-openai      # GPT-4o  (needs OPENAI_API_KEY)
+#   make demo-ollama      # a real local model — $0, no key, no cloud
+#   make demo-offline     # scripted mock — $0, no key, no network
+#
+# — or configure here directly: set provider / model / pricing on each alias
+# below (e.g. provider: anthropic, model: claude-sonnet-4-6, with its prices).
+# Every provider is selected the same standard way; a swap is a one-line edit.
+# See docs/guides/model-providers.md.
+#
+# Pricing: a non-local provider with no price would make the Go cost table
+# (cost.pricing.models, derived from this map) read $0 and silently disable the
+# RFC 0023 budget gate, so the missing-price guard (agents/model_aliases.py)
+# fails closed on an unpriced *non-local* alias. Local providers (ollama / mock)
+# are $0-real and carry an explicit 0. The `unconfigured` sentinel below fails
+# loud on its own, before any pricing check — resolving it tells you to pick a
+# provider.
 models:
   aliases:
-    # Default for task agents, personas, and sub-agents. The Anthropic
-    # Sonnet 4 → 4.6 retirement migration is absorbed by editing only the
-    # `model:` field on this one entry (see RFC 0033 §Motivation).
+    # UNCONFIGURED by default — pick a provider (run a demo above, or replace
+    # `provider` / `model` / pricing here). Resolving an `unconfigured` alias is
+    # a loud, actionable error (agents/model_aliases.py) — no silent $0 routing.
     quality:
-      provider: anthropic
-      model: claude-sonnet-4-6
-      input_per_1m_tokens: 3.00
-      output_per_1m_tokens: 15.00
-    # Cheaper / faster model for evaluators and similar low-stakes calls.
-    fast:
-      provider: anthropic
-      model: claude-haiku-4-5-20251001
-      input_per_1m_tokens: 0.80
-      output_per_1m_tokens: 4.00
-    # The summarization-on-close path (RFC 0020) selects this alias on a
-    # surface separate from the provider factory; kept distinct from
-    # `fast` so the two can pivot independently.
-    summarizer:
-      provider: anthropic
-      model: claude-haiku-4-5-20251001
-      input_per_1m_tokens: 0.80
-      output_per_1m_tokens: 4.00
-    # OpenAI peer (RFC 0033 amendment item 2) — a priced cloud
-    # alternative so the release ships "Any Provider", and the master-plan
-    # Phase 4 one-line provider-swap test resolves to a priced target
-    # rather than tripping PR 4's missing-price guard. gpt-4o list pricing.
-    quality-openai:
-      provider: openai
-      model: gpt-4o
-      input_per_1m_tokens: 2.50
-      output_per_1m_tokens: 10.00
-    # Local model (RFC 0033 amendment item 6) — $0 real cost; see the
-    # local-pricing decision in the block comment above.
-    local-fast:
-      provider: ollama
-      model: llama3.1
+      provider: unconfigured
+      model: unconfigured
       input_per_1m_tokens: 0
       output_per_1m_tokens: 0
-      notes: >-
-        Local Ollama model — $0 real cost. Carries an explicit 0 price
-        (documented $0-real, not absent) so PR 4's missing-price guard
-        reads it as $0-by-design. The wallet-cap demo pins to a priced
-        cloud alias (quality), not this one.
+    fast:
+      provider: unconfigured
+      model: unconfigured
+      input_per_1m_tokens: 0
+      output_per_1m_tokens: 0
+    summarizer:
+      provider: unconfigured
+      model: unconfigured
+      input_per_1m_tokens: 0
+      output_per_1m_tokens: 0
 
 default:
   model_routing:
@@ -128,33 +97,21 @@ default:
 
 cost:
   pricing:
-    # RFC 0033 §F (PR 5): DERIVED from models.aliases (above) — one entry per
-    # physical `model:` an alias resolves to, keyed for the Go cost pipeline
-    # (internal/cost/config.go EstimateCost, which keys by the physical model
-    # id it reads off telemetry). This is no longer hand-maintained: it is the
-    # projection of the alias map produced by agents/optimization.py
-    # derived_cost_pricing(). Keep it in lock-step — when an alias's model or
-    # price changes, regenerate this block from the alias map. The optimization
-    # test suite (TestShippedCostPricingDerivedFromAliases) fails if this block
-    # diverges from the projection, so a stale hand-edit cannot merge.
+    # RFC 0033 §F: DERIVED from models.aliases (above) — one entry per physical
+    # `model:` an alias resolves to, keyed for the Go cost pipeline
+    # (internal/cost/config.go EstimateCost). It is the projection of the alias
+    # map produced by agents/optimization.py derived_cost_pricing(); keep it in
+    # lock-step (the optimization test TestShippedCostPricingDerivedFromAliases
+    # fails on drift).
     #
-    # Deriving it is what re-keys cost on a migration: PR 3 routed every stock
-    # agent to `quality` → claude-sonnet-4-6, and pricing that physical id here
-    # (not the retired claude-sonnet-4-20250514) is what keeps EstimateCost
-    # non-zero and the RFC 0023 budget/lease gate live for alias-routed calls.
-    # A $0-real local model (llama3.1) carries its explicit 0 — EstimateCost
-    # then reads $0 for it, which is correct.
+    # The shipped aliases are UNCONFIGURED (no provider — see the block comment
+    # above), so the projection is just the placeholder `unconfigured` model at
+    # $0. No agent ever sends it: resolving an unconfigured alias fails loud
+    # first. When you configure a provider here (or run a demo, which mounts a
+    # configured config/demo/<provider>/optimization.yaml with its own priced
+    # rows), regenerate this block from the alias map.
     models:
-      "claude-sonnet-4-6":
-        input_per_1m_tokens: 3.00
-        output_per_1m_tokens: 15.00
-      "claude-haiku-4-5-20251001":
-        input_per_1m_tokens: 0.80
-        output_per_1m_tokens: 4.00
-      "gpt-4o":
-        input_per_1m_tokens: 2.50
-        output_per_1m_tokens: 10.00
-      "llama3.1":
+      "unconfigured":
         input_per_1m_tokens: 0
         output_per_1m_tokens: 0
 

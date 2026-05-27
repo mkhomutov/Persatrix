@@ -8,12 +8,17 @@
 # openai) authenticates without a per-deployment override. There is no hard
 # startup key-guard: an agent routed to a provider whose key is unset logs a
 # clear startup warning (agents/llm_factory.py) and local providers
-# (ollama / mock) need no key at all. Pick a provider by pointing the
-# `quality` alias at it in config/optimization.yaml — or use one of the
-# zero-config demo overlays:
-#   make demo-offline   # mock provider, $0, no key, no network
-#   make demo-ollama    # real local model via Ollama, no key, no cloud spend
-#   make demo-openai    # OpenAI cloud peer (needs OPENAI_API_KEY)
+# (ollama / mock) need no key at all.
+#
+# NO DEFAULT PROVIDER: the base config/optimization.yaml ships its model
+# aliases UNCONFIGURED, so a plain `docker compose up` fails loud at agent
+# startup until you pick a provider — either configure the `quality` alias in
+# config/optimization.yaml, or run one of the zero-config demo overlays (each
+# mounts a per-provider alias config):
+#   make demo-anthropic # Claude        (needs ANTHROPIC_API_KEY)
+#   make demo-openai    # OpenAI        (needs OPENAI_API_KEY)
+#   make demo-ollama    # real local model via Ollama — no key, no cloud spend
+#   make demo-offline   # mock provider — $0, no key, no network
 
 services:
   # ─── Orchestrator (Go) ────────────────────────────

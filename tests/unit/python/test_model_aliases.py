@@ -368,3 +368,40 @@ def test_raw_fallback_constants_mirror_llm_client() -> None:
     # llm_client uses an inline ("claude",) literal for the anthropic
     # default (no named constant to pin against); lock ours to that value.
     assert model_aliases._DEFAULT_ANTHROPIC_PREFIXES == ("claude",)
+
+
+class TestUnconfiguredSentinel:
+    """An alias declaring ``provider: unconfigured`` is the shipped base
+    config's default — no provider is selected. Resolving it must fail loud
+    with an actionable message (run a demo, or configure the alias) rather
+    than silently routing or returning a $0 record. Fires unconditionally,
+    including under ``use_alias_map`` (so it cannot be a $0 budget hole and a
+    test can drive it). RFC 0033 / v0.3.4 "no default provider" amendment.
+    """
+
+    def test_unconfigured_alias_fails_loud(self) -> None:
+        with use_alias_map({"quality": {
+            "provider": "unconfigured",
+            "model": "unconfigured",
+            "input_per_1m_tokens": 0,
+            "output_per_1m_tokens": 0,
+        }}), pytest.raises(SystemExit) as exc:
+            resolve("quality")
+        msg = str(exc.value)
+        assert "quality" in msg
+        assert "not configured" in msg
+        # Actionable: points at the demos / the alias config.
+        assert "demo-" in msg and "optimization.yaml" in msg
+
+    def test_unconfigured_fires_before_price_guard(self) -> None:
+        # Even with a real price present, an unconfigured provider is the
+        # "pick one" sentinel, so the unconfigured error wins over any pricing
+        # check — the operator must choose a provider first.
+        with use_alias_map({"quality": {
+            "provider": "unconfigured",
+            "model": "unconfigured",
+            "input_per_1m_tokens": 3.0,
+            "output_per_1m_tokens": 15.0,
+        }}), pytest.raises(SystemExit) as exc:
+            resolve("quality")
+        assert "not configured" in str(exc.value)
