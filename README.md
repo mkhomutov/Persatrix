@@ -281,7 +281,7 @@ Persatrix is BUSL-1.1 licensed with no warranty. Use at your own risk
 | **v0.3.1** | Chat with a persona that remembers stated facts about you across interactions and follows the conversation it's currently having | ✅ Released |
 | **v0.3.2** | Every LLM call passes through a wallet lease before it's issued — cost becomes a structural gate, not a post-hoc accountant — and the memory facade is frozen as the single path to agent memory ahead of the v0.4.0 Postgres split | ✅ Released |
 | **v0.3.3** | A persona with no scheduled work and no inbound traffic costs nothing — its event loop parks until something wakes it (an inbound message, a scheduled timer, or a salience-triggered memory write) instead of polling on a fixed tick | ✅ Released |
-| **v0.3.4** | Run the same agents on any provider — Anthropic, OpenAI, a free local model (Ollama), or a $0 offline mock — by naming a logical model alias (`quality` / `fast` / `summarizer`); a vendor swap is a one-line config edit | 🚧 Release prep |
+| **v0.3.4** | Run the same agents on any provider — Anthropic, OpenAI, a free local model (Ollama), or a $0 offline mock — by naming a logical model alias (`quality` / `fast` / `summarizer`); a vendor swap is a one-line config edit | ✅ Released |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
 | **v0.6.0** | Run agent societies across multiple nodes and networks | 📋 Planned |
