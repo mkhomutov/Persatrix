@@ -117,8 +117,8 @@ make demo-offline     # free: scripted mock, no key, no network  ← start here
 
 > **No default provider.** A bare `docker compose up` ships with the model
 > aliases **unconfigured**, so agents fail loud at startup until you pick a
-> provider — run a `make demo-*` above, or set `provider`/`model` on the
-> `quality` alias in [`config/optimization.yaml`](config/optimization.yaml).
+> provider — run a `make demo-*` above, or configure the `quality` / `fast` /
+> `summarizer` role aliases in [`config/optimization.yaml`](config/optimization.yaml).
 > This is deliberate: provider choice is always explicit, never an accidental
 > default that could spend money.
 
@@ -207,14 +207,17 @@ real Ollama tag like `llama3.2`, and `provider_config.base_url` defaults to
 > priced cloud provider instead. Already running Ollama yourself? Point the
 > `quality` alias at `provider: ollama` (set `provider_config.base_url`, or
 > `PERSATRIX_OLLAMA_BASE_URL`, if it's not on the default port) to route the
-> society to it without the bundled container.
+> society to it without the bundled container. (Point all three role aliases —
+> `quality` / `fast` / `summarizer` — at it for the whole society, not just
+> `quality`.)
 
 ### Run on OpenAI — or any other provider 🔀
 
 Anthropic, OpenAI, Ollama, and the offline mock are **peers** — none is the
-default. Switching the whole society between them is a one-line edit to the
-`quality` alias in [`config/optimization.yaml`](config/optimization.yaml), not a
-code change, and each has a one-command demo:
+default. Switching a role between them is a one-line edit to its alias in
+[`config/optimization.yaml`](config/optimization.yaml) — the society's three
+role aliases (`quality` / `fast` / `summarizer`) move the same way — not a code
+change, and each provider has a one-command demo that configures all three:
 
 ```bash
 make demo-anthropic               # Claude  (needs ANTHROPIC_API_KEY)

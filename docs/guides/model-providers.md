@@ -46,7 +46,8 @@ defaults, the pricing table, and the docs.
 > is always explicit. A plain `docker compose up` fails loud at agent startup
 > with an actionable message until you pick one — run a [demo](#zero-config-demos)
 > (which mounts a configured alias config) or set `provider`/`model`/pricing on
-> the alias yourself. Nothing privileges a vendor or can spend money by default.
+> the three role aliases (`quality` / `fast` / `summarizer`) yourself. Nothing
+> privileges a vendor or can spend money by default.
 
 ---
 
@@ -72,10 +73,11 @@ own worked example.
 
 ---
 
-## Swapping providers is one line
+## Swapping providers is one line per role
 
-To move the whole society from Anthropic to OpenAI, edit the `quality` alias
-— nothing else:
+Switching the model behind a role is a single-entry edit — no code change, no
+sweep across `agents.yaml`, the pricing table, and the docs. To move the
+`quality` role (the task and persona agents) from Anthropic to OpenAI:
 
 ```diff
  quality:
@@ -89,12 +91,20 @@ To move the whole society from Anthropic to OpenAI, edit the `quality` alias
 +  output_per_1m_tokens: 10.00
 ```
 
-The same agents, unchanged, now route to OpenAI, and cost re-keys to the new
-physical model because the cost table is derived from the alias map (below).
-This is verified end-to-end by the manual test
+The quality-routed agents, unchanged, now run on OpenAI, and cost re-keys to
+the new physical model because the cost table is derived from the alias map
+(below). This is verified end-to-end by the manual test
 [MT-ALIAS-002](../manual-tests/MT-ALIAS-002.md): a single alias edit re-routed
 a live agent to a different provider, with cost re-keyed to the new model and
 the config reverted clean.
+
+> **The society spans three role aliases** — `quality` (the task and persona
+> agents), `fast` (evaluators), and `summarizer` (the summarisation-on-close
+> path, [RFC 0020](../rfcs/0020-interaction-lifecycle.md)). Moving the **whole**
+> society to a provider means pointing all three at it — each a one-line edit; a
+> [demo config](#zero-config-demos) does that in one file. Configure at least the
+> role aliases your run exercises: leaving `summarizer` `unconfigured` doesn't
+> break chat, but summarisation-on-close silently degrades to its fallback.
 
 > The alias entry is **authoritative**. If an agent sets its own `provider:`
 > field that *disagrees* with the alias it resolves to, the factory fails loud
