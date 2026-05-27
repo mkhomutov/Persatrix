@@ -43,7 +43,7 @@ alias swap).
 
 **Related Automated Tests**:
 - Python: `tests/unit/python/test_model_aliases.py` (resolver returns the alias's declared
-  provider); `tests/unit/python/test_optimization.py`
+  provider); `tests/unit/python/test_optimization_cost_pricing.py`
   (`TestShippedCostPricingDerivedFromAliases` — the derived pricing table covers every alias's
   physical model, so a swapped target is already priced).
 
