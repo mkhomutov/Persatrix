@@ -129,6 +129,18 @@ jobs:
       - name: Run unit tests
         run: python -m pytest tests/unit/python/ -v --tb=short
 
+      # ISSUE-0076: CI ran only the unit suite + the single bored-persona cost
+      # gate (the cost-regression-gate job below), so the rest of
+      # tests/integration/ was never gated by any CI job. The v0.3.4
+      # no-default-provider change (#440) shipped the base config's `summarizer`
+      # alias unconfigured, which broke the close-path integration tests, and
+      # the breakage reached main undetected. This step closes the gap by
+      # running the full integration tier (mirrors `make test-integration`); it
+      # subsumes the conditional bored-persona gate, which stays as a always-
+      # present required status check + wake-path trigger in its own right.
+      - name: Run integration tests
+        run: PYTHONPATH="agents/generated" python -m pytest tests/integration/ -v --tb=short -c agents/pyproject.toml
+
       # RFC 0029 §Test Strategy — personal-tier recall latency gate. Fails
       # the build on a >20% p99/p50 regression off the committed baseline;
       # runs informational-only (exit 0) until the perf-baseline-capture
