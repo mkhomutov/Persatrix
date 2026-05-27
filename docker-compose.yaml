@@ -1,5 +1,24 @@
 # Persatrix — Local Development Stack
 # Usage: docker compose up -d
+#
+# Provider-neutral onboarding (RFC 0033 — "Any Model, Any Provider"): every
+# agent service plumbs *every* provider key optionally (ANTHROPIC_API_KEY /
+# OPENAI_API_KEY, each with a `:-` empty default), so first-run privileges no
+# single vendor and a config-only provider swap (the `quality` alias →
+# openai) authenticates without a per-deployment override. There is no hard
+# startup key-guard: an agent routed to a provider whose key is unset logs a
+# clear startup warning (agents/llm_factory.py) and local providers
+# (ollama / mock) need no key at all.
+#
+# NO DEFAULT PROVIDER: the base config/optimization.yaml ships its model
+# aliases UNCONFIGURED, so a plain `docker compose up` fails loud at agent
+# startup until you pick a provider — either configure the `quality` alias in
+# config/optimization.yaml, or run one of the zero-config demo overlays (each
+# mounts a per-provider alias config):
+#   make demo-anthropic # Claude        (needs ANTHROPIC_API_KEY)
+#   make demo-openai    # OpenAI        (needs OPENAI_API_KEY)
+#   make demo-ollama    # real local model via Ollama — no key, no cloud spend
+#   make demo-offline   # mock provider — $0, no key, no network
 
 services:
   # ─── Orchestrator (Go) ────────────────────────────
@@ -83,7 +102,11 @@ services:
       - ./config:/app/config:ro
       - workspace:/workspace
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set — export it or add to .env}
+      # Provider-neutral: every provider key plumbed optionally (see the
+      # file header). The configured provider's own key is the one that must
+      # be set; local providers (ollama / mock) need none.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     # NOTE(review-PR188, N3): wait for orchestrator /healthz (healthcheck at
     # line ~54) to pass before starting. Without `service_healthy`, a cold
@@ -113,7 +136,11 @@ services:
       - ./config:/app/config:ro
       - workspace:/workspace
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set — export it or add to .env}
+      # Provider-neutral: every provider key plumbed optionally (see the
+      # file header). The configured provider's own key is the one that must
+      # be set; local providers (ollama / mock) need none.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     # See agent-planner depends_on comment for rationale (PR188 N3).
     depends_on:
@@ -138,7 +165,11 @@ services:
       - ./config:/app/config:ro
       - workspace:/workspace:ro
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set — export it or add to .env}
+      # Provider-neutral: every provider key plumbed optionally (see the
+      # file header). The configured provider's own key is the one that must
+      # be set; local providers (ollama / mock) need none.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     # See agent-planner depends_on comment for rationale (PR188 N3).
     depends_on:
@@ -189,7 +220,11 @@ services:
       # rm persatrix_ember-owl-data && docker compose up -d`.
       - ember-owl-data:/app/data
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set — export it or add to .env}
+      # Provider-neutral: every provider key plumbed optionally (see the
+      # file header). The configured provider's own key is the one that must
+      # be set; local providers (ollama / mock) need none.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     # See agent-planner depends_on comment for rationale (PR188 N3).
     depends_on:
@@ -219,7 +254,11 @@ services:
       # persona's SQLite memory store at /app/data/memory.db is isolated.
       - iron-fox-data:/app/data
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set — export it or add to .env}
+      # Provider-neutral: every provider key plumbed optionally (see the
+      # file header). The configured provider's own key is the one that must
+      # be set; local providers (ollama / mock) need none.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     depends_on:
       orchestrator:
@@ -244,7 +283,11 @@ services:
       - workspace:/workspace:ro
       - nova-sparrow-data:/app/data
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set — export it or add to .env}
+      # Provider-neutral: every provider key plumbed optionally (see the
+      # file header). The configured provider's own key is the one that must
+      # be set; local providers (ollama / mock) need none.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     depends_on:
       orchestrator:

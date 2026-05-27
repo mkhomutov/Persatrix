@@ -377,34 +377,57 @@ class TestModelAliasesAccessor:
 
 
 class TestShippedYamlModelAliases:
-    """Pin the alias block PR 1 ships in ``config/optimization.yaml``.
+    """Pin the alias blocks shipped in ``config/optimization.yaml`` and the
+    per-provider demo configs under ``config/demo/``.
 
-    Mirrors :class:`TestShippedYamlMatchesHardcodedDefaults`: the on-disk
-    file is the single source of truth, so a drift between this PR's
-    promised aliases and the shipped block surfaces here.
+    The on-disk files are the single source of truth, so a drift between the
+    promised aliases and the shipped blocks surfaces here. v0.3.4 "no default
+    provider": the base config ships role aliases UNCONFIGURED; the concrete
+    provider/model mappings live in the demo configs.
     """
 
-    def test_shipped_yaml_carries_core_aliases(self) -> None:
+    @staticmethod
+    def _aliases_for(config_path: str | None) -> dict:
         import os
 
-        os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
+        prior = os.environ.get("PERSATRIX_OPTIMIZATION_CONFIG")
+        if config_path is None:
+            os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
+        else:
+            os.environ["PERSATRIX_OPTIMIZATION_CONFIG"] = config_path
         reset_cache()
         try:
-            aliases = model_aliases()
+            return model_aliases()
         finally:
+            if prior is not None:
+                os.environ["PERSATRIX_OPTIMIZATION_CONFIG"] = prior
+            else:
+                os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
             reset_cache()
 
+    def test_base_config_ships_unconfigured_role_aliases(self) -> None:
+        aliases = self._aliases_for(None)
         if not aliases:
             pytest.skip("config/optimization.yaml absent in this checkout")
+        # No default provider: role aliases ship as the `unconfigured` sentinel.
+        for role in ("quality", "fast", "summarizer"):
+            assert aliases[role]["provider"] == "unconfigured", role
 
-        # quality migrates Sonnet 4 → 4.6 by editing only this entry.
+    def test_anthropic_demo_carries_core_aliases(self) -> None:
+        aliases = self._aliases_for("config/demo/anthropic/optimization.yaml")
+        if not aliases:
+            pytest.skip("config/demo/anthropic absent in this checkout")
+        # quality → Sonnet 4.6; fast / summarizer → Haiku.
         assert aliases["quality"]["provider"] == "anthropic"
         assert aliases["quality"]["model"] == "claude-sonnet-4-6"
-        # fast / summarizer route to Haiku.
         for alias in ("fast", "summarizer"):
             assert aliases[alias]["provider"] == "anthropic"
             assert aliases[alias]["model"] == "claude-haiku-4-5-20251001"
-        # OpenAI peer ships priced (amendment item 2).
+
+    def test_openai_demo_ships_priced_peer(self) -> None:
+        aliases = self._aliases_for("config/demo/openai/optimization.yaml")
+        if not aliases:
+            pytest.skip("config/demo/openai absent in this checkout")
         openai_aliases = [
             name for name, entry in aliases.items()
             if entry.get("provider") == "openai"

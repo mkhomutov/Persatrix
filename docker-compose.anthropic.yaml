@@ -1,0 +1,45 @@
+# Anthropic overlay for docker-compose.yaml — runs the whole society on
+# Anthropic (Claude), a peer of OpenAI / Ollama / offline.
+#
+#   make demo-anthropic       # needs ANTHROPIC_API_KEY in your environment / .env
+#       — or —
+#   docker compose -f docker-compose.yaml -f docker-compose.anthropic.yaml up -d --build
+#
+# Provider selection is config-driven (RFC 0033 — there is no force-knob, and no
+# default provider): the base config/optimization.yaml ships its aliases
+# UNCONFIGURED, so a plain `docker compose up` fails loud until you pick a
+# provider. This overlay mounts config/demo/anthropic/optimization.yaml over the
+# stack's optimization.yaml, pointing the quality / fast / summarizer aliases at
+# Anthropic (Claude). It is the "configure Anthropic" choice as a one-command
+# demo — Anthropic is not privileged over the other providers.
+#
+# This is a REAL cloud provider: it spends real money and needs ANTHROPIC_API_KEY
+# (the base compose plumbs it into every agent). Set a hard spending cap at
+# https://console.anthropic.com/ before running — see the README § Cost Warning.
+
+# The alias config is mounted into the orchestrator (cost table) and every
+# agent (alias resolution).
+x-anthropic-config: &anthropic-config
+  - ./config/demo/anthropic/optimization.yaml:/app/config/optimization.yaml:ro
+
+services:
+  orchestrator:
+    volumes: *anthropic-config
+
+  agent-planner:
+    volumes: *anthropic-config
+
+  agent-coder:
+    volumes: *anthropic-config
+
+  agent-reviewer:
+    volumes: *anthropic-config
+
+  agent-ember-owl:
+    volumes: *anthropic-config
+
+  agent-iron-fox:
+    volumes: *anthropic-config
+
+  agent-nova-sparrow:
+    volumes: *anthropic-config

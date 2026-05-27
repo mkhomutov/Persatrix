@@ -245,34 +245,52 @@ docker-down: ## Stop all services
 docker-logs: ## Tail logs
 	docker compose logs -f
 
-demo-offline: ## Run the demo society with ZERO cost — no API key, no network (PERSATRIX_OFFLINE)
-	@echo "→ Starting Persatrix in offline mode (MockProvider — no API calls, no spend)..."
-	@# ANTHROPIC_API_KEY is a throwaway value: it only satisfies the base
-	@# compose file's startup `:?` key-guard, which Compose evaluates before
-	@# the overlay merges. PERSATRIX_OFFLINE=1 routes every agent to the
-	@# MockProvider, so the value is never used. See docker-compose.offline.yaml.
-	@# --build so the agent image always bakes the current source (the
-	@# Dockerfile COPYs + pip-installs agents/, so `up` alone would reuse a
-	@# stale image and miss MockProvider). Layer caching keeps it fast when
-	@# nothing changed.
-	ANTHROPIC_API_KEY=offline-not-used PERSATRIX_OFFLINE=1 \
-	  docker compose -f docker-compose.yaml -f docker-compose.offline.yaml up -d --build
+demo-anthropic: ## Run the demo society on Anthropic (Claude) — needs ANTHROPIC_API_KEY; spends real money
+	@echo "→ Starting Persatrix on Anthropic (Claude) — REAL cloud calls, REAL spend."
+	@echo "  Needs ANTHROPIC_API_KEY in your environment or .env. Set a hard cap at https://console.anthropic.com/ first."
+	@# Provider selection is config-driven (RFC 0033 — no force-knob, no default
+	@# provider): the base config ships UNCONFIGURED, so this overlay mounts an
+	@# alias config pointing every agent at `provider: anthropic`. Anthropic is a
+	@# peer of openai / ollama / offline. --build matches the other demos.
+	docker compose -f docker-compose.yaml -f docker-compose.anthropic.yaml up -d --build
+	@echo "✓ Anthropic society up. Try:  ./bin/persatrix chat ember-owl"
+	@echo "  Stop with: make docker-down"
+
+demo-offline: ## Run the demo society with ZERO cost — no API key, no network (mock provider)
+	@echo "→ Starting Persatrix in offline mode (mock provider — no API calls, no spend)..."
+	@# Provider selection is config-driven (RFC 0033 — no force-knob): the
+	@# offline overlay mounts an alias config pointing every agent at
+	@# `provider: mock`, so no API key is needed. --build so the agent image
+	@# always bakes the current source (the Dockerfile COPYs + pip-installs
+	@# agents/, so `up` alone would reuse a stale image). Layer caching keeps
+	@# it fast when nothing changed.
+	docker compose -f docker-compose.yaml -f docker-compose.offline.yaml up -d --build
 	@echo "✓ Offline society up. Try:  ./bin/persatrix chat ember-owl"
 	@echo "  Stop with: make docker-down"
 
-demo-ollama: ## Run the demo society on a REAL local model via Ollama — no API key, no cloud spend (PERSATRIX_OLLAMA; set PERSATRIX_OLLAMA_MODEL to change the model)
+demo-ollama: ## Run the demo society on a REAL local model via Ollama — no API key, no cloud spend (set PERSATRIX_OLLAMA_MODEL to change the model)
 	@echo "→ Starting Persatrix on a local Ollama model ($(or $(PERSATRIX_OLLAMA_MODEL),llama3.2)) — no cloud calls, no per-token spend..."
 	@echo "  First run pulls the model into the ollama-models volume — a few GB; this can take minutes."
-	@# ANTHROPIC_API_KEY is a throwaway value: it only satisfies the base
-	@# compose file's startup `:?` key-guard, which Compose evaluates before
-	@# the overlay merges. The overlay sets PERSATRIX_OLLAMA=1 per agent, which
-	@# routes every agent to the local OllamaProvider, so the value is never
-	@# used. See docker-compose.ollama.yaml.
+	@# Provider selection is config-driven (RFC 0033 — no force-knob): the
+	@# ollama overlay mounts an alias config pointing every agent at
+	@# `provider: ollama` (base_url on the compose bridge). PERSATRIX_OLLAMA_MODEL
+	@# overrides the pulled model AND the agents in lock-step. No API key needed.
 	@# --build so the agent image bakes the current source (matches demo-offline).
-	ANTHROPIC_API_KEY=ollama-not-used \
-	  docker compose -f docker-compose.yaml -f docker-compose.ollama.yaml up -d --build
+	docker compose -f docker-compose.yaml -f docker-compose.ollama.yaml up -d --build
 	@echo "✓ Local-model society up. Try:  ./bin/persatrix chat ember-owl"
 	@echo "  Stop with: make docker-down  (the pulled model persists in the ollama-models volume)"
+
+demo-openai: ## Run the demo society on OpenAI (cloud peer) — needs OPENAI_API_KEY; spends real money
+	@echo "→ Starting Persatrix on OpenAI (gpt-4o / gpt-4o-mini) — REAL cloud calls, REAL spend."
+	@echo "  Needs OPENAI_API_KEY in your environment or .env. Set a hard cap at https://platform.openai.com/ first."
+	@# Provider selection is config-driven (RFC 0033 — no force-knob): the
+	@# openai overlay mounts an alias config pointing every agent at
+	@# `provider: openai` — the release's one-line provider swap as a demo. The
+	@# base compose plumbs OPENAI_API_KEY into every agent (closes MT F-5).
+	@# --build matches the other demos.
+	docker compose -f docker-compose.yaml -f docker-compose.openai.yaml up -d --build
+	@echo "✓ OpenAI society up. Try:  ./bin/persatrix chat ember-owl"
+	@echo "  Stop with: make docker-down"
 
 reset: ## Stop the stack and purge ALL named volumes (channels DB / orchestrator-data, persona memory / ember-owl-data + iron-fox-data + nova-sparrow-data, agent scratch / workspace) — operator workaround for F-3 cross-run state bleed; see docs/issues/ISSUE-0051
 	@echo "→ Stopping stack and removing named volumes..."

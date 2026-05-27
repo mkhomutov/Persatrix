@@ -227,6 +227,29 @@ class TestShippedCostPricingDerivedFromAliases:
                 os.environ["PERSATRIX_OPTIMIZATION_CONFIG"] = prior
             reset_cache()
 
+    @staticmethod
+    def _demo(
+        provider: str,
+        accessor: Callable[[], dict[str, dict[str, float]]],
+    ) -> dict[str, dict[str, float]]:
+        # Read a per-provider demo config (config/demo/<provider>/optimization.yaml)
+        # — the *configured* artifacts. The base config ships UNCONFIGURED (no
+        # default provider), so the priced-physical-model assertions live here.
+        # Restores the prior override so this does not leak env into siblings.
+        prior = os.environ.get("PERSATRIX_OPTIMIZATION_CONFIG")
+        os.environ["PERSATRIX_OPTIMIZATION_CONFIG"] = str(
+            Path("config") / "demo" / provider / "optimization.yaml"
+        )
+        reset_cache()
+        try:
+            return accessor()
+        finally:
+            if prior is not None:
+                os.environ["PERSATRIX_OPTIMIZATION_CONFIG"] = prior
+            else:
+                os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
+            reset_cache()
+
     def test_shipped_does_not_clobber_existing_env_override(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -252,25 +275,48 @@ class TestShippedCostPricingDerivedFromAliases:
             pytest.skip("config/optimization.yaml absent in this checkout")
         assert committed == derived
 
-    def test_quality_physical_model_priced_and_retired_id_gone(self) -> None:
-        pricing = self._shipped(optimization.cost_pricing_models)
-        if not pricing:
+    def test_base_role_aliases_ship_unconfigured(self) -> None:
+        # v0.3.4 "no default provider": the shipped base config's role aliases
+        # carry the `unconfigured` sentinel — provider choice is always explicit
+        # (resolving one fails loud; see test_model_aliases TestUnconfiguredSentinel).
+        prior = os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
+        reset_cache()
+        try:
+            aliases = optimization.model_aliases()
+        finally:
+            if prior is not None:
+                os.environ["PERSATRIX_OPTIMIZATION_CONFIG"] = prior
+            reset_cache()
+        if not aliases:
             pytest.skip("config/optimization.yaml absent in this checkout")
-        # PR 3 routed every stock agent to `quality` → claude-sonnet-4-6;
-        # PR 5 prices that physical id so the RFC 0023 gate is not $0.
+        for role in ("quality", "fast", "summarizer"):
+            assert aliases.get(role, {}).get("provider") == "unconfigured", role
+
+    @pytest.mark.parametrize("provider", ["anthropic", "offline", "ollama", "openai"])
+    def test_demo_committed_block_matches_derived(self, provider: str) -> None:
+        # Each per-provider demo config (the configured artifacts) keeps the
+        # §F drift guard: its committed cost.pricing.models equals the projection
+        # of its alias map.
+        committed = self._demo(provider, optimization.cost_pricing_models)
+        derived = self._demo(provider, optimization.derived_cost_pricing)
+        assert committed == derived
+
+    def test_anthropic_demo_prices_quality_physical_model(self) -> None:
+        # The base ships `quality` UNCONFIGURED; the anthropic demo is the
+        # configured artifact that prices the physical model it resolves to
+        # (claude-sonnet-4-6) so the RFC 0023 gate is not $0, retired id gone.
+        # This is also what the Go alias cost-attribution gate pins against
+        # (internal/server/cost_alias_gate_test.go loads config/demo/anthropic).
+        pricing = self._demo("anthropic", optimization.cost_pricing_models)
         assert "claude-sonnet-4-6" in pricing
         assert pricing["claude-sonnet-4-6"]["input_per_1m_tokens"] > 0
         assert pricing["claude-sonnet-4-6"]["output_per_1m_tokens"] > 0
-        # The retired raw id the old hand-maintained block keyed is dropped —
-        # it no longer matches any alias's physical model.
         assert "claude-sonnet-4-20250514" not in pricing
 
-    def test_openai_physical_model_priced(self) -> None:
-        pricing = self._shipped(optimization.cost_pricing_models)
-        if not pricing:
-            pytest.skip("config/optimization.yaml absent in this checkout")
-        # Amendment item 2 — the OpenAI peer ships priced so the Phase 4
-        # one-line swap resolves to a priced target.
+    def test_openai_demo_prices_physical_model(self) -> None:
+        # The OpenAI peer ships as a configured demo, priced so the one-line
+        # swap resolves to a priced target (amendment 2026-05-24 item 2).
+        pricing = self._demo("openai", optimization.cost_pricing_models)
         assert "gpt-4o" in pricing
         assert pricing["gpt-4o"]["input_per_1m_tokens"] > 0
         assert pricing["gpt-4o"]["output_per_1m_tokens"] > 0

@@ -54,6 +54,13 @@ _DEFAULT_OPENAI_PREFIXES: tuple[str, ...] = ("gpt-", "o1-", "o3-", "o4-")
 # local by provider name; an OpenAI-compatible provider whose base_url
 # points at a loopback host (e.g. a local vLLM / LM Studio server) is local
 # by endpoint.
+# The shipped base config ships its role aliases (quality / fast / summarizer)
+# with this sentinel provider — *no provider is configured by default*. An agent
+# that resolves such an alias fails loud (below) until an operator picks a
+# provider (run a `make demo-*`, or set provider/model on the alias). This is the
+# v0.3.4 "no default provider" stance: provider choice is always explicit.
+_UNCONFIGURED_PROVIDER = "unconfigured"
+
 _LOCAL_PROVIDERS: frozenset[str] = frozenset({"mock", "ollama"})
 _LOCALHOST_HOSTS: frozenset[str] = frozenset(
     {"localhost", "127.0.0.1", "0.0.0.0", "::1"},
@@ -340,6 +347,21 @@ def resolve(
 
     entry = _current_alias_map().get(alias_or_model)
     if entry is not None:
+        # v0.3.4 "no default provider" — the shipped base config ships role
+        # aliases with `provider: unconfigured`. Resolving one means the
+        # operator has not picked a provider yet: fail loud with an actionable
+        # message rather than routing or returning a silent $0 record. Checked
+        # *before* the price guard and unconditionally (even under the test
+        # seam), so it can never be a $0 budget hole.
+        if entry.get("provider") == _UNCONFIGURED_PROVIDER:
+            raise SystemExit(
+                f"Model alias {alias_or_model!r} is not configured — no "
+                f"provider is selected (the shipped default). Pick one: run "
+                f"`make demo-anthropic` / `demo-openai` / `demo-ollama` / "
+                f"`demo-offline`, or set 'provider' and 'model' on the "
+                f"{alias_or_model!r} alias in config/optimization.yaml. See "
+                f"docs/guides/model-providers.md.",
+            )
         # RFC 0033 PR 4 — fail closed if *this* resolved alias is an unpriced
         # non-local entry (a silent $0 budget gate). Scoped to the resolved
         # alias: an unrelated misconfigured alias elsewhere in the map must not

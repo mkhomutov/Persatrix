@@ -138,6 +138,14 @@ values for each dimension are enumerated in
 the natural-language descriptions rendered into the prompt live in
 [prompts/runtime/persona/sections/behavior-dimensions.yaml](../../prompts/runtime/persona/sections/behavior-dimensions.yaml).
 
+**`model`** names a logical alias (a role like `quality` / `fast` /
+`summarizer`), not a vendor model ID — it resolves to a concrete
+`(provider, model, pricing)` record in
+[config/optimization.yaml](../../config/optimization.yaml) at call time, so a
+vendor retirement or a provider swap is a one-line edit there. See the
+[model providers & aliases guide](model-providers.md) for the four providers
+(Anthropic / OpenAI / Ollama / mock) and how to swap between them.
+
 **`autonomy`** controls when and how the persona wakes. Only three of the
 five enum `level` values are wired today — `passive`, `reactive`, and
 `semi-autonomous`. `autonomous` and `supervisor` parse but are deferred to a

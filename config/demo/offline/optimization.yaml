@@ -1,0 +1,82 @@
+# Demo optimization overlay — OFFLINE (mock provider).
+#
+# Mounted over /app/config/optimization.yaml by docker-compose.offline.yaml
+# (`make demo-offline`). It points the three aliases the society references
+# (quality / fast / summarizer) at the zero-cost mock provider, so EVERY
+# agent runs on the in-process MockProvider — no API key, no network, no
+# spend. This is the config-driven equivalent of the old PERSATRIX_OFFLINE
+# force-knob: provider selection is now a one-line alias edit (RFC 0033),
+# and a demo is just an alias config.
+#
+# Derived from config/optimization.yaml — keep the non-alias blocks (budgets,
+# wallet, conversation_window) in step with it.
+schema_version: "0.2"
+active_profile: "default"
+
+models:
+  aliases:
+    # All three roles route to the mock. `model: offline` is the physical
+    # model id the mock reports in telemetry (gen_ai.request.model=offline,
+    # gen_ai.system=mock) and the lease/cost key — priced 0 below ($0-real
+    # local model; the missing-price guard exempts `mock`).
+    quality:
+      provider: mock
+      model: offline
+      input_per_1m_tokens: 0
+      output_per_1m_tokens: 0
+    fast:
+      provider: mock
+      model: offline
+      input_per_1m_tokens: 0
+      output_per_1m_tokens: 0
+    summarizer:
+      provider: mock
+      model: offline
+      input_per_1m_tokens: 0
+      output_per_1m_tokens: 0
+
+default:
+  model_routing:
+    defaults:
+      task_agents: "quality"
+      sub_agents: "quality"
+      evaluators: "fast"
+  caching:
+    exact:
+      enabled: true
+      max_entries: 10000
+      ttl_seconds: 3600
+  context_management:
+    max_context_tokens: 80000
+    summarization:
+      enabled: true
+      model: "summarizer"
+
+cost:
+  pricing:
+    # Derived from the aliases above — one row per physical model. The mock
+    # runs at $0 (documented $0-real, not absent), so EstimateCost reads $0
+    # and the RFC 0023 wallet machinery still settles each turn at $0.
+    models:
+      "offline":
+        input_per_1m_tokens: 0
+        output_per_1m_tokens: 0
+  budgets:
+    global:
+      max_daily_usd: 100.00
+      alert_at_percent: [50, 80, 95]
+      on_exceed: "pause_and_alert"
+    per_workflow:
+      default_max_usd: 10.00
+    per_agent:
+      default_max_usd: 5.00
+
+wallet:
+  ttl_seconds: 60
+  reaper_interval_seconds: 5
+  max_active_leases: 16
+
+conversation_window:
+  enabled: true
+  max_turns: 20
+  max_tokens: 2048

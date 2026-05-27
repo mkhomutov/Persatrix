@@ -1,8 +1,9 @@
 # Curated offline replies for Persatrix offline / demo mode.
 #
-# Consumed by agents.llm_offline.MockProvider when PERSATRIX_OFFLINE=1 (or an
-# agent sets `provider: mock`). No API key, no network, no cost — the whole
-# society runs on these scripted replies plus a persona-flavoured fallback.
+# Consumed by agents.llm_offline.MockProvider when a model alias (or an agent)
+# sets `provider: mock` — e.g. `make demo-offline`. No API key, no network, no
+# cost — the whole society runs on these scripted replies plus a persona-
+# flavoured fallback.
 #
 # Shape:
 #   responses:

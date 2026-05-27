@@ -24,9 +24,11 @@ OpenAI with correctly-keyed non-zero cost. The local-target variant (Edge Case 1
 `ollama` provider and documents the $0-local case.
 
 **Out of Scope**: First-time alias→cost wiring (that is [MT-ALIAS-001](MT-ALIAS-001.md)); the
-keyless force-flag demo paths ([MT-OFFLINE-001](MT-OFFLINE-001.md) /
-[MT-OLLAMA-001](MT-OLLAMA-001.md) drive `PERSATRIX_OFFLINE` / `PERSATRIX_OLLAMA`, **not** a config
-alias swap).
+keyless local/offline demo paths ([MT-OFFLINE-001](MT-OFFLINE-001.md) /
+[MT-OLLAMA-001](MT-OLLAMA-001.md) — which, like every demo since the v0.3.4
+[knob-free refactor](../v0.3.4-plan-amendment-2026-05-27.md), also select their provider via a
+mounted alias config; this test exercises the *user-facing* one-line edit to the live
+`config/optimization.yaml` rather than a pre-baked demo overlay).
 
 ---
 

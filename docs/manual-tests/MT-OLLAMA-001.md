@@ -7,6 +7,16 @@
 **Last Updated**: 2026-05-27
 **Status**: Active
 
+> **Recipe update pending (v0.3.4 release-prep).** Provider selection is now
+> purely config/alias-driven — the `PERSATRIX_OLLAMA` force-knob is **removed**
+> ([amendment 2026-05-27](../v0.3.4-plan-amendment-2026-05-27.md)). `make demo-ollama`
+> still works, but it now selects the Ollama provider by mounting an alias config
+> ([`config/demo/ollama/optimization.yaml`](../../config/demo/ollama/optimization.yaml))
+> rather than setting an env flag — so the `PERSATRIX_OLLAMA=1` / throwaway-key
+> prose below is superseded (`PERSATRIX_OLLAMA_MODEL` / `PERSATRIX_OLLAMA_BASE_URL`
+> survive as provider configuration). The recipe is refreshed with fresh live
+> evidence in the [release-prep PR 4 Docker smoke](../v0.3.4-release-checklist.md#1-pre-release-verification).
+
 ---
 
 ## Overview

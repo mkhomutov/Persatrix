@@ -9,9 +9,14 @@ unchanged.
 This is the RFC 0033 §D integration point: the configured ``model`` field
 is run through :func:`agents.model_aliases.resolve`, so an agent can name a
 logical alias (``quality`` / ``fast`` / ``summarizer``) or a raw vendor ID.
-The two global offline / Ollama force-flags are honoured *before* the model
-field, exactly as before, so the keyless ``make demo-offline`` /
-``make demo-ollama`` paths are unaffected.
+Provider selection is **purely config/alias-driven** — every provider
+(``anthropic`` / ``openai`` / ``ollama`` / ``mock``) is chosen the same
+standard way, by the resolved ``provider`` field. There is no global
+force-knob: the keyless ``make demo-offline`` / ``make demo-ollama`` /
+``make demo-openai`` paths select their provider by mounting an alias config
+that points the agents' aliases at ``mock`` / ``ollama`` / ``openai`` (the
+v0.3.4 provider-parity refactor removed ``PERSATRIX_OFFLINE`` /
+``PERSATRIX_OLLAMA``).
 """
 
 from __future__ import annotations
@@ -20,14 +25,8 @@ import logging
 import os
 from typing import Any
 
-from .llm_offline import MockProvider, offline_mode_enabled
-from .llm_ollama import (
-    OllamaProvider,
-    ollama_mode_enabled,
-    resolve_ollama_base_url,
-    resolve_ollama_model,
-    warn_if_forced_base_url_override,
-)
+from .llm_offline import MockProvider
+from .llm_ollama import OllamaProvider, resolve_ollama_base_url
 from .llm_providers import AnthropicProvider, OpenAIProvider
 from .llm_types import LLMProvider
 from .model_aliases import resolve as resolve_model
@@ -108,65 +107,25 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
     the *physical* model into ``create_message(model=…)`` so the API call
     goes to the vendor ID — never an alias name.
 
-    Two global env force-flags are checked before the ``model`` field, in
-    order of precedence:
-
-    1. ``PERSATRIX_OFFLINE`` (or ``provider: mock``) → the zero-cost
-       :class:`agents.llm_offline.MockProvider` — no API key, no network.
-    2. ``PERSATRIX_OLLAMA`` → :class:`agents.llm_ollama.OllamaProvider`
-       pointed at a locally-served model, with the configured model
-       force-substituted for the single pulled one — no API key, no cloud
-       spend. Offline wins if both are set (it needs no running daemon).
-
-    Otherwise the ``model`` field is run through the RFC 0033 resolver:
+    The ``model`` field is run through the RFC 0033 resolver and the resolved
+    ``provider`` selects the concrete class — the **same standard path for
+    every provider** (``anthropic`` / ``openai`` / ``ollama`` / ``mock``):
 
     * A declared ``models.aliases`` entry is authoritative for the
       provider (an explicit, *disagreeing* ``provider:`` field is a
       ``SystemExit`` — §D rule 1) and for ``provider_config`` per-field
-      (§D rule 2).
+      (§D rule 2). So routing the whole society to a local / mock / OpenAI
+      provider is a one-line edit to the ``quality`` alias — exactly what the
+      ``make demo-*`` overlays mount.
     * A raw vendor ID falls through (§E): the explicit ``provider:`` field
       wins, else the provider is inferred from the prefix table; a
       one-shot deprecation warning fires and the per-agent
       ``persatrix.llm.alias.raw_id_usage`` counter increments.
+
+    There is no global env force-knob — provider selection is config-driven
+    (the v0.3.4 provider-parity refactor removed ``PERSATRIX_OFFLINE`` /
+    ``PERSATRIX_OLLAMA``).
     """
-    # Offline / mock override — checked before the model field so a demo
-    # config can carry a real model id (or a placeholder) without needing
-    # a key. The env var is the global "make the whole society free" knob.
-    # Returns the configured model verbatim (the mock ignores it); resolve()
-    # is deliberately not run here so a placeholder/empty model is tolerated.
-    if offline_mode_enabled() or agent_config.get("provider") == "mock":
-        logger.info(
-            "LLM offline mode active for agent %r — using MockProvider "
-            "(no API calls, no cost)",
-            agent_config.get("id", "<unknown>"),
-        )
-        return MockProvider.from_config(agent_config), str(agent_config.get("model") or "")
-
-    # Local-model override — Ollama runs a real model on the operator's own
-    # machine with no API key and no cloud spend. PERSATRIX_OLLAMA=1 forces
-    # EVERY agent onto the local daemon (the `make demo-ollama` knob) and
-    # substitutes the single pulled model for the configured one; a per-agent
-    # `provider: ollama` (handled below) opts a single agent in instead.
-    # Checked after offline mode, which wins if both are set — the mock needs
-    # neither a network nor a running daemon.
-    if ollama_mode_enabled():
-        base_url = resolve_ollama_base_url(agent_config.get("provider_config"))
-        force_model = resolve_ollama_model()
-        warn_if_forced_base_url_override(
-            agent_config.get("id", "<unknown>"), agent_config.get("provider_config")
-        )
-        logger.info(
-            "LLM Ollama mode active for agent %r — using OllamaProvider at %s "
-            "(local model %r, no cloud calls)",
-            agent_config.get("id", "<unknown>"),
-            base_url,
-            force_model,
-        )
-        try:
-            return OllamaProvider(base_url=base_url, force_model=force_model), force_model
-        except ImportError:
-            raise SystemExit(_OLLAMA_IMPORT_ERROR)
-
     model = agent_config["model"]
     # S-18: guard against empty model string — "" would otherwise reach the
     # resolver as an empty reference.
@@ -238,18 +197,37 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
                 "Install with: pip install 'openai>=1.50.0'"
             )
     elif provider == "ollama":
-        # Per-agent local model over Ollama's OpenAI-compatible API. No API
-        # key needed (Ollama ignores auth); base_url resolves provider_config
-        # first, then the PERSATRIX_OLLAMA_BASE_URL env, then the localhost
-        # default. The agent's configured `model` (or alias-resolved model)
-        # is a real Ollama tag, used verbatim — no force-substitution on this
-        # opt-in path.
+        # Local model over Ollama's OpenAI-compatible API. No API key needed
+        # (Ollama ignores auth); base_url resolves provider_config first, then
+        # the PERSATRIX_OLLAMA_BASE_URL env, then the localhost default. The
+        # alias/agent `model:` is a real Ollama tag, used verbatim — unless
+        # PERSATRIX_OLLAMA_MODEL is set, a configuration override (not a
+        # selection knob) that swaps the tag for every agent built here so the
+        # demo's `ollama-pull` and the agents stay in step. Scope: this is the
+        # create_provider (agent) surface only — the summarisation-on-close model
+        # (persona_runtime.summarize_close, RFC 0020) resolves on its own surface
+        # and is not covered by this override (ISSUE-0075).
+        model_override = os.environ.get("PERSATRIX_OLLAMA_MODEL", "").strip()
+        ollama_model = model_override or physical_model
         try:
             return OllamaProvider(
                 base_url=resolve_ollama_base_url(provider_config),
-            ), physical_model
+            ), ollama_model
         except ImportError:
             raise SystemExit(_OLLAMA_IMPORT_ERROR)
+    elif provider == "mock":
+        # Zero-cost offline provider — no API key, no network. Selected the
+        # same standard way (an alias / agent entry declaring `provider: mock`),
+        # so `make demo-offline` is just an alias config pointing the society
+        # at the mock. MockProvider ignores the physical model, but it is
+        # returned so the RFC 0023 lease keys on the same string the derived
+        # cost table prices ($0 for the local mock entry).
+        logger.info(
+            "Offline mock provider active for agent %r — using MockProvider "
+            "(no API calls, no cost)",
+            agent_id,
+        )
+        return MockProvider.from_config(agent_config), physical_model
     raise SystemExit(f"Unknown LLM provider: {provider!r}")
 
 
