@@ -7,21 +7,34 @@
 **Last Updated**: 2026-05-27
 **Status**: Active
 
+> **v0.3.4 recipe — config-driven (no default provider; no `quality-openai` peer).** The base
+> [`config/optimization.yaml`](../../config/optimization.yaml) ships every role alias
+> **unconfigured**, and there is **no** shipped `quality-openai` peer alias — the per-provider
+> configs live under [`config/demo/<provider>/`](../../config/demo/). This test demonstrates the
+> one-line provider swap as the move from the Anthropic alias config to the OpenAI alias config:
+> the **same agents**, unchanged, re-route to a different provider because the `quality` / `fast` /
+> `summarizer` alias entries name a different `provider` / `model`
+> ([amendment 2026-05-27](../v0.3.4-plan-amendment-2026-05-27.md)). Re-run live against HEAD (see
+> [Test Results](#test-results)).
+
 ---
 
 ## Overview
 
 **Purpose**: Validate the v0.3.4 headline claim — *"a provider swap is a one-line edit."* The
-same agent, unchanged, must route to a **different provider** after editing a single field on
-its model alias in [`config/optimization.yaml`](../../config/optimization.yaml), and still report
-correct cost (non-zero for a priced cloud peer; documented-$0 for a local target).
+same agent, unchanged, must route to a **different provider** after re-pointing its model alias's
+`provider` / `model`, and still report correct cost (non-zero for a priced cloud peer;
+documented-$0 for a local target).
 
-**Scope**: The RFC 0033 §D promise that model identity lives in **one** place. We flip the
-`quality` alias's `provider` / `model` from the Anthropic default to a priced OpenAI peer
-(`gpt-4o`) — a one-line-class edit to the alias entry, with **no edit** to `config/agents.yaml`,
-the routing defaults, or any agent code — and confirm the same `ember-owl` persona now calls
-OpenAI with correctly-keyed non-zero cost. The local-target variant (Edge Case 1) flips to the
-`ollama` provider and documents the $0-local case.
+**Scope**: The RFC 0033 §D promise that model identity lives in **one** place. We re-point the
+`quality` / `fast` / `summarizer` aliases from Anthropic to a priced OpenAI peer (`gpt-4o`) — an
+alias-block change with **no edit** to `config/agents.yaml`, the routing defaults, or any agent
+code — and confirm the same `ember-owl` persona now calls OpenAI with correctly-keyed non-zero
+cost. In v0.3.4 each provider is a mounted alias config, so the swap is `make demo-anthropic` →
+`make demo-openai` (the `config/demo/anthropic` vs `config/demo/openai` diff is exactly the alias
+block); the equivalent manual form is editing the `quality` entry's `provider` / `model` / price in
+the active config. The local-target variant (Edge Case 1) flips to the `ollama` provider and
+documents the $0-local case.
 
 **Out of Scope**: First-time alias→cost wiring (that is [MT-ALIAS-001](MT-ALIAS-001.md)); the
 keyless local/offline demo paths ([MT-OFFLINE-001](MT-OFFLINE-001.md) /
@@ -38,10 +51,11 @@ mounted alias config; this test exercises the *user-facing* one-line edit to the
 - [docs/rfcs/0033-model-alias-layer.md](../rfcs/0033-model-alias-layer.md) — §Motivation
   (one-line migration), §D (alias is authoritative).
 - [docs/v0.3.4-plan-amendment-2026-05-24.md](../v0.3.4-plan-amendment-2026-05-24.md) — Phase 4
-  additions, item 3 (the provider-swap MT).
-- [config/optimization.yaml](../../config/optimization.yaml) — `models.aliases.quality` (the
-  edited entry) and `models.aliases.quality-openai` (the priced OpenAI peer that demonstrates a
-  $0-trip-free swap target).
+  additions, item 3 (the provider-swap MT); and
+  [amendment 2026-05-27](../v0.3.4-plan-amendment-2026-05-27.md) (config-driven, no default provider).
+- [config/demo/anthropic/optimization.yaml](../../config/demo/anthropic/optimization.yaml) and
+  [config/demo/openai/optimization.yaml](../../config/demo/openai/optimization.yaml) — the two
+  alias configs whose `quality` / `fast` / `summarizer` block is the entire swap delta.
 
 **Related Automated Tests**:
 - Python: `tests/unit/python/test_model_aliases.py` (resolver returns the alias's declared
@@ -66,17 +80,19 @@ mounted alias config; this test exercises the *user-facing* one-line edit to the
 
 ### Application State
 
-- ☐ Full stack up and healthy (as [MT-ALIAS-001](MT-ALIAS-001.md) Preconditions).
-- ☐ `make validate` exits 0 before and after the edit.
-- ☐ Working tree clean — the alias edit is **reverted** at the end of the test
-  (`git checkout config/optimization.yaml`).
+- ☐ `make demo-anthropic` up and healthy (the baseline, as [MT-ALIAS-001](MT-ALIAS-001.md)).
+- ☐ `make validate` exits 0 (base config).
+- ☐ If you demonstrate the swap by editing a config file in place (rather than switching demo
+  overlays), the edit is **reverted** at the end (`git checkout <the edited config>`) and the
+  working tree is clean. The demo-overlay swap mutates no tracked file.
 
 ### Test Data
 
-The stock `quality` alias resolves to `anthropic` / `claude-sonnet-4-6`. The shipped
-`quality-openai` alias resolves to `openai` / `gpt-4o` (priced, `2.50` / `10.00`) and is the
-reference target. This test edits the **`quality`** entry so the unchanged `ember-owl` (which
-references `quality`) follows the swap without touching the agent.
+The Anthropic alias config (`config/demo/anthropic`) resolves `quality` → `anthropic` /
+`claude-sonnet-4-6` (priced `3.00` / `15.00`); the OpenAI alias config (`config/demo/openai`)
+resolves `quality` → `openai` / `gpt-4o` (priced `2.50` / `10.00`). The unchanged `ember-owl`
+(which references `quality`) follows whichever provider the active `quality` entry names — without
+touching the agent, the routing defaults, or any code.
 
 ---
 
@@ -84,7 +100,7 @@ references `quality`) follows the swap without touching the agent.
 
 ### Step 1: Baseline — Confirm the Agent Routes to Anthropic
 
-**Action**: Drive one turn on the stock config and confirm the provider (per
+**Action**: With `make demo-anthropic` up, drive one turn and confirm the provider (per
 [MT-ALIAS-001](MT-ALIAS-001.md) Steps 3–5): `gen_ai.system=anthropic`,
 `gen_ai.request.model=claude-sonnet-4-6`, `model_alias=quality`.
 
@@ -95,32 +111,33 @@ references `quality`) follows the swap without touching the agent.
 
 ### Step 2: The One-Line Swap
 
-**Action**: Edit **only** the `quality` alias's `provider` + `model` (and its inline price to the
-swap target's list price) in `config/optimization.yaml`:
-
-```yaml
-  aliases:
-    quality:
-      provider: openai          # was: anthropic
-      model: gpt-4o             # was: claude-sonnet-4-6
-      input_per_1m_tokens: 2.50 # was: 3.00
-      output_per_1m_tokens: 10.00 # was: 15.00
-```
-
-Regenerate the derived Go pricing table if the swap introduces a physical model not already in
-`cost.pricing.models` (here `gpt-4o` is already present from the `quality-openai` peer, so the
-table is unchanged), run `make validate`, and recreate the agent containers so they re-resolve:
+**Action**: Re-point the society from Anthropic to OpenAI by switching to the OpenAI alias config —
+the v0.3.4 config-driven form of the one-line swap:
 
 ```bash
-make validate
-docker compose -f docker-compose.yaml up -d --force-recreate agent-ember-owl
+make demo-openai
 ```
 
-**Expected Result**: `make validate` exits 0. **No edit was made to `config/agents.yaml`, the
-routing defaults, or any agent code** — the swap is the alias edit alone.
+This mounts [`config/demo/openai/optimization.yaml`](../../config/demo/openai/optimization.yaml) in
+place of the Anthropic one. The **only** thing that differs between the two configs is the alias
+block (`quality` → `openai` / `gpt-4o`, priced `2.50` / `10.00`); `config/agents.yaml`, the routing
+defaults, and all agent code are identical:
+
+```bash
+diff <(grep -A4 'quality:' config/demo/anthropic/optimization.yaml) \
+     <(grep -A4 'quality:' config/demo/openai/optimization.yaml)
+```
+
+The equivalent **manual** one-line-class edit (without the demo overlay) is to flip the `quality`
+entry's `provider` / `model` / price in the active `config/optimization.yaml`, then
+`docker compose ... up -d --force-recreate agent-ember-owl`. The OpenAI physical model (`gpt-4o`) is
+already priced in the derived `cost.pricing.models` table, so no table regeneration is needed.
+
+**Expected Result**: The swap is confined to the alias block — **no edit** to `config/agents.yaml`,
+the routing defaults, or any agent code. `gpt-4o` is already in the derived pricing table.
 
 **Verification**:
-- [ ] Only the `quality` alias entry changed (`git diff --stat` shows one file)
+- [ ] The swap changes only the alias `provider` / `model` / price (the `diff` above is the whole delta)
 - [ ] `make validate` exits 0
 
 ---
@@ -163,19 +180,22 @@ table is derived from the alias map — not hand-keyed to the old physical model
 
 ---
 
-### Step 5: Revert
+### Step 5: Revert / Teardown
 
-**Action**:
+**Action**: The overlay swap mutates no tracked file — switch back to the baseline (or tear down):
 
 ```bash
-git checkout config/optimization.yaml
-make validate
-docker compose -f docker-compose.yaml up -d --force-recreate agent-ember-owl
+make demo-anthropic    # back on Anthropic
+# or: make docker-down
 git diff --quiet && echo "TREE CLEAN"
 ```
 
+If you used the **manual** in-place edit instead, revert it
+(`git checkout config/optimization.yaml` — or the edited demo config), `make validate`, and
+`--force-recreate agent-ember-owl`.
+
 **Verification**:
-- [ ] `config/optimization.yaml` restored; working tree clean
+- [ ] Working tree clean (no tracked config left edited)
 
 ---
 
@@ -184,10 +204,10 @@ git diff --quiet && echo "TREE CLEAN"
 | Step | Expected Outcome | Pass/Fail |
 |------|------------------|-----------|
 | 1 | Stock agent routes to Anthropic `claude-sonnet-4-6` | ☐ |
-| 2 | One-line alias edit only; `make validate` clean | ☐ |
+| 2 | Swap confined to the alias block (overlay switch or one-entry edit); `make validate` clean | ☐ |
 | 3 | Same agent now routes to OpenAI `gpt-4o`; alias name unchanged | ☐ |
 | 4 | Cost re-keyed to gpt-4o rate, non-zero, keyed to `ember-owl` | ☐ |
-| 5 | Config reverted; working tree clean | ☐ |
+| 5 | Working tree clean (overlay leaves no tracked edit; revert any in-place edit) | ☐ |
 
 ---
 
@@ -221,13 +241,14 @@ swap.
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-05-27 | Claude (Opus 4.7) | Windows 11 + Docker Desktop | ✅ Pass | See [`v0.3.4-execution-report.md`](v0.3.4-execution-report.md#mt-alias-002--one-line-provider-swap-evidence-live). |
+| 2026-05-27 | Claude (Opus 4.7) | Windows 11 + Docker 29.3.1 | ✅ Pass | **Config-driven re-run on HEAD `6ce23cd`**: baseline `make demo-anthropic` (`claude-sonnet-4-6`, `$0.008424`), swapped via `make demo-openai` — the same unchanged ember-owl now `reply_status="ok"` on OpenAI; cost `1887/17/$0.0048875`, **exactly** the `gpt-4o` rate (1887×$2.50/1M + 17×$10.00/1M; at the old sonnet rate it would have been $0.005916). Prometheus `agent_llm_calls_total{gen_ai_system="openai", gen_ai_request_model="gpt-4o"}=1`. `OPENAI_API_KEY` is now plumbed into agents by the base compose — the former F-5 throwaway-override gap is closed. |
 
 ---
 
 ## Notes
 
 - "One-line edit" is shorthand for *one alias entry*: provider + model (+ its inline price). The
-  point is that the edit is confined to the alias block — agents, routing defaults, pricing
-  table, and code are untouched.
-- Keep the swap reverted in version control; this MT mutates `config/optimization.yaml` only for
-  the duration of the run.
+  point is that the swap is confined to the alias block — agents, routing defaults, and code are
+  untouched (and `gpt-4o` is already in the derived pricing table).
+- The demo-overlay swap mutates no tracked file. If you demonstrate the swap by editing a config in
+  place instead, revert it (`git checkout`) so the working tree stays clean.
