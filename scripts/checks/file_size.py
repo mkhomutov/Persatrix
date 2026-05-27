@@ -235,6 +235,17 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # with full detail deferred to the grandfathered execution report. Written
     # against the v0.3.3 release; archive once the tag ships.
     "docs/v0.3.3-release-checklist.md",
+    # docs/v0.3.4-release-prep-plan.md is the v0.3.4 release-prep sequencer —
+    # same release-cycle-accumulator pattern as the v0.3.0 / v0.3.1 plans and
+    # the v0.3.3 checklist above. It crossed the 3 000-word prose cap when PR 1
+    # made the provider-neutral onboarding scope explicit (the F-5 per-agent
+    # OPENAI_API_KEY plumbing requirement) on top of the four PR scope +
+    # acceptance blocks and the §Current state / §Known follow-up inventories;
+    # it will keep accumulating as PRs 2–4 land their status + acceptance
+    # residuals. Trimming the per-PR scope/acceptance detail would erase the
+    # contract the sequence depends on. Remove this entry once v0.3.4 ships and
+    # the plan is archived.
+    "docs/v0.3.4-release-prep-plan.md",
     # docs/guides/persona-agents.md was at 2 867 words on the v0.3.0
     # release-candidate tip; release-prep PR 2 added three §2 callouts
     # (interactions-not-messages per RFC 0020, now-anchor per RFC 0021,
