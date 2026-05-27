@@ -5,13 +5,17 @@ id: ISSUE-0076
 # summary: one-line description, surfaced as the Summary column in INDEX.md
 summary: "CI never runs the full tests/integration/ suite, so the v0.3.4 no-default-provider change broke the close-path integration tests undetected"
 # status: open | in_progress | resolved
-status: open
+status: resolved
 # severity: low | medium | high | critical
 severity: high
 # area: internal/ package or agent subsystem (cost, persona, memory, grpc, ...)
 area: ci
 # created: YYYY-MM-DD when the finding was first captured (validated)
 created: 2026-05-27
+# closed: YYYY-MM-DD — set only when status == resolved (validated)
+closed: 2026-05-27
+# closed_pr: closing PR number (no leading "#") — rendered as #NNN link in INDEX
+closed_pr: 443
 refs:
   - .github/workflows/ci.yml
   - docs/v0.3.4-plan-amendment-2026-05-27.md
