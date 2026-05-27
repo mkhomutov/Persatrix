@@ -7,6 +7,15 @@
 **Last Updated**: 2026-05-27
 **Status**: Active
 
+> **v0.3.4 recipe — config-driven (no default provider).** The base
+> [`config/optimization.yaml`](../../config/optimization.yaml) ships the `quality` / `fast` /
+> `summarizer` aliases **unconfigured** — there is no default provider, so a plain
+> `docker compose up` fails loud at agent startup. This test runs `make demo-anthropic`, which
+> mounts [`config/demo/anthropic/optimization.yaml`](../../config/demo/anthropic/optimization.yaml)
+> (pointing `quality` → `anthropic` / `claude-sonnet-4-6`, priced 3.00 / 15.00) over the stack's
+> config ([amendment 2026-05-27](../v0.3.4-plan-amendment-2026-05-27.md)). Re-run live against the
+> config-driven HEAD (see [Test Results](#test-results)).
+
 ---
 
 ## Overview
@@ -76,21 +85,28 @@ automated `cost-attribution gate` (`internal/server/cost_alias_gate_test.go` +
 
 ### Application State
 
-- ☐ Full stack up: `docker compose -f docker-compose.yaml up -d --build` (orchestrator + agents
-  + collector + jaeger + prometheus), all services healthy.
-- ☐ `make validate` exits 0 (config valid; `schema_version: "0.2"`).
-- ☐ The stock `config/optimization.yaml` ships `quality` as a **priced** Anthropic alias
-  (`input_per_1m_tokens: 3.00`, `output_per_1m_tokens: 15.00`) — no edit required.
+- ☐ Stack up via `make demo-anthropic`
+  (`docker compose -f docker-compose.yaml -f docker-compose.anthropic.yaml up -d --build` —
+  orchestrator + agents + collector + jaeger + prometheus), all services healthy. The overlay
+  mounts [`config/demo/anthropic/optimization.yaml`](../../config/demo/anthropic/optimization.yaml),
+  which configures `quality` → `anthropic` / `claude-sonnet-4-6` (priced `3.00` / `15.00`).
+- ☐ `make validate` exits 0 (base config valid; `schema_version: "0.2"`).
+- ☐ The base `config/optimization.yaml` ships `quality` **unconfigured** (no default provider) — a
+  plain `docker compose up` (no demo overlay) fails loud at agent startup with the actionable
+  "pick a provider" `SystemExit`. The Anthropic configuration arrives via the mounted demo config,
+  not the base file.
 
 > **Operator note (carry-forward F-3)**: an *empty* `ANTHROPIC_API_KEY` exported in the shell
-> shadows the populated `.env` under Compose interpolation precedence
-> (`required variable ANTHROPIC_API_KEY is missing a value`). Clear the empty shell var before
-> `docker compose` so Compose reads `.env`.
+> shadows the populated `.env` under Compose interpolation precedence. v0.3.4 plumbs keys with a
+> `:-` empty default (the hard `:?` guard was dropped), so an empty shell value no longer aborts
+> `up` — the agent just logs an unset-key warning and fails on the first request. Unset the empty
+> shell var (or give it the real key) before `docker compose` so Compose reads `.env`.
 
 ### Test Data
 
 The stock `ember-owl` persona (and every task agent) already references `model: "quality"` in
-[`config/agents.yaml`](../../config/agents.yaml). No config edit is needed.
+[`config/agents.yaml`](../../config/agents.yaml) — no agent edit is needed. `make demo-anthropic`
+supplies the `quality` alias's provider/model/pricing via the mounted demo config.
 
 ---
 
@@ -248,6 +264,7 @@ authoritative; the redundant disagreeing field is a config bug, not a silent res
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-05-27 | Claude (Opus 4.7) | Windows 11 + Docker Desktop | ✅ Pass | See [`v0.3.4-execution-report.md`](v0.3.4-execution-report.md#mt-alias-001--primary-gate-evidence-live) for per-step evidence. |
+| 2026-05-27 | Claude (Opus 4.7) | Windows 11 + Docker 29.3.1 | ✅ Pass | **Config-driven re-run on HEAD `6ce23cd`** (`make demo-anthropic`): no raw-ID / key warning; chat turn `reply_status="ok"`; cost `2708/20/$0.008424`, **exactly** the `claude-sonnet-4-6` rate (2708×$3.00/1M + 20×$15.00/1M), keyed to ember-owl; Prometheus `agent_llm_calls_total{gen_ai_system="anthropic", gen_ai_request_model="claude-sonnet-4-6"}=1`. Both Go gate tests PASS on HEAD. |
 
 ---
 

@@ -7,28 +7,30 @@
 **Last Updated**: 2026-05-27
 **Status**: Active
 
-> **Recipe update pending (v0.3.4 release-prep).** Provider selection is now
-> purely config/alias-driven — the `PERSATRIX_OFFLINE` force-knob is **removed**
-> ([amendment 2026-05-27](../v0.3.4-plan-amendment-2026-05-27.md)). `make demo-offline`
-> still works, but it now selects the mock provider by mounting an alias config
-> ([`config/demo/offline/optimization.yaml`](../../config/demo/offline/optimization.yaml))
-> rather than setting an env flag — so the `PERSATRIX_OFFLINE=1` / throwaway-key
-> prose below is superseded. The recipe is refreshed with fresh live evidence in
-> the [release-prep PR 4 Docker smoke](../v0.3.4-release-checklist.md#1-pre-release-verification).
+> **v0.3.4 recipe — config-driven (no force-knob).** Provider selection is purely
+> config/alias-driven: `make demo-offline` selects the mock provider by mounting
+> [`config/demo/offline/optimization.yaml`](../../config/demo/offline/optimization.yaml)
+> (every alias → `provider: mock`) over the stack's `optimization.yaml` via a Compose
+> overlay — there is **no** `PERSATRIX_OFFLINE` force-knob
+> ([amendment 2026-05-27](../v0.3.4-plan-amendment-2026-05-27.md)). The steps below use
+> that config-driven recipe and were re-run live against the config-driven HEAD
+> (see [Test Results](#test-results)).
 
 ---
 
 ## Overview
 
 **Purpose**: Verify the keyless, zero-cost offline mode — *the whole society runs with no API
-key, no network egress, and no spend*. With `PERSATRIX_OFFLINE=1` (the `make demo-offline` knob),
-every agent routes to the in-process `MockProvider`, serving curated replies from
+key, no network egress, and no spend*. With `make demo-offline` (which mounts an alias config
+pointing every alias at `provider: mock`), every agent routes to the in-process `MockProvider`,
+serving curated replies from
 [`config/offline_responses.yaml`](../../config/offline_responses.yaml). A full chat round-trip
 must complete, populate the `gen_ai.*` spans, and settle the RFC 0023 wallet lease at **$0**.
 
-**Scope**: The offline force-flag path through
-[`agents/llm_factory.py`](../../agents/llm_factory.py) `create_provider()` (offline wins over
-every other selector, before the `model:` field is read) →
+**Scope**: The `provider: mock` path through
+[`agents/llm_factory.py`](../../agents/llm_factory.py) `create_provider()` — the resolved alias's
+`provider` field selects the concrete class, the *same standard path as every provider* (RFC 0033
+§D) →
 [`agents/llm_offline.py`](../../agents/llm_offline.py) `MockProvider` → the same span / wallet
 machinery a real provider uses, but with $0 pricing. Carried from
 [#422](https://github.com/mkhomutov/Persatrix/pull/422).
@@ -42,10 +44,15 @@ a real model); cloud-provider routing and alias swaps ([MT-ALIAS-001](MT-ALIAS-0
 ## Related Documentation
 
 **Feature Documentation**:
-- [docker-compose.offline.yaml](../../docker-compose.offline.yaml) — the overlay
-  (`PERSATRIX_OFFLINE=1` + `PERSATRIX_OFFLINE_RESPONSES` per agent).
+- [docker-compose.offline.yaml](../../docker-compose.offline.yaml) — the overlay (mounts
+  `config/demo/offline/optimization.yaml` + sets `PERSATRIX_OFFLINE_RESPONSES` per agent — that
+  env var is mock *configuration*, where to read replies, not a provider-selection knob).
+- [config/demo/offline/optimization.yaml](../../config/demo/offline/optimization.yaml) — the mock
+  alias config the overlay mounts (`quality` / `fast` / `summarizer` → `provider: mock`).
 - [Makefile](../../Makefile) `demo-offline` target.
-- [agents/llm_offline.py](../../agents/llm_offline.py) — `MockProvider`, `offline_mode_enabled()`.
+- [agents/llm_factory.py](../../agents/llm_factory.py) — `create_provider()` (the `provider: mock`
+  branch).
+- [agents/llm_offline.py](../../agents/llm_offline.py) — `MockProvider`, `MockProvider.from_config()`.
 - [config/offline_responses.yaml](../../config/offline_responses.yaml) — curated per-agent
   replies + persona-flavoured fallback.
 
@@ -64,9 +71,9 @@ a real model); cloud-provider routing and alias swaps ([MT-ALIAS-001](MT-ALIAS-0
 ### System Requirements
 
 - ☐ Windows / macOS / Linux with Docker + Docker Compose
-- ☐ **No API key required.** `make demo-offline` passes a throwaway
-  `ANTHROPIC_API_KEY=offline-not-used` only to satisfy the base compose file's `:?` key-guard;
-  it is never used (offline routing precedes any provider SDK construction).
+- ☐ **No API key required.** The base compose plumbs every provider key with a `:-` empty default
+  (the single-vendor `:?` startup guard was dropped in v0.3.4), and the mock provider constructs no
+  SDK and makes no network call — so no key, throwaway or real, is needed.
 - ☐ `curl` + `jq` in PATH.
 
 ### Application State
@@ -93,13 +100,13 @@ make demo-offline
 docker compose -f docker-compose.yaml -f docker-compose.offline.yaml ps
 ```
 
-**Expected Result**: The stack builds and comes up healthy with `PERSATRIX_OFFLINE=1` per agent.
-Agent logs show `LLM offline mode active for agent '<id>' — using MockProvider (no API calls, no
-cost)`.
+**Expected Result**: The stack builds and comes up healthy with the mock alias config mounted.
+Agent logs show `Offline mock provider active for agent '<id>' — using MockProvider (no API calls,
+no cost)`.
 
 **Verification**:
 - [ ] All agents healthy
-- [ ] `LLM offline mode active … MockProvider` logged for each agent
+- [ ] `Offline mock provider active … MockProvider` logged for each agent
 
 ---
 
@@ -189,12 +196,15 @@ goes through the same span machinery, so observability is intact even with no pr
 **Expected Behavior**: The turn degrades gracefully to a generated persona-flavoured placeholder
 reply — still `reply_status="ok"`, still $0.
 
-### Edge Case 2: Offline + Ollama Both Set
+### Edge Case 2: A Real Provider Key Is Present in the Environment
 
-**Scenario**: Both `PERSATRIX_OFFLINE=1` and `PERSATRIX_OLLAMA=1` are exported.
+**Scenario**: A real `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` is exported while the mock alias
+config is mounted.
 
-**Expected Behavior**: Offline wins (it needs neither a network nor a running daemon) — the
-factory checks offline first. Covered by `test_llm_offline.py`.
+**Expected Behavior**: Ignored — provider selection is the resolved alias `provider` (here
+`mock`), not key presence. The factory constructs `MockProvider`, builds no provider SDK, and
+makes no network call. Covered by `test_llm_offline.py` (the factory-interplay regression: an
+alias declaring `provider: mock` routes to the mock regardless of the environment).
 
 ---
 
@@ -203,12 +213,14 @@ factory checks offline first. Covered by `test_llm_offline.py`.
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | 2026-05-27 | Claude (Opus 4.7) | Windows 11 + Docker Desktop | ✅ Pass | See [`v0.3.4-execution-report.md`](v0.3.4-execution-report.md#mt-offline-001--offline-0-evidence-live). |
+| 2026-05-27 | Claude (Opus 4.7) | Windows 11 + Docker 29.3.1 | ✅ Pass | **Config-driven re-run on HEAD `6ce23cd`** (`make demo-offline`): log `Offline mock provider active for agent 'ember-owl' — using MockProvider (no API calls, no cost)`; chat turn `reply_status="ok"` with the curated `["flaky"]` reply; cost `1600/146/$0` keyed to ember-owl; Prometheus `agent_llm_calls_total{gen_ai_system="mock", gen_ai_request_model="offline"}=1`. |
 
 ---
 
 ## Notes
 
-- The throwaway `ANTHROPIC_API_KEY` in `make demo-offline` only satisfies the base compose `:?`
-  guard, which Compose evaluates before the overlay merges; it is never consumed.
+- `make demo-offline` needs no key: the base compose plumbs provider keys with a `:-` empty
+  default (the single-vendor `:?` startup guard was dropped in v0.3.4), and the mock provider
+  builds no SDK.
 - Offline mode is the "$0 keyless demo" promise; Ollama is the "$0 real-model" promise. Both sit
-  on the same provider-selection axis (`create_provider`).
+  on the same provider-selection axis (the resolved alias `provider` in `create_provider`).
