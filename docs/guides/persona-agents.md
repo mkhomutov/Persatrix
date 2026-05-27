@@ -562,13 +562,18 @@ Chat needs the orchestrator and the target persona agent both running.
 > the commands below — otherwise the agent will start but every chat turn
 > will fail.
 
-The simplest local stack is Docker:
+The simplest local stack is Docker. Provider choice is config-driven — the base
+config ships **no default provider**, so a bare `docker compose up` fails loud at
+startup; pick one with a `make demo-*` target, which rebuilds the images
+(`--build`) and brings up the orchestrator + all agents declared in
+`config/agents.yaml`:
 
 ```bash
-make docker-build
-make docker-up   # orchestrator + all agents declared in config/agents.yaml
-make build-cli   # → cli/target/release/persatrix
+make demo-anthropic   # on Claude — needs ANTHROPIC_API_KEY (live chat is a real LLM round-trip)
+make build-cli        # → cli/target/release/persatrix
 ```
+
+For a keyless `$0` stack use `make demo-offline`; `make demo-ollama` runs a free local model.
 
 If you would rather run the orchestrator and an agent on the host:
 

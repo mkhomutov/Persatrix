@@ -54,10 +54,14 @@ RFC 0019 closeout follow-up issue's Loki query-path item); per-agent dashboard /
 ### System Requirements
 
 - Docker + Docker Compose (the test exercises the compose-managed observability stack).
-- Current images. Run `docker compose build` before the first `docker compose up -d`, and after any
-  change under [agents/](../../agents/) or [cmd/orchestrator/](../../cmd/orchestrator/). Stale
-  images silently skip the OTEL SDK init path — Steps 3 and 4 then fail because no agent spans
-  reach Jaeger and no agent metrics reach Prometheus.
+- Current images + a configured provider. Bring the stack up with `make demo-anthropic` (Step 1) —
+  it passes `--build`, so the orchestrator + agent images always rebuild from current source, and it
+  mounts the Anthropic alias config. The base `config/optimization.yaml` ships **no default provider**
+  ([amendment 2026-05-27](../v0.3.4-plan-amendment-2026-05-27.md)), so a bare `docker compose up -d`
+  fails loud at agent startup — a provider overlay (a `make demo-*`) is required. Rebuild after any
+  change under [agents/](../../agents/) or [cmd/orchestrator/](../../cmd/orchestrator/): stale images
+  silently skip the OTEL SDK init path — Steps 3 and 4 then fail because no agent spans reach Jaeger
+  and no agent metrics reach Prometheus.
 - `ANTHROPIC_API_KEY` exported in the shell environment for the workflow-driven steps. Without it,
   the workflow reaches a terminal `failed` state quickly; trace lookups still work but do not
   exercise the LLM-call span path.
@@ -80,7 +84,7 @@ RFC 0019 closeout follow-up issue's Loki query-path item); per-agent dashboard /
 **Action**:
 
 ```pwsh
-docker compose up -d
+make demo-anthropic   # --build + the Anthropic alias overlay (the base config has no default provider)
 docker compose ps
 ```
 
@@ -276,7 +280,7 @@ docker compose logs --tail=200 otel-collector | Select-String -Pattern "TracesEx
     in Step 4. Tracked in the RFC 0019 closeout follow-up issue's "Loki query path / loki-config
     pin" item.
   - The `otel-collector` service has no Docker healthcheck (upstream distroless image ships no
-    probe binary). A cold-start `docker compose up -d` may briefly race the OTLP receiver bind and
+    probe binary). A cold-start `make demo-anthropic` may briefly race the OTLP receiver bind and
     drop the first batch (visible as a one-off non-zero `agent.observability.{spans,logs}.dropped`
     metric on first boot). Steady-state operation is unaffected. Tracked in the same follow-up
     issue.
