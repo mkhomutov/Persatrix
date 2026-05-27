@@ -201,4 +201,3 @@ not Ollama. Covered by `test_llm_ollama.py` / `test_llm_offline.py`.
   `localhost` — `PERSATRIX_OLLAMA_BASE_URL` is set per agent in the overlay.
 - Default model is `llama3.2`; set `PERSATRIX_OLLAMA_MODEL` to change it (the alias map's
   `local-fast` entry names `llama3.1` for the per-agent opt-in path, a separate surface).
-</content>

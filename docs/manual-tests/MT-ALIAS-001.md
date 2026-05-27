@@ -257,5 +257,3 @@ authoritative; the redundant disagreeing field is a config bug, not a silent res
   metric-reader interval and lag by up to one interval, so use them only as corroboration.
 - This is the v0.3.4 analogue of v0.3.3's `MT-IDLE-001` gate: there the promise was *idle costs
   nothing*; here it is *an alias-routed turn costs the right amount, keyed correctly*.
-</content>
-</invoke>

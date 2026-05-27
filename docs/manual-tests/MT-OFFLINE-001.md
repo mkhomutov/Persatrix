@@ -203,4 +203,3 @@ factory checks offline first. Covered by `test_llm_offline.py`.
   guard, which Compose evaluates before the overlay merges; it is never consumed.
 - Offline mode is the "$0 keyless demo" promise; Ollama is the "$0 real-model" promise. Both sit
   on the same provider-selection axis (`create_provider`).
-</content>

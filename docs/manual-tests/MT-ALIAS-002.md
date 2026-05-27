@@ -229,4 +229,3 @@ swap.
   table, and code are untouched.
 - Keep the swap reverted in version control; this MT mutates `config/optimization.yaml` only for
   the duration of the run.
-</content>
