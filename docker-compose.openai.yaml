@@ -1,0 +1,47 @@
+# Cloud-peer overlay for docker-compose.yaml — runs the whole society on
+# OpenAI, the major cloud alternative to Anthropic ("Any Provider").
+#
+#   make demo-openai          # needs OPENAI_API_KEY in your environment / .env
+#       — or —
+#   docker compose -f docker-compose.yaml -f docker-compose.openai.yaml up -d --build
+#
+# Provider selection is config-driven (RFC 0033 — there is no force-knob): this
+# overlay mounts config/demo/optimization.openai.yaml over the stack's
+# optimization.yaml, which points the quality / fast / summarizer aliases at
+# `provider: openai` (gpt-4o / gpt-4o-mini). It is the release's one-line
+# provider swap applied as a demo — the same agents, unchanged, route to a
+# different provider, and cost re-keys to the new physical models because the
+# cost table is derived from the aliases.
+#
+# Unlike demo-offline / demo-ollama this is a REAL cloud provider: it spends
+# real money and needs OPENAI_API_KEY. The base compose already plumbs that key
+# into every agent, so no per-deployment override is required (this closes
+# the F-5 gap from the v0.3.4 MT execution report). Set a hard spending cap at
+# https://platform.openai.com/ before running — see the README § Cost Warning.
+
+# The alias config is mounted into the orchestrator (cost table) and every
+# agent (alias resolution).
+x-openai-config: &openai-config
+  - ./config/demo/optimization.openai.yaml:/app/config/optimization.yaml:ro
+
+services:
+  orchestrator:
+    volumes: *openai-config
+
+  agent-planner:
+    volumes: *openai-config
+
+  agent-coder:
+    volumes: *openai-config
+
+  agent-reviewer:
+    volumes: *openai-config
+
+  agent-ember-owl:
+    volumes: *openai-config
+
+  agent-iron-fox:
+    volumes: *openai-config
+
+  agent-nova-sparrow:
+    volumes: *openai-config

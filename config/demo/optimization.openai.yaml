@@ -1,0 +1,85 @@
+# Demo optimization overlay — OPENAI (cloud peer).
+#
+# Mounted over /app/config/optimization.yaml by docker-compose.openai.yaml
+# (`make demo-openai`). It points the three aliases the society references
+# (quality / fast / summarizer) at OpenAI, so the whole society runs on the
+# major cloud alternative to Anthropic — the "Any Provider" peer. Needs
+# OPENAI_API_KEY (the base compose plumbs it into every agent).
+#
+# This is the one-line provider swap the release headlines, applied as a demo
+# config: the same agents, unchanged, route to a different provider, and cost
+# re-keys to the new physical models because the cost table is derived from
+# these aliases.
+#
+# Derived from config/optimization.yaml — keep the non-alias blocks in step.
+schema_version: "0.2"
+active_profile: "default"
+
+models:
+  aliases:
+    # gpt-4o for the quality role; gpt-4o-mini for the cheaper fast /
+    # summarizer roles. OpenAI list pricing (USD per 1M tokens).
+    quality:
+      provider: openai
+      model: gpt-4o
+      input_per_1m_tokens: 2.50
+      output_per_1m_tokens: 10.00
+    fast:
+      provider: openai
+      model: gpt-4o-mini
+      input_per_1m_tokens: 0.15
+      output_per_1m_tokens: 0.60
+    summarizer:
+      provider: openai
+      model: gpt-4o-mini
+      input_per_1m_tokens: 0.15
+      output_per_1m_tokens: 0.60
+
+default:
+  model_routing:
+    defaults:
+      task_agents: "quality"
+      sub_agents: "quality"
+      evaluators: "fast"
+  caching:
+    exact:
+      enabled: true
+      max_entries: 10000
+      ttl_seconds: 3600
+  context_management:
+    max_context_tokens: 80000
+    summarization:
+      enabled: true
+      model: "summarizer"
+
+cost:
+  pricing:
+    # Derived from the aliases above — these priced cloud models keep the
+    # RFC 0023 budget/lease gate live (a real per-token cost accrues), so the
+    # wallet-cap demo trips here, unlike the $0-local offline / ollama demos.
+    models:
+      "gpt-4o":
+        input_per_1m_tokens: 2.50
+        output_per_1m_tokens: 10.00
+      "gpt-4o-mini":
+        input_per_1m_tokens: 0.15
+        output_per_1m_tokens: 0.60
+  budgets:
+    global:
+      max_daily_usd: 100.00
+      alert_at_percent: [50, 80, 95]
+      on_exceed: "pause_and_alert"
+    per_workflow:
+      default_max_usd: 10.00
+    per_agent:
+      default_max_usd: 5.00
+
+wallet:
+  ttl_seconds: 60
+  reaper_interval_seconds: 5
+  max_active_leases: 16
+
+conversation_window:
+  enabled: true
+  max_turns: 20
+  max_tokens: 2048

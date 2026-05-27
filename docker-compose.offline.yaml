@@ -1,49 +1,55 @@
-# Offline / demo overlay for docker-compose.yaml — runs the whole society
-# with the zero-cost MockProvider: no API key, no network, no spend.
+# Offline / demo overlay for docker-compose.yaml — runs the whole society on
+# the zero-cost mock provider: no API key, no network, no spend.
 #
 #   make demo-offline
 #       — or —
-#   ANTHROPIC_API_KEY=offline PERSATRIX_OFFLINE=1 \
-#     docker compose -f docker-compose.yaml -f docker-compose.offline.yaml up
+#   docker compose -f docker-compose.yaml -f docker-compose.offline.yaml up -d --build
 #
-# Why a throwaway ANTHROPIC_API_KEY is still passed: the base compose file
-# guards the key with `${ANTHROPIC_API_KEY:?...}`, which Compose evaluates
-# when it parses that file — before this overlay is merged. Supplying any
-# non-empty value satisfies that startup check; the value is never used,
-# because PERSATRIX_OFFLINE=1 routes every agent to the MockProvider in
-# agents.llm_client.create_provider before any provider SDK is constructed.
+# Provider selection is config-driven (RFC 0033 — there is no force-knob): this
+# overlay mounts config/demo/optimization.offline.yaml over the stack's
+# optimization.yaml, which points the quality / fast / summarizer aliases at
+# `provider: mock`. The factory (agents/llm_factory.py) then routes every agent
+# to the in-process MockProvider in agents.llm_offline before any provider SDK
+# is constructed. The base compose plumbs provider keys optionally, so no
+# throwaway key is needed.
 #
-# Each agent also gets PERSATRIX_OFFLINE_RESPONSES pointed at the config
-# volume (mounted read-only at /app/config) so curated replies load
-# regardless of where the package is installed inside the image.
+# Each agent also gets PERSATRIX_OFFLINE_RESPONSES pointed at the config volume
+# (mounted read-only at /app/config) so the curated replies load regardless of
+# where the package is installed inside the image. (That env var is mock
+# *configuration* — where to read replies — not a provider-selection knob.)
+
+# The alias config is mounted into the orchestrator (it prices the mock model
+# at $0 in its cost table) and every agent (they resolve the aliases).
+x-offline-config: &offline-config
+  - ./config/demo/optimization.offline.yaml:/app/config/optimization.yaml:ro
+
+x-offline-agent-env: &offline-agent-env
+  PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"
 
 services:
+  orchestrator:
+    volumes: *offline-config
+
   agent-planner:
-    environment:
-      PERSATRIX_OFFLINE: "1"
-      PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"
+    volumes: *offline-config
+    environment: *offline-agent-env
 
   agent-coder:
-    environment:
-      PERSATRIX_OFFLINE: "1"
-      PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"
+    volumes: *offline-config
+    environment: *offline-agent-env
 
   agent-reviewer:
-    environment:
-      PERSATRIX_OFFLINE: "1"
-      PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"
+    volumes: *offline-config
+    environment: *offline-agent-env
 
   agent-ember-owl:
-    environment:
-      PERSATRIX_OFFLINE: "1"
-      PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"
+    volumes: *offline-config
+    environment: *offline-agent-env
 
   agent-iron-fox:
-    environment:
-      PERSATRIX_OFFLINE: "1"
-      PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"
+    volumes: *offline-config
+    environment: *offline-agent-env
 
   agent-nova-sparrow:
-    environment:
-      PERSATRIX_OFFLINE: "1"
-      PERSATRIX_OFFLINE_RESPONSES: "/app/config/offline_responses.yaml"
+    volumes: *offline-config
+    environment: *offline-agent-env

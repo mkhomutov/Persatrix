@@ -1,0 +1,86 @@
+# Demo optimization overlay — OLLAMA (real local model).
+#
+# Mounted over /app/config/optimization.yaml by docker-compose.ollama.yaml
+# (`make demo-ollama`). It points the three aliases the society references
+# (quality / fast / summarizer) at a model served locally by the bundled
+# `ollama` service — real inference, no API key, no cloud spend. This is the
+# config-driven equivalent of the old PERSATRIX_OLLAMA force-knob.
+#
+# The model below (llama3.2) must match the tag docker-compose.ollama.yaml's
+# `ollama-pull` service pulls. PERSATRIX_OLLAMA_MODEL overrides BOTH (the pull
+# and every ollama-routed agent) in lock-step, so a different model is one env
+# var, not a config edit.
+#
+# Derived from config/optimization.yaml — keep the non-alias blocks in step.
+schema_version: "0.2"
+active_profile: "default"
+
+models:
+  aliases:
+    # All three roles route to the local daemon over its OpenAI-compatible
+    # /v1 endpoint on the compose bridge. $0-real (the missing-price guard
+    # exempts `ollama`); the explicit 0 keeps the derived cost table complete.
+    quality:
+      provider: ollama
+      model: llama3.2
+      input_per_1m_tokens: 0
+      output_per_1m_tokens: 0
+      provider_config:
+        base_url: "http://ollama:11434/v1"
+    fast:
+      provider: ollama
+      model: llama3.2
+      input_per_1m_tokens: 0
+      output_per_1m_tokens: 0
+      provider_config:
+        base_url: "http://ollama:11434/v1"
+    summarizer:
+      provider: ollama
+      model: llama3.2
+      input_per_1m_tokens: 0
+      output_per_1m_tokens: 0
+      provider_config:
+        base_url: "http://ollama:11434/v1"
+
+default:
+  model_routing:
+    defaults:
+      task_agents: "quality"
+      sub_agents: "quality"
+      evaluators: "fast"
+  caching:
+    exact:
+      enabled: true
+      max_entries: 10000
+      ttl_seconds: 3600
+  context_management:
+    max_context_tokens: 80000
+    summarization:
+      enabled: true
+      model: "summarizer"
+
+cost:
+  pricing:
+    models:
+      "llama3.2":
+        input_per_1m_tokens: 0
+        output_per_1m_tokens: 0
+  budgets:
+    global:
+      max_daily_usd: 100.00
+      alert_at_percent: [50, 80, 95]
+      on_exceed: "pause_and_alert"
+    per_workflow:
+      default_max_usd: 10.00
+    per_agent:
+      default_max_usd: 5.00
+
+wallet:
+  ttl_seconds: 60
+  reaper_interval_seconds: 5
+  max_active_leases: 16
+
+conversation_window:
+  enabled: true
+  max_turns: 20
+  max_tokens: 2048

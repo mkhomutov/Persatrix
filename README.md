@@ -87,15 +87,21 @@ agents) interact with over time.
 ## Quick start
 
 You'll need: **Docker Desktop**, **Go 1.24+**, **Python 3.11+**,
-**Rust 1.80+**, and an **`ANTHROPIC_API_KEY`** from
-<https://console.anthropic.com/>.
+**Rust 1.80+**, and **an LLM provider**. Persatrix is provider-agnostic
+([RFC 0033](docs/rfcs/0033-model-alias-layer.md)) — pick whichever you have a
+key for (Anthropic or OpenAI), or run a **free** local / offline model with no
+key at all (see [below](#try-it-free--offline-mode-no-api-key-no-cost-)). The
+example below uses an Anthropic key from <https://console.anthropic.com/>; swap
+the provider with a one-line edit (see the
+[model providers guide](docs/guides/model-providers.md)).
 
 ```bash
 # Clone + configure
 git clone https://github.com/mkhomutov/Persatrix.git
 cd Persatrix
 cp .env.example .env
-# Edit .env and paste your ANTHROPIC_API_KEY
+# Edit .env and paste the API key for your provider (e.g. ANTHROPIC_API_KEY
+# or OPENAI_API_KEY) — or skip the key entirely and use `make demo-offline`.
 
 # Build everything
 make all && make build-agents
@@ -119,34 +125,35 @@ and the [channels guide](docs/guides/channels.md).
 
 ### Try it free — offline mode (no API key, no cost) 🆓
 
-> **Coming in the next release — not in v0.3.3 (the latest tagged release).**
-> Offline mode is already in the source tree, so the `git clone` Quick start
-> above includes it today; a downloaded v0.3.3 release artifact does not.
+> **New in v0.3.4 — not in v0.3.3 (the latest tagged release).** Offline mode
+> is already in the source tree, so the `git clone` Quick start above includes
+> it today; a downloaded v0.3.3 release artifact does not.
 
 Want to see the society work before wiring up a paid API key? Run the whole
 stack against the built-in **offline provider** — scripted, persona-accurate
 replies with **zero LLM calls and zero spend**:
 
 ```bash
-make demo-offline                 # brings the stack up with PERSATRIX_OFFLINE=1
+make demo-offline                 # routes every agent to the mock provider
 ./bin/persatrix chat ember-owl    # chat for free
 ```
 
 Everything runs end to end — chat, multi-agent channels, memory, the
 budget-lease path, and the OpenTelemetry traces — on canned replies. Edit the
 replies in [`config/offline_responses.yaml`](config/offline_responses.yaml),
-or drop the flag any time to switch to a real model.
+or point the `quality` alias at a real provider any time to switch
+([model providers guide](docs/guides/model-providers.md)).
 
 **"$0" means $0 of your real money** — no API key is used and no provider call
-is ever issued. The *in-app* wallet, though, is fully live: every canned reply
-still acquires and settles an [RFC 0023 lease](docs/rfcs/0023-llm-call-leasing.md)
-against a **simulated** per-agent budget priced at real model rates
-([`config/optimization.yaml`](config/optimization.yaml): `$5`/agent at Sonnet
-pricing), so the cost gate is something you can actually watch work in the
-OpenTelemetry traces. Leave the society running and an agent will eventually
-**pause itself** when it hits that cap — that's the wallet doing its job, not a
-bug. Restart the stack (`make docker-down && make demo-offline`) to reset the
-simulated wallet.
+is ever issued. The *in-app* wallet still runs: every canned reply acquires and
+settles an [RFC 0023 lease](docs/rfcs/0023-llm-call-leasing.md) against a
+simulated per-agent budget, so you can watch the lease machinery work in the
+OpenTelemetry traces. But the mock is a genuinely **$0** local model — each
+lease settles at `$0`, so the budget **never accrues** and the wallet cap is
+never reached in offline mode. To watch an agent **pause itself at the cap**
+(the wallet doing its job), run on a **priced** provider instead — a cloud
+alias like Anthropic, or `make demo-openai` — where real per-token cost
+accrues against the `$5`/agent simulated budget. See [§ Cost Warning](#-cost-warning).
 
 > Offline mode removes the **API-key** and **cost** barriers (the two scariest
 > ones). You still need the Docker + Go + Rust toolchain to build the stack
@@ -154,16 +161,16 @@ simulated wallet.
 
 ### Run a real local model — Ollama (no API key, no cloud cost) 🦙
 
-> **Coming in the next release — not in v0.3.3 (the latest tagged release),**
-> like offline mode above. It's already in the source tree, so the `git clone`
-> Quick start above includes it today; a downloaded v0.3.3 release artifact does not.
+> **New in v0.3.4 — not in v0.3.3 (the latest tagged release),** like offline
+> mode above. It's already in the source tree, so the `git clone` Quick start
+> above includes it today; a downloaded v0.3.3 release artifact does not.
 
 Want **real** inference — not canned replies — without a cloud API key or
 per-token spend? Run the whole society on a model served locally by
 [Ollama](https://ollama.com):
 
 ```bash
-make demo-ollama                  # pulls the model + brings the stack up (PERSATRIX_OLLAMA=1)
+make demo-ollama                  # pulls the model + routes every agent to it
 ./bin/persatrix chat ember-owl    # chat against your local model
 ```
 
@@ -177,17 +184,37 @@ reuse the volume. CPU works out of the box; uncomment the `deploy` block in
 Under the hood, `ollama` is a **first-class provider**
 ([`agents/llm_ollama.py`](agents/llm_ollama.py)) — a thin subclass of the
 OpenAI-compatible provider, because Ollama speaks that wire format verbatim at
-`/v1`. To point a **single** agent at Ollama instead of the whole society, set
-`provider: ollama` on its [`config/agents.yaml`](config/agents.yaml) entry (its
-`model:` is then a real Ollama tag like `llama3.2`, and
-`provider_config.base_url` defaults to `http://localhost:11434/v1`).
+`/v1` — selected the same config-driven way as any other provider
+([model providers guide](docs/guides/model-providers.md)). To point a
+**single** agent at Ollama instead of the whole society, set `provider: ollama`
+on its [`config/agents.yaml`](config/agents.yaml) entry (its `model:` is then a
+real Ollama tag like `llama3.2`, and `provider_config.base_url` defaults to
+`http://localhost:11434/v1`).
 
 > **Real model, $0 of real money** — inference runs on your own hardware, so
 > there is no cloud bill. The *in-app* [RFC 0023 wallet](docs/rfcs/0023-llm-call-leasing.md)
-> still simulates a per-agent budget at the configured model's price, exactly
-> as in offline mode above. Already running Ollama yourself? `PERSATRIX_OLLAMA=1`
-> (plus `PERSATRIX_OLLAMA_BASE_URL` if it's not on the default port) routes the
+> still leases each call, but a local model is $0, so (as in offline mode) the
+> budget never accrues and the cap is never reached — watch the cap trip on a
+> priced cloud provider instead. Already running Ollama yourself? Point the
+> `quality` alias at `provider: ollama` (set `provider_config.base_url`, or
+> `PERSATRIX_OLLAMA_BASE_URL`, if it's not on the default port) to route the
 > society to it without the bundled container.
+
+### Run on OpenAI — or any other provider 🔀
+
+Anthropic, OpenAI, Ollama, and the offline mock are **peers**: switching the
+whole society between them is a one-line edit to the `quality` alias in
+[`config/optimization.yaml`](config/optimization.yaml), not a code change. For
+the OpenAI cloud peer:
+
+```bash
+make demo-openai                  # routes every agent to OpenAI (gpt-4o / gpt-4o-mini)
+```
+
+`make demo-openai` needs `OPENAI_API_KEY` in your `.env` (it spends real money
+— set a cap first). See the **[model providers & aliases guide](docs/guides/model-providers.md)**
+for how aliases resolve to a `(provider, model, pricing)` record, the one-line
+swap, and adding a brand-new provider.
 
 ---
 
@@ -241,6 +268,7 @@ Persatrix is BUSL-1.1 licensed with no warranty. Use at your own risk
 | **v0.3.1** | Chat with a persona that remembers stated facts about you across interactions and follows the conversation it's currently having | ✅ Released |
 | **v0.3.2** | Every LLM call passes through a wallet lease before it's issued — cost becomes a structural gate, not a post-hoc accountant — and the memory facade is frozen as the single path to agent memory ahead of the v0.4.0 Postgres split | ✅ Released |
 | **v0.3.3** | A persona with no scheduled work and no inbound traffic costs nothing — its event loop parks until something wakes it (an inbound message, a scheduled timer, or a salience-triggered memory write) instead of polling on a fixed tick | ✅ Released |
+| **v0.3.4** | Run the same agents on any provider — Anthropic, OpenAI, a free local model (Ollama), or a $0 offline mock — by naming a logical model alias (`quality` / `fast` / `summarizer`); a vendor swap is a one-line config edit | 🚧 Release prep |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
 | **v0.6.0** | Run agent societies across multiple nodes and networks | 📋 Planned |
@@ -277,6 +305,8 @@ LLM's reply landing back. Diagrams in
 
 - [Persona agents guide](docs/guides/persona-agents.md) — declare a
   persona, configure memory, set budgets
+- [Model providers & aliases guide](docs/guides/model-providers.md) — run on
+  Anthropic / OpenAI / Ollama / offline, the one-line provider swap
 - [Channels guide](docs/guides/channels.md) — shared channels, DMs,
   response policies
 - [v0.3.0 demo walkthrough](docs/guides/v0.3.0-demo.md) — three pre-defined

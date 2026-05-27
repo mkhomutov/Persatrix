@@ -1,8 +1,12 @@
 """Tests for the offline / mock LLM provider (agents.llm_offline).
 
-No network, no API key, no cost — these tests assert exactly that the
-MockProvider returns deterministic scripted or fallback text and that
-create_provider routes to it under PERSATRIX_OFFLINE / provider: mock.
+No network, no API key, no cost — these tests assert that the MockProvider
+returns deterministic scripted or fallback text and that ``create_provider``
+routes to it the **same standard way** every other provider is selected:
+through the resolved ``provider`` field (an alias declaring ``provider:
+mock``, or a per-agent ``provider: mock``). There is no global env force-knob
+— RFC 0033 made provider selection purely config/alias-driven (the v0.3.4
+provider-parity refactor removed ``PERSATRIX_OFFLINE``).
 """
 
 from __future__ import annotations
@@ -14,8 +18,9 @@ import pytest
 
 from agents.llm_client import MockProvider as MockProviderReexport
 from agents.llm_client import create_provider
-from agents.llm_offline import MockProvider, offline_mode_enabled, reset_cache
+from agents.llm_offline import MockProvider, reset_cache
 from agents.llm_types import StopReason
+from agents.model_aliases import use_alias_map
 
 _FIXTURE = """\
 responses:
@@ -33,34 +38,20 @@ responses:
 def _offline_env_baseline(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> Iterator[None]:
-    """Deterministic baseline: env off, fixtures pointed at a temp file.
+    """Deterministic baseline: fixtures pointed at a temp file.
 
-    Mirrors conftest's autouse env-isolation idiom so PERSATRIX_OFFLINE /
-    PERSATRIX_OFFLINE_RESPONSES never leak across tests, and the cached
-    fixture read is cleared before and after each test.
+    Mirrors conftest's autouse env-isolation idiom so
+    PERSATRIX_OFFLINE_RESPONSES never leaks across tests, and the cached
+    fixture read is cleared before and after each test. (The responses path
+    is mock *configuration* — analogous to an API key — not a provider-
+    selection knob.)
     """
-    monkeypatch.delenv("PERSATRIX_OFFLINE", raising=False)
     fixture = tmp_path / "offline_responses.yaml"
     fixture.write_text(_FIXTURE, encoding="utf-8")
     monkeypatch.setenv("PERSATRIX_OFFLINE_RESPONSES", str(fixture))
     reset_cache()
     yield
     reset_cache()
-
-
-# ─── offline_mode_enabled ───────────────────────────────────
-
-
-@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
-def test_offline_mode_enabled_truthy(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
-    monkeypatch.setenv("PERSATRIX_OFFLINE", value)
-    assert offline_mode_enabled() is True
-
-
-@pytest.mark.parametrize("value", ["", "0", "false", "no", "off", "nope"])
-def test_offline_mode_enabled_falsy(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
-    monkeypatch.setenv("PERSATRIX_OFFLINE", value)
-    assert offline_mode_enabled() is False
 
 
 # ─── scripted replies ───────────────────────────────────────
@@ -158,34 +149,52 @@ async def test_synthetic_usage_is_populated_but_no_real_call() -> None:
 # ─── create_provider routing ────────────────────────────────
 
 
-def test_create_provider_offline_env_forces_mock(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PERSATRIX_OFFLINE", "1")
-    # A real Anthropic model id — offline mode must override it anyway.
-    provider, _model = create_provider(
-        {"id": "ember-owl", "model": "claude-sonnet-4-20250514"}
-    )
+def test_create_provider_alias_routes_to_mock() -> None:
+    """An alias declaring ``provider: mock`` routes to MockProvider — the
+    same standard alias path anthropic / openai / ollama take. The alias's
+    physical ``model`` reaches the call site (never the alias name)."""
+    alias_map = {
+        "quality": {
+            "provider": "mock",
+            "model": "offline",
+            "input_per_1m_tokens": 0,
+            "output_per_1m_tokens": 0,
+        },
+    }
+    with use_alias_map(alias_map):
+        provider, model = create_provider({"id": "ember-owl", "model": "quality"})
     assert isinstance(provider, MockProvider)
     assert provider.name == "mock"
+    assert model == "offline"
 
 
-def test_create_provider_explicit_mock_without_env() -> None:
+def test_create_provider_explicit_mock_per_agent() -> None:
+    """A per-agent ``provider: mock`` routes to MockProvider on the raw path."""
     provider, _model = create_provider(
         {"id": "x", "model": "claude-sonnet-4-20250514", "provider": "mock"}
     )
     assert isinstance(provider, MockProvider)
 
 
-def test_create_provider_offline_tolerates_placeholder_model(
+def test_create_provider_offline_env_does_not_force_mock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Offline override is checked before the model field is read/validated."""
+    """The removed ``PERSATRIX_OFFLINE`` knob no longer forces the mock.
+
+    Provider selection is config-driven now: with the agent routed to a real
+    cloud model and no mock alias/override, setting the legacy env has no
+    effect — the agent resolves to its configured provider.
+    """
     monkeypatch.setenv("PERSATRIX_OFFLINE", "1")
-    provider, _model = create_provider({"id": "x", "model": ""})
-    assert isinstance(provider, MockProvider)
+    provider, _model = create_provider(
+        {"id": "ember-owl", "model": "claude-sonnet-4-20250514"}
+    )
+    assert not isinstance(provider, MockProvider)
+    assert provider.name == "anthropic"
 
 
 def test_create_provider_normal_path_unaffected() -> None:
-    """With env off and no provider override, the real SDK provider is used."""
+    """With no provider override, the real SDK provider is used."""
     provider, model = create_provider({"id": "x", "model": "claude-sonnet-4-20250514"})
     assert not isinstance(provider, MockProvider)
     assert provider.name == "anthropic"

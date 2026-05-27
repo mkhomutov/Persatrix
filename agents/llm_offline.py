@@ -7,13 +7,20 @@ API key, or token spend**, so the whole agent society — chat, channels,
 memory, the wallet-lease path, OpenTelemetry traces — runs end-to-end for
 $0 and zero risk.
 
-Activation (either is sufficient; the env var wins):
+Activation is purely config/alias-driven — the **same standard way** every
+other provider is selected (RFC 0033). There is no global force-knob:
 
-* ``PERSATRIX_OFFLINE=1`` — global override, forces *every* agent onto the
-  mock regardless of its configured ``model`` / ``provider``.
-* ``provider: mock`` in an agent's ``config/agents.yaml`` entry.
+* ``provider: mock`` on a ``models.aliases`` entry the agents reference
+  (e.g. ``quality`` → ``{provider: mock, model: offline, …}``) routes the
+  whole society to the mock — this is how ``make demo-offline`` works.
+* ``provider: mock`` directly on an agent's ``config/agents.yaml`` entry
+  opts a single agent in.
 
-Both are wired in :func:`agents.llm_client.create_provider`.
+Both flow through :func:`agents.llm_client.create_provider`'s provider
+dispatch. The curated-replies file path is read from
+``PERSATRIX_OFFLINE_RESPONSES`` (mock *configuration*, analogous to an API
+key — not a provider-selection knob); it defaults to
+``config/offline_responses.yaml``.
 
 **Reply selection.** Each turn the provider:
 
@@ -54,13 +61,10 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "MockProvider",
-    "offline_mode_enabled",
     "reset_cache",
 ]
 
-_OFFLINE_ENV = "PERSATRIX_OFFLINE"
 _RESPONSES_ENV = "PERSATRIX_OFFLINE_RESPONSES"
-_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 # Repo-relative default location for curated offline replies.  Mirrors the
 # ``config/`` anchoring used by :mod:`agents.optimization`.
@@ -73,11 +77,6 @@ _DEFAULT_RESPONSES_PATH: Path = (
 # or echoing it back — same delimiter shape as
 # :func:`agents.chat_reply.extract_chat_reply`.
 _USER_MSG_DELIM_RE = re.compile(r"<\|/?user_message[^|]*\|>")
-
-
-def offline_mode_enabled() -> bool:
-    """Return whether ``PERSATRIX_OFFLINE`` selects the offline provider."""
-    return os.environ.get(_OFFLINE_ENV, "").strip().lower() in _TRUTHY
 
 
 @lru_cache(maxsize=1)
