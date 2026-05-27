@@ -214,6 +214,17 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # the report past the 3 000-word prose cap. Written against the v0.3.3
     # release; archive once the tag ships.
     "docs/manual-tests/v0.3.3-execution-report.md",
+    # docs/manual-tests/v0.3.4-execution-report.md is the v0.3.4 sibling of
+    # the v0.3.0–v0.3.3 reports above — identical per-release accumulator
+    # pattern. The release-prep PR 1 sweep (38 rows = 4 new RFC 0033 MTs +
+    # 34 carried-forward, plus the automated suites) carries inline per-step
+    # evidence tables for the four new MTs (alias routing, the live one-line
+    # provider swap with exact gpt-4o cost math, offline $0, Ollama real
+    # tokens) and the §Follow-ups findings (F-5 OPENAI_API_KEY plumbing,
+    # F-6 CPU-Ollama latency, F-7 1% tail-sampling), pushing it past the
+    # 3 000-word prose cap. Written against the v0.3.4 release; archive once
+    # the tag ships.
+    "docs/manual-tests/v0.3.4-execution-report.md",
     # docs/v0.3.3-release-checklist.md crossed the 3 000-word prose cap as a
     # release-cycle record: the §3.1 Upgrade Notes table (8 rows — event-driven
     # loop, fire-and-forget channel dispatch, autonomy.timers, scheduled_wakes

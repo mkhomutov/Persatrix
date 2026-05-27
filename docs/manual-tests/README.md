@@ -85,6 +85,15 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-COST-001](MT-COST-001.md) | `GET /api/v1/cost/summary` reports token usage for a completed run | Active |
 | [MT-COST-002](MT-COST-002.md) | Workflow exceeding budget is aborted with the expected reason | Active |
 
+## Model Alias / Provider (RFC 0033 — v0.3.4)
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-ALIAS-001](MT-ALIAS-001.md) | Alias-routed agent reports correctly-keyed, non-zero cost (live) + `model_alias` span | Active |
+| [MT-ALIAS-002](MT-ALIAS-002.md) | One-line provider swap re-routes the same agent (headline claim) | Active |
+| [MT-OFFLINE-001](MT-OFFLINE-001.md) | Offline mode (`MockProvider`) — full round-trip at $0, zero network | Active |
+| [MT-OLLAMA-001](MT-OLLAMA-001.md) | Ollama local model — real tokens, $0 cloud spend | Active |
+
 ## Integration
 
 | ID | Title | Status |
@@ -112,6 +121,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | v0.3.1 | [v0.3.1-execution-report.md](v0.3.1-execution-report.md) | ✅ Complete |
 | v0.3.2 | [v0.3.2-execution-report.md](v0.3.2-execution-report.md) | ✅ Complete |
 | v0.3.3 | [v0.3.3-execution-report.md](v0.3.3-execution-report.md) | ✅ Complete |
+| v0.3.4 | [v0.3.4-execution-report.md](v0.3.4-execution-report.md) | ✅ Complete |
 
 ---
 
