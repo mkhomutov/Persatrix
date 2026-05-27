@@ -265,6 +265,7 @@ authoritative; the redundant disagreeing field is a config bug, not a silent res
 |------|--------|----|--------|-------|
 | 2026-05-27 | Claude (Opus 4.7) | Windows 11 + Docker Desktop | ✅ Pass | See [`v0.3.4-execution-report.md`](v0.3.4-execution-report.md#mt-alias-001--primary-gate-evidence-live) for per-step evidence. |
 | 2026-05-27 | Claude (Opus 4.7) | Windows 11 + Docker 29.3.1 | ✅ Pass | **Config-driven re-run on HEAD `6ce23cd`** (`make demo-anthropic`): no raw-ID / key warning; chat turn `reply_status="ok"`; cost `2708/20/$0.008424`, **exactly** the `claude-sonnet-4-6` rate (2708×$3.00/1M + 20×$15.00/1M), keyed to ember-owl; Prometheus `agent_llm_calls_total{gen_ai_system="anthropic", gen_ai_request_model="claude-sonnet-4-6"}=1`. Both Go gate tests PASS on HEAD. |
+| 2026-05-27 | Claude (Opus 4.7) | Windows 11 (post-bump RC tip `3ad32b2`) | ✅ Pass | **Release-prep PR 4 re-certification.** The automated Step-6 cost-attribution gate (`TestCostSummary_AliasRoutedAgent_ReportsNonZeroCost` + `TestLoadCostConfig_ShippedConfig_PricesAliasPhysicalModels`) re-ran **fresh, both PASS** on the post-version-bump tip; the live Steps 1–5 carry forward from the `6ce23cd` row above — the RC-tip delta ([#442](https://github.com/mkhomutov/Persatrix/pull/442) version+changelog, [#443](https://github.com/mkhomutov/Persatrix/pull/443) test-infra) touches no provider/routing/cost code. See [v0.3.4-execution-report.md § Re-Execution](v0.3.4-execution-report.md#re-execution--release-prep-pr-4-post-version-bump-rc-tip). |
 
 ---
 

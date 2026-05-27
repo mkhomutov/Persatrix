@@ -240,6 +240,19 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # with full detail deferred to the grandfathered execution report. Written
     # against the v0.3.3 release; archive once the tag ships.
     "docs/v0.3.3-release-checklist.md",
+    # docs/v0.3.4-release-checklist.md is the v0.3.4 sibling of the v0.3.3
+    # checklist above — identical release-cycle-record pattern. It crossed the
+    # 3 000-word prose cap in release-prep PR 4 when the §1 gate checkboxes were
+    # filled with the post-bump re-certification evidence (per-gate results +
+    # the carried-forward Docker-smoke leg values) on top of the §3.1 Upgrade
+    # Notes table (7 rows — provider-agnostic aliases, no-default-provider,
+    # config-driven selection, provider-neutral onboarding, missing-price guard,
+    # alias-derived pricing + model_alias span, $0-local vs the wallet cap) and
+    # the §6 Known Gaps inventory, both inherently long for this provider-parity
+    # release. The PR 4 gate evidence is already condensed, with full detail
+    # deferred to the grandfathered execution report. Written against the v0.3.4
+    # release; archive once the tag ships.
+    "docs/v0.3.4-release-checklist.md",
     # docs/v0.3.4-release-prep-plan.md is the v0.3.4 release-prep sequencer —
     # same release-cycle-accumulator pattern as the v0.3.0 / v0.3.1 plans and
     # the v0.3.3 checklist above. It crossed the 3 000-word prose cap when PR 1
