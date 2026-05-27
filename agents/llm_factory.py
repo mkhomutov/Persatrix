@@ -202,8 +202,11 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
         # the PERSATRIX_OLLAMA_BASE_URL env, then the localhost default. The
         # alias/agent `model:` is a real Ollama tag, used verbatim — unless
         # PERSATRIX_OLLAMA_MODEL is set, a configuration override (not a
-        # selection knob) that swaps the tag for *every* ollama-routed agent so
-        # the demo's `ollama-pull` and the agents stay in lock-step.
+        # selection knob) that swaps the tag for every agent built here so the
+        # demo's `ollama-pull` and the agents stay in step. Scope: this is the
+        # create_provider (agent) surface only — the summarisation-on-close model
+        # (persona_runtime.summarize_close, RFC 0020) resolves on its own surface
+        # and is not covered by this override (ISSUE-0075).
         model_override = os.environ.get("PERSATRIX_OLLAMA_MODEL", "").strip()
         ollama_model = model_override or physical_model
         try:

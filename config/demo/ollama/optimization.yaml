@@ -7,9 +7,13 @@
 # config-driven equivalent of the old PERSATRIX_OLLAMA force-knob.
 #
 # The model below (llama3.2) must match the tag docker-compose.ollama.yaml's
-# `ollama-pull` service pulls. PERSATRIX_OLLAMA_MODEL overrides BOTH (the pull
-# and every ollama-routed agent) in lock-step, so a different model is one env
-# var, not a config edit.
+# `ollama-pull` service pulls. PERSATRIX_OLLAMA_MODEL overrides the pull AND the
+# agents (the factory applies it to every agent built via create_provider), so a
+# different model is one env var. NOTE: it does NOT reach the summarization-on-
+# close model — that resolves from the `summarizer` alias below on a separate
+# surface (RFC 0020). If you set PERSATRIX_OLLAMA_MODEL, match the three `model:`
+# fields below too, or summarization-on-close requests the un-pulled llama3.2 and
+# degrades to its fallback (ISSUE-0075).
 #
 # Derived from config/optimization.yaml — keep the non-alias blocks in step.
 schema_version: "0.2"

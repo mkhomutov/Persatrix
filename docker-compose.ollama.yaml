@@ -14,10 +14,13 @@
 # needed.
 #
 # Pick the model with PERSATRIX_OLLAMA_MODEL (default: llama3.2). It overrides
-# BOTH the one-shot `ollama-pull` service below AND every ollama-routed agent
-# (the factory applies it over the alias's model), so the pulled model and the
-# agents stay in lock-step. First pull downloads a few GB into a named volume
-# and can take minutes; subsequent runs reuse `ollama-models`.
+# BOTH the one-shot `ollama-pull` service below AND every agent (the factory
+# applies it over the alias's model), so the pulled model and the agents stay in
+# step. NOTE: it does not reach the summarization-on-close model (a separate
+# surface, RFC 0020) — if you override the model, match the `summarizer` alias's
+# `model:` in config/demo/ollama/optimization.yaml too (ISSUE-0075). First pull
+# downloads a few GB into a named volume and can take minutes; subsequent runs
+# reuse `ollama-models`.
 #
 # CPU by default. For NVIDIA GPU acceleration, uncomment the `deploy` block on
 # the `ollama` service (requires the NVIDIA Container Toolkit on the host).

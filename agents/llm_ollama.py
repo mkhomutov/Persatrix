@@ -32,9 +32,12 @@ dispatch. The daemon endpoint is read from the alias/agent
 ``provider_config.base_url`` (most specific), then ``PERSATRIX_OLLAMA_BASE_URL``
 (the deployment-wide endpoint the compose overlay sets to reach the bundled
 ``ollama`` service), then the localhost default. ``PERSATRIX_OLLAMA_MODEL`` is
-an optional model *override* the factory applies to ollama-routed agents (it
-keeps the demo's ``ollama-pull`` and the agents in lock-step). Both env vars
-are provider *configuration* — analogous to an API key — not selection knobs.
+an optional model *override* the factory applies to agents built via
+``create_provider`` (it keeps the demo's ``ollama-pull`` and the agents in step;
+the summarisation-on-close surface — :mod:`agents.persona_runtime.summarize_close`,
+RFC 0020 — resolves its own model and is *not* covered, see ISSUE-0075). Both
+env vars are provider *configuration* — analogous to an API key — not selection
+knobs.
 
 **No API key.** Ollama ignores the ``Authorization`` header, but the OpenAI
 SDK rejects an empty key at construction, so a harmless sentinel is passed
