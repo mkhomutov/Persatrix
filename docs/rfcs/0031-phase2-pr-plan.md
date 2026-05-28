@@ -324,9 +324,9 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 1 | Notes-tier session coverage | `feature/v035-rfc0031p2-notes-coverage` | 🔀 PR open | [#448](https://github.com/mkhomutov/Persatrix/pull/448) | — |
-| 2 | Episodic + notes recall filtering | `feature/v035-rfc0031p2-episodic-recall` | 🔀 PR open | [#449](https://github.com/mkhomutov/Persatrix/pull/449) | — |
-| 3 | Relationship + facts recall filtering | `feature/v035-rfc0031p2-relationship-facts-recall` | ⬜ Not started | — | — |
+| 1 | Notes-tier session coverage | `feature/v035-rfc0031p2-notes-coverage` | ✅ Merged | [#448](https://github.com/mkhomutov/Persatrix/pull/448) | 2026-05-28 |
+| 2 | Episodic + notes recall filtering | `feature/v035-rfc0031p2-episodic-recall` | ✅ Merged | [#449](https://github.com/mkhomutov/Persatrix/pull/449) | 2026-05-28 |
+| 3 | Relationship + facts recall filtering | `feature/v035-rfc0031p2-relationship-facts-recall` | 🔀 PR open | [#450](https://github.com/mkhomutov/Persatrix/pull/450) | — |
 | 4 | Facade read-path extension + call-site threading | `feature/v035-rfc0031p2-facade-callsites` | ⬜ Not started | — | — |
 | 5 | Dementia-test bridge + review follow-ups | `feature/v035-rfc0031p2-dementia-bridge` | ⬜ Not started | — | — |
 | 6 | Phase 2 closeout | `feature/v035-rfc0031p2-close` | ⬜ Not started | — | — |
