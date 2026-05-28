@@ -176,19 +176,16 @@ class _MemoryContextMixin:
     # RFC 0021 PR 2: temporal seam, set by ``_LLMPersonaAgent.__init__``.
     _clock: Clock
     _timezone: str
-    # RFC 0026 PR 3 — facts tier seam.  ``_fact_store`` is the
-    # per-agent FactStore created by ``create_persona_agent``; ``None``
-    # is the diagnostic-disable path (``memory.facts.enabled: false``)
-    # **and** the back-compat default for legacy mixin harnesses that
-    # subclass :class:`_MemoryContextMixin` without wiring a fact
-    # store.  ``_facts_budget_tokens`` is the per-tier soft slice from
+    # RFC 0026 PR 3 — facts tier seam.  ``_fact_store`` is the per-agent
+    # FactStore created by ``create_persona_agent``; ``None`` is the
+    # diagnostic-disable path (``memory.facts.enabled: false``) and the
+    # back-compat default for legacy mixin harnesses that subclass
+    # :class:`_MemoryContextMixin` without wiring a fact store.
+    # ``_facts_budget_tokens`` is the per-tier soft slice from
     # ``memory.facts.budget_tokens`` (default
     # :data:`agents.persona_runtime.facts_section.DEFAULT_FACTS_BUDGET_TOKENS`).
-    # Class-level defaults keep the older
-    # ``tests/unit/python/test_memory_context_*`` harnesses (built
-    # before PR 3) green — they assemble a mixin without going through
-    # ``create_persona_agent`` and would otherwise hit
-    # ``AttributeError`` on the new attributes.
+    # Class-level defaults keep the older ``test_memory_context_*``
+    # harnesses green (assembled without ``create_persona_agent``).
     _fact_store: FactStore | None = None
     _facts_enabled: bool = True
     _facts_budget_tokens: int = DEFAULT_FACTS_BUDGET_TOKENS
@@ -305,10 +302,12 @@ class _MemoryContextMixin:
         # TICK events are handled by the PR 5 empty-context short-circuit.
         # (RFC 0017 §D; previously: PR #60 TICK skip preserved through PR 2/3.)
         try:
+            # PR 4: ``sessions=None`` = §D default; ``"*"`` pinned unreachable.
             episodes = await self._episodic_memory.recall(
                 query,
                 limit=5,
                 min_score=DEFAULT_EPISODIC_MIN_SCORE,
+                sessions=None,
             )
         except Exception:
             logger.warning(
@@ -332,6 +331,7 @@ class _MemoryContextMixin:
                 query,
                 limit=5,
                 min_score=DEFAULT_NOTES_MIN_SCORE,
+                sessions=None,  # PR 4: §D default; "*" pinned unreachable.
             )
         except Exception:
             logger.warning(

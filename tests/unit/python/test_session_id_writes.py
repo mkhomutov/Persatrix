@@ -310,5 +310,146 @@ class TestRecordInteractionSessionID:
         assert row[0] == "run-a"
 
 
+# ─── normalize_session_id helper (RFC 0031 Phase 2 PR 4 — F16) ─
+
+
+class TestNormalizeSessionIDHelper:
+    """The shared :func:`agents.session_id.normalize_session_id` helper.
+
+    Symmetric across the four persona-memory tier write boundaries —
+    every tier funnels caller-supplied ``session_id`` through this so a
+    direct programmatic caller passing ``""`` / ``"   "`` / ``None`` /
+    ``"  run-a  "`` lands the same canonical value as the env-var read
+    via :func:`agents.session_id.resolve_session_id_silent`.
+    """
+
+    def test_empty_string_collapses_to_legacy(self) -> None:
+        from agents.session_id import LEGACY_SESSION_ID, normalize_session_id
+
+        assert normalize_session_id("") == LEGACY_SESSION_ID
+
+    def test_whitespace_only_collapses_to_legacy(self) -> None:
+        from agents.session_id import LEGACY_SESSION_ID, normalize_session_id
+
+        assert normalize_session_id("   ") == LEGACY_SESSION_ID
+        assert normalize_session_id("\t") == LEGACY_SESSION_ID
+        assert normalize_session_id("\n") == LEGACY_SESSION_ID
+
+    def test_none_collapses_to_legacy(self) -> None:
+        from agents.session_id import LEGACY_SESSION_ID, normalize_session_id
+
+        assert normalize_session_id(None) == LEGACY_SESSION_ID
+
+    def test_surrounding_whitespace_stripped(self) -> None:
+        from agents.session_id import normalize_session_id
+
+        assert normalize_session_id("  run-a  ") == "run-a"
+
+    def test_canonical_value_passes_through(self) -> None:
+        from agents.session_id import normalize_session_id
+
+        assert normalize_session_id("run-a") == "run-a"
+
+
+class TestSessionIDNormalizationUniformAcrossTiers:
+    """Every persona-memory tier write boundary normalises empty /
+    whitespace input identically (RFC 0031 Phase 2 PR 4 — PR 1 F16
+    carry-forward).  Without this, a tier would persist a NOT NULL
+    ``""`` row that escapes both real-session and legacy-carve-out
+    recall filters.
+    """
+
+    async def test_episodic_normalises_empty(
+        self, memory: EpisodicMemory,
+    ) -> None:
+        from agents.session_id import LEGACY_SESSION_ID
+
+        ep_id = await memory.store_episode("hello", {}, session_id="")
+        async with memory._ensure_db().execute(
+            "SELECT session_id FROM episodes WHERE id = ?", (ep_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == LEGACY_SESSION_ID
+
+    async def test_episodic_normalises_whitespace(
+        self, memory: EpisodicMemory,
+    ) -> None:
+        from agents.session_id import LEGACY_SESSION_ID
+
+        ep_id = await memory.store_episode("hello", {}, session_id="   ")
+        async with memory._ensure_db().execute(
+            "SELECT session_id FROM episodes WHERE id = ?", (ep_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == LEGACY_SESSION_ID
+
+    async def test_relationship_normalises_empty(
+        self, rel_memory: RelationshipMemory,
+    ) -> None:
+        from agents.session_id import LEGACY_SESSION_ID
+
+        await rel_memory.record_interaction("bob", "chat", session_id="")
+        async with rel_memory._ensure_db().execute(
+            "SELECT session_id FROM relationships "
+            "WHERE participant_id = ? AND other_participant_id = ?",
+            ("test-agent", "bob"),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == LEGACY_SESSION_ID
+
+    async def test_facts_normalises_empty(self) -> None:
+        from agents.memory.facts import FactStore
+        from agents.session_id import LEGACY_SESSION_ID
+
+        store = FactStore(
+            agent_id="test-agent",
+            db_path=":memory:",
+            predicate_validator=lambda _p: None,
+        )
+        await store.initialize()
+        try:
+            fact_id = await store.store(
+                subject="alice",
+                predicate="likes",
+                object="kayaking",
+                source_interaction_id=None,
+                asserted_at=1.0,
+                session_id="",
+            )
+            db = store._ensure_db()  # noqa: SLF001 — test inspection
+            async with db.execute(
+                "SELECT session_id FROM facts WHERE fact_id = ?", (fact_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            assert row is not None
+            assert row[0] == LEGACY_SESSION_ID
+        finally:
+            await store.close()
+
+    async def test_notes_normalises_empty(
+        self, memory: EpisodicMemory,
+    ) -> None:
+        """Notes tier (PR #451 deep-review L2): the notes write path
+        also funnels caller-supplied ``session_id`` through
+        :func:`agents.session_id.normalize_session_id` — pins symmetry
+        with the other three tiers so the four-tier invariant is not
+        a doc-only claim.
+        """
+        from agents.session_id import LEGACY_SESSION_ID
+
+        note_id = await memory.store_note(
+            "topic-x", "note content", session_id="",
+        )
+        async with memory._ensure_db().execute(
+            "SELECT session_id FROM notes WHERE id = ?", (note_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == LEGACY_SESSION_ID
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

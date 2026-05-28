@@ -262,41 +262,32 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
         scope: str | None = None,
         tags: Iterable[str] | None = None,
         min_score: float | None = None,
+        sessions: list[str] | str | None = None,
     ) -> list[MemoryEntry]:
         """Return relevant memory entries for *query* (RFC 0008 §B).
 
-        Parameters
-        ----------
-        query:
-            Free-text query passed through to the underlying episodic tier.
-        limit:
-            Maximum number of entries to return.  The facade may return
-            fewer when the tag/scope filter trims the underlying recall
-            results — it does not over-fetch in Phase 2.
-        scope:
-            Optional scope filter (e.g. ``"channel:slack-#dev"``).  Phase 2
-            filters in Python after recall; SQL-side scope filtering is
-            wired in PR 5.
-        tags:
-            Required-tag filter with **AND semantics** — an entry is admitted
-            only when its tag set is a *superset* of the requested tags.
-            This is the contract [RFC 0011 PR plan](../../docs/rfcs/0011-pr-plan.md)
-            PR 5 pins against; do not change to OR without an RFC amendment.
-        min_score:
-            Optional relevance floor in ``[0, 1]`` applied to FTS5 BM25
-            normalised scores.  ``None`` falls back to the facade's
-            ``default_min_score`` (constructor arg, typically read from
-            ``config/agents.yaml`` ``memory.min_score``).
+        ``scope`` filters in Python after recall (SQL-side lands in PR 5).
+        ``tags`` is AND-semantic — entry tags must be a superset of the
+        requested set (RFC 0011 PR 5 contract; do not change to OR).
+        ``min_score`` is the FTS5 BM25 relevance floor in ``[0, 1]``;
+        ``None`` falls back to the facade's ``default_min_score``.
+        ``sessions`` (RFC 0031 §D / PR 4 — OQ #4 back-compat): ``None``
+        → the tier's ``_active_session_id`` + ``legacy`` carve-out;
+        list → those sessions + carve-out; ``"*"`` → no filter
+        (CLI/debug); ``[]`` → :class:`ValueError`.  PR 451 review M2
+        carry-forward: pass-through to the tier so
+        :func:`agents.memory._session_filter._resolve_session_list` is
+        the single source of truth for the §D default; the facade's own
+        ``_session_id`` snapshot is read from the same env var as the
+        tier's at construction so the two are equal by construction.
+        Matches ``channel_history.recall_channel_episodes`` which has
+        always been pass-through.
         """
         self._require_initialised()
         effective_min_score = (
             min_score if min_score is not None else self._default_min_score
         )
-        # The recall + scope/tags filter loop lives in
-        # :func:`agents.memory.scope_recall.recall_with_scope_filter` so
-        # the persona-runtime channel-history tier shares the same
-        # overfetch + AND-tag + scope-fallback contract.  The facade is
-        # the ``MemoryEntry`` projection layer on top of the shared helper.
+        # Pass ``sessions`` through unchanged; the tier resolves it.
         episodes = await recall_with_scope_filter(
             self._episodic,
             query,
@@ -304,6 +295,7 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
             scope=scope,
             tags=tags,
             min_score=effective_min_score,
+            sessions=sessions,
         )
         out: list[MemoryEntry] = []
         for ep in episodes:

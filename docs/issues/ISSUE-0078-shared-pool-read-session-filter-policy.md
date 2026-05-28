@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0078
 summary: "`SharedMemoryPool.read` calls `self._episodic.recall` with no `sessions=` kwarg, so the pool's read view silently collapses to the pool's *init-time* `_active_session_id` + the `legacy` carve-out. A row written under a session different from the pool's init session (canonical: pool constructed in `legacy` env, then writer publishes via the facade with `session_id='run-a'`) is invisible to every reader. Bypasses RFC 0008 §H's cross-agent / cross-session sharing intent. Open policy question for PR 4 (facade read-path extension) — fix should thread `sessions` through `read_from_pool` → `read_via_facade` → `pool.read` → `pool._episodic.recall`, and decide the default-mode policy for shared pools."
-status: open
+status: resolved
 severity: medium
 area: agents/memory
 created: 2026-05-28
+closed: 2026-05-28
+closed_pr: 451
 refs:
   - docs/rfcs/0008-agent-memory-context-optimization.md
   - docs/rfcs/0031-per-session-namespacing-channels.md
@@ -149,3 +151,15 @@ needs three layers, and the default policy needs to be picked.
 > tier layer; the shared-pool surface inherits the new tier default
 > without an explicit decision.  PR 4 owns the facade read-path
 > extension and is the right place to thread + decide.
+>
+> 2026-05-28 — **resolved** by PR #451 (RFC 0031 Phase 2 PR 4).
+> Initial PR threaded `sessions` end-to-end and picked Policy A by
+> defaulting `read_from_pool(sessions=None)` to `"*"` at the facade.
+> Deep-review finding M2 then moved the default down to the data
+> layer itself: `SharedMemoryPool.read` defaults `sessions="*"`, and
+> `read_via_facade` / `read_from_pool` are pass-throughs.  Single
+> source of truth — a direct caller of the pool tier cannot
+> accidentally trigger session narrowing.  Pinned by
+> `tests/unit/python/test_shared_memory_pool.py::test_pool_read_default_is_cross_session`
+> and the three facade-layer pins in
+> `test_session_recall_default_path.py::TestFacadeReadFromPoolSessionForwarding`.

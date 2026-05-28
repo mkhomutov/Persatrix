@@ -23,6 +23,34 @@ load-bearing for the "ship Phase 2 with no backfill" property: pre-RFC
 rows persist with ``session_id = 'legacy'`` and remain visible from
 every session.
 
+Where resolution happens (PR 451 deep-review L2 follow-up):
+:func:`_resolve_session_list` may be called either at the **facade**
+layer or at the **tier** layer depending on whether the recall path
+holds its own per-instance active-session snapshot.
+
+* When the recall implementation is a class method that already owns
+  an ``_active_session_id`` (e.g. :meth:`EpisodicMemory.recall`), the
+  facade is a pass-through — it forwards ``sessions`` unchanged and
+  the tier calls :func:`_resolve_session_list` against its own
+  snapshot.  This is the
+  :meth:`~agents.memory.facade.MemoryStore.retrieve_relevant` shape.
+* When the recall implementation is a free function with no session
+  state (e.g. :func:`agents.memory.episodic_procedural.recall_procedures`),
+  the facade resolves with its own ``_session_id`` snapshot and
+  passes the resulting ``session_list`` down to the free function.
+  This is the
+  :meth:`~agents.memory.facade_procedural.ProceduralFacadeMixin.retrieve_procedures`
+  shape.
+
+Both shapes produce equivalent behaviour today because
+:meth:`MemoryStore.__init__` resolves :envvar:`PERSATRIX_SESSION_ID`
+into its ``_session_id`` and into the embedded
+:attr:`EpisodicMemory._active_session_id` from the same env-var with
+no intervening await — pinned by
+``test_session_recall_default_path.py::TestFacadeAndTierSessionSnapshotsAgreeOnConstruction``.
+A future fifth read method should pick the shape that matches whether
+its leaf recall holds its own snapshot; both are correct.
+
 Internal helper (leading underscore module name); callers inside
 :mod:`agents.memory` import the public names directly.
 """

@@ -25,6 +25,7 @@ from typing import Any
 
 import aiosqlite
 
+from ._session_filter import session_in_clause as _session_in_clause
 from .decay import (
     DEFAULT_C_MIN,
     DEFAULT_LAMBDA_PER_DAY,
@@ -133,6 +134,7 @@ async def recall_procedures(
     lambda_per_day: float = DEFAULT_LAMBDA_PER_DAY,
     stale_threshold: float | None = None,
     now: float | None = None,
+    session_list: list[str] | None = None,
 ) -> list[ProcedureRecallEntry]:
     """Return procedural entries with read-time confidence decay applied.
 
@@ -188,19 +190,36 @@ async def recall_procedures(
     # substring verbatim regardless of array position.  Phase 5 uses
     # ``LIKE`` rather than FTS5 so a procedure key with punctuation
     # can be matched verbatim by the caller without FTS5-sanitising.
+    # NB: every appended fragment below owns its own leading space,
+    # and ``sql_base`` does not carry one at its end — the resulting
+    # composed SQL contains no doubled whitespace.  (The single space
+    # inside ``"agent_id = ? AND tags_json…"`` is internal token
+    # separation, not a trailing space.)  PR #451 deep-review nit; L2
+    # carry-forward clarified the wording.
     sql_base = (
         "SELECT id, summary, tags_json, confidence, "
         "last_validated_at, created_at, importance "
         "FROM episodes WHERE agent_id = ? "
-        "AND tags_json LIKE '%\"procedure:%' "
+        "AND tags_json LIKE '%\"procedure:%'"
     )
     params: list[Any] = [agent_id]
+    # RFC 0031 Phase 2 PR 4: session filter is applied verbatim on the
+    # ``session_id`` column (the procedural tier reuses the ``episodes``
+    # table, so the §D predicate composes with the existing tag-based
+    # WHERE).  ``session_list=None`` is the ``"*"`` sentinel and produces
+    # an empty fragment.  Carve-out is already in the resolved list.
+    if session_list is not None:
+        session_clause, session_params = _session_in_clause(
+            session_list, column="session_id",
+        )
+        sql_base += session_clause
+        params.extend(session_params)
     if sql_cutoff_seconds is not None:
         # COALESCE(last_validated_at, created_at) is the same anchor
         # the application-side decay uses, so the cutoff cannot
         # exclude a row the in-Python loop would have admitted.
         sql_base += (
-            "AND (? - COALESCE(last_validated_at, created_at)) <= ? "
+            " AND (? - COALESCE(last_validated_at, created_at)) <= ?"
         )
         params.extend([timestamp, sql_cutoff_seconds])
     if query:
@@ -208,12 +227,12 @@ async def recall_procedures(
         # ``%`` / ``_`` in caller-supplied search text does not widen
         # the match.  Pair with ``ESCAPE '\\'``.
         sql = (
-            sql_base + "AND summary LIKE ? ESCAPE '\\' "
-            "ORDER BY created_at DESC LIMIT ?"
+            sql_base + " AND summary LIKE ? ESCAPE '\\'"
+            " ORDER BY created_at DESC LIMIT ?"
         )
         params.extend([f"%{_escape_like(query)}%", max(limit * 2, limit)])
     else:
-        sql = sql_base + "ORDER BY created_at DESC LIMIT ?"
+        sql = sql_base + " ORDER BY created_at DESC LIMIT ?"
         params.append(max(limit * 2, limit))
     async with db.execute(sql, tuple(params)) as cursor:
         rows = list(await cursor.fetchall())

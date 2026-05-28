@@ -128,11 +128,17 @@ async def recall_channel_episodes(
     if channel_scope is None:
         return []
     try:
+        # RFC 0031 Phase 2 PR 4: explicit ``sessions=None`` documents
+        # that channel-history recall takes §D's active-session-plus-
+        # legacy default.  The source-level pin in
+        # ``test_session_recall_default_path.py`` asserts the all-
+        # sessions ``"*"`` sentinel is never reachable from this site.
         return await recall_with_scope_filter(
             episodic,
             "",
             limit=CHANNEL_RECALL_LIMIT,
             scope=channel_scope,
+            sessions=None,
         )
     except Exception:
         logger.warning(
