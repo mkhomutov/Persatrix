@@ -214,6 +214,18 @@ class TestStoreNoteToolThreadsActiveSession:
             create_memory_tools(memory, gate, max_notes=500)
             td = get_tool("store_note")
             assert td is not None
+            # ``ToolDefinition.func`` is typed ``Callable | None`` on the
+            # registry dataclass (the field has a ``None`` default so an
+            # unregistered stub can be constructed in non-test code).  The
+            # ``assert td is not None`` above narrows ``td`` but not
+            # ``td.func`` — needed because this test method's typed
+            # ``memory: EpisodicMemory`` parameter flips mypy into checked
+            # mode (peer tests in ``test_memory_tools_permissions.py`` rely
+            # on untyped signatures to skip narrowing).  The runtime
+            # contract is that any tool returned by ``get_tool`` has
+            # ``func`` set by the ``@tool`` decorator, so the assertion is
+            # always true here.
+            assert td.func is not None
             result = await td.func(topic="t", content="c")
             assert result.success is True
             note_id = result.data["note_id"]
