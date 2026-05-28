@@ -91,6 +91,16 @@ def session_in_clause(
 
     ``session_list=None`` → ``("", [])`` (no filter — ``"*"`` mode);
     a resolved list → an IN-clause with one placeholder per id.
+
+    ``column`` is interpolated directly into the returned SQL fragment
+    via f-string — it must be a **trusted internal literal** (a column
+    or qualified ``alias.column`` reference fixed at the call site),
+    never user input.  Every in-tree caller passes a string constant
+    (``"session_id"`` / ``"n.session_id"`` / ``"e.session_id"``); a
+    pin in :file:`tests/unit/python/test_session_id_session_filter.py`
+    asserts the verbatim-interpolation contract.  If this helper is
+    ever re-exported beyond :mod:`agents.memory`, gate ``column``
+    against a known-good set before relaxing the contract.
     """
     if session_list is None:
         return "", []

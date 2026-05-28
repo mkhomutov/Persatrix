@@ -235,7 +235,7 @@ class NoteStore:
             session plus the ``legacy`` carve-out; a non-empty list →
             those sessions plus the carve-out; ``"*"`` → all sessions
             (CLI / debug only); ``[]`` → :class:`ValueError`.  See
-            :func:`agents.memory._session_filter.session_filter_clause`
+            :func:`agents.memory._session_filter.session_in_clause`
             for the SQL shape and the carve-out rationale.
         """
         if limit < 1:

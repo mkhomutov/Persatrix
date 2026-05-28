@@ -455,9 +455,15 @@ class TestCrossEpisodicMemoryInstanceIsolation:
     async def test_two_instances_isolated_by_active_session(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        fd, path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        try:
+        # ``TemporaryDirectory`` (vs. ``mkstemp`` + ``os.unlink``) cleans
+        # the whole sibling set on exit — WAL mode creates ``-shm`` /
+        # ``-wal`` companion files alongside the main ``.db``, and an
+        # ``os.unlink(path)`` of only the main file leaves the
+        # companions behind on Windows where the OS does not garbage-
+        # collect the temp dir.  (PR 449 deep-review carry-forward.)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "memory.db")
+
             # Construct memory_a under run-a; write a run-a row.
             monkeypatch.setenv(SESSION_ID_ENV_VAR, "run-a")
             mem_a = EpisodicMemory(agent_id="shared-agent", db_path=path)
@@ -480,8 +486,6 @@ class TestCrossEpisodicMemoryInstanceIsolation:
                 assert eps == []
             finally:
                 await mem_b.close()
-        finally:
-            os.unlink(path)
 
 
 if __name__ == "__main__":
