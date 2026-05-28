@@ -229,12 +229,11 @@ class SharedMemoryPool:
     ) -> list[SharedPoolEntry]:
         """Return entries matching *query*, filtered by ``min_confidence``.
 
-        Raises :class:`SharedMemoryPermissionError` when ``agent_id`` is
-        not a reader.  ``sessions`` (RFC 0031 PR 4 / ISSUE-0078 Policy
-        A) defaults to ``"*"`` — RFC 0008 §H cross-session by design;
-        policy lives here (data layer), not at the facade, so a direct
-        caller cannot silently narrow to ``_active_session_id``.  Pass
-        an explicit list to opt in to session-scoping.  (PR #451 M2.)
+        Raises :class:`SharedMemoryPermissionError` when ``agent_id``
+        is not a reader.  ``sessions`` defaults to ``"*"`` (RFC 0008
+        §H cross-session; ISSUE-0078 Policy A — data-layer policy, so
+        a direct caller cannot silently narrow to ``_active_session_id``).
+        Explicit ``None`` collapses to ``"*"`` (PR #451 M1/M2).
         """
         if not self._initialized:
             raise RuntimeError(
@@ -245,6 +244,7 @@ class SharedMemoryPool:
             raise ValueError(
                 f"min_confidence must be in [0.0, 1.0], got {min_confidence}",
             )
+        sessions = "*" if sessions is None else sessions  # PR #451 M1
         # PR #223 S3: over-fetch under a trust filter so post-filter
         # honours ``limit``; no-op when ``min_confidence is None``.
         # ``recall`` bumps ``access_count`` for every BM25 hit including

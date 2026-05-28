@@ -190,9 +190,12 @@ async def recall_procedures(
     # substring verbatim regardless of array position.  Phase 5 uses
     # ``LIKE`` rather than FTS5 so a procedure key with punctuation
     # can be matched verbatim by the caller without FTS5-sanitising.
-    # NB: each appended fragment owns its own leading-space prefix, so
-    # ``sql_base`` does NOT carry a trailing space — keeps the composed
-    # SQL free of doubled whitespace (PR #451 deep-review nit).
+    # NB: every appended fragment below owns its own leading space,
+    # and ``sql_base`` does not carry one at its end — the resulting
+    # composed SQL contains no doubled whitespace.  (The single space
+    # inside ``"agent_id = ? AND tags_json…"`` is internal token
+    # separation, not a trailing space.)  PR #451 deep-review nit; L2
+    # carry-forward clarified the wording.
     sql_base = (
         "SELECT id, summary, tags_json, confidence, "
         "last_validated_at, created_at, importance "

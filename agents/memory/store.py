@@ -272,21 +272,22 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
         ``min_score`` is the FTS5 BM25 relevance floor in ``[0, 1]``;
         ``None`` falls back to the facade's ``default_min_score``.
         ``sessions`` (RFC 0031 §D / PR 4 — OQ #4 back-compat): ``None``
-        → the facade's ``_session_id`` + ``legacy`` carve-out; list →
-        those sessions + carve-out; ``"*"`` → no filter (CLI/debug);
-        ``[]`` → :class:`ValueError`.
+        → the tier's ``_active_session_id`` + ``legacy`` carve-out;
+        list → those sessions + carve-out; ``"*"`` → no filter
+        (CLI/debug); ``[]`` → :class:`ValueError`.  PR 451 review M2
+        carry-forward: pass-through to the tier so
+        :func:`agents.memory._session_filter._resolve_session_list` is
+        the single source of truth for the §D default; the facade's own
+        ``_session_id`` snapshot is read from the same env var as the
+        tier's at construction so the two are equal by construction.
+        Matches ``channel_history.recall_channel_episodes`` which has
+        always been pass-through.
         """
         self._require_initialised()
         effective_min_score = (
             min_score if min_score is not None else self._default_min_score
         )
-        # OQ #4: ``sessions=None`` resolves to the facade's own
-        # ``_session_id`` so the tier sees an explicit list.
-        effective_sessions = (
-            sessions if sessions is not None else [self._session_id]
-        )
-        # Shared recall + scope/tags filter loop with channel-history
-        # tier; facade projects the ``Episode`` rows onto ``MemoryEntry``.
+        # Pass ``sessions`` through unchanged; the tier resolves it.
         episodes = await recall_with_scope_filter(
             self._episodic,
             query,
@@ -294,7 +295,7 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
             scope=scope,
             tags=tags,
             min_score=effective_min_score,
-            sessions=effective_sessions,
+            sessions=sessions,
         )
         out: list[MemoryEntry] = []
         for ep in episodes:

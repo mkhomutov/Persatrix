@@ -46,9 +46,19 @@ async def facade_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Build a ``MemoryStore`` keyed to a named ``PERSATRIX_SESSION_ID``.
 
     Returns an async factory ``(session_id, agent_id) -> MemoryStore``.
+
     All stores share the same ``db_path`` so writes under one session
     are visible to recall under another (the cross-run state-bleed
     surface this test exists to close).
+
+    Env-var semantics (PR #451 deep-review L3): the
+    ``PERSATRIX_SESSION_ID`` value is captured **at construction time**
+    by both :attr:`MemoryStore._session_id` and the embedded
+    :attr:`EpisodicMemory._active_session_id`.  Subsequent ``_build``
+    calls override the env var, but already-built stores keep the
+    snapshot they were constructed with — that is the property under
+    test (a second run under a different session id does not inherit
+    the first run's tag).
     """
     db_path = tmp_path / "shared.db"
     stores: list[MemoryStore] = []

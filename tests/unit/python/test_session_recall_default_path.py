@@ -45,13 +45,13 @@ from agents.memory.shared_pool import (
 # ─── Source-level pin ───────────────────────────────────────
 
 
-# Modules on the persona-runtime *default* recall path.  Adding a new
-# recall call site to the persona prompt-assembly pipeline means
-# extending this list — the source-level scan is the regression bar
-# against a new site silently wiring ``"*"``.  CLI / debug surfaces
-# (``persatrix memory recall --all-sessions``, Phase 3) are NOT on this
-# list; they are allowed to pass ``"*"`` explicitly.
-PERSONA_RUNTIME_RECALL_MODULES = (
+# Modules on the agent-default *prompt-context* recall path.  Adding a
+# new recall call site that feeds the LLM prompt means extending this
+# list — the source-level scan is the regression bar against a new site
+# silently wiring ``"*"``.  CLI / debug surfaces (``persatrix memory
+# recall --all-sessions``, Phase 3) are NOT on this list; they are
+# allowed to pass ``"*"`` explicitly.
+PROMPT_CONTEXT_RECALL_MODULES = (
     Path("agents/persona_runtime/memory_context.py"),
     Path("agents/persona_runtime/channel_history.py"),
     # ``facts_section.py`` issues ``FactStore.recall(subject=...)`` at
@@ -60,14 +60,27 @@ PERSONA_RUNTIME_RECALL_MODULES = (
     # adding ``sessions="*"`` to the facts recall slips past the pin.
     # (PR #451 deep-review H1 carry-forward.)
     Path("agents/persona_runtime/facts_section.py"),
+    # ``agents/base.py`` is the task-agent recall site
+    # (``_augment_system_prompt_with_memory`` at the
+    # ``self.memory.retrieve_relevant`` call): the integration test
+    # in ``test_session_recall_isolation.py`` names "task-agent /
+    # sub-agent path" as a beneficiary of the facade default.  A
+    # contributor adding ``sessions="*"`` there would smuggle every
+    # session's content into the LLM system prompt — same F-3 hazard.
+    # (PR #451 deep-review L1 carry-forward.)
+    Path("agents/base.py"),
 )
+
+# Back-compat alias — the original name was narrower than the actual
+# set.  Kept for any out-of-tree test that imported the previous symbol.
+PERSONA_RUNTIME_RECALL_MODULES = PROMPT_CONTEXT_RECALL_MODULES
 
 
 class TestPersonaRuntimeNeverReachesAllSessions:
-    """The persona-runtime default context path source files must not
-    contain ``sessions="*"`` / ``sessions = "*"`` / ``SESSIONS_ALL``."""
+    """The agent-default prompt-context source files must not contain
+    ``sessions="*"`` / ``sessions = "*"`` / ``SESSIONS_ALL``."""
 
-    @pytest.mark.parametrize("module_path", PERSONA_RUNTIME_RECALL_MODULES)
+    @pytest.mark.parametrize("module_path", PROMPT_CONTEXT_RECALL_MODULES)
     def test_no_sessions_all_literal_in_source(
         self, module_path: Path,
     ) -> None:
@@ -76,8 +89,8 @@ class TestPersonaRuntimeNeverReachesAllSessions:
         repo_root = Path(__file__).resolve().parents[3]
         full_path = repo_root / module_path
         assert full_path.exists(), (
-            f"persona-runtime recall module {module_path} not found at "
-            f"{full_path} — update PERSONA_RUNTIME_RECALL_MODULES if the "
+            f"prompt-context recall module {module_path} not found at "
+            f"{full_path} — update PROMPT_CONTEXT_RECALL_MODULES if the "
             "file was moved or renamed."
         )
         source = full_path.read_text(encoding="utf-8")
@@ -120,10 +133,13 @@ async def facade_at_run_a(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 class TestFacadeRetrieveRelevantSessionForwarding:
     """``MemoryStore.retrieve_relevant`` threads ``sessions=`` to the
-    underlying episodic recall.  Default ``None`` resolves to the
-    facade's construction-time ``_session_id``."""
+    underlying episodic recall.  The facade is a pass-through — the
+    tier's :func:`_resolve_session_list` is the single source of truth
+    for the §D "active session + legacy carve-out" default (PR 451
+    review M2: removed the facade-side pre-resolve so the resolution
+    rule lives in one place, matching ``channel_history``)."""
 
-    async def test_default_forwards_facade_session_id(
+    async def test_default_passes_none_through_to_tier(
         self, facade_at_run_a: MemoryStore,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -139,10 +155,13 @@ class TestFacadeRetrieveRelevantSessionForwarding:
 
         monkeypatch.setattr(facade_at_run_a._episodic, "recall", spy)
         await facade_at_run_a.retrieve_relevant("anything")
-        # Default ``sessions=None`` at the facade resolves to the
-        # facade's own ``_session_id`` so the tier's ``_resolve_session_list``
-        # walks the "active session + legacy carve-out" branch.
-        assert captured["sessions"] == ["run-a"]
+        # Default ``sessions=None`` at the facade flows through to the
+        # tier unchanged; the tier's :func:`_resolve_session_list`
+        # expands it to ``[_active_session_id, "legacy"]`` at the SQL
+        # boundary.  Behavioural equivalent (run-b cannot see run-a)
+        # is pinned at the SQL layer in
+        # :file:`tests/integration/test_session_recall_isolation.py`.
+        assert captured["sessions"] is None
 
     async def test_explicit_list_threads_through(
         self, facade_at_run_a: MemoryStore,
@@ -322,6 +341,40 @@ class TestFacadeReadFromPoolSessionForwarding:
         finally:
             await fac.close()
 
+    async def test_explicit_none_is_cross_session(
+        self, pool_at_run_a: SharedMemoryPool,
+        tmp_path: Path,
+    ) -> None:
+        """Facade-layer twin of
+        :meth:`TestPoolReadTierDefaultIsCrossSession.test_explicit_none_is_cross_session`
+        — PR 451 review M1.  ``read_from_pool(sessions=None)`` is a
+        synonym for cross-session, matching the default-omission case;
+        the data-layer policy applies for every code path that lands at
+        :meth:`SharedMemoryPool.read`, not just default-kwarg-omission.
+        """
+        await pool_at_run_a.write(
+            "alice", "shared insight", confidence=0.9, session_id="run-b",
+        )
+
+        registry = SharedPoolRegistry({"team-mem": pool_at_run_a})
+        fac = MemoryStore(
+            agent_id="alice",
+            db_path=str(tmp_path / "f.db"),
+            shared_pools=registry,
+        )
+        await fac.initialize()
+        try:
+            results = await fac.read_from_pool(
+                "team-mem", "shared", sessions=None,
+            )
+            assert any("shared insight" in r.content for r in results), (
+                "PR 451 M1: read_from_pool(sessions=None) must be a "
+                "synonym for the cross-session default; type allows None "
+                "and Python convention treats None as 'use default'."
+            )
+        finally:
+            await fac.close()
+
 
 class TestPoolReadTierDefaultIsCrossSession:
     """Tier-direct sibling to TestFacadeReadFromPoolSessionForwarding —
@@ -344,6 +397,34 @@ class TestPoolReadTierDefaultIsCrossSession:
         assert "shared insight" in contents, (
             "RFC 0008 §H: SharedMemoryPool.read() default must be "
             f"cross-session; got {contents!r}."
+        )
+
+    async def test_explicit_none_is_cross_session(
+        self, pool_at_run_a: SharedMemoryPool,
+    ) -> None:
+        """``pool.read(sessions=None)`` is **equivalent** to default
+        omission — also cross-session.  Pins the PR 451 review M1 fix
+        against a footgun: the type allows ``None`` and Python convention
+        treats ``None`` as "use default", so a future caller writing
+        ``pool.read(sessions=user_input or None)`` must not silently
+        narrow to ``[_active_session_id, "legacy"]``.
+
+        Without the M1 fix, ``None`` propagated to
+        :meth:`EpisodicMemory.recall` and resolved through
+        :func:`_resolve_session_list` to the active-session-plus-legacy
+        branch — the exact silent narrowing ISSUE-0078 was filed against,
+        re-introduced behind explicit-``None`` rather than default-omit.
+        """
+        await pool_at_run_a.write(
+            "alice", "shared insight", confidence=0.9, session_id="run-b",
+        )
+        # Explicit ``sessions=None`` — must behave identically to default.
+        entries = await pool_at_run_a.read("bob", "shared", sessions=None)
+        contents = {e.content for e in entries}
+        assert "shared insight" in contents, (
+            "RFC 0008 §H / PR 451 M1: SharedMemoryPool.read(sessions=None) "
+            "must be a synonym for the cross-session default, not narrow "
+            f"to the tier's _active_session_id; got {contents!r}."
         )
 
 
