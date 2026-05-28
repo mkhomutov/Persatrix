@@ -5,6 +5,8 @@ status: resolved
 severity: medium
 area: agents/memory
 created: 2026-05-28
+closed: 2026-05-28
+closed_pr: 451
 refs:
   - docs/rfcs/0008-agent-memory-context-optimization.md
   - docs/rfcs/0031-per-session-namespacing-channels.md
