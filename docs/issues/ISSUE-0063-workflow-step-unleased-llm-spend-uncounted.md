@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0063
 summary: "recordStepUsage's TokenCounter retirement (RFC 0023 PR 3) assumes every workflow-step LLM call is leased — a persona agent serving a workflow step routes through the un-leased persona action loop, so its spend reaches neither the budget counter nor a wallet lease until PR 5 wires those origins."
-status: open
+status: resolved
 severity: medium
 area: internal/scheduler
 created: 2026-05-19
+closed: 2026-05-20
+closed_pr: 388
 refs:
   - docs/rfcs/0023-llm-call-leasing.md
   - docs/rfcs/0023-pr-plan.md
@@ -113,3 +115,21 @@ written to add does not cover the persona-as-workflow-step path.
 > `agents/persona_runtime/action_loop.py` for the `AUTONOMOUS_TICK` origin, so
 > it is the natural home for whichever resolution path (persona `TASK_ASSIGNED`
 > leasing, or the planner/scheduler guard) PR 5 design selects.
+
+> 2026-05-28 — **resolved.** PR 5 selected the persona-`TASK_ASSIGNED`-leasing
+> path. `agents/persona_runtime/wallet_cause.py::cause_for_event` maps
+> `EventType.TASK_ASSIGNED → CAUSE_WORKFLOW_TASK` (the arm's docstring cites
+> "PR 5; ISSUE-0063"), and the action loop threads it as `cause=` into
+> `create_message` (`action_loop.py:398`). So a persona agent serving a
+> workflow step now acquires a `CAUSE_WORKFLOW_TASK` lease — the issue's
+> defined fix-path (step 2) — making the PR 3 `recordStepUsage` retirement
+> correct for that path too. Verified on HEAD.
+>
+> **Residual carved out (not covered by this closure):** the memory-compression
+> `create_message` (`agents/memory/working.py:183`,
+> `WorkingMemory.compress_if_needed`) — named in the Impact section above as
+> "likewise un-leased" — still passes **no `cause`** and remains uncounted.
+> That is a distinct un-leased surface, not the persona-as-workflow-step LLM
+> call this issue scoped; whether to lease it or accept it as uncounted-by-design
+> is an open follow-up. [ISSUE-0072](ISSUE-0072-memory-compression-hardcoded-model-literals.md)
+> covers the same call's stale-model-identity aspect and cross-references this one.
