@@ -239,5 +239,37 @@ class TestPublishViaFacadeSessionID:
             await pool.close()
 
 
+# ─── Construction-invariant pin: facade snapshot == tier snapshot ──
+
+
+class TestFacadeAndTierSessionSnapshotsAgreeOnConstruction:
+    """M2 pass-through on ``MemoryStore.retrieve_relevant`` relies on the
+    facade's ``_session_id`` and the embedded
+    :class:`EpisodicMemory`'s ``_active_session_id`` snapshotting the
+    same ``PERSATRIX_SESSION_ID`` — both read
+    :func:`resolve_session_id_silent` and the two reads in
+    ``MemoryStore.__init__`` are sequential with no intervening await.
+    A future edit inserting an await between them would silently
+    diverge the snapshots and route ``sessions=None`` against the
+    wrong active session.  (PR 451 deep-review L1 follow-up.)
+    """
+
+    async def test_session_snapshots_match_under_named_session(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        monkeypatch.setenv("PERSATRIX_SESSION_ID", "run-a")
+        fac = MemoryStore(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))
+        assert fac._session_id == fac._episodic._active_session_id == "run-a"  # noqa: SLF001
+
+    async def test_session_snapshots_match_under_legacy_default(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        # Env-unset lands both reads on ``LEGACY_SESSION_ID`` via the
+        # ``or LEGACY_SESSION_ID`` branch — same invariant must hold.
+        monkeypatch.delenv("PERSATRIX_SESSION_ID", raising=False)
+        fac = MemoryStore(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))
+        assert fac._session_id == fac._episodic._active_session_id == "legacy"  # noqa: SLF001
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

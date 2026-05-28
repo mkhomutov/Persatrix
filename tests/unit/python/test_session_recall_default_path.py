@@ -437,6 +437,13 @@ class TestPersonaRuntimeCallSitesDoNotPassAllSentinel:
     ``sessions="*"``.  Complements the source-level scan above so a
     contributor introducing a ``recall(sessions=…)`` argument computed
     at runtime cannot smuggle ``"*"`` through.
+
+    TODO (PR 5 — L5 follow-up): harness is synthetic (calls
+    ``recall`` directly with the same kwarg shape ``_inject_memory_context``
+    uses, not the mixin itself).  Rewrite against a real
+    ``_inject_memory_context`` invocation once PR 5's dementia-test
+    bridge wires the full persona pipeline.  Source-level scan above
+    stays as cheap defence either way.
     """
 
     async def test_episodic_recall_default_path_never_sees_star(

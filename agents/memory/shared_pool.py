@@ -225,7 +225,7 @@ class SharedMemoryPool:
         *,
         limit: int = 10,
         min_confidence: float | None = None,
-        sessions: list[str] | str | None = "*",
+        sessions: list[str] | str | None = "*",  # matches _session_filter.SESSIONS_ALL
     ) -> list[SharedPoolEntry]:
         """Return entries matching *query*, filtered by ``min_confidence``.
 

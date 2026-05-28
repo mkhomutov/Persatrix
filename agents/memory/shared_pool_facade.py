@@ -83,7 +83,7 @@ async def read_via_facade(
     limit: int = 10,
     min_confidence: float | None = None,
     tags: Iterable[str] | None = None,
-    sessions: list[str] | str | None = "*",
+    sessions: list[str] | str | None = "*",  # matches _session_filter.SESSIONS_ALL
 ) -> list[SharedPoolEntry]:
     """Read entries with consumer-side trust + AND-tag filter.
 
@@ -155,7 +155,7 @@ class SharedPoolFacadeMixin:
         limit: int = 10,
         min_confidence: float | None = None,
         tags: Iterable[str] | None = None,
-        sessions: list[str] | str | None = "*",
+        sessions: list[str] | str | None = "*",  # matches _session_filter.SESSIONS_ALL
     ) -> list[SharedPoolEntry]:
         """Consumer-side shared-pool read.
 
