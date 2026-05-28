@@ -47,6 +47,7 @@ async def recall_with_scope_filter(
     scope: str | None = None,
     tags: Iterable[str] | None = None,
     min_score: float | None = None,
+    sessions: list[str] | str | None = None,
 ) -> list[Episode]:
     """Recall episodes and filter by ``scope`` / ``tags`` Python-side.
 
@@ -74,6 +75,14 @@ async def recall_with_scope_filter(
         empty iterable matches everything.
     min_score:
         Forwarded to :meth:`EpisodicMemory.recall`.
+    sessions:
+        RFC 0031 §D recall filter (Phase 2 PR 2) — forwarded verbatim
+        to :meth:`EpisodicMemory.recall`.  Orthogonal to ``scope`` /
+        ``tags`` per `RFC 0031 §F
+        <../../docs/rfcs/0031-per-session-namespacing-channels.md#f-interaction-with-rfc-0020-g-scope>`_:
+        separate column, separate predicate, ANDed at the SQL layer
+        — the session filter never widens the §G scope filter or
+        vice versa.
     """
     required_tags = frozenset(tags or ())
     recall_limit = (
@@ -85,6 +94,7 @@ async def recall_with_scope_filter(
         query,
         limit=recall_limit,
         min_score=min_score,
+        sessions=sessions,
     )
     out: list[Episode] = []
     for ep in episodes:

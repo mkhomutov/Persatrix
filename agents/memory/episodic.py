@@ -26,8 +26,10 @@ from ..observability.spans import (
     EPISODIC_RECALL_SPAN,
     EPISODIC_REMEMBER_SPAN,
 )
+from ..session_id import resolve_session_id_silent
 from ._boundary import warn_external_construction
 from ._salience import EPISODIC_APPEND_SALIENCE, emit_for_tier
+from ._session_filter import _resolve_session_list
 from .episodic_notes_api import _EpisodicNotesAPIMixin
 from .episodic_queries import (
     EPISODE_SELECT,
@@ -105,6 +107,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         self._db: aiosqlite.Connection | None = None
         self._fts5: bool = False
         self._note_store: NoteStore | None = None
+        # RFC 0031 Phase 2 PR 2 — tier-owned (see ``recall`` docstring).
+        self._active_session_id = resolve_session_id_silent()
 
     @property
     def agent_id(self) -> str:
@@ -158,6 +162,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
 
         self._note_store = NoteStore(
             agent_id=self._agent_id, db=self._db, fts5=self._fts5,
+            active_session_id=self._active_session_id,
         )
 
     async def close(self) -> None:
@@ -281,6 +286,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         limit: int = 10,
         min_importance: float = 0.0,
         min_score: float | None = None,
+        sessions: list[str] | str | None = None,
     ) -> list[Episode]:
         """Retrieve relevant episodes ranked by composite score.
 
@@ -294,6 +300,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
             normalised scores.  ``None`` → no filtering (current behaviour).
             LIKE-fallback path ignores this parameter (all LIKE matches score
             ``1.0`` per RFC 0017 Section C).
+        sessions:
+            RFC 0031 §D recall filter — see ``_resolve_session_list``.
         """
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
@@ -311,12 +319,14 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
             raise ValueError(
                 f"min_score must be in [0.0, 1.0] or None, got {min_score}"
             )
+        session_list = _resolve_session_list(sessions, self._active_session_id)
         with _tracer.start_as_current_span(
             EPISODIC_RECALL_SPAN,
             attributes={
                 "agent.id": self._agent_id,
                 "query.kind": "recall",
                 "query.empty": not query,
+                "session_id": self._active_session_id,  # OQ #7
             },
         ) as span:
             # Mirror the LLM/tool/store_episode span error contract: a SQLite
@@ -333,14 +343,19 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
 
                 if query and self._fts5:
                     rows = await recall_fts5(
-                        db, self._agent_id, query, limit, min_importance, min_score,
+                        db, self._agent_id, query, limit, min_importance,
+                        min_score, sessions=session_list,
                     )
                 elif query:
                     rows = await recall_like(
-                        db, self._agent_id, query, limit, min_importance, min_score,
+                        db, self._agent_id, query, limit, min_importance,
+                        min_score, sessions=session_list,
                     )
                 else:
-                    rows = await recall_recency(db, self._agent_id, limit, min_importance)
+                    rows = await recall_recency(
+                        db, self._agent_id, limit, min_importance,
+                        sessions=session_list,
+                    )
 
                 # RFC 0020 PR 5 / PR-262 review M1: drop unfinalised
                 # closing rows at this chokepoint so the facade, persona

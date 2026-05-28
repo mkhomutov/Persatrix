@@ -67,6 +67,7 @@ class _EpisodicNotesAPIMixin:
         *,
         limit: int = 10,
         min_score: float | None = None,
+        sessions: list[str] | str | None = None,
     ) -> list[Note]:
         """Retrieve notes matching query, ranked by relevance.
 
@@ -78,13 +79,17 @@ class _EpisodicNotesAPIMixin:
             Optional relevance floor in ``[0, 1]`` applied to FTS5 BM25
             normalised scores.  ``None`` → no filtering (current behaviour).
             LIKE-fallback path ignores this parameter per RFC 0017 Section C.
+        sessions:
+            RFC 0031 §D recall filter (Phase 2 PR 2) — forwarded
+            verbatim to :meth:`NoteStore.recall_notes`.  See that
+            method's docstring for the four-mode contract.
         """
         if min_score is not None and not 0.0 <= min_score <= 1.0:
             raise ValueError(
                 f"min_score must be in [0.0, 1.0] or None, got {min_score}"
             )
         return await self._ensure_note_store().recall_notes(
-            query, limit=limit, min_score=min_score,
+            query, limit=limit, min_score=min_score, sessions=sessions,
         )
 
     async def update_note(self, note_id: str, content: str) -> bool:
