@@ -163,40 +163,49 @@ class TestDeleteOldEpisodes:
 
 
 class TestFutureMigration:
-    async def test_hypothetical_v9_migration_applied(self):
-        """Patch MIGRATIONS with a hypothetical v9 entry, verify v1–v9 applied.
+    async def test_hypothetical_v10_migration_applied(self):
+        """Patch MIGRATIONS with a hypothetical v10 entry, verify v1–v10 applied.
 
         Original test asserted v1–v5; v5 is now occupied by RFC 0020's
         episodes-interaction migration, v6 by RFC 0008 PR 5's
         procedural-tier columns, v7 by RFC 0031 Phase 1's session_id
-        columns, and v8 by RFC 0026 PR 1's declarative-facts table, so
-        the forward-compat probe is bumped to v9.  Behaviour under test
-        (forward-compat for new migration tail entries) is unchanged.
+        columns, v8 by RFC 0026 PR 1's declarative-facts table, and v9
+        by RFC 0031 Phase 2 PR 1's notes-tier session_id column, so
+        the forward-compat probe is bumped to v10.  Behaviour under
+        test (forward-compat for new migration tail entries) is
+        unchanged.
+
+        When migration v9 landed in commit 3b6e7f7 this probe was left
+        at v9, so the second ``MIGRATIONS.append((9, ...))`` collided
+        with the registered v9 and SQLite raised
+        ``UNIQUE constraint failed: schema_version.version``.  The
+        rename to v10 + table-name + assertion-list bump restores the
+        forward-compat shape (always one past the highest real version).
         """
         from agents.memory.migrations import MIGRATIONS
 
-        v9 = (
-            9,
+        v10 = (
+            10,
             "Hypothetical test-only table",
-            "CREATE TABLE IF NOT EXISTS _test_v9 (id TEXT PRIMARY KEY);",
+            "CREATE TABLE IF NOT EXISTS _test_v10 (id TEXT PRIMARY KEY);",
         )
         original = list(MIGRATIONS)
         try:
-            MIGRATIONS.append(v9)
+            MIGRATIONS.append(v10)
             mem = EpisodicMemory(agent_id="test-agent", db_path=":memory:")
             await mem.initialize()
             db = mem._ensure_db()
 
-            # All nine versions should be recorded
+            # All ten versions should be recorded
             async with db.execute(
                 "SELECT version FROM schema_version ORDER BY version"
             ) as cursor:
                 versions = [r[0] for r in await cursor.fetchall()]
-            assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
-            # v9 table should exist
+            # v10 table should exist
             async with db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v9'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v10'"
             ) as cursor:
                 assert await cursor.fetchone() is not None
 
