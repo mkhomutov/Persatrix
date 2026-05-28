@@ -220,5 +220,39 @@ async def test_direct_store_episode_keeps_episode_default(
     )
 
 
+async def test_store_note_emits_surface_note(
+    tmp_path: Path,
+    metric_reader: InMemoryMetricReader,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RFC 0031 Phase 2 PR 1 review F2 — the notes tier must surface
+    as ``surface="note"`` so operator dashboards can split it from
+    episode / observation / procedure / relationship / shared_pool.
+
+    Without this attribute the notes write path would either not emit
+    at all (PR 1's pre-fix state — invisible) or share an existing
+    surface label (false-attribution: a notes write inflating the
+    episode count).
+    """
+    monkeypatch.delenv("PERSATRIX_SESSION_ID", raising=False)
+    mem = EpisodicMemory(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))
+    await mem.initialize()
+    try:
+        await mem.store_note("topic", "content", session_id="run-a")
+    finally:
+        await mem.close()
+
+    points = _collect_surfaces(metric_reader)
+    matched = [
+        attrs for _, attrs in points if attrs.get("session_id") == "run-a"
+    ]
+    assert matched, f"expected a write tagged run-a; got {points!r}"
+    assert matched[0].get("surface") == "note", (
+        "store_note must set surface='note' so dashboards split it from "
+        "episode / observation / procedure / relationship / shared_pool; "
+        f"got: {matched[0]!r}"
+    )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

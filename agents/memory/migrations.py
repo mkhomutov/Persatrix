@@ -4,9 +4,10 @@ Schema migrations and shared scoring SQL fragments.
 Forward-only migrations applied by ``_apply_migrations()`` and shared
 scoring constants used by ``episodic.py``.
 
-The callable migration handlers (currently ``v4`` through ``v8``) live
+The callable migration handlers (currently ``v4`` through ``v9``) live
 in :mod:`agents.memory._migration_handlers` — itself split across that
-module and :mod:`agents.memory._migration_facts` to stay under the
+module, :mod:`agents.memory._migration_facts` (v8), and
+:mod:`agents.memory._migration_notes_session` (v9) to stay under the
 500-line soft cap.  All handlers are re-exported below for backwards
 compatibility, so call sites and tests should keep importing them from
 this module.
@@ -28,6 +29,7 @@ from ._migration_handlers import (
     _apply_migration_6,
     _apply_migration_7,
     _apply_migration_8,
+    _apply_migration_9,
 )
 
 __all__ = [
@@ -42,6 +44,7 @@ __all__ = [
     "_apply_migration_6",
     "_apply_migration_7",
     "_apply_migration_8",
+    "_apply_migration_9",
     "_apply_migrations",
     "_fts5_available",
 ]
@@ -224,6 +227,21 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         8,
         "RFC 0026: declarative-facts table + subject/session indexes",
         "",  # handled by _apply_migration_8()
+    ),
+    # Migration 9 (RFC 0031 Phase 2 PR 1) tags the ``notes`` tier with
+    # the operator-namespace ``session_id`` column — the last
+    # persona-memory recall surface missing a session dimension after
+    # v7 (episodes/relationships) and v8 (facts).  Same callable-handler
+    # rationale as v5/v6/v7: ``ALTER TABLE ... ADD COLUMN`` is not
+    # idempotent before SQLite 3.35 so the handler guards with
+    # ``PRAGMA table_info`` and short-circuits cleanly when a
+    # partial-restore baseline has no ``notes`` table.  See
+    # docs/rfcs/0031-phase2-pr-plan.md PR 1 for the column / index
+    # contract.
+    (
+        9,
+        "RFC 0031 Phase 2: session_id on notes",
+        "",  # handled by _apply_migration_9()
     ),
 ]
 

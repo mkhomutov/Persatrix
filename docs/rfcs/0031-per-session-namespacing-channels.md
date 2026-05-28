@@ -3,7 +3,7 @@ id: RFC-0031
 title: Per-Session Namespacing for Channels and Persona Memory
 summary: First-class Session scope under which channels are created and persona-memory rows are tagged — root-cause fix for v0.3.0 F-3 cross-run state bleed (currently mitigated by `make reset`).
 type: architecture
-status: partially_implemented
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-12
 target: v0.3.1 (Phase 1) + v0.3.x (Phases 2–4)
@@ -15,7 +15,7 @@ depends_on:
 # RFC 0031 — Per-Session Namespacing for Channels and Persona Memory
 
 **Type**: architecture
-**Status**: ⚠️ Partially Implemented (Phase 1)
+**Status**: 🚧 Implementing (Phase 1 shipped v0.3.1; Phase 2 underway in v0.3.5 — RFC 0031 Phase 2 PR 1 [#448](https://github.com/mkhomutov/Persatrix/pull/448) opened: notes-tier `session_id` coverage via migration v9 + write-path threading)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-12
 **Target**: v0.3.1 (Phase 1) + v0.3.x (Phases 2–4)

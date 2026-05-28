@@ -7,6 +7,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 <!-- BEGIN rfcs:auto -->
 | ID | Status | Type | Target | Created | Title |
 |----|--------|------|--------|---------|-------|
+| [RFC-0031](0031-per-session-namespacing-channels.md) | 🚧 Implementing | architecture | v0.3.1 (Phase 1) + v0.3.x (Phases 2–4) | 2026-05-12 | Per-Session Namespacing for Channels and Persona Memory |
 | [RFC-0007](0007-conditional-looped-workflow-control-flow.md) | 📋 Proposed | feature | v0.4.0 | 2026-04-15 | Conditional and Looped Workflow Control Flow |
 | [RFC-0012](0012-protocols-organizations.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3 — organizations & authority); v0.5.0 (Phases 4–5 — meeting/negotiation protocols, inter-org federation) | 2026-05-16 | Protocols & Organizations |
 | [RFC-0013](0013-legal-ethical-compliance.md) | 📋 Proposed | architecture | v0.5.0 | 2026-04-16 | Legal, Ethical & Regulatory Compliance Framework |
@@ -34,7 +35,6 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0021](0021-persona-temporal-awareness.md) | ⚠️ Partially Implemented | architecture | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | 2026-04-25 | Persona Temporal Awareness |
 | [RFC-0024](0024-event-driven-scheduling.md) | ⚠️ Partially Implemented | architecture | v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6) | 2026-05-09 | Event-Driven Agent Scheduling |
 | [RFC-0029](0029-personal-society-storage-split.md) | ⚠️ Partially Implemented | architecture | Phase 1 v0.3.2 (facade + tier rename); Phases 2–6 v0.4.0 — see docs/v0.3.2-plan.md and docs/rfcs/0029-pr-plan.md | 2026-05-10 | Personal/Society Storage Split |
-| [RFC-0031](0031-per-session-namespacing-channels.md) | ⚠️ Partially Implemented | architecture | v0.3.1 (Phase 1) + v0.3.x (Phases 2–4) | 2026-05-12 | Per-Session Namespacing for Channels and Persona Memory |
 | [RFC-0033](0033-model-alias-layer.md) | ⚠️ Partially Implemented | architecture | v0.3.4 (Phases 1–2) + v0.3.5+ (Phase 3) | 2026-05-15 | Provider-Agnostic Model Alias Layer |
 | [RFC-0034](0034-persona-conversational-working-memory.md) | ⚠️ Partially Implemented | architecture | v0.3.1 (Phase 1) + v0.3.x (Phases 2–3) | 2026-05-15 | Persona Conversational Working Memory |
 | [RFC-0001](0001-core-orchestration-pipeline.md) | ✅ Implemented | architecture | v0.1 (MVP) | 2026-04-08 | Core Orchestration Pipeline (Planner + State + Registry) |

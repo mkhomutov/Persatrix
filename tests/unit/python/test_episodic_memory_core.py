@@ -70,7 +70,15 @@ class TestMigrations:
             "SELECT version, description FROM schema_version ORDER BY version"
         ) as cursor:
             rows = list(await cursor.fetchall())
-        assert len(rows) == 8
+        # Schema-version row count + per-row identity pin: every new
+        # migration MUST bump both the count and add a (version,
+        # description-substring) assertion here.  When migration v9
+        # (RFC 0031 Phase 2 PR 1 — session_id on notes) landed in
+        # commit 3b6e7f7 this assertion was left at the v8 count; this
+        # fix-up brings it into parity with the actual MIGRATIONS list
+        # so the pin keeps doing its job (catching a missing
+        # registration / description-typo, not always-falling-on-the-tail).
+        assert len(rows) == 9
         assert rows[0][0] == 1
         assert "Initial schema" in rows[0][1]
         assert rows[1][0] == 2
@@ -87,6 +95,14 @@ class TestMigrations:
         assert "session_id" in rows[6][1]
         assert rows[7][0] == 8
         assert "facts" in rows[7][1].lower()
+        # v9 substring uses ``"session_id on notes"`` rather than the
+        # plain ``"session_id"`` substring used at v6→v7 so the pin
+        # disambiguates against v7's
+        # ``"RFC 0031: session_id on episodes + relationships"`` —
+        # both rows share the ``session_id`` token, so a swap would
+        # otherwise round-trip green.
+        assert rows[8][0] == 9
+        assert "session_id on notes" in rows[8][1].lower()
 
     async def test_migrations_are_idempotent(self, memory: EpisodicMemory):
         """Re-running migrations does not error or duplicate rows."""
@@ -95,7 +111,11 @@ class TestMigrations:
         async with db.execute("SELECT COUNT(*) FROM schema_version") as cursor:
             row = await cursor.fetchone()
         assert row is not None
-        assert row[0] == 8
+        # Bumped from 8 → 9 alongside migration v9 (RFC 0031 Phase 2
+        # PR 1).  The previous value was a count of registered
+        # migrations frozen at the v8 tail; same fix-up rationale as
+        # ``test_migration_version_recorded`` above.
+        assert row[0] == 9
 
     async def test_wal_mode_enabled(self):
         """WAL mode is set on file-based databases (not :memory:)."""
