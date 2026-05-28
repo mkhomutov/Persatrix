@@ -70,6 +70,17 @@ class TestStoreEpisodeSessionID:
 
 class TestStoreNoteSessionID:
     async def test_default_writes_legacy(self, memory: EpisodicMemory):
+        # Compare against ``LEGACY_SESSION_ID`` rather than the literal
+        # ``"legacy"`` so a future rename of the carve-out constant in
+        # ``agents.session_id`` (and its Go-side ``channels.DefaultSessionID``
+        # counterpart) only needs to touch the leaf module — the
+        # signature-default pin at ``test_default_uses_legacy_session_id_constant``
+        # below uses the same style.  (PR 1 second deep-review finding #3 —
+        # the new notes-tier asserts had drifted to the literal while the
+        # F4 normalisation asserts in ``TestStoreNoteSessionIDNormalization``
+        # used the constant; this unifies the rows added by PR 1.)
+        from agents.session_id import LEGACY_SESSION_ID
+
         note_id = await memory.store_note("topic", "content")
         async with memory._ensure_db().execute(
             "SELECT session_id FROM notes WHERE id = ?",
@@ -77,7 +88,7 @@ class TestStoreNoteSessionID:
         ) as cursor:
             row = await cursor.fetchone()
         assert row is not None
-        assert row[0] == "legacy"
+        assert row[0] == LEGACY_SESSION_ID
 
     async def test_explicit_session_id_round_trip(
         self, memory: EpisodicMemory,
