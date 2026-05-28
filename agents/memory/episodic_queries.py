@@ -22,6 +22,14 @@ from typing import Any
 
 import aiosqlite
 
+from ._episodic_agent_state import (
+    get_interaction_count,
+    increment_interaction_count,
+    load_agent_state,
+    persist_agent_state,
+    reset_interaction_count,
+)
+from ._session_filter import session_in_clause
 from .interaction_janitor import SUMMARY_PENDING_TEXT
 from .migrations import _SCORE_EXPR, _SCORE_EXPR_BARE
 
@@ -192,21 +200,25 @@ async def recall_fts5(
     limit: int,
     min_importance: float,
     min_score: float | None = None,
+    *,
+    sessions: list[str] | None = None,
 ) -> list[aiosqlite.Row]:
     """FTS5 search with composite BM25 x importance x access x recency scoring.
 
-    Falls back to LIKE search if the query contains malformed FTS5 syntax
-    (e.g. lone ``*``, unbalanced quotes, bare ``NOT``).
+    Falls back to LIKE search on malformed FTS5 syntax (lone ``*``,
+    unbalanced quotes, bare ``NOT``).  ``sessions`` (RFC 0031 Phase 2
+    PR 2) is a resolved list from
+    :func:`agents.memory._session_filter._resolve_session_list` — ``None``
+    is the ``"*"`` no-filter mode.
     """
+    sess_clause, sess_params = session_in_clause(sessions, column="e.session_id")
     safe_query = _FTS5_SANITIZE.sub(" ", query).strip()
     if not safe_query:
-        # Pure-punctuation query (e.g. ".,<>|!@#") sanitizes to empty.
-        # LIKE on the raw query would match literally on punctuation —
-        # rarely useful and surprising.  Fall through to a pure recency/
-        # importance ranking so the caller still gets relevant episodes.
-        return await recall_recency(db, agent_id, limit, min_importance)
-    # Normalised BM25 floor: 1.0/(1+|rank|) >= min_score  iff  |rank| <= (1/min_score - 1).
-    # ``resolve_min_score`` maps ``None`` → 0.0 so every match passes.
+        # Pure-punctuation query sanitizes to empty — fall through to a
+        # pure recency ranking so the caller still gets relevant rows.
+        return await recall_recency(
+            db, agent_id, limit, min_importance, sessions=sessions,
+        )
     effective_min_score = resolve_min_score(min_score)
     try:
         async with db.execute(
@@ -218,20 +230,27 @@ async def recall_fts5(
               AND e.agent_id = ?
               AND e.importance >= ?
               AND (1.0 / (1.0 + ABS(fts.rank))) >= ?
+              {sess_clause}
             ORDER BY
                 (fts.rank * -1)
                 * {_SCORE_EXPR}
                 DESC
             LIMIT ?
             """,
-            (safe_query, agent_id, min_importance, effective_min_score, time.time(), limit),
+            (
+                safe_query, agent_id, min_importance, effective_min_score,
+                *sess_params, time.time(), limit,
+            ),
         ) as cursor:
             return list(await cursor.fetchall())
     except sqlite3.OperationalError as exc:
         logger.warning(
             "FTS5 query failed for %r, falling back to LIKE: %s", query, exc,
         )
-        return await recall_like(db, agent_id, query, limit, min_importance, min_score)
+        return await recall_like(
+            db, agent_id, query, limit, min_importance, min_score,
+            sessions=sessions,
+        )
 
 
 async def recall_like(
@@ -241,16 +260,16 @@ async def recall_like(
     limit: int,
     min_importance: float,
     min_score: float | None = None,  # noqa: ARG001 — LIKE matches are binary (score=1.0)
+    *,
+    sessions: list[str] | None = None,
 ) -> list[aiosqlite.Row]:
     """LIKE fallback when FTS5 is unavailable.
 
-    Escapes LIKE wildcard characters (``%``, ``_``) in the query so they
-    are matched literally rather than treated as pattern metacharacters.
-
-    ``min_score`` is accepted for signature compatibility but is not applied:
-    LIKE matching is binary (match or not), so every match is treated as
-    score ``1.0`` per RFC 0017 Section C.
+    Escapes ``%`` / ``_`` so they match literally.  ``min_score`` is
+    signature-only — LIKE matches are binary, every match scores ``1.0``
+    per RFC 0017 §C.  ``sessions`` — see :func:`recall_fts5`.
     """
+    sess_clause, sess_params = session_in_clause(sessions, column="session_id")
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{escaped}%"
     async with db.execute(
@@ -260,12 +279,16 @@ async def recall_like(
         WHERE agent_id = ?
           AND importance >= ?
           AND (summary LIKE ? ESCAPE '\\' OR context_json LIKE ? ESCAPE '\\')
+          {sess_clause}
         ORDER BY
             {_SCORE_EXPR_BARE}
             DESC
         LIMIT ?
         """,
-        (agent_id, min_importance, pattern, pattern, time.time(), limit),
+        (
+            agent_id, min_importance, pattern, pattern,
+            *sess_params, time.time(), limit,
+        ),
     ) as cursor:
         return list(await cursor.fetchall())
 
@@ -275,132 +298,31 @@ async def recall_recency(
     agent_id: str,
     limit: int,
     min_importance: float,
+    *,
+    sessions: list[str] | None = None,
 ) -> list[aiosqlite.Row]:
-    """No query text — rank by importance x access x recency only."""
+    """No query text — rank by importance x access x recency only.
+
+    ``sessions`` — see :func:`recall_fts5`.  The persona-runtime
+    channel-history tier hits this path with an empty query, so this
+    is the load-bearing path for closing F-3 on the empty-query surface.
+    """
+    sess_clause, sess_params = session_in_clause(sessions, column="session_id")
     async with db.execute(
         f"""
         SELECT {EPISODE_SELECT}
         FROM episodes
         WHERE agent_id = ?
           AND importance >= ?
+          {sess_clause}
         ORDER BY
             {_SCORE_EXPR_BARE}
             DESC
         LIMIT ?
         """,
-        (agent_id, min_importance, time.time(), limit),
+        (agent_id, min_importance, *sess_params, time.time(), limit),
     ) as cursor:
         return list(await cursor.fetchall())
-
-
-# ─── Interaction counter helpers ─────────────────────────────
-
-
-async def get_interaction_count(db: aiosqlite.Connection, agent_id: str) -> int:
-    """Get the current interaction count for this agent."""
-    async with db.execute(
-        "SELECT interaction_count FROM agent_state WHERE agent_id = ?",
-        (agent_id,),
-    ) as cursor:
-        row = await cursor.fetchone()
-    return row[0] if row else 0
-
-
-async def increment_interaction_count(
-    db: aiosqlite.Connection, agent_id: str,
-) -> int:
-    """Increment and return the new interaction count (upsert).
-
-    Uses RETURNING to get the post-upsert count in a single round-trip,
-    eliminating a read-after-write race (F-3b-2).  Requires SQLite >= 3.35
-    (Python 3.11+ ships >= 3.39).
-
-    ISSUE-0055: the RETURNING row is drained with ``execute_fetchall``
-    (one aiosqlite round-trip), not ``execute()`` + a separate
-    ``fetchone()``.  ``execute()`` steps a RETURNING statement only to
-    its first row, leaving the *write* VDBE active across the ``await``
-    before ``fetchone()``; on the shared connection a concurrent
-    ``COMMIT`` in that gap raised "cannot commit transaction - SQL
-    statements in progress".  One round-trip never suspends it.
-    """
-    now = time.time()
-    rows = list(await db.execute_fetchall(
-        """
-        INSERT INTO agent_state (agent_id, interaction_count, updated_at)
-        VALUES (?, 1, ?)
-        ON CONFLICT(agent_id) DO UPDATE
-            SET interaction_count = interaction_count + 1,
-                updated_at = ?
-        RETURNING interaction_count
-        """,
-        (agent_id, now, now),
-    ))
-    await db.commit()
-    return rows[0][0] if rows else 0
-
-
-async def reset_interaction_count(
-    db: aiosqlite.Connection, agent_id: str,
-) -> None:
-    """Reset the interaction counter to zero."""
-    now = time.time()
-    await db.execute(
-        """
-        INSERT INTO agent_state (agent_id, interaction_count, updated_at)
-        VALUES (?, 0, ?)
-        ON CONFLICT(agent_id) DO UPDATE
-            SET interaction_count = 0,
-                updated_at = ?
-        """,
-        (agent_id, now, now),
-    )
-    await db.commit()
-
-
-# ─── Persona state persistence helpers ──────────────────────
-
-
-async def persist_agent_state(
-    db: aiosqlite.Connection,
-    agent_id: str,
-    state_json: str,
-) -> None:
-    """Persist opaque agent state JSON to the agent_state table (upsert).
-
-    Preserves interaction_count managed by the interaction counter helpers.
-    """
-    now = time.time()
-    await db.execute(
-        """
-        INSERT INTO agent_state
-            (agent_id, interaction_count, persona_state_json, updated_at)
-        VALUES (?, 0, ?, ?)
-        ON CONFLICT(agent_id) DO UPDATE
-            SET persona_state_json = ?,
-                updated_at = ?
-        """,
-        (agent_id, state_json, now, state_json, now),
-    )
-    await db.commit()
-
-
-async def load_agent_state(
-    db: aiosqlite.Connection,
-    agent_id: str,
-) -> str | None:
-    """Load opaque agent state JSON from the agent_state table.
-
-    Returns ``None`` if no state has been persisted for this agent.
-    """
-    async with db.execute(
-        "SELECT persona_state_json FROM agent_state WHERE agent_id = ?",
-        (agent_id,),
-    ) as cursor:
-        row = await cursor.fetchone()
-    if row and row[0]:
-        result: str = row[0]
-        return result
-    return None
 
 
 # ─── Episode write helpers ──────────────────────────────────

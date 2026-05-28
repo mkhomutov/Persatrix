@@ -348,27 +348,25 @@ class TestLegacyUpgrade:
 
 
 class TestNotesProjectionContract:
-    """Pin the INSERT / SELECT / dataclass three-way contract that PR 1
-    deliberately left asymmetric.
+    """Pin the INSERT / SELECT / dataclass three-way contract.
 
-    PR 1 widened the ``notes`` table to 9 columns (added ``session_id``)
-    but kept ``_NOTE_COLS`` (the canonical SELECT projection used by
-    every recall path) at 8 columns and left :class:`Note` with 8 fields
-    so the recall API stays unchanged this PR — recall-side filtering
-    lands in a later Phase 2 PR.
+    PR 1 (migration v9) widened the ``notes`` table to 9 columns
+    (added ``session_id``) but deliberately kept ``_NOTE_COLS`` and the
+    :class:`Note` dataclass at 8 fields so the recall API stayed
+    unchanged.  PR 2 closes the gap: ``_NOTE_COLS`` now projects
+    ``session_id`` and the :class:`Note` dataclass carries the field —
+    moving the three together is exactly what this pin enforces.
 
-    Without these pins, a Phase 2 recall PR that extends
-    ``_NOTE_COLS`` to include ``session_id`` without also extending
-    :meth:`NoteStore._row_to_note` (or vice versa) silently corrupts
-    hydration: ``_row_to_note`` indexes ``row[0]..row[len(_NOTE_COLS)-1]``
-    onto :class:`Note` positionally, so a one-sided shift maps
-    ``session_id`` into ``updated_at`` (or raises ``IndexError``) with
-    no failing test to catch it.
+    Without these pins, a one-sided edit (add a column to
+    ``_NOTE_COLS`` without adjusting :meth:`NoteStore._row_to_note`,
+    or vice versa) shifts the positional mapping and ``session_id``
+    rolls into ``updated_at`` (or raises ``IndexError``) with no
+    failing test to catch it.
 
     The :mod:`agents.memory.facts` module already carries the comment
     *"sync with SELECT statements — same pattern as _NOTE_COLS"* at
     :file:`facts.py:112`, showing maintainers already recognise this
-    sync-hazard.  This class is the missing pin.  (PR 1 review F7.)
+    sync-hazard.  (PR 1 review F7.)
     """
 
     def test_note_cols_pinned_shape(self):
@@ -383,6 +381,7 @@ class TestNotesProjectionContract:
         assert _NOTE_COLS == (
             "id", "agent_id", "topic", "content", "tags_json",
             "access_count", "created_at", "updated_at",
+            "session_id",
         ), (
             "_NOTE_COLS shape change — also update Note dataclass + "
             "NoteStore._row_to_note positional mapping in "
@@ -432,6 +431,10 @@ class TestNotesProjectionContract:
         assert note.access_count == 0
         assert note.created_at > 0.0
         assert note.updated_at > 0.0
+        # PR 2: the session_id projection lands on the dataclass.
+        # ``memory`` fixture has no PERSATRIX_SESSION_ID set so the
+        # store_note default falls through to ``"legacy"``.
+        assert note.session_id == "legacy"
 
 
 if __name__ == "__main__":
