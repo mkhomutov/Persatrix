@@ -313,7 +313,11 @@ class TestStoreExtractedFacts:
             session_id="run-a",
         )
         assert n == 2
-        results = await fact_store.recall(subject="bob")
+        # RFC 0031 Phase 2 PR 3: default recall is session-scoped, so a
+        # round-trip test that wrote under ``run-a`` recalls under
+        # ``run-a`` explicitly rather than relying on the no-filter
+        # default that no longer exists.
+        results = await fact_store.recall(subject="bob", sessions=["run-a"])
         # Subject was canonicalised — both rows live under the same key.
         assert len(results) == 2
         predicates = {f.predicate for f in results}

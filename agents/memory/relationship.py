@@ -15,8 +15,10 @@ import logging
 
 import aiosqlite
 
+from ..session_id import resolve_session_id_silent
 from ._boundary import warn_external_construction
 from ._salience import RELATIONSHIP_APPEND_SALIENCE, emit_for_tier
+from ._session_filter import _resolve_session_list
 from .migrations import _apply_migrations
 from .relationship_mutations import (
     apply_decay as _apply_decay,
@@ -77,6 +79,11 @@ class RelationshipMemory:
         self._agent_id = agent_id
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None
+        # RFC 0031 Phase 2 PR 3 — tier-owned active session (mirrors
+        # EpisodicMemory).  The persona-direct read path bypasses the
+        # MemoryStore facade, so the tier must resolve its own active
+        # session for ``sessions=None`` recall to be correct there too.
+        self._active_session_id = resolve_session_id_silent()
 
     @property
     def agent_id(self) -> str:
@@ -137,15 +144,27 @@ class RelationshipMemory:
         *,
         participant_type: str = "agent",
         other_participant_type: str = "agent",
+        sessions: list[str] | str | None = None,
     ) -> float:
         """Get current trust score for another participant (0.0–1.0).
 
         Returns the default (0.5) if no relationship exists.
+
+        ``sessions`` (RFC 0031 Phase 2 PR 3) — see
+        :func:`agents.memory._session_filter._resolve_session_list` for
+        the four-mode contract.  Default ``None`` resolves to the
+        tier's active session plus the always-visible ``legacy``
+        carve-out; a row in another session yields the neutral default
+        so a foreign-session trust value cannot leak into the prompt.
         """
+        session_list = _resolve_session_list(
+            sessions, self._active_session_id,
+        )
         return await _get_trust(
             self._ensure_db(), self._agent_id, other_id,
             participant_type=participant_type,
             other_participant_type=other_participant_type,
+            sessions=session_list,
         )
 
     async def update_trust(
@@ -241,18 +260,29 @@ class RelationshipMemory:
         *,
         participant_type: str = "agent",
         other_participant_type: str = "agent",
+        sessions: list[str] | str | None = None,
     ) -> RelationshipSummary:
-        """Get full relationship context for injection into LLM prompt."""
+        """Get full relationship context for injection into LLM prompt.
+
+        ``sessions`` (RFC 0031 Phase 2 PR 3) — see :meth:`get_trust`.
+        A row in a non-active non-legacy session yields the "no
+        relationship" summary, matching :meth:`get_trust`.
+        """
+        session_list = _resolve_session_list(
+            sessions, self._active_session_id,
+        )
         return await _get_relationship_summary(
             self._ensure_db(), self._agent_id, other_id,
             participant_type=participant_type,
             other_participant_type=other_participant_type,
+            sessions=session_list,
         )
 
     async def get_all_relationships(
         self,
         *,
         participant_type: str = "agent",
+        sessions: list[str] | str | None = None,
     ) -> list[RelationshipSummary]:
         """Get summaries for all known relationships of this agent.
 
@@ -262,8 +292,14 @@ class RelationshipMemory:
            (defaults to ``[]``) to avoid N+1 queries. Use
            ``get_relationship_summary()`` for individual relationships
            with full interaction history.
+
+        ``sessions`` (RFC 0031 Phase 2 PR 3) — see :meth:`get_trust`.
         """
+        session_list = _resolve_session_list(
+            sessions, self._active_session_id,
+        )
         return await _get_all_relationships(
             self._ensure_db(), self._agent_id,
             participant_type=participant_type,
+            sessions=session_list,
         )

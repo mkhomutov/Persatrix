@@ -8,6 +8,7 @@ string; they carry no object state and are safe to call from any async context.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 import time
@@ -274,16 +275,24 @@ async def record_interaction(
     # every ``record_interaction`` call, not just the first-seen INSERT
     # branch, so dashboards see one tick per persona-level interaction
     # event regardless of whether the conflict path fired.
-    inst = try_get_instruments()
-    if inst is not None:
-        inst.sessions_writes.add(
-            1,
-            attributes={
-                "session_id": session_id,
-                "agent.id": agent_id,
-                "surface": "relationship",
-            },
-        )
+    #
+    # RFC 0031 Phase 2 PR 3 (F17 carry-forward): wrapped in
+    # ``contextlib.suppress`` so an OTEL backend exception cannot
+    # surface as a write failure after ``db.commit()`` has already
+    # persisted the row — same failure-isolation contract as
+    # :meth:`EpisodicMemory.store_episode` (PR #337 M1) and
+    # :meth:`NoteStore.store_note` (PR 449).
+    with contextlib.suppress(Exception):
+        inst = try_get_instruments()
+        if inst is not None:
+            inst.sessions_writes.add(
+                1,
+                attributes={
+                    "session_id": session_id,
+                    "agent.id": agent_id,
+                    "surface": "relationship",
+                },
+            )
     return interaction_id
 
 
