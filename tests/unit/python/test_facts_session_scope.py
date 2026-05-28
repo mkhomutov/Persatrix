@@ -22,6 +22,9 @@ Active session resolved once at tier construction via
 
 from __future__ import annotations
 
+import os
+import tempfile
+
 import pytest
 
 from agents.memory.facts import FactStore
@@ -229,6 +232,99 @@ class TestLegacyCarveOutVisibleByDefault:
             subject="bob", sessions=["run-b"],
         )
         assert legacy_id in {f.fact_id for f in facts}
+
+
+# ─── Documented gap — cross-session supersede (ISSUE-0079) ──
+
+
+class TestCrossSessionSupersedeIsDocumentedGap:
+    """Pin the F-3 hole on the write side of the facts tier.
+
+    PR 3 closes F-3 on :meth:`FactStore.recall`, but
+    :func:`agents.memory._facts_supersede.apply_supersession` (invoked
+    from :meth:`FactStore.store`) keys symmetric latest-asserted-wins
+    on ``(agent_id, subject, predicate)`` with **no** ``session_id``
+    predicate — see :file:`agents/memory/_facts_supersede.py:87-97`.
+    Writing the same ``(subject, predicate)`` in a different session
+    with a later ``asserted_at`` silently marks the active-session
+    row's ``superseded_by`` non-null, so it disappears from the active
+    session's default recall (which filters both
+    ``superseded_by IS NULL`` *and* the §D session-IN clause).
+
+    Net effect: a fact written under ``run-b`` can erase a fact under
+    ``run-a`` from ``run-a``'s own view — the canonical F-3 reproduction
+    on the facts surface, just relocated from the read path to the
+    write path.
+
+    Tracked as
+    `ISSUE-0079 <../../../docs/issues/ISSUE-0079-cross-session-supersede-not-scoped.md>`_.
+    Fix needs an RFC 0026 §F amendment — supersede is currently
+    documented as per-``(agent_id, subject, predicate)``, and scoping
+    it by ``session_id`` is a real semantics call (each session keeps
+    its own truth about ``bob.lives_in`` vs. one global truth).
+
+    Marker is :data:`pytest.mark.xfail(strict=True)` so the day a PR
+    fixes the gap the assertion flips to ``XPASS`` and the suite fails,
+    forcing the marker to be removed.  The xfail is **not**
+    ``raises=AssertionError`` — keeping the exception type open
+    insulates the pin against an interim refactor that surfaces a
+    different exception class along the way.
+    """
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "ISSUE-0079: cross-session supersede is not yet scoped by "
+            "session_id; RFC 0026 §F treats latest-asserted-wins as "
+            "per-(agent_id, subject, predicate) only.  PR 3 ships the "
+            "recall-side §D filter; the write-side gap is the deferred "
+            "F-3 closer on this surface."
+        ),
+    )
+    async def test_run_b_write_does_not_supersede_run_a_fact(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Two sessions write the same ``(bob, lives_in)`` predicate.
+        Post-fix the run-a row must remain live from run-a's view; pre-fix
+        run-b's later write supersedes it globally and run-a sees nothing.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "memory.db")
+
+            monkeypatch.setenv(SESSION_ID_ENV_VAR, "run-a")
+            store_a = FactStore(agent_id="t", db_path=path)
+            await store_a.initialize()
+            try:
+                await store_a.store(
+                    subject="bob", predicate="lives_in", object="A",
+                    source_interaction_id="ix-a", asserted_at=1000.0,
+                    session_id="run-a",
+                )
+            finally:
+                await store_a.close()
+
+            monkeypatch.setenv(SESSION_ID_ENV_VAR, "run-b")
+            store_b = FactStore(agent_id="t", db_path=path)
+            await store_b.initialize()
+            try:
+                await store_b.store(
+                    subject="bob", predicate="lives_in", object="B",
+                    source_interaction_id="ix-b", asserted_at=2000.0,
+                    session_id="run-b",
+                )
+            finally:
+                await store_b.close()
+
+            monkeypatch.setenv(SESSION_ID_ENV_VAR, "run-a")
+            store_a2 = FactStore(agent_id="t", db_path=path)
+            await store_a2.initialize()
+            try:
+                facts = await store_a2.recall(subject="bob")
+                # Pre-fix: run-a row has superseded_by != NULL ⇒ recall is [].
+                # Post-fix: the run-a fact is still visible from run-a.
+                assert {f.object for f in facts} == {"A"}
+            finally:
+                await store_a2.close()
 
 
 if __name__ == "__main__":

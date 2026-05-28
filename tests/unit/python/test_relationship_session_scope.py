@@ -419,6 +419,56 @@ class TestRecordInteractionMetricFailureIsolated:
         )
 
 
+# ─── Documented gap — recent_interactions cross-session leak (ISSUE-0080) ──
+
+
+class TestRecentInteractionsCrossSessionLeakIsDocumentedGap:
+    """Pin the F-3 hole on :meth:`get_relationship_summary`'s secondary
+    fetch into ``interactions`` (`ISSUE-0080
+    <../../../docs/issues/ISSUE-0080-relationship-recent-interactions-cross-session-leak.md>`_).
+
+    PR 3 filters the ``relationships`` row by ``session_id``; the
+    follow-up SELECT that populates
+    :attr:`RelationshipSummary.recent_interactions` does not — and the
+    ``interactions`` table has no ``session_id`` column at all
+    (migration v7 added it only to ``episodes`` / ``relationships``).
+    Combined with ``record_interaction``'s ON-CONFLICT increment on
+    the original first-seen row, the row-visible path leaks every
+    cross-session interaction's ``outcome`` / ``sentiment`` /
+    timestamp into the prompt and inflates ``interaction_count``.
+    Strict-xfail so the day a PR closes the gap the suite flips to
+    ``XPASS`` and forces marker removal.
+    """
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "ISSUE-0080: recent_interactions + interaction_count leak "
+            "across sessions when the relationship row is visible. "
+            "Needs migration v10 adding session_id to interactions + "
+            "the recall-side filter."
+        ),
+    )
+    async def test_recent_interactions_excludes_foreign_session_history(
+        self, memory_at_run_a: RelationshipMemory,
+    ) -> None:
+        # First-seen under run-a → relationships row tagged "run-a".
+        await memory_at_run_a.record_interaction(
+            "peer-a", "task_delegation", outcome="ok-A",
+            session_id="run-a",
+        )
+        # Cross-session second interaction with the same peer.
+        await memory_at_run_a.record_interaction(
+            "peer-a", "task_delegation", outcome="ok-B",
+            session_id="run-b",
+        )
+        summary = await memory_at_run_a.get_relationship_summary("peer-a")
+        # Pre-fix: count=2 + both outcomes leak. Post-fix: only run-a.
+        outcomes = {i.outcome for i in summary.recent_interactions}
+        assert summary.interaction_count == 1, summary.interaction_count
+        assert outcomes == {"ok-A"}, outcomes
+
+
 # Keep test_session_id_metric_failure_isolation's `pytest.main` idiom.
 if __name__ == "__main__":
     with contextlib.suppress(SystemExit):
