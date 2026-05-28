@@ -9,6 +9,7 @@ and does not run its own migrations.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -19,6 +20,8 @@ from dataclasses import dataclass, field
 
 import aiosqlite
 
+from ..observability.metrics import try_get_instruments
+from ..session_id import LEGACY_SESSION_ID
 from ._salience import NOTES_APPEND_SALIENCE, emit_for_tier
 from .episodic_queries import resolve_min_score
 
@@ -96,7 +99,7 @@ class NoteStore:
         tags: list[str] | None = None,
         max_notes: int = 500,
         *,
-        session_id: str = "legacy",
+        session_id: str = LEGACY_SESSION_ID,
     ) -> str:
         """Store a new note. Prunes oldest low-access notes if over cap.
 
@@ -104,9 +107,15 @@ class NoteStore:
 
         ``session_id`` (RFC 0031 Phase 2 PR 1 — migration v9) tags the row
         with the operator-namespace active at write time; default
-        ``"legacy"`` matches ``channels.DefaultSessionID`` so pre-RFC
-        callers produce queryable rows.  PR 1 ships no recall-side
-        filtering — that lands in a later Phase 2 PR.
+        :data:`agents.session_id.LEGACY_SESSION_ID` matches
+        ``channels.DefaultSessionID`` so pre-RFC callers produce
+        queryable rows.  Empty / whitespace-only values normalise to
+        ``LEGACY_SESSION_ID`` to match the leaf-module contract at
+        :func:`agents.session_id.resolve_session_id_silent` — without
+        this, a direct caller passing ``session_id=""`` would persist an
+        orphan row (NOT NULL accepts ``''``, but neither real-session
+        nor legacy-carve-out filters match it).  PR 1 ships no
+        recall-side filtering — that lands in a later Phase 2 PR.
         """
         # Validate max_notes: _prune_notes() computes
         # LIMIT MAX(0, count - max_notes + 1), so max_notes=0 would
@@ -124,6 +133,13 @@ class NoteStore:
                 f"content exceeds {_MAX_NOTE_CONTENT_BYTES} byte limit "
                 f"({len(content_bytes)} bytes)"
             )
+        # Normalise session_id at the storage boundary to mirror
+        # agents.session_id.resolve_session_id_silent's contract: empty
+        # / whitespace-only collapses to LEGACY_SESSION_ID.  Prevents a
+        # direct programmatic caller (or test fixture) from persisting
+        # an orphan row that escapes both real-session and legacy filters
+        # once Phase 2 recall lands.  (PR 1 review F4.)
+        session_id = (session_id or "").strip() or LEGACY_SESSION_ID
 
         # Prune oldest low-access notes if at capacity.
         await self._prune_notes(max_notes)
@@ -149,6 +165,25 @@ class NoteStore:
             ),
         )
         await self._db.commit()
+        # RFC 0031 Phase 2 PR 1 review F2 — increment the per-session
+        # write counter, matching the episodes / relationships / facts
+        # tiers' emit shape.  ``surface="note"`` so dashboards can split
+        # the notes tier from the other persona-memory write surfaces
+        # (see ``test_session_id_surface_granularity`` for the contract).
+        # Wrapped in ``contextlib.suppress`` so a metric-backend failure
+        # cannot mark the write failed after ``db.commit()`` — same
+        # failure-isolation contract as ``store_episode`` (PR #337 M1).
+        with contextlib.suppress(Exception):
+            inst = try_get_instruments()
+            if inst is not None:
+                inst.sessions_writes.add(
+                    1,
+                    attributes={
+                        "session_id": session_id,
+                        "agent.id": self._agent_id,
+                        "surface": "note",
+                    },
+                )
         emit_for_tier(
             agent_id=self._agent_id,
             tier="notes",

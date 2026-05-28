@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ..session_id import LEGACY_SESSION_ID
+
 if TYPE_CHECKING:
     from .notes import Note, NoteStore
 
@@ -40,16 +42,19 @@ class _EpisodicNotesAPIMixin:
         tags: list[str] | None = None,
         max_notes: int = 500,
         *,
-        session_id: str = "legacy",
+        session_id: str = LEGACY_SESSION_ID,
     ) -> str:
         """Store a new note. Prunes oldest low-access notes if over cap.
 
         Returns the generated note ID.
 
         ``session_id`` (RFC 0031 Phase 2 PR 1) is forwarded to the
-        underlying :class:`NoteStore`; default ``"legacy"`` matches the
+        underlying :class:`NoteStore`; default
+        :data:`agents.session_id.LEGACY_SESSION_ID` matches the
         operator-namespace carve-out used by the other persona-memory
-        tiers' write paths.
+        tiers' write paths.  Empty / whitespace-only values are
+        normalised by :meth:`NoteStore.store_note` at the storage
+        boundary — this layer is a pass-through.
         """
         return await self._ensure_note_store().store_note(
             topic, content, tags=tags, max_notes=max_notes,

@@ -35,10 +35,19 @@ async def _apply_migration_9(db: aiosqlite.Connection) -> None:
 
     Idempotency: ``ALTER TABLE ... ADD COLUMN`` predates ``IF NOT EXISTS``
     in SQLite < 3.35 (Persatrix does not require that minimum), so the
-    column existence is checked via ``PRAGMA table_info`` first — same
-    discipline as v5/v6/v7.  The ``sqlite_master`` guard short-circuits a
-    partial-restore baseline (``schema_version`` recorded up to v8 but no
-    ``notes`` table) so the ``ALTER TABLE`` cannot crash.
+    column existence is checked via ``PRAGMA table_info`` first.  The
+    ``sqlite_master`` guard short-circuits a partial-restore baseline
+    (``schema_version`` recorded up to v8 but no ``notes`` table) so the
+    ``ALTER TABLE`` cannot crash.
+
+    Commit shape mirrors v7 (RFC 0031 Phase 1) and v8 (RFC 0026 PR 1) —
+    a single ``await db.commit()`` after the guarded DDL block, including
+    on the no-``notes``-table short-circuit.  v5 / v6 use the alternative
+    ``return``-without-commit shape on their missing-table branch; v7
+    intentionally broke from that pattern and v8 / v9 inherit v7's shape
+    so the four ``session_id``-bearing tiers share one handler skeleton.
+    (PR 1 review F13/14 — the original docstring mis-cited v5/v6 as kin;
+    the actual lineage is v7 → v8 → v9.)
 
     The ``notes`` FTS5 mirror + sync triggers (migration v2) index
     ``topic`` / ``content`` / ``tags_json`` only, not ``session_id``, so

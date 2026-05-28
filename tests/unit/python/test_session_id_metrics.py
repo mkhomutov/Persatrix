@@ -155,5 +155,34 @@ async def test_multiple_writes_partition_by_session_id(
     assert by_session.get("run-b") == 1
 
 
+async def test_store_note_increments_sessions_writes(
+    tmp_path: Path,
+    metric_reader: InMemoryMetricReader,
+) -> None:
+    """RFC 0031 Phase 2 PR 1 review F2 — notes-tier writes must emit
+    on the same counter as episodes / relationships / facts so operator
+    dashboards see the notes surface on the session dimension.
+
+    Without this emit the PR's write-path-threading framing was
+    incomplete on observability — session_id flowed to the row but not
+    to the counter, so a PromQL ``sum by (surface)`` over
+    ``sessions.writes`` would never show a ``surface="note"`` series.
+    """
+    mem = EpisodicMemory(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))
+    await mem.initialize()
+    try:
+        await mem.store_note("topic", "content", session_id="run-a")
+    finally:
+        await mem.close()
+
+    points = _collect(metric_reader)
+    writes = points.get("sessions.writes", [])
+    assert writes, "counter must emit on store_note"
+    by_session = {attrs.get("session_id"): v for v, attrs in writes}
+    assert by_session.get("run-a") == 1, (
+        f"expected one write tagged run-a; got: {writes!r}"
+    )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

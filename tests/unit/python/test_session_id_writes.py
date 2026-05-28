@@ -109,6 +109,77 @@ class TestStoreNoteSessionID:
         assert by_id[b] == "run-b"
 
 
+class TestStoreNoteSessionIDNormalization:
+    """PR 1 review F4 + F5 — the ``session_id`` kwarg accepts the same
+    shape the leaf module's ``resolve_session_id_silent`` produces:
+    empty / whitespace-only strings collapse to
+    :data:`agents.session_id.LEGACY_SESSION_ID`, and the kwarg default
+    is the constant (not a hand-duplicated ``"legacy"`` literal) so a
+    cross-language rename of the carve-out only needs to touch the
+    leaf module.
+
+    Without this normalisation a caller passing ``session_id=""``
+    persists an empty string into the NOT NULL column — accepted by
+    SQLite ('' is not NULL) but orphaned from both real-session and
+    ``'legacy'`` carve-out filters once Phase 2 recall lands.
+    """
+
+    async def test_empty_string_normalises_to_legacy(
+        self, memory: EpisodicMemory,
+    ):
+        from agents.session_id import LEGACY_SESSION_ID
+
+        note_id = await memory.store_note(
+            "topic", "content", session_id="",
+        )
+        async with memory._ensure_db().execute(
+            "SELECT session_id FROM notes WHERE id = ?",
+            (note_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == LEGACY_SESSION_ID
+
+    async def test_whitespace_only_normalises_to_legacy(
+        self, memory: EpisodicMemory,
+    ):
+        from agents.session_id import LEGACY_SESSION_ID
+
+        note_id = await memory.store_note(
+            "topic", "content", session_id="   ",
+        )
+        async with memory._ensure_db().execute(
+            "SELECT session_id FROM notes WHERE id = ?",
+            (note_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == LEGACY_SESSION_ID
+
+    async def test_default_uses_legacy_session_id_constant(self):
+        """Kwarg default on both the storage primitive and the mixin
+        is the centralised constant — not a hand-duplicated literal.
+
+        A future rename of ``LEGACY_SESSION_ID`` (or its Go-side
+        ``channels.DefaultSessionID`` counterpart) only needs to touch
+        the leaf module; this pin catches a regression that re-inlines
+        the string literal on either signature.
+        """
+        import inspect
+
+        from agents.memory.episodic_notes_api import _EpisodicNotesAPIMixin
+        from agents.memory.notes import NoteStore
+        from agents.session_id import LEGACY_SESSION_ID
+
+        for fn in (NoteStore.store_note, _EpisodicNotesAPIMixin.store_note):
+            sig = inspect.signature(fn)
+            assert sig.parameters["session_id"].default == LEGACY_SESSION_ID, (
+                f"{fn.__qualname__} session_id default drifted from "
+                f"LEGACY_SESSION_ID — re-import the constant rather than "
+                f"hardcoding the literal"
+            )
+
+
 class TestStoreNoteToolThreadsActiveSession:
     """The builtin ``store_note`` tool threads the per-process
     ``PERSATRIX_SESSION_ID`` into the write, not the bare ``"legacy"``

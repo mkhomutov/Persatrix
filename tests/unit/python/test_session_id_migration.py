@@ -105,12 +105,23 @@ class TestMigrationIdempotency:
         # Simulate the crash-between-DDL-and-version-record case.  Calling
         # the handler again on an already-migrated DB must not raise and
         # must not produce duplicate columns.
+        #
+        # The duplicate-column count is read directly from PRAGMA rows
+        # rather than via a set-based ``_columns`` helper — a set can
+        # never contain duplicates, so a set-based count would have been
+        # trivially 0 or 1 and could not actually witness a regression
+        # that dropped the column-existence guard.  (PR 448 review F9:
+        # the v9 mirror in test_session_id_notes_migration.py was fixed
+        # in the same review pass.)
         db = memory._ensure_db()
         await _apply_migration_7(db)
-        ep_cols = await _columns(db, "episodes")
-        rel_cols = await _columns(db, "relationships")
-        assert sum(1 for c in ep_cols if c == "session_id") == 1
-        assert sum(1 for c in rel_cols if c == "session_id") == 1
+
+        async def _column_count(table: str, name: str) -> int:
+            cursor = await db.execute(f"PRAGMA table_info({table})")
+            return sum(1 for row in await cursor.fetchall() if row[1] == name)
+
+        assert await _column_count("episodes", "session_id") == 1
+        assert await _column_count("relationships", "session_id") == 1
 
 
 # ─── Empty-baseline guard ───────────────────────────────────
