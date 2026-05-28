@@ -25,6 +25,7 @@ from typing import Any
 
 import aiosqlite
 
+from ._session_filter import session_in_clause as _session_in_clause
 from .decay import (
     DEFAULT_C_MIN,
     DEFAULT_LAMBDA_PER_DAY,
@@ -133,6 +134,7 @@ async def recall_procedures(
     lambda_per_day: float = DEFAULT_LAMBDA_PER_DAY,
     stale_threshold: float | None = None,
     now: float | None = None,
+    session_list: list[str] | None = None,
 ) -> list[ProcedureRecallEntry]:
     """Return procedural entries with read-time confidence decay applied.
 
@@ -195,6 +197,17 @@ async def recall_procedures(
         "AND tags_json LIKE '%\"procedure:%' "
     )
     params: list[Any] = [agent_id]
+    # RFC 0031 Phase 2 PR 4: session filter is applied verbatim on the
+    # ``session_id`` column (the procedural tier reuses the ``episodes``
+    # table, so the §D predicate composes with the existing tag-based
+    # WHERE).  ``session_list=None`` is the ``"*"`` sentinel and produces
+    # an empty fragment.  Carve-out is already in the resolved list.
+    if session_list is not None:
+        session_clause, session_params = _session_in_clause(
+            session_list, column="session_id",
+        )
+        sql_base += session_clause + " "
+        params.extend(session_params)
     if sql_cutoff_seconds is not None:
         # COALESCE(last_validated_at, created_at) is the same anchor
         # the application-side decay uses, so the cutoff cannot

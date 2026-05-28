@@ -23,6 +23,7 @@ import re
 import time
 from typing import TYPE_CHECKING, Any
 
+from ._session_filter import _resolve_session_list
 from .episodic_procedural import (
     ProcedureRecallEntry,
 )
@@ -189,6 +190,7 @@ class ProceduralFacadeMixin:
         *,
         limit: int = 10,
         now: float | None = None,
+        sessions: list[str] | str | None = None,
     ) -> list[ProcedureRecallEntry]:
         """Return procedural entries with read-time confidence decay applied.
 
@@ -210,8 +212,18 @@ class ProceduralFacadeMixin:
         ``now`` (PR 6b, PR 5 R1 L4): override the read-time clock for
         deterministic tests.  When ``None`` (the default) the helper
         uses :func:`time.time`.
+
+        ``sessions`` (RFC 0031 Phase 2 PR 4 — OQ #4 back-compat
+        extension): same §D shape as
+        :meth:`MemoryStore.retrieve_relevant`.  ``None`` resolves to the
+        facade's construction-time ``_session_id`` plus the ``legacy``
+        carve-out; an explicit list still includes ``legacy``; ``"*"``
+        bypasses the filter (CLI / debug); ``[]`` is :class:`ValueError`.
+        Procedural rows live in the same ``episodes`` table as
+        observations, so the §D predicate is applied verbatim.
         """
         self._require_initialised()
+        session_list = _resolve_session_list(sessions, self._session_id)
         return await _recall_procedures(
             self._episodic._ensure_db(),  # noqa: SLF001
             self._agent_id,
@@ -221,6 +233,7 @@ class ProceduralFacadeMixin:
             lambda_per_day=self._lambda_per_day,
             stale_threshold=self._stale_alert_threshold,
             now=now,
+            session_list=session_list,
         )
 
 

@@ -83,8 +83,16 @@ async def read_via_facade(
     limit: int = 10,
     min_confidence: float | None = None,
     tags: Iterable[str] | None = None,
+    sessions: list[str] | str | None = None,
 ) -> list[SharedPoolEntry]:
-    """Read entries with consumer-side trust + AND-tag filter."""
+    """Read entries with consumer-side trust + AND-tag filter.
+
+    ``sessions`` (RFC 0031 Phase 2 PR 4) is forwarded verbatim to
+    :meth:`SharedMemoryPool.read`.  Caller-side default policy lives on
+    :meth:`SharedPoolFacadeMixin.read_from_pool` (`ISSUE-0078
+    <../../docs/issues/ISSUE-0078-shared-pool-read-session-filter-policy.md>`_
+    Policy A — cross-session); this helper is shape-preserving.
+    """
     if registry is None:
         raise SharedMemoryPermissionError(
             f"shared pool {pool_name!r} is not configured",
@@ -98,7 +106,8 @@ async def read_via_facade(
     # back to ``limit`` after the AND-tag filter below.
     recall_limit = limit * _TAG_FILTER_OVERFETCH_FACTOR if tags else limit
     entries = await pool.read(
-        agent_id, query, limit=recall_limit, min_confidence=min_confidence,
+        agent_id, query, limit=recall_limit,
+        min_confidence=min_confidence, sessions=sessions,
     )
     if tags:
         required = frozenset(tags)
@@ -143,11 +152,29 @@ class SharedPoolFacadeMixin:
         limit: int = 10,
         min_confidence: float | None = None,
         tags: Iterable[str] | None = None,
+        sessions: list[str] | str | None = None,
     ) -> list[SharedPoolEntry]:
+        """Consumer-side shared-pool read.
+
+        ``sessions`` (RFC 0031 Phase 2 PR 4 — `ISSUE-0078
+        <../../docs/issues/ISSUE-0078-shared-pool-read-session-filter-policy.md>`_
+        Policy A — cross-session default for shared pools): ``None``
+        resolves to the ``"*"`` "no filter" sentinel so a row written
+        under any session is visible to any reader (RFC 0008 §H —
+        shared pools are cross-agent / cross-session by design; the
+        pool tier's own ``_active_session_id`` captured at pool
+        construction must not silently narrow the read view).  An
+        explicit list or ``"*"`` is forwarded verbatim; ``[]`` raises
+        :class:`ValueError` from the tier helper.
+        """
         self._require_initialised()
+        effective_sessions: list[str] | str = (
+            "*" if sessions is None else sessions
+        )
         return await read_via_facade(
             self._shared_pools, self._agent_id, pool_name, query,
             limit=limit, min_confidence=min_confidence, tags=tags,
+            sessions=effective_sessions,
         )
 
 

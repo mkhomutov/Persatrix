@@ -20,6 +20,7 @@ from opentelemetry import trace
 
 from ..observability.metrics import try_get_instruments
 from ..observability.spans import RELATIONSHIP_UPDATE_SPAN
+from ..session_id import normalize_session_id
 from .relationship_queries import truncate_field, validate_other_id, validate_participant_types
 from .relationship_types import (
     _DEFAULT_TRUST,
@@ -211,6 +212,11 @@ async def record_interaction(
     if math.isnan(sentiment) or math.isinf(sentiment):
         raise ValueError(f"sentiment must be a finite number, got {sentiment}")
     sentiment = max(-1.0, min(1.0, sentiment))
+    # Normalise session_id at the storage boundary (RFC 0031 Phase 2
+    # PR 4 — PR 1 F16 carry-forward).  Symmetric with the other three
+    # persona-memory tier write paths so a direct programmatic caller
+    # passing ``session_id=""`` cannot persist an orphan row.
+    session_id = normalize_session_id(session_id)
 
     if outcome:
         outcome = truncate_field(agent_id, outcome, other_id, "outcome")

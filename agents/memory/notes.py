@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 import aiosqlite
 
 from ..observability.metrics import try_get_instruments
-from ..session_id import LEGACY_SESSION_ID
+from ..session_id import LEGACY_SESSION_ID, normalize_session_id
 from ._salience import NOTES_APPEND_SALIENCE, emit_for_tier
 from ._session_filter import _resolve_session_list, session_in_clause
 from .episodic_queries import resolve_min_score
@@ -152,13 +152,12 @@ class NoteStore:
                 f"content exceeds {_MAX_NOTE_CONTENT_BYTES} byte limit "
                 f"({len(content_bytes)} bytes)"
             )
-        # Normalise session_id at the storage boundary to mirror
-        # agents.session_id.resolve_session_id_silent's contract: empty
-        # / whitespace-only collapses to LEGACY_SESSION_ID.  Prevents a
-        # direct programmatic caller (or test fixture) from persisting
-        # an orphan row that escapes both real-session and legacy filters
-        # once Phase 2 recall lands.  (PR 1 review F4.)
-        session_id = (session_id or "").strip() or LEGACY_SESSION_ID
+        # Normalise session_id at the storage boundary via the shared
+        # helper (RFC 0031 Phase 2 PR 4, PR 1 F16 carry-forward — same
+        # invariant now applied uniformly across the four persona-memory
+        # tier write boundaries so a future fifth tier inherits it for
+        # free).  Empty / whitespace-only / None → LEGACY_SESSION_ID.
+        session_id = normalize_session_id(session_id)
 
         # Prune scoped to ``(agent_id, session_id)`` per PR 1 F1 carry-
         # forward: a run-b write cannot evict a run-a row.  Trade-off is

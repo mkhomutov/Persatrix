@@ -50,3 +50,25 @@ def resolve_session_id_silent() -> str:
     the same value the facade ended up tagging.
     """
     return os.environ.get(SESSION_ID_ENV_VAR, "").strip() or LEGACY_SESSION_ID
+
+
+def normalize_session_id(value: str | None) -> str:
+    """Normalise a caller-supplied ``session_id`` at the storage boundary.
+
+    Empty / whitespace-only / ``None`` → :data:`LEGACY_SESSION_ID`.  Any
+    other value is returned with surrounding whitespace stripped.
+
+    Mirrors :func:`resolve_session_id_silent`'s contract for the
+    env-var read so a direct programmatic caller (or test fixture)
+    cannot persist a row tagged ``""`` that escapes both the real-
+    session and the legacy-carve-out recall filters.  Applied at the
+    four persona-memory tier write boundaries (``episodes`` /
+    ``relationships`` / ``facts`` / ``notes``) so the invariant is
+    uniform across tiers.
+
+    RFC 0031 Phase 2 PR 4 (PR 1 review F16 carry-forward): factored out
+    of the per-tier ``(session_id or "").strip() or LEGACY_SESSION_ID``
+    pattern so adding a fifth tier in the future inherits the
+    normalisation by calling one helper instead of re-implementing it.
+    """
+    return (value or "").strip() or LEGACY_SESSION_ID

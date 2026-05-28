@@ -26,7 +26,7 @@ from ..observability.spans import (
     EPISODIC_RECALL_SPAN,
     EPISODIC_REMEMBER_SPAN,
 )
-from ..session_id import resolve_session_id_silent
+from ..session_id import normalize_session_id, resolve_session_id_silent
 from ._boundary import warn_external_construction
 from ._salience import EPISODIC_APPEND_SALIENCE, emit_for_tier
 from ._session_filter import _resolve_session_list
@@ -233,10 +233,9 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                 # Clamp importance to [0.0, 1.0] — the scoring formula assumes
                 # non-negative values; negative importance would invert ranking.
                 if not 0.0 <= importance <= 1.0:
-                    logger.warning(
-                        "importance=%.4f out of [0.0, 1.0] range, clamping", importance,
-                    )
+                    logger.warning("importance=%.4f out of [0.0, 1.0] range, clamping", importance)
                     importance = max(0.0, min(1.0, importance))
+                session_id = normalize_session_id(session_id)  # PR 4 / F16
                 episode_id = await insert_episode(
                     db, self._agent_id,
                     summary=summary, context=context, outcome=outcome,

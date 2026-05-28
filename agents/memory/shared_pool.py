@@ -225,12 +225,15 @@ class SharedMemoryPool:
         *,
         limit: int = 10,
         min_confidence: float | None = None,
+        sessions: list[str] | str | None = None,
     ) -> list[SharedPoolEntry]:
         """Return entries matching *query*, filtered by ``min_confidence``.
 
         Raises :class:`SharedMemoryPermissionError` when ``agent_id`` is
-        not a reader of this pool.  ``min_confidence=None`` admits all
-        entries (the default — explicit operator opt-in for trust filters).
+        not a reader.  ``sessions`` (RFC 0031 PR 4 / ISSUE-0078 Policy A)
+        is forwarded to :meth:`EpisodicMemory.recall`; production callers
+        route through :meth:`MemoryStore.read_from_pool` which defaults
+        to ``"*"`` per RFC 0008 §H cross-agent design.
         """
         if not self._initialized:
             raise RuntimeError(
@@ -241,18 +244,15 @@ class SharedMemoryPool:
             raise ValueError(
                 f"min_confidence must be in [0.0, 1.0], got {min_confidence}",
             )
-        # PR #223 deep-review S3: over-fetch when a trust filter is
-        # active so the post-filter result honours ``limit``.  No-op when
-        # ``min_confidence is None`` (no culling will happen).
+        # PR #223 S3: over-fetch under a trust filter so post-filter
+        # honours ``limit``; no-op when ``min_confidence is None``.
+        # ``recall`` bumps ``access_count`` for every BM25 hit including
+        # post-filter drops — harmless under FIFO (PR #223 pass-3 NTH-1).
         recall_limit = (
             limit * _MIN_CONFIDENCE_OVERFETCH_FACTOR
-            if min_confidence is not None
-            else limit
+            if min_confidence is not None else limit
         )
-        # Note: ``recall`` increments ``access_count`` for every BM25 hit,
-        # including rows the post-filter drops. Harmless (FIFO ignores it);
-        # PR #223 pass-3 NTH-1.
-        episodes = await self._episodic.recall(query, limit=recall_limit)
+        episodes = await self._episodic.recall(query, limit=recall_limit, sessions=sessions)
         out: list[SharedPoolEntry] = []
         for ep in episodes:
             ctx = ep.context if isinstance(ep.context, dict) else {}

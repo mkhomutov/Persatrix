@@ -232,6 +232,29 @@ Three properties matter:
    **Reads carry a partial-result flag so degraded cross-agent visibility is not silent.** Society-tier read results (`list[PoolEntry]`, `list[InboundTrust]`, etc.) are wrapped in a typed envelope with an `is_partial: bool` field. Under the `Available` mode the field is `False`. Under `Transient outage` with `--keep-source` fallback, the field is `True` and the rows are the caller's own slice only — never B's, never C's. Callers whose correctness depends on cross-agent completeness (the `bonds_inbound` reader is the canonical case — acting on a partial trust graph would mis-rank peers) check `is_partial` and surface a "trust scores stale" warning to the user rather than acting on stale-and-missing data. This matches the symmetry the write path already has: writes never silently fall back, and now reads never silently shrink.
 3. **The facade enforces "vectors-as-accelerator-only."** Section F. There is no `recall_by_similarity_returning_content` method; only `recall_by_similarity_returning_ids` exists, and the result must be hydrated through a personal/society read that has authoritative provenance.
 
+#### Amendment — RFC 0031 Phase 2 PR 4 (2026-05-28)
+
+[RFC 0031 §D](0031-per-session-namespacing-channels.md#d-recall-semantics) needs the `MemoryStore` facade read methods to accept a `sessions` filter (the F-3 closer) but Phase 1 only wired `session_id` on the *write* side — leaving the read methods on the otherwise-frozen Phase 1 surface as the only place left to attach the filter. Per the [RFC 0031 Phase 2 PR plan §OQ #4](0031-phase2-pr-plan.md#open-question-status-carried-from-phase-1) back-compat path, this amendment **adds one optional, defaulted keyword-only parameter** to each of the three Phase 1 read methods. The Phase 1 contract — "no tier-specific DSN escapes the facade," typed envelope shape, single-agent mode, capability tokens — is unchanged.
+
+| Method | Phase 1 signature | v0.3.5 signature |
+|---|---|---|
+| [`retrieve_relevant`](../../agents/memory/store.py#L257) | `(query, *, limit, scope, tags, min_score)` | `(query, *, limit, scope, tags, min_score, sessions: list[str] \| str \| None = None)` |
+| [`retrieve_procedures`](../../agents/memory/facade_procedural.py#L186) | `(query, *, limit, now)` | `(query, *, limit, now, sessions: list[str] \| str \| None = None)` |
+| [`read_from_pool`](../../agents/memory/shared_pool_facade.py#L141) | `(pool_name, query, *, limit, min_confidence, tags)` | `(pool_name, query, *, limit, min_confidence, tags, sessions: list[str] \| str \| None = None)` |
+
+Why this is back-compat rather than signature drift:
+
+- Every change adds a **defaulted keyword-only** parameter. Existing callers — every in-tree call site at v0.3.4, every external caller built against the Phase 1 surface — compile and run unchanged; only callers that opt in see the new behaviour.
+- The `sessions=None` default mirrors what the facade did before the amendment (no session filtering); the new "active-session-plus-legacy" behaviour is layered *on top* of the resolved default. The `legacy` carve-out keeps every pre-Phase-2 row visible from every session, so no operator data hides itself behind the new default.
+- Shared pools are cross-session by RFC 0008 §H design — [ISSUE-0078](../issues/ISSUE-0078-shared-pool-read-session-filter-policy.md) records the Policy A choice that `read_from_pool(sessions=None)` resolves to `"*"` at the underlying pool tier, not the caller's `_session_id`, so the existing cross-agent visibility property is preserved.
+
+Why not wait for v0.4.0:
+
+- The Phase 1 surface was declared frozen *for the v0.4.0 Postgres split* — adding a defaulted keyword-only kwarg in v0.3.5 does not affect Postgres routing, capability-token enforcement, or the typed-envelope shape (those are §D / §E / §C properties; `sessions` is a row-level filter on `episodes` / `pool_entries`). The Phase 3 Postgres schema already carries `session_id` columns (Phase 1 migration v7).
+- The cost of waiting is leaving F-3 — the v0.3.0 cross-run state-bleed bug catalogued in [v0.3.0-test-findings-pr-plan.md](../v0.3.0-test-findings-pr-plan.md) — open through v0.3.x, in tension with the v0.3.5 story.
+
+The amendment is RFC-0029-author-confirmed at v0.3.5 planning (per [v0.3.5-plan.md §Open-question status](../v0.3.5-plan.md#open-question-status-carried-from-phase-1)). No symmetric write-path change is required — `session_id` was already on the Phase 1 write APIs.
+
 ### D. Society Store: Schema and Backend
 
 Postgres, single instance per deployment. Schema laid out per [storage-architecture-roadmap.md §Target picture](../storage-architecture-roadmap.md#target-picture):

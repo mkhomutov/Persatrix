@@ -31,7 +31,7 @@ from dataclasses import dataclass
 import aiosqlite
 
 from ..observability.metrics import try_get_instruments
-from ..session_id import resolve_session_id_silent
+from ..session_id import normalize_session_id, resolve_session_id_silent
 from ._facts_audit import emit_audit as _emit_audit
 from ._facts_erasure import delete_by_subject as _delete_by_subject
 from ._facts_reinforce import mark_recalled_for_agent as _mark_recalled_for_agent
@@ -265,6 +265,10 @@ class FactStore:
         # the production write path (extractor pre-canonicalises) is
         # unaffected.
         subject = canonicalize_subject(subject)
+        # Normalise session_id at the storage boundary (RFC 0031 Phase 2
+        # PR 4 — PR 1 F16 carry-forward).  Symmetric with the other three
+        # persona-memory tier write paths.
+        session_id = normalize_session_id(session_id)
 
         db = self._ensure_db()
         fact_id = str(uuid.uuid4())
