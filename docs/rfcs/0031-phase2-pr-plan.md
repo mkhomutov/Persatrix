@@ -1,9 +1,9 @@
 # RFC 0031 — PR Implementation Plan (Phase 2 — Recall Filtering + Dementia-Test Bridge)
 
 **RFC**: [0031-per-session-namespacing-channels.md](0031-per-session-namespacing-channels.md)
-**Status**: 📋 Draft — pending version assignment (see [§Prerequisites](#prerequisites))
+**Status**: 📋 Ready — assigned to v0.3.5 ([v0.3.5-plan.md](../v0.3.5-plan.md) is the umbrella; Phase 1 of that plan executes this workstream)
 **Created**: 2026-05-19
-**Branch prefix**: `feature/v034-rfc0031p2-` *(proposed — resolves to the patch assigned by [§Prerequisites](#prerequisites))*
+**Branch prefix**: `feature/v035-rfc0031p2-` *(assigned — v0.3.5, per [v0.3.5-plan.md §Phase 0](../v0.3.5-plan.md#phase-0--this-pr))*
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
 **Companion to**: [0031-pr-plan.md](0031-pr-plan.md) (Phase 1 — v0.3.1, shipped)
@@ -25,7 +25,7 @@ The [RFC §C storage-model table](0031-per-session-namespacing-channels.md#c-sto
 - **`facts`** — the RFC 0026 declarative-facts tier (migration v8) **already carries `session_id`**: [`_migration_facts.py:75`](../../agents/memory/_migration_facts.py#L75) added the column following the RFC 0031 v7 convention, and [`facts.py`](../../agents/memory/facts.py) stamps it on every write. Facts needs **recall-side filtering only** — no migration, no write work.
 - **`notes`** — the RFC 0008 notes tier ([`migrations.py:120`](../../agents/memory/migrations.py#L120), migration v2) **has no `session_id` column**. Phase 1's migration v7 ([`_migration_handlers.py:378`](../../agents/memory/_migration_handlers.py#L378)) scoped to `episodes` + `relationships` only. Notes are recalled into the persona prompt at [`memory_context.py`](../../agents/persona_runtime/memory_context.py), so a notes tier with no session dimension re-introduces F-3 on the notes surface even after episodes/relationships are filtered.
 
-**PR 1 of this plan closes the `notes` gap** (column + index + write threading). The [RFC §C table is amended](#pr-6-featurev034-rfc0031p2-close--phase-2-closeout) in PR 6 to list all four persona-memory tiers (`episodes`, `relationships`, `facts`, `notes`) so the spec matches the tier set.
+**PR 1 of this plan closes the `notes` gap** (column + index + write threading). The [RFC §C table is amended](#pr-6-featurev035-rfc0031p2-close--phase-2-closeout) in PR 6 to list all four persona-memory tiers (`episodes`, `relationships`, `facts`, `notes`) so the spec matches the tier set.
 
 ### Open-question status (carried from Phase 1)
 
@@ -39,15 +39,15 @@ The [RFC §C storage-model table](0031-per-session-namespacing-channels.md#c-sto
 
 ## Prerequisites
 
-Phase 2 implementation is gated on a maintainer sequencing call. RFC 0031 Phases 2–4 are currently `v0.3.x — uncommitted` in [v0.3.x-sequencing.md §Updated decision](../v0.3.x-sequencing.md#updated-decision); the [v0.3.2 plan](../v0.3.2-plan.md#decision-on-the-uncommitted-v03x-rows) explicitly deferred them to *"the v0.3.3 plan opening or a dedicated v0.3.x plan."* The chosen direction is a **dedicated v0.3.x patch** (proposed: **v0.3.4**) so the per-version one-story contract stays clean — v0.3.4's story is *"every run is auto-isolated; persona memory no longer bleeds across runs."*
+Phase 2 implementation was gated on a maintainer sequencing call. That call is now made: **RFC 0031 Phases 2–4 are committed to v0.3.5** ([v0.3.x-sequencing.md §Amendment 2026-05-23](../v0.3.x-sequencing.md#amendment-2026-05-23--v034-carries-rfc-0033-ahead-of-rfc-0031-phases-24) — v0.3.5 = Session Isolation), with [v0.3.5-plan.md](../v0.3.5-plan.md) as the umbrella. The per-version one-story contract holds — v0.3.5's story is *"every run is auto-isolated; persona memory no longer bleeds across runs."*
 
-Before PR 1 opens:
+The three prerequisites below are satisfied as of the v0.3.5 Phase 0 PR:
 
-1. **Amend [v0.3.x-sequencing.md](../v0.3.x-sequencing.md)** — move the `RFC 0031 Phases 2–4` row from `uncommitted` to the assigned patch.
-2. **Open the patch master plan** (`docs/v0.3.4-plan.md`, modeled on [v0.3.2-plan.md](../v0.3.2-plan.md)) — this Phase 2 PR plan becomes its implementation workstream.
-3. **Confirm the branch prefix** — `feature/v034-rfc0031p2-` resolves to the assigned patch number. If the assigned patch is not v0.3.4, sweep the prefix across all six PR headings, the [Progress Overview](#progress-overview-phase-2) table, and the PR 6 anchor link before PR 1 opens.
+1. Done — [v0.3.x-sequencing.md](../v0.3.x-sequencing.md) amended: the `RFC 0031 Phases 2–4` row is committed to v0.3.5 (Amendment 2026-05-23).
+2. Done — patch master plan opened ([`docs/v0.3.5-plan.md`](../v0.3.5-plan.md)); this Phase 2 PR plan is its Phase 1 implementation workstream.
+3. Done — branch prefix swept to `feature/v035-rfc0031p2-` across all six PR headings, the [Progress Overview](#progress-overview-phase-2) table, and the PR 6 anchor link.
 
-This plan stands as the implementation detail regardless of which patch absorbs it; only the version label and branch prefix depend on step 1.
+This plan stands as the implementation detail regardless of which patch absorbed it; the version label and branch prefix resolved to v0.3.5.
 
 ---
 
@@ -73,7 +73,7 @@ PR 1 must precede PR 2 — recall filtering on a `notes.session_id` column that 
 
 ## PR Sequence
 
-### PR 1: `feature/v034-rfc0031p2-notes-coverage` — Notes-Tier Session Coverage
+### PR 1: `feature/v035-rfc0031p2-notes-coverage` — Notes-Tier Session Coverage
 
 **Depends on**: Nothing (v0.3.3 baseline; RFC 0031 Phase 1 + RFC 0026 + RFC 0029 Phase 1 all merged).
 **Purpose**: Bring the `notes` tier to `session_id` parity with `episodes` / `relationships` / `facts` so Phase 2 recall filtering has a non-degenerate column to filter on. Pure write-path + migration — mirrors Phase 1 PR 3.
@@ -112,7 +112,7 @@ PR 1 must precede PR 2 — recall filtering on a `notes.session_id` column that 
 
 ---
 
-### PR 2: `feature/v034-rfc0031p2-episodic-recall` — Episodic + Notes Recall Filtering
+### PR 2: `feature/v035-rfc0031p2-episodic-recall` — Episodic + Notes Recall Filtering
 
 **Depends on**: PR 1 merged.
 **Purpose**: Make episodic and notes recall session-scoped per [RFC §D](0031-per-session-namespacing-channels.md#d-recall-semantics). Establish the `sessions` parameter shape and the active-session resolution that PRs 3–4 reuse.
@@ -153,7 +153,7 @@ PR 1 must precede PR 2 — recall filtering on a `notes.session_id` column that 
 
 ---
 
-### PR 3: `feature/v034-rfc0031p2-relationship-facts-recall` — Relationship + Facts Recall Filtering
+### PR 3: `feature/v035-rfc0031p2-relationship-facts-recall` — Relationship + Facts Recall Filtering
 
 **Depends on**: PR 2 merged (recommended — reuses the §D predicate shape).
 **Purpose**: Apply the same session-scoped recall to the relationship and facts tiers.
@@ -170,7 +170,7 @@ PR 1 must precede PR 2 — recall filtering on a `notes.session_id` column that 
 #### Key implementation details
 
 - The relationship first-seen contract (Phase 1: stamp on INSERT, preserve on UPDATE — [MT-SESSION-001 Step 7](../manual-tests/MT-SESSION-001.md)) is unchanged; PR 3 is recall-side only.
-- Facts recall feeds the **primary dementia-test surface** ([MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md) Legs 1/2/5). The `legacy` carve-out means pre-RFC fact rows stay visible — a persona upgraded into v0.3.4 does not "forget" facts asserted before sessions existed.
+- Facts recall feeds the **primary dementia-test surface** ([MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md) Legs 1/2/5). The `legacy` carve-out means pre-RFC fact rows stay visible — a persona upgraded into v0.3.5 does not "forget" facts asserted before sessions existed.
 - Reuse the exact predicate helper from PR 2 (extract it to a shared `agents/memory/_session_filter.py` if PR 2 did not already) so the four tiers cannot drift.
 
 #### Tests
@@ -187,7 +187,7 @@ PR 1 must precede PR 2 — recall filtering on a `notes.session_id` column that 
 
 ---
 
-### PR 4: `feature/v034-rfc0031p2-facade-callsites` — Facade Read-Path Extension + Call-Site Threading
+### PR 4: `feature/v035-rfc0031p2-facade-callsites` — Facade Read-Path Extension + Call-Site Threading
 
 **Depends on**: PRs 2 + 3 merged.
 **Purpose**: Extend the frozen RFC 0029 `MemoryStore` facade read methods with the `sessions` parameter (OQ #4 back-compat extension) and route the persona-runtime recall call sites through it.
@@ -226,7 +226,7 @@ PR 1 must precede PR 2 — recall filtering on a `notes.session_id` column that 
 
 ---
 
-### PR 5: `feature/v034-rfc0031p2-dementia-bridge` — Dementia-Test Bridge + Review Follow-Ups
+### PR 5: `feature/v035-rfc0031p2-dementia-bridge` — Dementia-Test Bridge + Review Follow-Ups
 
 **Depends on**: PR 4 merged.
 **Purpose**: Update [MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md) to exercise multi-session continuity explicitly — the [RFC §Phase 2 deliverable #4](0031-per-session-namespacing-channels.md#phase-2-recall-filtering-and-the-dementia-test-bridge) — and the [RFC §Test Strategy E2E pin](0031-per-session-namespacing-channels.md#test-strategy). Absorb PR 1–4 review findings.
@@ -235,7 +235,7 @@ PR 1 must precede PR 2 — recall filtering on a `notes.session_id` column that 
 
 | File | Change |
 |------|--------|
-| [`docs/manual-tests/MT-MEMORY-005-dementia-test.md`](../manual-tests/MT-MEMORY-005-dementia-test.md) | New Setup step: export `PERSATRIX_SESSION_ID=<arc-id>` once and reuse it across all five interactions — per [OQ #1 resolution 1a](0031-per-session-namespacing-channels.md#open-questions), default single-session recall **is** the dementia-test recall path because the arc shares one session id. New leg / variant note: a second arc under a different `PERSATRIX_SESSION_ID` must **not** surface the first arc's facts unless `sessions="*"` is passed. New Test-Results row for the v0.3.4 run. |
+| [`docs/manual-tests/MT-MEMORY-005-dementia-test.md`](../manual-tests/MT-MEMORY-005-dementia-test.md) | New Setup step: export `PERSATRIX_SESSION_ID=<arc-id>` once and reuse it across all five interactions — per [OQ #1 resolution 1a](0031-per-session-namespacing-channels.md#open-questions), default single-session recall **is** the dementia-test recall path because the arc shares one session id. New leg / variant note: a second arc under a different `PERSATRIX_SESSION_ID` must **not** surface the first arc's facts unless `sessions="*"` is passed. New Test-Results row for the v0.3.5 run. |
 | `tests/integration/test_session_continuity.py` | **New** — the [RFC §Test Strategy E2E](0031-per-session-namespacing-channels.md#test-strategy) pin: one session spanning a simulated multi-day arc → recall stays inside the arc; a second session → no bleed; explicit `sessions=[arc1, arc2]` → continuity across both. This is the canonical "fixed F-3 without breaking the dementia test" regression test. |
 | [`docs/manual-tests/MT-SESSION-001.md`](../manual-tests/MT-SESSION-001.md) | Edge Case 2 ("Phase 2 recall semantics") updated from "will still surface the prior session's rows" to the shipped Phase 2 behaviour. |
 | Review-follow-up subsections | "From PR N review" entries per the [RFC 0017 PR plan §PR 6 precedent](0017-pr-plan.md) — each finding paraphrased inline, no link to local review reports per [.github/copilot-instructions.md](../../.github/copilot-instructions.md). |
@@ -248,13 +248,13 @@ PR 1 must precede PR 2 — recall filtering on a `notes.session_id` column that 
 #### PR checklist
 
 - [ ] `make test` passes; `make lint` clean.
-- [ ] MT-MEMORY-005 carries a multi-session continuity step and a v0.3.4 Test-Results row.
+- [ ] MT-MEMORY-005 carries a multi-session continuity step and a v0.3.5 Test-Results row.
 - [ ] MT-SESSION-001 Edge Case 2 reflects shipped Phase 2 behaviour.
 - [ ] All PR 1–4 review findings addressed or downgraded to tracked issues with rationale.
 
 ---
 
-### PR 6: `feature/v034-rfc0031p2-close` — Phase 2 Closeout
+### PR 6: `feature/v035-rfc0031p2-close` — Phase 2 Closeout
 
 **Depends on**: PR 5 merged.
 **Purpose**: Mark Phase 2 implemented; amend the RFC §C storage table; hand off to Phase 3 (operator CLI).
@@ -263,10 +263,10 @@ PR 1 must precede PR 2 — recall filtering on a `notes.session_id` column that 
 
 | File | Change |
 |------|--------|
-| [`docs/rfcs/0031-per-session-namespacing-channels.md`](0031-per-session-namespacing-channels.md) | [§C storage-model table](0031-per-session-namespacing-channels.md#c-storage-model) amended to list all four persona-memory tiers (`episodes`, `relationships`, `facts`, `notes`) with their migration versions (v7 / v7 / v8 / v9). Status note: "Phase 2 implemented in v0.3.4." [§Decision/Next Steps](0031-per-session-namespacing-channels.md#decision--next-steps) updated — OQ #4 / OQ #7 resolutions recorded; remaining work is Phases 3–4. |
-| [`ROADMAP.md`](../../ROADMAP.md) | RFC 0031 row stays `⚠️ Partially Implemented`; target line updated to `v0.3.1 (P1) + v0.3.4 (P2) + v0.3.x (P3–4)`. `Last updated` refresh. |
+| [`docs/rfcs/0031-per-session-namespacing-channels.md`](0031-per-session-namespacing-channels.md) | [§C storage-model table](0031-per-session-namespacing-channels.md#c-storage-model) amended to list all four persona-memory tiers (`episodes`, `relationships`, `facts`, `notes`) with their migration versions (v7 / v7 / v8 / v9). Status note: "Phase 2 implemented in v0.3.5." [§Decision/Next Steps](0031-per-session-namespacing-channels.md#decision--next-steps) updated — OQ #4 / OQ #7 resolutions recorded; remaining work is Phases 3–4. |
+| [`ROADMAP.md`](../../ROADMAP.md) | RFC 0031 row stays `⚠️ Partially Implemented`; target line updated to `v0.3.1 (P1) + v0.3.5 (P2) + v0.3.x (P3–4)`. `Last updated` refresh. |
 | [`docs/rfcs/0031-phase2-pr-plan.md`](0031-phase2-pr-plan.md) | [Progress Overview](#progress-overview-phase-2) rows filled with merged-PR numbers and dates. |
-| [`docs/issues/ISSUE-0051-…`](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md) | Note appended: "F-3 root cause closed by RFC 0031 Phase 2 (v0.3.4); issue stays `open` until Phase 4 operator-docs closeout." |
+| [`docs/issues/ISSUE-0051-…`](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md) | Note appended: "F-3 root cause closed by RFC 0031 Phase 2 (v0.3.5); issue stays `open` until Phase 4 operator-docs closeout." |
 
 No code changes; doc-only.
 
@@ -296,7 +296,7 @@ No code changes; doc-only.
 
 Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-instructions.md):
 
-- **PR 1 opens** → RFC 0031 row → `🚧 Implementing` (resuming active implementation from the `⚠️ Partially Implemented` Phase 1 pause, per Status Hygiene rule 1 — not a status regression); the v0.3.4 master-plan progress row → 🔄 In progress.
+- **PR 1 opens** → RFC 0031 row → `🚧 Implementing` (resuming active implementation from the `⚠️ Partially Implemented` Phase 1 pause, per Status Hygiene rule 1 — not a status regression); the v0.3.5 master-plan progress row → 🔄 In progress.
 - **Each PR merges** → fill the [Progress Overview](#progress-overview-phase-2) row.
 - **PR 6 merges** → RFC 0031 stays `⚠️ Partially Implemented` (Phases 3–4 remain); target line updated; `Last updated` refresh.
 
@@ -306,12 +306,12 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 1 | Notes-tier session coverage | `feature/v034-rfc0031p2-notes-coverage` | ⬜ Not started | — | — |
-| 2 | Episodic + notes recall filtering | `feature/v034-rfc0031p2-episodic-recall` | ⬜ Not started | — | — |
-| 3 | Relationship + facts recall filtering | `feature/v034-rfc0031p2-relationship-facts-recall` | ⬜ Not started | — | — |
-| 4 | Facade read-path extension + call-site threading | `feature/v034-rfc0031p2-facade-callsites` | ⬜ Not started | — | — |
-| 5 | Dementia-test bridge + review follow-ups | `feature/v034-rfc0031p2-dementia-bridge` | ⬜ Not started | — | — |
-| 6 | Phase 2 closeout | `feature/v034-rfc0031p2-close` | ⬜ Not started | — | — |
+| 1 | Notes-tier session coverage | `feature/v035-rfc0031p2-notes-coverage` | ⬜ Not started | — | — |
+| 2 | Episodic + notes recall filtering | `feature/v035-rfc0031p2-episodic-recall` | ⬜ Not started | — | — |
+| 3 | Relationship + facts recall filtering | `feature/v035-rfc0031p2-relationship-facts-recall` | ⬜ Not started | — | — |
+| 4 | Facade read-path extension + call-site threading | `feature/v035-rfc0031p2-facade-callsites` | ⬜ Not started | — | — |
+| 5 | Dementia-test bridge + review follow-ups | `feature/v035-rfc0031p2-dementia-bridge` | ⬜ Not started | — | — |
+| 6 | Phase 2 closeout | `feature/v035-rfc0031p2-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 
