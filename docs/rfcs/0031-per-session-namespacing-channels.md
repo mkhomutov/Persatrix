@@ -344,8 +344,9 @@ Phases are scoped to be independently shippable. Sequencing is the constraint; s
 3. **Does the wire-side `session_id` go on `ChannelMessageEvent`, or is the storage-side `channels.session_id` column enough?**
    The storage-side `channels` row already carries `session_id` per §C — `proto/task.proto` has no `Channel` wire message today (channels are storage-only; the wire surface for channel traffic is just [`ChannelMessageEvent`](../../proto/task.proto)), so the question is purely about whether to add an additive `session_id` field on `ChannelMessageEvent`. Adding it lets a session-replay export carry the session id on every message and lets receivers tag traces without a join back to `channels.db`; the cost is a per-message string in protobuf payloads (already non-trivial — see `content` max 4000) and a name-collision footgun against the existing `ChatRequest.session_id` (OQ 8). Default proposal: omit from `ChannelMessageEvent` until a concrete export or trace-tagging use case earns it; the storage-side column is sufficient for §D's recall predicate. If/when added, the field name must reflect OQ 8's resolution.
 
-4. **How does this RFC sequence against RFC 0029 Phase 1 (`MemoryStore` facade)?**
-   RFC 0029 Phase 1 freezes the facade signature. If this RFC ships first, the facade includes `session_id` on every read path from day one. If RFC 0029 ships first, the facade is back-compat-extended. The cheaper sequencing is this RFC's Phase 1 lands *before* RFC 0029 Phase 1 freezes the facade — coordinate with the RFC 0029 author before either is `👍 Accepted`.
+4. **How does this RFC sequence against RFC 0029 Phase 1 (`MemoryStore` facade)? — ✅ Resolved (back-compat extension; v0.3.5 planning, 2026-05-28).**
+   RFC 0029 Phase 1 freezes the facade signature. If this RFC ships first, the facade includes `session_id` on every read path from day one. If RFC 0029 ships first, the facade is back-compat-extended. The cheaper sequencing was this RFC's Phase 1 landing *before* RFC 0029 Phase 1 froze the facade.
+   **Outcome:** RFC 0029 Phase 1 merged first (v0.3.2), and Phase 1 of this RFC had added `session_id` only to the facade *write* methods — so there was nothing on the read side for RFC 0029 to carry, and the "facade has `session_id` on reads from day one" path is off the table. Phase 2 therefore takes the **additive back-compat-extension** path: an optional, defaulted, keyword-only `sessions` parameter appended to the frozen `MemoryStore` read signatures, so no existing caller breaks. The decision is the maintainer's to make as RFC 0029's facade owner and is taken here; [Phase 2 PR 4](0031-phase2-pr-plan.md#pr-4-featurev035-rfc0031p2-facade-callsites--facade-read-path-extension--call-site-threading) records the amendment in [RFC 0029 §C](0029-personal-society-storage-split.md#c-memorystore-facade) and is where it physically lands. Detail: [Phase 2 PR plan §Open-question status](0031-phase2-pr-plan.md#open-question-status-carried-from-phase-1).
 
 5. **Should `persatrix session delete` exist, or does compliance erasure (RFC 0013) own that?**
    Argument for a `delete` verb: operators want to clean up CI-run sessions without waiting for the compliance-erasure path. Argument against: deletion is a permanent operation and RFC 0013's right-to-erasure work is the right home. Default proposal: no `delete` verb in this RFC; operators use `archive` and rely on a future bulk-prune verb scoped against RFC 0013.
@@ -353,8 +354,9 @@ Phases are scoped to be independently shippable. Sequencing is the constraint; s
 6. **Active-session resolution order — env var, file, CLI flag — what wins?**
    Proposed: CLI flag `--session` > env var `PERSATRIX_SESSION_ID` > file `~/.persatrix/active-session` > built-in default `legacy`. Confirm before Phase 3.
 
-7. **Does the session_id appear in OTEL trace attributes (RFC 0019)?**
-   Adding it to span attributes makes per-session trace queries trivial in Tempo / Honeycomb. Cardinality is bounded by the number of operator-created sessions, which is small in practice. Proposed: yes, as a low-cardinality attribute under the existing `persatrix.*` namespace. Confirm with the observability reviewer before Phase 1.
+7. **Does the session_id appear in OTEL trace attributes (RFC 0019)? — ✅ Resolved (yes, on the recall span; v0.3.5 planning, 2026-05-28).**
+   Adding it to span attributes makes per-session trace queries trivial in Tempo / Honeycomb.
+   **Outcome:** yes — `session_id` is folded into the existing recall span attributes under the `persatrix.*` namespace. Its cardinality grows with the number of operator-created sessions over a deployment's lifetime, which is acceptable on a **trace span** but is exactly why it is **never** added as a metric label. The decision is the maintainer's to make as the observability reviewer and is taken here; it physically lands with the recall path in [Phase 2 PR 2](0031-phase2-pr-plan.md#pr-2-featurev035-rfc0031p2-episodic-recall--episodic--notes-recall-filtering), not Phase 1 — the original "before Phase 1" framing predates the recall span; Phase 1 shipped only the write-side `sessions.writes` counter.
 
 8. **Wire-level name collision against RFC 0016 `ChatRequest.session_id` — rename, disambiguate, or live with it?**
    [`proto/task.proto:93`](../../proto/task.proto#L93) already defines `ChatRequest.session_id` (RFC 0016 §5) — a server-generated per-chat-conversation UUID. This RFC reuses the same identifier name for a per-operator-namespace scope; the §A "Distinct from RFC 0016" table spells out the five-dimension semantic gap. Phase 1's plumbing threads this RFC's `session_id` through structured logs (RFC 0018), OTEL spans (RFC 0019, OQ 7 above), and the future `MemoryStore` facade signature (OQ 4) — every one of those surfaces will then carry two unrelated fields with the same name. Three candidate resolutions:
@@ -372,12 +374,14 @@ Phases are scoped to be independently shippable. Sequencing is the constraint; s
 - **Open Question 1** (dementia-test continuity) — single-session default (1a). Load-bearing in Phase 2 recall filtering.
 - **Open Question 8** (wire-level name collision against RFC 0016 `ChatRequest.session_id`) — rename RFC 0016 wire field to `chat_session_id` (8b), shipped in RFC 0031 PR 1 ([#333](https://github.com/mkhomutov/Persatrix/pull/333)).
 
-**Remaining before moving to `👍 Accepted` and resuming Phases 2–4:**
+**Resolved at v0.3.5 planning (2026-05-28), clearing the acceptance gate** (see the ✅ Resolved notes inline in §Open Questions):
 
-- Confirm **Open Question 4** sequencing with RFC 0029.
-- Confirm **Open Question 7** with the observability reviewer.
+- **Open Question 4** (RFC 0029 facade sequencing) — RFC 0029 Phase 1 froze the facade first (v0.3.2), so Phase 2 takes the additive back-compat-extension path: an optional, defaulted `sessions` keyword on the frozen read signatures. Facade-owner-confirmed; recorded against Phase 2 PR 4.
+- **Open Question 7** (OTEL span attribute) — yes, on the recall span under `persatrix.*`; never a metric label. Observability-reviewer-confirmed; lands in Phase 2 PR 2.
 
-Open Questions 2, 3, 5, 6 may be resolved during phased implementation review of Phases 2–4 without blocking acceptance.
+With OQ 4 and OQ 7 resolved, the design acceptance gate is clear. The RFC does **not** flip to a separate `👍 Accepted` row — Phase 1 already shipped, so implementation status (not design status) is now the gating dimension; it advances to `✅ Implemented` when Phases 2–4 land.
+
+Open Questions 2, 3, 5, 6 resolve during Phase 3 implementation review (the CLI / proto surface they touch) without blocking — each carries a standing default proposal in §Open Questions.
 
 ## Related Documentation
 
