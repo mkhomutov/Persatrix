@@ -238,15 +238,17 @@ Three properties matter:
 
 | Method | Phase 1 signature | v0.3.5 signature |
 |---|---|---|
-| [`retrieve_relevant`](../../agents/memory/store.py#L257) | `(query, *, limit, scope, tags, min_score)` | `(query, *, limit, scope, tags, min_score, sessions: list[str] \| str \| None = None)` |
-| [`retrieve_procedures`](../../agents/memory/facade_procedural.py#L186) | `(query, *, limit, now)` | `(query, *, limit, now, sessions: list[str] \| str \| None = None)` |
-| [`read_from_pool`](../../agents/memory/shared_pool_facade.py#L141) | `(pool_name, query, *, limit, min_confidence, tags)` | `(pool_name, query, *, limit, min_confidence, tags, sessions: list[str] \| str \| None = None)` |
+| [`retrieve_relevant`](../../agents/memory/store.py) | `(query, *, limit, scope, tags, min_score)` | `(query, *, limit, scope, tags, min_score, sessions: list[str] \| str \| None = None)` |
+| [`retrieve_procedures`](../../agents/memory/facade_procedural.py) | `(query, *, limit, now)` | `(query, *, limit, now, sessions: list[str] \| str \| None = None)` |
+| [`read_from_pool`](../../agents/memory/shared_pool_facade.py) | `(pool_name, query, *, limit, min_confidence, tags)` | `(pool_name, query, *, limit, min_confidence, tags, sessions: list[str] \| str \| None = "*")` |
+
+(File-only links — `#Lxxx` anchors rot on every reformat; jump to the method symbol from the file.)
 
 Why this is back-compat rather than signature drift:
 
 - Every change adds a **defaulted keyword-only** parameter. Existing callers — every in-tree call site at v0.3.4, every external caller built against the Phase 1 surface — compile and run unchanged; only callers that opt in see the new behaviour.
-- The `sessions=None` default mirrors what the facade did before the amendment (no session filtering); the new "active-session-plus-legacy" behaviour is layered *on top* of the resolved default. The `legacy` carve-out keeps every pre-Phase-2 row visible from every session, so no operator data hides itself behind the new default.
-- Shared pools are cross-session by RFC 0008 §H design — [ISSUE-0078](../issues/ISSUE-0078-shared-pool-read-session-filter-policy.md) records the Policy A choice that `read_from_pool(sessions=None)` resolves to `"*"` at the underlying pool tier, not the caller's `_session_id`, so the existing cross-agent visibility property is preserved.
+- For `retrieve_relevant` / `retrieve_procedures` the `sessions=None` default mirrors what the facade did before the amendment (no session filtering); the new "active-session-plus-legacy" behaviour is layered *on top* of the resolved default. The `legacy` carve-out keeps every pre-Phase-2 row visible from every session, so no operator data hides itself behind the new default.
+- Shared pools are cross-session by RFC 0008 §H design — [ISSUE-0078](../issues/ISSUE-0078-shared-pool-read-session-filter-policy.md) records the Policy A choice. PR #451 deep-review M2 moved the policy from the facade override to the data layer: `SharedMemoryPool.read` itself defaults `sessions="*"`, and the facade is a pass-through. This eliminates the smell of split policy across two layers — a direct caller of the pool tier cannot accidentally trigger session narrowing, and the existing cross-agent visibility property is preserved.
 
 Why not wait for v0.4.0:
 

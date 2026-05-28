@@ -429,6 +429,27 @@ class TestSessionIDNormalizationUniformAcrossTiers:
         finally:
             await store.close()
 
+    async def test_notes_normalises_empty(
+        self, memory: EpisodicMemory,
+    ) -> None:
+        """Notes tier (PR #451 deep-review L2): the notes write path
+        also funnels caller-supplied ``session_id`` through
+        :func:`agents.session_id.normalize_session_id` — pins symmetry
+        with the other three tiers so the four-tier invariant is not
+        a doc-only claim.
+        """
+        from agents.session_id import LEGACY_SESSION_ID
+
+        note_id = await memory.store_note(
+            "topic-x", "note content", session_id="",
+        )
+        async with memory._ensure_db().execute(
+            "SELECT session_id FROM notes WHERE id = ?", (note_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == LEGACY_SESSION_ID
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

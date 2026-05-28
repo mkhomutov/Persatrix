@@ -225,15 +225,16 @@ class SharedMemoryPool:
         *,
         limit: int = 10,
         min_confidence: float | None = None,
-        sessions: list[str] | str | None = None,
+        sessions: list[str] | str | None = "*",
     ) -> list[SharedPoolEntry]:
         """Return entries matching *query*, filtered by ``min_confidence``.
 
         Raises :class:`SharedMemoryPermissionError` when ``agent_id`` is
-        not a reader.  ``sessions`` (RFC 0031 PR 4 / ISSUE-0078 Policy A)
-        is forwarded to :meth:`EpisodicMemory.recall`; production callers
-        route through :meth:`MemoryStore.read_from_pool` which defaults
-        to ``"*"`` per RFC 0008 §H cross-agent design.
+        not a reader.  ``sessions`` (RFC 0031 PR 4 / ISSUE-0078 Policy
+        A) defaults to ``"*"`` — RFC 0008 §H cross-session by design;
+        policy lives here (data layer), not at the facade, so a direct
+        caller cannot silently narrow to ``_active_session_id``.  Pass
+        an explicit list to opt in to session-scoping.  (PR #451 M2.)
         """
         if not self._initialized:
             raise RuntimeError(

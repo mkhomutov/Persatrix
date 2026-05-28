@@ -190,11 +190,14 @@ async def recall_procedures(
     # substring verbatim regardless of array position.  Phase 5 uses
     # ``LIKE`` rather than FTS5 so a procedure key with punctuation
     # can be matched verbatim by the caller without FTS5-sanitising.
+    # NB: each appended fragment owns its own leading-space prefix, so
+    # ``sql_base`` does NOT carry a trailing space — keeps the composed
+    # SQL free of doubled whitespace (PR #451 deep-review nit).
     sql_base = (
         "SELECT id, summary, tags_json, confidence, "
         "last_validated_at, created_at, importance "
         "FROM episodes WHERE agent_id = ? "
-        "AND tags_json LIKE '%\"procedure:%' "
+        "AND tags_json LIKE '%\"procedure:%'"
     )
     params: list[Any] = [agent_id]
     # RFC 0031 Phase 2 PR 4: session filter is applied verbatim on the
@@ -206,14 +209,14 @@ async def recall_procedures(
         session_clause, session_params = _session_in_clause(
             session_list, column="session_id",
         )
-        sql_base += session_clause + " "
+        sql_base += session_clause
         params.extend(session_params)
     if sql_cutoff_seconds is not None:
         # COALESCE(last_validated_at, created_at) is the same anchor
         # the application-side decay uses, so the cutoff cannot
         # exclude a row the in-Python loop would have admitted.
         sql_base += (
-            "AND (? - COALESCE(last_validated_at, created_at)) <= ? "
+            " AND (? - COALESCE(last_validated_at, created_at)) <= ?"
         )
         params.extend([timestamp, sql_cutoff_seconds])
     if query:
@@ -221,12 +224,12 @@ async def recall_procedures(
         # ``%`` / ``_`` in caller-supplied search text does not widen
         # the match.  Pair with ``ESCAPE '\\'``.
         sql = (
-            sql_base + "AND summary LIKE ? ESCAPE '\\' "
-            "ORDER BY created_at DESC LIMIT ?"
+            sql_base + " AND summary LIKE ? ESCAPE '\\'"
+            " ORDER BY created_at DESC LIMIT ?"
         )
         params.extend([f"%{_escape_like(query)}%", max(limit * 2, limit)])
     else:
-        sql = sql_base + "ORDER BY created_at DESC LIMIT ?"
+        sql = sql_base + " ORDER BY created_at DESC LIMIT ?"
         params.append(max(limit * 2, limit))
     async with db.execute(sql, tuple(params)) as cursor:
         rows = list(await cursor.fetchall())

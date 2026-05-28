@@ -54,6 +54,12 @@ from agents.memory.shared_pool import (
 PERSONA_RUNTIME_RECALL_MODULES = (
     Path("agents/persona_runtime/memory_context.py"),
     Path("agents/persona_runtime/channel_history.py"),
+    # ``facts_section.py`` issues ``FactStore.recall(subject=...)`` at
+    # :func:`recall_facts_for_event` — also on the persona prompt-
+    # assembly default path.  Without it on this list, a contributor
+    # adding ``sessions="*"`` to the facts recall slips past the pin.
+    # (PR #451 deep-review H1 carry-forward.)
+    Path("agents/persona_runtime/facts_section.py"),
 )
 
 
@@ -315,6 +321,30 @@ class TestFacadeReadFromPoolSessionForwarding:
             assert "from c" not in contents
         finally:
             await fac.close()
+
+
+class TestPoolReadTierDefaultIsCrossSession:
+    """Tier-direct sibling to TestFacadeReadFromPoolSessionForwarding —
+    asserts the cross-session policy lives at the data layer (PR #451
+    M2 / ISSUE-0078 resolution).  A direct caller of
+    :meth:`SharedMemoryPool.read` that bypasses the facade must not
+    silently narrow to the pool tier's construction-time
+    ``_active_session_id``.
+    """
+
+    async def test_default_sees_writes_from_other_sessions(
+        self, pool_at_run_a: SharedMemoryPool,
+    ) -> None:
+        await pool_at_run_a.write(
+            "alice", "shared insight", confidence=0.9, session_id="run-b",
+        )
+        # No ``sessions=`` kwarg — must still see the ``run-b`` row.
+        entries = await pool_at_run_a.read("bob", "shared")
+        contents = {e.content for e in entries}
+        assert "shared insight" in contents, (
+            "RFC 0008 §H: SharedMemoryPool.read() default must be "
+            f"cross-session; got {contents!r}."
+        )
 
 
 # ─── Runtime pin: spy on EpisodicMemory.recall reachability ─
