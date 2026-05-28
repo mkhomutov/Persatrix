@@ -257,7 +257,11 @@ class TestSessionId:
             asserted_at=1000.0,
             session_id="run-a",
         )
-        (fact,) = await fact_store.recall(subject="bob")
+        # RFC 0031 Phase 2 PR 3: default recall is session-scoped, so a
+        # round-trip test that wrote under ``run-a`` recalls under
+        # ``run-a`` explicitly rather than relying on the no-filter
+        # default that no longer exists.
+        (fact,) = await fact_store.recall(subject="bob", sessions=["run-a"])
         assert fact.session_id == "run-a"
 
 

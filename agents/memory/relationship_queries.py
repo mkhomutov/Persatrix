@@ -14,6 +14,7 @@ import aiosqlite
 from opentelemetry import trace
 
 from ..observability.spans import RELATIONSHIP_LOOKUP_SPAN
+from ._session_filter import session_in_clause
 from .relationship_types import (
     _DEFAULT_TRUST,
     _MAX_RECENT_INTERACTIONS,
@@ -75,18 +76,26 @@ async def get_trust(
     *,
     participant_type: str = "agent",
     other_participant_type: str = "agent",
+    sessions: list[str] | None = None,
 ) -> float:
     """Get current trust score for another participant (0.0–1.0).
 
     Returns the default (0.5) if no relationship exists.
+
+    ``sessions`` (RFC 0031 Phase 2 PR 3) is a resolved list from
+    :func:`agents.memory._session_filter._resolve_session_list` —
+    ``None`` is the ``"*"`` no-filter mode.
     """
+    sess_clause, sess_params = session_in_clause(sessions, column="session_id")
     attrs = {"agent.id": agent_id, "participant.id": other_id}
     with _tracer.start_as_current_span(RELATIONSHIP_LOOKUP_SPAN, attributes=attrs):
         async with db.execute(
             "SELECT trust_score FROM relationships "
             "WHERE participant_id = ? AND participant_type = ? "
-            "AND other_participant_id = ? AND other_participant_type = ?",
-            (agent_id, participant_type, other_id, other_participant_type),
+            "AND other_participant_id = ? AND other_participant_type = ?"
+            f"{sess_clause}",
+            (agent_id, participant_type, other_id, other_participant_type,
+             *sess_params),
         ) as cursor:
             row = await cursor.fetchone()
         return row[0] if row is not None else _DEFAULT_TRUST
@@ -99,15 +108,26 @@ async def get_relationship_summary(
     *,
     participant_type: str = "agent",
     other_participant_type: str = "agent",
+    sessions: list[str] | None = None,
 ) -> RelationshipSummary:
-    """Get full relationship context for injection into LLM prompt."""
+    """Get full relationship context for injection into LLM prompt.
+
+    ``sessions`` — see :func:`get_trust`.  The §D filter applies to
+    the ``relationships`` row only; the ``interactions`` history we
+    load below is keyed off the same row's ``other_participant_id``,
+    so once the row is filtered out the summary collapses to the "no
+    relationship" branch and no interactions are fetched.
+    """
+    sess_clause, sess_params = session_in_clause(sessions, column="session_id")
     # Fetch relationship row.
     async with db.execute(
         "SELECT trust_score, interaction_count, last_interaction_at, notes "
         "FROM relationships "
         "WHERE participant_id = ? AND participant_type = ? "
-        "AND other_participant_id = ? AND other_participant_type = ?",
-        (agent_id, participant_type, other_id, other_participant_type),
+        "AND other_participant_id = ? AND other_participant_type = ?"
+        f"{sess_clause}",
+        (agent_id, participant_type, other_id, other_participant_type,
+         *sess_params),
     ) as cursor:
         row = await cursor.fetchone()
 
@@ -183,6 +203,7 @@ async def get_all_relationships(
     agent_id: str,
     *,
     participant_type: str = "agent",
+    sessions: list[str] | None = None,
 ) -> list[RelationshipSummary]:
     """Get summaries for all known relationships of an agent.
 
@@ -192,15 +213,19 @@ async def get_all_relationships(
        (defaults to ``[]``) to avoid N+1 queries. Use
        ``get_relationship_summary()`` for individual relationships
        with full interaction history.
+
+    ``sessions`` — see :func:`get_trust`.
     """
+    sess_clause, sess_params = session_in_clause(sessions, column="session_id")
     async with db.execute(
         "SELECT other_participant_id, other_participant_type, "
         "trust_score, interaction_count, "
         "last_interaction_at, notes "
         "FROM relationships "
-        "WHERE participant_id = ? AND participant_type = ? "
+        "WHERE participant_id = ? AND participant_type = ?"
+        f"{sess_clause} "
         "ORDER BY trust_score DESC",
-        (agent_id, participant_type),
+        (agent_id, participant_type, *sess_params),
     ) as cursor:
         rows = await cursor.fetchall()
 

@@ -31,9 +31,12 @@ from dataclasses import dataclass
 import aiosqlite
 
 from ..observability.metrics import try_get_instruments
+from ..session_id import resolve_session_id_silent
 from ._facts_audit import emit_audit as _emit_audit
+from ._facts_erasure import delete_by_subject as _delete_by_subject
 from ._facts_reinforce import mark_recalled_for_agent as _mark_recalled_for_agent
 from ._facts_supersede import apply_supersession as _apply_supersession
+from ._session_filter import _resolve_session_list, session_in_clause
 from .fact_predicates import canonicalize_subject, validate_predicate
 from .migrations import _apply_migrations
 
@@ -168,6 +171,12 @@ class FactStore:
         self._predicate_validator = (
             predicate_validator or _default_predicate_validator
         )
+        # RFC 0031 Phase 2 PR 3 — tier-owned active session (mirrors
+        # EpisodicMemory / RelationshipMemory).  The persona-direct
+        # recall path bypasses the MemoryStore facade, so the tier
+        # must resolve its own active session for ``sessions=None`` to
+        # be correct on that path.
+        self._active_session_id = resolve_session_id_silent()
 
     @property
     def agent_id(self) -> str:
@@ -337,6 +346,7 @@ class FactStore:
         subject: str,
         limit: int = 10,
         include_superseded: bool = False,
+        sessions: list[str] | str | None = None,
     ) -> list[Fact]:
         """Return facts about ``subject`` ordered most-recent-first.
 
@@ -355,28 +365,42 @@ class FactStore:
         ``_subject_seeds`` pre-step) canonicalises before the SELECT.
         Empty / whitespace-only subjects raise ``ValueError`` first,
         symmetric with :meth:`store`'s explicit empty-check.
+
+        ``sessions`` (RFC 0031 Phase 2 PR 3): four-mode §D filter — see
+        :func:`agents.memory._session_filter._resolve_session_list`.
+        Default ``None`` → active session + ``legacy`` carve-out (the
+        load-bearing dementia-test surface; pre-RFC fact rows persist
+        with ``session_id='legacy'`` and stay visible after upgrade).
         """
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
         limit = min(limit, _MAX_RECALL_LIMIT)
         subject = canonicalize_subject(subject)
+        session_list = _resolve_session_list(
+            sessions, self._active_session_id,
+        )
+        sess_clause, sess_params = session_in_clause(
+            session_list, column="session_id",
+        )
 
         db = self._ensure_db()
         if include_superseded:
             sql = (
                 f"SELECT {_FACT_SELECT} FROM facts "
-                "WHERE agent_id = ? AND subject = ? "
+                "WHERE agent_id = ? AND subject = ?"
+                f"{sess_clause} "
                 "ORDER BY asserted_at DESC LIMIT ?"
             )
         else:
             sql = (
                 f"SELECT {_FACT_SELECT} FROM facts "
                 "WHERE agent_id = ? AND subject = ? "
-                "AND superseded_by IS NULL "
+                "AND superseded_by IS NULL"
+                f"{sess_clause} "
                 "ORDER BY asserted_at DESC LIMIT ?"
             )
         async with db.execute(
-            sql, (self._agent_id, subject, limit),
+            sql, (self._agent_id, subject, *sess_params, limit),
         ) as cursor:
             rows = await cursor.fetchall()
         return [self._row_to_fact(row) for row in rows]
@@ -431,56 +455,14 @@ class FactStore:
     async def delete_by_subject(self, subject_id: str) -> dict[str, int]:
         """Erase every fact tied to ``subject_id`` — RFC 0013 §C / RFC 0026 §H.
 
-        Traverses **both** the ``subject`` column (facts *about* the
-        subject) and the ``source_interaction_id`` column (facts
-        *extracted during* an interaction belonging to the subject —
-        even if the declared subject is someone else).
-
-        Return shape: two **disjoint** row-counts whose sum is the
-        total number of fact rows erased.  The split exists so the
-        audit log can show whether erasure landed via the declared
-        ``subject`` traversal or via the ``source_interaction_id``
-        reverse-edge traversal.  A row matching both columns is counted
-        once, in the ``by_subject`` bucket (the first DELETE removes
-        the row; the second DELETE sees no match).  This is **not** a
-        per-column match counter — it is a per-row attribution counter
-        biased toward the declared-subject column.  Pinned by
-        :class:`tests.unit.python.test_fact_store.TestDeleteBySubject`.
-
-        Per-agent ACL — RFC 0008 §H.  Both DELETEs are scoped to the
-        local ``agent_id``, so an erasure call from agent A cannot
-        touch agent B's facts even when both stores share the same
-        SQLite connection.
-
-        Phase 1 ships the storage primitive only.  RFC 0013's
-        ``SubjectErasure`` (target v0.5.0) will wire this into the
-        umbrella ``records_deleted`` audit map.  Without this primitive,
-        the first GDPR / CCPA request after v0.3.1 ships would silently
-        miss extracted facts — see RFC 0026 §H.
-
-        Subject canonicalisation (PR #346 review M-1): the ``subject``
-        traversal canonicalises so a mixed-case erasure hits the
-        canonical rows :meth:`store` persists; ``source_interaction_id``
-        stays raw (opaque UUIDs, not subject strings).  Empty subjects
-        raise ``ValueError`` before either DELETE.
+        Delegates to :func:`agents.memory._facts_erasure.delete_by_subject`
+        for the SQL body; see that helper for the disjoint-bucket
+        return-shape contract and the ``source_interaction_id``
+        reverse-edge traversal rationale.
         """
-        db = self._ensure_db()
-        cursor = await db.execute(
-            "DELETE FROM facts WHERE agent_id = ? AND subject = ?",
-            (self._agent_id, canonicalize_subject(subject_id)),
+        return await _delete_by_subject(
+            self._ensure_db(), self._agent_id, subject_id,
         )
-        by_subject = cursor.rowcount
-        cursor = await db.execute(
-            "DELETE FROM facts WHERE agent_id = ? "
-            "AND source_interaction_id = ?",
-            (self._agent_id, subject_id),
-        )
-        by_source = cursor.rowcount
-        await db.commit()
-        return {
-            "facts_deleted_by_subject": by_subject,
-            "facts_deleted_by_source_interaction": by_source,
-        }
 
     # ─── Internal helpers ──────────────────────────────────
 
