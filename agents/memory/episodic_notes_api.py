@@ -39,13 +39,21 @@ class _EpisodicNotesAPIMixin:
         content: str,
         tags: list[str] | None = None,
         max_notes: int = 500,
+        *,
+        session_id: str = "legacy",
     ) -> str:
         """Store a new note. Prunes oldest low-access notes if over cap.
 
         Returns the generated note ID.
+
+        ``session_id`` (RFC 0031 Phase 2 PR 1) is forwarded to the
+        underlying :class:`NoteStore`; default ``"legacy"`` matches the
+        operator-namespace carve-out used by the other persona-memory
+        tiers' write paths.
         """
         return await self._ensure_note_store().store_note(
             topic, content, tags=tags, max_notes=max_notes,
+            session_id=session_id,
         )
 
     async def recall_notes(

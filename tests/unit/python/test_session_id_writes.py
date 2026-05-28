@@ -1,15 +1,17 @@
 """
-Tests for the RFC 0031 Phase 1 write-path ``session_id`` kwarg.
+Tests for the RFC 0031 write-path ``session_id`` kwarg.
 
 ``EpisodicMemory.store_episode`` and ``RelationshipMemory.record_interaction``
 accept ``session_id`` as a keyword-only argument and persist it on the
-appropriate row.  The default (``"legacy"``) matches the orchestrator-side
-synthetic carve-out so pre-RFC callers produce queryable rows without
-ambiguity.
+appropriate row (Phase 1).  RFC 0031 Phase 2 PR 1 brings the ``notes`` tier
+to parity — ``NoteStore.store_note`` (via the ``EpisodicMemory`` delegation)
+also accepts and persists ``session_id``.  The default (``"legacy"``) matches
+the orchestrator-side synthetic carve-out so pre-RFC callers produce
+queryable rows without ambiguity.
 
-Phase 1 ships **write-path only**; recall-side filtering lands in Phase 2.
-These tests assert the write contract — round-trip via direct SQLite read
-— without making any recall claims.
+These tests assert the **write contract** — round-trip via direct SQLite
+read — without making any recall claims; recall-side filtering lands in
+the later Phase 2 PRs.
 """
 
 from __future__ import annotations
@@ -61,6 +63,88 @@ class TestStoreEpisodeSessionID:
         by_id = {r[0]: r[1] for r in rows}
         assert by_id[a] == "run-a"
         assert by_id[b] == "run-b"
+
+
+# ─── EpisodicMemory.store_note (RFC 0031 Phase 2 PR 1) ──────
+
+
+class TestStoreNoteSessionID:
+    async def test_default_writes_legacy(self, memory: EpisodicMemory):
+        note_id = await memory.store_note("topic", "content")
+        async with memory._ensure_db().execute(
+            "SELECT session_id FROM notes WHERE id = ?",
+            (note_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == "legacy"
+
+    async def test_explicit_session_id_round_trip(
+        self, memory: EpisodicMemory,
+    ):
+        note_id = await memory.store_note(
+            "topic", "content", session_id="run-a",
+        )
+        async with memory._ensure_db().execute(
+            "SELECT session_id FROM notes WHERE id = ?",
+            (note_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == "run-a"
+
+    async def test_two_sessions_coexist_at_storage_layer(
+        self, memory: EpisodicMemory,
+    ):
+        a = await memory.store_note("a", "ca", session_id="run-a")
+        b = await memory.store_note("b", "cb", session_id="run-b")
+        async with memory._ensure_db().execute(
+            "SELECT id, session_id FROM notes WHERE id IN (?, ?) "
+            "ORDER BY id",
+            (a, b),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        by_id = {r[0]: r[1] for r in rows}
+        assert by_id[a] == "run-a"
+        assert by_id[b] == "run-b"
+
+
+class TestStoreNoteToolThreadsActiveSession:
+    """The builtin ``store_note`` tool threads the per-process
+    ``PERSATRIX_SESSION_ID`` into the write, not the bare ``"legacy"``
+    default — so agent-initiated notes are tagged with the active
+    operator namespace (RFC 0031 Phase 2 PR 1).  Resolution happens at
+    tool-construction time, mirroring the facade's silent construction-time
+    read; this pins that the threading is not silently dropped.
+    """
+
+    async def test_tool_threads_resolved_session_id(
+        self, memory: EpisodicMemory, monkeypatch,
+    ):
+        from agents.tools.builtin import create_memory_tools
+        from agents.tools.permissions import PermissionGate
+        from agents.tools.registry import clear_registry, get_tool
+
+        monkeypatch.setenv("PERSATRIX_SESSION_ID", "run-tool")
+        gate = PermissionGate({"memory": {"read": True, "write": True}})
+        clear_registry()
+        try:
+            create_memory_tools(memory, gate, max_notes=500)
+            td = get_tool("store_note")
+            assert td is not None
+            result = await td.func(topic="t", content="c")
+            assert result.success is True
+            note_id = result.data["note_id"]
+        finally:
+            clear_registry()
+
+        async with memory._ensure_db().execute(
+            "SELECT session_id FROM notes WHERE id = ?",
+            (note_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == "run-tool"
 
 
 # ─── RelationshipMemory.record_interaction ──────────────────

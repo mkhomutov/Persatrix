@@ -306,7 +306,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 1 | Notes-tier session coverage | `feature/v035-rfc0031p2-notes-coverage` | ⬜ Not started | — | — |
+| 1 | Notes-tier session coverage | `feature/v035-rfc0031p2-notes-coverage` | 🔀 PR open | — | — |
 | 2 | Episodic + notes recall filtering | `feature/v035-rfc0031p2-episodic-recall` | ⬜ Not started | — | — |
 | 3 | Relationship + facts recall filtering | `feature/v035-rfc0031p2-relationship-facts-recall` | ⬜ Not started | — | — |
 | 4 | Facade read-path extension + call-site threading | `feature/v035-rfc0031p2-facade-callsites` | ⬜ Not started | — | — |

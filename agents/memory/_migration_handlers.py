@@ -9,11 +9,13 @@ rewrites tables with the 12-step ALTER TABLE pattern, performs an
 baselines where the migration must inspect the live schema before
 issuing DDL.  See each handler's docstring for per-version rationale.
 
-The registry currently covers ``v4`` through ``v8``.  Migration ``v8``
+The registry currently covers ``v4`` through ``v9``.  Migration ``v8``
 (RFC 0026 PR 1 — declarative-facts table) lives in
-:mod:`agents.memory._migration_facts` and is re-exported below so this
-module stays under the 500-line repo-wide soft cap; the split mirrors
-:mod:`agents.observability._metrics_facts`.
+:mod:`agents.memory._migration_facts` and migration ``v9`` (RFC 0031
+Phase 2 PR 1 — ``session_id`` on notes) lives in
+:mod:`agents.memory._migration_notes_session`; both are re-exported below
+so this module stays under the 500-line repo-wide soft cap.  The split
+mirrors :mod:`agents.observability._metrics_facts`.
 
 Public API (``_MIGRATION_HANDLERS`` plus the ``_apply_migration_N``
 callables) is re-exported by :mod:`agents.memory.migrations` for
@@ -28,11 +30,14 @@ from collections.abc import Awaitable, Callable
 import aiosqlite
 
 # Migration v8 (RFC 0026 PR 1) lives in :mod:`agents.memory._migration_facts`
-# so this module stays under the 500-line cap — mirrors the
-# :mod:`agents.observability._metrics_facts` split.  Re-exported here so
-# existing call sites (``from ._migration_handlers import _apply_migration_8``)
-# continue to work without churn.
+# and v9 (RFC 0031 Phase 2 PR 1) in
+# :mod:`agents.memory._migration_notes_session` so this module stays under
+# the 500-line cap — mirrors the :mod:`agents.observability._metrics_facts`
+# split.  Re-exported here so existing call sites
+# (``from ._migration_handlers import _apply_migration_8``) continue to
+# work without churn.
 from ._migration_facts import _apply_migration_8
+from ._migration_notes_session import _apply_migration_9
 
 
 async def _apply_migration_4(db: aiosqlite.Connection) -> None:
@@ -447,4 +452,5 @@ _MIGRATION_HANDLERS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]
     6: _apply_migration_6,
     7: _apply_migration_7,
     8: _apply_migration_8,
+    9: _apply_migration_9,
 }

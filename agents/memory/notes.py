@@ -95,10 +95,18 @@ class NoteStore:
         content: str,
         tags: list[str] | None = None,
         max_notes: int = 500,
+        *,
+        session_id: str = "legacy",
     ) -> str:
         """Store a new note. Prunes oldest low-access notes if over cap.
 
         Returns the generated note ID.
+
+        ``session_id`` (RFC 0031 Phase 2 PR 1 — migration v9) tags the row
+        with the operator-namespace active at write time; default
+        ``"legacy"`` matches ``channels.DefaultSessionID`` so pre-RFC
+        callers produce queryable rows.  PR 1 ships no recall-side
+        filtering — that lands in a later Phase 2 PR.
         """
         # Validate max_notes: _prune_notes() computes
         # LIMIT MAX(0, count - max_notes + 1), so max_notes=0 would
@@ -126,8 +134,8 @@ class NoteStore:
             """
             INSERT INTO notes
                 (id, agent_id, topic, content, tags_json,
-                 access_count, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+                 access_count, created_at, updated_at, session_id)
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
             """,
             (
                 note_id,
@@ -137,6 +145,7 @@ class NoteStore:
                 json.dumps(tags or []),
                 now,
                 now,
+                session_id,
             ),
         )
         await self._db.commit()
