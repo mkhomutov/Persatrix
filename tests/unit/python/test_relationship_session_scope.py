@@ -468,6 +468,29 @@ class TestRecentInteractionsCrossSessionLeakIsDocumentedGap:
         assert summary.interaction_count == 1, summary.interaction_count
         assert outcomes == {"ok-A"}, outcomes
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason="ISSUE-0080: count column leak also surfaces via get_all_relationships",
+    )
+    async def test_get_all_relationships_count_excludes_foreign_session(
+        self, memory_at_run_a: RelationshipMemory,
+    ) -> None:
+        """``get_all_relationships`` reads the same leaked column —
+        cadence aggregations over every visible row inherit the
+        cross-session-inflated count.  Forces PR 5 to fix both list-
+        and summary-mode in one migration-v10 patch.
+        """
+        await memory_at_run_a.record_interaction(
+            "peer-a", "task_delegation", session_id="run-a",
+        )
+        await memory_at_run_a.record_interaction(
+            "peer-a", "task_delegation", session_id="run-b",
+        )
+        rels = await memory_at_run_a.get_all_relationships()
+        peer_a = next(r for r in rels if r.other_participant_id == "peer-a")
+        # Pre-fix: count == 2.  Post-fix: count == 1.
+        assert peer_a.interaction_count == 1, peer_a.interaction_count
+
 
 # Keep test_session_id_metric_failure_isolation's `pytest.main` idiom.
 if __name__ == "__main__":

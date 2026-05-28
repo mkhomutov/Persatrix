@@ -117,6 +117,22 @@ async def get_relationship_summary(
     load below is keyed off the same row's ``other_participant_id``,
     so once the row is filtered out the summary collapses to the "no
     relationship" branch and no interactions are fetched.
+
+    .. warning::
+
+       When the ``relationships`` row IS visible to the active
+       session, the secondary fetches into the ``interactions``
+       table below (recent interactions + ``MIN(created_at)``) are
+       **not** session-scoped — the ``interactions`` table has no
+       ``session_id`` column (migration v7 added it only to
+       ``episodes`` / ``relationships``).  Combined with
+       :func:`record_interaction`'s ON-CONFLICT increment on the
+       original first-seen row, the row-visible path leaks every
+       cross-session interaction's ``outcome`` / ``sentiment`` /
+       timestamp and inflates ``interaction_count``.  Tracked as
+       `ISSUE-0080
+       <../../docs/issues/ISSUE-0080-relationship-recent-interactions-cross-session-leak.md>`_;
+       owned by PR 5 (migration v10).
     """
     sess_clause, sess_params = session_in_clause(sessions, column="session_id")
     # Fetch relationship row.

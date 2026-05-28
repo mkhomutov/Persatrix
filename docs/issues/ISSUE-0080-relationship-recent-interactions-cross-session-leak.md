@@ -117,6 +117,16 @@ directly into the persona's LLM context (see
   `MIN(created_at) FROM interactions`) inherits the same leak —
   the timestamp reflects the very first interaction in any
   session, not the active one.
+* `get_all_relationships` reads the same `interaction_count`
+  column directly on every visible row (without populating
+  `recent_interactions`).  The cross-session-inflated count
+  surfaces in list-mode reads too, so any cadence / intimacy
+  computation that aggregates over all visible relationships
+  inherits the noise.  Asymmetric: only the first-seen session's
+  tier sees the inflated count (the row stays tagged with that
+  session_id, so cross-session readers don't see the row at all).
+  Pinned by `TestRecentInteractionsCrossSessionLeakIsDocumentedGap::test_get_all_relationships_count_excludes_foreign_session`
+  as a sibling strict-`xfail` to the summary-surface pin.
 
 Currently mitigated only by the fact that PR 3 ships before PR 4
 (facade extension), so the production write path still tags rows
@@ -173,12 +183,18 @@ dementia-test recall surface.
    Recommend **(C)** — preserves the v3 column for the unfiltered
    admin / debug path, surfaces a per-session count to the prompt
    without touching the write path. Decision belongs in the same
-   PR that adds the migration.
+   PR that adds the migration.  Apply the chosen policy
+   uniformly across **both** `get_relationship_summary` (the
+   row + secondary interactions read) and `get_all_relationships`
+   (the row-only list-mode read) — they are pinned by sibling
+   xfails and PR 5 should close both in the same patch.
 
 5. **Update tests**:
-   * Remove the `xfail` marker on
-     `TestRecentInteractionsCrossSessionLeakIsDocumentedGap` once
-     fixed. Strict-xfail will fail the suite as the forcing
+   * Remove the `xfail` markers on **both** tests in
+     `TestRecentInteractionsCrossSessionLeakIsDocumentedGap`
+     (`test_recent_interactions_excludes_foreign_session_history`
+     and `test_get_all_relationships_count_excludes_foreign_session`)
+     once fixed. Strict-xfail will fail the suite as the forcing
      function.
    * Extend `test_relationship_memory_interactions.py` with
      migration-v10 round-trip coverage.
