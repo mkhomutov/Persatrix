@@ -227,3 +227,18 @@ final PR.
 > (session: a Go follow-up; principal: gated on RFC 0039) — and this
 > umbrella stays open until it lands.
 > Single-session-per-process deployments are unchanged and correct today.
+>
+> 2026-05-29 — **ISSUE-0082 fed the session half of the rail.** The Go
+> orchestrator now mints + persists a `(agent, channel, user) → session_id`
+> binding (`internal/channels/session_binding.go`, migration v4) and emits
+> `persatrix-session` on the live dispatch path
+> (`internal/channels/grpc_dispatcher.go` via
+> `internal/observability/grpcmeta`), so `_session_from_context` resolves a
+> real per-request id and the cross-conversation isolation this issue's
+> Python vertical built is now **active**. Pinned end-to-end by
+> `tests/integration/test_session_emission_isolation.py`. **This issue
+> stays open** until the *principal* half is fed: `persatrix-principal`
+> still emits nothing (every request resolves to `'local'`), so the
+> cross-tenant boundary remains dormant pending the verified-principal
+> source in [RFC 0039](../rfcs/0039-user-accounts-authentication.md) —
+> tracked as ISSUE-0082 Part 2.

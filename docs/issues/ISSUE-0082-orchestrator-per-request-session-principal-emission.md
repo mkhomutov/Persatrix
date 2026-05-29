@@ -81,3 +81,22 @@ mechanism.
 > the multi-conversation / multi-user story) but is **latent** today: no
 > shipped deployment serves multiple conversations or tenants from one
 > process, so nothing leaks until that ships *and* this is wired.
+>
+> 2026-05-29 — **Part 1 (session emission) landed.** PR 1 added the
+> persisted `(agent, channel, user) → session_id` binding store
+> (`internal/channels/session_binding.go`, migration v4) — the
+> orchestrator-authoritative source RFC 0031 §B specifies. PR 2 wired its
+> emission: `GRPCMessageDispatcher.Dispatch` resolves the binding and
+> injects `persatrix-session` (`internal/observability/grpcmeta`) on every
+> outbound `ReceiveChannelMessage`, feeding the ISSUE-0081 rail on the
+> session axis. PR 3 lands the end-to-end gate
+> (`tests/integration/test_session_emission_isolation.py`): a real gRPC
+> `persatrix-session` header freezes the interaction's session, two
+> concurrent conversations for one agent recall in isolation, and a
+> pre-activation `legacy` row stays visible to both. RFC 0031 §B/§E
+> amendments updated to record the session axis is now active. **This
+> issue stays open for Part 2 (principal emission)**, gated on
+> [RFC 0039](../rfcs/0039-user-accounts-authentication.md): until a
+> verified principal source exists the orchestrator emits nothing on the
+> `persatrix-principal` rail and the storage layer correctly collapses to
+> the single-tenant `'local'` principal.
