@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from ..session_id import current_session_id
 from .shared_pool import (
     _MIN_CONFIDENCE_OVERFETCH_FACTOR,
     SharedMemoryPermissionError,
@@ -145,8 +146,12 @@ class SharedPoolFacadeMixin:
         return await publish_via_facade(
             self._shared_pools, self._agent_id, pool_name, content,
             confidence=confidence, tags=tags,
+            # ISSUE-0081: call-time default — a per-request
+            # ``session_scope`` wins over the construction snapshot.
             session_id=(
-                session_id if session_id is not None else self._session_id
+                session_id
+                if session_id is not None
+                else (current_session_id() or self._session_id)
             ),
         )
 

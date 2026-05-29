@@ -59,7 +59,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from ..session_id import LEGACY_SESSION_ID
+from ..session_id import LEGACY_SESSION_ID, current_session_id
 
 __all__ = [
     "SESSIONS_ALL",
@@ -84,6 +84,19 @@ def _resolve_session_list(
     list of session ids extended with :data:`LEGACY_SESSION_ID` for
     the always-visible carve-out.
 
+    Call-time active session (ISSUE-0081): for the ``sessions=None``
+    default path the active session is resolved as
+    ``current_session_id() or active_session_id`` — a per-request
+    ``session_scope`` (task-local ContextVar) wins, and the
+    construction-time ``active_session_id`` snapshot passed by the tier
+    is the fallback seed.  This is the single seam that makes **every**
+    tier's default recall (episodes / relationships / facts / notes /
+    procedures) honour the per-conversation scope without each call site
+    re-implementing the precedence — the same single-source-of-truth
+    rationale this module exists for.  When no scope is active the
+    snapshot is used verbatim, so behaviour is unchanged for the
+    single-session CLI / test / boot paths.
+
     De-duplication: if :data:`LEGACY_SESSION_ID` is already present in
     the resolved list (either as the active session under
     ``sessions=None`` or supplied explicitly in the list form), the
@@ -103,7 +116,7 @@ def _resolve_session_list(
     if sessions == SESSIONS_ALL:
         return None
     if sessions is None:
-        ids: list[str] = [active_session_id]
+        ids: list[str] = [current_session_id() or active_session_id]
     elif isinstance(sessions, list):
         if not sessions:
             raise ValueError(

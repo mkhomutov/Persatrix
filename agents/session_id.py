@@ -34,22 +34,68 @@ the "no logging import" property and the facade/leaf agreement.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Final
 
 SESSION_ID_ENV_VAR: Final[str] = "PERSATRIX_SESSION_ID"
 LEGACY_SESSION_ID: Final[str] = "legacy"
 
+#: Task-local active session id (ISSUE-0081 / RFC 0031 follow-up).
+#:
+#: RFC 0031 modelled "session = one process run": the env var is read
+#: once at boot and cached at tier construction.  That is unsafe once one
+#: persona process fields more than one conversation concurrently — the
+#: shared ``(agent_id, session_id)`` namespace lets conversation A's
+#: writes recall into conversation B's prompt.  A :class:`ContextVar` is
+#: auto-copied into each :class:`asyncio.Task`, so a per-request
+#: ``session_scope`` set on one task cannot bleed into a sibling task.
+#:
+#: ``None`` means "no per-request override is active" — callers fall back
+#: to their construction-time env snapshot, which is why single-session
+#: CLI / test / boot paths are unchanged when nothing sets the var.  The
+#: gRPC correlation interceptor (RFC 0018 Phase 3 rail) binds this from
+#: incoming request metadata in the follow-up PR.
+_ACTIVE_SESSION_ID: ContextVar[str | None] = ContextVar(
+    "persatrix_active_session_id", default=None,
+)
+
+
+def current_session_id() -> str | None:
+    """Return the task-local active session id, or ``None`` when unset.
+
+    Override-only reader: consults **only** the :data:`_ACTIVE_SESSION_ID`
+    ContextVar, never the env var.  An unset scope is ``None`` even when
+    :data:`SESSION_ID_ENV_VAR` is exported, so call-time recall / write
+    seams can spell "context override, else my construction snapshot" as
+    ``current_session_id() or self._active_session_id`` and preserve the
+    snapshot semantics existing tests pin.
+    """
+    return _ACTIVE_SESSION_ID.get()
+
 
 def resolve_session_id_silent() -> str:
-    """Return the resolved ``PERSATRIX_SESSION_ID`` with no log output.
+    """Return the resolved active session id with no log output.
 
-    Empty / unset / whitespace-only env → :data:`LEGACY_SESSION_ID`.
-    Any other value is returned verbatim — including non-canonical
-    characters that the persona-runtime wrapper will WARN about; the
-    leaf does not pre-filter so the WARN message can still fire on
-    the same value the facade ended up tagging.
+    Precedence: **task-local scope → env var → legacy carve-out**.  The
+    :data:`_ACTIVE_SESSION_ID` ContextVar wins when a per-request
+    ``session_scope`` is active; otherwise the env var is read, and an
+    empty / unset / whitespace-only env → :data:`LEGACY_SESSION_ID`.
+
+    Non-canonical characters are returned verbatim — including values the
+    persona-runtime wrapper will WARN about; the leaf does not pre-filter
+    so the WARN message can still fire on the same value the facade ended
+    up tagging.
+
+    Tier constructors call this with no scope active, so their cached
+    snapshot keeps resolving from the env var exactly as before.
     """
-    return os.environ.get(SESSION_ID_ENV_VAR, "").strip() or LEGACY_SESSION_ID
+    return (
+        current_session_id()
+        or os.environ.get(SESSION_ID_ENV_VAR, "").strip()
+        or LEGACY_SESSION_ID
+    )
 
 
 def normalize_session_id(value: str | None) -> str:
@@ -72,3 +118,36 @@ def normalize_session_id(value: str | None) -> str:
     normalisation by calling one helper instead of re-implementing it.
     """
     return (value or "").strip() or LEGACY_SESSION_ID
+
+
+@contextmanager
+def session_scope(session_id: str | None) -> Iterator[str]:
+    """Bind ``session_id`` as the task-local active session for the block.
+
+    Sets the :data:`_ACTIVE_SESSION_ID` ContextVar to the normalised
+    value (blank / ``None`` → :data:`LEGACY_SESSION_ID`, via
+    :func:`normalize_session_id`) for the duration of the ``with`` block
+    and restores the previous value on exit — including on exception, via
+    the saved :class:`contextvars.Token`.
+
+    Normalising up front means a blank per-request session can never
+    silently fall through to a tier's construction snapshot; it collapses
+    to the ``legacy`` carve-out, matching the storage-boundary contract.
+
+    Yields the resolved id so callers can log / assert what was bound::
+
+        with session_scope(request_session) as sid:
+            ...  # current_session_id() == sid inside the block
+
+    Concurrency: because the ContextVar is copied per :class:`asyncio.Task`,
+    two tasks each entering their own ``session_scope`` do not see each
+    other's value — this is the isolation a process-global env var cannot
+    provide.  Enter the scope **inside** the task coroutine (not in the
+    parent before spawning) so each task mutates its own context copy.
+    """
+    resolved = normalize_session_id(session_id)
+    token = _ACTIVE_SESSION_ID.set(resolved)
+    try:
+        yield resolved
+    finally:
+        _ACTIVE_SESSION_ID.reset(token)
