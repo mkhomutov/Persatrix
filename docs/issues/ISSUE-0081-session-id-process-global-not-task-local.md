@@ -206,3 +206,21 @@ final PR.
 > per-principal — they are capacity/erasure-policy calls deferred to the
 > RFC 0039 multi-tenant work, not read-confidentiality leaks (recall
 > stays principal-filtered). See the RFC 0031 §C amendment.
+>
+> 2026-05-29 — **PR 4 (carve-out closeout) completes the Python vertical.**
+> A post-PR-3 audit confirmed PR 3's unconditional `AND principal_id = ?`
+> already bounds the session `legacy` carve-out to a single principal on
+> every per-request path, so PR 4 adds **no new mechanism**: it pins the
+> property as the issue's explicit TDD gate — *a foreign tenant can
+> neither read nor write `legacy` rows* — across all four tiers' default
+> recall path, the notes mutation surface, and the facts supersession
+> older-sweep (`tests/unit/python/test_principal_legacy_carveout.py`), and
+> finalises the RFC 0031 §D amendment. The carve-out is **retained** (it
+> stays load-bearing for the within-principal pre-RFC-upgrade dementia
+> surface), not retired via backfill. **This issue stays open** because
+> the per-request rail (`persatrix-session` / `persatrix-principal`) is
+> armed but **not yet fed**: the Go orchestrator still resolves one
+> session id per process at boot and emits no per-request headers, so the
+> cross-conversation / cross-tenant fix is dormant until the orchestrator
+> emits per-request ids (session: a Go follow-up; principal: RFC 0039).
+> Single-session-per-process deployments are unchanged and correct today.
