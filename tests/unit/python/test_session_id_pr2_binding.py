@@ -48,7 +48,6 @@ from agents.memory.episodic import EpisodicMemory
 from agents.memory.interactions import InteractionTracker
 from agents.persona import create_persona_agent
 from agents.persona_types import AgentEvent, EventType
-from agents.session_metadata import _session_from_metadata
 from agents.session_id import (
     EVENT_SESSION_METADATA_KEY,
     LEGACY_SESSION_ID,
@@ -57,11 +56,11 @@ from agents.session_id import (
     current_session_id,
     session_scope,
 )
+from agents.session_metadata import _session_from_metadata
 from agents.tools.builtin import create_memory_tools
 from agents.tools.permissions import PermissionGate
 
 from ._persona_test_helpers import _PERSONA_CONFIG, _make_client
-
 
 # ─── Group A — the pure metadata-lifting helper ─────────────
 
@@ -104,6 +103,28 @@ class TestSessionFromMetadata:
     def test_first_matching_value_wins(self) -> None:
         meta = [("persatrix-session", "conv-first"), ("persatrix-session", "conv-second")]
         assert _session_from_metadata(meta) == "conv-first"
+
+    def test_empty_value_then_nonempty_match_wins(self) -> None:
+        # A blank first value must not short-circuit to ``None``: scanning
+        # continues so a later non-empty header for the same key still binds.
+        meta = [("persatrix-session", ""), ("persatrix-session", "conv-late")]
+        assert _session_from_metadata(meta) == "conv-late"
+
+    def test_bytes_value_is_skipped(self) -> None:
+        # ``persatrix-session`` is a non-binary header (no ``-bin`` suffix), so
+        # gRPC always delivers a ``str``.  A ``bytes`` value is anomalous and is
+        # treated as absent (→ fall back to the construction snapshot) rather
+        # than guessing an encoding.
+        assert _session_from_metadata([("persatrix-session", b"conv-x")]) is None
+
+    def test_event_envelope_key_is_namespaced(self) -> None:
+        # The in-process envelope key rides the shared ``event.metadata`` dict
+        # alongside generic keys (``chat_session_id`` is a *different* concept —
+        # the CLI chat session, not the RFC 0031 operator namespace).  A
+        # namespaced value avoids colliding with a future bare ``session_id``
+        # and stays distinct from the wire header so the two evolve apart.
+        assert EVENT_SESSION_METADATA_KEY == "persatrix_session"
+        assert EVENT_SESSION_METADATA_KEY != SESSION_METADATA_GRPC_KEY
 
 
 # ─── Group B — on_event binds the scope for the handler ─────

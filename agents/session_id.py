@@ -44,7 +44,7 @@ LEGACY_SESSION_ID: Final[str] = "legacy"
 
 #: gRPC metadata header the orchestrator emits to carry the per-request
 #: session id (ISSUE-0081 PR 2).  Lower-case by HTTP/2 convention; the
-#: server-side lift (:func:`agents.server_servicers._session_from_metadata`)
+#: server-side lift (:func:`agents.session_metadata._session_from_metadata`)
 #: matches it case-insensitively so a proxy / test harness presenting mixed
 #: case still binds.  This is the cross-language contract with
 #: ``cmd/orchestrator`` — a rename here is a conscious break.
@@ -54,9 +54,15 @@ SESSION_METADATA_GRPC_KEY: Final[str] = "persatrix-session"
 #: :attr:`AgentEvent.metadata` from the gRPC ingress to
 #: :meth:`agents.persona_runtime._LLMPersonaAgent.on_event`, where it is
 #: bound into a :func:`session_scope` for the lifetime of the handler.
-#: Distinct from the wire header (:data:`SESSION_METADATA_GRPC_KEY`) so the
-#: in-process event envelope and the HTTP/2 header can evolve independently.
-EVENT_SESSION_METADATA_KEY: Final[str] = "session_id"
+#: Namespaced (not a bare ``session_id``) because it shares the generic
+#: ``event.metadata`` dict with unrelated keys — notably ``chat_session_id``,
+#: a *different* concept (the CLI chat session, not the RFC 0031 operator
+#: namespace) — so an un-prefixed name would invite collision/confusion.
+#: Also intentionally distinct from the wire header
+#: (:data:`SESSION_METADATA_GRPC_KEY`) so the in-process event envelope and
+#: the HTTP/2 header can evolve independently.  In-process only — never
+#: serialised back onto the wire.
+EVENT_SESSION_METADATA_KEY: Final[str] = "persatrix_session"
 
 #: Task-local active session id (ISSUE-0081 / RFC 0031 follow-up).
 #:
