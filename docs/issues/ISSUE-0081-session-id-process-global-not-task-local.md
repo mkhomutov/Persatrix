@@ -1,0 +1,184 @@
+---
+id: ISSUE-0081
+summary: "`PERSATRIX_SESSION_ID` is resolved once per process from a global env var and cached at tier construction (`agents/session_id.py:52`, `episodic.py:111` et al.). The persona runtime hosts many personas in one process (`dispatch.py:71`) and a single `agent_id` can field multiple concurrent conversations, all sharing one process-global session id — so once recall filtering is live (RFC 0031 Phase 2), conversation/user A's writes bleed into conversation/user B's recall under the same `(agent_id, session_id)`. Separately, the storage scope key has no tenant dimension and the `legacy` carve-out is readable/writable from every session, which is a cross-tenant leak the moment multi-user ships. Both gaps are out of scope of RFC 0031 as written (the RFC models session = one process run, set by the Go orchestrator at boot)."
+status: open
+severity: high
+area: agents/memory
+created: 2026-05-29
+refs:
+  - docs/rfcs/0031-per-session-namespacing-channels.md
+  - docs/rfcs/0031-phase2-pr-plan.md
+  - agents/session_id.py
+  - agents/memory/_session_filter.py
+  - agents/memory/episodic.py
+  - agents/memory/relationship.py
+  - agents/memory/facts.py
+  - agents/memory/notes.py
+  - agents/dispatch.py
+  - agents/server_servicers.py
+  - agents/observability/grpc_logging.py
+  - cmd/orchestrator/startup.go
+---
+
+## Summary
+
+RFC 0031 closes F-3 (cross-**run** state bleed) on the assumption that
+**one process == one session**: `PERSATRIX_SESSION_ID` is read once at
+boot by the Go orchestrator (`cmd/orchestrator/startup.go:39`
+`resolveSessionID`), exported into the persona-runtime process, and on
+the Python side resolved by `resolve_session_id_silent()`
+(`agents/session_id.py:52`):
+
+```python
+return os.environ.get(SESSION_ID_ENV_VAR, "").strip() or LEGACY_SESSION_ID
+```
+
+Every memory tier caches that value **once, at construction**:
+
+- `agents/memory/episodic.py:111` — `self._active_session_id = resolve_session_id_silent()`
+- `agents/memory/facts.py:179`, `agents/memory/relationship.py:86`,
+  `agents/memory/store.py:161`, and `NoteStore` via the
+  `active_session_id` ctor arg (`notes.py:111`)
+- `agents/persona.py:124` — `PersonaAgent._session_id`
+
+`_resolve_session_list` (`agents/memory/_session_filter.py:77`) uses that
+cached snapshot whenever `sessions=None` (the default recall path), so
+the active-session filter is fixed for the lifetime of the tier object.
+
+Two facts make the process-global assumption unsafe:
+
+1. **One process hosts many personas.** `agents/dispatch.py:71` holds
+   `self._agents: dict[str, _LLMPersonaAgent]`; `agents/server.py` /
+   `agents/server_persona.py` serve them all behind one gRPC server.
+2. **The memory tiers are long-lived per persona.**
+   `create_persona_agent` (`agents/persona.py:270`) calls
+   `build_personal_tiers(agent_id, ...)` **once** per `agent_id`; the
+   tier objects (and their cached `_active_session_id`) are reused across
+   every event that persona handles.
+
+So a single `agent_id` fielding two concurrent conversations (two users
+in a channel, two DM threads) shares one `(agent_id, session_id)`
+namespace. With recall filtering now live (Phase 2 PRs #449–#452),
+conversation/user A's writes are recalled into conversation/user B's
+prompt. This is the **intra-process sibling of F-3**: the RFC fixed
+cross-process bleed but the same bleed re-opens across concurrent
+conversations inside one process.
+
+A second, related gap: the storage scope key is `(agent_id,
+session_id)` with **no tenant/principal dimension**, and the `legacy`
+carve-out (`_session_filter.py` appends `LEGACY_SESSION_ID`; the notes
+mutation surface filters `session_id IN (active, legacy)`) is readable
+**and writable** from every session by design. Both become cross-tenant
+data-bleed surfaces the moment more than one user is served by one
+deployment.
+
+## Context
+
+Surfaced in a design discussion after RFC 0031 Phase 2 PR 5 (#452)
+landed. The RFC's threat model is explicitly *cross-run* (rerunning the
+same channel test under a new `PERSATRIX_SESSION_ID`); it never modeled
+(a) one process serving multiple concurrent conversations for the same
+agent, or (b) multiple tenants/users in one deployment. RFC 0031 Phases
+3–4 are an *operator CLI + docs* pass — neither gap is on that roadmap.
+
+Reproduction shape (illustrative — one shared tier, two concurrent
+contexts):
+
+```python
+mem = build_personal_tiers("agent-a", db_path=path).episodic  # cached _active_session_id
+
+# Conversation 1 writes; conversation 2 reads — same process, same agent.
+await mem.store_episode("user-1 told me a secret", session_id="conv-1")
+notes = await mem.recall("secret")            # sessions=None → cached snapshot
+# notes includes conv-1's row regardless of which conversation is asking.
+```
+
+Because the env var is process-global and the snapshot is cached, there
+is no per-conversation seam to set today — even a correct caller cannot
+narrow recall to the conversation in flight.
+
+## Impact
+
+- **Cross-conversation memory bleed (live now, latent severity rising).**
+  Any deployment where one persona handles more than one conversation at
+  a time leaks recall across them. The persona's LLM prompt is built
+  from `recall` / `get_relationship_summary` / facts / notes — all of
+  which default to the cached session, so the contamination lands
+  directly in the prompt. This is the same dementia-test failure mode
+  RFC 0031 was created to fix, on the concurrency axis.
+- **Cross-tenant leak (blocks multi-user).** With no tenant dimension
+  and a globally-shared `legacy` carve-out, user B can read and mutate
+  rows user A wrote (directly for `legacy`, and via the shared
+  `(agent_id, session_id)` key for any shared session). This is a
+  privacy boundary, not just a correctness nit.
+- **Mechanism, not policy, is the blocker.** Every downstream filter
+  (the §D recall predicate, per-session supersession, per-session
+  counts, the mutation surface) is already correct and stays unchanged.
+  Only the *source* of the active session id — process-global env read,
+  cached at construction — is too weak.
+
+## Proposed fix / investigation path
+
+The fix is to move the session id from **process-global, cached** to
+**task-local, resolved at call time**, then propagate a per-request
+session id across the gRPC boundary, then add a tenant dimension. The
+storage layer (scope predicates, migrations machinery, carve-out logic)
+is reused as-is. There is a strong in-repo precedent for the propagation
+half: **RFC 0018 Phase 3** already binds `persatrix-*` gRPC metadata
+keys to task-local `contextvars.ContextVar`s per request and resets them
+after (`agents/observability/grpc_logging.py`). The session id should
+ride the same rail.
+
+Sequenced as a multi-PR workstream (all v0.3.5):
+
+1. **PR 1 — context-local session id (enabler).** Add a
+   `contextvars.ContextVar[str | None]` to `agents/session_id.py` with
+   `current_session_id()` reader and a `session_scope(session_id)`
+   context manager. Resolution precedence: **ContextVar → env var →
+   `legacy`**. Make the tiers resolve the active session **at call
+   time** (recall *and* mutation paths) as `current_session_id() or
+   self._active_session_id`, keeping the construction snapshot as a
+   fallback seed. Behaviour is unchanged when no ContextVar is set (the
+   env var still seeds it), so single-session CLI / test / boot paths do
+   not move. TDD gate: two concurrent `asyncio` tasks under different
+   `session_scope(...)` get isolated recall and writes from **one**
+   shared tier instance.
+
+2. **PR 2 — gRPC session propagation + dispatch binding.** Extend the
+   RFC 0018 correlation interceptor (or add a sibling) to bind a
+   `persatrix-session` metadata key from incoming gRPC metadata into the
+   session ContextVar for the duration of the call. The Go orchestrator
+   emits `persatrix-session` per outgoing request, derived from the
+   conversation/user. **Open design decision — the "session unit":**
+   what defines a conversation key (channel? DM thread? `(channel,
+   peer)`? user?), and whether the id is orchestrator-authoritative
+   (required for the dementia-test multi-day arc to survive a process
+   restart) vs. derived deterministically from a stable conversation
+   key. Lands an **RFC 0031 §B/§E amendment** recording the chosen unit.
+
+3. **PR 3 — tenant/principal dimension.** Migration adding
+   `principal_id` (working name) to `episodes` / `relationships` /
+   `facts` / `notes` / `interactions`; extend the scope key from
+   `(agent_id, session_id)` to `(agent_id, principal_id, session_id)`
+   across every recall and mutation path; propagate `principal_id` from
+   the orchestrator via the same metadata rail. **RFC 0031 §C
+   amendment.**
+
+4. **PR 4 — legacy carve-out multi-tenant hardening.** Make the carve-out
+   tenant-scoped (or retire it via a backfill migration) so it can no
+   longer bridge tenants. **RFC 0031 §D amendment.** TDD: a foreign
+   tenant can neither read nor write `legacy` rows.
+
+A Phase closeout (RFC §C/§D status flips, ROADMAP) folds in with the
+final PR.
+
+## Notes
+
+> 2026-05-29 — initial capture during a post-PR-#452 design review.
+> Severity is high (not medium) because the cross-conversation leak
+> contaminates the persona LLM prompt directly and the cross-tenant leak
+> is a privacy boundary that blocks the multi-user story. The maintainer
+> directed that **all gaps be closed within v0.3.5**, multi-PR. The
+> contextvars enabler (PR 1) is decision-free and is being built first;
+> the session-unit (PR 2) and tenant-key (PR 3) design calls are
+> recorded inline in those PRs as RFC amendments for review.

@@ -325,7 +325,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                 "agent.id": self._agent_id,
                 "query.kind": "recall",
                 "query.empty": not query,
-                "session_id": self._active_session_id,  # OQ #7
+                # OQ #7 / ISSUE-0081: call-time active session (scope-aware).
+                "session_id": (session_list or [self._active_session_id])[0],
             },
         ) as span:
             # Mirror the LLM/tool/store_episode span error contract: a SQLite

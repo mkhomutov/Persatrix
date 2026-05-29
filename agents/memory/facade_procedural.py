@@ -23,6 +23,7 @@ import re
 import time
 from typing import TYPE_CHECKING, Any
 
+from ..session_id import current_session_id
 from ._session_filter import _resolve_session_list
 from .episodic_procedural import (
     ProcedureRecallEntry,
@@ -167,8 +168,12 @@ class ProceduralFacadeMixin:
             context=context,
             importance=confidence,
             tags=[f"procedure:{key}"],
+            # ISSUE-0081: call-time default — a per-request
+            # ``session_scope`` wins over the construction snapshot.
             session_id=(
-                session_id if session_id is not None else self._session_id
+                session_id
+                if session_id is not None
+                else (current_session_id() or self._session_id)
             ),
             # RFC 0031 PR 4 follow-up F2: procedural rows live in the
             # same ``episodes`` table as observations; pin the counter

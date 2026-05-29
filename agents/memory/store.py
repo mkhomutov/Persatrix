@@ -26,7 +26,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from ..session_id import resolve_session_id_silent
+from ..session_id import current_session_id, resolve_session_id_silent
 from .decay import (
     DEFAULT_C_MIN,
     DEFAULT_LAMBDA_PER_DAY,
@@ -386,7 +386,14 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
             importance=importance,
             tags=tag_list,
             scope=scope,
-            session_id=session_id if session_id is not None else self._session_id,
+            # ISSUE-0081: resolve the default at *call* time — a
+            # per-request ``session_scope`` (task-local) wins over the
+            # construction-time snapshot, which stays the fallback seed.
+            session_id=(
+                session_id
+                if session_id is not None
+                else (current_session_id() or self._session_id)
+            ),
             surface="observation",  # RFC 0031 PR 4 F2: counter dimension
         )
 
