@@ -115,6 +115,28 @@ func TestMigrateV2ToV3_StampsUserVersionInTransaction(t *testing.T) {
 		"migrateV2ToV3 must stamp user_version=3 inside its own tx")
 }
 
+// TestMigrateV3ToV4_StampsUserVersionInTransaction asserts the same
+// atomicity property for the v3→v4 step (ISSUE-0082 PR 1 —
+// `session_bindings`). The migration is a single `CREATE TABLE`, so a
+// re-run would fail with "table already exists" rather than corrupt data;
+// pinning the stamp inside the tx keeps the next boot from attempting that
+// re-run at all, consistent with the v1→v2 / v2→v3 discipline.
+func TestMigrateV3ToV4_StampsUserVersionInTransaction(t *testing.T) {
+	db, _ := rawSchemaDB(t)
+
+	_, err := db.Exec(schemaV1SQL)
+	require.NoError(t, err, "apply v1 baseline")
+	require.NoError(t, migrateV1ToV2(db), "advance to v2")
+	require.NoError(t, migrateV2ToV3(db), "advance to v3")
+	require.Equal(t, 3, readUserVersion(t, db),
+		"precondition: at v3 with user_version=3 before exercising v3→v4")
+
+	require.NoError(t, migrateV3ToV4(db))
+
+	assert.Equal(t, 4, readUserVersion(t, db),
+		"migrateV3ToV4 must stamp user_version=4 inside its own tx")
+}
+
 // TestApplySchema_FreshDB_StampsLatestVersion is the integration-shaped
 // counterpart to the two single-step tests above. It is intentionally
 // duplicative with `TestSQLiteStore_SchemaV3_Migration_Idempotent` (which
