@@ -319,10 +319,16 @@ class TestMigration4:
         mem = RelationshipMemory(agent_id="agent-a", db_path=file_db_path)
         await mem.initialize()
 
-        # Verify backfilled data.
+        # Verify backfilled data.  ``interaction_count`` is derived
+        # per-session from the filtered ``interactions`` subquery (PR 5
+        # ISSUE-0080 Policy C), so it reflects the actual visible
+        # interaction rows (one) rather than the legacy stored value
+        # (three).  The legacy ``relationships.interaction_count``
+        # column survives unchanged for the unfiltered admin / debug
+        # path.
         summary = await mem.get_relationship_summary("agent-b")
         assert summary.trust_score == pytest.approx(0.8, abs=0.001)
-        assert summary.interaction_count == 3
+        assert summary.interaction_count == 1
         assert summary.notes == "trusted colleague"
         assert summary.other_participant_type == "agent"
         assert len(summary.recent_interactions) == 1

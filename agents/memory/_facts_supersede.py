@@ -10,14 +10,27 @@ imported by the parent module without exposing it to direct callers.
 Symmetric latest-asserted-wins rule (RFC 0026 §F)
 -------------------------------------------------
 When a fact tuple is written, the storage primitive enforces a single
-live row per ``(agent_id, subject, predicate)`` key, with the row
-carrying the greatest ``asserted_at`` winning.  Two cases:
+live row per ``(agent_id, subject, predicate, session_id)`` key, with
+the row carrying the greatest ``asserted_at`` winning.  The
+``session_id`` predicate is the RFC 0031 Phase 2 PR 5 §F amendment —
+each session keeps its own truth about ``(subject, predicate)`` rather
+than one global truth; cross-session writes never retroactively
+contaminate another session's view (`ISSUE-0079
+<../../docs/issues/ISSUE-0079-cross-session-supersede-not-scoped.md>`_).
+The ``legacy`` carve-out participates asymmetrically, mirroring the §D
+recall filter (``session_id IN (active, legacy)``) — a write tagged
+with the active session can supersede an older ``legacy`` row (a pre-RFC
+fact the active session has reasserted) and a ``legacy`` write can
+supersede its own predecessors, but a ``legacy`` write cannot reach
+across to a named session ("not vice versa") and a non-legacy write
+cannot reach across to another non-legacy session.  Two cases:
 
-* **Older / equal live rows** (``asserted_at <= new.asserted_at``) are
-  marked superseded by the new row.  Pulling all qualifying rows
-  cleans up older-side legacy multi-live invariant violations from the
-  pre-PR-5a ``<`` semantics on the same write, not just the most
-  recent one.  Newer-side legacy violations (multiple strictly-newer
+* **Older / equal live rows** (``asserted_at <= new.asserted_at`` in
+  the same session *or* the ``legacy`` carve-out) are marked superseded
+  by the new row.  Pulling all qualifying rows cleans up older-side
+  legacy multi-live invariant violations from the pre-PR-5a ``<``
+  semantics on the same write, not just the most recent one.  Newer-side
+  legacy violations (multiple strictly-newer
   live rows for the same key) are *not* healed by an in-band write —
   the forward-pass ``LIMIT 1`` only points the new row at the topmost
   dominator; the lower-but-still-newer siblings remain live alongside.
@@ -44,6 +57,8 @@ may not hold.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
+
+from ..session_id import LEGACY_SESSION_ID
 
 if TYPE_CHECKING:
     import aiosqlite
@@ -76,6 +91,7 @@ async def apply_supersession(
     predicate: str,
     asserted_at: float,
     new_fact_id: str,
+    session_id: str,
 ) -> SupersessionResult:
     """Sweep older + newer live rows for the symmetric latest-wins chain.
 
@@ -83,18 +99,57 @@ async def apply_supersession(
     after the INSERT and before the per-statement ``commit``.  The
     helper issues the ``UPDATE`` writes itself but defers the commit to
     the caller so the INSERT and the chain land atomically.
+
+    ``session_id`` (RFC 0031 Phase 2 PR 5 — RFC 0026 §F amendment): the
+    supersede chain is keyed on ``(agent_id, subject, predicate,
+    session_id)`` with the ``legacy`` carve-out folded in asymmetrically.
+    A write in session ``run-b`` cannot supersede a row in session
+    ``run-a`` — each named session has its own latest-wins chain on the
+    same ``(subject, predicate)`` (`ISSUE-0079
+    <../../docs/issues/ISSUE-0079-cross-session-supersede-not-scoped.md>`_).
+
+    The carve-out is asymmetric, matching the §D recall filter
+    (``session_id IN (active, legacy)``):
+
+    * **Older sweep** spans ``(session_id, legacy)`` — an active-session
+      write absorbs older ``legacy`` predecessors (the upgrade hot-path:
+      a pre-RFC fact reasserted under a pinned session), so the active
+      session sees a single live row rather than the legacy row and the
+      reassertion both surfacing through the carve-out.
+    * **Newer dominator** stays exact (``session_id`` only) — a
+      ``legacy`` row never supersedes a named session's write ("but not
+      vice versa").
+
+    Consequence (accepted tradeoff): because ``superseded_by`` is a
+    single global pointer, an active session absorbing a ``legacy`` row
+    also removes it from *other* sessions' carve-out view.  This is the
+    latest-asserted-wins contract applied across the shared pre-RFC
+    baseline; isolation between two *named* sessions is unaffected.
+    The residual newer-side case (an active write that is *older* than a
+    live ``legacy`` row) is left unhealed in-band, symmetric to the
+    same-session newer-side caveat documented on the module.
     """
+    older_sessions: tuple[str, ...] = (
+        (session_id,)
+        if session_id == LEGACY_SESSION_ID
+        else (session_id, LEGACY_SESSION_ID)
+    )
+    older_placeholders = ",".join("?" for _ in older_sessions)
     async with db.execute(
-        """
+        f"""
         SELECT fact_id FROM facts
         WHERE agent_id = ?
           AND subject = ?
           AND predicate = ?
+          AND session_id IN ({older_placeholders})
           AND superseded_by IS NULL
           AND asserted_at <= ?
           AND fact_id != ?
-        """,
-        (agent_id, subject, predicate, asserted_at, new_fact_id),
+        """,  # noqa: S608 — placeholders only; values bound below.
+        (
+            agent_id, subject, predicate, *older_sessions,
+            asserted_at, new_fact_id,
+        ),
     ) as cursor:
         older_rows = await cursor.fetchall()
     older_fact_ids: tuple[str, ...] = tuple(row[0] for row in older_rows)
@@ -105,12 +160,13 @@ async def apply_supersession(
         WHERE agent_id = ?
           AND subject = ?
           AND predicate = ?
+          AND session_id = ?
           AND superseded_by IS NULL
           AND asserted_at > ?
         ORDER BY asserted_at DESC
         LIMIT 1
         """,
-        (agent_id, subject, predicate, asserted_at),
+        (agent_id, subject, predicate, session_id, asserted_at),
     ) as cursor:
         newer_row = await cursor.fetchone()
     self_superseded_by: str | None = newer_row[0] if newer_row else None

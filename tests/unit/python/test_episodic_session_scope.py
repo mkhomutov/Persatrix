@@ -399,6 +399,13 @@ class TestNotesPruneIsSessionScoped:
         assert len(run_b) == 2
 
 
+# NOTE: ``TestNotesMutationIsSessionScoped`` (PR 5 / ISSUE-0077) was
+# moved to :mod:`tests.unit.python.test_notes_mutation_session_scope`
+# to keep this file under the 500-line review-friendly cap.  The
+# ``memory_at_run_a`` fixture is re-imported by that sibling module
+# so the construction shape stays in one place.
+
+
 # ─── scope_recall passthrough (RFC 0020 §G orthogonal) ─────
 
 

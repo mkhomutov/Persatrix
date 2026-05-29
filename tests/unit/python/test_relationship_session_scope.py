@@ -419,36 +419,27 @@ class TestRecordInteractionMetricFailureIsolated:
         )
 
 
-# ─── Documented gap — recent_interactions cross-session leak (ISSUE-0080) ──
+# ─── Interactions are session-scoped (PR 5 / ISSUE-0080) ────
 
 
-class TestRecentInteractionsCrossSessionLeakIsDocumentedGap:
-    """Pin the F-3 hole on :meth:`get_relationship_summary`'s secondary
-    fetch into ``interactions`` (`ISSUE-0080
-    <../../../docs/issues/ISSUE-0080-relationship-recent-interactions-cross-session-leak.md>`_).
+class TestRecentInteractionsAreSessionScoped:
+    """The read-side F-3 closer for :meth:`get_relationship_summary`'s
+    secondary fetch into ``interactions``.
 
-    PR 3 filters the ``relationships`` row by ``session_id``; the
-    follow-up SELECT that populates
-    :attr:`RelationshipSummary.recent_interactions` does not — and the
-    ``interactions`` table has no ``session_id`` column at all
-    (migration v7 added it only to ``episodes`` / ``relationships``).
-    Combined with ``record_interaction``'s ON-CONFLICT increment on
-    the original first-seen row, the row-visible path leaks every
-    cross-session interaction's ``outcome`` / ``sentiment`` /
-    timestamp into the prompt and inflates ``interaction_count``.
-    Strict-xfail so the day a PR closes the gap the suite flips to
-    ``XPASS`` and forces marker removal.
+    Migration v10 (PR 5) added ``session_id`` to the ``interactions``
+    table; :func:`record_interaction` threads the active session id onto
+    every INSERT; both ``interactions`` SELECTs in
+    :func:`get_relationship_summary` (the recent-history page and the
+    ``MIN(created_at)`` first-interaction-at lookup) now carry the §D
+    predicate.  ``interaction_count`` is derived at read time from the
+    filtered ``interactions`` subquery — policy (C) in `ISSUE-0080
+    <../../../docs/issues/ISSUE-0080-relationship-recent-interactions-cross-session-leak.md>`_:
+    the column survives for the unfiltered admin / debug path, but the
+    summary surface returns a per-session count.  Applied uniformly to
+    :meth:`get_all_relationships` so cadence aggregations no longer
+    inherit the cross-session-inflated count.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "ISSUE-0080: recent_interactions + interaction_count leak "
-            "across sessions when the relationship row is visible. "
-            "Needs migration v10 adding session_id to interactions + "
-            "the recall-side filter."
-        ),
-    )
     async def test_recent_interactions_excludes_foreign_session_history(
         self, memory_at_run_a: RelationshipMemory,
     ) -> None:
@@ -468,10 +459,6 @@ class TestRecentInteractionsCrossSessionLeakIsDocumentedGap:
         assert summary.interaction_count == 1, summary.interaction_count
         assert outcomes == {"ok-A"}, outcomes
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="ISSUE-0080: count column leak also surfaces via get_all_relationships",
-    )
     async def test_get_all_relationships_count_excludes_foreign_session(
         self, memory_at_run_a: RelationshipMemory,
     ) -> None:

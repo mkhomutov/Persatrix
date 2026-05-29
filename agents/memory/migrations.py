@@ -4,11 +4,12 @@ Schema migrations and shared scoring SQL fragments.
 Forward-only migrations applied by ``_apply_migrations()`` and shared
 scoring constants used by ``episodic.py``.
 
-The callable migration handlers (currently ``v4`` through ``v9``) live
+The callable migration handlers (currently ``v4`` through ``v10``) live
 in :mod:`agents.memory._migration_handlers` — itself split across that
-module, :mod:`agents.memory._migration_facts` (v8), and
-:mod:`agents.memory._migration_notes_session` (v9) to stay under the
-500-line soft cap.  All handlers are re-exported below for backwards
+module, :mod:`agents.memory._migration_facts` (v8),
+:mod:`agents.memory._migration_notes_session` (v9), and
+:mod:`agents.memory._migration_interactions_session` (v10) to stay under
+the 500-line soft cap.  All handlers are re-exported below for backwards
 compatibility, so call sites and tests should keep importing them from
 this module.
 """
@@ -30,6 +31,7 @@ from ._migration_handlers import (
     _apply_migration_7,
     _apply_migration_8,
     _apply_migration_9,
+    _apply_migration_10,
 )
 
 __all__ = [
@@ -45,6 +47,7 @@ __all__ = [
     "_apply_migration_7",
     "_apply_migration_8",
     "_apply_migration_9",
+    "_apply_migration_10",
     "_apply_migrations",
     "_fts5_available",
 ]
@@ -242,6 +245,19 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         9,
         "RFC 0031 Phase 2: session_id on notes",
         "",  # handled by _apply_migration_9()
+    ),
+    # Migration 10 (RFC 0031 Phase 2 PR 5) tags the ``interactions``
+    # table with the operator-namespace ``session_id`` column.  Migration
+    # v7 added ``session_id`` to the parent ``relationships`` row but
+    # not to ``interactions`` — the secondary fetch in
+    # ``get_relationship_summary`` leaked cross-session interaction
+    # history into the persona prompt (ISSUE-0080).  Same callable-
+    # handler rationale as v7/v8/v9 — ``ALTER TABLE ... ADD COLUMN``
+    # is not idempotent before SQLite 3.35.
+    (
+        10,
+        "RFC 0031 Phase 2: session_id on interactions",
+        "",  # handled by _apply_migration_10()
     ),
 ]
 

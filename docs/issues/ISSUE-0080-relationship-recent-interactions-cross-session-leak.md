@@ -1,17 +1,22 @@
 ---
 id: ISSUE-0080
 summary: "`RelationshipMemory.get_relationship_summary` filters the `relationships` row by `session_id` (RFC 0031 Phase 2 PR 3) but the secondary fetch into the `interactions` table is un-scoped — and the `interactions` table has no `session_id` column at all. When the relationship row IS visible to the active session, `recent_interactions` returns *every* cross-session interaction for that peer, and `interaction_count` is the global running total (`record_interaction`'s ON-CONFLICT increments the original first-seen row). F-3 read-side leak on the load-bearing prompt-injection surface; needs a v10 migration adding `session_id` to `interactions`."
-status: open
+status: resolved
+resolution: "Closed by RFC 0031 Phase 2 PR 5.  Migration v10 adds `session_id TEXT NOT NULL DEFAULT 'legacy'` + `idx_interactions_session` to the `interactions` table; `record_interaction` threads the active session id onto every INSERT; both `interactions` SELECTs in `get_relationship_summary` (recent-history page + the `MIN(created_at)`/`MAX(created_at)` span) carry the §D predicate; `interaction_count` and `last_interaction_at` are derived per-session from the filtered subquery (Policy C — columns survive unchanged for the unfiltered admin / debug path); `get_all_relationships` derives both the count and the last-interaction timestamp via a LEFT JOIN with the same predicate so cadence aggregations no longer inherit the cross-session-inflated count or the cross-session `last_interaction_at` bump.  Deep-review follow-up: `last_interaction_at` was the `MAX(created_at)` twin of the enumerated `first_interaction_at` leak — `record_interaction`'s ON-CONFLICT refreshes the `relationships` column with no session predicate, so reading it surfaced another session's 'Last seen' (RFC 0021 cadence upper bound); now derived from the filtered subquery alongside `MIN`.  Pinned by `tests/unit/python/test_relationship_session_scope.py::TestRecentInteractionsAreSessionScoped` (xfail markers removed), `tests/unit/python/test_relationship_last_interaction_session_scope.py::TestLastInteractionAtIsSessionScoped` (the timestamp-twin pins, in their own module to keep the parent file under the 500-line cap), `tests/unit/python/test_session_id_interactions_migration.py`, and the integration-level `tests/integration/test_session_continuity.py::TestMultiSessionWriteSideIsolation::test_summary_count_does_not_inflate_across_sessions`."
 severity: medium
 area: agents/memory
 created: 2026-05-28
+closed: 2026-05-29
 refs:
   - docs/rfcs/0031-per-session-namespacing-channels.md
   - docs/rfcs/0031-phase2-pr-plan.md
   - agents/memory/relationship_queries.py
   - agents/memory/relationship_mutations.py
   - agents/memory/migrations.py
+  - agents/memory/_migration_interactions_session.py
   - tests/unit/python/test_relationship_session_scope.py
+  - tests/unit/python/test_session_id_interactions_migration.py
+  - tests/integration/test_session_continuity.py
 ---
 
 ## Summary
@@ -213,3 +218,16 @@ dementia-test recall surface.
 > once PR 4's facade extension wires the active session id into
 > production writes — that's a load-bearing dementia-test failure
 > mode.
+
+> 2026-05-29 — PR 5 deep-review follow-up. The §3 fix and the §Impact
+> enumeration covered `recent_interactions` / `interaction_count` /
+> `first_interaction_at` but missed `last_interaction_at`, the
+> `MAX(created_at)` twin of the first-interaction-at leak. It is read
+> straight from the `relationships.last_interaction_at` column, which
+> `record_interaction`'s ON-CONFLICT refreshes keyed on the participant
+> 4-tuple with no session predicate — so a cross-session write bumps
+> the first-seen (or `legacy`) row's "Last seen" and the RFC 0021
+> cadence upper bound. Closed in the same tier: both `get_relationship_summary`
+> and `get_all_relationships` now derive `last_interaction_at` from the
+> session-filtered `interactions` subquery (`MAX(created_at)`), symmetric
+> with the `MIN` already in place.
