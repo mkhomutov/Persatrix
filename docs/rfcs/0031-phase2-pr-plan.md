@@ -1,7 +1,7 @@
 # RFC 0031 — PR Implementation Plan (Phase 2 — Recall Filtering + Dementia-Test Bridge)
 
 **RFC**: [0031-per-session-namespacing-channels.md](0031-per-session-namespacing-channels.md)
-**Status**: 📋 Ready — assigned to v0.3.5 ([v0.3.5-plan.md](../v0.3.5-plan.md) is the umbrella; Phase 1 of that plan executes this workstream)
+**Status**: ✅ Implemented — v0.3.5 (PRs 1–6 merged; [v0.3.5-plan.md](../v0.3.5-plan.md) is the umbrella; Phase 1 of that plan executes this workstream). Two correctness gaps recall filtering exposed in the multi-persona process — process-global session id ([ISSUE-0081](../issues/ISSUE-0081-session-id-process-global-not-task-local.md)) and the orchestrator never emitting a per-request session ([ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) Part 1) — were closed in the same release before this closeout.
 **Created**: 2026-05-19
 **Branch prefix**: `feature/v035-rfc0031p2-` *(assigned — v0.3.5, per [v0.3.5-plan.md §Phase 0](../v0.3.5-plan.md#phase-0--this-pr))*
 **Target**: `main`
@@ -338,8 +338,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 2 | Episodic + notes recall filtering | `feature/v035-rfc0031p2-episodic-recall` | ✅ Merged | [#449](https://github.com/mkhomutov/Persatrix/pull/449) | 2026-05-28 |
 | 3 | Relationship + facts recall filtering | `feature/v035-rfc0031p2-relationship-facts-recall` | ✅ Merged | [#450](https://github.com/mkhomutov/Persatrix/pull/450) | 2026-05-28 |
 | 4 | Facade read-path extension + call-site threading | `feature/v035-rfc0031p2-facade-callsites` | ✅ Merged | [#451](https://github.com/mkhomutov/Persatrix/pull/451) | 2026-05-28 |
-| 5 | Dementia-test bridge + review follow-ups | `feature/v035-rfc0031p2-dementia-bridge` | 🔀 PR open | — | — |
-| 6 | Phase 2 closeout | `feature/v035-rfc0031p2-close` | ⬜ Not started | — | — |
+| 5 | Dementia-test bridge + review follow-ups | `feature/v035-rfc0031p2-dementia-bridge` | ✅ Merged | [#452](https://github.com/mkhomutov/Persatrix/pull/452) | 2026-05-28 |
+| 6 | Phase 2 closeout | `feature/v035-rfc0031p2-close` | 🔀 PR open | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 

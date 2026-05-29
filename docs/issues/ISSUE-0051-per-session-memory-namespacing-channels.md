@@ -84,3 +84,18 @@ Open questions:
 > and surfaces the dementia-test continuity tension (RFC OQ 1) as the
 > load-bearing prerequisite before any implementation PR opens. This
 > issue stays `open` until the RFC reaches `✅ Implemented`.
+>
+> 2026-05-29 — **F-3 root cause closed by RFC 0031 Phase 2 (v0.3.5).**
+> Default recall is now session-scoped across all four persona-memory
+> tiers (`episodes` / `relationships` v7, `facts` v8, `notes` v9) with
+> the always-visible `'legacy'` carve-out, so a rerun reusing the same
+> channel name + `--user` under a new session no longer inherits the
+> prior run's memory ([Phase 2 PR plan](../rfcs/0031-phase2-pr-plan.md),
+> PRs 1–6). The multi-persona-process correctness gaps that recall
+> filtering exposed were closed in the same release
+> ([ISSUE-0081](ISSUE-0081-session-id-process-global-not-task-local.md)
+> task-local session id +
+> [ISSUE-0082](ISSUE-0082-orchestrator-per-request-session-principal-emission.md)
+> Part 1 per-request `persatrix-session` emission). This issue stays
+> `open` until the Phase 4 operator-docs closeout (`docs/guides/sessions.md`
+> + `make reset` deprecation breadcrumb), where it is closed.

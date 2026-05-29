@@ -3,10 +3,10 @@ id: RFC-0031
 title: Per-Session Namespacing for Channels and Persona Memory
 summary: First-class Session scope under which channels are created and persona-memory rows are tagged — root-cause fix for v0.3.0 F-3 cross-run state bleed (currently mitigated by `make reset`).
 type: architecture
-status: implementing
+status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-12
-target: v0.3.1 (Phase 1) + v0.3.x (Phases 2–4)
+target: v0.3.1 (P1) + v0.3.5 (P2) + v0.3.x (P3–4)
 depends_on:
   - RFC-0011
   - RFC-0020
@@ -15,10 +15,10 @@ depends_on:
 # RFC 0031 — Per-Session Namespacing for Channels and Persona Memory
 
 **Type**: architecture
-**Status**: 🚧 Implementing (Phase 1 shipped v0.3.1; Phase 2 underway in v0.3.5 — RFC 0031 Phase 2 PR 1 [#448](https://github.com/mkhomutov/Persatrix/pull/448) opened: notes-tier `session_id` coverage via migration v9 + write-path threading)
+**Status**: ⚠️ Partially Implemented (Phase 1 shipped v0.3.1; Phase 2 — session-scoped default recall across all four persona-memory tiers, the F-3 closer — shipped v0.3.5; Phases 3–4 (operator CLI + docs) remain)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-12
-**Target**: v0.3.1 (Phase 1) + v0.3.x (Phases 2–4)
+**Target**: v0.3.1 (P1) + v0.3.5 (P2) + v0.3.x (P3–4)
 **Depends on**: RFC 0011 (Channels), RFC 0020 (Interaction Lifecycle — §G scope vocabulary)
 **Relates to**: RFC 0008 (Memory & Context Optimization), RFC 0029 (Personal/Society Storage Split)
 **Spawned from**: [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md) — root-cause fix for F-3 cross-run state bleed; currently mitigated by `make reset` (PR 6 of [v0.3.0 channel test-findings plan](../v0.3.0-test-findings-pr-plan.md))
@@ -162,8 +162,12 @@ CREATE TABLE sessions (
 | `messages` (Go) | `session_id TEXT NOT NULL` | inherits from `channels` | new covering index `idx_messages_channel_session(channel_id, session_id, timestamp DESC)` replaces today's [`idx_messages_channel_ts`](../../internal/channels/sqlite_schema.go) — same prefix shape (`channel_id` first), session as the middle key, timestamp tail preserved so existing chronological scans stay covered |
 | `episodes` (Python, [`agents/memory/episodic.py`](../../agents/memory/episodic.py)) | `session_id TEXT NOT NULL` | `'legacy'` for pre-RFC rows | `idx_episodes_session` |
 | `relationships` (Python, [`agents/memory/relationship_mutations.py`](../../agents/memory/relationship_mutations.py)) | `session_id TEXT NOT NULL` | `'legacy'` for pre-RFC rows | `idx_rel_session` |
+| `facts` (Python, [`agents/memory/facts.py`](../../agents/memory/facts.py)) | `session_id TEXT NOT NULL` | `'legacy'` for pre-RFC rows | `idx_facts_session` |
+| `notes` (Python, [`agents/memory/notes.py`](../../agents/memory/notes.py)) | `session_id TEXT NOT NULL` | `'legacy'` for pre-RFC rows | `idx_notes_session` |
 
-All four tables use the **same** column shape — `TEXT NOT NULL` with the `'legacy'` literal as the migration default — so the recall predicate is uniform (§D). An earlier draft of this table had the Python side nullable (`TEXT` / `NULL` default) and the Go side `NOT NULL`; this was tightened during deep review because the asymmetric form forced every recall path to special-case both `IS NULL` and `= 'legacy'`, and there is no design reason for the two stores to disagree on whether "pre-RFC row" is a NULL or a string. SQLite (used by both Go's `internal/channels/sqlite.go` and Python's `agents/memory/*.py`) supports `ALTER TABLE ... ADD COLUMN session_id TEXT NOT NULL DEFAULT 'legacy'` with a constant default since 3.20.0, so the migration is still a one-statement no-backfill change on both sides.
+> **Phase 2 status (v0.3.5).** The six tables above all carry a `session_id` column; the four Python tiers gained theirs across the following migrations: `episodes` + `relationships` at **v7** (RFC 0031 Phase 1), `facts` at **v8** (the tier's introducing migration carries the column), and `notes` at **v9** ([Phase 2 PR 1](0031-phase2-pr-plan.md#pr-1-featurev035-rfc0031p2-notes-coverage--notes-tier-session-coverage), which closed the last tier gap). All four persona-memory tiers — `episodes`, `relationships`, `facts`, `notes` — now filter recall by the active session with the always-visible `'legacy'` carve-out per §D, implemented in v0.3.5 ([Phase 2 PR plan](0031-phase2-pr-plan.md)). The Go `channels` / `messages` columns shipped in Phase 1 (v0.3.1).
+
+All six tables use the **same** column shape — `TEXT NOT NULL` with the `'legacy'` literal as the migration default — so the recall predicate is uniform (§D). An earlier draft of this table had the Python side nullable (`TEXT` / `NULL` default) and the Go side `NOT NULL`; this was tightened during deep review because the asymmetric form forced every recall path to special-case both `IS NULL` and `= 'legacy'`, and there is no design reason for the two stores to disagree on whether "pre-RFC row" is a NULL or a string. SQLite (used by both Go's `internal/channels/sqlite.go` and Python's `agents/memory/*.py`) supports `ALTER TABLE ... ADD COLUMN session_id TEXT NOT NULL DEFAULT 'legacy'` with a constant default since 3.20.0, so the migration is still a one-statement no-backfill change on both sides.
 
 The `legacy` sentinel is *not* a real row in the `sessions` table — recall and list paths treat `session_id = 'legacy'` as a synthetic "before sessions existed" namespace. This keeps the migration zero-cost (no backfill UPDATE on existing rows). See Open Question 3 for the alternative of materialising a `legacy` row.
 
@@ -395,6 +399,8 @@ Phases are scoped to be independently shippable. Sequencing is the constraint; s
 ## Decision / Next Steps
 
 **Phase 1 implemented in v0.3.1** ([v0.3.1-plan.md](../v0.3.1-plan.md), [0031-pr-plan.md](0031-pr-plan.md)). Status flipped to `⚠️ Partially Implemented (Phase 1)` on the merge of PR 5 (closeout); RFC remains open until Phases 2–4 land in subsequent v0.3.x patches. Open Questions 1 and 8 were resolved at plan-authoring time before Phase 1 shipped its non-additive column / env-var names ([0031-pr-plan.md §Open-question resolutions](0031-pr-plan.md#open-question-resolutions-locked-at-plan-authoring-time)).
+
+**Phase 2 implemented in v0.3.5** ([v0.3.5-plan.md](../v0.3.5-plan.md), [0031-phase2-pr-plan.md](0031-phase2-pr-plan.md)). Default recall is now session-scoped across all four persona-memory tiers (`episodes`, `relationships`, `facts`, `notes`) — defaulting to the active session plus the always-visible `'legacy'` carve-out, with cross-session recall the explicit `sessions=[…]` / `sessions="*"` opt-in (§D). The notes-tier `session_id` gap (migration v9) and the additive `MemoryStore` facade read-path extension (OQ #4) landed in the same workstream; OQ #7's recall-span `session_id` attribute ships with the episodic recall path. This **closes F-3 cross-run state bleed at the root**: a rerun reusing the same channel name + user under a new session no longer recalls the prior run's participants, topics, or facts. Two correctness gaps that recall filtering exposed in the multi-persona persona-runtime process were closed in the same release before the closeout — the per-request session id was made task-local rather than process-global ([ISSUE-0081](../issues/ISSUE-0081-session-id-process-global-not-task-local.md)) and the orchestrator now **emits** `persatrix-session` per request from a persisted `(agent, channel, user)` binding ([ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) Part 1; see the §B/§E amendments), so the §D recall filter binds to a real per-conversation session rather than one process-global snapshot. The orthogonal principal/tenant axis ([ISSUE-0081](../issues/ISSUE-0081-session-id-process-global-not-task-local.md), §C amendment) ships its storage + rail but stays armed-not-fed pending [RFC 0039](0039-user-accounts-authentication.md). Remaining work: Phase 3 (operator CLI) and Phase 4 (operator docs + [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md) closeout).
 
 **Already resolved (at plan-authoring time, locked by Phase 1's non-additive surface):**
 
