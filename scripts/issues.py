@@ -54,6 +54,12 @@ TEMPLATE_NAME = "ISSUE-TEMPLATE.md"
 
 ISSUE_FILE_PATTERN = re.compile(r"^ISSUE-\d{4}-[a-z0-9-]+\.md$")
 
+#: Filename-stem suffixes that mark a *companion* doc (e.g. a per-issue PR
+#: implementation plan) rather than the issue itself. Companions live
+#: alongside the issue but carry no front-matter and are excluded from
+#: INDEX.md — mirrors ``COMPANION_SUFFIXES`` in ``scripts/rfcs.py``.
+COMPANION_SUFFIXES = ("-pr-plan",)
+
 ALLOWED_STATUS = {"open", "in_progress", "resolved"}
 ALLOWED_SEVERITY = {"low", "medium", "high", "critical"}
 
@@ -88,10 +94,23 @@ def _scalar(fm: dict[str, str | list[str]], key: str) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _is_companion(name: str) -> bool:
+    """True for a companion doc (e.g. ``ISSUE-0082-…-pr-plan.md``).
+
+    Matches on the filename *stem* suffix so a real issue that merely
+    mentions ``pr-plan`` mid-slug (``ISSUE-0041-0021-pr-plan-…-doc-nit.md``)
+    is still treated as an issue.
+    """
+    stem = name.removesuffix(".md")
+    return any(stem.endswith(suffix) for suffix in COMPANION_SUFFIXES)
+
+
 def collect_issues() -> list[Issue]:
     issues: list[Issue] = []
     for path in sorted(ISSUES_DIR.glob("ISSUE-*.md")):
         if path.name == TEMPLATE_NAME:
+            continue
+        if _is_companion(path.name):
             continue
         if not ISSUE_FILE_PATTERN.match(path.name):
             print(
