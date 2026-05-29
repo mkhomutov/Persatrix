@@ -26,14 +26,14 @@ from ._notes_recall import (
     _recall_notes_like,
     _recall_notes_recency,
 )
-
-# Re-exported for backward compatibility with tests that import the
-# regex from :mod:`agents.memory.notes` (the parent module is the
-# documented entry point even though the helpers now live in
-# :mod:`agents.memory._notes_recall`).
-__all__ = ["Note", "NoteStore", "_FTS5_SPECIAL"]
 from ._salience import NOTES_APPEND_SALIENCE, emit_for_tier
 from ._session_filter import _resolve_session_list
+
+# ``_FTS5_SPECIAL`` is re-exported for backward compatibility with tests
+# that import the regex from :mod:`agents.memory.notes` (the parent
+# module is the documented entry point even though the helpers now live
+# in :mod:`agents.memory._notes_recall`).
+__all__ = ["Note", "NoteStore", "_FTS5_SPECIAL"]
 
 logger = logging.getLogger(__name__)
 
