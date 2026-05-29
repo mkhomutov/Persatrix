@@ -75,6 +75,13 @@ class TestEpisodicLegacyCarveout:
         )
         with principal_scope("tenant-a"), session_scope(_READER_SESSION):
             assert await mem.recall("") == []
+        # Positive control: the 'local' principal (no scope) DOES see the
+        # baseline through the very same carve-out path, so the empty result
+        # above is the principal boundary at work — not a baseline row that
+        # silently failed to store. (Mirrors the owner-visible control in
+        # ``test_foreign_tenant_cannot_read_legacy_row``.)
+        with session_scope(_READER_SESSION):
+            assert len(await mem.recall("")) == 1
 
     async def test_foreign_write_does_not_reach_local_baseline(
         self, mem: EpisodicMemory,
