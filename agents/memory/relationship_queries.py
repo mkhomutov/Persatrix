@@ -119,7 +119,8 @@ async def get_relationship_summary(
     * the ``interactions`` recent-history page (PR 5, migration v10 —
       `ISSUE-0080
       <../../docs/issues/ISSUE-0080-relationship-recent-interactions-cross-session-leak.md>`_),
-    * the ``MIN(created_at)`` first-interaction-at lookup (PR 5, same).
+    * the ``MIN(created_at)`` / ``MAX(created_at)`` first/last-
+      interaction-at span lookup (PR 5, same).
 
     ``interaction_count`` on the returned summary is the **per-session
     count derived from the filtered ``interactions`` subquery** (Policy
@@ -127,17 +128,26 @@ async def get_relationship_summary(
     column survives unchanged for the unfiltered admin / debug path,
     but the prompt-injection surface returns a count that matches what
     the persona can actually see in ``recent_interactions``.
+
+    ``last_interaction_at`` is likewise derived from the filtered
+    interactions subquery (``MAX(created_at)``), **not** read from the
+    ``relationships`` column: ``record_interaction``'s ``ON CONFLICT``
+    refreshes that column keyed on the participant 4-tuple with no
+    session predicate, so a cross-session write bumps the first-seen
+    row's timestamp.  Reading the column would surface another session's
+    "Last seen" (and skew the RFC 0021 cadence upper bound) — the same
+    leak class as ``recent_interactions`` / ``first_interaction_at``.
     """
     rel_sess_clause, rel_sess_params = session_in_clause(
         sessions, column="session_id",
     )
-    # Fetch relationship row.  ``interaction_count`` from this column
-    # is not surfaced to the prompt; we derive a per-session count below
-    # from the filtered ``interactions`` subquery instead (PR 5
-    # ISSUE-0080 Policy C — column survives unchanged for the
-    # unfiltered admin / debug path).
+    # Fetch relationship row.  ``interaction_count`` and
+    # ``last_interaction_at`` from this row are not surfaced to the
+    # prompt; we derive per-session values below from the filtered
+    # ``interactions`` subquery instead (PR 5 ISSUE-0080 Policy C — the
+    # columns survive unchanged for the unfiltered admin / debug path).
     async with db.execute(
-        "SELECT trust_score, last_interaction_at, notes "
+        "SELECT trust_score, notes "
         "FROM relationships "
         "WHERE participant_id = ? AND participant_type = ? "
         "AND other_participant_id = ? AND other_participant_type = ?"
@@ -157,7 +167,7 @@ async def get_relationship_summary(
             notes=None,
         )
 
-    trust_score, last_interaction_at, notes = row
+    trust_score, notes = row
 
     # Both ``interactions`` SELECTs below carry the §D filter — PR 5 /
     # ISSUE-0080 fix.  ``interactions`` rows now carry ``session_id``
@@ -212,20 +222,24 @@ async def get_relationship_summary(
         count_row = await cursor.fetchone()
     interaction_count = int(count_row[0]) if count_row is not None else 0
 
-    # RFC 0021 PR 2: cadence rendering needs the relationship's first
-    # interaction timestamp.  PR 5 / ISSUE-0080: filtered by session so
-    # the timestamp reflects the active session's first interaction,
-    # not the global first.
+    # RFC 0021 PR 2: cadence rendering needs the relationship's first +
+    # last interaction timestamps.  PR 5 / ISSUE-0080: both bounds are
+    # derived from the session-filtered subquery so they reflect the
+    # active session's span, not the global one — ``last_interaction_at``
+    # in particular must not inherit the cross-session ON-CONFLICT bump
+    # on the ``relationships`` column.  ``MIN``/``MAX`` over an empty
+    # filtered set return ``(NULL, NULL)``, collapsing both to ``None``.
     async with db.execute(
-        "SELECT MIN(created_at) FROM interactions "
+        "SELECT MIN(created_at), MAX(created_at) FROM interactions "
         "WHERE participant_id = ? AND participant_type = ? "
         "AND other_participant_id = ? AND other_participant_type = ?"
         f"{int_sess_clause}",
         (agent_id, participant_type, other_id, other_participant_type,
          *int_sess_params),
     ) as cursor:
-        first_row = await cursor.fetchone()
-    first_interaction_at = first_row[0] if first_row is not None else None
+        span_row = await cursor.fetchone()
+    first_interaction_at = span_row[0] if span_row is not None else None
+    last_interaction_at = span_row[1] if span_row is not None else None
 
     return RelationshipSummary(
         other_participant_id=other_id,
@@ -257,11 +271,14 @@ async def get_all_relationships(
 
     ``sessions`` — see :func:`get_trust`.
 
-    ``interaction_count`` is derived per-session from the filtered
-    ``interactions`` subquery — Policy (C) from `ISSUE-0080
+    ``interaction_count`` and ``last_interaction_at`` are derived
+    per-session from the filtered ``interactions`` subquery — Policy (C)
+    from `ISSUE-0080
     <../../docs/issues/ISSUE-0080-relationship-recent-interactions-cross-session-leak.md>`_,
     applied uniformly to both list- and summary-mode reads so cadence
-    aggregations do not inherit the cross-session-inflated count.
+    aggregations do not inherit the cross-session-inflated count or the
+    cross-session ``last_interaction_at`` bump on the ``relationships``
+    column.
     """
     rel_sess_clause, rel_sess_params = session_in_clause(
         sessions, column="r.session_id",
@@ -269,15 +286,19 @@ async def get_all_relationships(
     int_sess_clause, int_sess_params = session_in_clause(
         sessions, column="i.session_id",
     )
-    # LEFT JOIN aggregates per-session count from ``interactions`` onto
-    # each visible relationship row.  Same predicate shape on both
-    # sides; ``COUNT(i.id)`` yields 0 for relationships with no
+    # LEFT JOIN aggregates the per-session count + last-interaction
+    # timestamp from ``interactions`` onto each visible relationship row.
+    # Same predicate shape on both sides; ``COUNT(i.id)`` yields 0 and
+    # ``MAX(i.created_at)`` yields NULL for relationships with no
     # in-session interactions (a row tagged ``legacy`` that has only
-    # been seeded via config, for instance).
+    # been seeded via config, for instance).  ``MAX(i.created_at)``
+    # replaces ``r.last_interaction_at`` so list-mode reads do not
+    # surface the cross-session ON-CONFLICT bump on the column (PR 5 /
+    # ISSUE-0080).
     async with db.execute(
         "SELECT r.other_participant_id, r.other_participant_type, "
         "r.trust_score, COUNT(i.id) AS in_session_count, "
-        "r.last_interaction_at, r.notes "
+        "MAX(i.created_at) AS in_session_last, r.notes "
         "FROM relationships r "
         "LEFT JOIN interactions i ON "
         "  i.participant_id = r.participant_id "
@@ -289,7 +310,7 @@ async def get_all_relationships(
         f"{rel_sess_clause} "
         "GROUP BY r.participant_id, r.participant_type, "
         "  r.other_participant_id, r.other_participant_type, "
-        "  r.trust_score, r.last_interaction_at, r.notes "
+        "  r.trust_score, r.notes "
         "ORDER BY r.trust_score DESC",
         (*int_sess_params, agent_id, participant_type, *rel_sess_params),
     ) as cursor:
