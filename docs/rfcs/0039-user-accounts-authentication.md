@@ -499,6 +499,24 @@ the substrate RFC 0037's confidentiality model implicitly assumes: the
 asserted. The same claim is the identity any future channel-publish or
 recall endpoint authenticates against.
 
+> **Downstream consumer — [ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) (principal emission).**
+> [ISSUE-0081](../issues/ISSUE-0081-session-id-process-global-not-task-local.md)
+> already shipped the persona-side **principal/tenant rail** — a
+> `principal_id` storage dimension with a strict-equality recall filter and
+> a `persatrix-principal` gRPC header bound task-locally per request
+> ([RFC 0031 §C amendment](0031-per-session-namespacing-channels.md#c-storage-model);
+> [`agents/principal_id.py`](../../agents/principal_id.py)) — but it is
+> **armed and unfed**: nothing emits a principal, so every request resolves
+> to the single-tenant `'local'` default. The verified `participant_id`
+> claim defined here is that missing **source**: once `auth.mode: enabled`,
+> the orchestrator emits the session's verified principal on the
+> `persatrix-principal` header at the same dispatch chokepoint it emits
+> `persatrix-session` (ISSUE-0082 Part 1, a self-contained Go follow-up that
+> does not wait on this RFC). This does **not** change this RFC's
+> multi-tenancy / per-user-memory-isolation Non-Goals — it records that the
+> principal rail's activation is *gated on this RFC's verified claim*, and
+> that the storage layer correctly collapses to `'local'` until then.
+
 ### G. Bootstrapping the first operator
 
 Account creation is `operator`-gated (§E) — but a fresh install has no
@@ -956,6 +974,13 @@ blocks on it.
 - [RFC 0001 — Core Orchestration Pipeline](0001-core-orchestration-pipeline.md)
   — the in-memory orchestrator `Store` that `accounts.db` deliberately
   does not use.
+- [ISSUE-0082 — Orchestrator per-request session/principal emission](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md)
+  — its principal half (Part 2) is gated on this RFC's verified
+  `participant_id` claim (§F); the orchestrator emits `persatrix-principal`
+  once `auth.mode: enabled`.
+- [ISSUE-0081 — Session id process-global, not task-local](../issues/ISSUE-0081-session-id-process-global-not-task-local.md)
+  — shipped the persona-side principal/tenant rail this RFC's verified
+  claim feeds.
 - [SECURITY.md](../../SECURITY.md) — the project security posture and
   experimental-software disclaimer.
 - [ROADMAP.md](../../ROADMAP.md) — version planning; the v0.4.0 identity

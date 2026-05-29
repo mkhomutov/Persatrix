@@ -7,6 +7,7 @@ area: cmd/orchestrator
 created: 2026-05-29
 refs:
   - docs/issues/ISSUE-0081-session-id-process-global-not-task-local.md
+  - docs/issues/ISSUE-0082-part1-session-emission-pr-plan.md
   - docs/rfcs/0031-per-session-namespacing-channels.md
   - docs/rfcs/0039-user-accounts-authentication.md
   - cmd/orchestrator/startup.go
