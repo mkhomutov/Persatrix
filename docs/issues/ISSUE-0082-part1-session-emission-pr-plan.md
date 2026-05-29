@@ -212,5 +212,3 @@ Once [RFC 0039](../rfcs/0039-user-accounts-authentication.md) lands authenticate
 * [ISSUE-0035 — dead-but-wired chat executor](ISSUE-0035-chat-executor-dead-but-wired-cleanup.md) — why emission targets only the live `Dispatch` path.
 * [`internal/observability/grpcmeta`](../../internal/observability/grpcmeta/grpcmeta.go) — the outbound `persatrix-*` metadata pattern PR 2 extends.
 * [BRANCHING.md](../BRANCHING.md) — branching / squash-merge convention.
-</content>
-</invoke>
