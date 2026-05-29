@@ -123,7 +123,18 @@ func initChannels(
 			MessagesCascadeCapped: orchMetrics.ChannelMessagesCascadeCapped,
 		}
 	}
-	dispatcher := selectChannelDispatcher(reg, logger)
+	// ISSUE-0082 PR 2: build the per-request session resolver over the
+	// channels store so the dispatcher can emit `persatrix-session` per
+	// request. Construction only fails on a programming error (a non-SQLite
+	// store); degrade to no session emission rather than failing channels
+	// startup — delivery must not depend on the session rail being wired.
+	sessionResolver, srErr := channels.NewSessionResolver(chanStore)
+	if srErr != nil {
+		logger.Warn("channels: session resolver unavailable; per-request persatrix-session emission disabled (personas fall back to legacy snapshot)",
+			zap.Error(srErr))
+		sessionResolver = nil
+	}
+	dispatcher := selectChannelDispatcher(reg, sessionResolver, logger)
 	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)
 	// `channels.yaml` may override the default cascade-depth cap. Apply
 	// after construction so the router's [defaults.DefaultMaxCascadeDepth]
@@ -201,10 +212,18 @@ func initChannels(
 //     (PR 4a-ii-β-1) that turns each per-recipient `Dispatch` into an
 //     `AgentService.ReceiveChannelMessage` gRPC call against the
 //     address the recipient registered under.
-func selectChannelDispatcher(reg registry.Registry, logger *zap.Logger) channels.MessageDispatcher {
+//   - sessionResolver != nil → emitted as the `persatrix-session` gRPC
+//     header per dispatch (ISSUE-0082 PR 2). Nil disables session emission
+//     (the dispatcher ships no header; personas fall back to the legacy
+//     construction snapshot).
+func selectChannelDispatcher(reg registry.Registry, sessionResolver channels.SessionBinder, logger *zap.Logger) channels.MessageDispatcher {
 	if reg == nil {
 		logger.Info("channels: registry not available; cross-process dispatch disabled (NoopDispatcher in use)")
 		return channels.NoopDispatcher{}
 	}
-	return channels.NewGRPCMessageDispatcher(reg, logger)
+	var opts []channels.DispatcherOption
+	if sessionResolver != nil {
+		opts = append(opts, channels.WithSessionResolver(sessionResolver))
+	}
+	return channels.NewGRPCMessageDispatcher(reg, logger, opts...)
 }

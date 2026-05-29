@@ -102,7 +102,7 @@ func TestSelectChannelDispatcher_NilRegistryReturnsNoop(t *testing.T) {
 	core, recorded := observer.New(zapcore.InfoLevel)
 	logger := zap.New(core)
 
-	d := selectChannelDispatcher(nil, logger)
+	d := selectChannelDispatcher(nil, nil, logger)
 
 	_, ok := d.(channels.NoopDispatcher)
 	assert.True(t, ok,
@@ -128,7 +128,7 @@ func TestSelectChannelDispatcher_NonNilRegistryDoesNotLogDisabled(t *testing.T) 
 	logger := zap.New(core)
 	reg := registry.NewInMemoryRegistry(logger)
 
-	_ = selectChannelDispatcher(reg, logger)
+	_ = selectChannelDispatcher(reg, nil, logger)
 
 	logs := recorded.FilterMessageSnippet("cross-process dispatch disabled").All()
 	assert.Empty(t, logs,
@@ -145,7 +145,7 @@ func TestSelectChannelDispatcher_NonNilRegistryReturnsGRPC(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 	reg := registry.NewInMemoryRegistry(logger)
 
-	d := selectChannelDispatcher(reg, logger)
+	d := selectChannelDispatcher(reg, nil, logger)
 
 	_, ok := d.(*channels.GRPCMessageDispatcher)
 	assert.True(t, ok,

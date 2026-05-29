@@ -187,8 +187,8 @@ No production code in PR 3 — test + docs only.
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 1 | Per-request session binding store | `feature/v035-issue0082-session-source` | 🔀 PR open | — | — |
-| 2 | `persatrix-session` emission on the dispatch path | `feature/v035-issue0082-emit` | ⬜ Not started | — | — |
+| 1 | Per-request session binding store | `feature/v035-issue0082-session-source` | ✅ Merged | [#458](https://github.com/mkhomutov/Persatrix/pull/458) | ✅ |
+| 2 | `persatrix-session` emission on the dispatch path | `feature/v035-issue0082-emit` | 🔀 PR open | — | — |
 | 3 | End-to-end isolation test + closeout | `feature/v035-issue0082-e2e-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
