@@ -72,13 +72,10 @@ class TestMigrations:
             rows = list(await cursor.fetchall())
         # Schema-version row count + per-row identity pin: every new
         # migration MUST bump both the count and add a (version,
-        # description-substring) assertion here.  When migration v9
-        # (RFC 0031 Phase 2 PR 1 — session_id on notes) landed in
-        # commit 3b6e7f7 this assertion was left at the v8 count; this
-        # fix-up brings it into parity with the actual MIGRATIONS list
-        # so the pin keeps doing its job (catching a missing
-        # registration / description-typo, not always-falling-on-the-tail).
-        assert len(rows) == 9
+        # description-substring) assertion here.  The count bumped from
+        # 9 → 10 alongside migration v10 (RFC 0031 Phase 2 PR 5 —
+        # session_id on interactions).
+        assert len(rows) == 10
         assert rows[0][0] == 1
         assert "Initial schema" in rows[0][1]
         assert rows[1][0] == 2
@@ -103,6 +100,10 @@ class TestMigrations:
         # otherwise round-trip green.
         assert rows[8][0] == 9
         assert "session_id on notes" in rows[8][1].lower()
+        # v10 disambiguates against v7 / v9 via the ``interactions``
+        # token (the table name).
+        assert rows[9][0] == 10
+        assert "session_id on interactions" in rows[9][1].lower()
 
     async def test_migrations_are_idempotent(self, memory: EpisodicMemory):
         """Re-running migrations does not error or duplicate rows."""
@@ -111,11 +112,10 @@ class TestMigrations:
         async with db.execute("SELECT COUNT(*) FROM schema_version") as cursor:
             row = await cursor.fetchone()
         assert row is not None
-        # Bumped from 8 → 9 alongside migration v9 (RFC 0031 Phase 2
-        # PR 1).  The previous value was a count of registered
-        # migrations frozen at the v8 tail; same fix-up rationale as
-        # ``test_migration_version_recorded`` above.
-        assert row[0] == 9
+        # Bumped from 9 → 10 alongside migration v10 (RFC 0031 Phase 2
+        # PR 5 — session_id on interactions).  Same row-count discipline
+        # as ``test_migration_version_recorded`` above.
+        assert row[0] == 10
 
     async def test_wal_mode_enabled(self):
         """WAL mode is set on file-based databases (not :memory:)."""

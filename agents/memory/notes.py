@@ -12,8 +12,6 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import re
-import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -22,9 +20,20 @@ import aiosqlite
 
 from ..observability.metrics import try_get_instruments
 from ..session_id import LEGACY_SESSION_ID, normalize_session_id
+from ._notes_recall import (
+    _FTS5_SPECIAL,
+    _recall_notes_fts5,
+    _recall_notes_like,
+    _recall_notes_recency,
+)
+
+# Re-exported for backward compatibility with tests that import the
+# regex from :mod:`agents.memory.notes` (the parent module is the
+# documented entry point even though the helpers now live in
+# :mod:`agents.memory._notes_recall`).
+__all__ = ["Note", "NoteStore", "_FTS5_SPECIAL"]
 from ._salience import NOTES_APPEND_SALIENCE, emit_for_tier
-from ._session_filter import _resolve_session_list, session_in_clause
-from .episodic_queries import resolve_min_score
+from ._session_filter import _resolve_session_list
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +60,6 @@ class Note:
     updated_at: float = 0.0
     session_id: str = LEGACY_SESSION_ID
 
-
-# FTS5 MATCH operator characters that cause parse errors when present in
-# freeform (LLM-generated or user-generated) queries.  Rather than
-# enumerate every problematic character (colons, commas, periods, angle
-# brackets, pipes, etc.), strip all non-alphanumeric characters except
-# spaces.  This keeps meaningful search tokens while preventing FTS5
-# syntax errors that force repeated LIKE fallbacks.
-_FTS5_SPECIAL = re.compile(r'[^a-zA-Z0-9\s]+')
 
 # Maximum content size for a single note (10 KB).
 _MAX_NOTE_CONTENT_BYTES = 10_240
@@ -257,15 +258,22 @@ class NoteStore:
         )
 
         if query and self._fts5:
-            rows = await self._recall_notes_fts5(
-                query, limit, min_score, session_list,
+            rows = await _recall_notes_fts5(
+                self._db, agent_id=self._agent_id, query=query,
+                limit=limit, min_score=min_score,
+                sessions=session_list, note_cols=_NOTE_COLS,
             )
         elif query:
-            rows = await self._recall_notes_like(
-                query, limit, min_score, session_list,
+            rows = await _recall_notes_like(
+                self._db, agent_id=self._agent_id, query=query,
+                limit=limit, min_score=min_score,
+                sessions=session_list, note_cols=_NOTE_COLS,
             )
         else:
-            rows = await self._recall_notes_recency(limit, session_list)
+            rows = await _recall_notes_recency(
+                self._db, agent_id=self._agent_id, limit=limit,
+                sessions=session_list, note_cols=_NOTE_COLS,
+            )
 
         notes = [self._row_to_note(row) for row in rows]
 
@@ -284,7 +292,14 @@ class NoteStore:
         return notes
 
     async def update_note(self, note_id: str, content: str) -> bool:
-        """Update note content. Topic and tags preserved. Returns True if found."""
+        """Update note content. Topic and tags preserved. Returns True if found.
+
+        RFC 0031 Phase 2 PR 5 / `ISSUE-0077
+        <../../docs/issues/ISSUE-0077-notes-mutation-not-session-scoped.md>`_:
+        scoped to ``(agent_id, session_id IN (active, legacy))`` so a
+        ``run-b`` caller cannot mutate a ``run-a`` row; the ``legacy``
+        carve-out matches the recall surface (permissive policy).
+        """
         if not content or not content.strip():
             raise ValueError("content must not be empty")
         content_bytes = content.encode("utf-8")
@@ -296,26 +311,42 @@ class NoteStore:
         now = time.time()
         cursor = await self._db.execute(
             "UPDATE notes SET content = ?, updated_at = ? "
-            "WHERE id = ? AND agent_id = ?",
-            (content, now, note_id, self._agent_id),
+            "WHERE id = ? AND agent_id = ? "
+            "AND session_id IN (?, ?)",
+            (
+                content, now, note_id, self._agent_id,
+                self._active_session_id, LEGACY_SESSION_ID,
+            ),
         )
         await self._db.commit()
         return cursor.rowcount > 0
 
     async def delete_note(self, note_id: str) -> bool:
-        """Delete a note by ID (agent-scoped). Returns True if found."""
+        """Delete a note by ID. Returns True if found.  Session-scoped
+        per :meth:`update_note`."""
         cursor = await self._db.execute(
-            "DELETE FROM notes WHERE id = ? AND agent_id = ?",
-            (note_id, self._agent_id),
+            "DELETE FROM notes "
+            "WHERE id = ? AND agent_id = ? "
+            "AND session_id IN (?, ?)",
+            (
+                note_id, self._agent_id,
+                self._active_session_id, LEGACY_SESSION_ID,
+            ),
         )
         await self._db.commit()
         return cursor.rowcount > 0
 
     async def count_notes(self) -> int:
-        """Return the number of notes for this agent."""
+        """Number of notes visible to the active session (per
+        :meth:`update_note`'s session scope)."""
         async with self._db.execute(
-            "SELECT COUNT(*) FROM notes WHERE agent_id = ?",
-            (self._agent_id,),
+            "SELECT COUNT(*) FROM notes "
+            "WHERE agent_id = ? "
+            "AND session_id IN (?, ?)",
+            (
+                self._agent_id,
+                self._active_session_id, LEGACY_SESSION_ID,
+            ),
         ) as cursor:
             row = await cursor.fetchone()
         return row[0] if row else 0
@@ -351,120 +382,6 @@ class NoteStore:
                 max_notes,
             ),
         )
-
-    async def _recall_notes_fts5(
-        self,
-        query: str,
-        limit: int,
-        min_score: float | None,
-        sessions: list[str] | None,
-    ) -> list[aiosqlite.Row]:
-        """FTS5 search across topic, content, and tags.
-
-        ``sessions`` (RFC 0031 Phase 2 PR 2) is the resolved session
-        list from :func:`agents.memory._session_filter._resolve_session_list`;
-        ``None`` is the ``"*"`` no-filter mode.
-        """
-        sess_clause, sess_params = session_in_clause(
-            sessions, column="n.session_id",
-        )
-        safe_query = _FTS5_SPECIAL.sub(" ", query).strip()
-        if not safe_query:
-            return await self._recall_notes_like(
-                query, limit, min_score, sessions,
-            )
-        effective_min_score = resolve_min_score(min_score)
-        try:
-            async with self._db.execute(
-                f"""
-                SELECT {", ".join(f"n.{c}" for c in _NOTE_COLS)}
-                FROM notes_fts fts
-                JOIN notes n ON n.rowid = fts.rowid
-                WHERE notes_fts MATCH ?
-                  AND n.agent_id = ?
-                  AND (1.0 / (1.0 + ABS(fts.rank))) >= ?
-                  {sess_clause}
-                ORDER BY fts.rank * -1 DESC
-                LIMIT ?
-                """,
-                (
-                    safe_query, self._agent_id, effective_min_score,
-                    *sess_params, limit,
-                ),
-            ) as cursor:
-                return list(await cursor.fetchall())
-        except sqlite3.OperationalError as exc:
-            logger.warning(
-                "Notes FTS5 query failed for %r (sanitized: %r), falling back to LIKE: %s",
-                query,
-                safe_query,
-                exc,
-            )
-            return await self._recall_notes_like(
-                query, limit, min_score, sessions,
-            )
-
-    async def _recall_notes_like(
-        self,
-        query: str,
-        limit: int,
-        min_score: float | None,  # noqa: ARG002 — LIKE matches score 1.0
-        sessions: list[str] | None,
-    ) -> list[aiosqlite.Row]:
-        """LIKE fallback when FTS5 is unavailable.
-
-        ``min_score`` is accepted for signature compatibility but is not
-        applied: LIKE matching is binary, so every match scores ``1.0``
-        per RFC 0017 Section C.  ``sessions`` — see :meth:`_recall_notes_fts5`.
-        """
-        sess_clause, sess_params = session_in_clause(
-            sessions, column="session_id",
-        )
-        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        pattern = f"%{escaped}%"
-        async with self._db.execute(
-            f"""
-            SELECT {_NOTE_SELECT}
-            FROM notes
-            WHERE agent_id = ?
-              AND (topic LIKE ? ESCAPE '\\'
-                   OR content LIKE ? ESCAPE '\\'
-                   OR tags_json LIKE ? ESCAPE '\\')
-              {sess_clause}
-            ORDER BY updated_at DESC
-            LIMIT ?
-            """,
-            (
-                self._agent_id, pattern, pattern, pattern,
-                *sess_params, limit,
-            ),
-        ) as cursor:
-            return list(await cursor.fetchall())
-
-    async def _recall_notes_recency(
-        self,
-        limit: int,
-        sessions: list[str] | None,
-    ) -> list[aiosqlite.Row]:
-        """No query — return most recently updated notes.
-
-        ``sessions`` — see :meth:`_recall_notes_fts5`.
-        """
-        sess_clause, sess_params = session_in_clause(
-            sessions, column="session_id",
-        )
-        async with self._db.execute(
-            f"""
-            SELECT {_NOTE_SELECT}
-            FROM notes
-            WHERE agent_id = ?
-              {sess_clause}
-            ORDER BY updated_at DESC
-            LIMIT ?
-            """,
-            (self._agent_id, *sess_params, limit),
-        ) as cursor:
-            return list(await cursor.fetchall())
 
     def _row_to_note(self, row: aiosqlite.Row) -> Note:
         """Convert a database row to a Note dataclass.

@@ -72,9 +72,10 @@ For each turn, capture the per-tier provenance of what the [`MemoryBudget` alloc
 ### Setup
 
 1. Start the orchestrator and a persona named `dementia-test-bob`.
-2. From the CLI, open a chat session: `persatrix chat dementia-test-bob`.
-3. Note the session start time. Plan to leave ≥ 11 minutes of idle time between Interaction 2 and Interaction 3 (forces RFC 0020 idle-gap closure).
-4. Plan to leave ≥ 11 minutes between Interaction 4 and Interaction 5.
+2. **Pin the operator session id for the whole arc** (RFC 0031 Phase 2 — v0.3.5): `export PERSATRIX_SESSION_ID=dementia-arc-$(date +%Y%m%d)` (PowerShell: `$env:PERSATRIX_SESSION_ID = "dementia-arc-$(Get-Date -Format yyyyMMdd)"`). Re-export it before *every* interaction window — the orchestrator + persona-runtime both snapshot the value at start; under v0.3.5's §D recall default, single-session recall is the dementia-test recall path ([OQ #1 resolution 1a](../rfcs/0031-per-session-namespacing-channels.md#open-questions)). Forgetting to pin the value causes spurious recall misses on every leg because each interaction would resolve a different session id.
+3. From the CLI, open a chat session: `persatrix chat dementia-test-bob`.
+4. Note the session start time. Plan to leave ≥ 11 minutes of idle time between Interaction 2 and Interaction 3 (forces RFC 0020 idle-gap closure).
+5. Plan to leave ≥ 11 minutes between Interaction 4 and Interaction 5.
 
 ### Leg 1 — Named Entity (Interactions 1 → 4)
 
@@ -202,6 +203,15 @@ Re-run after [§B](../memory-quality-roadmap.md#b-continuity-bridge-across-inter
 
 Re-run after [RFC 0027](../rfcs/0027-reflection-driven-consolidation.md) lands in v0.4.0. Legs that depend on multi-interaction relationship-arc reasoning ("our relationship has shifted") become testable; extend the procedure with a fourth leg after that ships.
 
+### V5 — Post-RFC 0031 Phase 2 (session isolation, v0.3.5)
+
+Re-run after [RFC 0031 Phase 2](../rfcs/0031-per-session-namespacing-channels.md) lands. Two extensions:
+
+1. **Single-session arc**: canonical V2 run with the Setup `PERSATRIX_SESSION_ID` pin — every leg passes with default recall ([OQ #1 1a](../rfcs/0031-per-session-namespacing-channels.md#open-questions)). The Phase 2 PR-plan calls this the **dementia-test bridge**.
+2. **Multi-session no-bleed**: close the arc, re-export a fresh `PERSATRIX_SESSION_ID`, and re-run Leg 1's Interaction 4 trigger. The persona must **not** reference Mira — absence is the v0.3.5 promise; a reference is the F-3 reproduction. Cross-session continuity by opt-in is the Phase 3 CLI path (`persatrix memory recall --sessions=…`).
+
+V5 supersedes the v0.3.x re-run cadence — every v0.3.5+ run is a V5 run.
+
 ---
 
 ## Edge Cases & Error Scenarios
@@ -232,6 +242,7 @@ Re-run after [RFC 0027](../rfcs/0027-reflection-driven-consolidation.md) lands i
 |------|--------|----|---------|--------|-------|
 | 2026-05-17 | Claude (Opus 4.7) | Windows 11 + Docker | V2 | Pass | v0.3.1 surface run. All 5 legs Pass; release-blocker Legs 1/2/5 Pass. Facts tier extracted 0 facts at run time (root-caused as ISSUE-0054); legs carried by the RFC 0034 conversation window. See [v0.3.1-execution-report.md](v0.3.1-execution-report.md#mt-memory-005-acceptance-passfail-gate). |
 | 2026-05-17 | Claude (Opus 4.7) | Windows 11 + Docker | V2 | Pass | Release-prep PR 4 re-run on the RC tip (`main` 47a7797, post-ISSUE-0054-fix). All 5 legs Pass; release-blocker Legs 1/2/5 Pass **via the RFC 0026 facts tier** (6 facts extracted + recalled, clean fence-free episode summaries). F-1 confirmed closed. See [v0.3.1-execution-report.md](v0.3.1-execution-report.md#mt-memory-005-re-run--release-prep-pr-4-release-candidate-tip). |
+| _pending v0.3.5 RP_ | — | — | V5 | — | Scheduled for v0.3.5 release-prep: V5 single-session arc + multi-session no-bleed extension under the `PERSATRIX_SESSION_ID` pin (RFC 0031 Phase 2). The dementia-test bridge from [`0031-phase2-pr-plan.md` PR 5](../rfcs/0031-phase2-pr-plan.md#pr-5-featurev035-rfc0031p2-dementia-bridge--dementia-test-bridge--review-follow-ups). |
 
 ---
 

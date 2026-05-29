@@ -1,17 +1,22 @@
 ---
 id: ISSUE-0080
 summary: "`RelationshipMemory.get_relationship_summary` filters the `relationships` row by `session_id` (RFC 0031 Phase 2 PR 3) but the secondary fetch into the `interactions` table is un-scoped — and the `interactions` table has no `session_id` column at all. When the relationship row IS visible to the active session, `recent_interactions` returns *every* cross-session interaction for that peer, and `interaction_count` is the global running total (`record_interaction`'s ON-CONFLICT increments the original first-seen row). F-3 read-side leak on the load-bearing prompt-injection surface; needs a v10 migration adding `session_id` to `interactions`."
-status: open
+status: closed
+resolution: "Closed by RFC 0031 Phase 2 PR 5.  Migration v10 adds `session_id TEXT NOT NULL DEFAULT 'legacy'` + `idx_interactions_session` to the `interactions` table; `record_interaction` threads the active session id onto every INSERT; both `interactions` SELECTs in `get_relationship_summary` (recent-history page + `MIN(created_at)`) carry the §D predicate; `interaction_count` is derived per-session from the filtered subquery (Policy C — column survives unchanged for the unfiltered admin / debug path); `get_all_relationships` derives the count via a LEFT JOIN with the same predicate so cadence aggregations no longer inherit the cross-session-inflated count.  Pinned by `tests/unit/python/test_relationship_session_scope.py::TestRecentInteractionsAreSessionScoped` (xfail markers removed), `tests/unit/python/test_session_id_interactions_migration.py`, and the integration-level `tests/integration/test_session_continuity.py::TestMultiSessionWriteSideIsolation::test_summary_count_does_not_inflate_across_sessions`."
 severity: medium
 area: agents/memory
 created: 2026-05-28
+closed: 2026-05-29
 refs:
   - docs/rfcs/0031-per-session-namespacing-channels.md
   - docs/rfcs/0031-phase2-pr-plan.md
   - agents/memory/relationship_queries.py
   - agents/memory/relationship_mutations.py
   - agents/memory/migrations.py
+  - agents/memory/_migration_interactions_session.py
   - tests/unit/python/test_relationship_session_scope.py
+  - tests/unit/python/test_session_id_interactions_migration.py
+  - tests/integration/test_session_continuity.py
 ---
 
 ## Summary

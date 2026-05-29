@@ -10,8 +10,18 @@ imported by the parent module without exposing it to direct callers.
 Symmetric latest-asserted-wins rule (RFC 0026 §F)
 -------------------------------------------------
 When a fact tuple is written, the storage primitive enforces a single
-live row per ``(agent_id, subject, predicate)`` key, with the row
-carrying the greatest ``asserted_at`` winning.  Two cases:
+live row per ``(agent_id, subject, predicate, session_id)`` key, with
+the row carrying the greatest ``asserted_at`` winning.  The
+``session_id`` predicate is the RFC 0031 Phase 2 PR 5 §F amendment —
+each session keeps its own truth about ``(subject, predicate)`` rather
+than one global truth; cross-session writes never retroactively
+contaminate another session's view (`ISSUE-0079
+<../../docs/issues/ISSUE-0079-cross-session-supersede-not-scoped.md>`_).
+The ``legacy`` carve-out participates symmetrically — a write tagged
+with the active session can supersede a ``legacy`` row (a pre-RFC fact
+the active session has reasserted) and a ``legacy`` write can supersede
+its own predecessors, but a non-legacy write cannot reach across to
+another non-legacy session.  Two cases:
 
 * **Older / equal live rows** (``asserted_at <= new.asserted_at``) are
   marked superseded by the new row.  Pulling all qualifying rows
@@ -76,6 +86,7 @@ async def apply_supersession(
     predicate: str,
     asserted_at: float,
     new_fact_id: str,
+    session_id: str,
 ) -> SupersessionResult:
     """Sweep older + newer live rows for the symmetric latest-wins chain.
 
@@ -83,6 +94,13 @@ async def apply_supersession(
     after the INSERT and before the per-statement ``commit``.  The
     helper issues the ``UPDATE`` writes itself but defers the commit to
     the caller so the INSERT and the chain land atomically.
+
+    ``session_id`` (RFC 0031 Phase 2 PR 5 — RFC 0026 §F amendment): the
+    supersede chain is keyed on ``(agent_id, subject, predicate,
+    session_id)``.  A write in session ``run-b`` cannot supersede a row
+    in session ``run-a`` — each session has its own latest-wins chain
+    on the same ``(subject, predicate)`` (`ISSUE-0079
+    <../../docs/issues/ISSUE-0079-cross-session-supersede-not-scoped.md>`_).
     """
     async with db.execute(
         """
@@ -90,11 +108,12 @@ async def apply_supersession(
         WHERE agent_id = ?
           AND subject = ?
           AND predicate = ?
+          AND session_id = ?
           AND superseded_by IS NULL
           AND asserted_at <= ?
           AND fact_id != ?
         """,
-        (agent_id, subject, predicate, asserted_at, new_fact_id),
+        (agent_id, subject, predicate, session_id, asserted_at, new_fact_id),
     ) as cursor:
         older_rows = await cursor.fetchall()
     older_fact_ids: tuple[str, ...] = tuple(row[0] for row in older_rows)
@@ -105,12 +124,13 @@ async def apply_supersession(
         WHERE agent_id = ?
           AND subject = ?
           AND predicate = ?
+          AND session_id = ?
           AND superseded_by IS NULL
           AND asserted_at > ?
         ORDER BY asserted_at DESC
         LIMIT 1
         """,
-        (agent_id, subject, predicate, asserted_at),
+        (agent_id, subject, predicate, session_id, asserted_at),
     ) as cursor:
         newer_row = await cursor.fetchone()
     self_superseded_by: str | None = newer_row[0] if newer_row else None

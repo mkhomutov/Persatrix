@@ -234,53 +234,27 @@ class TestLegacyCarveOutVisibleByDefault:
         assert legacy_id in {f.fact_id for f in facts}
 
 
-# ─── Documented gap — cross-session supersede (ISSUE-0079) ──
+# ─── Cross-session supersede is session-scoped (PR 5 / ISSUE-0079) ──
 
 
-class TestCrossSessionSupersedeIsDocumentedGap:
-    """Pin the F-3 hole on the write side of the facts tier.
+class TestCrossSessionSupersedeIsSessionScoped:
+    """The write-side F-3 closer on the facts tier.
 
-    PR 3 closes F-3 on :meth:`FactStore.recall`, but
-    :func:`agents.memory._facts_supersede.apply_supersession` (invoked
-    from :meth:`FactStore.store`) keys symmetric latest-asserted-wins
-    on ``(agent_id, subject, predicate)`` with **no** ``session_id``
-    predicate — see :file:`agents/memory/_facts_supersede.py:87-97`.
-    Writing the same ``(subject, predicate)`` in a different session
-    with a later ``asserted_at`` silently marks the active-session
-    row's ``superseded_by`` non-null, so it disappears from the active
-    session's default recall (which filters both
-    ``superseded_by IS NULL`` *and* the §D session-IN clause).
+    PR 3 closed F-3 on :meth:`FactStore.recall`; PR 5 closes the
+    write-side by adding the ``session_id`` predicate to
+    :func:`agents.memory._facts_supersede.apply_supersession`.  Symmetric
+    latest-asserted-wins is now keyed on
+    ``(agent_id, subject, predicate, session_id)`` so a fact written
+    under ``run-b`` cannot retroactively contaminate ``run-a``'s view
+    of its own fact (`ISSUE-0079
+    <../../../docs/issues/ISSUE-0079-cross-session-supersede-not-scoped.md>`_).
 
-    Net effect: a fact written under ``run-b`` can erase a fact under
-    ``run-a`` from ``run-a``'s own view — the canonical F-3 reproduction
-    on the facts surface, just relocated from the read path to the
-    write path.
-
-    Tracked as
-    `ISSUE-0079 <../../../docs/issues/ISSUE-0079-cross-session-supersede-not-scoped.md>`_.
-    Fix needs an RFC 0026 §F amendment — supersede is currently
-    documented as per-``(agent_id, subject, predicate)``, and scoping
-    it by ``session_id`` is a real semantics call (each session keeps
-    its own truth about ``bob.lives_in`` vs. one global truth).
-
-    Marker is :data:`pytest.mark.xfail(strict=True)` so the day a PR
-    fixes the gap the assertion flips to ``XPASS`` and the suite fails,
-    forcing the marker to be removed.  The xfail is **not**
-    ``raises=AssertionError`` — keeping the exception type open
-    insulates the pin against an interim refactor that surfaces a
-    different exception class along the way.
+    RFC 0026 §F amendment: latest-asserted-wins is per-session.  Each
+    session keeps its own truth about ``bob.lives_in``; the ``legacy``
+    carve-out participates in supersede so a pre-RFC row can still be
+    superseded by an active-session reassertion (but not vice versa).
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "ISSUE-0079: cross-session supersede is not yet scoped by "
-            "session_id; RFC 0026 §F treats latest-asserted-wins as "
-            "per-(agent_id, subject, predicate) only.  PR 3 ships the "
-            "recall-side §D filter; the write-side gap is the deferred "
-            "F-3 closer on this surface."
-        ),
-    )
     async def test_run_b_write_does_not_supersede_run_a_fact(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:

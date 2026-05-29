@@ -163,49 +163,40 @@ class TestDeleteOldEpisodes:
 
 
 class TestFutureMigration:
-    async def test_hypothetical_v10_migration_applied(self):
-        """Patch MIGRATIONS with a hypothetical v10 entry, verify v1–v10 applied.
+    async def test_hypothetical_v11_migration_applied(self):
+        """Patch MIGRATIONS with a hypothetical v11 entry, verify v1–v11 applied.
 
-        Original test asserted v1–v5; v5 is now occupied by RFC 0020's
-        episodes-interaction migration, v6 by RFC 0008 PR 5's
-        procedural-tier columns, v7 by RFC 0031 Phase 1's session_id
-        columns, v8 by RFC 0026 PR 1's declarative-facts table, and v9
-        by RFC 0031 Phase 2 PR 1's notes-tier session_id column, so
-        the forward-compat probe is bumped to v10.  Behaviour under
-        test (forward-compat for new migration tail entries) is
-        unchanged.
-
-        When migration v9 landed in commit 3b6e7f7 this probe was left
-        at v9, so the second ``MIGRATIONS.append((9, ...))`` collided
-        with the registered v9 and SQLite raised
-        ``UNIQUE constraint failed: schema_version.version``.  The
-        rename to v10 + table-name + assertion-list bump restores the
-        forward-compat shape (always one past the highest real version).
+        Forward-compat probe — always one past the highest real
+        migration.  Bumped from v10 → v11 when migration v10 (RFC 0031
+        Phase 2 PR 5 — ``session_id`` on interactions) landed; the
+        rename + table-name bump preserves the
+        "one-past-the-tail collision" contract that previously caught
+        ``UNIQUE constraint failed: schema_version.version`` regressions.
         """
         from agents.memory.migrations import MIGRATIONS
 
-        v10 = (
-            10,
+        v11 = (
+            11,
             "Hypothetical test-only table",
-            "CREATE TABLE IF NOT EXISTS _test_v10 (id TEXT PRIMARY KEY);",
+            "CREATE TABLE IF NOT EXISTS _test_v11 (id TEXT PRIMARY KEY);",
         )
         original = list(MIGRATIONS)
         try:
-            MIGRATIONS.append(v10)
+            MIGRATIONS.append(v11)
             mem = EpisodicMemory(agent_id="test-agent", db_path=":memory:")
             await mem.initialize()
             db = mem._ensure_db()
 
-            # All ten versions should be recorded
+            # All eleven versions should be recorded
             async with db.execute(
                 "SELECT version FROM schema_version ORDER BY version"
             ) as cursor:
                 versions = [r[0] for r in await cursor.fetchall()]
-            assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
-            # v10 table should exist
+            # v11 table should exist
             async with db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v10'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v11'"
             ) as cursor:
                 assert await cursor.fetchone() is not None
 
