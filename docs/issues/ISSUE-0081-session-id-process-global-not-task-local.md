@@ -182,3 +182,19 @@ final PR.
 > contextvars enabler (PR 1) is decision-free and is being built first;
 > the session-unit (PR 2) and tenant-key (PR 3) design calls are
 > recorded inline in those PRs as RFC amendments for review.
+>
+> 2026-05-29 — **PR 3 (tenant/principal dimension) landed the Python
+> vertical.** Migration v11 adds `principal_id TEXT NOT NULL DEFAULT
+> 'local'` to all five persona-memory tables; the scope key is now
+> `(agent_id, principal_id, session_id)` with **strict-equality** recall
+> (no carve-out — `agents/memory/_principal_filter.py`) on both the read
+> and write paths (including the facts supersession chain). A sibling
+> `principal_scope` ContextVar + the `persatrix-principal` gRPC rail
+> (`agents/principal_id.py`, bound in `on_event` via
+> `agents/request_scope.py`) ship now and resolve to `'local'` until the
+> verified-principal source (RFC 0039, still proposed) lands. Per the
+> maintainer's recorded decisions: **strict isolation** over a
+> default-principal carve-out, and **Python-vertical + rail now, Go
+> orchestrator emission deferred** (mirroring PR 2). Recorded as the
+> RFC 0031 §C/§D amendments. Remaining: PR 4 hardens the session
+> `legacy` carve-out so it cannot bridge principals.

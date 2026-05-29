@@ -29,8 +29,9 @@ from .dispatch import EventDispatcher
 from .generated import task_pb2, task_pb2_grpc
 from .participant import validate_participant_type
 from .persona_types import AgentEvent, EventType
+from .principal_id import EVENT_PRINCIPAL_METADATA_KEY
 from .session_id import EVENT_SESSION_METADATA_KEY
-from .session_metadata import _session_from_context
+from .session_metadata import _principal_from_context, _session_from_context
 from .wallet_client import BudgetExceededError
 
 logger = logging.getLogger("Persatrix.agent.server")
@@ -252,6 +253,10 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         request_session = _session_from_context(context)
         if request_session is not None:
             event.metadata[EVENT_SESSION_METADATA_KEY] = request_session
+        # ISSUE-0081 PR 3: same rail for the tenant/principal axis.
+        request_principal = _principal_from_context(context)
+        if request_principal is not None:
+            event.metadata[EVENT_PRINCIPAL_METADATA_KEY] = request_principal
 
         try:
             # dispatch(execute_actions=False) returns actions without firing
@@ -429,6 +434,10 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         request_session = _session_from_context(context)
         if request_session is not None:
             event.metadata[EVENT_SESSION_METADATA_KEY] = request_session
+        # ISSUE-0081 PR 3: the tenant/principal rides the same envelope.
+        request_principal = _principal_from_context(context)
+        if request_principal is not None:
+            event.metadata[EVENT_PRINCIPAL_METADATA_KEY] = request_principal
 
         # Fire-and-forget: enqueue onto the agent's EventLoop and return
         # immediately. The loop owns decide → execute → recover when it

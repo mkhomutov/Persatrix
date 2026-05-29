@@ -17,6 +17,8 @@ import sqlite3
 
 import aiosqlite
 
+from ..principal_id import DEFAULT_PRINCIPAL_ID
+from ._principal_filter import principal_eq_clause
 from ._session_filter import session_in_clause
 from .episodic_queries import resolve_min_score
 
@@ -36,22 +38,29 @@ async def _recall_notes_fts5(
     min_score: float | None,
     sessions: list[str] | None,
     note_cols: tuple[str, ...],
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> list[aiosqlite.Row]:
     """FTS5 search across topic, content, and tags.
 
     ``sessions`` is the resolved session list from
     :func:`agents.memory._session_filter._resolve_session_list`;
-    ``None`` is the ``"*"`` no-filter mode.  Falls back to LIKE on
-    FTS5 parse failure or empty sanitized query.
+    ``None`` is the ``"*"`` no-filter mode.  ``principal_id``
+    (ISSUE-0081 PR 3) is the resolved active tenant — unconditional
+    strict equality, no carve-out.  Falls back to LIKE on FTS5 parse
+    failure or empty sanitized query.
     """
     sess_clause, sess_params = session_in_clause(
         sessions, column="n.session_id",
+    )
+    princ_clause, princ_params = principal_eq_clause(
+        principal_id, column="n.principal_id",
     )
     safe_query = _FTS5_SPECIAL.sub(" ", query).strip()
     if not safe_query:
         return await _recall_notes_like(
             db, agent_id=agent_id, query=query, limit=limit,
             min_score=min_score, sessions=sessions, note_cols=note_cols,
+            principal_id=principal_id,
         )
     effective_min_score = resolve_min_score(min_score)
     try:
@@ -64,12 +73,13 @@ async def _recall_notes_fts5(
               AND n.agent_id = ?
               AND (1.0 / (1.0 + ABS(fts.rank))) >= ?
               {sess_clause}
+              {princ_clause}
             ORDER BY fts.rank * -1 DESC
             LIMIT ?
             """,
             (
                 safe_query, agent_id, effective_min_score,
-                *sess_params, limit,
+                *sess_params, *princ_params, limit,
             ),
         ) as cursor:
             return list(await cursor.fetchall())
@@ -81,6 +91,7 @@ async def _recall_notes_fts5(
         return await _recall_notes_like(
             db, agent_id=agent_id, query=query, limit=limit,
             min_score=min_score, sessions=sessions, note_cols=note_cols,
+            principal_id=principal_id,
         )
 
 
@@ -93,15 +104,19 @@ async def _recall_notes_like(
     min_score: float | None,  # noqa: ARG001 — LIKE matches score 1.0
     sessions: list[str] | None,
     note_cols: tuple[str, ...],
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> list[aiosqlite.Row]:
     """LIKE fallback when FTS5 is unavailable.
 
     ``min_score`` is accepted for signature compatibility but not
     applied: LIKE matching is binary so every match scores ``1.0`` per
-    RFC 0017 Section C.
+    RFC 0017 Section C.  ``principal_id`` — see :func:`_recall_notes_fts5`.
     """
     sess_clause, sess_params = session_in_clause(
         sessions, column="session_id",
+    )
+    princ_clause, princ_params = principal_eq_clause(
+        principal_id, column="principal_id",
     )
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{escaped}%"
@@ -115,10 +130,14 @@ async def _recall_notes_like(
                OR content LIKE ? ESCAPE '\\'
                OR tags_json LIKE ? ESCAPE '\\')
           {sess_clause}
+          {princ_clause}
         ORDER BY updated_at DESC
         LIMIT ?
         """,
-        (agent_id, pattern, pattern, pattern, *sess_params, limit),
+        (
+            agent_id, pattern, pattern, pattern,
+            *sess_params, *princ_params, limit,
+        ),
     ) as cursor:
         return list(await cursor.fetchall())
 
@@ -130,10 +149,17 @@ async def _recall_notes_recency(
     limit: int,
     sessions: list[str] | None,
     note_cols: tuple[str, ...],
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> list[aiosqlite.Row]:
-    """No query — return most recently updated notes."""
+    """No query — return most recently updated notes.
+
+    ``principal_id`` — see :func:`_recall_notes_fts5`.
+    """
     sess_clause, sess_params = session_in_clause(
         sessions, column="session_id",
+    )
+    princ_clause, princ_params = principal_eq_clause(
+        principal_id, column="principal_id",
     )
     note_select = ", ".join(note_cols)
     async with db.execute(
@@ -142,9 +168,10 @@ async def _recall_notes_recency(
         FROM notes
         WHERE agent_id = ?
           {sess_clause}
+          {princ_clause}
         ORDER BY updated_at DESC
         LIMIT ?
         """,
-        (agent_id, *sess_params, limit),
+        (agent_id, *sess_params, *princ_params, limit),
     ) as cursor:
         return list(await cursor.fetchall())

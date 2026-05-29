@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 
+from ..observability.metrics import try_get_instruments
 from ..observability.spans import current_llm_span_id
 from ._events import MemoryTier, emit_memory_write
 
@@ -68,6 +69,38 @@ def emit_for_tier(
         )
 
 
+def emit_session_write(
+    *,
+    agent_id: str,
+    session_id: str,
+    surface: str,
+) -> None:
+    """Increment the per-session ``sessions.writes`` counter after a write.
+
+    The RFC 0031 Phase 1 ``sessions.writes`` instrument (PR #337 M1) is
+    emitted from every persona-memory write boundary (episodes / notes /
+    relationships) with the same shape; extracted here so the three sites
+    share one shim instead of re-implementing the ``try_get_instruments``
+    + ``contextlib.suppress`` block (and so ``episodic.py`` stays under the
+    file-size cap once ISSUE-0081 PR 3 added the tenant dimension).
+
+    Like :func:`emit_for_tier`, the ``contextlib.suppress`` preserves the
+    failure-isolation contract: the row is already persisted, so a
+    metrics-backend failure must not surface as a write failure.
+    """
+    with contextlib.suppress(Exception):
+        inst = try_get_instruments()
+        if inst is not None:
+            inst.sessions_writes.add(
+                1,
+                attributes={
+                    "session_id": session_id,
+                    "agent.id": agent_id,
+                    "surface": surface,
+                },
+            )
+
+
 __all__ = [
     "EPISODIC_APPEND_SALIENCE",
     "FACTS_APPEND_SALIENCE",
@@ -75,4 +108,5 @@ __all__ = [
     "REFLECTION_CONTRADICTION_SALIENCE",
     "RELATIONSHIP_APPEND_SALIENCE",
     "emit_for_tier",
+    "emit_session_write",
 ]

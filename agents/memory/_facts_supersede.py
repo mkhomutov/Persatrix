@@ -92,6 +92,7 @@ async def apply_supersession(
     asserted_at: float,
     new_fact_id: str,
     session_id: str,
+    principal_id: str,
 ) -> SupersessionResult:
     """Sweep older + newer live rows for the symmetric latest-wins chain.
 
@@ -107,6 +108,12 @@ async def apply_supersession(
     ``run-a`` — each named session has its own latest-wins chain on the
     same ``(subject, predicate)`` (`ISSUE-0079
     <../../docs/issues/ISSUE-0079-cross-session-supersede-not-scoped.md>`_).
+
+    ``principal_id`` (ISSUE-0081 PR 3) adds the orthogonal tenant axis to
+    the chain key with **strict equality** (no carve-out — the principal
+    axis has none): both sweeps require ``principal_id = ?`` so a write by
+    one tenant can never supersede — and thereby silently retract — a row
+    owned by another, even when subject / predicate / session collide.
 
     The carve-out is asymmetric, matching the §D recall filter
     (``session_id IN (active, legacy)``):
@@ -142,13 +149,14 @@ async def apply_supersession(
           AND subject = ?
           AND predicate = ?
           AND session_id IN ({older_placeholders})
+          AND principal_id = ?
           AND superseded_by IS NULL
           AND asserted_at <= ?
           AND fact_id != ?
         """,  # noqa: S608 — placeholders only; values bound below.
         (
             agent_id, subject, predicate, *older_sessions,
-            asserted_at, new_fact_id,
+            principal_id, asserted_at, new_fact_id,
         ),
     ) as cursor:
         older_rows = await cursor.fetchall()
@@ -161,12 +169,13 @@ async def apply_supersession(
           AND subject = ?
           AND predicate = ?
           AND session_id = ?
+          AND principal_id = ?
           AND superseded_by IS NULL
           AND asserted_at > ?
         ORDER BY asserted_at DESC
         LIMIT 1
         """,
-        (agent_id, subject, predicate, session_id, asserted_at),
+        (agent_id, subject, predicate, session_id, principal_id, asserted_at),
     ) as cursor:
         newer_row = await cursor.fetchone()
     self_superseded_by: str | None = newer_row[0] if newer_row else None

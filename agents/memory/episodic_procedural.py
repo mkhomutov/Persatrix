@@ -25,6 +25,8 @@ from typing import Any
 
 import aiosqlite
 
+from ..principal_id import DEFAULT_PRINCIPAL_ID
+from ._principal_filter import principal_eq_clause as _principal_eq_clause
 from ._session_filter import session_in_clause as _session_in_clause
 from .decay import (
     DEFAULT_C_MIN,
@@ -135,6 +137,7 @@ async def recall_procedures(
     stale_threshold: float | None = None,
     now: float | None = None,
     session_list: list[str] | None = None,
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> list[ProcedureRecallEntry]:
     """Return procedural entries with read-time confidence decay applied.
 
@@ -214,6 +217,14 @@ async def recall_procedures(
         )
         sql_base += session_clause
         params.extend(session_params)
+    # ISSUE-0081 PR 3: strict tenant equality is unconditional (no "*"
+    # bypass) — a procedure row owned by another tenant must never be
+    # admitted even on the CLI/debug ``sessions="*"`` path.
+    principal_clause, principal_params = _principal_eq_clause(
+        principal_id, column="principal_id",
+    )
+    sql_base += principal_clause
+    params.extend(principal_params)
     if sql_cutoff_seconds is not None:
         # COALESCE(last_validated_at, created_at) is the same anchor
         # the application-side decay uses, so the cutoff cannot

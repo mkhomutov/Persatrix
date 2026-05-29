@@ -163,40 +163,40 @@ class TestDeleteOldEpisodes:
 
 
 class TestFutureMigration:
-    async def test_hypothetical_v11_migration_applied(self):
-        """Patch MIGRATIONS with a hypothetical v11 entry, verify v1–v11 applied.
+    async def test_hypothetical_v12_migration_applied(self):
+        """Patch MIGRATIONS with a hypothetical v12 entry, verify v1–v12 applied.
 
         Forward-compat probe — always one past the highest real
-        migration.  Bumped from v10 → v11 when migration v10 (RFC 0031
-        Phase 2 PR 5 — ``session_id`` on interactions) landed; the
-        rename + table-name bump preserves the
-        "one-past-the-tail collision" contract that previously caught
+        migration.  Bumped v11 → v12 when migration v11 (ISSUE-0081 PR 3 —
+        ``principal_id`` on all five tiers) landed; the rename +
+        table-name bump preserves the "one-past-the-tail collision"
+        contract that previously caught
         ``UNIQUE constraint failed: schema_version.version`` regressions.
         """
         from agents.memory.migrations import MIGRATIONS
 
-        v11 = (
-            11,
+        v12 = (
+            12,
             "Hypothetical test-only table",
-            "CREATE TABLE IF NOT EXISTS _test_v11 (id TEXT PRIMARY KEY);",
+            "CREATE TABLE IF NOT EXISTS _test_v12 (id TEXT PRIMARY KEY);",
         )
         original = list(MIGRATIONS)
         try:
-            MIGRATIONS.append(v11)
+            MIGRATIONS.append(v12)
             mem = EpisodicMemory(agent_id="test-agent", db_path=":memory:")
             await mem.initialize()
             db = mem._ensure_db()
 
-            # All eleven versions should be recorded
+            # All twelve versions should be recorded
             async with db.execute(
                 "SELECT version FROM schema_version ORDER BY version"
             ) as cursor:
                 versions = [r[0] for r in await cursor.fetchall()]
-            assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+            assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
-            # v11 table should exist
+            # v12 table should exist
             async with db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v11'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='_test_v12'"
             ) as cursor:
                 assert await cursor.fetchone() is not None
 

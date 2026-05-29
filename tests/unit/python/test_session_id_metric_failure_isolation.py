@@ -54,9 +54,17 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-from agents.memory import episodic as _ep_mod
+from agents.memory import _salience as _sal_mod
 from agents.memory.episodic import EpisodicMemory
 from agents.observability.spans import EPISODIC_REMEMBER_SPAN
+
+# ISSUE-0081 PR 3: the post-commit ``sessions.writes`` emission +
+# ``contextlib.suppress`` wrapper were extracted from ``episodic.py`` into
+# the shared ``agents.memory._salience.emit_session_write`` shim, so the
+# failure-injection patch targets ``_salience.try_get_instruments`` (the
+# new lookup site).  The end-to-end invariant under test is unchanged:
+# a metric-backend failure after ``db.commit()`` must not propagate to the
+# caller or mark the remember span ERROR.
 
 
 @pytest.fixture
@@ -128,7 +136,7 @@ async def test_metric_failure_after_commit_does_not_mark_span_error(
     wrapper at the metric call site is the load-bearing piece.
     """
     raising = _RaisingInstruments()
-    monkeypatch.setattr(_ep_mod, "try_get_instruments", lambda: raising)
+    monkeypatch.setattr(_sal_mod, "try_get_instruments", lambda: raising)
 
     mem = EpisodicMemory(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))
     await mem.initialize()
@@ -195,7 +203,7 @@ async def test_metric_failure_does_not_record_exception_on_span(
     would still leak a spurious exception event into the trace.
     """
     monkeypatch.setattr(
-        _ep_mod, "try_get_instruments", lambda: _RaisingInstruments(),
+        _sal_mod, "try_get_instruments", lambda: _RaisingInstruments(),
     )
 
     mem = EpisodicMemory(agent_id="ember-owl", db_path=str(tmp_path / "m.db"))

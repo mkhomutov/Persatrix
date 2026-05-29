@@ -26,6 +26,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from ..principal_id import resolve_principal_id_silent
 from ..session_id import current_session_id, resolve_session_id_silent
 from .decay import (
     DEFAULT_C_MIN,
@@ -159,6 +160,13 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
         # ``agents.session_id`` so the env-var name + legacy carve-out
         # cannot drift against ``agents.persona_runtime.session_id``.
         self._session_id = resolve_session_id_silent()
+        # ISSUE-0081 PR 3: resolve the tenant/principal once at
+        # construction, same rationale as the session snapshot above.  The
+        # procedural recall path (the only facade-level read that builds
+        # its own scope predicate) threads this; the per-tier objects own
+        # their own ``_active_principal_id`` snapshots for the
+        # persona-direct path.
+        self._principal_id = resolve_principal_id_silent()
 
     @classmethod
     def from_config(cls, config: StoreConfig) -> MemoryStore:

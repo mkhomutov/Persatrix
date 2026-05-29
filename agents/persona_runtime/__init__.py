@@ -63,7 +63,7 @@ from ..persona_types import (
     EventType,
     PersonaState,
 )
-from ..session_id import session_scope_from_metadata
+from ..request_scope import request_scope_from_metadata
 from ..tools.registry import ToolDefinition
 from .action_loop import _ActionLoopMixin
 from .conversation_seed import _ConversationWindowMixin
@@ -382,11 +382,11 @@ class _LLMPersonaAgent(
             span.add_event("received")
             async with self._lock:
                 span.add_event("queued")
-                # ISSUE-0081 PR 2: bind the orchestrator-authored per-request
-                # session for the handler's lifetime (``wait_for``'s child task
-                # copies this task-local scope; see ``session_scope_from_metadata``).
+                # ISSUE-0081 PR 2+3: bind the per-request session AND tenant
+                # for the handler's lifetime (``wait_for``'s child task copies
+                # these task-local scopes; see ``request_scope_from_metadata``).
                 try:
-                    with session_scope_from_metadata(event.metadata):
+                    with request_scope_from_metadata(event.metadata):
                         actions = await asyncio.wait_for(
                             self._on_event_inner(event), timeout=timeout,
                         )

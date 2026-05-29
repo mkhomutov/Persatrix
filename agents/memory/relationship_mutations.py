@@ -8,7 +8,6 @@ string; they carry no object state and are safe to call from any async context.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import math
 import time
@@ -18,9 +17,10 @@ from typing import Any
 import aiosqlite
 from opentelemetry import trace
 
-from ..observability.metrics import try_get_instruments
 from ..observability.spans import RELATIONSHIP_UPDATE_SPAN
+from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ..session_id import normalize_session_id
+from ._salience import emit_session_write
 from .relationship_queries import truncate_field, validate_other_id, validate_participant_types
 from .relationship_types import (
     _DEFAULT_TRUST,
@@ -187,6 +187,7 @@ async def record_interaction(
     participant_type: str = "agent",
     other_participant_type: str = "agent",
     session_id: str = "legacy",
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> str:
     """Record an interaction with another participant.
 
@@ -230,8 +231,8 @@ async def record_interaction(
             (id, participant_id, participant_type,
              other_participant_id, other_participant_type,
              interaction_type, outcome, sentiment, created_at,
-             session_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             session_id, principal_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             interaction_id,
@@ -244,6 +245,7 @@ async def record_interaction(
             sentiment,
             now,
             session_id,
+            principal_id,
         ),
     )
 
@@ -252,15 +254,16 @@ async def record_interaction(
     # ON CONFLICT branch deliberately omits it so the row tracks the
     # first-seen session and a future cross-session interaction does
     # not silently overwrite the per-row tag (recall semantics for that
-    # use case live on the interactions table in Phase 2).
+    # use case live on the interactions table in Phase 2).  ISSUE-0081
+    # PR 3: ``principal_id`` rides the same first-seen-INSERT contract.
     await db.execute(
         """
         INSERT INTO relationships
             (participant_id, participant_type,
              other_participant_id, other_participant_type,
              trust_score, interaction_count,
-             last_interaction_at, notes, session_id)
-        VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?)
+             last_interaction_at, notes, session_id, principal_id)
+        VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, ?)
         ON CONFLICT(participant_id, participant_type,
                     other_participant_id, other_participant_type) DO UPDATE SET
             interaction_count = interaction_count + 1,
@@ -274,33 +277,19 @@ async def record_interaction(
             _DEFAULT_TRUST,
             now,
             session_id,
+            principal_id,
             now,
         ),
     )
     await db.commit()
     # RFC 0031 Phase 1 — increment the per-session write counter (Python
-    # mirror of the orchestrator-side ``sessions.writes``).  Recorded on
-    # every ``record_interaction`` call, not just the first-seen INSERT
-    # branch, so dashboards see one tick per persona-level interaction
-    # event regardless of whether the conflict path fired.
-    #
-    # RFC 0031 Phase 2 PR 3 (F17 carry-forward): wrapped in
-    # ``contextlib.suppress`` so an OTEL backend exception cannot
-    # surface as a write failure after ``db.commit()`` has already
-    # persisted the row — same failure-isolation contract as
-    # :meth:`EpisodicMemory.store_episode` (PR #337 M1) and
-    # :meth:`NoteStore.store_note` (PR 449).
-    with contextlib.suppress(Exception):
-        inst = try_get_instruments()
-        if inst is not None:
-            inst.sessions_writes.add(
-                1,
-                attributes={
-                    "session_id": session_id,
-                    "agent.id": agent_id,
-                    "surface": "relationship",
-                },
-            )
+    # mirror of the orchestrator-side ``sessions.writes``) via the shared
+    # shim.  Recorded on every ``record_interaction`` call, not just the
+    # first-seen INSERT branch, so dashboards see one tick per persona-level
+    # interaction event regardless of whether the conflict path fired.
+    emit_session_write(
+        agent_id=agent_id, session_id=session_id, surface="relationship",
+    )
     return interaction_id
 
 
@@ -310,6 +299,7 @@ async def seed_trust(
     config_relationships: list[dict[str, Any]],
     *,
     session_id: str = "legacy",
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> None:
     """Seed trust scores from agent config. Never overwrites existing rows.
 
@@ -319,6 +309,11 @@ async def seed_trust(
     so MT-SESSION-001 Step 7 sees ``run-a`` on a config-seeded row
     rather than the column-default ``legacy``.  Existing rows are still
     untouched — INSERT OR IGNORE preserves the first-seen contract.
+
+    ``principal_id`` (ISSUE-0081 PR 3; default
+    :data:`DEFAULT_PRINCIPAL_ID`) tags the same seed rows with the active
+    tenant so a config-seeded relationship is visible to the principal
+    that booted the persona, not bridged across tenants.
     """
     for entry in config_relationships:
         other_id = entry.get("agent_id")
@@ -349,9 +344,9 @@ async def seed_trust(
                 (participant_id, participant_type,
                  other_participant_id, other_participant_type,
                  trust_score, interaction_count,
-                 last_interaction_at, notes, session_id)
-            VALUES (?, 'agent', ?, 'agent', ?, 0, NULL, NULL, ?)
+                 last_interaction_at, notes, session_id, principal_id)
+            VALUES (?, 'agent', ?, 'agent', ?, 0, NULL, NULL, ?, ?)
             """,
-            (agent_id, other_id, trust_level, session_id),
+            (agent_id, other_id, trust_level, session_id, principal_id),
         )
     await db.commit()

@@ -9,15 +9,17 @@ rewrites tables with the 12-step ALTER TABLE pattern, performs an
 baselines where the migration must inspect the live schema before
 issuing DDL.  See each handler's docstring for per-version rationale.
 
-The registry currently covers ``v4`` through ``v10``.  Migration ``v8``
+The registry currently covers ``v4`` through ``v11``.  Migration ``v8``
 (RFC 0026 PR 1 — declarative-facts table) lives in
 :mod:`agents.memory._migration_facts`, migration ``v9`` (RFC 0031
 Phase 2 PR 1 — ``session_id`` on notes) lives in
-:mod:`agents.memory._migration_notes_session`, and migration ``v10``
+:mod:`agents.memory._migration_notes_session`, migration ``v10``
 (RFC 0031 Phase 2 PR 5 — ``session_id`` on interactions) lives in
-:mod:`agents.memory._migration_interactions_session`; all are re-exported
-below so this module stays under the 500-line repo-wide soft cap.  The
-split mirrors :mod:`agents.observability._metrics_facts`.
+:mod:`agents.memory._migration_interactions_session`, and migration
+``v11`` (ISSUE-0081 PR 3 — ``principal_id`` on all five tiers) lives in
+:mod:`agents.memory._migration_principal`; all are re-exported below so
+this module stays under the 500-line repo-wide soft cap.  The split
+mirrors :mod:`agents.observability._metrics_facts`.
 
 Public API (``_MIGRATION_HANDLERS`` plus the ``_apply_migration_N``
 callables) is re-exported by :mod:`agents.memory.migrations` for
@@ -41,6 +43,7 @@ import aiosqlite
 from ._migration_facts import _apply_migration_8
 from ._migration_interactions_session import _apply_migration_10
 from ._migration_notes_session import _apply_migration_9
+from ._migration_principal import _apply_migration_11
 
 
 async def _apply_migration_4(db: aiosqlite.Connection) -> None:
@@ -457,4 +460,5 @@ _MIGRATION_HANDLERS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]
     8: _apply_migration_8,
     9: _apply_migration_9,
     10: _apply_migration_10,
+    11: _apply_migration_11,
 }

@@ -15,8 +15,10 @@ import logging
 
 import aiosqlite
 
+from ..principal_id import resolve_principal_id_silent
 from ..session_id import resolve_session_id_silent
 from ._boundary import warn_external_construction
+from ._principal_filter import resolve_active_principal
 from ._salience import RELATIONSHIP_APPEND_SALIENCE, emit_for_tier
 from ._session_filter import _resolve_session_list
 from .migrations import _apply_migrations
@@ -84,6 +86,9 @@ class RelationshipMemory:
         # MemoryStore facade, so the tier must resolve its own active
         # session for ``sessions=None`` recall to be correct there too.
         self._active_session_id = resolve_session_id_silent()
+        # ISSUE-0081 PR 3 — tenant snapshot; call-time ``principal_scope``
+        # wins via ``resolve_active_principal`` on recall + write paths.
+        self._active_principal_id = resolve_principal_id_silent()
 
     @property
     def agent_id(self) -> str:
@@ -121,6 +126,7 @@ class RelationshipMemory:
             await _seed_trust(
                 self._db, self._agent_id, config_relationships,
                 session_id=session_id,
+                principal_id=resolve_active_principal(self._active_principal_id),
             )
 
     async def close(self) -> None:
@@ -165,6 +171,7 @@ class RelationshipMemory:
             participant_type=participant_type,
             other_participant_type=other_participant_type,
             sessions=session_list,
+            principal_id=resolve_active_principal(self._active_principal_id),
         )
 
     async def update_trust(
@@ -244,6 +251,7 @@ class RelationshipMemory:
             participant_type=participant_type,
             other_participant_type=other_participant_type,
             session_id=session_id,
+            principal_id=resolve_active_principal(self._active_principal_id),
         )
         emit_for_tier(
             agent_id=self._agent_id,
@@ -276,6 +284,7 @@ class RelationshipMemory:
             participant_type=participant_type,
             other_participant_type=other_participant_type,
             sessions=session_list,
+            principal_id=resolve_active_principal(self._active_principal_id),
         )
 
     async def get_all_relationships(
@@ -302,4 +311,5 @@ class RelationshipMemory:
             self._ensure_db(), self._agent_id,
             participant_type=participant_type,
             sessions=session_list,
+            principal_id=resolve_active_principal(self._active_principal_id),
         )
