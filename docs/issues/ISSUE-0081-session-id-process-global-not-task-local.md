@@ -196,5 +196,13 @@ final PR.
 > maintainer's recorded decisions: **strict isolation** over a
 > default-principal carve-out, and **Python-vertical + rail now, Go
 > orchestrator emission deferred** (mirroring PR 2). Recorded as the
-> RFC 0031 §C/§D amendments. Remaining: PR 4 hardens the session
-> `legacy` carve-out so it cannot bridge principals.
+> RFC 0031 §C/§D amendments. A review follow-up principal-scoped the
+> procedural-reuse `refresh_confidence` (it matched `(agent_id, key)`
+> only — a second tenant's re-store refreshed the first tenant's row and
+> was then dropped by the refresh short-circuit). Remaining: PR 4 hardens
+> the session `legacy` carve-out so it cannot bridge principals; and the
+> agent-global background maintenance sweeps (episode eviction/retention,
+> superseded-fact prune) plus GDPR `delete_by_subject` are not yet
+> per-principal — they are capacity/erasure-policy calls deferred to the
+> RFC 0039 multi-tenant work, not read-confidentiality leaks (recall
+> stays principal-filtered). See the RFC 0031 §C amendment.

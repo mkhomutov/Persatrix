@@ -314,6 +314,8 @@ async def refresh_confidence(
     db: aiosqlite.Connection,
     agent_id: str,
     key: str,
+    *,
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> bool:
     """Mark every procedure row tagged ``procedure:{key}`` as freshly validated.
 
@@ -324,6 +326,15 @@ async def refresh_confidence(
     Implements the "Confidence refresh on successful reuse" contract
     from RFC 0008 §G — :meth:`MemoryStore.store_procedure` invokes it
     automatically when a re-store hits an existing key.
+
+    ``principal_id`` (ISSUE-0081 PR 3; default :data:`DEFAULT_PRINCIPAL_ID`)
+    scopes the refresh to the active tenant with the same strict equality
+    the recall path uses.  Without it the UPDATE matched on
+    ``(agent_id, key)`` only, so a second tenant re-storing the same key
+    refreshed the *first* tenant's row (cross-tenant write-bleed) and —
+    because ``store_procedure`` short-circuits on a non-zero rowcount — its
+    own write was silently dropped.  The predicate is now symmetric with
+    :func:`recall_procedures` (review follow-up).
     """
     if not key or not key.strip():
         raise ValueError("key must not be empty")
@@ -335,10 +346,14 @@ async def refresh_confidence(
     # because ``json.dumps`` quotes every list element) still anchor the
     # match to a single tag-array element.
     pattern = f'%"procedure:{_escape_like(key)}"%'
+    principal_clause, principal_params = _principal_eq_clause(
+        principal_id, column="principal_id",
+    )
     cursor = await db.execute(
         "UPDATE episodes SET confidence = 1.0, last_validated_at = ? "
-        "WHERE agent_id = ? AND tags_json LIKE ? ESCAPE '\\'",
-        (time.time(), agent_id, pattern),
+        "WHERE agent_id = ? AND tags_json LIKE ? ESCAPE '\\'"
+        f"{principal_clause}",
+        (time.time(), agent_id, pattern, *principal_params),
     )
     await db.commit()
     return (cursor.rowcount or 0) > 0

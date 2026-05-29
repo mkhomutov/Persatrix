@@ -294,6 +294,47 @@ class TestProceduralPrincipalIsolation:
             finally:
                 await store.close()
 
+    async def test_store_same_key_two_principals_isolated(self) -> None:
+        """Two tenants storing a procedure under the *same* key must each
+        own a distinct row — tenant-b's store must neither mutate tenant-a's
+        procedure nor be silently dropped.
+
+        Regression for the ISSUE-0081 PR 3 review finding: ``store_procedure``
+        opens with ``refresh_confidence``, whose UPDATE matched on
+        ``(agent_id, key)`` only.  A second tenant re-storing the same key
+        therefore (a) reset the *first* tenant's ``confidence`` /
+        ``last_validated_at`` (cross-tenant write-bleed) and (b) returned
+        early via the refresh short-circuit, so its own row was never
+        inserted (silent lost write — invisible afterwards because recall is
+        principal-filtered).  The refresh predicate is now principal-scoped,
+        symmetric with the recall path.
+        """
+        from agents.memory.facade import MemoryStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "m.db")
+            store = MemoryStore(agent_id="a", db_path=path)
+            await store.initialize()
+            try:
+                with principal_scope("tenant-a"):
+                    await store.store_procedure(
+                        "do.thing", "a-step", confidence=0.9,
+                    )
+                with principal_scope("tenant-b"):
+                    await store.store_procedure(
+                        "do.thing", "b-step", confidence=0.4,
+                    )
+                    got_b = await store.retrieve_procedures(sessions="*")
+                # tenant-b's own write persisted (not eaten by the refresh
+                # short-circuit) and carries tenant-b's body.
+                assert [e.content for e in got_b] == ["b-step"]
+                # tenant-a still owns its untouched row.
+                with principal_scope("tenant-a"):
+                    got_a = await store.retrieve_procedures(sessions="*")
+                assert [e.content for e in got_a] == ["a-step"]
+            finally:
+                await store.close()
+
 
 # ─── Single-tenant: behaviour unchanged ─────────────────────
 

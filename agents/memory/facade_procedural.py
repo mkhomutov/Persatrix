@@ -155,7 +155,14 @@ class ProceduralFacadeMixin:
             )
         db = self._episodic._ensure_db()  # noqa: SLF001 — facade owns the connection
         # Refresh path: existing key → reset confidence + last_validated.
-        refreshed = await _refresh_confidence(db, self._agent_id, key)
+        # ISSUE-0081 PR 3: scope the refresh to the active tenant (symmetric
+        # with ``retrieve_procedures``) so a second tenant re-storing the
+        # same key neither refreshes the first tenant's row nor loses its
+        # own write to the refresh short-circuit (review follow-up).
+        refreshed = await _refresh_confidence(
+            db, self._agent_id, key,
+            principal_id=resolve_active_principal(self._principal_id),
+        )
         if refreshed:
             return
         context: dict[str, Any] = {"procedure_key": key}
