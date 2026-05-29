@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/mkhomutov/persatrix/internal/generated/taskpb"
+	"github.com/mkhomutov/persatrix/internal/observability/grpcmeta"
 	"github.com/mkhomutov/persatrix/internal/registry"
 )
 
@@ -38,6 +39,16 @@ var dispatcherTracer = otel.Tracer("persatrix/channels/dispatch")
 // `Get` is required for per-recipient lookups.
 type AgentResolver interface {
 	Get(ctx context.Context, agentID string) (*registry.AgentInfo, error)
+}
+
+// SessionBinder resolves (and on first sight mints + persists) the
+// per-request session id for the `(agent, channel, user)` unit decided in
+// RFC 0031 §B. [*SessionResolver] is the production implementation; the
+// interface is the seam unit tests stub so dispatch coverage does not need a
+// real SQLite store. Defined locally (not imported) so the dispatcher depends
+// only on the one method it calls.
+type SessionBinder interface {
+	Resolve(ctx context.Context, agentID, channelID, userID string) (string, error)
 }
 
 // dialFunc is the seam the dispatcher uses to open a gRPC connection.
@@ -91,6 +102,23 @@ type GRPCMessageDispatcher struct {
 	resolver AgentResolver
 	logger   *zap.Logger
 	dial     dialFunc
+	// sessions resolves the per-request `persatrix-session` id emitted on
+	// the outbound gRPC metadata (ISSUE-0082 PR 2). Nil on the
+	// channels-disabled / NoopDispatcher-sibling paths and in tests that do
+	// not exercise emission — a nil binder means no session header, so
+	// behaviour is byte-identical to the pre-ISSUE-0082 dispatch.
+	sessions SessionBinder
+}
+
+// DispatcherOption configures a [GRPCMessageDispatcher] at construction.
+type DispatcherOption func(*GRPCMessageDispatcher)
+
+// WithSessionResolver wires the per-request [SessionBinder] whose id is
+// emitted as the `persatrix-session` gRPC header on every dispatch. Omitting
+// it leaves the dispatcher emitting no session header (the pre-ISSUE-0082
+// behaviour).
+func WithSessionResolver(b SessionBinder) DispatcherOption {
+	return func(d *GRPCMessageDispatcher) { d.sessions = b }
 }
 
 // ErrAgentNotReady is returned (wrapped) when the registry reports a
@@ -101,15 +129,19 @@ var ErrAgentNotReady = errors.New("channels: agent not ready")
 // NewGRPCMessageDispatcher wires a dispatcher around the orchestrator's
 // agent registry. `logger` may be nil — replaced with `zap.NewNop()` to
 // keep the no-OTEL test paths quiet.
-func NewGRPCMessageDispatcher(resolver AgentResolver, logger *zap.Logger) *GRPCMessageDispatcher {
+func NewGRPCMessageDispatcher(resolver AgentResolver, logger *zap.Logger, opts ...DispatcherOption) *GRPCMessageDispatcher {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &GRPCMessageDispatcher{
+	d := &GRPCMessageDispatcher{
 		resolver: resolver,
 		logger:   logger,
 		dial:     grpc.NewClient,
 	}
+	for _, opt := range opts {
+		opt(d)
+	}
+	return d
 }
 
 // Dispatch implements [MessageDispatcher].
@@ -171,6 +203,36 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 	// Address known — pin it on the span so a delivery failure can be
 	// correlated to a specific dial target by Jaeger/Tempo query.
 	span.SetAttributes(attribute.String("recipient.address", agent.Address))
+
+	// ISSUE-0082 PR 2: resolve the per-request session for the
+	// (recipient-agent, channel, sender) unit (RFC 0031 §B) and emit it as
+	// the `persatrix-session` gRPC header, feeding the ISSUE-0081 rail that
+	// re-establishes a per-conversation `session_scope` persona-side. The
+	// resolver is the single source of the id; `Dispatch` is the only live
+	// emission site (the synchronous chat path is dead-but-wired, ISSUE-0035).
+	//
+	// Resolution failure is non-fatal by design: a session hiccup must never
+	// drop a message. On error we log and dispatch without the header, so the
+	// persona falls back to its construction-time (legacy) snapshot — exactly
+	// the pre-activation behaviour, with no row stranded (§D legacy carve-out).
+	if d.sessions != nil {
+		sid, sErr := d.sessions.Resolve(ctx, participantID, msg.ChannelID, msg.SenderID)
+		switch {
+		case sErr != nil:
+			d.logger.Warn("channels: session resolve failed; dispatching without persatrix-session (persona falls back to legacy snapshot)",
+				zap.String("participant_id", participantID),
+				zap.String("channel_id", msg.ChannelID),
+				zap.String("sender_id", msg.SenderID),
+				zap.Error(sErr),
+			)
+		case sid != "":
+			ctx = grpcmeta.InjectSession(ctx, sid)
+			// Low-cardinality-on-span, never a metric label (RFC 0031 OQ #7):
+			// pin the session so a trace can be pivoted to the conversation
+			// it served.
+			span.SetAttributes(attribute.String("session.id", sid))
+		}
+	}
 
 	conn, err := d.dial(agent.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {

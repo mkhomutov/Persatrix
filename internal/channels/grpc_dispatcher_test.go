@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
@@ -41,15 +42,21 @@ func (s *stubResolver) Get(_ context.Context, id string) (*registry.AgentInfo, e
 }
 
 // recordingAgentServer captures the most recent ReceiveChannelMessage
-// payload so tests can assert wire-shape invariants.
+// payload so tests can assert wire-shape invariants. `gotMD` captures the
+// incoming gRPC metadata so the ISSUE-0082 session-header emission can be
+// asserted from the receiver's perspective (the wire is the contract).
 type recordingAgentServer struct {
 	taskpb.UnimplementedAgentServiceServer
 	gotEvent *taskpb.ChannelMessageEvent
+	gotMD    metadata.MD
 	respond  func() error
 }
 
-func (r *recordingAgentServer) ReceiveChannelMessage(_ context.Context, ev *taskpb.ChannelMessageEvent) (*taskpb.TaskAck, error) {
+func (r *recordingAgentServer) ReceiveChannelMessage(ctx context.Context, ev *taskpb.ChannelMessageEvent) (*taskpb.TaskAck, error) {
 	r.gotEvent = ev
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		r.gotMD = md
+	}
 	if r.respond != nil {
 		if err := r.respond(); err != nil {
 			return nil, err

@@ -41,6 +41,15 @@ const (
 	// MDWorkflowID is the workflow definition identifier (independent of the
 	// per-execution `MDExecutionID`).  Maps to `workflow_id`.
 	MDWorkflowID = "persatrix-workflow-id"
+	// MDSession is the per-request session id the orchestrator emits on the
+	// channel-dispatch path (ISSUE-0082 PR 2).  It is a distinct concern from
+	// the four correlation IDs above: its persona-side consumer is the agent
+	// gRPC servicer + `_LLMPersonaAgent.on_event` (which re-establishes a
+	// `session_scope` from it), NOT the RFC 0018 logging interceptor that
+	// binds the four IDs to structlog.  The wire value MUST byte-match
+	// `agents.session_id.SESSION_METADATA_GRPC_KEY` — a rename on either side
+	// silently disables the ISSUE-0081 per-request session rail.
+	MDSession = "persatrix-session"
 )
 
 // IDs carries the four correlation IDs propagated across the gRPC boundary.
@@ -80,6 +89,24 @@ func InjectIDs(ctx context.Context, ids IDs) context.Context {
 		return ctx
 	}
 	return metadata.AppendToOutgoingContext(ctx, pairs...)
+}
+
+// InjectSession returns ctx with the per-request session id appended to the
+// outgoing gRPC metadata under [MDSession].  An empty id is a no-op (the ctx
+// is returned unchanged), matching the partial-set semantics of [InjectIDs] —
+// the live dispatch path always resolves a concrete id, but a blank must
+// never ride the wire as an empty header the persona side would ignore.
+//
+// Session is deliberately a separate helper rather than a fifth field on
+// [IDs]: it has a distinct persona-side consumer (the session_scope rebind,
+// not the structlog correlation interceptor) and the two evolve
+// independently.  AppendToOutgoingContext merges, so this composes with a
+// prior InjectIDs on the same ctx.
+func InjectSession(ctx context.Context, sessionID string) context.Context {
+	if sessionID == "" {
+		return ctx
+	}
+	return metadata.AppendToOutgoingContext(ctx, MDSession, sessionID)
 }
 
 // ExtractIDs reads the four metadata keys from ctx's incoming gRPC metadata
