@@ -1,7 +1,7 @@
 ---
 id: ISSUE-0077
 summary: "`NoteStore.update_note` / `delete_note` / `count_notes` remain agent-scoped after RFC 0031 Phase 2 PR 2 — a non-active session that knows a note's UUID can mutate or delete a row owned by another session. The recall (read) surface is session-scoped + legacy carve-out, so UUID exposure to the LLM is constrained, but the write/admin surface bypasses §D — defence-in-depth gap, not an active exploit."
-status: closed
+status: resolved
 resolution: "Closed by RFC 0031 Phase 2 PR 5 — all three mutation methods now filter on `(agent_id, session_id IN (active, legacy))`, mirroring the §D recall predicate.  Pinned by `tests/unit/python/test_notes_mutation_session_scope.py::TestNotesMutationIsSessionScoped`."
 severity: low
 area: agents/memory

@@ -1,7 +1,7 @@
 ---
 id: ISSUE-0079
 summary: "`FactStore.store` invokes `_facts_supersede.apply_supersession`, which keys symmetric latest-asserted-wins on `(agent_id, subject, predicate)` with no `session_id` predicate — a fact written under one session can mark the same `(subject, predicate)` row from another session as `superseded_by`, removing it from the other session's default recall. Read-side §D recall filtering shipped in PR #450, but the write-side gap leaves F-3 only partially closed on the facts surface."
-status: closed
+status: resolved
 resolution: "Closed by RFC 0031 Phase 2 PR 5 — supersede is now keyed on `(agent_id, subject, predicate, session_id)` per the RFC 0026 §F amendment.  Each session keeps its own truth about `(subject, predicate)`; a write in `run-b` cannot retroactively contaminate `run-a`'s view.  Pinned by `tests/unit/python/test_facts_session_scope.py::TestCrossSessionSupersedeIsSessionScoped` (xfail marker removed) and by the integration-level `tests/integration/test_session_continuity.py::TestMultiSessionWriteSideIsolation::test_arc_2_fact_does_not_supersede_arc_1_fact`."
 severity: medium
 area: agents/memory
