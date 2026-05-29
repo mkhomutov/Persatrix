@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 import aiohttp
 
 from ..prompt_loader import load_snippet
-from ..session_id import resolve_session_id_silent
+from ..session_id import current_session_id, resolve_session_id_silent
 from .permissions import PermissionGate
 from .registry import ToolDefinition, ToolResult, get_tool, tool
 from .sandbox import PathValidator
@@ -348,9 +348,10 @@ def create_memory_tools(
     # once at tool-construction time (the env var is fixed for the life of
     # a persona-runtime process), mirroring the silent construction-time
     # read the MemoryStore facade does for the episode/relationship write
-    # path.  Captured in the closure and threaded into every note write so
-    # agent-initiated notes are tagged with the active session, not the
-    # bare ``"legacy"`` default.
+    # path.  Captured in the closure as the *fallback*; ISSUE-0081 PR 2
+    # layers a call-time ``session_scope`` override on top at the write
+    # site so a note stored while handling a concurrent conversation is
+    # tagged with that conversation's session, not this snapshot.
     session_id = resolve_session_id_silent()
 
     @tool(
@@ -367,7 +368,9 @@ def create_memory_tools(
         try:
             note_id = await memory.store_note(
                 topic=topic, content=content, tags=tag_list, max_notes=max_notes,
-                session_id=session_id,
+                # ISSUE-0081 PR 2: call-time scope wins over the
+                # construction snapshot captured above.
+                session_id=current_session_id() or session_id,
             )
         except ValueError as exc:
             return ToolResult(success=False, error=str(exc), error_type="ValueError")

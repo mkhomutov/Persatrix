@@ -29,6 +29,8 @@ from .dispatch import EventDispatcher
 from .generated import task_pb2, task_pb2_grpc
 from .participant import validate_participant_type
 from .persona_types import AgentEvent, EventType
+from .session_id import EVENT_SESSION_METADATA_KEY
+from .session_metadata import _session_from_context
 from .wallet_client import BudgetExceededError
 
 logger = logging.getLogger("Persatrix.agent.server")
@@ -243,6 +245,14 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             },
         )
 
+        # ISSUE-0081 PR 2: bind the orchestrator-authored per-request
+        # session onto the event so ``on_event`` enters a ``session_scope``
+        # for the handler.  Absent header → key omitted → handler runs
+        # under its construction snapshot (single-session / legacy path).
+        request_session = _session_from_context(context)
+        if request_session is not None:
+            event.metadata[EVENT_SESSION_METADATA_KEY] = request_session
+
         try:
             # dispatch(execute_actions=False) returns actions without firing
             # side-effects so we can extract the reply first (OQ 5/7).
@@ -411,16 +421,25 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             metadata={"cascade_depth": request.cascade_depth},
         )
 
+        # ISSUE-0081 PR 2: carry the per-request session through to the
+        # deferred EventLoop drain.  The fire-and-forget path processes the
+        # event in a different (boot-created) task, so the scope cannot ride
+        # a ContextVar set here — it must travel on the event envelope and
+        # be re-entered inside ``on_event`` when the loop drains.
+        request_session = _session_from_context(context)
+        if request_session is not None:
+            event.metadata[EVENT_SESSION_METADATA_KEY] = request_session
+
         # Fire-and-forget: enqueue onto the agent's EventLoop and return
         # immediately. The loop owns decide → execute → recover when it
         # drains (RFC 0024 Phase 4). ``enqueue_inbound`` returns ``False``
         # only when the loop's bounded queue is full (discard-not-block).
         accepted = self._dispatcher.enqueue_inbound(target_agent_id, event)
 
-        # ``context`` is intentionally unused: the ack is conveyed in the
-        # ``TaskAck`` body, never via a gRPC status code. Other rejection
+        # ``context`` is read above for the session header but is never
+        # used to set a gRPC status code: the ack is conveyed in the
+        # ``TaskAck`` body, never via a status code. Other rejection
         # branches above also do not touch ``context``.
-        _ = context
         if not accepted:
             return task_pb2.TaskAck(
                 success=False,

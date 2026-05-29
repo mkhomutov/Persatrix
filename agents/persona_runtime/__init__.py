@@ -63,6 +63,7 @@ from ..persona_types import (
     EventType,
     PersonaState,
 )
+from ..session_id import session_scope_from_metadata
 from ..tools.registry import ToolDefinition
 from .action_loop import _ActionLoopMixin
 from .conversation_seed import _ConversationWindowMixin
@@ -158,11 +159,6 @@ class MemoryNamespace:
     relationship: RelationshipMemory
     working: WorkingMemory
     facts: FactStore | None = None
-
-
-# Deprecated alias — kept for backward compatibility with external code
-# that imported the previously underscored name.  Prefer ``MemoryNamespace``.
-_MemoryNamespace = MemoryNamespace
 
 
 # ─── LLM-Powered Persona Agent ────────────────────────────
@@ -386,10 +382,14 @@ class _LLMPersonaAgent(
             span.add_event("received")
             async with self._lock:
                 span.add_event("queued")
+                # ISSUE-0081 PR 2: bind the orchestrator-authored per-request
+                # session for the handler's lifetime (``wait_for``'s child task
+                # copies this task-local scope; see ``session_scope_from_metadata``).
                 try:
-                    actions = await asyncio.wait_for(
-                        self._on_event_inner(event), timeout=timeout,
-                    )
+                    with session_scope_from_metadata(event.metadata):
+                        actions = await asyncio.wait_for(
+                            self._on_event_inner(event), timeout=timeout,
+                        )
                     span.add_event(
                         "handled",
                         attributes={"actions.count": len(actions)},

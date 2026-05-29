@@ -34,13 +34,35 @@ the "no logging import" property and the facade/leaf agreement.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import Iterator, Mapping
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from contextvars import ContextVar
 from typing import Final
 
 SESSION_ID_ENV_VAR: Final[str] = "PERSATRIX_SESSION_ID"
 LEGACY_SESSION_ID: Final[str] = "legacy"
+
+#: gRPC metadata header the orchestrator emits to carry the per-request
+#: session id (ISSUE-0081 PR 2).  Lower-case by HTTP/2 convention; the
+#: server-side lift (:func:`agents.session_metadata._session_from_metadata`)
+#: matches it case-insensitively so a proxy / test harness presenting mixed
+#: case still binds.  This is the cross-language contract with
+#: ``cmd/orchestrator`` — a rename here is a conscious break.
+SESSION_METADATA_GRPC_KEY: Final[str] = "persatrix-session"
+
+#: Key under which the resolved session id rides on
+#: :attr:`AgentEvent.metadata` from the gRPC ingress to
+#: :meth:`agents.persona_runtime._LLMPersonaAgent.on_event`, where it is
+#: bound into a :func:`session_scope` for the lifetime of the handler.
+#: Namespaced (not a bare ``session_id``) because it shares the generic
+#: ``event.metadata`` dict with unrelated keys — notably ``chat_session_id``,
+#: a *different* concept (the CLI chat session, not the RFC 0031 operator
+#: namespace) — so an un-prefixed name would invite collision/confusion.
+#: Also intentionally distinct from the wire header
+#: (:data:`SESSION_METADATA_GRPC_KEY`) so the in-process event envelope and
+#: the HTTP/2 header can evolve independently.  In-process only — never
+#: serialised back onto the wire.
+EVENT_SESSION_METADATA_KEY: Final[str] = "persatrix_session"
 
 #: Task-local active session id (ISSUE-0081 / RFC 0031 follow-up).
 #:
@@ -151,3 +173,25 @@ def session_scope(session_id: str | None) -> Iterator[str]:
         yield resolved
     finally:
         _ACTIVE_SESSION_ID.reset(token)
+
+
+def session_scope_from_metadata(
+    metadata: Mapping[str, object],
+) -> AbstractContextManager[str | None]:
+    """Return the per-request :func:`session_scope` for an event's metadata.
+
+    ISSUE-0081 PR 2: :meth:`agents.persona_runtime._LLMPersonaAgent.on_event`
+    enters this around :func:`asyncio.wait_for`, whose child task copies the
+    task-local scope so recall + write seams inside ``_on_event_inner`` resolve
+    to *this* conversation even when a sibling runs concurrently in-process.
+
+    Reads :data:`EVENT_SESSION_METADATA_KEY` off ``metadata``.  A present,
+    non-empty string binds a scope; anything else (missing key, blank, or a
+    tick event with no session) yields a :func:`~contextlib.nullcontext` so
+    call-time resolution falls back to the construction snapshot — leaving the
+    single-session / CLI / tick paths unchanged.
+    """
+    sid = metadata.get(EVENT_SESSION_METADATA_KEY)
+    if isinstance(sid, str) and sid:
+        return session_scope(sid)
+    return nullcontext()
