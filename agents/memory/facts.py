@@ -301,6 +301,7 @@ class FactStore:
             predicate=predicate,
             asserted_at=asserted_at,
             new_fact_id=fact_id,
+            session_id=session_id,
         )
         await db.commit()
 

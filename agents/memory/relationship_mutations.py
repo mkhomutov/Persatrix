@@ -229,8 +229,9 @@ async def record_interaction(
         INSERT INTO interactions
             (id, participant_id, participant_type,
              other_participant_id, other_participant_type,
-             interaction_type, outcome, sentiment, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             interaction_type, outcome, sentiment, created_at,
+             session_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             interaction_id,
@@ -242,6 +243,7 @@ async def record_interaction(
             outcome,
             sentiment,
             now,
+            session_id,
         ),
     )
 

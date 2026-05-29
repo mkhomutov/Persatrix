@@ -346,13 +346,39 @@ python -m persatrix_agents.server 2>&1 | Select-String "PERSATRIX_SESSION_ID"
 # Expect: WARN line citing the same canonical regex
 ```
 
-### Edge Case 2: Phase 2 recall semantics
+### Edge Case 2: Phase 2 recall semantics (v0.3.5 — shipped)
 
-A repeated read against `episodes` or `relationships` under a different
-`PERSATRIX_SESSION_ID` will **still surface the prior session's rows
-in Phase 1** — recall has no session filter yet. This is the Phase 2
-work item; the dementia-test ([MT-MEMORY-005](MT-MEMORY-005-dementia-test.md))
-is the acceptance gate for Phase 2 and will tighten the contract.
+A repeated read against `episodes` / `relationships` / `facts` /
+`notes` under a different `PERSATRIX_SESSION_ID` **does not surface
+the prior session's rows by default** in v0.3.5+ ([RFC 0031 Phase 2
+§D](../rfcs/0031-per-session-namespacing-channels.md#d-recall-semantics)).
+Default recall is scoped to the active session plus the always-visible
+`legacy` carve-out; cross-session recall is an explicit opt-in via the
+`sessions=` parameter on the public read methods (and the Phase 3
+operator path `persatrix memory recall --sessions=…`).
+
+The Phase 2 PR sequence closed F-3 on every persona-memory recall
+surface:
+
+- PR 1 — migration v9: `notes.session_id` column;
+- PR 2 — episodic + notes recall filtering;
+- PR 3 — relationship + facts recall filtering;
+- PR 4 — `MemoryStore` facade `sessions=` extension + persona-runtime
+  call-site threading;
+- PR 5 — migration v10 (`interactions.session_id`), facts symmetric
+  latest-wins per-session
+  ([ISSUE-0079](../issues/ISSUE-0079-cross-session-supersede-not-scoped.md)),
+  `interaction_count` derived per-session
+  ([ISSUE-0080](../issues/ISSUE-0080-relationship-recent-interactions-cross-session-leak.md)),
+  notes mutation surface session-scoped
+  ([ISSUE-0077](../issues/ISSUE-0077-notes-mutation-not-session-scoped.md)),
+  and the dementia-test bridge
+  ([`tests/integration/test_session_continuity.py`](../../tests/integration/test_session_continuity.py)).
+
+The dementia-test ([MT-MEMORY-005](MT-MEMORY-005-dementia-test.md)) V5
+variant is the acceptance gate for Phase 2; the F-3 reproduction now
+returns empty by default and only surfaces the prior arc when the
+operator passes the explicit `--sessions=…` flag.
 
 ### Edge Case 3: Migration replay on existing data
 

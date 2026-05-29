@@ -177,9 +177,12 @@ class TestMigrationIdempotency:
 
             # Simulate crash-between-DDL-and-version-record: drop the v9
             # row from schema_version while leaving the column + index in
-            # place.  The next umbrella pass will see current=8 and
-            # re-dispatch the v9 handler against an already-altered table.
-            await db.execute("DELETE FROM schema_version WHERE version = 9")
+            # place.  Also drop any later-version rows so the umbrella's
+            # ``current = MAX(version)`` reads as 8 and re-dispatches the
+            # v9 handler against an already-altered table — without this
+            # the addition of v10 (RFC 0031 Phase 2 PR 5) would leave
+            # ``current = 10`` and the v9 branch would be skipped.
+            await db.execute("DELETE FROM schema_version WHERE version >= 9")
             await db.commit()
 
             # Second umbrella pass — handler re-runs against

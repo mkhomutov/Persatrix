@@ -220,24 +220,25 @@ class TestRelationshipTemporal:
                     "alice", "chat", outcome="ok",
                 )
             db = agent._relationship_memory._ensure_db()  # noqa: SLF001 — test-only
+            # ISSUE-0080 PR 5 follow-up: ``last_interaction_at`` is now
+            # derived from ``MAX(created_at)`` over the (session-filtered)
+            # ``interactions`` rows, not read from the ``relationships``
+            # column.  Rewrite *every* alice interaction to a coherent
+            # timestamp — baseline all three to 3 days ago, then push the
+            # oldest back to 21 days ago — so ``MAX`` = 3 days ago and
+            # ``MIN`` = 21 days ago.  (Pre-fix this test left the middle
+            # row at real wall-clock time and leaned on the column.)
+            await db.execute(
+                "UPDATE interactions SET created_at = ? "
+                "WHERE other_participant_id = 'alice'",
+                (_FROZEN_EPOCH - 3 * 86_400,),
+            )
             await db.execute(
                 "UPDATE interactions SET created_at = ? "
                 "WHERE other_participant_id = 'alice' "
                 "AND rowid = (SELECT MIN(rowid) FROM interactions "
                 "WHERE other_participant_id='alice')",
                 (_FROZEN_EPOCH - 21 * 86_400,),
-            )
-            await db.execute(
-                "UPDATE interactions SET created_at = ? "
-                "WHERE other_participant_id = 'alice' "
-                "AND rowid = (SELECT MAX(rowid) FROM interactions "
-                "WHERE other_participant_id='alice')",
-                (_FROZEN_EPOCH - 3 * 86_400,),
-            )
-            await db.execute(
-                "UPDATE relationships SET last_interaction_at = ? "
-                "WHERE other_participant_id = 'alice'",
-                (_FROZEN_EPOCH - 3 * 86_400,),
             )
             await db.commit()
 
