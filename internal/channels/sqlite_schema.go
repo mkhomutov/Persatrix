@@ -30,7 +30,13 @@ import (
 //	    `legacy` session is a synthetic carve-out (no row in `sessions`)
 //	    — Phase 3 CLI's `persatrix session new --label legacy` is
 //	    rejected, per OQ #2 resolution.
-const channelStoreSchemaVersion = 3
+//	v4 — ISSUE-0082 PR 1: introduces the `session_bindings` table — the
+//	    per-request `(agent_id, channel_id, user_id) → session_id` map the
+//	    orchestrator's SessionResolver mints into. Authoritative + persisted
+//	    so a per-conversation session id survives a persona-process restart
+//	    (RFC 0031 §B session unit). Pure addition: no existing column or row
+//	    is touched.
+const channelStoreSchemaVersion = 4
 
 // schemaV1SQL is the original schema shipped in PR #231. Applied verbatim
 // when opening a fresh database; the v1→v2 migration below uses
@@ -174,9 +180,60 @@ func applyMigration(db *sql.DB, target int) error {
 		return migrateV1ToV2(db)
 	case 3:
 		return migrateV2ToV3(db)
+	case 4:
+		return migrateV3ToV4(db)
 	default:
 		return fmt.Errorf("no migration registered for v%d", target)
 	}
+}
+
+// migrateV3ToV4 adds the `session_bindings` table (ISSUE-0082 PR 1). The
+// orchestrator's SessionResolver mints one session id per
+// `(agent_id, channel_id, user_id)` triple and persists the mapping here,
+// so the id is authoritative and survives a persona-process restart — the
+// dementia-test multi-day-arc property recorded in RFC 0031 §B.
+//
+// Forward-only and a pure addition: it creates one new table and touches no
+// existing row, so there is no backfill and the v1→v2 foreign-keys-off
+// rebuild dance is unnecessary. `created_at` is REAL (unix seconds as a
+// float) to match the sibling `sessions` table, not the DATETIME-encoded
+// channels/messages columns.
+//
+// No FOREIGN KEY ties `session_id` to `sessions(id)`: the resolver writes
+// the binding and its `sessions` row in one atomic transaction, so that mint
+// — not a schema constraint — is what guarantees every binding references a
+// registered session. Integrity is therefore code-enforced, consistent with
+// RFC 0031 §G's code-enforced (not DB-enforced) stance for `session_id`.
+//
+// The whole migration runs in one transaction and stamps `user_version`
+// inside it (PR #335 review L3) so the schema change and its version
+// bookkeeping commit or roll back atomically.
+func migrateV3ToV4(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []string{
+		`CREATE TABLE session_bindings (
+            agent_id   TEXT NOT NULL,
+            channel_id TEXT NOT NULL,
+            user_id    TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            PRIMARY KEY (agent_id, channel_id, user_id)
+        )`,
+	}
+	for _, q := range stmts {
+		if _, err := tx.Exec(q); err != nil {
+			return fmt.Errorf("exec %q: %w", firstLine(q), err)
+		}
+	}
+	if err := stampUserVersionTx(tx, 4); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // migrateV2ToV3 lands the RFC 0031 Phase 1 per-session storage tags on the

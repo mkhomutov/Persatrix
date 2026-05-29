@@ -281,7 +281,8 @@ func TestSQLiteStore_Migration_V2ToV3_LegacyRowsCarryLegacy(t *testing.T) {
 	withDB(t, path, func(db *sql.DB) {
 		var version int
 		require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
-		assert.Equal(t, 3, version)
+		assert.Equal(t, channelStoreSchemaVersion, version,
+			"a v2 DB opened by this binary migrates through to the latest version")
 
 		// Sessions table is present and empty.
 		var n int
