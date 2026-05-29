@@ -26,7 +26,7 @@ from ..observability.spans import (
     EPISODIC_RECALL_SPAN,
     EPISODIC_REMEMBER_SPAN,
 )
-from ..session_id import normalize_session_id, resolve_session_id_silent
+from ..session_id import current_session_id, normalize_session_id, resolve_session_id_silent
 from ._boundary import warn_external_construction
 from ._salience import EPISODIC_APPEND_SALIENCE, emit_for_tier
 from ._session_filter import _resolve_session_list
@@ -325,8 +325,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                 "agent.id": self._agent_id,
                 "query.kind": "recall",
                 "query.empty": not query,
-                # OQ #7 / ISSUE-0081: call-time active session (scope-aware).
-                "session_id": (session_list or [self._active_session_id])[0],
+                # OQ #7/0081: active session (scope over snapshot), not the filter shape.
+                "session_id": current_session_id() or self._active_session_id,
             },
         ) as span:
             # Mirror the LLM/tool/store_episode span error contract: a SQLite

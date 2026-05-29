@@ -37,6 +37,7 @@ Four groups:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 
 import pytest
 
@@ -340,6 +341,70 @@ class TestFacadeWriteDefaultHonoursScope:
             row = await cursor.fetchone()
         assert row is not None
         assert row[0] == "run-x"
+
+
+# ─── Group E — recall span names the active session ─────────
+
+
+@pytest.fixture
+def span_exporter() -> Iterator[object]:
+    """Capture finished spans (same shape as ``test_episodic_session_scope``)."""
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    provider = trace.get_tracer_provider()
+    if not isinstance(provider, TracerProvider):
+        provider = TracerProvider()
+        trace.set_tracer_provider(provider)
+    exp = InMemorySpanExporter()
+    processor = SimpleSpanProcessor(exp)
+    provider.add_span_processor(processor)
+    yield exp
+    processor.shutdown()
+
+
+class TestRecallSpanNamesActiveSession:
+    """The ``EPISODIC_RECALL_SPAN`` ``session_id`` attribute names the
+    call-time *active* session — never the ``sessions=`` filter shape.
+
+    Pins the OQ #7 contract (``test_episodic_session_scope`` documents it
+    as "the active session, not the filter mode") against the ISSUE-0081
+    scope axis: the span must follow ``current_session_id() or snapshot``,
+    so an explicit filter list cannot move it and a per-request
+    ``session_scope`` wins over the construction snapshot.
+    """
+
+    @staticmethod
+    def _latest_session_id(span_exporter: object) -> object:
+        spans = [
+            s for s in span_exporter.get_finished_spans()  # type: ignore[attr-defined]
+            if s.name == "agent.memory.episodic.recall"
+        ]
+        assert spans, "no episodic recall spans captured"
+        return (spans[-1].attributes or {}).get("session_id")
+
+    async def test_explicit_filter_does_not_move_span_session(
+        self, episodic: EpisodicMemory, span_exporter: object,
+    ) -> None:
+        # No scope: the span reports the construction snapshot (``_SEED``),
+        # never the first filtered id ("conv-b") — that would be the filter
+        # shape, the exact failure the OQ #7 contract forbids.
+        await episodic.recall("secret", limit=5, sessions=["conv-b"])
+        assert self._latest_session_id(span_exporter) == _SEED
+
+    async def test_scope_wins_over_filter_and_snapshot(
+        self, episodic: EpisodicMemory, span_exporter: object,
+    ) -> None:
+        # A per-request ``session_scope`` is the call-time active session;
+        # the span reports it over both the filter shape ("conv-b") and the
+        # construction snapshot (``_SEED``).
+        with session_scope("conv-a"):
+            await episodic.recall("secret", limit=5, sessions=["conv-b"])
+        assert self._latest_session_id(span_exporter) == "conv-a"
 
 
 if __name__ == "__main__":
