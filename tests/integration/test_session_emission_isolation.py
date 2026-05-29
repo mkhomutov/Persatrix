@@ -50,7 +50,7 @@ Two layers of pin:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from unittest.mock import AsyncMock, MagicMock
 
 import grpc
@@ -89,7 +89,7 @@ _LEGACY_MARKER = "pre-activation-legacy-carveout-row"
 
 
 @pytest.fixture(autouse=True)
-def _clean_registry() -> AsyncIterator[None]:
+def _clean_registry() -> Iterator[None]:
     clear_registry()
     yield
     clear_registry()
