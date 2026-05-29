@@ -47,11 +47,20 @@ async def update_trust(
     *,
     participant_type: str = "agent",
     other_participant_type: str = "agent",
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> float:
     """Update trust score. Returns new value (clamped to [0.0, 1.0]).
 
     *delta* is clamped to ±0.2 to prevent single interactions from
     swinging trust dramatically.
+
+    ``principal_id`` (ISSUE-0081 PR 3; default :data:`DEFAULT_PRINCIPAL_ID`)
+    tags the row and is part of the ``relationships`` primary key, so this
+    upsert lands on — and reads back — *this* tenant's row.  Without it a
+    first-touch ``update_trust`` created a row under the column default
+    ``local`` (invisible to the writing tenant, leaked to the default
+    principal) and a second tenant's upsert mutated the first's
+    ``trust_score`` (review H1 / H2).
 
     .. note::
 
@@ -93,10 +102,11 @@ async def update_trust(
                 (participant_id, participant_type,
                  other_participant_id, other_participant_type,
                  trust_score, interaction_count,
-                 last_interaction_at, notes)
-            VALUES (?, ?, ?, ?, ?, 0, NULL, ?)
+                 last_interaction_at, notes, principal_id)
+            VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?)
             ON CONFLICT(participant_id, participant_type,
-                        other_participant_id, other_participant_type) DO UPDATE SET
+                        other_participant_id, other_participant_type,
+                        principal_id) DO UPDATE SET
                 trust_score = MAX(0.0, MIN(1.0, relationships.trust_score + ?)),
                 notes = ?
             RETURNING trust_score
@@ -108,6 +118,7 @@ async def update_trust(
                 other_participant_type,
                 insert_trust,
                 reason,
+                principal_id,
                 delta,
                 reason,
             ),
@@ -144,12 +155,17 @@ async def apply_decay(
     decay_rate: float = 0.01,
     *,
     participant_type: str = "agent",
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> int:
     """Decay all trust scores toward 0.5 (neutral).
 
     Formula: ``new = old + decay_rate * (0.5 - old)``.
     Rows within 0.001 of neutral are skipped.  Decays all
     ``other_participant_type`` values uniformly (PR #120 F-5).
+
+    ``principal_id`` (ISSUE-0081 PR 3; default :data:`DEFAULT_PRINCIPAL_ID`)
+    scopes the maintenance pass to the active tenant — a decay run on one
+    tenant's request must not move another tenant's trust.
 
     Returns the number of relationships updated.
     """
@@ -160,9 +176,10 @@ async def apply_decay(
         UPDATE relationships
         SET trust_score = trust_score + ? * (0.5 - trust_score)
         WHERE participant_id = ? AND participant_type = ?
+          AND principal_id = ?
           AND ABS(trust_score - 0.5) > 0.001
         """,
-        (decay_rate, agent_id, participant_type),
+        (decay_rate, agent_id, participant_type, principal_id),
     )
     updated = cursor.rowcount
     if updated:
@@ -255,7 +272,9 @@ async def record_interaction(
     # first-seen session and a future cross-session interaction does
     # not silently overwrite the per-row tag (recall semantics for that
     # use case live on the interactions table in Phase 2).  ISSUE-0081
-    # PR 3: ``principal_id`` rides the same first-seen-INSERT contract.
+    # PR 3: ``principal_id`` is part of the primary key / conflict target
+    # (not a first-seen tag like ``session_id``) — a different tenant
+    # therefore upserts its *own* row instead of mutating this one.
     await db.execute(
         """
         INSERT INTO relationships
@@ -265,7 +284,8 @@ async def record_interaction(
              last_interaction_at, notes, session_id, principal_id)
         VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, ?)
         ON CONFLICT(participant_id, participant_type,
-                    other_participant_id, other_participant_type) DO UPDATE SET
+                    other_participant_id, other_participant_type,
+                    principal_id) DO UPDATE SET
             interaction_count = interaction_count + 1,
             last_interaction_at = ?
         """,

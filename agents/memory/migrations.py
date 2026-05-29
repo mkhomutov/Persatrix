@@ -267,8 +267,12 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     # ``interactions``.  Where ``session_id`` (v7–v10) scopes by operator
     # run, ``principal_id`` scopes by tenant with a STRICT-equality recall
     # predicate (no carve-out), closing the cross-tenant leak ISSUE-0081
-    # flagged.  Same callable-handler rationale as v7/v9/v10 —
-    # ``ALTER TABLE ... ADD COLUMN`` is not idempotent before SQLite 3.35.
+    # flagged.  The four UUID-keyed tiers gain it as a column; the
+    # participant-tuple-keyed ``relationships`` table is rebuilt with
+    # ``principal_id`` *in the primary key* so a second tenant's upsert
+    # cannot mutate the first tenant's aggregate row (review H2).  Same
+    # callable-handler rationale as v7/v9/v10 — ``ALTER TABLE ... ADD
+    # COLUMN`` is not idempotent before SQLite 3.35.
     # See docs/rfcs/0031-per-session-namespacing-channels.md §C amendment.
     (
         11,

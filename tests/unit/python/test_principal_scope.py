@@ -27,6 +27,7 @@ import pytest
 from agents.memory.episodic import EpisodicMemory
 from agents.memory.facts import FactStore
 from agents.memory.relationship import RelationshipMemory
+from agents.memory.relationship_types import _DEFAULT_TRUST
 from agents.principal_id import DEFAULT_PRINCIPAL_ID, principal_scope
 
 # ─── Episodic ───────────────────────────────────────────────
@@ -200,6 +201,71 @@ class TestRelationshipPrincipalIsolation:
             )
             assert summary_a.interaction_count == 1
             assert len(summary_a.recent_interactions) == 1
+
+    async def test_update_trust_first_touch_tags_active_principal(
+        self, rel: RelationshipMemory,
+    ) -> None:
+        """``update_trust`` as the *first* touch (no prior
+        ``record_interaction``) must tag the new ``relationships`` row with
+        the active principal, not the column default ``local``.
+
+        Regression for ISSUE-0081 PR 3 review H1: the write path read its
+        trust back as the neutral default (it filtered on ``tenant-a`` but
+        the row was created as ``local``), and the value leaked to the
+        default principal.
+        """
+        with principal_scope("tenant-a"):
+            await rel.update_trust("peer", 0.2, "warmed up")
+            # tenant-a reads back the value it just wrote.
+            assert await rel.get_trust("peer", sessions="*") == pytest.approx(0.7)
+        # The default ``local`` principal must NOT see tenant-a's trust.
+        assert await rel.get_trust("peer", sessions="*") == _DEFAULT_TRUST
+
+    async def test_record_interaction_two_writers_isolated(
+        self, rel: RelationshipMemory,
+    ) -> None:
+        """Two tenants recording interactions with the *same* participant
+        tuple must not share the aggregate ``relationships`` row.
+
+        Regression for ISSUE-0081 PR 3 review H2: the 4-tuple primary key
+        let tenant-b's ``ON CONFLICT DO UPDATE`` mutate tenant-a's
+        ``trust_score`` (and tenant-b could never read its own write back).
+        """
+        with principal_scope("tenant-a"):
+            await rel.record_interaction(
+                "peer", "chat", outcome="ok", sentiment=0.5, session_id="legacy",
+            )
+            await rel.update_trust("peer", 0.2, "a-warmed")
+            a_trust = await rel.get_trust("peer", sessions="*")
+        with principal_scope("tenant-b"):
+            await rel.record_interaction(
+                "peer", "chat", outcome="bad", sentiment=-0.5, session_id="legacy",
+            )
+            await rel.update_trust("peer", -0.2, "b-cooled")
+            b_trust = await rel.get_trust("peer", sessions="*")
+        # tenant-b sees its own (independent) row, not the neutral default.
+        assert b_trust == pytest.approx(0.3)
+        # tenant-a's trust is untouched by tenant-b's write.
+        with principal_scope("tenant-a"):
+            assert await rel.get_trust("peer", sessions="*") == pytest.approx(a_trust)
+            assert await rel.get_trust("peer", sessions="*") == pytest.approx(0.7)
+
+    async def test_apply_decay_is_principal_scoped(
+        self, rel: RelationshipMemory,
+    ) -> None:
+        """``apply_decay`` must only decay rows owned by the active tenant —
+        a tenant-b maintenance pass cannot move tenant-a's trust.
+        """
+        with principal_scope("tenant-a"):
+            await rel.update_trust("peer", 0.2, "a")  # → 0.7
+        with principal_scope("tenant-b"):
+            await rel.update_trust("peer", 0.2, "b")  # → 0.7
+            await rel.apply_decay(decay_rate=0.5)      # tenant-b only
+            b_after = await rel.get_trust("peer", sessions="*")
+        with principal_scope("tenant-a"):
+            a_after = await rel.get_trust("peer", sessions="*")
+        assert b_after < 0.7  # tenant-b decayed toward neutral
+        assert a_after == pytest.approx(0.7)  # tenant-a untouched
 
 
 # ─── Procedural (facade path) ───────────────────────────────

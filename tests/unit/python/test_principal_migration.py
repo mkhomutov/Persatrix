@@ -58,6 +58,12 @@ async def _column_default(
     return None
 
 
+async def _pk_columns(db: aiosqlite.Connection, table: str) -> set[str]:
+    """Return the set of column names forming ``table``'s primary key."""
+    cursor = await db.execute(f"PRAGMA table_info({table})")
+    return {row[1] for row in await cursor.fetchall() if row[5] > 0}
+
+
 async def _index_exists(db: aiosqlite.Connection, name: str) -> bool:
     cursor = await db.execute(
         "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
@@ -147,6 +153,97 @@ class TestFreshSchemaMigration:
             row = await cursor.fetchone()
         assert row is not None
         assert row[0] == 1
+
+
+# ─── Relationships primary-key rebuild ──────────────────────
+
+
+class TestRelationshipsPrimaryKey:
+    """ISSUE-0081 PR 3 review H2 — ``relationships`` needs ``principal_id``
+    *in the primary key*, not merely as a column.
+
+    The aggregate ``relationships`` row is keyed on the participant tuple
+    only; without the tenant axis in the key, a second tenant's
+    ``ON CONFLICT DO UPDATE`` mutates the first tenant's row and the
+    recall-side principal filter silently masks the damage.  v11 rebuilds
+    the table so each ``(participant tuple, principal)`` is a distinct row.
+    ``session_id`` stays out of the key by design (the aggregate row is
+    cross-session shared; per-session views derive from ``interactions``).
+    """
+
+    @pytest.fixture
+    async def memory(self):
+        mem = EpisodicMemory(agent_id="t", db_path=":memory:")
+        await mem.initialize()
+        yield mem
+        await mem.close()
+
+    async def test_fresh_pk_includes_principal(
+        self, memory: EpisodicMemory,
+    ) -> None:
+        assert memory._db is not None
+        pk = await _pk_columns(memory._db, "relationships")
+        assert pk == {
+            "participant_id", "participant_type",
+            "other_participant_id", "other_participant_type",
+            "principal_id",
+        }
+
+    async def test_v10_rebuild_preserves_row_and_keys_principal(self) -> None:
+        async with aiosqlite.connect(":memory:") as db:
+            await _seed_v10_baseline(db)
+            # A pre-v11 relationships row (session_id present, no principal_id).
+            await db.execute(
+                "INSERT INTO relationships "
+                "(participant_id, participant_type, other_participant_id, "
+                " other_participant_type, trust_score, interaction_count, "
+                " last_interaction_at, notes, session_id) "
+                "VALUES ('a', 'agent', 'peer', 'agent', 0.9, 3, ?, 'n', 'run-a')",
+                (_time.time(),),
+            )
+            await db.commit()
+
+            await _apply_migration_11(db)
+
+            # PK now carries the tenant axis.
+            assert "principal_id" in await _pk_columns(db, "relationships")
+            # The pre-existing row is preserved and upgraded to 'local'.
+            async with db.execute(
+                "SELECT trust_score, interaction_count, session_id, principal_id "
+                "FROM relationships WHERE participant_id='a' "
+                "AND other_participant_id='peer'",
+            ) as cur:
+                row = await cur.fetchone()
+            assert row is not None
+            assert row[0] == 0.9
+            assert row[1] == 3
+            assert row[2] == "run-a"
+            assert row[3] == DEFAULT_PRINCIPAL_ID
+
+    async def test_two_principals_coexist_as_distinct_rows(
+        self, memory: EpisodicMemory,
+    ) -> None:
+        """The whole point of the rebuild: two principals can hold their own
+        row for the same participant tuple.
+        """
+        assert memory._db is not None
+        db = memory._db
+        for principal in ("tenant-a", "tenant-b"):
+            await db.execute(
+                "INSERT INTO relationships "
+                "(participant_id, participant_type, other_participant_id, "
+                " other_participant_type, trust_score, principal_id) "
+                "VALUES ('a', 'agent', 'peer', 'agent', 0.5, ?)",
+                (principal,),
+            )
+        await db.commit()
+        async with db.execute(
+            "SELECT COUNT(*) FROM relationships "
+            "WHERE participant_id='a' AND other_participant_id='peer'",
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert row[0] == 2
 
 
 # ─── In-place upgrade from a v10 baseline ───────────────────

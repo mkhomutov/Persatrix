@@ -198,6 +198,7 @@ class RelationshipMemory:
             self._ensure_db(), self._agent_id, other_id, delta, reason,
             participant_type=participant_type,
             other_participant_type=other_participant_type,
+            principal_id=resolve_active_principal(self._active_principal_id),
         )
 
     async def apply_decay(
@@ -217,6 +218,7 @@ class RelationshipMemory:
         return await _apply_decay(
             self._ensure_db(), self._agent_id, decay_rate,
             participant_type=participant_type,
+            principal_id=resolve_active_principal(self._active_principal_id),
         )
 
     # ─── Interaction recording ──────────────────────────────
