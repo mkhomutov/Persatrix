@@ -123,7 +123,7 @@ func (r *SessionResolver) mint(ctx context.Context, agentID, channelID, userID s
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("channels: begin session mint tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -142,6 +142,12 @@ func (r *SessionResolver) mint(ctx context.Context, agentID, channelID, userID s
 	// Register the session row only when our binding insert won. A loser
 	// (DO NOTHING → 0 rows) must not write a `sessions` row no binding
 	// references.
+	//
+	// Only id + created_at are written; `label` and `metadata_json` stay
+	// NULL. Minting registers the session so it is discoverable (Phase 3
+	// `persatrix session list`); naming it is a separate operator action,
+	// not the mint path's job. This is the first writer of the `sessions`
+	// table, so it sets that precedent.
 	if won == 1 {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO sessions (id, created_at) VALUES (?, ?)
@@ -163,7 +169,7 @@ func (r *SessionResolver) mint(ctx context.Context, agentID, channelID, userID s
 			agentID, channelID, userID)
 	}
 	if err := tx.Commit(); err != nil {
-		return "", err
+		return "", fmt.Errorf("channels: commit session mint tx: %w", err)
 	}
 	return sid, nil
 }

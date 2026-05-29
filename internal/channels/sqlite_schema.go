@@ -199,6 +199,12 @@ func applyMigration(db *sql.DB, target int) error {
 // float) to match the sibling `sessions` table, not the DATETIME-encoded
 // channels/messages columns.
 //
+// No FOREIGN KEY ties `session_id` to `sessions(id)`: the resolver writes
+// the binding and its `sessions` row in one atomic transaction, so that mint
+// — not a schema constraint — is what guarantees every binding references a
+// registered session. Integrity is therefore code-enforced, consistent with
+// RFC 0031 §G's code-enforced (not DB-enforced) stance for `session_id`.
+//
 // The whole migration runs in one transaction and stamps `user_version`
 // inside it (PR #335 review L3) so the schema change and its version
 // bookkeeping commit or roll back atomically.

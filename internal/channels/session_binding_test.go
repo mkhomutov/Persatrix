@@ -126,9 +126,13 @@ func TestSessionResolver_MintRegistersSession(t *testing.T) {
 // TestSessionResolver_ConcurrentFirstSight_SingleID pins the race contract:
 // N goroutines racing the very first resolve of one triple all agree on a
 // single id, and the store ends up with exactly one binding row and one
-// session row — no double-mint, no orphan session. SQLite's single-writer
-// model narrows the window but the ON CONFLICT DO NOTHING + re-read guard
-// is what closes it.
+// session row — no double-mint, no orphan session. The store pins
+// MaxOpenConns(1), so the writes themselves serialize at the pool; the race
+// the guard actually closes is two goroutines both passing the lock-free
+// fast-path lookup before either mints — the loser's INSERT … ON CONFLICT
+// DO NOTHING then no-ops and the re-read returns the winner's id, rather
+// than erroring on the primary key or minting a second session. Runs under
+// -race to pin the absence of a data race on the shared resolver.
 func TestSessionResolver_ConcurrentFirstSight_SingleID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 	store, err := NewSQLiteStore(path, SQLiteOptions{})
