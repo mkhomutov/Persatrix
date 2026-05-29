@@ -385,11 +385,14 @@ class TestRecordInteractionMetricFailureIsolated:
         self, memory_at_run_a: RelationshipMemory,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from agents.memory import relationship_mutations as _rm_mod
+        # ISSUE-0081 PR 3: the ``sessions.writes`` emission moved into the
+        # shared ``agents.memory._salience.emit_session_write`` shim, so the
+        # failure is injected at that shim's ``try_get_instruments`` lookup.
+        from agents.memory import _salience as _sal_mod
 
         raising = _RaisingInstruments()
         monkeypatch.setattr(
-            _rm_mod, "try_get_instruments", lambda: raising,
+            _sal_mod, "try_get_instruments", lambda: raising,
         )
 
         # No ``pytest.raises``: the suppress wrapper must isolate the

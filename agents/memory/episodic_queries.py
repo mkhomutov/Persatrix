@@ -22,6 +22,7 @@ from typing import Any
 
 import aiosqlite
 
+from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ._episodic_agent_state import (
     get_interaction_count,
     increment_interaction_count,
@@ -29,6 +30,7 @@ from ._episodic_agent_state import (
     persist_agent_state,
     reset_interaction_count,
 )
+from ._principal_filter import principal_eq_clause
 from ._session_filter import session_in_clause
 from .interaction_janitor import SUMMARY_PENDING_TEXT
 from .migrations import _SCORE_EXPR, _SCORE_EXPR_BARE
@@ -202,6 +204,7 @@ async def recall_fts5(
     min_score: float | None = None,
     *,
     sessions: list[str] | None = None,
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> list[aiosqlite.Row]:
     """FTS5 search with composite BM25 x importance x access x recency scoring.
 
@@ -210,14 +213,24 @@ async def recall_fts5(
     PR 2) is a resolved list from
     :func:`agents.memory._session_filter._resolve_session_list` — ``None``
     is the ``"*"`` no-filter mode.
+
+    ``principal_id`` (ISSUE-0081 PR 3) is the resolved active tenant; the
+    predicate is unconditional strict equality (no carve-out, no
+    no-filter mode).  Defaults to :data:`DEFAULT_PRINCIPAL_ID` so a
+    single-tenant direct caller is fail-safe; the production tier always
+    passes the call-time-resolved active principal.
     """
     sess_clause, sess_params = session_in_clause(sessions, column="e.session_id")
+    princ_clause, princ_params = principal_eq_clause(
+        principal_id, column="e.principal_id",
+    )
     safe_query = _FTS5_SANITIZE.sub(" ", query).strip()
     if not safe_query:
         # Pure-punctuation query sanitizes to empty — fall through to a
         # pure recency ranking so the caller still gets relevant rows.
         return await recall_recency(
             db, agent_id, limit, min_importance, sessions=sessions,
+            principal_id=principal_id,
         )
     effective_min_score = resolve_min_score(min_score)
     try:
@@ -231,6 +244,7 @@ async def recall_fts5(
               AND e.importance >= ?
               AND (1.0 / (1.0 + ABS(fts.rank))) >= ?
               {sess_clause}
+              {princ_clause}
             ORDER BY
                 (fts.rank * -1)
                 * {_SCORE_EXPR}
@@ -239,7 +253,7 @@ async def recall_fts5(
             """,
             (
                 safe_query, agent_id, min_importance, effective_min_score,
-                *sess_params, time.time(), limit,
+                *sess_params, *princ_params, time.time(), limit,
             ),
         ) as cursor:
             return list(await cursor.fetchall())
@@ -249,7 +263,7 @@ async def recall_fts5(
         )
         return await recall_like(
             db, agent_id, query, limit, min_importance, min_score,
-            sessions=sessions,
+            sessions=sessions, principal_id=principal_id,
         )
 
 
@@ -262,14 +276,19 @@ async def recall_like(
     min_score: float | None = None,  # noqa: ARG001 — LIKE matches are binary (score=1.0)
     *,
     sessions: list[str] | None = None,
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> list[aiosqlite.Row]:
     """LIKE fallback when FTS5 is unavailable.
 
     Escapes ``%`` / ``_`` so they match literally.  ``min_score`` is
     signature-only — LIKE matches are binary, every match scores ``1.0``
-    per RFC 0017 §C.  ``sessions`` — see :func:`recall_fts5`.
+    per RFC 0017 §C.  ``sessions`` / ``principal_id`` — see
+    :func:`recall_fts5`.
     """
     sess_clause, sess_params = session_in_clause(sessions, column="session_id")
+    princ_clause, princ_params = principal_eq_clause(
+        principal_id, column="principal_id",
+    )
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{escaped}%"
     async with db.execute(
@@ -280,6 +299,7 @@ async def recall_like(
           AND importance >= ?
           AND (summary LIKE ? ESCAPE '\\' OR context_json LIKE ? ESCAPE '\\')
           {sess_clause}
+          {princ_clause}
         ORDER BY
             {_SCORE_EXPR_BARE}
             DESC
@@ -287,7 +307,7 @@ async def recall_like(
         """,
         (
             agent_id, min_importance, pattern, pattern,
-            *sess_params, time.time(), limit,
+            *sess_params, *princ_params, time.time(), limit,
         ),
     ) as cursor:
         return list(await cursor.fetchall())
@@ -300,14 +320,19 @@ async def recall_recency(
     min_importance: float,
     *,
     sessions: list[str] | None = None,
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> list[aiosqlite.Row]:
     """No query text — rank by importance x access x recency only.
 
-    ``sessions`` — see :func:`recall_fts5`.  The persona-runtime
-    channel-history tier hits this path with an empty query, so this
-    is the load-bearing path for closing F-3 on the empty-query surface.
+    ``sessions`` / ``principal_id`` — see :func:`recall_fts5`.  The
+    persona-runtime channel-history tier hits this path with an empty
+    query, so this is the load-bearing path for closing F-3 (and the
+    ISSUE-0081 cross-tenant leak) on the empty-query surface.
     """
     sess_clause, sess_params = session_in_clause(sessions, column="session_id")
+    princ_clause, princ_params = principal_eq_clause(
+        principal_id, column="principal_id",
+    )
     async with db.execute(
         f"""
         SELECT {EPISODE_SELECT}
@@ -315,12 +340,16 @@ async def recall_recency(
         WHERE agent_id = ?
           AND importance >= ?
           {sess_clause}
+          {princ_clause}
         ORDER BY
             {_SCORE_EXPR_BARE}
             DESC
         LIMIT ?
         """,
-        (agent_id, min_importance, *sess_params, time.time(), limit),
+        (
+            agent_id, min_importance, *sess_params, *princ_params,
+            time.time(), limit,
+        ),
     ) as cursor:
         return list(await cursor.fetchall())
 
@@ -343,6 +372,7 @@ async def insert_episode(
     turn_count: int | None,
     session_id: str,
     scope: str | None,
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> str:
     """INSERT one episode row and COMMIT; return the generated episode id.
 
@@ -365,10 +395,10 @@ async def insert_episode(
              importance, access_count, last_accessed_at,
              tags_json, created_at, compressed_at, compression_level,
              interaction_id, started_at, closed_at, turn_count, scope,
-             session_id)
+             session_id, principal_id)
         VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0,
                 ?, ?, ?, ?, ?,
-                ?)
+                ?, ?)
         """,
         (
             episode_id,
@@ -385,6 +415,7 @@ async def insert_episode(
             turn_count,
             scope,
             session_id,
+            principal_id,
         ),
     )
     await db.commit()

@@ -24,6 +24,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from ..session_id import current_session_id
+from ._principal_filter import resolve_active_principal
 from ._session_filter import _resolve_session_list
 from .episodic_procedural import (
     ProcedureRecallEntry,
@@ -101,6 +102,8 @@ class ProceduralFacadeMixin:
     # RFC 0031 Phase 1: facade-level construction-time default for the
     # operator-namespace tag (see :class:`agents.memory.facade.MemoryStore`).
     _session_id: str
+    # ISSUE-0081 PR 3: facade-level tenant snapshot (same source).
+    _principal_id: str
 
     def _require_initialised(self) -> None: ...  # pragma: no cover — host
 
@@ -152,7 +155,14 @@ class ProceduralFacadeMixin:
             )
         db = self._episodic._ensure_db()  # noqa: SLF001 — facade owns the connection
         # Refresh path: existing key → reset confidence + last_validated.
-        refreshed = await _refresh_confidence(db, self._agent_id, key)
+        # ISSUE-0081 PR 3: scope the refresh to the active tenant (symmetric
+        # with ``retrieve_procedures``) so a second tenant re-storing the
+        # same key neither refreshes the first tenant's row nor loses its
+        # own write to the refresh short-circuit (review follow-up).
+        refreshed = await _refresh_confidence(
+            db, self._agent_id, key,
+            principal_id=resolve_active_principal(self._principal_id),
+        )
         if refreshed:
             return
         context: dict[str, Any] = {"procedure_key": key}
@@ -239,6 +249,7 @@ class ProceduralFacadeMixin:
             stale_threshold=self._stale_alert_threshold,
             now=now,
             session_list=session_list,
+            principal_id=resolve_active_principal(self._principal_id),
         )
 
 

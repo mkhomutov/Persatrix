@@ -32,6 +32,7 @@ from ._migration_handlers import (
     _apply_migration_8,
     _apply_migration_9,
     _apply_migration_10,
+    _apply_migration_11,
 )
 
 __all__ = [
@@ -48,6 +49,7 @@ __all__ = [
     "_apply_migration_8",
     "_apply_migration_9",
     "_apply_migration_10",
+    "_apply_migration_11",
     "_apply_migrations",
     "_fts5_available",
 ]
@@ -258,6 +260,24 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         10,
         "RFC 0031 Phase 2: session_id on interactions",
         "",  # handled by _apply_migration_10()
+    ),
+    # Migration 11 (ISSUE-0081 PR 3) adds the tenant/principal dimension
+    # ``principal_id`` to all five persona-memory tables in one version —
+    # ``episodes`` / ``relationships`` / ``facts`` / ``notes`` /
+    # ``interactions``.  Where ``session_id`` (v7–v10) scopes by operator
+    # run, ``principal_id`` scopes by tenant with a STRICT-equality recall
+    # predicate (no carve-out), closing the cross-tenant leak ISSUE-0081
+    # flagged.  The four UUID-keyed tiers gain it as a column; the
+    # participant-tuple-keyed ``relationships`` table is rebuilt with
+    # ``principal_id`` *in the primary key* so a second tenant's upsert
+    # cannot mutate the first tenant's aggregate row (review H2).  Same
+    # callable-handler rationale as v7/v9/v10 — ``ALTER TABLE ... ADD
+    # COLUMN`` is not idempotent before SQLite 3.35.
+    # See docs/rfcs/0031-per-session-namespacing-channels.md §C amendment.
+    (
+        11,
+        "ISSUE-0081: principal_id on all five persona-memory tiers",
+        "",  # handled by _apply_migration_11()
     ),
 ]
 

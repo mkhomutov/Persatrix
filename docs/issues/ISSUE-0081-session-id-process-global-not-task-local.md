@@ -182,3 +182,27 @@ final PR.
 > contextvars enabler (PR 1) is decision-free and is being built first;
 > the session-unit (PR 2) and tenant-key (PR 3) design calls are
 > recorded inline in those PRs as RFC amendments for review.
+>
+> 2026-05-29 — **PR 3 (tenant/principal dimension) landed the Python
+> vertical.** Migration v11 adds `principal_id TEXT NOT NULL DEFAULT
+> 'local'` to all five persona-memory tables; the scope key is now
+> `(agent_id, principal_id, session_id)` with **strict-equality** recall
+> (no carve-out — `agents/memory/_principal_filter.py`) on both the read
+> and write paths (including the facts supersession chain). A sibling
+> `principal_scope` ContextVar + the `persatrix-principal` gRPC rail
+> (`agents/principal_id.py`, bound in `on_event` via
+> `agents/request_scope.py`) ship now and resolve to `'local'` until the
+> verified-principal source (RFC 0039, still proposed) lands. Per the
+> maintainer's recorded decisions: **strict isolation** over a
+> default-principal carve-out, and **Python-vertical + rail now, Go
+> orchestrator emission deferred** (mirroring PR 2). Recorded as the
+> RFC 0031 §C/§D amendments. A review follow-up principal-scoped the
+> procedural-reuse `refresh_confidence` (it matched `(agent_id, key)`
+> only — a second tenant's re-store refreshed the first tenant's row and
+> was then dropped by the refresh short-circuit). Remaining: PR 4 hardens
+> the session `legacy` carve-out so it cannot bridge principals; and the
+> agent-global background maintenance sweeps (episode eviction/retention,
+> superseded-fact prune) plus GDPR `delete_by_subject` are not yet
+> per-principal — they are capacity/erasure-policy calls deferred to the
+> RFC 0039 multi-tenant work, not read-confidentiality leaks (recall
+> stays principal-filtered). See the RFC 0031 §C amendment.

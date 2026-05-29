@@ -59,11 +59,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple
 
 from ..session_id import LEGACY_SESSION_ID
+from ._facts_audit import emit_audit
 
 if TYPE_CHECKING:
     import aiosqlite
 
-__all__ = ["SupersessionResult", "apply_supersession"]
+__all__ = ["SupersessionResult", "apply_supersession", "retract_fact"]
 
 
 class SupersessionResult(NamedTuple):
@@ -92,6 +93,7 @@ async def apply_supersession(
     asserted_at: float,
     new_fact_id: str,
     session_id: str,
+    principal_id: str,
 ) -> SupersessionResult:
     """Sweep older + newer live rows for the symmetric latest-wins chain.
 
@@ -107,6 +109,12 @@ async def apply_supersession(
     ``run-a`` — each named session has its own latest-wins chain on the
     same ``(subject, predicate)`` (`ISSUE-0079
     <../../docs/issues/ISSUE-0079-cross-session-supersede-not-scoped.md>`_).
+
+    ``principal_id`` (ISSUE-0081 PR 3) adds the orthogonal tenant axis to
+    the chain key with **strict equality** (no carve-out — the principal
+    axis has none): both sweeps require ``principal_id = ?`` so a write by
+    one tenant can never supersede — and thereby silently retract — a row
+    owned by another, even when subject / predicate / session collide.
 
     The carve-out is asymmetric, matching the §D recall filter
     (``session_id IN (active, legacy)``):
@@ -142,13 +150,14 @@ async def apply_supersession(
           AND subject = ?
           AND predicate = ?
           AND session_id IN ({older_placeholders})
+          AND principal_id = ?
           AND superseded_by IS NULL
           AND asserted_at <= ?
           AND fact_id != ?
         """,  # noqa: S608 — placeholders only; values bound below.
         (
             agent_id, subject, predicate, *older_sessions,
-            asserted_at, new_fact_id,
+            principal_id, asserted_at, new_fact_id,
         ),
     ) as cursor:
         older_rows = await cursor.fetchall()
@@ -161,12 +170,13 @@ async def apply_supersession(
           AND subject = ?
           AND predicate = ?
           AND session_id = ?
+          AND principal_id = ?
           AND superseded_by IS NULL
           AND asserted_at > ?
         ORDER BY asserted_at DESC
         LIMIT 1
         """,
-        (agent_id, subject, predicate, session_id, asserted_at),
+        (agent_id, subject, predicate, session_id, principal_id, asserted_at),
     ) as cursor:
         newer_row = await cursor.fetchone()
     self_superseded_by: str | None = newer_row[0] if newer_row else None
@@ -190,3 +200,45 @@ async def apply_supersession(
         superseded_older_ids=older_fact_ids,
         self_superseded_by=self_superseded_by,
     )
+
+
+async def retract_fact(
+    db: aiosqlite.Connection,
+    *,
+    agent_id: str,
+    fact_id: str,
+    by_fact_id: str,
+    principal_id: str,
+) -> bool:
+    """Explicitly point ``fact_id``'s ``superseded_by`` at ``by_fact_id``.
+
+    The manual-retract primitive behind
+    :meth:`agents.memory.facts.FactStore.supersede` — for callers (PR 4 +
+    future RFC 0027 consolidation) that retract a fact without writing a
+    successor of identical ``(subject, predicate)``.  Only a live row
+    (``superseded_by IS NULL``) owned by ``agent_id`` is touched.
+
+    ``principal_id`` (ISSUE-0081 PR 3 review follow-up) scopes the write
+    with the same strict equality :func:`apply_supersession` uses, so a
+    tenant cannot retract another tenant's fact by id even though both
+    rows share the ``agent_id``.  Commits itself and, on a true result,
+    emits the RFC 0026 §G ``fact.supersede`` audit record — mirroring the
+    self-contained-primitive precedent of
+    :func:`agents.memory._facts_reinforce.mark_recalled_for_agent`.
+    Returns ``True`` iff a live row was updated.
+    """
+    cursor = await db.execute(
+        "UPDATE facts SET superseded_by = ? "
+        "WHERE fact_id = ? AND agent_id = ? "
+        "AND superseded_by IS NULL "
+        "AND principal_id = ?",
+        (by_fact_id, fact_id, agent_id, principal_id),
+    )
+    await db.commit()
+    retracted = (cursor.rowcount or 0) > 0
+    if retracted:
+        emit_audit(
+            "fact.supersede", agent_id=agent_id,
+            superseded_fact_id=fact_id, by_fact_id=by_fact_id,
+        )
+    return retracted

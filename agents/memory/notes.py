@@ -9,7 +9,6 @@ and does not run its own migrations.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import time
@@ -18,7 +17,7 @@ from dataclasses import dataclass, field
 
 import aiosqlite
 
-from ..observability.metrics import try_get_instruments
+from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ..session_id import LEGACY_SESSION_ID, normalize_session_id
 from ._notes_recall import (
     _FTS5_SPECIAL,
@@ -26,7 +25,8 @@ from ._notes_recall import (
     _recall_notes_like,
     _recall_notes_recency,
 )
-from ._salience import NOTES_APPEND_SALIENCE, emit_for_tier
+from ._principal_filter import resolve_active_principal
+from ._salience import NOTES_APPEND_SALIENCE, emit_for_tier, emit_session_write
 from ._session_filter import _resolve_session_list
 
 # ``_FTS5_SPECIAL`` is re-exported for backward compatibility with tests
@@ -99,6 +99,7 @@ class NoteStore:
         fts5: bool,
         *,
         active_session_id: str = LEGACY_SESSION_ID,
+        active_principal_id: str = DEFAULT_PRINCIPAL_ID,
     ) -> None:
         self._agent_id = agent_id
         self._db = db
@@ -109,6 +110,9 @@ class NoteStore:
         # read per call.  Defaults to legacy so a hand-built test
         # fixture does not have to opt in.
         self._active_session_id = active_session_id
+        # ISSUE-0081 PR 3 — tenant snapshot, threaded the same way; the
+        # call-time ``principal_scope`` wins via ``resolve_active_principal``.
+        self._active_principal_id = active_principal_id
 
     # ─── CRUD ───────────────────────────────────────────────
 
@@ -159,11 +163,15 @@ class NoteStore:
         # tier write boundaries so a future fifth tier inherits it for
         # free).  Empty / whitespace-only / None → LEGACY_SESSION_ID.
         session_id = normalize_session_id(session_id)
+        # ISSUE-0081 PR 3: resolve the active tenant once (scope override,
+        # else construction snapshot) for both the prune scope and the row tag.
+        principal_id = resolve_active_principal(self._active_principal_id)
 
-        # Prune scoped to ``(agent_id, session_id)`` per PR 1 F1 carry-
-        # forward: a run-b write cannot evict a run-a row.  Trade-off is
-        # per-session capacity; see :meth:`_prune_notes` for details.
-        await self._prune_notes(max_notes, session_id)
+        # Prune scoped to ``(agent_id, session_id, principal_id)`` per PR 1
+        # F1 carry-forward extended to the tenant axis: a run-b / tenant-b
+        # write cannot evict a run-a / tenant-a row.  Trade-off is
+        # per-(session, principal) capacity; see :meth:`_prune_notes`.
+        await self._prune_notes(max_notes, session_id, principal_id)
 
         note_id = str(uuid.uuid4())
         now = time.time()
@@ -171,8 +179,9 @@ class NoteStore:
             """
             INSERT INTO notes
                 (id, agent_id, topic, content, tags_json,
-                 access_count, created_at, updated_at, session_id)
-            VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
+                 access_count, created_at, updated_at, session_id,
+                 principal_id)
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
             """,
             (
                 note_id,
@@ -183,28 +192,17 @@ class NoteStore:
                 now,
                 now,
                 session_id,
+                principal_id,
             ),
         )
         await self._db.commit()
-        # RFC 0031 Phase 2 PR 1 review F2 — increment the per-session
-        # write counter, matching the episodes / relationships / facts
-        # tiers' emit shape.  ``surface="note"`` so dashboards can split
-        # the notes tier from the other persona-memory write surfaces
+        # RFC 0031 Phase 2 PR 1 review F2 — increment the per-session write
+        # counter via the shared shim.  ``surface="note"`` so dashboards can
+        # split the notes tier from the other persona-memory write surfaces
         # (see ``test_session_id_surface_granularity`` for the contract).
-        # Wrapped in ``contextlib.suppress`` so a metric-backend failure
-        # cannot mark the write failed after ``db.commit()`` — same
-        # failure-isolation contract as ``store_episode`` (PR #337 M1).
-        with contextlib.suppress(Exception):
-            inst = try_get_instruments()
-            if inst is not None:
-                inst.sessions_writes.add(
-                    1,
-                    attributes={
-                        "session_id": session_id,
-                        "agent.id": self._agent_id,
-                        "surface": "note",
-                    },
-                )
+        emit_session_write(
+            agent_id=self._agent_id, session_id=session_id, surface="note",
+        )
         emit_for_tier(
             agent_id=self._agent_id,
             tier="notes",
@@ -256,23 +254,27 @@ class NoteStore:
         session_list = _resolve_session_list(
             sessions, self._active_session_id,
         )
+        active_principal = resolve_active_principal(self._active_principal_id)
 
         if query and self._fts5:
             rows = await _recall_notes_fts5(
                 self._db, agent_id=self._agent_id, query=query,
                 limit=limit, min_score=min_score,
                 sessions=session_list, note_cols=_NOTE_COLS,
+                principal_id=active_principal,
             )
         elif query:
             rows = await _recall_notes_like(
                 self._db, agent_id=self._agent_id, query=query,
                 limit=limit, min_score=min_score,
                 sessions=session_list, note_cols=_NOTE_COLS,
+                principal_id=active_principal,
             )
         else:
             rows = await _recall_notes_recency(
                 self._db, agent_id=self._agent_id, limit=limit,
                 sessions=session_list, note_cols=_NOTE_COLS,
+                principal_id=active_principal,
             )
 
         notes = [self._row_to_note(row) for row in rows]
@@ -309,43 +311,55 @@ class NoteStore:
                 f"({len(content_bytes)} bytes)"
             )
         now = time.time()
+        # ISSUE-0081 PR 3: strict tenant equality in addition to the
+        # session carve-out — a foreign principal cannot mutate this row
+        # even if it knows the UUID and shares the session/legacy scope.
+        principal_id = resolve_active_principal(self._active_principal_id)
         cursor = await self._db.execute(
             "UPDATE notes SET content = ?, updated_at = ? "
             "WHERE id = ? AND agent_id = ? "
-            "AND session_id IN (?, ?)",
+            "AND session_id IN (?, ?) "
+            "AND principal_id = ?",
             (
                 content, now, note_id, self._agent_id,
                 self._active_session_id, LEGACY_SESSION_ID,
+                principal_id,
             ),
         )
         await self._db.commit()
         return cursor.rowcount > 0
 
     async def delete_note(self, note_id: str) -> bool:
-        """Delete a note by ID. Returns True if found.  Session-scoped
-        per :meth:`update_note`."""
+        """Delete a note by ID. Returns True if found.  Session- and
+        principal-scoped per :meth:`update_note`."""
+        principal_id = resolve_active_principal(self._active_principal_id)
         cursor = await self._db.execute(
             "DELETE FROM notes "
             "WHERE id = ? AND agent_id = ? "
-            "AND session_id IN (?, ?)",
+            "AND session_id IN (?, ?) "
+            "AND principal_id = ?",
             (
                 note_id, self._agent_id,
                 self._active_session_id, LEGACY_SESSION_ID,
+                principal_id,
             ),
         )
         await self._db.commit()
         return cursor.rowcount > 0
 
     async def count_notes(self) -> int:
-        """Number of notes visible to the active session (per
-        :meth:`update_note`'s session scope)."""
+        """Number of notes visible to the active session + tenant (per
+        :meth:`update_note`'s scope)."""
+        principal_id = resolve_active_principal(self._active_principal_id)
         async with self._db.execute(
             "SELECT COUNT(*) FROM notes "
             "WHERE agent_id = ? "
-            "AND session_id IN (?, ?)",
+            "AND session_id IN (?, ?) "
+            "AND principal_id = ?",
             (
                 self._agent_id,
                 self._active_session_id, LEGACY_SESSION_ID,
+                principal_id,
             ),
         ) as cursor:
             row = await cursor.fetchone()
@@ -353,32 +367,40 @@ class NoteStore:
 
     # ─── Internal helpers ──────────────────────────────────
 
-    async def _prune_notes(self, max_notes: int, session_id: str) -> None:
-        """Remove oldest low-access notes in ``session_id`` when count >= max_notes.
+    async def _prune_notes(
+        self, max_notes: int, session_id: str, principal_id: str,
+    ) -> None:
+        """Remove oldest low-access notes in the ``(session_id,
+        principal_id)`` scope when count >= max_notes.
 
         Single atomic DELETE-with-subquery avoids a TOCTOU race between
         SELECT count and DELETE on shared-DB topologies (F-3b-1).
-        RFC 0031 Phase 2 PR 2: scoped to ``(agent_id, session_id)`` so
-        write-side isolation extends to the lifecycle path — per-session
-        capacity instead of per-agent (PR 1 review F1 carry-forward).
+        RFC 0031 Phase 2 PR 2 scoped this to ``(agent_id, session_id)``;
+        ISSUE-0081 PR 3 extends it to ``(agent_id, session_id,
+        principal_id)`` so write-side isolation covers the tenant axis —
+        a tenant-b write cannot evict a tenant-a row.  Trade-off is
+        per-(session, principal) capacity.
         """
         await self._db.execute(
             """
-            DELETE FROM notes WHERE agent_id = ? AND session_id = ? AND id IN (
+            DELETE FROM notes
+            WHERE agent_id = ? AND session_id = ? AND principal_id = ?
+              AND id IN (
                 SELECT id FROM notes
-                WHERE agent_id = ? AND session_id = ?
+                WHERE agent_id = ? AND session_id = ? AND principal_id = ?
                 ORDER BY access_count ASC, created_at ASC
                 LIMIT MAX(
                     0,
                     (SELECT COUNT(*) FROM notes
-                     WHERE agent_id = ? AND session_id = ?) - ? + 1
+                     WHERE agent_id = ? AND session_id = ?
+                       AND principal_id = ?) - ? + 1
                 )
             )
             """,
             (
-                self._agent_id, session_id,
-                self._agent_id, session_id,
-                self._agent_id, session_id,
+                self._agent_id, session_id, principal_id,
+                self._agent_id, session_id, principal_id,
+                self._agent_id, session_id, principal_id,
                 max_notes,
             ),
         )

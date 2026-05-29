@@ -11,7 +11,6 @@ structured knowledge the agent chooses to persist, delegated to
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import sqlite3
 import time
@@ -21,14 +20,15 @@ import aiosqlite
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
-from ..observability.metrics import try_get_instruments
 from ..observability.spans import (
     EPISODIC_RECALL_SPAN,
     EPISODIC_REMEMBER_SPAN,
 )
+from ..principal_id import resolve_principal_id_silent
 from ..session_id import current_session_id, normalize_session_id, resolve_session_id_silent
 from ._boundary import warn_external_construction
-from ._salience import EPISODIC_APPEND_SALIENCE, emit_for_tier
+from ._principal_filter import resolve_active_principal
+from ._salience import EPISODIC_APPEND_SALIENCE, emit_for_tier, emit_session_write
 from ._session_filter import _resolve_session_list
 from .episodic_notes_api import _EpisodicNotesAPIMixin
 from .episodic_queries import (
@@ -109,6 +109,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         self._note_store: NoteStore | None = None
         # RFC 0031 Phase 2 PR 2 — tier-owned (see ``recall`` docstring).
         self._active_session_id = resolve_session_id_silent()
+        # ISSUE-0081 PR 3 — tenant snapshot (call-time scope wins on use).
+        self._active_principal_id = resolve_principal_id_silent()
 
     @property
     def agent_id(self) -> str:
@@ -163,6 +165,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         self._note_store = NoteStore(
             agent_id=self._agent_id, db=self._db, fts5=self._fts5,
             active_session_id=self._active_session_id,
+            active_principal_id=self._active_principal_id,
         )
 
     async def close(self) -> None:
@@ -236,6 +239,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                     logger.warning("importance=%.4f out of [0.0, 1.0] range, clamping", importance)
                     importance = max(0.0, min(1.0, importance))
                 session_id = normalize_session_id(session_id)  # PR 4 / F16
+                # ISSUE-0081 PR 3: tag the row with the active tenant.
+                principal_id = resolve_active_principal(self._active_principal_id)
                 episode_id = await insert_episode(
                     db, self._agent_id,
                     summary=summary, context=context, outcome=outcome,
@@ -243,26 +248,17 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                     interaction_id=interaction_id, started_at=started_at,
                     closed_at=closed_at, turn_count=turn_count,
                     session_id=session_id, scope=scope,
+                    principal_id=principal_id,
                 )
             except Exception as exc:
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, str(exc)))
                 raise
-            # RFC 0031 Phase 1 sessions.writes (PR #337 M1) — outside
-            # the persistence try; suppress OTEL exceptions so a metric
-            # backend failure cannot mark the span ERROR or surface as a
-            # write failure (row is already persisted).
-            with contextlib.suppress(Exception):
-                inst = try_get_instruments()
-                if inst is not None:
-                    inst.sessions_writes.add(
-                        1,
-                        attributes={
-                            "session_id": session_id,
-                            "agent.id": self._agent_id,
-                            "surface": surface,
-                        },
-                    )
+            # RFC 0031 Phase 1 sessions.writes (PR #337 M1) — the shim
+            # suppresses OTEL errors so a metric failure is not a write failure.
+            emit_session_write(
+                agent_id=self._agent_id, session_id=session_id, surface=surface,
+            )
         # Emit *after* the EPISODIC_REMEMBER_SPAN closes so ``source_span_id``
         # captures the parent span (the LLM-call span when the write
         # originates inside the action loop) rather than the inner episodic
@@ -319,6 +315,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                 f"min_score must be in [0.0, 1.0] or None, got {min_score}"
             )
         session_list = _resolve_session_list(sessions, self._active_session_id)
+        active_principal = resolve_active_principal(self._active_principal_id)
         with _tracer.start_as_current_span(
             EPISODIC_RECALL_SPAN,
             attributes={
@@ -327,6 +324,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                 "query.empty": not query,
                 # OQ #7/0081: active session (scope over snapshot), not the filter shape.
                 "session_id": current_session_id() or self._active_session_id,
+                "principal_id": active_principal,  # ISSUE-0081 PR 3
             },
         ) as span:
             # Mirror the LLM/tool/store_episode span error contract: a SQLite
@@ -345,16 +343,18 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                     rows = await recall_fts5(
                         db, self._agent_id, query, limit, min_importance,
                         min_score, sessions=session_list,
+                        principal_id=active_principal,
                     )
                 elif query:
                     rows = await recall_like(
                         db, self._agent_id, query, limit, min_importance,
                         min_score, sessions=session_list,
+                        principal_id=active_principal,
                     )
                 else:
                     rows = await recall_recency(
                         db, self._agent_id, limit, min_importance,
-                        sessions=session_list,
+                        sessions=session_list, principal_id=active_principal,
                     )
 
                 # RFC 0020 PR 5 / PR-262 review M1: drop unfinalised

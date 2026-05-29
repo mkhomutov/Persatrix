@@ -31,11 +31,14 @@ from dataclasses import dataclass
 import aiosqlite
 
 from ..observability.metrics import try_get_instruments
+from ..principal_id import resolve_principal_id_silent
 from ..session_id import normalize_session_id, resolve_session_id_silent
 from ._facts_audit import emit_audit as _emit_audit
 from ._facts_erasure import delete_by_subject as _delete_by_subject
 from ._facts_reinforce import mark_recalled_for_agent as _mark_recalled_for_agent
 from ._facts_supersede import apply_supersession as _apply_supersession
+from ._facts_supersede import retract_fact as _retract_fact
+from ._principal_filter import principal_eq_clause, resolve_active_principal
 from ._session_filter import _resolve_session_list, session_in_clause
 from .fact_predicates import canonicalize_subject, validate_predicate
 from .migrations import _apply_migrations
@@ -177,6 +180,8 @@ class FactStore:
         # must resolve its own active session for ``sessions=None`` to
         # be correct on that path.
         self._active_session_id = resolve_session_id_silent()
+        # ISSUE-0081 PR 3 — tenant snapshot (call-time scope wins on use).
+        self._active_principal_id = resolve_principal_id_silent()
 
     @property
     def agent_id(self) -> str:
@@ -269,6 +274,8 @@ class FactStore:
         # PR 4 — PR 1 F16 carry-forward).  Symmetric with the other three
         # persona-memory tier write paths.
         session_id = normalize_session_id(session_id)
+        # ISSUE-0081 PR 3: active tenant for the row tag + supersede chain key.
+        principal_id = resolve_active_principal(self._active_principal_id)
 
         db = self._ensure_db()
         fact_id = str(uuid.uuid4())
@@ -278,8 +285,8 @@ class FactStore:
             INSERT INTO facts
                 (fact_id, agent_id, subject, predicate, object,
                  certainty, source_interaction_id, asserted_at,
-                 last_recalled_at, superseded_by, session_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+                 last_recalled_at, superseded_by, session_id, principal_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
             """,
             (
                 fact_id,
@@ -291,6 +298,7 @@ class FactStore:
                 source_interaction_id,
                 asserted_at,
                 session_id,
+                principal_id,
             ),
         )
 
@@ -302,6 +310,7 @@ class FactStore:
             asserted_at=asserted_at,
             new_fact_id=fact_id,
             session_id=session_id,
+            principal_id=principal_id,
         )
         await db.commit()
 
@@ -387,13 +396,18 @@ class FactStore:
         sess_clause, sess_params = session_in_clause(
             session_list, column="session_id",
         )
+        # ISSUE-0081 PR 3 — strict tenant equality appended to every branch.
+        princ_clause, princ_params = principal_eq_clause(
+            resolve_active_principal(self._active_principal_id),
+            column="principal_id",
+        )
 
         db = self._ensure_db()
         if include_superseded:
             sql = (
                 f"SELECT {_FACT_SELECT} FROM facts "
                 "WHERE agent_id = ? AND subject = ?"
-                f"{sess_clause} "
+                f"{sess_clause}{princ_clause} "
                 "ORDER BY asserted_at DESC LIMIT ?"
             )
         else:
@@ -401,11 +415,11 @@ class FactStore:
                 f"SELECT {_FACT_SELECT} FROM facts "
                 "WHERE agent_id = ? AND subject = ? "
                 "AND superseded_by IS NULL"
-                f"{sess_clause} "
+                f"{sess_clause}{princ_clause} "
                 "ORDER BY asserted_at DESC LIMIT ?"
             )
         async with db.execute(
-            sql, (self._agent_id, subject, *sess_params, limit),
+            sql, (self._agent_id, subject, *sess_params, *princ_params, limit),
         ) as cursor:
             rows = await cursor.fetchall()
         return [self._row_to_fact(row) for row in rows]
@@ -419,26 +433,19 @@ class FactStore:
     async def supersede(self, fact_id: str, by_fact_id: str) -> bool:
         """Manually mark ``fact_id`` as superseded by ``by_fact_id``.
 
-        Returns ``True`` if a row was updated.  Storage-only helper —
-        the latest-asserted-wins policy in :meth:`store` is the common
-        path; this exists for callers (PR 4 + future RFC 0027
-        consolidation) that need to retract a fact without writing a
-        successor of identical ``(subject, predicate)``.
+        Storage-only retract for callers (PR 4 + future RFC 0027
+        consolidation) that retract a fact without writing a successor of
+        identical ``(subject, predicate)``; the latest-asserted-wins policy
+        in :meth:`store` is the common path.  Principal-scoped via
+        :func:`._facts_supersede.retract_fact` (ISSUE-0081 PR 3 review) so
+        it is symmetric with the automatic chain — a tenant cannot retract
+        another tenant's fact by id.  Returns ``True`` iff a row was updated.
         """
-        db = self._ensure_db()
-        cursor = await db.execute(
-            "UPDATE facts SET superseded_by = ? "
-            "WHERE fact_id = ? AND agent_id = ? "
-            "AND superseded_by IS NULL",
-            (by_fact_id, fact_id, self._agent_id),
+        return await _retract_fact(
+            self._ensure_db(), agent_id=self._agent_id,
+            fact_id=fact_id, by_fact_id=by_fact_id,
+            principal_id=resolve_active_principal(self._active_principal_id),
         )
-        await db.commit()
-        if cursor.rowcount > 0:
-            _emit_audit(
-                "fact.supersede", agent_id=self._agent_id,
-                superseded_fact_id=fact_id, by_fact_id=by_fact_id,
-            )
-        return cursor.rowcount > 0
 
     async def prune(self, *, before: float) -> int:
         """Delete superseded facts asserted before ``before`` seconds.

@@ -8,7 +8,6 @@ string; they carry no object state and are safe to call from any async context.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import math
 import time
@@ -18,9 +17,10 @@ from typing import Any
 import aiosqlite
 from opentelemetry import trace
 
-from ..observability.metrics import try_get_instruments
 from ..observability.spans import RELATIONSHIP_UPDATE_SPAN
+from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ..session_id import normalize_session_id
+from ._salience import emit_session_write
 from .relationship_queries import truncate_field, validate_other_id, validate_participant_types
 from .relationship_types import (
     _DEFAULT_TRUST,
@@ -47,11 +47,20 @@ async def update_trust(
     *,
     participant_type: str = "agent",
     other_participant_type: str = "agent",
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> float:
     """Update trust score. Returns new value (clamped to [0.0, 1.0]).
 
     *delta* is clamped to ±0.2 to prevent single interactions from
     swinging trust dramatically.
+
+    ``principal_id`` (ISSUE-0081 PR 3; default :data:`DEFAULT_PRINCIPAL_ID`)
+    tags the row and is part of the ``relationships`` primary key, so this
+    upsert lands on — and reads back — *this* tenant's row.  Without it a
+    first-touch ``update_trust`` created a row under the column default
+    ``local`` (invisible to the writing tenant, leaked to the default
+    principal) and a second tenant's upsert mutated the first's
+    ``trust_score`` (review H1 / H2).
 
     .. note::
 
@@ -93,10 +102,11 @@ async def update_trust(
                 (participant_id, participant_type,
                  other_participant_id, other_participant_type,
                  trust_score, interaction_count,
-                 last_interaction_at, notes)
-            VALUES (?, ?, ?, ?, ?, 0, NULL, ?)
+                 last_interaction_at, notes, principal_id)
+            VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?)
             ON CONFLICT(participant_id, participant_type,
-                        other_participant_id, other_participant_type) DO UPDATE SET
+                        other_participant_id, other_participant_type,
+                        principal_id) DO UPDATE SET
                 trust_score = MAX(0.0, MIN(1.0, relationships.trust_score + ?)),
                 notes = ?
             RETURNING trust_score
@@ -108,6 +118,7 @@ async def update_trust(
                 other_participant_type,
                 insert_trust,
                 reason,
+                principal_id,
                 delta,
                 reason,
             ),
@@ -144,12 +155,17 @@ async def apply_decay(
     decay_rate: float = 0.01,
     *,
     participant_type: str = "agent",
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> int:
     """Decay all trust scores toward 0.5 (neutral).
 
     Formula: ``new = old + decay_rate * (0.5 - old)``.
     Rows within 0.001 of neutral are skipped.  Decays all
     ``other_participant_type`` values uniformly (PR #120 F-5).
+
+    ``principal_id`` (ISSUE-0081 PR 3; default :data:`DEFAULT_PRINCIPAL_ID`)
+    scopes the maintenance pass to the active tenant — a decay run on one
+    tenant's request must not move another tenant's trust.
 
     Returns the number of relationships updated.
     """
@@ -160,9 +176,10 @@ async def apply_decay(
         UPDATE relationships
         SET trust_score = trust_score + ? * (0.5 - trust_score)
         WHERE participant_id = ? AND participant_type = ?
+          AND principal_id = ?
           AND ABS(trust_score - 0.5) > 0.001
         """,
-        (decay_rate, agent_id, participant_type),
+        (decay_rate, agent_id, participant_type, principal_id),
     )
     updated = cursor.rowcount
     if updated:
@@ -187,6 +204,7 @@ async def record_interaction(
     participant_type: str = "agent",
     other_participant_type: str = "agent",
     session_id: str = "legacy",
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> str:
     """Record an interaction with another participant.
 
@@ -230,8 +248,8 @@ async def record_interaction(
             (id, participant_id, participant_type,
              other_participant_id, other_participant_type,
              interaction_type, outcome, sentiment, created_at,
-             session_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             session_id, principal_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             interaction_id,
@@ -244,6 +262,7 @@ async def record_interaction(
             sentiment,
             now,
             session_id,
+            principal_id,
         ),
     )
 
@@ -252,17 +271,21 @@ async def record_interaction(
     # ON CONFLICT branch deliberately omits it so the row tracks the
     # first-seen session and a future cross-session interaction does
     # not silently overwrite the per-row tag (recall semantics for that
-    # use case live on the interactions table in Phase 2).
+    # use case live on the interactions table in Phase 2).  ISSUE-0081
+    # PR 3: ``principal_id`` is part of the primary key / conflict target
+    # (not a first-seen tag like ``session_id``) — a different tenant
+    # therefore upserts its *own* row instead of mutating this one.
     await db.execute(
         """
         INSERT INTO relationships
             (participant_id, participant_type,
              other_participant_id, other_participant_type,
              trust_score, interaction_count,
-             last_interaction_at, notes, session_id)
-        VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?)
+             last_interaction_at, notes, session_id, principal_id)
+        VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, ?)
         ON CONFLICT(participant_id, participant_type,
-                    other_participant_id, other_participant_type) DO UPDATE SET
+                    other_participant_id, other_participant_type,
+                    principal_id) DO UPDATE SET
             interaction_count = interaction_count + 1,
             last_interaction_at = ?
         """,
@@ -274,33 +297,19 @@ async def record_interaction(
             _DEFAULT_TRUST,
             now,
             session_id,
+            principal_id,
             now,
         ),
     )
     await db.commit()
     # RFC 0031 Phase 1 — increment the per-session write counter (Python
-    # mirror of the orchestrator-side ``sessions.writes``).  Recorded on
-    # every ``record_interaction`` call, not just the first-seen INSERT
-    # branch, so dashboards see one tick per persona-level interaction
-    # event regardless of whether the conflict path fired.
-    #
-    # RFC 0031 Phase 2 PR 3 (F17 carry-forward): wrapped in
-    # ``contextlib.suppress`` so an OTEL backend exception cannot
-    # surface as a write failure after ``db.commit()`` has already
-    # persisted the row — same failure-isolation contract as
-    # :meth:`EpisodicMemory.store_episode` (PR #337 M1) and
-    # :meth:`NoteStore.store_note` (PR 449).
-    with contextlib.suppress(Exception):
-        inst = try_get_instruments()
-        if inst is not None:
-            inst.sessions_writes.add(
-                1,
-                attributes={
-                    "session_id": session_id,
-                    "agent.id": agent_id,
-                    "surface": "relationship",
-                },
-            )
+    # mirror of the orchestrator-side ``sessions.writes``) via the shared
+    # shim.  Recorded on every ``record_interaction`` call, not just the
+    # first-seen INSERT branch, so dashboards see one tick per persona-level
+    # interaction event regardless of whether the conflict path fired.
+    emit_session_write(
+        agent_id=agent_id, session_id=session_id, surface="relationship",
+    )
     return interaction_id
 
 
@@ -310,6 +319,7 @@ async def seed_trust(
     config_relationships: list[dict[str, Any]],
     *,
     session_id: str = "legacy",
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
 ) -> None:
     """Seed trust scores from agent config. Never overwrites existing rows.
 
@@ -319,6 +329,11 @@ async def seed_trust(
     so MT-SESSION-001 Step 7 sees ``run-a`` on a config-seeded row
     rather than the column-default ``legacy``.  Existing rows are still
     untouched — INSERT OR IGNORE preserves the first-seen contract.
+
+    ``principal_id`` (ISSUE-0081 PR 3; default
+    :data:`DEFAULT_PRINCIPAL_ID`) tags the same seed rows with the active
+    tenant so a config-seeded relationship is visible to the principal
+    that booted the persona, not bridged across tenants.
     """
     for entry in config_relationships:
         other_id = entry.get("agent_id")
@@ -349,9 +364,9 @@ async def seed_trust(
                 (participant_id, participant_type,
                  other_participant_id, other_participant_type,
                  trust_score, interaction_count,
-                 last_interaction_at, notes, session_id)
-            VALUES (?, 'agent', ?, 'agent', ?, 0, NULL, NULL, ?)
+                 last_interaction_at, notes, session_id, principal_id)
+            VALUES (?, 'agent', ?, 'agent', ?, 0, NULL, NULL, ?, ?)
             """,
-            (agent_id, other_id, trust_level, session_id),
+            (agent_id, other_id, trust_level, session_id, principal_id),
         )
     await db.commit()
