@@ -29,11 +29,23 @@ async def _apply_migration_10(db: aiosqlite.Connection) -> None:
     """RFC 0031 Phase 2 PR 5: ``session_id`` on the ``interactions`` tier.
 
     Adds ``session_id TEXT NOT NULL DEFAULT 'legacy'`` to ``interactions``
-    and creates ``idx_interactions_session`` so the §D recall filter has
-    a column + index pair without a follow-up migration.  The
-    ``'legacy'`` default matches the v7/v8/v9 carve-out so pre-RFC
-    interaction rows upgrade cleanly with no backfill UPDATE and stay
-    visible from every session under the carve-out.
+    and creates ``idx_interactions_session`` for parity with the
+    per-tier session indexes from v7 / v9 (``idx_episodes_session`` /
+    ``idx_rel_session`` / ``idx_notes_session``).  The standalone index
+    is **not** what serves the §D recall filter: the SELECTs in
+    :func:`agents.memory.relationship_queries.get_relationship_summary`
+    and :func:`~agents.memory.relationship_queries.get_all_relationships`
+    are anchored on the participant 4-tuple, so ``EXPLAIN QUERY PLAN``
+    shows them seeking ``idx_interactions_participant_lookup`` and
+    applying ``session_id`` as a residual filter — do not drop that
+    composite on the assumption this index covers recall.  The
+    session-only index exists to keep the four tiers uniform and to give
+    a future session-scoped maintenance/lifecycle op an index without a
+    follow-up migration (the shape the notes per-session capacity prune
+    already plans against ``idx_notes_session``).  The ``'legacy'``
+    default matches the v7/v8/v9 carve-out so pre-RFC interaction rows
+    upgrade cleanly with no backfill UPDATE and stay visible from every
+    session under the carve-out.
 
     Idempotency: ``ALTER TABLE ... ADD COLUMN`` predates ``IF NOT EXISTS``
     in SQLite < 3.35; the column existence is checked via
