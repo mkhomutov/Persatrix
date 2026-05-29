@@ -162,6 +162,34 @@ class TestFactsPrincipalIsolation:
             got_b = await store.recall(subject="bob", sessions="*")
         assert [f.object for f in got_b] == ["LA"]
 
+    async def test_manual_supersede_cross_principal_denied(
+        self, store: FactStore,
+    ) -> None:
+        """``FactStore.supersede`` is principal-scoped, symmetric with the
+        automatic supersession chain: a tenant-b caller cannot retract a
+        tenant-a fact by id, even though both rows share the agent
+        (ISSUE-0081 PR 3 review follow-up).
+        """
+        with principal_scope("tenant-a"):
+            fact_a = await store.store(
+                subject="bob", predicate="lives_in", object="NYC",
+                source_interaction_id="ix-a", asserted_at=1000.0,
+                session_id="legacy",
+            )
+        with principal_scope("tenant-b"):
+            fact_b = await store.store(
+                subject="carol", predicate="lives_in", object="LA",
+                source_interaction_id="ix-b", asserted_at=2000.0,
+                session_id="legacy",
+            )
+            # tenant-b attempts to retract tenant-a's fact by id → no-op.
+            retracted = await store.supersede(fact_a, fact_b)
+        assert retracted is False
+        # tenant-a's fact is still live (untouched by the foreign retract).
+        with principal_scope("tenant-a"):
+            got = await store.recall(subject="bob", sessions="*")
+        assert [f.object for f in got] == ["NYC"]
+
 
 # ─── Relationship ───────────────────────────────────────────
 

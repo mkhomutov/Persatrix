@@ -37,6 +37,7 @@ from ._facts_audit import emit_audit as _emit_audit
 from ._facts_erasure import delete_by_subject as _delete_by_subject
 from ._facts_reinforce import mark_recalled_for_agent as _mark_recalled_for_agent
 from ._facts_supersede import apply_supersession as _apply_supersession
+from ._facts_supersede import retract_fact as _retract_fact
 from ._principal_filter import principal_eq_clause, resolve_active_principal
 from ._session_filter import _resolve_session_list, session_in_clause
 from .fact_predicates import canonicalize_subject, validate_predicate
@@ -432,26 +433,19 @@ class FactStore:
     async def supersede(self, fact_id: str, by_fact_id: str) -> bool:
         """Manually mark ``fact_id`` as superseded by ``by_fact_id``.
 
-        Returns ``True`` if a row was updated.  Storage-only helper —
-        the latest-asserted-wins policy in :meth:`store` is the common
-        path; this exists for callers (PR 4 + future RFC 0027
-        consolidation) that need to retract a fact without writing a
-        successor of identical ``(subject, predicate)``.
+        Storage-only retract for callers (PR 4 + future RFC 0027
+        consolidation) that retract a fact without writing a successor of
+        identical ``(subject, predicate)``; the latest-asserted-wins policy
+        in :meth:`store` is the common path.  Principal-scoped via
+        :func:`._facts_supersede.retract_fact` (ISSUE-0081 PR 3 review) so
+        it is symmetric with the automatic chain — a tenant cannot retract
+        another tenant's fact by id.  Returns ``True`` iff a row was updated.
         """
-        db = self._ensure_db()
-        cursor = await db.execute(
-            "UPDATE facts SET superseded_by = ? "
-            "WHERE fact_id = ? AND agent_id = ? "
-            "AND superseded_by IS NULL",
-            (by_fact_id, fact_id, self._agent_id),
+        return await _retract_fact(
+            self._ensure_db(), agent_id=self._agent_id,
+            fact_id=fact_id, by_fact_id=by_fact_id,
+            principal_id=resolve_active_principal(self._active_principal_id),
         )
-        await db.commit()
-        if cursor.rowcount > 0:
-            _emit_audit(
-                "fact.supersede", agent_id=self._agent_id,
-                superseded_fact_id=fact_id, by_fact_id=by_fact_id,
-            )
-        return cursor.rowcount > 0
 
     async def prune(self, *, before: float) -> int:
         """Delete superseded facts asserted before ``before`` seconds.

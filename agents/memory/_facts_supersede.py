@@ -59,11 +59,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple
 
 from ..session_id import LEGACY_SESSION_ID
+from ._facts_audit import emit_audit
 
 if TYPE_CHECKING:
     import aiosqlite
 
-__all__ = ["SupersessionResult", "apply_supersession"]
+__all__ = ["SupersessionResult", "apply_supersession", "retract_fact"]
 
 
 class SupersessionResult(NamedTuple):
@@ -199,3 +200,45 @@ async def apply_supersession(
         superseded_older_ids=older_fact_ids,
         self_superseded_by=self_superseded_by,
     )
+
+
+async def retract_fact(
+    db: aiosqlite.Connection,
+    *,
+    agent_id: str,
+    fact_id: str,
+    by_fact_id: str,
+    principal_id: str,
+) -> bool:
+    """Explicitly point ``fact_id``'s ``superseded_by`` at ``by_fact_id``.
+
+    The manual-retract primitive behind
+    :meth:`agents.memory.facts.FactStore.supersede` — for callers (PR 4 +
+    future RFC 0027 consolidation) that retract a fact without writing a
+    successor of identical ``(subject, predicate)``.  Only a live row
+    (``superseded_by IS NULL``) owned by ``agent_id`` is touched.
+
+    ``principal_id`` (ISSUE-0081 PR 3 review follow-up) scopes the write
+    with the same strict equality :func:`apply_supersession` uses, so a
+    tenant cannot retract another tenant's fact by id even though both
+    rows share the ``agent_id``.  Commits itself and, on a true result,
+    emits the RFC 0026 §G ``fact.supersede`` audit record — mirroring the
+    self-contained-primitive precedent of
+    :func:`agents.memory._facts_reinforce.mark_recalled_for_agent`.
+    Returns ``True`` iff a live row was updated.
+    """
+    cursor = await db.execute(
+        "UPDATE facts SET superseded_by = ? "
+        "WHERE fact_id = ? AND agent_id = ? "
+        "AND superseded_by IS NULL "
+        "AND principal_id = ?",
+        (by_fact_id, fact_id, agent_id, principal_id),
+    )
+    await db.commit()
+    retracted = (cursor.rowcount or 0) > 0
+    if retracted:
+        emit_audit(
+            "fact.supersede", agent_id=agent_id,
+            superseded_fact_id=fact_id, by_fact_id=by_fact_id,
+        )
+    return retracted
