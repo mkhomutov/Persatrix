@@ -222,5 +222,8 @@ final PR.
 > armed but **not yet fed**: the Go orchestrator still resolves one
 > session id per process at boot and emits no per-request headers, so the
 > cross-conversation / cross-tenant fix is dormant until the orchestrator
-> emits per-request ids (session: a Go follow-up; principal: RFC 0039).
+> emits per-request ids. That activation half is tracked as its own
+> issue — [ISSUE-0082](ISSUE-0082-orchestrator-per-request-session-principal-emission.md)
+> (session: a Go follow-up; principal: gated on RFC 0039) — and this
+> umbrella stays open until it lands.
 > Single-session-per-process deployments are unchanged and correct today.
