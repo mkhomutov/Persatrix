@@ -35,6 +35,16 @@ type SessionResolver struct {
 	db *sql.DB
 }
 
+// ErrEmptySessionAxis is returned by [SessionResolver.Resolve] when any of
+// the (agent, channel, user) axes is empty. The session unit is defined on
+// all three axes (RFC 0031 §B); an empty component is never a valid unit, so
+// the resolver fails loud rather than minting a session keyed on an empty
+// axis — a junk row would pollute the `sessions` registry the Phase 3 CLI
+// surfaces and mis-group the per-conversation recall this issue isolates.
+// Callers compare with [errors.Is], matching the package's sentinel
+// convention.
+var ErrEmptySessionAxis = errors.New("channels: session resolve requires non-empty (agent, channel, user)")
+
 // NewSessionResolver builds a resolver over the channel store's database.
 // It requires the SQLite-backed [ChannelStore] (the only production
 // implementation); a different implementation is a programming error and
@@ -57,7 +67,15 @@ type rowQuerier interface {
 // minting and persisting a new one on first sight. The returned id is
 // never empty and never the `legacy` carve-out — it is always a concrete
 // UUIDv7 registered in the `sessions` table.
+//
+// Every axis is load-bearing (RFC 0031 §B): an empty agent, channel, or
+// user is a caller bug and returns [ErrEmptySessionAxis] without touching
+// the store, never a session minted on a partial triple.
 func (r *SessionResolver) Resolve(ctx context.Context, agentID, channelID, userID string) (string, error) {
+	if agentID == "" || channelID == "" || userID == "" {
+		return "", fmt.Errorf("%w: agent=%q channel=%q user=%q",
+			ErrEmptySessionAxis, agentID, channelID, userID)
+	}
 	// Fast path: an existing binding is the overwhelmingly common case —
 	// one mint per conversation, every subsequent message reuses it. No
 	// transaction needed for the read.
@@ -96,9 +114,11 @@ func (r *SessionResolver) mint(ctx context.Context, agentID, channelID, userID s
 	if err != nil {
 		return "", fmt.Errorf("channels: mint session id: %w", err)
 	}
-	// REAL (unix seconds) to match the `sessions` / `session_bindings`
-	// created_at columns; sub-second precision keeps UUIDv7's time ordering
-	// and the row timestamp consistent.
+	// created_at is unix seconds as a float, matching the REAL column type
+	// the sibling `sessions` table uses (not the DATETIME encoding on
+	// channels/messages). The sub-second fraction is preserved rather than
+	// truncated to whole seconds, so the stamp keeps sub-millisecond
+	// resolution.
 	now := float64(time.Now().UTC().UnixNano()) / float64(time.Second)
 
 	tx, err := r.db.BeginTx(ctx, nil)

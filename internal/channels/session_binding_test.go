@@ -167,3 +167,48 @@ func TestSessionResolver_ConcurrentFirstSight_SingleID(t *testing.T) {
 		assert.Equal(t, 1, sessions, "exactly one session row — no double-mint orphan")
 	})
 }
+
+// TestSessionResolver_EmptyAxis_Rejected pins the input contract: the
+// (agent, channel, user) unit is load-bearing on every axis (RFC 0031 §B —
+// the same grain TestSessionResolver_DistinctTriples_DistinctIDs proves), so
+// an empty component is never a valid unit. The resolver fails loud with
+// ErrEmptySessionAxis rather than minting a session keyed on an empty axis —
+// such a junk row would pollute the `sessions` registry the Phase 3 CLI
+// surfaces and mis-group recall, the very isolation property ISSUE-0082
+// exists to protect. The rejection writes neither a binding nor a session row.
+func TestSessionResolver_EmptyAxis_Rejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	store, err := NewSQLiteStore(path, SQLiteOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	r := mustResolver(t, store)
+	ctx := context.Background()
+
+	cases := []struct {
+		name                       string
+		agentID, channelID, userID string
+	}{
+		{"empty agent", "", "group:planning", "user-1"},
+		{"empty channel", "agent-a", "", "user-1"},
+		{"empty user", "agent-a", "group:planning", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id, err := r.Resolve(ctx, tc.agentID, tc.channelID, tc.userID)
+			require.Error(t, err, "an empty axis must be rejected")
+			assert.ErrorIs(t, err, ErrEmptySessionAxis,
+				"rejection must surface the ErrEmptySessionAxis sentinel")
+			assert.Empty(t, id, "no session id is returned on a rejected triple")
+		})
+	}
+
+	// The rejected triples must have left the store untouched — fail-loud,
+	// not fail-and-still-write.
+	withDB(t, path, func(db *sql.DB) {
+		var bindings, sessions int
+		require.NoError(t, db.QueryRow(`SELECT COUNT(1) FROM session_bindings`).Scan(&bindings))
+		require.NoError(t, db.QueryRow(`SELECT COUNT(1) FROM sessions`).Scan(&sessions))
+		assert.Equal(t, 0, bindings, "rejected triples must not write a binding row")
+		assert.Equal(t, 0, sessions, "rejected triples must not write a session row")
+	})
+}
