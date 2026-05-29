@@ -15,7 +15,7 @@ depends_on:
 # RFC 0031 — Per-Session Namespacing for Channels and Persona Memory
 
 **Type**: architecture
-**Status**: 🚧 Implementing (Phase 1 shipped v0.3.1; Phase 2 — session-scoped default recall across all four persona-memory tiers, the F-3 closer — shipped v0.3.5; Phases 3–4 (operator CLI + docs) remain)
+**Status**: ⚠️ Partially Implemented (Phase 1 shipped v0.3.1; Phase 2 — session-scoped default recall across all four persona-memory tiers, the F-3 closer — shipped v0.3.5; Phases 3–4 (operator CLI + docs) remain)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-12
 **Target**: v0.3.1 (P1) + v0.3.5 (P2) + v0.3.x (P3–4)
@@ -165,7 +165,7 @@ CREATE TABLE sessions (
 | `facts` (Python, [`agents/memory/facts.py`](../../agents/memory/facts.py)) | `session_id TEXT NOT NULL` | `'legacy'` for pre-RFC rows | `idx_facts_session` |
 | `notes` (Python, [`agents/memory/notes.py`](../../agents/memory/notes.py)) | `session_id TEXT NOT NULL` | `'legacy'` for pre-RFC rows | `idx_notes_session` |
 
-> **Phase 2 status (v0.3.5).** The six tables above carry their `session_id` columns across the following Python migrations: `episodes` + `relationships` at **v7** (RFC 0031 Phase 1), `facts` at **v8** (the tier's introducing migration carries the column), and `notes` at **v9** ([Phase 2 PR 1](0031-phase2-pr-plan.md#pr-1-featurev035-rfc0031p2-notes-coverage--notes-tier-session-coverage), which closed the last tier gap). All four persona-memory tiers — `episodes`, `relationships`, `facts`, `notes` — now filter recall by the active session with the always-visible `'legacy'` carve-out per §D, implemented in v0.3.5 ([Phase 2 PR plan](0031-phase2-pr-plan.md)). The Go `channels` / `messages` columns shipped in Phase 1 (v0.3.1).
+> **Phase 2 status (v0.3.5).** The six tables above all carry a `session_id` column; the four Python tiers gained theirs across the following migrations: `episodes` + `relationships` at **v7** (RFC 0031 Phase 1), `facts` at **v8** (the tier's introducing migration carries the column), and `notes` at **v9** ([Phase 2 PR 1](0031-phase2-pr-plan.md#pr-1-featurev035-rfc0031p2-notes-coverage--notes-tier-session-coverage), which closed the last tier gap). All four persona-memory tiers — `episodes`, `relationships`, `facts`, `notes` — now filter recall by the active session with the always-visible `'legacy'` carve-out per §D, implemented in v0.3.5 ([Phase 2 PR plan](0031-phase2-pr-plan.md)). The Go `channels` / `messages` columns shipped in Phase 1 (v0.3.1).
 
 All six tables use the **same** column shape — `TEXT NOT NULL` with the `'legacy'` literal as the migration default — so the recall predicate is uniform (§D). An earlier draft of this table had the Python side nullable (`TEXT` / `NULL` default) and the Go side `NOT NULL`; this was tightened during deep review because the asymmetric form forced every recall path to special-case both `IS NULL` and `= 'legacy'`, and there is no design reason for the two stores to disagree on whether "pre-RFC row" is a NULL or a string. SQLite (used by both Go's `internal/channels/sqlite.go` and Python's `agents/memory/*.py`) supports `ALTER TABLE ... ADD COLUMN session_id TEXT NOT NULL DEFAULT 'legacy'` with a constant default since 3.20.0, so the migration is still a one-statement no-backfill change on both sides.
 
