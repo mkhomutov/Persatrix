@@ -34,17 +34,15 @@ from ..memory.boundary_detectors import (
 from ..memory.episodic import EpisodicMemory
 from ..memory.interactions import (
     SCOPE_TICK,
-    SUMMARY_PENDING_TEXT,
     Interaction,
     InteractionTracker,
     cleanup_closing_interactions,
     scope_for_channel_event,
 )
 from ..persona_types import EventType
-from .summarize_close import (
-    drain_pending_summary_tasks,
-    finalize_closed_interaction,
-)
+from ..session_id import current_session_id
+from .close_path import persist_closed_interaction
+from .summarize_close import drain_pending_summary_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +103,26 @@ class _EpisodeRoutingMixin:
         EventType.AGENT_JOINED,
         EventType.AGENT_LEFT,
     })
+
+    @property
+    def _active_write_session_id(self) -> str:
+        """Session to tag *fresh* writes with (ISSUE-0081 PR 2).
+
+        Call-time precedence: a per-request ``session_scope`` (entered by
+        :meth:`_LLMPersonaAgent.on_event`) wins over the construction-time
+        ``_session_id`` snapshot, so a row written while handling
+        conversation A's event lands under A even when a sibling
+        conversation shares this process.  Falls back to ``_session_id``
+        when no scope is active (tick / boot / single-session paths), which
+        is exactly the pre-PR-2 behaviour.
+
+        This is the *open*-time session.  The close path
+        (:meth:`_persist_closed_interaction`) deliberately uses the
+        interaction's frozen ``session_id`` instead — see that method and
+        :class:`agents.memory.interactions.Interaction` for the
+        sibling-mislabel guard.
+        """
+        return current_session_id() or self._session_id
 
     async def _store_event_episode(
         self, event: AgentEvent, actions: list[AgentAction],
@@ -167,7 +185,8 @@ class _EpisodeRoutingMixin:
                     event.event_type.value,
                 )
                 await self._episodic_memory.store_episode(
-                    summary=summary, context=ctx, session_id=self._session_id)
+                    summary=summary, context=ctx,
+                    session_id=self._active_write_session_id)
                 return
             scope = (
                 SCOPE_TICK
@@ -179,7 +198,10 @@ class _EpisodeRoutingMixin:
             # the PR 4 summariser will never read this payload (it will
             # short-circuit on ``turn_count == 1``).  Passing the
             # duplicate dict was dead bytes on the hot path.
-            self._interaction_tracker.add_turn(scope, payload=None)
+            self._interaction_tracker.add_turn(
+                scope, payload=None,
+                session_id=self._active_write_session_id,
+            )
             # Distinct local name from the ``for closed in idle_check()``
             # loop above so mypy sees a single binding type for each name.
             structural_close = self._interaction_tracker.close(
@@ -207,7 +229,12 @@ class _EpisodeRoutingMixin:
                 started_at=structural_close.started_at,
                 closed_at=structural_close.closed_at,
                 turn_count=structural_close.turn_count,
-                scope=structural_close.scope, session_id=self._session_id,
+                scope=structural_close.scope,
+                # Single-turn open+close in one call: the interaction's
+                # frozen session equals ``_active_write_session_id`` here,
+                # but use the interaction's value so the open and close
+                # writes share one source of truth (sibling-mislabel guard).
+                session_id=structural_close.session_id,
             )
         except Exception:
             # PR 6 slice 4 #6 + slice 5 #13: this try guards the
@@ -345,7 +372,8 @@ class _EpisodeRoutingMixin:
                 self.agent_id, event.event_type.value,
             )
             await self._episodic_memory.store_episode(
-                summary=summary, context=ctx, session_id=self._session_id)
+                summary=summary, context=ctx,
+                session_id=self._active_write_session_id)
             return
         # ISSUE-0054 — RFC 0026's facts extractor needs the real
         # message body: the combined summarise + extract LLM call at
@@ -373,7 +401,10 @@ class _EpisodeRoutingMixin:
         message_text = (event.payload or {}).get("content")
         if isinstance(message_text, str) and message_text.strip():
             payload["text"] = message_text
-        interaction = self._interaction_tracker.add_turn(scope, payload=payload)
+        interaction = self._interaction_tracker.add_turn(
+            scope, payload=payload,
+            session_id=self._active_write_session_id,
+        )
         # PR-3 review #12: ``add_turn`` now closes inline when the
         # MaxTurns cap fires.  The returned interaction is the
         # cap-closed one (with ``close_reason == REASON_MAX_TURNS``);
@@ -393,67 +424,21 @@ class _EpisodeRoutingMixin:
                 await self._persist_closed_interaction(closed)
 
     async def _persist_closed_interaction(self, interaction: Interaction) -> None:
-        """RFC 0020 PR 4 close-path orchestrator (two-phase write).
+        """RFC 0020 PR 4 close-path orchestrator — see
+        :func:`agents.persona_runtime.close_path.persist_closed_interaction`.
 
-        Phase 1 (sync, under ``_lock``): INSERT a ``closing`` row with
-        :data:`SUMMARY_PENDING_TEXT` so the row exists before any LLM
-        call and the janitor can sweep it on crash recovery.  Phase 2
-        (background): :func:`finalize_closed_interaction` summarises
-        and ``UPDATE``s outside the lock.  See PR #229 deep-review
-        Must-Fix #1 + Should-Fix #1.
+        Thin seam over the extracted two-phase write so this module stays
+        under the file-size cap; tests patch / call this method directly.
         """
-        if interaction.turn_count == 0:
-            return  # idle no-turn scope — nothing to persist.
-        # PR-4 review #25 (slice 7): dead ``or self._llm_client is None``
-        # clause removed; mixin annotation is now ``LLMClient``.
-        if interaction.interaction_id is None:
-            logger.warning(
-                "Closed interaction for agent %s has no interaction_id "
-                "(scope=%s); skipping persistence",
-                self.agent_id, interaction.scope,
-            )
-            return
-        ctx: dict[str, Any] = {
-            "scope": interaction.scope,
-            "close_reason": interaction.close_reason,
-            "turn_count": interaction.turn_count,
-            # ISSUE-0054 / RFC 0020 §D — strip the inbound message
-            # ``text`` the multi-turn path stashes for the RFC 0026
-            # extractor: Phase 2 reads it off the in-memory interaction,
-            # so the persisted ``context_json`` stays body-free.
-            "turns": [
-                {"at": t.at, "payload": {
-                    k: v for k, v in t.payload.items() if k != "text"}}
-                for t in interaction.turns
-            ],
-        }
-        try:
-            await self._episodic_memory.store_episode(
-                summary=SUMMARY_PENDING_TEXT, context=ctx,
-                interaction_id=interaction.interaction_id,
-                started_at=interaction.started_at,
-                closed_at=interaction.closed_at,
-                turn_count=interaction.turn_count, scope=interaction.scope,
-                session_id=self._session_id)
-        except Exception:
-            logger.warning(
-                "Failed to persist closed interaction for agent %s (scope=%s)",
-                self.agent_id, interaction.scope, exc_info=True,
-            )
-            return
-        # Phase 2: background summarise + finalise.  add_done_callback
-        # auto-cleans the tracking set so references don't accumulate.
-        task: asyncio.Task[None] = asyncio.create_task(
-            finalize_closed_interaction(
-                llm_client=self._llm_client, memory_ns=self._memory_ns,
-                episodic=self._episodic_memory, agent_id=self.agent_id,
-                interaction=interaction,
-                on_finalized=self._tick_auto_reflect_counter,
-                session_id=self._session_id,
-            ),
+        await persist_closed_interaction(
+            episodic=self._episodic_memory,
+            llm_client=self._llm_client,
+            memory_ns=self._memory_ns,
+            agent_id=self.agent_id,
+            interaction=interaction,
+            pending_tasks=self._pending_summarize_tasks,
+            on_finalized=self._tick_auto_reflect_counter,
         )
-        self._pending_summarize_tasks.add(task)
-        task.add_done_callback(self._pending_summarize_tasks.discard)
 
     async def drain_pending_summaries(self) -> None:
         """Await in-flight background summary tasks (RFC 0020 PR 4).

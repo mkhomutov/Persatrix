@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from ..observability.metrics import current_agent_id, try_get_instruments
+from ..session_id import LEGACY_SESSION_ID
 from .boundary_detectors import (
     DEFAULT_IDLE_TIMEOUT_SEC,
     REASON_IDLE_GAP,
@@ -177,6 +178,15 @@ class Interaction:
     closed_at: float | None = None
     close_reason: str = ""
     structural_close_reason: str = ""
+    # ISSUE-0081 PR 2: the RFC 0031 session captured when the interaction
+    # *opened*, frozen for its lifetime.  Load-bearing for the
+    # sibling-mislabel guard: ``idle_check`` can flush conversation B's
+    # stale interaction while conversation A's event holds the active
+    # scope, so the close-path persistence must tag the row with the
+    # session the interaction was born under — not whatever scope is bound
+    # at flush time.  Defaults to the ``legacy`` carve-out so a pre-PR-2
+    # construction site (or a turn opened with no scope) stays visible.
+    session_id: str = LEGACY_SESSION_ID
 
     @property
     def turn_count(self) -> int:
@@ -265,12 +275,25 @@ class InteractionTracker:
 
     # ── Lifecycle ──
 
-    def start(self, scope: str, *, now: float | None = None) -> Interaction:
+    def start(
+        self,
+        scope: str,
+        *,
+        now: float | None = None,
+        session_id: str | None = None,
+    ) -> Interaction:
         """Open a new interaction in ``scope``.
 
         If an interaction is already open in this scope, returns it
         unchanged — callers should prefer :meth:`add_turn` which handles
         both the open-and-append and start-then-append cases.
+
+        ``session_id`` (ISSUE-0081 PR 2) is the RFC 0031 session frozen
+        onto the new interaction; ``None`` / blank collapses to the
+        ``legacy`` carve-out.  It is *only* honoured when a fresh
+        interaction is opened — an already-open scope keeps the session it
+        was born under, so a later turn arriving on a different scope
+        cannot relabel it.
         """
         existing = self._open.get(scope)
         if existing is not None and existing.is_open:
@@ -280,6 +303,7 @@ class InteractionTracker:
             interaction_id=str(uuid.uuid4()),
             scope=scope,
             started_at=ts,
+            session_id=session_id or LEGACY_SESSION_ID,
         )
         self._open[scope] = interaction
         _emit_opened()
@@ -291,6 +315,7 @@ class InteractionTracker:
         payload: dict[str, object] | None = None,
         *,
         now: float | None = None,
+        session_id: str | None = None,
     ) -> Interaction:
         """Append a turn, opening an interaction in ``scope`` if needed.
 
@@ -304,11 +329,16 @@ class InteractionTracker:
         ``idle_check`` sweep) ensures the cap-fired closure is
         attributed to ``max_turns`` even when a structural event
         arrives between the cap-th turn and the next event.
+
+        ``session_id`` (ISSUE-0081 PR 2) is forwarded to :meth:`start`
+        and so is captured only when this call *opens* the interaction;
+        a turn appended to an already-open scope ignores it (the session
+        is frozen at open).
         """
         ts = now if now is not None else self._clock()
         interaction = self._open.get(scope)
         if interaction is None or not interaction.is_open:
-            interaction = self.start(scope, now=ts)
+            interaction = self.start(scope, now=ts, session_id=session_id)
         interaction.turns.append(Turn(at=ts, payload=payload or {}))
         if (
             self._max_turns is not None
