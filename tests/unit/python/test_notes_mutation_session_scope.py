@@ -72,6 +72,7 @@ class TestNotesMutationIsSessionScoped:
             mem_b = EpisodicMemory(agent_id="shared-agent", db_path=path)
             await mem_b.initialize()
             try:
+                assert mem_b._note_store is not None
                 ok = await mem_b._note_store.update_note(run_a_id, "tampered")
                 # Pre-fix: True (mutated). Post-fix: False (no row matched).
                 assert ok is False
@@ -108,6 +109,7 @@ class TestNotesMutationIsSessionScoped:
             mem_b = EpisodicMemory(agent_id="shared-agent", db_path=path)
             await mem_b.initialize()
             try:
+                assert mem_b._note_store is not None
                 ok = await mem_b._note_store.delete_note(run_a_id)
                 assert ok is False
             finally:
@@ -137,6 +139,7 @@ class TestNotesMutationIsSessionScoped:
             "topic-l", "content-l", session_id="legacy",
         )
         # Pre-fix: 3 (agent-wide). Post-fix: 2 (active session + legacy).
+        assert memory_at_run_a._note_store is not None
         n = await memory_at_run_a._note_store.count_notes()
         assert n == 2, f"count_notes leaked run-b row: got {n}"
 
@@ -149,5 +152,6 @@ class TestNotesMutationIsSessionScoped:
         legacy_id = await memory_at_run_a.store_note(
             "topic-l", "original-l", session_id="legacy",
         )
+        assert memory_at_run_a._note_store is not None
         ok = await memory_at_run_a._note_store.update_note(legacy_id, "edited")
         assert ok is True

@@ -109,17 +109,20 @@ class TestFreshSchemaMigration:
     async def test_interactions_session_column_present(
         self, memory: EpisodicMemory,
     ) -> None:
+        assert memory._db is not None
         cols = await _columns(memory._db, "interactions")
         assert "session_id" in cols
 
     async def test_interactions_session_index_created(
         self, memory: EpisodicMemory,
     ) -> None:
+        assert memory._db is not None
         assert await _index_exists(memory._db, "idx_interactions_session")
 
     async def test_schema_version_records_v10(
         self, memory: EpisodicMemory,
     ) -> None:
+        assert memory._db is not None
         async with memory._db.execute(
             "SELECT COUNT(*) FROM schema_version WHERE version = 10",
         ) as cursor:

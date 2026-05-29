@@ -40,6 +40,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -378,6 +379,7 @@ class TestInjectMemoryContextDefaultPath:
         from agents.persona_runtime.channel_history import (
             recall_channel_episodes,
         )
+        from agents.persona_types import AgentEvent
 
         monkeypatch.setenv("PERSATRIX_SESSION_ID", "run-a")
         mem = EpisodicMemory(agent_id="ember", db_path=str(tmp_path / "m.db"))
@@ -406,7 +408,7 @@ class TestInjectMemoryContextDefaultPath:
                     return {}
 
             await recall_channel_episodes(
-                mem, _Evt(), agent_id="ember",
+                mem, cast(AgentEvent, _Evt()), agent_id="ember",
             )
 
             # Also exercise the direct mixin call paths from
