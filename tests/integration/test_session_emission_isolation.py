@@ -23,11 +23,18 @@ This file drives the **real** ``AgentServiceServicer`` over a real ephemeral
 gRPC channel; the client emits the ``persatrix-session`` header exactly as the
 Go orchestrator's ``grpcmeta.InjectSession`` does on its outbound dispatch.
 The Go-side emission is independently pinned by the PR 2 dispatcher tests
-(``internal/channels/grpc_dispatcher_test.go``); standing up the real Go
-binary from pytest is heavier scaffolding than this contract pin justifies —
+(``internal/channels/grpc_dispatcher_session_test.go``); standing up the real
+Go binary from pytest is heavier scaffolding than this contract pin justifies —
 the same reasoning as ``test_channel_cascade_backstop_cross_process.py``.  The
-header *string* is taken from :data:`agents.session_id.SESSION_METADATA_GRPC_KEY`,
-so a rename that desyncs the cross-language wire key trips this test too.
+header *string* is taken from :data:`agents.session_id.SESSION_METADATA_GRPC_KEY`
+— the same constant the servicer lifts — so the emit here can never drift to a
+stale hard-coded key while the servicer moves on.  This does **not** by itself
+guard the cross-language wire *value*: the emit and the lift resolve through that
+one Python constant, so renaming its value would move both in lock-step and keep
+this test green.  The Go↔Python agreement on the literal ``"persatrix-session"``
+is pinned independently — Python side by
+``tests/unit/python/test_session_id_pr2_binding.py``, Go side by
+``internal/observability/grpcmeta/grpcmeta_test.go``.
 
 Two layers of pin:
 
@@ -239,14 +246,14 @@ class _GrpcWorld:
         # ``_inbound_fallback_tasks`` (strong ref). Awaiting the snapshot drains
         # the ingest; the done-callback empties the set. A bound keeps a stuck
         # task from hanging the whole pytest deadline.
-        deadline = asyncio.get_event_loop().time() + 10.0
+        deadline = asyncio.get_running_loop().time() + 10.0
         while self._dispatcher._inbound_fallback_tasks:
             pending = list(self._dispatcher._inbound_fallback_tasks)
             await asyncio.wait_for(
                 asyncio.gather(*pending, return_exceptions=True),
                 timeout=10.0,
             )
-            if asyncio.get_event_loop().time() > deadline:
+            if asyncio.get_running_loop().time() > deadline:
                 raise TimeoutError("inbound fallback tasks did not drain")
 
     async def close_dm(self, peer: str) -> None:
