@@ -1,11 +1,10 @@
 // ISSUE-0082 PR 1 — per-request session binding store.
 //
-// The SessionResolver is the orchestrator-authoritative, persisted source
-// of a per-request session id keyed on the (agent, channel, user) unit
-// decided in RFC 0031 §B (the PR 2 amendment). These tests pin the store
-// contract only — the resolver is NOT yet wired into the dispatch path
-// (that activation is PR 2), so there is no behaviour change for any live
-// caller until then.
+// The SessionResolver is the orchestrator-authoritative, persisted source of
+// a per-request session id keyed on the (agent, channel) unit — room
+// continuity, per the RFC 0031 §A scope-axes amendment (ISSUE-0083 dropped the
+// sender axis the original PR 2 amendment carried). These tests pin the store
+// contract only.
 package channels
 
 import (
@@ -30,48 +29,50 @@ func mustResolver(t *testing.T, store ChannelStore) *SessionResolver {
 	return r
 }
 
-// TestSessionResolver_SameTriple_StableID asserts a second resolve of the
-// same (agent, channel, user) triple returns the first mint — one
-// conversation, one session id, every subsequent message reuses it.
-func TestSessionResolver_SameTriple_StableID(t *testing.T) {
+// TestSessionResolver_SamePair_StableID asserts a second resolve of the
+// same (agent, channel) pair returns the first mint — one room, one session
+// id, every subsequent message reuses it.
+func TestSessionResolver_SamePair_StableID(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
 	r := mustResolver(t, store)
 	ctx := context.Background()
 
-	id1, err := r.Resolve(ctx, "agent-a", "group:planning", "user-1")
+	id1, err := r.Resolve(ctx, "agent-a", "group:planning")
 	require.NoError(t, err)
 	assert.NotEmpty(t, id1, "resolver must mint a non-empty session id")
 	assert.NotEqual(t, DefaultSessionID, id1,
 		"minted id must not collide with the legacy carve-out")
 
-	id2, err := r.Resolve(ctx, "agent-a", "group:planning", "user-1")
+	id2, err := r.Resolve(ctx, "agent-a", "group:planning")
 	require.NoError(t, err)
 	assert.Equal(t, id1, id2,
-		"same (agent, channel, user) resolves to the same session id")
+		"same (agent, channel) resolves to the same session id")
 }
 
-// TestSessionResolver_DistinctTriples_DistinctIDs asserts each axis of the
-// unit is load-bearing: varying the user, the channel, or the agent yields
-// a distinct session id. This is the §B grain — two peers in one channel,
-// or two DM threads with one agent, are distinct sessions.
-func TestSessionResolver_DistinctTriples_DistinctIDs(t *testing.T) {
+// TestSessionResolver_DistinctPairs_DistinctIDs asserts each axis of the
+// (agent, channel) unit is load-bearing: varying the channel or the agent
+// yields a distinct session id. This is the post-ISSUE-0083 room grain —
+// distinct rooms (and two DM-thread channel ids) are distinct sessions. The
+// sender is no longer an axis at all (it is not even a parameter); the
+// "two senders in one room share a session" complement is pinned one layer up
+// at the dispatch site by
+// TestGRPCMessageDispatcher_SendersInOneChannelShareSession.
+func TestSessionResolver_DistinctPairs_DistinctIDs(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
 	r := mustResolver(t, store)
 	ctx := context.Background()
 
-	base, err := r.Resolve(ctx, "agent-a", "group:planning", "user-1")
+	base, err := r.Resolve(ctx, "agent-a", "group:planning")
 	require.NoError(t, err)
-	otherUser, err := r.Resolve(ctx, "agent-a", "group:planning", "user-2")
+	otherChan, err := r.Resolve(ctx, "agent-a", "group:other")
 	require.NoError(t, err)
-	otherChan, err := r.Resolve(ctx, "agent-a", "group:other", "user-1")
-	require.NoError(t, err)
-	otherAgent, err := r.Resolve(ctx, "agent-b", "group:planning", "user-1")
+	otherAgent, err := r.Resolve(ctx, "agent-b", "group:planning")
 	require.NoError(t, err)
 
 	seen := map[string]bool{}
-	for _, id := range []string{base, otherUser, otherChan, otherAgent} {
+	for _, id := range []string{base, otherChan, otherAgent} {
 		require.NotEmpty(t, id)
-		assert.False(t, seen[id], "session id %q reused across distinct triples", id)
+		assert.False(t, seen[id], "session id %q reused across distinct pairs", id)
 		seen[id] = true
 	}
 }
@@ -87,7 +88,7 @@ func TestSessionResolver_StableAcrossReopen(t *testing.T) {
 	store1, err := NewSQLiteStore(path, SQLiteOptions{})
 	require.NoError(t, err)
 	id1, err := mustResolver(t, store1).Resolve(
-		context.Background(), "agent-a", "group:planning", "user-1")
+		context.Background(), "agent-a", "group:planning")
 	require.NoError(t, err)
 	require.NoError(t, store1.Close())
 
@@ -95,7 +96,7 @@ func TestSessionResolver_StableAcrossReopen(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store2.Close() })
 	id2, err := mustResolver(t, store2).Resolve(
-		context.Background(), "agent-a", "group:planning", "user-1")
+		context.Background(), "agent-a", "group:planning")
 	require.NoError(t, err)
 
 	assert.Equal(t, id1, id2, "session id must persist across a store reopen")
@@ -111,7 +112,7 @@ func TestSessionResolver_MintRegistersSession(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	id, err := mustResolver(t, store).Resolve(
-		context.Background(), "agent-a", "group:planning", "user-1")
+		context.Background(), "agent-a", "group:planning")
 	require.NoError(t, err)
 
 	withDB(t, path, func(db *sql.DB) {
@@ -124,9 +125,9 @@ func TestSessionResolver_MintRegistersSession(t *testing.T) {
 }
 
 // TestSessionResolver_ConcurrentFirstSight_SingleID pins the race contract:
-// N goroutines racing the very first resolve of one triple all agree on a
-// single id, and the store ends up with exactly one binding row and one
-// session row — no double-mint, no orphan session. The store pins
+// N goroutines racing the very first resolve of one (agent, channel) pair all
+// agree on a single id, and the store ends up with exactly one binding row and
+// one session row — no double-mint, no orphan session. The store pins
 // MaxOpenConns(1), so the writes themselves serialize at the pool; the race
 // the guard actually closes is two goroutines both passing the lock-free
 // fast-path lookup before either mints — the loser's INSERT … ON CONFLICT
@@ -151,7 +152,7 @@ func TestSessionResolver_ConcurrentFirstSight_SingleID(t *testing.T) {
 			defer wg.Done()
 			<-start
 			ids[i], errs[i] = r.Resolve(
-				context.Background(), "agent-a", "group:planning", "user-1")
+				context.Background(), "agent-a", "group:planning")
 		}(i)
 	}
 	close(start)
@@ -160,26 +161,27 @@ func TestSessionResolver_ConcurrentFirstSight_SingleID(t *testing.T) {
 	for i := 0; i < n; i++ {
 		require.NoErrorf(t, errs[i], "goroutine %d", i)
 		assert.Equalf(t, ids[0], ids[i],
-			"all concurrent resolves of one triple must agree (goroutine %d)", i)
+			"all concurrent resolves of one pair must agree (goroutine %d)", i)
 	}
 
 	withDB(t, path, func(db *sql.DB) {
 		var bindings, sessions int
 		require.NoError(t, db.QueryRow(`SELECT COUNT(1) FROM session_bindings`).Scan(&bindings))
 		require.NoError(t, db.QueryRow(`SELECT COUNT(1) FROM sessions`).Scan(&sessions))
-		assert.Equal(t, 1, bindings, "exactly one binding row for one triple")
+		assert.Equal(t, 1, bindings, "exactly one binding row for one pair")
 		assert.Equal(t, 1, sessions, "exactly one session row — no double-mint orphan")
 	})
 }
 
 // TestSessionResolver_EmptyAxis_Rejected pins the input contract: the
-// (agent, channel, user) unit is load-bearing on every axis (RFC 0031 §B —
-// the same grain TestSessionResolver_DistinctTriples_DistinctIDs proves), so
-// an empty component is never a valid unit. The resolver fails loud with
-// ErrEmptySessionAxis rather than minting a session keyed on an empty axis —
-// such a junk row would pollute the `sessions` registry the Phase 3 CLI
-// surfaces and mis-group recall, the very isolation property ISSUE-0082
-// exists to protect. The rejection writes neither a binding nor a session row.
+// (agent, channel) unit is load-bearing on every axis (RFC 0031 §A scope-axes
+// amendment — the same grain TestSessionResolver_DistinctPairs_DistinctIDs
+// proves), so an empty component is never a valid unit. The resolver fails
+// loud with ErrEmptySessionAxis rather than minting a session keyed on an
+// empty axis — such a junk row would pollute the `sessions` registry the
+// Phase 3 CLI surfaces and mis-group recall, the very isolation property
+// ISSUE-0082 exists to protect. The rejection writes neither a binding nor a
+// session row.
 func TestSessionResolver_EmptyAxis_Rejected(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 	store, err := NewSQLiteStore(path, SQLiteOptions{})
@@ -189,24 +191,23 @@ func TestSessionResolver_EmptyAxis_Rejected(t *testing.T) {
 	ctx := context.Background()
 
 	cases := []struct {
-		name                       string
-		agentID, channelID, userID string
+		name               string
+		agentID, channelID string
 	}{
-		{"empty agent", "", "group:planning", "user-1"},
-		{"empty channel", "agent-a", "", "user-1"},
-		{"empty user", "agent-a", "group:planning", ""},
+		{"empty agent", "", "group:planning"},
+		{"empty channel", "agent-a", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			id, err := r.Resolve(ctx, tc.agentID, tc.channelID, tc.userID)
+			id, err := r.Resolve(ctx, tc.agentID, tc.channelID)
 			require.Error(t, err, "an empty axis must be rejected")
 			assert.ErrorIs(t, err, ErrEmptySessionAxis,
 				"rejection must surface the ErrEmptySessionAxis sentinel")
-			assert.Empty(t, id, "no session id is returned on a rejected triple")
+			assert.Empty(t, id, "no session id is returned on a rejected pair")
 		})
 	}
 
-	// The rejected triples must have left the store untouched — fail-loud,
+	// The rejected pairs must have left the store untouched — fail-loud,
 	// not fail-and-still-write.
 	withDB(t, path, func(db *sql.DB) {
 		var bindings, sessions int

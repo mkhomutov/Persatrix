@@ -3,17 +3,19 @@ package channels
 // ISSUE-0082 PR 1 — per-request session binding store.
 //
 // SessionResolver makes the orchestrator the authoritative, persisted
-// source of a per-request session id keyed on the `(agent, channel, user)`
-// unit decided in RFC 0031 §B (the PR 2 amendment). It is the source the
-// dispatch path will feed into the `persatrix-session` gRPC header in PR 2;
-// this PR ships the store only — there is no production caller yet, so
-// behaviour is unchanged for every live deployment.
+// source of a per-request session id keyed on the `(agent, channel)` unit —
+// room continuity, per the RFC 0031 §A scope-axes amendment. ISSUE-0083
+// dropped the sender axis the original §B PR-2 amendment carried: it only
+// ever changed the multi-party-room case, and changed it wrongly (one session
+// per speaker fragmented an agent's memory of one room). DMs are unaffected —
+// distinct DM threads are already distinct channel ids. It is the source the
+// dispatch path feeds into the `persatrix-session` gRPC header (PR 2).
 //
-// The binding table is the `(agent, channel, user) → session_id` map; the
+// The binding table is the `(agent, channel) → session_id` map; the
 // `sessions` table stays the session registry (id, label, created_at, …).
-// A pure deterministic hash of the triple would survive a restart without
+// A pure deterministic hash of the pair would survive a restart without
 // persistence, but §B deliberately chose *authoritative + persisted* over
-// *derived* so a future operator surface (`persatrix session …`) can label,
+// *derived* so the operator surface (`persatrix session …`) can label,
 // list, and archive the session as a first-class registered row.
 
 import (
@@ -27,23 +29,23 @@ import (
 )
 
 // SessionResolver resolves (and on first sight mints + persists) the
-// session id for an `(agent, channel, user)` triple. It is safe for
-// concurrent use: minting runs in a single transaction guarded by
-// `INSERT … ON CONFLICT DO NOTHING` + re-read, so a concurrent first-sight
-// of the same triple resolves to one id with no orphan session row.
+// session id for an `(agent, channel)` pair. It is safe for concurrent use:
+// minting runs in a single transaction guarded by `INSERT … ON CONFLICT DO
+// NOTHING` + re-read, so a concurrent first-sight of the same pair resolves
+// to one id with no orphan session row.
 type SessionResolver struct {
 	db *sql.DB
 }
 
-// ErrEmptySessionAxis is returned by [SessionResolver.Resolve] when any of
-// the (agent, channel, user) axes is empty. The session unit is defined on
-// all three axes (RFC 0031 §B); an empty component is never a valid unit, so
-// the resolver fails loud rather than minting a session keyed on an empty
-// axis — a junk row would pollute the `sessions` registry the Phase 3 CLI
-// surfaces and mis-group the per-conversation recall this issue isolates.
+// ErrEmptySessionAxis is returned by [SessionResolver.Resolve] when either of
+// the (agent, channel) axes is empty. The session unit is defined on both
+// axes (RFC 0031 §A scope-axes amendment); an empty component is never a valid
+// unit, so the resolver fails loud rather than minting a session keyed on an
+// empty axis — a junk row would pollute the `sessions` registry the Phase 3
+// CLI surfaces and mis-group the per-room recall this issue isolates.
 // Callers compare with [errors.Is], matching the package's sentinel
 // convention.
-var ErrEmptySessionAxis = errors.New("channels: session resolve requires non-empty (agent, channel, user)")
+var ErrEmptySessionAxis = errors.New("channels: session resolve requires non-empty (agent, channel)")
 
 // NewSessionResolver builds a resolver over the channel store's database.
 // It requires the SQLite-backed [ChannelStore] (the only production
@@ -63,37 +65,37 @@ type rowQuerier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// Resolve returns the session id bound to `(agentID, channelID, userID)`,
-// minting and persisting a new one on first sight. The returned id is
-// never empty and never the `legacy` carve-out — it is always a concrete
-// UUIDv7 registered in the `sessions` table.
+// Resolve returns the session id bound to `(agentID, channelID)`, minting
+// and persisting a new one on first sight. The returned id is never empty
+// and never the `legacy` carve-out — it is always a concrete UUIDv7
+// registered in the `sessions` table.
 //
-// Every axis is load-bearing (RFC 0031 §B): an empty agent, channel, or
-// user is a caller bug and returns [ErrEmptySessionAxis] without touching
-// the store, never a session minted on a partial triple.
-func (r *SessionResolver) Resolve(ctx context.Context, agentID, channelID, userID string) (string, error) {
-	if agentID == "" || channelID == "" || userID == "" {
-		return "", fmt.Errorf("%w: agent=%q channel=%q user=%q",
-			ErrEmptySessionAxis, agentID, channelID, userID)
+// Both axes are load-bearing (RFC 0031 §A): an empty agent or channel is a
+// caller bug and returns [ErrEmptySessionAxis] without touching the store,
+// never a session minted on a partial pair.
+func (r *SessionResolver) Resolve(ctx context.Context, agentID, channelID string) (string, error) {
+	if agentID == "" || channelID == "" {
+		return "", fmt.Errorf("%w: agent=%q channel=%q",
+			ErrEmptySessionAxis, agentID, channelID)
 	}
 	// Fast path: an existing binding is the overwhelmingly common case —
-	// one mint per conversation, every subsequent message reuses it. No
-	// transaction needed for the read.
-	if sid, ok, err := r.lookup(ctx, r.db, agentID, channelID, userID); err != nil {
+	// one mint per room, every subsequent message reuses it. No transaction
+	// needed for the read.
+	if sid, ok, err := r.lookup(ctx, r.db, agentID, channelID); err != nil {
 		return "", err
 	} else if ok {
 		return sid, nil
 	}
-	return r.mint(ctx, agentID, channelID, userID)
+	return r.mint(ctx, agentID, channelID)
 }
 
-// lookup reads the bound session id for the triple. `ok` is false (with a
+// lookup reads the bound session id for the pair. `ok` is false (with a
 // nil error) when no binding exists yet.
-func (r *SessionResolver) lookup(ctx context.Context, q rowQuerier, agentID, channelID, userID string) (sid string, ok bool, err error) {
+func (r *SessionResolver) lookup(ctx context.Context, q rowQuerier, agentID, channelID string) (sid string, ok bool, err error) {
 	err = q.QueryRowContext(ctx,
 		`SELECT session_id FROM session_bindings
-		   WHERE agent_id = ? AND channel_id = ? AND user_id = ?`,
-		agentID, channelID, userID).Scan(&sid)
+		   WHERE agent_id = ? AND channel_id = ?`,
+		agentID, channelID).Scan(&sid)
 	switch {
 	case err == nil:
 		return sid, true, nil
@@ -104,12 +106,12 @@ func (r *SessionResolver) lookup(ctx context.Context, q rowQuerier, agentID, cha
 	}
 }
 
-// mint creates a new session for an unseen triple. It inserts the binding
+// mint creates a new session for an unseen pair. It inserts the binding
 // with `ON CONFLICT DO NOTHING` and only registers the `sessions` row when
 // that insert won the race, so a concurrent first-sight that lost cannot
 // leave an orphan session row. The canonical id is then re-read inside the
 // same transaction — the winner's id, whether or not this call won.
-func (r *SessionResolver) mint(ctx context.Context, agentID, channelID, userID string) (string, error) {
+func (r *SessionResolver) mint(ctx context.Context, agentID, channelID string) (string, error) {
 	newID, err := uuid.NewV7()
 	if err != nil {
 		return "", fmt.Errorf("channels: mint session id: %w", err)
@@ -128,10 +130,10 @@ func (r *SessionResolver) mint(ctx context.Context, agentID, channelID, userID s
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO session_bindings (agent_id, channel_id, user_id, session_id, created_at)
-		 VALUES (?, ?, ?, ?, ?)
-		 ON CONFLICT(agent_id, channel_id, user_id) DO NOTHING`,
-		agentID, channelID, userID, newID.String(), now)
+		`INSERT INTO session_bindings (agent_id, channel_id, session_id, created_at)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(agent_id, channel_id) DO NOTHING`,
+		agentID, channelID, newID.String(), now)
 	if err != nil {
 		return "", fmt.Errorf("channels: insert session binding: %w", err)
 	}
@@ -157,7 +159,7 @@ func (r *SessionResolver) mint(ctx context.Context, agentID, channelID, userID s
 		}
 	}
 
-	sid, ok, err := r.lookup(ctx, tx, agentID, channelID, userID)
+	sid, ok, err := r.lookup(ctx, tx, agentID, channelID)
 	if err != nil {
 		return "", err
 	}
@@ -165,8 +167,8 @@ func (r *SessionResolver) mint(ctx context.Context, agentID, channelID, userID s
 		// Unreachable: we either inserted the binding above or it already
 		// existed. Treat a vanished row as a hard error rather than risk a
 		// second mint outside this transaction.
-		return "", fmt.Errorf("channels: session binding missing after insert for (%q,%q,%q)",
-			agentID, channelID, userID)
+		return "", fmt.Errorf("channels: session binding missing after insert for (%q,%q)",
+			agentID, channelID)
 	}
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("channels: commit session mint tx: %w", err)

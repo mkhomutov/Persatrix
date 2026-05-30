@@ -23,22 +23,23 @@ import (
 // and `startBufconnServer` helpers.
 
 // stubSessionBinder implements [SessionBinder] for unit tests. `fn` lets a
-// test shape the per-triple id (or return an error) without standing up a
-// real SQLite-backed SessionResolver.
+// test shape the per-`(agent, channel)` id (or return an error) without
+// standing up a real SQLite-backed SessionResolver.
 type stubSessionBinder struct {
-	fn func(agentID, channelID, userID string) (string, error)
+	fn func(agentID, channelID string) (string, error)
 }
 
-func (s *stubSessionBinder) Resolve(_ context.Context, agentID, channelID, userID string) (string, error) {
-	return s.fn(agentID, channelID, userID)
+func (s *stubSessionBinder) Resolve(_ context.Context, agentID, channelID string) (string, error) {
+	return s.fn(agentID, channelID)
 }
 
 // TestGRPCMessageDispatcher_EmitsSessionHeader pins the ISSUE-0082 PR 2
 // activation: when a SessionResolver is wired, Dispatch resolves the
-// per-request session for the `(recipient-agent, channel, sender)` unit
-// (RFC 0031 §B) and emits it as the `persatrix-session` gRPC header so the
-// persona side re-establishes the session_scope ISSUE-0081 built. The wire
-// key MUST match grpcmeta.MDSession (the cross-language contract with
+// per-request session for the `(recipient-agent, channel)` unit (RFC 0031 §A
+// scope-axes amendment — the sender axis was dropped in ISSUE-0083) and emits
+// it as the `persatrix-session` gRPC header so the persona side re-establishes
+// the session_scope ISSUE-0081 built. The wire key MUST match
+// grpcmeta.MDSession (the cross-language contract with
 // agents.session_id.SESSION_METADATA_GRPC_KEY).
 func TestGRPCMessageDispatcher_EmitsSessionHeader(t *testing.T) {
 	srv := &recordingAgentServer{}
@@ -48,10 +49,11 @@ func TestGRPCMessageDispatcher_EmitsSessionHeader(t *testing.T) {
 	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{
 		"agent-b": {ID: "agent-b", Address: "ignored:0", Status: registry.StatusHealthy},
 	}}
-	// Deterministic per-triple id so the assertion can recompute the
-	// expected value from the dispatched (agent, channel, sender).
-	binder := &stubSessionBinder{fn: func(a, c, u string) (string, error) {
-		return "sess|" + a + "|" + c + "|" + u, nil
+	// Deterministic per-pair id so the assertion can recompute the expected
+	// value from the dispatched (agent, channel) — and so it stays the same
+	// regardless of which sender's message triggered the dispatch.
+	binder := &stubSessionBinder{fn: func(a, c string) (string, error) {
+		return "sess|" + a + "|" + c, nil
 	}}
 	d := NewGRPCMessageDispatcher(resolver, zap.NewNop(), WithSessionResolver(binder))
 	d.dial = dial
@@ -65,15 +67,18 @@ func TestGRPCMessageDispatcher_EmitsSessionHeader(t *testing.T) {
 	}, msg))
 
 	require.NotNil(t, srv.gotMD, "receiver must observe incoming metadata")
-	assert.Equal(t, []string{"sess|agent-b|group:planning|agent-a"}, srv.gotMD.Get(grpcmeta.MDSession),
-		"persatrix-session must carry the resolver's id for the (recipient-agent, channel, sender) triple")
+	assert.Equal(t, []string{"sess|agent-b|group:planning"}, srv.gotMD.Get(grpcmeta.MDSession),
+		"persatrix-session must carry the resolver's id for the (recipient-agent, channel) pair — the sender is not part of the key")
 }
 
-// TestGRPCMessageDispatcher_DistinctSendersGetDistinctSessions pins the
-// per-conversation grain: two senders in one channel for one recipient
-// agent resolve to two different sessions, so the persona recalls each
-// conversation in isolation rather than sharing one namespace.
-func TestGRPCMessageDispatcher_DistinctSendersGetDistinctSessions(t *testing.T) {
+// TestGRPCMessageDispatcher_SendersInOneChannelShareSession pins the
+// post-ISSUE-0083 room-continuity grain (inverting the pre-reframing
+// "distinct senders → distinct sessions" assertion): two senders in one
+// channel for one recipient agent resolve to the SAME session, so the agent's
+// episodic memory of one room is not fragmented by who spoke. When Alice
+// references something Bob said, the agent recalls under one shared room
+// session that saw both turns.
+func TestGRPCMessageDispatcher_SendersInOneChannelShareSession(t *testing.T) {
 	srv := &recordingAgentServer{}
 	dial, cleanup := startBufconnServer(t, srv)
 	defer cleanup()
@@ -81,8 +86,10 @@ func TestGRPCMessageDispatcher_DistinctSendersGetDistinctSessions(t *testing.T) 
 	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{
 		"agent-b": {ID: "agent-b", Address: "ignored:0", Status: registry.StatusHealthy},
 	}}
-	binder := &stubSessionBinder{fn: func(a, c, u string) (string, error) {
-		return "sess:" + u, nil // vary by sender only
+	// Vary the id by (agent, channel) only — the sender is not an input, so a
+	// binder that tried to vary by sender could not, by construction.
+	binder := &stubSessionBinder{fn: func(a, c string) (string, error) {
+		return "sess:" + a + ":" + c, nil
 	}}
 	d := NewGRPCMessageDispatcher(resolver, zap.NewNop(), WithSessionResolver(binder))
 	d.dial = dial
@@ -99,10 +106,47 @@ func TestGRPCMessageDispatcher_DistinctSendersGetDistinctSessions(t *testing.T) 
 	}))
 	second := srv.gotMD.Get(grpcmeta.MDSession)
 
-	require.Equal(t, []string{"sess:alice"}, first)
-	require.Equal(t, []string{"sess:bob"}, second)
+	require.Equal(t, []string{"sess:agent-b:group:planning"}, first)
+	assert.Equal(t, first, second,
+		"two senders in one channel must resolve to ONE shared room session (ISSUE-0083: sender axis dropped)")
+}
+
+// TestGRPCMessageDispatcher_DistinctChannelsGetDistinctSessions pins the
+// isolation that survives the sender-axis drop: the channel axis alone keeps
+// distinct rooms (and the two DM-thread channel ids `dm:a:b` vs `dm:c:b`)
+// isolated. Concurrent conversations stay independent — the property
+// ISSUE-0081/0082 shipped — now keyed on (agent, channel) instead of the
+// triple.
+func TestGRPCMessageDispatcher_DistinctChannelsGetDistinctSessions(t *testing.T) {
+	srv := &recordingAgentServer{}
+	dial, cleanup := startBufconnServer(t, srv)
+	defer cleanup()
+
+	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{
+		"agent-b": {ID: "agent-b", Address: "ignored:0", Status: registry.StatusHealthy},
+	}}
+	binder := &stubSessionBinder{fn: func(a, c string) (string, error) {
+		return "sess:" + a + ":" + c, nil
+	}}
+	d := NewGRPCMessageDispatcher(resolver, zap.NewNop(), WithSessionResolver(binder))
+	d.dial = dial
+
+	base := DispatchEnvelope{Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways}}
+
+	require.NoError(t, d.Dispatch(context.Background(), base, ChannelMessage{
+		ID: "m-1", ChannelID: "dm:a:b", SenderID: "alice", Timestamp: time.Now().UTC(),
+	}))
+	first := srv.gotMD.Get(grpcmeta.MDSession)
+
+	require.NoError(t, d.Dispatch(context.Background(), base, ChannelMessage{
+		ID: "m-2", ChannelID: "dm:c:b", SenderID: "carol", Timestamp: time.Now().UTC(),
+	}))
+	second := srv.gotMD.Get(grpcmeta.MDSession)
+
+	require.Equal(t, []string{"sess:agent-b:dm:a:b"}, first)
+	require.Equal(t, []string{"sess:agent-b:dm:c:b"}, second)
 	assert.NotEqual(t, first, second,
-		"two senders in one channel must resolve to distinct sessions (per-conversation isolation)")
+		"distinct channels must resolve to distinct sessions (per-room isolation preserved)")
 }
 
 // TestGRPCMessageDispatcher_SessionResolveErrorIsNonFatal pins the
@@ -119,7 +163,7 @@ func TestGRPCMessageDispatcher_SessionResolveErrorIsNonFatal(t *testing.T) {
 	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{
 		"agent-b": {ID: "agent-b", Address: "ignored:0", Status: registry.StatusHealthy},
 	}}
-	binder := &stubSessionBinder{fn: func(_, _, _ string) (string, error) {
+	binder := &stubSessionBinder{fn: func(_, _ string) (string, error) {
 		return "", errors.New("db locked")
 	}}
 	d := NewGRPCMessageDispatcher(resolver, zap.NewNop(), WithSessionResolver(binder))
@@ -177,7 +221,7 @@ func TestGRPCMessageDispatcher_SessionPinnedOnSpan(t *testing.T) {
 	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{
 		"agent-b": {ID: "agent-b", Address: "agent-b:9090", Status: registry.StatusHealthy},
 	}}
-	binder := &stubSessionBinder{fn: func(_, _, _ string) (string, error) {
+	binder := &stubSessionBinder{fn: func(_, _ string) (string, error) {
 		return "sess-on-span", nil
 	}}
 	d := NewGRPCMessageDispatcher(resolver, zap.NewNop(), WithSessionResolver(binder))

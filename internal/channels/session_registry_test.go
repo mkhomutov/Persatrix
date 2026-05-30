@@ -189,7 +189,7 @@ func TestSessionRegistry_AutoMintedSession_AppearsInList(t *testing.T) {
 	resolver := mustResolver(t, store)
 	ctx := context.Background()
 
-	autoID, err := resolver.Resolve(ctx, "agent-a", "group:planning", "user-1")
+	autoID, err := resolver.Resolve(ctx, "agent-a", "group:planning")
 	require.NoError(t, err)
 
 	got, err := r.ListSessions(ctx, false)

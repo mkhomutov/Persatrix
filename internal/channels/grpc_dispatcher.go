@@ -42,13 +42,14 @@ type AgentResolver interface {
 }
 
 // SessionBinder resolves (and on first sight mints + persists) the
-// per-request session id for the `(agent, channel, user)` unit decided in
-// RFC 0031 §B. [*SessionResolver] is the production implementation; the
-// interface is the seam unit tests stub so dispatch coverage does not need a
-// real SQLite store. Defined locally (not imported) so the dispatcher depends
-// only on the one method it calls.
+// per-request session id for the `(agent, channel)` unit — room continuity,
+// per the RFC 0031 §A scope-axes amendment (ISSUE-0083 dropped the sender
+// axis). [*SessionResolver] is the production implementation; the interface
+// is the seam unit tests stub so dispatch coverage does not need a real
+// SQLite store. Defined locally (not imported) so the dispatcher depends only
+// on the one method it calls.
 type SessionBinder interface {
-	Resolve(ctx context.Context, agentID, channelID, userID string) (string, error)
+	Resolve(ctx context.Context, agentID, channelID string) (string, error)
 }
 
 // dialFunc is the seam the dispatcher uses to open a gRPC connection.
@@ -205,9 +206,11 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 	span.SetAttributes(attribute.String("recipient.address", agent.Address))
 
 	// ISSUE-0082 PR 2: resolve the per-request session for the
-	// (recipient-agent, channel, sender) unit (RFC 0031 §B) and emit it as
-	// the `persatrix-session` gRPC header, feeding the ISSUE-0081 rail that
-	// re-establishes a per-conversation `session_scope` persona-side. The
+	// (recipient-agent, channel) unit — room continuity, per the RFC 0031 §A
+	// scope-axes amendment (ISSUE-0083 dropped the sender axis: co-speakers in
+	// one room now share the agent's session rather than fragmenting it) — and
+	// emit it as the `persatrix-session` gRPC header, feeding the ISSUE-0081
+	// rail that re-establishes a per-room `session_scope` persona-side. The
 	// resolver is the single source of the id; `Dispatch` is the only live
 	// emission site (the synchronous chat path is dead-but-wired, ISSUE-0035).
 	//
@@ -215,14 +218,17 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 	// drop a message. On error we log and dispatch without the header, so the
 	// persona falls back to its construction-time (legacy) snapshot — exactly
 	// the pre-activation behaviour, with no row stranded (§D legacy carve-out).
+	//
+	// `msg.SenderID` is intentionally not part of the session key (ISSUE-0083);
+	// it stays available for the per-participant relationship / facts write
+	// paths, which are correctly sender-scoped.
 	if d.sessions != nil {
-		sid, sErr := d.sessions.Resolve(ctx, participantID, msg.ChannelID, msg.SenderID)
+		sid, sErr := d.sessions.Resolve(ctx, participantID, msg.ChannelID)
 		switch {
 		case sErr != nil:
 			d.logger.Warn("channels: session resolve failed; dispatching without persatrix-session (persona falls back to legacy snapshot)",
 				zap.String("participant_id", participantID),
 				zap.String("channel_id", msg.ChannelID),
-				zap.String("sender_id", msg.SenderID),
 				zap.Error(sErr),
 			)
 		case sid != "":
