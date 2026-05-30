@@ -39,7 +39,7 @@ The [RFC §C storage-model table](0031-per-session-namespacing-channels.md#c-sto
 
 ## Prerequisites
 
-Phase 2 implementation was gated on a maintainer sequencing call. That call is now made: **RFC 0031 Phases 2–4 are committed to v0.3.5** ([v0.3.x-sequencing.md §Amendment 2026-05-23](../v0.3.x-sequencing.md#amendment-2026-05-23--v034-carries-rfc-0033-ahead-of-rfc-0031-phases-24) — v0.3.5 = Session Isolation), with [v0.3.5-plan.md](../v0.3.5-plan.md) as the umbrella. The per-version one-story contract holds — v0.3.5's story is *"every run is auto-isolated; persona memory no longer bleeds across runs."*
+Phase 2 implementation was gated on a maintainer sequencing call. That call is now made: **RFC 0031 Phases 2–4 are committed to v0.3.5** ([v0.3.x-sequencing.md §Amendment 2026-05-23](../v0.3.x-sequencing.md#amendment-2026-05-23--v034-carries-rfc-0033-ahead-of-rfc-0031-phases-24) — v0.3.5 = Session-Scoped Memory), with [v0.3.5-plan.md](../v0.3.5-plan.md) as the umbrella. The per-version one-story contract holds — v0.3.5's story is *"persona-memory recall is session-scoped; a run reads only its own session and is isolated by choosing it."*
 
 The three prerequisites below are satisfied as of the v0.3.5 Phase 0 PR:
 
