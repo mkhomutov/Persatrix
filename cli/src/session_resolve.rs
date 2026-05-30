@@ -30,12 +30,21 @@ use crate::commands::session::lookup_session;
 /// already-registry-resolved `--session` value (label → canonical id happens
 /// in [`resolve_for_invocation`] before this), so the precedence layer never
 /// forwards a bare label.
+///
+/// Every arm — flag, env, and file — is `nonblank`-filtered so a blank /
+/// whitespace-only value at any layer falls through to the next rather than
+/// forwarding an empty id the orchestrator would read as "no session". The file
+/// arm is filtered here too even though [`active_session::read`] already
+/// trims+drops blanks: it keeps this pure function self-contained rather than
+/// relying on a caller-upheld invariant, and uniform across the three sources.
 fn resolve_precedence(
     flag: Option<&str>,
     env: Option<&str>,
     file: Option<String>,
 ) -> Option<String> {
-    nonblank(flag).or_else(|| nonblank(env)).or(file)
+    nonblank(flag)
+        .or_else(|| nonblank(env))
+        .or_else(|| nonblank(file.as_deref()))
 }
 
 /// Trim and drop a blank value, so `PERSATRIX_SESSION_ID=` (or a whitespace-only
@@ -138,6 +147,16 @@ mod tests {
         // `PERSATRIX_SESSION_ID=` (exported empty) must not shadow the pointer.
         let got = resolve_precedence(None, Some(""), Some("from-file".to_string()));
         assert_eq!(got.as_deref(), Some("from-file"));
+    }
+
+    #[test]
+    fn blank_file_yields_none() {
+        // The file arm is `nonblank`-filtered like the flag/env arms, so a
+        // blank / whitespace-only pointer value yields "no session" rather than
+        // forwarding an empty id. `active_session::read` already trims+filters,
+        // so this is defensive — it keeps `resolve_precedence` self-contained
+        // (no reliance on a caller-upheld invariant) and uniform across arms.
+        assert!(resolve_precedence(None, None, Some("   ".to_string())).is_none());
     }
 
     #[test]

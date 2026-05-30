@@ -213,3 +213,26 @@ func TestSessionOverrideValid(t *testing.T) {
 		})
 	}
 }
+
+// TestNew_RejectsInvalidChannelSessionID pins that the boot-default session id
+// (PERSATRIX_SESSION_ID, threaded via WithChannelSessionID) is held to the same
+// wire-legality as a per-request override (PR #469 deep-review finding 2). The
+// boot default rides the very same gRPC `persatrix-session` metadata header on
+// every dispatch that arrives without an explicit override, so a control /
+// non-ASCII byte there would make *every* channel dispatch fail at send time —
+// worse than the graceful legacy fallback, and not surfaced until the first
+// message drops. Fail loud at construction instead. Empty and printable-ASCII
+// ids still construct fine (exercised by the other tests in this package, which
+// pass "" or "boot-default").
+func TestNew_RejectsInvalidChannelSessionID(t *testing.T) {
+	logger := zap.NewNop()
+	_, err := New("127.0.0.1:0", t.TempDir(),
+		state.NewInMemoryStore(logger),
+		registry.NewInMemoryRegistry(logger),
+		planner.NewYAMLPlanner(logger),
+		logger,
+		WithChannelSessionID("bad\nid"),
+	)
+	require.Error(t, err,
+		"a boot session id with a control byte must fail server construction, not silently break every dispatch")
+}

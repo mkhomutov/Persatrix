@@ -53,8 +53,15 @@ func TestHandleChat_SessionIDIsOperatorNamespace(t *testing.T) {
 // header and would otherwise silently fail the dispatch. The handler rejects it
 // with a 400 before publishing, consistent with the publish path
 // (TestPublish_InvalidSessionOverride_Rejected).
+//
+// It also rejects *before any side effect*: the agent is healthy, so the
+// pre-fix handler would have already opened the DM channel (and demoted the
+// user's membership) by the time the override was validated. The override check
+// is hoisted above `GetOrCreateDM`, so a rejected chat leaves no DM behind —
+// parity with `TestPublish_InvalidSessionOverride_Rejected`, which asserts no
+// row is persisted (PR #469 deep-review finding 1, follow-up).
 func TestHandleChat_InvalidSessionOverride_Rejected(t *testing.T) {
-	srv, reg, _, _ := chatTestServer(t)
+	srv, reg, _, store := chatTestServer(t)
 	registerHealthyAgent(t, reg, "agent-x", "Agent X")
 
 	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice", SessionID: "bad\nid"})
@@ -65,6 +72,14 @@ func TestHandleChat_InvalidSessionOverride_Rejected(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
 	assert.Equal(t, "BAD_REQUEST", env.Code,
 		"error envelope code must be machine-readable BAD_REQUEST")
+
+	// No DM channel was created: the override is validated before the
+	// GetOrCreateDM side effect, mirroring the publish path's reject-before-
+	// persist contract.
+	chans, err := store.ListChannels(context.Background(), 100, "")
+	require.NoError(t, err)
+	assert.Empty(t, chans,
+		"a rejected chat must not create a DM channel as a side effect (reject before GetOrCreateDM)")
 }
 
 // TestHandleChat_ChatSessionIDJSONTagOnResponse pins the wire-name on
