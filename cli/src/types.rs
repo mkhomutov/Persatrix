@@ -288,15 +288,12 @@ mod tests {
         assert_eq!(json["user_id"], "local");
         assert_eq!(json["chat_session_id"], "");
         assert_eq!(json["participant_type"], "user");
-        // Empty operator session_id is omitted (Go `omitempty` parity).
-        assert!(json.get("session_id").is_none());
-        // Regression: pre-v0.3.1 field name must not appear on the wire.
-        // RFC 0031 OQ #8 — the operator-namespace `session_id` now owns
-        // that JSON key elsewhere; RFC 0016's chat token rides on
-        // `chat_session_id`.
+        // An empty operator `session_id` is omitted (Go `omitempty` parity).
+        // RFC 0016's chat token rides on `chat_session_id`, not this key
+        // (RFC 0031 OQ #8) — so an absent override leaves the wire untouched.
         assert!(
             json.get("session_id").is_none(),
-            "legacy `session_id` JSON key must not be emitted (RFC 0031 OQ #8)"
+            "empty operator `session_id` must be omitted (Go omitempty parity)"
         );
     }
 

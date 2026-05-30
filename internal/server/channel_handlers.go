@@ -7,6 +7,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -214,6 +215,33 @@ func (s *Server) handleGetChannel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, channelToResponse(ch, members), http.StatusOK)
 }
 
+// resolveSessionOverride applies an optional per-request `session_id` override
+// (RFC 0031 Phase 3 PR 4), shared by [Server.handleChat] and
+// [Server.handlePublishMessage] so the two stay in lockstep.
+//
+// It returns the context to dispatch under and the session id to stamp on the
+// persisted row. When `rawSessionID` is non-blank the returned context carries
+// [channels.WithSessionOverride] (so the dispatch chokepoint emits it as the
+// `persatrix-session` header, beating the ISSUE-0082 auto-binding) and the
+// returned id is the override. A blank / whitespace-only value is treated as
+// absent: the context is returned unchanged and the boot default
+// ([Server.channelSessionID]) is used, so behaviour is byte-identical to the
+// pre-override path.
+//
+// The override id is trusted, not validated against the session registry — by
+// design, not omission: it mirrors the unauthenticated `sender_id` (auth lands
+// in RFC 0009 Phase 4) and the CLI's env / active-session pass-through, which
+// also skip the registry so an operator can name an ad-hoc or not-yet-minted
+// session. On a *group* publish the override applies to every responding
+// recipient of this message, not a single (agent, channel) pair.
+func (s *Server) resolveSessionOverride(ctx context.Context, rawSessionID string) (context.Context, string) {
+	override := strings.TrimSpace(rawSessionID)
+	if override == "" {
+		return ctx, s.channelSessionID
+	}
+	return channels.WithSessionOverride(ctx, override), override
+}
+
 // handlePublishMessage handles POST /api/v1/channels/{id}/messages.
 //
 // Routes through [ChannelRouter.Publish] when a router was injected, so
@@ -268,17 +296,9 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// RFC 0031 Phase 3 PR 4: an explicit `session_id` override (the CLI's
-	// `--session`) replaces the boot default for this one publish, and is
-	// threaded onto the dispatch context so it overrides the ISSUE-0082
-	// auto-binding too (see channels.WithSessionOverride). Absent it, the
-	// boot default / auto-binding stands — behaviour is byte-identical to
-	// before. Trimmed so a whitespace-only field is treated as absent.
-	sessionOverride := strings.TrimSpace(req.SessionID)
-	effectiveSession := s.channelSessionID
-	if sessionOverride != "" {
-		effectiveSession = sessionOverride
-	}
+	// RFC 0031 Phase 3 PR 4: apply the optional `session_id` override (the
+	// CLI's `--session`) — see [Server.resolveSessionOverride].
+	ctx, effectiveSession := s.resolveSessionOverride(r.Context(), req.SessionID)
 
 	msg := channels.ChannelMessage{
 		ID:        uuid.NewString(),
@@ -290,11 +310,6 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 		Mentions:  req.Mentions,
 		Metadata:  req.Metadata,
 		SessionID: effectiveSession, // RFC 0031 Phase 1 — empty falls through to legacy
-	}
-
-	ctx := r.Context()
-	if sessionOverride != "" {
-		ctx = channels.WithSessionOverride(ctx, sessionOverride)
 	}
 
 	var pubErr error

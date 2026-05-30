@@ -62,16 +62,20 @@ pub(crate) fn resolve_session(flag: Option<&str>) -> Option<String> {
 /// registry to a canonical id (`GET /api/v1/sessions/{id}`); an archived target
 /// **warns but proceeds** — the operator named it explicitly, distinct from
 /// `session use`, which refuses to activate an archived session. The resolved
-/// id then feeds the OQ #6 precedence ([`resolve_session`]). Returns the id to
-/// forward on the request body, or `None` to omit the field.
+/// id then feeds the OQ #6 precedence ([`resolve_session`]). A blank /
+/// whitespace-only flag is treated as absent — it falls through the precedence
+/// chain (matching [`nonblank`]) rather than being sent to the registry, so a
+/// stray `--session ""` does not fail the command on a value that was never a
+/// real session. Returns the id to forward on the request body, or `None` to
+/// omit the field.
 pub(crate) async fn resolve_for_invocation(
     client: &reqwest::Client,
     server: &str,
     flag: Option<&str>,
 ) -> Result<Option<String>, String> {
-    let resolved_flag = match flag {
+    let resolved_flag = match nonblank(flag) {
         Some(raw) => {
-            let sess = lookup_session(client, server, raw).await?;
+            let sess = lookup_session(client, server, &raw).await?;
             if sess.archived {
                 let label = if sess.label.is_empty() {
                     String::new()
@@ -140,5 +144,23 @@ mod tests {
     fn flag_is_trimmed() {
         let got = resolve_precedence(Some("  padded  "), None, None);
         assert_eq!(got.as_deref(), Some("padded"));
+    }
+
+    #[tokio::test]
+    async fn blank_flag_does_not_trigger_a_registry_lookup() {
+        // A whitespace-only `--session` must fall through the OQ #6 precedence
+        // (treated as "no flag"), exactly as `resolve_precedence` already does
+        // for the pure layer — it must NOT be forwarded to the registry, which
+        // would fail the whole command on a value the operator never meant as a
+        // session. The client points at a closed port: were the blank flag
+        // erroneously sent to `lookup_session`, the GET would error and this
+        // would be `Err`. After the `nonblank` gate it short-circuits before any
+        // network call, so the result is `Ok` regardless of env / pointer state.
+        let client = reqwest::Client::new();
+        let got = resolve_for_invocation(&client, "http://127.0.0.1:1", Some("   ")).await;
+        assert!(
+            got.is_ok(),
+            "a blank --session must fall through, not hit the registry: {got:?}"
+        );
     }
 }
