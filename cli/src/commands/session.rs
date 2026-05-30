@@ -9,7 +9,7 @@
 
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use tabled::{settings::Style, Table, Tabled};
+use tabled::{Table, Tabled};
 
 use crate::types::{api_error_message, validate_path_param, validate_session_label};
 
@@ -99,13 +99,14 @@ pub(crate) async fn dispatch(
 // ─── Pure helpers (testable without an HTTP server) ─────────────────────
 
 /// Render the `session list` table, or a friendly line when empty.
+///
+/// Uses the `tabled` crate-default style (no `Style` override) to match the
+/// sibling `agent list` table — the repo's only other `tabled`-based list.
 pub(crate) fn render_session_table(sessions: &[SessionResponse]) -> String {
     if sessions.is_empty() {
         return "No sessions.".to_string();
     }
-    let mut table = Table::new(sessions);
-    table.with(Style::rounded());
-    table.to_string()
+    Table::new(sessions).to_string()
 }
 
 // ─── Subcommand entry points ────────────────────────────────────────────

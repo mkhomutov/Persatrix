@@ -104,6 +104,25 @@ fn render_session_table_carries_headers_and_rows() {
     assert!(out.contains("arc"));
 }
 
+#[test]
+fn render_session_table_uses_agent_list_default_style() {
+    // Consistency: the only other `tabled`-based list (`agent list`) renders
+    // with the crate-default style — `Table::new(..)` with no `.with(Style::..)`
+    // override. Guard against re-introducing a divergent border style (the
+    // rounded box-drawing corner `╭` is what `Style::rounded()` emits).
+    let rows = vec![SessionResponse {
+        id: "0190abc".to_string(),
+        label: "arc".to_string(),
+        created_at: "2026-05-30T12:00:00Z".to_string(),
+        archived: false,
+    }];
+    let out = render_session_table(&rows);
+    assert!(
+        !out.contains('╭'),
+        "session table should use the agent-list default style, not rounded borders: {out}"
+    );
+}
+
 // ─── clap parse tests ──────────────────────────────────────────────────────
 //
 // A local `Parser` wrapper exercises `SessionCommands` parsing without pulling
