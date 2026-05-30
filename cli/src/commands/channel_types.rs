@@ -95,6 +95,12 @@ pub(crate) struct PublishMessageRequest {
     pub(crate) thread_id: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) mentions: Vec<String>,
+    /// RFC 0031 Phase 3 `--session` override (id-or-label resolved to a
+    /// canonical id CLI-side before send). Omitted when empty so the
+    /// orchestrator keeps its boot default / auto-binding — matching the Go
+    /// `session_id,omitempty` tag on `publishMessageRequest`.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub(crate) session_id: String,
 }
 
 #[derive(Serialize)]
@@ -226,12 +232,14 @@ mod tests {
             content: "hi".to_string(),
             thread_id: String::new(),
             mentions: Vec::new(),
+            session_id: String::new(),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["sender_id"], "alice");
         assert_eq!(json["content"], "hi");
         assert!(json.get("thread_id").is_none(), "empty thread_id omitted");
         assert!(json.get("mentions").is_none(), "empty mentions omitted");
+        assert!(json.get("session_id").is_none(), "empty session_id omitted");
     }
 
     #[test]
@@ -241,10 +249,25 @@ mod tests {
             content: "ping".to_string(),
             thread_id: "msg-100".to_string(),
             mentions: vec!["bob".to_string(), "carol".to_string()],
+            session_id: String::new(),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["thread_id"], "msg-100");
         assert_eq!(json["mentions"], serde_json::json!(["bob", "carol"]));
+    }
+
+    #[test]
+    fn publish_message_request_includes_session_id_when_set() {
+        // RFC 0031 Phase 3: a resolved `--session` id rides on `session_id`.
+        let req = PublishMessageRequest {
+            sender_id: "alice".to_string(),
+            content: "hi".to_string(),
+            thread_id: String::new(),
+            mentions: Vec::new(),
+            session_id: "run-arc-3".to_string(),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["session_id"], "run-arc-3");
     }
 
     #[test]

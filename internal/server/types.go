@@ -56,18 +56,25 @@ type errorResponse struct {
 //
 // `chat_session_id` (RFC 0016 chat-conversation token) was renamed from
 // `session_id` in v0.3.1 to disambiguate from RFC 0031's operator-
-// namespace `session_id`. JSON callers sending the legacy `session_id`
-// key receive `400 BAD_REQUEST "invalid or malformed JSON body"` —
-// `decodeJSON` in `helpers.go` enables `DisallowUnknownFields`, so the
-// rename fails loud rather than degrading to a silent fresh-session
-// mint. See CHANGELOG `[0.3.1]` Upgrade Notes and the regression test
-// `TestHandleChat_LegacySessionIDJSONKeyRejected`.
+// namespace `session_id`. As of RFC 0031 Phase 3 (PR 4) the `session_id`
+// key is back — now carrying the operator session the rename reserved it
+// for (see the `SessionID` field below), no longer the RFC 0016 chat token.
+// See CHANGELOG `[0.3.1]` Upgrade Notes for the rename and the test
+// `TestHandleChat_SessionIDIsOperatorNamespace`.
+//
+// `session_id` (distinct from `chat_session_id`) is the RFC 0031 Phase 3
+// operator-namespace session override the v0.3.1 rename deliberately reserved
+// this key for. When present it replaces the orchestrator's boot-default
+// session for this conversation — both on the persisted inbound row and as the
+// `persatrix-session` header the dispatch path emits to the persona (overriding
+// the ISSUE-0082 auto-binding). Absent, the boot default / auto-binding stands.
 type chatRequest struct {
 	Message         string `json:"message"`
 	UserID          string `json:"user_id"`
 	ChatSessionID   string `json:"chat_session_id"`
 	TimeoutSeconds  int32  `json:"timeout_seconds"`
 	ParticipantType string `json:"participant_type"`
+	SessionID       string `json:"session_id,omitempty"`
 }
 
 // createSessionRequest is the JSON body for POST /api/v1/sessions

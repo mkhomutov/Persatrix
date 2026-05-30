@@ -240,9 +240,10 @@ async fn cmd_session_archive(
 /// Resolve an id-or-label against the registry via `GET /api/v1/sessions/{id}`.
 ///
 /// Shared by `use` (validate before pointing) and `current` (enrich the stored
-/// id with its human label). The path value is validated to keep traversal /
-/// query-injection out of the URL before it is sent.
-async fn resolve_session(
+/// id with its human label) and the `--session` override resolver
+/// ([`crate::session_resolve`]). The path value is validated to keep traversal
+/// / query-injection out of the URL before it is sent.
+pub(crate) async fn lookup_session(
     client: &reqwest::Client,
     server: &str,
     id_or_label: &str,
@@ -290,7 +291,7 @@ async fn cmd_session_use(
     // Resolve against the registry first so a typo or an archived target fails
     // *before* the pointer is written — never after, when it would silently
     // misroute the next channel (RFC §Security: misconfiguration risk).
-    let sess = resolve_session(client, server, id_or_label).await?;
+    let sess = lookup_session(client, server, id_or_label).await?;
     if sess.archived {
         // Pass `archived = false` to the annotation: the sentence already says
         // "is archived", so we want only the label suffix — and an unlabeled,
@@ -324,7 +325,7 @@ async fn cmd_session_current(client: &reqwest::Client, server: &str) -> Result<(
     // Enrich the stored id with its registry label. If the lookup fails (the
     // registry is down, or the session was archived/removed out from under the
     // pointer), still report the active id — a degraded answer beats none.
-    match resolve_session(client, server, &active_id).await {
+    match lookup_session(client, server, &active_id).await {
         Ok(sess) => {
             // Surface the archived marker: GET returns archived rows (200; the
             // row is preserved, RFC 0031 §B), so a pointer left on a session

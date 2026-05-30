@@ -10,16 +10,28 @@ use crate::types::{api_error_message, validate_resource_id, ChatRequest, ChatRes
 /// Interactive REPL for chatting with a persona agent via the orchestrator
 /// REST endpoint `POST /api/v1/agents/{agent_id}/chat`.
 pub(crate) async fn cmd_chat(
-    _client: &reqwest::Client,
+    client: &reqwest::Client,
     server: &str,
     agent_id: &str,
     user_id: &str,
+    session_flag: Option<&str>,
 ) -> Result<(), String> {
     validate_resource_id(agent_id, "agent ID")?;
     // Validate user_id with the same resource-ID rules as agent_id.
     // Prevents arbitrary strings (whitespace, special chars) from propagating
     // to the server and into logs. Default "local" passes this check.
     validate_resource_id(user_id, "user ID")?;
+
+    // RFC 0031 Phase 3 `--session` override: resolve once before the REPL
+    // (the session is fixed for the conversation), applying the OQ #6
+    // precedence. Empty when no session is in play — the field is then omitted
+    // and the orchestrator keeps its boot default / auto-binding. The provided
+    // `client` (short-timeout) is fine for the registry GET; the REPL builds
+    // its own long-timeout client below for the chat turns.
+    let operator_session_id =
+        crate::session_resolve::resolve_for_invocation(client, server, session_flag)
+            .await?
+            .unwrap_or_default();
 
     // Build a dedicated client with a longer timeout for chat (agent LLM
     // calls can take a while).
@@ -94,6 +106,7 @@ pub(crate) async fn cmd_chat(
             user_id: user_id.to_string(),
             chat_session_id: session_id.clone(),
             participant_type: "user".to_string(),
+            session_id: operator_session_id.clone(),
         };
 
         // Spawn a spinner task that activates after ~2 seconds

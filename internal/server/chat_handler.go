@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -285,6 +286,19 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		metadata["participant_type"] = req.ParticipantType
 	}
 
+	// RFC 0031 Phase 3 PR 4: an explicit `session_id` override (the CLI's
+	// `--session`) replaces the boot-default session for this conversation —
+	// both on the persisted inbound row and, threaded onto the dispatch
+	// context below, as the `persatrix-session` header the persona receives
+	// (overriding the ISSUE-0082 auto-binding). This is the RFC 0031
+	// operator-namespace session, distinct from the RFC 0016 chat token on
+	// `chat_session_id`. Trimmed so a whitespace-only field reads as absent.
+	sessionOverride := strings.TrimSpace(req.SessionID)
+	effectiveSession := s.channelSessionID
+	if sessionOverride != "" {
+		effectiveSession = sessionOverride
+	}
+
 	inbound := channels.ChannelMessage{
 		ID:        uuid.NewString(),
 		ChannelID: dm.ID,
@@ -294,11 +308,15 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		Timestamp: time.Now().UTC(),
 		Metadata:  metadata,
 		// RFC 0031 Phase 1: tag the chat publish with the per-process
-		// default session_id (PERSATRIX_SESSION_ID at boot). Empty
-		// falls through to the store's legacy default.
-		SessionID: s.channelSessionID,
+		// default session_id (PERSATRIX_SESSION_ID at boot), or the
+		// per-request `--session` override when supplied. Empty falls
+		// through to the store's legacy default.
+		SessionID: effectiveSession,
 	}
 
+	if sessionOverride != "" {
+		ctx = channels.WithSessionOverride(ctx, sessionOverride)
+	}
 	reply, err := s.channelRouter.PublishAndAwait(ctx, inbound, agentID, timeout)
 	if err != nil {
 		switch {

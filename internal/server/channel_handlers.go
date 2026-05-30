@@ -9,6 +9,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -267,6 +268,18 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RFC 0031 Phase 3 PR 4: an explicit `session_id` override (the CLI's
+	// `--session`) replaces the boot default for this one publish, and is
+	// threaded onto the dispatch context so it overrides the ISSUE-0082
+	// auto-binding too (see channels.WithSessionOverride). Absent it, the
+	// boot default / auto-binding stands — behaviour is byte-identical to
+	// before. Trimmed so a whitespace-only field is treated as absent.
+	sessionOverride := strings.TrimSpace(req.SessionID)
+	effectiveSession := s.channelSessionID
+	if sessionOverride != "" {
+		effectiveSession = sessionOverride
+	}
+
 	msg := channels.ChannelMessage{
 		ID:        uuid.NewString(),
 		ChannelID: id,
@@ -276,12 +289,17 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 		ThreadID:  req.ThreadID,
 		Mentions:  req.Mentions,
 		Metadata:  req.Metadata,
-		SessionID: s.channelSessionID, // RFC 0031 Phase 1 — empty falls through to legacy
+		SessionID: effectiveSession, // RFC 0031 Phase 1 — empty falls through to legacy
+	}
+
+	ctx := r.Context()
+	if sessionOverride != "" {
+		ctx = channels.WithSessionOverride(ctx, sessionOverride)
 	}
 
 	var pubErr error
 	if s.channelRouter != nil {
-		pubErr = s.channelRouter.Publish(r.Context(), msg, req.ChannelType)
+		pubErr = s.channelRouter.Publish(ctx, msg, req.ChannelType)
 	} else {
 		// PR #245 review (round 3) Should-Fix #3: signpost the
 		// router-nil fallback once per process. The fallback path
