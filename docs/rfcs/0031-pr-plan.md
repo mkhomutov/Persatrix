@@ -405,7 +405,7 @@ Default recall becomes session-scoped per OQ #1 resolution 1a. Cross-session rec
 
 ### Phase 3 — Operator CLI
 
-`persatrix session new / use / list / archive / current`. Active-session pointer at `~/.persatrix/active-session` plus `PERSATRIX_ACTIVE_SESSION_FILE` override. `--session` flag on `persatrix chat` / `persatrix channel publish` / `persatrix channel list`. `persatrix session new --label legacy` rejected per OQ #2 resolution.
+`persatrix session new / use / list / archive / current`. Active-session pointer at `~/.persatrix/active-session` plus `PERSATRIX_ACTIVE_SESSION_FILE` override. `--session` flag on `persatrix chat` / `persatrix channel send` / `persatrix channel reply`. `persatrix session new --label legacy` rejected per OQ #2 resolution.
 
 ### Phase 4 — Operator Documentation Pass
 

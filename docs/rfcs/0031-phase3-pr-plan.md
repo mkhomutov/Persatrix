@@ -62,7 +62,7 @@ Before the per-PR detail, the reconciliation the whole phase depends on. After P
 | `PERSATRIX_SESSION_ID` env var | operator, at boot | the orchestrator + persona-runtime **construction-time seed / single-session fallback** | Phase 1 (v0.3.1) |
 | Per-request `(agent, channel, user)` binding | orchestrator, auto-minted on first sight | the **live channel-dispatch path** — emitted as the `persatrix-session` gRPC header, overrides the construction snapshot per request | ISSUE-0082 Part 1 (v0.3.5) |
 | `~/.persatrix/active-session` pointer file (+ `PERSATRIX_ACTIVE_SESSION_FILE`) | operator, via `persatrix session use` / `new --activate` | the boot seed when no env var is set, and the CLI default for `--session` | **Phase 3 (this plan, PR 3)** |
-| `--session` flag on `chat` / `channel publish` / `channel list` | operator, per invocation | a one-invocation **override**, above the auto-binding | **Phase 3 (this plan, PR 4)** |
+| `--session` flag on `chat` / `channel send` / `channel reply` | operator, per invocation | a one-invocation **override**, above the auto-binding | **Phase 3 (this plan, PR 4)** |
 
 The [RFC OQ #6](0031-per-session-namespacing-channels.md#open-questions) precedence chain — `--session` flag > `PERSATRIX_SESSION_ID` env var > `~/.persatrix/active-session` file > built-in `legacy` — is the **resolution order for a process-lifetime / single-conversation session**. The ISSUE-0082 per-request binding is a distinct, per-conversation axis that sits on top of it on the dispatch path; PR 4 reconciles the two by making the explicit `--session` flag the highest-precedence signal the orchestrator honours, above the auto-binding, for the one invocation it accompanies. Absent `--session`, the auto-binding stands (concurrent conversations stay isolated — the Phase 2 + ISSUE-0082 guarantee is not regressed). This is recorded as the [OQ #6 amendment](#open-question-status).
 
@@ -82,7 +82,7 @@ PR 2 (Rust CLI registry verbs: session new / list / archive → PR 1 endpoints)
   ↓
 PR 3 (active-session pointer file + PERSATRIX_ACTIVE_SESSION_FILE; session use / current; new --activate side effect)
   ↓
-PR 4 (--session override on chat / channel publish / channel list; orchestrator honours it above the auto-binding)
+PR 4 (--session override on chat / channel send / channel reply; orchestrator honours it above the auto-binding)
   ↓
 PR 5 (closeout: end-to-end CLI integration test; --all-sessions carve-out issue; RFC/ROADMAP/master-plan status)
 ```
@@ -231,7 +231,7 @@ OQ #1 / #4 / #7 were consumed by Phase 2; OQ #3 / #8 resolved upstream (Phase 1)
 
 **Depends on**: PR 3 merged.
 **Sequencing caveat**: ✅ **settled** — the [sender-axis drop (ISSUE-0083)](../issues/ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md) **shipped 2026-05-30, before this PR**, so the binding key is already `(agent, channel)`. PR 4's inline `(agent, channel, user)` references read `(agent, channel)`; the override sits above the auto-binding regardless of its key.
-**Purpose**: Add `--session` to `persatrix chat` / `persatrix channel publish` / `persatrix channel list`, resolve the [OQ #6](0031-per-session-namespacing-channels.md#open-questions) precedence chain CLI-side, forward the resolved id to the orchestrator, and make the orchestrator honour it **above the per-request auto-binding** for that invocation. This is the reconciliation PR — it makes the explicit operator signal the highest-precedence one without regressing the Phase 2 + ISSUE-0082 concurrent-isolation guarantee.
+**Purpose**: Add `--session` to `persatrix chat` / `persatrix channel send` / `persatrix channel reply`, resolve the [OQ #6](0031-per-session-namespacing-channels.md#open-questions) precedence chain CLI-side, forward the resolved id to the orchestrator, and make the orchestrator honour it **above the per-request auto-binding** for that invocation. This is the reconciliation PR — it makes the explicit operator signal the highest-precedence one without regressing the Phase 2 + ISSUE-0082 concurrent-isolation guarantee.
 
 #### Scope
 
@@ -256,7 +256,7 @@ OQ #1 / #4 / #7 were consumed by Phase 2; OQ #3 / #8 resolved upstream (Phase 1)
 
 - CLI precedence: flag > env > file > none, each layer pinned.
 - Override emitted as `persatrix-session`; absent override → auto-binding still emitted; concurrent override + non-override dispatches stay independent.
-- `channel publish --session <label>` resolves the label; archived-label warns-but-proceeds.
+- `channel send --session <label>` resolves the label; archived-label warns-but-proceeds.
 
 #### PR checklist
 

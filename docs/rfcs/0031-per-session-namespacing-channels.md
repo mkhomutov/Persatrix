@@ -226,7 +226,7 @@ persatrix session archive <id-or-label>
 persatrix session current
 ```
 
-The active-session pointer lives at `~/.persatrix/active-session` (path overridable via `PERSATRIX_ACTIVE_SESSION_FILE`). The orchestrator reads it at startup; an explicit `--session` flag on `persatrix chat` / `persatrix channel publish` / etc. overrides the file for that one invocation.
+The active-session pointer lives at `~/.persatrix/active-session` (path overridable via `PERSATRIX_ACTIVE_SESSION_FILE`). The orchestrator reads it at startup; an explicit `--session` flag on `persatrix chat` / `persatrix channel send` / `persatrix channel reply` overrides the file for that one invocation.
 
 **Phasing of the three resolution mechanisms.** The full precedence chain in Open Question 6 (`--session` flag > `PERSATRIX_SESSION_ID` env var > `~/.persatrix/active-session` file > built-in `legacy`) does not light up in one phase:
 
@@ -240,7 +240,7 @@ Between Phase 1 and Phase 3, **the env var is the only way to set a session**. A
 
 `make reset` is **kept**, and its operator-guide subsection is updated — but the framing is **superseded by the [scope-axes reframing](../memory-scope-axes.md)** (§A amendment) recorded after this section was authored. The original intent ("prefer `persatrix session new --activate` for run isolation; `make reset` is the deprecated nuclear option") no longer holds: a session is now *room continuity* that accumulates, so `session new --activate` switches rooms rather than handing back a clean slate. Run/test isolation moves to the `epoch` axis ([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)); until it ships, `make reset` **remains** the supported clean-slate path (not deprecated). The Phase 4 breadcrumb ([channels.md](../guides/channels.md) / [persona-agents.md](../guides/persona-agents.md)) and [`docs/guides/sessions.md`](../guides/sessions.md) carry this corrected framing. Removal of `make reset` is out of scope.
 
-> **Amendment — Phase 3 operator CLI shipped, v0.3.5 ([Phase 3 PR plan](0031-phase3-pr-plan.md), PRs 1–5).** All three resolution mechanisms in the table above are now wired: the `/api/v1/sessions` REST registry + `session new / list / archive` (PRs 1–2), the `~/.persatrix/active-session` pointer file (+ `PERSATRIX_ACTIVE_SESSION_FILE`) + `session use / current / new --activate` (PR 3), and the `--session` override on `chat` / `channel publish / list` (PR 4); the lifecycle is pinned end-to-end by [`tests/integration/test_session_operator_surface.py`](../../tests/integration/test_session_operator_surface.py) (PR 5).
+> **Amendment — Phase 3 operator CLI shipped, v0.3.5 ([Phase 3 PR plan](0031-phase3-pr-plan.md), PRs 1–5).** All three resolution mechanisms in the table above are now wired: the `/api/v1/sessions` REST registry + `session new / list / archive` (PRs 1–2), the `~/.persatrix/active-session` pointer file (+ `PERSATRIX_ACTIVE_SESSION_FILE`) + `session use / current / new --activate` (PR 3), and the `--session` override on `chat` / `channel send` / `channel reply` (PR 4); the lifecycle is pinned end-to-end by [`tests/integration/test_session_operator_surface.py`](../../tests/integration/test_session_operator_surface.py) (PR 5).
 >
 > **OQ #6 reconciliation.** The precedence chain governs the *process-lifetime* session; the [ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) per-request auto-binding (keyed `(agent, channel)` after [ISSUE-0083](../issues/ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md)) is a distinct dispatch-path axis. An explicit `--session` wins **above** the auto-binding for that one invocation; absent it the auto-binding stands, so the Phase 2 + ISSUE-0082 concurrent-isolation guarantee is not regressed (pinned in `channel_session_handler_test.go` + `grpc_dispatcher_test.go`).
 >
@@ -327,7 +327,7 @@ Phases are scoped to be independently shippable. Sequencing is the constraint; s
 
 1. `cli/src/commands/session.rs` with the verbs listed in §E.
 2. Active-session file at `~/.persatrix/active-session` plus `PERSATRIX_ACTIVE_SESSION_FILE` override.
-3. `persatrix chat` / `persatrix channel publish` / `persatrix channel list` honor `--session` (overriding the file) and default to the file value otherwise.
+3. `persatrix chat` / `persatrix channel send` / `persatrix channel reply` honor `--session` (overriding the file) and default to the file value otherwise.
 4. `make reset` operator-guide subsections in [channels.md](../guides/channels.md) and [persona-agents.md](../guides/persona-agents.md) get the "prefer `persatrix session new --activate`" callout.
 
 **Dependencies**: Phase 1.

@@ -66,7 +66,7 @@ persatrix session archive <id-or-label> [--json]
 - **`use`** sets the active session by id *or* label. The target is resolved
   against the registry first, so a typo or an archived target fails **before**
   the pointer is written — never after, when new channels would silently
-  misroute. The active id is logged at `INFO`.
+  misroute. The active id is echoed on success.
 - **`current`** prints the active session (label-enriched), or
   `no active session — using legacy` when no pointer is set.
 - **`archive`** marks a session inactive. Archive is **one-way** (RFC 0031 §B):
@@ -105,7 +105,7 @@ Three mechanisms can set the process-lifetime session. They resolve in this
 
 | Precedence | Mechanism | Set by |
 |------------|-----------|--------|
-| 1 (highest) | `--session <id-or-label>` flag on `chat` / `channel publish` / `channel list` | per invocation |
+| 1 (highest) | `--session <id-or-label>` flag on `chat` / `channel send` / `channel reply` | per invocation |
 | 2 | `PERSATRIX_SESSION_ID` env var | operator, at boot |
 | 3 | `~/.persatrix/active-session` pointer file | `session use` / `new --activate` |
 | 4 (fallback) | built-in `legacy` | — |
@@ -178,8 +178,8 @@ fix sessions ship.
   dimension). Keep credentials, tokens, and PII out of session labels.
 - **Stale pointers misroute.** A `~/.persatrix/active-session` pointing at an
   archived session makes new channels attach to a session you thought was done.
-  `use` validates the target before writing, and activation logs the id at
-  `INFO` — check `session current` when a run surfaces unexpected memory.
+  `use` validates the target before writing, and activation echoes the active
+  id — check `session current` when a run surfaces unexpected memory.
 
 ## Related documentation
 

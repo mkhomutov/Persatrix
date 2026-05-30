@@ -429,10 +429,12 @@ deferrals, not implementation oversights:
 - **Per-channel `cascade_depth` overrides** → v0.3.x; see
   [OQ #11](../rfcs/0011-channels-bridges.md#open-questions).
 - **Persona name discovery / dynamic membership** → v0.4.0 (RFC 0011 OQ #1).
-- **Per-session memory namespacing** so reruns with the same channel
-  name + user id are auto-isolated (current workaround: `make reset` —
-  see §10) → tracked in
-  [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md).
+- **Whole-world run/test isolation** (the `epoch` axis) so a rerun reusing the
+  same channel name inherits *nothing* → tracked in
+  [ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md). (Per-session
+  recall namespacing itself shipped in v0.3.5 — [RFC 0031](../rfcs/0031-per-session-namespacing-channels.md);
+  see §10 and the [sessions guide](sessions.md). `make reset` stays the
+  clean-slate nuke until epoch lands.)
 
 ---
 
