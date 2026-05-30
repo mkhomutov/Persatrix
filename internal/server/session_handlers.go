@@ -11,6 +11,7 @@ package server
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -35,6 +36,12 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	// Normalise the operator-supplied label at the boundary: trim surrounding
+	// whitespace and reject an empty-or-whitespace-only value (the auto-mint
+	// path is the only legitimate source of label-less rows). Trimming also
+	// funnels a padded " legacy " into the store's reserved-id guard, so the
+	// §D carve-out cannot be skirted with a whitespace-padded variant.
+	req.Label = strings.TrimSpace(req.Label)
 	if req.Label == "" {
 		writeError(w, "BAD_REQUEST", "label is required", http.StatusBadRequest)
 		return

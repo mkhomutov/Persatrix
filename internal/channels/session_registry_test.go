@@ -200,3 +200,50 @@ func TestSessionRegistry_AutoMintedSession_AppearsInList(t *testing.T) {
 	assert.Empty(t, got[0].Label,
 		"the resolver registers id + created_at only; label stays empty until named")
 }
+
+// TestSessionRegistry_Get_PrefersIDMatchOverLabelMatch asserts an exact id
+// match wins over a row whose *label* happens to equal that id. This pins the
+// id-first resolution order the split lookup relies on (id is the primary key
+// and the unambiguous form).
+func TestSessionRegistry_Get_PrefersIDMatchOverLabelMatch(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	r := mustRegistry(t, store)
+	ctx := context.Background()
+
+	a, err := r.CreateSession(ctx, "session-a")
+	require.NoError(t, err)
+	// b's label is a's id — a pathological-but-legal collision the id-first
+	// order must resolve in favour of the row whose *id* matches.
+	b, err := r.CreateSession(ctx, a.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, a.ID, b.ID)
+
+	got, err := r.GetSession(ctx, a.ID)
+	require.NoError(t, err)
+	assert.Equal(t, a.ID, got.ID,
+		"an exact id match wins over a row whose label equals that id")
+}
+
+// TestSessionRegistry_Get_DuplicateLabelResolvesLowestID documents the
+// deliberate label contract: labels are not unique (the schema has no UNIQUE,
+// and the auto-mint path writes NULL labels), so two sessions may share a
+// label. GetSession resolves such a label deterministically to the earliest-
+// created (lowest id) row. Whether the operator surface should reject a
+// duplicate label is a PR 2 UX decision; this test pins today's behaviour so it
+// stays intentional rather than accidental.
+func TestSessionRegistry_Get_DuplicateLabelResolvesLowestID(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	r := mustRegistry(t, store)
+	ctx := context.Background()
+
+	first, err := r.CreateSession(ctx, "dup")
+	require.NoError(t, err)
+	second, err := r.CreateSession(ctx, "dup")
+	require.NoError(t, err)
+	require.Less(t, first.ID, second.ID)
+
+	got, err := r.GetSession(ctx, "dup")
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, got.ID,
+		"duplicate labels resolve to the earliest-created (lowest id) row")
+}

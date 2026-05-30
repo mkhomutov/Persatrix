@@ -184,6 +184,33 @@ func TestSessions_CreateEmptyLabelRejected(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+// TestSessions_CreateWhitespaceLabelRejected asserts a whitespace-only label
+// is rejected like an empty one — "   " is not a name, and the boundary trims
+// before the required-label check.
+func TestSessions_CreateWhitespaceLabelRejected(t *testing.T) {
+	srv, _ := sessionTestServer(t)
+	body, _ := json.Marshal(createSessionRequest{Label: "   "})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/sessions", body)
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"a whitespace-only label must be rejected like an empty one")
+
+	// No row leaked.
+	rec = doRequest(srv.Handler(), http.MethodGet, "/api/v1/sessions?include_archived=true", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var all listSessionsResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &all))
+	assert.Empty(t, all.Sessions)
+}
+
+// TestSessions_CreateTrimsLabelWhitespace asserts surrounding whitespace is
+// trimmed at the boundary so the stored (and rendered) label is canonical.
+func TestSessions_CreateTrimsLabelWhitespace(t *testing.T) {
+	srv, _ := sessionTestServer(t)
+	created := createSessionViaREST(t, srv, "  arc-1  ")
+	assert.Equal(t, "arc-1", created.Label,
+		"surrounding whitespace is trimmed so the stored label is canonical")
+}
+
 // TestSessions_AutoMintedAppearsInList asserts a session minted by the
 // ISSUE-0082 dispatch-path resolver (seeded here directly) is visible through
 // the operator-facing list endpoint on day one.

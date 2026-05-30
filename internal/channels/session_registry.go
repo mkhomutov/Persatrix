@@ -165,18 +165,32 @@ func (r *SessionRegistry) ListSessions(ctx context.Context, includeArchived bool
 }
 
 // GetSession resolves a session by id *or* label and returns the row, or
-// [ErrSessionNotFound] when neither matches. The id is tried first (it is the
-// primary key and the unambiguous form); the label is the fallback so
-// `session use <label>` / `current` can render the human name. When duplicate
-// labels exist, the lowest id (earliest-created) wins deterministically.
+// [ErrSessionNotFound] when neither matches.
+//
+// The id is tried first: it is the primary key, so the common path is an index
+// hit and the unambiguous form. Only on a miss does it fall back to a label
+// lookup — the label column is unindexed, so keeping it off the id path avoids
+// a full-table scan on the registry (which grows one row per auto-minted
+// binding). The two-query split also makes the id-wins-over-label precedence
+// explicit rather than leaning on an `OR` whose plan SQLite cannot index. The
+// label fallback is what lets `session use <label>` / `current` render the
+// human name; when duplicate labels exist, the lowest id (earliest-created)
+// wins deterministically.
 func (r *SessionRegistry) GetSession(ctx context.Context, idOrLabel string) (Session, error) {
-	row := r.db.QueryRowContext(ctx,
-		`SELECT id, label, created_at, archived_at FROM sessions
-		   WHERE id = ? OR label = ?
-		   ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, id ASC
-		   LIMIT 1`,
-		idOrLabel, idOrLabel, idOrLabel)
-	s, err := scanSession(row)
+	const cols = `SELECT id, label, created_at, archived_at FROM sessions`
+
+	s, err := scanSession(r.db.QueryRowContext(ctx, cols+` WHERE id = ?`, idOrLabel))
+	if err == nil {
+		return s, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return Session{}, err
+	}
+
+	// No id match — fall back to the label, lowest id first for a deterministic
+	// resolution when labels collide.
+	s, err = scanSession(r.db.QueryRowContext(ctx,
+		cols+` WHERE label = ? ORDER BY id ASC LIMIT 1`, idOrLabel))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, fmt.Errorf("%w: %s", ErrSessionNotFound, idOrLabel)
 	}
