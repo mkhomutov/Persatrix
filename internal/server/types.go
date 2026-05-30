@@ -70,6 +70,30 @@ type chatRequest struct {
 	ParticipantType string `json:"participant_type"`
 }
 
+// createSessionRequest is the JSON body for POST /api/v1/sessions
+// (RFC 0031 Phase 3, §E operator surface). `label` is the human-readable
+// name the operator gives the session; it is required (the auto-mint path is
+// the only route that creates label-less rows) and must not be the reserved
+// `legacy` carve-out (OQ #2a — rejected server-side).
+type createSessionRequest struct {
+	Label string `json:"label"`
+}
+
+// sessionResponse is the JSON shape returned by the session registry
+// endpoints. `created_at` is RFC3339 (matching channelResponse); `archived`
+// is the one-way archive flag (RFC 0031 §B).
+type sessionResponse struct {
+	ID        string    `json:"id"`
+	Label     string    `json:"label,omitempty"` // empty for auto-minted, not-yet-named rows
+	CreatedAt time.Time `json:"created_at"`
+	Archived  bool      `json:"archived"`
+}
+
+// listSessionsResponse is the envelope for GET /api/v1/sessions.
+type listSessionsResponse struct {
+	Sessions []sessionResponse `json:"sessions"`
+}
+
 // chatResponse is the JSON response for POST /api/v1/agents/{id}/chat.
 type chatResponse struct {
 	Reply            string `json:"reply"`

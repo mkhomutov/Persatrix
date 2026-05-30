@@ -80,6 +80,13 @@ type Server struct {
 	channelStore  channels.ChannelStore
 	channelRouter *channels.ChannelRouter
 
+	// sessionRegistry is the operator-facing CRUD surface over the
+	// `sessions` table (RFC 0031 Phase 3 §E), built from the channel store
+	// in WithChannels. When nil — channels not wired, or a non-SQLite store
+	// — the /api/v1/sessions endpoints return 503 UNAVAILABLE, matching the
+	// channel handlers' zero-config degradation.
+	sessionRegistry *channels.SessionRegistry
+
 	// channelSessionID is the per-process default session id stamped on
 	// every CreateChannel / PublishMessage that arrives without an
 	// explicit session_id (RFC 0031 Phase 1). Sourced from
@@ -186,6 +193,17 @@ func WithChannels(store channels.ChannelStore, router *channels.ChannelRouter) S
 	return func(s *Server) {
 		s.channelStore = store
 		s.channelRouter = router
+		// RFC 0031 Phase 3 §E: the session registry rides on the same store,
+		// so wire it wherever channels are wired. Construction only fails on a
+		// programming error (a non-SQLite store); degrade to nil (the
+		// /api/v1/sessions endpoints return 503) rather than failing channel
+		// wiring — the registry is additive to the existing channel surface.
+		reg, err := channels.NewSessionRegistry(store)
+		if err != nil {
+			s.logger.Warn("channels: session registry unavailable; /api/v1/sessions will return 503", zap.Error(err))
+			return
+		}
+		s.sessionRegistry = reg
 	}
 }
 
@@ -291,6 +309,14 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/channels/{id}/messages/{msg_id}/thread", s.handleGetThread)
 	s.mux.HandleFunc("POST /api/v1/channels/{id}/members", s.handleAddChannelMember)
 	s.mux.HandleFunc("DELETE /api/v1/channels/{id}/members/{participant_id}", s.handleDeleteChannelMember)
+
+	// Session registry endpoints (RFC 0031 Phase 3 §E operator surface).
+	// Enabler for the `persatrix session …` CLI verbs (PR 2); return 503
+	// when the channels subsystem (and thus the registry) is not wired.
+	s.mux.HandleFunc("POST /api/v1/sessions", s.handleCreateSession)
+	s.mux.HandleFunc("GET /api/v1/sessions", s.handleListSessions)
+	s.mux.HandleFunc("GET /api/v1/sessions/{id}", s.handleGetSession)
+	s.mux.HandleFunc("POST /api/v1/sessions/{id}/archive", s.handleArchiveSession)
 
 	// Minimal health endpoint (C-02: satisfies existing docker-compose.yaml healthcheck)
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)

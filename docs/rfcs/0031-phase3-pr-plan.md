@@ -316,7 +316,7 @@ No production code in PR 5 — test + docs only.
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
 | — | This plan (Phase 3 PR plan authoring) | `feature/v035-rfc0031p3-plan` | 🔀 PR open | — | — |
-| 1 | Orchestrator `/api/v1/sessions` REST surface | `feature/v035-rfc0031p3-rest` | ⬜ Not started | — | — |
+| 1 | Orchestrator `/api/v1/sessions` REST surface | `feature/v035-rfc0031p3-rest` | 🔀 PR open | — | — |
 | 2 | CLI registry verbs (`new` / `list` / `archive`) | `feature/v035-rfc0031p3-cli-registry` | ⬜ Not started | — | — |
 | 3 | Active-session pointer file + `use` / `current` / `--activate` | `feature/v035-rfc0031p3-active-file` | ⬜ Not started | — | — |
 | 4 | `--session` override on `chat` / `channel` | `feature/v035-rfc0031p3-session-override` | ⬜ Not started | — | — |
