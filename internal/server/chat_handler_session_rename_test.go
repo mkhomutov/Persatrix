@@ -1,34 +1,85 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mkhomutov/persatrix/internal/channels"
 )
 
-// TestHandleChat_LegacySessionIDJSONKeyRejected pins the v0.3.1 break:
-// legacy `"session_id"` JSON key (pre-RFC-0031-OQ-8 rename) fails loud
-// at 400 via `decodeJSON`'s `DisallowUnknownFields`. Operators see a
-// clear error rather than a silently-rebound fresh session id.
+// TestHandleChat_SessionIDIsOperatorNamespace pins the RFC 0031 Phase 3
+// (PR 4) fulfilment of the key the v0.3.1 rename reserved: `session_id` on the
+// chat body is now the operator-namespace session override, NOT the RFC 0016
+// chat token (which lives on `chat_session_id`). It is accepted — no longer
+// rejected by `decodeJSON`'s `DisallowUnknownFields` — and stamps the
+// persisted inbound row, so a `persatrix chat --session run-arc-3` re-binds the
+// conversation to that session (RFC 0031 OQ #1 resolution 1a). This supersedes
+// the v0.3.1-era `TestHandleChat_LegacySessionIDJSONKeyRejected`, which guarded
+// the interim window before this operator field existed.
+func TestHandleChat_SessionIDIsOperatorNamespace(t *testing.T) {
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+	publishReplyAfter(t, router, store, "alice", "agent-x", "ok", 20*time.Millisecond)
+
+	body := []byte(`{"message":"Hi","user_id":"alice","session_id":"run-arc-3"}`)
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	require.Equal(t, 200, rec.Code, "session_id is now an accepted operator field; body=%s", rec.Body.String())
+
+	dm, err := store.GetOrCreateDM(context.Background(), "alice", "agent-x")
+	require.NoError(t, err)
+	hist, err := store.GetHistory(context.Background(), dm.ID, 10, time.Time{})
+	require.NoError(t, err)
+
+	var inbound *channels.ChannelMessage
+	for i := range hist {
+		if hist[i].SenderID == "alice" {
+			inbound = &hist[i]
+			break
+		}
+	}
+	require.NotNil(t, inbound, "inbound message must persist")
+	assert.Equal(t, "run-arc-3", inbound.SessionID,
+		"the operator-namespace session_id override must stamp the inbound row")
+}
+
+// TestHandleChat_InvalidSessionOverride_Rejected pins the fail-loud boundary
+// check (PR #469 deep-review finding 1): an operator `session_id` carrying a
+// control / non-ASCII byte cannot ride the gRPC `persatrix-session` metadata
+// header and would otherwise silently fail the dispatch. The handler rejects it
+// with a 400 before publishing, consistent with the publish path
+// (TestPublish_InvalidSessionOverride_Rejected).
 //
-// Pins three layers — HTTP status, error-message substring, AND the
-// machine-readable `errorResponse.Code` envelope — so a regression that
-// flips the status code while keeping the substring (or vice versa)
-// still fails the test. (PR #333 review fix: finding L2.)
-func TestHandleChat_LegacySessionIDJSONKeyRejected(t *testing.T) {
-	srv, reg, _, _ := chatTestServer(t)
+// It also rejects *before any side effect*: the agent is healthy, so the
+// pre-fix handler would have already opened the DM channel (and demoted the
+// user's membership) by the time the override was validated. The override check
+// is hoisted above `GetOrCreateDM`, so a rejected chat leaves no DM behind —
+// parity with `TestPublish_InvalidSessionOverride_Rejected`, which asserts no
+// row is persisted (PR #469 deep-review finding 1, follow-up).
+func TestHandleChat_InvalidSessionOverride_Rejected(t *testing.T) {
+	srv, reg, _, store := chatTestServer(t)
 	registerHealthyAgent(t, reg, "agent-x", "Agent X")
 
-	body := []byte(`{"message":"Hi","user_id":"alice","session_id":"legacy-sess"}`)
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice", SessionID: "bad\nid"})
 	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
-	assert.Equal(t, 400, rec.Code, "body=%s", rec.Body.String())
-	assert.Contains(t, rec.Body.String(), "invalid or malformed JSON body")
+	require.Equal(t, 400, rec.Code, "a malformed session_id must fail loud; body=%s", rec.Body.String())
 
 	var env errorResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
-	assert.Equal(t, "BAD_REQUEST", env.Code, "error envelope code must be machine-readable BAD_REQUEST, not just a free-text message")
+	assert.Equal(t, "BAD_REQUEST", env.Code,
+		"error envelope code must be machine-readable BAD_REQUEST")
+
+	// No DM channel was created: the override is validated before the
+	// GetOrCreateDM side effect, mirroring the publish path's reject-before-
+	// persist contract.
+	chans, err := store.ListChannels(context.Background(), 100, "")
+	require.NoError(t, err)
+	assert.Empty(t, chans,
+		"a rejected chat must not create a DM channel as a side effect (reject before GetOrCreateDM)")
 }
 
 // TestHandleChat_ChatSessionIDJSONTagOnResponse pins the wire-name on

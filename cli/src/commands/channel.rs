@@ -7,7 +7,7 @@
 //! unknown server fields are dropped (the DTOs do not set
 //! `deny_unknown_fields` and do not flatten extras).
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::time::Duration;
 
 use colored::Colorize;
@@ -18,6 +18,7 @@ use crate::commands::channel_types::{
     AddMemberRequest, ChannelMember, ChannelMessage, ChannelView, HistoryResponse,
     ListChannelsResponse, PublishMessageRequest,
 };
+use crate::commands::channel_watch::{watch_seen_cap_for, WatchState, FULL_PAGE_WARNING_TEXT};
 use crate::types::{api_error_message, validate_path_param, validate_resource_id};
 
 /// 5 s poll cadence for `channel watch` (RFC 0011 OQ #4 default).
@@ -29,26 +30,6 @@ pub(crate) const DEFAULT_HISTORY_LIMIT: u32 = 50;
 /// Mirrors `channelMaxMentionsPerPublish` so the CLI fails fast with a
 /// clear message instead of round-tripping a generic 400.
 pub(crate) const MAX_MENTIONS_PER_PUBLISH: usize = 10;
-
-/// Floor for the `WatchState` dedup ring (~20× the default 50-page).
-/// Back-to-back full pages never re-emit at the default; on overflow
-/// the oldest id is evicted and a re-appearing id is treated as new.
-/// [`watch_seen_cap_for`] scales the ring at higher `--limit` values.
-pub(crate) const WATCH_SEEN_CAP: usize = 1024;
-
-/// Ceiling on [`watch_seen_cap_for`] so a pathological `--limit` typo
-/// cannot drive [`WatchState::with_cap`] into a multi-GB allocation.
-/// 16× [`WATCH_SEEN_CAP`] sits well above the server's
-/// `channelMaxLimit = 1000` × the 4× ring multiplier (= 4000), so no
-/// real `--limit` ever reaches the clamp. PR #302 deep-review S1.
-pub(crate) const WATCH_SEEN_CAP_CEILING: usize = WATCH_SEEN_CAP * 16;
-
-/// Stderr text for the watch full-page warning. Stays accurate for
-/// both genuine page rollover (data loss) and benign bursts of exactly
-/// `--limit` new messages (no loss); the corrective knobs are the same
-/// either way. PR #302 finding 5.
-pub(crate) const FULL_PAGE_WARNING_TEXT: &str =
-    "polled page was completely full of new messages — the page may have rolled over; consider raising --limit or lowering --interval";
 
 // ─── Pure helpers (testable without an HTTP server) ─────────────────────
 
@@ -110,17 +91,6 @@ pub(crate) fn validate_message_id(input: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Scale the [`WatchState`] dedup ring with the per-poll page size. 4×
-/// `limit` preserves the historic "ring covers a few full pages" property;
-/// [`WATCH_SEEN_CAP`] floors the small-limit case (multi-channel monitors)
-/// and [`WATCH_SEEN_CAP_CEILING`] clamps pathological `--limit` typos so
-/// `with_cap` cannot eager-allocate gigabytes. PR #302 findings 2 + S1.
-pub(crate) fn watch_seen_cap_for(limit: u32) -> usize {
-    // Floor ≤ ceiling by construction (1024 ≤ 16384), so `clamp` is safe.
-    let scaled = (limit as usize).saturating_mul(4);
-    scaled.clamp(WATCH_SEEN_CAP, WATCH_SEEN_CAP_CEILING)
-}
-
 /// Validate `--as` (sender) and each `--mention` against the resource-id
 /// shape (`^[a-z0-9][a-z0-9-]*[a-z0-9]$`). Parity with `cmd_chat`. The
 /// server's `participantIDPattern` is broader, but every configured
@@ -150,71 +120,6 @@ pub(crate) fn validate_mention_count(mentions: &[String]) -> Result<(), String> 
         ));
     }
     Ok(())
-}
-
-/// Tracks the high-watermark for `persatrix channel watch`.
-///
-/// Each poll returns the latest N messages newest-first; we filter by
-/// message id (not timestamp — SQLite's ms resolution can repeat) and
-/// only print ids we have not seen yet. The `seen` set is bounded by a
-/// FIFO ring so a long-running watch does not grow heap monotonically;
-/// on overflow the oldest id is evicted, and a re-sighting after
-/// eviction prints again. The cap defaults to [`WATCH_SEEN_CAP`].
-#[derive(Debug)]
-pub(crate) struct WatchState {
-    seen: HashSet<String>,
-    order: VecDeque<String>,
-    cap: usize,
-}
-
-impl Default for WatchState {
-    fn default() -> Self {
-        Self::with_cap(WATCH_SEEN_CAP)
-    }
-}
-
-impl WatchState {
-    /// Construct a `WatchState` with an explicit ring capacity (test seam).
-    /// `cap` is clamped to ≥1 — a zero cap would make the ring useless
-    /// and reintroduce the unbounded-growth risk via the `HashSet`.
-    pub(crate) fn with_cap(cap: usize) -> Self {
-        let cap = cap.max(1);
-        Self {
-            seen: HashSet::with_capacity(cap),
-            order: VecDeque::with_capacity(cap),
-            cap,
-        }
-    }
-
-    /// Filter `batch` to unseen messages and reverse to oldest-first
-    /// (the server returns newest-first; humans want chronological).
-    pub(crate) fn apply_batch(&mut self, mut batch: Vec<ChannelMessage>) -> Vec<ChannelMessage> {
-        batch.reverse();
-        let mut out: Vec<ChannelMessage> = Vec::new();
-        for msg in batch {
-            if self.record(msg.id.clone()) {
-                out.push(msg);
-            }
-        }
-        out
-    }
-
-    /// Insert `id` into the ring. Returns `true` when newly seen,
-    /// `false` when already present. On overflow the oldest entry is
-    /// evicted from both `order` (FIFO) and `seen` (lookup) so the two
-    /// stay in lockstep.
-    fn record(&mut self, id: String) -> bool {
-        if !self.seen.insert(id.clone()) {
-            return false;
-        }
-        self.order.push_back(id);
-        if self.order.len() > self.cap {
-            if let Some(oldest) = self.order.pop_front() {
-                self.seen.remove(&oldest);
-            }
-        }
-        true
-    }
 }
 
 // ─── Subcommand entry points ────────────────────────────────────────────
@@ -313,6 +218,7 @@ pub(crate) async fn cmd_channel_send(
     explicit_mentions: &[String],
     mention_all: bool,
     thread_id: &str,
+    session_flag: Option<&str>,
     json_out: bool,
 ) -> Result<(), String> {
     let canonical = canonicalize_channel_id(name);
@@ -320,6 +226,10 @@ pub(crate) async fn cmd_channel_send(
     // `--mention-all` resolves from the server's member list (already
     // validated at join time); only the explicit inputs need a check.
     validate_send_inputs(sender_id, explicit_mentions)?;
+    // RFC 0031 Phase 3 `--session` override (OQ #6 precedence; see session_resolve).
+    let session_id = crate::session_resolve::resolve_for_invocation(client, server, session_flag)
+        .await?
+        .unwrap_or_default();
     let mentions = if mention_all {
         let members = fetch_channel_members(client, server, &canonical).await?;
         expand_mentions(explicit_mentions, true, &members, sender_id)
@@ -335,6 +245,7 @@ pub(crate) async fn cmd_channel_send(
         content: message.to_string(),
         thread_id: thread_id.to_string(),
         mentions,
+        session_id,
     };
     let resp = client
         .post(format!("{server}/api/v1/channels/{canonical}/messages"))

@@ -260,6 +260,19 @@ func New(addr, workflowsDir string, store state.Store, reg registry.Registry, pl
 		opt(s)
 	}
 
+	// RFC 0031 Phase 3 PR 4: the boot-default session id (PERSATRIX_SESSION_ID,
+	// via WithChannelSessionID) rides the same gRPC `persatrix-session` metadata
+	// header as a per-request `--session` override, so it must satisfy the same
+	// wire-legality (printable ASCII). A control / non-ASCII byte here would make
+	// *every* channel dispatch fail at gRPC send time — worse than the graceful
+	// legacy fallback, and not surfaced until the first message silently drops.
+	// Fail loud at construction instead, reusing the override charset check. An
+	// empty id passes (the store applies its own `legacy` default).
+	if !sessionOverrideValid(s.channelSessionID) {
+		return nil, fmt.Errorf(
+			"channel session id (PERSATRIX_SESSION_ID) must be printable ASCII (no control or non-ASCII characters)")
+	}
+
 	s.registerRoutes()
 	return s, nil
 }

@@ -75,6 +75,11 @@ pub(crate) enum ChannelCommands {
         /// Mention every channel member (resolved client-side via GET /channels/{id})
         #[arg(long)]
         mention_all: bool,
+        /// Session id or label to publish under (RFC 0031 §E `--session`
+        /// override). Resolves above `PERSATRIX_SESSION_ID` and the
+        /// active-session file; an archived target warns but proceeds.
+        #[arg(long)]
+        session: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -89,6 +94,10 @@ pub(crate) enum ChannelCommands {
         mention: Vec<String>,
         #[arg(long)]
         mention_all: bool,
+        /// Session id or label to publish under (RFC 0031 §E `--session`
+        /// override). See `channel send --session`.
+        #[arg(long)]
+        session: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -139,6 +148,7 @@ pub(crate) async fn dispatch(
             r#as,
             mention,
             mention_all,
+            session,
             json,
         } => {
             let sender_id = r#as.unwrap_or_else(default_user);
@@ -151,6 +161,7 @@ pub(crate) async fn dispatch(
                 &mention,
                 mention_all,
                 "",
+                session.as_deref(),
                 json,
             )
             .await
@@ -162,6 +173,7 @@ pub(crate) async fn dispatch(
             r#as,
             mention,
             mention_all,
+            session,
             json,
         } => {
             // Reject empty `message_id` before constructing the request:
@@ -179,6 +191,7 @@ pub(crate) async fn dispatch(
                 &mention,
                 mention_all,
                 &message_id,
+                session.as_deref(),
                 json,
             )
             .await

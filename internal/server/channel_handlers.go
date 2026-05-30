@@ -267,6 +267,14 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RFC 0031 Phase 3 PR 4: apply the optional `session_id` override (the
+	// CLI's `--session`) — see [Server.resolveSessionOverride].
+	ctx, effectiveSession, err := s.resolveSessionOverride(r.Context(), req.SessionID)
+	if err != nil {
+		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	msg := channels.ChannelMessage{
 		ID:        uuid.NewString(),
 		ChannelID: id,
@@ -276,12 +284,12 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 		ThreadID:  req.ThreadID,
 		Mentions:  req.Mentions,
 		Metadata:  req.Metadata,
-		SessionID: s.channelSessionID, // RFC 0031 Phase 1 — empty falls through to legacy
+		SessionID: effectiveSession, // RFC 0031 Phase 1 — empty falls through to legacy
 	}
 
 	var pubErr error
 	if s.channelRouter != nil {
-		pubErr = s.channelRouter.Publish(r.Context(), msg, req.ChannelType)
+		pubErr = s.channelRouter.Publish(ctx, msg, req.ChannelType)
 	} else {
 		// PR #245 review (round 3) Should-Fix #3: signpost the
 		// router-nil fallback once per process. The fallback path

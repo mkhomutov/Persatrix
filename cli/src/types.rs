@@ -78,6 +78,11 @@ pub(crate) struct ChatRequest {
     pub(crate) user_id: String,
     pub(crate) chat_session_id: String,
     pub(crate) participant_type: String,
+    /// RFC 0031 Phase 3 operator-namespace session override (the `--session`
+    /// flag), distinct from the RFC 0016 `chat_session_id` above. Omitted when
+    /// empty (Go `session_id,omitempty` parity).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub(crate) session_id: String,
 }
 
 #[derive(Deserialize)]
@@ -276,19 +281,19 @@ mod tests {
             user_id: "local".to_string(),
             chat_session_id: "".to_string(),
             participant_type: "user".to_string(),
+            session_id: String::new(),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["message"], "Hello");
         assert_eq!(json["user_id"], "local");
         assert_eq!(json["chat_session_id"], "");
         assert_eq!(json["participant_type"], "user");
-        // Regression: pre-v0.3.1 field name must not appear on the wire.
-        // RFC 0031 OQ #8 — the operator-namespace `session_id` now owns
-        // that JSON key elsewhere; RFC 0016's chat token rides on
-        // `chat_session_id`.
+        // An empty operator `session_id` is omitted (Go `omitempty` parity).
+        // RFC 0016's chat token rides on `chat_session_id`, not this key
+        // (RFC 0031 OQ #8) — so an absent override leaves the wire untouched.
         assert!(
             json.get("session_id").is_none(),
-            "legacy `session_id` JSON key must not be emitted (RFC 0031 OQ #8)"
+            "empty operator `session_id` must be omitted (Go omitempty parity)"
         );
     }
 
@@ -390,10 +395,15 @@ mod tests {
             user_id: "local".to_string(),
             chat_session_id: "sess-123".to_string(),
             participant_type: "user".to_string(),
+            // RFC 0031 Phase 3: a populated operator session rides on the
+            // `session_id` key, distinct from the RFC 0016 `chat_session_id`.
+            session_id: "run-arc-3".to_string(),
         };
         let json = serde_json::to_string(&req).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["message"].as_str().unwrap().len(), 50_000);
+        assert_eq!(parsed["session_id"], "run-arc-3");
+        assert_eq!(parsed["chat_session_id"], "sess-123");
     }
 
     #[test]
@@ -406,6 +416,7 @@ mod tests {
             user_id: "local".to_string(),
             chat_session_id: "".to_string(),
             participant_type: "user".to_string(),
+            session_id: String::new(),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["message"], unicode_msg);

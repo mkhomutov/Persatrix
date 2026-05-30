@@ -40,6 +40,13 @@ type publishMessageRequest struct {
 	Mentions    []string       `json:"mentions,omitempty"`
 	ChannelType string         `json:"channel_type,omitempty"` // optional cross-check (RFC 0011 §C)
 	Metadata    map[string]any `json:"metadata,omitempty"`
+	// SessionID is the optional RFC 0031 Phase 3 `--session` override. When
+	// present it replaces the orchestrator's boot-default session
+	// (`Server.channelSessionID`) for this one publish — both as the
+	// persisted row's `session_id` and as the value the dispatch path emits
+	// as the `persatrix-session` header (overriding the ISSUE-0082
+	// auto-binding). Absent, the boot default / auto-binding stands.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // channelResponse is the JSON shape returned by GET/POST /api/v1/channels.

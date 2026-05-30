@@ -6,6 +6,11 @@
 
 use super::*;
 use crate::commands::channel_types::{ChannelMember, ChannelMessage};
+// WatchState + watch-ring constants moved to `channel_watch` (RFC 0031 Phase 3
+// PR 4 size-cap relief); import them here so the watch tests keep resolving.
+use crate::commands::channel_watch::{
+    watch_seen_cap_for, WatchState, FULL_PAGE_WARNING_TEXT, WATCH_SEEN_CAP, WATCH_SEEN_CAP_CEILING,
+};
 
 fn member(id: &str, respond: &str) -> ChannelMember {
     ChannelMember {

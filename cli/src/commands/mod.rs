@@ -3,6 +3,7 @@ pub(crate) mod channel;
 pub(crate) mod channel_dispatch;
 pub(crate) mod channel_render;
 pub(crate) mod channel_types;
+pub(crate) mod channel_watch;
 pub(crate) mod chat;
 pub(crate) mod logs;
 pub(crate) mod session;

@@ -149,6 +149,159 @@ func TestGRPCMessageDispatcher_DistinctChannelsGetDistinctSessions(t *testing.T)
 		"distinct channels must resolve to distinct sessions (per-room isolation preserved)")
 }
 
+// TestGRPCMessageDispatcher_ExplicitOverrideBeatsAutoBinding pins the
+// RFC 0031 Phase 3 PR 4 reconciliation: when the request context carries an
+// explicit `--session` override, Dispatch emits THAT id as `persatrix-session`,
+// not the resolver's auto-binding. The explicit operator signal is the
+// highest-precedence one (OQ #6 amendment) — the override wins for the one
+// request it accompanies.
+func TestGRPCMessageDispatcher_ExplicitOverrideBeatsAutoBinding(t *testing.T) {
+	srv := &recordingAgentServer{}
+	dial, cleanup := startBufconnServer(t, srv)
+	defer cleanup()
+
+	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{
+		"agent-b": {ID: "agent-b", Address: "ignored:0", Status: registry.StatusHealthy},
+	}}
+	// The binder would auto-bind to this id; the override must beat it.
+	binder := &stubSessionBinder{fn: func(a, c string) (string, error) {
+		return "auto|" + a + "|" + c, nil
+	}}
+	d := NewGRPCMessageDispatcher(resolver, zap.NewNop(), WithSessionResolver(binder))
+	d.dial = dial
+
+	ctx := WithSessionOverride(context.Background(), "run-arc-3")
+	require.NoError(t, d.Dispatch(ctx, DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
+	}, ChannelMessage{
+		ID: "m-1", ChannelID: "group:planning", SenderID: "alice", Timestamp: time.Now().UTC(),
+	}))
+
+	assert.Equal(t, []string{"run-arc-3"}, srv.gotMD.Get(grpcmeta.MDSession),
+		"an explicit --session override must beat the auto-binding for this request")
+}
+
+// TestGRPCMessageDispatcher_OverrideEmittedWithoutResolver pins that the
+// override is honoured even when no SessionResolver is wired — the override
+// path reads the context directly and does not depend on the auto-binding
+// machinery. (A `--session` invocation against a dispatcher with no resolver,
+// e.g. a single-conversation deployment, still routes to the named session.)
+func TestGRPCMessageDispatcher_OverrideEmittedWithoutResolver(t *testing.T) {
+	srv := &recordingAgentServer{}
+	dial, cleanup := startBufconnServer(t, srv)
+	defer cleanup()
+
+	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{
+		"agent-b": {ID: "agent-b", Address: "ignored:0", Status: registry.StatusHealthy},
+	}}
+	d := NewGRPCMessageDispatcher(resolver, zap.NewNop()) // no WithSessionResolver
+	d.dial = dial
+
+	ctx := WithSessionOverride(context.Background(), "run-arc-3")
+	require.NoError(t, d.Dispatch(ctx, DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
+	}, ChannelMessage{
+		ID: "m-1", ChannelID: "group:planning", SenderID: "alice", Timestamp: time.Now().UTC(),
+	}))
+
+	assert.Equal(t, []string{"run-arc-3"}, srv.gotMD.Get(grpcmeta.MDSession),
+		"the override must emit even with no resolver wired")
+}
+
+// TestGRPCMessageDispatcher_NoOverrideKeepsAutoBinding pins the no-regression
+// half of the reconciliation: absent an override on the context, emission is
+// byte-identical to today — the resolver's auto-binding id is emitted. This is
+// the property the override must not weaken (Phase 2 + ISSUE-0082 concurrent
+// isolation).
+func TestGRPCMessageDispatcher_NoOverrideKeepsAutoBinding(t *testing.T) {
+	srv := &recordingAgentServer{}
+	dial, cleanup := startBufconnServer(t, srv)
+	defer cleanup()
+
+	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{
+		"agent-b": {ID: "agent-b", Address: "ignored:0", Status: registry.StatusHealthy},
+	}}
+	binder := &stubSessionBinder{fn: func(a, c string) (string, error) {
+		return "auto|" + a + "|" + c, nil
+	}}
+	d := NewGRPCMessageDispatcher(resolver, zap.NewNop(), WithSessionResolver(binder))
+	d.dial = dial
+
+	// context.Background() carries no override — the auto-binding must stand.
+	require.NoError(t, d.Dispatch(context.Background(), DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
+	}, ChannelMessage{
+		ID: "m-1", ChannelID: "group:planning", SenderID: "alice", Timestamp: time.Now().UTC(),
+	}))
+
+	assert.Equal(t, []string{"auto|agent-b|group:planning"}, srv.gotMD.Get(grpcmeta.MDSession),
+		"absent an override the auto-binding must be emitted unchanged (no concurrent-isolation regression)")
+}
+
+// TestGRPCMessageDispatcher_OverrideAndAutoBindingStayIndependent pins that an
+// overridden dispatch and a non-overridden dispatch through the SAME
+// dispatcher emit independent ids — the override does not leak into a sibling
+// request that did not carry one. Two recording servers isolate the captured
+// metadata so the assertion needs no shared-state synchronisation.
+func TestGRPCMessageDispatcher_OverrideAndAutoBindingStayIndependent(t *testing.T) {
+	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{
+		"agent-b": {ID: "agent-b", Address: "ignored:0", Status: registry.StatusHealthy},
+	}}
+	binder := &stubSessionBinder{fn: func(a, c string) (string, error) {
+		return "auto|" + a + "|" + c, nil
+	}}
+	d := NewGRPCMessageDispatcher(resolver, zap.NewNop(), WithSessionResolver(binder))
+
+	// Overridden dispatch.
+	srvOverride := &recordingAgentServer{}
+	dialO, cleanupO := startBufconnServer(t, srvOverride)
+	defer cleanupO()
+	d.dial = dialO
+	require.NoError(t, d.Dispatch(WithSessionOverride(context.Background(), "run-arc-3"),
+		DispatchEnvelope{Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways}},
+		ChannelMessage{ID: "m-1", ChannelID: "group:planning", SenderID: "alice", Timestamp: time.Now().UTC()}))
+
+	// Non-overridden dispatch through the same dispatcher.
+	srvAuto := &recordingAgentServer{}
+	dialA, cleanupA := startBufconnServer(t, srvAuto)
+	defer cleanupA()
+	d.dial = dialA
+	require.NoError(t, d.Dispatch(context.Background(),
+		DispatchEnvelope{Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways}},
+		ChannelMessage{ID: "m-2", ChannelID: "group:planning", SenderID: "bob", Timestamp: time.Now().UTC()}))
+
+	assert.Equal(t, []string{"run-arc-3"}, srvOverride.gotMD.Get(grpcmeta.MDSession))
+	assert.Equal(t, []string{"auto|agent-b|group:planning"}, srvAuto.gotMD.Get(grpcmeta.MDSession),
+		"a sibling request without an override must still get the auto-binding")
+}
+
+// TestGRPCMessageDispatcher_OverridePinnedOnSpan pins that the override id —
+// like the auto-binding — lands on the channel.dispatch span as `session.id`,
+// so trace correlation works regardless of which path supplied the session
+// (RFC 0031 OQ #7).
+func TestGRPCMessageDispatcher_OverridePinnedOnSpan(t *testing.T) {
+	exporter := installSpanRecorder(t)
+
+	srv := &recordingAgentServer{}
+	dial, cleanup := startBufconnServer(t, srv)
+	defer cleanup()
+
+	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{
+		"agent-b": {ID: "agent-b", Address: "agent-b:9090", Status: registry.StatusHealthy},
+	}}
+	d := NewGRPCMessageDispatcher(resolver, zap.NewNop())
+	d.dial = dial
+
+	require.NoError(t, d.Dispatch(WithSessionOverride(context.Background(), "run-arc-3"),
+		DispatchEnvelope{Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways}},
+		ChannelMessage{ID: "m-1", ChannelID: "group:planning", SenderID: "alice", Timestamp: time.Now().UTC()}))
+
+	dispatchSpans := filterSpansByName(exporter.GetSpans(), "channel.dispatch")
+	require.Len(t, dispatchSpans, 1)
+	assert.Equal(t, "run-arc-3", spanAttrMap(dispatchSpans[0])["session.id"],
+		"the override id must be pinned on the channel.dispatch span")
+}
+
 // TestGRPCMessageDispatcher_SessionResolveErrorIsNonFatal pins the
 // graceful-degradation contract: a session-resolution failure must NOT drop
 // the message. Dispatch proceeds without the header, and the persona side

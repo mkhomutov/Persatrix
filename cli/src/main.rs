@@ -1,5 +1,6 @@
 mod active_session;
 mod commands;
+mod session_resolve;
 mod types;
 mod validation;
 
@@ -110,6 +111,11 @@ enum Commands {
         /// lowercase alphanumeric + hyphens to satisfy the resource-ID contract).
         #[arg(long)]
         user: Option<String>,
+        /// Persona-memory session id or label to converse under (RFC 0031 §E
+        /// `--session` override). Resolves above `PERSATRIX_SESSION_ID` and the
+        /// active-session file; an archived target warns but proceeds.
+        #[arg(long)]
+        session: Option<String>,
     },
     /// Manage blueprints
     Init {
@@ -309,12 +315,16 @@ async fn main() {
             )
             .await
         }
-        Commands::Chat { agent_id, user } => {
+        Commands::Chat {
+            agent_id,
+            user,
+            session,
+        } => {
             // Resolve user identity: explicit --user flag first, otherwise
             // fall back to the shared OS-username derivation (see
             // [`default_user_id`]).
             let user_id = user.unwrap_or_else(default_user_id);
-            cmd_chat(&client, server, &agent_id, &user_id).await
+            cmd_chat(&client, server, &agent_id, &user_id, session.as_deref()).await
         }
         Commands::Validate { path, strict } => cmd_validate(&path, strict).await,
         Commands::Test {

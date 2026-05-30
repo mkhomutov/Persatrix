@@ -214,6 +214,15 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 	// resolver is the single source of the id; `Dispatch` is the only live
 	// emission site (the synchronous chat path is dead-but-wired, ISSUE-0035).
 	//
+	// RFC 0031 Phase 3 PR 4: an explicit per-request `--session` override
+	// (threaded onto ctx by the REST handler — see [WithSessionOverride]) is
+	// the highest-precedence signal (OQ #6 amendment). When present it beats
+	// the auto-binding for this one request — the reconciliation that lets an
+	// operator deliberately re-bind a conversation (e.g. a dementia-test arc
+	// across runs, RFC 0031 OQ #1 resolution 1a). It is checked *before* the
+	// resolver, so an override does not even consult the binder; absent an
+	// override the auto-binding stands and concurrent-isolation is unchanged.
+	//
 	// Resolution failure is non-fatal by design: a session hiccup must never
 	// drop a message. On error we log and dispatch without the header, so the
 	// persona falls back to its construction-time (legacy) snapshot — exactly
@@ -222,7 +231,10 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 	// `msg.SenderID` is intentionally not part of the session key (ISSUE-0083);
 	// it stays available for the per-participant relationship / facts write
 	// paths, which are correctly sender-scoped.
-	if d.sessions != nil {
+	if override := SessionOverrideFromContext(ctx); override != "" {
+		ctx = grpcmeta.InjectSession(ctx, override)
+		span.SetAttributes(attribute.String("session.id", override))
+	} else if d.sessions != nil {
 		sid, sErr := d.sessions.Resolve(ctx, participantID, msg.ChannelID)
 		switch {
 		case sErr != nil:

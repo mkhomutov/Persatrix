@@ -196,6 +196,19 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RFC 0031 Phase 3 PR 4: apply the optional `session_id` override (the
+	// CLI's `--session`) — see [Server.resolveSessionOverride]. This is the
+	// RFC 0031 operator-namespace session, distinct from the RFC 0016 chat
+	// token on `chat_session_id`. Resolved here, *before* GetOrCreateDM, so a
+	// malformed override is rejected (400) before any side effect — parity with
+	// the publish path's reject-before-persist. The agent lookup above still
+	// runs first, so a bad agent (404/503) keeps precedence over a bad session.
+	ctx, effectiveSession, err := s.resolveSessionOverride(ctx, req.SessionID)
+	if err != nil {
+		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	dm, err := s.channelStore.GetOrCreateDM(ctx, userID, agentID)
 	// ISSUE-0034: demote the user's membership to RespondNever so
 	// `ChannelRouter.fanout` skips dispatch to the user on every agent
@@ -294,9 +307,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		Timestamp: time.Now().UTC(),
 		Metadata:  metadata,
 		// RFC 0031 Phase 1: tag the chat publish with the per-process
-		// default session_id (PERSATRIX_SESSION_ID at boot). Empty
-		// falls through to the store's legacy default.
-		SessionID: s.channelSessionID,
+		// default session_id (PERSATRIX_SESSION_ID at boot), or the
+		// per-request `--session` override when supplied. Empty falls
+		// through to the store's legacy default.
+		SessionID: effectiveSession,
 	}
 
 	reply, err := s.channelRouter.PublishAndAwait(ctx, inbound, agentID, timeout)
