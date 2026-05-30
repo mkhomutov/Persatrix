@@ -159,11 +159,6 @@ async fn cmd_session_new(
         .json()
         .await
         .map_err(|e| format!("invalid response: {e}"))?;
-    // `--activate` is sugar for "create, then `session use <new-id>`": write the
-    // pointer to the freshly minted id so the next channel/chat run binds to it.
-    if activate {
-        active_session::write(&stored.id)?;
-    }
     if json {
         println!("{}", serde_json::to_string(&stored).unwrap());
     } else {
@@ -172,7 +167,14 @@ async fn cmd_session_new(
             stored.id.bold(),
             format!("({})", stored.label).cyan()
         );
-        if activate {
+    }
+    // `--activate` is sugar for "create, then `session use <new-id>`". Write the
+    // pointer only AFTER the created id has been reported above, so a
+    // pointer-write failure surfaces as an error without hiding the freshly
+    // minted id the operator needs to recover (a follow-up `session use <id>`).
+    if activate {
+        active_session::write(&stored.id)?;
+        if !json {
             println!("Active session is now {}", stored.id.bold());
         }
     }
@@ -259,6 +261,27 @@ async fn resolve_session(
         .map_err(|e| format!("invalid response: {e}"))
 }
 
+/// Render the annotation that follows a session id in `use` / `current` output:
+/// the label and/or an `archived` marker, parenthesised. Returns the empty
+/// string (nothing to annotate) for a live, unlabeled session so callers can
+/// append it unconditionally; the leading space is included only when there is
+/// something to show.
+///
+/// Kept pure so the rendering — including the archived arm — is unit-testable
+/// without a live registry. `current` relies on that arm because `GET
+/// /api/v1/sessions/{id}` returns archived rows with 200 (the row is preserved;
+/// RFC 0031 §B). Without the marker a pointer left on a since-archived session
+/// would read as a normal active one, contradicting `use`, which refuses to
+/// activate an archived session.
+fn session_annotation(label: &str, archived: bool) -> String {
+    match (label.is_empty(), archived) {
+        (true, false) => String::new(),
+        (true, true) => " (archived)".to_string(),
+        (false, false) => format!(" ({label})"),
+        (false, true) => format!(" ({label}, archived)"),
+    }
+}
+
 async fn cmd_session_use(
     client: &reqwest::Client,
     server: &str,
@@ -276,13 +299,14 @@ async fn cmd_session_use(
     }
     active_session::write(&sess.id)?;
     // Echo the active id at activation time — the documented mitigation for the
-    // stale-pointer footgun (RFC §Security: misconfiguration risk).
-    let label = if sess.label.is_empty() {
-        String::new()
-    } else {
-        format!(" ({})", sess.label)
-    };
-    println!("Active session is now {}{}", sess.id.bold(), label.cyan());
+    // stale-pointer footgun (RFC §Security: misconfiguration risk). `archived`
+    // is guaranteed false here by the guard above, so no marker is rendered.
+    let annotation = session_annotation(&sess.label, sess.archived);
+    println!(
+        "Active session is now {}{}",
+        sess.id.bold(),
+        annotation.cyan()
+    );
     Ok(())
 }
 
@@ -297,14 +321,14 @@ async fn cmd_session_current(client: &reqwest::Client, server: &str) -> Result<(
     // registry is down, or the session was archived/removed out from under the
     // pointer), still report the active id — a degraded answer beats none.
     match resolve_session(client, server, &active_id).await {
-        Ok(sess) if !sess.label.is_empty() => {
-            println!(
-                "Active session: {} {}",
-                sess.id.bold(),
-                format!("({})", sess.label).cyan()
-            );
+        Ok(sess) => {
+            // Surface the archived marker: GET returns archived rows (200; the
+            // row is preserved, RFC 0031 §B), so a pointer left on a session
+            // archived after activation would otherwise read as a normal active
+            // one — and `use` would refuse to re-activate it.
+            let annotation = session_annotation(&sess.label, sess.archived);
+            println!("Active session: {}{}", sess.id.bold(), annotation.cyan());
         }
-        Ok(sess) => println!("Active session: {}", sess.id.bold()),
         Err(e) => {
             println!("Active session: {}", active_id.bold());
             eprintln!("warning: could not resolve session label: {e}");

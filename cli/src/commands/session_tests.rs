@@ -180,6 +180,34 @@ fn parses_current() {
     assert!(matches!(cli.cmd, SessionCommands::Current));
 }
 
+// ─── session_annotation rendering (pure — no registry) ──────────────────────
+// Pins the `use` / `current` id annotation, including the `archived` marker that
+// `current` surfaces for a pointer left on a since-archived session. `GET
+// /api/v1/sessions/{id}` returns archived rows with 200 (the row is preserved;
+// RFC 0031 §B), so without the marker such a pointer would read as a normal
+// active session — contradicting `use`, which refuses to re-activate one. The
+// leading space is part of the annotation so callers append it unconditionally.
+
+#[test]
+fn annotation_is_label_in_parens_when_live() {
+    assert_eq!(super::session_annotation("arc", false), " (arc)");
+}
+
+#[test]
+fn annotation_is_empty_when_live_and_unlabeled() {
+    assert_eq!(super::session_annotation("", false), "");
+}
+
+#[test]
+fn annotation_marks_archived_alongside_label() {
+    assert_eq!(super::session_annotation("arc", true), " (arc, archived)");
+}
+
+#[test]
+fn annotation_marks_archived_when_unlabeled() {
+    assert_eq!(super::session_annotation("", true), " (archived)");
+}
+
 #[test]
 fn parses_new_requires_label() {
     use clap::Parser;
