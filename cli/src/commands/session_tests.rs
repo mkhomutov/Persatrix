@@ -140,12 +140,44 @@ fn parses_new_with_label() {
     use clap::Parser;
     let cli = TestCli::try_parse_from(["x", "new", "--label", "arc"]).unwrap();
     match cli.cmd {
-        SessionCommands::New { label, json } => {
+        SessionCommands::New {
+            label,
+            activate,
+            json,
+        } => {
             assert_eq!(label, "arc");
+            assert!(!activate, "--activate must default off");
             assert!(!json);
         }
         _ => panic!("expected New"),
     }
+}
+
+#[test]
+fn parses_new_with_activate() {
+    use clap::Parser;
+    let cli = TestCli::try_parse_from(["x", "new", "--label", "arc", "--activate"]).unwrap();
+    match cli.cmd {
+        SessionCommands::New { activate, .. } => assert!(activate),
+        _ => panic!("expected New"),
+    }
+}
+
+#[test]
+fn parses_use() {
+    use clap::Parser;
+    let cli = TestCli::try_parse_from(["x", "use", "arc"]).unwrap();
+    match cli.cmd {
+        SessionCommands::Use { id_or_label } => assert_eq!(id_or_label, "arc"),
+        _ => panic!("expected Use"),
+    }
+}
+
+#[test]
+fn parses_current() {
+    use clap::Parser;
+    let cli = TestCli::try_parse_from(["x", "current"]).unwrap();
+    assert!(matches!(cli.cmd, SessionCommands::Current));
 }
 
 #[test]

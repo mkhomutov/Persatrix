@@ -1,3 +1,4 @@
+mod active_session;
 mod commands;
 mod types;
 mod validation;

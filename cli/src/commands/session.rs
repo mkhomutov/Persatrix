@@ -1,16 +1,21 @@
-//! `persatrix session` — operator session registry verbs (RFC 0031 §E).
+//! `persatrix session` — operator session verbs (RFC 0031 §E).
 //!
 //! Thin-client pattern (per `.github/instructions/rust-cli.instructions.md`):
 //! every subcommand marshals args into a REST call against the orchestrator
 //! `/api/v1/sessions` surface (Phase 3 PR 1) and prints the response. Wire
-//! shapes mirror `internal/server/types.go`. These three verbs are pure REST
-//! — nothing touches SQLite or `~/.persatrix/`; the active-session pointer
-//! file and `use` / `current` land in a later PR.
+//! shapes mirror `internal/server/types.go`.
+//!
+//! The registry verbs (`new` / `list` / `archive`) are pure REST. The pointer
+//! verbs (`use` / `current`, and `new --activate`'s side effect) additionally
+//! read/write the CLI-local `~/.persatrix/active-session` file via
+//! [`crate::active_session`], resolving their id-or-label argument against the
+//! registry over REST first.
 
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use tabled::{Table, Tabled};
 
+use crate::active_session;
 use crate::types::{api_error_message, validate_path_param, validate_session_label};
 
 // ─── Session registry DTOs (mirror `internal/server/types.go`) ──────────────
@@ -55,6 +60,10 @@ pub(crate) enum SessionCommands {
         /// Human-readable label for the session (required)
         #[arg(long)]
         label: String,
+        /// Activate the new session by writing it to the active-session
+        /// pointer file (equivalent to a follow-up `session use <new-id>`).
+        #[arg(long)]
+        activate: bool,
         /// Emit raw JSON (single line) instead of the human confirmation.
         #[arg(long)]
         json: bool,
@@ -76,6 +85,13 @@ pub(crate) enum SessionCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Set the active session by id or label (writes the local pointer file)
+    Use {
+        /// Session id or label to activate
+        id_or_label: String,
+    },
+    /// Show the currently active session
+    Current,
 }
 
 /// Route a parsed [`SessionCommands`] to its handler.
@@ -85,7 +101,11 @@ pub(crate) async fn dispatch(
     cmd: SessionCommands,
 ) -> Result<(), String> {
     match cmd {
-        SessionCommands::New { label, json } => cmd_session_new(client, server, label, json).await,
+        SessionCommands::New {
+            label,
+            activate,
+            json,
+        } => cmd_session_new(client, server, label, activate, json).await,
         SessionCommands::List {
             include_archived,
             json,
@@ -93,6 +113,8 @@ pub(crate) async fn dispatch(
         SessionCommands::Archive { id_or_label, json } => {
             cmd_session_archive(client, server, &id_or_label, json).await
         }
+        SessionCommands::Use { id_or_label } => cmd_session_use(client, server, &id_or_label).await,
+        SessionCommands::Current => cmd_session_current(client, server).await,
     }
 }
 
@@ -115,6 +137,7 @@ async fn cmd_session_new(
     client: &reqwest::Client,
     server: &str,
     label: String,
+    activate: bool,
     json: bool,
 ) -> Result<(), String> {
     // Fail fast client-side: enforce the resource-id label shape (a CLI funnel
@@ -136,6 +159,11 @@ async fn cmd_session_new(
         .json()
         .await
         .map_err(|e| format!("invalid response: {e}"))?;
+    // `--activate` is sugar for "create, then `session use <new-id>`": write the
+    // pointer to the freshly minted id so the next channel/chat run binds to it.
+    if activate {
+        active_session::write(&stored.id)?;
+    }
     if json {
         println!("{}", serde_json::to_string(&stored).unwrap());
     } else {
@@ -144,6 +172,9 @@ async fn cmd_session_new(
             stored.id.bold(),
             format!("({})", stored.label).cyan()
         );
+        if activate {
+            println!("Active session is now {}", stored.id.bold());
+        }
     }
     Ok(())
 }
@@ -200,6 +231,84 @@ async fn cmd_session_archive(
         println!("{}", serde_json::to_string(&payload).unwrap());
     } else {
         println!("Archived session {}", id_or_label.bold());
+    }
+    Ok(())
+}
+
+/// Resolve an id-or-label against the registry via `GET /api/v1/sessions/{id}`.
+///
+/// Shared by `use` (validate before pointing) and `current` (enrich the stored
+/// id with its human label). The path value is validated to keep traversal /
+/// query-injection out of the URL before it is sent.
+async fn resolve_session(
+    client: &reqwest::Client,
+    server: &str,
+    id_or_label: &str,
+) -> Result<SessionResponse, String> {
+    validate_path_param(id_or_label, "session id")?;
+    let resp = client
+        .get(format!("{server}/api/v1/sessions/{id_or_label}"))
+        .send()
+        .await
+        .map_err(|e| format!("connection failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(api_error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("invalid response: {e}"))
+}
+
+async fn cmd_session_use(
+    client: &reqwest::Client,
+    server: &str,
+    id_or_label: &str,
+) -> Result<(), String> {
+    // Resolve against the registry first so a typo or an archived target fails
+    // *before* the pointer is written — never after, when it would silently
+    // misroute the next channel (RFC §Security: misconfiguration risk).
+    let sess = resolve_session(client, server, id_or_label).await?;
+    if sess.archived {
+        return Err(format!(
+            "session {} ({}) is archived and cannot be activated (archive is one-way; RFC 0031 §B)",
+            sess.id, sess.label
+        ));
+    }
+    active_session::write(&sess.id)?;
+    // Echo the active id at activation time — the documented mitigation for the
+    // stale-pointer footgun (RFC §Security: misconfiguration risk).
+    let label = if sess.label.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", sess.label)
+    };
+    println!("Active session is now {}{}", sess.id.bold(), label.cyan());
+    Ok(())
+}
+
+async fn cmd_session_current(client: &reqwest::Client, server: &str) -> Result<(), String> {
+    let Some(active_id) = active_session::read() else {
+        // No pointer set: recall falls back to the built-in `legacy` namespace
+        // (RFC §D carve-out), so say so rather than printing nothing.
+        println!("No active session — using {}.", "legacy".bold());
+        return Ok(());
+    };
+    // Enrich the stored id with its registry label. If the lookup fails (the
+    // registry is down, or the session was archived/removed out from under the
+    // pointer), still report the active id — a degraded answer beats none.
+    match resolve_session(client, server, &active_id).await {
+        Ok(sess) if !sess.label.is_empty() => {
+            println!(
+                "Active session: {} {}",
+                sess.id.bold(),
+                format!("({})", sess.label).cyan()
+            );
+        }
+        Ok(sess) => println!("Active session: {}", sess.id.bold()),
+        Err(e) => {
+            println!("Active session: {}", active_id.bold());
+            eprintln!("warning: could not resolve session label: {e}");
+        }
     }
     Ok(())
 }
