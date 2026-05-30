@@ -134,7 +134,7 @@ Everything above sits inside an `(epoch, principal)` pair: cross-room recall and
 
 ## Decisions taken
 
-These were settled in the design discussion that produced this doc:
+These were settled in the design discussion that produced this doc. This note is the planning record, **not the ratified decision-of-record**: the binding changes land in the [RFC 0031 §A amendment](rfcs/0031-per-session-namespacing-channels.md#a-vocabulary) and the follow-up issues below — treat those as authoritative once merged, and promote these decisions into an RFC (a 0031 amendment or successor) before they are implemented as code.
 
 1. **Session = room-continuity**, keyed `(agent, channel)`; it accumulates and is not a per-run isolation namespace. (Confirmed.)
 2. **Drop the sender axis** from the session unit: `(agent, channel, sender)` → `(agent, channel)`. (Confirmed; the sender's per-conversation isolation rationale only held for DMs, which the channel axis already separates.)
@@ -151,10 +151,10 @@ Tracked as three follow-up issues:
 - **[ISSUE-0084](issues/ISSUE-0084-fact-scope-by-subject-not-uniform-session.md) — fact scope by subject.** Recall/write gains a subject classification (person vs topic) to choose person-scoped (cross-room) vs room-scoped keying. A precise change to the facts tier, not a rewrite; refines the blanket Phase-2 session-scoping in §D.
 - **[ISSUE-0085](issues/ISSUE-0085-epoch-axis-run-isolation.md) — add the epoch axis.** A new migration adding `epoch_id` across the persona-memory tiers (and the Go channel store), structurally modeled on the `principal_id` migration (v11), as the real home of F-3 test/run isolation. Sequenced after ISSUE-0083.
 
-Plus two doc-level reconciliations (no issue — handled in the amendments):
+Plus two doc-level reconciliations:
 
-- **RFC 0031** — the `(agent, channel, user)` unit (§B amendment) is superseded; session is redefined from "isolation namespace" to "room continuity"; F-3 isolation moves to the epoch axis; facts gain subject-dependent scope. Recorded in the [§A amendment](rfcs/0031-per-session-namespacing-channels.md#a-vocabulary).
-- **RFC 0042 reconciliation** — its proposed `session:` / `channel:` state-scope prefixes must agree with "session = room"; if session and channel are the same axis for memory, the state-namespacing vocabulary should not present them as two independent scopes without saying how they relate.
+- **RFC 0031** — **handled in this pass** ([§A amendment](rfcs/0031-per-session-namespacing-channels.md#a-vocabulary)): the `(agent, channel, user)` unit (§B amendment) is superseded; session is redefined from "isolation namespace" to "room continuity"; F-3 isolation moves to the epoch axis; facts gain subject-dependent scope.
+- **RFC 0042 reconciliation** — **not amended here and not yet tracked by an issue**; carried as an [open follow-on](#open-follow-ons). Its proposed `session:` / `channel:` state-scope prefixes must agree with "session = room"; if session and channel are the same axis for memory, the state-namespacing vocabulary should not present them as two independent scopes without saying how they relate.
 
 ## Open follow-ons
 
@@ -163,6 +163,7 @@ Plus two doc-level reconciliations (no issue — handled in the amendments):
 - **Group-as-participant** — relationship and addressing for a group entity (intersects RFC 0011 / RFC 0012).
 - **Consent-gated anonymized retention** — the principal-axis split between deletable raw data and retained anonymized experience (intersects RFC 0013 / RFC 0039).
 - **Agent-global maintenance sweeps** — eviction / retention / janitor already skip the principal filter; the epoch filter will have the same gap and the same deferral.
+- **RFC 0042 vocabulary reconciliation** — align RFC 0042's `session:` / `channel:` state-scope prefixes with "session = room" (RFC 0042 is *not* amended by this pass; no issue filed yet — file one when RFC 0042 next moves).
 
 ## Related documentation
 

@@ -45,7 +45,7 @@ The [v0.3.5 master plan §Phase 2 acceptance](../v0.3.5-plan.md#phase-2--author-
 
 - **PR 1–3 (REST registry surface, registry verbs, pointer file): unaffected.** They manage the `sessions` *registry* and the active-session *pointer*, both independent of the binding key. They ship as written.
 - **PR 4 (`--session` override): unaffected in shape.** It still overrides the per-request binding for one invocation; only the binding's key changes (upstream). Its inline `(agent, channel, user)` references should read `(agent, channel)`.
-- **PR 5 (closeout integration test):** the "two senders → distinct sessions" expectation becomes "two senders in one room → one shared room session" once the sender-axis drop lands; sequence the two so the test asserts the post-reframing behaviour.
+- **PR 5 (closeout integration test):** the canonical "two senders → distinct sessions" assertion lives in `grpc_dispatcher_session_test.go` and is inverted by [ISSUE-0083](../issues/ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md), **not** by PR 5's operator-surface test (which, as scoped, exercises override-vs-auto-binding, not multi-party recall). If PR 5 adds a multi-party recall leg, it must assert the post-reframing "two senders in one room → one shared room session" and be sequenced *after* the sender-axis drop so it never pins the pre-reframing behaviour.
 
 **New open decision for the maintainer:** does Phase 3 (or a sibling phase) also ship an operator surface for the **epoch** axis — the actual home of test-run isolation now — or does `make reset` remain the run-isolation tool until a later phase / successor RFC? This plan does not yet cover epoch. Flagged for sequencing alongside the sender-axis-drop and facts-by-subject follow-ups tracked in [Memory Scope Axes §Consequences](../memory-scope-axes.md#consequences-for-the-current-code-and-rfc-0031).
 
@@ -229,6 +229,7 @@ OQ #1 / #4 / #7 were consumed by Phase 2; OQ #3 / #8 resolved upstream (Phase 1)
 ### PR 4: `feature/v035-rfc0031p3-session-override` — `--session` Override on `chat` / `channel`
 
 **Depends on**: PR 3 merged.
+**Sequencing caveat**: PR 4's `(agent, channel, user)` binding-key references collapse to `(agent, channel)` once the [sender-axis drop (ISSUE-0083)](../issues/ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md) lands. ISSUE-0083 is "upstream of or parallel to" this phase but its order is **not yet committed** (see [Amendment](#amendment--scope-axes-reframing)); resolve whether it precedes PR 4 before executing, so PR 4 wires the override against the final binding key.
 **Purpose**: Add `--session` to `persatrix chat` / `persatrix channel publish` / `persatrix channel list`, resolve the [OQ #6](0031-per-session-namespacing-channels.md#open-questions) precedence chain CLI-side, forward the resolved id to the orchestrator, and make the orchestrator honour it **above the per-request auto-binding** for that invocation. This is the reconciliation PR — it makes the explicit operator signal the highest-precedence one without regressing the Phase 2 + ISSUE-0082 concurrent-isolation guarantee.
 
 #### Scope
@@ -268,6 +269,7 @@ OQ #1 / #4 / #7 were consumed by Phase 2; OQ #3 / #8 resolved upstream (Phase 1)
 ### PR 5: `feature/v035-rfc0031p3-close` — Closeout + `--all-sessions` Carve-Out
 
 **Depends on**: PR 4 merged.
+**Sequencing caveat**: if the integration test adds a multi-party recall leg, its expected behaviour depends on whether the [sender-axis drop (ISSUE-0083)](../issues/ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md) has landed (two senders → distinct vs. one shared room session). Sequence it after ISSUE-0083, or keep the test to the operator-surface scope below, so it never pins the pre-reframing behaviour (see [Amendment](#amendment--scope-axes-reframing)).
 **Purpose**: Prove the verb set end-to-end through the live REST path, carve out the deferred `--all-sessions` debug verb as a tracked issue, and land the documentation/status closeout. No production code.
 
 #### Scope
