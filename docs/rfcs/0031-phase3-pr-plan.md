@@ -1,7 +1,7 @@
 # RFC 0031 — PR Implementation Plan (Phase 3 — Operator CLI + Active-Session Resolution)
 
 **RFC**: [0031-per-session-namespacing-channels.md](0031-per-session-namespacing-channels.md)
-**Status**: 📋 Ready — v0.3.5 (Phase 2 of [v0.3.5-plan.md](../v0.3.5-plan.md))
+**Status**: 📋 Ready — v0.3.5 (Phase 2 of [v0.3.5-plan.md](../v0.3.5-plan.md)) · ⚠️ read [Amendment — scope-axes reframing](#amendment--scope-axes-reframing) before executing
 **Created**: 2026-05-29
 **Branch prefix**: `feature/v035-rfc0031p3-`
 **Target**: `main`
@@ -29,6 +29,27 @@ Two assumptions baked into RFC §E (authored 2026-05-12, before the ISSUE-0081/0
 ### `persatrix memory recall --all-sessions` is carved out, not built here
 
 The [v0.3.5 master plan §Phase 2 acceptance](../v0.3.5-plan.md#phase-2--author--implement-rfc-0031-phase-3-operator-cli) and [RFC §Security Considerations](0031-per-session-namespacing-channels.md#security-considerations) mention a `persatrix memory recall --all-sessions` verb as the only operator route to the `sessions="*"` debug mode. Planning research found **no `persatrix memory` command, no memory-recall REST endpoint, and no recall RPC** anywhere today — surfacing `"*"` to an operator means building an entire operator memory-inspection surface (CLI verb + orchestrator REST + a gRPC recall path into each persona's `memory.db`), which is a *different* story from the session operator surface and is conspicuously absent from [RFC §E's own Phase 3 deliverable list](0031-per-session-namespacing-channels.md#phase-3-operator-cli). This plan **carves it out as a follow-up issue** (mirroring how Phase 4 carves out `persatrix memory legacy-prune`). Keeping it out has a security upside: the `"*"` sentinel keeps **no operator entry point at all**, so it provably cannot reach a prompt context — strictly stronger than the Phase 2 guarantee. See [§Open-question status — OQ #6 amendment](#open-question-status) and [PR 5](#pr-5-featurev035-rfc0031p3-close--closeout--all-sessions-carve-out). *(Decision flagged for the maintainer in the PR thread.)*
+
+---
+
+## Amendment — scope-axes reframing
+
+**Recorded 2026-05-30, after Phase 2 shipped.** A design review of RFC 0031 against two edge cases — a channel with **no human participant**, and a room with **multiple humans + multiple agents** — found that `session_id` was overloaded across four jobs and that the `(recipient-agent, channel, sender)` binding *fragments* a multi-party room (one agent gets a separate session per speaker). The resolution reframes the model into four orthogonal axes; full model, glossary, and decision record in [Memory Scope Axes](../memory-scope-axes.md), recorded on the RFC in the [§A amendment](0031-per-session-namespacing-channels.md#a-vocabulary). Parts of this plan predate it:
+
+**What the reframing changes under this plan:**
+
+- **Session unit drops the sender axis** — the `(agent, channel, user)` binding referenced throughout this plan ([Overview](#overview), [the session-model table](#the-session-model-the-cli-sits-on-top-of), PR 4, PR 5) is superseded by **`(agent, channel)`**. Two DM threads are already distinct channel ids, so the channel axis alone isolates them; the sender axis only ever changed the group case, and changed it wrongly. This is a code change to the shipped [ISSUE-0082 binding](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) (`internal/channels/session_binding.go`), **upstream of or parallel to this CLI work — not one of these five PRs**.
+- **"Session" is now room-continuity, not a run-isolation namespace.** F-3 run-isolation moves to a new **epoch** axis (orthogonal column, modeled on `principal_id`, no `legacy` carve-out). The operator's "give me a fresh world for this test run" need — which this plan implicitly served via `session new --activate` — is now an *epoch* concern, so `session new --activate` activates a continuity room, it does **not** hand back a clean slate.
+
+**Impact on the five PRs:**
+
+- **PR 1–3 (REST registry surface, registry verbs, pointer file): unaffected.** They manage the `sessions` *registry* and the active-session *pointer*, both independent of the binding key. They ship as written.
+- **PR 4 (`--session` override): unaffected in shape.** It still overrides the per-request binding for one invocation; only the binding's key changes (upstream). Its inline `(agent, channel, user)` references should read `(agent, channel)`.
+- **PR 5 (closeout integration test):** the "two senders → distinct sessions" expectation becomes "two senders in one room → one shared room session" once the sender-axis drop lands; sequence the two so the test asserts the post-reframing behaviour.
+
+**New open decision for the maintainer:** does Phase 3 (or a sibling phase) also ship an operator surface for the **epoch** axis — the actual home of test-run isolation now — or does `make reset` remain the run-isolation tool until a later phase / successor RFC? This plan does not yet cover epoch. Flagged for sequencing alongside the sender-axis-drop and facts-by-subject follow-ups tracked in [Memory Scope Axes §Consequences](../memory-scope-axes.md#consequences-for-the-current-code-and-rfc-0031).
+
+> Inline `(agent, channel, user)` references in the sections below predate this amendment; the unit is now `(agent, channel)`.
 
 ---
 

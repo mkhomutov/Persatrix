@@ -112,6 +112,8 @@ The vocabulary intentionally does *not* reuse "scope" — RFC 0020 §G owns that
 
 A row of `episodes` carries *both* a chat-session id (RFC 0016, identifying the conversation that produced it) and an operator-session id (this RFC, identifying the namespace it belongs to). Phase 1 plumbing must surface the two as distinct fields in structured logs (RFC 0018) and OTEL spans (RFC 0019 — see Open Question 7). **Open Question 8 captures whether to rename one of them on the wire before Phase 1 lands** — the name overlap is the single largest source of misimplementation risk this vocabulary section is *also* trying to head off.
 
+> **Amendment — scope-axes reframing (v0.3.x).** A review against multi-party rooms found `session_id` overloaded — the `(recipient-agent, channel, sender)` unit fragments a room by speaker. It is split into four orthogonal axes: **session = room** `(agent, channel)`, **relationship** (cross-room), **epoch** (run/test isolation, where F-3 now lives), **principal** (tenant). Follow-ups: drop the sender axis ([ISSUE-0083](../issues/ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md)); F-3 moves off `session_id` to `epoch` ([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)); relationship confirmed cross-room (validates the §C PK choice); fact scope becomes subject-dependent ([ISSUE-0084](../issues/ISSUE-0084-fact-scope-by-subject-not-uniform-session.md)). OQ 1's single-session default holds *within* session=room. Full model + decisions: [Memory Scope Axes](../memory-scope-axes.md).
+
 ### B. Session Lifecycle
 
 ```mermaid
