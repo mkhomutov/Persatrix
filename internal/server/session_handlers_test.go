@@ -218,7 +218,7 @@ func TestSessions_AutoMintedAppearsInList(t *testing.T) {
 	srv, store := sessionTestServer(t)
 	resolver, err := channels.NewSessionResolver(store)
 	require.NoError(t, err)
-	autoID, err := resolver.Resolve(t.Context(), "agent-a", "group:planning", "user-1")
+	autoID, err := resolver.Resolve(t.Context(), "agent-a", "group:planning")
 	require.NoError(t, err)
 
 	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/sessions", nil)

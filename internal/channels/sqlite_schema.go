@@ -36,7 +36,14 @@ import (
 //	    so a per-conversation session id survives a persona-process restart
 //	    (RFC 0031 §B session unit). Pure addition: no existing column or row
 //	    is touched.
-const channelStoreSchemaVersion = 4
+//	v5 — ISSUE-0083 (scope-axes reframing): drops the `user_id` (sender) axis
+//	    from `session_bindings`, rebuilding it onto the `(agent_id,
+//	    channel_id)` pair — room continuity, per the RFC 0031 §A amendment.
+//	    The sender axis fragmented a multi-party room (one session per
+//	    speaker); the channel axis alone already isolates DMs (distinct
+//	    channel ids). Existing triple bindings collapse to the pair, the
+//	    earliest-created winning so a room keeps its oldest continuity.
+const channelStoreSchemaVersion = 5
 
 // schemaV1SQL is the original schema shipped in PR #231. Applied verbatim
 // when opening a fresh database; the v1→v2 migration below uses
@@ -182,9 +189,71 @@ func applyMigration(db *sql.DB, target int) error {
 		return migrateV2ToV3(db)
 	case 4:
 		return migrateV3ToV4(db)
+	case 5:
+		return migrateV4ToV5(db)
 	default:
 		return fmt.Errorf("no migration registered for v%d", target)
 	}
+}
+
+// migrateV4ToV5 drops the sender (`user_id`) axis from `session_bindings`
+// (ISSUE-0083). RFC 0031 §A's scope-axes amendment redefines a session as
+// room continuity keyed `(agent, channel)`: the sender axis only ever changed
+// the multi-party-room case, and changed it wrongly — agent X talking in one
+// `group:` room with senders Alice and Bob got two sessions, fragmenting its
+// episodic memory of one conversation by who spoke. DMs are unaffected (one
+// sender, so the triple already collapses to the pair).
+//
+// SQLite cannot DROP a PRIMARY-KEY column in place, so the table is rebuilt.
+// Existing triple-keyed rows collapse onto the `(agent, channel)` pair with
+// `INSERT OR IGNORE ... ORDER BY created_at ASC`: the earliest-created binding
+// for each pair inserts first and wins; later rows for the same pair hit the
+// new PK and are ignored. A multi-party room therefore keeps its *oldest*
+// session id, so the room's longest-running continuity survives the collapse.
+//
+// The losing sessions' rows in the `sessions` registry are deliberately left
+// in place — archive/list still resolve them, and RFC 0013 makes row deletion
+// compliance-erasure territory, not a migration's job. Only the binding map
+// collapses; no `sessions` row and no memory row is deleted.
+//
+// `session_bindings` has no FOREIGN KEY and nothing references it (RFC 0031
+// §G code-enforced integrity), so the rebuild needs no foreign-keys-off dance.
+// The whole migration runs in one transaction and stamps `user_version`
+// inside it (PR #335 review L3) so schema and bookkeeping commit atomically.
+func migrateV4ToV5(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []string{
+		`CREATE TABLE session_bindings_v5 (
+            agent_id   TEXT NOT NULL,
+            channel_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            PRIMARY KEY (agent_id, channel_id)
+        )`,
+		// Earliest-created binding per (agent, channel) wins the collapse:
+		// the SELECT feeds rows oldest-first, and OR IGNORE drops every later
+		// row that would conflict on the new pair PK.
+		`INSERT OR IGNORE INTO session_bindings_v5 (agent_id, channel_id, session_id, created_at)
+            SELECT agent_id, channel_id, session_id, created_at
+              FROM session_bindings
+             ORDER BY created_at ASC`,
+		`DROP TABLE session_bindings`,
+		`ALTER TABLE session_bindings_v5 RENAME TO session_bindings`,
+	}
+	for _, q := range stmts {
+		if _, err := tx.Exec(q); err != nil {
+			return fmt.Errorf("exec %q: %w", firstLine(q), err)
+		}
+	}
+	if err := stampUserVersionTx(tx, 5); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // migrateV3ToV4 adds the `session_bindings` table (ISSUE-0082 PR 1). The

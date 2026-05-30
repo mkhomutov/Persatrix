@@ -137,6 +137,30 @@ func TestMigrateV3ToV4_StampsUserVersionInTransaction(t *testing.T) {
 		"migrateV3ToV4 must stamp user_version=4 inside its own tx")
 }
 
+// TestMigrateV4ToV5_StampsUserVersionInTransaction asserts the same
+// atomicity property for the v4→v5 step (ISSUE-0083 — sender-axis drop). The
+// migration rebuilds `session_bindings` (CREATE new / INSERT collapse / DROP
+// old / RENAME); a re-run on the already-rebuilt pair table would fail (the
+// old table is gone), so pinning the stamp inside the tx keeps the next boot
+// from attempting that re-run at all, consistent with the v1→v2 … v3→v4
+// discipline.
+func TestMigrateV4ToV5_StampsUserVersionInTransaction(t *testing.T) {
+	db, _ := rawSchemaDB(t)
+
+	_, err := db.Exec(schemaV1SQL)
+	require.NoError(t, err, "apply v1 baseline")
+	require.NoError(t, migrateV1ToV2(db), "advance to v2")
+	require.NoError(t, migrateV2ToV3(db), "advance to v3")
+	require.NoError(t, migrateV3ToV4(db), "advance to v4")
+	require.Equal(t, 4, readUserVersion(t, db),
+		"precondition: at v4 with user_version=4 before exercising v4→v5")
+
+	require.NoError(t, migrateV4ToV5(db))
+
+	assert.Equal(t, 5, readUserVersion(t, db),
+		"migrateV4ToV5 must stamp user_version=5 inside its own tx")
+}
+
 // TestApplySchema_FreshDB_StampsLatestVersion is the integration-shaped
 // counterpart to the two single-step tests above. It is intentionally
 // duplicative with `TestSQLiteStore_SchemaV3_Migration_Idempotent` (which

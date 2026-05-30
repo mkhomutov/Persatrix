@@ -38,7 +38,7 @@ The [v0.3.5 master plan §Phase 2 acceptance](../v0.3.5-plan.md#phase-2--author-
 
 **What the reframing changes under this plan:**
 
-- **Session unit drops the sender axis** — the `(agent, channel, user)` binding referenced throughout this plan ([Overview](#overview), [the session-model table](#the-session-model-the-cli-sits-on-top-of), PR 4, PR 5) is superseded by **`(agent, channel)`**. Two DM threads are already distinct channel ids, so the channel axis alone isolates them; the sender axis only ever changed the group case, and changed it wrongly. This is a code change to the shipped [ISSUE-0082 binding](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) (`internal/channels/session_binding.go`), **upstream of or parallel to this CLI work — not one of these five PRs**.
+- **Session unit drops the sender axis** — the `(agent, channel, user)` binding referenced throughout this plan ([Overview](#overview), [the session-model table](#the-session-model-the-cli-sits-on-top-of), PR 4, PR 5) is superseded by **`(agent, channel)`**. Two DM threads are already distinct channel ids, so the channel axis alone isolates them; the sender axis only ever changed the group case, and changed it wrongly. This was a code change to the shipped [ISSUE-0082 binding](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) (`internal/channels/session_binding.go`), **upstream of this CLI work — not one of these five PRs**. ✅ **[ISSUE-0083](../issues/ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md) shipped 2026-05-30** (channel-store schema v5), **before PR 4**, so PR 4 wires the override against the final `(agent, channel)` key.
 - **"Session" is now room-continuity, not a run-isolation namespace.** F-3 run-isolation moves to a new **epoch** axis (orthogonal column, modeled on `principal_id`, no `legacy` carve-out). The operator's "give me a fresh world for this test run" need — which this plan implicitly served via `session new --activate` — is now an *epoch* concern, so `session new --activate` activates a continuity room, it does **not** hand back a clean slate.
 
 **Impact on the five PRs:**
@@ -230,7 +230,7 @@ OQ #1 / #4 / #7 were consumed by Phase 2; OQ #3 / #8 resolved upstream (Phase 1)
 ### PR 4: `feature/v035-rfc0031p3-session-override` — `--session` Override on `chat` / `channel`
 
 **Depends on**: PR 3 merged.
-**Sequencing caveat**: PR 4's `(agent, channel, user)` binding-key references collapse to `(agent, channel)` once the [sender-axis drop (ISSUE-0083)](../issues/ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md) lands. ISSUE-0083 is "upstream of or parallel to" this phase but its order is **not yet committed** (see [Amendment](#amendment--scope-axes-reframing)); resolve whether it precedes PR 4 before executing, so PR 4 wires the override against the final binding key.
+**Sequencing caveat**: ✅ **settled** — the [sender-axis drop (ISSUE-0083)](../issues/ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md) **shipped 2026-05-30, before this PR**, so the binding key is already `(agent, channel)`. PR 4's inline `(agent, channel, user)` references read `(agent, channel)`; the override sits above the auto-binding regardless of its key.
 **Purpose**: Add `--session` to `persatrix chat` / `persatrix channel publish` / `persatrix channel list`, resolve the [OQ #6](0031-per-session-namespacing-channels.md#open-questions) precedence chain CLI-side, forward the resolved id to the orchestrator, and make the orchestrator honour it **above the per-request auto-binding** for that invocation. This is the reconciliation PR — it makes the explicit operator signal the highest-precedence one without regressing the Phase 2 + ISSUE-0082 concurrent-isolation guarantee.
 
 #### Scope
@@ -270,7 +270,7 @@ OQ #1 / #4 / #7 were consumed by Phase 2; OQ #3 / #8 resolved upstream (Phase 1)
 ### PR 5: `feature/v035-rfc0031p3-close` — Closeout + `--all-sessions` Carve-Out
 
 **Depends on**: PR 4 merged.
-**Sequencing caveat**: if the integration test adds a multi-party recall leg, its expected behaviour depends on whether the [sender-axis drop (ISSUE-0083)](../issues/ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md) has landed (two senders → distinct vs. one shared room session). Sequence it after ISSUE-0083, or keep the test to the operator-surface scope below, so it never pins the pre-reframing behaviour (see [Amendment](#amendment--scope-axes-reframing)).
+**Sequencing caveat**: ✅ the [sender-axis drop (ISSUE-0083)](../issues/ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md) has landed (2026-05-30), so a multi-party recall leg — if added — must assert the post-reframing "two senders in one room → one shared room session"; the pre-reframing "two senders → distinct" behaviour no longer exists to pin against (see [Amendment](#amendment--scope-axes-reframing)).
 **Purpose**: Prove the verb set end-to-end through the live REST path, carve out the deferred `--all-sessions` debug verb as a tracked issue, and land the documentation/status closeout. No production code.
 
 #### Scope
