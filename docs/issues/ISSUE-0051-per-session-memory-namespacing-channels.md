@@ -6,6 +6,7 @@ severity: medium
 area: agents/memory
 created: 2026-05-12
 closed: 2026-05-30
+closed_pr: 471
 refs:
   - docs/v0.3.0-test-findings-pr-plan.md
   - docs/guides/channels.md
