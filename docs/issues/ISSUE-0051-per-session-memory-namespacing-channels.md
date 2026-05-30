@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0051
 summary: "Per-session memory namespacing for channels + persona memory — F-3 root-cause fix (currently mitigated by `make reset` operator workaround)"
-status: open
+status: resolved
 severity: medium
 area: agents/memory
 created: 2026-05-12
+closed: 2026-05-30
 refs:
   - docs/v0.3.0-test-findings-pr-plan.md
   - docs/guides/channels.md
@@ -99,3 +100,25 @@ Open questions:
 > Part 1 per-request `persatrix-session` emission). This issue stays
 > `open` until the Phase 4 operator-docs closeout (`docs/guides/sessions.md`
 > + `make reset` deprecation breadcrumb), where it is closed.
+>
+> 2026-05-30 — **Closed at the RFC 0031 Phase 4 docs closeout (v0.3.5).**
+> [`docs/guides/sessions.md`](../guides/sessions.md) ships the operator
+> guide (resolution chain, `legacy` carve-out, the split-volume `make
+> reset` asymmetry, the no-secrets-in-labels note); the
+> [channels.md](../guides/channels.md) / [persona-agents.md](../guides/persona-agents.md)
+> `make reset` subsections carry the reframed breadcrumb; and
+> [RFC 0031](../rfcs/0031-per-session-namespacing-channels.md) reaches
+> `✅ Implemented` (all four phases shipped). The F-3 **recall** root cause
+> is closed: default recall is session-scoped, so a run under a fresh
+> session id inherits no prior run's memory.
+>
+> **Carried forward (not regressed):** the scope-axes reframing
+> ([memory-scope-axes.md](../memory-scope-axes.md)) redefines `session` as
+> room-continuity `(agent, channel)` that *accumulates* — so a rerun
+> reusing the same channel name now auto-binds to the *same* session and
+> would still inherit it. Everyday, no-wipe run/test isolation is the new
+> **epoch** axis, tracked in
+> [ISSUE-0085](ISSUE-0085-epoch-axis-run-isolation.md); until it lands,
+> `make reset` remains the supported clean-slate path. F-3 as a
+> *recall-bleed* defect is fixed here; F-3 as an *auto-isolation
+> ergonomic* moves to ISSUE-0085.
