@@ -47,6 +47,26 @@ func TestHandleChat_SessionIDIsOperatorNamespace(t *testing.T) {
 		"the operator-namespace session_id override must stamp the inbound row")
 }
 
+// TestHandleChat_InvalidSessionOverride_Rejected pins the fail-loud boundary
+// check (PR #469 deep-review finding 1): an operator `session_id` carrying a
+// control / non-ASCII byte cannot ride the gRPC `persatrix-session` metadata
+// header and would otherwise silently fail the dispatch. The handler rejects it
+// with a 400 before publishing, consistent with the publish path
+// (TestPublish_InvalidSessionOverride_Rejected).
+func TestHandleChat_InvalidSessionOverride_Rejected(t *testing.T) {
+	srv, reg, _, _ := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+
+	body, _ := json.Marshal(chatRequest{Message: "Hi", UserID: "alice", SessionID: "bad\nid"})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+	require.Equal(t, 400, rec.Code, "a malformed session_id must fail loud; body=%s", rec.Body.String())
+
+	var env errorResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+	assert.Equal(t, "BAD_REQUEST", env.Code,
+		"error envelope code must be machine-readable BAD_REQUEST")
+}
+
 // TestHandleChat_ChatSessionIDJSONTagOnResponse pins the wire-name on
 // the response side: a v0.3.1 client decoding the chat response sees
 // `chat_session_id`, not `session_id`. Guards against accidental

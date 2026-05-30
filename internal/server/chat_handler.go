@@ -289,7 +289,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// CLI's `--session`) — see [Server.resolveSessionOverride]. This is the
 	// RFC 0031 operator-namespace session, distinct from the RFC 0016 chat
 	// token on `chat_session_id`.
-	ctx, effectiveSession := s.resolveSessionOverride(ctx, req.SessionID)
+	ctx, effectiveSession, err := s.resolveSessionOverride(ctx, req.SessionID)
+	if err != nil {
+		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	inbound := channels.ChannelMessage{
 		ID:        uuid.NewString(),

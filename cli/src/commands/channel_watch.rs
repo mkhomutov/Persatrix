@@ -3,9 +3,12 @@
 //! Split from [`super::channel`] for the same reason its tests live in
 //! `channel_tests.rs`: to keep that file under the 500-line review cap. The
 //! watch poll loop's bounded `seen` ring and its `--limit`-scaled capacity are
-//! a cohesive concern, separable from the publish / list / join verbs. The
-//! names are re-exported from `channel.rs` so the `#[path]` test module's
-//! `use super::*` keeps resolving them.
+//! a cohesive concern, separable from the publish / list / join verbs.
+//! `channel.rs` imports the names it still uses ([`WatchState`],
+//! [`watch_seen_cap_for`], [`FULL_PAGE_WARNING_TEXT`]); the watch tests in the
+//! `#[path]`-attached `channel_tests.rs` import them directly from here, since
+//! their `use super::*` (resolving against `channel.rs`) no longer covers names
+//! that have moved out of it.
 
 use std::collections::{HashSet, VecDeque};
 

@@ -153,3 +153,63 @@ func TestPublish_NoSessionOverride_KeepsBootDefault(t *testing.T) {
 	assert.Empty(t, disp.overrides()[0],
 		"absent an override, no override rides the dispatch context (auto-binding stands)")
 }
+
+// TestPublish_InvalidSessionOverride_Rejected pins the fail-loud boundary check
+// (PR #469 deep-review finding 1): the override id rides the gRPC
+// `persatrix-session` metadata header, which is printable-ASCII only. A control
+// or non-ASCII byte would be rejected by the gRPC transport at send time and
+// silently fail the fanout dispatch (the publish already returned 201). Reject
+// it at the REST boundary with a 400 instead, mirroring how the handler already
+// fails loud on a bad sender_id / mention count / cascade depth. The row must
+// not be persisted either.
+func TestPublish_InvalidSessionOverride_Rejected(t *testing.T) {
+	srv, store, _ := publishOverrideTestServer(t)
+	createPlanningChannel(t, srv.Handler())
+
+	pubBody, _ := json.Marshal(publishMessageRequest{
+		SenderID: "alice", Content: "hello", SessionID: "bad\nid",
+	})
+	rec := doRequest(srv.Handler(), http.MethodPost,
+		"/api/v1/channels/group:planning/messages", pubBody)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+
+	var env errorResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+	assert.Equal(t, "BAD_REQUEST", env.Code,
+		"a malformed session_id must fail loud with a machine-readable BAD_REQUEST envelope")
+
+	hist, err := store.GetHistory(context.Background(), "group:planning", 10, time.Time{})
+	require.NoError(t, err)
+	assert.Empty(t, hist, "a rejected publish must not persist a row")
+}
+
+// TestSessionOverrideValid pins the charset contract of the override id: it must
+// be printable ASCII (0x20–0x7E) so it can ride the gRPC `persatrix-session`
+// metadata header. The id is otherwise trusted (not checked against the
+// registry), so ad-hoc operator-chosen ids — uppercase, underscores, dots, even
+// internal spaces — pass; only wire-illegal control / non-ASCII bytes are
+// rejected.
+func TestSessionOverrideValid(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"uuidv7", "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b", true},
+		{"reserved legacy", "legacy", true},
+		{"label-style id", "run-arc-3", true},
+		{"ad-hoc operator id", "My_Session.2024", true},
+		{"internal space is legal metadata", "run arc 3", true},
+		{"newline", "run\narc", false},
+		{"tab", "run\tarc", false},
+		{"carriage return", "run\rarc", false},
+		{"null byte", "run\x00arc", false},
+		{"del", "run\x7farc", false},
+		{"non-ascii", "rún-arc", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, sessionOverrideValid(tc.in))
+		})
+	}
+}
