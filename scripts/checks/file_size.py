@@ -167,6 +167,20 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # this entry once the remaining PR 4–7 sequence closes out and the plan
     # is sealed at the v0.3.4 release tag.
     "docs/rfcs/0033-pr-plan.md",
+    # Long-form architecture RFC (cf. docs/rfcs/0005-persona-agent-memory.md
+    # above) that accumulates implementation amendments inline so each spec
+    # section carries its as-built reconciliation: the ISSUE-0081 PR 2/3/4
+    # session-model amendments, the scope-axes reframing (§A), and the Phase 3
+    # operator-CLI closeout. The RFC exited the Phase 3 PR 4 window at ~7 995
+    # words (just under the cap); the Phase 3 PR 5 closeout amendment (§E — all
+    # three resolution mechanisms wired, the OQ #6 override-above-auto-binding
+    # reconciliation, and the ISSUE-0086 `--all-sessions` carve-out) tipped it
+    # to ~8 090. Trimming the closeout would split the operator-surface
+    # contract from the spec it amends; reaching into unrelated amendments to
+    # offset it trades fidelity for an arbitrary line. Remove this entry at RFC
+    # seal (Phase 4 closeout) or if a maintenance PR moves the amendment
+    # history into a separate changelog.
+    "docs/rfcs/0031-per-session-namespacing-channels.md",
     # docs/observability.md tipped over the 3 000-word prose limit when
     # RFC 0009 PR 1c added the audit-logger metric inventory + SLO alert
     # templates to §13. The new content is already trimmed (a one-line
