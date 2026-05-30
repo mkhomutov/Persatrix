@@ -135,7 +135,9 @@ pub(crate) async fn api_error_message(resp: reqwest::Response) -> String {
     }
 }
 
-pub(crate) use crate::validation::{validate_path_param, validate_resource_id};
+pub(crate) use crate::validation::{
+    validate_path_param, validate_resource_id, validate_session_label,
+};
 
 #[cfg(test)]
 mod tests {

@@ -46,6 +46,35 @@ pub(crate) fn validate_resource_id(value: &str, label: &str) -> Result<(), Strin
     Ok(())
 }
 
+/// Session labels that collide with the RFC 0031 §D `legacy` carve-out and
+/// must never be minted as an operator session. Mirrors the server-
+/// authoritative guard (`channels.ErrReservedSessionID`); the CLI fails fast
+/// with a friendlier message, but the server stays the guard of record.
+pub(crate) const RESERVED_SESSION_LABELS: [&str; 1] = ["legacy"];
+
+/// Validate an operator-supplied `session new --label`.
+///
+/// Enforces the cross-component resource-id shape (so labels are usable as
+/// id-or-label path values downstream) and rejects the reserved `legacy`
+/// sentinel before it can reach the wire (OQ #2a).
+///
+/// Note the asymmetry: only the reserved-`legacy` check mirrors the server
+/// guard ([`RESERVED_SESSION_LABELS`] ↔ `channels.ErrReservedSessionID`). The
+/// resource-id *shape* constraint is a CLI-side funnel the orchestrator does
+/// not impose — `CreateSession` only trims, rejects empty, and rejects the
+/// reserved sentinel — so a raw REST caller can still mint a label this
+/// rejects. The CLI is intentionally the stricter path so its own minted
+/// labels stay addressable by the later `use` / `archive` verbs.
+pub(crate) fn validate_session_label(value: &str) -> Result<(), String> {
+    validate_resource_id(value, "session label")?;
+    if RESERVED_SESSION_LABELS.contains(&value) {
+        return Err(format!(
+            "session label {value:?} is reserved (the always-visible `legacy` carve-out); choose another name"
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,5 +145,34 @@ mod tests {
     fn validate_resource_id_rejects_leading_trailing_hyphen() {
         assert!(validate_resource_id("-agent", "id").to_owned().is_err());
         assert!(validate_resource_id("agent-", "id").is_err());
+    }
+
+    // ─── validate_session_label tests ────────────────────────────────────
+
+    #[test]
+    fn validate_session_label_accepts_valid_labels() {
+        assert!(validate_session_label("arc").is_ok());
+        assert!(validate_session_label("run-arc-3").is_ok());
+        assert!(validate_session_label("dementia-test").is_ok());
+    }
+
+    #[test]
+    fn validate_session_label_rejects_reserved_legacy() {
+        // OQ #2a: `legacy` passes the resource-id shape but collides with the
+        // §D carve-out, so it must be rejected with the reserved message.
+        let err = validate_session_label("legacy").unwrap_err();
+        assert!(
+            err.contains("reserved"),
+            "expected the reserved-label message, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_session_label_rejects_malformed() {
+        // Shape violations are caught before the reserved check.
+        assert!(validate_session_label("My Arc").is_err());
+        assert!(validate_session_label("Legacy").is_err());
+        assert!(validate_session_label(" legacy ").is_err());
+        assert!(validate_session_label("").is_err());
     }
 }
