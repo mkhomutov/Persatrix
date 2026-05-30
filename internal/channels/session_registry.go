@@ -80,8 +80,12 @@ func isReservedSessionID(s string) bool {
 }
 
 // SessionRegistry reads and writes the `sessions` registry over the channel
-// store's database. Safe for concurrent use — every method is a single
-// statement (or a guarded UPDATE), so no cross-statement transaction is held.
+// store's database. Safe for concurrent use without holding a transaction:
+// the reads are single statements, and ArchiveSession's read-then-update is
+// made race-safe by the `archived_at IS NULL` guard on the UPDATE — a
+// concurrent archive in the window between its read and its write turns the
+// UPDATE into a 0-row no-op that preserves the original stamp, so no two
+// callers can clobber each other.
 type SessionRegistry struct {
 	db *sql.DB
 }

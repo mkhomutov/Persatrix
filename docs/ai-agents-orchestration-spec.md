@@ -912,6 +912,14 @@ POST   /api/v1/channels/{id}/messages       — inject a message (observer/human
 GET    /api/v1/channels/{id}/summary        — get AI-generated channel summary
 ```
 
+#### Session Registry (v0.3.5 — RFC 0031 Phase 3)
+```
+POST   /api/v1/sessions                     — create a named session (rejects the reserved `legacy` label)
+GET    /api/v1/sessions                     — list sessions (active only; ?include_archived=true widens it)
+GET    /api/v1/sessions/{id}                — resolve a session by id or label
+POST   /api/v1/sessions/{id}/archive        — archive a session (one-way; row + tagged memory preserved)
+```
+
 #### Organizations & Personas (v0.2)
 ```
 POST   /api/v1/organizations                — create an organization

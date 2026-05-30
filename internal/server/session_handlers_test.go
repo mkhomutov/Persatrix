@@ -229,9 +229,12 @@ func TestSessions_AutoMintedAppearsInList(t *testing.T) {
 	assert.Equal(t, autoID, list.Sessions[0].ID)
 }
 
-// TestSessions_ServiceUnavailableWhenChannelsUnwired asserts the endpoints
-// degrade to 503 (not panic / 500) when the channel store — and therefore the
+// TestSessions_ServiceUnavailableWhenChannelsUnwired asserts every endpoint
+// degrades to 503 (not panic / 500) when the channel store — and therefore the
 // session registry — is not configured, matching the channel handlers' shape.
+// All four verbs share the same nil-registry guard; the table pins each one so
+// a future handler that forgets the guard fails this test rather than 500-ing
+// (or panicking on a nil registry) at runtime.
 func TestSessions_ServiceUnavailableWhenChannelsUnwired(t *testing.T) {
 	logger := zap.NewNop()
 	srv, err := New("127.0.0.1:0", t.TempDir(),
@@ -242,6 +245,25 @@ func TestSessions_ServiceUnavailableWhenChannelsUnwired(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/sessions", nil)
-	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	// The create body is irrelevant: the nil-registry guard runs before the
+	// JSON/label checks, so an empty body still 503s rather than 400s.
+	createBody, _ := json.Marshal(createSessionRequest{Label: "arc-1"})
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   []byte
+	}{
+		{"create", http.MethodPost, "/api/v1/sessions", createBody},
+		{"list", http.MethodGet, "/api/v1/sessions", nil},
+		{"get", http.MethodGet, "/api/v1/sessions/some-id", nil},
+		{"archive", http.MethodPost, "/api/v1/sessions/some-id/archive", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doRequest(srv.Handler(), tc.method, tc.path, tc.body)
+			assert.Equal(t, http.StatusServiceUnavailable, rec.Code,
+				"%s %s must degrade to 503 when the registry is unwired", tc.method, tc.path)
+		})
+	}
 }
