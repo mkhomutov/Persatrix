@@ -147,7 +147,7 @@ Collected via `pip-licenses --from=mixed` against the `agents` extras (72 packag
 
 ## Rust dependencies
 
-Collected via `cargo license --json` inside `cli/` (206 crates).
+Collected via `cargo license --json` inside `cli/` (222 crates).
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
@@ -177,6 +177,8 @@ Collected via `cargo license --json` inside `cli/` (206 crates).
 | `core-foundation` | 0.10.1 | Apache-2.0 OR MIT | [link](https://github.com/servo/core-foundation-rs) |
 | `core-foundation-sys` | 0.8.7 | Apache-2.0 OR MIT | [link](https://github.com/servo/core-foundation-rs) |
 | `ctrlc` | 3.5.2 | Apache-2.0 OR MIT | [link](https://github.com/Detegr/rust-ctrlc.git) |
+| `dirs` | 5.0.1 | Apache-2.0 OR MIT | [link](https://github.com/soc/dirs-rs) |
+| `dirs-sys` | 0.4.1 | Apache-2.0 OR MIT | [link](https://github.com/dirs-dev/dirs-sys-rs) |
 | `dispatch2` | 0.3.1 | Apache-2.0 OR MIT OR Zlib | [link](https://github.com/madsmtm/objc2) |
 | `displaydoc` | 0.2.5 | Apache-2.0 OR MIT | [link](https://github.com/yaahc/displaydoc) |
 | `encoding_rs` | 0.8.35 | (Apache-2.0 OR MIT) AND BSD-3-Clause | [link](https://github.com/hsivonen/encoding_rs) |
@@ -229,6 +231,7 @@ Collected via `cargo license --json` inside `cli/` (206 crates).
 | `lazy_static` | 1.5.0 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang-nursery/lazy-static.rs) |
 | `leb128fmt` | 0.1.0 | Apache-2.0 OR MIT | [link](https://github.com/bluk/leb128fmt) |
 | `libc` | 0.2.184 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/libc) |
+| `libredox` | 0.1.17 | MIT | [link](https://gitlab.redox-os.org/redox-os/libredox.git) |
 | `linux-raw-sys` | 0.12.1 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/sunfishcode/linux-raw-sys) |
 | `litemap` | 0.8.2 | Unicode-3.0 | [link](https://github.com/unicode-org/icu4x) |
 | `log` | 0.4.29 | Apache-2.0 OR MIT | [link](https://github.com/rust-lang/log) |
@@ -245,6 +248,7 @@ Collected via `cargo license --json` inside `cli/` (206 crates).
 | `openssl-macros` | 0.1.1 | Apache-2.0 OR MIT |  |
 | `openssl-probe` | 0.2.1 | Apache-2.0 OR MIT | [link](https://github.com/rustls/openssl-probe) |
 | `openssl-sys` | 0.9.116 | MIT | [link](https://github.com/rust-openssl/rust-openssl) |
+| `option-ext` | 0.2.0 | MPL-2.0 | [link](https://github.com/soc/option-ext.git) |
 | `papergrid` | 0.17.0 | MIT | [link](https://github.com/zhiburt/tabled) |
 | `percent-encoding` | 2.3.2 | Apache-2.0 OR MIT | [link](https://github.com/servo/rust-url/) |
 | `pin-project-lite` | 0.2.17 | Apache-2.0 OR MIT | [link](https://github.com/taiki-e/pin-project-lite) |
@@ -256,6 +260,7 @@ Collected via `cargo license --json` inside `cli/` (206 crates).
 | `proc-macro2` | 1.0.106 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/proc-macro2) |
 | `quote` | 1.0.45 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/quote) |
 | `r-efi` | 6.0.0 | Apache-2.0 OR LGPL-2.1-or-later OR MIT | [link](https://github.com/r-efi/r-efi) |
+| `redox_users` | 0.4.6 | MIT | [link](https://gitlab.redox-os.org/redox-os/users) |
 | `reqwest` | 0.12.28 | Apache-2.0 OR MIT | [link](https://github.com/seanmonstar/reqwest) |
 | `ring` | 0.17.14 | Apache-2.0 AND ISC | [link](https://github.com/briansmith/ring) |
 | `rustix` | 1.1.4 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/bytecodealliance/rustix) |
@@ -290,6 +295,8 @@ Collected via `cargo license --json` inside `cli/` (206 crates).
 | `tabled_derive` | 0.11.0 | MIT | [link](https://github.com/zhiburt/tabled) |
 | `tempfile` | 3.27.0 | Apache-2.0 OR MIT | [link](https://github.com/Stebalien/tempfile) |
 | `testing_table` | 0.3.0 | MIT | [link](https://github.com/zhiburt/tabled) |
+| `thiserror` | 1.0.69 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/thiserror) |
+| `thiserror-impl` | 1.0.69 | Apache-2.0 OR MIT | [link](https://github.com/dtolnay/thiserror) |
 | `tinystr` | 0.8.3 | Unicode-3.0 | [link](https://github.com/unicode-org/icu4x) |
 | `tokio` | 1.51.1 | MIT | [link](https://github.com/tokio-rs/tokio) |
 | `tokio-macros` | 2.7.0 | MIT | [link](https://github.com/tokio-rs/tokio) |
@@ -329,17 +336,26 @@ Collected via `cargo license --json` inside `cli/` (206 crates).
 | `windows-registry` | 0.6.1 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows-result` | 0.4.1 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows-strings` | 0.5.1 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
+| `windows-sys` | 0.48.0 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows-sys` | 0.52.0 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows-sys` | 0.59.0 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows-sys` | 0.61.2 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
+| `windows-targets` | 0.48.5 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows-targets` | 0.52.6 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
+| `windows_aarch64_gnullvm` | 0.48.5 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows_aarch64_gnullvm` | 0.52.6 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
+| `windows_aarch64_msvc` | 0.48.5 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows_aarch64_msvc` | 0.52.6 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
+| `windows_i686_gnu` | 0.48.5 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows_i686_gnu` | 0.52.6 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows_i686_gnullvm` | 0.52.6 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
+| `windows_i686_msvc` | 0.48.5 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows_i686_msvc` | 0.52.6 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
+| `windows_x86_64_gnu` | 0.48.5 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows_x86_64_gnu` | 0.52.6 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
+| `windows_x86_64_gnullvm` | 0.48.5 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows_x86_64_gnullvm` | 0.52.6 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
+| `windows_x86_64_msvc` | 0.48.5 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `windows_x86_64_msvc` | 0.52.6 | Apache-2.0 OR MIT | [link](https://github.com/microsoft/windows-rs) |
 | `wit-bindgen` | 0.51.0 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/bytecodealliance/wit-bindgen) |
 | `wit-bindgen-core` | 0.51.0 | Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT | [link](https://github.com/bytecodealliance/wit-bindgen) |

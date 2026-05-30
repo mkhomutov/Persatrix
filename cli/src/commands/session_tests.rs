@@ -140,12 +140,72 @@ fn parses_new_with_label() {
     use clap::Parser;
     let cli = TestCli::try_parse_from(["x", "new", "--label", "arc"]).unwrap();
     match cli.cmd {
-        SessionCommands::New { label, json } => {
+        SessionCommands::New {
+            label,
+            activate,
+            json,
+        } => {
             assert_eq!(label, "arc");
+            assert!(!activate, "--activate must default off");
             assert!(!json);
         }
         _ => panic!("expected New"),
     }
+}
+
+#[test]
+fn parses_new_with_activate() {
+    use clap::Parser;
+    let cli = TestCli::try_parse_from(["x", "new", "--label", "arc", "--activate"]).unwrap();
+    match cli.cmd {
+        SessionCommands::New { activate, .. } => assert!(activate),
+        _ => panic!("expected New"),
+    }
+}
+
+#[test]
+fn parses_use() {
+    use clap::Parser;
+    let cli = TestCli::try_parse_from(["x", "use", "arc"]).unwrap();
+    match cli.cmd {
+        SessionCommands::Use { id_or_label } => assert_eq!(id_or_label, "arc"),
+        _ => panic!("expected Use"),
+    }
+}
+
+#[test]
+fn parses_current() {
+    use clap::Parser;
+    let cli = TestCli::try_parse_from(["x", "current"]).unwrap();
+    assert!(matches!(cli.cmd, SessionCommands::Current));
+}
+
+// ─── session_annotation rendering (pure — no registry) ──────────────────────
+// Pins the `use` / `current` id annotation, including the `archived` marker that
+// `current` surfaces for a pointer left on a since-archived session. `GET
+// /api/v1/sessions/{id}` returns archived rows with 200 (the row is preserved;
+// RFC 0031 §B), so without the marker such a pointer would read as a normal
+// active session — contradicting `use`, which refuses to re-activate one. The
+// leading space is part of the annotation so callers append it unconditionally.
+
+#[test]
+fn annotation_is_label_in_parens_when_live() {
+    assert_eq!(super::session_annotation("arc", false), " (arc)");
+}
+
+#[test]
+fn annotation_is_empty_when_live_and_unlabeled() {
+    assert_eq!(super::session_annotation("", false), "");
+}
+
+#[test]
+fn annotation_marks_archived_alongside_label() {
+    assert_eq!(super::session_annotation("arc", true), " (arc, archived)");
+}
+
+#[test]
+fn annotation_marks_archived_when_unlabeled() {
+    assert_eq!(super::session_annotation("", true), " (archived)");
 }
 
 #[test]

@@ -318,8 +318,8 @@ No production code in PR 5 — test + docs only.
 |---|-------|--------|--------|-----------|--------|
 | — | This plan (Phase 3 PR plan authoring) | `feature/v035-rfc0031p3-plan` | 🔀 PR open | — | — |
 | 1 | Orchestrator `/api/v1/sessions` REST surface | `feature/v035-rfc0031p3-rest` | ✅ Merged | [#464](https://github.com/mkhomutov/Persatrix/pull/464) | 2026-05-30 |
-| 2 | CLI registry verbs (`new` / `list` / `archive`) | `feature/v035-rfc0031p3-cli-registry` | 🔀 PR open | [#466](https://github.com/mkhomutov/Persatrix/pull/466) | — |
-| 3 | Active-session pointer file + `use` / `current` / `--activate` | `feature/v035-rfc0031p3-active-file` | ⬜ Not started | — | — |
+| 2 | CLI registry verbs (`new` / `list` / `archive`) | `feature/v035-rfc0031p3-cli-registry` | ✅ Merged | [#466](https://github.com/mkhomutov/Persatrix/pull/466) | 2026-05-30 |
+| 3 | Active-session pointer file + `use` / `current` / `--activate` | `feature/v035-rfc0031p3-active-file` | 🔀 PR open | — | — |
 | 4 | `--session` override on `chat` / `channel` | `feature/v035-rfc0031p3-session-override` | ⬜ Not started | — | — |
 | 5 | Closeout + `--all-sessions` carve-out | `feature/v035-rfc0031p3-close` | ⬜ Not started | — | — |
 

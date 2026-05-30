@@ -19,6 +19,9 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 colored = "2"
 ctrlc = "3"                       # graceful Ctrl-C handling for chat REPL
 tabled = "0.20"                   # table output formatting
+# Home-directory resolution for the `~/.persatrix/active-session` pointer file
+# (RFC 0031 Phase 3 §E). The only cross-platform homedir API; std has none.
+dirs = "5"
 # Async stream combinators (StreamExt::next) for the SSE follow loop.
 # Already pulled in transitively by reqwest; declared here so cli/src code can
 # `use futures_util::StreamExt` without depending on a transitive surface.
@@ -30,3 +33,9 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # SSE parsing is implemented inline in cli/src/commands/logs.rs against the
 # server's narrow contract (`data: <json>\n\n` + `: heartbeat\n\n`); a full
 # eventsource crate would be overkill for the two frame shapes in use.
+
+[dev-dependencies]
+# Isolated temp directories for the active-session pointer-file tests, so they
+# never touch the real `~/.persatrix/`. Already in the dependency graph
+# transitively; declared here for direct test use.
+tempfile = "3"
