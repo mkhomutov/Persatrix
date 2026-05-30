@@ -122,11 +122,20 @@ fn parses_new_with_label() {
     let cli = TestCli::try_parse_from(["x", "new", "--label", "arc"]).unwrap();
     match cli.cmd {
         SessionCommands::New { label, json } => {
-            assert_eq!(label.as_deref(), Some("arc"));
+            assert_eq!(label, "arc");
             assert!(!json);
         }
         _ => panic!("expected New"),
     }
+}
+
+#[test]
+fn parses_new_requires_label() {
+    use clap::Parser;
+    // `--label` is a clap-required flag (matching the `blueprint` / `output` /
+    // `config` required-flag convention in main.rs), so omitting it is a parse
+    // error with a usage block — not a deferred runtime error.
+    assert!(TestCli::try_parse_from(["x", "new"]).is_err());
 }
 
 #[test]

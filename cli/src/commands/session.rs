@@ -11,8 +11,7 @@ use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use tabled::{settings::Style, Table, Tabled};
 
-use crate::types::{api_error_message, validate_path_param};
-use crate::validation::validate_session_label;
+use crate::types::{api_error_message, validate_path_param, validate_session_label};
 
 // ─── Session registry DTOs (mirror `internal/server/types.go`) ──────────────
 
@@ -55,7 +54,7 @@ pub(crate) enum SessionCommands {
     New {
         /// Human-readable label for the session (required)
         #[arg(long)]
-        label: Option<String>,
+        label: String,
         /// Emit raw JSON (single line) instead of the human confirmation.
         #[arg(long)]
         json: bool,
@@ -114,12 +113,13 @@ pub(crate) fn render_session_table(sessions: &[SessionResponse]) -> String {
 async fn cmd_session_new(
     client: &reqwest::Client,
     server: &str,
-    label: Option<String>,
+    label: String,
     json: bool,
 ) -> Result<(), String> {
-    let label = label.ok_or("session new requires --label <name>")?;
-    // Client-side fail-fast mirror of the server's reserved-id guard (OQ #2a);
-    // the server stays authoritative.
+    // Fail fast client-side: enforce the resource-id label shape (a CLI funnel
+    // the server does not impose) and reject the reserved `legacy` sentinel
+    // before the wire (OQ #2a). The server stays the guard of record — see
+    // `validate_session_label`.
     validate_session_label(&label)?;
     let req = CreateSessionRequest { label };
     let resp = client

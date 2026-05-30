@@ -57,6 +57,14 @@ pub(crate) const RESERVED_SESSION_LABELS: [&str; 1] = ["legacy"];
 /// Enforces the cross-component resource-id shape (so labels are usable as
 /// id-or-label path values downstream) and rejects the reserved `legacy`
 /// sentinel before it can reach the wire (OQ #2a).
+///
+/// Note the asymmetry: only the reserved-`legacy` check mirrors the server
+/// guard ([`RESERVED_SESSION_LABELS`] ↔ `channels.ErrReservedSessionID`). The
+/// resource-id *shape* constraint is a CLI-side funnel the orchestrator does
+/// not impose — `CreateSession` only trims, rejects empty, and rejects the
+/// reserved sentinel — so a raw REST caller can still mint a label this
+/// rejects. The CLI is intentionally the stricter path so its own minted
+/// labels stay addressable by the later `use` / `archive` verbs.
 pub(crate) fn validate_session_label(value: &str) -> Result<(), String> {
     validate_resource_id(value, "session label")?;
     if RESERVED_SESSION_LABELS.contains(&value) {
