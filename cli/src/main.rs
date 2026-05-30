@@ -9,6 +9,7 @@ use commands::agent::{cmd_agent_info, cmd_agent_list, cmd_agent_reload, cmd_test
 use commands::channel_dispatch::{dispatch as dispatch_channel, ChannelCommands};
 use commands::chat::cmd_chat;
 use commands::logs::{cmd_logs, LogsOptions};
+use commands::session::{dispatch as dispatch_session, SessionCommands};
 use commands::validate::cmd_validate;
 use commands::workflow::{cmd_run, cmd_status};
 
@@ -141,6 +142,9 @@ enum Commands {
         #[arg(long, default_value = "agent")]
         group_by: String,
     },
+    /// Manage persona-memory sessions (RFC 0031 §E)
+    #[command(subcommand)]
+    Session(SessionCommands),
     /// State management
     #[command(subcommand)]
     State(StateCommands),
@@ -345,6 +349,7 @@ async fn main() {
             Ok(())
         }
         Commands::Channel(cmd) => dispatch_channel(&client, server, cmd, default_user_id).await,
+        Commands::Session(cmd) => dispatch_session(&client, server, cmd).await,
         Commands::Node(_) => {
             println!("{}", "Command 'node' not yet implemented".yellow());
             Ok(())
