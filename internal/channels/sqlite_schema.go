@@ -214,7 +214,12 @@ func applyMigration(db *sql.DB, target int) error {
 // The losing sessions' rows in the `sessions` registry are deliberately left
 // in place — archive/list still resolve them, and RFC 0013 makes row deletion
 // compliance-erasure territory, not a migration's job. Only the binding map
-// collapses; no `sessions` row and no memory row is deleted.
+// collapses; no `sessions` row and no memory row is deleted. This is
+// forward-continuity only: persona memory already written under a collapsed-
+// away session stays in the persona's store but falls outside default room
+// recall (which filters to the surviving session + `legacy`), so pre-upgrade
+// turns from a losing-session speaker are not recalled by default. That
+// cross-subsystem consequence is recorded in the ISSUE-0083 resolution note.
 //
 // `session_bindings` has no FOREIGN KEY and nothing references it (RFC 0031
 // §G code-enforced integrity), so the rebuild needs no foreign-keys-off dance.

@@ -68,3 +68,28 @@ This is pinned (as the *intended* behaviour, which this issue reverses) by [`grp
 > ISSUE-0083's order vs. Phase 3 PR 4 — is settled by landing this **before** PR 4,
 > so PR 4 wires the `--session` override against the final `(agent, channel)`
 > binding key.
+
+> 2026-05-30 — migration consequence (forward-continuity only; pre-upgrade
+> history is *not* healed). The collapse fixes the room's binding going forward,
+> but it does not — and structurally cannot — re-home memory already written
+> under the sessions it drops. The binding session id is what the persona writes
+> and recall-filters under: the orchestrator emits it as the `persatrix-session`
+> header, the persona binds it as the task-local `session_scope`
+> (`agents/session_id.py`), episode writes route under
+> `current_session_id() or self._session_id`
+> (`agents/persona_runtime/episode_routing.py`), and default recall filters to
+> `[active_session, legacy]` (`agents/memory/_session_filter.py`). So a
+> multi-party room that accumulated memory under per-speaker sessions pre-upgrade
+> keeps only the *surviving* (oldest) session reachable: rows tagged with a
+> collapsed-away session remain in the persona's store (no deletion, RFC 0013)
+> but fall outside default room recall — the agent will not, by default, recall
+> what a *losing*-session speaker said before the upgrade. They carry a concrete
+> UUID, not `legacy`, so the always-visible carve-out does not surface them;
+> `sessions=[…]` (or `"*"` debug) still can. This is the persona-side mirror of
+> the orchestrator's "losing `sessions` rows are left in place" choice above, and
+> is acceptable for the same reason: it is the no-backfill stance, the stranded
+> volume pre-production is dev/test data, and `make reset` is the operator nuke.
+> Note the two session concepts are distinct: the orchestrator's
+> `channels.session_id` / `messages.session_id` history columns are tagged with
+> the boot-time `defaultSessionID` (router), *not* the binding session, so the
+> collapse retags no orchestrator message/channel row.
