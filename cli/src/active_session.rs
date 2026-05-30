@@ -183,4 +183,30 @@ mod tests {
         write_at(&p, "second").unwrap();
         assert_eq!(read_at(&p).as_deref(), Some("second"));
     }
+
+    // ─── public wrappers honour PERSATRIX_ACTIVE_SESSION_FILE (env seam) ──────
+    // The `resolve_path` precedence above is pure; this pins the real
+    // `path()` → `read()` / `write()` wiring end-to-end against a TempDir the
+    // override points at, so a typo in the env-var constant or a mis-wired
+    // wrapper is caught — without ever touching the operator's real
+    // `~/.persatrix/`. Safe to mutate the process env here: `path()` is the only
+    // reader of this var and no other test calls it.
+    #[test]
+    fn public_wrappers_honour_env_override() {
+        let dir = TempDir::new().unwrap();
+        let pointer = dir.path().join("active-session");
+        let prior = std::env::var(ACTIVE_SESSION_FILE_ENV).ok();
+        std::env::set_var(ACTIVE_SESSION_FILE_ENV, &pointer);
+
+        assert_eq!(path().as_deref(), Some(pointer.as_path()));
+        assert!(read().is_none(), "no pointer written yet → None");
+        write("env-sess").unwrap();
+        assert_eq!(read().as_deref(), Some("env-sess"));
+
+        // Restore the ambient environment so sibling tests are unaffected.
+        match prior {
+            Some(v) => std::env::set_var(ACTIVE_SESSION_FILE_ENV, v),
+            None => std::env::remove_var(ACTIVE_SESSION_FILE_ENV),
+        }
+    }
 }

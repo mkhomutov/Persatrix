@@ -292,9 +292,13 @@ async fn cmd_session_use(
     // misroute the next channel (RFC §Security: misconfiguration risk).
     let sess = resolve_session(client, server, id_or_label).await?;
     if sess.archived {
+        // Pass `archived = false` to the annotation: the sentence already says
+        // "is archived", so we want only the label suffix — and an unlabeled,
+        // auto-minted row then renders no empty `()` (it collapses to "").
         return Err(format!(
-            "session {} ({}) is archived and cannot be activated (archive is one-way; RFC 0031 §B)",
-            sess.id, sess.label
+            "session {}{} is archived and cannot be activated (archive is one-way; RFC 0031 §B)",
+            sess.id,
+            session_annotation(&sess.label, false)
         ));
     }
     active_session::write(&sess.id)?;
