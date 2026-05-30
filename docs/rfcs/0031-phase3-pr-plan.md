@@ -175,6 +175,7 @@ OQ #1 / #4 / #7 were consumed by Phase 2; OQ #3 / #8 resolved upstream (Phase 1)
 #### Key implementation details
 
 - **REST-only — no SQLite, no homedir.** These three verbs are pure REST calls; nothing touches `~/.persatrix/` (that is PR 3). Keeps PR 2 reviewable as "the registry client" with no filesystem surface.
+- **Label uniqueness lands here, with a known resolution edge to close.** PR 1 deliberately left labels nullable/non-unique (the schema has no `UNIQUE`, and the auto-mint path writes NULL labels); `GetSession` pins "duplicate labels resolve to the lowest id" as a *characterization* test, not a desired contract. The robust fix — a migration-backed partial unique index on non-NULL labels — belongs here with the `session new` UX (a check-then-insert at PR 1 would have been a racy half-measure). Until that index exists, note the edge it closes: with duplicate labels, `GetSession` resolves lowest-id **ignoring `archived` state**, so `use <label>`/`archive <label>` can land on an archived row while an active namesake exists (`archive` would then no-op on the already-archived row, leaving the active one un-archived). The unique index eliminates the duplicate, and with it this edge; until then it is bounded to the unmanaged-duplicate case PR 2 forbids.
 - **`list` default order** matches the UUIDv7 lexicographic-by-creation order PR 1 returns; `--json` emits the raw response for scripting, matching the `channel list --json` precedent.
 - **Error surfacing** uses the existing `api_error_message(resp)` ([`types.rs`](../../cli/src/types.rs#L130)) so PR 1's reserved-`legacy` 4xx renders as a clean operator error, not a panic.
 
@@ -316,7 +317,7 @@ No production code in PR 5 — test + docs only.
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
 | — | This plan (Phase 3 PR plan authoring) | `feature/v035-rfc0031p3-plan` | 🔀 PR open | — | — |
-| 1 | Orchestrator `/api/v1/sessions` REST surface | `feature/v035-rfc0031p3-rest` | ⬜ Not started | — | — |
+| 1 | Orchestrator `/api/v1/sessions` REST surface | `feature/v035-rfc0031p3-rest` | 🔀 PR open | — | — |
 | 2 | CLI registry verbs (`new` / `list` / `archive`) | `feature/v035-rfc0031p3-cli-registry` | ⬜ Not started | — | — |
 | 3 | Active-session pointer file + `use` / `current` / `--activate` | `feature/v035-rfc0031p3-active-file` | ⬜ Not started | — | — |
 | 4 | `--session` override on `chat` / `channel` | `feature/v035-rfc0031p3-session-override` | ⬜ Not started | — | — |
