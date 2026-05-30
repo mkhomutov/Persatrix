@@ -15,7 +15,7 @@ depends_on:
 # RFC 0031 — Per-Session Namespacing for Channels and Persona Memory
 
 **Type**: architecture
-**Status**: 🚧 Implementing (Phase 1 shipped v0.3.1; Phase 2 — session-scoped default recall across all four persona-memory tiers, the F-3 closer — shipped v0.3.5; Phase 3 — operator CLI — in progress, `/api/v1/sessions` REST registry surface landed first; Phase 4 (docs) remains)
+**Status**: 🚧 Implementing (Phase 1 shipped v0.3.1; Phase 2 — session-scoped default recall across all four persona-memory tiers, the F-3 closer — shipped v0.3.5; Phase 3 — `persatrix session …` operator CLI (registry verbs + active-session pointer + `--session` override) — shipped v0.3.5, all three resolution mechanisms now wired; Phase 4 (operator docs + [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md) closeout) remains)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-12
 **Target**: v0.3.1 (P1) + v0.3.5 (P2) + v0.3.x (P3–4)
@@ -239,6 +239,12 @@ The active-session pointer lives at `~/.persatrix/active-session` (path overrida
 Between Phase 1 and Phase 3, **the env var is the only way to set a session**. An operator who reads §E after Phase 1 ships but before Phase 3 does, and then creates `~/.persatrix/active-session` by hand, will get silent fallback to `legacy` — the file-reading code isn't there yet. The Phase 1 deliverable list (below) is intentionally narrow for this reason; the operator-guide page (`docs/guides/sessions.md`, Phase 4) lands only after all three mechanisms are wired so the docs never describe a setting that doesn't work yet.
 
 `make reset` is **kept** but its operator-guide subsection is updated: "Prefer `persatrix session new --activate` for run isolation; `make reset` is now the deprecated nuclear option for clearing all volumes across all sessions." Removal of `make reset` is out of scope; deprecation breadcrumb only.
+
+> **Amendment — Phase 3 operator CLI shipped, v0.3.5 ([Phase 3 PR plan](0031-phase3-pr-plan.md), PRs 1–5).** All three resolution mechanisms in the table above are now wired: the `/api/v1/sessions` REST registry + `session new / list / archive` (PRs 1–2), the `~/.persatrix/active-session` pointer file (+ `PERSATRIX_ACTIVE_SESSION_FILE`) + `session use / current / new --activate` (PR 3), and the `--session` override on `chat` / `channel publish / list` (PR 4); the lifecycle is pinned end-to-end by [`tests/integration/test_session_operator_surface.py`](../../tests/integration/test_session_operator_surface.py) (PR 5).
+>
+> **OQ #6 reconciliation.** The precedence chain governs the *process-lifetime* session; the [ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) per-request auto-binding (keyed `(agent, channel)` after [ISSUE-0083](../issues/ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md)) is a distinct dispatch-path axis. An explicit `--session` wins **above** the auto-binding for that one invocation; absent it the auto-binding stands, so the Phase 2 + ISSUE-0082 concurrent-isolation guarantee is not regressed (pinned in `channel_session_handler_test.go` + `grpc_dispatcher_test.go`).
+>
+> **`--all-sessions` deferred** to [ISSUE-0086](../issues/ISSUE-0086-operator-all-sessions-recall-verb.md): the only operator route to `sessions="*"` (§Security Considerations) needs an operator memory-inspection surface that does not exist. Unbuilt is the stronger posture — `"*"` retains **no operator entry point**, so it cannot reach a prompt context. **Phase 4** (operator guide + `make reset` breadcrumb + [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md) closeout) remains.
 
 > **Amendment — [ISSUE-0081](../issues/ISSUE-0081-session-id-process-global-not-task-local.md), v0.3.5 (PR 2).** The resolution mechanisms above (env var → file → flag) all set a *process-lifetime* session. PR 2 adds a fourth, per-request transport for the concurrency fix recorded in the §B amendment: the orchestrator emits the session id as a gRPC metadata header, `persatrix-session` (the cross-language contract lives at `agents/session_id.py::SESSION_METADATA_GRPC_KEY`). It is lower-case by HTTP/2 convention and lifted case-insensitively server-side.
 >

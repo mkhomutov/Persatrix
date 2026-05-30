@@ -1,7 +1,7 @@
 # RFC 0031 — PR Implementation Plan (Phase 3 — Operator CLI + Active-Session Resolution)
 
 **RFC**: [0031-per-session-namespacing-channels.md](0031-per-session-namespacing-channels.md)
-**Status**: 📋 Ready — v0.3.5 (Phase 2 of [v0.3.5-plan.md](../v0.3.5-plan.md)) · ⚠️ read [Amendment — scope-axes reframing](#amendment--scope-axes-reframing) before executing
+**Status**: ✅ Implemented — v0.3.5 (Phase 2 of [v0.3.5-plan.md](../v0.3.5-plan.md)); all five PRs merged 2026-05-30 · see [Amendment — scope-axes reframing](#amendment--scope-axes-reframing)
 **Created**: 2026-05-29
 **Branch prefix**: `feature/v035-rfc0031p3-`
 **Target**: `main`
@@ -277,9 +277,9 @@ OQ #1 / #4 / #7 were consumed by Phase 2; OQ #3 / #8 resolved upstream (Phase 1)
 
 | File | Change |
 |------|--------|
-| `tests/integration/test_session_operator_surface.py` (new) | The Phase 3 acceptance gate: drive `session new --label arc → use → current → list → archive` against a live orchestrator and assert the registry + pointer-file state at each step; then a `channel publish --session arc` recalls under `arc` (override beats the auto-binding) while a no-`--session` publish stays auto-bound; an archived session's rows stay readable via the `legacy` carve-out. Gated in CI with the rest of `tests/integration/` per [ISSUE-0076](../issues/ISSUE-0076-full-integration-suite-not-run-in-ci.md). |
-| `docs/issues/ISSUE-00NN-operator-all-sessions-recall-verb.md` (new) | Carve out `persatrix memory recall --all-sessions` (the only operator route to `sessions="*"`) as a follow-up: it needs an operator memory-inspection surface (CLI verb + orchestrator REST + persona-side recall RPC) that does not exist; until it ships, the `"*"` sentinel keeps no operator entry point — provably unreachable from a prompt context. Mirrors the [Phase 4 `legacy-prune` carve-out](0031-per-session-namespacing-channels.md#phase-4-cleanup-and-documentation-pass). |
-| [`docs/rfcs/0031-per-session-namespacing-channels.md`](0031-per-session-namespacing-channels.md) | §E status update: the file + flag resolution mechanisms are now wired; record the OQ #6 amendment (override-above-auto-binding) and that the `--all-sessions` entry point is deferred. RFC stays `⚠️ Partially Implemented` (Phase 4 docs + ISSUE-0051 closeout remain). |
+| `tests/integration/test_session_operator_surface.py` (new) | The Phase 3 acceptance gate: drive `session new --label arc → use → current → list → archive` against a **live** orchestrator (real `bin/persatrix-server` + `persatrix` binaries, ephemeral ports, per-test `--channels-db` + `PERSATRIX_ACTIVE_SESSION_FILE`) and assert the registry + pointer-file state at each step, plus the OQ #2a reserved-`legacy` guard end-to-end and an archived session staying resolvable (`GET {id}` 200; `current` renders the archived marker — RFC 0031 §B). Opt-in via `-m requires_orchestrator` (the `test_logs_e2e.py` harness shape); collected by the `tests/integration/` CI step ([ISSUE-0076](../issues/ISSUE-0076-full-integration-suite-not-run-in-ci.md)) and skipped there when the binaries are not built. **Scope note:** this orchestrator-only harness does not stand up the persona society, so the `--session` *override-beats-auto-binding* + *recall-isolation* legs are pinned where they live — `internal/server/channel_session_handler_test.go` + `internal/channels/grpc_dispatcher_test.go` (PR 4) and `tests/integration/test_session_emission_isolation.py` (ISSUE-0082 PR 3) — rather than re-stood-up here (the same reasoning `test_session_emission_isolation.py` records for declining to start the Go binary). |
+| [`docs/issues/ISSUE-0086-operator-all-sessions-recall-verb.md`](../issues/ISSUE-0086-operator-all-sessions-recall-verb.md) (new) | Carve out `persatrix memory recall --all-sessions` (the only operator route to `sessions="*"`) as a follow-up: it needs an operator memory-inspection surface (CLI verb + orchestrator REST + persona-side recall RPC) that does not exist; until it ships, the `"*"` sentinel keeps no operator entry point — provably unreachable from a prompt context. Mirrors the [Phase 4 `legacy-prune` carve-out](0031-per-session-namespacing-channels.md#phase-4-cleanup-and-documentation-pass). |
+| [`docs/rfcs/0031-per-session-namespacing-channels.md`](0031-per-session-namespacing-channels.md) | §E status update: the file + flag resolution mechanisms are now wired; record the OQ #6 amendment (override-above-auto-binding) and that the `--all-sessions` entry point is deferred. Body `**Status**:` heading advances Phase 3 → shipped; Phase 4 docs + ISSUE-0051 closeout remain (RFC overall still `🚧 Implementing`). |
 | [`docs/v0.3.5-plan.md`](../v0.3.5-plan.md) | [Master Progress Overview](../v0.3.5-plan.md#master-progress-overview) row 2 → ✅ Merged with the final PR date. |
 | [`ROADMAP.md`](../../ROADMAP.md) | Status-hygiene refresh for the Phase 3 work; RFC 0031 stays `🚧 Implementing` (Phase 4 remains). |
 
@@ -287,16 +287,16 @@ No production code in PR 5 — test + docs only.
 
 #### Key implementation details
 
-- **The integration test is the regression pin** for the operator surface: the verb lifecycle, the pointer-file precedence, the override-beats-auto-binding reconciliation, and the `legacy` carve-out's survival across archive — the four properties Phase 3 adds.
+- **The integration test is the regression pin** for the operator surface: the verb lifecycle, the pointer-file read/write, the reserved-`legacy` guard, and an archived session's row surviving (resolvable + marked) across archive. The override-beats-auto-binding reconciliation and the cross-session recall isolation are pinned upstream (PR 4 Go tests + the ISSUE-0082 emission-isolation Python gate), since this orchestrator-only harness does not run the persona society.
 - **The carve-out is deliberate scope discipline**, not an omission: building the `"*"` operator route is a separate "operator memory inspection" story, and leaving it unbuilt is the stronger security posture (no operator entry point to the all-sessions sentinel).
 - **`make reset` deprecation breadcrumb is Phase 4's, not this PR's.** [RFC §E Phase 3 deliverable 4](0031-per-session-namespacing-channels.md#phase-3-operator-cli) lists the breadcrumb, but the [v0.3.5 master plan §Phase 3](../v0.3.5-plan.md#phase-3--rfc-0031-phase-4-operator-docs--issue-0051-closeout) assigns the `channels.md` / `persona-agents.md` breadcrumb + `docs/guides/sessions.md` to the Phase 4 docs pass, which lands only after all three resolution mechanisms are wired. This plan defers it there to avoid a doc that describes the file mechanism before PR 3 ships it.
 
 #### PR checklist
 
-- [ ] `make test` passes; the new integration test runs in the full `tests/integration/` suite.
-- [ ] `--all-sessions` carve-out issue filed and linked from RFC §E + the issues index.
-- [ ] RFC §E reflects file + flag wired; OQ #6 amendment recorded; RFC stays `⚠️ Partially Implemented`.
-- [ ] [v0.3.5-plan.md](../v0.3.5-plan.md) Master Progress Overview row 2 → ✅ Merged.
+- [x] `make test` passes; the new integration test runs in the full `tests/integration/` suite (opt-in `-m requires_orchestrator`; skips cleanly when binaries are absent, mirroring `test_logs_e2e.py`).
+- [x] `--all-sessions` carve-out issue filed ([ISSUE-0086](../issues/ISSUE-0086-operator-all-sessions-recall-verb.md)) and linked from RFC §E + the issues index.
+- [x] RFC §E reflects file + flag wired; OQ #6 amendment recorded; RFC Phase 3 marked shipped, Phase 4 (docs) + ISSUE-0051 closeout remain.
+- [x] [v0.3.5-plan.md](../v0.3.5-plan.md) Master Progress Overview row 2 → ✅ Merged.
 
 ---
 
@@ -316,12 +316,12 @@ No production code in PR 5 — test + docs only.
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| — | This plan (Phase 3 PR plan authoring) | `feature/v035-rfc0031p3-plan` | 🔀 PR open | — | — |
+| — | This plan (Phase 3 PR plan authoring) | `feature/v035-rfc0031p3-plan` | ✅ Merged | [#462](https://github.com/mkhomutov/Persatrix/pull/462) | 2026-05-30 |
 | 1 | Orchestrator `/api/v1/sessions` REST surface | `feature/v035-rfc0031p3-rest` | ✅ Merged | [#464](https://github.com/mkhomutov/Persatrix/pull/464) | 2026-05-30 |
 | 2 | CLI registry verbs (`new` / `list` / `archive`) | `feature/v035-rfc0031p3-cli-registry` | ✅ Merged | [#466](https://github.com/mkhomutov/Persatrix/pull/466) | 2026-05-30 |
-| 3 | Active-session pointer file + `use` / `current` / `--activate` | `feature/v035-rfc0031p3-active-file` | 🔀 PR open | — | — |
-| 4 | `--session` override on `chat` / `channel` | `feature/v035-rfc0031p3-session-override` | ⬜ Not started | — | — |
-| 5 | Closeout + `--all-sessions` carve-out | `feature/v035-rfc0031p3-close` | ⬜ Not started | — | — |
+| 3 | Active-session pointer file + `use` / `current` / `--activate` | `feature/v035-rfc0031p3-active-file` | ✅ Merged | [#467](https://github.com/mkhomutov/Persatrix/pull/467) | 2026-05-30 |
+| 4 | `--session` override on `chat` / `channel` | `feature/v035-rfc0031p3-session-override` | ✅ Merged | [#469](https://github.com/mkhomutov/Persatrix/pull/469) | 2026-05-30 |
+| 5 | Closeout + `--all-sessions` carve-out | `feature/v035-rfc0031p3-close` | 🔀 PR open | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 
