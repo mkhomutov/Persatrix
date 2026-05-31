@@ -19,6 +19,7 @@ import sys
 
 from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 
+from .model_aliases import validate_alias_pricing
 from .observability.logging import configure_logging
 from .observability.metrics import init_metrics, try_get_instruments
 from .observability.metrics import shutdown as metrics_shutdown
@@ -28,6 +29,23 @@ from .server import AgentServer
 from .server_persona import load_agent, setup_shared_pools
 
 logger = logging.getLogger("Persatrix.agent.server")
+
+
+def _validate_startup_config() -> None:
+    """Eagerly validate the whole alias map at boot (ISSUE-0071).
+
+    The RFC 0033 PR 4 missing-price guard fires *per-resolve*, scoped to the
+    resolved alias — so an unpriced non-local alias that no agent ever
+    resolves (e.g. in an all-local/offline society whose agents take the
+    factory's force-flag early-return before ``resolve()``) is never caught
+    at runtime, silently leaving its RFC 0023 budget gate disabled. Running
+    :func:`validate_alias_pricing` over the *entire* map at startup closes
+    that gap: a misconfigured registry fails fast and loud, naming the
+    offending alias, regardless of which provider mode is active. A clean
+    map (the shipped config) returns ``None``; ``SystemExit`` propagates so
+    boot aborts with the actionable message.
+    """
+    validate_alias_pricing()
 
 
 def main() -> None:
@@ -58,13 +76,13 @@ def main() -> None:
         "--orchestrator-grpc",
         default=None,
         help="Orchestrator gRPC target for the LogService stream (host:port). "
-             "Defaults to the orchestrator REST host on port 9090.",
+        "Defaults to the orchestrator REST host on port 9090.",
     )
     parser.add_argument(
         "--advertise-address",
         default=None,
         help="gRPC address advertised to the orchestrator (host:port). "
-             "Defaults to bind host:port. Set to Docker service name in containers.",
+        "Defaults to bind host:port. Set to Docker service name in containers.",
     )
     parser.add_argument(
         "--log-level",
@@ -94,6 +112,11 @@ def main() -> None:
         service_instance=args.agent,
         level=args.log_level,
     )
+
+    # Fail fast on a misconfigured alias map before any tracing / socket bind
+    # (ISSUE-0071) — an unpriced non-local alias is a silent $0 budget hole the
+    # per-resolve guard would miss until (or unless) something resolves it.
+    _validate_startup_config()
 
     # Initialise OTEL tracing before any gRPC or async code starts.
     init_tracing()
@@ -176,7 +199,8 @@ def main() -> None:
         _inst_shutdown = try_get_instruments()
         if _inst_shutdown is not None:
             _inst_shutdown.agent_active.add(
-                -1, attributes={"agent.id": agent.agent_id},
+                -1,
+                attributes={"agent.id": agent.agent_id},
             )
         await tracing_shutdown()
         await metrics_shutdown()
