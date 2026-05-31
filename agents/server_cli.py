@@ -76,13 +76,13 @@ def main() -> None:
         "--orchestrator-grpc",
         default=None,
         help="Orchestrator gRPC target for the LogService stream (host:port). "
-             "Defaults to the orchestrator REST host on port 9090.",
+        "Defaults to the orchestrator REST host on port 9090.",
     )
     parser.add_argument(
         "--advertise-address",
         default=None,
         help="gRPC address advertised to the orchestrator (host:port). "
-             "Defaults to bind host:port. Set to Docker service name in containers.",
+        "Defaults to bind host:port. Set to Docker service name in containers.",
     )
     parser.add_argument(
         "--log-level",
@@ -199,7 +199,8 @@ def main() -> None:
         _inst_shutdown = try_get_instruments()
         if _inst_shutdown is not None:
             _inst_shutdown.agent_active.add(
-                -1, attributes={"agent.id": agent.agent_id},
+                -1,
+                attributes={"agent.id": agent.agent_id},
             )
         await tracing_shutdown()
         await metrics_shutdown()
