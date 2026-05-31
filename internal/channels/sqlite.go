@@ -27,6 +27,20 @@ import (
 // truth — PR #335 review L2.
 const DefaultSessionID = "legacy"
 
+// DefaultEpochID is the run/test-isolation epoch applied to every channel /
+// message row that arrives without an explicit epoch (ISSUE-0085 PR 2 —
+// channel-store schema v6). Unlike [DefaultSessionID] it is NOT a carve-out:
+// the epoch recall predicate (forthcoming) is strict equality with no
+// `legacy`-style "always visible" escape, so a fresh epoch sees nothing. PR 2
+// only lands the column (backfilled here via the SQL DEFAULT); no writer sets
+// a non-default epoch until the gRPC rail (PR 4) lights up the producer.
+//
+// Cross-language contract: mirrors `agents.epoch_id.DEFAULT_EPOCH_ID` — the
+// `'live'` literal the persona-memory migration v12 backfills onto its five
+// tiers. A rename here is a conscious break that must move in lock-step with
+// the Python leaf.
+const DefaultEpochID = "live"
+
 // SessionMetrics is the subset of orchestrator OTEL handles the channel
 // store needs for the RFC 0031 `sessions.writes` counter. Defined locally
 // so the channels package does not take a dependency on the orchestrator-

@@ -73,9 +73,9 @@ class TestMigrations:
         # Schema-version row count + per-row identity pin: every new
         # migration MUST bump both the count and add a (version,
         # description-substring) assertion here.  The count bumped from
-        # 10 → 11 alongside migration v11 (ISSUE-0081 PR 3 — principal_id
+        # 11 → 12 alongside migration v12 (ISSUE-0085 PR 2 — epoch_id
         # on all five persona-memory tiers).
-        assert len(rows) == 11
+        assert len(rows) == 12
         assert rows[0][0] == 1
         assert "Initial schema" in rows[0][1]
         assert rows[1][0] == 2
@@ -108,6 +108,10 @@ class TestMigrations:
         # ``principal_id`` token (no other migration carries it).
         assert rows[10][0] == 11
         assert "principal_id" in rows[10][1].lower()
+        # v12 is the orthogonal run/test-isolation axis — disambiguated by
+        # the ``epoch_id`` token (no other migration carries it).
+        assert rows[11][0] == 12
+        assert "epoch_id" in rows[11][1].lower()
 
     async def test_migrations_are_idempotent(self, memory: EpisodicMemory):
         """Re-running migrations does not error or duplicate rows."""
@@ -116,10 +120,10 @@ class TestMigrations:
         async with db.execute("SELECT COUNT(*) FROM schema_version") as cursor:
             row = await cursor.fetchone()
         assert row is not None
-        # Bumped from 10 → 11 alongside migration v11 (ISSUE-0081 PR 3 —
-        # principal_id on all five tiers).  Same row-count discipline
+        # Bumped from 11 → 12 alongside migration v12 (ISSUE-0085 PR 2 —
+        # epoch_id on all five tiers).  Same row-count discipline
         # as ``test_migration_version_recorded`` above.
-        assert row[0] == 11
+        assert row[0] == 12
 
     async def test_wal_mode_enabled(self):
         """WAL mode is set on file-based databases (not :memory:)."""

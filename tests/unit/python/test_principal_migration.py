@@ -183,10 +183,13 @@ class TestRelationshipsPrimaryKey:
     ) -> None:
         assert memory._db is not None
         pk = await _pk_columns(memory._db, "relationships")
+        # On a fresh DB every migration runs, so the relationships PK also
+        # carries the v12 ``epoch_id`` axis (ISSUE-0085) — this test pins
+        # only that ``principal_id`` is *among* the key columns.
         assert pk == {
             "participant_id", "participant_type",
             "other_participant_id", "other_participant_type",
-            "principal_id",
+            "principal_id", "epoch_id",
         }
 
     async def test_v10_rebuild_preserves_row_and_keys_principal(self) -> None:

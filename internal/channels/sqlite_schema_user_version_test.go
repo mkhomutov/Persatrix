@@ -161,6 +161,31 @@ func TestMigrateV4ToV5_StampsUserVersionInTransaction(t *testing.T) {
 		"migrateV4ToV5 must stamp user_version=5 inside its own tx")
 }
 
+// TestMigrateV5ToV6_StampsUserVersionInTransaction asserts the same
+// atomicity property for the v5→v6 step (ISSUE-0085 PR 2 — epoch_id columns).
+// The migration is additive (ADD COLUMN + CREATE INDEX); a re-run would fail
+// with "duplicate column name" / "index already exists" rather than corrupt
+// data, so pinning the stamp inside the tx keeps the next boot from
+// attempting that re-run at all, consistent with the v1→v2 … v4→v5
+// discipline.
+func TestMigrateV5ToV6_StampsUserVersionInTransaction(t *testing.T) {
+	db, _ := rawSchemaDB(t)
+
+	_, err := db.Exec(schemaV1SQL)
+	require.NoError(t, err, "apply v1 baseline")
+	require.NoError(t, migrateV1ToV2(db), "advance to v2")
+	require.NoError(t, migrateV2ToV3(db), "advance to v3")
+	require.NoError(t, migrateV3ToV4(db), "advance to v4")
+	require.NoError(t, migrateV4ToV5(db), "advance to v5")
+	require.Equal(t, 5, readUserVersion(t, db),
+		"precondition: at v5 with user_version=5 before exercising v5→v6")
+
+	require.NoError(t, migrateV5ToV6(db))
+
+	assert.Equal(t, 6, readUserVersion(t, db),
+		"migrateV5ToV6 must stamp user_version=6 inside its own tx")
+}
+
 // TestApplySchema_FreshDB_StampsLatestVersion is the integration-shaped
 // counterpart to the two single-step tests above. It is intentionally
 // duplicative with `TestSQLiteStore_SchemaV3_Migration_Idempotent` (which
