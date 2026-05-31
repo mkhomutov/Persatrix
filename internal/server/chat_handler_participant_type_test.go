@@ -95,4 +95,11 @@ func TestHandleChat_RejectsInvalidParticipantType(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
 	assert.Equal(t, "BAD_REQUEST", env.Code, "rejection must use the BAD_REQUEST envelope code")
+	// The message echoes the offending value — parity with the gRPC
+	// SendChatMessage guard, whose `validate_participant_type` ValueError
+	// renders the rejected value (`Invalid participant_type 'robot': ...`).
+	// Echoing it tells the caller *which* value was rejected, not just that
+	// the field was bad.
+	assert.Contains(t, env.Error, "robot",
+		"rejection message must echo the offending participant_type value")
 }

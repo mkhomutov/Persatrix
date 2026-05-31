@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -229,7 +230,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// ISSUE-0068 silent-misclassification this change exists to remove. An
 	// omitted field is NOT a caller bug — it defaults to "user" below.
 	if req.ParticipantType != "" && !channels.IsValidParticipantType(req.ParticipantType) {
-		writeError(w, "BAD_REQUEST", "participant_type must be one of [agent, user]", http.StatusBadRequest)
+		// Echo the offending value (`%q` quotes + escapes control chars) so
+		// the caller sees *which* value was rejected — parity with the gRPC
+		// SendChatMessage guard, whose `validate_participant_type` ValueError
+		// renders the rejected value (`Invalid participant_type 'robot': …`).
+		writeError(w, "BAD_REQUEST", fmt.Sprintf("participant_type %q must be one of [agent, user]", req.ParticipantType), http.StatusBadRequest)
 		return
 	}
 
