@@ -88,13 +88,23 @@ class TestAliasHit:
             input_per_1m_tokens=3.00,
             output_per_1m_tokens=15.00,
             provider_config={},
-            raw=False,
         )
 
-    def test_alias_is_not_raw(self) -> None:
+    def test_alias_carries_its_logical_name(self) -> None:
         with use_alias_map(_SAMPLE_ALIASES):
-            assert resolve("fast").raw is False
             assert resolve("fast").alias == "fast"
+
+    def test_resolved_model_has_no_raw_field(self) -> None:
+        # RFC 0033 Phase 3 retired the raw-vendor-ID pass-through, so a
+        # resolved record is *always* a declared alias. The vestigial ``raw``
+        # discriminator (only ever ``False`` after the cutover) is gone — pin
+        # its absence so it cannot quietly reappear.
+        import dataclasses
+
+        field_names = {f.name for f in dataclasses.fields(ResolvedModel)}
+        assert "raw" not in field_names
+        with use_alias_map(_SAMPLE_ALIASES):
+            assert not hasattr(resolve("fast"), "raw")
 
     def test_openai_alias_round_trips(self) -> None:
         with use_alias_map(_SAMPLE_ALIASES):

@@ -173,7 +173,8 @@ async def summarize_closed_interaction(
             llm_client.create_message(
                 model=resolved_summarization.model,
                 # RFC 0033 §G — emit the alias the summariser model came in via
-                # (e.g. ``summarizer``) on the span; None on the raw-ID path.
+                # (e.g. ``summarizer``) on the span. Since Phase 3 retired the
+                # raw-ID pass-through, a resolved reference is always an alias.
                 model_alias=resolved_summarization.alias,
                 messages=[{"role": "user", "content": prompt}],
                 system=load_snippet("episode-summarizer"),

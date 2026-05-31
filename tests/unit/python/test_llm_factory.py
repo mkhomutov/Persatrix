@@ -199,7 +199,8 @@ class TestStockConfigMigration:
         try:
             for agent in self._shipped_agents():
                 resolved = resolve(agent["model"])
-                assert resolved.raw is False, f"{agent['id']} still uses a raw vendor ID"
+                # Phase 3 retired the raw pass-through, so a successful resolve
+                # is already proof the agent routes via a declared alias.
                 assert resolved.alias in {"quality", "fast", "summarizer"}, agent["id"]
                 assert resolved.provider == "anthropic", agent["id"]
         finally:

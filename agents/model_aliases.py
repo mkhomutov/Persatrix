@@ -59,10 +59,11 @@ _LOCALHOST_HOSTS: frozenset[str] = frozenset(
 class ResolvedModel:
     """The resolved identity of a model reference (RFC 0033 §C).
 
-    ``alias`` is the logical name the reference came in as, or ``None``
-    when the reference was a raw vendor ID that fell through (``raw`` is
-    then ``True``). ``model`` is always the physical vendor ID the API
-    call must use — never the alias name.
+    ``alias`` is the logical name the reference came in as. As of RFC 0033
+    Phase 3 every resolved reference is a declared alias (the §E raw-vendor-ID
+    pass-through is retired), so ``alias`` is always set — the ``str | None``
+    type is kept for the public contract. ``model`` is always the physical
+    vendor ID the API call must use — never the alias name.
     """
 
     alias: str | None
@@ -71,7 +72,6 @@ class ResolvedModel:
     input_per_1m_tokens: float
     output_per_1m_tokens: float
     provider_config: dict[str, Any] = field(default_factory=dict)
-    raw: bool = False
 
 
 # ─── Test seam ────────────────────────────────────────────────
@@ -150,7 +150,6 @@ def _from_alias_entry(alias: str, entry: dict[str, Any]) -> ResolvedModel:
         input_per_1m_tokens=_coerce_price(entry.get("input_per_1m_tokens")),
         output_per_1m_tokens=_coerce_price(entry.get("output_per_1m_tokens")),
         provider_config=dict(provider_config),
-        raw=False,
     )
 
 
@@ -287,7 +286,7 @@ def validate_alias_pricing(
 def resolve(alias_or_model: str) -> ResolvedModel:
     """Resolve ``alias_or_model`` to a :class:`ResolvedModel`.
 
-    * A declared alias returns its configured record (``raw=False``). The
+    * A declared alias returns its configured record. The
       alias entry is the joint declaration of provider + model + pricing and
       stays authoritative (RFC 0033 §D rule 1; a *disagreeing* explicit
       provider on an agent entry is caught by the factory, not here). A
