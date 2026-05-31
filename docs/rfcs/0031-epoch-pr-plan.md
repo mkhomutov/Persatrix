@@ -2,7 +2,7 @@
 
 **RFC**: [0031-per-session-namespacing-channels.md](0031-per-session-namespacing-channels.md) · design home: [Memory Scope Axes §Epoch](../memory-scope-axes.md#epoch--the-testrun-isolation-axis)
 **Tracks**: [ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)
-**Status**: 🚧 Implementing — v0.3.5 ([Phase 3b](../v0.3.5-plan.md#phase-3b--rfc-0031-epoch-axis-issue-0085)); PR 1 (leaf) + PR 2 (migration, [#474](https://github.com/mkhomutov/Persatrix/pull/474)) merged, PR 3 (filter + per-tier wiring) open, PRs 4–6 remaining
+**Status**: 🚧 Implementing — v0.3.5 ([Phase 3b](../v0.3.5-plan.md#phase-3b--rfc-0031-epoch-axis-issue-0085)); PR 1 (leaf) + PR 2 (migration, [#474](https://github.com/mkhomutov/Persatrix/pull/474)) merged, PR 3 (filter + per-tier wiring, [#475](https://github.com/mkhomutov/Persatrix/pull/475)) open, PRs 4–6 remaining
 **Created**: 2026-05-31
 **Branch prefix**: `feature/v035-issue0085-` / `feature/v035-epoch-`
 **Target**: `main`
@@ -52,9 +52,9 @@ The epoch leaf (`agents/epoch_id.py`, PR 1) is the dependency-free sibling of [`
 PR 1 (epoch leaf: agents/epoch_id.py — env/header/contextvar/scope) ── ✅ merged (#472)
   ↓
 PR 2 (migration v12: epoch_id TEXT NOT NULL DEFAULT 'live' across the five persona-memory tiers
-      + channel-store v6; epoch_id in the relationships PK; backfill 'live')
+      + channel-store v6; epoch_id in the relationships PK; backfill 'live') ── ✅ merged (#474)
   ↓
-PR 3 (agents/memory/_epoch_filter.py strict-equality predicate + per-tier recall+write wiring)
+PR 3 (agents/memory/_epoch_filter.py strict-equality predicate + per-tier recall+write wiring) ── 🔀 open (#475)
   ↓
 PR 4 (gRPC rail: orchestrator resolves PERSATRIX_EPOCH at boot + emits persatrix-epoch per request;
       persona-runtime on_event lifts it into epoch_scope)
@@ -77,7 +77,7 @@ PR 2 before PR 3 — the filter cannot wire to a column that does not exist. PR 
 
 ### PR 2: `feature/v035-epoch-migration` — Migration (epoch_id columns + relationships PK)
 
-**Status**: 🔀 PR open ([#474](https://github.com/mkhomutov/Persatrix/pull/474)).
+**Status**: ✅ Merged ([#474](https://github.com/mkhomutov/Persatrix/pull/474)).
 **Depends on**: PR 1.
 **Purpose**: Add `epoch_id TEXT NOT NULL DEFAULT 'live'` to the five persona-memory tiers (`episodes`, `relationships`, `facts`, `notes`, `interactions`) as persona-memory **migration v12**, and the sibling column on the Go channel store (**schema v6**, after the ISSUE-0083 v5). Put `epoch_id` in the `relationships` **primary key**, mirroring the `principal_id` v11 migration's table-rebuild handler ([`agents/memory/_migration_principal.py`](../../agents/memory/_migration_principal.py)).
 
@@ -138,8 +138,8 @@ PR 2 before PR 3 — the filter cannot wire to a column that does not exist. PR 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
 | 1 | Epoch leaf module | `feature/v035-issue0085-epoch-leaf` | ✅ Merged | [#472](https://github.com/mkhomutov/Persatrix/pull/472) | 2026-05-31 |
-| 2 | Migration (epoch_id columns + relationships PK) | `feature/v035-epoch-migration` | 🔀 PR open | [#474](https://github.com/mkhomutov/Persatrix/pull/474) | — |
-| 3 | Filter helper + per-tier wiring | `feature/v035-epoch-filter` | 🔀 PR open | — | — |
+| 2 | Migration (epoch_id columns + relationships PK) | `feature/v035-epoch-migration` | ✅ Merged | [#474](https://github.com/mkhomutov/Persatrix/pull/474) | 2026-05-31 |
+| 3 | Filter helper + per-tier wiring | `feature/v035-epoch-filter` | 🔀 PR open | [#475](https://github.com/mkhomutov/Persatrix/pull/475) | — |
 | 4 | gRPC rail (emission + ingress lift) | `feature/v035-epoch-rail` | ⬜ Not started | — | — |
 | 5 | Operator surface (`--epoch` + env docs) | `feature/v035-epoch-operator` | ⬜ Not started | — | — |
 | 6 | Closeout (F-3 structural-isolation gate + docs) | `feature/v035-epoch-close` | ⬜ Not started | — | — |
