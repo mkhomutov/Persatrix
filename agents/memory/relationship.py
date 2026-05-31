@@ -15,9 +15,11 @@ import logging
 
 import aiosqlite
 
+from ..epoch_id import resolve_epoch_id_silent
 from ..principal_id import resolve_principal_id_silent
 from ..session_id import resolve_session_id_silent
 from ._boundary import warn_external_construction
+from ._epoch_filter import resolve_active_epoch
 from ._principal_filter import resolve_active_principal
 from ._salience import RELATIONSHIP_APPEND_SALIENCE, emit_for_tier
 from ._session_filter import _resolve_session_list
@@ -89,6 +91,9 @@ class RelationshipMemory:
         # ISSUE-0081 PR 3 — tenant snapshot; call-time ``principal_scope``
         # wins via ``resolve_active_principal`` on recall + write paths.
         self._active_principal_id = resolve_principal_id_silent()
+        # ISSUE-0085 PR 3 — epoch snapshot; call-time ``epoch_scope`` wins
+        # via ``resolve_active_epoch`` on recall + write paths.
+        self._active_epoch_id = resolve_epoch_id_silent()
 
     @property
     def agent_id(self) -> str:
@@ -127,6 +132,7 @@ class RelationshipMemory:
                 self._db, self._agent_id, config_relationships,
                 session_id=session_id,
                 principal_id=resolve_active_principal(self._active_principal_id),
+                epoch_id=resolve_active_epoch(self._active_epoch_id),
             )
 
     async def close(self) -> None:
@@ -172,6 +178,7 @@ class RelationshipMemory:
             other_participant_type=other_participant_type,
             sessions=session_list,
             principal_id=resolve_active_principal(self._active_principal_id),
+            epoch_id=resolve_active_epoch(self._active_epoch_id),
         )
 
     async def update_trust(
@@ -199,6 +206,7 @@ class RelationshipMemory:
             participant_type=participant_type,
             other_participant_type=other_participant_type,
             principal_id=resolve_active_principal(self._active_principal_id),
+            epoch_id=resolve_active_epoch(self._active_epoch_id),
         )
 
     async def apply_decay(
@@ -219,6 +227,7 @@ class RelationshipMemory:
             self._ensure_db(), self._agent_id, decay_rate,
             participant_type=participant_type,
             principal_id=resolve_active_principal(self._active_principal_id),
+            epoch_id=resolve_active_epoch(self._active_epoch_id),
         )
 
     # ─── Interaction recording ──────────────────────────────
@@ -254,6 +263,7 @@ class RelationshipMemory:
             other_participant_type=other_participant_type,
             session_id=session_id,
             principal_id=resolve_active_principal(self._active_principal_id),
+            epoch_id=resolve_active_epoch(self._active_epoch_id),
         )
         emit_for_tier(
             agent_id=self._agent_id,
@@ -287,6 +297,7 @@ class RelationshipMemory:
             other_participant_type=other_participant_type,
             sessions=session_list,
             principal_id=resolve_active_principal(self._active_principal_id),
+            epoch_id=resolve_active_epoch(self._active_epoch_id),
         )
 
     async def get_all_relationships(
@@ -314,4 +325,5 @@ class RelationshipMemory:
             participant_type=participant_type,
             sessions=session_list,
             principal_id=resolve_active_principal(self._active_principal_id),
+            epoch_id=resolve_active_epoch(self._active_epoch_id),
         )

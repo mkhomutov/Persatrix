@@ -17,8 +17,10 @@ from dataclasses import dataclass, field
 
 import aiosqlite
 
+from ..epoch_id import DEFAULT_EPOCH_ID
 from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ..session_id import LEGACY_SESSION_ID, normalize_session_id
+from ._epoch_filter import resolve_active_epoch
 from ._notes_recall import (
     _FTS5_SPECIAL,
     _recall_notes_fts5,
@@ -100,6 +102,7 @@ class NoteStore:
         *,
         active_session_id: str = LEGACY_SESSION_ID,
         active_principal_id: str = DEFAULT_PRINCIPAL_ID,
+        active_epoch_id: str = DEFAULT_EPOCH_ID,
     ) -> None:
         self._agent_id = agent_id
         self._db = db
@@ -113,6 +116,9 @@ class NoteStore:
         # ISSUE-0081 PR 3 — tenant snapshot, threaded the same way; the
         # call-time ``principal_scope`` wins via ``resolve_active_principal``.
         self._active_principal_id = active_principal_id
+        # ISSUE-0085 PR 3 — epoch snapshot, threaded the same way; the
+        # call-time ``epoch_scope`` wins via ``resolve_active_epoch``.
+        self._active_epoch_id = active_epoch_id
 
     # ─── CRUD ───────────────────────────────────────────────
 
@@ -166,12 +172,15 @@ class NoteStore:
         # ISSUE-0081 PR 3: resolve the active tenant once (scope override,
         # else construction snapshot) for both the prune scope and the row tag.
         principal_id = resolve_active_principal(self._active_principal_id)
+        # ISSUE-0085 PR 3: resolve the active epoch the same way.
+        epoch_id = resolve_active_epoch(self._active_epoch_id)
 
-        # Prune scoped to ``(agent_id, session_id, principal_id)`` per PR 1
-        # F1 carry-forward extended to the tenant axis: a run-b / tenant-b
-        # write cannot evict a run-a / tenant-a row.  Trade-off is
-        # per-(session, principal) capacity; see :meth:`_prune_notes`.
-        await self._prune_notes(max_notes, session_id, principal_id)
+        # Prune scoped to ``(agent_id, session_id, principal_id, epoch_id)``
+        # per PR 1 F1 carry-forward extended to the tenant + epoch axes: a
+        # run-b / tenant-b / epoch-b write cannot evict a run-a row.
+        # Trade-off is per-(session, principal, epoch) capacity; see
+        # :meth:`_prune_notes`.
+        await self._prune_notes(max_notes, session_id, principal_id, epoch_id)
 
         note_id = str(uuid.uuid4())
         now = time.time()
@@ -180,8 +189,8 @@ class NoteStore:
             INSERT INTO notes
                 (id, agent_id, topic, content, tags_json,
                  access_count, created_at, updated_at, session_id,
-                 principal_id)
-            VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+                 principal_id, epoch_id)
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
             """,
             (
                 note_id,
@@ -193,6 +202,7 @@ class NoteStore:
                 now,
                 session_id,
                 principal_id,
+                epoch_id,
             ),
         )
         await self._db.commit()
@@ -255,26 +265,27 @@ class NoteStore:
             sessions, self._active_session_id,
         )
         active_principal = resolve_active_principal(self._active_principal_id)
+        active_epoch = resolve_active_epoch(self._active_epoch_id)
 
         if query and self._fts5:
             rows = await _recall_notes_fts5(
                 self._db, agent_id=self._agent_id, query=query,
                 limit=limit, min_score=min_score,
                 sessions=session_list, note_cols=_NOTE_COLS,
-                principal_id=active_principal,
+                principal_id=active_principal, epoch_id=active_epoch,
             )
         elif query:
             rows = await _recall_notes_like(
                 self._db, agent_id=self._agent_id, query=query,
                 limit=limit, min_score=min_score,
                 sessions=session_list, note_cols=_NOTE_COLS,
-                principal_id=active_principal,
+                principal_id=active_principal, epoch_id=active_epoch,
             )
         else:
             rows = await _recall_notes_recency(
                 self._db, agent_id=self._agent_id, limit=limit,
                 sessions=session_list, note_cols=_NOTE_COLS,
-                principal_id=active_principal,
+                principal_id=active_principal, epoch_id=active_epoch,
             )
 
         notes = [self._row_to_note(row) for row in rows]
@@ -314,52 +325,60 @@ class NoteStore:
         # ISSUE-0081 PR 3: strict tenant equality in addition to the
         # session carve-out — a foreign principal cannot mutate this row
         # even if it knows the UUID and shares the session/legacy scope.
+        # ISSUE-0085 PR 3: strict epoch equality, same reasoning — a fresh
+        # epoch cannot mutate a prior run's row through the session carve-out.
         principal_id = resolve_active_principal(self._active_principal_id)
+        epoch_id = resolve_active_epoch(self._active_epoch_id)
         cursor = await self._db.execute(
             "UPDATE notes SET content = ?, updated_at = ? "
             "WHERE id = ? AND agent_id = ? "
             "AND session_id IN (?, ?) "
-            "AND principal_id = ?",
+            "AND principal_id = ? "
+            "AND epoch_id = ?",
             (
                 content, now, note_id, self._agent_id,
                 self._active_session_id, LEGACY_SESSION_ID,
-                principal_id,
+                principal_id, epoch_id,
             ),
         )
         await self._db.commit()
         return cursor.rowcount > 0
 
     async def delete_note(self, note_id: str) -> bool:
-        """Delete a note by ID. Returns True if found.  Session- and
-        principal-scoped per :meth:`update_note`."""
+        """Delete a note by ID. Returns True if found.  Session-,
+        principal-, and epoch-scoped per :meth:`update_note`."""
         principal_id = resolve_active_principal(self._active_principal_id)
+        epoch_id = resolve_active_epoch(self._active_epoch_id)
         cursor = await self._db.execute(
             "DELETE FROM notes "
             "WHERE id = ? AND agent_id = ? "
             "AND session_id IN (?, ?) "
-            "AND principal_id = ?",
+            "AND principal_id = ? "
+            "AND epoch_id = ?",
             (
                 note_id, self._agent_id,
                 self._active_session_id, LEGACY_SESSION_ID,
-                principal_id,
+                principal_id, epoch_id,
             ),
         )
         await self._db.commit()
         return cursor.rowcount > 0
 
     async def count_notes(self) -> int:
-        """Number of notes visible to the active session + tenant (per
-        :meth:`update_note`'s scope)."""
+        """Number of notes visible to the active session + tenant + epoch
+        (per :meth:`update_note`'s scope)."""
         principal_id = resolve_active_principal(self._active_principal_id)
+        epoch_id = resolve_active_epoch(self._active_epoch_id)
         async with self._db.execute(
             "SELECT COUNT(*) FROM notes "
             "WHERE agent_id = ? "
             "AND session_id IN (?, ?) "
-            "AND principal_id = ?",
+            "AND principal_id = ? "
+            "AND epoch_id = ?",
             (
                 self._agent_id,
                 self._active_session_id, LEGACY_SESSION_ID,
-                principal_id,
+                principal_id, epoch_id,
             ),
         ) as cursor:
             row = await cursor.fetchone()
@@ -369,38 +388,41 @@ class NoteStore:
 
     async def _prune_notes(
         self, max_notes: int, session_id: str, principal_id: str,
+        epoch_id: str,
     ) -> None:
         """Remove oldest low-access notes in the ``(session_id,
-        principal_id)`` scope when count >= max_notes.
+        principal_id, epoch_id)`` scope when count >= max_notes.
 
         Single atomic DELETE-with-subquery avoids a TOCTOU race between
         SELECT count and DELETE on shared-DB topologies (F-3b-1).
         RFC 0031 Phase 2 PR 2 scoped this to ``(agent_id, session_id)``;
-        ISSUE-0081 PR 3 extends it to ``(agent_id, session_id,
-        principal_id)`` so write-side isolation covers the tenant axis —
-        a tenant-b write cannot evict a tenant-a row.  Trade-off is
-        per-(session, principal) capacity.
+        ISSUE-0081 PR 3 extended it to the tenant axis; ISSUE-0085 PR 3
+        extends it again to the epoch axis so write-side isolation covers
+        run/test isolation — a fresh-epoch write cannot evict a prior
+        run's row.  Trade-off is per-(session, principal, epoch) capacity.
         """
         await self._db.execute(
             """
             DELETE FROM notes
             WHERE agent_id = ? AND session_id = ? AND principal_id = ?
+              AND epoch_id = ?
               AND id IN (
                 SELECT id FROM notes
                 WHERE agent_id = ? AND session_id = ? AND principal_id = ?
+                  AND epoch_id = ?
                 ORDER BY access_count ASC, created_at ASC
                 LIMIT MAX(
                     0,
                     (SELECT COUNT(*) FROM notes
                      WHERE agent_id = ? AND session_id = ?
-                       AND principal_id = ?) - ? + 1
+                       AND principal_id = ? AND epoch_id = ?) - ? + 1
                 )
             )
             """,
             (
-                self._agent_id, session_id, principal_id,
-                self._agent_id, session_id, principal_id,
-                self._agent_id, session_id, principal_id,
+                self._agent_id, session_id, principal_id, epoch_id,
+                self._agent_id, session_id, principal_id, epoch_id,
+                self._agent_id, session_id, principal_id, epoch_id,
                 max_notes,
             ),
         )

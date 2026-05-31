@@ -24,6 +24,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from ..session_id import current_session_id
+from ._epoch_filter import resolve_active_epoch
 from ._principal_filter import resolve_active_principal
 from ._session_filter import _resolve_session_list
 from .episodic_procedural import (
@@ -104,6 +105,8 @@ class ProceduralFacadeMixin:
     _session_id: str
     # ISSUE-0081 PR 3: facade-level tenant snapshot (same source).
     _principal_id: str
+    # ISSUE-0085 PR 3: facade-level epoch snapshot (same source).
+    _epoch_id: str
 
     def _require_initialised(self) -> None: ...  # pragma: no cover — host
 
@@ -162,6 +165,7 @@ class ProceduralFacadeMixin:
         refreshed = await _refresh_confidence(
             db, self._agent_id, key,
             principal_id=resolve_active_principal(self._principal_id),
+            epoch_id=resolve_active_epoch(self._epoch_id),
         )
         if refreshed:
             return
@@ -250,6 +254,7 @@ class ProceduralFacadeMixin:
             now=now,
             session_list=session_list,
             principal_id=resolve_active_principal(self._principal_id),
+            epoch_id=resolve_active_epoch(self._epoch_id),
         )
 
 

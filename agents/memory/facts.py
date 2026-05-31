@@ -26,13 +26,14 @@ import contextlib
 import logging
 import uuid
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
 
 import aiosqlite
 
+from ..epoch_id import resolve_epoch_id_silent
 from ..observability.metrics import try_get_instruments
 from ..principal_id import resolve_principal_id_silent
 from ..session_id import normalize_session_id, resolve_session_id_silent
+from ._epoch_filter import epoch_eq_clause, resolve_active_epoch
 from ._facts_audit import emit_audit as _emit_audit
 from ._facts_erasure import delete_by_subject as _delete_by_subject
 from ._facts_reinforce import mark_recalled_for_agent as _mark_recalled_for_agent
@@ -41,11 +42,15 @@ from ._facts_supersede import retract_fact as _retract_fact
 from ._principal_filter import principal_eq_clause, resolve_active_principal
 from ._session_filter import _resolve_session_list, session_in_clause
 from .fact_predicates import canonicalize_subject, validate_predicate
+from .fact_types import _FACT_COLS, _FACT_SELECT, Fact
 from .migrations import _apply_migrations
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Fact", "FactStore"]
+# ``Fact`` / column constants moved to :mod:`agents.memory.fact_types`
+# (ISSUE-0085 PR 3 — keep this module under the 500-line cap); re-exported
+# here so ``from agents.memory.facts import Fact`` is unchanged.
+__all__ = ["Fact", "FactStore", "_FACT_COLS", "_FACT_SELECT"]
 
 
 # Recall limit ceiling — mirrors :data:`agents.memory.notes._MAX_RECALL_LIMIT`
@@ -53,84 +58,6 @@ __all__ = ["Fact", "FactStore"]
 # prompt (RFC 0017 budget allocator owns the per-tier slice; this is the
 # hard upper bound on row count regardless of token shape).
 _MAX_RECALL_LIMIT = 100
-
-
-# ─── Data model ─────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class Fact:
-    """A single declarative-fact tuple — RFC 0026 §A data shape.
-
-    Frozen so a recall caller cannot silently desynchronise its in-memory
-    view from the persisted row.  Mutations must round-trip through
-    :class:`FactStore` (``store`` / ``supersede``).
-
-    ``fact_id`` is a ``uuid4`` hex string in this implementation; the
-    RFC text names ULID but the rest of the storage layer
-    (``Episode.id``, ``Note.id``, ``Interaction.id``) uses
-    ``uuid.uuid4`` and the ``asserted_at`` column already gives
-    chronological ordering, so the ULID time-prefix property is not
-    load-bearing here.
-
-    ``source_interaction_id`` is typed ``str | None`` and the DDL
-    column is nullable.  PR 5a amended RFC §A to permit ``NULL`` —
-    three legitimate callers (test fixtures, the future RFC 0013
-    erasure backfill, and the OQ #9 operator-seeded fact path) commit
-    rows without a source interaction; the PR 2 extractor always
-    populates it on the production write path.
-
-    ``asserted_at`` is ``float`` (epoch seconds) rather than the RFC's
-    ``datetime`` — matches the codebase convention (``episodes.created_at``,
-    ``interactions.started_at`` are both REAL epoch-seconds) so a single
-    conversion seam (``time.time()``) covers every tier.  Tracked as a
-    RFC §A amendment in PR 6.
-
-    ``certainty`` is seeded by the extractor (PR 2) and decayed /
-    reinforced by PR 4's use-based salience rule.  PR 1 stores whatever
-    value the caller supplies (default ``1.0``) — recall does not yet
-    apply a salience score.
-
-    ``superseded_by`` carries the ``fact_id`` of the row that replaces
-    this one under latest-asserted-wins retraction.  PR 4 owns the
-    recall-side policy; PR 1 ships the column + the write path so the
-    schema is forward-compatible.
-
-    ``session_id`` mirrors the migration-v7 contract on episodes /
-    relationships — pre-RFC-0031 callers produce queryable rows with
-    the ``'legacy'`` synthetic carve-out.
-    """
-
-    fact_id: str
-    agent_id: str
-    subject: str
-    predicate: str
-    object: str
-    certainty: float
-    source_interaction_id: str | None
-    asserted_at: float
-    last_recalled_at: float | None
-    superseded_by: str | None
-    session_id: str
-
-
-# Column list pinned here so :meth:`FactStore._row_to_fact` stays in
-# sync with SELECT statements — same pattern as ``_NOTE_COLS`` in
-# :mod:`agents.memory.notes`.
-_FACT_COLS = (
-    "fact_id",
-    "agent_id",
-    "subject",
-    "predicate",
-    "object",
-    "certainty",
-    "source_interaction_id",
-    "asserted_at",
-    "last_recalled_at",
-    "superseded_by",
-    "session_id",
-)
-_FACT_SELECT = ", ".join(_FACT_COLS)
 
 
 # Predicate validation seam — PR 2 swapped the Phase-1 permissive
@@ -182,6 +109,8 @@ class FactStore:
         self._active_session_id = resolve_session_id_silent()
         # ISSUE-0081 PR 3 — tenant snapshot (call-time scope wins on use).
         self._active_principal_id = resolve_principal_id_silent()
+        # ISSUE-0085 PR 3 — epoch (run/test) snapshot, same shape.
+        self._active_epoch_id = resolve_epoch_id_silent()
 
     @property
     def agent_id(self) -> str:
@@ -276,6 +205,8 @@ class FactStore:
         session_id = normalize_session_id(session_id)
         # ISSUE-0081 PR 3: active tenant for the row tag + supersede chain key.
         principal_id = resolve_active_principal(self._active_principal_id)
+        # ISSUE-0085 PR 3: active epoch for the row tag + supersede chain key.
+        epoch_id = resolve_active_epoch(self._active_epoch_id)
 
         db = self._ensure_db()
         fact_id = str(uuid.uuid4())
@@ -285,8 +216,9 @@ class FactStore:
             INSERT INTO facts
                 (fact_id, agent_id, subject, predicate, object,
                  certainty, source_interaction_id, asserted_at,
-                 last_recalled_at, superseded_by, session_id, principal_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+                 last_recalled_at, superseded_by, session_id, principal_id,
+                 epoch_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
             """,
             (
                 fact_id,
@@ -299,6 +231,7 @@ class FactStore:
                 asserted_at,
                 session_id,
                 principal_id,
+                epoch_id,
             ),
         )
 
@@ -311,6 +244,7 @@ class FactStore:
             new_fact_id=fact_id,
             session_id=session_id,
             principal_id=principal_id,
+            epoch_id=epoch_id,
         )
         await db.commit()
 
@@ -401,13 +335,18 @@ class FactStore:
             resolve_active_principal(self._active_principal_id),
             column="principal_id",
         )
+        # ISSUE-0085 PR 3 — strict epoch equality, same shape.
+        epoch_clause, epoch_params = epoch_eq_clause(
+            resolve_active_epoch(self._active_epoch_id),
+            column="epoch_id",
+        )
 
         db = self._ensure_db()
         if include_superseded:
             sql = (
                 f"SELECT {_FACT_SELECT} FROM facts "
                 "WHERE agent_id = ? AND subject = ?"
-                f"{sess_clause}{princ_clause} "
+                f"{sess_clause}{princ_clause}{epoch_clause} "
                 "ORDER BY asserted_at DESC LIMIT ?"
             )
         else:
@@ -415,11 +354,14 @@ class FactStore:
                 f"SELECT {_FACT_SELECT} FROM facts "
                 "WHERE agent_id = ? AND subject = ? "
                 "AND superseded_by IS NULL"
-                f"{sess_clause}{princ_clause} "
+                f"{sess_clause}{princ_clause}{epoch_clause} "
                 "ORDER BY asserted_at DESC LIMIT ?"
             )
         async with db.execute(
-            sql, (self._agent_id, subject, *sess_params, *princ_params, limit),
+            sql, (
+                self._agent_id, subject, *sess_params, *princ_params,
+                *epoch_params, limit,
+            ),
         ) as cursor:
             rows = await cursor.fetchall()
         return [self._row_to_fact(row) for row in rows]
@@ -445,6 +387,7 @@ class FactStore:
             self._ensure_db(), agent_id=self._agent_id,
             fact_id=fact_id, by_fact_id=by_fact_id,
             principal_id=resolve_active_principal(self._active_principal_id),
+            epoch_id=resolve_active_epoch(self._active_epoch_id),
         )
 
     async def prune(self, *, before: float) -> int:
