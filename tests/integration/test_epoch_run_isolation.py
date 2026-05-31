@@ -17,7 +17,7 @@ fresh epoch and assert it inherits **nothing** — across every
 persona-memory tier at once (episodes, relationship trust + interaction
 history, person-facts).  The unit pins prove the predicate shape per
 tier (`tests/unit/python/test_epoch_filter.py`,
-`test_epoch_*_scope.py`); what this adds is the end-to-end property a
+`test_epoch_scope.py`); what this adds is the end-to-end property a
 future refactor cannot regress without tripping.
 
 The decisive design choice vs. :file:`test_session_continuity.py`:
@@ -59,7 +59,8 @@ class _Bundle:
     resolved :envvar:`PERSATRIX_EPOCH` — the env value is captured at
     construction (``resolve_epoch_id_silent`` into ``_active_epoch_id``),
     so an already-built bundle keeps its epoch even after a later build
-    overrides the env var.  That snapshot is the property under test: a
+    overrides the env var.  That snapshot is the property under test
+    (pinned by ``test_prior_run_bundle_retains_its_epoch_snapshot``): a
     second run under a fresh epoch tags and filters on its own id.
     """
 
@@ -141,14 +142,25 @@ class TestEpochRunIsolation:
         run1 = await epoch_factory("run-1")
         await _seed_run(run1)
 
-        # Sanity: run 1 reads its own state back (the filter is not just
-        # hiding everything — within-epoch continuity is intact).
+        # Sanity: run 1 reads its own state back across every tier this
+        # test later asserts is isolated (episode, trust + interactions,
+        # person-fact) — so each isolation assertion below is non-vacuous
+        # in its own right, not only via TestWithinEpochContinuity.  The
+        # filter narrows by epoch; it is not hiding everything.
         summary1 = await run1.rels.get_relationship_summary(ALICE)
         assert summary1.trust_score > 0.5, (
             "within-epoch sanity: run-1 must see the trust it built "
             f"(got {summary1.trust_score})"
         )
         assert summary1.interaction_count == 1
+        episodes1 = await run1.facade.retrieve_relevant("alice")
+        assert any("alice" in e.content for e in episodes1), (
+            "within-epoch sanity: run-1 must retrieve the episode it stored"
+        )
+        facts1 = await run1.facts.recall(subject=ALICE)
+        assert any(f.object == "lakeshore" for f in facts1), (
+            "within-epoch sanity: run-1 must recall the person-fact it stored"
+        )
 
         # Run 2 — SAME room, SAME user, fresh epoch ``run-2``.  This is
         # the rerun a fresh channel name alone cannot isolate: the
@@ -180,6 +192,49 @@ class TestEpochRunIsolation:
         assert facts == [], (
             "F-3 structural leak: run-1 person-fact surfaced under a fresh "
             f"epoch ({facts!r})"
+        )
+
+    async def test_prior_run_bundle_retains_its_epoch_snapshot(
+        self, epoch_factory,
+    ) -> None:
+        """An already-built bundle keeps reading its own epoch after a
+        later build overrides ``PERSATRIX_EPOCH``.
+
+        The complement to
+        :meth:`test_rerun_under_fresh_epoch_inherits_nothing`: that test
+        proves the *new* run sees nothing; this proves the **snapshot**
+        is what isolates them.  Each tier resolves its ``epoch_id`` from
+        the construction-time snapshot (``resolve_epoch_id_silent`` into
+        ``_active_epoch_id``), never the live env var
+        (``agents.memory._epoch_filter.resolve_active_epoch`` is
+        ``current_epoch_id() or snapshot`` — no env read) — so building a
+        fresh ``run-2`` bundle, which flips the env to ``run-2``, must not
+        retroactively blind ``run-1``'s bundle to its own rows.  Were a
+        tier to read the env at query time instead, run-1 would resolve
+        to ``run-2`` here and lose its data: the regression this pins.
+        """
+        run1 = await epoch_factory("run-1")
+        await _seed_run(run1)
+
+        # A later build flips PERSATRIX_EPOCH to ``run-2`` — the env the
+        # run-1 snapshot must ignore.  (Its bundle is unused here.)
+        await epoch_factory("run-2")
+
+        # run-1 still reads its own arc back across every tier: the env
+        # moved on, the construction-time snapshot did not.
+        summary = await run1.rels.get_relationship_summary(ALICE)
+        assert summary.trust_score > 0.5, (
+            "snapshot retention: run-1 lost its trust once run-2 was built "
+            f"(got {summary.trust_score}) — a tier read the env at query time"
+        )
+        assert summary.interaction_count == 1
+        facts = await run1.facts.recall(subject=ALICE)
+        assert any(f.object == "lakeshore" for f in facts), (
+            "snapshot retention: run-1 lost its fact once run-2 was built"
+        )
+        episodes = await run1.facade.retrieve_relevant("alice")
+        assert any("alice" in e.content for e in episodes), (
+            "snapshot retention: run-1 lost its episode once run-2 was built"
         )
 
 
