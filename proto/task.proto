@@ -199,6 +199,22 @@ message ChannelMessageEvent {
   // `docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md` for
   // the full contract.
   int32 cascade_depth = 11;
+  // ISSUE-0068 / RFC 0011 amendment "Participant-type wire propagation":
+  // the peer type ("user" | "agent") of `sender_id`. Carried as a
+  // first-class field for the same reason as `cascade_depth = 11`:
+  // `ChannelMessageEvent` has no metadata map, so the
+  // `ChannelMessage.Metadata["participant_type"]` the REST chat handler
+  // sets is otherwise dropped at this boundary — leaving the agent's
+  // relationship tier to default every channel-delivered chat peer to
+  // "agent" instead of "user". The orchestrator populates it from the
+  // publish metadata; the agent maps it onto the
+  // `sender_participant_type` event-metadata key its episode-routing
+  // close path already reads. Empty (proto3 implicit presence) is the
+  // genuine agent-to-agent case and resolves to "agent" downstream — the
+  // REST chat handler defaults an omitted request field to "user" before
+  // publish, so ordinary fanout never fabricates a peer type. See
+  // `docs/rfcs/0011-amendment-participant-type-wire-propagation.md`.
+  string sender_participant_type = 12;
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)

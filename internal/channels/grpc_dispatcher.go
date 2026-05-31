@@ -387,5 +387,13 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		//
 		// [RFC 0011 amendment 'Cascade-depth wire propagation']: ../../docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md
 		CascadeDepth: int32(readCascadeDepth(msg.Metadata)),
+		// ISSUE-0068 / [RFC 0011 amendment 'Participant-type wire
+		// propagation']: lift the publish-side `participant_type`
+		// (set by the REST chat handler) onto the typed proto field so
+		// the peer type survives this boundary. Empty for ordinary
+		// agent-to-agent fanout — the agent resolves that to "agent".
+		//
+		// [RFC 0011 amendment 'Participant-type wire propagation']: ../../docs/rfcs/0011-amendment-participant-type-wire-propagation.md
+		SenderParticipantType: readParticipantType(msg.Metadata),
 	}
 }

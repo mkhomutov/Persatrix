@@ -5,16 +5,18 @@ id: ISSUE-0068
 # summary: one-line description, surfaced as the Summary column in INDEX.md
 summary: "Human chat peer is recorded as other_participant_type='agent' (not 'user') in the relationship tier — REST chat participant_type is dropped at the ChannelMessageEvent proto boundary"
 # status: open | in_progress | resolved
-status: open
+status: resolved
 # severity: low | medium | high | critical
 severity: medium
 # area: internal/ package or agent subsystem
 area: memory
 # created: YYYY-MM-DD when the finding was first captured (validated)
 created: 2026-05-22
+closed: 2026-05-31
 # refs: documentary only — not surfaced in INDEX, useful for grep
 refs:
   - docs/rfcs/0011-channels-bridges.md
+  - docs/rfcs/0011-amendment-participant-type-wire-propagation.md
   - docs/rfcs/0020-interaction-lifecycle.md
   - proto/task.proto
   - docs/manual-tests/MT-CHAT-004.md
@@ -101,6 +103,27 @@ The clean fix requires carrying peer type to the agent. Options:
 
 Whichever path is chosen, reconcile the `participant_type` vs `sender_participant_type` key naming
 between `chat_handler.go` and `episode_routing.py`.
+
+## Resolution
+
+> 2026-05-31 — resolved via **option 1** (the proto change), under the
+> [RFC 0011 Participant-Type Wire Propagation amendment](../rfcs/0011-amendment-participant-type-wire-propagation.md),
+> mirroring the cascade-depth wire-propagation precedent:
+>
+> - `proto/task.proto`: `ChannelMessageEvent` gains `string sender_participant_type = 12` — the
+>   peer type is now a first-class wire field rather than dropped at the metadata-less boundary.
+> - `internal/server/chat_handler.go`: an omitted REST `participant_type` defaults to `"user"`
+>   (REST chat is always a human→persona DM), matching the gRPC servicer's OQ-3 default. The
+>   reproduction's "user_id only (no participant_type)" case now records `"user"`.
+> - `internal/channels/grpc_dispatcher.go` (+ `participant_type.go`): `channelMessageToProto`
+>   lifts `Metadata["participant_type"]` onto the typed field; empty for agent-to-agent fanout.
+> - `agents/server_servicers.py`: `ReceiveChannelMessage` seeds
+>   `event.metadata["sender_participant_type"]` from the typed field — **reconciling the
+>   `participant_type` vs `sender_participant_type` key-name mismatch** at the single ingress seam.
+>   The existing episode-routing → `record_close` path consumes it unchanged.
+>
+> `MT-CHAT-004`'s `other_participant_type == "user"` assertion is now reachable; its
+> ⚠️ Accepted-with-known-gap note is cleared.
 
 ## Notes
 

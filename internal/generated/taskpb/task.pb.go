@@ -787,9 +787,25 @@ type ChannelMessageEvent struct {
 	// also the cascade-origin value. See
 	// `docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md` for
 	// the full contract.
-	CascadeDepth  int32 `protobuf:"varint,11,opt,name=cascade_depth,json=cascadeDepth,proto3" json:"cascade_depth,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	CascadeDepth int32 `protobuf:"varint,11,opt,name=cascade_depth,json=cascadeDepth,proto3" json:"cascade_depth,omitempty"`
+	// ISSUE-0068 / RFC 0011 amendment "Participant-type wire propagation":
+	// the peer type ("user" | "agent") of `sender_id`. Carried as a
+	// first-class field for the same reason as `cascade_depth = 11`:
+	// `ChannelMessageEvent` has no metadata map, so the
+	// `ChannelMessage.Metadata["participant_type"]` the REST chat handler
+	// sets is otherwise dropped at this boundary — leaving the agent's
+	// relationship tier to default every channel-delivered chat peer to
+	// "agent" instead of "user". The orchestrator populates it from the
+	// publish metadata; the agent maps it onto the
+	// `sender_participant_type` event-metadata key its episode-routing
+	// close path already reads. Empty (proto3 implicit presence) is the
+	// genuine agent-to-agent case and resolves to "agent" downstream — the
+	// REST chat handler defaults an omitted request field to "user" before
+	// publish, so ordinary fanout never fabricates a peer type. See
+	// `docs/rfcs/0011-amendment-participant-type-wire-propagation.md`.
+	SenderParticipantType string `protobuf:"bytes,12,opt,name=sender_participant_type,json=senderParticipantType,proto3" json:"sender_participant_type,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *ChannelMessageEvent) Reset() {
@@ -897,6 +913,13 @@ func (x *ChannelMessageEvent) GetCascadeDepth() int32 {
 		return x.CascadeDepth
 	}
 	return 0
+}
+
+func (x *ChannelMessageEvent) GetSenderParticipantType() string {
+	if x != nil {
+		return x.SenderParticipantType
+	}
+	return ""
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
@@ -1019,7 +1042,7 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\x87\x03\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xbf\x03\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -1034,7 +1057,8 @@ const file_task_proto_rawDesc = "" +
 	"\x0erespond_policy\x18\t \x01(\tR\rrespondPolicy\x125\n" +
 	"\x17thread_parent_sender_id\x18\n" +
 	" \x01(\tR\x14threadParentSenderId\x12#\n" +
-	"\rcascade_depth\x18\v \x01(\x05R\fcascadeDepth\"H\n" +
+	"\rcascade_depth\x18\v \x01(\x05R\fcascadeDepth\x126\n" +
+	"\x17sender_participant_type\x18\f \x01(\tR\x15senderParticipantType\"H\n" +
 	"\aTaskAck\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12#\n" +
 	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage*^\n" +

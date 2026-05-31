@@ -56,6 +56,7 @@ def test_channel_message_event_roundtrips_all_fields():
         respond_policy="when_mentioned",
         thread_parent_sender_id="dave",
         cascade_depth=3,
+        sender_participant_type="user",
     )
 
     blob = event.SerializeToString()
@@ -77,6 +78,7 @@ def test_channel_message_event_roundtrips_all_fields():
     assert decoded.respond_policy == "when_mentioned"
     assert decoded.thread_parent_sender_id == "dave"
     assert decoded.cascade_depth == 3
+    assert decoded.sender_participant_type == "user"
 
 
 def test_channel_message_event_cascade_depth_default_roundtrips():
@@ -188,6 +190,9 @@ def test_channel_message_event_field_numbers_pinned():
         # tag byte.
         (9, "respond_policy", "when_mentioned"),
         (10, "thread_parent_sender_id", "dave"),
+        # Field 11 is `int32 cascade_depth` (varint); pinned in
+        # test_channel_message_event_cascade_depth_field_number_pinned.
+        (12, "sender_participant_type", "user"),
     ]
     for field_number, attr, value in cases:
         ev = task_pb2.ChannelMessageEvent(**{attr: value})

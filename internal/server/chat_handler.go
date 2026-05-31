@@ -304,9 +304,18 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	metadata := map[string]any{
 		"chat_session_id": sessionID,
 	}
-	if req.ParticipantType != "" {
-		metadata["participant_type"] = req.ParticipantType
+	// ISSUE-0068: REST chat is always a human talking to a persona, so an
+	// omitted `participant_type` defaults to "user" — matching the gRPC
+	// SendChatMessage servicer's OQ-3 default. Without this default the
+	// field rides the wire empty and the agent's relationship tier records
+	// the human peer as `other_participant_type=agent`. An explicit value
+	// is passed through verbatim (e.g. a bridge integration tagging a
+	// non-human sender).
+	participantType := req.ParticipantType
+	if participantType == "" {
+		participantType = "user"
 	}
+	metadata["participant_type"] = participantType
 
 	inbound := channels.ChannelMessage{
 		ID:        uuid.NewString(),

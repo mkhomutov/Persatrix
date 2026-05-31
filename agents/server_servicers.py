@@ -436,6 +436,20 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             metadata={"cascade_depth": request.cascade_depth},
         )
 
+        # ISSUE-0068: lift the sender's peer type off the typed proto
+        # field onto the metadata key the episode-routing close path reads
+        # (``sender_participant_type``) so a channel-delivered (REST) chat
+        # peer is recorded as ``other_participant_type=user`` rather than
+        # the ``agent`` default. Only seed a non-empty value: an empty
+        # field is genuine agent-to-agent traffic, which the read path
+        # resolves to ``agent``. Reconciles the publish-side
+        # ``participant_type`` key with the read-side
+        # ``sender_participant_type`` key at this single boundary.
+        if request.sender_participant_type:
+            event.metadata["sender_participant_type"] = (
+                request.sender_participant_type
+            )
+
         # ISSUE-0081 PR 2: carry the per-request session through to the
         # deferred EventLoop drain.  The fire-and-forget path processes the
         # event in a different (boot-created) task, so the scope cannot ride
