@@ -366,11 +366,15 @@ func TestHandleChat_PropagatesSessionAndParticipantMetadata(t *testing.T) {
 	registerHealthyAgent(t, reg, "agent-x", "Agent X")
 	publishReplyAfter(t, router, store, "alice", "agent-x", "ok", 20*time.Millisecond)
 
+	// "agent" is a valid, non-default vocabulary value (the default is
+	// "user"), so it still proves an explicit field overrides the default
+	// while staying inside the `{"agent","user"}` set the handler now
+	// validates — a bridge tagging a non-human sender is the real use case.
 	body, _ := json.Marshal(chatRequest{
 		Message:         "Hi",
 		UserID:          "alice",
 		ChatSessionID:   "sess-xyz",
-		ParticipantType: "human",
+		ParticipantType: "agent",
 	})
 	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
 	require.Equal(t, 200, rec.Code, "body=%s", rec.Body.String())
@@ -393,7 +397,7 @@ func TestHandleChat_PropagatesSessionAndParticipantMetadata(t *testing.T) {
 	require.NotNil(t, inbound, "inbound message must persist")
 	require.NotNil(t, inbound.Metadata, "metadata must be populated")
 	assert.Equal(t, "sess-xyz", inbound.Metadata["chat_session_id"], "chat_session_id must be propagated to metadata")
-	assert.Equal(t, "human", inbound.Metadata["participant_type"], "participant_type must be propagated to metadata")
+	assert.Equal(t, "agent", inbound.Metadata["participant_type"], "participant_type must be propagated to metadata")
 }
 
 // TestHandleChat_ZeroTimestampReplyDoesNotLeakNegativeUnix pins the

@@ -114,7 +114,10 @@ between `chat_handler.go` and `episode_routing.py`.
 >   peer type is now a first-class wire field rather than dropped at the metadata-less boundary.
 > - `internal/server/chat_handler.go`: an omitted REST `participant_type` defaults to `"user"`
 >   (REST chat is always a human→persona DM), matching the gRPC servicer's OQ-3 default. The
->   reproduction's "user_id only (no participant_type)" case now records `"user"`.
+>   reproduction's "user_id only (no participant_type)" case now records `"user"`. An **explicit**
+>   value is validated against `{"agent","user"}` (`channels.IsValidParticipantType`) and rejected
+>   with `400` if out of vocabulary — parity with the gRPC servicer's `validate_participant_type`,
+>   so a typo can no longer silently degrade to `"agent"` downstream.
 > - `internal/channels/grpc_dispatcher.go` (+ `participant_type.go`): `channelMessageToProto`
 >   lifts `Metadata["participant_type"]` onto the typed field; empty for agent-to-agent fanout.
 > - `agents/server_servicers.py`: `ReceiveChannelMessage` seeds

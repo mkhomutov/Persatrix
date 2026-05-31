@@ -112,7 +112,7 @@ both participants as members
 **Action**:
 
 ```pwsh
-$body = '{"message":"hi from MT-005","user_id":"alice","participant_type":"human"}'
+$body = '{"message":"hi from MT-005","user_id":"alice","participant_type":"user"}'
 $resp = Invoke-RestMethod -Uri http://127.0.0.1:8080/api/v1/agents/ember-owl/chat `
     -Method POST -ContentType 'application/json' -Body $body -TimeoutSec 60
 $resp | Select-Object reply_status, agent_id, chat_session_id | Format-Table
@@ -240,7 +240,7 @@ resulting channel id.
 **Action**:
 
 ```pwsh
-$body = '{"message":"hi from MT-005 step 6","user_id":"zara","participant_type":"human"}'
+$body = '{"message":"hi from MT-005 step 6","user_id":"zara","participant_type":"user"}'
 $null = Invoke-RestMethod -Uri http://127.0.0.1:8080/api/v1/agents/ember-owl/chat `
     -Method POST -ContentType 'application/json' -Body $body -TimeoutSec 60
 $dmZ = Invoke-RestMethod http://127.0.0.1:8080/api/v1/channels/dm:ember-owl:zara
@@ -268,10 +268,12 @@ The chat handler maps `ErrInvalidParticipantID` to 400
 Send a chat where `user_id` equals the agent id to exercise this path.
 
 > The 400 fires from the `CanonicalDMID` same-id check and is independent of
-> `participant_type` — the chat handler propagates that field as metadata
-> only ([chat_handler.go:283-285](../../internal/server/chat_handler.go#L283-L285)).
-> Flipping the body to `participant_type:"human"` does not change the
-> outcome; the rejection is purely id-shape.
+> *which* valid `participant_type` you send — the chat handler propagates that
+> field as metadata only. Flipping the body between the two valid values
+> (`"agent"` ↔ `"user"`) does not change the outcome; the rejection is purely
+> id-shape. (An *out-of-vocabulary* `participant_type` such as `"human"` is
+> itself rejected with 400 earlier, by the ISSUE-0068 validation, before the
+> id-shape check — so use a valid value here to exercise the same-id path.)
 
 **Action**:
 

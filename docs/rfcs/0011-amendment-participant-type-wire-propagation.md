@@ -35,7 +35,7 @@ string sender_participant_type = 12;  // proto/task.proto
 
 ### REST (orchestrator publish) — the default
 
-The REST chat handler defaults an **omitted** `participant_type` request field to `"user"` before publish. REST chat is, by construction, a human talking to a persona; an empty field is the common case, not a missing one. This matches the gRPC `SendChatMessage` servicer's OQ-3 `"user"` default ([`server_servicers.py`](../../agents/server_servicers.py)), so the two chat entry points agree. An explicit request value is passed through verbatim (e.g. a future bridge integration tagging a non-human sender).
+The REST chat handler defaults an **omitted** `participant_type` request field to `"user"` before publish. REST chat is, by construction, a human talking to a persona; an empty field is the common case, not a missing one. This matches the gRPC `SendChatMessage` servicer's OQ-3 `"user"` default ([`server_servicers.py`](../../agents/server_servicers.py)), so the two chat entry points agree. An **explicit** request value is validated against the `{"agent", "user"}` vocabulary ([`channels.IsValidParticipantType`](../../internal/channels/participant_type.go)) and rejected with `400 BAD_REQUEST` if out of vocabulary — parity with the gRPC servicer's `validate_participant_type` guard; a valid explicit value (e.g. a future bridge integration tagging a non-human sender as `"agent"`) passes through unchanged.
 
 The default lives in the **REST handler**, not the dispatcher: the dispatcher translates *all* channel messages (including agent-to-agent fanout), so a default there would mislabel inter-agent traffic as `"user"`. Only the handler knows it is building a human→agent DM.
 
@@ -45,7 +45,11 @@ The orchestrator populates `sender_participant_type` from `ChannelMessage.Metada
 
 ### Trust model
 
-`sender_participant_type` is **advisory, low-stakes** input. Unlike `cascade_depth`, a wrong value does not enable a resource-exhaustion cascade — it degrades relationship-tier peer typing only. The agent-side read path already constrains the value to the `{"agent", "user"}` allowlist ([`record_close.py`](../../agents/persona_runtime/record_close.py) `extract_peer_from_interaction`), so an out-of-vocabulary value safely degrades to `"agent"` rather than corrupting the row. No inbound clamp or rejection is added at the boundary.
+`sender_participant_type` is **advisory, low-stakes** input. Unlike `cascade_depth`, a wrong value does not enable a resource-exhaustion cascade — it degrades relationship-tier peer typing only. Defence is layered:
+
+- **External boundary (REST):** the chat handler rejects an explicit out-of-vocabulary `participant_type` with `400 BAD_REQUEST` before any side effect — a caller bug is surfaced loudly rather than silently coerced, matching the gRPC servicer.
+- **Internal fanout (dispatcher → agent):** no inbound clamp is added; ordinary agent-to-agent traffic carries an empty field, and the orchestrator only lifts a value the trusted REST handler already validated.
+- **Last line (agent read path):** `extract_peer_from_interaction` ([`record_close.py`](../../agents/persona_runtime/record_close.py)) constrains the value to the `{"agent", "user"}` allowlist, so any value that nonetheless slips through degrades safely to `"agent"` rather than corrupting the row.
 
 ## What this amendment does NOT change
 
@@ -58,7 +62,7 @@ The orchestrator populates `sender_participant_type` from `ChannelMessage.Metada
 Single PR (ISSUE-0068), test-driven:
 
 1. **proto** — `string sender_participant_type = 12` on `ChannelMessageEvent`; regenerate Go + Python stubs. Wire-shape round-trip tests on both sides extended to pin field 12.
-2. **Go orchestrator** — `channelMessageToProto` lifts `Metadata["participant_type"]` onto the field ([`grpc_dispatcher.go`](../../internal/channels/grpc_dispatcher.go) + `participant_type.go` reader, sibling of `cascade_depth.go`); `chat_handler.go` defaults an omitted request field to `"user"`.
+2. **Go orchestrator** — `channelMessageToProto` lifts `Metadata["participant_type"]` onto the field ([`grpc_dispatcher.go`](../../internal/channels/grpc_dispatcher.go) + `participant_type.go` reader, sibling of `cascade_depth.go`); `chat_handler.go` defaults an omitted request field to `"user"` and rejects an explicit out-of-vocabulary value with `400` (`channels.IsValidParticipantType`, the Go mirror of Python's `VALID_PARTICIPANT_TYPES`).
 3. **Python agent** — `ReceiveChannelMessage` seeds `event.metadata["sender_participant_type"]` from the typed field when non-empty ([`server_servicers.py`](../../agents/server_servicers.py)); the existing episode-routing → `record_close` path consumes it unchanged.
 
 The agent-side consumer half (`event.metadata["sender_participant_type"]` → `other_participant_type`) predates this amendment and is already exercised by integration tests that inject the metadata key directly — this amendment delivers the value those tests assumed the wire carried.

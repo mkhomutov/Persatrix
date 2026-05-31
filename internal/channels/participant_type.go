@@ -14,6 +14,29 @@ package channels
 // [RFC 0011 participant-type amendment]: ../../docs/rfcs/0011-amendment-participant-type-wire-propagation.md
 const participantTypeMetadataKey = "participant_type"
 
+// validParticipantTypes is the canonical peer-type vocabulary, the Go
+// anchor mirroring the Python `participant.VALID_PARTICIPANT_TYPES`
+// frozenset. The agent-side relationship tier honours only these two
+// values (`record_close.py::extract_peer_from_interaction` clamps any
+// other to "agent"); external boundaries validate against this set so an
+// out-of-vocabulary value is rejected loudly rather than silently
+// degraded.
+var validParticipantTypes = map[string]struct{}{
+	"agent": {},
+	"user":  {},
+}
+
+// IsValidParticipantType reports whether t is a recognised peer type
+// ("agent" | "user"). The REST chat handler uses it to reject an explicit
+// out-of-vocabulary `participant_type` at the request boundary, matching
+// the gRPC SendChatMessage servicer's `validate_participant_type` guard.
+// The empty string is NOT valid here: callers apply their own default
+// (REST chat defaults an omitted field to "user") before validating.
+func IsValidParticipantType(t string) bool {
+	_, ok := validParticipantTypes[t]
+	return ok
+}
+
 // readParticipantType extracts the inbound participant_type from a
 // publish metadata bag. Returns "" when absent or non-string — a
 // malformed claim is treated as the genuine agent-to-agent case (the

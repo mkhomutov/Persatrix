@@ -58,3 +58,41 @@ func TestHandleChat_DefaultsParticipantTypeToUser(t *testing.T) {
 	assert.Equal(t, "user", inbound.Metadata["participant_type"],
 		"omitted participant_type must default to \"user\" for REST chat")
 }
+
+// TestHandleChat_RejectsInvalidParticipantType pins the input-hygiene half
+// of the fix: an *explicit* `participant_type` outside the
+// `{"agent", "user"}` vocabulary is rejected with 400 BAD_REQUEST before
+// any side effect — parity with the gRPC SendChatMessage servicer, which
+// already returns INVALID_ARGUMENT for the same input
+// (`agents/participant.py::validate_participant_type`).
+//
+// Without this, an out-of-vocabulary value (a typo like "Human", or
+// "customer") rides the wire verbatim and the agent's allowlist clamp
+// (`record_close.py::extract_peer_from_interaction`) silently degrades it
+// to "agent" — re-introducing the exact ISSUE-0068 silent-misclassification
+// this PR exists to eliminate, just triggered by a bad value instead of an
+// omitted one.
+func TestHandleChat_RejectsInvalidParticipantType(t *testing.T) {
+	srv, reg, _, _ := chatTestServer(t)
+	registerHealthyAgent(t, reg, "agent-x", "Agent X")
+
+	// No reply is staged: validation rejects before GetOrCreateDM and the
+	// reply waiter, so the handler returns immediately. `timeout_seconds=1`
+	// floors any hang to ~1s (504) should the guard ever regress, instead
+	// of blocking on the 30s default.
+	body, _ := json.Marshal(chatRequest{
+		Message:         "Hi",
+		UserID:          "bob",
+		ParticipantType: "robot", // outside {"agent","user"}
+		TimeoutSeconds:  1,
+	})
+	rec := doRequest(srv.Handler(), "POST", "/api/v1/agents/agent-x/chat", body)
+
+	require.Equal(t, 400, rec.Code, "invalid participant_type must be rejected; body=%s", rec.Body.String())
+	var env struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+	assert.Equal(t, "BAD_REQUEST", env.Code, "rejection must use the BAD_REQUEST envelope code")
+}
