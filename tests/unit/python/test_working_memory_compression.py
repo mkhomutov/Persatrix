@@ -196,15 +196,18 @@ class TestCompression:
         assert "max_tokens" in call_kwargs
 
     async def test_compression_uses_configured_model(self):
-        """Verify that the configurable compression_model is passed to the LLM call."""
-        wm = WorkingMemory(max_tokens=100, compression_model="gpt-4o-mini")
+        """The configured compression_model alias is resolved to its physical
+        model before the provider call (ISSUE-0072: alias-routed, not a raw id).
+        ``model_alias`` is telemetry — LLMClient strips it before the provider,
+        so the provider sees only the physical id."""
+        wm = WorkingMemory(max_tokens=100, compression_model="alt")
         wm.add_section(
             _make_section(name="a", token_count=200, content="a" * 800, compressible=True)
         )
         client = _make_llm_client(summary="short")
         await wm.compress_if_needed(client)
         call_kwargs = client._provider.create_message.call_args.kwargs
-        assert call_kwargs["model"] == "gpt-4o-mini"
+        assert call_kwargs["model"] == "physical-alt-model"
 
     async def test_compression_null_response_preserves_original(self):
         """When LLM returns text=None, the original section is preserved."""

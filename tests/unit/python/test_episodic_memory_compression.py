@@ -222,7 +222,9 @@ class TestSummarizeOldEpisodes:
         assert ep.compression_level == 1
 
     async def test_compression_model_forwarded_to_llm(self, memory: EpisodicMemory):
-        """The compression_model parameter is passed through to LLM client."""
+        """The configured compression_model alias is resolved and forwarded to
+        the LLM client (ISSUE-0072: the physical model and alias reach
+        create_message, never the raw alias name)."""
         db = memory._ensure_db()
         old_time = time.time() - 30 * 86400
         ep_id = await memory.store_episode(
@@ -239,11 +241,12 @@ class TestSummarizeOldEpisodes:
         )
 
         await memory.summarize_old_episodes(
-            7, llm_client, compression_model="custom-model-v2"
+            7, llm_client, compression_model="alt"
         )
         llm_client.create_message.assert_called_once()
         call_kwargs = llm_client.create_message.call_args
-        assert call_kwargs.kwargs["model"] == "custom-model-v2"
+        assert call_kwargs.kwargs["model"] == "physical-alt-model"
+        assert call_kwargs.kwargs["model_alias"] == "alt"
 
     async def test_partial_batch_failure(self, memory: EpisodicMemory):
         """In a batch of 3 episodes, if the 2nd LLM call fails,
