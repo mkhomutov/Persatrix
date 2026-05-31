@@ -16,13 +16,15 @@ seam, so they stay hermetic and never touch the shipped config cache.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from agents import server_cli
 from agents.model_aliases import use_alias_map
 
 # A priced non-local alias: passes the whole-map guard.
-_PRICED = {
+_PRICED: dict[str, dict[str, Any]] = {
     "quality": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-6",
@@ -33,7 +35,7 @@ _PRICED = {
 
 # A non-local alias with no pricing: the silent-$0 budget hole ISSUE-0071
 # closes at boot.
-_UNPRICED_NON_LOCAL = {
+_UNPRICED_NON_LOCAL: dict[str, dict[str, Any]] = {
     "quality": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-6",
@@ -49,7 +51,7 @@ _UNPRICED_NON_LOCAL = {
 }
 
 # A local ($0-by-design) alias with no pricing: legitimate, must boot clean.
-_LOCAL_UNPRICED = {
+_LOCAL_UNPRICED: dict[str, dict[str, Any]] = {
     "quality": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-6",
