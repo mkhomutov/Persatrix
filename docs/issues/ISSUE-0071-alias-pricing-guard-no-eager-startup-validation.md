@@ -5,7 +5,7 @@ status: resolved
 severity: low
 area: agents/optimization
 created: 2026-05-26
-resolved: 2026-05-31
+closed: 2026-05-31
 refs:
   - docs/rfcs/0033-model-alias-layer.md
   - docs/rfcs/0033-pr-plan.md
