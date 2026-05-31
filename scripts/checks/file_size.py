@@ -98,6 +98,18 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # release-cycle narrative would erase context. Remove this entry once
     # v0.3.1 is archived.
     "docs/v0.3.1-plan.md",
+    # docs/v0.3.5-plan.md is the active v0.3.5 master plan — same
+    # release-cycle accumulator pattern as docs/v0.3.0-plan.md /
+    # docs/v0.3.1-plan.md above. It sat just under the 3000-word prose cap
+    # through Phases 0–4 and crossed it when the 2026-05-31 scope decision
+    # folded the epoch axis (ISSUE-0085) into the release as Phase 3b —
+    # adding the phase section, the Master Progress row, and the Acceptance
+    # gate. The per-PR detail lives in the dedicated
+    # docs/rfcs/0031-epoch-pr-plan.md; the umbrella holds only the
+    # release-level framing, and trimming the surrounding narrative would
+    # erase release-cycle context. Remove this entry once v0.3.5 ships and
+    # the plan is archived.
+    "docs/v0.3.5-plan.md",
     # docs/v0.3.x-sequencing.md orchestrates the v0.3.1 / v0.3.2 / v0.3.3
     # patch sequence and accumulates amendments as new v0.3.x-targeted
     # RFCs file (the 2026-05-12 amendment captured the RFC 0030 + RFC
