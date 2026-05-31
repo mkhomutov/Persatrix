@@ -8,8 +8,39 @@ All tests use mock LLM client — no real API calls.
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from agents.llm_client import LLMClient, LLMResponse, Usage
 from agents.memory.working import ContextSection, WorkingMemory
+from agents.model_aliases import use_alias_map
+
+# ISSUE-0072: compression resolves its model through the RFC 0033 alias layer.
+# The shipped base config ships ``summarizer`` as ``provider: unconfigured`` (a
+# loud SystemExit), so the suite declares a concrete local model the way an
+# operator's config would.
+_SUMMARIZER_ALIAS_MAP = {
+    "summarizer": {
+        "provider": "mock",
+        "model": "physical-summarizer-model",
+        "input_per_1m_tokens": 0.0,
+        "output_per_1m_tokens": 0.0,
+    },
+    # A second alias proving an operator-chosen compression_model also routes
+    # through the alias layer (not just the default).
+    "alt": {
+        "provider": "mock",
+        "model": "physical-alt-model",
+        "input_per_1m_tokens": 0.0,
+        "output_per_1m_tokens": 0.0,
+    },
+}
+
+
+@pytest.fixture(autouse=True)
+def _configured_summarizer_alias():
+    """Route the ``summarizer`` alias to a local mock model for the module."""
+    with use_alias_map(_SUMMARIZER_ALIAS_MAP):
+        yield
 
 # ─── Fixtures ───────────────────────────────────────────────
 
@@ -45,6 +76,30 @@ def _make_llm_client(summary: str = "compressed summary") -> LLMClient:
 
 
 class TestCompression:
+    async def test_compression_resolves_model_through_alias_layer(self):
+        """ISSUE-0072: compression routes its model through the RFC 0033 alias
+        layer — it sends the resolved *physical* model and threads the alias
+        name as ``model_alias`` for the span, never a raw vendor literal."""
+        wm = WorkingMemory(max_tokens=100)
+        wm.add_section(
+            _make_section(
+                name="low",
+                priority=10,
+                token_count=200,
+                content="a" * 800,
+                compressible=True,
+            )
+        )
+        llm_client = AsyncMock()
+        llm_client.create_message = AsyncMock(
+            return_value=LLMResponse(text="short", usage=Usage(10, 20))
+        )
+        await wm.compress_if_needed(llm_client)
+        llm_client.create_message.assert_awaited()
+        kwargs = llm_client.create_message.call_args.kwargs
+        assert kwargs["model"] == "physical-summarizer-model"
+        assert kwargs["model_alias"] == "summarizer"
+
     async def test_no_compression_under_budget(self):
         wm = WorkingMemory(max_tokens=500)
         wm.add_section(_make_section(name="a", token_count=100))
