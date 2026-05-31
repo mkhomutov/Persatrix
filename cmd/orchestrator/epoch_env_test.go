@@ -14,12 +14,24 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/mkhomutov/persatrix/internal/channels"
 )
 
 // TestResolveEpochID_UnsetDefaultsToLive asserts the documented fallback
-// when PERSATRIX_EPOCH is unset: the helper returns "live" (matching
-// agents.epoch_id.DEFAULT_EPOCH_ID) and emits an INFO line at boot so the
-// operator can see the process landed on the single-world default epoch.
+// when PERSATRIX_EPOCH is unset: the helper returns the canonical
+// [channels.DefaultEpochID] anchor ("live") and emits an INFO line at boot
+// so the operator can see the process landed on the single-world default
+// epoch.
+//
+// The expected value is asserted against [channels.DefaultEpochID] — the one
+// exported Go copy of the cross-language sentinel, pinned to "live" by
+// channels.TestDefaultEpochID_CrossLanguageLockStepLiteral and named by the
+// Python leaf test (test_epoch_id_leaf_module.py) as *the* Go anchor — not a
+// bare local literal. This mirrors resolveSessionID sourcing its default from
+// [channels.DefaultSessionID] (PR #335 review L2: the default "lives in one
+// place"), so the orchestrator boot default can never drift from the value
+// the channel-store migration and the Python filter agree on.
 func TestResolveEpochID_UnsetDefaultsToLive(t *testing.T) {
 	t.Setenv("PERSATRIX_EPOCH", "")
 
@@ -27,7 +39,7 @@ func TestResolveEpochID_UnsetDefaultsToLive(t *testing.T) {
 	logger := zap.New(core)
 
 	got := resolveEpochID(logger)
-	assert.Equal(t, "live", got)
+	assert.Equal(t, channels.DefaultEpochID, got)
 
 	logs := recorded.FilterMessageSnippet("PERSATRIX_EPOCH").All()
 	require.Len(t, logs, 1, "exactly one boot log line about the env var")

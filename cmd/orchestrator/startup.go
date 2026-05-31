@@ -56,21 +56,25 @@ func resolveSessionID(logger *zap.Logger) string {
 // half of the F-3 fix).
 const epochIDEnvVar = "PERSATRIX_EPOCH"
 
-// defaultEpochID is the epoch every production / untagged deployment uses
-// when the env var is unset, and the `DEFAULT 'live'` value the persona-
-// memory epoch migration (v12) backfills onto pre-existing rows. It MUST
-// byte-match `agents.epoch_id.DEFAULT_EPOCH_ID` — both sides default to it
-// independently, so a drift would split a single-world deployment across two
-// epochs (Go emitting one default, Python filtering on another).
-const defaultEpochID = "live"
-
 // resolveEpochID returns the per-process epoch sourced from PERSATRIX_EPOCH.
-// An unset env var logs INFO and returns [defaultEpochID] ("live") — the
-// single-world default that leaves production behaviour unchanged. A value
-// containing characters outside [A-Za-z0-9_-] emits a WARN but is still
-// accepted verbatim, mirroring [resolveSessionID]'s soft-validation posture:
-// an operator stuck on the env-var knob is never blocked on a stricter
-// validator landing first.
+// An unset env var logs INFO and returns the canonical [channels.DefaultEpochID]
+// ("live") — the single-world default that leaves production behaviour
+// unchanged. A value containing characters outside [A-Za-z0-9_-] emits a WARN
+// but is still accepted verbatim, mirroring [resolveSessionID]'s
+// soft-validation posture: an operator stuck on the env-var knob is never
+// blocked on a stricter validator landing first.
+//
+// The fallback is sourced from [channels.DefaultEpochID] (not a local "live"
+// literal) so the cross-language sentinel lives in one place — mirroring
+// [resolveSessionID]'s use of [channels.DefaultSessionID] (PR #335 review L2).
+// That exported constant is the value the persona-memory epoch migration (v12)
+// backfills onto pre-existing rows and is pinned to byte-match
+// `agents.epoch_id.DEFAULT_EPOCH_ID` by channels' cross-language lock-step
+// test; reusing it here means a single-world deployment can never split across
+// two defaults (Go emitting one, Python filtering on another). The boot-log
+// message hard-codes 'live' in the human-readable text because that is what an
+// operator greps for in incident triage; the structured `epoch_id` field
+// carries the canonical value.
 //
 // Unlike the session id (per-room, resolved per request by the
 // SessionResolver), the epoch is a single process-global value: `live` in
@@ -80,8 +84,8 @@ func resolveEpochID(logger *zap.Logger) string {
 	v := os.Getenv(epochIDEnvVar)
 	if v == "" {
 		logger.Info(epochIDEnvVar+" unset; defaulting to 'live' epoch",
-			zap.String("epoch_id", defaultEpochID))
-		return defaultEpochID
+			zap.String("epoch_id", channels.DefaultEpochID))
+		return channels.DefaultEpochID
 	}
 	if !sessionIDPattern.MatchString(v) {
 		logger.Warn(epochIDEnvVar+" contains characters outside [A-Za-z0-9_-]; accepting verbatim",
