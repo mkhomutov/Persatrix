@@ -219,6 +219,7 @@ pub(crate) async fn cmd_channel_send(
     mention_all: bool,
     thread_id: &str,
     session_flag: Option<&str>,
+    epoch_flag: Option<&str>,
     json_out: bool,
 ) -> Result<(), String> {
     let canonical = canonicalize_channel_id(name);
@@ -230,6 +231,9 @@ pub(crate) async fn cmd_channel_send(
     let session_id = crate::session_resolve::resolve_for_invocation(client, server, session_flag)
         .await?
         .unwrap_or_default();
+    // ISSUE-0085 PR 5 `--epoch` override (flag > PERSATRIX_EPOCH env; see
+    // epoch_resolve). No registry lookup — epoch has no lifecycle.
+    let epoch_id = crate::epoch_resolve::resolve_epoch(epoch_flag).unwrap_or_default();
     let mentions = if mention_all {
         let members = fetch_channel_members(client, server, &canonical).await?;
         expand_mentions(explicit_mentions, true, &members, sender_id)
@@ -246,6 +250,7 @@ pub(crate) async fn cmd_channel_send(
         thread_id: thread_id.to_string(),
         mentions,
         session_id,
+        epoch_id,
     };
     let resp = client
         .post(format!("{server}/api/v1/channels/{canonical}/messages"))

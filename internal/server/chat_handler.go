@@ -209,6 +209,16 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ISSUE-0085 PR 5: apply the optional `epoch_id` override (the CLI's
+	// `--epoch`) — see [Server.resolveEpochOverride]. Resolved here beside the
+	// session override so both ride the one dispatch context; a malformed value
+	// is rejected (400) before GetOrCreateDM, matching the session path.
+	ctx, err = s.resolveEpochOverride(ctx, req.EpochID)
+	if err != nil {
+		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	dm, err := s.channelStore.GetOrCreateDM(ctx, userID, agentID)
 	// ISSUE-0034: demote the user's membership to RespondNever so
 	// `ChannelRouter.fanout` skips dispatch to the user on every agent

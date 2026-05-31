@@ -15,6 +15,7 @@ pub(crate) async fn cmd_chat(
     agent_id: &str,
     user_id: &str,
     session_flag: Option<&str>,
+    epoch_flag: Option<&str>,
 ) -> Result<(), String> {
     validate_resource_id(agent_id, "agent ID")?;
     // Validate user_id with the same resource-ID rules as agent_id.
@@ -32,6 +33,12 @@ pub(crate) async fn cmd_chat(
         crate::session_resolve::resolve_for_invocation(client, server, session_flag)
             .await?
             .unwrap_or_default();
+
+    // ISSUE-0085 `--epoch` override: resolve the run/test-isolation epoch
+    // (flag > PERSATRIX_EPOCH env) once for the conversation. Empty when none
+    // is in play — the field is then omitted and the orchestrator keeps its
+    // boot default ("live"). No registry lookup (epoch has no lifecycle).
+    let operator_epoch_id = crate::epoch_resolve::resolve_epoch(epoch_flag).unwrap_or_default();
 
     // Build a dedicated client with a longer timeout for chat (agent LLM
     // calls can take a while).
@@ -107,6 +114,7 @@ pub(crate) async fn cmd_chat(
             chat_session_id: session_id.clone(),
             participant_type: "user".to_string(),
             session_id: operator_session_id.clone(),
+            epoch_id: operator_epoch_id.clone(),
         };
 
         // Spawn a spinner task that activates after ~2 seconds

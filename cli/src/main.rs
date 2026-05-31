@@ -1,7 +1,9 @@
 mod active_session;
 mod commands;
+mod epoch_resolve;
 mod session_resolve;
 mod types;
+mod user_id;
 mod validation;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -14,6 +16,7 @@ use commands::logs::{cmd_logs, LogsOptions};
 use commands::session::{dispatch as dispatch_session, SessionCommands};
 use commands::validate::cmd_validate;
 use commands::workflow::{cmd_run, cmd_status};
+use user_id::default_user_id;
 
 /// Persatrix CLI — manage agents, workflows, and the mesh.
 #[derive(Parser)]
@@ -116,6 +119,12 @@ enum Commands {
         /// active-session file; an archived target warns but proceeds.
         #[arg(long)]
         session: Option<String>,
+        /// Run/test-isolation epoch to converse under (ISSUE-0085 `--epoch`
+        /// override). Resolves above `PERSATRIX_EPOCH`; strict-equality
+        /// isolation (no `legacy` carve-out, no `*` wildcard) — a fresh epoch
+        /// inherits none of a prior run's memory.
+        #[arg(long)]
+        epoch: Option<String>,
     },
     /// Manage blueprints
     Init {
@@ -319,12 +328,21 @@ async fn main() {
             agent_id,
             user,
             session,
+            epoch,
         } => {
             // Resolve user identity: explicit --user flag first, otherwise
             // fall back to the shared OS-username derivation (see
             // [`default_user_id`]).
             let user_id = user.unwrap_or_else(default_user_id);
-            cmd_chat(&client, server, &agent_id, &user_id, session.as_deref()).await
+            cmd_chat(
+                &client,
+                server,
+                &agent_id,
+                &user_id,
+                session.as_deref(),
+                epoch.as_deref(),
+            )
+            .await
         }
         Commands::Validate { path, strict } => cmd_validate(&path, strict).await,
         Commands::Test {
@@ -374,122 +392,5 @@ async fn main() {
     if let Err(e) = result {
         eprintln!("{} {e}", "error:".red().bold());
         std::process::exit(1);
-    }
-}
-
-/// Resolve the default user identity from the OS environment for
-/// channel subcommands that did not pass `--as <id>`. Mirrors the
-/// fallback logic used by `Commands::Chat` so the two REPLs and the
-/// channel CLI agree on the implicit identity.
-pub(crate) fn default_user_id() -> String {
-    let raw = std::env::var("USERNAME")
-        .or_else(|_| std::env::var("USER"))
-        .unwrap_or_default();
-    normalize_user_id(&raw)
-}
-
-/// Normalize a raw OS username into a resource-ID-safe string.
-///
-/// Converts to lowercase, replaces every non-alphanumeric character with '-',
-/// strips leading/trailing hyphens, and falls back to "local" when the result
-/// would otherwise be empty.
-pub(crate) fn normalize_user_id(raw: &str) -> String {
-    let normalized: String = raw
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    let trimmed = normalized.trim_matches('-').to_string();
-    if trimmed.is_empty() {
-        "local".to_string()
-    } else {
-        trimmed
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::normalize_user_id;
-
-    #[test]
-    fn normalize_simple_lowercase() {
-        assert_eq!(normalize_user_id("alice"), "alice");
-    }
-
-    #[test]
-    fn normalize_uppercase_converted() {
-        assert_eq!(normalize_user_id("Alice"), "alice");
-        assert_eq!(normalize_user_id("MKHOMUTOV"), "mkhomutov");
-    }
-
-    #[test]
-    fn normalize_alphanumeric_preserved() {
-        assert_eq!(normalize_user_id("user01"), "user01");
-    }
-
-    #[test]
-    fn normalize_spaces_become_hyphens() {
-        assert_eq!(normalize_user_id("John Doe"), "john-doe");
-    }
-
-    #[test]
-    fn normalize_dots_become_hyphens() {
-        // Windows UPN style: john.doe
-        assert_eq!(normalize_user_id("john.doe"), "john-doe");
-    }
-
-    #[test]
-    fn normalize_domain_prefix_stripped() {
-        // Windows DOMAIN\user — backslash becomes hyphen, leading hyphen trimmed
-        // after the domain part, but the whole thing is lowercased and hyphens
-        // replace non-alphanumeric chars; leading/trailing hyphens are stripped.
-        // "CORP\\jdoe" → "corp-jdoe"
-        assert_eq!(normalize_user_id("CORP\\jdoe"), "corp-jdoe");
-    }
-
-    #[test]
-    fn normalize_leading_trailing_hyphens_stripped() {
-        // Underscore at start: "_build" → "-build" → "build"
-        assert_eq!(normalize_user_id("_build"), "build");
-    }
-
-    #[test]
-    fn normalize_empty_falls_back_to_local() {
-        assert_eq!(normalize_user_id(""), "local");
-    }
-
-    #[test]
-    fn normalize_only_special_chars_falls_back_to_local() {
-        assert_eq!(normalize_user_id("___"), "local");
-        assert_eq!(normalize_user_id("..."), "local");
-    }
-
-    #[test]
-    fn normalize_unicode_becomes_hyphens() {
-        // Non-ASCII chars are replaced with '-'; result trimmed if needed
-        assert_eq!(normalize_user_id("björn"), "bj-rn");
-    }
-
-    #[test]
-    fn normalize_result_passes_resource_id_validation() {
-        // The output of normalize_user_id must always satisfy validate_resource_id.
-        use crate::types::validate_resource_id;
-        let inputs = [
-            "Alice",
-            "MKHOMUTOV",
-            "john.doe",
-            "John Doe",
-            "CORP\\jdoe",
-            "user01",
-            "",
-            "___",
-        ];
-        for input in inputs {
-            let result = normalize_user_id(input);
-            assert!(
-                validate_resource_id(&result, "user_id").is_ok(),
-                "normalize_user_id({input:?}) = {result:?} failed validate_resource_id",
-            );
-        }
     }
 }
