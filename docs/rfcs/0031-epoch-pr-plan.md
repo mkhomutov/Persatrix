@@ -2,7 +2,7 @@
 
 **RFC**: [0031-per-session-namespacing-channels.md](0031-per-session-namespacing-channels.md) · design home: [Memory Scope Axes §Epoch](../memory-scope-axes.md#epoch--the-testrun-isolation-axis)
 **Tracks**: [ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)
-**Status**: 🚧 Implementing — v0.3.5 ([Phase 3b](../v0.3.5-plan.md#phase-3b--rfc-0031-epoch-axis-issue-0085)); PR 1 (leaf) + PR 2 (migration, [#474](https://github.com/mkhomutov/Persatrix/pull/474)) + PR 3 (filter + per-tier wiring, [#475](https://github.com/mkhomutov/Persatrix/pull/475)) + PR 4 (gRPC rail, [#476](https://github.com/mkhomutov/Persatrix/pull/476)) merged, PR 5 (operator surface) open, PR 6 remaining
+**Status**: ✅ Complete — v0.3.5 ([Phase 3b](../v0.3.5-plan.md#phase-3b--rfc-0031-epoch-axis-issue-0085)); PR 1 (leaf, [#472](https://github.com/mkhomutov/Persatrix/pull/472)) + PR 2 (migration, [#474](https://github.com/mkhomutov/Persatrix/pull/474)) + PR 3 (filter + per-tier wiring, [#475](https://github.com/mkhomutov/Persatrix/pull/475)) + PR 4 (gRPC rail, [#476](https://github.com/mkhomutov/Persatrix/pull/476)) + PR 5 (operator surface, [#477](https://github.com/mkhomutov/Persatrix/pull/477)) merged; PR 6 (closeout — this PR) open
 **Created**: 2026-05-31
 **Branch prefix**: `feature/v035-issue0085-` / `feature/v035-epoch-`
 **Target**: `main`
@@ -119,6 +119,7 @@ PR 2 before PR 3 — the filter cannot wire to a column that does not exist. PR 
 
 ### PR 6: `feature/v035-epoch-close` — Closeout
 
+**Status**: 🔀 PR open (this PR).
 **Depends on**: PR 5.
 **Purpose**: Prove the structural F-3 fix end-to-end and land the documentation/status closeout. No new production code.
 
@@ -149,8 +150,8 @@ PR 2 before PR 3 — the filter cannot wire to a column that does not exist. PR 
 | 2 | Migration (epoch_id columns + relationships PK) | `feature/v035-epoch-migration` | ✅ Merged | [#474](https://github.com/mkhomutov/Persatrix/pull/474) | 2026-05-31 |
 | 3 | Filter helper + per-tier wiring | `feature/v035-epoch-filter` | ✅ Merged | [#475](https://github.com/mkhomutov/Persatrix/pull/475) | 2026-05-31 |
 | 4 | gRPC rail (emission + ingress lift) | `feature/v035-epoch-rail` | ✅ Merged | [#476](https://github.com/mkhomutov/Persatrix/pull/476) | 2026-05-31 |
-| 5 | Operator surface (`--epoch` + env docs) | `feature/v035-epoch-operator` | 🔀 PR open | — | — |
-| 6 | Closeout (F-3 structural-isolation gate + docs) | `feature/v035-epoch-close` | ⬜ Not started | — | — |
+| 5 | Operator surface (`--epoch` + env docs) | `feature/v035-epoch-operator` | ✅ Merged | [#477](https://github.com/mkhomutov/Persatrix/pull/477) | 2026-05-31 |
+| 6 | Closeout (F-3 structural-isolation gate + docs) | `feature/v035-epoch-close` | 🔀 PR open | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 
