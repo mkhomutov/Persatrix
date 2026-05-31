@@ -2,7 +2,7 @@
 
 **RFC**: [0031-per-session-namespacing-channels.md](0031-per-session-namespacing-channels.md) · design home: [Memory Scope Axes §Epoch](../memory-scope-axes.md#epoch--the-testrun-isolation-axis)
 **Tracks**: [ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)
-**Status**: 🚧 Implementing — v0.3.5 ([Phase 3b](../v0.3.5-plan.md#phase-3b--rfc-0031-epoch-axis-issue-0085)); PR 1 (leaf) merged, PRs 2–6 remaining
+**Status**: 🚧 Implementing — v0.3.5 ([Phase 3b](../v0.3.5-plan.md#phase-3b--rfc-0031-epoch-axis-issue-0085)); PR 1 (leaf) merged, PR 2 (migration) open ([#474](https://github.com/mkhomutov/Persatrix/pull/474)), PRs 3–6 remaining
 **Created**: 2026-05-31
 **Branch prefix**: `feature/v035-issue0085-` / `feature/v035-epoch-`
 **Target**: `main`
@@ -77,10 +77,11 @@ PR 2 before PR 3 — the filter cannot wire to a column that does not exist. PR 
 
 ### PR 2: `feature/v035-epoch-migration` — Migration (epoch_id columns + relationships PK)
 
+**Status**: 🔀 PR open ([#474](https://github.com/mkhomutov/Persatrix/pull/474)).
 **Depends on**: PR 1.
 **Purpose**: Add `epoch_id TEXT NOT NULL DEFAULT 'live'` to the five persona-memory tiers (`episodes`, `relationships`, `facts`, `notes`, `interactions`) as persona-memory **migration v12**, and the sibling column on the Go channel store (**schema v6**, after the ISSUE-0083 v5). Put `epoch_id` in the `relationships` **primary key**, mirroring the `principal_id` v11 migration's table-rebuild handler ([`agents/memory/_migration_principal.py`](../../agents/memory/_migration_principal.py)).
 
-**Key details**: backfill `'live'` onto pre-existing rows (the default makes this implicit for `ALTER ... ADD COLUMN`; the relationships rebuild copies rows with `epoch_id = 'live'`). No data loss; single-world / pre-migration deployments are byte-identical (everything is the default epoch). Follows the v11 callable-handler pattern for the PK rebuild, the plain `ALTER` for the other four tiers.
+**Key details**: backfill `'live'` onto pre-existing rows (the default makes this implicit for `ALTER ... ADD COLUMN`; the relationships rebuild copies rows with `epoch_id = 'live'`). No data loss; single-world / pre-migration deployments are byte-identical (everything is the default epoch). Follows the v11 callable-handler pattern for the PK rebuild, the plain `ALTER` for the other four tiers. The PK change forces the two `relationships` upsert `ON CONFLICT` targets ([`relationship_mutations.py`](../../agents/memory/relationship_mutations.py)) to add `epoch_id` to match — the *only* per-tier write touch in this PR; resolving and *tagging* the active epoch stays in PR 3 (rows keep the `'live'` column default here). The Go-store half adds `epoch_id` to `channels` + `messages` (mirroring the v3 `session_id` placement); the v6 `migrateV5ToV6` addition tipped `internal/channels/sqlite_schema.go` over the 500-line cap, so the migration functions were extracted into `internal/channels/sqlite_migrations.go` (mechanical move, no behaviour change).
 
 **Tests**: migration idempotency + version-record; relationships PK includes `epoch_id` (an `ON CONFLICT` upsert under two epochs creates two rows, never bleeds); backfill leaves pre-existing rows at `'live'`. Mirror `test_principal_migration.py`.
 
@@ -134,7 +135,7 @@ PR 2 before PR 3 — the filter cannot wire to a column that does not exist. PR 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
 | 1 | Epoch leaf module | `feature/v035-issue0085-epoch-leaf` | ✅ Merged | [#472](https://github.com/mkhomutov/Persatrix/pull/472) | 2026-05-31 |
-| 2 | Migration (epoch_id columns + relationships PK) | `feature/v035-epoch-migration` | ⬜ Not started | — | — |
+| 2 | Migration (epoch_id columns + relationships PK) | `feature/v035-epoch-migration` | 🔀 PR open | [#474](https://github.com/mkhomutov/Persatrix/pull/474) | — |
 | 3 | Filter helper + per-tier wiring | `feature/v035-epoch-filter` | ⬜ Not started | — | — |
 | 4 | gRPC rail (emission + ingress lift) | `feature/v035-epoch-rail` | ⬜ Not started | — | — |
 | 5 | Operator surface (`--epoch` + env docs) | `feature/v035-epoch-operator` | ⬜ Not started | — | — |
