@@ -168,11 +168,33 @@ def test_create_provider_alias_routes_to_mock() -> None:
     assert model == "offline"
 
 
-def test_create_provider_explicit_mock_per_agent() -> None:
-    """A per-agent ``provider: mock`` routes to MockProvider on the raw path."""
-    provider, _model = create_provider(
-        {"id": "x", "model": "claude-sonnet-4-20250514", "provider": "mock"}
-    )
+# A configured anthropic alias for the "real provider is used" cases — as of
+# RFC 0033 Phase 3 a raw vendor ID is rejected, so these route via an alias.
+_ANTHROPIC_ALIAS = {
+    "quality": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "input_per_1m_tokens": 3.0,
+        "output_per_1m_tokens": 15.0,
+    },
+}
+
+
+def test_create_provider_agreeing_mock_provider_field() -> None:
+    """A redundant-but-agreeing per-agent ``provider: mock`` field on a mock
+    alias is accepted (RFC 0033 §D rule 1) and routes to MockProvider."""
+    alias_map = {
+        "offline": {
+            "provider": "mock",
+            "model": "mock",
+            "input_per_1m_tokens": 0,
+            "output_per_1m_tokens": 0,
+        },
+    }
+    with use_alias_map(alias_map):
+        provider, _model = create_provider(
+            {"id": "x", "model": "offline", "provider": "mock"}
+        )
     assert isinstance(provider, MockProvider)
 
 
@@ -186,20 +208,20 @@ def test_create_provider_offline_env_does_not_force_mock(
     effect — the agent resolves to its configured provider.
     """
     monkeypatch.setenv("PERSATRIX_OFFLINE", "1")
-    provider, _model = create_provider(
-        {"id": "ember-owl", "model": "claude-sonnet-4-20250514"}
-    )
+    with use_alias_map(_ANTHROPIC_ALIAS):
+        provider, _model = create_provider({"id": "ember-owl", "model": "quality"})
     assert not isinstance(provider, MockProvider)
     assert provider.name == "anthropic"
 
 
 def test_create_provider_normal_path_unaffected() -> None:
-    """With no provider override, the real SDK provider is used."""
-    provider, model = create_provider({"id": "x", "model": "claude-sonnet-4-20250514"})
+    """With no provider override, the real SDK provider is used and the
+    alias's physical model id reaches the call site."""
+    with use_alias_map(_ANTHROPIC_ALIAS):
+        provider, model = create_provider({"id": "x", "model": "quality"})
     assert not isinstance(provider, MockProvider)
     assert provider.name == "anthropic"
-    # The raw vendor id passes through unchanged (RFC 0033 §E).
-    assert model == "claude-sonnet-4-20250514"
+    assert model == "claude-sonnet-4-6"
 
 
 def test_mock_provider_reexported_from_llm_client() -> None:

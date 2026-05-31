@@ -2,20 +2,18 @@
 
 The resolver is the single source of truth for model identity: it maps a
 logical alias (``quality`` / ``fast`` / ``summarizer``) to a concrete
-``(provider, model, pricing)`` record, and passes a raw vendor model ID
-through unchanged during the cutover window (RFC 0033 §E). This module
-pins that contract:
+``(provider, model, pricing)`` record. As of RFC 0033 **Phase 3** the
+cutover-window raw-vendor-ID pass-through (§E) is **retired**: every model
+reference must be a declared alias. This module pins that contract:
 
 * an alias hit returns the configured :class:`ResolvedModel`;
-* a recognised raw vendor ID falls through with ``alias=None, raw=True``;
-* a string that is neither a declared alias nor a recognised vendor
-  prefix is a loud ``SystemExit`` (the "clear up-front error" the RFC
-  substitutes for ``_infer_provider``'s silent default-to-openai);
+* a string that is not a declared alias — whether a raw vendor ID
+  (``claude-sonnet-4-20250514`` / ``gpt-4o``) or a typo — is a loud
+  ``SystemExit`` naming the string and pointing at ``models.aliases``
+  (the "clear up-front error" the RFC substitutes for ``_infer_provider``'s
+  silent default-to-openai);
 * the context-manager test seam registers a temporary map for the
   duration of a ``with`` block without mutating the process singleton.
-
-PR 1 ships the resolver *unconsumed* — ``create_provider`` is not rewired
-until PR 2 — so these unit tests are the only thing exercising it.
 """
 
 from __future__ import annotations
@@ -65,12 +63,11 @@ def isolated_config(
 ) -> Iterator[None]:
     """Point the optimization loader at an absent file.
 
-    With no on-disk ``provider_inference`` block, ``provider_inference()``
-    returns ``{}`` and the resolver's raw fall-through uses its module
-    fallback prefixes — so the raw-ID tests are deterministic regardless
-    of the developer's checked-out ``config/optimization.yaml``. The cache
-    is cleared on both sides so neither this test nor its neighbours leak
-    a stale parse.
+    With no on-disk config the config-backed alias map is empty, so a test
+    that asserts against the singleton (e.g. the seam-isolation test) sees a
+    deterministic ``{}`` regardless of the developer's checked-out
+    ``config/optimization.yaml``. The cache is cleared on both sides so
+    neither this test nor its neighbours leak a stale parse.
     """
     monkeypatch.setenv(
         "PERSATRIX_OPTIMIZATION_CONFIG", str(tmp_path / "absent.yaml"),
@@ -91,13 +88,23 @@ class TestAliasHit:
             input_per_1m_tokens=3.00,
             output_per_1m_tokens=15.00,
             provider_config={},
-            raw=False,
         )
 
-    def test_alias_is_not_raw(self) -> None:
+    def test_alias_carries_its_logical_name(self) -> None:
         with use_alias_map(_SAMPLE_ALIASES):
-            assert resolve("fast").raw is False
             assert resolve("fast").alias == "fast"
+
+    def test_resolved_model_has_no_raw_field(self) -> None:
+        # RFC 0033 Phase 3 retired the raw-vendor-ID pass-through, so a
+        # resolved record is *always* a declared alias. The vestigial ``raw``
+        # discriminator (only ever ``False`` after the cutover) is gone — pin
+        # its absence so it cannot quietly reappear.
+        import dataclasses
+
+        field_names = {f.name for f in dataclasses.fields(ResolvedModel)}
+        assert "raw" not in field_names
+        with use_alias_map(_SAMPLE_ALIASES):
+            assert not hasattr(resolve("fast"), "raw")
 
     def test_openai_alias_round_trips(self) -> None:
         with use_alias_map(_SAMPLE_ALIASES):
@@ -138,74 +145,38 @@ class TestAliasHit:
         assert isinstance(resolved.input_per_1m_tokens, float)
 
 
-class TestRawFallThrough:
-    def test_raw_anthropic_id_falls_through(self, isolated_config: None) -> None:
-        with use_alias_map(_SAMPLE_ALIASES):
-            resolved = resolve("claude-sonnet-4-20250514")
-        assert resolved.alias is None
-        assert resolved.raw is True
-        assert resolved.provider == "anthropic"
-        assert resolved.model == "claude-sonnet-4-20250514"
+class TestRawIdRejected:
+    """RFC 0033 Phase 3 — the §E raw-vendor-ID pass-through is retired.
 
-    def test_raw_openai_prefix_id_falls_through(self, isolated_config: None) -> None:
-        with use_alias_map(_SAMPLE_ALIASES):
-            resolved = resolve("gpt-4o-mini")
-        assert resolved.alias is None
-        assert resolved.raw is True
-        assert resolved.provider == "openai"
-        assert resolved.model == "gpt-4o-mini"
+    A model reference that is not a declared alias is a loud ``SystemExit``,
+    no matter how recognisable the vendor prefix once was. There is no
+    longer a ``raw=True`` record, no prefix inference, and no
+    ``explicit_provider`` escape hatch — the alias map is the only surface.
+    """
 
-    def test_raw_openai_exact_id_falls_through(self, isolated_config: None) -> None:
-        with use_alias_map(_SAMPLE_ALIASES):
-            resolved = resolve("o3")
-        assert resolved.alias is None
-        assert resolved.raw is True
-        assert resolved.provider == "openai"
+    def test_raw_anthropic_id_raises_systemexit(self) -> None:
+        with use_alias_map(_SAMPLE_ALIASES), pytest.raises(SystemExit) as exc:
+            resolve("claude-sonnet-4-20250514")
+        msg = str(exc.value)
+        assert "claude-sonnet-4-20250514" in msg
+        # Actionable: tells the operator to declare it as an alias.
+        assert "alias" in msg
 
-    def test_raw_fall_through_carries_no_pricing(self, isolated_config: None) -> None:
-        # The resolver has no pricing for an arbitrary raw vendor ID; it
-        # degrades to 0.0 (the Go cost path keys pricing off telemetry,
-        # RFC 0033 §F). PR 4's missing-price guard leaves this path alone.
-        with use_alias_map(_SAMPLE_ALIASES):
-            resolved = resolve("claude-sonnet-4-20250514")
-        assert resolved.input_per_1m_tokens == 0.0
-        assert resolved.output_per_1m_tokens == 0.0
+    def test_raw_openai_prefix_id_raises_systemexit(self) -> None:
+        with use_alias_map(_SAMPLE_ALIASES), pytest.raises(SystemExit) as exc:
+            resolve("gpt-4o-mini")
+        assert "gpt-4o-mini" in str(exc.value)
 
+    def test_raw_openai_exact_id_raises_systemexit(self) -> None:
+        with use_alias_map(_SAMPLE_ALIASES), pytest.raises(SystemExit):
+            resolve("o3")
 
-class TestExplicitProviderHint:
-    """RFC 0033 §D rule 1 — on the raw pass-through an explicit ``provider``
-    field wins over prefix inference. PR 2's factory needs this so a
-    per-agent ``provider: ollama`` on a local model id like ``llama3.2``
-    — which no prefix rule recognises — resolves without a spurious
-    ``SystemExit``. On the alias path the entry stays authoritative; the
-    hint is ignored there (the factory raises on a *disagreeing* field)."""
-
-    def test_explicit_provider_used_on_raw_fall_through(
-        self, isolated_config: None,
-    ) -> None:
-        with use_alias_map(_SAMPLE_ALIASES):
-            resolved = resolve("llama3.2", explicit_provider="ollama")
-        assert resolved.raw is True
-        assert resolved.alias is None
-        assert resolved.provider == "ollama"
-        assert resolved.model == "llama3.2"
-
-    def test_explicit_provider_skips_unknown_model_systemexit(
-        self, isolated_config: None,
-    ) -> None:
-        # Without the hint an unrecognised id is a loud SystemExit; the hint
-        # short-circuits inference so the raw local model passes through.
+    def test_local_tag_raises_systemexit(self) -> None:
+        # A local Ollama tag that no prefix rule ever recognised used to need
+        # an explicit_provider hint to pass through; that escape hatch is gone
+        # — it must be a declared alias now, so a bare tag is a SystemExit.
         with use_alias_map(_SAMPLE_ALIASES), pytest.raises(SystemExit):
             resolve("llama3.2")
-        with use_alias_map(_SAMPLE_ALIASES):
-            assert resolve("llama3.2", explicit_provider="ollama").provider == "ollama"
-
-    def test_explicit_provider_ignored_for_declared_alias(self) -> None:
-        with use_alias_map(_SAMPLE_ALIASES):
-            resolved = resolve("quality", explicit_provider="openai")
-        # The alias entry's provider is authoritative, not the hint.
-        assert resolved.provider == "anthropic"
-        assert resolved.raw is False
 
 
 class TestUnknownString:
@@ -348,26 +319,6 @@ def test_module_exports_public_surface() -> None:
 
     for name in ("ResolvedModel", "resolve", "use_alias_map"):
         assert name in mod.__all__
-
-
-def test_raw_fallback_constants_mirror_llm_client() -> None:
-    """The raw-ID fall-through fallback prefixes are duplicated from
-    ``agents.llm_client`` — they cannot be imported, because that module
-    imports *this* one once the factory is rewired (RFC 0033 PR 2, a
-    cycle). The module comment claims they mirror llm_client's constants;
-    pin that here so the two cannot silently drift. They only bind in a
-    config-less checkout (the shipped ``provider_inference`` block, pinned
-    by test_optimization.py, otherwise overrides them), but in that path
-    they — not the YAML — drive provider inference, so a drift would route
-    raw IDs differently between the resolver and the legacy factory.
-    """
-    from agents import llm_client, model_aliases
-
-    assert model_aliases._DEFAULT_OPENAI_EXACT == llm_client._OPENAI_EXACT_MODELS
-    assert model_aliases._DEFAULT_OPENAI_PREFIXES == llm_client._OPENAI_PREFIX_MODELS
-    # llm_client uses an inline ("claude",) literal for the anthropic
-    # default (no named constant to pin against); lock ours to that value.
-    assert model_aliases._DEFAULT_ANTHROPIC_PREFIXES == ("claude",)
 
 
 class TestUnconfiguredSentinel:

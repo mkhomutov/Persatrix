@@ -22,6 +22,7 @@ from agents.llm_client import (
     _infer_provider,
     create_provider,
 )
+from agents.model_aliases import use_alias_map
 
 # ─── Helpers ────────────────────────────────────────────────
 
@@ -440,44 +441,37 @@ class TestCreateProvider:
         assert _infer_provider("o4-mini") == "openai"
         assert _infer_provider("o4") == "openai"
 
-    def test_explicit_anthropic_provider(self):
-        mock_anthropic = MagicMock()
-        mock_anthropic.AsyncAnthropic.return_value = AsyncMock()
-        with patch.dict(sys.modules, {"anthropic": mock_anthropic}):
-            provider, model = create_provider(
-                {"model": "claude-sonnet-4-20250514", "provider": "anthropic"}
-            )
-            assert isinstance(provider, AnthropicProvider)
-            assert model == "claude-sonnet-4-20250514"
+    # As of RFC 0033 Phase 3 ``create_provider`` accepts only declared aliases
+    # (the raw-vendor-ID pass-through is retired), so these route through the
+    # alias seam: the alias's ``provider`` selects the class, its ``model`` is
+    # the physical id returned. Raw-ID rejection and provider_config precedence
+    # are pinned in test_llm_factory.py; here we pin the llm_client re-export.
+    @staticmethod
+    def _alias(provider: str, model: str) -> dict:
+        return {"a": {"provider": provider, "model": model,
+                      "input_per_1m_tokens": 1.0, "output_per_1m_tokens": 1.0}}
 
-    def test_explicit_openai_provider(self):
-        mock_openai = MagicMock()
-        mock_openai.AsyncOpenAI.return_value = AsyncMock()
-        with patch.dict(sys.modules, {"openai": mock_openai}):
-            provider, model = create_provider({"model": "gpt-4o", "provider": "openai"})
-            assert isinstance(provider, OpenAIProvider)
-            assert model == "gpt-4o"
+    def test_alias_routes_to_anthropic_provider(self):
+        mod = MagicMock()
+        mod.AsyncAnthropic.return_value = AsyncMock()
+        with use_alias_map(self._alias("anthropic", "claude-sonnet-4-20250514")), \
+                patch.dict(sys.modules, {"anthropic": mod}):
+            provider, model = create_provider({"model": "a"})
+        assert isinstance(provider, AnthropicProvider)
+        assert model == "claude-sonnet-4-20250514"
 
-    def test_openai_with_base_url(self):
-        mock_openai = MagicMock()
-        mock_openai.AsyncOpenAI.return_value = AsyncMock()
-        with patch.dict(sys.modules, {"openai": mock_openai}):
-            provider, model = create_provider({
-                "model": "qwen2.5-coder:32b",
-                "provider": "openai",
-                "provider_config": {"base_url": "http://localhost:11434/v1"},
-            })
-            assert isinstance(provider, OpenAIProvider)
-            assert model == "qwen2.5-coder:32b"
+    def test_alias_routes_to_openai_provider(self):
+        mod = MagicMock()
+        mod.AsyncOpenAI.return_value = AsyncMock()
+        with use_alias_map(self._alias("openai", "gpt-4o")), \
+                patch.dict(sys.modules, {"openai": mod}):
+            provider, model = create_provider({"model": "a"})
+        assert isinstance(provider, OpenAIProvider)
+        assert model == "gpt-4o"
 
     def test_unknown_provider_exits(self):
-        with pytest.raises(SystemExit, match="Unknown LLM provider"):
-            create_provider({"model": "test", "provider": "unknown"})
-
-    def test_inferred_from_model_prefix(self):
-        mock_anthropic = MagicMock()
-        mock_anthropic.AsyncAnthropic.return_value = AsyncMock()
-        with patch.dict(sys.modules, {"anthropic": mock_anthropic}):
-            provider, model = create_provider({"model": "claude-sonnet-4-20250514"})
-            assert isinstance(provider, AnthropicProvider)
-            assert model == "claude-sonnet-4-20250514"
+        # An alias may declare any provider string; an unrecognised one falls
+        # through every factory branch to the "Unknown LLM provider" exit.
+        with use_alias_map(self._alias("unknown", "x")), \
+                pytest.raises(SystemExit, match="Unknown LLM provider"):
+            create_provider({"model": "a"})

@@ -7,20 +7,20 @@ retirement or a provider swap is a one-line edit to one map entry instead
 of a sweep across ``config/agents.yaml``, ``config/optimization.yaml``,
 ``agents/persona_types.py``, and the pricing table.
 
-During the cutover window the resolver also accepts a **raw vendor model
-ID** (e.g. ``claude-sonnet-4-20250514``) and passes it through unchanged,
-inferring the provider from the existing prefix table (RFC 0033 §E). A
-string that is neither a declared alias nor a recognised vendor prefix is
-a loud :class:`SystemExit` — the "clear up-front error" this RFC
-substitutes for ``_infer_provider``'s silent default-to-openai.
+As of RFC 0033 **Phase 3** the cutover-window raw-vendor-ID pass-through
+(§E) is **retired**: a model reference must be a declared alias. Any string
+that is not an alias — a raw vendor ID like ``claude-sonnet-4-20250514``, or
+a typo'd alias name — is a loud :class:`SystemExit` naming the string and
+pointing at ``models.aliases`` (the "clear up-front error" this RFC
+substitutes for ``_infer_provider``'s silent default-to-openai). There is no
+longer a ``raw=True`` record, no prefix inference, and no provider-hint
+escape hatch.
 
 This module is a **leaf**: it imports config accessors from
 :mod:`agents.optimization` only — never the provider classes or
 :class:`~agents.llm_client.LLMClient`. That keeps it unit-testable in
 isolation and, critically, avoids an import cycle with
-:mod:`agents.llm_client`, which imports *this* module once the factory is
-rewired (RFC 0033 PR 2). PR 1 ships the resolver **unconsumed** — no call
-site reads it yet, so it changes no runtime behaviour.
+:mod:`agents.llm_client`, which imports *this* module via the factory.
 """
 
 from __future__ import annotations
@@ -33,20 +33,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from agents.optimization import model_aliases as _load_alias_block
-from agents.optimization import provider_inference
 
 logger = logging.getLogger(__name__)
-
-# Fallback prefix table for the raw-ID pass-through, used only when
-# config/optimization.yaml ships no ``provider_inference`` block. Mirrors
-# ``agents.llm_client._OPENAI_EXACT_MODELS`` / ``_OPENAI_PREFIX_MODELS``;
-# tests/unit/python/test_optimization.py pins the shipped YAML to those
-# constants, so the config remains the single source of truth and these
-# only bind in a config-less dev checkout. They are not imported from
-# ``llm_client`` because that module imports *this* one in PR 2 (cycle).
-_DEFAULT_ANTHROPIC_PREFIXES: tuple[str, ...] = ("claude",)
-_DEFAULT_OPENAI_EXACT: frozenset[str] = frozenset({"o1", "o3", "o4"})
-_DEFAULT_OPENAI_PREFIXES: tuple[str, ...] = ("gpt-", "o1-", "o3-", "o4-")
 
 # Local providers run on the operator's own machine at $0 real cost, so a
 # $0 (or absent) price on their alias entries is by design — the
@@ -71,10 +59,11 @@ _LOCALHOST_HOSTS: frozenset[str] = frozenset(
 class ResolvedModel:
     """The resolved identity of a model reference (RFC 0033 §C).
 
-    ``alias`` is the logical name the reference came in as, or ``None``
-    when the reference was a raw vendor ID that fell through (``raw`` is
-    then ``True``). ``model`` is always the physical vendor ID the API
-    call must use — never the alias name.
+    ``alias`` is the logical name the reference came in as. As of RFC 0033
+    Phase 3 every resolved reference is a declared alias (the §E raw-vendor-ID
+    pass-through is retired), so ``alias`` is always set — the ``str | None``
+    type is kept for the public contract. ``model`` is always the physical
+    vendor ID the API call must use — never the alias name.
     """
 
     alias: str | None
@@ -83,7 +72,6 @@ class ResolvedModel:
     input_per_1m_tokens: float
     output_per_1m_tokens: float
     provider_config: dict[str, Any] = field(default_factory=dict)
-    raw: bool = False
 
 
 # ─── Test seam ────────────────────────────────────────────────
@@ -162,28 +150,6 @@ def _from_alias_entry(alias: str, entry: dict[str, Any]) -> ResolvedModel:
         input_per_1m_tokens=_coerce_price(entry.get("input_per_1m_tokens")),
         output_per_1m_tokens=_coerce_price(entry.get("output_per_1m_tokens")),
         provider_config=dict(provider_config),
-        raw=False,
-    )
-
-
-def _infer_raw_provider(model: str) -> str:
-    """Infer the provider for a raw vendor model ID from the prefix table
-    (RFC 0033 §E). Raises :class:`SystemExit` for a string that matches no
-    known prefix — that is neither an alias nor a recognised vendor ID."""
-    rules = provider_inference()
-    anthropic_prefixes = tuple(
-        rules.get("anthropic_prefixes", _DEFAULT_ANTHROPIC_PREFIXES),
-    )
-    openai_exact = frozenset(rules.get("openai_exact", _DEFAULT_OPENAI_EXACT))
-    openai_prefixes = tuple(rules.get("openai_prefixes", _DEFAULT_OPENAI_PREFIXES))
-    if model.startswith(anthropic_prefixes):
-        return "anthropic"
-    if model in openai_exact or model.startswith(openai_prefixes):
-        return "openai"
-    raise SystemExit(
-        f"Unknown model reference {model!r}: not a declared alias in "
-        f"models.aliases and not a recognised vendor model ID. Declare it "
-        f"as an alias in config/optimization.yaml or use a known vendor ID.",
     )
 
 
@@ -255,9 +221,9 @@ def _check_entry_pricing(alias: str, entry: dict[str, Any]) -> None:
     priced alias (the PR 3 cost-regression row in the RFC 0033 PR plan). A
     local ($0-by-design) entry is exempt (:func:`_provider_is_local`),
     so an explicit-0 simulation price and a forgotten cloud price are
-    distinguishable. The guard is **scoped to the alias surface** — the raw-ID
-    fall-through in :func:`resolve` keeps its deliberate §E graceful-
-    degradation behaviour, which Phase 3 closes.
+    distinguishable. Since RFC 0033 Phase 3 retired the §E raw-vendor-ID
+    pass-through, the alias surface is the *only* surface — every resolved
+    reference is a declared alias and runs through this guard.
     """
     if _provider_is_local(entry):
         return
@@ -317,30 +283,23 @@ def validate_alias_pricing(
     _check_alias_pricing(mapping)
 
 
-def resolve(
-    alias_or_model: str, *, explicit_provider: str | None = None,
-) -> ResolvedModel:
+def resolve(alias_or_model: str) -> ResolvedModel:
     """Resolve ``alias_or_model`` to a :class:`ResolvedModel`.
 
-    * A declared alias returns its configured record (``raw=False``).
-      ``explicit_provider`` is ignored here — the alias entry is the joint
-      declaration of provider + model + pricing and stays authoritative
-      (RFC 0033 §D rule 1; a *disagreeing* explicit provider is caught by
-      the factory, not silently overridden here). A config-backed alias is
-      run through the missing-price guard (RFC 0033 PR 4), scoped to *this*
-      entry: an unpriced non-local alias fails closed with a loud
-      :class:`SystemExit`, enforcing the inline-price invariant PR 5's cost-
-      table derivation keys the RFC 0023 budget gate from (see
+    * A declared alias returns its configured record. The
+      alias entry is the joint declaration of provider + model + pricing and
+      stays authoritative (RFC 0033 §D rule 1; a *disagreeing* explicit
+      provider on an agent entry is caught by the factory, not here). A
+      config-backed alias is run through the missing-price guard (RFC 0033
+      PR 4), scoped to *this* entry: an unpriced non-local alias fails closed
+      with a loud :class:`SystemExit`, enforcing the inline-price invariant
+      the cost-table derivation keys the RFC 0023 budget gate from (see
       :func:`_check_entry_pricing`).
-    * A recognised raw vendor ID falls through with ``alias=None,
-      raw=True``. When ``explicit_provider`` is given it wins over prefix
-      inference (§D rule 1, raw path — preserves today's
-      ``agent_config.get("provider") or _infer_provider(model)`` so a
-      per-agent ``provider: ollama`` on a local tag like ``llama3.2`` that
-      no prefix rule recognises still resolves). Otherwise the provider is
-      inferred from the prefix table (§E). The raw record carries no
-      pricing (the Go cost path keys off telemetry, §F).
-    * Anything else is a loud :class:`SystemExit` naming the string.
+    * Anything else — a raw vendor ID or a typo'd alias name — is a loud
+      :class:`SystemExit` naming the string. RFC 0033 **Phase 3** retired the
+      §E raw-vendor-ID pass-through: there is no prefix inference, no
+      ``raw=True`` record, and no provider-hint escape hatch. The single
+      source of truth for model identity is ``models.aliases``.
     """
     if not alias_or_model or not alias_or_model.strip():
         raise SystemExit("Model reference is empty")
@@ -373,15 +332,13 @@ def resolve(
             _check_entry_pricing(alias_or_model, entry)
         return _from_alias_entry(alias_or_model, entry)
 
-    provider = explicit_provider or _infer_raw_provider(alias_or_model)
-    return ResolvedModel(
-        alias=None,
-        provider=provider,
-        model=alias_or_model,
-        input_per_1m_tokens=0.0,
-        output_per_1m_tokens=0.0,
-        provider_config={},
-        raw=True,
+    # RFC 0033 Phase 3 — the §E raw-vendor-ID pass-through is retired. A
+    # reference that is not a declared alias is a config error, not a silent
+    # route: fail loud, naming the string and the one place to declare it.
+    raise SystemExit(
+        f"Unknown model reference {alias_or_model!r}: not a declared alias in "
+        f"models.aliases. Declare it as an alias in config/optimization.yaml "
+        f"(the raw vendor-ID pass-through was removed in RFC 0033 Phase 3).",
     )
 
 

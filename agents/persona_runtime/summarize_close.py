@@ -145,21 +145,18 @@ async def summarize_closed_interaction(
     prompt = _build_summarization_prompt(interaction, view)
     # Summarisation picks its model on a surface separate from
     # create_provider; resolve it here too (RFC 0033 §D) so the alias name
-    # never reaches the vendor API. While the config field is still a raw
-    # Haiku ID, resolve() returns it unchanged; PR 3's flip to the
-    # ``summarizer`` alias resolves to the physical model the same way the
-    # factory path does.
+    # never reaches the vendor API. The config field references the
+    # ``summarizer`` alias, which resolves to the physical model the same way
+    # the factory path does.
     #
     # resolve() is a *startup* validator — it raises SystemExit (a
-    # BaseException) on an unknown reference. This surface runs per-close on
-    # a background task whose caller (finalize_closed_interaction) guards
-    # only ``except Exception``, so an unresolvable summarisation model must
-    # degrade to the deterministic fallback like every other failure here
-    # rather than escape as an uncaught task exception that also skips the
-    # failure metric. NOTE: this surface is *not* counted by
-    # persatrix.llm.alias.raw_id_usage (that counter covers only the
-    # create_provider/agent surface), so a raw summarisation model is
-    # invisible to the RFC 0033 Phase 3 gate until PR 3 migrates it.
+    # BaseException) on an unknown reference (and, since RFC 0033 Phase 3
+    # retired the raw-vendor-ID pass-through, on any non-alias reference).
+    # This surface runs per-close on a background task whose caller
+    # (finalize_closed_interaction) guards only ``except Exception``, so an
+    # unresolvable summarisation model must degrade to the deterministic
+    # fallback like every other failure here rather than escape as an
+    # uncaught task exception that also skips the failure metric.
     summarization_model_ref = summarization_model()
     try:
         resolved_summarization = resolve_model(summarization_model_ref)
@@ -176,7 +173,8 @@ async def summarize_closed_interaction(
             llm_client.create_message(
                 model=resolved_summarization.model,
                 # RFC 0033 §G — emit the alias the summariser model came in via
-                # (e.g. ``summarizer``) on the span; None on the raw-ID path.
+                # (e.g. ``summarizer``) on the span. Since Phase 3 retired the
+                # raw-ID pass-through, a resolved reference is always an alias.
                 model_alias=resolved_summarization.alias,
                 messages=[{"role": "user", "content": prompt}],
                 system=load_snippet("episode-summarizer"),
