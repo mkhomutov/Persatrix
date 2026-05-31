@@ -40,17 +40,18 @@ func TestChannelMessageEvent_RoundTripsAllFields(t *testing.T) {
 	// reverting to proto3's zero (empty string / nil slice) and trips
 	// the equality check below.
 	original := &taskpb.ChannelMessageEvent{
-		MessageId:            "msg-001",
-		ChannelId:            "group:eng",
-		ChannelType:          "group",
-		SenderId:             "alice",
-		Content:              "hello world",
-		Timestamp:            "2026-05-04T12:00:00Z",
-		ThreadId:             "t-1",
-		Mentions:             []string{"bob", "carol"},
-		RespondPolicy:        "when_mentioned",
-		ThreadParentSenderId: "dave",
-		CascadeDepth:         3,
+		MessageId:             "msg-001",
+		ChannelId:             "group:eng",
+		ChannelType:           "group",
+		SenderId:              "alice",
+		Content:               "hello world",
+		Timestamp:             "2026-05-04T12:00:00Z",
+		ThreadId:              "t-1",
+		Mentions:              []string{"bob", "carol"},
+		RespondPolicy:         "when_mentioned",
+		ThreadParentSenderId:  "dave",
+		CascadeDepth:          3,
+		SenderParticipantType: "user",
 	}
 
 	blob, err := proto.Marshal(original)
@@ -79,6 +80,7 @@ func TestChannelMessageEvent_RoundTripsAllFields(t *testing.T) {
 	assert.Equal(t, "when_mentioned", decoded.RespondPolicy)
 	assert.Equal(t, "dave", decoded.ThreadParentSenderId)
 	assert.Equal(t, int32(3), decoded.CascadeDepth)
+	assert.Equal(t, "user", decoded.SenderParticipantType)
 }
 
 // TestChannelMessageEvent_CascadeDepthRoundTripsWithoutValue pins the proto3
@@ -210,6 +212,9 @@ func TestChannelMessageEvent_FieldNumbersPinned(t *testing.T) {
 		// own tag byte.
 		{9, "respond_policy", func(e *taskpb.ChannelMessageEvent, v string) { e.RespondPolicy = v }, "when_mentioned"},
 		{10, "thread_parent_sender_id", func(e *taskpb.ChannelMessageEvent, v string) { e.ThreadParentSenderId = v }, "dave"},
+		// Field 11 is `int32 cascade_depth` (varint, not length-delimited);
+		// pinned in TestChannelMessageEvent_CascadeDepthFieldNumberPinned.
+		{12, "sender_participant_type", func(e *taskpb.ChannelMessageEvent, v string) { e.SenderParticipantType = v }, "user"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
