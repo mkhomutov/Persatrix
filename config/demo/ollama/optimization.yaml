@@ -16,7 +16,7 @@
 # degrades to its fallback (ISSUE-0075).
 #
 # Derived from config/optimization.yaml — keep the non-alias blocks in step.
-schema_version: "0.2"
+schema_version: "0.3"
 active_profile: "default"
 
 models:

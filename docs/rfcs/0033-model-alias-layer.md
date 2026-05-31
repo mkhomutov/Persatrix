@@ -3,10 +3,10 @@ id: RFC-0033
 title: Provider-Agnostic Model Alias Layer
 summary: Decouple agent configs from vendor-specific model IDs by routing every model reference through a single alias map, so vendor deprecations and multi-provider expansion change one file instead of dozens.
 type: architecture
-status: partially_implemented
+status: implemented
 author: Maksim Khomutov
 created: 2026-05-15
-target: v0.3.4 (Phases 1–2) + v0.3.5+ (Phase 3)
+target: v0.3.4 (Phases 1–2) + v0.3.5 (Phase 3)
 depends_on:
   - RFC-0004
   - RFC-0008
@@ -15,10 +15,10 @@ depends_on:
 # RFC 0033 — Provider-Agnostic Model Alias Layer
 
 **Type**: architecture
-**Status**: ⚠️ Partially Implemented (Phases 1–2) — all seven Phases-1–2 PRs merged ([#431](https://github.com/mkhomutov/Persatrix/pull/431)–[#436](https://github.com/mkhomutov/Persatrix/pull/436) + closeout). Tracking plan: [0033-pr-plan.md](0033-pr-plan.md). Phase 3 (raw-ID pass-through removal + `_infer_provider` retirement) stays observed-traffic gated for v0.3.5+.
+**Status**: ✅ Implemented — Phases 1–2 in v0.3.4 (all seven PRs [#431](https://github.com/mkhomutov/Persatrix/pull/431)–[#436](https://github.com/mkhomutov/Persatrix/pull/436) + closeout); Phase 3 (raw-ID pass-through removal + `_infer_provider` retirement, schema bump to `"0.3"`) in v0.3.5 as a conditional co-resident — the dogfood `raw_id_usage` gate satisfied, the maintainer opted in. Tracking plan: [0033-pr-plan.md](0033-pr-plan.md).
 **Author**: Maksim Khomutov
 **Date**: 2026-05-15
-**Target**: v0.3.4 (Phases 1–2) + v0.3.5+ (Phase 3)
+**Target**: v0.3.4 (Phases 1–2) + v0.3.5 (Phase 3)
 **PR plan**: [0033-pr-plan.md](0033-pr-plan.md) (Phases 1–2 — the v0.3.4 contract)
 **Depends on**: RFC 0004 (Python Agent gRPC Server — established the `LLMProvider` Protocol), RFC 0008 (Memory & Context Optimization — established `optimization.yaml` as the cost/routing config home)
 **Relates to**: RFC 0006 (Efficiency & Execution Limits — cost pricing tables)
@@ -342,13 +342,13 @@ Each phase ships as an independent PR under the v0.3.x umbrella, branch prefix `
 
 **Dependencies**: Phase 1 merged.
 
-### Phase 3 — Pass-through removal + `_infer_provider` retirement
+### Phase 3 — Pass-through removal + `_infer_provider` retirement ✅ (v0.3.5)
 
-**Deliverables**:
+**Deliverables** (all shipped — see [§Implemented in v0.3.5](#implemented-in-v035-phase-3)):
 
-1. Remove the raw-ID fallthrough in `resolve()`.
-2. Delete `_infer_provider` and the `provider_inference` config block.
-3. Schema bump to `"0.3"`; loader rejects raw vendor IDs in `agents.yaml` with a clear error.
+1. Remove the raw-ID fallthrough in `resolve()`. ✅ ([#481](https://github.com/mkhomutov/Persatrix/pull/481))
+2. Delete `_infer_provider` and the `provider_inference` config block. ✅
+3. Schema bump to `"0.3"`; loader rejects raw vendor IDs in `agents.yaml` with a clear error (the `resolve()` `SystemExit`). ✅
 
 **Dependencies**: Phase 2 merged **and** zero raw-ID startup warnings observed in dogfood (the gate is observed traffic, not a calendar date — per project preference against pre-production calendar gates).
 
@@ -425,7 +425,14 @@ The proximate motivator (Sonnet 4 retirement on 2026-06-15) provided a natural d
 
 Phases 1–2 shipped under the v0.3.4 umbrella per [`0033-pr-plan.md`](0033-pr-plan.md) — PRs 1 ([#431](https://github.com/mkhomutov/Persatrix/pull/431)), 2 ([#432](https://github.com/mkhomutov/Persatrix/pull/432)), 3 ([#433](https://github.com/mkhomutov/Persatrix/pull/433)), 4 ([#434](https://github.com/mkhomutov/Persatrix/pull/434)), 5 ([#435](https://github.com/mkhomutov/Persatrix/pull/435)), 6 ([#436](https://github.com/mkhomutov/Persatrix/pull/436)). Every model reference now routes through the `models.aliases` map: `agents/model_aliases.py` `resolve()` maps a logical alias to a `(provider, model_id, pricing)` record; `create_provider` returns `(provider, physical_model)` so the alias name never reaches `create_message`; the Anthropic Sonnet 4 → 4.6 migration was absorbed by editing only the `quality` alias entry. No runtime path carries a literal vendor model ID (the `SubAgentRequest.model` default became `None`, resolved at construction per [§J](#j-persona-and-sub-agent-model-selection)). A missing-price guard fails closed for unpriced non-local aliases ([§E](#e-backwards-compatibility) raw-ID fall-through untouched); the legacy `cost.pricing.models` block is derived from the alias map and the `persatrix.llm.model_alias` span attribute is emitted, so the v0.3.2 cost surface reports correctly-keyed, non-zero cost across the re-keying. A priced OpenAI peer alias ships so the release is genuinely *Any Provider*. The raw-ID pass-through ([§E](#e-backwards-compatibility)) still works but fires a one-shot startup deprecation warning per agent and increments the `persatrix.llm.alias.raw_id_usage` counter.
 
-**Still scheduled**: Phase 3 (remove the raw-ID fall-through, retire `_infer_provider` and the `provider_inference` block, schema bump to `"0.3"`, loader rejection of raw vendor IDs in `agents.yaml`) ships in v0.3.5+, **gated on observed traffic** — the `raw_id_usage` counter reading zero across the dogfood window, not a calendar date — per the [Phased Implementation Plan](#phased-implementation-plan). This is a partial-RFC closeout; the full-RFC closeout waits for Phase 3.
+### Implemented in v0.3.5 (Phase 3)
+
+Phase 3 shipped under the v0.3.5 umbrella as a conditional co-resident (the dogfood `raw_id_usage` gate satisfied, the maintainer opted in — see the [v0.3.5 plan §Conditional co-resident](../v0.3.5-plan.md#conditional-co-resident--rfc-0033-phase-3)). Two slices:
+
+1. **Raw-ID pass-through removal** (deliverable 1, [#481](https://github.com/mkhomutov/Persatrix/pull/481)): `resolve()` now rejects any reference that is not a declared alias with a loud `SystemExit` naming the string; the `ResolvedModel.raw` discriminator and the resolver's own `_infer_raw_provider` prefix engine are gone. The factory's `resolved.raw` branch and `_note_raw_id_usage` machinery were removed with it.
+2. **Inference retirement + schema bump** (deliverables 2–3): the now-dead `_infer_provider` heuristic ([§I](#i-retirement-of-_infer_provider)) and its `_OPENAI_*` prefix tables, the `optimization.provider_inference()` accessor + the `default.model_routing.provider_inference` YAML block, and the `persatrix.llm.alias.raw_id_usage` gate counter are deleted; `config/optimization.yaml` `schema_version` is bumped to `"0.3"`. Loader-level rejection of raw vendor IDs is the `resolve()` `SystemExit` from slice 1 — there is no remaining path that prefix-infers a provider.
+
+This is the full-RFC closeout: provider is data, not inferred; `models.aliases` is the single source of truth for model identity.
 
 ## Related Documentation
 

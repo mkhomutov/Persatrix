@@ -135,20 +135,11 @@ class _Instruments:
             unit="{token}",
             description="Input and output tokens billed by the LLM provider.",
         )
-        # RFC 0033 PR 2 — raw-ID usage counter. Increments once per agent
-        # whose ``model:`` is a raw vendor ID rather than a models.aliases
-        # entry. This counter reading zero across the dogfood window is the
-        # Phase 3 entrance signal (raw-ID pass-through + ``_infer_provider``
-        # removal); it rides the existing ``persatrix.llm.*`` export path.
-        self.alias_raw_id_usage: Counter = meter.create_counter(
-            name="persatrix.llm.alias.raw_id_usage",
-            unit="{usage}",
-            description=(
-                "Agents still referencing a raw vendor model ID instead of a "
-                "models.aliases entry (RFC 0033). Attribute: agent.id. Reads "
-                "zero ⇒ the Phase 3 raw-ID pass-through removal can open."
-            ),
-        )
+        # RFC 0033 Phase 3: the ``persatrix.llm.alias.raw_id_usage`` gate
+        # counter is retired. It was the Phase 3 *entrance* signal (raw-ID
+        # usage reading zero); with Phase 3 landed — the raw-ID pass-through
+        # and the ``_infer_provider`` heuristic both removed, ``resolve``
+        # rejecting any non-alias reference — there is nothing left to count.
         self.event_dispatched: Counter = meter.create_counter(
             name="agent.event.dispatched",
             unit="{event}",

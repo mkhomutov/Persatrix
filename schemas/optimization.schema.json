@@ -7,7 +7,7 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "description": "Optimization-config schema version. RFC 0033 Phase 1 bumped this from \"0.1\" to \"0.2\" when the `models.aliases` block landed; Phase 3 (raw-ID rejection) will bump it to \"0.3\"."
+      "description": "Optimization-config schema version. RFC 0033 Phase 1 bumped this from \"0.1\" to \"0.2\" when the `models.aliases` block landed; Phase 3 (raw-ID rejection) bumped it to \"0.3\" — model identity now flows exclusively through `models.aliases` (a raw vendor model ID is rejected at resolve, not prefix-inferred), and the `default.model_routing.provider_inference` block is retired."
     },
     "models": {
       "type": "object",
