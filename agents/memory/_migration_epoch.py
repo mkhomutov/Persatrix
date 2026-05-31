@@ -54,6 +54,7 @@ from __future__ import annotations
 import aiosqlite
 
 from ..epoch_id import DEFAULT_EPOCH_ID
+from ..principal_id import DEFAULT_PRINCIPAL_ID
 
 #: ``(table, epoch-index name)`` pairs for the four UUID-keyed tiers.
 #: ``relationships`` is **not** here — after v11 it keys on the participant
@@ -125,9 +126,12 @@ async def _rebuild_relationships_epoch_pk(
     cols = {row[1] for row in info}
     # ``principal_id`` is guaranteed present + in-key by v11, but guard
     # defensively against an odd baseline: carry it forward when present,
-    # else default 'local' (mirrors v11's own has-column carry-forward).
+    # else default to ``DEFAULT_PRINCIPAL_ID`` (mirrors v11's own has-column
+    # carry-forward, including its use of the constant over a bare literal).
     has_principal_col = "principal_id" in cols
-    principal_src = "principal_id" if has_principal_col else "'local'"
+    principal_src = (
+        "principal_id" if has_principal_col else f"'{DEFAULT_PRINCIPAL_ID}'"
+    )
     # A baseline could already carry epoch_id as a plain column (e.g. a
     # pre-amendment v12 run); carry its values forward, else default 'live'.
     has_epoch_col = "epoch_id" in cols
@@ -145,13 +149,13 @@ async def _rebuild_relationships_epoch_pk(
             last_interaction_at REAL,
             notes TEXT,
             session_id TEXT NOT NULL DEFAULT 'legacy',
-            principal_id TEXT NOT NULL DEFAULT 'local',
+            principal_id TEXT NOT NULL DEFAULT '{DEFAULT_PRINCIPAL_ID}',
             epoch_id TEXT NOT NULL DEFAULT '{DEFAULT_EPOCH_ID}',
             PRIMARY KEY (participant_id, participant_type,
                          other_participant_id, other_participant_type,
                          principal_id, epoch_id)
         )
-        """,  # noqa: S608 — DEFAULT_EPOCH_ID is a trusted constant.
+        """,  # noqa: S608 — DEFAULT_PRINCIPAL_ID / DEFAULT_EPOCH_ID are trusted constants.
     )
     await db.execute(
         f"""

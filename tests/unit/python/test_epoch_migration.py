@@ -44,6 +44,7 @@ from agents.memory.migrations import (
     _apply_migration_12,
     _apply_migrations,
 )
+from agents.principal_id import DEFAULT_PRINCIPAL_ID
 
 _TIERS = ("episodes", "relationships", "facts", "notes", "interactions")
 _INDEXES = (
@@ -202,6 +203,13 @@ class TestRelationshipsPrimaryKey:
         }
 
     async def test_v11_rebuild_preserves_row_and_keys_epoch(self) -> None:
+        # Distinct, non-default sentinel values in *every* carried column so
+        # a regression that drops a column from the rebuild's INSERT...SELECT
+        # (or transposes two) fails loudly — the CREATE TABLE alone keeping a
+        # column would otherwise hide a lost value behind its DEFAULT.  The
+        # two ``*_type`` columns use 'user' (not the 'agent' default) for the
+        # same reason.
+        last_at = 12345.0
         async with aiosqlite.connect(":memory:") as db:
             await _seed_v11_baseline(db)
             # A pre-v12 relationships row (session_id + principal_id present,
@@ -211,9 +219,9 @@ class TestRelationshipsPrimaryKey:
                 "(participant_id, participant_type, other_participant_id, "
                 " other_participant_type, trust_score, interaction_count, "
                 " last_interaction_at, notes, session_id, principal_id) "
-                "VALUES ('a', 'agent', 'peer', 'agent', 0.9, 3, ?, 'n', "
+                "VALUES ('a', 'user', 'peer', 'user', 0.9, 3, ?, 'n', "
                 "        'run-a', 'tenant-x')",
-                (_time.time(),),
+                (last_at,),
             )
             await db.commit()
 
@@ -223,20 +231,30 @@ class TestRelationshipsPrimaryKey:
             pk = await _pk_columns(db, "relationships")
             assert "epoch_id" in pk
             assert "principal_id" in pk
-            # The pre-existing row is preserved and upgraded to 'live'.
+            # Every pre-existing column round-trips through the rebuild and the
+            # row is upgraded to the 'live' epoch (full-parity guard, not a
+            # subset — see comment above).
             async with db.execute(
-                "SELECT trust_score, interaction_count, session_id, "
-                "       principal_id, epoch_id "
+                "SELECT participant_id, participant_type, "
+                "       other_participant_id, other_participant_type, "
+                "       trust_score, interaction_count, last_interaction_at, "
+                "       notes, session_id, principal_id, epoch_id "
                 "FROM relationships WHERE participant_id='a' "
                 "AND other_participant_id='peer'",
             ) as cur:
                 row = await cur.fetchone()
             assert row is not None
-            assert row[0] == 0.9
-            assert row[1] == 3
-            assert row[2] == "run-a"
-            assert row[3] == "tenant-x"
-            assert row[4] == DEFAULT_EPOCH_ID
+            assert row[0] == "a"
+            assert row[1] == "user"
+            assert row[2] == "peer"
+            assert row[3] == "user"
+            assert row[4] == 0.9
+            assert row[5] == 3
+            assert row[6] == last_at
+            assert row[7] == "n"
+            assert row[8] == "run-a"
+            assert row[9] == "tenant-x"
+            assert row[10] == DEFAULT_EPOCH_ID
 
     async def test_two_epochs_coexist_as_distinct_rows(
         self, memory: EpisodicMemory,
@@ -264,6 +282,63 @@ class TestRelationshipsPrimaryKey:
             row = await cur.fetchone()
         assert row is not None
         assert row[0] == 2
+
+    async def test_principal_less_baseline_carries_default_principal(
+        self,
+    ) -> None:
+        """Defensive branch: a ``relationships`` table without ``principal_id``
+        upgrades cleanly, carrying the row forward under the *default*
+        principal.
+
+        The production ladder always runs v11 (which adds ``principal_id``)
+        before v12, so this odd shape is unreachable in normal upgrades — but
+        the handler guards against it (``has_principal_col`` carry-forward,
+        mirroring v11's own).  Pinning it both covers that otherwise-untested
+        branch and ties the fallback to :data:`DEFAULT_PRINCIPAL_ID` rather
+        than a bare ``'local'`` literal, so the two move together if the
+        constant ever changes.
+        """
+        async with aiosqlite.connect(":memory:") as db:
+            # A v10-shape relationships table: participant tuple + session_id,
+            # *no* principal_id, *no* epoch_id (i.e. before v11 ever ran).
+            await db.execute(
+                "CREATE TABLE relationships ("
+                " participant_id TEXT NOT NULL,"
+                " participant_type TEXT NOT NULL DEFAULT 'agent',"
+                " other_participant_id TEXT NOT NULL,"
+                " other_participant_type TEXT NOT NULL DEFAULT 'agent',"
+                " trust_score REAL DEFAULT 0.5,"
+                " interaction_count INTEGER DEFAULT 0,"
+                " last_interaction_at REAL,"
+                " notes TEXT,"
+                " session_id TEXT NOT NULL DEFAULT 'legacy',"
+                " PRIMARY KEY (participant_id, participant_type,"
+                "              other_participant_id, other_participant_type))",
+            )
+            await db.execute(
+                "INSERT INTO relationships "
+                "(participant_id, participant_type, other_participant_id, "
+                " other_participant_type, trust_score, session_id) "
+                "VALUES ('a', 'agent', 'peer', 'agent', 0.7, 'run-a')",
+            )
+            await db.commit()
+
+            await _apply_migration_12(db)
+
+            pk = await _pk_columns(db, "relationships")
+            assert "principal_id" in pk
+            assert "epoch_id" in pk
+            async with db.execute(
+                "SELECT trust_score, session_id, principal_id, epoch_id "
+                "FROM relationships WHERE participant_id='a' "
+                "AND other_participant_id='peer'",
+            ) as cur:
+                row = await cur.fetchone()
+            assert row is not None
+            assert row[0] == 0.7
+            assert row[1] == "run-a"
+            assert row[2] == DEFAULT_PRINCIPAL_ID
+            assert row[3] == DEFAULT_EPOCH_ID
 
 
 # ─── In-place upgrade from a v11 baseline ───────────────────
