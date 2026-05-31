@@ -112,7 +112,7 @@ class TestModelAliasesAccessor:
     def test_aliases_block_parses(self, config_path: Path) -> None:
         _write_yaml(
             config_path,
-            'schema_version: "0.2"\n'
+            'schema_version: "0.3"\n'
             "models:\n"
             "  aliases:\n"
             "    quality:\n"

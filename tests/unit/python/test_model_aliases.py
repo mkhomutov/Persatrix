@@ -10,8 +10,8 @@ reference must be a declared alias. This module pins that contract:
 * a string that is not a declared alias — whether a raw vendor ID
   (``claude-sonnet-4-20250514`` / ``gpt-4o``) or a typo — is a loud
   ``SystemExit`` naming the string and pointing at ``models.aliases``
-  (the "clear up-front error" the RFC substitutes for ``_infer_provider``'s
-  silent default-to-openai);
+  (the "clear up-front error" the RFC substitutes for the deleted
+  ``_infer_provider`` heuristic's silent default-to-openai);
 * the context-manager test seam registers a temporary map for the
   duration of a ``with`` block without mutating the process singleton.
 """
