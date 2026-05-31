@@ -48,6 +48,12 @@ def test_leaf_exports_required_symbols() -> None:
     )
 
     assert EPOCH_ID_ENV_VAR == "PERSATRIX_EPOCH"
+    # Cross-language lock-step: the Go channel store carries its own copy as
+    # `internal/channels.DefaultEpochID`, pinned to the same literal by
+    # `TestDefaultEpochID_CrossLanguageLockStepLiteral`. The epoch axis is
+    # strict-equality with a live producer from day one, so a rename here MUST
+    # move the Go const too — otherwise Go- and Python-defaulted rows stop
+    # matching once epoch filtering lights up.
     assert DEFAULT_EPOCH_ID == "live"
     # Wire header is HTTP/2 lower-case; in-process event key is distinct.
     assert EPOCH_METADATA_GRPC_KEY == "persatrix-epoch"

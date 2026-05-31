@@ -184,3 +184,27 @@ func TestSQLiteStore_Migration_V5ToV6_BackfillsLive(t *testing.T) {
 		assert.Equal(t, DefaultEpochID, msgEpoch, "pre-v6 message row backfilled to live")
 	})
 }
+
+// TestDefaultEpochID_CrossLanguageLockStepLiteral pins the literal value of
+// [DefaultEpochID] to the cross-language sentinel `live`. The Go channel
+// store and the Python persona-memory leaf each carry their own copy of this
+// constant (`internal/channels.DefaultEpochID` and
+// `agents.epoch_id.DEFAULT_EPOCH_ID`); the epoch axis is strict-equality with
+// a live producer from day one, so the two subsystems MUST agree on the
+// untagged default or, once epoch filtering lights up (PR 3/4), a channel row
+// defaulted on the Go side and a memory row defaulted on the Python side stop
+// matching and cross-subsystem recall silently drifts.
+//
+// The other epoch tests tie DefaultEpochID to the migration's behaviour
+// (insert → read back → compare), which catches a *Go-internal* rename but
+// stays green if a contributor renames the const AND the SQL literal together
+// — silently diverging from Python. This literal pin is the Go mirror of
+// `assert DEFAULT_EPOCH_ID == "live"` in
+// tests/unit/python/test_epoch_id_leaf_module.py, so a rename on either side
+// now breaks that side's pin and surfaces the lock-step contract documented on
+// the [DefaultEpochID] declaration.
+func TestDefaultEpochID_CrossLanguageLockStepLiteral(t *testing.T) {
+	assert.Equal(t, "live", DefaultEpochID,
+		"DefaultEpochID must equal the cross-language sentinel 'live' — "+
+			"move it in lock-step with agents.epoch_id.DEFAULT_EPOCH_ID")
+}
