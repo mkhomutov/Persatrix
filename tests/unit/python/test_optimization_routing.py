@@ -4,7 +4,7 @@ PR 3 migrates ``default.model_routing.defaults`` and the
 ``context_management.summarization.model`` field from raw vendor IDs to
 model aliases. ``model_routing_defaults()`` and ``sub_agent_default_model()``
 are the read side the sub-agent ``None``-default resolution (RFC 0033 §J.3)
-sits on; both are profile-aware exactly like ``provider_inference()``.
+sits on; both are profile-aware (active profile, then ``default``).
 
 Kept in a module separate from ``test_optimization.py`` to stay under the
 repo's per-file line cap.
@@ -46,8 +46,8 @@ class TestModelRoutingDefaults:
 
     PR 3 migrates these values from raw vendor IDs to alias names
     (``task_agents`` / ``sub_agents`` → ``quality``, ``evaluators`` →
-    ``fast``); the accessor is profile-aware exactly like
-    ``provider_inference()`` so the resolution chain is uniform.
+    ``fast``); the accessor is profile-aware (active profile, then
+    ``default``) so the resolution chain is uniform.
     """
 
     def test_missing_file_returns_empty_dict(self, config_path: Path) -> None:
@@ -64,8 +64,8 @@ class TestModelRoutingDefaults:
     ) -> None:
         _write_yaml(
             config_path,
-            "default:\n  model_routing:\n    provider_inference:\n"
-            "      anthropic_prefixes: [claude]\n",
+            "default:\n  model_routing:\n    something_else:\n"
+            "      foo: [bar]\n",
         )
         assert model_routing_defaults() == {}
 

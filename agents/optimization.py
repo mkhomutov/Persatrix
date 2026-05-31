@@ -114,40 +114,12 @@ def summarization_model() -> str:
     return ""
 
 
-def provider_inference() -> dict[str, list[str]]:
-    """Return the provider-inference routing rules from optimization.yaml.
-
-    Resolution order:
-
-    1. ``<active_profile>.model_routing.provider_inference``
-    2. ``default.model_routing.provider_inference``
-    3. Empty dict (caller falls back to hardcoded defaults).
-
-    The returned dict has up to three keys:
-    ``anthropic_prefixes``, ``openai_exact``, ``openai_prefixes``.
-    """
-    cfg = _load_config()
-    active = cfg.get("active_profile") or "default"
-    profiles = (active, "default") if active != "default" else ("default",)
-    for profile in profiles:
-        section = cfg.get(profile)
-        if not isinstance(section, dict):
-            continue
-        routing = section.get("model_routing")
-        if not isinstance(routing, dict):
-            continue
-        inference = routing.get("provider_inference")
-        if isinstance(inference, dict):
-            return {k: list(v) for k, v in inference.items() if isinstance(v, list)}
-    return {}
-
-
 def model_routing_defaults() -> dict[str, str]:
     """Return ``<profile>.model_routing.defaults`` — the alias each agent
     *role* (``task_agents`` / ``sub_agents`` / ``evaluators``) routes to
     when it does not name a model explicitly.
 
-    Resolution order mirrors :func:`provider_inference`:
+    Resolution order (active profile, then ``default``):
 
     1. ``<active_profile>.model_routing.defaults``
     2. ``default.model_routing.defaults``
@@ -211,7 +183,7 @@ def model_aliases() -> dict[str, dict[str, Any]]:
     The RFC 0033 alias map is the single source of truth for model
     identity: each entry maps a logical alias (``quality`` / ``fast`` /
     ``summarizer``) to a concrete ``(provider, model, pricing)`` record.
-    Unlike :func:`provider_inference`, the block is **not** profile-scoped
+    Unlike :func:`model_routing_defaults`, the block is **not** profile-scoped
     — it sits at the top level alongside ``default`` / ``cost`` (RFC 0033
     §B), so resolution does not consult ``active_profile``.
 
@@ -347,7 +319,6 @@ __all__ = [
     "derived_cost_pricing",
     "model_aliases",
     "model_routing_defaults",
-    "provider_inference",
     "reset_cache",
     "sub_agent_default_model",
     "summarization_model",

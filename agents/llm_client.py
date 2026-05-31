@@ -42,7 +42,6 @@ from .observability.spans import (
     STOP_REASON_TO_GEN_AI,
     gen_ai_attributes,
 )
-from .optimization import provider_inference
 from .wallet_client import BudgetExceededError, Lease, WalletClient
 
 logger = logging.getLogger(__name__)
@@ -369,33 +368,12 @@ class LLMClient:
 # ─── Provider Factory ────────────────────────────────────────
 
 
-# S-14: Separate exact matches from prefix matches for o-series models.
-# ``startswith("o1")`` would match "o10", "o100" etc. Instead, use exact
-# matches for bare model names and prefix matches for versioned names.
-# These defaults are overridden by config/optimization.yaml provider_inference.
-_OPENAI_EXACT_MODELS: frozenset[str] = frozenset({"o1", "o3", "o4"})
-_OPENAI_PREFIX_MODELS: tuple[str, ...] = ("gpt-", "o1-", "o3-", "o4-")
-
-
-# ``_infer_provider`` is the raw-ID prefix-routing heuristic. It is no longer
-# on the ``create_provider`` path (the RFC 0033 resolver — see
-# :mod:`agents.llm_factory` — owns provider selection now), but is retained
-# through Phase 2 as the documented raw-ID fall-through engine and is pinned
-# by ``tests/unit/python/test_model_aliases.py`` against the resolver's own
-# copy. RFC 0033 §I retires it in Phase 3, gated on zero raw-ID usage.
-def _infer_provider(model: str) -> str:
-    rules = provider_inference()
-    anthropic_prefixes = tuple(rules.get("anthropic_prefixes", ("claude",)))
-    openai_exact = frozenset(rules.get("openai_exact", _OPENAI_EXACT_MODELS))
-    openai_prefixes = tuple(rules.get("openai_prefixes", _OPENAI_PREFIX_MODELS))
-    if model.startswith(anthropic_prefixes):
-        return "anthropic"
-    if model in openai_exact or model.startswith(openai_prefixes):
-        return "openai"
-    logger.warning(
-        "Unknown model prefix %r, defaulting to openai provider", model
-    )
-    return "openai"
+# RFC 0033 §I / Phase 3: provider selection flows exclusively through the
+# alias map's declared ``provider`` field (:func:`agents.model_aliases.resolve`)
+# — provider is data, not inferred. The raw-ID prefix-routing heuristic
+# ``_infer_provider`` (and its ``_OPENAI_*`` prefix tables) was retired with the
+# §E raw-vendor-ID pass-through; a reference that is not a declared alias is now
+# a loud ``SystemExit`` at resolve, not a silent prefix-inferred route.
 
 
 # ``create_provider`` lives in :mod:`agents.llm_factory` and is re-exported

@@ -10,7 +10,7 @@
 #
 # Derived from config/optimization.yaml — keep the non-alias blocks (budgets,
 # wallet, conversation_window) in step with it.
-schema_version: "0.2"
+schema_version: "0.3"
 active_profile: "default"
 
 models:

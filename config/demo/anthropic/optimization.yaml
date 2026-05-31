@@ -16,7 +16,7 @@
 # the base config no longer carries a priced provider.
 #
 # Derived from the v0.3.3 shipped config — keep the non-alias blocks in step.
-schema_version: "0.2"
+schema_version: "0.3"
 active_profile: "default"
 
 models:

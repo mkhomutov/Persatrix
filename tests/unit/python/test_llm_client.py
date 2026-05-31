@@ -19,7 +19,6 @@ from agents.llm_client import (
     OpenAIProvider,
     StopReason,
     ToolCall,
-    _infer_provider,
     create_provider,
 )
 from agents.model_aliases import use_alias_map
@@ -423,23 +422,24 @@ class TestLLMClient:
 
 
 class TestCreateProvider:
-    def test_infer_anthropic_from_model(self):
-        assert _infer_provider("claude-sonnet-4-20250514") == "anthropic"
-        assert _infer_provider("claude-3-haiku-20240307") == "anthropic"
+    def test_infer_provider_is_retired(self):
+        """RFC 0033 Phase 3 (deliverable 2) — the raw-ID prefix-routing
+        heuristic ``_infer_provider`` is deleted.
 
-    def test_infer_openai_from_unknown_model(self):
-        assert _infer_provider("gpt-4o") == "openai"
-        assert _infer_provider("qwen2.5-coder") == "openai"
+        It was the engine behind the §E raw-vendor-ID pass-through that
+        Phase 3 deliverable 1 (#481) retired; with the pass-through gone it
+        had no production reader and only a self-referential test. Provider
+        selection now flows exclusively through the alias map's declared
+        ``provider`` field (``agents.model_aliases.resolve``) — provider is
+        data, not inferred (RFC 0033 §H). Pin its absence so a future change
+        cannot resurrect the heuristic without tripping here.
+        """
+        import agents.llm_client as llm_client
 
-    def test_infer_openai_o_series(self):
-        """S-10: o-series model prefixes should resolve to openai."""
-        assert _infer_provider("o1") == "openai"
-        assert _infer_provider("o1-preview") == "openai"
-        assert _infer_provider("o1-mini") == "openai"
-        assert _infer_provider("o3") == "openai"
-        assert _infer_provider("o3-mini") == "openai"
-        assert _infer_provider("o4-mini") == "openai"
-        assert _infer_provider("o4") == "openai"
+        assert not hasattr(llm_client, "_infer_provider"), (
+            "_infer_provider must be retired (RFC 0033 §I / Phase 3) — "
+            "provider is declared on the alias, never inferred from a prefix"
+        )
 
     # As of RFC 0033 Phase 3 ``create_provider`` accepts only declared aliases
     # (the raw-vendor-ID pass-through is retired), so these route through the

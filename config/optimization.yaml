@@ -1,5 +1,9 @@
 # Persatrix Optimization Configuration
-schema_version: "0.2"
+# schema_version 0.3 (RFC 0033 Phase 3): model identity flows exclusively
+# through models.aliases — a raw vendor model ID is rejected at resolve
+# (agents/model_aliases.py), not prefix-inferred. The provider_inference
+# block and the _infer_provider heuristic it fed are retired.
+schema_version: "0.3"
 
 # Active profile: cost_optimized | speed_optimized | quality_optimized | simulation_optimized | custom
 active_profile: "default"
@@ -66,18 +70,6 @@ default:
       task_agents: "quality"
       sub_agents: "quality"
       evaluators: "fast"
-    provider_inference:
-      anthropic_prefixes:
-        - "claude"
-      openai_exact:
-        - "o1"
-        - "o3"
-        - "o4"
-      openai_prefixes:
-        - "gpt-"
-        - "o1-"
-        - "o3-"
-        - "o4-"
 
   caching:
     exact:

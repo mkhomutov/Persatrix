@@ -182,11 +182,12 @@ dashboard can group spend by logical role while the vendor ID stays visible.
 The alias is telemetry-only — it is never forwarded to the provider API. See
 [observability.md § 10.5](../observability.md#105-persatrix-specific-attribute-namespace).
 
-A raw vendor ID used in place of an alias still works (the §E fall-through) but
-fires a one-shot deprecation warning and increments the
-`persatrix.llm.alias.raw_id_usage` counter; that counter reading zero across
-the dogfood window is the entrance signal for RFC 0033 Phase 3 (raw-ID
-removal).
+As of RFC 0033 **Phase 3** a `model:` field must name a declared alias. A raw
+vendor ID (or a typo'd alias name) is no longer a silent fall-through — it
+fails loud with a `SystemExit` at resolve, naming the string and pointing at
+`models.aliases`. Provider is data, not inferred: the prefix-routing heuristic
+(`_infer_provider`) and the `persatrix.llm.alias.raw_id_usage` dogfood gate
+counter that authorised this cutover are retired.
 
 ---
 

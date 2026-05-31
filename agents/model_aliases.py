@@ -12,9 +12,9 @@ As of RFC 0033 **Phase 3** the cutover-window raw-vendor-ID pass-through
 that is not an alias — a raw vendor ID like ``claude-sonnet-4-20250514``, or
 a typo'd alias name — is a loud :class:`SystemExit` naming the string and
 pointing at ``models.aliases`` (the "clear up-front error" this RFC
-substitutes for ``_infer_provider``'s silent default-to-openai). There is no
-longer a ``raw=True`` record, no prefix inference, and no provider-hint
-escape hatch.
+substitutes for the deleted ``_infer_provider`` heuristic's silent
+default-to-openai). There is no longer a ``raw=True`` record, no prefix
+inference, and no provider-hint escape hatch.
 
 This module is a **leaf**: it imports config accessors from
 :mod:`agents.optimization` only — never the provider classes or
