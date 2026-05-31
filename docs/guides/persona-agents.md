@@ -603,17 +603,24 @@ compose project declares, not only the memory stores. Idempotent (the
 second invocation finds nothing to remove). Restart the stack with
 `make docker-up` afterwards.
 
-> **`make reset` wipes volumes; it is not the session tool.** Per-session
-> recall isolation shipped in v0.3.5 ([RFC 0031](../rfcs/0031-per-session-namespacing-channels.md)
-> Phases 2–4): default recall is session-scoped and the operator-visible
-> `persatrix session …` CLI lands — see the [sessions operator
-> guide](sessions.md). But a **session is room continuity** (`(agent,
-> channel)`) that *accumulates*, not a clean slate — `persatrix session new
-> --activate` switches to a fresh continuity room, it does **not** purge the
-> `ember-owl-data` memory volume. Whole-world run/test isolation is the
-> forthcoming **epoch** axis
-> ([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)); until it
-> ships, `make reset` remains the supported clean-rerun path. The original
+> **`make reset` wipes volumes; it is not the run-isolation tool — epoch is.**
+> For a clean rerun that inherits *nothing*, set a fresh **epoch**:
+> `PERSATRIX_EPOCH=<id>` (or `--epoch <id>`) isolates the run across every
+> persona-memory tier — episodes, relationship trust, *and* person-facts — at
+> once, the residue a fresh channel name alone leaves behind. See the
+> [epochs operator guide](epochs.md). `make reset` (`docker compose down -v`)
+> drops the whole stack — the `ember-owl-data` memory volume, the
+> `orchestrator-data` channels store, and `workspace` — i.e. **all** epochs
+> across **all** sessions; reach for it only when you want everything gone.
+>
+> The two axes are orthogonal: a **session is room continuity** (`(agent,
+> channel)`, *accumulating*) — `persatrix session new` switches to a fresh
+> continuity room but does **not** purge participant-keyed state; **epoch** is
+> the strict-equality per-run isolation axis. Both shipped in v0.3.5
+> ([RFC 0031](../rfcs/0031-per-session-namespacing-channels.md): session-scoped
+> recall + the `persatrix session …` CLI in Phases 2–4, see the
+> [sessions operator guide](sessions.md); the epoch axis in Phase 3b,
+> [ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)). The original
 > F-3 finding is closed as
 > [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md)
 > (surfaced as F-3 in

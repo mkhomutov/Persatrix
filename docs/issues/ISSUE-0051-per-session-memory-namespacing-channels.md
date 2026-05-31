@@ -117,9 +117,9 @@ Open questions:
 > ([memory-scope-axes.md](../memory-scope-axes.md)) redefines `session` as
 > room-continuity `(agent, channel)` that *accumulates* — so a rerun
 > reusing the same channel name now auto-binds to the *same* session and
-> would still inherit it. Everyday, no-wipe run/test isolation is the new
-> **epoch** axis, tracked in
-> [ISSUE-0085](ISSUE-0085-epoch-axis-run-isolation.md); until it lands,
-> `make reset` remains the supported clean-slate path. F-3 as a
-> *recall-bleed* defect is fixed here; F-3 as an *auto-isolation
-> ergonomic* moves to ISSUE-0085.
+> would still inherit it. Everyday, no-wipe run/test isolation is the
+> **epoch** axis, **shipped in v0.3.5** ([ISSUE-0085](ISSUE-0085-epoch-axis-run-isolation.md),
+> RFC 0031 Phase 3b): a fresh `PERSATRIX_EPOCH` / `--epoch` inherits
+> *nothing* across all five tiers. `make reset` is now the whole-stack
+> nuke, not the run-isolation tool. F-3 as a *recall-bleed* defect is
+> fixed here; F-3 as an *auto-isolation ergonomic* is closed by ISSUE-0085.

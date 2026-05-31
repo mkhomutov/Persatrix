@@ -16,9 +16,11 @@ another's.
 > ongoing memory, keyed `(agent, channel)`. It **accumulates** across runs and
 > restarts — that is the point. Switching sessions changes *which* room's memory
 > a run reads and writes; it does **not** wipe anything. If you want a rerun that
-> inherits *nothing* (test isolation), that is the forthcoming **epoch** axis
-> ([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)); until it
-> ships, `make reset` (§6) is the supported clean-slate path.
+> inherits *nothing* (test isolation), that is the **epoch** axis — a sibling of
+> this one, shipped in v0.3.5
+> ([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)); see the
+> [epochs guide](epochs.md). `make reset` (§6) stays the whole-stack nuke, not
+> the everyday run-isolation tool.
 
 ---
 
@@ -139,9 +141,12 @@ Pruning legacy rows once they stop mattering is a deferred follow-up
 
 `make reset` (`docker compose down -v`) wipes **every** named volume in the
 compose project — the orchestrator `channels.db`, the per-persona `memory.db`
-volumes, and the agent scratch `workspace`. It is the **nuclear option** for a
-clean rerun and remains the supported run-isolation tool until the `epoch` axis
-([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)) ships.
+volumes, and the agent scratch `workspace`. It is the **nuclear option** — the
+whole stack, all epochs across all sessions. For everyday run/test isolation,
+reach for the `epoch` axis instead (a fresh `PERSATRIX_EPOCH` / `--epoch`
+inherits *nothing*; [ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md),
+[epochs guide](epochs.md)); `make reset` is for when you want the volumes
+themselves gone.
 
 Because the session **registry** (`channels.db`) and the per-agent
 **memory.db** files live in *different* volumes that no single transaction spans

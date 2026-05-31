@@ -397,19 +397,26 @@ from a prior run, copy them out before resetting. The target is
 idempotent — running it twice in a row succeeds cleanly (the second
 invocation finds nothing to remove).
 
-> **`make reset` is the volume-wipe nuke, not the everyday session tool.**
-> Per-session recall isolation shipped in v0.3.5: [RFC 0031](../rfcs/0031-per-session-namespacing-channels.md)
-> Phases 2–4 make default persona-memory recall session-scoped and add the
-> operator-visible `persatrix session …` CLI — see the
-> [sessions operator guide](sessions.md). But a **session is room
-> continuity** (keyed `(agent, channel)`), not a per-run clean slate: it
-> *accumulates* across runs, so `persatrix session new --activate` switches
-> to a fresh continuity room — it does **not** purge prior state. Whole-world
-> run/test isolation (a rerun that inherits *nothing*) is the forthcoming
-> **epoch** axis ([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md));
-> until it lands, `make reset` remains the supported way to wipe every volume
-> across all sessions for a clean rerun. The original F-3 finding is closed
-> as [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md)
+> **`make reset` is the volume-wipe nuke, not the everyday run-isolation tool.**
+> For a clean rerun — one that inherits *nothing* from the prior run — set a
+> fresh **epoch** instead: `PERSATRIX_EPOCH=<id>` or the `--epoch <id>` flag
+> isolates a run across *all* persona-memory tiers (episodes, relationship
+> trust, person-facts) at once. See the [epochs operator guide](epochs.md).
+> `make reset` runs `docker compose down -v`: it wipes **every** volume — all
+> epochs across all sessions — so it cannot express the isolated-but-coexisting
+> worlds an epoch gives you (CI keeps prior runs' data on disk under their own
+> epoch). Reach for `make reset` only when you want the whole stack gone.
+>
+> Note the two axes are orthogonal: a **session is room continuity** (keyed
+> `(agent, channel)`, *accumulating*) — `persatrix session new` switches to a
+> fresh continuity room but does **not** purge participant-keyed state; **epoch**
+> is the per-run/test isolation axis (strict equality, no carve-out). v0.3.5
+> ships both: session-scoped recall + the `persatrix session …` CLI
+> ([RFC 0031](../rfcs/0031-per-session-namespacing-channels.md) Phases 2–4, see
+> the [sessions operator guide](sessions.md)) and the epoch axis
+> ([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md), Phase 3b). The
+> original F-3 finding is closed as
+> [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md)
 > (surfaced as F-3 in
 > [docs/v0.3.0-test-findings-pr-plan.md](../v0.3.0-test-findings-pr-plan.md)).
 
@@ -429,12 +436,14 @@ deferrals, not implementation oversights:
 - **Per-channel `cascade_depth` overrides** → v0.3.x; see
   [OQ #11](../rfcs/0011-channels-bridges.md#open-questions).
 - **Persona name discovery / dynamic membership** → v0.4.0 (RFC 0011 OQ #1).
-- **Whole-world run/test isolation** (the `epoch` axis) so a rerun reusing the
-  same channel name inherits *nothing* → tracked in
-  [ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md). (Per-session
-  recall namespacing itself shipped in v0.3.5 — [RFC 0031](../rfcs/0031-per-session-namespacing-channels.md);
-  see §10 and the [sessions guide](sessions.md). `make reset` stays the
-  clean-slate nuke until epoch lands.)
+- ~~**Whole-world run/test isolation** (the `epoch` axis)~~ → **shipped in
+  v0.3.5** ([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md),
+  [RFC 0031](../rfcs/0031-per-session-namespacing-channels.md) Phase 3b): a
+  rerun reusing the same channel name under a fresh `PERSATRIX_EPOCH` / `--epoch`
+  inherits *nothing*. See the [epochs guide](epochs.md). (Per-session recall
+  namespacing also shipped in v0.3.5; see §10 and the
+  [sessions guide](sessions.md). `make reset` is now the whole-stack nuke, not
+  the run-isolation tool — epoch is.)
 
 ---
 

@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0085
 summary: "Under the scope-axes reframing, `session` becomes the room-continuity unit `(agent, channel)` — it accumulates and never auto-resets — so it can no longer be the home of F-3 run/test isolation. F-3's bleed spans both room-scoped memory (episodes) and person-scoped memory (relationship, person-facts), so a fresh channel name cannot isolate a rerun (relationship/person-facts are keyed on the participant and survive a room rename). Add a dedicated orthogonal `epoch_id` axis (default `live`), modeled on the `principal_id` axis: strict equality, **no `legacy` carve-out** (a fresh epoch sees nothing), in the `relationships` primary key, on the same task-local contextvar + gRPC-header rail. Prod never changes it; CI bumps it per run. Keep `make reset` as the nuke; reject overloading `principal_id` for test isolation."
-status: open
+status: resolved
 severity: medium
 area: agents/memory
 created: 2026-05-30
+closed: 2026-05-31
 refs:
   - docs/memory-scope-axes.md
   - docs/rfcs/0031-per-session-namespacing-channels.md
@@ -43,3 +44,16 @@ So isolation is a logical-key axis, structurally identical to the `principal_id`
 6. **Maintenance sweeps caveat** — the agent-global eviction/retention/janitor sweeps already skip the `principal_id` filter; `epoch_id` inherits the same gap and the same deferral (capacity-policy decision, not a per-request read path).
 
 > Maintainer owns sequencing (later patch / new RFC 0031 phase / successor RFC). This is the structural half of the reframing; [ISSUE-0083](ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md) is the prerequisite that makes it necessary.
+
+## Resolution
+
+**Resolved in v0.3.5** as RFC 0031 [Phase 3b](../v0.3.5-plan.md#phase-3b--rfc-0031-epoch-axis-issue-0085), executing the [epoch PR plan](../rfcs/0031-epoch-pr-plan.md) (PRs 1–6):
+
+1. **Migration** ✅ — migration v12 added `epoch_id TEXT NOT NULL DEFAULT 'live'` across the five persona-memory tiers + channel-store v6, with `epoch_id` in the `relationships` primary key ([#474](https://github.com/mkhomutov/Persatrix/pull/474)).
+2. **Recall + write filter** ✅ — `agents/memory/_epoch_filter.py`: unconditional `AND epoch_id = ?`, no carve-out, no `'*'` sentinel; wired across every recall + per-request write path ([#475](https://github.com/mkhomutov/Persatrix/pull/475)).
+3. **Rail** ✅ — `agents/epoch_id.py` ContextVar + `persatrix-epoch` gRPC header; orchestrator boot-resolves `PERSATRIX_EPOCH` (default `live`) and emits it per request; persona-runtime ingress lifts it into an `epoch_scope` ([#472](https://github.com/mkhomutov/Persatrix/pull/472), [#476](https://github.com/mkhomutov/Persatrix/pull/476)).
+4. **Operator surface** ✅ — resolved to **bare flag + env, no registry verbs** (epoch has no continuity-room lifecycle to manage): `--epoch <id>` on the dispatch-bearing verbs (precedence above `PERSATRIX_EPOCH`), documented in [`docs/guides/epochs.md`](../guides/epochs.md) ([#477](https://github.com/mkhomutov/Persatrix/pull/477)).
+5. **`make reset` framing** ✅ — reframed at epoch as the everyday run-isolation tool across the channels / persona-agents / sessions guides; `make reset` is the whole-stack nuke (all epochs across all sessions).
+6. **Maintenance sweeps caveat** — `epoch_id` inherits the `principal_id` deferral (the agent-global eviction/retention/janitor sweeps skip the filter): recorded, not closed.
+
+The structural F-3 fix is gated end-to-end by `tests/integration/test_epoch_run_isolation.py`: a rerun reusing `--user alice` under a fresh `PERSATRIX_EPOCH` — same room, same user — inherits none of the prior run's episodes, relationship trust, or person-facts.
