@@ -62,6 +62,15 @@ class TestEventTimeoutSubmodule:
 
         assert "_coerce_event_timeout" in pkg.__all__
 
+    def test_submodule_defines_all(self) -> None:
+        # Every extracted persona_runtime submodule that re-exports a symbol
+        # through the package root declares its own ``__all__`` (F-64-DR5-06;
+        # mirrors the ``memory_context`` helper-extraction precedent), so the
+        # re-export surface is explicit rather than incidental.
+        import agents.persona_runtime.event_timeout as mod
+
+        assert mod.__all__ == ["_coerce_event_timeout"]
+
 
 class TestEventTimeoutBehaviourParity:
     """The move preserves coercion semantics exactly."""

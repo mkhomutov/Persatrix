@@ -17,6 +17,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["_coerce_event_timeout"]
+
 
 def _coerce_event_timeout(
     raw_value: object,
