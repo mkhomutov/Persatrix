@@ -347,9 +347,12 @@ func main() {
 	}
 
 	sessionID := resolveSessionID(logger)
+	// ISSUE-0085 PR 4: resolve the per-process run/test-isolation epoch once
+	// at boot. `live` in production (behaviour unchanged); a per-job id in CI.
+	epochID := resolveEpochID(logger)
 
 	// RFC 0011 PR 2 — channels subsystem (see channels.go).
-	chanOpts, chanCleanup, chanErr := initChannels(*configDir, *channelsDB, sessionID, orchMetrics, reg, logger)
+	chanOpts, chanCleanup, chanErr := initChannels(*configDir, *channelsDB, sessionID, epochID, orchMetrics, reg, logger)
 	if chanErr != nil {
 		logger.Fatal("channels: config-vs-store reconcile failed", zap.Error(chanErr))
 	}

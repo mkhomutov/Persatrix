@@ -26,12 +26,17 @@ from .channel_validation import validate_channel_message_event
 from .chat_reply import chat_error_response as _chat_error_response
 from .chat_reply import extract_chat_reply as _extract_chat_reply
 from .dispatch import EventDispatcher
+from .epoch_id import EVENT_EPOCH_METADATA_KEY
 from .generated import task_pb2, task_pb2_grpc
 from .participant import validate_participant_type
 from .persona_types import AgentEvent, EventType
 from .principal_id import EVENT_PRINCIPAL_METADATA_KEY
 from .session_id import EVENT_SESSION_METADATA_KEY
-from .session_metadata import _principal_from_context, _session_from_context
+from .session_metadata import (
+    _epoch_from_context,
+    _principal_from_context,
+    _session_from_context,
+)
 from .wallet_client import BudgetExceededError
 
 logger = logging.getLogger("Persatrix.agent.server")
@@ -257,6 +262,11 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         request_principal = _principal_from_context(context)
         if request_principal is not None:
             event.metadata[EVENT_PRINCIPAL_METADATA_KEY] = request_principal
+        # ISSUE-0085 PR 4: the per-process epoch rides the same rail so
+        # ``on_event`` enters an ``epoch_scope`` for run/test isolation.
+        request_epoch = _epoch_from_context(context)
+        if request_epoch is not None:
+            event.metadata[EVENT_EPOCH_METADATA_KEY] = request_epoch
 
         try:
             # dispatch(execute_actions=False) returns actions without firing
@@ -438,6 +448,11 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         request_principal = _principal_from_context(context)
         if request_principal is not None:
             event.metadata[EVENT_PRINCIPAL_METADATA_KEY] = request_principal
+        # ISSUE-0085 PR 4: the per-process epoch rides the same envelope so
+        # the deferred EventLoop drain re-enters the run-isolation scope.
+        request_epoch = _epoch_from_context(context)
+        if request_epoch is not None:
+            event.metadata[EVENT_EPOCH_METADATA_KEY] = request_epoch
 
         # Fire-and-forget: enqueue onto the agent's EventLoop and return
         # immediately. The loop owns decide → execute → recover when it

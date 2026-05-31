@@ -50,6 +50,46 @@ func resolveSessionID(logger *zap.Logger) string {
 	return v
 }
 
+// epochIDEnvVar is the env var read once at orchestrator boot to determine
+// the per-process run/test-isolation epoch emitted on the `persatrix-epoch`
+// gRPC header on every outbound dispatch. ISSUE-0085 PR 4 (the structural
+// half of the F-3 fix).
+const epochIDEnvVar = "PERSATRIX_EPOCH"
+
+// defaultEpochID is the epoch every production / untagged deployment uses
+// when the env var is unset, and the `DEFAULT 'live'` value the persona-
+// memory epoch migration (v12) backfills onto pre-existing rows. It MUST
+// byte-match `agents.epoch_id.DEFAULT_EPOCH_ID` — both sides default to it
+// independently, so a drift would split a single-world deployment across two
+// epochs (Go emitting one default, Python filtering on another).
+const defaultEpochID = "live"
+
+// resolveEpochID returns the per-process epoch sourced from PERSATRIX_EPOCH.
+// An unset env var logs INFO and returns [defaultEpochID] ("live") — the
+// single-world default that leaves production behaviour unchanged. A value
+// containing characters outside [A-Za-z0-9_-] emits a WARN but is still
+// accepted verbatim, mirroring [resolveSessionID]'s soft-validation posture:
+// an operator stuck on the env-var knob is never blocked on a stricter
+// validator landing first.
+//
+// Unlike the session id (per-room, resolved per request by the
+// SessionResolver), the epoch is a single process-global value: `live` in
+// production, a per-job id in CI. It is resolved once here at boot and ferried
+// to the dispatcher via [channels.WithEpoch].
+func resolveEpochID(logger *zap.Logger) string {
+	v := os.Getenv(epochIDEnvVar)
+	if v == "" {
+		logger.Info(epochIDEnvVar+" unset; defaulting to 'live' epoch",
+			zap.String("epoch_id", defaultEpochID))
+		return defaultEpochID
+	}
+	if !sessionIDPattern.MatchString(v) {
+		logger.Warn(epochIDEnvVar+" contains characters outside [A-Za-z0-9_-]; accepting verbatim",
+			zap.String("epoch_id", v))
+	}
+	return v
+}
+
 // validateStartupFlags rejects malformed --env, --deadline-mode, and
 // PERSATRIX_LOG_FORMAT values at startup so a typo (--env=test,
 // --deadline-mode=dervied, PERSATRIX_LOG_FORMAT=preety) surfaces as a clean

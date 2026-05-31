@@ -50,6 +50,17 @@ const (
 	// `agents.session_id.SESSION_METADATA_GRPC_KEY` — a rename on either side
 	// silently disables the ISSUE-0081 per-request session rail.
 	MDSession = "persatrix-session"
+	// MDEpoch is the per-process run/test-isolation epoch the orchestrator
+	// resolves once at boot (`live` in production, a per-job id in CI) and
+	// emits on every dispatch (ISSUE-0085 PR 4). It is an orthogonal scope
+	// axis from MDSession: session answers "which room?" (per-room, varies by
+	// (agent, channel)); epoch answers "which logical run wrote this row?"
+	// (process-global, constant for the process lifetime). Its persona-side
+	// consumer is the same `on_event` funnel, which re-establishes an
+	// `epoch_scope` from it for the strict-equality run-isolation filter. The
+	// wire value MUST byte-match `agents.epoch_id.EPOCH_METADATA_GRPC_KEY` — a
+	// rename on either side silently disables the per-request epoch rail.
+	MDEpoch = "persatrix-epoch"
 )
 
 // IDs carries the four correlation IDs propagated across the gRPC boundary.
@@ -107,6 +118,26 @@ func InjectSession(ctx context.Context, sessionID string) context.Context {
 		return ctx
 	}
 	return metadata.AppendToOutgoingContext(ctx, MDSession, sessionID)
+}
+
+// InjectEpoch returns ctx with the per-process epoch appended to the outgoing
+// gRPC metadata under [MDEpoch]. An empty id is a no-op (the ctx is returned
+// unchanged), matching the partial-set semantics of [InjectSession] — the live
+// dispatch path always carries a concrete boot-resolved epoch (at least the
+// default "live"), but a blank must never ride the wire as an empty header the
+// persona side would ignore.
+//
+// Epoch is a separate helper rather than folded into [InjectSession] because
+// the two are orthogonal scope axes (room-continuity vs. run-isolation) with
+// independent producers: the session id is resolved per request by the
+// SessionResolver, the epoch is a single process-global value resolved once at
+// boot. AppendToOutgoingContext merges, so this composes with a prior
+// InjectSession / InjectIDs on the same ctx.
+func InjectEpoch(ctx context.Context, epochID string) context.Context {
+	if epochID == "" {
+		return ctx
+	}
+	return metadata.AppendToOutgoingContext(ctx, MDEpoch, epochID)
 }
 
 // ExtractIDs reads the four metadata keys from ctx's incoming gRPC metadata
