@@ -47,6 +47,14 @@ type publishMessageRequest struct {
 	// as the `persatrix-session` header (overriding the ISSUE-0082
 	// auto-binding). Absent, the boot default / auto-binding stands.
 	SessionID string `json:"session_id,omitempty"`
+	// EpochID is the optional ISSUE-0085 PR 5 `--epoch` override. When present
+	// it replaces the orchestrator's boot-resolved process epoch
+	// (PERSATRIX_EPOCH) for this one publish — emitted as the `persatrix-epoch`
+	// header the dispatch path sends to the persona (the run/test-isolation
+	// axis), orthogonal to `session_id` (room-continuity). Unlike SessionID it
+	// is NOT stamped on the persisted row (the channel-store `epoch_id` column
+	// keeps its "live" default); absent, the boot epoch stands.
+	EpochID string `json:"epoch_id,omitempty"`
 }
 
 // channelResponse is the JSON shape returned by GET/POST /api/v1/channels.

@@ -271,13 +271,22 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 
 	// ISSUE-0085 PR 4: emit the per-process run/test-isolation epoch on every
 	// dispatch so the persona side re-establishes an `epoch_scope` for the
-	// strict-equality run-isolation filter. Unlike the session id, the epoch
-	// is process-global (resolved once at boot, not per-room), so there is no
-	// resolver, no per-request failure path, and no `--session`-style
-	// override here. Empty means no epoch was wired (channels-disabled /
-	// pre-wiring path) — emit nothing and the persona falls back to its
-	// construction-time ("live") snapshot, byte-identical to pre-ISSUE-0085.
-	if d.epoch != "" {
+	// strict-equality run-isolation filter. Unlike the session id, the epoch is
+	// process-global (resolved once at boot, not per-room), so there is no
+	// resolver and no per-request failure path.
+	//
+	// ISSUE-0085 PR 5: an explicit per-request `--epoch` override (threaded
+	// onto ctx by the REST handler — see [WithEpochOverride]) takes precedence
+	// *above* the boot epoch for the one request it accompanies, mirroring the
+	// `--session` override above. Absent an override the boot epoch ([WithEpoch])
+	// stands, so the process-global default (PR 4) is byte-identically
+	// preserved. When neither is present nothing is emitted (channels-disabled /
+	// pre-wiring path) and the persona falls back to its construction-time
+	// ("live") snapshot, byte-identical to pre-ISSUE-0085.
+	if override := EpochOverrideFromContext(ctx); override != "" {
+		ctx = grpcmeta.InjectEpoch(ctx, override)
+		span.SetAttributes(attribute.String("epoch.id", override))
+	} else if d.epoch != "" {
 		ctx = grpcmeta.InjectEpoch(ctx, d.epoch)
 		// Low-cardinality-on-span, never a metric label (RFC 0031 OQ #7),
 		// matching the session-id posture: pin the epoch so a trace can be

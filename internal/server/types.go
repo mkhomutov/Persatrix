@@ -75,6 +75,14 @@ type chatRequest struct {
 	TimeoutSeconds  int32  `json:"timeout_seconds"`
 	ParticipantType string `json:"participant_type"`
 	SessionID       string `json:"session_id,omitempty"`
+	// EpochID is the optional ISSUE-0085 PR 5 `--epoch` override. When present
+	// it replaces the orchestrator's boot-resolved process epoch (PERSATRIX_EPOCH)
+	// for this one conversation — emitted as the `persatrix-epoch` header the
+	// dispatch path sends to the persona (the run/test-isolation axis). Distinct
+	// from `session_id` (room-continuity); orthogonal scope axes. Absent, the
+	// boot epoch stands. Not stamped on a persisted row (no channel-store epoch
+	// write path; run-isolation is enforced persona-side via the rail).
+	EpochID string `json:"epoch_id,omitempty"`
 }
 
 // createSessionRequest is the JSON body for POST /api/v1/sessions

@@ -80,6 +80,10 @@ pub(crate) enum ChannelCommands {
         /// active-session file; an archived target warns but proceeds.
         #[arg(long)]
         session: Option<String>,
+        /// Run/test-isolation epoch to publish under (ISSUE-0085 `--epoch`
+        /// override). Resolves above `PERSATRIX_EPOCH`; strict-equality.
+        #[arg(long)]
+        epoch: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -98,6 +102,10 @@ pub(crate) enum ChannelCommands {
         /// override). See `channel send --session`.
         #[arg(long)]
         session: Option<String>,
+        /// Run/test-isolation epoch to publish under (ISSUE-0085 `--epoch`
+        /// override). See `channel send --epoch`.
+        #[arg(long)]
+        epoch: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -149,6 +157,7 @@ pub(crate) async fn dispatch(
             mention,
             mention_all,
             session,
+            epoch,
             json,
         } => {
             let sender_id = r#as.unwrap_or_else(default_user);
@@ -162,6 +171,7 @@ pub(crate) async fn dispatch(
                 mention_all,
                 "",
                 session.as_deref(),
+                epoch.as_deref(),
                 json,
             )
             .await
@@ -174,6 +184,7 @@ pub(crate) async fn dispatch(
             mention,
             mention_all,
             session,
+            epoch,
             json,
         } => {
             // Reject empty `message_id` before constructing the request:
@@ -192,6 +203,7 @@ pub(crate) async fn dispatch(
                 mention_all,
                 &message_id,
                 session.as_deref(),
+                epoch.as_deref(),
                 json,
             )
             .await

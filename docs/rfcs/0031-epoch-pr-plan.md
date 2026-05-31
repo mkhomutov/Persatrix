@@ -2,7 +2,7 @@
 
 **RFC**: [0031-per-session-namespacing-channels.md](0031-per-session-namespacing-channels.md) · design home: [Memory Scope Axes §Epoch](../memory-scope-axes.md#epoch--the-testrun-isolation-axis)
 **Tracks**: [ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)
-**Status**: 🚧 Implementing — v0.3.5 ([Phase 3b](../v0.3.5-plan.md#phase-3b--rfc-0031-epoch-axis-issue-0085)); PR 1 (leaf) + PR 2 (migration, [#474](https://github.com/mkhomutov/Persatrix/pull/474)) + PR 3 (filter + per-tier wiring, [#475](https://github.com/mkhomutov/Persatrix/pull/475)) merged, PR 4 (gRPC rail) open, PRs 5–6 remaining
+**Status**: 🚧 Implementing — v0.3.5 ([Phase 3b](../v0.3.5-plan.md#phase-3b--rfc-0031-epoch-axis-issue-0085)); PR 1 (leaf) + PR 2 (migration, [#474](https://github.com/mkhomutov/Persatrix/pull/474)) + PR 3 (filter + per-tier wiring, [#475](https://github.com/mkhomutov/Persatrix/pull/475)) + PR 4 (gRPC rail, [#476](https://github.com/mkhomutov/Persatrix/pull/476)) merged, PR 5 (operator surface) open, PR 6 remaining
 **Created**: 2026-05-31
 **Branch prefix**: `feature/v035-issue0085-` / `feature/v035-epoch-`
 **Target**: `main`
@@ -99,7 +99,7 @@ PR 2 before PR 3 — the filter cannot wire to a column that does not exist. PR 
 
 ### PR 4: `feature/v035-epoch-rail` — gRPC Rail (orchestrator emission + ingress lift)
 
-**Status**: 🔀 PR open.
+**Status**: ✅ Merged ([#476](https://github.com/mkhomutov/Persatrix/pull/476)).
 **Depends on**: PR 3.
 **Purpose**: Light up the producer. The orchestrator resolves the epoch at boot from `PERSATRIX_EPOCH` (default `live`) and emits it on the `persatrix-epoch` gRPC header per request; the persona-runtime ingress lifts the header into an `epoch_scope` for the handler's lifetime via `on_event` (mirroring the principal metadata rail wiring + `test_principal_metadata_rail.py` / `test_principal_scope.py`).
 
@@ -109,8 +109,13 @@ PR 2 before PR 3 — the filter cannot wire to a column that does not exist. PR 
 
 ### PR 5: `feature/v035-epoch-operator` — Operator Surface
 
+**Status**: 🔀 PR open.
 **Depends on**: PR 4.
 **Purpose**: The operator surface resolved as in-scope by the Phase 3 plan's open decision. Minimum: a `--epoch <id>` override (parity with `--session`, precedence above the boot env) on the dispatch-bearing verbs, and `PERSATRIX_EPOCH` documented as the per-process/CI knob. Whether epoch warrants registry verbs (`epoch new/list`) like sessions, or stays a bare flag + env (epoch has no continuity-room lifecycle to manage), is settled in the PR thread — the bare flag + env is the default, registry verbs an explicit add.
+
+**Decision (this PR): bare flag + env, no registry verbs.** Epoch has no continuity-room lifecycle to mint/activate/archive, so there is nothing for `epoch new/list` to manage — the session registry exists for that lifecycle, which epoch lacks by design. The override is therefore a pure two-layer precedence (`--epoch` flag > `PERSATRIX_EPOCH` env > boot `live`), with no active-epoch pointer file.
+
+**Delivered**: CLI (`cli/`) — `cli/src/epoch_resolve.rs` (the dependency-free `resolve_epoch` precedence helper, sibling of `session_resolve.rs` but with no registry lookup / pointer file); `--epoch` flag on `chat` + `channel send` / `channel reply` (`main.rs`, `channel_dispatch.rs`); `epoch_id` (`omitempty`) on the `ChatRequest` / `PublishMessageRequest` wire bodies. Orchestrator (`internal/`) — `channels.WithEpochOverride` / `EpochOverrideFromContext` (request-scoped context value, sibling of `session_override.go`); `GRPCMessageDispatcher.Dispatch` prefers the override over the boot epoch ([`WithEpoch`](../../internal/channels/grpc_dispatcher.go)) when emitting `persatrix-epoch`; `Server.resolveEpochOverride` lifts the REST `epoch_id` onto the dispatch context (`channel_epoch_override.go`), wire-legality-checked (printable ASCII → 400, reusing the session override's gate) and wired into both `handleChat` + `handlePublishMessage`. **Not** stamped on the persisted channel-store row (the `epoch_id` column keeps its `live` default — run-isolation is enforced persona-side via the rail), the one asymmetry from the session override, which does stamp. Operator guide: [`docs/guides/epochs.md`](../guides/epochs.md). Test-driven by `epoch_resolve.rs` unit tests, the `ChatRequest`/`PublishMessageRequest` serde tests, `grpc_dispatcher_epoch_override_test.go` (override-beats-boot / emitted-without-boot / no-override-keeps-boot / span-pin), and `channel_epoch_override_test.go` (handler threading + 400 rejection + `resolveEpochOverride` unit).
 
 ### PR 6: `feature/v035-epoch-close` — Closeout
 
@@ -143,8 +148,8 @@ PR 2 before PR 3 — the filter cannot wire to a column that does not exist. PR 
 | 1 | Epoch leaf module | `feature/v035-issue0085-epoch-leaf` | ✅ Merged | [#472](https://github.com/mkhomutov/Persatrix/pull/472) | 2026-05-31 |
 | 2 | Migration (epoch_id columns + relationships PK) | `feature/v035-epoch-migration` | ✅ Merged | [#474](https://github.com/mkhomutov/Persatrix/pull/474) | 2026-05-31 |
 | 3 | Filter helper + per-tier wiring | `feature/v035-epoch-filter` | ✅ Merged | [#475](https://github.com/mkhomutov/Persatrix/pull/475) | 2026-05-31 |
-| 4 | gRPC rail (emission + ingress lift) | `feature/v035-epoch-rail` | 🔀 PR open | — | — |
-| 5 | Operator surface (`--epoch` + env docs) | `feature/v035-epoch-operator` | ⬜ Not started | — | — |
+| 4 | gRPC rail (emission + ingress lift) | `feature/v035-epoch-rail` | ✅ Merged | [#476](https://github.com/mkhomutov/Persatrix/pull/476) | 2026-05-31 |
+| 5 | Operator surface (`--epoch` + env docs) | `feature/v035-epoch-operator` | 🔀 PR open | — | — |
 | 6 | Closeout (F-3 structural-isolation gate + docs) | `feature/v035-epoch-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred

@@ -83,6 +83,12 @@ pub(crate) struct ChatRequest {
     /// empty (Go `session_id,omitempty` parity).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub(crate) session_id: String,
+    /// ISSUE-0085 PR 5 run/test-isolation epoch override (the `--epoch` flag),
+    /// orthogonal to `session_id` (room-continuity vs. run-isolation). Omitted
+    /// when empty (Go `epoch_id,omitempty` parity) so the orchestrator keeps
+    /// its boot default ("live").
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub(crate) epoch_id: String,
 }
 
 #[derive(Deserialize)]

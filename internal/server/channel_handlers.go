@@ -275,6 +275,16 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ISSUE-0085 PR 5: apply the optional `epoch_id` override (the CLI's
+	// `--epoch`) onto the same dispatch context — see [Server.resolveEpochOverride].
+	// The epoch is not stamped on the persisted row (unlike the session), so
+	// there is no effective-id return; only the dispatch context is threaded.
+	ctx, err = s.resolveEpochOverride(ctx, req.EpochID)
+	if err != nil {
+		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	msg := channels.ChannelMessage{
 		ID:        uuid.NewString(),
 		ChannelID: id,

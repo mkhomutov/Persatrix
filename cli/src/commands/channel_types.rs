@@ -101,6 +101,11 @@ pub(crate) struct PublishMessageRequest {
     /// `session_id,omitempty` tag on `publishMessageRequest`.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub(crate) session_id: String,
+    /// ISSUE-0085 PR 5 `--epoch` run/test-isolation override, orthogonal to
+    /// `session_id`. Omitted when empty so the orchestrator keeps its boot
+    /// epoch ("live") — matching the Go `epoch_id,omitempty` tag.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub(crate) epoch_id: String,
 }
 
 #[derive(Serialize)]
@@ -233,6 +238,7 @@ mod tests {
             thread_id: String::new(),
             mentions: Vec::new(),
             session_id: String::new(),
+            epoch_id: String::new(),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["sender_id"], "alice");
@@ -240,6 +246,7 @@ mod tests {
         assert!(json.get("thread_id").is_none(), "empty thread_id omitted");
         assert!(json.get("mentions").is_none(), "empty mentions omitted");
         assert!(json.get("session_id").is_none(), "empty session_id omitted");
+        assert!(json.get("epoch_id").is_none(), "empty epoch_id omitted");
     }
 
     #[test]
@@ -250,6 +257,7 @@ mod tests {
             thread_id: "msg-100".to_string(),
             mentions: vec!["bob".to_string(), "carol".to_string()],
             session_id: String::new(),
+            epoch_id: String::new(),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["thread_id"], "msg-100");
@@ -265,9 +273,27 @@ mod tests {
             thread_id: String::new(),
             mentions: Vec::new(),
             session_id: "run-arc-3".to_string(),
+            epoch_id: String::new(),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["session_id"], "run-arc-3");
+    }
+
+    #[test]
+    fn publish_message_request_includes_epoch_id_when_set() {
+        // ISSUE-0085 PR 5: a resolved `--epoch` id rides on `epoch_id`,
+        // orthogonal to the `--session` override.
+        let req = PublishMessageRequest {
+            sender_id: "alice".to_string(),
+            content: "hi".to_string(),
+            thread_id: String::new(),
+            mentions: Vec::new(),
+            session_id: String::new(),
+            epoch_id: "ci-run-5".to_string(),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["epoch_id"], "ci-run-5");
+        assert!(json.get("session_id").is_none(), "empty session_id omitted");
     }
 
     #[test]
