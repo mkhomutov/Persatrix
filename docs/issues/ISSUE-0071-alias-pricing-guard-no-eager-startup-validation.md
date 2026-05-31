@@ -1,15 +1,27 @@
 ---
 id: ISSUE-0071
 summary: "The RFC 0033 PR 4 missing-price guard fires per-resolve (scoped to the resolved alias), so an unpriced non-local alias that no agent resolves is never caught at runtime: an all-local/offline society (whose agents take the factory's mock/ollama/offline early-return before resolve()) boots without validating any cloud alias, and validate_alias_pricing() — the whole-map validator that would close the gap — is wired only into tests, not an eager startup check"
-status: open
+status: resolved
 severity: low
 area: agents/optimization
 created: 2026-05-26
+resolved: 2026-05-31
 refs:
   - docs/rfcs/0033-model-alias-layer.md
   - docs/rfcs/0033-pr-plan.md
   - docs/v0.3.4-plan-amendment-2026-05-24.md
 ---
+
+> **Resolved 2026-05-31** — adopted **proposed fix option 1**: `validate_alias_pricing()`
+> (no-arg, whole-map) is now wired into the server bootstrap via a new
+> `agents.server_cli._validate_startup_config()` seam, called from `main()`
+> after logging is configured and **before the socket is bound**. A
+> misconfigured registry — including an *unused* unpriced non-local alias, and
+> in an all-local/offline society that never resolves a cloud alias — now fails
+> fast and loud at boot, naming the offending alias, rather than only on first
+> resolve (or never). The per-resolve scoped guard stays as the runtime
+> backstop; local ($0-real) aliases remain exempt. Covered by
+> `tests/unit/python/test_server_cli_startup_validation.py`.
 
 ## Summary
 
