@@ -69,6 +69,7 @@ from .action_loop import _ActionLoopMixin
 from .conversation_seed import _ConversationWindowMixin
 from .conversation_window import ConversationWindowConfig, build_conversation_messages
 from .episode_routing import _EpisodeRoutingMixin
+from .event_timeout import _coerce_event_timeout  # noqa: F401 — re-exported (ISSUE-0053 extraction)
 from .memory_context import _MemoryContextMixin, _truncate_with_ellipsis  # noqa: F401
 from .prompt_assembly import _PromptAssemblyMixin
 from .state_persistence import _StatePersistenceMixin
@@ -109,42 +110,6 @@ class Linkable(Protocol):
 # pathological link list).  Oldest-drop semantics preserve the most
 # recent causality, which is what operators usually want.
 _PENDING_TICK_LINKS_CAP: Final[int] = 32
-
-
-# ─── Helper Functions ──────────────────────────────────────
-
-
-def _coerce_event_timeout(
-    raw_value: object,
-    default: float,
-    agent_id: str,
-    *,
-    min_value: float | None = None,
-    setting_name: str = "event_timeout",
-) -> float:
-    """Coerce a config-sourced timeout to ``float`` with optional floor.
-
-    Returns *default* (and warns) when coercion fails or — when
-    ``min_value`` is given — when the coerced value is ``<= min_value``.
-    PR-3 review #19 folded the prior caller-side ``<= 0`` re-check for
-    ``interaction_idle_timeout_sec`` into this helper.  PR #60 review
-    extracted the original try/float guard from on_event / on_tick.
-    """
-    try:
-        value = float(raw_value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        logger.warning(
-            "Agent %s: invalid %s %r, using default %.0fs",
-            agent_id, setting_name, raw_value, default,
-        )
-        return default
-    if min_value is not None and value <= min_value:
-        logger.warning(
-            "Agent %s: %s=%r is not greater than %r; using default %.0fs",
-            agent_id, setting_name, value, min_value, default,
-        )
-        return default
-    return value
 
 
 # ─── Memory namespace ─────────────────────────────────────

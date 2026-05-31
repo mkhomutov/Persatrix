@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0053
 summary: "agents/persona_runtime/__init__.py sits 1 line under the 500-line code cap — the next addition trips the strict file-size check"
-status: open
+status: resolved
 severity: low
 area: agents/persona_runtime
 created: 2026-05-16
+closed: 2026-05-31
 refs:
   - docs/rfcs/0034-persona-conversational-working-memory.md
   - docs/rfcs/0034-pr-plan.md
@@ -44,6 +45,25 @@ rather than trimming prose — mirroring the existing mixin-split pattern
 `_coerce_event_timeout` helper, each of which is self-contained. That
 restores headroom and keeps `__init__.py` focused on assembly +
 re-exports.
+
+## Resolution
+
+> 2026-05-31 — resolved (v0.3.5 candidate fold-in, per the
+> [v0.3.5 plan §Candidate fold-ins](../v0.3.5-plan.md#candidate-fold-ins-maintainer-decision)).
+> Took the issue's own recommended path: extracted the self-contained
+> `_coerce_event_timeout` helper into a dedicated `event_timeout` submodule
+> (`agents/persona_runtime/event_timeout.py`) rather than trimming docstring
+> prose, mirroring the existing `conversation_window` / `summarize_close`
+> extraction precedent. `agents/persona_runtime/__init__.py` re-exports the
+> helper (`# noqa: F401`) and keeps it in `__all__`, so every existing
+> importer — `agents/persona.py`'s back-compat re-export,
+> `test_persona_agent_factory`, `test_persona_state` — is unaffected.
+> `__init__.py` dropped 500 → 465 lines (35 lines of headroom restored).
+> Test-driven by
+> `tests/unit/python/test_persona_runtime_event_timeout_extraction.py`
+> (submodule home + same-object re-export from both the package root and
+> `agents.persona`, `__all__` membership, coercion behaviour parity, and a
+> regression pin that `__init__.py` stays well under the cap).
 
 ## Notes
 
