@@ -2,7 +2,7 @@
 
 **RFC**: [0031-per-session-namespacing-channels.md](0031-per-session-namespacing-channels.md) · design home: [Memory Scope Axes §Epoch](../memory-scope-axes.md#epoch--the-testrun-isolation-axis)
 **Tracks**: [ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)
-**Status**: 🚧 Implementing — v0.3.5 ([Phase 3b](../v0.3.5-plan.md#phase-3b--rfc-0031-epoch-axis-issue-0085)); PR 1 (leaf) merged, PRs 2–6 open
+**Status**: 🚧 Implementing — v0.3.5 ([Phase 3b](../v0.3.5-plan.md#phase-3b--rfc-0031-epoch-axis-issue-0085)); PR 1 (leaf) merged, PRs 2–6 remaining
 **Created**: 2026-05-31
 **Branch prefix**: `feature/v035-issue0085-` / `feature/v035-epoch-`
 **Target**: `main`
@@ -133,7 +133,7 @@ PR 2 before PR 3 — the filter cannot wire to a column that does not exist. PR 
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 1 | Epoch leaf module | `feature/v035-issue0085-epoch-leaf` | ✅ Merged | [#472](https://github.com/mkhomutov/Persatrix/pull/472) | — |
+| 1 | Epoch leaf module | `feature/v035-issue0085-epoch-leaf` | ✅ Merged | [#472](https://github.com/mkhomutov/Persatrix/pull/472) | 2026-05-31 |
 | 2 | Migration (epoch_id columns + relationships PK) | `feature/v035-epoch-migration` | ⬜ Not started | — | — |
 | 3 | Filter helper + per-tier wiring | `feature/v035-epoch-filter` | ⬜ Not started | — | — |
 | 4 | gRPC rail (emission + ingress lift) | `feature/v035-epoch-rail` | ⬜ Not started | — | — |
