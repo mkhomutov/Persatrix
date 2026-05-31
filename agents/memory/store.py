@@ -26,6 +26,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from ..epoch_id import resolve_epoch_id_silent
 from ..principal_id import resolve_principal_id_silent
 from ..session_id import current_session_id, resolve_session_id_silent
 from .decay import (
@@ -48,13 +49,13 @@ from .society_facade import (
     SocietyFacadeMixin,
     SocietyTransientError,
 )
+from .store_compress import compress_entries
 from .store_types import (
     Candidate,
     CompressedView,
     MemoryDisabledError,
     MemoryEntry,
 )
-from .working import estimate_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,12 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
         # their own ``_active_principal_id`` snapshots for the
         # persona-direct path.
         self._principal_id = resolve_principal_id_silent()
+        # ISSUE-0085 PR 3: resolve the run/test epoch once at construction,
+        # same rationale as the session + principal snapshots above.  The
+        # procedural recall path threads this; the per-tier objects own
+        # their own ``_active_epoch_id`` snapshots for the persona-direct
+        # path.
+        self._epoch_id = resolve_epoch_id_silent()
 
     @classmethod
     def from_config(cls, config: StoreConfig) -> MemoryStore:
@@ -430,48 +437,10 @@ class MemoryStore(ProceduralFacadeMixin, SharedPoolFacadeMixin, SocietyFacadeMix
     # :class:`ProceduralFacadeMixin` to keep this file under the
     # repo's 500-line cap.
 
-    @staticmethod
-    def compress(
-        entries: Iterable[MemoryEntry],
-        *,
-        target_tokens: int,
-    ) -> CompressedView:
-        """Extractively compress *entries* into a view of ≤ ``target_tokens``.
-
-        RFC 0020 PR 4 contract.  Phase 2 implementation: highest-
-        importance first, in-order until the running token count would
-        exceed ``target_tokens``.  Idempotent.  Entries individually
-        larger than ``target_tokens`` are silently skipped (knapsack-
-        suboptimal but acceptable for Phase 2 — the extractive path is a
-        stop-gap until PR 5's abstractive path) and count toward
-        ``entries_dropped``.  :func:`staticmethod` so RFC 0020 PR 4's
-        persona-runtime call site can invoke it without a facade instance.
-        Pinned by [RFC 0020 PR plan](../../docs/rfcs/0020-pr-plan.md) PR 4.
-        """
-        if target_tokens < 0:
-            raise ValueError(f"target_tokens must be >= 0, got {target_tokens}")
-        entry_list = list(entries)
-        # Stable-sort by importance descending so equal-importance entries
-        # retain their input order (deterministic for tests).
-        ordered = sorted(entry_list, key=lambda e: -e.importance)
-        admitted_chunks: list[str] = []
-        admitted_tokens = 0
-        admitted_count = 0
-        # tokens_before is summed over the original input set.
-        tokens_before = sum(estimate_tokens(e.content) for e in entry_list)
-        for entry in ordered:
-            entry_tokens = estimate_tokens(entry.content)
-            if admitted_tokens + entry_tokens > target_tokens:
-                continue
-            admitted_chunks.append(entry.content)
-            admitted_tokens += entry_tokens
-            admitted_count += 1
-        return CompressedView(
-            summary="\n\n".join(admitted_chunks),
-            entries_dropped=len(entry_list) - admitted_count,
-            tokens_before=tokens_before,
-            tokens_after=admitted_tokens,
-        )
+    # ``compress`` moved to :mod:`agents.memory.store_compress` (ISSUE-0085
+    # PR 3 — keep this module under the 500-line cap); re-exported as a
+    # ``staticmethod`` so ``MemoryStore.compress(...)`` is unchanged.
+    compress = staticmethod(compress_entries)
 
     # ─── Internals ───────────────────────────────────────────────
 

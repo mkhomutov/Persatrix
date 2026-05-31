@@ -17,6 +17,7 @@ from typing import Any
 import aiosqlite
 from opentelemetry import trace
 
+from ..epoch_id import DEFAULT_EPOCH_ID
 from ..observability.spans import RELATIONSHIP_UPDATE_SPAN
 from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ..session_id import normalize_session_id
@@ -48,6 +49,7 @@ async def update_trust(
     participant_type: str = "agent",
     other_participant_type: str = "agent",
     principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> float:
     """Update trust score. Returns new value (clamped to [0.0, 1.0]).
 
@@ -61,6 +63,11 @@ async def update_trust(
     ``local`` (invisible to the writing tenant, leaked to the default
     principal) and a second tenant's upsert mutated the first's
     ``trust_score`` (review H1 / H2).
+
+    ``epoch_id`` (ISSUE-0085 PR 3; default :data:`DEFAULT_EPOCH_ID`) is
+    likewise part of the ``relationships`` primary key (migration v12), so
+    the same first-touch / cross-writer guarantees hold for the run/test
+    isolation axis — a fresh epoch upserts its own row.
 
     .. note::
 
@@ -102,8 +109,8 @@ async def update_trust(
                 (participant_id, participant_type,
                  other_participant_id, other_participant_type,
                  trust_score, interaction_count,
-                 last_interaction_at, notes, principal_id)
-            VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?)
+                 last_interaction_at, notes, principal_id, epoch_id)
+            VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)
             ON CONFLICT(participant_id, participant_type,
                         other_participant_id, other_participant_type,
                         principal_id, epoch_id) DO UPDATE SET
@@ -119,6 +126,7 @@ async def update_trust(
                 insert_trust,
                 reason,
                 principal_id,
+                epoch_id,
                 delta,
                 reason,
             ),
@@ -156,6 +164,7 @@ async def apply_decay(
     *,
     participant_type: str = "agent",
     principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> int:
     """Decay all trust scores toward 0.5 (neutral).
 
@@ -165,7 +174,9 @@ async def apply_decay(
 
     ``principal_id`` (ISSUE-0081 PR 3; default :data:`DEFAULT_PRINCIPAL_ID`)
     scopes the maintenance pass to the active tenant — a decay run on one
-    tenant's request must not move another tenant's trust.
+    tenant's request must not move another tenant's trust.  ``epoch_id``
+    (ISSUE-0085 PR 3; default :data:`DEFAULT_EPOCH_ID`) scopes it to the
+    active run/test epoch for the same reason.
 
     Returns the number of relationships updated.
     """
@@ -177,9 +188,10 @@ async def apply_decay(
         SET trust_score = trust_score + ? * (0.5 - trust_score)
         WHERE participant_id = ? AND participant_type = ?
           AND principal_id = ?
+          AND epoch_id = ?
           AND ABS(trust_score - 0.5) > 0.001
         """,
-        (decay_rate, agent_id, participant_type, principal_id),
+        (decay_rate, agent_id, participant_type, principal_id, epoch_id),
     )
     updated = cursor.rowcount
     if updated:
@@ -205,6 +217,7 @@ async def record_interaction(
     other_participant_type: str = "agent",
     session_id: str = "legacy",
     principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> str:
     """Record an interaction with another participant.
 
@@ -248,8 +261,8 @@ async def record_interaction(
             (id, participant_id, participant_type,
              other_participant_id, other_participant_type,
              interaction_type, outcome, sentiment, created_at,
-             session_id, principal_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             session_id, principal_id, epoch_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             interaction_id,
@@ -263,6 +276,7 @@ async def record_interaction(
             now,
             session_id,
             principal_id,
+            epoch_id,
         ),
     )
 
@@ -277,17 +291,18 @@ async def record_interaction(
     # therefore upserts its *own* row instead of mutating this one.
     # ISSUE-0085 PR 2: ``epoch_id`` joins the primary key / conflict target
     # for the same reason (a rerun under a fresh epoch upserts its own row),
-    # so the target now lists it.  PR 2 only matches the conflict target to
-    # the new PK — the row keeps the ``'live'`` column default; resolving
-    # and *tagging* the active epoch on the INSERT is PR 3's per-tier wiring.
+    # so the target lists it.  PR 3 (this PR) now *tags* the INSERT with the
+    # resolved active epoch (rather than relying on the ``'live'`` column
+    # default), so a non-default-epoch first-touch lands on — and reads back
+    # — its own row, symmetric with ``principal_id``.
     await db.execute(
         """
         INSERT INTO relationships
             (participant_id, participant_type,
              other_participant_id, other_participant_type,
              trust_score, interaction_count,
-             last_interaction_at, notes, session_id, principal_id)
-        VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, ?)
+             last_interaction_at, notes, session_id, principal_id, epoch_id)
+        VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, ?, ?)
         ON CONFLICT(participant_id, participant_type,
                     other_participant_id, other_participant_type,
                     principal_id, epoch_id) DO UPDATE SET
@@ -303,6 +318,7 @@ async def record_interaction(
             now,
             session_id,
             principal_id,
+            epoch_id,
             now,
         ),
     )
@@ -325,6 +341,7 @@ async def seed_trust(
     *,
     session_id: str = "legacy",
     principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> None:
     """Seed trust scores from agent config. Never overwrites existing rows.
 
@@ -338,7 +355,9 @@ async def seed_trust(
     ``principal_id`` (ISSUE-0081 PR 3; default
     :data:`DEFAULT_PRINCIPAL_ID`) tags the same seed rows with the active
     tenant so a config-seeded relationship is visible to the principal
-    that booted the persona, not bridged across tenants.
+    that booted the persona, not bridged across tenants.  ``epoch_id``
+    (ISSUE-0085 PR 3; default :data:`DEFAULT_EPOCH_ID`) tags them with the
+    active run/test epoch for the same reason.
     """
     for entry in config_relationships:
         other_id = entry.get("agent_id")
@@ -369,9 +388,13 @@ async def seed_trust(
                 (participant_id, participant_type,
                  other_participant_id, other_participant_type,
                  trust_score, interaction_count,
-                 last_interaction_at, notes, session_id, principal_id)
-            VALUES (?, 'agent', ?, 'agent', ?, 0, NULL, NULL, ?, ?)
+                 last_interaction_at, notes, session_id, principal_id,
+                 epoch_id)
+            VALUES (?, 'agent', ?, 'agent', ?, 0, NULL, NULL, ?, ?, ?)
             """,
-            (agent_id, other_id, trust_level, session_id, principal_id),
+            (
+                agent_id, other_id, trust_level, session_id, principal_id,
+                epoch_id,
+            ),
         )
     await db.commit()

@@ -94,6 +94,7 @@ async def apply_supersession(
     new_fact_id: str,
     session_id: str,
     principal_id: str,
+    epoch_id: str,
 ) -> SupersessionResult:
     """Sweep older + newer live rows for the symmetric latest-wins chain.
 
@@ -115,6 +116,11 @@ async def apply_supersession(
     axis has none): both sweeps require ``principal_id = ?`` so a write by
     one tenant can never supersede — and thereby silently retract — a row
     owned by another, even when subject / predicate / session collide.
+
+    ``epoch_id`` (ISSUE-0085 PR 3) adds the run/test-isolation axis to the
+    chain key with the same **strict equality** (no carve-out, no ``"*"``):
+    both sweeps require ``epoch_id = ?`` so a write under a fresh epoch can
+    never supersede a prior run's row.
 
     The carve-out is asymmetric, matching the §D recall filter
     (``session_id IN (active, legacy)``):
@@ -151,13 +157,14 @@ async def apply_supersession(
           AND predicate = ?
           AND session_id IN ({older_placeholders})
           AND principal_id = ?
+          AND epoch_id = ?
           AND superseded_by IS NULL
           AND asserted_at <= ?
           AND fact_id != ?
         """,  # noqa: S608 — placeholders only; values bound below.
         (
             agent_id, subject, predicate, *older_sessions,
-            principal_id, asserted_at, new_fact_id,
+            principal_id, epoch_id, asserted_at, new_fact_id,
         ),
     ) as cursor:
         older_rows = await cursor.fetchall()
@@ -171,12 +178,16 @@ async def apply_supersession(
           AND predicate = ?
           AND session_id = ?
           AND principal_id = ?
+          AND epoch_id = ?
           AND superseded_by IS NULL
           AND asserted_at > ?
         ORDER BY asserted_at DESC
         LIMIT 1
         """,
-        (agent_id, subject, predicate, session_id, principal_id, asserted_at),
+        (
+            agent_id, subject, predicate, session_id, principal_id,
+            epoch_id, asserted_at,
+        ),
     ) as cursor:
         newer_row = await cursor.fetchone()
     self_superseded_by: str | None = newer_row[0] if newer_row else None
@@ -209,6 +220,7 @@ async def retract_fact(
     fact_id: str,
     by_fact_id: str,
     principal_id: str,
+    epoch_id: str,
 ) -> bool:
     """Explicitly point ``fact_id``'s ``superseded_by`` at ``by_fact_id``.
 
@@ -218,10 +230,11 @@ async def retract_fact(
     successor of identical ``(subject, predicate)``.  Only a live row
     (``superseded_by IS NULL``) owned by ``agent_id`` is touched.
 
-    ``principal_id`` (ISSUE-0081 PR 3 review follow-up) scopes the write
-    with the same strict equality :func:`apply_supersession` uses, so a
-    tenant cannot retract another tenant's fact by id even though both
-    rows share the ``agent_id``.  Commits itself and, on a true result,
+    ``principal_id`` (ISSUE-0081 PR 3 review follow-up) and ``epoch_id``
+    (ISSUE-0085 PR 3) scope the write with the same strict equality
+    :func:`apply_supersession` uses, so neither a foreign tenant nor a
+    fresh epoch can retract another's fact by id even though both rows
+    share the ``agent_id``.  Commits itself and, on a true result,
     emits the RFC 0026 §G ``fact.supersede`` audit record — mirroring the
     self-contained-primitive precedent of
     :func:`agents.memory._facts_reinforce.mark_recalled_for_agent`.
@@ -231,8 +244,9 @@ async def retract_fact(
         "UPDATE facts SET superseded_by = ? "
         "WHERE fact_id = ? AND agent_id = ? "
         "AND superseded_by IS NULL "
-        "AND principal_id = ?",
-        (by_fact_id, fact_id, agent_id, principal_id),
+        "AND principal_id = ? "
+        "AND epoch_id = ?",
+        (by_fact_id, fact_id, agent_id, principal_id, epoch_id),
     )
     await db.commit()
     retracted = (cursor.rowcount or 0) > 0

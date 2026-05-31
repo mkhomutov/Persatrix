@@ -25,7 +25,9 @@ from typing import Any
 
 import aiosqlite
 
+from ..epoch_id import DEFAULT_EPOCH_ID
 from ..principal_id import DEFAULT_PRINCIPAL_ID
+from ._epoch_filter import epoch_eq_clause as _epoch_eq_clause
 from ._principal_filter import principal_eq_clause as _principal_eq_clause
 from ._session_filter import session_in_clause as _session_in_clause
 from .decay import (
@@ -138,6 +140,7 @@ async def recall_procedures(
     now: float | None = None,
     session_list: list[str] | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> list[ProcedureRecallEntry]:
     """Return procedural entries with read-time confidence decay applied.
 
@@ -225,6 +228,14 @@ async def recall_procedures(
     )
     sql_base += principal_clause
     params.extend(principal_params)
+    # ISSUE-0085 PR 3: strict epoch equality is unconditional (no "*"
+    # bypass) — a procedure row written under another epoch must never be
+    # admitted even on the CLI/debug ``sessions="*"`` path.
+    epoch_clause, epoch_params = _epoch_eq_clause(
+        epoch_id, column="epoch_id",
+    )
+    sql_base += epoch_clause
+    params.extend(epoch_params)
     if sql_cutoff_seconds is not None:
         # COALESCE(last_validated_at, created_at) is the same anchor
         # the application-side decay uses, so the cutoff cannot
@@ -316,6 +327,7 @@ async def refresh_confidence(
     key: str,
     *,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> bool:
     """Mark every procedure row tagged ``procedure:{key}`` as freshly validated.
 
@@ -349,11 +361,17 @@ async def refresh_confidence(
     principal_clause, principal_params = _principal_eq_clause(
         principal_id, column="principal_id",
     )
+    # ISSUE-0085 PR 3: the refresh is epoch-scoped symmetric with recall,
+    # so a re-store under a fresh epoch neither refreshes another epoch's
+    # row nor loses its own write to the ``store_procedure`` short-circuit.
+    epoch_clause, epoch_params = _epoch_eq_clause(
+        epoch_id, column="epoch_id",
+    )
     cursor = await db.execute(
         "UPDATE episodes SET confidence = 1.0, last_validated_at = ? "
         "WHERE agent_id = ? AND tags_json LIKE ? ESCAPE '\\'"
-        f"{principal_clause}",
-        (time.time(), agent_id, pattern, *principal_params),
+        f"{principal_clause}{epoch_clause}",
+        (time.time(), agent_id, pattern, *principal_params, *epoch_params),
     )
     await db.commit()
     return (cursor.rowcount or 0) > 0

@@ -13,8 +13,10 @@ import logging
 import aiosqlite
 from opentelemetry import trace
 
+from ..epoch_id import DEFAULT_EPOCH_ID
 from ..observability.spans import RELATIONSHIP_LOOKUP_SPAN
 from ..principal_id import DEFAULT_PRINCIPAL_ID
+from ._epoch_filter import epoch_eq_clause
 from ._principal_filter import principal_eq_clause
 from ._session_filter import session_in_clause
 from .relationship_types import (
@@ -80,6 +82,7 @@ async def get_trust(
     other_participant_type: str = "agent",
     sessions: list[str] | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> float:
     """Get current trust score for another participant (0.0–1.0).
 
@@ -88,13 +91,17 @@ async def get_trust(
     ``sessions`` (RFC 0031 Phase 2 PR 3) is a resolved list from
     :func:`agents.memory._session_filter._resolve_session_list` —
     ``None`` is the ``"*"`` no-filter mode.  ``principal_id``
-    (ISSUE-0081 PR 3) is the resolved active tenant — unconditional
-    strict equality, no carve-out — so a foreign-tenant trust value
-    cannot leak into the prompt.
+    (ISSUE-0081 PR 3) / ``epoch_id`` (ISSUE-0085 PR 3) are the resolved
+    active tenant + run/test epoch — each unconditional strict equality,
+    no carve-out — so a foreign-tenant or prior-run trust value cannot
+    leak into the prompt.
     """
     sess_clause, sess_params = session_in_clause(sessions, column="session_id")
     princ_clause, princ_params = principal_eq_clause(
         principal_id, column="principal_id",
+    )
+    epoch_clause, epoch_params = epoch_eq_clause(
+        epoch_id, column="epoch_id",
     )
     attrs = {"agent.id": agent_id, "participant.id": other_id}
     with _tracer.start_as_current_span(RELATIONSHIP_LOOKUP_SPAN, attributes=attrs):
@@ -102,9 +109,9 @@ async def get_trust(
             "SELECT trust_score FROM relationships "
             "WHERE participant_id = ? AND participant_type = ? "
             "AND other_participant_id = ? AND other_participant_type = ?"
-            f"{sess_clause}{princ_clause}",
+            f"{sess_clause}{princ_clause}{epoch_clause}",
             (agent_id, participant_type, other_id, other_participant_type,
-             *sess_params, *princ_params),
+             *sess_params, *princ_params, *epoch_params),
         ) as cursor:
             row = await cursor.fetchone()
         return row[0] if row is not None else _DEFAULT_TRUST
@@ -119,6 +126,7 @@ async def get_relationship_summary(
     other_participant_type: str = "agent",
     sessions: list[str] | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> RelationshipSummary:
     """Get full relationship context for injection into LLM prompt.
 
@@ -158,6 +166,12 @@ async def get_relationship_summary(
     princ_clause, princ_params = principal_eq_clause(
         principal_id, column="principal_id",
     )
+    # ISSUE-0085 PR 3 — strict epoch equality on every fetch in this
+    # function, reused like ``princ_clause`` (all SELECTs here are
+    # single-table / unaliased, so one ``epoch_id`` clause suffices).
+    epoch_clause, epoch_params = epoch_eq_clause(
+        epoch_id, column="epoch_id",
+    )
     # Fetch relationship row.  ``interaction_count`` and
     # ``last_interaction_at`` from this row are not surfaced to the
     # prompt; we derive per-session values below from the filtered
@@ -168,9 +182,9 @@ async def get_relationship_summary(
         "FROM relationships "
         "WHERE participant_id = ? AND participant_type = ? "
         "AND other_participant_id = ? AND other_participant_type = ?"
-        f"{rel_sess_clause}{princ_clause}",
+        f"{rel_sess_clause}{princ_clause}{epoch_clause}",
         (agent_id, participant_type, other_id, other_participant_type,
-         *rel_sess_params, *princ_params),
+         *rel_sess_params, *princ_params, *epoch_params),
     ) as cursor:
         row = await cursor.fetchone()
 
@@ -202,11 +216,11 @@ async def get_relationship_summary(
         "FROM interactions "
         "WHERE participant_id = ? AND participant_type = ? "
         "AND other_participant_id = ? AND other_participant_type = ? "
-        f"{int_sess_clause}{princ_clause} "
+        f"{int_sess_clause}{princ_clause}{epoch_clause} "
         "ORDER BY created_at DESC LIMIT ?",
         (agent_id, participant_type, other_id,
          other_participant_type, *int_sess_params, *princ_params,
-         _MAX_RECENT_INTERACTIONS),
+         *epoch_params, _MAX_RECENT_INTERACTIONS),
     ) as cursor:
         interaction_rows = await cursor.fetchall()
 
@@ -232,9 +246,9 @@ async def get_relationship_summary(
         "SELECT COUNT(*) FROM interactions "
         "WHERE participant_id = ? AND participant_type = ? "
         "AND other_participant_id = ? AND other_participant_type = ?"
-        f"{int_sess_clause}{princ_clause}",
+        f"{int_sess_clause}{princ_clause}{epoch_clause}",
         (agent_id, participant_type, other_id, other_participant_type,
-         *int_sess_params, *princ_params),
+         *int_sess_params, *princ_params, *epoch_params),
     ) as cursor:
         count_row = await cursor.fetchone()
     interaction_count = int(count_row[0]) if count_row is not None else 0
@@ -250,9 +264,9 @@ async def get_relationship_summary(
         "SELECT MIN(created_at), MAX(created_at) FROM interactions "
         "WHERE participant_id = ? AND participant_type = ? "
         "AND other_participant_id = ? AND other_participant_type = ?"
-        f"{int_sess_clause}{princ_clause}",
+        f"{int_sess_clause}{princ_clause}{epoch_clause}",
         (agent_id, participant_type, other_id, other_participant_type,
-         *int_sess_params, *princ_params),
+         *int_sess_params, *princ_params, *epoch_params),
     ) as cursor:
         span_row = await cursor.fetchone()
     first_interaction_at = span_row[0] if span_row is not None else None
@@ -277,6 +291,7 @@ async def get_all_relationships(
     participant_type: str = "agent",
     sessions: list[str] | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> list[RelationshipSummary]:
     """Get summaries for all known relationships of an agent.
 
@@ -311,6 +326,13 @@ async def get_all_relationships(
     int_princ_clause, int_princ_params = principal_eq_clause(
         principal_id, column="i.principal_id",
     )
+    # ISSUE-0085 PR 3 — strict epoch equality on both JOIN sides.
+    rel_epoch_clause, rel_epoch_params = epoch_eq_clause(
+        epoch_id, column="r.epoch_id",
+    )
+    int_epoch_clause, int_epoch_params = epoch_eq_clause(
+        epoch_id, column="i.epoch_id",
+    )
     # LEFT JOIN aggregates the per-session count + last-interaction
     # timestamp from ``interactions`` onto each visible relationship row.
     # Same predicate shape on both sides; ``COUNT(i.id)`` yields 0 and
@@ -330,17 +352,17 @@ async def get_all_relationships(
         "  AND i.participant_type = r.participant_type "
         "  AND i.other_participant_id = r.other_participant_id "
         "  AND i.other_participant_type = r.other_participant_type"
-        f"{int_sess_clause}{int_princ_clause} "
+        f"{int_sess_clause}{int_princ_clause}{int_epoch_clause} "
         "WHERE r.participant_id = ? AND r.participant_type = ?"
-        f"{rel_sess_clause}{rel_princ_clause} "
+        f"{rel_sess_clause}{rel_princ_clause}{rel_epoch_clause} "
         "GROUP BY r.participant_id, r.participant_type, "
         "  r.other_participant_id, r.other_participant_type, "
         "  r.trust_score, r.notes "
         "ORDER BY r.trust_score DESC",
         (
-            *int_sess_params, *int_princ_params,
+            *int_sess_params, *int_princ_params, *int_epoch_params,
             agent_id, participant_type,
-            *rel_sess_params, *rel_princ_params,
+            *rel_sess_params, *rel_princ_params, *rel_epoch_params,
         ),
     ) as cursor:
         rows = await cursor.fetchall()

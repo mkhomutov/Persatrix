@@ -22,6 +22,7 @@ from typing import Any
 
 import aiosqlite
 
+from ..epoch_id import DEFAULT_EPOCH_ID
 from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ._episodic_agent_state import (
     get_interaction_count,
@@ -30,6 +31,7 @@ from ._episodic_agent_state import (
     persist_agent_state,
     reset_interaction_count,
 )
+from ._epoch_filter import epoch_eq_clause
 from ._principal_filter import principal_eq_clause
 from ._session_filter import session_in_clause
 from .interaction_janitor import SUMMARY_PENDING_TEXT
@@ -205,6 +207,7 @@ async def recall_fts5(
     *,
     sessions: list[str] | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> list[aiosqlite.Row]:
     """FTS5 search with composite BM25 x importance x access x recency scoring.
 
@@ -219,10 +222,18 @@ async def recall_fts5(
     no-filter mode).  Defaults to :data:`DEFAULT_PRINCIPAL_ID` so a
     single-tenant direct caller is fail-safe; the production tier always
     passes the call-time-resolved active principal.
+
+    ``epoch_id`` (ISSUE-0085 PR 3) is the resolved active run/test epoch;
+    same unconditional strict-equality shape as ``principal_id`` (no
+    carve-out, no ``"*"`` bypass).  Defaults to :data:`DEFAULT_EPOCH_ID`
+    so a single-world direct caller is fail-safe.
     """
     sess_clause, sess_params = session_in_clause(sessions, column="e.session_id")
     princ_clause, princ_params = principal_eq_clause(
         principal_id, column="e.principal_id",
+    )
+    epoch_clause, epoch_params = epoch_eq_clause(
+        epoch_id, column="e.epoch_id",
     )
     safe_query = _FTS5_SANITIZE.sub(" ", query).strip()
     if not safe_query:
@@ -230,7 +241,7 @@ async def recall_fts5(
         # pure recency ranking so the caller still gets relevant rows.
         return await recall_recency(
             db, agent_id, limit, min_importance, sessions=sessions,
-            principal_id=principal_id,
+            principal_id=principal_id, epoch_id=epoch_id,
         )
     effective_min_score = resolve_min_score(min_score)
     try:
@@ -245,6 +256,7 @@ async def recall_fts5(
               AND (1.0 / (1.0 + ABS(fts.rank))) >= ?
               {sess_clause}
               {princ_clause}
+              {epoch_clause}
             ORDER BY
                 (fts.rank * -1)
                 * {_SCORE_EXPR}
@@ -253,7 +265,7 @@ async def recall_fts5(
             """,
             (
                 safe_query, agent_id, min_importance, effective_min_score,
-                *sess_params, *princ_params, time.time(), limit,
+                *sess_params, *princ_params, *epoch_params, time.time(), limit,
             ),
         ) as cursor:
             return list(await cursor.fetchall())
@@ -263,7 +275,7 @@ async def recall_fts5(
         )
         return await recall_like(
             db, agent_id, query, limit, min_importance, min_score,
-            sessions=sessions, principal_id=principal_id,
+            sessions=sessions, principal_id=principal_id, epoch_id=epoch_id,
         )
 
 
@@ -277,17 +289,21 @@ async def recall_like(
     *,
     sessions: list[str] | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> list[aiosqlite.Row]:
     """LIKE fallback when FTS5 is unavailable.
 
     Escapes ``%`` / ``_`` so they match literally.  ``min_score`` is
     signature-only — LIKE matches are binary, every match scores ``1.0``
-    per RFC 0017 §C.  ``sessions`` / ``principal_id`` — see
-    :func:`recall_fts5`.
+    per RFC 0017 §C.  ``sessions`` / ``principal_id`` / ``epoch_id`` —
+    see :func:`recall_fts5`.
     """
     sess_clause, sess_params = session_in_clause(sessions, column="session_id")
     princ_clause, princ_params = principal_eq_clause(
         principal_id, column="principal_id",
+    )
+    epoch_clause, epoch_params = epoch_eq_clause(
+        epoch_id, column="epoch_id",
     )
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{escaped}%"
@@ -300,6 +316,7 @@ async def recall_like(
           AND (summary LIKE ? ESCAPE '\\' OR context_json LIKE ? ESCAPE '\\')
           {sess_clause}
           {princ_clause}
+          {epoch_clause}
         ORDER BY
             {_SCORE_EXPR_BARE}
             DESC
@@ -307,7 +324,7 @@ async def recall_like(
         """,
         (
             agent_id, min_importance, pattern, pattern,
-            *sess_params, *princ_params, time.time(), limit,
+            *sess_params, *princ_params, *epoch_params, time.time(), limit,
         ),
     ) as cursor:
         return list(await cursor.fetchall())
@@ -321,17 +338,22 @@ async def recall_recency(
     *,
     sessions: list[str] | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> list[aiosqlite.Row]:
     """No query text — rank by importance x access x recency only.
 
-    ``sessions`` / ``principal_id`` — see :func:`recall_fts5`.  The
-    persona-runtime channel-history tier hits this path with an empty
-    query, so this is the load-bearing path for closing F-3 (and the
-    ISSUE-0081 cross-tenant leak) on the empty-query surface.
+    ``sessions`` / ``principal_id`` / ``epoch_id`` — see
+    :func:`recall_fts5`.  The persona-runtime channel-history tier hits
+    this path with an empty query, so this is the load-bearing path for
+    closing F-3 (and the ISSUE-0081 / ISSUE-0085 cross-axis leaks) on the
+    empty-query surface.
     """
     sess_clause, sess_params = session_in_clause(sessions, column="session_id")
     princ_clause, princ_params = principal_eq_clause(
         principal_id, column="principal_id",
+    )
+    epoch_clause, epoch_params = epoch_eq_clause(
+        epoch_id, column="epoch_id",
     )
     async with db.execute(
         f"""
@@ -341,6 +363,7 @@ async def recall_recency(
           AND importance >= ?
           {sess_clause}
           {princ_clause}
+          {epoch_clause}
         ORDER BY
             {_SCORE_EXPR_BARE}
             DESC
@@ -348,7 +371,7 @@ async def recall_recency(
         """,
         (
             agent_id, min_importance, *sess_params, *princ_params,
-            time.time(), limit,
+            *epoch_params, time.time(), limit,
         ),
     ) as cursor:
         return list(await cursor.fetchall())
@@ -373,6 +396,7 @@ async def insert_episode(
     session_id: str,
     scope: str | None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> str:
     """INSERT one episode row and COMMIT; return the generated episode id.
 
@@ -395,10 +419,10 @@ async def insert_episode(
              importance, access_count, last_accessed_at,
              tags_json, created_at, compressed_at, compression_level,
              interaction_id, started_at, closed_at, turn_count, scope,
-             session_id, principal_id)
+             session_id, principal_id, epoch_id)
         VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0,
                 ?, ?, ?, ?, ?,
-                ?, ?)
+                ?, ?, ?)
         """,
         (
             episode_id,
@@ -416,6 +440,7 @@ async def insert_episode(
             scope,
             session_id,
             principal_id,
+            epoch_id,
         ),
     )
     await db.commit()

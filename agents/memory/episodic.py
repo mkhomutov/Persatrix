@@ -20,6 +20,7 @@ import aiosqlite
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
+from ..epoch_id import resolve_epoch_id_silent
 from ..observability.spans import (
     EPISODIC_RECALL_SPAN,
     EPISODIC_REMEMBER_SPAN,
@@ -27,12 +28,21 @@ from ..observability.spans import (
 from ..principal_id import resolve_principal_id_silent
 from ..session_id import current_session_id, normalize_session_id, resolve_session_id_silent
 from ._boundary import warn_external_construction
+from ._epoch_filter import resolve_active_epoch
 from ._principal_filter import resolve_active_principal
 from ._salience import EPISODIC_APPEND_SALIENCE, emit_for_tier, emit_session_write
 from ._session_filter import _resolve_session_list
+from .episodic_crud import (
+    count_episodes as _count_episodes,
+)
+from .episodic_crud import (
+    delete_episode as _delete_episode,
+)
+from .episodic_crud import (
+    get_episode as _get_episode,
+)
 from .episodic_notes_api import _EpisodicNotesAPIMixin
 from .episodic_queries import (
-    EPISODE_SELECT,
     MAX_RECALL_LIMIT,
     Episode,
     get_interaction_count,
@@ -111,6 +121,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         self._active_session_id = resolve_session_id_silent()
         # ISSUE-0081 PR 3 — tenant snapshot (call-time scope wins on use).
         self._active_principal_id = resolve_principal_id_silent()
+        # ISSUE-0085 PR 3 — epoch (run/test) snapshot, same shape.
+        self._active_epoch_id = resolve_epoch_id_silent()
 
     @property
     def agent_id(self) -> str:
@@ -166,6 +178,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
             agent_id=self._agent_id, db=self._db, fts5=self._fts5,
             active_session_id=self._active_session_id,
             active_principal_id=self._active_principal_id,
+            active_epoch_id=self._active_epoch_id,
         )
 
     async def close(self) -> None:
@@ -241,6 +254,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                 session_id = normalize_session_id(session_id)  # PR 4 / F16
                 # ISSUE-0081 PR 3: tag the row with the active tenant.
                 principal_id = resolve_active_principal(self._active_principal_id)
+                # ISSUE-0085 PR 3: tag the row with the active epoch.
+                epoch_id = resolve_active_epoch(self._active_epoch_id)
                 episode_id = await insert_episode(
                     db, self._agent_id,
                     summary=summary, context=context, outcome=outcome,
@@ -248,7 +263,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                     interaction_id=interaction_id, started_at=started_at,
                     closed_at=closed_at, turn_count=turn_count,
                     session_id=session_id, scope=scope,
-                    principal_id=principal_id,
+                    principal_id=principal_id, epoch_id=epoch_id,
                 )
             except Exception as exc:
                 span.record_exception(exc)
@@ -316,6 +331,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
             )
         session_list = _resolve_session_list(sessions, self._active_session_id)
         active_principal = resolve_active_principal(self._active_principal_id)
+        active_epoch = resolve_active_epoch(self._active_epoch_id)
         with _tracer.start_as_current_span(
             EPISODIC_RECALL_SPAN,
             attributes={
@@ -325,6 +341,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                 # OQ #7/0081: active session (scope over snapshot), not the filter shape.
                 "session_id": current_session_id() or self._active_session_id,
                 "principal_id": active_principal,  # ISSUE-0081 PR 3
+                "epoch_id": active_epoch,  # ISSUE-0085 PR 3
             },
         ) as span:
             # Mirror the LLM/tool/store_episode span error contract: a SQLite
@@ -343,18 +360,19 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                     rows = await recall_fts5(
                         db, self._agent_id, query, limit, min_importance,
                         min_score, sessions=session_list,
-                        principal_id=active_principal,
+                        principal_id=active_principal, epoch_id=active_epoch,
                     )
                 elif query:
                     rows = await recall_like(
                         db, self._agent_id, query, limit, min_importance,
                         min_score, sessions=session_list,
-                        principal_id=active_principal,
+                        principal_id=active_principal, epoch_id=active_epoch,
                     )
                 else:
                     rows = await recall_recency(
                         db, self._agent_id, limit, min_importance,
                         sessions=session_list, principal_id=active_principal,
+                        epoch_id=active_epoch,
                     )
 
                 # RFC 0020 PR 5 / PR-262 review M1: drop unfinalised
@@ -398,25 +416,11 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
 
     async def get_episode(self, episode_id: str) -> Episode | None:
         """Retrieve a single episode by ID (agent-scoped)."""
-        db = self._ensure_db()
-        async with db.execute(
-            f"SELECT {EPISODE_SELECT} FROM episodes WHERE id = ? AND agent_id = ?",
-            (episode_id, self._agent_id),
-        ) as cursor:
-            row = await cursor.fetchone()
-        if row is None:
-            return None
-        return row_to_episode(row)
+        return await _get_episode(self._ensure_db(), self._agent_id, episode_id)
 
     async def count_episodes(self) -> int:
         """Return the number of episodes for this agent."""
-        db = self._ensure_db()
-        async with db.execute(
-            "SELECT COUNT(*) FROM episodes WHERE agent_id = ?",
-            (self._agent_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-        return row[0] if row else 0
+        return await _count_episodes(self._ensure_db(), self._agent_id)
 
     # ─── Episode summarization & retention ──────────────────
 
@@ -450,13 +454,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
 
     async def delete_episode(self, episode_id: str) -> bool:
         """Delete a single episode by ID, agent-scoped. RFC 0008 PR 3a / N5."""
-        db = self._ensure_db()
-        cursor = await db.execute(
-            "DELETE FROM episodes WHERE id = ? AND agent_id = ?",
-            (episode_id, self._agent_id),
-        )
-        await db.commit()
-        return (cursor.rowcount or 0) > 0
+        return await _delete_episode(self._ensure_db(), self._agent_id, episode_id)
 
     # ─── Notes ─────────────────────────────────────────────
     # ``store_note`` / ``recall_notes`` / … — see :class:`_EpisodicNotesAPIMixin`.
