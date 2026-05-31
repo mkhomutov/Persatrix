@@ -49,7 +49,7 @@ var channelsDB = flag.String("channels-db", "data/channels.db", "SQLite path for
 //   - err: non-nil only on a hard reconcile failure (operator action
 //     required); nil on the soft "channels disabled" path.
 func initChannels(
-	cfgDir, dbPath, sessionID string,
+	cfgDir, dbPath, sessionID, epochID string,
 	orchMetrics *obsmetrics.Instruments,
 	reg registry.Registry,
 	logger *zap.Logger,
@@ -134,7 +134,7 @@ func initChannels(
 			zap.Error(srErr))
 		sessionResolver = nil
 	}
-	dispatcher := selectChannelDispatcher(reg, sessionResolver, logger)
+	dispatcher := selectChannelDispatcher(reg, sessionResolver, epochID, logger)
 	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)
 	// `channels.yaml` may override the default cascade-depth cap. Apply
 	// after construction so the router's [defaults.DefaultMaxCascadeDepth]
@@ -216,7 +216,12 @@ func initChannels(
 //     header per dispatch (ISSUE-0082 PR 2). Nil disables session emission
 //     (the dispatcher ships no header; personas fall back to the legacy
 //     construction snapshot).
-func selectChannelDispatcher(reg registry.Registry, sessionResolver channels.SessionBinder, logger *zap.Logger) channels.MessageDispatcher {
+//   - epochID != "" → emitted as the `persatrix-epoch` gRPC header on every
+//     dispatch (ISSUE-0085 PR 4). The orchestrator resolves it once at boot
+//     (`live` in production, a per-job id in CI); empty disables epoch
+//     emission (personas fall back to their construction-time "live"
+//     snapshot, byte-identical to the pre-epoch dispatch).
+func selectChannelDispatcher(reg registry.Registry, sessionResolver channels.SessionBinder, epochID string, logger *zap.Logger) channels.MessageDispatcher {
 	if reg == nil {
 		logger.Info("channels: registry not available; cross-process dispatch disabled (NoopDispatcher in use)")
 		return channels.NoopDispatcher{}
@@ -224,6 +229,9 @@ func selectChannelDispatcher(reg registry.Registry, sessionResolver channels.Ses
 	var opts []channels.DispatcherOption
 	if sessionResolver != nil {
 		opts = append(opts, channels.WithSessionResolver(sessionResolver))
+	}
+	if epochID != "" {
+		opts = append(opts, channels.WithEpoch(epochID))
 	}
 	return channels.NewGRPCMessageDispatcher(reg, logger, opts...)
 }

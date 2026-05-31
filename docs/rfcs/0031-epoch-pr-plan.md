@@ -2,7 +2,7 @@
 
 **RFC**: [0031-per-session-namespacing-channels.md](0031-per-session-namespacing-channels.md) · design home: [Memory Scope Axes §Epoch](../memory-scope-axes.md#epoch--the-testrun-isolation-axis)
 **Tracks**: [ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)
-**Status**: 🚧 Implementing — v0.3.5 ([Phase 3b](../v0.3.5-plan.md#phase-3b--rfc-0031-epoch-axis-issue-0085)); PR 1 (leaf) + PR 2 (migration, [#474](https://github.com/mkhomutov/Persatrix/pull/474)) merged, PR 3 (filter + per-tier wiring, [#475](https://github.com/mkhomutov/Persatrix/pull/475)) open, PRs 4–6 remaining
+**Status**: 🚧 Implementing — v0.3.5 ([Phase 3b](../v0.3.5-plan.md#phase-3b--rfc-0031-epoch-axis-issue-0085)); PR 1 (leaf) + PR 2 (migration, [#474](https://github.com/mkhomutov/Persatrix/pull/474)) + PR 3 (filter + per-tier wiring, [#475](https://github.com/mkhomutov/Persatrix/pull/475)) merged, PR 4 (gRPC rail) open, PRs 5–6 remaining
 **Created**: 2026-05-31
 **Branch prefix**: `feature/v035-issue0085-` / `feature/v035-epoch-`
 **Target**: `main`
@@ -87,7 +87,7 @@ PR 2 before PR 3 — the filter cannot wire to a column that does not exist. PR 
 
 ### PR 3: `feature/v035-epoch-filter` — Strict-Equality Filter + Per-Tier Wiring
 
-**Status**: 🔀 PR open.
+**Status**: ✅ Merged ([#475](https://github.com/mkhomutov/Persatrix/pull/475)).
 **Depends on**: PR 2.
 **Purpose**: Add `agents/memory/_epoch_filter.py` (`resolve_active_epoch` + `epoch_eq_clause`, the sibling of [`_principal_filter.py`](../../agents/memory/_principal_filter.py)) and wire **every recall and per-request write path** across the five tiers to filter and tag by the resolved epoch. Unconditional `AND epoch_id = ?` — **no carve-out, no `"*"` bypass**.
 
@@ -99,10 +99,13 @@ PR 2 before PR 3 — the filter cannot wire to a column that does not exist. PR 
 
 ### PR 4: `feature/v035-epoch-rail` — gRPC Rail (orchestrator emission + ingress lift)
 
+**Status**: 🔀 PR open.
 **Depends on**: PR 3.
 **Purpose**: Light up the producer. The orchestrator resolves the epoch at boot from `PERSATRIX_EPOCH` (default `live`) and emits it on the `persatrix-epoch` gRPC header per request; the persona-runtime ingress lifts the header into an `epoch_scope` for the handler's lifetime via `on_event` (mirroring the principal metadata rail wiring + `test_principal_metadata_rail.py` / `test_principal_scope.py`).
 
 **Key details**: unlike the principal rail (silent until RFC 0039), the epoch rail has a live producer immediately — `live` in prod, a per-job id in CI. Cross-language contract: the emitted header string-matches `agents.epoch_id.EPOCH_METADATA_GRPC_KEY` (asserted as a literal, per the ISSUE-0082 PR 2 discipline). The `channel.dispatch` span carries the resolved epoch (low-cardinality-on-span, never a metric label — per OQ #7).
+
+**Delivered**: Go side — `grpcmeta.MDEpoch` + `InjectEpoch` ([`grpcmeta.go`](../../internal/observability/grpcmeta/grpcmeta.go)); `resolveEpochID` boot read (default `live`, soft-validated) in [`startup.go`](../../cmd/orchestrator/startup.go); `GRPCMessageDispatcher.epoch` field + `WithEpoch` option emitting `persatrix-epoch` (and pinning `epoch.id` on the `channel.dispatch` span) on every dispatch ([`grpc_dispatcher.go`](../../internal/channels/grpc_dispatcher.go)); wired through `initChannels` → `selectChannelDispatcher`. Python side — `_epoch_from_metadata` / `_epoch_from_context` lift ([`session_metadata.py`](../../agents/session_metadata.py)); `epoch_scope_from_metadata` folded into the combined `request_scope_from_metadata` ExitStack ([`request_scope.py`](../../agents/request_scope.py)) so `on_event` binds all three axes at one site; both servicer ingress points tag the event envelope with `EVENT_EPOCH_METADATA_KEY` ([`server_servicers.py`](../../agents/server_servicers.py)). Unlike the per-room session resolver, the epoch is process-global — no per-request resolver, no failure path, no `--session`-style override (that is PR 5). Test-driven by `test_epoch_metadata_rail.py` (helper lift + combined-scope binding + `on_event` binding), `grpcmeta_test.go` (round-trip + cross-language literal + coexistence), `epoch_env_test.go` (boot resolution), `grpc_dispatcher_epoch_test.go` (emission + process-global invariance + no-wiring default + span pin).
 
 ### PR 5: `feature/v035-epoch-operator` — Operator Surface
 
@@ -139,8 +142,8 @@ PR 2 before PR 3 — the filter cannot wire to a column that does not exist. PR 
 |---|-------|--------|--------|-----------|--------|
 | 1 | Epoch leaf module | `feature/v035-issue0085-epoch-leaf` | ✅ Merged | [#472](https://github.com/mkhomutov/Persatrix/pull/472) | 2026-05-31 |
 | 2 | Migration (epoch_id columns + relationships PK) | `feature/v035-epoch-migration` | ✅ Merged | [#474](https://github.com/mkhomutov/Persatrix/pull/474) | 2026-05-31 |
-| 3 | Filter helper + per-tier wiring | `feature/v035-epoch-filter` | 🔀 PR open | [#475](https://github.com/mkhomutov/Persatrix/pull/475) | — |
-| 4 | gRPC rail (emission + ingress lift) | `feature/v035-epoch-rail` | ⬜ Not started | — | — |
+| 3 | Filter helper + per-tier wiring | `feature/v035-epoch-filter` | ✅ Merged | [#475](https://github.com/mkhomutov/Persatrix/pull/475) | 2026-05-31 |
+| 4 | gRPC rail (emission + ingress lift) | `feature/v035-epoch-rail` | 🔀 PR open | — | — |
 | 5 | Operator surface (`--epoch` + env docs) | `feature/v035-epoch-operator` | ⬜ Not started | — | — |
 | 6 | Closeout (F-3 structural-isolation gate + docs) | `feature/v035-epoch-close` | ⬜ Not started | — | — |
 

@@ -109,6 +109,14 @@ type GRPCMessageDispatcher struct {
 	// not exercise emission — a nil binder means no session header, so
 	// behaviour is byte-identical to the pre-ISSUE-0082 dispatch.
 	sessions SessionBinder
+	// epoch is the per-process run/test-isolation id emitted on the outbound
+	// `persatrix-epoch` gRPC metadata on every dispatch (ISSUE-0085 PR 4).
+	// Unlike `sessions` (resolved per request) this is a single value the
+	// orchestrator resolves once at boot from PERSATRIX_EPOCH. Empty on the
+	// channels-disabled / pre-wiring paths and in tests that do not exercise
+	// emission — an empty epoch means no header, so behaviour is
+	// byte-identical to the pre-ISSUE-0085 dispatch.
+	epoch string
 }
 
 // DispatcherOption configures a [GRPCMessageDispatcher] at construction.
@@ -120,6 +128,15 @@ type DispatcherOption func(*GRPCMessageDispatcher)
 // behaviour).
 func WithSessionResolver(b SessionBinder) DispatcherOption {
 	return func(d *GRPCMessageDispatcher) { d.sessions = b }
+}
+
+// WithEpoch wires the per-process run/test-isolation epoch (resolved once at
+// orchestrator boot from PERSATRIX_EPOCH) emitted as the `persatrix-epoch`
+// gRPC header on every dispatch (ISSUE-0085 PR 4). Omitting it (or passing an
+// empty id) leaves the dispatcher emitting no epoch header — the
+// pre-ISSUE-0085 behaviour.
+func WithEpoch(epoch string) DispatcherOption {
+	return func(d *GRPCMessageDispatcher) { d.epoch = epoch }
 }
 
 // ErrAgentNotReady is returned (wrapped) when the registry reports a
@@ -250,6 +267,22 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 			// it served.
 			span.SetAttributes(attribute.String("session.id", sid))
 		}
+	}
+
+	// ISSUE-0085 PR 4: emit the per-process run/test-isolation epoch on every
+	// dispatch so the persona side re-establishes an `epoch_scope` for the
+	// strict-equality run-isolation filter. Unlike the session id, the epoch
+	// is process-global (resolved once at boot, not per-room), so there is no
+	// resolver, no per-request failure path, and no `--session`-style
+	// override here. Empty means no epoch was wired (channels-disabled /
+	// pre-wiring path) — emit nothing and the persona falls back to its
+	// construction-time ("live") snapshot, byte-identical to pre-ISSUE-0085.
+	if d.epoch != "" {
+		ctx = grpcmeta.InjectEpoch(ctx, d.epoch)
+		// Low-cardinality-on-span, never a metric label (RFC 0031 OQ #7),
+		// matching the session-id posture: pin the epoch so a trace can be
+		// pivoted to the logical run / branch it served.
+		span.SetAttributes(attribute.String("epoch.id", d.epoch))
 	}
 
 	conn, err := d.dial(agent.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))

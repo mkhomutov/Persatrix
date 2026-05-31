@@ -1,8 +1,11 @@
-"""gRPC session-id + principal metadata extraction (ISSUE-0081 PR 2 / PR 3).
+"""gRPC scope-axis metadata extraction (ISSUE-0081 PR 2/3 · ISSUE-0085 PR 4).
 
 The orchestrator emits the per-request session id as the
-:data:`~agents.session_id.SESSION_METADATA_GRPC_KEY` header and (once
-RFC 0039 auth lands) the per-request tenant as the
+:data:`~agents.session_id.SESSION_METADATA_GRPC_KEY` header, the
+per-process epoch as the
+:data:`~agents.epoch_id.EPOCH_METADATA_GRPC_KEY` header (``live`` in
+production, a per-job id in CI), and (once RFC 0039 auth lands) the
+per-request tenant as the
 :data:`~agents.principal_id.PRINCIPAL_METADATA_GRPC_KEY` header on every
 outbound call.  The helpers here lift those headers off inbound gRPC
 metadata so both ``SendChatMessage`` and ``ReceiveChannelMessage`` share
@@ -18,6 +21,7 @@ from typing import cast
 
 import grpc.aio
 
+from .epoch_id import EPOCH_METADATA_GRPC_KEY
 from .principal_id import PRINCIPAL_METADATA_GRPC_KEY
 from .session_id import SESSION_METADATA_GRPC_KEY
 
@@ -55,6 +59,11 @@ def _principal_from_metadata(metadata: _Metadata) -> str | None:
     return _header_from_metadata(metadata, PRINCIPAL_METADATA_GRPC_KEY)
 
 
+def _epoch_from_metadata(metadata: _Metadata) -> str | None:
+    """Lift the ``persatrix-epoch`` header off gRPC invocation metadata."""
+    return _header_from_metadata(metadata, EPOCH_METADATA_GRPC_KEY)
+
+
 def _invocation_metadata(context: grpc.aio.ServicerContext) -> _Metadata:
     """Return a live context's invocation metadata as ``(key, value)`` pairs.
 
@@ -79,3 +88,8 @@ def _session_from_context(context: grpc.aio.ServicerContext) -> str | None:
 def _principal_from_context(context: grpc.aio.ServicerContext) -> str | None:
     """Read the principal header off a live gRPC context."""
     return _principal_from_metadata(_invocation_metadata(context))
+
+
+def _epoch_from_context(context: grpc.aio.ServicerContext) -> str | None:
+    """Read the epoch header off a live gRPC context."""
+    return _epoch_from_metadata(_invocation_metadata(context))

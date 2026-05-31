@@ -146,3 +146,52 @@ func TestInjectSession_CoexistsWithInjectIDs(t *testing.T) {
 	require.Equal(t, []string{"exec-1"}, md.Get(MDExecutionID))
 	require.Equal(t, []string{"sess-018f"}, md.Get(MDSession))
 }
+
+// TestMDEpochMatchesCrossLanguageContract is the Go-side half of the
+// ISSUE-0085 cross-language epoch contract. The orchestrator emits this
+// exact wire form; the persona side lifts it via
+// `agents.epoch_id.EPOCH_METADATA_GRPC_KEY`. Asserting the literal here
+// (per the ISSUE-0082 PR 2 discipline) means a rename of the Go constant
+// fails this test rather than shipping a dead header that silently
+// disables per-request epoch binding persona-side.
+func TestMDEpochMatchesCrossLanguageContract(t *testing.T) {
+	require.Equal(t, "persatrix-epoch", MDEpoch,
+		"MDEpoch must byte-match agents.epoch_id.EPOCH_METADATA_GRPC_KEY; "+
+			"a drift disables per-request epoch binding persona-side")
+}
+
+func TestInjectEpoch_RoundTrip(t *testing.T) {
+	ctx := InjectEpoch(context.Background(), "run-42")
+
+	md, ok := metadata.FromOutgoingContext(ctx)
+	require.True(t, ok, "outgoing metadata should be present")
+	require.Equal(t, []string{"run-42"}, md.Get(MDEpoch))
+}
+
+func TestInjectEpoch_EmptyIsNoOp(t *testing.T) {
+	// An empty epoch matches the partial-set semantics of InjectIDs /
+	// InjectSession: nothing is appended, so no outgoing metadata is
+	// created. The live dispatch path never emits empty (the boot resolver
+	// always lands on at least the default "live" epoch), but a defensive
+	// no-op keeps a future caller from stamping a blank header the persona
+	// side would ignore anyway.
+	ctx := InjectEpoch(context.Background(), "")
+	_, ok := metadata.FromOutgoingContext(ctx)
+	require.False(t, ok, "empty epoch must not create outgoing metadata")
+}
+
+func TestInjectEpoch_CoexistsWithSessionAndIDs(t *testing.T) {
+	// The three independent axes (correlation IDs, session, epoch) must all
+	// survive on one ctx without clobbering each other (AppendToOutgoingContext
+	// merges). Epoch and session are orthogonal scope axes with distinct
+	// persona-side consumers.
+	ctx := InjectIDs(context.Background(), IDs{AgentID: "ember-owl"})
+	ctx = InjectSession(ctx, "sess-018f")
+	ctx = InjectEpoch(ctx, "run-42")
+
+	md, ok := metadata.FromOutgoingContext(ctx)
+	require.True(t, ok)
+	require.Equal(t, []string{"ember-owl"}, md.Get(MDAgentID))
+	require.Equal(t, []string{"sess-018f"}, md.Get(MDSession))
+	require.Equal(t, []string{"run-42"}, md.Get(MDEpoch))
+}

@@ -50,6 +50,50 @@ func resolveSessionID(logger *zap.Logger) string {
 	return v
 }
 
+// epochIDEnvVar is the env var read once at orchestrator boot to determine
+// the per-process run/test-isolation epoch emitted on the `persatrix-epoch`
+// gRPC header on every outbound dispatch. ISSUE-0085 PR 4 (the structural
+// half of the F-3 fix).
+const epochIDEnvVar = "PERSATRIX_EPOCH"
+
+// resolveEpochID returns the per-process epoch sourced from PERSATRIX_EPOCH.
+// An unset env var logs INFO and returns the canonical [channels.DefaultEpochID]
+// ("live") — the single-world default that leaves production behaviour
+// unchanged. A value containing characters outside [A-Za-z0-9_-] emits a WARN
+// but is still accepted verbatim, mirroring [resolveSessionID]'s
+// soft-validation posture: an operator stuck on the env-var knob is never
+// blocked on a stricter validator landing first.
+//
+// The fallback is sourced from [channels.DefaultEpochID] (not a local "live"
+// literal) so the cross-language sentinel lives in one place — mirroring
+// [resolveSessionID]'s use of [channels.DefaultSessionID] (PR #335 review L2).
+// That exported constant is the value the persona-memory epoch migration (v12)
+// backfills onto pre-existing rows and is pinned to byte-match
+// `agents.epoch_id.DEFAULT_EPOCH_ID` by channels' cross-language lock-step
+// test; reusing it here means a single-world deployment can never split across
+// two defaults (Go emitting one, Python filtering on another). The boot-log
+// message hard-codes 'live' in the human-readable text because that is what an
+// operator greps for in incident triage; the structured `epoch_id` field
+// carries the canonical value.
+//
+// Unlike the session id (per-room, resolved per request by the
+// SessionResolver), the epoch is a single process-global value: `live` in
+// production, a per-job id in CI. It is resolved once here at boot and ferried
+// to the dispatcher via [channels.WithEpoch].
+func resolveEpochID(logger *zap.Logger) string {
+	v := os.Getenv(epochIDEnvVar)
+	if v == "" {
+		logger.Info(epochIDEnvVar+" unset; defaulting to 'live' epoch",
+			zap.String("epoch_id", channels.DefaultEpochID))
+		return channels.DefaultEpochID
+	}
+	if !sessionIDPattern.MatchString(v) {
+		logger.Warn(epochIDEnvVar+" contains characters outside [A-Za-z0-9_-]; accepting verbatim",
+			zap.String("epoch_id", v))
+	}
+	return v
+}
+
 // validateStartupFlags rejects malformed --env, --deadline-mode, and
 // PERSATRIX_LOG_FORMAT values at startup so a typo (--env=test,
 // --deadline-mode=dervied, PERSATRIX_LOG_FORMAT=preety) surfaces as a clean
