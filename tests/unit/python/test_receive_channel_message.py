@@ -395,3 +395,43 @@ class TestReceiveChannelMessageCascadeDepth:
         )
         event = _enqueued_event(dispatcher)
         assert event.metadata.get("cascade_depth") == 0
+
+
+class TestReceiveChannelMessageParticipantType:
+    """ISSUE-0068 / RFC 0011 participant-type wire-propagation amendment.
+
+    The gRPC receive path reads ``request.sender_participant_type`` (typed
+    proto field) and seeds the resulting
+    ``AgentEvent.metadata["sender_participant_type"]`` — the exact key the
+    episode-routing close path reads to set ``other_participant_type`` on
+    the relationship row. Before this, the field was dropped at the proto
+    boundary and every channel-delivered (REST) chat peer was recorded as
+    ``agent`` instead of ``user``.
+    """
+
+    async def test_wire_participant_type_seeds_event_metadata(self):
+        servicer, dispatcher = _make_servicer()
+        await servicer.ReceiveChannelMessage(
+            _channel_event(sender_participant_type="user"),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        event = _enqueued_event(dispatcher)
+        assert event.metadata.get("sender_participant_type") == "user", (
+            f"servicer must seed metadata.sender_participant_type from the "
+            f"typed proto field; got metadata={event.metadata!r}"
+        )
+
+    async def test_empty_participant_type_not_seeded(self):
+        """Empty wire field (genuine agent-to-agent traffic) leaves the key
+        absent, so the episode-routing read defaults to ``agent`` — the
+        correct peer type for inter-agent channel messages."""
+        servicer, dispatcher = _make_servicer()
+        await servicer.ReceiveChannelMessage(
+            _channel_event(sender_participant_type=""),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        event = _enqueued_event(dispatcher)
+        assert "sender_participant_type" not in event.metadata, (
+            f"empty wire field must not seed the metadata key; "
+            f"got metadata={event.metadata!r}"
+        )
