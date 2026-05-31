@@ -3,10 +3,10 @@ id: RFC-0031
 title: Per-Session Namespacing for Channels and Persona Memory
 summary: First-class Session scope under which channels are created and persona-memory rows are tagged — root-cause fix for v0.3.0 F-3 cross-run state bleed (currently mitigated by `make reset`).
 type: architecture
-status: implementing
+status: implemented
 author: Maksim Khomutov
 created: 2026-05-12
-target: v0.3.1 (P1) + v0.3.5 (P2) + v0.3.x (P3–4)
+target: v0.3.1 (P1) + v0.3.5 (P2–4)
 depends_on:
   - RFC-0011
   - RFC-0020
@@ -15,10 +15,10 @@ depends_on:
 # RFC 0031 — Per-Session Namespacing for Channels and Persona Memory
 
 **Type**: architecture
-**Status**: 🚧 Implementing (Phase 1 shipped v0.3.1; Phase 2 — session-scoped default recall across all four persona-memory tiers, the F-3 closer — shipped v0.3.5; Phase 3 — `persatrix session …` operator CLI (registry verbs + active-session pointer + `--session` override) — shipped v0.3.5, all three resolution mechanisms now wired; Phase 4 (operator docs + [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md) closeout) remains)
+**Status**: ✅ Implemented (Phase 1 shipped v0.3.1; Phase 2 — session-scoped default recall across all four persona-memory tiers, the F-3 closer — shipped v0.3.5; Phase 3 — `persatrix session …` operator CLI (registry verbs + active-session pointer + `--session` override) — shipped v0.3.5; Phase 4 — operator docs ([`docs/guides/sessions.md`](../guides/sessions.md)) + `make reset` breadcrumb + [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md) closeout — shipped v0.3.5. **Successor work** from the [scope-axes reframing](../memory-scope-axes.md) (§A amendment) — the `epoch` run-isolation axis ([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)), subject-scoped facts ([ISSUE-0084](../issues/ISSUE-0084-fact-scope-by-subject-not-uniform-session.md)), and the `--all-sessions` recall verb ([ISSUE-0086](../issues/ISSUE-0086-operator-all-sessions-recall-verb.md)) — is tracked separately, not under this RFC's four phases.)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-12
-**Target**: v0.3.1 (P1) + v0.3.5 (P2) + v0.3.x (P3–4)
+**Target**: v0.3.1 (P1) + v0.3.5 (P2–4)
 **Depends on**: RFC 0011 (Channels), RFC 0020 (Interaction Lifecycle — §G scope vocabulary)
 **Relates to**: RFC 0008 (Memory & Context Optimization), RFC 0029 (Personal/Society Storage Split)
 **Spawned from**: [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md) — root-cause fix for F-3 cross-run state bleed; currently mitigated by `make reset` (PR 6 of [v0.3.0 channel test-findings plan](../v0.3.0-test-findings-pr-plan.md))
@@ -226,7 +226,7 @@ persatrix session archive <id-or-label>
 persatrix session current
 ```
 
-The active-session pointer lives at `~/.persatrix/active-session` (path overridable via `PERSATRIX_ACTIVE_SESSION_FILE`). The orchestrator reads it at startup; an explicit `--session` flag on `persatrix chat` / `persatrix channel publish` / etc. overrides the file for that one invocation.
+The active-session pointer lives at `~/.persatrix/active-session` (path overridable via `PERSATRIX_ACTIVE_SESSION_FILE`). The orchestrator reads it at startup; an explicit `--session` flag on `persatrix chat` / `persatrix channel send` / `persatrix channel reply` overrides the file for that one invocation.
 
 **Phasing of the three resolution mechanisms.** The full precedence chain in Open Question 6 (`--session` flag > `PERSATRIX_SESSION_ID` env var > `~/.persatrix/active-session` file > built-in `legacy`) does not light up in one phase:
 
@@ -238,13 +238,15 @@ The active-session pointer lives at `~/.persatrix/active-session` (path overrida
 
 Between Phase 1 and Phase 3, **the env var is the only way to set a session**. An operator who reads §E after Phase 1 ships but before Phase 3 does, and then creates `~/.persatrix/active-session` by hand, will get silent fallback to `legacy` — the file-reading code isn't there yet. The Phase 1 deliverable list (below) is intentionally narrow for this reason; the operator-guide page (`docs/guides/sessions.md`, Phase 4) lands only after all three mechanisms are wired so the docs never describe a setting that doesn't work yet.
 
-`make reset` is **kept** but its operator-guide subsection is updated: "Prefer `persatrix session new --activate` for run isolation; `make reset` is now the deprecated nuclear option for clearing all volumes across all sessions." Removal of `make reset` is out of scope; deprecation breadcrumb only.
+`make reset` is **kept**, and its operator-guide subsection is updated — but the framing is **superseded by the [scope-axes reframing](../memory-scope-axes.md)** (§A amendment) recorded after this section was authored. The original intent ("prefer `persatrix session new --activate` for run isolation; `make reset` is the deprecated nuclear option") no longer holds: a session is now *room continuity* that accumulates, so `session new --activate` switches rooms rather than handing back a clean slate. Run/test isolation moves to the `epoch` axis ([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)); until it ships, `make reset` **remains** the supported clean-slate path (not deprecated). The Phase 4 breadcrumb ([channels.md](../guides/channels.md) / [persona-agents.md](../guides/persona-agents.md)) and [`docs/guides/sessions.md`](../guides/sessions.md) carry this corrected framing. Removal of `make reset` is out of scope.
 
-> **Amendment — Phase 3 operator CLI shipped, v0.3.5 ([Phase 3 PR plan](0031-phase3-pr-plan.md), PRs 1–5).** All three resolution mechanisms in the table above are now wired: the `/api/v1/sessions` REST registry + `session new / list / archive` (PRs 1–2), the `~/.persatrix/active-session` pointer file (+ `PERSATRIX_ACTIVE_SESSION_FILE`) + `session use / current / new --activate` (PR 3), and the `--session` override on `chat` / `channel publish / list` (PR 4); the lifecycle is pinned end-to-end by [`tests/integration/test_session_operator_surface.py`](../../tests/integration/test_session_operator_surface.py) (PR 5).
+> **Amendment — Phase 3 operator CLI shipped, v0.3.5 ([Phase 3 PR plan](0031-phase3-pr-plan.md), PRs 1–5).** All three resolution mechanisms in the table above are now wired: the `/api/v1/sessions` REST registry + `session new / list / archive` (PRs 1–2), the `~/.persatrix/active-session` pointer file (+ `PERSATRIX_ACTIVE_SESSION_FILE`) + `session use / current / new --activate` (PR 3), and the `--session` override on `chat` / `channel send` / `channel reply` (PR 4); the lifecycle is pinned end-to-end by [`tests/integration/test_session_operator_surface.py`](../../tests/integration/test_session_operator_surface.py) (PR 5).
 >
 > **OQ #6 reconciliation.** The precedence chain governs the *process-lifetime* session; the [ISSUE-0082](../issues/ISSUE-0082-orchestrator-per-request-session-principal-emission.md) per-request auto-binding (keyed `(agent, channel)` after [ISSUE-0083](../issues/ISSUE-0083-session-binding-sender-axis-fragments-multiparty-rooms.md)) is a distinct dispatch-path axis. An explicit `--session` wins **above** the auto-binding for that one invocation; absent it the auto-binding stands, so the Phase 2 + ISSUE-0082 concurrent-isolation guarantee is not regressed (pinned in `channel_session_handler_test.go` + `grpc_dispatcher_test.go`).
 >
-> **`--all-sessions` deferred** to [ISSUE-0086](../issues/ISSUE-0086-operator-all-sessions-recall-verb.md): the only operator route to `sessions="*"` (§Security Considerations) needs an operator memory-inspection surface that does not exist. Unbuilt is the stronger posture — `"*"` retains **no operator entry point**, so it cannot reach a prompt context. **Phase 4** (operator guide + `make reset` breadcrumb + [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md) closeout) remains.
+> **`--all-sessions` deferred** to [ISSUE-0086](../issues/ISSUE-0086-operator-all-sessions-recall-verb.md): the only operator route to `sessions="*"` (§Security Considerations) needs an operator memory-inspection surface that does not exist. Unbuilt is the stronger posture — `"*"` retains **no operator entry point**, so it cannot reach a prompt context.
+>
+> **Amendment — Phase 4 docs closeout shipped, v0.3.5.** [`docs/guides/sessions.md`](../guides/sessions.md) ships (resolution chain, `legacy` carve-out, the split-volume `make reset` asymmetry, no-secrets-in-labels); the [channels.md](../guides/channels.md) / [persona-agents.md](../guides/persona-agents.md) `make reset` subsections carry the reframed breadcrumb; and [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md) is **closed**. RFC 0031's four phases are complete (`✅ Implemented`); the scope-axes reframing's `epoch` / subject-scoped-facts / `--all-sessions` work is tracked as successor issues, not under this RFC.
 
 > **Amendment — [ISSUE-0081](../issues/ISSUE-0081-session-id-process-global-not-task-local.md), v0.3.5 (PR 2).** The resolution mechanisms above (env var → file → flag) all set a *process-lifetime* session. PR 2 adds a fourth, per-request transport for the concurrency fix recorded in the §B amendment: the orchestrator emits the session id as a gRPC metadata header, `persatrix-session` (the cross-language contract lives at `agents/session_id.py::SESSION_METADATA_GRPC_KEY`). It is lower-case by HTTP/2 convention and lifted case-insensitively server-side.
 >
@@ -325,7 +327,7 @@ Phases are scoped to be independently shippable. Sequencing is the constraint; s
 
 1. `cli/src/commands/session.rs` with the verbs listed in §E.
 2. Active-session file at `~/.persatrix/active-session` plus `PERSATRIX_ACTIVE_SESSION_FILE` override.
-3. `persatrix chat` / `persatrix channel publish` / `persatrix channel list` honor `--session` (overriding the file) and default to the file value otherwise.
+3. `persatrix chat` / `persatrix channel send` / `persatrix channel reply` honor `--session` (overriding the file) and default to the file value otherwise.
 4. `make reset` operator-guide subsections in [channels.md](../guides/channels.md) and [persona-agents.md](../guides/persona-agents.md) get the "prefer `persatrix session new --activate`" callout.
 
 **Dependencies**: Phase 1.

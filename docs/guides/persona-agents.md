@@ -603,16 +603,21 @@ compose project declares, not only the memory stores. Idempotent (the
 second invocation finds nothing to remove). Restart the stack with
 `make docker-up` afterwards.
 
-> **Operator workaround, not a fix.** Per-session memory namespacing —
-> so reruns with the same user id are auto-isolated — is tracked in
+> **`make reset` wipes volumes; it is not the session tool.** Per-session
+> recall isolation shipped in v0.3.5 ([RFC 0031](../rfcs/0031-per-session-namespacing-channels.md)
+> Phases 2–4): default recall is session-scoped and the operator-visible
+> `persatrix session …` CLI lands — see the [sessions operator
+> guide](sessions.md). But a **session is room continuity** (`(agent,
+> channel)`) that *accumulates*, not a clean slate — `persatrix session new
+> --activate` switches to a fresh continuity room, it does **not** purge the
+> `ember-owl-data` memory volume. Whole-world run/test isolation is the
+> forthcoming **epoch** axis
+> ([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)); until it
+> ships, `make reset` remains the supported clean-rerun path. The original
+> F-3 finding is closed as
 > [ISSUE-0051](../issues/ISSUE-0051-per-session-memory-namespacing-channels.md)
-> and addressed by [RFC 0031](../rfcs/0031-per-session-namespacing-channels.md).
-> Phase 1 (shipped in v0.3.1) tags every storage write with a
-> `session_id`; the operator-facing `persatrix session new --activate`
-> CLI that supersedes `make reset` for run isolation lands in RFC 0031
-> Phase 3 (a later v0.3.x patch). Until then, `make reset` remains the
-> supported cross-run isolation path. Originally surfaced as F-3 in
-> [docs/v0.3.0-test-findings-pr-plan.md](../v0.3.0-test-findings-pr-plan.md).
+> (surfaced as F-3 in
+> [docs/v0.3.0-test-findings-pr-plan.md](../v0.3.0-test-findings-pr-plan.md)).
 
 ### Opening a chat
 
