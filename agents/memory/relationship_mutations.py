@@ -106,7 +106,7 @@ async def update_trust(
             VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?)
             ON CONFLICT(participant_id, participant_type,
                         other_participant_id, other_participant_type,
-                        principal_id) DO UPDATE SET
+                        principal_id, epoch_id) DO UPDATE SET
                 trust_score = MAX(0.0, MIN(1.0, relationships.trust_score + ?)),
                 notes = ?
             RETURNING trust_score
@@ -275,6 +275,11 @@ async def record_interaction(
     # PR 3: ``principal_id`` is part of the primary key / conflict target
     # (not a first-seen tag like ``session_id``) — a different tenant
     # therefore upserts its *own* row instead of mutating this one.
+    # ISSUE-0085 PR 2: ``epoch_id`` joins the primary key / conflict target
+    # for the same reason (a rerun under a fresh epoch upserts its own row),
+    # so the target now lists it.  PR 2 only matches the conflict target to
+    # the new PK — the row keeps the ``'live'`` column default; resolving
+    # and *tagging* the active epoch on the INSERT is PR 3's per-tier wiring.
     await db.execute(
         """
         INSERT INTO relationships
@@ -285,7 +290,7 @@ async def record_interaction(
         VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, ?)
         ON CONFLICT(participant_id, participant_type,
                     other_participant_id, other_participant_type,
-                    principal_id) DO UPDATE SET
+                    principal_id, epoch_id) DO UPDATE SET
             interaction_count = interaction_count + 1,
             last_interaction_at = ?
         """,

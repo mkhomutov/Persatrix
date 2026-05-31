@@ -71,7 +71,6 @@ func TestSQLiteStore_SchemaV5_Migration_Idempotent(t *testing.T) {
 		var version int
 		require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
 		assert.Equal(t, channelStoreSchemaVersion, version, "user_version stamped to the latest schema version")
-		assert.Equal(t, 5, channelStoreSchemaVersion, "ISSUE-0083 bumps the channel store to v5")
 	})
 }
 
@@ -116,7 +115,11 @@ func TestSQLiteStore_Migration_V4ToV5_CollapsesSenderAxis(t *testing.T) {
 	withDB(t, path, func(db *sql.DB) {
 		var version int
 		require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
-		assert.Equal(t, 5, version, "v4→v5 ran")
+		// NewSQLiteStore runs the full migration loop, so a v4 baseline
+		// advances past v4→v5 (the collapse this test pins) all the way to
+		// the latest version. The collapse itself is asserted by the
+		// session_bindings shape below.
+		assert.Equal(t, channelStoreSchemaVersion, version, "migrations advanced past v4→v5 collapse")
 
 		assert.ElementsMatch(t,
 			[]string{"agent_id", "channel_id", "session_id", "created_at"},

@@ -4,12 +4,14 @@ Schema migrations and shared scoring SQL fragments.
 Forward-only migrations applied by ``_apply_migrations()`` and shared
 scoring constants used by ``episodic.py``.
 
-The callable migration handlers (currently ``v4`` through ``v10``) live
+The callable migration handlers (currently ``v4`` through ``v12``) live
 in :mod:`agents.memory._migration_handlers` — itself split across that
 module, :mod:`agents.memory._migration_facts` (v8),
-:mod:`agents.memory._migration_notes_session` (v9), and
-:mod:`agents.memory._migration_interactions_session` (v10) to stay under
-the 500-line soft cap.  All handlers are re-exported below for backwards
+:mod:`agents.memory._migration_notes_session` (v9),
+:mod:`agents.memory._migration_interactions_session` (v10),
+:mod:`agents.memory._migration_principal` (v11), and
+:mod:`agents.memory._migration_epoch` (v12) to stay under the 500-line
+soft cap.  All handlers are re-exported below for backwards
 compatibility, so call sites and tests should keep importing them from
 this module.
 """
@@ -33,6 +35,7 @@ from ._migration_handlers import (
     _apply_migration_9,
     _apply_migration_10,
     _apply_migration_11,
+    _apply_migration_12,
 )
 
 __all__ = [
@@ -50,6 +53,7 @@ __all__ = [
     "_apply_migration_9",
     "_apply_migration_10",
     "_apply_migration_11",
+    "_apply_migration_12",
     "_apply_migrations",
     "_fts5_available",
 ]
@@ -278,6 +282,25 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         11,
         "ISSUE-0081: principal_id on all five persona-memory tiers",
         "",  # handled by _apply_migration_11()
+    ),
+    # Migration 12 (ISSUE-0085 PR 2) adds the run/test-isolation dimension
+    # ``epoch_id`` to all five persona-memory tables in one version —
+    # ``episodes`` / ``relationships`` / ``facts`` / ``notes`` /
+    # ``interactions``.  Where ``principal_id`` (v11) scopes by tenant,
+    # ``epoch_id`` scopes by test run / logical branch with the SAME
+    # STRICT-equality recall predicate (no carve-out, no ``'*'`` sentinel) —
+    # the structural half of the F-3 fix.  The four UUID-keyed tiers gain it
+    # as a column; the participant-tuple-keyed ``relationships`` table is
+    # rebuilt with ``epoch_id`` *in the primary key* (alongside the
+    # ``principal_id`` v11 put there) so a rerun's upsert under a fresh epoch
+    # cannot mutate the prior run's aggregate row.  Same callable-handler
+    # rationale as v7/v9/v10/v11 — ``ALTER TABLE ... ADD COLUMN`` is not
+    # idempotent before SQLite 3.35.  See
+    # docs/issues/ISSUE-0085-epoch-axis-run-isolation.md.
+    (
+        12,
+        "ISSUE-0085: epoch_id on all five persona-memory tiers",
+        "",  # handled by _apply_migration_12()
     ),
 ]
 
