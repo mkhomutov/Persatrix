@@ -8,8 +8,9 @@ path's ``EstimateCost`` returns ``$0`` for any model absent from the
 pricing table, which silently disables the RFC 0023 pre-call lease /
 budget gate for that agent. A non-local alias with no price is a loud
 ``SystemExit``; a local ($0-by-design) alias is distinguishable from an
-unpriced one and passes silently; the raw-ID fall-through (§E) is left
-untouched (that back-compat half-step is Phase 3's to close).
+unpriced one and passes silently. As of RFC 0033 Phase 3 the §E raw-ID
+fall-through is retired, so a raw vendor ID is rejected up front by the
+resolver and never reaches this guard at all.
 """
 
 from __future__ import annotations
@@ -213,17 +214,16 @@ class TestMissingPriceGuard:
         with use_alias_map({}):
             validate_alias_pricing()
 
-    # ── raw-ID fall-through is NOT subject to the guard (§E) ──
-    def test_raw_id_fall_through_not_failed_closed(
+    # ── raw-ID references are rejected outright (RFC 0033 Phase 3) ──
+    def test_raw_id_reference_raises_systemexit(
         self, isolated_config: None,
     ) -> None:
-        # A valid (all-priced) map; resolving a raw vendor ID still degrades
-        # to a $0 record rather than tripping the fail-closed guard — that
-        # back-compat half-step is Phase 3's to close, not PR 4's.
-        with use_alias_map(_SAMPLE_ALIASES):
-            resolved = resolve("claude-sonnet-4-20250514")
-        assert resolved.raw is True
-        assert resolved.input_per_1m_tokens == 0.0
+        # Phase 3 retired the §E pass-through: a raw vendor ID no longer
+        # degrades to a $0 record at all — it never reaches the price guard
+        # because the resolver rejects it up front as an undeclared alias.
+        with use_alias_map(_SAMPLE_ALIASES), pytest.raises(SystemExit) as exc:
+            resolve("claude-sonnet-4-20250514")
+        assert "claude-sonnet-4-20250514" in str(exc.value)
 
     # ── the guard runs on the first config-backed resolve (not at load) ──
     def test_guard_fires_on_first_resolve_from_config(

@@ -30,7 +30,6 @@ from .llm_ollama import OllamaProvider, resolve_ollama_base_url
 from .llm_providers import AnthropicProvider, OpenAIProvider
 from .llm_types import LLMProvider
 from .model_aliases import resolve as resolve_model
-from .observability.metrics import try_get_instruments
 
 logger = logging.getLogger(__name__)
 
@@ -43,63 +42,6 @@ _OLLAMA_IMPORT_ERROR = (
 )
 
 
-# ─── Raw-ID deprecation signal (RFC 0033 PR 2) ──────────────
-#
-# When an agent's ``model:`` is a raw vendor ID rather than a
-# ``models.aliases`` entry, the factory keeps routing it (the §E
-# pass-through) but flags it: a human-facing deprecation warning, emitted
-# once per process so a society of raw agents does not spam the log, plus a
-# per-agent OTEL counter. The counter (``persatrix.llm.alias.raw_id_usage``)
-# reading zero across the dogfood window is the RFC 0033 Phase 3 entrance
-# signal — the gate that authorises removing the pass-through and
-# ``_infer_provider``. Both are de-duplicated so re-creating an agent's
-# provider within a process does not double-count; the counter dedup
-# records an agent only once it has actually been counted, so a
-# create_provider call that runs before metrics init (instruments
-# unavailable) is retried rather than silently marked counted.
-#
-# Scope caveat (Phase 3 gate): this counter covers only the create_provider
-# (agent) surface. The summarisation-model surface
-# (``persona_runtime.summarize_close``) resolves its own model and is NOT
-# counted here, so a raw summarisation model is invisible to the gate. PR 3
-# migrates *both* the agent configs and the summarisation field to aliases,
-# so a clean zero reading is authoritative only once that migration lands.
-#
-# The dedup is best-effort, not synchronized: concurrent create_provider
-# calls could in principle double-warn or double-count a raw agent. That is
-# harmless for a deprecation signal (worst case a duplicate log line / an
-# over-count by one) and agents are loaded sequentially at startup today, so
-# a lock would be over-engineering.
-_raw_id_warning_emitted = False
-_raw_id_counted_agents: set[str] = set()
-
-
-def _note_raw_id_usage(agent_id: str, model: str) -> None:
-    """Record that ``agent_id`` resolved a raw vendor ``model`` (RFC 0033 §E)."""
-    global _raw_id_warning_emitted
-    if not _raw_id_warning_emitted:
-        logger.warning(
-            "DEPRECATION (RFC 0033): agent %r references a raw vendor model "
-            "ID %r instead of a models.aliases entry. Migrate it to an alias "
-            "in config/optimization.yaml so a vendor retirement or provider "
-            "swap is a one-line edit. The raw-ID pass-through is removed in a "
-            "future release (Phase 3).",
-            agent_id,
-            model,
-        )
-        _raw_id_warning_emitted = True
-    if agent_id not in _raw_id_counted_agents:
-        # Record the agent as counted only *after* a successful emit. If the
-        # first create_provider for an agent runs before metrics init
-        # (instruments unavailable), leaving the set untouched lets a later
-        # call count it once instruments exist, rather than silently marking
-        # it counted-forever and under-reading the Phase 3 gate.
-        inst = try_get_instruments()
-        if inst is not None:
-            inst.alias_raw_id_usage.add(1, attributes={"agent.id": agent_id})
-            _raw_id_counted_agents.add(agent_id)
-
-
 def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
     """Create an LLM provider from agent config (RFC 0033 §D).
 
@@ -109,18 +51,15 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
 
     The ``model`` field is run through the RFC 0033 resolver and the resolved
     ``provider`` selects the concrete class — the **same standard path for
-    every provider** (``anthropic`` / ``openai`` / ``ollama`` / ``mock``):
-
-    * A declared ``models.aliases`` entry is authoritative for the
-      provider (an explicit, *disagreeing* ``provider:`` field is a
-      ``SystemExit`` — §D rule 1) and for ``provider_config`` per-field
-      (§D rule 2). So routing the whole society to a local / mock / OpenAI
-      provider is a one-line edit to the ``quality`` alias — exactly what the
-      ``make demo-*`` overlays mount.
-    * A raw vendor ID falls through (§E): the explicit ``provider:`` field
-      wins, else the provider is inferred from the prefix table; a
-      one-shot deprecation warning fires and the per-agent
-      ``persatrix.llm.alias.raw_id_usage`` counter increments.
+    every provider** (``anthropic`` / ``openai`` / ``ollama`` / ``mock``). The
+    ``model`` field must be a declared ``models.aliases`` entry: the alias is
+    authoritative for the provider (an explicit, *disagreeing* ``provider:``
+    field is a ``SystemExit`` — §D rule 1) and for ``provider_config``
+    per-field (§D rule 2). So routing the whole society to a local / mock /
+    OpenAI provider is a one-line edit to the ``quality`` alias — exactly what
+    the ``make demo-*`` overlays mount. A raw vendor ID is **not** accepted:
+    RFC 0033 Phase 3 retired the §E pass-through, so the resolver rejects any
+    non-alias reference with a loud ``SystemExit``.
 
     There is no global env force-knob — provider selection is config-driven
     (the v0.3.4 provider-parity refactor removed ``PERSATRIX_OFFLINE`` /
@@ -134,14 +73,12 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
 
     agent_id = agent_config.get("id", "<unknown>")
     explicit_provider = agent_config.get("provider")
-    # On the raw pass-through, an explicit provider field wins over prefix
-    # inference (§D rule 1, raw path); on the alias path the entry is
-    # authoritative and the hint is ignored by resolve().
-    resolved = resolve_model(model, explicit_provider=explicit_provider)
+    # The resolver rejects any non-alias reference (RFC 0033 Phase 3); on the
+    # alias path the entry is authoritative and an agent-entry provider hint
+    # is validated against it below, never used to route.
+    resolved = resolve_model(model)
 
-    if resolved.raw:
-        _note_raw_id_usage(str(agent_id), model)
-    elif explicit_provider and explicit_provider != resolved.provider:
+    if explicit_provider and explicit_provider != resolved.provider:
         # §D rule 1 — a model that resolves to an alias plus a disagreeing
         # explicit provider is a config bug, not a silent resolve-one-way.
         raise SystemExit(

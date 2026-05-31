@@ -17,11 +17,14 @@ def _resolvable_summarization_model(monkeypatch: pytest.MonkeyPatch) -> None:
     this they collapse to the fallback and fail on the LLM-summary assertion.
 
     Mirrors the unit-suite fixture in ``tests/unit/python/conftest.py``: it
-    patches only the name bound *inside* ``summarize_close`` (not the
+    patches only the names bound *inside* ``summarize_close`` (not the
     ``agents.optimization`` accessor), so its effect is confined to
-    ``summarize_closed_interaction`` callers. Those tests mock the LLM, so the
-    model only needs to *resolve*, never call out — a raw vendor id the prefix
-    table recognises does that. Tests that deliberately want an unresolvable
+    ``summarize_closed_interaction`` callers. RFC 0033 Phase 3 retired the
+    raw-vendor-ID pass-through, so a raw id no longer resolves; the baseline
+    instead stubs ``resolve_model`` to a canned
+    :class:`~agents.model_aliases.ResolvedModel` directly — the close-path
+    tests mock the LLM, so the model only needs to *resolve* to a valid
+    record, never call out. Tests that deliberately want an unresolvable
     model re-monkeypatch this in the test body, which wins over this baseline.
 
     See ISSUE-0076: CI never ran the full ``tests/integration/`` suite, so the
@@ -29,5 +32,17 @@ def _resolvable_summarization_model(monkeypatch: pytest.MonkeyPatch) -> None:
     close-path tests silently broken.
     """
     import agents.persona_runtime.summarize_close as sc
+    from agents.model_aliases import ResolvedModel
 
-    monkeypatch.setattr(sc, "summarization_model", lambda: "claude-haiku-test")
+    monkeypatch.setattr(sc, "summarization_model", lambda: "summarizer")
+    monkeypatch.setattr(
+        sc,
+        "resolve_model",
+        lambda _ref: ResolvedModel(
+            alias="summarizer",
+            provider="anthropic",
+            model="claude-haiku-test",
+            input_per_1m_tokens=0.80,
+            output_per_1m_tokens=4.00,
+        ),
+    )

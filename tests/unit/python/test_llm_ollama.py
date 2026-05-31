@@ -156,26 +156,48 @@ async def test_create_message_passes_model_verbatim() -> None:
 # ─── create_provider routing ────────────────────────────────
 
 
-def test_create_provider_explicit_ollama_per_agent() -> None:
-    """Per-agent ``provider: ollama`` routes to OllamaProvider; the
-    configured Ollama tag is used verbatim."""
+# RFC 0033 Phase 3 retired the raw-vendor-ID pass-through, so every agent
+# routes through a declared alias. An ``ollama`` alias whose physical ``model``
+# is the local tag; an ``anthropic`` alias for the "real cloud" cases.
+_OLLAMA_ALIAS = {
+    "local": {
+        "provider": "ollama",
+        "model": "llama3.2",
+        "input_per_1m_tokens": 0,
+        "output_per_1m_tokens": 0,
+    },
+}
+_ANTHROPIC_ALIAS = {
+    "quality": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "input_per_1m_tokens": 3.0,
+        "output_per_1m_tokens": 15.0,
+    },
+}
+
+
+def test_create_provider_ollama_alias_per_agent() -> None:
+    """An ``ollama`` alias routes to OllamaProvider; the configured Ollama tag
+    is used verbatim. The agreeing per-agent ``provider: ollama`` is accepted."""
     mod, _client = _mock_openai_module()
-    with patch.dict(sys.modules, {"openai": mod}):
+    with use_alias_map(_OLLAMA_ALIAS), patch.dict(sys.modules, {"openai": mod}):
         provider, model = create_provider(
-            {"id": "x", "model": "llama3.2", "provider": "ollama"}
+            {"id": "x", "model": "local", "provider": "ollama"}
         )
     assert isinstance(provider, OllamaProvider)
     assert model == "llama3.2"
 
 
 def test_create_provider_ollama_respects_provider_config_base_url() -> None:
+    # §D rule 2 — the alias leaves provider_config unset, so the agent entry's
+    # base_url fills the gap and reaches the SDK call.
     mod, _client = _mock_openai_module()
-    with patch.dict(sys.modules, {"openai": mod}):
+    with use_alias_map(_OLLAMA_ALIAS), patch.dict(sys.modules, {"openai": mod}):
         create_provider(
             {
                 "id": "x",
-                "model": "llama3.2",
-                "provider": "ollama",
+                "model": "local",
                 "provider_config": {"base_url": "http://gpu-box:11434/v1"},
             }
         )
@@ -196,10 +218,8 @@ def test_create_provider_ollama_model_env_override(
     """
     monkeypatch.setenv("PERSATRIX_OLLAMA_MODEL", "qwen2.5")
     mod, _client = _mock_openai_module()
-    with patch.dict(sys.modules, {"openai": mod}):
-        provider, model = create_provider(
-            {"id": "x", "model": "llama3.2", "provider": "ollama"}
-        )
+    with use_alias_map(_OLLAMA_ALIAS), patch.dict(sys.modules, {"openai": mod}):
+        provider, model = create_provider({"id": "x", "model": "local"})
     assert isinstance(provider, OllamaProvider)
     assert model == "qwen2.5"
 
@@ -214,9 +234,8 @@ def test_create_provider_ollama_env_does_not_force_provider(
     provider.
     """
     monkeypatch.setenv("PERSATRIX_OLLAMA", "1")
-    provider, _model = create_provider(
-        {"id": "ember-owl", "model": "claude-sonnet-4-6"}
-    )
+    with use_alias_map(_ANTHROPIC_ALIAS):
+        provider, _model = create_provider({"id": "ember-owl", "model": "quality"})
     assert not isinstance(provider, OllamaProvider)
     assert provider.name == "anthropic"
 

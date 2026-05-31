@@ -1,21 +1,19 @@
 """Tests for the provider factory (``agents.llm_factory``).
 
-PR 2 of the RFC 0033 PR plan rewires ``create_provider`` to consume the
-alias resolver and return ``(provider, physical_model)``. These tests pin
-the §D precedence rules and the raw-ID deprecation signal (the one-shot
-warning + the per-agent ``persatrix.llm.alias.raw_id_usage`` counter that
-gates Phase 3).
+``create_provider`` consumes the alias resolver and returns
+``(provider, physical_model)``. These tests pin the §D precedence rules.
+As of RFC 0033 **Phase 3** the §E raw-vendor-ID pass-through is retired:
+a ``model:`` that is not a declared alias is a loud ``SystemExit`` at
+factory time, so there is no longer a deprecation warning or a
+``persatrix.llm.alias.raw_id_usage`` gate counter to exercise here.
 
-``create_provider`` is exercised through its public
-``agents.llm_client`` re-export to also pin that import path; the
-process-wide raw-ID dedup state and the ``try_get_instruments`` hook live
-in ``agents.llm_factory``, so those patch/monkeypatch targets point there.
-All tests use mocked SDK modules — no real API calls.
+``create_provider`` is exercised through its public ``agents.llm_client``
+re-export to also pin that import path. All tests use mocked SDK modules —
+no real API calls.
 """
 
 from __future__ import annotations
 
-import logging
 import os
 import sys
 from pathlib import Path
@@ -25,7 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import yaml
 
-from agents import llm_factory, optimization
+from agents import optimization
 from agents.llm_client import AnthropicProvider, OpenAIProvider, create_provider
 from agents.model_aliases import resolve, use_alias_map
 
@@ -58,13 +56,6 @@ def _mock_openai_module() -> MagicMock:
     mod = MagicMock()
     mod.AsyncOpenAI.return_value = AsyncMock()
     return mod
-
-
-@pytest.fixture
-def _reset_raw_id_signal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reset the process-wide raw-ID dedup state so each test starts clean."""
-    monkeypatch.setattr(llm_factory, "_raw_id_warning_emitted", False)
-    monkeypatch.setattr(llm_factory, "_raw_id_counted_agents", set())
 
 
 class TestCreateProviderAliasResolution:
@@ -118,76 +109,32 @@ class TestCreateProviderAliasResolution:
         assert mod.AsyncOpenAI.call_args.kwargs["base_url"] == "https://alias-host/v1"
 
 
-class TestCreateProviderRawIdSignal:
-    """RFC 0033 PR 2 — raw vendor IDs warn once + feed the Phase 3 gate counter."""
+class TestCreateProviderRejectsRawId:
+    """RFC 0033 Phase 3 — the §E raw-vendor-ID pass-through is retired.
 
-    def test_raw_id_emits_deprecation_warning_once_per_process(
-        self, _reset_raw_id_signal: None, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        with use_alias_map(_ALIAS_MAP), patch.dict(
-            sys.modules, {"anthropic": _mock_anthropic_module()}
-        ), caplog.at_level(logging.WARNING, logger="agents.llm_factory"):
-            _, model = create_provider(
-                {"id": "raw-agent", "model": "claude-sonnet-4-20250514"}
-            )
-            # Second creation for the same raw agent must not re-warn.
+    A ``model:`` that is not a declared alias no longer routes with a
+    deprecation warning; it is a loud ``SystemExit`` at factory time,
+    naming the offending string so an operator declares it as an alias.
+    """
+
+    def test_raw_vendor_id_raises_systemexit(self) -> None:
+        with use_alias_map(_ALIAS_MAP), pytest.raises(SystemExit) as exc:
             create_provider({"id": "raw-agent", "model": "claude-sonnet-4-20250514"})
-        deprecations = [r for r in caplog.records if "RFC 0033" in r.getMessage()]
-        assert len(deprecations) == 1
-        assert "claude-sonnet-4-20250514" in deprecations[0].getMessage()
-        # The physical id still flows through unchanged on the raw path.
-        assert model == "claude-sonnet-4-20250514"
+        assert "claude-sonnet-4-20250514" in str(exc.value)
 
-    def test_raw_id_increments_counter_once_per_agent(
-        self, _reset_raw_id_signal: None
-    ) -> None:
-        fake_inst = MagicMock()
+    def test_raw_vendor_id_raises_before_any_provider_built(self) -> None:
+        # The resolver rejects the raw id before the factory ever reaches a
+        # provider branch, so no SDK module import is needed for the failure.
+        with use_alias_map(_ALIAS_MAP), pytest.raises(SystemExit):
+            create_provider({"id": "raw-o", "model": "gpt-4o"})
+
+    def test_alias_path_still_resolves(self) -> None:
+        # The alias path is unaffected — a declared alias resolves normally.
         with use_alias_map(_ALIAS_MAP), patch.dict(
             sys.modules, {"anthropic": _mock_anthropic_module()}
-        ), patch("agents.llm_factory.try_get_instruments", return_value=fake_inst):
-            create_provider({"id": "raw-x", "model": "claude-sonnet-4-20250514"})
-            create_provider({"id": "raw-x", "model": "claude-sonnet-4-20250514"})
-        fake_inst.alias_raw_id_usage.add.assert_called_once_with(
-            1, attributes={"agent.id": "raw-x"}
-        )
-
-    def test_raw_id_counter_retries_when_instruments_unavailable_first(
-        self, _reset_raw_id_signal: None
-    ) -> None:
-        """The Phase 3 gate counter must not silently under-read.
-
-        The counter de-dup records an agent only *after* a successful emit:
-        if the first ``create_provider`` runs before metrics init
-        (``try_get_instruments()`` returns ``None``), a later call once
-        instruments exist must still count the agent — otherwise the gate
-        counter under-reads and could falsely open. ``side_effect=[None,
-        fake_inst]`` simulates instruments coming up between the two calls.
-        """
-        fake_inst = MagicMock()
-        with use_alias_map(_ALIAS_MAP), patch.dict(
-            sys.modules, {"anthropic": _mock_anthropic_module()}
-        ), patch(
-            "agents.llm_factory.try_get_instruments",
-            side_effect=[None, fake_inst],
         ):
-            create_provider({"id": "raw-late", "model": "claude-sonnet-4-20250514"})
-            create_provider({"id": "raw-late", "model": "claude-sonnet-4-20250514"})
-        fake_inst.alias_raw_id_usage.add.assert_called_once_with(
-            1, attributes={"agent.id": "raw-late"}
-        )
-
-    def test_alias_path_emits_no_raw_id_signal(
-        self, _reset_raw_id_signal: None, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        fake_inst = MagicMock()
-        with use_alias_map(_ALIAS_MAP), patch.dict(
-            sys.modules, {"anthropic": _mock_anthropic_module()}
-        ), patch(
-            "agents.llm_factory.try_get_instruments", return_value=fake_inst
-        ), caplog.at_level(logging.WARNING, logger="agents.llm_factory"):
-            create_provider({"id": "q", "model": "quality"})
-        assert not any("RFC 0033" in r.getMessage() for r in caplog.records)
-        fake_inst.alias_raw_id_usage.add.assert_not_called()
+            _, model = create_provider({"id": "q", "model": "quality"})
+        assert model == "claude-sonnet-4-6"
 
 
 class TestStockConfigMigration:
@@ -259,21 +206,18 @@ class TestStockConfigMigration:
             os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
             optimization.reset_cache()
 
-    def test_create_provider_for_stock_agents_emits_no_raw_id_warning(
-        self, _reset_raw_id_signal: None, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_create_provider_for_stock_agents_builds_physical_model(self) -> None:
+        # Against the configured anthropic demo, every stock agent builds a
+        # provider and returns the physical vendor id (never an alias name) —
+        # the alias path the Phase 3 resolver leaves as the only path.
         os.environ["PERSATRIX_OPTIMIZATION_CONFIG"] = self._ANTHROPIC_DEMO
         optimization.reset_cache()
         try:
             agents = self._shipped_agents()
-            with patch.dict(
-                sys.modules, {"anthropic": _mock_anthropic_module()}
-            ), caplog.at_level(logging.WARNING, logger="agents.llm_factory"):
+            with patch.dict(sys.modules, {"anthropic": _mock_anthropic_module()}):
                 for agent in agents:
-                    create_provider(agent)
-            assert not any(
-                "RFC 0033" in r.getMessage() for r in caplog.records
-            ), "a stock agent still trips the raw-ID deprecation warning"
+                    _, model = create_provider(agent)
+                    assert model == "claude-sonnet-4-6", agent["id"]
         finally:
             os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
             optimization.reset_cache()

@@ -458,19 +458,21 @@ class TestSingleTurnInteractionFactExtraction:
         assert (summary, failed, facts_raw) == (expected, False, None)
 
 
+def _raise_unresolvable(_ref: str) -> None:
+    # RFC 0033 Phase 3: the resolver raises SystemExit on a non-alias reference.
+    raise SystemExit("Unknown model reference 'totally-unknown-model-xyz'")
+
+
 @pytest.mark.asyncio
 class TestUnresolvableSummarizationModelFallsBack:
-    """RFC 0033 PR 2 — an unresolvable summarisation model must degrade to
-    the fallback, not escape as an uncaught SystemExit past the caller."""
+    """RFC 0033 — unresolvable summarisation model degrades to the fallback, not a SystemExit."""
 
     async def test_unresolvable_model_returns_fallback_not_systemexit(
         self, monkeypatch: pytest.MonkeyPatch,
     ):
         import agents.persona_runtime.summarize_close as sc
 
-        monkeypatch.setattr(
-            sc, "summarization_model", lambda: "totally-unknown-model-xyz",
-        )
+        monkeypatch.setattr(sc, "resolve_model", _raise_unresolvable)
         result = await summarize_closed_interaction(
             _make_envelope_client('{"summary": "x", "facts": []}'),
             "test-agent",
@@ -483,9 +485,7 @@ class TestUnresolvableSummarizationModelFallsBack:
     ):
         import agents.persona_runtime.summarize_close as sc
 
-        monkeypatch.setattr(
-            sc, "summarization_model", lambda: "totally-unknown-model-xyz",
-        )
+        monkeypatch.setattr(sc, "resolve_model", _raise_unresolvable)
         reader, metrics_mod = _build_meter()
         try:
             await summarize_closed_interaction(
