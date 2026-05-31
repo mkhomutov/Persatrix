@@ -382,9 +382,9 @@ class _LLMPersonaAgent(
             span.add_event("received")
             async with self._lock:
                 span.add_event("queued")
-                # ISSUE-0081 PR 2+3: bind the per-request session AND tenant
-                # for the handler's lifetime (``wait_for``'s child task copies
-                # these task-local scopes; see ``request_scope_from_metadata``).
+                # ISSUE-0081 PR 2/3 · ISSUE-0085 PR 4: bind the per-request session,
+                # tenant AND epoch for the handler's lifetime (``wait_for``'s child
+                # task copies these scopes; see ``request_scope_from_metadata``).
                 try:
                     with request_scope_from_metadata(event.metadata):
                         actions = await asyncio.wait_for(
