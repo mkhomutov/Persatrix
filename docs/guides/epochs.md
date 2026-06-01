@@ -4,15 +4,18 @@
 > axis — the `PERSATRIX_EPOCH` process knob and the per-invocation `--epoch`
 > override on the dispatch-bearing verbs.
 
-**Status**: 🚧 v0.3.5 (RFC 0031 epoch axis, [ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md)).
-The storage, filter, and gRPC rail ship in PRs 2–4; this guide documents the
-operator surface (PR 5). The end-to-end run-isolation acceptance gate lands with
-the PR 6 closeout.
+**Status**: ✅ Shipped in v0.3.5 (RFC 0031 epoch axis,
+[ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md) closed). The
+storage + strict-equality filter + gRPC rail (PRs 2–4), the `--epoch` operator
+surface (PR 5), and the end-to-end run-isolation acceptance gate
+([`test_epoch_run_isolation.py`](../../tests/integration/test_epoch_run_isolation.py),
+PR 6 closeout) are all merged
+([#472](https://github.com/mkhomutov/Persatrix/pull/472)–[#478](https://github.com/mkhomutov/Persatrix/pull/478)).
 
 ## TL;DR
 
 ```bash
-PERSATRIX_EPOCH=ci-run-5 persatrix serve     # whole process runs under one epoch
+PERSATRIX_EPOCH=ci-run-5 make run            # whole orchestrator boots under one epoch
 persatrix chat support-bot --epoch ci-run-5  # one invocation under an explicit epoch
 ```
 
@@ -54,10 +57,12 @@ The orchestrator reads `PERSATRIX_EPOCH` once at boot and emits it on every
 dispatch as the `persatrix-epoch` gRPC header; the persona side re-establishes an
 `epoch_scope` from it so recall and writes filter by that epoch. Unset defaults
 to `live` (an INFO line at boot records the fallback). A value outside
-`[A-Za-z0-9_-]` is accepted verbatim with a WARN.
+`[A-Za-z0-9_-]` is accepted verbatim with a WARN. Set it in the orchestrator's
+environment — locally via `make run`, or under Docker on the orchestrator
+service in your compose env:
 
 ```bash
-PERSATRIX_EPOCH=ci-$GITHUB_RUN_ID persatrix serve
+PERSATRIX_EPOCH=ci-$GITHUB_RUN_ID make run
 ```
 
 ## The per-invocation override: `--epoch`

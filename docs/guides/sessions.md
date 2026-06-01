@@ -122,6 +122,17 @@ Three mechanisms can set the process-lifetime session. They resolve in this
   seeds from. It does **not** live-rebind in-flight processes — they continue
   under the session they started with.
 
+> **Scoping a whole arc vs. a single call.** A `--session` (or `--epoch`) on one
+> `chat` / `channel send` call governs the *recall query* and channel-binding for
+> that invocation. But a persona's episode is written asynchronously at
+> *interaction close* in its background loop, tagged with the session the
+> persona-runtime **snapshotted at boot** — so a per-invocation override does
+> **not** retag that close-path write in a long-running persona. To scope an
+> entire arc (e.g. a dementia-test run across calls), set the session at the
+> persona's boot (`PERSATRIX_SESSION_ID`), not per invocation. The structural
+> isolation itself is intact either way; this is a write-attribution nuance, not
+> a recall leak.
+
 ## 5. The `legacy` carve-out
 
 Rows written before this RFC shipped (and any row whose session resolves to the
