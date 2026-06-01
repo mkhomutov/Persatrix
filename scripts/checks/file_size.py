@@ -219,15 +219,15 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # report (3 395 words at tag time) set the precedent; the v0.3.0 PR 4
     # rerun (this addition) brings the report to ~4 600 words.
     "docs/manual-tests/v0.3.0-execution-report.md",
-    # docs/manual-tests/v0.3.1-execution-report.md is the v0.3.1 sibling of
-    # v0.3.0-execution-report.md above — identical per-release accumulator
-    # pattern. The PR 1 live execution pass (the 26 previously-blocked rows
-    # run against the Docker Compose stack) brought the report to ~4 250
-    # words: every test row carries an inline outcome + evidence note, plus
-    # the MT-MEMORY-005 per-leg acceptance table and the §Follow-ups
-    # findings (F-1 facts-tier gap). Written against the v0.3.1 release;
-    # archive once the tag ships.
+    # docs/manual-tests/v0.3.1-execution-report.md — v0.3.1 sibling of the
+    # v0.3.0 report above; same per-release accumulator pattern (~4 250 words
+    # after the PR 1 live pass). Archive once the tag ships.
     "docs/manual-tests/v0.3.1-execution-report.md",
+    # docs/manual-tests/MT-MEMORY-005-dementia-test.md — the qualitative
+    # memory acceptance gate; gains a Test Results row every memory-touching
+    # release (v0.3.1 ×2, v0.3.5 ×2), so it sits at the 3 000-word prose cap
+    # as a permanent release-cycle accumulator. Trim only if a row is dropped.
+    "docs/manual-tests/MT-MEMORY-005-dementia-test.md",
     # docs/manual-tests/v0.3.2-execution-report.md is the v0.3.2 sibling of
     # the v0.3.0 / v0.3.1 reports above — identical per-release accumulator
     # pattern. The release-prep PR 1 sweep (32 tests + wallet acquire+settle
@@ -290,6 +290,14 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # deferred to the grandfathered execution report. Written against the v0.3.4
     # release; archive once the tag ships.
     "docs/v0.3.4-release-checklist.md",
+    # docs/v0.3.5-release-checklist.md is the v0.3.5 sibling of the v0.3.3 /
+    # v0.3.4 checklists above — identical release-cycle-record pattern. It
+    # crossed the 3 000-word prose cap in release-prep PR 4 when the §1/§2/§7
+    # gate boxes were filled with the post-bump re-certification evidence (+ the
+    # two §4 live hard-block legs reserved for Phase 6) on top of the §3.1
+    # Upgrade Notes table and §6 Known Gaps inventory. Written against the
+    # v0.3.5 release; archive once the tag ships.
+    "docs/v0.3.5-release-checklist.md",
     # docs/v0.3.4-release-prep-plan.md is the v0.3.4 release-prep sequencer —
     # same release-cycle-accumulator pattern as the v0.3.0 / v0.3.1 plans and
     # the v0.3.3 checklist above. It crossed the 3 000-word prose cap when PR 1

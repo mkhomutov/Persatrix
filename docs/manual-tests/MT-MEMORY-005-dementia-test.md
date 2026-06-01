@@ -242,7 +242,8 @@ V5 supersedes the v0.3.x re-run cadence — every v0.3.5+ run is a V5 run.
 |------|--------|----|---------|--------|-------|
 | 2026-05-17 | Claude (Opus 4.7) | Windows 11 + Docker | V2 | Pass | v0.3.1 surface run. All 5 legs Pass; release-blocker Legs 1/2/5 Pass. Facts tier extracted 0 facts at run time (root-caused as ISSUE-0054); legs carried by the RFC 0034 conversation window. See [v0.3.1-execution-report.md](v0.3.1-execution-report.md#mt-memory-005-acceptance-passfail-gate). |
 | 2026-05-17 | Claude (Opus 4.7) | Windows 11 + Docker | V2 | Pass | Release-prep PR 4 re-run on the RC tip (`main` 47a7797, post-ISSUE-0054-fix). All 5 legs Pass; release-blocker Legs 1/2/5 Pass **via the RFC 0026 facts tier** (6 facts extracted + recalled, clean fence-free episode summaries). F-1 confirmed closed. See [v0.3.1-execution-report.md](v0.3.1-execution-report.md#mt-memory-005-re-run--release-prep-pr-4-release-candidate-tip). |
-| 2026-06-01 | Claude (Opus 4.8) | macOS + Docker | V5 | Bridge ✅ / arc carried | v0.3.5 RP PR 1 ([report](v0.3.5-execution-report.md)). Bridge green live ([`test_session_continuity.py`](../../tests/integration/test_session_continuity.py)); recall isolation verified live ([MT-SESSION-003](MT-SESSION-003.md)). Full arc not run here — ⚠️ Accepted-with-known-gap. |
+| 2026-06-01 | Claude (Opus 4.8) | macOS + Docker | V5 | Bridge ✅ / arc carried | v0.3.5 RP PR 1: bridge green live ([`test_session_continuity.py`](../../tests/integration/test_session_continuity.py)) + recall isolation ([MT-SESSION-003](MT-SESSION-003.md)); full arc run live in PR 4 (row below). |
+| 2026-06-01 | Claude (Opus 4.8) | macOS + Docker (Anthropic) | V5 | **Pass** | v0.3.5 RP **PR 4** live (§4 hard-block): all 5 legs Pass + no-bleed holds; facts-tier-empty = [ISSUE-0054](../issues/ISSUE-0054-rfc0026-facts-tier-extracts-no-facts.md). Evidence: [exec report § PR 4](v0.3.5-execution-report.md#re-execution--release-prep-pr-4-post-version-bump-rc-tip). |
 
 ---
 
