@@ -170,8 +170,11 @@ class TestRoutingDefaultsAreReservedForTaskAgentsAndEvaluators:
         ):
             # An omitted model: key is a KeyError (schema-`required` rejects it
             # earlier via `make validate`), never a route to defaults.task_agents.
-            with pytest.raises(KeyError):
+            with pytest.raises(KeyError) as exc:
                 create_provider({"id": "t"})
+        # The missing `model:` key itself, not an unrelated KeyError from a
+        # deeper routing-fallback lookup.
+        assert "model" in str(exc.value)
 
 
 class TestStockConfigMigration:
