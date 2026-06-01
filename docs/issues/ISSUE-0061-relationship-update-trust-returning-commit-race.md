@@ -10,7 +10,6 @@ closed_pr: 380
 refs:
   - docs/issues/ISSUE-0055-close-path-sqlite-commit-race-catchup-storm.md
   - docs/issues/ISSUE-0060-shared-connection-commit-race-unguarded-writers.md
-  - docs/pr-reviews/PR-380-review.md
   - agents/memory/relationship_mutations.py
   - agents/memory/relationship.py
 ---
@@ -48,9 +47,8 @@ the close-path commit race fixed in PR #380 for
 
 ## Context
 
-Found during the PR #380 review
-([`docs/pr-reviews/PR-380-review.md`](../pr-reviews/PR-380-review.md),
-finding M1). PR #380 fixed the episodic-connection `RETURNING` race and,
+Found during the [PR #380](https://github.com/mkhomutov/Persatrix/pull/380)
+review (finding M1). PR #380 fixed the episodic-connection `RETURNING` race and,
 via [ISSUE-0060](ISSUE-0060-shared-connection-commit-race-unguarded-writers.md),
 audited the episodic connection and concluded `increment_interaction_count`
 was its sole `RETURNING` writer — correct *for that connection*. The
