@@ -42,6 +42,14 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | ID | Title | Status |
 |----|-------|--------|
 | [MT-SESSION-001](MT-SESSION-001.md) | `PERSATRIX_SESSION_ID` cross-process write contract | Active |
+| [MT-SESSION-002](MT-SESSION-002.md) | Session operator surface, live (`new`/`use`/`list`/`archive`/`current` + resolution chain) | Active |
+| [MT-SESSION-003](MT-SESSION-003.md) | F-3 recall isolation + within-session continuity | Active |
+
+## Epoch
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-EPOCH-001](MT-EPOCH-001.md) | Epoch structural run-isolation (fresh `PERSATRIX_EPOCH`/`--epoch`, same room+user, inherits nothing) | Active |
 
 ## Config
 
@@ -122,6 +130,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | v0.3.2 | [v0.3.2-execution-report.md](v0.3.2-execution-report.md) | ✅ Complete |
 | v0.3.3 | [v0.3.3-execution-report.md](v0.3.3-execution-report.md) | ✅ Complete |
 | v0.3.4 | [v0.3.4-execution-report.md](v0.3.4-execution-report.md) | ✅ Complete |
+| v0.3.5 | [v0.3.5-execution-report.md](v0.3.5-execution-report.md) | 🔄 In progress |
 
 ---
 
