@@ -115,9 +115,16 @@ def summarization_model() -> str:
 
 
 def model_routing_defaults() -> dict[str, str]:
-    """Return ``<profile>.model_routing.defaults`` — the alias each agent
-    *role* (``task_agents`` / ``sub_agents`` / ``evaluators``) routes to
-    when it does not name a model explicitly.
+    """Return ``<profile>.model_routing.defaults`` — the role → alias map.
+
+    Only ``sub_agents`` is consumed at runtime: it backs the RFC 0033 §J
+    ``SubAgentRequest`` ``None``-resolution via :func:`sub_agent_default_model`.
+    ``task_agents`` and ``evaluators`` are **reserved** (ISSUE-0069): task
+    agents and evaluators carry an explicit ``model:`` in ``config/agents.yaml``
+    (schema-``required``), and :func:`agents.llm_factory.create_provider` never
+    falls back to these keys — a missing/empty ``model:`` hard-stops. This
+    accessor surfaces all three for config-contract completeness, but the two
+    reserved roles have no consumer; do not treat them as an applied fallback.
 
     Resolution order (active profile, then ``default``):
 

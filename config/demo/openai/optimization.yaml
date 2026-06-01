@@ -37,10 +37,12 @@ models:
 
 default:
   model_routing:
+    # ISSUE-0069: only `sub_agents` is consumed (RFC 0033 §J sub-agent default);
+    # `task_agents` / `evaluators` are reserved — see config/optimization.yaml.
     defaults:
-      task_agents: "quality"
-      sub_agents: "quality"
-      evaluators: "fast"
+      task_agents: "quality"  # reserved (not consumed)
+      sub_agents: "quality"   # live: RFC 0033 §J sub-agent default
+      evaluators: "fast"      # reserved (not consumed)
   caching:
     exact:
       enabled: true

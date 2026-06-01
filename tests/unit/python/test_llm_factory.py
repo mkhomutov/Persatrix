@@ -137,6 +137,43 @@ class TestCreateProviderRejectsRawId:
         assert model == "claude-sonnet-4-6"
 
 
+class TestRoutingDefaultsAreReservedForTaskAgentsAndEvaluators:
+    """ISSUE-0069 — ``defaults.task_agents`` / ``.evaluators`` are *reserved*.
+
+    RFC 0033 §J wires only the ``sub_agents`` routing default (the
+    ``SubAgentRequest`` ``None``-resolution). ``create_provider`` — the task-agent
+    construction site — takes its model from the explicit ``model:`` field and
+    **never** consults ``model_routing_defaults()``: a missing/empty ``model:``
+    hard-stops rather than falling back to ``defaults.task_agents``. These tests
+    pin that contract executably, so a future attempt to *wire* the fallback
+    (ISSUE-0069 option 1) trips here instead of silently changing behaviour the
+    config comment documents as reserved.
+
+    A fully-resolvable routing default is present (patched), so the hard-stop is
+    a deliberate no-fallback choice, not the mere absence of a target.
+    """
+
+    _ROUTING = {"task_agents": "quality", "sub_agents": "quality", "evaluators": "fast"}
+
+    def test_empty_model_hard_stops_without_routing_fallback(self) -> None:
+        with use_alias_map(_ALIAS_MAP), patch.object(
+            optimization, "model_routing_defaults", return_value=self._ROUTING
+        ):
+            with pytest.raises(SystemExit) as exc:
+                create_provider({"id": "t", "model": ""})
+        # The empty-model hard-stop, not a route to defaults.task_agents.
+        assert "empty" in str(exc.value)
+
+    def test_absent_model_hard_stops_without_routing_fallback(self) -> None:
+        with use_alias_map(_ALIAS_MAP), patch.object(
+            optimization, "model_routing_defaults", return_value=self._ROUTING
+        ):
+            # An omitted model: key is a KeyError (schema-`required` rejects it
+            # earlier via `make validate`), never a route to defaults.task_agents.
+            with pytest.raises(KeyError):
+                create_provider({"id": "t"})
+
+
 class TestStockConfigMigration:
     """RFC 0033 PR 3 + the v0.3.4 "no default provider" amendment.
 
