@@ -176,6 +176,13 @@ class WorkingMemory:
             key=lambda s: s.priority,
         )
 
+        # Nothing to compress — return before touching the alias layer (mirrors
+        # episodic_retention's ``if not rows`` guard ahead of resolve()). Avoids
+        # a wasted resolve() and a misleading "skipping compression pass"
+        # warning when there was never any compression to skip.
+        if not compressible:
+            return
+
         # ISSUE-0072 / RFC 0033 §D — resolve the compression model through the
         # alias layer so the physical id + pricing live only in config, never a
         # code-baked vendor literal. resolve() raises SystemExit (a

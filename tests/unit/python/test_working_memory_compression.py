@@ -6,6 +6,7 @@ All tests use mock LLM client — no real API calls.
 """
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -99,6 +100,28 @@ class TestCompression:
         kwargs = llm_client.create_message.call_args.kwargs
         assert kwargs["model"] == "physical-summarizer-model"
         assert kwargs["model_alias"] == "summarizer"
+
+    async def test_no_resolve_when_nothing_compressible(self, caplog):
+        """Over budget but no compressible sections: compression is a silent
+        no-op. It must not reach the alias layer at all — so an unresolvable
+        compression model produces no misleading 'skipping compression pass'
+        warning when there was never any compression to skip. Mirrors
+        episodic_retention's ``if not rows: return 0`` guard ahead of resolve()."""
+        wm = WorkingMemory(max_tokens=100, compression_model="nonexistent-alias")
+        wm.add_section(
+            _make_section(
+                name="pinned",
+                token_count=200,
+                content="a" * 800,
+                compressible=False,
+            )
+        )
+        llm_client = AsyncMock()
+        llm_client.create_message = AsyncMock()
+        with caplog.at_level(logging.WARNING):
+            await wm.compress_if_needed(llm_client)
+        llm_client.create_message.assert_not_awaited()
+        assert "not resolvable" not in caplog.text
 
     async def test_no_compression_under_budget(self):
         wm = WorkingMemory(max_tokens=500)
