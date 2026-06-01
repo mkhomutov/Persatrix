@@ -290,6 +290,14 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # deferred to the grandfathered execution report. Written against the v0.3.4
     # release; archive once the tag ships.
     "docs/v0.3.4-release-checklist.md",
+    # docs/v0.3.5-release-checklist.md is the v0.3.5 sibling of the v0.3.3 /
+    # v0.3.4 checklists above — identical release-cycle-record pattern. It
+    # crossed the 3 000-word prose cap in release-prep PR 4 when the §1/§2/§7
+    # gate boxes were filled with the post-bump re-certification evidence (+ the
+    # two §4 live hard-block legs reserved for Phase 6) on top of the §3.1
+    # Upgrade Notes table and §6 Known Gaps inventory. Written against the
+    # v0.3.5 release; archive once the tag ships.
+    "docs/v0.3.5-release-checklist.md",
     # docs/v0.3.4-release-prep-plan.md is the v0.3.4 release-prep sequencer —
     # same release-cycle-accumulator pattern as the v0.3.0 / v0.3.1 plans and
     # the v0.3.3 checklist above. It crossed the 3 000-word prose cap when PR 1
