@@ -99,7 +99,7 @@ This follows the orchestrator's established optional-subsystem pattern (channels
 Why same-origin embedding wins, grounded in the current code:
 
 - The REST surface has **no CORS middleware** today. A separate-origin SPA would be blocked by the browser unless we add CORS or front everything with a proxy. Same-origin needs neither.
-- The REST surface has **no authentication** yet (documented posture in `agent_handlers.go`; auth waits on RFC 0039). Serving the UI from the same origin means there is exactly **one** boundary to secure later, and the future auth layer (or a fronting proxy) covers `/ui` and `/api` together.
+- The REST surface has **no authentication** yet. The in-code posture (`agent_handlers.go`) documents the surface as unauthenticated *"until token validation lands in RFC 0009 Phase 4"*; the *human* identity axis the console actually needs is carried by RFC 0039 (User Accounts & Authentication), which explicitly reframes RFC 0009 as the agent-identity counterpart and takes human auth as its own scope. Either way, serving the UI from the same origin means there is exactly **one** boundary to secure later, and the future auth layer (or a fronting proxy) covers `/ui` and `/api` together.
 - **Single-binary distribution** is preserved — the static assets live inside the orchestrator binary, so "download, run, open `http://localhost:8080/ui`" works with no separate frontend deploy.
 
 **Alternatives considered:**
@@ -168,7 +168,7 @@ Slice 1 delivers the "feel the taste" moment with three panels, all over today's
 
 **2. Channel timeline panel** — watch personas interact.
 - `GET /api/v1/channels` to list channels; `GET /api/v1/channels/{id}/messages?limit=&before=` to render history newest-first.
-- **Live view by polling** (no channel-push API exists today): the panel polls the messages endpoint on an interval and appends new messages. A real-time channel SSE/WebSocket is a named later enhancement, not a Slice-1 dependency.
+- **Live view by polling** (no channel-push API exists today): the panel polls the messages endpoint on a bounded interval (default ~2–3 s) and appends new messages, pausing polling when the tab is backgrounded and backing off on errors so idle browser tabs do not hammer the unauthenticated localhost surface. A real-time channel SSE/WebSocket is a named later enhancement, not a Slice-1 dependency.
 - Optional: `POST /api/v1/channels/{id}/messages` to let a human post into a group channel and watch agents respond (reuses the mention fan-out already in RFC 0011).
 
 **3. Memory strip (stretch within Slice 1)** — make persistence *visible*.
@@ -189,13 +189,13 @@ Sketched here to show the architecture scales; each is its own design pass.
 
 ### F. Auth & Multi-Tenancy Forward-Compatibility
 
-The system will gain authentication and multi-tenancy (RFC 0039 and successors). The console must not paint that into a corner. The schema already carries the seed: ISSUE-0081 added `principal_id TEXT NOT NULL DEFAULT 'local'` to the session/chat path. We treat **today's no-auth localhost mode as the degenerate single-tenant case (`principal=local`)**, not as the permanent shape.
+The system will gain authentication and multi-tenancy (RFC 0039 and successors). The console must not paint that into a corner. The schema already carries the seed: ISSUE-0081 (PR 3) added `principal_id TEXT NOT NULL DEFAULT 'local'` across the **persona-memory tiers** (the Python memory layer — see `agents/principal_id.py`). Note this axis lives at the memory tier and is **not yet surfaced on the REST/chat API the console consumes** — today that surface carries only `user_id`, no explicit principal/tenant field. We treat **today's no-auth localhost mode as the degenerate single-tenant case (`principal=local`)**, not as the permanent shape.
 
 Concrete forward-compat rules for Slice 1:
 
-1. **Identity is server-provided, never assumed.** The SPA reads `GET /api/v1/ui/context` for the current principal/tenant and capability hints. Today it returns `{ "principal": "local", "tenant": "local", "authenticated": false }`. When RFC 0039 lands, the same endpoint returns the real identity and the client needs no structural change.
+1. **Identity is server-provided, never assumed.** The SPA reads `GET /api/v1/ui/context` for the current principal/tenant and capability hints. Today it returns `{ "principal": "local", "tenant": "local", "authenticated": false }`. When RFC 0039 lands, the same endpoint returns the real identity and the client needs no structural change. Note the chat endpoint requires the client to *supply* `user_id` as a request field; in local mode the console must derive that value from the `/ui/context` principal rather than prompting for or hard-coding it, so there is a single server-provided identity source even before auth exists.
 2. **No client-side single-user assumptions.** Persona lists, channels, sessions, and memory views are always rendered as "what *this* principal/tenant can see," even when that is everything (local mode). No global caches keyed without the tenant axis.
-3. **Ride the tenant axis the backend already namespaces by.** Session/epoch scoping (RFC 0031) and `principal_id` are the seams multi-tenancy will widen; the client passes them through rather than flattening them.
+3. **Ride the tenant axis the backend already namespaces by.** Session/epoch scoping (RFC 0031) *is* exposed on the REST surface today, so the client passes it through rather than flattening it. The `principal_id` axis exists at the memory tier but is **not yet plumbed through the REST/chat API** — until it is, the client reads principal/tenant from `/api/v1/ui/context` and supplies `user_id` on chat, and must avoid any single-principal assumption so that wiring the principal axis through later is purely additive.
 4. **Same-origin = one auth boundary.** Because `/ui` and `/api` share an origin, the future auth layer (cookie/session or a fronting authenticating proxy) covers both at once with no CORS-with-credentials complexity.
 5. **Write slices are auth-gated by construction.** Slice 5 (control plane) declares a hard dependency on RFC 0039; it cannot ship enabled before auth exists.
 
@@ -208,7 +208,7 @@ What Slice 1 needs that the backend does **not** yet provide:
 | Static asset serving / `embed.FS` | Serving the SPA at all | New `WithUI` `ServerOption` + `--enable-ui` flag (Phase 1) |
 | `GET /api/v1/ui/config` | Feature toggles | New lightweight handler returning enabled/available panels (Phase 1) |
 | `GET /api/v1/ui/context` | Auth/tenant forward-compat | New handler; returns `principal=local` today (Phase 1) |
-| Read-only persona-memory endpoint (e.g. `GET /api/v1/agents/{id}/memory?user_id=`) | Memory strip (stretch) + Slice 2 | New handler over the existing recall/relationship tiers; **scope to Slice 2 if it pressures Phase 1** |
+| Read-only persona-memory endpoint (e.g. `GET /api/v1/agents/{id}/memory?user_id=`) | Memory strip (stretch) + Slice 2 | New Go handler **plus a new gRPC read method into the Python persona runtime** — the recall/relationship tiers live in `agents/memory/`, not the Go server, so this crosses the Go↔Python boundary and is more than a thin handler; **scope to Slice 2 if it pressures Phase 1** |
 | Channel live-push (SSE/WebSocket) | Real-time channel timeline | **Deferred** — poll the existing messages endpoint in Slice 1; design a channel SSE later, reusing the log-stream SSE pattern |
 | CORS middleware | Only if a separate-origin deploy is ever wanted | **Not needed** for embedded same-origin; revisit only if a decoupled deploy is requested |
 
@@ -220,6 +220,7 @@ Everything else Slice 1 uses (chat, channel list/history/publish, agent list/inf
 - **Write-capable panels are gated.** Slice 1 is interact-only against existing endpoints; Slice 5 (control plane, destructive/admin actions) declares a hard dependency on RFC 0039 and cannot be enabled before auth exists.
 - **No new privileged endpoints.** The only new endpoints (`/api/v1/ui/config`, `/api/v1/ui/context`, and the optional read-only memory endpoint) are read-only and must respect the same rate-limiting/audit middleware already applied to the REST surface.
 - **Multi-tenancy isolation is a backend invariant.** The console must never become a side channel that bypasses tenant scoping; all data it shows flows through the same scoped APIs, so isolation is enforced server-side, not in the client.
+- **CSRF on browser-driven writes.** Slice 1 introduces browser-issued `POST`s (chat, optional human channel-publish) to a surface that today has no auth and no CSRF defense. While the surface is unauthenticated this is moot, but the moment the recommended exposure path lands — a fronting proxy adding *cookie/session* auth — those same-origin `POST`s become CSRF targets. The auth design (RFC 0039 / the fronting layer) must pair cookie auth with a CSRF mitigation (SameSite cookies, a CSRF token, or a custom-header/Origin check); the console should be built to send whichever the auth layer chooses. Flagged here because the console is what first makes these endpoints reachable from a browser.
 - **Static assets** are embedded (not user-uploaded) and served read-only; no path traversal risk beyond what `http.FileServer` over an `embed.FS` already prevents.
 
 ## Phased Implementation Plan
@@ -258,7 +259,7 @@ Everything else Slice 1 uses (chat, channel list/history/publish, agent list/inf
 | Go orchestrator | `internal/server/server.go`, `internal/server/ui_handlers.go` (new) | `WithUI` option, `/ui` static serving, `/api/v1/ui/config` + `/api/v1/ui/context` handlers |
 | Go orchestrator | `cmd/orchestrator/main.go` | `--enable-ui` flag + conditional `WithUI` wiring |
 | Web console | `web/` or `internal/ui/` (new) | SPA source + build config + `embed.FS` package exposing `Assets()` |
-| Go orchestrator (optional) | `internal/server/memory_handlers.go` (new) | Read-only persona-memory endpoint for the memory strip / Slice 2 |
+| Go orchestrator (optional) | `internal/server/memory_handlers.go` (new) + persona-runtime gRPC service (`agents/`) | Read-only persona-memory endpoint for the memory strip / Slice 2 — Go handler **and** a new gRPC read method into the Python memory tiers (`agents/memory/`) |
 | Docs | `docs/guides/web-console.md` (new), `README.md`, `ROADMAP.md` | Quick-start, try-it entry, roadmap slot |
 | Build | `Makefile`, CI | UI build step producing embedded static assets |
 
