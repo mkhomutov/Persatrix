@@ -27,6 +27,13 @@ working alongside other agents in shared channels.
   one YAML file — name, background, communication style, goals — and
   chat with them from your terminal. They remember your name, what you
   asked yesterday, and how much they trust you, all across restarts.
+  That memory is **session-scoped** (v0.3.5): a run reads only its own
+  session's (room's) rows, so two concurrent conversations don't bleed
+  into each other. A session is room continuity, not a clean slate — to
+  re-run a scenario in a fresh world that inherits *nothing* (same room
+  and user), bump the `epoch` run-isolation axis instead of nuking
+  volumes. See the [sessions](docs/guides/sessions.md) and
+  [epochs](docs/guides/epochs.md) guides.
 - **A team of agents that talk to each other.** Drop two or more agents
   into a shared channel and watch them coordinate, debate, and build
   shared context — like Slack, but the participants are AI personas
@@ -274,6 +281,7 @@ Persatrix is BUSL-1.1 licensed with no warranty. Use at your own risk
 | **v0.3.2** | Every LLM call passes through a wallet lease before it's issued — cost becomes a structural gate, not a post-hoc accountant — and the memory facade is frozen as the single path to agent memory ahead of the v0.4.0 Postgres split | ✅ Released |
 | **v0.3.3** | A persona with no scheduled work and no inbound traffic costs nothing — its event loop parks until something wakes it (an inbound message, a scheduled timer, or a salience-triggered memory write) instead of polling on a fixed tick | ✅ Released |
 | **v0.3.4** | Run the same agents on any provider — Anthropic, OpenAI, a free local model (Ollama), or a $0 offline mock — by naming a logical model alias (`quality` / `fast` / `summarizer`); a vendor swap is a one-line config edit | ✅ Released |
+| **v0.3.5** | Persona-memory recall is session-scoped — a run reads only its own session's (room's) rows (plus the always-visible `legacy` rows), so concurrent conversations don't bleed; to re-run a scenario in a clean world (same room + user, inheriting nothing) bump the `epoch` run-isolation axis instead of nuking volumes with `make reset` | 🚧 Release prep |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
 | **v0.6.0** | Run agent societies across multiple nodes and networks | 📋 Planned |
@@ -282,8 +290,9 @@ For PR-level progress and per-RFC status, see [ROADMAP.md](ROADMAP.md).
 For per-release upgrade notes and operator-visible changes, see
 [CHANGELOG.md](CHANGELOG.md). For known limitations and deferred scope in
 the current release (channels are internal-only and unauthenticated,
-per-session recall filtering and conversational memory for group channels
-deferred, the RFC 0024 `tick_interval_seconds` deprecation warning deferred
+conversational memory for group channels deferred, the
+`persatrix memory recall --all-sessions` operator verb and subject-scoped
+facts deferred, the RFC 0024 `tick_interval_seconds` deprecation warning deferred
 to v0.4.0 and its removal to v0.5+, salience-triggered wakes shipping
 disabled by default until calibrated, RFC 0029 Phases 2–6 and the Postgres
 society backend deferred to v0.4.0, RFC 0009 Phases 3–4 deferred to v0.4.0),
