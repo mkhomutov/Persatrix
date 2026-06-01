@@ -256,6 +256,17 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # 3 000-word prose cap. Written against the v0.3.4 release; archive once
     # the tag ships.
     "docs/manual-tests/v0.3.4-execution-report.md",
+    # docs/manual-tests/v0.3.5-execution-report.md is the v0.3.5 sibling of
+    # the v0.3.0–v0.3.4 reports above — identical per-release accumulator
+    # pattern. The release-prep PR 1 sweep (3 new session/epoch MTs +
+    # the carried-forward v0.3.4 surface) carries the automated-gate results
+    # (20+5 integration / 893 unit / 153 Rust), inline per-step evidence
+    # tables for MT-SESSION-002 / -003 / MT-EPOCH-001, the § Environment &
+    # constraints rationale, and the §Follow-ups findings (F-1 boot-scope
+    # write tagging, F-2 epoch interaction-continuity, F-3/F-4 environment),
+    # pushing it past the 3 000-word prose cap. Written against the v0.3.5
+    # release; archive once the tag ships.
+    "docs/manual-tests/v0.3.5-execution-report.md",
     # docs/v0.3.3-release-checklist.md crossed the 3 000-word prose cap as a
     # release-cycle record: the §3.1 Upgrade Notes table (8 rows — event-driven
     # loop, fire-and-forget channel dispatch, autonomy.timers, scheduled_wakes
