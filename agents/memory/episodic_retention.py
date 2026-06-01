@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 
+from ..model_aliases import resolve
 from ..prompt_loader import load_snippet
 from .episodic_queries import EPISODE_SELECT, row_to_episode
 
@@ -42,7 +43,7 @@ async def summarize_old_episodes(
     older_than_days: float,
     llm_client: LLMClient,
     *,
-    compression_model: str = "claude-haiku-4",
+    compression_model: str = "summarizer",
     batch_size: int = 50,
 ) -> int:
     """Summarize raw episodes older than *older_than_days*.
@@ -88,6 +89,21 @@ async def summarize_old_episodes(
     if not rows:
         return 0
 
+    # ISSUE-0072 / RFC 0033 §D — resolve the compression model through the alias
+    # layer (config-owned identity). resolve() raises SystemExit on an
+    # unconfigured/unknown alias; degrade to "nothing summarized this batch"
+    # rather than let a BaseException escape the per-episode ``except``.
+    try:
+        resolved = resolve(compression_model)
+    except SystemExit as exc:
+        logger.warning(
+            "Episode-retention compression model %r is not resolvable: %s; "
+            "skipping summarization batch",
+            compression_model,
+            exc,
+        )
+        return 0
+
     summarized = 0
     for row in rows:
         episode = row_to_episode(row)
@@ -108,7 +124,8 @@ async def summarize_old_episodes(
 
         try:
             response = await llm_client.create_message(
-                model=compression_model,
+                model=resolved.model,
+                model_alias=resolved.alias,
                 messages=[{"role": "user", "content": prompt}],
                 system=load_snippet("episode-summarizer"),
                 tools=[],

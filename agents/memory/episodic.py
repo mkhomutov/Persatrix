@@ -429,7 +429,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         older_than_days: float,
         llm_client: LLMClient,
         *,
-        compression_model: str = "claude-haiku-4",
+        compression_model: str = "summarizer",
         batch_size: int = 50,
     ) -> int:
         """Summarize raw episodes older than *older_than_days*.

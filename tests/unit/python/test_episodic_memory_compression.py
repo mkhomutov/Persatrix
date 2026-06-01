@@ -11,6 +11,35 @@ import pytest
 
 from agents.llm_client import LLMResponse, StopReason, Usage
 from agents.memory.episodic import EpisodicMemory
+from agents.model_aliases import use_alias_map
+
+# ISSUE-0072: episode compression resolves its model through the RFC 0033 alias
+# layer. The shipped base config ships ``summarizer`` as ``provider:
+# unconfigured`` (a loud SystemExit), so the suite declares a concrete local
+# model the way an operator's config would.
+_SUMMARIZER_ALIAS_MAP = {
+    "summarizer": {
+        "provider": "mock",
+        "model": "physical-summarizer-model",
+        "input_per_1m_tokens": 0.0,
+        "output_per_1m_tokens": 0.0,
+    },
+    # A second alias proving an operator-chosen compression_model also routes
+    # through the alias layer (not just the default).
+    "alt": {
+        "provider": "mock",
+        "model": "physical-alt-model",
+        "input_per_1m_tokens": 0.0,
+        "output_per_1m_tokens": 0.0,
+    },
+}
+
+
+@pytest.fixture(autouse=True)
+def _configured_summarizer_alias():
+    """Route the ``summarizer`` alias to a local mock model for the module."""
+    with use_alias_map(_SUMMARIZER_ALIAS_MAP):
+        yield
 
 
 def _make_llm_response(text: str | None) -> LLMResponse:
@@ -29,6 +58,34 @@ def _make_llm_response(text: str | None) -> LLMResponse:
 class TestSummarizeOldEpisodes:
     """summarize_old_episodes() selects raw episodes older than threshold
     and replaces their summary via LLM, incrementing compression_level."""
+
+    async def test_summarization_routes_through_alias_layer(
+        self, memory: EpisodicMemory
+    ):
+        """ISSUE-0072: episode compression resolves its model through the RFC
+        0033 alias layer — physical model on ``model`` and the alias name on
+        ``model_alias``, never a raw vendor literal."""
+        db = memory._ensure_db()
+        old_time = time.time() - 30 * 86400
+        ep_id = await memory.store_episode(
+            summary="Original long summary about a debugging session",
+            context={"task": "debug"},
+        )
+        await db.execute(
+            "UPDATE episodes SET created_at = ? WHERE id = ?", (old_time, ep_id)
+        )
+        await db.commit()
+
+        llm_client = AsyncMock()
+        llm_client.create_message = AsyncMock(
+            return_value=_make_llm_response("compressed")
+        )
+
+        count = await memory.summarize_old_episodes(7, llm_client)
+        assert count == 1
+        kwargs = llm_client.create_message.call_args.kwargs
+        assert kwargs["model"] == "physical-summarizer-model"
+        assert kwargs["model_alias"] == "summarizer"
 
     async def test_summarizes_old_raw_episodes(self, memory: EpisodicMemory):
         """Old episodes with compression_level=0 get summarized."""
@@ -165,7 +222,9 @@ class TestSummarizeOldEpisodes:
         assert ep.compression_level == 1
 
     async def test_compression_model_forwarded_to_llm(self, memory: EpisodicMemory):
-        """The compression_model parameter is passed through to LLM client."""
+        """The configured compression_model alias is resolved and forwarded to
+        the LLM client (ISSUE-0072: the physical model and alias reach
+        create_message, never the raw alias name)."""
         db = memory._ensure_db()
         old_time = time.time() - 30 * 86400
         ep_id = await memory.store_episode(
@@ -182,11 +241,12 @@ class TestSummarizeOldEpisodes:
         )
 
         await memory.summarize_old_episodes(
-            7, llm_client, compression_model="custom-model-v2"
+            7, llm_client, compression_model="alt"
         )
         llm_client.create_message.assert_called_once()
         call_kwargs = llm_client.create_message.call_args
-        assert call_kwargs.kwargs["model"] == "custom-model-v2"
+        assert call_kwargs.kwargs["model"] == "physical-alt-model"
+        assert call_kwargs.kwargs["model_alias"] == "alt"
 
     async def test_partial_batch_failure(self, memory: EpisodicMemory):
         """In a batch of 3 episodes, if the 2nd LLM call fails,

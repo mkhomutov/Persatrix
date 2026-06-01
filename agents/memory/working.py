@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass
 
 from ..llm_client import LLMClient
+from ..model_aliases import resolve
 from ..prompt_loader import load_snippet
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ class WorkingMemory:
     def __init__(
         self,
         max_tokens: int = 100_000,
-        compression_model: str = "claude-haiku-4-5",
+        compression_model: str = "summarizer",
     ) -> None:
         self._max_tokens = max_tokens
         self._compression_model = compression_model
@@ -175,13 +176,38 @@ class WorkingMemory:
             key=lambda s: s.priority,
         )
 
+        # Nothing to compress — return before touching the alias layer (mirrors
+        # episodic_retention's ``if not rows`` guard ahead of resolve()). Avoids
+        # a wasted resolve() and a misleading "skipping compression pass"
+        # warning when there was never any compression to skip.
+        if not compressible:
+            return
+
+        # ISSUE-0072 / RFC 0033 §D — resolve the compression model through the
+        # alias layer so the physical id + pricing live only in config, never a
+        # code-baked vendor literal. resolve() raises SystemExit (a
+        # BaseException the per-section ``except Exception`` would not catch) on
+        # an unconfigured/unknown alias, so degrade to "no compression this
+        # pass" rather than tear the caller down.
+        try:
+            resolved = resolve(self._compression_model)
+        except SystemExit as exc:
+            logger.warning(
+                "Working-memory compression model %r is not resolvable: %s; "
+                "skipping compression pass",
+                self._compression_model,
+                exc,
+            )
+            return
+
         for section in compressible:
             if self.total_tokens() <= self._max_tokens:
                 break
 
             try:
                 response = await llm_client.create_message(
-                    model=self._compression_model,
+                    model=resolved.model,
+                    model_alias=resolved.alias,
                     messages=[{"role": "user", "content": section.content}],
                     system=load_snippet("working-memory-compressor"),
                     tools=[],
