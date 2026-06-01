@@ -136,8 +136,15 @@ Compose file plumbs every provider key into each agent optionally, so
 no per-deployment override.
 
 To opt a **single** agent onto a different provider instead of the whole
-society, set `provider:` (and a `model:` tag) directly on its `agents.yaml`
-entry — e.g. `provider: ollama`, `model: llama3.2`.
+society, give it its own alias: add an entry to `models.aliases` that declares
+the provider, model, and price (e.g. `local-fast: {provider: ollama, model:
+llama3.2, input_per_1m_tokens: 0, output_per_1m_tokens: 0}`), then point that
+agent's `agents.yaml` `model:` field at the new alias (`model: local-fast`).
+Since [RFC 0033 Phase 3](../rfcs/0033-model-alias-layer.md) retired the
+raw-vendor-ID pass-through, an agent `model:` **must** name a declared alias — a
+raw model tag (`model: llama3.2`) is rejected with a loud `SystemExit`, mock
+agents included ([ISSUE-0074](../issues/ISSUE-0074-mock-provider-raw-id-deprecation-gate.md)).
+The agent's own `provider:` field, if set, must agree with the alias (§D).
 
 ---
 
