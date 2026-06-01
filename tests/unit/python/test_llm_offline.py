@@ -198,6 +198,39 @@ def test_create_provider_agreeing_mock_provider_field() -> None:
     assert isinstance(provider, MockProvider)
 
 
+def test_create_provider_per_agent_mock_raw_model_id_is_rejected() -> None:
+    """ISSUE-0074 / RFC 0033 Phase 3 — a single-agent ``provider: mock`` opt-in
+    that names a *raw* vendor model id is rejected with a loud ``SystemExit``.
+
+    Pre-Phase-3 the raw-id mock path merely emitted a deprecation warning and
+    nudged the ``persatrix.llm.alias.raw_id_usage`` gate counter off zero (the
+    open question this issue raised). Phase 3 retired the §E raw-vendor-ID
+    pass-through entirely, so the question is now decided: a mock agent, like
+    every other, must reference a declared ``models.aliases`` entry — there is
+    no raw-id escape hatch and no counter to nudge. The resolver rejects the
+    unknown reference before the per-agent ``provider: mock`` field is ever
+    consulted, naming the string and pointing at the one place to declare it.
+    """
+    # A valid map that simply does not declare the raw id the agent names.
+    alias_map = {
+        "offline": {
+            "provider": "mock",
+            "model": "mock",
+            "input_per_1m_tokens": 0,
+            "output_per_1m_tokens": 0,
+        },
+    }
+    with use_alias_map(alias_map):
+        with pytest.raises(SystemExit, match="not a declared alias"):
+            create_provider(
+                {
+                    "id": "x",
+                    "model": "claude-haiku-4-5-20251001",
+                    "provider": "mock",
+                }
+            )
+
+
 def test_create_provider_offline_env_does_not_force_mock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

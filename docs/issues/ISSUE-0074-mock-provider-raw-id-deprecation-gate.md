@@ -1,15 +1,42 @@
 ---
 id: ISSUE-0074
 summary: "Per-agent `provider: mock` with a raw model id now trips the RFC 0033 raw-ID deprecation warning + Phase 3 `alias.raw_id_usage` gate counter (mock skipped resolve() pre-v0.3.4). Phase 3 open question: count mock agents or exempt them? Latent — no shipped config triggers it."
-status: open
+status: resolved
 severity: low
 area: agents/llm_factory
 created: 2026-05-27
+closed: 2026-06-01
 refs:
   - docs/rfcs/0033-model-alias-layer.md
   - docs/v0.3.4-plan-amendment-2026-05-27.md
   - agents/llm_factory.py
+  - agents/model_aliases.py
 ---
+
+> **Resolved 2026-06-01** — decided by **RFC 0033 Phase 3** (shipped in v0.3.5
+> as the conditional co-resident, [#481](https://github.com/mkhomutov/Persatrix/pull/481)
+> / [#482](https://github.com/mkhomutov/Persatrix/pull/482)), which makes the
+> open question moot: Phase 3 retired the §E raw-vendor-ID pass-through
+> entirely, so there is no longer a raw-ID path, no `_note_raw_id_usage` call,
+> and no `persatrix.llm.alias.raw_id_usage` counter to nudge. This is **candidate
+> disposition 2** (mock agents reference a declared alias) made structural: a
+> per-agent `provider: mock` with a *raw* model id no longer warns-and-counts —
+> the resolver rejects it up front with a loud `SystemExit` naming the string
+> ([agents/model_aliases.py](../../agents/model_aliases.py) `resolve`), exactly
+> as for any other provider. Disposition 1 (exempt local providers) is therefore
+> unnecessary; there is nothing left to exempt.
+>
+> - [tests/unit/python/test_llm_offline.py](../../tests/unit/python/test_llm_offline.py)
+>   `test_create_provider_per_agent_mock_raw_model_id_is_rejected` pins the
+>   contract executably: a `provider: mock` agent naming a raw vendor id hits
+>   `SystemExit` (`not a declared alias`) at resolve, before the per-agent
+>   provider field is consulted — so a future raw-id-for-mock escape hatch trips
+>   this test.
+> - [docs/guides/model-providers.md](../guides/model-providers.md) — the
+>   single-agent provider opt-in recipe was **stale** (it told operators to set
+>   `provider: ollama`, `model: llama3.2` directly, a raw tag that Phase 3 now
+>   rejects). Corrected to the alias-based recipe: declare a per-agent alias and
+>   point the agent's `model:` at it.
 
 ## Summary
 
