@@ -66,10 +66,18 @@ default:
     # vendor IDs. Each role resolves through models.aliases (above) at call
     # time — so the Anthropic Sonnet 4 → 4.6 retirement, or any provider
     # swap, is a one-line edit to the `quality` entry, not a sweep here.
+    #
+    # ISSUE-0069: only `sub_agents` is a live routing default — it backs the
+    # RFC 0033 §J SubAgentRequest `None`-resolution (agents/optimization.py
+    # sub_agent_default_model()). `task_agents` and `evaluators` are RESERVED:
+    # task agents and evaluators carry an explicit `model:` in agents.yaml
+    # (schema-`required`), and create_provider never falls back to these keys —
+    # an agent with no usable `model:` hard-stops. They are kept for forward
+    # symmetry, not consumed; do not assume they apply.
     defaults:
-      task_agents: "quality"
-      sub_agents: "quality"
-      evaluators: "fast"
+      task_agents: "quality"  # reserved (not consumed) — see note above
+      sub_agents: "quality"   # live: RFC 0033 §J sub-agent default
+      evaluators: "fast"      # reserved (not consumed) — see note above
 
   caching:
     exact:

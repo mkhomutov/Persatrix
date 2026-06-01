@@ -1,14 +1,41 @@
 ---
 id: ISSUE-0069
 summary: "model_routing.defaults.task_agents / .evaluators are migrated to aliases and surfaced by model_routing_defaults() but consumed by no runtime path — only sub_agents is wired; an agent with no usable model: is hard-stopped (schema-rejected if absent, SystemExit if empty), never falling back to the routing default"
-status: open
+status: resolved
 severity: low
 area: agents/optimization
 created: 2026-05-26
+closed: 2026-06-01
 refs:
   - docs/rfcs/0033-model-alias-layer.md
   - docs/rfcs/0033-pr-plan.md
 ---
+
+> **Resolved 2026-06-01** — adopted **proposed fix option 2 (document as
+> reserved)**, the disposition RFC 0033 §J supports: §J wires only the
+> ``sub_agents`` ``None``-resolution and never states that task agents /
+> evaluators consume their routing defaults. Wiring a fallback (option 1) would
+> contradict §J's "agent-declared model is authoritative" stance, so the keys
+> are documented as reserved rather than made live.
+>
+> - The schema deliberately leaves ``default.model_routing`` unconstrained (the
+>   Go orchestrator owns that surface — see
+>   [schemas/optimization.schema.json](../../schemas/optimization.schema.json)
+>   description), so the "mark reserved in the schema" half does not apply; the
+>   documentation lands as config comments + the accessor docstring instead.
+> - [config/optimization.yaml](../../config/optimization.yaml) (and the four
+>   ``config/demo/*`` overlays) now annotate ``task_agents`` / ``evaluators`` as
+>   **reserved (not consumed)** and ``sub_agents`` as the lone live default.
+> - [agents/optimization.py](../../agents/optimization.py)
+>   ``model_routing_defaults()`` docstring corrected — it no longer claims all
+>   three roles route to the default; it names ``sub_agents`` as the sole
+>   consumer and the other two as reserved.
+> - [tests/unit/python/test_llm_factory.py](../../tests/unit/python/test_llm_factory.py)
+>   ``TestRoutingDefaultsAreReservedForTaskAgentsAndEvaluators`` pins the
+>   contract executably: with a fully-resolvable routing default present,
+>   ``create_provider`` with an empty/absent ``model:`` hard-stops (``SystemExit``
+>   / ``KeyError``) rather than falling back to ``defaults.task_agents`` — so a
+>   future attempt to wire the fallback trips this test.
 
 ## Summary
 
