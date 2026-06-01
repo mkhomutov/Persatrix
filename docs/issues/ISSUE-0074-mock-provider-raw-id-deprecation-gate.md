@@ -10,6 +10,7 @@ refs:
   - docs/rfcs/0033-model-alias-layer.md
   - docs/v0.3.4-plan-amendment-2026-05-27.md
   - agents/llm_factory.py
+  - agents/model_aliases.py
 ---
 
 > **Resolved 2026-06-01** — decided by **RFC 0033 Phase 3** (shipped in v0.3.5
