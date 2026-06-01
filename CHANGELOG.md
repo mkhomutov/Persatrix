@@ -2,6 +2,60 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.5] - 2026-06-01
+
+> **Codename:** Session-Scoped Memory
+
+### Highlights
+
+- **Persona-memory recall is now session-scoped — concurrent conversations no longer bleed into each other** (RFC 0031, Phases 2–4). A run reads only the rows tagged with its own session (its room), plus the always-visible `legacy` carve-out, across all four persona-memory tiers (episodes, relationships, facts, notes). Reaching across sessions (`sessions="*"`) is an explicit, library-only opt-in with no operator entry point — the default context path is pinned never to reach it. A session is *room continuity*, not a clean slate.
+- **A first-class `persatrix session …` operator surface.** `persatrix session new --label L [--activate] / use <id-or-label> / list [--include-archived] / current / archive <id-or-label>`, backed by the `/api/v1/sessions` REST registry. The active session resolves by precedence `--session` flag > `PERSATRIX_SESSION_ID` env > `~/.persatrix/active-session` pointer file > built-in `legacy`.
+- **Run/test isolation is the sibling `epoch` axis — a same-room/same-user rerun under a fresh `epoch` inherits nothing** ([ISSUE-0085](docs/issues/ISSUE-0085-epoch-axis-run-isolation.md)). Where a session gives a room continuity, a fresh `PERSATRIX_EPOCH` (or `--epoch`) gives a *clean slate* under the same room and user — strict-equality isolation of episodes / relationship trust / person-facts with no `legacy` carve-out and no `*` wildcard. This replaces `make reset` as the everyday run-isolation tool; `make reset` is reframed as the whole-stack volume nuke.
+- **Together these close the F-3 cross-run state bleed at the root** — the *recall* half via session scoping, the *structural* half via epoch strict-equality isolation.
+- **The model-alias layer is complete (RFC 0033 Phase 3, co-resident).** A raw vendor `model:` that is not a declared alias is now **rejected at resolve** with a loud `SystemExit`; `models.aliases` is the single source of truth for model identity. The v0.3.4 raw-ID fall-through deprecation, the `_infer_provider` heuristic, and the `provider_inference` accessor are retired; `config/optimization.yaml` `schema_version` bumps `"0.2"` → `"0.3"`.
+
+### Upgrade Notes
+
+| Notable change | Detail |
+|----------------|--------|
+| **[Behaviour change — session-scoped default recall]** | Default persona-memory recall is now **session-scoped**: a run reads only the rows tagged with its active session, plus the always-visible `legacy` carve-out, across all four persona-memory tiers (episodes, relationships, facts, notes). Concurrent conversations no longer bleed into each other. Reaching across sessions (`sessions="*"`) is an explicit, library-only opt-in with no operator entry point (RFC 0031 §D). This is a behaviour change from the pre-v0.3.5 whole-store recall. |
+| **[Feature]** `persatrix session …` operator CLI | A first-class session surface: `persatrix session new --label L [--activate] / use <id-or-label> / list [--include-archived] / current / archive <id-or-label>`, backed by the `/api/v1/sessions` REST registry. The active session resolves by precedence `--session` flag > `PERSATRIX_SESSION_ID` env > `~/.persatrix/active-session` pointer file > built-in `legacy` (RFC 0031 OQ #6). `legacy` is a reserved label; archive is one-way. See the [sessions operator guide](docs/guides/sessions.md). |
+| **[Feature]** Epoch run/test-isolation axis | A new `epoch` axis isolates a *same-named* rerun structurally: a fresh `PERSATRIX_EPOCH` (orchestrator boot env) or `--epoch <id>` (per-invocation override on `chat` / `channel send` / `channel reply`), default `live`, inherits **none** of a prior run's episodes / relationship trust / person-facts — strict-equality isolation with no `legacy` carve-out and no `*` wildcard. Production is unchanged (untagged deployments run under `live`). See the [epochs operator guide](docs/guides/epochs.md). |
+| **[Behaviour change — `make reset` reframed]** | `make reset` (`docker compose down -v`) is now positioned as the **whole-stack volume nuke** — all epochs across all sessions — not the everyday run-isolation tool. For an isolated rerun reach for a fresh `epoch` instead; `make reset` is for when you want the volumes themselves gone. The breadcrumb is reframed across the [channels](docs/guides/channels.md), [persona-agents](docs/guides/persona-agents.md), and [sessions](docs/guides/sessions.md) guides. |
+| **[Migration]** Auto-migration to `legacy` / `live` | A pre-v0.3.5 database auto-migrates on first open. Persona memory (`memory.db`) runs migrations v4→**v12**: the session axis added `session_id` (episodes/relationships v7, facts v8, notes v9, defaulting `'legacy'`); the epoch axis added `epoch_id` across all five tiers + the `relationships` primary key (v12, defaulting `'live'`). The channel store (`channels.db`) is at `channelStoreSchemaVersion = 6` (v5 session axis, v6 epoch axis). Every existing row lands under `session_id='legacy'` / `epoch_id='live'` and stays visible from the default resolution path — single-world deployments are byte-identical. |
+| **[Behaviour change — RFC 0033 Phase 3]** Raw vendor IDs rejected | A `model:` in `config/agents.yaml` / `config/optimization.yaml` that is **not a declared alias** is now **rejected at resolve** with a loud `SystemExit` — the RFC 0033 §E raw-ID fall-through (a deprecation warning in v0.3.4) is removed, along with the `_infer_provider` heuristic, the `provider_inference` accessor/YAML block, and the `persatrix.llm.alias.raw_id_usage` gate counter. `config/optimization.yaml` `schema_version` bumps `"0.2"` → `"0.3"`. `models.aliases` is the single source of truth for model identity — provider is data, not inferred. |
+
+### 🚀 Features
+
+- *(RFC 0031 Phase 2 — session-scoped default recall)* Session scoping landed across all four persona-memory tiers: notes-tier `session_id` coverage + migration v9 (#448), episodic + notes recall filtering (#449), relationship + facts recall filtering (#450), the facade read-path `sessions=` extension + call-site threading (#451), the dementia-test bridge + interactions/supersede session scoping (#452), and the Phase 2 closeout that closed **F-3** at the recall layer (#461). The session-emission isolation work (per-request session binding store → dispatch-path emission → end-to-end gate, #458–#460) and the context-local session-id + principal/tenant dimension (#453–#456) underpin it.
+- *(RFC 0031 Phase 3 — operator CLI)* A first-class session surface: the orchestrator `/api/v1/sessions` REST registry (#464), the `new / list / archive` registry verbs (#466), the active-session pointer file + `use / current / --activate` (#467), the dropped session-binding sender axis (#468), and the `--session` override on `chat` / `channel` (#469), with the operator-surface e2e gate + closeout (#470). Phase 4 shipped the operator guides + reframed `make reset` breadcrumb and closed [ISSUE-0051](docs/issues/ISSUE-0051-per-session-memory-namespacing-channels.md) (#471).
+- *(Epoch run-isolation axis — Phase 3b)* A new structural `epoch` axis ([ISSUE-0085](docs/issues/ISSUE-0085-epoch-axis-run-isolation.md)): the `agents/epoch_id.py` leaf module (#472), migration v12 (`epoch_id`) + channel-store v6 (#474), the strict-equality filter + per-tier wiring (#475), the gRPC rail — orchestrator emission + ingress lift (#476), the `--epoch` operator override (#477), and the closeout with the F-3 structural-isolation gate (#478).
+- *(RFC 0033 Phase 3 — alias-layer closeout)* Raw vendor IDs are now rejected at resolve: the resolver raw-ID pass-through removal (#481) and the `_infer_provider` / `provider_inference` retirement + `schema_version` `"0.3"` (#482), with eager whole-map alias pricing validation at server boot (#483, ISSUE-0071), memory-compression routed through the alias layer (#484, ISSUE-0072), `task_agents`/`evaluators` routing defaults documented as reserved (#485, ISSUE-0069), and mock agents resolving through an alias (#486, ISSUE-0074).
+
+### 🐛 Bug Fixes
+
+- *(channels)* ISSUE-0068 ([#479](https://github.com/mkhomutov/Persatrix/pull/479)) — the chat peer is now recorded with its `participant_type` carried to the agent (the lone defect fix in the window).
+
+### 📝 Refactoring
+
+- *(ISSUE-0053)* Extract `_coerce_event_timeout` to its own submodule (#480).
+- *(ISSUE-0083)* Drop the session-binding sender axis — `(agent, channel, user)` → `(agent, channel)` (#468).
+
+### 📚 Documentation
+
+- *(v035)* Open the v0.3.5 master plan — Session Isolation (RFC 0031 Phases 2–4) (#447); fold the ISSUE-0085 epoch axis into v0.3.5 scope (#473); RFC 0031 Phase 3 PR plan + session scope-axes reframing (#462); ISSUE-0082 session-emission PR plan (#457).
+- *(operator guides)* New [sessions](docs/guides/sessions.md) and [epochs](docs/guides/epochs.md) guides; the reframed `make reset` breadcrumb across the channels / persona-agents / sessions guides (#471, #478).
+- *(release-prep)* The v0.3.5 release-prep plan (#487), the MT execution report (#488), and the README / ROADMAP refresh + the [v0.3.5 release checklist](docs/v0.3.5-release-checklist.md) + the sessions/epochs guide verification (#489).
+
+### 🧪 Testing
+
+- Three new manual tests — [`MT-SESSION-002`](docs/manual-tests/MT-SESSION-002.md) *session operator surface, live* (the **primary v0.3.5 gate**: the `new / use / list / archive / current` round-trip + the `--session` > env > pointer-file > `legacy` resolution chain), [`MT-SESSION-003`](docs/manual-tests/MT-SESSION-003.md) *F-3 recall isolation + within-session continuity* (the **headline-claim test**: a fresh session surfaces none of a prior session's rows **and** a within-session arc still continues), and [`MT-EPOCH-001`](docs/manual-tests/MT-EPOCH-001.md) *epoch structural run-isolation* (a fresh `PERSATRIX_EPOCH` / `--epoch`, same room + same `--user`, inherits nothing).
+- New **session + epoch structural-isolation gates** — the automated release-blocker counterpart to the new MTs: [`test_session_recall_isolation.py`](tests/integration/test_session_recall_isolation.py), [`test_epoch_run_isolation.py`](tests/integration/test_epoch_run_isolation.py), [`test_session_continuity.py`](tests/integration/test_session_continuity.py), [`test_session_emission_isolation.py`](tests/integration/test_session_emission_isolation.py), and [`test_session_id_cross_process.py`](tests/integration/test_session_id_cross_process.py). The dementia-test continuity gate ([`MT-MEMORY-005`](docs/manual-tests/MT-MEMORY-005-dementia-test.md)) is **re-run** on the session-routed config to prove single-session continuity is not regressed.
+- The carried-forward **alias cost-attribution gate** (`internal/server/cost_alias_gate_test.go`, `internal/cost/cost_alias_pricing_test.go`) stays green after the RFC 0033 Phase 3 raw-ID rejection; the bored-persona [`cost-regression-gate`](tests/integration/test_bored_persona_cost.py) remains a release-blocker.
+- Full **40-row** manual-test surface (3 new + the 37-row v0.3.4 surface carried forward, regression-checked against the session/epoch-routed config) executed against the `3ceb400` RC tip — 34 Pass, 5 Accepted-with-known-gap, 1 Deprecated, 0 Fail (#488).
+
+[0.3.5]: https://github.com/mkhomutov/Persatrix/compare/v0.3.4...v0.3.5
+
 ## [0.3.4] - 2026-05-27
 
 > **Codename:** Any Model, Any Provider
