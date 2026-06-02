@@ -104,6 +104,10 @@ type Server struct {
 	// --enable-ui is off — the /ui/ route is never registered, so /ui/ is a
 	// clean 404 and the rest of the surface is untouched. Wired via WithUI.
 	uiFS fs.FS
+	// uiConfig holds the parsed config/ui.yaml feature toggles (RFC 0048 PR 2)
+	// reported by /api/v1/ui/config; nil → the Slice-1 defaults. The companion
+	// `available` flag is runtime-derived (Server.panelAvailable), not stored.
+	uiConfig *UIConfig
 }
 
 // ServerOption configures optional Server dependencies.
@@ -342,8 +346,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/sessions/{id}", s.handleGetSession)
 	s.mux.HandleFunc("POST /api/v1/sessions/{id}/archive", s.handleArchiveSession)
 
-	// Embedded web console static serving (RFC 0048 — optional, nil-safe; see ui.go).
-	s.registerUIRoutes()
+	// Embedded web console (RFC 0048) registers in Handler() on the
+	// security-bypass root mux, not here — see registerUIRoutes.
 
 	// Minimal health endpoint (C-02: satisfies existing docker-compose.yaml healthcheck)
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
@@ -375,6 +379,11 @@ func (s *Server) registerRoutes() {
 // future top-level endpoints — must be added under `/api/v1/` or they
 // will silently bypass the security middleware.
 //
+// The embedded web console (RFC 0048, WithUI) is the one deliberate exception:
+// it registers on this root mux too, so its anonymous operator traffic also
+// bypasses the limiter+breaker — leaving it under the H-01 deny would 403 the
+// console whenever an agent is quarantined. See registerUIRoutes.
+//
 // The 429/403 short-circuit responses still flow back through
 // loggingMiddleware and appear in the access log with their
 // X-Request-ID header set, because both wrappers sit inside the logging
@@ -382,22 +391,17 @@ func (s *Server) registerRoutes() {
 func (s *Server) Handler() http.Handler {
 	// TODO(v0.2): per-request timeout middleware — see RFC 0002 H3
 	//
-	// Path-scoped middleware mount. We need /healthz to bypass the
-	// limiter+breaker (see godoc above), but s.mux already has every
-	// route registered on it (including /healthz). The cheapest
-	// "bypass" is to construct a tiny outer mux that splits traffic:
-	//   - /healthz                     → handle directly, no security layer
-	//   - everything else (/api/v1/…)  → wrapped mux
-	// The inner /healthz registration on s.mux becomes unreachable
-	// through Handler() but is preserved so any test/integration code
-	// hitting s.mux directly (without the middleware stack) keeps
-	// working.
+	// Path-scoped middleware mount: an outer mux splits /healthz (and the
+	// RFC 0048 console) off to bypass the limiter+breaker while everything
+	// else flows through the wrapped s.mux. The /healthz copy on s.mux is
+	// shadowed here but kept so direct-s.mux test/integration code still works.
 	var apiH http.Handler = s.mux
 	if s.rateLimiter != nil || s.circuitBreaker != nil {
 		apiH = security.RESTRateLimitMiddleware(s.rateLimiter, s.circuitBreaker)(apiH)
 	}
 	root := http.NewServeMux()
 	root.HandleFunc("GET /healthz", s.handleHealthz)
+	s.registerUIRoutes(root) // RFC 0048 console: bypass limiter+breaker like /healthz (no-op when WithUI unwired)
 	root.Handle("/", apiH)
 
 	var h http.Handler = root

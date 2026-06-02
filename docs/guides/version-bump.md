@@ -20,8 +20,16 @@ This updates:
 |------|-------|
 | `cli/Cargo.toml` | `version = "X.Y.Z"` |
 | `agents/pyproject.toml` | `version = "X.Y.Z"` |
+| `agents/observability/metrics.py` | `_DEFAULT_SERVICE_VERSION = "X.Y.Z"` |
+| `agents/observability/tracing.py` | `_DEFAULT_SERVICE_VERSION = "X.Y.Z"` (+ docstring default) |
+| `internal/server/ui_handlers.go` | `const defaultServiceVersion = "X.Y.Z"` |
 
-The Go orchestrator version is set by the **git tag** — no file edit needed.
+A proper release build stamps the Go orchestrator's binary version from the
+**git tag** (`go install`/`ldflags`). The `ui_handlers.go` constant above is only
+the **fallback** the web console reports when that stamp and the
+`PERSATRIX_SERVICE_VERSION` env var are both absent (a plain `go build`/Docker
+image), so it must be bumped in lockstep — same posture as the Python
+`_DEFAULT_SERVICE_VERSION` defaults.
 
 ## Manual Steps
 

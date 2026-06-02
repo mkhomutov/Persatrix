@@ -27,6 +27,7 @@ _SCHEMA_MAP: dict[str, str] = {
     "agents.yaml": "agent.schema.json",
     "channels.yaml": "channel.schema.json",
     "optimization.yaml": "optimization.schema.json",
+    "ui.yaml": "ui.schema.json",
 }
 
 # Workflow files live in a separate directory and share one schema.

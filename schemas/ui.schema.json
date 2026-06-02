@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://persatrix.dev/schemas/ui.schema.json",
+  "title": "Persatrix Web Console Configuration (v0.3.6+)",
+  "description": "Internal-only schema until v1.0; `$id` may break across v0.x bumps without notice. Feature-toggle file for the embedded operator/tester web console (RFC 0048) served at /ui under the orchestrator's --enable-ui flag. Each panel carries a single operator-authored `enabled` toggle. The companion `available` flag is runtime-derived by the server (whether the panel's backing subsystem is wired) and reported in GET /api/v1/ui/config — it MUST NOT be authored here. The per-panel `additionalProperties:false` enforces that: an `available:` key (or any typo) fails `make validate` rather than silently having no effect.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "panels": {
+      "type": "object",
+      "description": "Per-panel toggles keyed by panel name (e.g. chat, channel_timeline, memory_strip, cost). Unknown panel names are accepted for forward-compatibility — an older binary serving a newer bundle simply ignores panels it does not recognise.",
+      "additionalProperties": { "$ref": "#/definitions/panel" }
+    }
+  },
+  "definitions": {
+    "panel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the console offers this panel. A panel renders only when it is both enabled here and reported available at runtime."
+        }
+      }
+    }
+  }
+}
