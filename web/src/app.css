@@ -115,14 +115,19 @@ body {
   gap: 0.75rem;
 }
 
-.composer {
+/* The chat composer and the channel-timeline publish form are the same kind of
+   write surface (labelled controls stacked over a submit button), so they share
+   one rule set rather than each re-deriving the layout. */
+.composer,
+.publish {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
   max-width: 40rem;
 }
 
-.composer label {
+.composer label,
+.publish label {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
@@ -131,19 +136,22 @@ body {
 
 .composer textarea,
 .composer select,
-.composer input {
+.composer input,
+.publish textarea {
   font: inherit;
   padding: 0.3rem;
 }
 
-.composer button {
+.composer button,
+.publish button {
   align-self: flex-start;
   font: inherit;
   padding: 0.4rem 1rem;
   cursor: pointer;
 }
 
-.composer button:disabled {
+.composer button:disabled,
+.publish button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }
@@ -183,4 +191,54 @@ body {
      error rather than inheriting the body text colour. */
   color: #b00020;
   color: light-dark(#b00020, #ff8a80);
+}
+
+/* Channel timeline panel (RFC 0048 Phase 1 PR 5). Same minimalism as the chat
+   panel — enough structure to scan a channel and reach the publish form. */
+.channels > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.9rem;
+  max-width: 40rem;
+  margin-bottom: 1rem;
+}
+
+.channels > label select {
+  font: inherit;
+  padding: 0.3rem;
+}
+
+.timeline {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.message {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.message .sender {
+  font-weight: 600;
+}
+
+.message .ts {
+  /* Metadata about the message, not its content — muted and small, like the
+     per-turn scope annotation in the chat panel. */
+  opacity: 0.6;
+  font-size: 0.8rem;
+}
+
+.poll-error {
+  /* Non-fatal "live updates paused" notice: muted, not alarming — the loaded
+     history is still on screen while the poll backs off. */
+  opacity: 0.7;
+  font-size: 0.85rem;
 }

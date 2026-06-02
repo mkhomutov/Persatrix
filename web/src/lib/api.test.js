@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { loadBootstrap, listAgents, sendChat, ApiError } from "./api.js";
+import {
+  loadBootstrap,
+  listAgents,
+  sendChat,
+  listChannels,
+  getChannelHistory,
+  publishMessage,
+  ApiError,
+} from "./api.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -219,5 +227,188 @@ describe("sendChat", () => {
     expect(error).toBeInstanceOf(ApiError);
     expect(error.status).toBe(0);
     expect(error.cause).toBe(cause);
+  });
+});
+
+describe("listChannels", () => {
+  it("fetches the channel list and returns the parsed envelope", async () => {
+    // GET /api/v1/channels returns {channels, next_cursor} (channel_types.go
+    // listChannelsResponse), not a bare array — the panel reads `.channels`, so
+    // the client returns the envelope verbatim rather than unwrapping it (and
+    // discarding the cursor a later slice may paginate on).
+    const envelope = {
+      channels: [
+        { id: "general", name: "General", channel_type: "group" },
+        { id: "ops", name: "Ops", channel_type: "group" },
+      ],
+      next_cursor: "ops",
+    };
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(envelope)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await listChannels();
+
+    expect(result).toEqual(envelope);
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/channels");
+  });
+
+  it("throws an ApiError when the list endpoint responds non-2xx", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({}, false, 503)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listChannels()).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("getChannelHistory", () => {
+  function history(overrides = {}) {
+    return {
+      messages: [
+        {
+          id: "m2",
+          channel_id: "general",
+          sender_id: "alice",
+          content: "second",
+          timestamp: "2026-06-02T10:00:02Z",
+          mentions: [],
+        },
+        {
+          id: "m1",
+          channel_id: "general",
+          sender_id: "bob",
+          content: "first",
+          timestamp: "2026-06-02T10:00:01Z",
+          mentions: [],
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  it("fetches a channel's history and returns the parsed envelope", async () => {
+    const body = history();
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(body)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getChannelHistory("general");
+
+    expect(result).toEqual(body);
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/channels/general/messages");
+  });
+
+  it("appends limit and before as query params only when supplied", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(history())));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getChannelHistory("general", {
+      limit: 50,
+      before: "2026-06-02T10:00:00Z",
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/v1/channels/general/messages?limit=50&before=2026-06-02T10%3A00%3A00Z",
+    );
+
+    await getChannelHistory("general", { limit: 25 });
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      "/api/v1/channels/general/messages?limit=25",
+    );
+  });
+
+  it("encodes the channel id into the request path", async () => {
+    // DM channel ids carry colons (`dm:a:b`); encoding keeps the request pinned
+    // to the {id}/messages route for any id rather than leaning on ids being
+    // path-safe slugs.
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(history())));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getChannelHistory("dm:alice:bob");
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/v1/channels/dm%3Aalice%3Abob/messages",
+    );
+  });
+
+  it("throws an ApiError when history responds non-2xx", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({}, false, 404)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getChannelHistory("missing")).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("publishMessage", () => {
+  function published(overrides = {}) {
+    return {
+      id: "m3",
+      channel_id: "general",
+      sender_id: "local",
+      content: "hello channel",
+      timestamp: "2026-06-02T10:00:03Z",
+      mentions: [],
+      ...overrides,
+    };
+  }
+
+  it("POSTs JSON to the channel's messages route and returns the stored message", async () => {
+    const msg = published();
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(msg, true, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await publishMessage("general", {
+      senderId: "local",
+      content: "hello channel",
+    });
+
+    expect(result).toEqual(msg);
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/channels/general/messages");
+    expect(init.method).toBe("POST");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+  });
+
+  it("sends the content and the context-derived sender_id", async () => {
+    // publishMessageRequest requires sender_id (channel_handlers.go); the console
+    // publishes as the /ui/context principal threaded in as userId, never a
+    // free-text sender (RFC §F rule 1).
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(jsonResponse(published(), true, 201)),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await publishMessage("general", { senderId: "local", content: "hi" });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.sender_id).toBe("local");
+    expect(body.content).toBe("hi");
+  });
+
+  it("encodes the channel id into the request path", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(jsonResponse(published(), true, 201)),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await publishMessage("dm:alice:bob", { senderId: "local", content: "hi" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/v1/channels/dm%3Aalice%3Abob/messages",
+    );
+  });
+
+  it("surfaces the server error envelope on a 4xx", async () => {
+    const envelope = { error: "content is required", code: "BAD_REQUEST" };
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(jsonResponse(envelope, false, 400)),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await publishMessage("general", {
+      senderId: "local",
+      content: "",
+    }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(400);
+    expect(error.code).toBe("BAD_REQUEST");
   });
 });

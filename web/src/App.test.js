@@ -12,16 +12,20 @@ import App from "./App.svelte";
 // running orchestrator. This is the PR-3 smoke: the shell fetches config +
 // context, renders only the enabled && available panels, hides the rest, and
 // derives identity from the context principal — never a hard-coded user.
-// The shell mounts the real Chat panel for the enabled chat tab, whose mount
-// effect calls listAgents(); stub it (and sendChat) so the boot wiring under
-// test doesn't reach a real backend or throw on an undefined export. listAgents
-// resolves empty — these tests assert the shell's tab/identity wiring, not the
-// panel's contents.
+// The shell mounts the real Chat / ChannelTimeline panels for the enabled tabs,
+// whose mount effects call listAgents() / listChannels(); stub the panels' API
+// surface so the boot wiring under test doesn't reach a real backend or throw on
+// an undefined export. The list calls resolve empty — these tests assert the
+// shell's tab/identity wiring, not the panels' contents. (A deep-link / hashchange
+// to #/channels mounts ChannelTimeline, so its calls must be stubbed too.)
 vi.mock("./lib/api.js", () => ({
   ApiError: class ApiError extends Error {},
   loadBootstrap: vi.fn(),
   listAgents: vi.fn(() => Promise.resolve([])),
   sendChat: vi.fn(),
+  listChannels: vi.fn(() => Promise.resolve({ channels: [] })),
+  getChannelHistory: vi.fn(() => Promise.resolve({ messages: [] })),
+  publishMessage: vi.fn(),
 }));
 
 import { loadBootstrap } from "./lib/api.js";
