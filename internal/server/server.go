@@ -104,11 +104,9 @@ type Server struct {
 	// --enable-ui is off — the /ui/ route is never registered, so /ui/ is a
 	// clean 404 and the rest of the surface is untouched. Wired via WithUI.
 	uiFS fs.FS
-
-	// uiConfig holds the parsed config/ui.yaml feature toggles (RFC 0048 Phase 1
-	// PR 2) that /api/v1/ui/config reports. Nil → handleUIConfig falls back to
-	// the Slice-1 defaults. Wired via WithUIConfig. The companion `available`
-	// flag is runtime-derived (see Server.panelAvailable), never stored here.
+	// uiConfig holds the parsed config/ui.yaml feature toggles (RFC 0048 PR 2)
+	// reported by /api/v1/ui/config; nil → the Slice-1 defaults. The companion
+	// `available` flag is runtime-derived (Server.panelAvailable), not stored.
 	uiConfig *UIConfig
 }
 
