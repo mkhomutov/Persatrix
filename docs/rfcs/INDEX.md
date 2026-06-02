@@ -23,13 +23,13 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0045](0045-open-core-extraction-policy.md) | 📋 Proposed | process | v0.3.x (policy + dependency-direction CI gate) + v0.4.0+ (per-extraction RFCs) | 2026-05-24 | Open-Core Library Extraction Policy |
 | [RFC-0046](0046-budget-lease-extraction.md) | 📋 Proposed | architecture | v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate) | 2026-05-25 | Budget-Lease Library Extraction (persatrix-budget) |
 | [RFC-0047](0047-low-coupling-batch-extraction.md) | 📋 Proposed | architecture | v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate) | 2026-05-25 | Low-Coupling Batch Library Extraction (prompt kit, mock LLM, schemas) |
+| [RFC-0048](0048-operator-tester-web-console.md) | 📋 Proposed | feature | v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5) | 2026-06-01 | Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI) |
 | [RFC-0032](0032-channel-interaction-layer.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-12 | Wire-Level Channel Interaction Layer and Chat-Façade Unification |
 | [RFC-0040](0040-agent-orchestrator-transport-unification.md) | 🔨 Draft | protocol | v0.3.x (Phase 1) + v0.4.0 (Phases 2–4) | 2026-05-17 | Agent–Orchestrator Transport Unification |
 | [RFC-0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-20 | Typed Event Taxonomy and Lifecycle Callbacks |
 | [RFC-0042](0042-state-namespacing-by-scope.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-20 | State Namespacing by Scope Prefix |
 | [RFC-0043](0043-inbound-agent-interop-endpoint.md) | 🔨 Draft | protocol | v0.4.0+ | 2026-05-20 | Inbound Agent-Interop Endpoint |
 | [RFC-0044](0044-eval-set-golden-traces.md) | 🔨 Draft | process | v0.3.x (Phase 1 format + replay) + v0.4.0+ (typed-event goldens) | 2026-05-20 | Eval-Set Shape with Golden Traces |
-| [RFC-0048](0048-operator-tester-web-console.md) | 🔨 Draft | feature | v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5) | 2026-06-01 | Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI) |
 | [RFC-0009](0009-security-sandboxing.md) | ⚠️ Partially Implemented | architecture | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | 2026-04-15 | Agent Identity, Security & Sandboxing |
 | [RFC-0011](0011-channels-bridges.md) | ⚠️ Partially Implemented | feature | v0.3.0 (internal channels) + v0.5.0 (external bridges) | 2026-04-25 | Channels & Internal Agent Messaging |
 | [RFC-0021](0021-persona-temporal-awareness.md) | ⚠️ Partially Implemented | architecture | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | 2026-04-25 | Persona Temporal Awareness |

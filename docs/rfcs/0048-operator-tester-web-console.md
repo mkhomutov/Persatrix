@@ -3,7 +3,7 @@ id: RFC-0048
 title: "Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI)"
 summary: "Embedded same-origin web console for operators and testers, shipped as feature-toggled vertical slices; first slice is live interactions (chat + channels) to grow the community."
 type: feature
-status: draft
+status: proposed
 author: Maksim Khomutov
 created: 2026-06-01
 target: "v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5)"
@@ -16,7 +16,7 @@ depends_on:
 # RFC 0048 — Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI)
 
 **Type**: feature  
-**Status**: 🔨 Draft  
+**Status**: 📋 Proposed  
 **Author**: Maksim Khomutov  
 **Date**: 2026-06-01  
 **Target**: v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5)  
@@ -134,6 +134,8 @@ if *enableUI {
 }
 ```
 
+A bare `http.FileServer` over the `embed.FS` returns `404` for client-side routes that are not real files (e.g. reloading `/ui/chat`). If the SPA uses history-mode routing, the `/ui/` handler must fall back to serving `index.html` for unmatched paths; hash-mode routing sidesteps this. (`GET /ui` without the trailing slash is fine — `net/http` redirects it to `/ui/` for the subtree pattern.)
+
 ### C. The Feature-Toggle Model
 
 Each panel is gated independently so slices ship dark and operators opt in per deployment.
@@ -155,11 +157,23 @@ Each panel is gated independently so slices ship dark and operators opt in per d
 - **Client behavior.** On load the SPA fetches `/api/v1/ui/config` and renders only `enabled && available` panels. Unknown panels are ignored, so an older binary serving a newer asset bundle (or vice versa) degrades gracefully.
 - **Toggle source.** Panel enablement is set via **`config/ui.yaml`** alongside `--enable-ui`, consistent with the existing `config/*.yaml` convention (`channels.yaml`, `bridges.yaml`, `agents.yaml`) and its absent-file→`503` degradation, with `config/environments/*` overrides applying as they do for other config. Defaults: Slice 1 panels on, everything else off.
 
+  The file carries only the operator-controlled `enabled` flag per panel; `available` is **runtime-derived** by the server (from whether the backing subsystem is wired) and is never authored in YAML. Absent file → defaults below. Validated against `schemas/ui.schema.json` via `make validate`, like the other config files.
+
+  ```yaml
+  # config/ui.yaml — Web Console panel toggles (RFC 0048, v0.3.6+).
+  # `available` is derived at runtime and must NOT appear here.
+  panels:
+    chat:             { enabled: true }   # Slice 1
+    channel_timeline: { enabled: true }   # Slice 1
+    memory_strip:     { enabled: false }  # Slice 2 (ships dark)
+    cost:             { enabled: false }  # Slice 4 (ships dark)
+  ```
+
 This is the mechanism that makes "vertical slices" real: a half-built Memory Inspector can merge to `main` shipped-dark, exercised in tests, and flipped on only when ready.
 
 ### D. Slice 1 — Live Interactions (the hero)
 
-Slice 1 delivers the "feel the taste" moment with three panels, all over today's API.
+Slice 1 delivers the "feel the taste" moment with two shipping panels (a third, the memory strip, is deferred to Slice 2 — see below), all over today's API.
 
 **1. Chat panel** — talk to a persona.
 - `GET /api/v1/agents` to populate a persona picker; `GET /api/v1/agents/{id}` for display name/role.
@@ -208,7 +222,7 @@ What Slice 1 needs that the backend does **not** yet provide:
 | Static asset serving / `embed.FS` | Serving the SPA at all | New `WithUI` `ServerOption` + `--enable-ui` flag (Phase 1) |
 | `GET /api/v1/ui/config` | Feature toggles | New lightweight handler returning enabled/available panels (Phase 1) |
 | `GET /api/v1/ui/context` | Auth/tenant forward-compat | New handler; returns `principal=local` today (Phase 1) |
-| Read-only persona-memory endpoint (e.g. `GET /api/v1/agents/{id}/memory?user_id=`) | Memory strip (stretch) + Slice 2 | New Go handler **plus a new gRPC read method into the Python persona runtime** — the recall/relationship tiers live in `agents/memory/`, not the Go server, so this crosses the Go↔Python boundary and is more than a thin handler; **scope to Slice 2 if it pressures Phase 1** |
+| Read-only persona-memory endpoint (e.g. `GET /api/v1/agents/{id}/memory?user_id=`) | Memory strip (Slice 2) | New Go handler **plus a new gRPC read method into the Python persona runtime** — the recall/relationship tiers live in `agents/memory/`, not the Go server, so this crosses the Go↔Python boundary and is more than a thin handler; **scope to Slice 2 if it pressures Phase 1** |
 | Channel live-push (SSE/WebSocket) | Real-time channel timeline | **Deferred** — poll the existing messages endpoint in Slice 1; design a channel SSE later, reusing the log-stream SSE pattern |
 | CORS middleware | Only if a separate-origin deploy is ever wanted | **Not needed** for embedded same-origin; revisit only if a decoupled deploy is requested |
 
@@ -227,7 +241,7 @@ Everything else Slice 1 uses (chat, channel list/history/publish, agent list/inf
 
 ### Phase 1: Slice 1 — Interactions (v0.3.6)
 
-**Summary**: Stand up the embedded-UI scaffold and ship the Interactions slice (chat + channel timeline, memory strip as a toggled stretch).
+**Summary**: Stand up the embedded-UI scaffold and ship the Interactions slice (chat + channel timeline; the memory strip is deferred to Slice 2, its toggle shipping off).
 
 **Deliverables**:
 1. `WithUI` `ServerOption` + `--enable-ui` flag + `embed.FS` asset wiring (`internal/server/`, `cmd/orchestrator/`, new `internal/ui/` or `web/`).
@@ -258,6 +272,7 @@ Everything else Slice 1 uses (chat, channel list/history/publish, agent list/inf
 |-----------|-------|--------|
 | Go orchestrator | `internal/server/server.go`, `internal/server/ui_handlers.go` (new) | `WithUI` option, `/ui` static serving, `/api/v1/ui/config` + `/api/v1/ui/context` handlers |
 | Go orchestrator | `cmd/orchestrator/main.go` | `--enable-ui` flag + conditional `WithUI` wiring |
+| Config | `config/ui.yaml` (new), `schemas/ui.schema.json` (new), `config/environments/*` | Panel-toggle file + its JSON schema (wired into `make validate`); env overrides follow the existing pattern |
 | Web console | `web/` or `internal/ui/` (new) | SPA source + build config + `embed.FS` package exposing `Assets()` |
 | Go orchestrator (optional) | `internal/server/memory_handlers.go` (new) + persona-runtime gRPC service (`agents/`) | Read-only persona-memory endpoint for the memory strip / Slice 2 — Go handler **and** a new gRPC read method into the Python memory tiers (`agents/memory/`) |
 | Docs | `docs/guides/web-console.md` (new), `README.md`, `ROADMAP.md` | Quick-start, try-it entry, roadmap slot |
@@ -268,7 +283,7 @@ Everything else Slice 1 uses (chat, channel list/history/publish, agent list/inf
 - **Unit tests**: `ui_handlers` config/context shape; panel availability reflects wired subsystems (channels present/absent → `available` true/false).
 - **Integration tests**: with `--enable-ui`, `GET /ui/` serves the SPA shell; `/api/v1/ui/config` and `/api/v1/ui/context` return expected JSON; without the flag, `/ui` and the ui-endpoints are absent (404), other routes unaffected.
 - **E2E / smoke**: headless-browser flow — pick a persona, send a chat, see a reply; open a channel, see history, observe a polled update. (Preview/headless harness.)
-- **Manual tests**: a `docs/manual-tests` script — fresh stack, open the console, chat with a persona, reload, confirm the memory strip shows recall (when enabled); confirm session/epoch selectors scope correctly.
+- **Manual tests**: a `docs/manual-tests` script — fresh stack, open the console, chat with a persona, reload, confirm the persona's recall is visible in its chat replies; confirm session/epoch selectors scope correctly. (The memory-strip recall check moves here once Slice 2 lands.)
 - **Forward-compat check**: assert the SPA reads identity from `/api/v1/ui/context` and renders correctly for `principal=local`, with no hard-coded single-user assumptions.
 
 ## Open Questions
@@ -286,7 +301,7 @@ Everything else Slice 1 uses (chat, channel list/history/publish, agent list/inf
 
 ## Decision / Next Steps
 
-Status is **Draft**. The decisions requested before Phase 1 are now resolved (2026-06-02):
+Status is **Proposed** (complete and open for review; not yet implementing). The decisions requested before Phase 1 are now resolved (2026-06-02):
 
 - **Embedded same-origin SPA (Section B): confirmed.**
 - **OQ1 — framework: Svelte.**
@@ -295,7 +310,7 @@ Status is **Draft**. The decisions requested before Phase 1 are now resolved (20
 - **Slice-1 target: v0.3.6, confirmed.**
 - **OQ4 (channel real-time) and OQ5 (chat token streaming): remain deferred** — Slice 1 polls and uses request/response chat.
 
-With these settled, the next artifact is a Phase 1 PR plan (`0048-phase1-pr-plan.md`) decomposing the scaffold + Interactions slice (chat + channel timeline) into reviewable PRs. (Author may flip the status from Draft to Accepted/Proposed per the RFC process once this is reviewed.)
+With these settled, the gate to implementation is **review sign-off** (Proposed → Accepted requires explicit review approval per the RFC process). Once Accepted, the next artifact is a Phase 1 PR plan (`0048-phase1-pr-plan.md`) decomposing the scaffold + Interactions slice (chat + channel timeline) into reviewable PRs, at which point the status advances to Implementing.
 
 ## Related Documentation
 
