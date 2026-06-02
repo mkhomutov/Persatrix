@@ -7,7 +7,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 <!-- BEGIN rfcs:auto -->
 | ID | Status | Type | Target | Created | Title |
 |----|--------|------|--------|---------|-------|
-| [RFC-0048](0048-operator-tester-web-console.md) | 🚧 Implementing | feature | v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5) | 2026-06-01 | Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI) |
+| [RFC-0048](0048-operator-tester-web-console.md) | 👍 Accepted | feature | v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5) | 2026-06-01 | Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI) |
 | [RFC-0007](0007-conditional-looped-workflow-control-flow.md) | 📋 Proposed | feature | v0.4.0 | 2026-04-15 | Conditional and Looped Workflow Control Flow |
 | [RFC-0012](0012-protocols-organizations.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3 — organizations & authority); v0.5.0 (Phases 4–5 — meeting/negotiation protocols, inter-org federation) | 2026-05-16 | Protocols & Organizations |
 | [RFC-0013](0013-legal-ethical-compliance.md) | 📋 Proposed | architecture | v0.5.0 | 2026-04-16 | Legal, Ethical & Regulatory Compliance Framework |
