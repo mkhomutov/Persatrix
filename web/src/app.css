@@ -100,6 +100,12 @@ body {
   color: light-dark(#b00020, #ff8a80);
 }
 
+.empty-reply {
+  /* A reply_status:"empty" turn — the agent had nothing to say. Muted so the
+     placeholder reads as an annotation, not as the agent's actual words. */
+  opacity: 0.7;
+}
+
 .composer {
   display: flex;
   flex-direction: column;

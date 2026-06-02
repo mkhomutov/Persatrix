@@ -153,6 +153,23 @@ describe("Chat panel", () => {
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
   });
 
+  it("shows a placeholder for an empty reply instead of a blank line", async () => {
+    // The server can answer with reply_status:"empty" and an empty `reply`
+    // (chat_handler.go) — a valid turn where the agent had nothing to say.
+    // Rendering just the agent name with no text reads as a broken UI, so the
+    // panel surfaces an explicit placeholder.
+    sendChat.mockResolvedValue(reply({ reply: "", reply_status: "empty" }));
+
+    render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Alice" });
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "Hi" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(await screen.findByText(/no reply/i)).toBeTruthy();
+  });
+
   it("surfaces the server error envelope without crashing the panel", async () => {
     sendChat.mockRejectedValue(
       new ApiError("message exceeds maximum length of 4000 characters", 400),

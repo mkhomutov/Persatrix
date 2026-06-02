@@ -138,6 +138,19 @@ describe("sendChat", () => {
     expect(init.headers["Content-Type"]).toBe("application/json");
   });
 
+  it("encodes the agent id into the request path", async () => {
+    // The id is interpolated into the URL path; in practice it comes from the
+    // server's own agent list (a constrained registry key), but encoding it
+    // keeps the client robust against any id carrying a path-significant
+    // character rather than leaning on that assumption.
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(chatReply())));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendChat("a/b c", { message: "Hi", userId: "local" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/agents/a%2Fb%20c/chat");
+  });
+
   it("sends the message, the context user_id, and participant_type:user", async () => {
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(chatReply())));
     vi.stubGlobal("fetch", fetchMock);

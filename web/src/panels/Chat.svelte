@@ -172,7 +172,14 @@
             class:reply-error={turn.status === "error"}
           >
             <strong>{turn.agent}:</strong>
-            {turn.reply}
+            {#if turn.status === "empty"}
+              <!-- reply_status:"empty" is a valid turn (the agent had nothing to
+                   say, chat_handler.go) — show a placeholder so it doesn't read
+                   as a blank/broken line. -->
+              <em class="empty-reply">(no reply)</em>
+            {:else}
+              {turn.reply}
+            {/if}
           </p>
         </li>
       {/each}

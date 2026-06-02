@@ -141,5 +141,9 @@ export async function sendChat(agentID, { message, userId, sessionId, epochId })
   if (epochId) {
     body.epoch_id = epochId;
   }
-  return postJSON(`/api/v1/agents/${agentID}/chat`, body);
+  // Encode the id rather than interpolating it raw: it comes from the server's
+  // own agent list today (a constrained registry key), but encoding keeps the
+  // request pinned to the /agents/{id}/chat route for any id, instead of
+  // relying on that assumption holding.
+  return postJSON(`/api/v1/agents/${encodeURIComponent(agentID)}/chat`, body);
 }
