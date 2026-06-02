@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -96,6 +97,13 @@ type Server struct {
 	// session-aware handler shape (Phase 3 `--session` flag) needs to
 	// distinguish "no value supplied" from "operator picked legacy".
 	channelSessionID string
+
+	// uiFS is the embedded web-console asset tree (RFC 0048 Phase 1 PR 1 —
+	// optional, nil-safe). When non-nil, registerRoutes serves it under
+	// /ui/ via a static file server; when nil — the default, and whenever
+	// --enable-ui is off — the /ui/ route is never registered, so /ui/ is a
+	// clean 404 and the rest of the surface is untouched. Wired via WithUI.
+	uiFS fs.FS
 }
 
 // ServerOption configures optional Server dependencies.
@@ -218,6 +226,9 @@ func WithChannelSessionID(sessionID string) ServerOption {
 	}
 }
 
+// WithUI (RFC 0048 web console) lives in ui.go alongside the /ui/ route
+// registration, keeping all console wiring co-located.
+
 // New validates that workflowsDir is accessible and returns a configured Server.
 // Returns an error if the workflows directory is missing, inaccessible, or not a directory.
 func New(addr, workflowsDir string, store state.Store, reg registry.Registry, pl planner.Planner, logger *zap.Logger, opts ...ServerOption) (*Server, error) {
@@ -330,6 +341,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/sessions", s.handleListSessions)
 	s.mux.HandleFunc("GET /api/v1/sessions/{id}", s.handleGetSession)
 	s.mux.HandleFunc("POST /api/v1/sessions/{id}/archive", s.handleArchiveSession)
+
+	// Embedded web console static serving (RFC 0048 — optional, nil-safe; see ui.go).
+	s.registerUIRoutes()
 
 	// Minimal health endpoint (C-02: satisfies existing docker-compose.yaml healthcheck)
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
