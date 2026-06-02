@@ -83,9 +83,17 @@
     };
   });
 
+  // Back/forward and any external hash navigation re-resolve the active tab.
+  // A hash that doesn't name a rendered panel (manual address-bar edit, or a
+  // known-but-unavailable panel like #/memory) falls back to the first panel
+  // via hashPanelName — so canonicalise here too, mirroring the initial-load
+  // correction, rather than leaving the URL dangling a route that resolves to a
+  // different tab than the one shown. replaceState fires no hashchange, so this
+  // can't re-enter; a valid route is a no-op (the guard in canonicalizeHash).
   $effect(() => {
     const onHashChange = () => {
       activeName = hashPanelName();
+      canonicalizeHash(activeName);
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);

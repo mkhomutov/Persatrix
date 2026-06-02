@@ -369,4 +369,35 @@ describe("App shell boot", () => {
     );
     expect(chatTab.getAttribute("aria-selected")).toBe("false");
   });
+
+  it("canonicalises a stale hash reached after load, not just on initial boot", async () => {
+    // Initial-load canonicalisation rewrites a stale/unavailable deep-link hash
+    // to the fallback route. The same correction must apply when a stale hash is
+    // reached *after* boot (a manual address-bar edit, or any external hash
+    // navigation): the listener falls the active tab back to the first panel, so
+    // leaving the URL pointing at #/memory would dangle a route that resolves to
+    // a different tab — exactly the drift canonicalisation exists to prevent.
+    loadBootstrap.mockResolvedValue({
+      config: {
+        panels: {
+          chat: { enabled: true, available: true },
+          memory_strip: { enabled: true, available: false },
+        },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    const chatTab = await screen.findByRole("tab", { name: /chat/i });
+    expect(chatTab.getAttribute("aria-selected")).toBe("true");
+
+    // Navigate to a known-but-unavailable panel after boot.
+    window.location.hash = "#/memory";
+    await fireEvent(window, new HashChangeEvent("hashchange"));
+
+    // The active tab falls back to chat AND the URL is rewritten to match it.
+    await waitFor(() => expect(window.location.hash).toBe("#/chat"));
+    expect(chatTab.getAttribute("aria-selected")).toBe("true");
+  });
 });
