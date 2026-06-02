@@ -147,10 +147,18 @@
   {/if}
 </header>
 
+<!-- Boot states wrap their copy in <main> for the same reason the empty-state
+     and ready branches below do: every shell branch keeps its content inside a
+     landmark region, so nothing renders orphaned outside one. The error keeps
+     role=alert so it is still announced. -->
 {#if status === "loading"}
-  <p class="boot">Loading the console…</p>
+  <main class="content">
+    <p class="boot">Loading the console…</p>
+  </main>
 {:else if status === "error"}
-  <p class="boot error" role="alert">{errorMessage}</p>
+  <main class="content">
+    <p class="boot error" role="alert">{errorMessage}</p>
+  </main>
 {:else if panels.length === 0}
   <!-- Reachable backend with a valid principal but no enabled && available
        panel. Render the empty-state copy on its own — an empty role=tablist (a

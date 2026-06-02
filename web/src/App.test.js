@@ -86,6 +86,19 @@ describe("App shell boot", () => {
     });
   });
 
+  it("keeps the boot-error inside the main landmark (no orphaned content)", async () => {
+    // The empty-state branch already wraps its copy in <main>; the error state
+    // must too, so no shell content sits outside a landmark region (the
+    // orphaned-content a11y gap). The error stays a role=alert so it is still
+    // announced — wrapping it in <main> doesn't change that.
+    loadBootstrap.mockRejectedValue(new Error("boom"));
+
+    render(App);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.closest("main")).not.toBeNull();
+  });
+
   it("shows a boot-error state (no tabs) when context carries no principal", async () => {
     // RFC §F rule 1: identity comes only from the context principal. A reachable
     // backend that returns an empty principal is still unusable — the shell must

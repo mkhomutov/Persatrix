@@ -79,6 +79,10 @@ body {
   /* The boot-error state is exactly when legibility matters most, and :root
      opts into `color-scheme: light dark`, so the page may render dark. A fixed
      dark red fails contrast on a dark background — light-dark() pairs it with a
-     lighter red for the dark scheme. */
+     lighter red for the dark scheme.
+     The plain `color` first is a progressive-enhancement fallback: a browser
+     without light-dark() drops the second declaration and still renders a red
+     error rather than inheriting the body text colour. */
+  color: #b00020;
   color: light-dark(#b00020, #ff8a80);
 }
