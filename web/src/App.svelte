@@ -20,7 +20,6 @@
   let status = $state("loading");
   let panels = $state([]);
   let userId = $state(null);
-  let principal = $state(null);
   let errorMessage = $state("");
   let activeName = $state(hashPanelName());
 
@@ -46,7 +45,6 @@
         if (cancelled) return;
         panels = selectPanels(config);
         userId = deriveUserId(context);
-        principal = context?.principal ?? null;
         if (!userId) {
           status = "error";
           errorMessage =
@@ -78,13 +76,45 @@
     window.location.hash = panel.route;
     activeName = panel.name;
   }
+
+  // ARIA APG tabs keyboard interaction. The role=tab markup advertises a
+  // keyboard contract, so the tablist must honour it: Left/Right move between
+  // tabs (wrapping), Home/End jump to the ends, and — with automatic activation
+  // (cheap here, panels are local) — moving focus also selects. Focus is moved
+  // imperatively to the target tab so it pairs with the roving tabindex in the
+  // markup (only the active tab is in the Tab sequence).
+  function onTabKeydown(event) {
+    const last = panels.length - 1;
+    const current = panels.findIndex((p) => p.name === activeName);
+    let next;
+    switch (event.key) {
+      case "ArrowRight":
+        next = current >= last ? 0 : current + 1;
+        break;
+      case "ArrowLeft":
+        next = current <= 0 ? last : current - 1;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = last;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    selectTab(panels[next]);
+    const tablist = event.currentTarget.closest('[role="tablist"]');
+    tablist?.querySelectorAll('[role="tab"]')[next]?.focus();
+  }
 </script>
 
 <header class="topbar">
   <span class="brand">Persatrix console</span>
-  {#if principal}
+  {#if userId}
     <span class="principal" title="Identity from /api/v1/ui/context">
-      {principal}
+      {userId}
     </span>
   {/if}
 </header>
@@ -102,7 +132,9 @@
         id="tab-{panel.name}"
         aria-controls="panel-{panel.name}"
         aria-selected={panel.name === activeName}
+        tabindex={panel.name === activeName ? 0 : -1}
         onclick={() => selectTab(panel)}
+        onkeydown={onTabKeydown}
       >
         {panel.title}
       </button>

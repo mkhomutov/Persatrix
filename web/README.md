@@ -37,9 +37,11 @@ npm test           # Vitest (unit + component, run-once)
 npm run test:watch # Vitest in watch mode
 ```
 
-The dev server runs the SPA standalone. To exercise it against the real
-backend, run the orchestrator with `--enable-ui` and open
-`http://localhost:8080/ui`.
+The dev server runs the SPA standalone. Because `vite.config.js` sets
+`base: "/ui/"` (the subtree the orchestrator serves under), the dev server also
+mounts the app there — open `http://localhost:5173/ui/`, not the bare root. To
+exercise it against the real backend, run the orchestrator with `--enable-ui`
+and open `http://localhost:8080/ui`.
 
 ## Build (what ships)
 

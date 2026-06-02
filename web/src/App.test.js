@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/svelte";
+import {
+  render,
+  screen,
+  waitFor,
+  cleanup,
+  fireEvent,
+} from "@testing-library/svelte";
 import App from "./App.svelte";
 
 // Mock the backend client so the shell's boot wiring is exercised without a
@@ -96,6 +102,51 @@ describe("App shell boot", () => {
     });
     expect(screen.getByRole("alert").textContent).toMatch(/identity/i);
     expect(screen.queryByRole("tab")).toBeNull();
+  });
+
+  it("drives the tablist with roving tabindex + arrow keys (ARIA APG tabs)", async () => {
+    // The APG tabs pattern is more than roles: exactly one tab is in the Tab
+    // sequence (roving tabindex), and Left/Right/Home/End move focus *and*
+    // selection between tabs (automatic activation — cheap here, panels are
+    // local). Without this, the role=tab markup advertises a keyboard contract
+    // the shell doesn't honour.
+    loadBootstrap.mockResolvedValue({
+      config: {
+        panels: {
+          chat: { enabled: true, available: true },
+          channel_timeline: { enabled: true, available: true },
+        },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    const chatTab = await screen.findByRole("tab", { name: /chat/i });
+    const channelsTab = screen.getByRole("tab", { name: /channels/i });
+
+    // Roving tabindex: only the active (chat) tab is Tab-reachable.
+    expect(chatTab.getAttribute("tabindex")).toBe("0");
+    expect(channelsTab.getAttribute("tabindex")).toBe("-1");
+
+    // ArrowRight: focus + selection move to the next tab.
+    await fireEvent.keyDown(chatTab, { key: "ArrowRight" });
+    expect(channelsTab.getAttribute("aria-selected")).toBe("true");
+    expect(chatTab.getAttribute("aria-selected")).toBe("false");
+    expect(channelsTab.getAttribute("tabindex")).toBe("0");
+    expect(chatTab.getAttribute("tabindex")).toBe("-1");
+    expect(document.activeElement).toBe(channelsTab);
+
+    // ArrowRight wraps from the last tab back to the first.
+    await fireEvent.keyDown(channelsTab, { key: "ArrowRight" });
+    expect(chatTab.getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(chatTab);
+
+    // End jumps to the last tab, Home back to the first.
+    await fireEvent.keyDown(chatTab, { key: "End" });
+    expect(document.activeElement).toBe(channelsTab);
+    await fireEvent.keyDown(channelsTab, { key: "Home" });
+    expect(document.activeElement).toBe(chatTab);
   });
 
   it("exposes the active content region as a labelled tabpanel", async () => {
