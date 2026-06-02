@@ -3,7 +3,7 @@ id: RFC-0048
 title: "Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI)"
 summary: "Embedded same-origin web console for operators and testers, shipped as feature-toggled vertical slices; first slice is live interactions (chat + channels) to grow the community."
 type: feature
-status: proposed
+status: accepted
 author: Maksim Khomutov
 created: 2026-06-01
 target: "v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5)"
@@ -16,7 +16,7 @@ depends_on:
 # RFC 0048 — Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI)
 
 **Type**: feature  
-**Status**: 📋 Proposed  
+**Status**: 👍 Accepted  
 **Author**: Maksim Khomutov  
 **Date**: 2026-06-01  
 **Target**: v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5)  
@@ -301,7 +301,7 @@ Everything else Slice 1 uses (chat, channel list/history/publish, agent list/inf
 
 ## Decision / Next Steps
 
-Status is **Proposed** (complete and open for review; not yet implementing). The decisions requested before Phase 1 are now resolved (2026-06-02):
+Status is **Accepted** (review sign-off given 2026-06-02; Phase 1 PR plan authored — ready to implement). The decisions requested before Phase 1 are now resolved (2026-06-02):
 
 - **Embedded same-origin SPA (Section B): confirmed.**
 - **OQ1 — framework: Svelte.**
@@ -310,7 +310,7 @@ Status is **Proposed** (complete and open for review; not yet implementing). The
 - **Slice-1 target: v0.3.6, confirmed.**
 - **OQ4 (channel real-time) and OQ5 (chat token streaming): remain deferred** — Slice 1 polls and uses request/response chat.
 
-With these settled, the gate to implementation is **review sign-off** (Proposed → Accepted requires explicit review approval per the RFC process). Once Accepted, the next artifact is a Phase 1 PR plan (`0048-phase1-pr-plan.md`) decomposing the scaffold + Interactions slice (chat + channel timeline) into reviewable PRs, at which point the status advances to Implementing.
+With these settled and review sign-off given (2026-06-02), the RFC advances to **Accepted** (the only legal successor to Proposed per the [lifecycle](README.md#rfc-lifecycle); implementation has not started). The Phase 1 PR plan — [`0048-phase1-pr-plan.md`](0048-phase1-pr-plan.md) — decomposes the scaffold + Interactions slice (chat + channel timeline) into six reviewable PRs and is the active tracker for the build. Status advances to **Implementing** when the first Phase 1 PR opens, and to **Partially Implemented** once Slice 1 lands (its closeout PR per the plan).
 
 ## Related Documentation
 
