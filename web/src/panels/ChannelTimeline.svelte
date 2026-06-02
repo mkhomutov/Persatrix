@@ -88,7 +88,12 @@
   // off delay on error. The token guard drops a result whose channel was
   // switched out mid-flight.
   async function poll() {
-    pollTimer = null;
+    // Clear (not just null) any armed tick: poll() is invoked both by its own
+    // setTimeout and directly by the visibility handler on resume. A repeat
+    // 'visible' event while a tick is already armed would otherwise orphan that
+    // tick — leaving the browser to fire it later as one extra poll. clearPoll()
+    // is a no-op on the already-elapsed handle when poll() runs from the timer.
+    clearPoll();
     const channel = selectedChannel;
     const token = loadToken;
     if (!channel) {
@@ -261,6 +266,15 @@
     if (!selectedChannel || content.length === 0) {
       return;
     }
+    // Capture the active channel's load token before the await. The channel
+    // <select> stays enabled during a publish, so the operator can switch
+    // channels (or the panel can unmount) while this POST is in flight. The
+    // publish targets the channel it was issued against (publishMessage reads
+    // selectedChannel now, before the await); if the channel has since changed,
+    // the resolution must not echo the stored message into — nor seed its id
+    // against — the now-current channel. Mirrors the loadToken guard poll() /
+    // loadHistory() apply to their own resolutions.
+    const token = loadToken;
     publishError = "";
     publishing = true;
     try {
@@ -268,6 +282,12 @@
         senderId: userId,
         content,
       });
+      if (token !== loadToken) {
+        // Superseded by a channel switch (or unmount): drop the echo. The
+        // message persisted in its own channel and surfaces there on that
+        // channel's own load/poll — it must not appear under the new selection.
+        return;
+      }
       // Echo the stored message immediately rather than waiting a poll interval;
       // the de-dupe set keeps the upcoming poll from re-adding it. The agent
       // mention fan-out (RFC 0011) still surfaces on a later poll.
@@ -277,6 +297,12 @@
       }
       publishContent = "";
     } catch (err) {
+      if (token !== loadToken) {
+        // A failure for a channel the operator already left is not actionable
+        // here — surfacing it over the new selection (which onChannelChange just
+        // cleared) would read as though the new channel is broken.
+        return;
+      }
       publishError =
         err instanceof ApiError
           ? err.message

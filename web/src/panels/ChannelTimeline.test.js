@@ -308,4 +308,70 @@ describe("Channel timeline panel", () => {
     });
     expect(screen.queryByText(/second/)).toBeNull();
   });
+
+  it("drops a publish echo when the operator switches channel mid-flight", async () => {
+    // The channel <select> is not disabled while a publish is in flight, so the
+    // operator can switch channels before the POST resolves. The publish targets
+    // the channel it was issued against; its echo must not leak into — nor seed a
+    // seen-id against — the channel now selected. This mirrors the loadToken
+    // guard poll()/loadHistory() already apply to their own resolutions.
+    let resolvePublish;
+    publishMessage.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePublish = resolve;
+      }),
+    );
+
+    render(ChannelTimeline, { props: { userId: "local" } });
+    await screen.findByText(/second/); // general's history loaded
+
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "to general" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /post/i }));
+
+    // Switch to ops before the publish (issued against general) resolves.
+    getChannelHistory.mockResolvedValue(
+      historyOf(msg("o1", "ops message", "carol")),
+    );
+    await fireEvent.change(screen.getByRole("combobox", { name: /channel/i }), {
+      target: { value: "ops" },
+    });
+    await screen.findByText(/ops message/);
+
+    // The general-targeted publish now resolves with its stored message.
+    resolvePublish(msg("g9", "to general", "local", "2026-06-02T10:00:09Z"));
+    // Wait for the in-flight state to settle ("Posting…" → "Post"), which means
+    // the publish resolution (and its echo, were it buggy) has been processed.
+    await screen.findByRole("button", { name: "Post" });
+
+    // The general message must not appear in ops's timeline.
+    expect(screen.queryByText(/to general/)).toBeNull();
+  });
+
+  it("does not orphan the pending poll tick on a repeat visible event", async () => {
+    // poll() must clear any armed tick when it runs, not merely null the handle:
+    // the visibility handler calls poll() directly, and a repeat 'visible' event
+    // (tab already visible, a tick already armed) would otherwise leave that tick
+    // orphaned — firing one extra poll against the unauthenticated localhost
+    // surface the visibility-pause / backoff is meant to protect.
+    vi.useFakeTimers();
+    render(ChannelTimeline, { props: { userId: "local" } });
+    await vi.waitFor(() => expect(getChannelHistory).toHaveBeenCalled());
+    const afterLoad = getChannelHistory.mock.calls.length;
+
+    // A repeat 'visible' event fires an immediate catch-up poll and arms the
+    // next tick (document.hidden defaults false in jsdom).
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() =>
+      expect(getChannelHistory.mock.calls.length).toBe(afterLoad + 1),
+    );
+    const afterVisible = getChannelHistory.mock.calls.length;
+
+    // One base interval later exactly one tick should fire — the freshly-armed
+    // one. The previously-armed tick must have been cleared, not orphaned (which
+    // would fire a second poll in the same window).
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(getChannelHistory.mock.calls.length).toBe(afterVisible + 1);
+  });
 });
