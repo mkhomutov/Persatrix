@@ -209,4 +209,63 @@ describe("Chat panel", () => {
 
     expect(await screen.findByRole("alert")).toBeTruthy();
   });
+
+  it("retries persona loading after a load failure", async () => {
+    // The persona load is the panel's only hard dependency; a transient backend
+    // hiccup shouldn't strand the operator on a dead screen with no recourse but
+    // a full reload. A Retry control re-runs listAgents in place.
+    listAgents.mockRejectedValueOnce(new ApiError("backend down", 503));
+
+    render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("alert");
+
+    await fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+    await screen.findByRole("option", { name: "Alice" });
+    expect(listAgents).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows an empty state — not a blank picker — when no personas are registered", async () => {
+    // A successful-but-empty list is distinct from a load failure: there's
+    // nothing to talk to, so the composer would be a dead end. Tell the operator
+    // why rather than rendering an empty dropdown beside a disabled Send.
+    listAgents.mockResolvedValue([]);
+
+    render(Chat, { props: { userId: "local" } });
+
+    expect(await screen.findByText(/no personas/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
+  });
+
+  it("annotates a non-healthy persona with its status in the picker", async () => {
+    // GET /api/v1/agents returns agents of any status, but only a healthy one
+    // can actually reply (chat_handler.go → 503 otherwise). Surface the status
+    // up front so the operator isn't blind-sided after a wasted send.
+    listAgents.mockResolvedValue([
+      { id: "alice", name: "Alice", status: "healthy" },
+      { id: "carol", name: "Carol", status: "offline" },
+    ]);
+
+    render(Chat, { props: { userId: "local" } });
+
+    await screen.findByRole("option", { name: "Alice" });
+    expect(screen.getByRole("option", { name: "Carol (offline)" })).toBeTruthy();
+  });
+
+  it("measures message length by code point, matching the server's rune limit", async () => {
+    // The server caps at 4000 *runes* (utf8.RuneCountInString); a UTF-16 .length
+    // guard over-counts astral characters and would falsely block a valid
+    // message. 2001 astral chars = 4002 UTF-16 units but only 2001 code points,
+    // comfortably under the limit, so the send must go through.
+    render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Alice" });
+
+    const astral = "😀".repeat(2001);
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: astral },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => expect(sendChat).toHaveBeenCalled());
+  });
 });

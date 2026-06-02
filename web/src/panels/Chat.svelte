@@ -11,11 +11,17 @@
   // chatMaxMessageLength mirrors the server's constant (chat_handler.go) so an
   // over-length message is rejected with immediate feedback instead of burning a
   // round-trip; the server still enforces it — this is a courtesy guard, not the
-  // authority.
+  // authority. The server measures in runes (utf8.RuneCountInString), so the
+  // guard counts code points too (`[...text].length`) — a UTF-16 `.length` would
+  // over-count astral characters and falsely block a message the server accepts.
   const MAX_MESSAGE_LENGTH = 4000;
 
   let agents = $state([]);
   let agentsError = $state("");
+  // agentsLoaded flips true once the first (or a retried) load settles, so the
+  // "no personas" empty state only shows after a confirmed-empty list — never as
+  // a flash of the blank picker while the load is still in flight.
+  let agentsLoaded = $state(false);
   let selectedAgent = $state("");
   let message = $state("");
   let sessionId = $state("");
@@ -32,11 +38,21 @@
     Boolean(selectedAgent) && message.trim().length > 0 && !sending,
   );
 
-  $effect(() => {
-    let cancelled = false;
-    listAgents()
+  // loadToken disambiguates concurrent/superseded loads: each call stamps a
+  // token and only the latest may write state. This both guards against a
+  // resolve-after-unmount (the effect cleanup bumps the token) and makes Retry
+  // safe — a slow first load can never clobber the result of a later retry.
+  let loadToken = 0;
+
+  // loadAgents fetches the persona list and is re-runnable: the mount effect
+  // calls it once, and the Retry control calls it again after a load failure.
+  function loadAgents() {
+    const token = ++loadToken;
+    agentsError = "";
+    agentsLoaded = false;
+    return listAgents()
       .then((list) => {
-        if (cancelled) return;
+        if (token !== loadToken) return;
         agents = list;
         // Default the picker to the first persona so a newcomer can send
         // immediately without first opening the dropdown.
@@ -45,19 +61,34 @@
         }
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (token !== loadToken) return;
         agentsError = `Could not load personas: ${err.message}`;
+      })
+      .finally(() => {
+        if (token !== loadToken) return;
+        agentsLoaded = true;
       });
+  }
+
+  $effect(() => {
+    loadAgents();
     return () => {
-      cancelled = true;
+      // Invalidate any in-flight load so its resolution can't write to an
+      // unmounted component.
+      loadToken++;
     };
   });
 
   // agentLabel is the picker's display text: the persona's name, falling back to
-  // its id when unnamed — matching the server's own display-name fallback in
-  // chat_handler.go.
+  // its id when unnamed (matching the server's own display-name fallback in
+  // chat_handler.go). A non-healthy persona is annotated with its status, since
+  // only a healthy one can actually reply (the chat route 503s otherwise) — the
+  // operator sees that before spending a send, not after.
   function agentLabel(agent) {
-    return agent.name ? agent.name : agent.id;
+    const name = agent.name ? agent.name : agent.id;
+    return agent.status && agent.status !== "healthy"
+      ? `${name} (${agent.status})`
+      : name;
   }
 
   async function send() {
@@ -66,7 +97,7 @@
     if (!selectedAgent || text.length === 0) {
       return;
     }
-    if (text.length > MAX_MESSAGE_LENGTH) {
+    if ([...text].length > MAX_MESSAGE_LENGTH) {
       sendError = `Message exceeds the maximum length of ${MAX_MESSAGE_LENGTH} characters.`;
       return;
     }
@@ -120,6 +151,9 @@
 
   {#if agentsError}
     <p class="boot error" role="alert">{agentsError}</p>
+    <button type="button" class="retry" onclick={loadAgents}>Retry</button>
+  {:else if agentsLoaded && agents.length === 0}
+    <p class="empty">No personas are registered yet.</p>
   {:else}
     <ol class="transcript" aria-label="Conversation">
       {#each transcript as turn, i (i)}

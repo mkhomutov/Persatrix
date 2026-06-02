@@ -91,10 +91,11 @@ body {
 }
 
 .from-agent.reply-error {
-  /* A reply_status:"error" turn (e.g. a budget denial surfaced as a 200 with an
-     error envelope, chat_handler.go ISSUE-0065) is still a rendered reply, just
-     flagged so it doesn't read as a normal answer. Paired for the dark scheme
-     for the same reason .boot.error is. */
+  /* A reply_status:"error" turn (e.g. a budget denial surfaced as HTTP 200 with
+     reply_status="error" and the denial text in `reply`, chat_handler.go
+     ISSUE-0065) is still a rendered reply, just flagged so it doesn't read as a
+     normal answer. Paired for the dark scheme for the same reason .boot.error
+     is. */
   color: #b00020;
   color: light-dark(#b00020, #ff8a80);
 }
@@ -143,6 +144,17 @@ body {
 .thinking {
   opacity: 0.7;
   font-style: italic;
+}
+
+.empty {
+  opacity: 0.7;
+}
+
+.retry {
+  margin-top: 0.5rem;
+  font: inherit;
+  padding: 0.4rem 1rem;
+  cursor: pointer;
 }
 
 .boot.error {
