@@ -46,12 +46,21 @@
 
   // seenIds de-dupes the head poll against messages already shown (and against a
   // just-published echo). Not reactive — it's bookkeeping the render reads
-  // through `messages`, reset whenever the active channel changes.
+  // through `messages`, reset whenever the active channel changes. Both it and
+  // `messages` grow unbounded across a long-lived session on a busy channel
+  // (only a channel switch clears them); left uncapped on purpose for Slice 1's
+  // low-traffic localhost surface — a retention cap rides with the keyset
+  // back-fill / push channel later (OQ4), rather than silently dropping the tail.
   let seenIds = new Set();
   // pollTimer holds the pending setTimeout; backoffMs is the current poll delay,
   // reset to the base interval on every success.
   let pollTimer = null;
   let backoffMs = POLL_INTERVAL_MS;
+  // polling guards against a second concurrent fetch: the visibility handler
+  // invokes poll() directly, and a 'visible' event can land while a timer-fired
+  // tick is still awaiting its request. Not reactive — it's in-flight bookkeeping
+  // the render never reads.
+  let polling = false;
   // loadToken disambiguates superseded loads: switching channel (or unmount)
   // bumps it so an in-flight history fetch or poll can't write to a channel the
   // operator already navigated away from, and Retry is race-safe.
@@ -99,6 +108,14 @@
     if (!channel) {
       return;
     }
+    // A tick is already awaiting its fetch (the visibility handler can call
+    // poll() directly mid-flight). Don't fire a second concurrent request — the
+    // in-flight tick reschedules the loop when it settles, so the duplicate buys
+    // nothing and only adds load to the unauthenticated localhost surface.
+    if (polling) {
+      return;
+    }
+    polling = true;
     try {
       const { messages: head } = await getChannelHistory(channel, {
         limit: HEAD_LIMIT,
@@ -131,6 +148,8 @@
       pollError = `Live updates paused: ${err.message}`;
       backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
       scheduleNext(backoffMs);
+    } finally {
+      polling = false;
     }
   }
 
@@ -177,6 +196,11 @@
     messages = [];
     seenIds = new Set();
     backoffMs = POLL_INTERVAL_MS;
+    // Clear the in-flight flag too: bumping loadToken just stranded any prior
+    // channel's poll (it bails on the token mismatch without rescheduling), so
+    // without this reset that stale tick's flag could make the new channel's
+    // first poll bail on the guard and leave the loop unarmed.
+    polling = false;
     return getChannelHistory(channel, { limit: HISTORY_LIMIT })
       .then(({ messages: history }) => {
         if (token !== loadToken) {

@@ -374,4 +374,40 @@ describe("Channel timeline panel", () => {
     await vi.advanceTimersByTimeAsync(3000);
     expect(getChannelHistory.mock.calls.length).toBe(afterVisible + 1);
   });
+
+  it("does not launch a concurrent poll when a visible event arrives mid-poll", async () => {
+    // The visibility handler calls poll() directly on resume, but a 'visible'
+    // event can also arrive while a timer-fired tick is still awaiting its
+    // fetch. Without an in-flight guard that would launch a second concurrent
+    // request against the unauthenticated localhost surface. The in-flight tick
+    // reschedules the loop when it settles, so the redundant fetch buys nothing.
+    vi.useFakeTimers();
+    render(ChannelTimeline, { props: { userId: "local" } });
+    await vi.waitFor(() => expect(getChannelHistory).toHaveBeenCalled());
+    const afterLoad = getChannelHistory.mock.calls.length;
+
+    // Make the next poll hang so it stays in flight.
+    let resolvePoll;
+    getChannelHistory.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolvePoll = resolve;
+      }),
+    );
+
+    // The base interval fires the (now-hanging) poll.
+    await vi.advanceTimersByTimeAsync(3000);
+    const duringPoll = getChannelHistory.mock.calls.length;
+    expect(duringPoll).toBe(afterLoad + 1);
+
+    // A visible event arrives while that poll is still in flight: it must not
+    // start a second concurrent fetch (the handler runs synchronously up to the
+    // fetch, so the call count would jump immediately if it did).
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(getChannelHistory.mock.calls.length).toBe(duringPoll);
+
+    // Letting the in-flight poll settle, the loop resumes from a single timer.
+    resolvePoll(historyOf(msg("m2", "second"), msg("m1", "first")));
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(getChannelHistory.mock.calls.length).toBe(duringPoll + 1);
+  });
 });
