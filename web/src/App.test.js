@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/svelte";
+import { render, screen, waitFor, cleanup } from "@testing-library/svelte";
 import App from "./App.svelte";
 
 // Mock the backend client so the shell's boot wiring is exercised without a
@@ -18,6 +18,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmount between tests. Vitest is configured without `globals: true`, so
+  // @testing-library/svelte cannot auto-register its afterEach(cleanup) — left
+  // implicit, each render() leaks into jsdom and `getByRole`/`getByTitle`
+  // resolve against a prior test's DOM, making the suite order-dependent.
+  cleanup();
   vi.clearAllMocks();
 });
 
@@ -73,5 +78,40 @@ describe("App shell boot", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeTruthy();
     });
+  });
+
+  it("shows a boot-error state (no tabs) when context carries no principal", async () => {
+    // RFC §F rule 1: identity comes only from the context principal. A reachable
+    // backend that returns an empty principal is still unusable — the shell must
+    // surface the identity error rather than render panels with a null user.
+    loadBootstrap.mockResolvedValue({
+      config: { panels: { chat: { enabled: true, available: true } } },
+      context: { principal: "", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeTruthy();
+    });
+    expect(screen.getByRole("alert").textContent).toMatch(/identity/i);
+    expect(screen.queryByRole("tab")).toBeNull();
+  });
+
+  it("exposes the active content region as a labelled tabpanel", async () => {
+    // The tabs advertise role=tab/aria-selected; the content region they drive
+    // must be a matching role=tabpanel labelled by the active tab so the
+    // tab/panel relationship is complete for assistive tech.
+    loadBootstrap.mockResolvedValue({
+      config: { panels: { chat: { enabled: true, available: true } } },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    const tabpanel = await screen.findByRole("tabpanel");
+    const tab = screen.getByRole("tab", { name: /chat/i });
+    expect(tab.getAttribute("aria-controls")).toBe(tabpanel.id);
+    expect(tabpanel.getAttribute("aria-labelledby")).toBe(tab.id);
   });
 });

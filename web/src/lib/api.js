@@ -8,10 +8,12 @@
 // ApiError carries the HTTP status of a non-2xx response so callers can
 // distinguish "console couldn't reach its own backend" (the boot path) from a
 // transport failure, and surface the server's error envelope to the user
-// (PRs 4–5 lean on this for the chat/channel error paths).
+// (PRs 4–5 lean on this for the chat/channel error paths). A transport failure
+// (fetch rejecting) is reported as status 0 with the original error threaded
+// through the standard Error `cause` (via `options`) so it is not lost.
 export class ApiError extends Error {
-  constructor(message, status) {
-    super(message);
+  constructor(message, status, options) {
+    super(message, options);
     this.name = "ApiError";
     this.status = status;
   }

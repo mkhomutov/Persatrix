@@ -46,9 +46,10 @@ backend, run the orchestrator with `--enable-ui` and open
 `npm run build` (or, from the repo root, **`make ui`**) compiles the SPA into
 `../internal/ui/assets/`, the `//go:embed` tree the orchestrator serves. The
 build output is **git-ignored** — only the committed placeholder `index.html`
-and this `web/` source are tracked, so the placeholder and the generated bundle
-never coexist in git. `vite.config.js` sets `base: "/ui/"` so asset URLs resolve
-under the `/ui/` subtree.
+and this `web/` source are tracked, so the generated hashed bundle is never
+committed (see the heads-up below for the one tracked file the build rewrites).
+`vite.config.js` sets `base: "/ui/"` so asset URLs resolve under the `/ui/`
+subtree.
 
 To build a binary with the real console embedded:
 
@@ -58,6 +59,22 @@ make build-orchestrator       # embed it
 # or, in one step:
 make build-orchestrator-ui
 ```
+
+> **Heads-up — `make ui` dirties your working tree.** The hashed JS/CSS are
+> git-ignored, but `index.html` is the one *tracked* path the build also
+> overwrites (Vite emits its own `index.html` pointing at the hashed bundle).
+> So after `make ui`, `git status` shows `internal/ui/assets/index.html` as
+> modified — that diff is build output and **must not be committed**: a
+> committed build-output `index.html` references hashes that aren't in git, so a
+> clean checkout 404s every console asset. Restore the placeholder when you're
+> done:
+>
+> ```bash
+> git checkout -- internal/ui/assets/index.html
+> ```
+>
+> The `go` CI lane guards this — it fails if the checked-in `index.html` is no
+> longer the placeholder.
 
 ## Go-only contributors
 

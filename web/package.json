@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "description": "Embedded operator/tester web console for Persatrix (RFC 0048, Slice 1). Static Svelte SPA served same-origin under /ui by the orchestrator (--enable-ui).",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

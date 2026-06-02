@@ -30,6 +30,16 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Guard the //go:embed placeholder. `make ui` overwrites the tracked
+      # internal/ui/assets/index.html with Vite build output that references
+      # gitignored hashed bundles; if that output is ever committed, a clean
+      # checkout embeds an index.html pointing at assets that aren't in git —
+      # 404-ing every console asset while this Go-only lane still builds green.
+      # Assert the checked-in file is still the placeholder so that mistake fails
+      # CI loudly instead of shipping a broken embed.
+      - name: Assert UI embed is the committed placeholder (not build output)
+        run: grep -q "Web console assets are not built" internal/ui/assets/index.html
+
       - name: Build orchestrator
         run: go build ./cmd/orchestrator
 

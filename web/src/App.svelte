@@ -99,6 +99,8 @@
       <button
         type="button"
         role="tab"
+        id="tab-{panel.name}"
+        aria-controls="panel-{panel.name}"
         aria-selected={panel.name === activeName}
         onclick={() => selectTab(panel)}
       >
@@ -107,11 +109,25 @@
     {/each}
   </div>
 
+  <!-- The content region is the tabpanel for whichever tab is active;
+       id/aria-labelledby track activeName so the tab↔panel relationship is
+       complete for assistive tech (the tabs advertise aria-controls to match).
+       The role lives on a generic <div> rather than <main> so a non-interactive
+       landmark isn't given an interactive role; tabindex makes the panel
+       keyboard-reachable even when its content has no focusable element (ARIA
+       APG tabs pattern). -->
   <main class="content">
-    {#if ActiveComponent}
-      <ActiveComponent {userId} />
-    {:else}
-      <p class="boot">No panels are enabled for this deployment.</p>
-    {/if}
+    <div
+      role="tabpanel"
+      id="panel-{activeName}"
+      aria-labelledby="tab-{activeName}"
+      tabindex="0"
+    >
+      {#if ActiveComponent}
+        <ActiveComponent {userId} />
+      {:else}
+        <p class="boot">No panels are enabled for this deployment.</p>
+      {/if}
+    </div>
   </main>
 {/if}

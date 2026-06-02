@@ -41,4 +41,20 @@ describe("loadBootstrap", () => {
 
     await expect(loadBootstrap()).rejects.toBeInstanceOf(ApiError);
   });
+
+  it("wraps a transport failure as an ApiError with status 0 and the underlying cause", async () => {
+    // fetch rejecting (DNS failure, offline, CORS) is distinct from a non-2xx
+    // response: status 0 marks "couldn't reach the backend at all", and the
+    // original error must be preserved as `cause` for diagnosis rather than
+    // silently dropped.
+    const cause = new TypeError("Failed to fetch");
+    const fetchMock = vi.fn(() => Promise.reject(cause));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await loadBootstrap().catch((e) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(0);
+    expect(error.cause).toBe(cause);
+  });
 });
