@@ -1,0 +1,25 @@
+{
+  "name": "persatrix-web-console",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Embedded operator/tester web console for Persatrix (RFC 0048, Slice 1). Static Svelte SPA served same-origin under /ui by the orchestrator (--enable-ui).",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@testing-library/svelte": "^5.2.6",
+    "jsdom": "^25.0.1",
+    "svelte": "^5.19.0",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
+  }
+}

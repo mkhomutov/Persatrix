@@ -47,6 +47,10 @@ htmlcov/
 # PR review reports (local analysis artifacts)
 docs/pr-reviews/
 orchestrator.exe
+# Root-anchored: `go build ./cmd/orchestrator` (the README/CI build step) drops a
+# bare `orchestrator` binary in the repo root. Anchored with a leading slash so
+# it never shadows the tracked cmd/orchestrator/ package directory.
+/orchestrator
 .last_run_id
 
 # RFC 0048 Phase 1 (D2): the web-console embed dir holds only the committed
@@ -55,5 +59,22 @@ orchestrator.exe
 # artifacts that must never be committed. These rules live here, not in a
 # co-located internal/ui/assets/.gitignore, so the `//go:embed all:assets` tree
 # embeds only web assets and never serves a VCS file at /ui/.gitignore.
+#
+# Caveat: index.html below is the one tracked path the build also OVERWRITES
+# (Vite emits its own index.html referencing the hashed bundle). So after
+# `make ui` the working tree shows index.html as modified — that diff is build
+# output and must NOT be committed: a committed build-output index.html points
+# at gitignored hashes that are absent on a clean checkout, 404-ing every asset
+# and erasing the placeholder. The `go` CI lane guards this by asserting the
+# checked-in index.html is still the placeholder. After a local `make ui`, run
+# `git checkout -- internal/ui/assets/index.html` to restore it.
 internal/ui/assets/*
 !internal/ui/assets/index.html
+
+# RFC 0048 Phase 1 PR 3: the web/ frontend toolchain. node_modules/ is covered
+# by the global rule above; these catch the Vite caches and any stray local
+# build output (`make ui` writes the bundle into internal/ui/assets/, ignored
+# above — not into web/). Only web/ source + the committed lockfile are tracked.
+web/node_modules/
+web/dist/
+web/.vite/

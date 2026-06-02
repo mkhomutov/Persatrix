@@ -30,11 +30,60 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Guard the //go:embed placeholder. `make ui` overwrites the tracked
+      # internal/ui/assets/index.html with Vite build output that references
+      # gitignored hashed bundles; if that output is ever committed, a clean
+      # checkout embeds an index.html pointing at assets that aren't in git —
+      # 404-ing every console asset while this Go-only lane still builds green.
+      # Assert the checked-in file is still the placeholder so that mistake fails
+      # CI loudly instead of shipping a broken embed.
+      - name: Assert UI embed is the committed placeholder (not build output)
+        run: grep -q "Web console assets are not built" internal/ui/assets/index.html
+
       - name: Build orchestrator
         run: go build ./cmd/orchestrator
 
       - name: Run Go tests
         run: go test ./internal/... -v -race -cover
+
+  web-console:
+    # RFC 0048 Phase 1 PR 3 — the embedded web console's JS toolchain (the
+    # repo's 4th language). This is the *release/asset* lane: it runs the
+    # frontend unit tests, builds the real Svelte/Vite bundle into
+    # internal/ui/assets/, and confirms the orchestrator compiles with that
+    # bundle embedded. The Go-only `go` job above stays Node-free and builds
+    # against the committed placeholder embed, so a Go-only contributor is
+    # never blocked on the JS toolchain (v0.3.6-plan §Risk).
+    name: Web console (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Drive the web build through the same `make` targets the README hands
+      # contributors and a release runs, so CI exercises the documented
+      # interface, not a parallel set of raw npm commands. Each target is
+      # self-contained (`npm ci && …`): `ui-test` installs deps and runs Vitest,
+      # `ui` reinstalls and builds. The second `npm ci` is the cost of `ui`
+      # being a real release-build command; it is served fast by the setup-node
+      # npm cache configured above.
+      - name: Run web console unit tests
+        run: make ui-test
+
+      - name: Build web console bundle
+        run: make ui
+
+      - name: Build orchestrator with the real bundle embedded
+        run: go build ./cmd/orchestrator
 
   proto-staleness:
     name: Proto staleness check
