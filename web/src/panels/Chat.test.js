@@ -1,0 +1,212 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  render,
+  screen,
+  waitFor,
+  cleanup,
+  fireEvent,
+} from "@testing-library/svelte";
+import Chat from "./Chat.svelte";
+
+// The chat panel renders over today's synchronous chat API (RFC 0048 PR 4): it
+// lists personas, sends a message as the context-derived user, and shows the
+// reply. The backend client is mocked so the panel's wiring — picker, send,
+// thinking state, error surfacing, session/epoch pass-through, and the §F
+// identity rule — is exercised without a running orchestrator.
+vi.mock("../lib/api.js", () => ({
+  ApiError: class ApiError extends Error {
+    constructor(message, status, options) {
+      super(message, options);
+      this.name = "ApiError";
+      this.status = status;
+    }
+  },
+  listAgents: vi.fn(),
+  sendChat: vi.fn(),
+}));
+
+import { listAgents, sendChat, ApiError } from "../lib/api.js";
+
+const AGENTS = [
+  { id: "alice", name: "Alice", status: "healthy" },
+  { id: "bob", name: "Bob", status: "healthy" },
+];
+
+function reply(overrides = {}) {
+  return {
+    reply: "Hello, human.",
+    chat_session_id: "cs-1",
+    agent_id: "alice",
+    timestamp: 1717000000,
+    agent_display_name: "Alice",
+    reply_status: "ok",
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  listAgents.mockResolvedValue(AGENTS);
+  sendChat.mockResolvedValue(reply());
+});
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+describe("Chat panel", () => {
+  it("populates the persona picker from GET /api/v1/agents on mount", async () => {
+    render(Chat, { props: { userId: "local" } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "Alice" })).toBeTruthy();
+    });
+    expect(screen.getByRole("option", { name: "Bob" })).toBeTruthy();
+    expect(listAgents).toHaveBeenCalledOnce();
+  });
+
+  it("sends the message for the selected persona as the context-derived user", async () => {
+    render(Chat, { props: { userId: "local" } });
+
+    await screen.findByRole("option", { name: "Alice" });
+    const picker = screen.getByRole("combobox", { name: /persona/i });
+    await fireEvent.change(picker, { target: { value: "bob" } });
+    const message = screen.getByRole("textbox", { name: /message/i });
+    await fireEvent.input(message, { target: { value: "Hi Bob" } });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(sendChat).toHaveBeenCalledWith("bob", {
+        message: "Hi Bob",
+        userId: "local",
+      });
+    });
+  });
+
+  it("renders the agent's reply after a send", async () => {
+    render(Chat, { props: { userId: "local" } });
+
+    await screen.findByRole("option", { name: "Alice" });
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "Hi" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/hello, human\./i)).toBeTruthy();
+    });
+  });
+
+  it("shows a thinking state while the reply is in flight, then clears it", async () => {
+    // Slice 1 chat is synchronous (no streaming, OQ5); the panel must show a
+    // pending affordance until the reply lands so a slow agent doesn't read as a
+    // frozen UI. Hold the promise open to observe the state, then resolve it.
+    let resolveReply;
+    sendChat.mockReturnValue(
+      new Promise((resolve) => {
+        resolveReply = resolve;
+      }),
+    );
+
+    render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Alice" });
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "Hi" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
+
+    resolveReply(reply());
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  });
+
+  it("surfaces the server error envelope without crashing the panel", async () => {
+    sendChat.mockRejectedValue(
+      new ApiError("message exceeds maximum length of 4000 characters", 400),
+    );
+
+    render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Alice" });
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "x" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/maximum length/i);
+    // The panel stays usable: the message box and send control are still there.
+    expect(screen.getByRole("textbox", { name: /message/i })).toBeTruthy();
+  });
+
+  it("passes the optional session and epoch overrides through to the request", async () => {
+    // The chat API already accepts session_id / epoch_id (RFC 0031 / ISSUE-0085);
+    // surfacing them quietly demonstrates the v0.3.5 isolation story.
+    render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Alice" });
+
+    await fireEvent.input(screen.getByRole("textbox", { name: /session/i }), {
+      target: { value: "sess-7" },
+    });
+    await fireEvent.input(screen.getByRole("textbox", { name: /epoch/i }), {
+      target: { value: "ep-3" },
+    });
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "Hi" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(sendChat).toHaveBeenCalledWith("alice", {
+        message: "Hi",
+        userId: "local",
+        sessionId: "sess-7",
+        epochId: "ep-3",
+      });
+    });
+  });
+
+  it("acts as the context principal and offers no free-text user field", async () => {
+    // RFC §F rule 1: identity is the /ui/context principal threaded in as a prop;
+    // the panel must never expose a user_id input the operator could type into.
+    const { container } = render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Alice" });
+
+    expect(screen.getByText(/local/)).toBeTruthy();
+    expect(container.querySelector('input[name="user_id"]')).toBeNull();
+  });
+
+  it("guards over-length messages client-side before any round-trip", async () => {
+    // Mirror the server's 4000-char rejection so the user gets immediate
+    // feedback; the server still enforces, but the panel shouldn't burn a
+    // round-trip on input it knows is invalid.
+    render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Alice" });
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "a".repeat(4001) },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(sendChat).not.toHaveBeenCalled();
+  });
+
+  it("disables send until a message is entered", async () => {
+    render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Alice" });
+
+    expect(screen.getByRole("button", { name: /send/i }).disabled).toBe(true);
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "Hi" },
+    });
+    expect(screen.getByRole("button", { name: /send/i }).disabled).toBe(false);
+  });
+
+  it("surfaces a persona-load failure as an error state", async () => {
+    listAgents.mockRejectedValue(new ApiError("backend down", 503));
+
+    render(Chat, { props: { userId: "local" } });
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+  });
+});

@@ -75,6 +75,76 @@ body {
   padding: 1.5rem;
 }
 
+/* Chat panel (RFC 0048 Phase 1 PR 4). Still deliberately minimal — enough
+   structure to read a conversation and reach the composer, no design system. */
+.transcript {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.turn p {
+  margin: 0.15rem 0;
+}
+
+.from-agent.reply-error {
+  /* A reply_status:"error" turn (e.g. a budget denial surfaced as a 200 with an
+     error envelope, chat_handler.go ISSUE-0065) is still a rendered reply, just
+     flagged so it doesn't read as a normal answer. Paired for the dark scheme
+     for the same reason .boot.error is. */
+  color: #b00020;
+  color: light-dark(#b00020, #ff8a80);
+}
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 40rem;
+}
+
+.composer label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.9rem;
+}
+
+.composer textarea,
+.composer select,
+.composer input {
+  font: inherit;
+  padding: 0.3rem;
+}
+
+.composer button {
+  align-self: flex-start;
+  font: inherit;
+  padding: 0.4rem 1rem;
+  cursor: pointer;
+}
+
+.composer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.overrides {
+  font-size: 0.85rem;
+}
+
+.overrides label {
+  margin-top: 0.4rem;
+}
+
+.thinking {
+  opacity: 0.7;
+  font-style: italic;
+}
+
 .boot.error {
   /* The boot-error state is exactly when legibility matters most, and :root
      opts into `color-scheme: light dark`, so the page may render dark. A fixed
