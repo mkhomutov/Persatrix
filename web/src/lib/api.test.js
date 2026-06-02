@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { loadBootstrap, ApiError } from "./api.js";
+import { loadBootstrap, listAgents, sendChat, ApiError } from "./api.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -78,6 +78,146 @@ describe("loadBootstrap", () => {
 
     expect(error).toBeInstanceOf(ApiError);
     expect(error.status).toBe(200);
+    expect(error.cause).toBe(cause);
+  });
+});
+
+describe("listAgents", () => {
+  it("fetches the agent list and returns the array", async () => {
+    const agents = [
+      { id: "alice", name: "Alice", status: "healthy" },
+      { id: "bob", name: "Bob", status: "healthy" },
+    ];
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(agents)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await listAgents();
+
+    expect(result).toEqual(agents);
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/agents");
+  });
+
+  it("throws an ApiError when the list endpoint responds non-2xx", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({}, false, 500)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listAgents()).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("sendChat", () => {
+  // The chat endpoint is the one write Slice 1's chat panel issues. The client
+  // owns the wire contract the panel must not get wrong: the path, the JSON
+  // content-type the handler's requireJSON guard demands, the
+  // participant_type:"user" tag (RFC 0011 amendment — omitting it would record
+  // the human peer as an agent), and the /ui/context-derived user_id (RFC §F
+  // rule 1 — never free-text). The panel passes intent; the client serialises it.
+  function chatReply(overrides = {}) {
+    return {
+      reply: "Hello there.",
+      chat_session_id: "cs-1",
+      agent_id: "alice",
+      timestamp: 1717000000,
+      agent_display_name: "Alice",
+      reply_status: "ok",
+      ...overrides,
+    };
+  }
+
+  it("POSTs JSON to the agent's chat route and returns the parsed reply", async () => {
+    const reply = chatReply();
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(reply)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await sendChat("alice", { message: "Hi", userId: "local" });
+
+    expect(result).toEqual(reply);
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/agents/alice/chat");
+    expect(init.method).toBe("POST");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+  });
+
+  it("encodes the agent id into the request path", async () => {
+    // The id is interpolated into the URL path; in practice it comes from the
+    // server's own agent list (a constrained registry key), but encoding it
+    // keeps the client robust against any id carrying a path-significant
+    // character rather than leaning on that assumption.
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(chatReply())));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendChat("a/b c", { message: "Hi", userId: "local" });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/agents/a%2Fb%20c/chat");
+  });
+
+  it("sends the message, the context user_id, and participant_type:user", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(chatReply())));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendChat("alice", { message: "Hi", userId: "local" });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.message).toBe("Hi");
+    expect(body.user_id).toBe("local");
+    expect(body.participant_type).toBe("user");
+  });
+
+  it("passes session_id and epoch_id through only when supplied", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(chatReply())));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendChat("alice", {
+      message: "Hi",
+      userId: "local",
+      sessionId: "sess-7",
+      epochId: "ep-3",
+    });
+    const withOverrides = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(withOverrides.session_id).toBe("sess-7");
+    expect(withOverrides.epoch_id).toBe("ep-3");
+
+    await sendChat("alice", { message: "Hi", userId: "local" });
+    const without = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect("session_id" in without).toBe(false);
+    expect("epoch_id" in without).toBe(false);
+  });
+
+  it("surfaces the server error envelope (message + code) on a 4xx", async () => {
+    // chat_handler.go rejects an over-length message with a {error, code}
+    // envelope; the panel must show the server's own wording, not a generic
+    // failure, so the client lifts `error` onto the ApiError message and `code`
+    // onto the instance.
+    const envelope = {
+      error: "message exceeds maximum length of 4000 characters",
+      code: "BAD_REQUEST",
+    };
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(jsonResponse(envelope, false, 400)),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await sendChat("alice", { message: "x", userId: "local" }).catch(
+      (e) => e,
+    );
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(400);
+    expect(error.code).toBe("BAD_REQUEST");
+    expect(error.message).toContain("maximum length");
+  });
+
+  it("wraps a transport failure as an ApiError with status 0", async () => {
+    const cause = new TypeError("Failed to fetch");
+    const fetchMock = vi.fn(() => Promise.reject(cause));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await sendChat("alice", { message: "Hi", userId: "local" }).catch(
+      (e) => e,
+    );
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(0);
     expect(error.cause).toBe(cause);
   });
 });
