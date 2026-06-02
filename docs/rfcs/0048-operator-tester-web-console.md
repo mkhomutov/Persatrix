@@ -111,7 +111,7 @@ Why same-origin embedding wins, grounded in the current code:
 | Separate-origin SPA (own deploy) | Decoupled release cadence | Forces CORS + credentialed cross-origin auth now; breaks single-binary try-ability | Rejected |
 | Reuse Grafana/Jaeger only | Cheapest | Cannot show memory-tier, isolation, or interactive chat — none are metrics | Rejected (insufficient) |
 
-**Framework**: a minimal-runtime SPA framework (e.g. Svelte/SolidJS/Preact) whose build output is plain static files. The exact framework is an [Open Question](#open-questions); the architecture does not depend on it, since the contract is "static assets embedded behind `WithUI`."
+**Framework**: **Svelte** (plain Svelte + Vite, emitting plain static files) — chosen for the smallest mental model and minimal runtime, best suited to the community-growth / frontend-contributor-lane goal (see [Open Questions](#open-questions) for the resolved trade-off vs Preact/SolidJS). The architecture does not depend on this choice, since the contract is "static assets embedded behind `WithUI`."
 
 **Serving sketch** (mirrors existing nil-safe handler gating):
 
@@ -153,7 +153,7 @@ Each panel is gated independently so slices ship dark and operators opt in per d
   ```
 
 - **Client behavior.** On load the SPA fetches `/api/v1/ui/config` and renders only `enabled && available` panels. Unknown panels are ignored, so an older binary serving a newer asset bundle (or vice versa) degrades gracefully.
-- **Toggle source.** Panel enablement is set via flags/config alongside `--enable-ui` (e.g. a `ui.yaml` or repeated `--ui-panel=chat` flags — exact surface is a minor [Open Question](#open-questions)). Defaults: Slice 1 panels on, everything else off.
+- **Toggle source.** Panel enablement is set via **`config/ui.yaml`** alongside `--enable-ui`, consistent with the existing `config/*.yaml` convention (`channels.yaml`, `bridges.yaml`, `agents.yaml`) and its absent-file→`503` degradation, with `config/environments/*` overrides applying as they do for other config. Defaults: Slice 1 panels on, everything else off.
 
 This is the mechanism that makes "vertical slices" real: a half-built Memory Inspector can merge to `main` shipped-dark, exercised in tests, and flipped on only when ready.
 
@@ -171,10 +171,10 @@ Slice 1 delivers the "feel the taste" moment with three panels, all over today's
 - **Live view by polling** (no channel-push API exists today): the panel polls the messages endpoint on a bounded interval (default ~2–3 s) and appends new messages, pausing polling when the tab is backgrounded and backing off on errors so idle browser tabs do not hammer the unauthenticated localhost surface. A real-time channel SSE/WebSocket is a named later enhancement, not a Slice-1 dependency.
 - Optional: `POST /api/v1/channels/{id}/messages` to let a human post into a group channel and watch agents respond (reuses the mention fan-out already in RFC 0011).
 
-**3. Memory strip (stretch within Slice 1)** — make persistence *visible*.
-- A compact "what I remember about you" strip beside the chat: the persona's relationship/trust standing and a few recalled facts/notes about the current `user_id`.
-- This is the single cheapest way to prove "not a chatbot": send a message, reload, see yourself remembered.
-- **Depends on a read-only memory endpoint that does not exist yet** (see [API Gaps](#g-api-gaps--required-backend-work)). If that endpoint slips, Slice 1 ships chat + channel timeline only, and the memory strip becomes the bridge into Slice 2 (Memory Inspector). The strip is behind its own `memory_strip` toggle precisely so it can land later without reworking Slice 1.
+**3. Memory strip — deferred to Slice 2 (decided).**
+- The intended panel: a compact "what I remember about you" strip beside the chat — the persona's relationship/trust standing and a few recalled facts/notes about the current `user_id` — the cheapest way to prove "not a chatbot."
+- **Decision (2026-06-02): deferred to Slice 2.** It depends on a read-only memory endpoint that does not exist yet, and that endpoint is a new gRPC read method into the Python `agents/memory/` tiers (a Go↔Python boundary crossing with its own scope-filter design), not a thin handler — see [API Gaps](#g-api-gaps--required-backend-work). Deferring keeps Slice 1 (chat + channel timeline) small and shippable in v0.3.6.
+- The strip remains behind its own `memory_strip` toggle, so it lands in Slice 2 with **zero rework** to Slice 1. In the meantime, the persona's recall is already visible *in its chat replies*.
 
 **Session/epoch awareness**: the chat panel exposes optional session and epoch selectors (the API already accepts `session_id`/`epoch_id`), so even Slice 1 quietly demonstrates the v0.3.5 isolation story for curious testers.
 
@@ -235,7 +235,7 @@ Everything else Slice 1 uses (chat, channel list/history/publish, agent list/inf
 3. SPA scaffold (chosen framework) with the toggle/context bootstrap.
 4. **Chat panel** over `POST /api/v1/agents/{id}/chat` with persona picker and optional session/epoch selectors.
 5. **Channel timeline panel** over `GET /api/v1/channels/{id}/messages` with interval polling + optional human publish.
-6. **Memory strip** (behind `memory_strip` toggle) — *only if* the read-only memory endpoint lands this phase; otherwise deferred to Slice 2 with no rework to 1–5.
+6. ~~Memory strip~~ — **deferred to Slice 2 (decided 2026-06-02)**; the `memory_strip` toggle ships defaulting off, so the panel lands in Slice 2 with no rework to 1–5.
 7. Docs: a `docs/guides/web-console.md` quick-start; README "try it in the browser" entry.
 
 **Dependencies**: RFC 0002, RFC 0011, RFC 0016 (all implemented). No dependency on RFC 0039.
@@ -274,11 +274,11 @@ Everything else Slice 1 uses (chat, channel list/history/publish, agent list/inf
 ## Open Questions
 
 1. **SPA framework** — Svelte vs SolidJS vs Preact (minimal-runtime, static build). Does not affect the embedding contract.
-   **Resolution**: pending — decide before Phase 1 implementation.
+   **Resolution**: **Svelte (decided 2026-06-02)** — smallest mental model + minimal runtime, best fit for the community-growth/contributor-lane goal. Preact (React-compatible, largest contributor pool) was the runner-up and stays the fallback if React familiarity later outweighs simplicity; the framework-agnostic `WithUI` contract keeps the switch cheap.
 2. **Toggle surface** — `ui.yaml` config file vs repeated `--ui-panel=` flags vs env vars for per-panel enablement.
-   **Resolution**: pending — lean toward a small `ui.yaml` consistent with `channels.yaml`/`wallet.yaml`.
+   **Resolution**: **`config/ui.yaml` (decided 2026-06-02)** — consistent with the existing `config/*.yaml` convention (`channels.yaml`, `bridges.yaml`, `agents.yaml`) and the `config/environments/*` override mechanism.
 3. **Read-only memory endpoint** — land in Phase 1 (enables the memory strip) or defer to Slice 2? Shape and scope filters (`user_id`, `session_id`, `epoch_id`).
-   **Resolution**: pending — gate on Phase 1 effort budget.
+   **Resolution**: **Deferred to Slice 2 (decided 2026-06-02)** — it is a new gRPC read method into the Python `agents/memory/` tiers, not a thin handler, and deserves its own design pass; deferring keeps Slice 1 shippable in v0.3.6. The `memory_strip` toggle ships off so the panel lands additively.
 4. **Channel real-time** — design a channel SSE/WebSocket (reusing the log-stream SSE pattern) as a fast-follow, or keep polling indefinitely for Slice 1?
    **Resolution**: deferred — Slice 1 polls; revisit after Slice 1 lands.
 5. **Chat token streaming** — the chat endpoint is synchronous today; is a streaming variant worth adding for UI feel, and when?
@@ -286,7 +286,16 @@ Everything else Slice 1 uses (chat, channel list/history/publish, agent list/inf
 
 ## Decision / Next Steps
 
-Status is **Draft**. Requested decisions before Phase 1 begins: confirm the embedded same-origin SPA approach (Section B), resolve Open Questions 1–3, and confirm v0.3.6 as the Slice-1 target. On acceptance, the next artifact is a Phase 1 PR plan (`0048-phase1-pr-plan.md`) decomposing the scaffold + Interactions slice into reviewable PRs.
+Status is **Draft**. The decisions requested before Phase 1 are now resolved (2026-06-02):
+
+- **Embedded same-origin SPA (Section B): confirmed.**
+- **OQ1 — framework: Svelte.**
+- **OQ2 — toggle surface: `config/ui.yaml`.**
+- **OQ3 — read-only memory endpoint / memory strip: deferred to Slice 2.** Slice 1 ships chat + channel timeline.
+- **Slice-1 target: v0.3.6, confirmed.**
+- **OQ4 (channel real-time) and OQ5 (chat token streaming): remain deferred** — Slice 1 polls and uses request/response chat.
+
+With these settled, the next artifact is a Phase 1 PR plan (`0048-phase1-pr-plan.md`) decomposing the scaffold + Interactions slice (chat + channel timeline) into reviewable PRs. (Author may flip the status from Draft to Accepted/Proposed per the RFC process once this is reviewed.)
 
 ## Related Documentation
 
