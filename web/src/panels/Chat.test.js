@@ -153,6 +153,39 @@ describe("Chat panel", () => {
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
   });
 
+  it("locks the composer while a reply is in flight and keeps the pending text", async () => {
+    // The turn is synchronous; the composer stays editable today, so a message
+    // the operator keeps typing while "Waiting for a reply…" is silently wiped
+    // by the post-send `message = ""`, and the persona could be switched out from
+    // under the in-flight turn. Disable the composer inputs for the duration so
+    // the pending text survives and the reply can't be misattributed, then
+    // re-enable once the reply lands.
+    let resolveReply;
+    sendChat.mockReturnValue(
+      new Promise((resolve) => {
+        resolveReply = resolve;
+      }),
+    );
+
+    render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Alice" });
+    const message = screen.getByRole("textbox", { name: /message/i });
+    await fireEvent.input(message, { target: { value: "Hi" } });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => expect(message.disabled).toBe(true));
+    expect(screen.getByRole("combobox", { name: /persona/i }).disabled).toBe(
+      true,
+    );
+    // The in-flight prompt is still in the box, not cleared early.
+    expect(message.value).toBe("Hi");
+
+    resolveReply(reply());
+    await waitFor(() => expect(message.disabled).toBe(false));
+    // Cleared only after a successful turn.
+    expect(message.value).toBe("");
+  });
+
   it("shows a placeholder for an empty reply instead of a blank line", async () => {
     // The server can answer with reply_status:"empty" and an empty `reply`
     // (chat_handler.go) — a valid turn where the agent had nothing to say.
@@ -304,6 +337,39 @@ describe("Chat panel", () => {
 
     await screen.findByRole("option", { name: "Alice" });
     expect(screen.getByRole("option", { name: "Carol (offline)" })).toBeTruthy();
+  });
+
+  it("defaults the picker to the first healthy persona, skipping a non-healthy one", async () => {
+    // Only a healthy persona can reply (chat_handler.go → 503 otherwise). When
+    // the first-listed persona is offline, defaulting to it strands a newcomer on
+    // a guaranteed-503 dead end. Skip to the first healthy one so the default
+    // selection is always sendable; an all-unhealthy list still falls back to the
+    // first entry (nothing better to offer).
+    listAgents.mockResolvedValue([
+      { id: "carol", name: "Carol", status: "offline" },
+      { id: "alice", name: "Alice", status: "healthy" },
+    ]);
+
+    render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Alice" });
+
+    expect(screen.getByRole("combobox", { name: /persona/i }).value).toBe(
+      "alice",
+    );
+  });
+
+  it("falls back to the first persona when none are healthy", async () => {
+    listAgents.mockResolvedValue([
+      { id: "carol", name: "Carol", status: "offline" },
+      { id: "dave", name: "Dave", status: "starting" },
+    ]);
+
+    render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Carol (offline)" });
+
+    expect(screen.getByRole("combobox", { name: /persona/i }).value).toBe(
+      "carol",
+    );
   });
 
   it("measures message length by code point, matching the server's rune limit", async () => {

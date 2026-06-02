@@ -54,10 +54,15 @@
       .then((list) => {
         if (token !== loadToken) return;
         agents = list;
-        // Default the picker to the first persona so a newcomer can send
-        // immediately without first opening the dropdown.
+        // Default the picker to the first *healthy* persona so a newcomer can
+        // send immediately and the default landing isn't a guaranteed 503 (the
+        // chat route only answers for a healthy persona; an offline one is a dead
+        // end). Fall back to the first entry when none are healthy — there's
+        // nothing more sendable to offer, and the status annotation already warns
+        // why a send may fail.
         if (list.length > 0) {
-          selectedAgent = list[0].id;
+          const healthy = list.find((agent) => agent.status === "healthy");
+          selectedAgent = (healthy ?? list[0]).id;
         }
       })
       .catch((err) => {
@@ -194,9 +199,15 @@
     {/if}
 
     <form class="composer" onsubmit={onSubmit}>
+      <!-- The whole composer locks while a turn is in flight (`sending`): the
+           chat call is synchronous, so leaving it editable lets the operator
+           keep typing into a message that the post-send reset then wipes, or
+           switch persona out from under the pending reply. Disabling for the
+           round-trip keeps the in-flight text and pins the turn to its persona;
+           the "Waiting for a reply…" status says why. -->
       <label>
         Persona
-        <select bind:value={selectedAgent}>
+        <select bind:value={selectedAgent} disabled={sending}>
           {#each agents as agent (agent.id)}
             <option value={agent.id}>{agentLabel(agent)}</option>
           {/each}
@@ -209,6 +220,7 @@
           bind:value={message}
           rows="3"
           placeholder="Say something to the persona…"
+          disabled={sending}
         ></textarea>
       </label>
 
@@ -219,11 +231,21 @@
         <summary>Scope (optional)</summary>
         <label>
           Session ID
-          <input type="text" bind:value={sessionId} autocomplete="off" />
+          <input
+            type="text"
+            bind:value={sessionId}
+            autocomplete="off"
+            disabled={sending}
+          />
         </label>
         <label>
           Epoch ID
-          <input type="text" bind:value={epochId} autocomplete="off" />
+          <input
+            type="text"
+            bind:value={epochId}
+            autocomplete="off"
+            disabled={sending}
+          />
         </label>
       </details>
 
