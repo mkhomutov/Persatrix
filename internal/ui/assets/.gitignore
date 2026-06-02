@@ -1,8 +1,0 @@
-# RFC 0048 Phase 1 (D2): only the committed placeholder index.html and this
-# .gitignore are tracked. PR 3's `make ui` writes the real Svelte/Vite bundle
-# (hashed JS/CSS, .vite/, etc.) into this directory — those are build artifacts
-# and must never be committed. A clean checkout has only the placeholder; a
-# release build has the real bundle; they never coexist in git.
-*
-!.gitignore
-!index.html

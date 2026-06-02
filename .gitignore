@@ -48,3 +48,12 @@ htmlcov/
 docs/pr-reviews/
 orchestrator.exe
 .last_run_id
+
+# RFC 0048 Phase 1 (D2): the web-console embed dir holds only the committed
+# placeholder index.html in git. PR 3's `make ui` writes the real Svelte/Vite
+# bundle (hashed JS/CSS, .vite/, etc.) into internal/ui/assets/ — build
+# artifacts that must never be committed. These rules live here, not in a
+# co-located internal/ui/assets/.gitignore, so the `//go:embed all:assets` tree
+# embeds only web assets and never serves a VCS file at /ui/.gitignore.
+internal/ui/assets/*
+!internal/ui/assets/index.html
