@@ -33,6 +33,12 @@
   // history fetch) — a reload starts a fresh transcript, which is the expected
   // shape for a synchronous chat panel.
   let transcript = $state([]);
+  // Each turn carries a stable id for the {#each} key. The transcript is
+  // append-only today, so an array-index key would render identically — but a
+  // monotonic id keeps the keyed list correct if a later slice ever inserts,
+  // reorders, or rolls back a turn (e.g. an optimistic send), with no behavioural
+  // change now.
+  let nextTurnId = 0;
 
   const canSend = $derived(
     Boolean(selectedAgent) && message.trim().length > 0 && !sending,
@@ -133,6 +139,7 @@
       transcript = [
         ...transcript,
         {
+          id: nextTurnId++,
           prompt: text,
           reply: response.reply,
           agent: response.agent_display_name || selectedAgent,
@@ -194,7 +201,7 @@
     <p class="empty">No personas are registered yet.</p>
   {:else}
     <ol class="transcript" aria-label="Conversation">
-      {#each transcript as turn, i (i)}
+      {#each transcript as turn (turn.id)}
         <li class="turn">
           <p class="from-user"><strong>You:</strong> {turn.prompt}</p>
           <p
