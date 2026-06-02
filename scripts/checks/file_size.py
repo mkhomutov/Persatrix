@@ -35,7 +35,7 @@ DEFAULT_MAX_RFC_WORDS = 8000
 
 _RFC_PREFIX = "docs/rfcs/"
 
-CODE_EXTENSIONS = [".go", ".py", ".rs", ".js", ".ts", ".yaml", ".toml"]
+CODE_EXTENSIONS = [".go", ".py", ".rs", ".js", ".ts", ".svelte", ".css", ".yaml", ".toml"]
 DOC_EXTENSIONS = [".md"]
 
 _EXTRA_EXCLUDES = [
