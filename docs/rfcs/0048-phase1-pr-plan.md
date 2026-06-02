@@ -339,7 +339,7 @@ Tracking pointers only; each is its own design pass + PR plan ([RFC §E](0048-op
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 1 | `WithUI` ServerOption + embed package + static serving | `feature/v036-rfc0048p1-withui-scaffold` | ⬜ Not started | — | — |
+| 1 | `WithUI` ServerOption + embed package + static serving | `feature/v036-rfc0048p1-withui-scaffold` | 🔀 PR open | — | — |
 | 2 | UI config/context endpoints + `config/ui.yaml` + schema | `feature/v036-rfc0048p1-config-context` | ⬜ Not started | — | — |
 | 3 | JS toolchain + Svelte shell + build step | `feature/v036-rfc0048p1-spa-shell` | ⬜ Not started | — | — |
 | 4 | Chat panel | `feature/v036-rfc0048p1-chat-panel` | ⬜ Not started | — | — |

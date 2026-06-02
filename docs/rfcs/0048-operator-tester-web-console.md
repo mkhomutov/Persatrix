@@ -3,7 +3,7 @@ id: RFC-0048
 title: "Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI)"
 summary: "Embedded same-origin web console for operators and testers, shipped as feature-toggled vertical slices; first slice is live interactions (chat + channels) to grow the community."
 type: feature
-status: accepted
+status: implementing
 author: Maksim Khomutov
 created: 2026-06-01
 target: "v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5)"
@@ -16,7 +16,7 @@ depends_on:
 # RFC 0048 — Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI)
 
 **Type**: feature  
-**Status**: 👍 Accepted  
+**Status**: 🚧 Implementing  
 **Author**: Maksim Khomutov  
 **Date**: 2026-06-01  
 **Target**: v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5)  

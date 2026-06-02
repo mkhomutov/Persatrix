@@ -359,6 +359,11 @@ func main() {
 	defer chanCleanup()
 	srvOpts = append(srvOpts, chanOpts...)
 
+	// RFC 0048 Phase 1 / Slice 1 — embedded web console (see ui.go).
+	// Off by default; --enable-ui opts in (the enabled path emits its own
+	// security WARN). Appends zero or one WithUI option.
+	srvOpts = append(srvOpts, initUI(*enableUI, logger)...)
+
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir, schedOpts...)
 	logger.Info("scheduler initialized", zap.String("workflowsDir", absWorkflowsDir))
