@@ -33,6 +33,20 @@
     return match ? match.name : panels[0]?.name ?? null;
   }
 
+  // Canonicalise the URL after a deep link that fell back. A non-empty hash that
+  // doesn't name a rendered panel (a stale link, or a known panel that isn't
+  // available in this deployment, e.g. #/memory) resolves to the first panel via
+  // hashPanelName; rewrite the hash to that panel's route so the address bar
+  // matches the tab actually shown. replaceState (not push) keeps it a silent
+  // correction, and the guard leaves a bare /ui/ (empty hash) untouched so a
+  // clean load isn't forced to #/chat.
+  function canonicalizeHash(name) {
+    const panel = panels.find((p) => p.name === name);
+    if (panel && window.location.hash && window.location.hash !== panel.route) {
+      window.history.replaceState(null, "", panel.route);
+    }
+  }
+
   const activePanel = $derived(panels.find((p) => p.name === activeName));
   const ActiveComponent = $derived(
     activePanel ? COMPONENTS[activePanel.name] : null,
@@ -56,6 +70,7 @@
         userId = id;
         panels = selectPanels(config);
         activeName = hashPanelName();
+        canonicalizeHash(activeName);
         status = "ready";
       })
       .catch((err) => {

@@ -263,4 +263,97 @@ describe("App shell boot", () => {
     expect(replaceSpy).not.toHaveBeenCalled();
     replaceSpy.mockRestore();
   });
+
+  it("selects the deep-linked panel on initial load (hash routing)", async () => {
+    // A reload / shared link lands directly on a panel via the hash. The first
+    // rendered tab must be the one the hash names, not the default-first tab —
+    // this is the whole point of the D1 hash-mode routing decision.
+    window.location.hash = "#/channels";
+    loadBootstrap.mockResolvedValue({
+      config: {
+        panels: {
+          chat: { enabled: true, available: true },
+          channel_timeline: { enabled: true, available: true },
+        },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    const channelsTab = await screen.findByRole("tab", { name: /channels/i });
+    expect(channelsTab.getAttribute("aria-selected")).toBe("true");
+    const tabpanel = screen.getByRole("tabpanel");
+    expect(tabpanel.getAttribute("aria-labelledby")).toBe(channelsTab.id);
+  });
+
+  it("rewrites a stale/unavailable deep-link hash to the resolved fallback route", async () => {
+    // Deep-linking to a panel that isn't available in this deployment (#/memory
+    // — known name, but available:false) falls back to the first rendered panel.
+    // The URL must be canonicalised to the panel actually shown (via replace, not
+    // push) so the address bar doesn't dangle a route that resolves to a
+    // different tab.
+    window.location.hash = "#/memory";
+    const replaceSpy = vi.spyOn(window.history, "replaceState");
+    loadBootstrap.mockResolvedValue({
+      config: {
+        panels: {
+          chat: { enabled: true, available: true },
+          memory_strip: { enabled: true, available: false },
+        },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    await screen.findByRole("tab", { name: /chat/i });
+    await waitFor(() => expect(window.location.hash).toBe("#/chat"));
+    expect(replaceSpy).toHaveBeenCalledWith(null, "", "#/chat");
+    replaceSpy.mockRestore();
+  });
+
+  it("does not append a hash on a clean load with no deep link", async () => {
+    // The canonicalisation above must fire only for a non-empty stale hash. A
+    // bare /ui/ visit (no hash) is left untouched — we don't want to push
+    // #/chat onto every clean load.
+    loadBootstrap.mockResolvedValue({
+      config: { panels: { chat: { enabled: true, available: true } } },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    await screen.findByRole("tab", { name: /chat/i });
+    expect(window.location.hash).toBe("");
+  });
+
+  it("switches the active tab when the location hash changes (back/forward nav)", async () => {
+    // The shell registers a hashchange listener so browser Back/Forward (and any
+    // external hash navigation) moves the active tab. Without it, the URL and the
+    // rendered panel would drift apart after a history navigation.
+    loadBootstrap.mockResolvedValue({
+      config: {
+        panels: {
+          chat: { enabled: true, available: true },
+          channel_timeline: { enabled: true, available: true },
+        },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    const chatTab = await screen.findByRole("tab", { name: /chat/i });
+    expect(chatTab.getAttribute("aria-selected")).toBe("true");
+
+    window.location.hash = "#/channels";
+    await fireEvent(window, new HashChangeEvent("hashchange"));
+
+    const channelsTab = screen.getByRole("tab", { name: /channels/i });
+    await waitFor(() =>
+      expect(channelsTab.getAttribute("aria-selected")).toBe("true"),
+    );
+    expect(chatTab.getAttribute("aria-selected")).toBe("false");
+  });
 });
