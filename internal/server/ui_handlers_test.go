@@ -74,6 +74,33 @@ func TestWithUI_RedirectsBareUITrailingSlash(t *testing.T) {
 		"the redirect target must be the /ui/ subtree")
 }
 
+// TestWithUI_NoDirectoryListing hardens the static surface: a bare
+// http.FileServer renders an auto-generated listing for any directory lacking
+// an index.html, which on this deliberately-unauthenticated console surface
+// (RFC 0048 §Security) would expose the bundle's internal file names. PR 3's
+// Svelte/Vite output ships exactly such subdirectories (e.g. _app/, .vite/), so
+// the listing must be a clean 404 while individual hashed assets stay reachable
+// by their direct path. The scaffold today has no subdirs, so this test
+// supplies one via the injected FS to lock the contract before PR 3 relies on
+// it.
+func TestWithUI_NoDirectoryListing(t *testing.T) {
+	fsys := fstest.MapFS{
+		"index.html": &fstest.MapFile{
+			Data: []byte("<!doctype html><title>" + uiTestMarker + "</title>"),
+		},
+		"_app/immutable/chunk.js": &fstest.MapFile{Data: []byte("export const x = 1")},
+	}
+	srv := uiTestServer(t, WithUI(fsys))
+
+	listing := doRequest(srv.Handler(), http.MethodGet, "/ui/_app/immutable/", nil)
+	assert.Equal(t, http.StatusNotFound, listing.Code,
+		"a directory without index.html must 404, not serve a file listing")
+
+	asset := doRequest(srv.Handler(), http.MethodGet, "/ui/_app/immutable/chunk.js", nil)
+	assert.Equal(t, http.StatusOK, asset.Code,
+		"hardening must not break serving hashed assets by their direct path")
+}
+
 // TestWithoutUI_NotFound is the nil-safe gate: with no WithUI option the /ui/
 // route is never registered, so it is a clean 404 and the rest of the surface
 // is untouched.

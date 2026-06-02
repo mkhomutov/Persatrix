@@ -75,19 +75,20 @@ PRs 1–2 are Go + config + schema only — fully testable with no JS toolchain,
 | repo-root `.gitignore` (edit) | Add `internal/ui/assets/*` + `!internal/ui/assets/index.html` so PR 3's generated bundle is **not** committed — the bundle is a build artifact, only the placeholder is tracked. Kept at the repo root (not a co-located `internal/ui/assets/.gitignore`) so the `//go:embed all:assets` tree embeds only web assets and never serves a VCS file at `/ui/.gitignore`. |
 | [`internal/server/server.go`](../../internal/server/server.go) | Add `uiFS fs.FS` field; add `func WithUI(uiFS fs.FS) ServerOption` beside the existing `With*` options (~line 192). In `registerRoutes`, only when `s.uiFS != nil`, register `s.mux.Handle("GET /ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(s.uiFS))))`. (The config/context handlers land in PR 2.) `GET /ui` without trailing slash is redirected to `/ui/` by `net/http`'s subtree pattern — no extra route. |
 | [`cmd/orchestrator/main.go`](../../cmd/orchestrator/main.go) | Add `enableUI = flag.Bool("enable-ui", false, "Serve the embedded web console at /ui (RFC 0048; localhost-only until RFC 0039 auth)")`. When set, append `server.WithUI(ui.Assets())` to `srvOpts` (~line 246, beside the other conditional options). Defaults **off** per [RFC §Security](0048-operator-tester-web-console.md#security-considerations). |
-| `internal/server/ui_handlers_test.go` (new) | Integration: with `WithUI(fstest.MapFS{...})`, `GET /ui/` serves the shell (200, body contains a known marker); `GET /ui` 308-redirects to `/ui/`. Without `WithUI`, `GET /ui/` is 404 and the existing routes are unaffected (table-drive against the existing server test harness in `server_*_test.go`). |
+| `internal/server/ui_handlers_test.go` (new) | Integration: with `WithUI(fstest.MapFS{...})`, `GET /ui/` serves the shell (200, body contains a known marker); `GET /ui` 307-redirects to `/ui/`. Without `WithUI`, `GET /ui/` is 404 and the existing routes are unaffected (table-drive against the existing server test harness in `server_*_test.go`). |
 | `cmd/orchestrator/main_test.go` | Add a case asserting `--enable-ui=false` (default) registers no `/ui/` route and `--enable-ui=true` does — reuse the existing flag-wiring test pattern. |
 
 #### Key implementation details
 
 - **Mirror the nil-safe gate exactly.** `WithUI` follows `WithChannels` / `WithLogBuffer`: absent option → the route is never registered → `/ui/` is a clean 404, the rest of the surface is untouched. No new "disabled" branch logic inside handlers.
 - **`all:` embed pattern.** Vite emits a `.vite/manifest.json` and hashed asset names under dot-prefixed dirs in some configs; `//go:embed all:assets` ensures those are included so PR 3 needs no embed-directive change.
-- **Hash-mode routing ([D1](#plan-authoring-decisions-resolve-rfc-implementation-ambiguities))** means the static handler needs no `index.html` SPA-fallback shim — a plain `http.FileServer` is correct for every real-file request, and client routes live under `#`.
+- **Hash-mode routing ([D1](#plan-authoring-decisions-resolve-rfc-implementation-ambiguities))** means the static handler needs no `index.html` SPA-fallback shim — an `http.FileServer` is correct for every real-file request, and client routes live under `#`.
+- **No directory listings.** The `http.FileServer` is wrapped in a `noListFS` so a directory lacking an `index.html` returns 404 instead of `http.FileServer`'s auto-generated listing — the console is a deliberately-unauthenticated surface ([§Security](0048-operator-tester-web-console.md#security-considerations)) and PR 3's bundle subdirectories (`_app/`, `.vite/`) must not be browsable. Individual hashed assets stay reachable by direct path.
 - **No middleware change.** `/ui/` registers on `s.mux`, which the existing `apiH` middleware stack already wraps; static serving inherits it. See [D3](#plan-authoring-decisions-resolve-rfc-implementation-ambiguities) for the rate-limit caveat (deferred, not addressed here).
 
 #### Tests
 
-- Flag-on: `GET /ui/` → 200 with placeholder body; `GET /ui` → 308 → `/ui/`.
+- Flag-on: `GET /ui/` → 200 with placeholder body; `GET /ui` → 307 → `/ui/`.
 - Flag-off (default): `GET /ui/` → 404; `GET /healthz`, `GET /api/v1/agents` unaffected.
 - `internal/ui` compiles with only the committed placeholder present (the Go-only-build guarantee).
 
