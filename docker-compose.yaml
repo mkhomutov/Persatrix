@@ -45,8 +45,9 @@ services:
     # console at /ui (default off). The host publish of :8080 below stays the
     # one boundary; keep it as-is (do not expose beyond localhost) until the
     # REST surface is authenticated (RFC 0039). The Svelte bundle is baked into
-    # the binary from internal/ui/assets (run `make ui` before `compose build`
-    # to refresh it; a placeholder ships if the JS toolchain never ran).
+    # the binary from internal/ui/assets, built in-image by Dockerfile.orchestrator's
+    # Node stage — `compose build` always embeds the real console with no host JS
+    # toolchain and no prior `make ui`. (`make run-ui` is the local, non-Docker path.)
     command: ["--config", "/app/config/", "--http-bind", "0.0.0.0", "--http-port", "8080", "--grpc-bind", "0.0.0.0", "--port", "9090", "--workflows-dir", "/app/workflows/", "--env", "development", "--channels-db", "/var/lib/persatrix/channels.db", "--enable-ui"]
     ports:
       # NOTE(review-PR187, Should-Fix S1): the gRPC LogService is currently
