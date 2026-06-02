@@ -57,4 +57,27 @@ describe("loadBootstrap", () => {
     expect(error.status).toBe(0);
     expect(error.cause).toBe(cause);
   });
+
+  it("wraps a 2xx response with a malformed JSON body as an ApiError", async () => {
+    // A reachable backend can still return a 2xx with a non-JSON body (e.g. a
+    // proxy or error page served as 200). The raw SyntaxError from .json() must
+    // be wrapped so the module's "all client failures are ApiError" contract
+    // holds (PRs 4-5 lean on it); the HTTP status is preserved and the parse
+    // error threaded through `cause`.
+    const cause = new SyntaxError("Unexpected token < in JSON");
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.reject(cause),
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await loadBootstrap().catch((e) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(200);
+    expect(error.cause).toBe(cause);
+  });
 });

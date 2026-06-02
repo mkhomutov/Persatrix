@@ -165,4 +165,102 @@ describe("App shell boot", () => {
     expect(tab.getAttribute("aria-controls")).toBe(tabpanel.id);
     expect(tabpanel.getAttribute("aria-labelledby")).toBe(tab.id);
   });
+
+  it("does not leave a dangling aria-controls on inactive tabs", async () => {
+    // Only the active panel is mounted (lazy single-panel render — PRs 4-5'
+    // panels poll, so mounting all tabpanels hidden would start background work
+    // for tabs the operator isn't looking at). An inactive tab therefore has no
+    // panel in the DOM to control; advertising aria-controls to a missing id is
+    // a dangling ARIA reference, so the attribute is present only on the active
+    // tab (whose panel exists).
+    loadBootstrap.mockResolvedValue({
+      config: {
+        panels: {
+          chat: { enabled: true, available: true },
+          channel_timeline: { enabled: true, available: true },
+        },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    const channelsTab = await screen.findByRole("tab", { name: /channels/i });
+    const chatTab = screen.getByRole("tab", { name: /chat/i });
+    const tabpanel = screen.getByRole("tabpanel");
+    // chat is the default-active tab: its panel is mounted and controlled.
+    expect(chatTab.getAttribute("aria-controls")).toBe(tabpanel.id);
+    // channels is inactive: no panel mounted, so no aria-controls to dangle.
+    expect(channelsTab.getAttribute("aria-controls")).toBeNull();
+  });
+
+  it("renders a plain empty state (no tab scaffolding) when no panels are enabled", async () => {
+    // A reachable backend with a valid principal but zero enabled && available
+    // panels is a legitimate deployment. The shell must not render an empty
+    // role=tablist (invalid ARIA: a tablist with no tabs) or a tabpanel labelled
+    // by a tab that doesn't exist — just the empty-state copy.
+    loadBootstrap.mockResolvedValue({
+      config: { panels: { chat: { enabled: false, available: true } } },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    await waitFor(() => {
+      expect(screen.getByText(/no panels are enabled/i)).toBeTruthy();
+    });
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.queryByRole("tabpanel")).toBeNull();
+  });
+
+  it("replaces history for keyboard tab navigation so Back doesn't step through tabs", async () => {
+    // Automatic activation moves selection on every arrow keypress. If each
+    // keystroke pushed a hash history entry, arrowing across the tabs would bury
+    // the previous page under one entry per tab — Back would walk the tabs
+    // instead of leaving the console. Keyboard nav replaces; clicks still push.
+    loadBootstrap.mockResolvedValue({
+      config: {
+        panels: {
+          chat: { enabled: true, available: true },
+          channel_timeline: { enabled: true, available: true },
+        },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    const chatTab = await screen.findByRole("tab", { name: /chat/i });
+    const replaceSpy = vi.spyOn(window.history, "replaceState");
+
+    await fireEvent.keyDown(chatTab, { key: "ArrowRight" });
+
+    expect(replaceSpy).toHaveBeenCalled();
+    expect(window.location.hash).toBe("#/channels");
+    replaceSpy.mockRestore();
+  });
+
+  it("pushes a history entry when a tab is clicked (deep-linkable navigation)", async () => {
+    loadBootstrap.mockResolvedValue({
+      config: {
+        panels: {
+          chat: { enabled: true, available: true },
+          channel_timeline: { enabled: true, available: true },
+        },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    const channelsTab = await screen.findByRole("tab", { name: /channels/i });
+    const replaceSpy = vi.spyOn(window.history, "replaceState");
+
+    await fireEvent.click(channelsTab);
+
+    expect(window.location.hash).toBe("#/channels");
+    expect(replaceSpy).not.toHaveBeenCalled();
+    replaceSpy.mockRestore();
+  });
 });

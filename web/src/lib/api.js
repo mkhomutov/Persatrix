@@ -29,7 +29,19 @@ async function getJSON(path) {
   if (!response.ok) {
     throw new ApiError(`${path} responded ${response.status}`, response.status);
   }
-  return response.json();
+  try {
+    return await response.json();
+  } catch (cause) {
+    // A 2xx with a non-JSON body (a proxy/error page served as 200) reaches
+    // here. Wrap the raw SyntaxError so every failure out of this client is an
+    // ApiError — the status is the real HTTP status (the response was OK, the
+    // body was not), with the parse error threaded through `cause`.
+    throw new ApiError(
+      `${path} returned a malformed JSON body`,
+      response.status,
+      { cause },
+    );
+  }
 }
 
 // loadBootstrap fetches the two read-only boot endpoints concurrently and

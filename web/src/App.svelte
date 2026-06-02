@@ -43,14 +43,18 @@
     loadBootstrap()
       .then(({ config, context }) => {
         if (cancelled) return;
-        panels = selectPanels(config);
-        userId = deriveUserId(context);
-        if (!userId) {
+        // Resolve identity first: an empty principal is a boot-error, so bail
+        // before mutating shell state (panels/activeName) that the error branch
+        // doesn't render — no half-applied state in the failure path.
+        const id = deriveUserId(context);
+        if (!id) {
           status = "error";
           errorMessage =
             "The console could not determine an identity (no principal in /ui/context).";
           return;
         }
+        userId = id;
+        panels = selectPanels(config);
         activeName = hashPanelName();
         status = "ready";
       })
@@ -72,8 +76,17 @@
     return () => window.removeEventListener("hashchange", onHashChange);
   });
 
-  function selectTab(panel) {
-    window.location.hash = panel.route;
+  // Click navigation pushes a hash history entry — a deliberate, deep-linkable
+  // move. Keyboard navigation under automatic activation fires on every arrow
+  // keystroke, so it *replaces* instead: otherwise arrowing across the tabs
+  // would bury the previous page under one history entry per tab, and Back would
+  // walk the tabs rather than leave the console.
+  function selectTab(panel, { replace = false } = {}) {
+    if (replace) {
+      window.history.replaceState(null, "", panel.route);
+    } else {
+      window.location.hash = panel.route;
+    }
     activeName = panel.name;
   }
 
@@ -104,7 +117,7 @@
         return;
     }
     event.preventDefault();
-    selectTab(panels[next]);
+    selectTab(panels[next], { replace: true });
     const tablist = event.currentTarget.closest('[role="tablist"]');
     tablist?.querySelectorAll('[role="tab"]')[next]?.focus();
   }
@@ -123,6 +136,14 @@
   <p class="boot">Loading the console…</p>
 {:else if status === "error"}
   <p class="boot error" role="alert">{errorMessage}</p>
+{:else if panels.length === 0}
+  <!-- Reachable backend with a valid principal but no enabled && available
+       panel. Render the empty-state copy on its own — an empty role=tablist (a
+       tablist with no tabs) and a tabpanel labelled by a tab that doesn't exist
+       are both invalid ARIA, so the tab scaffolding is omitted entirely. -->
+  <main class="content">
+    <p class="boot">No panels are enabled for this deployment.</p>
+  </main>
 {:else}
   <div class="tabs" role="tablist" aria-label="Console panels">
     {#each panels as panel (panel.name)}
@@ -130,7 +151,9 @@
         type="button"
         role="tab"
         id="tab-{panel.name}"
-        aria-controls="panel-{panel.name}"
+        aria-controls={panel.name === activeName
+          ? `panel-${panel.name}`
+          : undefined}
         aria-selected={panel.name === activeName}
         tabindex={panel.name === activeName ? 0 : -1}
         onclick={() => selectTab(panel)}
@@ -143,7 +166,11 @@
 
   <!-- The content region is the tabpanel for whichever tab is active;
        id/aria-labelledby track activeName so the tab↔panel relationship is
-       complete for assistive tech (the tabs advertise aria-controls to match).
+       complete for assistive tech. Only the active panel is mounted (its panel
+       may poll, so mounting inactive panels would start background work for tabs
+       the operator isn't viewing); aria-controls is therefore set only on the
+       active tab — the one whose panel is actually in the DOM — so inactive tabs
+       don't dangle a reference to a missing element.
        The role lives on a generic <div> rather than <main> so a non-interactive
        landmark isn't given an interactive role; tabindex makes the panel
        keyboard-reachable even when its content has no focusable element (ARIA
@@ -158,7 +185,7 @@
       {#if ActiveComponent}
         <ActiveComponent {userId} />
       {:else}
-        <p class="boot">No panels are enabled for this deployment.</p>
+        <p class="boot">This panel isn’t available in this build.</p>
       {/if}
     </div>
   </main>
