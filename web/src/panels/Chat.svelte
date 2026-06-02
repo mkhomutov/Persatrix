@@ -121,11 +121,13 @@
       // Pass the optional isolation overrides through only when set, so an empty
       // selector leaves the orchestrator's boot defaults intact (the client
       // omits absent keys; see api.js sendChat).
-      if (sessionId.trim()) {
-        payload.sessionId = sessionId.trim();
+      const usedSession = sessionId.trim();
+      const usedEpoch = epochId.trim();
+      if (usedSession) {
+        payload.sessionId = usedSession;
       }
-      if (epochId.trim()) {
-        payload.epochId = epochId.trim();
+      if (usedEpoch) {
+        payload.epochId = usedEpoch;
       }
       const response = await sendChat(selectedAgent, payload);
       transcript = [
@@ -135,6 +137,13 @@
           reply: response.reply,
           agent: response.agent_display_name || selectedAgent,
           status: response.reply_status,
+          // Record the scope this turn was actually sent under. The overrides
+          // stay editable between turns, so turns under different session/epoch
+          // scopes can interleave in one transcript; pinning the scope per turn
+          // keeps the isolation story (RFC 0031 / ISSUE-0085) visible rather
+          // than silent. Empty when the turn rode the orchestrator's defaults.
+          session: usedSession,
+          epoch: usedEpoch,
         },
       ];
       message = "";
@@ -156,6 +165,17 @@
     event.preventDefault();
     send();
   }
+
+  // onPersonaChange clears a lingering send error when the operator switches
+  // persona: the error refers to the attempt that just failed, and a new
+  // selection is a fresh intent, so leaving the stale alert over the new picker
+  // value reads as if the new persona is already broken. The transcript and the
+  // in-progress message are left intact — only the transient error is dropped.
+  // Scoped to the user-driven change event so the programmatic default-selection
+  // during load doesn't clear an unrelated error.
+  function onPersonaChange() {
+    sendError = "";
+  }
 </script>
 
 <section class="panel chat" aria-label="Chat">
@@ -165,7 +185,12 @@
   {#if agentsError}
     <p class="boot error" role="alert">{agentsError}</p>
     <button type="button" class="retry" onclick={loadAgents}>Retry</button>
-  {:else if agentsLoaded && agents.length === 0}
+  {:else if !agentsLoaded}
+    <!-- Until the first load settles, show a loading line rather than falling
+         through to the composer beside an empty picker (a flash of a blank
+         dropdown). agentsLoaded gates both this and the empty state below. -->
+    <p class="loading" role="status">Loading personas…</p>
+  {:else if agents.length === 0}
     <p class="empty">No personas are registered yet.</p>
   {:else}
     <ol class="transcript" aria-label="Conversation">
@@ -186,6 +211,15 @@
               {turn.reply}
             {/if}
           </p>
+          {#if turn.session || turn.epoch}
+            <!-- Annotate the isolation scope this turn rode (RFC 0031 session /
+                 ISSUE-0085 epoch). Only shown when an override was set; a
+                 default-scope turn carries no annotation. -->
+            <p class="turn-scope">
+              {#if turn.session}<span>session: {turn.session}</span>{/if}
+              {#if turn.epoch}<span>epoch: {turn.epoch}</span>{/if}
+            </p>
+          {/if}
         </li>
       {/each}
     </ol>
@@ -207,7 +241,11 @@
            the "Waiting for a reply…" status says why. -->
       <label>
         Persona
-        <select bind:value={selectedAgent} disabled={sending}>
+        <select
+          bind:value={selectedAgent}
+          onchange={onPersonaChange}
+          disabled={sending}
+        >
           {#each agents as agent (agent.id)}
             <option value={agent.id}>{agentLabel(agent)}</option>
           {/each}

@@ -388,4 +388,71 @@ describe("Chat panel", () => {
 
     await waitFor(() => expect(sendChat).toHaveBeenCalled());
   });
+
+  it("shows a loading affordance until the persona list settles", async () => {
+    // During the in-flight initial load the panel must not fall through to the
+    // composer beside an empty picker (a flash of a blank dropdown). Hold
+    // listAgents open: assert a loading state and no composer, then resolve and
+    // assert the picker is populated and the loading state is gone.
+    let resolveAgents;
+    listAgents.mockReturnValue(
+      new Promise((resolve) => {
+        resolveAgents = resolve;
+      }),
+    );
+
+    render(Chat, { props: { userId: "local" } });
+
+    expect(await screen.findByText(/loading personas/i)).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: /persona/i })).toBeNull();
+
+    resolveAgents(AGENTS);
+    await screen.findByRole("option", { name: "Alice" });
+    expect(screen.queryByText(/loading personas/i)).toBeNull();
+  });
+
+  it("clears a prior send error when the persona is switched", async () => {
+    // A send error refers to the attempt that just failed; switching persona is
+    // a fresh intent, so the stale red alert must not linger over the new
+    // selection. (The message itself survives — a failed send doesn't clear it.)
+    sendChat.mockRejectedValueOnce(new ApiError("agent is not healthy", 503));
+
+    render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Alice" });
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "Hi" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+    await screen.findByRole("alert");
+
+    await fireEvent.change(screen.getByRole("combobox", { name: /persona/i }), {
+      target: { value: "bob" },
+    });
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("annotates a transcript turn with the scope overrides it was sent under", async () => {
+    // The override inputs stay editable between turns, so turns sent under
+    // different session/epoch scopes can interleave in one transcript. Record
+    // the scope each turn actually used so the isolation story (RFC 0031 /
+    // ISSUE-0085) is visible per-turn rather than silent. A turn with no
+    // override carries no annotation (covered by the plain-reply tests above).
+    render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Alice" });
+
+    await fireEvent.input(screen.getByRole("textbox", { name: /session/i }), {
+      target: { value: "sess-7" },
+    });
+    await fireEvent.input(screen.getByRole("textbox", { name: /epoch/i }), {
+      target: { value: "ep-3" },
+    });
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "Hi" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(await screen.findByText(/session: sess-7/i)).toBeTruthy();
+    expect(screen.getByText(/epoch: ep-3/i)).toBeTruthy();
+  });
 });

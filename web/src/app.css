@@ -106,6 +106,15 @@ body {
   opacity: 0.7;
 }
 
+.turn-scope {
+  /* Per-turn isolation scope (session/epoch override). Muted and small — it's
+     metadata about the turn, not part of the conversation. */
+  opacity: 0.7;
+  font-size: 0.8rem;
+  display: flex;
+  gap: 0.75rem;
+}
+
 .composer {
   display: flex;
   flex-direction: column;
@@ -147,7 +156,8 @@ body {
   margin-top: 0.4rem;
 }
 
-.thinking {
+.thinking,
+.loading {
   opacity: 0.7;
   font-style: italic;
 }
