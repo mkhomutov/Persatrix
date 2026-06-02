@@ -121,6 +121,38 @@ describe("Chat panel", () => {
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
   });
 
+  it("ignores a re-entrant submit while a reply is already in flight", async () => {
+    // The Send button is disabled mid-flight, but pressing Enter inside a
+    // single-line override input (Session/Epoch ID) still submits the form —
+    // canSend only gates the button's disabled attribute, not send() itself.
+    // send() must guard on the in-flight state so a second turn can't race the
+    // first; otherwise it collides on the server's replyWaiter (409) and burns a
+    // round-trip. Hold the first reply open, submit again, and assert the second
+    // submit is a no-op.
+    let resolveReply;
+    sendChat.mockReturnValue(
+      new Promise((resolve) => {
+        resolveReply = resolve;
+      }),
+    );
+
+    const { container } = render(Chat, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "Alice" });
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "Hi" },
+    });
+
+    const form = container.querySelector("form.composer");
+    await fireEvent.submit(form);
+    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
+    await fireEvent.submit(form);
+
+    expect(sendChat).toHaveBeenCalledTimes(1);
+
+    resolveReply(reply());
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  });
+
   it("surfaces the server error envelope without crashing the panel", async () => {
     sendChat.mockRejectedValue(
       new ApiError("message exceeds maximum length of 4000 characters", 400),
@@ -173,6 +205,11 @@ describe("Chat panel", () => {
     await screen.findByRole("option", { name: "Alice" });
 
     expect(screen.getByText(/local/)).toBeTruthy();
+    // Defend the rule itself, not one spelling of a violation: assert there is
+    // no user-identity textbox at all (the panel's textboxes are Message /
+    // Session ID / Epoch ID — none names a user), rather than probing for one
+    // exact input[name="user_id"] a regression could trivially sidestep.
+    expect(screen.queryByRole("textbox", { name: /user/i })).toBeNull();
     expect(container.querySelector('input[name="user_id"]')).toBeNull();
   });
 

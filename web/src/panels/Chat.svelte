@@ -92,6 +92,14 @@
   }
 
   async function send() {
+    // Guard re-entrancy: the Send button is disabled while a reply is in flight,
+    // but pressing Enter in a single-line override input still submits the form
+    // (canSend gates only the button, not send()). A second concurrent turn
+    // collides on the server's replyWaiter (409) and wastes a round-trip, so
+    // drop it here.
+    if (sending) {
+      return;
+    }
     sendError = "";
     const text = message.trim();
     if (!selectedAgent || text.length === 0) {

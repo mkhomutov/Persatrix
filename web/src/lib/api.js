@@ -123,9 +123,11 @@ export async function listAgents() {
 // sendChat issues the one synchronous chat turn (POST /api/v1/agents/{id}/chat)
 // and returns the parsed `chatResponse` ({reply, agent_display_name, …}). It
 // owns the wire contract the panel must not get wrong:
-//   - `participant_type:"user"` is always sent — omitting it makes the agent's
-//     relationship tier record the human peer as an agent (chat_handler.go
-//     ISSUE-0068);
+//   - `participant_type:"user"` is always sent explicitly. The handler now
+//     defaults an omitted value to "user" (chat_handler.go ISSUE-0068), so this
+//     is belt-and-suspenders rather than load-bearing — but it keeps the human
+//     peer tagged on the wire instead of relying on a server-side default the
+//     panel can't see, and stays correct against any caller path lacking it;
 //   - `user_id` is the /ui/context-derived principal the caller passes in, never
 //     prompted (RFC §F rule 1);
 //   - `session_id` / `epoch_id` ride only when supplied, so an unset selector
