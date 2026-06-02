@@ -1,11 +1,40 @@
 # Persatrix Orchestrator (Go)
-FROM golang:1.25-alpine AS builder
+#
+# Multi-stage: a Node stage builds the embedded web console bundle (RFC 0048),
+# then the Go stage embeds it into the binary, so the image ALWAYS serves the
+# real Svelte console — never the committed placeholder. This makes the Docker
+# path self-contained: `docker compose build` / `make demo-*` need no host JS
+# toolchain and no prior `make ui`, even for a bare `docker compose up --build`
+# straight from a clean clone. (The committed placeholder still keeps a plain
+# `go build ./...` / the Go-only CI lane green with no Node — RFC 0048 PR plan
+# D2; only this image build overrides it with the real bundle.)
 
+# ─── Stage 1: web console bundle (Svelte/Vite) ──────────────
+FROM node:22-alpine AS ui-builder
+WORKDIR /build/web
+# Copy manifests first so the `npm ci` layer caches on the lockfile and is
+# skipped on rebuilds that only touch source.
+COPY web/package.json web/package-lock.json web/.npmrc ./
+RUN npm ci
+COPY web/ ./
+# vite.config.js sets `base: "/ui/"` and `outDir: ../internal/ui/assets` with
+# emptyOutDir, so this writes the hashed bundle (overwriting the placeholder
+# index.html) to /build/internal/ui/assets.
+RUN npm run build
+
+# ─── Stage 2: Go orchestrator ───────────────────────────────
+FROM golang:1.25-alpine AS builder
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
+# Replace whatever asset tree arrived in the build context (the committed
+# placeholder on a clean checkout, or a stale host bundle) with the freshly
+# built one from the ui-builder stage, so the embedded //go:embed console is
+# deterministic regardless of host state.
+RUN rm -rf internal/ui/assets
+COPY --from=ui-builder /build/internal/ui/assets/ internal/ui/assets/
 RUN CGO_ENABLED=0 go build -o persatrix-server ./cmd/orchestrator
 
 FROM alpine:3.20

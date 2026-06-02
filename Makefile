@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run validate help demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate help demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -127,6 +127,10 @@ build-agents: ## Install Python agent dependencies
 run: build ## Run the orchestrator
 	$(GO_BIN)/persatrix-server$(EXE) --config config/
 
+run-ui: ui build-orchestrator ## Build the console bundle + orchestrator and run locally with the web console enabled (RFC 0048 — local UI iteration)
+	@echo "→ Web console enabled at http://localhost:8080/ui"
+	$(GO_BIN)/persatrix-server$(EXE) --config config/ --enable-ui
+
 run-agent: ## Run a Python agent process (AGENT=coder PORT=50051)
 	PYTHONPATH="agents/generated" $(PYTHON) -m persatrix_agents.server --agent $(AGENT) --port $(or $(PORT),50051)
 
@@ -245,6 +249,11 @@ validate: ## Validate all YAML configs against JSON schemas
 	@echo "✓ All configs valid"
 
 # ─── Docker ─────────────────────────────────────────────
+# NOTE(RFC 0048): the orchestrator image builds the web console bundle in a
+# Node stage inside Dockerfile.orchestrator, so docker-build / demo-* embed the
+# real console with NO host JS toolchain and no prior `make ui` — even a bare
+# `docker compose up --build` from a clean clone works. For local (non-Docker)
+# UI iteration use `make run-ui` (or `make build-orchestrator-ui`) instead.
 docker-build: ## Build Docker images
 	docker compose build
 

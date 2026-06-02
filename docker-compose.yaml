@@ -41,7 +41,13 @@ services:
     # store initialize; otherwise initChannels logs "mkdir data:
     # permission denied", channels stay disabled, and chat-as-DM
     # (RFC 0011 PR 4a-ii-β-2) returns 500 'chat not available'.
-    command: ["--config", "/app/config/", "--http-bind", "0.0.0.0", "--http-port", "8080", "--grpc-bind", "0.0.0.0", "--port", "9090", "--workflows-dir", "/app/workflows/", "--env", "development", "--channels-db", "/var/lib/persatrix/channels.db"]
+    # NOTE(RFC 0048): --enable-ui serves the embedded operator/tester web
+    # console at /ui (default off). The host publish of :8080 below stays the
+    # one boundary; keep it as-is (do not expose beyond localhost) until the
+    # REST surface is authenticated (RFC 0039). The Svelte bundle is baked into
+    # the binary from internal/ui/assets (run `make ui` before `compose build`
+    # to refresh it; a placeholder ships if the JS toolchain never ran).
+    command: ["--config", "/app/config/", "--http-bind", "0.0.0.0", "--http-port", "8080", "--grpc-bind", "0.0.0.0", "--port", "9090", "--workflows-dir", "/app/workflows/", "--env", "development", "--channels-db", "/var/lib/persatrix/channels.db", "--enable-ui"]
     ports:
       # NOTE(review-PR187, Should-Fix S1): the gRPC LogService is currently
       # unauthenticated (auth deferred to RFC 0009). --grpc-bind 0.0.0.0
