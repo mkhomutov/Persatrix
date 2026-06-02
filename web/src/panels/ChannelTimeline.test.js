@@ -93,6 +93,27 @@ describe("Channel timeline panel", () => {
     expect(items[1].textContent).toMatch(/first/);
   });
 
+  it("renders a human-readable timestamp but keeps the raw value machine-readable", async () => {
+    // The wire timestamp is RFC-3339 UTC (e.g. 2026-06-02T10:00:00Z) — readable
+    // by a machine, not by an operator scanning the timeline. The visible text
+    // is formatted for a human, while the <time> element keeps the raw value in
+    // its `datetime` attribute so it stays machine-parseable.
+    getChannelHistory.mockResolvedValue(
+      historyOf(msg("only", "hello", "alice", "2026-06-02T10:00:00Z")),
+    );
+
+    render(ChannelTimeline, { props: { userId: "local" } });
+    await screen.findByText(/hello/);
+
+    const timeEl = document.querySelector("time.ts");
+    expect(timeEl.getAttribute("datetime")).toBe("2026-06-02T10:00:00Z");
+    // Formatted for display: not the raw ISO string, and without its `T`
+    // date/time separator. The exact wording is locale/zone dependent, so the
+    // assertion is on what it must NOT be rather than an exact string.
+    expect(timeEl.textContent).not.toBe("2026-06-02T10:00:00Z");
+    expect(timeEl.textContent).not.toMatch(/\dT\d/);
+  });
+
   it("shows an empty state when no channels exist", async () => {
     listChannels.mockResolvedValue({ channels: [] });
 

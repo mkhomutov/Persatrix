@@ -347,6 +347,16 @@
   function onChannelChange() {
     publishError = "";
   }
+
+  // formatTimestamp renders the wire timestamp (RFC-3339 UTC) as a readable
+  // local date-time for the operator; the <time> element keeps the raw value in
+  // its machine-readable `datetime` attribute, so the human-facing text can be
+  // friendly without losing the parseable original. An unparseable value falls
+  // back to the raw string rather than rendering "Invalid Date".
+  function formatTimestamp(ts) {
+    const date = new Date(ts);
+    return Number.isNaN(date.getTime()) ? ts : date.toLocaleString();
+  }
 </script>
 
 <section class="panel channels" aria-label="Channels">
@@ -389,7 +399,9 @@
           <li class="message">
             <span class="sender">{message.sender_id}</span>
             <span class="content">{message.content}</span>
-            <time class="ts" datetime={message.timestamp}>{message.timestamp}</time>
+            <time class="ts" datetime={message.timestamp}
+              >{formatTimestamp(message.timestamp)}</time
+            >
           </li>
         {/each}
       </ol>
