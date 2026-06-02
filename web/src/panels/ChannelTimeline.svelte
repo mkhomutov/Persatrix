@@ -1,16 +1,336 @@
 <script>
-  // Channel-timeline panel slot (RFC 0048 Phase 1). PR 5 replaces this with the
-  // channel list + newest-first history that stays live by polling
-  // (visibility-pause + error-backoff + head-poll de-dupe), plus the optional
-  // human publish into a group channel.
+  // Channel-timeline panel (RFC 0048 Phase 1 PR 5) — watch personas interact:
+  // pick a channel, see its history newest-first, and keep it live by polling
+  // (no channel-push API exists today, OQ4). An optional human publish posts
+  // into the channel and the mention fan-out (RFC 0011) surfaces on the next
+  // poll. No backend change; pure render-over-existing-API. The shell threads in
+  // the /ui/context-derived userId (RFC §F single identity source), so the panel
+  // never prompts for or hard-codes a sender.
+  import {
+    listChannels,
+    getChannelHistory,
+    publishMessage,
+    ApiError,
+  } from "../lib/api.js";
+
   let { userId } = $props();
+
+  // POLL_INTERVAL_MS is the steady-state cadence; on a poll error the delay
+  // backs off exponentially up to MAX_BACKOFF_MS so an idle or erroring tab does
+  // not hammer the unauthenticated localhost surface (RFC §Security / §D.2). The
+  // head poll fetches at most HEAD_LIMIT newest messages and de-dupes against
+  // what's already shown — it never re-fetches the full history per tick.
+  const POLL_INTERVAL_MS = 3000;
+  const MAX_BACKOFF_MS = 30000;
+  const HISTORY_LIMIT = 50;
+  const HEAD_LIMIT = 50;
+
+  let channels = $state([]);
+  let channelsError = $state("");
+  // channelsLoaded gates the "no channels" empty state so it only shows after a
+  // confirmed-empty list, never as a flash of a blank picker mid-load.
+  let channelsLoaded = $state(false);
+  let selectedChannel = $state("");
+
+  // messages is the panel's view of the channel, newest-first (the wire order).
+  let messages = $state([]);
+  let historyError = $state("");
+  let historyLoaded = $state(false);
+  // pollError is a non-fatal banner: the loaded history stays on screen while
+  // the poll retries with backoff, so a transient hiccup doesn't blank the view.
+  let pollError = $state("");
+
+  let publishContent = $state("");
+  let publishing = $state(false);
+  let publishError = $state("");
+
+  // seenIds de-dupes the head poll against messages already shown (and against a
+  // just-published echo). Not reactive — it's bookkeeping the render reads
+  // through `messages`, reset whenever the active channel changes.
+  let seenIds = new Set();
+  // pollTimer holds the pending setTimeout; backoffMs is the current poll delay,
+  // reset to the base interval on every success.
+  let pollTimer = null;
+  let backoffMs = POLL_INTERVAL_MS;
+  // loadToken disambiguates superseded loads: switching channel (or unmount)
+  // bumps it so an in-flight history fetch or poll can't write to a channel the
+  // operator already navigated away from, and Retry is race-safe.
+  let loadToken = 0;
+
+  const canPublish = $derived(
+    Boolean(selectedChannel) && publishContent.trim().length > 0 && !publishing,
+  );
+
+  function clearPoll() {
+    if (pollTimer !== null) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  // scheduleNext arms the next poll, unless the tab is backgrounded — a hidden
+  // tab parks polling entirely (Page Visibility API) and the visibility handler
+  // resumes it. Always clears any pending timer first so callers can't stack two.
+  function scheduleNext(delay) {
+    clearPoll();
+    if (typeof document !== "undefined" && document.hidden) {
+      return;
+    }
+    pollTimer = setTimeout(poll, delay);
+  }
+
+  // poll fetches the channel head (HEAD_LIMIT newest), appends only messages not
+  // already seen, and reschedules: at the base interval on success, or a backed-
+  // off delay on error. The token guard drops a result whose channel was
+  // switched out mid-flight.
+  async function poll() {
+    pollTimer = null;
+    const channel = selectedChannel;
+    const token = loadToken;
+    if (!channel) {
+      return;
+    }
+    try {
+      const { messages: head } = await getChannelHistory(channel, {
+        limit: HEAD_LIMIT,
+      });
+      if (token !== loadToken) {
+        return;
+      }
+      // head is newest-first; the unseen ones are the newest, so prepending them
+      // (in their newest-first order) ahead of the existing list keeps the whole
+      // timeline newest-first without re-rendering or re-sorting what's shown.
+      const fresh = head.filter((m) => !seenIds.has(m.id));
+      if (fresh.length > 0) {
+        fresh.forEach((m) => seenIds.add(m.id));
+        messages = [...fresh, ...messages];
+      }
+      pollError = "";
+      backoffMs = POLL_INTERVAL_MS;
+      scheduleNext(POLL_INTERVAL_MS);
+    } catch (err) {
+      if (token !== loadToken) {
+        return;
+      }
+      // err is an ApiError out of the client (its message carries the server's
+      // wording when present); a non-ApiError still degrades to its message.
+      pollError = `Live updates paused: ${err.message}`;
+      backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
+      scheduleNext(backoffMs);
+    }
+  }
+
+  // loadChannels fetches the channel list and is re-runnable (mount + Retry).
+  function loadChannels() {
+    channelsError = "";
+    channelsLoaded = false;
+    return listChannels()
+      .then((result) => {
+        channels = result.channels ?? [];
+        if (channels.length > 0 && !selectedChannel) {
+          selectedChannel = channels[0].id;
+        }
+      })
+      .catch((err) => {
+        channelsError = `Could not load channels: ${err.message}`;
+      })
+      .finally(() => {
+        channelsLoaded = true;
+      });
+  }
+
+  // loadHistory replaces the timeline with the selected channel's history and
+  // (re)starts polling from a clean de-dupe set. Bumping loadToken invalidates
+  // any in-flight fetch/poll from the previous channel.
+  function loadHistory(channel) {
+    const token = ++loadToken;
+    clearPoll();
+    historyError = "";
+    pollError = "";
+    historyLoaded = false;
+    messages = [];
+    seenIds = new Set();
+    backoffMs = POLL_INTERVAL_MS;
+    return getChannelHistory(channel, { limit: HISTORY_LIMIT })
+      .then(({ messages: history }) => {
+        if (token !== loadToken) {
+          return;
+        }
+        messages = history;
+        history.forEach((m) => seenIds.add(m.id));
+        scheduleNext(POLL_INTERVAL_MS);
+      })
+      .catch((err) => {
+        if (token !== loadToken) {
+          return;
+        }
+        historyError = `Could not load history: ${err.message}`;
+      })
+      .finally(() => {
+        if (token !== loadToken) {
+          return;
+        }
+        historyLoaded = true;
+      });
+  }
+
+  $effect(() => {
+    loadChannels();
+    return () => {
+      // Invalidate any in-flight work and stop polling on unmount.
+      loadToken++;
+      clearPoll();
+    };
+  });
+
+  // React to the selected channel: each change reloads history and restarts the
+  // poll loop; the cleanup invalidates the prior channel's in-flight work so a
+  // slow fetch can't write to the newly-selected channel.
+  $effect(() => {
+    const channel = selectedChannel;
+    if (!channel) {
+      return;
+    }
+    loadHistory(channel);
+    return () => {
+      loadToken++;
+      clearPoll();
+    };
+  });
+
+  // Pause polling while the tab is backgrounded and catch up when it returns —
+  // the load-protection contract the RFC calls out for the unauthenticated
+  // surface. Hiding clears the pending timer; revealing polls immediately (then
+  // resumes the cadence) so a returning operator sees fresh messages at once.
+  $effect(() => {
+    function onVisibility() {
+      if (document.hidden) {
+        clearPoll();
+      } else if (selectedChannel && historyLoaded && !historyError) {
+        poll();
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  });
+
+  // channelLabel mirrors Chat's persona label: the channel's name, falling back
+  // to its id (DMs/threads have no name — channel_types.go).
+  function channelLabel(channel) {
+    return channel.name ? channel.name : channel.id;
+  }
+
+  async function publish() {
+    if (publishing) {
+      return;
+    }
+    const content = publishContent.trim();
+    if (!selectedChannel || content.length === 0) {
+      return;
+    }
+    publishError = "";
+    publishing = true;
+    try {
+      const stored = await publishMessage(selectedChannel, {
+        senderId: userId,
+        content,
+      });
+      // Echo the stored message immediately rather than waiting a poll interval;
+      // the de-dupe set keeps the upcoming poll from re-adding it. The agent
+      // mention fan-out (RFC 0011) still surfaces on a later poll.
+      if (stored && stored.id && !seenIds.has(stored.id)) {
+        seenIds.add(stored.id);
+        messages = [stored, ...messages];
+      }
+      publishContent = "";
+    } catch (err) {
+      publishError =
+        err instanceof ApiError
+          ? err.message
+          : `The message could not be posted: ${err.message}`;
+    } finally {
+      publishing = false;
+    }
+  }
+
+  function onPublishSubmit(event) {
+    event.preventDefault();
+    publish();
+  }
+
+  // onChannelChange drops a stale publish error when the operator switches
+  // channel — it refers to the prior channel's attempt, so leaving it over the
+  // new selection reads as if the new channel is already broken.
+  function onChannelChange() {
+    publishError = "";
+  }
 </script>
 
-<section class="panel" aria-label="Channels">
+<section class="panel channels" aria-label="Channels">
   <h2>Channels</h2>
-  <p class="placeholder">
-    The channel timeline arrives in RFC 0048 Phase 1 PR 5. You will watch a
-    channel and optionally post into it here.
-  </p>
   <p class="identity">Acting as <code>{userId}</code></p>
+
+  {#if channelsError}
+    <p class="boot error" role="alert">{channelsError}</p>
+    <button type="button" class="retry" onclick={loadChannels}>Retry</button>
+  {:else if !channelsLoaded}
+    <p class="loading" role="status">Loading channels…</p>
+  {:else if channels.length === 0}
+    <p class="empty">No channels exist yet.</p>
+  {:else}
+    <label>
+      Channel
+      <select bind:value={selectedChannel} onchange={onChannelChange}>
+        {#each channels as channel (channel.id)}
+          <option value={channel.id}>{channelLabel(channel)}</option>
+        {/each}
+      </select>
+    </label>
+
+    {#if pollError}
+      <!-- Non-fatal: the loaded history stays visible while the poll backs off
+           and retries, so a transient error doesn't blank the timeline. -->
+      <p class="poll-error" role="status">{pollError}</p>
+    {/if}
+
+    {#if historyError}
+      <p class="boot error" role="alert">{historyError}</p>
+    {:else if !historyLoaded}
+      <p class="loading" role="status">Loading messages…</p>
+    {:else if messages.length === 0}
+      <p class="empty">No messages yet.</p>
+    {:else}
+      <ol class="timeline" aria-label="Channel messages">
+        {#each messages as message (message.id)}
+          <li class="message">
+            <span class="sender">{message.sender_id}</span>
+            <span class="content">{message.content}</span>
+            <time class="ts" datetime={message.timestamp}>{message.timestamp}</time>
+          </li>
+        {/each}
+      </ol>
+    {/if}
+
+    {#if publishError}
+      <p class="boot error" role="alert">{publishError}</p>
+    {/if}
+
+    <!-- The optional human publish: a clearly-labelled write action so it reads
+         as deliberate, not a search box. The sender is the /ui/context principal
+         (userId) — never a free-text field (RFC §F rule 1). -->
+    <form class="publish" onsubmit={onPublishSubmit}>
+      <label>
+        Message
+        <textarea
+          bind:value={publishContent}
+          rows="2"
+          placeholder="Post a message to this channel…"
+          disabled={publishing}
+        ></textarea>
+      </label>
+      <button type="submit" disabled={!canPublish}>
+        {publishing ? "Posting…" : "Post"}
+      </button>
+    </form>
+  {/if}
 </section>

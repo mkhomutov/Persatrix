@@ -1,7 +1,8 @@
 // Thin typed-ish client for the console's backend (RFC 0048 Phase 1 / Slice 1).
 //
 // PR 3 needs only the two boot endpoints; PR 4 extends this module with the
-// chat/agents calls the chat panel drives. All calls are same-origin (the SPA
+// chat/agents calls the chat panel drives; PR 5 adds the channel list/history/
+// publish calls the timeline panel drives. All calls are same-origin (the SPA
 // is served by the orchestrator under /ui), so paths are root-relative and no
 // base URL or CORS handling is required.
 
@@ -146,4 +147,53 @@ export async function sendChat(agentID, { message, userId, sessionId, epochId })
   // request pinned to the /agents/{id}/chat route for any id, instead of
   // relying on that assumption holding.
   return postJSON(`/api/v1/agents/${encodeURIComponent(agentID)}/chat`, body);
+}
+
+// listChannels fetches the channels the timeline panel offers in its picker
+// (GET /api/v1/channels). It returns the server's `listChannelsResponse`
+// envelope ({channels, next_cursor}) verbatim rather than unwrapping to a bare
+// array: the panel reads `.channels`, and echoing the envelope keeps the
+// `next_cursor` cursor available for the keyset pagination a later slice may add
+// (channel_types.go), instead of discarding it at the client boundary.
+export async function listChannels() {
+  return getJSON("/api/v1/channels");
+}
+
+// getChannelHistory fetches a channel's message history
+// (GET /api/v1/channels/{id}/messages), returning the `historyResponse`
+// envelope ({messages}) — already newest-first on the wire (sqlite_messages.go
+// `ORDER BY timestamp DESC`), so the panel renders it without re-sorting. The
+// optional `limit` (positive int) and `before` (RFC-3339 cursor) ride only when
+// supplied — both error loudly server-side on a malformed value
+// (channel_query_params.go), so the head-poll passes just `limit` and a
+// paginating back-fill adds `before`.
+export async function getChannelHistory(channelID, { limit, before } = {}) {
+  const params = new URLSearchParams();
+  if (limit) {
+    params.set("limit", String(limit));
+  }
+  if (before) {
+    params.set("before", before);
+  }
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
+  // Encode the id (DM ids carry colons, e.g. `dm:a:b`) so the request stays
+  // pinned to the {id}/messages route for any channel id.
+  return getJSON(
+    `/api/v1/channels/${encodeURIComponent(channelID)}/messages${suffix}`,
+  );
+}
+
+// publishMessage posts a human message into a channel
+// (POST /api/v1/channels/{id}/messages) and returns the stored
+// `channelMessageResponse`. `sender_id` is REQUIRED by the handler
+// (channel_handlers.go) and is the /ui/context-derived principal the caller
+// passes in — never free-text (RFC §F rule 1). This is the one write Slice 1's
+// timeline issues; the agent mention fan-out (RFC 0011) surfaces on the next
+// poll.
+export async function publishMessage(channelID, { senderId, content }) {
+  return postJSON(`/api/v1/channels/${encodeURIComponent(channelID)}/messages`, {
+    sender_id: senderId,
+    content,
+  });
 }
