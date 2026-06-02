@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0087
 summary: "The RFC 0048 web console introduced the repo's first npm toolchain, and Dependabot flags three advisories against `web/package-lock.json`: vitest < 4.1.0 (GHSA-5xrq-8626-4rwp, nominally **critical** — arbitrary file read/exec via the Vitest UI server), vite <= 6.4.1 (GHSA-4w7w-66w2-5vf9, medium — optimized-deps `.map` path traversal), and esbuild <= 0.24.2 (GHSA-67mh-4wv8-2f99, medium — dev server accepts cross-origin requests). All three are **dev/build-time only** and none ships in the deployed artifact (a static prebuilt bundle + the Go binary), and the vitest `critical` exploit path requires the Vitest UI server — which this project never runs (`vitest run` is headless; there is no `@vitest/ui` dependency). Track the dependency bumps here; the vitest fix is a 2.x → 4.x major that needs a full suite re-validation."
-status: open
+status: resolved
 severity: medium
 area: web
 created: 2026-06-02
+closed: 2026-06-02
+closed_pr: 501
 refs:
   - web/package.json
   - web/package-lock.json
@@ -13,6 +15,10 @@ refs:
   - https://github.com/advisories/GHSA-4w7w-66w2-5vf9
   - https://github.com/advisories/GHSA-67mh-4wv8-2f99
 ---
+
+## Resolution
+
+Fixed in [PR #501](https://github.com/mkhomutov/Persatrix/pull/501): bumped `web/package.json` to `vite ^6.4.2` and `vitest ^4.1.0` and regenerated `web/package-lock.json`. The 2.x → 4.x vitest jump removed the old `vite-node → vite@5.4.21 → esbuild@0.21.5` subtree that fed the esbuild advisory; the resolved tree is `vitest@4.1.8`, `vite@6.4.3`, `esbuild@0.25.12` throughout, with no duplicate older copies. `npm audit` reports **0 vulnerabilities**; the full web suite (52 tests) and `vite build` are green under the new toolchain, and `go build ./...` against the embed is unaffected. The three default-branch Dependabot alerts clear once this merges to `main`. Stayed on vite 6 (not 8) because `@sveltejs/vite-plugin-svelte` 5.x peers `vite ^6` — a vite-8 jump would have forced a plugin major too, with no security benefit.
 
 ## Summary
 
