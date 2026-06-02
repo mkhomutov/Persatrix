@@ -122,6 +122,25 @@ describe("Channel timeline panel", () => {
     expect(listChannels).toHaveBeenCalledTimes(2);
   });
 
+  it("surfaces a history-load failure and retries it", async () => {
+    // The channel list loads, but the selected channel's initial history fetch
+    // fails. The poll loop only arms on a successful load, so without a Retry
+    // the error is a dead end — re-selecting the same channel fires no onchange,
+    // leaving a single-channel console stuck until reload. The Retry re-runs the
+    // load for the still-selected channel (mockRejectedValueOnce falls back to
+    // the beforeEach success on the second call).
+    getChannelHistory.mockRejectedValueOnce(new ApiError("history down", 503));
+
+    render(ChannelTimeline, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "General" });
+    await screen.findByRole("alert");
+
+    await fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(await screen.findByText(/second/)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("acts as the context principal for publish and offers no free-text user field", async () => {
     const { container } = render(ChannelTimeline, {
       props: { userId: "local" },

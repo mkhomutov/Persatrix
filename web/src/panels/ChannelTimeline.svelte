@@ -56,6 +56,10 @@
   // bumps it so an in-flight history fetch or poll can't write to a channel the
   // operator already navigated away from, and Retry is race-safe.
   let loadToken = 0;
+  // channelsToken does the same for the channel-list load — kept separate from
+  // loadToken so a channels reload (mount/Retry) never invalidates the active
+  // history poll, and a resolve-after-unmount can't write to a dead component.
+  let channelsToken = 0;
 
   const canPublish = $derived(
     Boolean(selectedChannel) && publishContent.trim().length > 0 && !publishing,
@@ -98,8 +102,13 @@
         return;
       }
       // head is newest-first; the unseen ones are the newest, so prepending them
-      // (in their newest-first order) ahead of the existing list keeps the whole
+      // (in their newest-first order) ahead of the existing list keeps the shown
       // timeline newest-first without re-rendering or re-sorting what's shown.
+      // Note the bound: if more than HEAD_LIMIT messages land between two ticks,
+      // the ones past the head's window (older than the head, newer than what's
+      // shown) are never re-fetched — an acceptable gap for Slice 1's poll-based,
+      // low-traffic localhost surface, to be closed by keyset back-fill or a
+      // push channel later (OQ4).
       const fresh = head.filter((m) => !seenIds.has(m.id));
       if (fresh.length > 0) {
         fresh.forEach((m) => seenIds.add(m.id));
@@ -121,20 +130,32 @@
   }
 
   // loadChannels fetches the channel list and is re-runnable (mount + Retry).
+  // The channelsToken guard drops a superseded resolution (a slow load that
+  // settles after a Retry, or after unmount), mirroring Chat's loadAgents.
   function loadChannels() {
+    const token = ++channelsToken;
     channelsError = "";
     channelsLoaded = false;
     return listChannels()
       .then((result) => {
+        if (token !== channelsToken) {
+          return;
+        }
         channels = result.channels ?? [];
         if (channels.length > 0 && !selectedChannel) {
           selectedChannel = channels[0].id;
         }
       })
       .catch((err) => {
+        if (token !== channelsToken) {
+          return;
+        }
         channelsError = `Could not load channels: ${err.message}`;
       })
       .finally(() => {
+        if (token !== channelsToken) {
+          return;
+        }
         channelsLoaded = true;
       });
   }
@@ -174,11 +195,23 @@
       });
   }
 
+  // retryHistory re-runs the selected channel's load after an initial-load
+  // failure. The poll loop only arms on a successful load, and re-selecting the
+  // same channel fires no onchange, so without this a failed first history fetch
+  // is a dead end (a single-channel console would be stuck until reload). Mirrors
+  // the channel-list Retry; loadHistory's loadToken bump keeps it race-safe.
+  function retryHistory() {
+    if (selectedChannel) {
+      loadHistory(selectedChannel);
+    }
+  }
+
   $effect(() => {
     loadChannels();
     return () => {
-      // Invalidate any in-flight work and stop polling on unmount.
-      loadToken++;
+      // Invalidate the in-flight channels load and stop polling on unmount.
+      // (The selected-channel effect's own cleanup invalidates history/poll.)
+      channelsToken++;
       clearPoll();
     };
   });
@@ -295,6 +328,7 @@
 
     {#if historyError}
       <p class="boot error" role="alert">{historyError}</p>
+      <button type="button" class="retry" onclick={retryHistory}>Retry</button>
     {:else if !historyLoaded}
       <p class="loading" role="status">Loading messages…</p>
     {:else if messages.length === 0}
