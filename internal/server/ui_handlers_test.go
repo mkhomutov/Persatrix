@@ -225,6 +225,34 @@ func TestUIContext_Local(t *testing.T) {
 	assert.False(t, body.Authenticated, "no auth layer today → authenticated=false")
 }
 
+// TestUIBuildVersion_FallsBackToCompiledDefault pins the fix for the PR-497
+// review finding: when PERSATRIX_SERVICE_VERSION is unset and the build carries
+// no module version — the plain `go build`/Docker case, and `go test`, where
+// build-info reports "(devel)" — build.version must report the compiled-in
+// defaultServiceVersion, never the old "dev" sentinel. This mirrors the Python
+// runtimes' _DEFAULT_SERVICE_VERSION so the console and the observability stack
+// agree on the version an operator sees.
+func TestUIBuildVersion_FallsBackToCompiledDefault(t *testing.T) {
+	t.Setenv("PERSATRIX_SERVICE_VERSION", "") // force the non-env path
+
+	got := uiBuildVersion()
+
+	assert.Equal(t, defaultServiceVersion, got,
+		"with no env var and no module version, the fallback must be the compiled-in default")
+	assert.Regexp(t, `^\d+\.\d+\.\d+`, got,
+		"build.version fallback must be a real semver, not the 'dev' sentinel")
+}
+
+// TestUIBuildVersion_EnvOverride guards the precedence: an explicit
+// PERSATRIX_SERVICE_VERSION (what real deployments and the observability
+// runtimes set) wins over the compiled-in default.
+func TestUIBuildVersion_EnvOverride(t *testing.T) {
+	t.Setenv("PERSATRIX_SERVICE_VERSION", "9.9.9-test")
+
+	assert.Equal(t, "9.9.9-test", uiBuildVersion(),
+		"an explicit env version must override the compiled-in default")
+}
+
 // TestUIEndpoints_404WhenDisabled is the nil-safe gate for PR 2: with no WithUI
 // option (the --enable-ui=off default) neither /api/v1/ui/config nor
 // /api/v1/ui/context is registered, so both are a clean 404 and the surface is

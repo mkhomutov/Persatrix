@@ -51,6 +51,15 @@ VERSION_FILES: list[tuple[str, str, str]] = [
         r'(\(default: ")\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?(")',
         r"\g<1>{version}\2",
     ),
+    # The Go orchestrator's compiled-in service-version fallback, surfaced by
+    # the web console's /api/v1/ui/config when PERSATRIX_SERVICE_VERSION is
+    # unset and the build carries no module version. Like the Python defaults
+    # above it is not a build input, so it must be bumped here or it drifts.
+    (
+        "internal/server/ui_handlers.go",
+        r'^(const defaultServiceVersion = ")[^"]+(")$',
+        r"\g<1>{version}\2",
+    ),
 ]
 
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$")

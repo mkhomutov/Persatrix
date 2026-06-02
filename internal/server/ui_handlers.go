@@ -101,11 +101,22 @@ func (s *Server) panelAvailable(name string) bool {
 	}
 }
 
-// uiBuildVersion resolves the version string surfaced in /api/v1/ui/config.
-// The orchestrator binary carries no compiled-in version constant, so it
+// defaultServiceVersion is the orchestrator binary's compiled-in service
+// version, used by [uiBuildVersion] when neither the PERSATRIX_SERVICE_VERSION
+// env var nor a `go install`/release module version is present (a plain
+// `go build`/Docker image, the common deployment case). It mirrors the Python
+// runtimes' _DEFAULT_SERVICE_VERSION so the console's reported version agrees
+// with the observability stack's service.version. Like that constant it is not
+// a build input, so a stale value never fails `make all` — scripts/bump_version.py
+// bumps it each release (VERSION_FILES) or it silently drifts.
+const defaultServiceVersion = "0.3.5"
+
+// uiBuildVersion resolves the version string surfaced in /api/v1/ui/config. It
 // prefers the PERSATRIX_SERVICE_VERSION env var (the same source the
-// observability runtimes read) and falls back to the module version stamped by
-// `go install`/release builds, then to "dev" for a plain `go build`/`go test`.
+// observability runtimes read), then the module version stamped by
+// `go install`/release builds, and finally the compiled-in
+// [defaultServiceVersion] — never an empty or "dev" placeholder, so an operator
+// always sees a real version and it matches the Python runtimes' default.
 func uiBuildVersion() string {
 	if v := os.Getenv("PERSATRIX_SERVICE_VERSION"); v != "" {
 		return v
@@ -115,5 +126,5 @@ func uiBuildVersion() string {
 			return v
 		}
 	}
-	return "dev"
+	return defaultServiceVersion
 }
