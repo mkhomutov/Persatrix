@@ -57,3 +57,11 @@ orchestrator.exe
 # embeds only web assets and never serves a VCS file at /ui/.gitignore.
 internal/ui/assets/*
 !internal/ui/assets/index.html
+
+# RFC 0048 Phase 1 PR 3: the web/ frontend toolchain. node_modules/ is covered
+# by the global rule above; these catch the Vite caches and any stray local
+# build output (`make ui` writes the bundle into internal/ui/assets/, ignored
+# above — not into web/). Only web/ source + the committed lockfile are tracked.
+web/node_modules/
+web/dist/
+web/.vite/

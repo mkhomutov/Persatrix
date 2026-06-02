@@ -36,6 +36,41 @@ jobs:
       - name: Run Go tests
         run: go test ./internal/... -v -race -cover
 
+  web-console:
+    # RFC 0048 Phase 1 PR 3 — the embedded web console's JS toolchain (the
+    # repo's 4th language). This is the *release/asset* lane: it runs the
+    # frontend unit tests, builds the real Svelte/Vite bundle into
+    # internal/ui/assets/, and confirms the orchestrator compiles with that
+    # bundle embedded. The Go-only `go` job above stays Node-free and builds
+    # against the committed placeholder embed, so a Go-only contributor is
+    # never blocked on the JS toolchain (v0.3.6-plan §Risk).
+    name: Web console (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install web dependencies
+        run: cd web && npm ci
+
+      - name: Run web console unit tests
+        run: cd web && npm test
+
+      - name: Build web console bundle
+        run: make ui
+
+      - name: Build orchestrator with the real bundle embedded
+        run: go build ./cmd/orchestrator
+
   proto-staleness:
     name: Proto staleness check
     runs-on: ubuntu-latest

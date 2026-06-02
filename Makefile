@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run validate help demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run validate help demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -9,6 +9,8 @@ PROTO_PY_OUT  := agents/generated
 PYTHON        := python3
 PIP           := pip3
 CARGO         := cargo
+NPM           := npm
+WEB_DIR       := web
 # On Windows, executables require the .exe extension; EXE is empty on Unix.
 EXE           := $(if $(filter Windows_NT,$(OS)),.exe,)
 
@@ -99,6 +101,16 @@ build-orchestrator: ## Build Go orchestrator binary
 	@mkdir -p $(GO_BIN)
 	go build -o $(GO_BIN)/persatrix-server$(EXE) ./cmd/orchestrator
 	@echo "✓ Orchestrator built → $(GO_BIN)/persatrix-server$(EXE)"
+
+ui: ## Build the embedded web console (RFC 0048) into internal/ui/assets/
+	@echo "→ Building web console (Svelte/Vite)..."
+	cd $(WEB_DIR) && $(NPM) ci && $(NPM) run build
+	@echo "✓ Web console built → internal/ui/assets/ (embed via WithUI, serve with --enable-ui)"
+
+ui-test: ## Run the web console's unit tests (Vitest)
+	cd $(WEB_DIR) && $(NPM) ci && $(NPM) test
+
+build-orchestrator-ui: ui build-orchestrator ## Build the orchestrator with the real console bundle embedded (release/asset lane)
 
 build-cli: ## Build Rust CLI binary
 	@echo "→ Building CLI..."
