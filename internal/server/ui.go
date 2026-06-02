@@ -25,6 +25,18 @@ func WithUI(uiFS fs.FS) ServerOption {
 	}
 }
 
+// WithUIConfig injects the parsed config/ui.yaml feature toggles (RFC 0048 §C)
+// that /api/v1/ui/config reports to the SPA. Separate from WithUI so the asset
+// tree and the toggle config stay independently injectable (a test can supply
+// toggles without an FS, or an FS without toggles). When absent — including
+// whenever --enable-ui is off — handleUIConfig falls back to the Slice-1
+// defaults (see [DefaultUIConfig]).
+func WithUIConfig(cfg *UIConfig) ServerOption {
+	return func(s *Server) {
+		s.uiConfig = cfg
+	}
+}
+
 // registerUIRoutes serves the embedded web console under /ui/ when WithUI wired
 // the asset tree (orchestrator --enable-ui, default off). Absent it, the route
 // is never registered, so /ui/ is a clean 404 and the rest of the surface is
@@ -48,6 +60,13 @@ func (s *Server) registerUIRoutes() {
 	}
 	fileServer := http.FileServer(noListFS{http.FS(s.uiFS)})
 	s.mux.Handle("GET /ui/", http.StripPrefix("/ui/", fileServer))
+
+	// The two read-only endpoints the SPA boots off (RFC 0048 PR 2). Registered
+	// in the same uiFS-gated block as the static handler so they share the
+	// console's enablement: with --enable-ui off neither is registered and both
+	// are a clean 404. They ride the existing /api/v1/* middleware stack.
+	s.mux.HandleFunc("GET /api/v1/ui/config", s.handleUIConfig)
+	s.mux.HandleFunc("GET /api/v1/ui/context", s.handleUIContext)
 }
 
 // noListFS wraps an http.FileSystem so http.FileServer never renders a

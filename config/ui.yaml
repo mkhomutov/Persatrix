@@ -1,0 +1,27 @@
+# Web Console Configuration (RFC 0048 — operator/tester web console, v0.3.6+).
+#
+# Schema: schemas/ui.schema.json — `make validate` against this file.
+#
+# This file is the feature-toggle surface for the embedded web console served
+# at /ui (orchestrator --enable-ui, default off). Each panel has a single
+# operator-authored knob, `enabled`, deciding whether the console *offers* it.
+#
+# IMPORTANT — `available` is runtime-derived, never authored here. The server
+# computes, per request, whether each panel's backing subsystem is actually
+# wired (e.g. channel_timeline.available = channels are configured) and reports
+# it alongside `enabled` in GET /api/v1/ui/config. The console renders a panel
+# only when it is BOTH enabled here AND available at runtime. Writing an
+# `available:` key in this file is a validation error (schema
+# additionalProperties:false) — it would have no effect and misleads the reader.
+#
+# Slice 1 (v0.3.6) ships the two hero panels on; memory_strip (Slice 2) and
+# cost (Slice 4) ship off so they land additively with no Slice-1 rework.
+panels:
+  chat:
+    enabled: true
+  channel_timeline:
+    enabled: true
+  memory_strip:
+    enabled: false
+  cost:
+    enabled: false

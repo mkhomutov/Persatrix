@@ -3,6 +3,8 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,7 +23,7 @@ import (
 // posture (RFC 0048 §Security): --enable-ui=false yields no server option, so
 // the /ui/ route is never registered.
 func TestInitUI_DisabledByDefault(t *testing.T) {
-	opts := initUI(false, zap.NewNop())
+	opts := initUI(false, t.TempDir(), zap.NewNop())
 	assert.Empty(t, opts,
 		"--enable-ui=false (default) must wire no UI option so /ui/ is never registered")
 }
@@ -32,7 +34,7 @@ func TestInitUI_DisabledByDefault(t *testing.T) {
 func TestInitUI_DisabledEmitsNoWarn(t *testing.T) {
 	core, recorded := observer.New(zapcore.WarnLevel)
 
-	_ = initUI(false, zap.New(core))
+	_ = initUI(false, t.TempDir(), zap.New(core))
 
 	assert.Empty(t, recorded.FilterMessageSnippet("web console ENABLED").All(),
 		"the disabled path must not emit the console-enabled security WARN")
@@ -44,10 +46,10 @@ func TestInitUI_DisabledEmitsNoWarn(t *testing.T) {
 func TestInitUI_EnabledWiresOption(t *testing.T) {
 	core, recorded := observer.New(zapcore.WarnLevel)
 
-	opts := initUI(true, zap.New(core))
+	opts := initUI(true, t.TempDir(), zap.New(core))
 
-	require.Len(t, opts, 1,
-		"--enable-ui=true must wire exactly one server option (WithUI(ui.Assets()))")
+	require.Len(t, opts, 2,
+		"--enable-ui=true must wire WithUI(ui.Assets()) + WithUIConfig(...)")
 	warns := recorded.FilterMessageSnippet("web console ENABLED").All()
 	require.Len(t, warns, 1,
 		"the enabled path must emit exactly one console-enabled security WARN")
@@ -60,7 +62,7 @@ func TestInitUI_EnabledWiresOption(t *testing.T) {
 // from the internal/ui embed package — the "go build with no JS toolchain"
 // guarantee surfaced through a flag-on binary.
 func TestInitUI_EnabledServesPlaceholder(t *testing.T) {
-	srv := buildUITestServer(t, initUI(true, zap.NewNop())...)
+	srv := buildUITestServer(t, initUI(true, t.TempDir(), zap.NewNop())...)
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
 
@@ -70,6 +72,38 @@ func TestInitUI_EnabledServesPlaceholder(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode,
 		"a flag-on binary must serve the embedded placeholder shell at /ui/")
+}
+
+// TestInitUI_EnabledServesConfig is the end-to-end proof that the enabled path
+// wires the config endpoint (RFC 0048 PR 2): a flag-on binary serves
+// /api/v1/ui/config off the loaded (here: absent → default) ui.yaml.
+func TestInitUI_EnabledServesConfig(t *testing.T) {
+	srv := buildUITestServer(t, initUI(true, t.TempDir(), zap.NewNop())...)
+	hs := httptest.NewServer(srv.Handler())
+	t.Cleanup(hs.Close)
+
+	resp, err := http.Get(hs.URL + "/api/v1/ui/config")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode,
+		"a flag-on binary must serve /api/v1/ui/config")
+}
+
+// TestInitUI_MalformedConfigSoftDegrades pins the channels.yaml-consistent
+// posture: a malformed config/ui.yaml does not abort console wiring — initUI
+// logs a WARN and falls back to defaults so the console still boots.
+func TestInitUI_MalformedConfigSoftDegrades(t *testing.T) {
+	cfgDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(cfgDir, "ui.yaml"), []byte("panels: [broken\n"), 0o600))
+
+	core, recorded := observer.New(zapcore.WarnLevel)
+	opts := initUI(true, cfgDir, zap.New(core))
+
+	require.Len(t, opts, 2, "a malformed ui.yaml must still wire the console (defaults)")
+	assert.NotEmpty(t, recorded.FilterMessageSnippet("ui.yaml").All(),
+		"a malformed ui.yaml must surface a WARN")
 }
 
 // buildUITestServer constructs a minimal Server with the given options for the

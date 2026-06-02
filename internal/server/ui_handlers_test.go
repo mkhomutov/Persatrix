@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"testing/fstest"
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/mkhomutov/persatrix/internal/channels"
 	"github.com/mkhomutov/persatrix/internal/planner"
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/state"
@@ -124,4 +126,117 @@ func TestWithoutUI_ExistingRoutesUnaffected(t *testing.T) {
 
 	agents := doRequest(srv.Handler(), http.MethodGet, "/api/v1/agents", nil)
 	assert.Equal(t, http.StatusOK, agents.Code, "GET /api/v1/agents must be unaffected by the UI scaffold")
+}
+
+// uiChannelStore builds a throwaway SQLite-backed channel store so a test can
+// wire WithChannels and exercise the runtime-derived `available` flag.
+func uiChannelStore(t *testing.T) channels.ChannelStore {
+	t.Helper()
+	store, err := channels.NewSQLiteStore(":memory:", channels.SQLiteOptions{
+		MaxChannels: 50,
+		Logger:      zap.NewNop(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
+// uiConfigResponseBody is the test-side mirror of the /api/v1/ui/config JSON
+// (RFC 0048 §C). Kept here, not imported from the handler, so the test pins the
+// wire shape independently of the server's internal struct.
+type uiConfigResponseBody struct {
+	Panels map[string]struct {
+		Enabled   bool `json:"enabled"`
+		Available bool `json:"available"`
+	} `json:"panels"`
+	Build struct {
+		Version string `json:"version"`
+	} `json:"build"`
+}
+
+// TestUIConfig_Shape pins the RFC 0048 §C config contract: the Slice-1 panel
+// toggles default on for chat/channel_timeline and off for memory_strip/cost,
+// and a non-empty build.version ships so the console can show what it is
+// rendering. channels wired → channel_timeline is available.
+func TestUIConfig_Shape(t *testing.T) {
+	srv := uiTestServer(t, WithUI(uiAssetFS()), WithChannels(uiChannelStore(t), nil))
+
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/ui/config", nil)
+	require.Equal(t, http.StatusOK, rec.Code, "GET /api/v1/ui/config must succeed when the console is wired")
+
+	var body uiConfigResponseBody
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+
+	require.Contains(t, body.Panels, "chat")
+	require.Contains(t, body.Panels, "channel_timeline")
+	require.Contains(t, body.Panels, "memory_strip")
+	require.Contains(t, body.Panels, "cost")
+
+	assert.True(t, body.Panels["chat"].Enabled, "chat ships enabled in Slice 1")
+	assert.True(t, body.Panels["channel_timeline"].Enabled, "channel_timeline ships enabled in Slice 1")
+	assert.False(t, body.Panels["memory_strip"].Enabled, "memory_strip ships off (Slice 2)")
+	assert.False(t, body.Panels["cost"].Enabled, "cost ships off (Slice 4)")
+
+	assert.True(t, body.Panels["chat"].Available, "chat is always wired")
+	assert.True(t, body.Panels["channel_timeline"].Available, "channels wired → channel_timeline available")
+	assert.False(t, body.Panels["memory_strip"].Available, "memory_strip has no backing subsystem yet (Slice 2)")
+
+	assert.NotEmpty(t, body.Build.Version, "build.version must be reported so the console can display it")
+}
+
+// TestUIConfig_AvailabilityTracksChannels is the unit-level proof of the
+// runtime-derivation contract (RFC 0048 §C / PR-plan D4): `available` is
+// computed by the server from whether the backing subsystem is wired, never
+// read from YAML. With no WithChannels, channel_timeline is unavailable.
+func TestUIConfig_AvailabilityTracksChannels(t *testing.T) {
+	srv := uiTestServer(t, WithUI(uiAssetFS())) // no WithChannels
+
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/ui/config", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var body uiConfigResponseBody
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+
+	assert.False(t, body.Panels["channel_timeline"].Available,
+		"channels absent → channel_timeline.available must be false")
+	assert.True(t, body.Panels["channel_timeline"].Enabled,
+		"the enabled toggle is independent of availability — it stays on, the client hides the slot")
+}
+
+// TestUIContext_Local pins the RFC 0048 §F identity contract for today's
+// no-auth localhost mode: the single-tenant degenerate case reports
+// principal=tenant=local and authenticated=false. PR 4's chat panel derives
+// user_id from this endpoint, never a hard-coded or free-text user.
+func TestUIContext_Local(t *testing.T) {
+	srv := uiTestServer(t, WithUI(uiAssetFS()))
+
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/ui/context", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var body struct {
+		Principal     string `json:"principal"`
+		Tenant        string `json:"tenant"`
+		Authenticated bool   `json:"authenticated"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+
+	assert.Equal(t, "local", body.Principal, "no-auth localhost principal is `local`")
+	assert.Equal(t, "local", body.Tenant, "single-tenant degenerate case tenant is `local`")
+	assert.False(t, body.Authenticated, "no auth layer today → authenticated=false")
+}
+
+// TestUIEndpoints_404WhenDisabled is the nil-safe gate for PR 2: with no WithUI
+// option (the --enable-ui=off default) neither /api/v1/ui/config nor
+// /api/v1/ui/context is registered, so both are a clean 404 and the surface is
+// unchanged.
+func TestUIEndpoints_404WhenDisabled(t *testing.T) {
+	srv := uiTestServer(t) // no WithUI
+
+	cfg := doRequest(srv.Handler(), http.MethodGet, "/api/v1/ui/config", nil)
+	assert.Equal(t, http.StatusNotFound, cfg.Code,
+		"without WithUI, /api/v1/ui/config must be a clean 404")
+
+	ctx := doRequest(srv.Handler(), http.MethodGet, "/api/v1/ui/context", nil)
+	assert.Equal(t, http.StatusNotFound, ctx.Code,
+		"without WithUI, /api/v1/ui/context must be a clean 404")
 }

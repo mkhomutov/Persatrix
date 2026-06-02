@@ -357,7 +357,7 @@ func main() {
 		logger.Fatal("channels: config-vs-store reconcile failed", zap.Error(chanErr))
 	}
 	defer chanCleanup()
-	srvOpts = append(append(srvOpts, chanOpts...), initUI(*enableUI, logger)...) // RFC 0048: +off-by-default web console
+	srvOpts = append(append(srvOpts, chanOpts...), initUI(*enableUI, *configDir, logger)...) // RFC 0048: +off-by-default web console
 
 	// 8c. Initialize scheduler (workflow run polling + execution)
 	sched := scheduler.NewWorkflowScheduler(store, reg, plan, exec, logger, absWorkflowsDir, schedOpts...)

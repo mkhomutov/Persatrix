@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"path/filepath"
 
 	"go.uber.org/zap"
 
@@ -20,7 +21,7 @@ import (
 var enableUI = flag.Bool("enable-ui", false,
 	"Serve the embedded web console at /ui (RFC 0048; localhost-only until RFC 0039 auth)")
 
-// initUI returns the server option that serves the embedded web console, or
+// initUI returns the server options that serve the embedded web console, or
 // nil when the console is disabled.
 //
 // When enableUI is false (the default), it returns no option, so the /ui/
@@ -28,15 +29,22 @@ var enableUI = flag.Bool("enable-ui", false,
 // runtime behaviour changes. When true, it wires the committed embedded asset
 // tree — a placeholder until `make ui` (RFC 0048 Phase 1 PR 3) overwrites it
 // with the real Svelte bundle, so a flag-on binary built without the JS
-// toolchain serves a clear "run make ui" message instead of failing.
+// toolchain serves a clear "run make ui" message instead of failing — plus the
+// parsed config/ui.yaml feature toggles that /api/v1/ui/config reports (RFC
+// 0048 Phase 1 PR 2).
 //
-// Returns a slice (zero or one option) so the caller can append unconditionally,
-// matching initChannels' shape.
+// config/ui.yaml is loaded from cfgDir with the channels.yaml-consistent
+// posture: an absent file is the expected zero-config case (defaults apply); a
+// malformed file is logged at WARN and soft-degrades to defaults so a config
+// typo never blocks the console from booting.
+//
+// Returns a slice (zero or two options) so the caller can append
+// unconditionally, matching initChannels' shape.
 //
 // On the enabled path it emits a startup WARN — co-located with the wiring like
 // channels.go's unauthenticated-surface warning — so the security posture is
 // impossible to miss in an operator's first log scrape.
-func initUI(enableUI bool, logger *zap.Logger) []server.ServerOption {
+func initUI(enableUI bool, cfgDir string, logger *zap.Logger) []server.ServerOption {
 	if !enableUI {
 		return nil
 	}
@@ -46,5 +54,18 @@ func initUI(enableUI bool, logger *zap.Logger) []server.ServerOption {
 			zap.String("auth_eta", "RFC 0039"),
 		)
 	}
-	return []server.ServerOption{server.WithUI(ui.Assets())}
+
+	uiCfgPath := filepath.Join(cfgDir, "ui.yaml")
+	uiCfg, err := server.LoadUIConfig(uiCfgPath)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("ui: config/ui.yaml load failed; falling back to Slice-1 panel defaults",
+				zap.String("path", uiCfgPath),
+				zap.Error(err),
+			)
+		}
+		uiCfg = server.DefaultUIConfig()
+	}
+
+	return []server.ServerOption{server.WithUI(ui.Assets()), server.WithUIConfig(uiCfg)}
 }
