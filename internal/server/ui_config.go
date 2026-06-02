@@ -54,13 +54,16 @@ func (c *UIConfig) PanelEnabled(name string) bool {
 
 // LoadUIConfig parses config/ui.yaml from path.
 //
-// Posture mirrors channels.LoadConfig: an absent file is the expected
-// zero-config case (a flag-on binary with no ui.yaml renders the Slice-1
-// defaults), so it returns [DefaultUIConfig] with no error; a present-but-
-// malformed file is an operator bug surfaced as an error so the caller can log
-// loudly and soft-degrade. KnownFields is enabled so a stray key (e.g. an
-// authored `available:`) surfaces as a parse error rather than silently
-// loading.
+// Absent file → [DefaultUIConfig] with no error: a flag-on binary with no
+// ui.yaml is the expected zero-config case and renders the Slice-1 defaults.
+// This differs from channels.LoadConfig, which returns the not-exist error for
+// its caller to classify — here the defaults-on-absent decision lives in the
+// loader because the console always has a sensible default panel set, whereas
+// an absent channels.yaml means "no channels at all". A present-but-malformed
+// file is an operator bug returned as an error so the caller can log loudly and
+// soft-degrade; that loud-on-malformed posture is the part that matches
+// channels.yaml. KnownFields is enabled so a stray key (e.g. an authored
+// `available:`) surfaces as a parse error rather than loading silently.
 func LoadUIConfig(path string) (*UIConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -74,12 +77,13 @@ func LoadUIConfig(path string) (*UIConfig, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(cfg); err != nil {
-		if !errors.Is(err, io.EOF) {
-			// io.EOF means the file is empty / fully commented out — treat as
-			// "no overrides" and fall back to defaults, matching channels.yaml.
-			return nil, fmt.Errorf("ui: parse %s: %w", path, err)
+		// io.EOF means the file is empty / fully commented out — treat as "no
+		// overrides" and fall back to defaults, matching channels.yaml. Any
+		// other decode error is an operator bug surfaced loudly.
+		if errors.Is(err, io.EOF) {
+			return DefaultUIConfig(), nil
 		}
-		return DefaultUIConfig(), nil
+		return nil, fmt.Errorf("ui: parse %s: %w", path, err)
 	}
 
 	// An empty/partial file leaves Panels nil or partial; backfill any panel the

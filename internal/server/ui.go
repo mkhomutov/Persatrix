@@ -37,10 +37,19 @@ func WithUIConfig(cfg *UIConfig) ServerOption {
 	}
 }
 
-// registerUIRoutes serves the embedded web console under /ui/ when WithUI wired
-// the asset tree (orchestrator --enable-ui, default off). Absent it, the route
-// is never registered, so /ui/ is a clean 404 and the rest of the surface is
-// untouched.
+// registerUIRoutes serves the embedded web console on mux when WithUI wired the
+// asset tree (orchestrator --enable-ui, default off). Absent it, no route is
+// registered, so the console surface is a clean 404 and the rest is untouched.
+//
+// It is registered on the security-bypass root mux (alongside /healthz) rather
+// than on s.mux behind RESTRateLimitMiddleware: the console is operator/tester
+// traffic, not agent API traffic, so it must NOT be governed by the agent
+// rate-limiter / circuit-breaker. The browser calls the boot endpoints
+// anonymously (no X-Agent-ID), and the PR #244 H-01 anonymous-deny fires
+// whenever *any* agent is quarantined — routing the console through that layer
+// would 403 it and make the console unbootable exactly when an operator needs
+// it to investigate or clear the quarantine. See [Server.Handler]. (Pinned by
+// ui_quarantine_test.go; the H-01 deny stays in force for genuine /api/v1/*.)
 //
 // http.FileServer (over hash-mode routing, RFC 0048 PR plan D1) is correct
 // because every real-file request maps to an embedded asset and client routes
@@ -54,19 +63,19 @@ func WithUIConfig(cfg *UIConfig) ServerOption {
 // PR 3's Svelte/Vite bundle ships subdirectories (e.g. _app/, .vite/) whose
 // internal filenames must not be browsable. Hashed assets stay reachable by
 // their direct path.
-func (s *Server) registerUIRoutes() {
+func (s *Server) registerUIRoutes(mux *http.ServeMux) {
 	if s.uiFS == nil {
 		return
 	}
 	fileServer := http.FileServer(noListFS{http.FS(s.uiFS)})
-	s.mux.Handle("GET /ui/", http.StripPrefix("/ui/", fileServer))
+	mux.Handle("GET /ui/", http.StripPrefix("/ui/", fileServer))
 
 	// The two read-only endpoints the SPA boots off (RFC 0048 PR 2). Registered
 	// in the same uiFS-gated block as the static handler so they share the
 	// console's enablement: with --enable-ui off neither is registered and both
-	// are a clean 404. They ride the existing /api/v1/* middleware stack.
-	s.mux.HandleFunc("GET /api/v1/ui/config", s.handleUIConfig)
-	s.mux.HandleFunc("GET /api/v1/ui/context", s.handleUIContext)
+	// are a clean 404.
+	mux.HandleFunc("GET /api/v1/ui/config", s.handleUIConfig)
+	mux.HandleFunc("GET /api/v1/ui/context", s.handleUIContext)
 }
 
 // noListFS wraps an http.FileSystem so http.FileServer never renders a
