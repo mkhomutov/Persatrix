@@ -153,54 +153,9 @@ describe("Channel timeline panel", () => {
     expect(await screen.findByText(/no channels/i)).toBeTruthy();
   });
 
-  it("makes the no-channels empty state an on-ramp, not a dead end (§F)", async () => {
-    listChannels.mockResolvedValue({ channels: [] });
-    render(ChannelTimeline, { props: { userId: "local" } });
-
-    await screen.findByText(/no channels/i);
-    expect(screen.getByRole("button", { name: /refresh/i })).toBeTruthy();
-    expect(screen.getByRole("link", { name: /quick-start/i })).toBeTruthy();
-  });
-
-  it("opens on the channel handed off from the chat panel (§F)", async () => {
-    // The chat panel records a target DM; the freshly-mounted timeline selects
-    // it (if present) and consumes the one-shot intent.
-    nav.targetChannel = "ops";
-    getChannelHistory.mockResolvedValue(
-      historyOf(msg("o1", "ops message", "alice")),
-    );
-
-    render(ChannelTimeline, { props: { userId: "local" } });
-
-    // History loaded for the handed-off channel, and the intent is cleared.
-    await waitFor(() =>
-      expect(getChannelHistory).toHaveBeenCalledWith("ops", expect.anything()),
-    );
-    expect(nav.targetChannel).toBe("");
-    const picker = screen.getByRole("combobox", { name: /channel/i });
-    expect(picker.value).toBe("ops");
-  });
-
-  it("consumes a stale hand-off intent even when its channel is absent (§F)", async () => {
-    // The hand-off intent is one-shot, scoped to the mount it triggered. If the
-    // requested DM isn't in the list (a race where it hasn't surfaced yet), the
-    // intent must still be consumed on this load — otherwise it leaks and would
-    // surface an unexpected jump on a later, unrelated mount/Refresh. The load
-    // falls back to the first channel.
-    nav.targetChannel = "missing-dm";
-
-    render(ChannelTimeline, { props: { userId: "local" } });
-
-    await waitFor(() =>
-      expect(getChannelHistory).toHaveBeenCalledWith(
-        "general",
-        expect.anything(),
-      ),
-    );
-    expect(nav.targetChannel).toBe("");
-    const picker = screen.getByRole("combobox", { name: /channel/i });
-    expect(picker.value).toBe("general");
-  });
+  // §F onboarding empty state + cross-panel hand-off (nav.targetChannel) live in
+  // ChannelTimeline.crosspanel.test.js, split out to keep each spec under the
+  // review-size cap.
 
   it("shows a no-messages state for an empty channel", async () => {
     getChannelHistory.mockResolvedValue(historyOf());
