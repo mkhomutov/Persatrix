@@ -5,8 +5,11 @@
   // userId (RFC §F single identity source), so the panel never prompts for or
   // hard-codes a user.
   import { listAgents, sendChat, getChatHistory, ApiError } from "../lib/api.js";
-  import { formatTimestamp } from "../lib/format.js";
   import ScopeSelector from "./ScopeSelector.svelte";
+  import OnboardingEmpty from "./OnboardingEmpty.svelte";
+  import PersonaHeader from "./PersonaHeader.svelte";
+  import ChatMessage from "./ChatMessage.svelte";
+  import { nav } from "../lib/nav.svelte.js";
 
   let { userId } = $props();
 
@@ -52,13 +55,9 @@
   let historyLoading = $state(false);
   let historyError = $state("");
   let historyToken = 0;
-  // The resolved DM channel id, captured from seeded history when present, for
-  // the §F "view this conversation in the timeline" deep-link (PR F). Empty
-  // until a conversation exists (a fresh persona has no DM yet). NOTE for §F: a
-  // live send into a fresh persona creates the DM server-side but does NOT
-  // populate this — chatResponse carries no channel id — so the deep-link stays
-  // empty until the next reload reseeds from history. §F should surface the id
-  // on the chat response (or re-resolve) rather than rely on a reload.
+  // The resolved DM channel id, for the §F "view in timeline" deep-link. Empty
+  // until a conversation exists; seeded from history on reseed (loadHistory) and
+  // re-resolved after the first live send (see send()).
   let dmChannelId = $state("");
 
   const canSend = $derived(
@@ -178,6 +177,25 @@
   // rather than an error.
   function cancelSend() {
     chatController?.abort();
+  }
+
+  // viewInTimeline hands the current conversation to the Channel Timeline (§F):
+  // it records the resolved DM channel id as the pending selection and switches
+  // the hash route, so the freshly-mounted timeline opens on this conversation —
+  // making "your chat is a real, watchable channel" a click, not an assertion.
+  // Only reachable once a conversation exists (dmChannelId is set from history).
+  //
+  // The affordance is a real <a href="#/channels"> (for link semantics), so we
+  // preventDefault and drive the route in JS: that guarantees the nav intent is
+  // recorded before the route changes, rather than racing the anchor's native
+  // navigation — and a modified click (new tab) would land on a fresh context
+  // without the intent anyway, so hijacking it to the in-place hand-off is the
+  // behaviour we want.
+  function viewInTimeline(event) {
+    event?.preventDefault();
+    if (!dmChannelId) return;
+    nav.targetChannel = dmChannelId;
+    window.location.hash = "#/channels";
   }
 
   // loadToken disambiguates concurrent/superseded loads: each call stamps a
@@ -307,6 +325,23 @@
         },
       ];
       message = "";
+      // First message of a fresh conversation creates the DM server-side (§F);
+      // chatResponse omits its id, so re-resolve it from history (the source of
+      // truth — DM ids are never hand-built, see channels.CanonicalDMID) to light
+      // up the hand-off this turn. Fire-and-forget + token-guarded: it neither
+      // blocks the composer nor outlives a persona switch, and a failed capture
+      // just leaves the link hidden until the next reseed. Guarded to the first
+      // turn (dmChannelId empty) so steady-state chatting adds no extra fetch.
+      if (!dmChannelId && selectedAgent) {
+        const token = historyToken;
+        getChatHistory(selectedAgent, { userId })
+          .then((r) => {
+            const m = r.messages ?? [];
+            if (token === historyToken && m.length > 0)
+              dmChannelId = m[0].channel_id ?? "";
+          })
+          .catch(() => {});
+      }
     } catch (err) {
       // A user-initiated cancel surfaces as an AbortError (fetch rejecting on
       // the aborted signal, wrapped as a status-0 ApiError with the AbortError
@@ -360,32 +395,18 @@
          dropdown). agentsLoaded gates both this and the empty state below. -->
     <p class="loading" role="status">Loading personas…</p>
   {:else if agents.length === 0}
-    <p class="empty">No personas are registered yet.</p>
+    <!-- Onboarding, not a dead end (§F): a fresh stack has no personas yet, so
+         say how to add one and offer a way to re-check without a full reload. -->
+    <OnboardingEmpty title="No personas are registered yet." onRetry={loadAgents}>
+      Register one with <code>persatrix agent register</code> (or add it to
+      <code>config/agents.yaml</code> and restart), then re-check.
+    </OnboardingEmpty>
   {:else}
-    {#if selectedAgentInfo}
-      <!-- Persona header: gives the conversation a face. Name + role identify
-           the persona; the capability chips say what it's for — all from fields
-           the agent DTO already carries (RFC 0048 amendment §A). -->
-      <header class="persona">
-        <span class="persona-name"
-          >{selectedAgentInfo.name || selectedAgentInfo.id}</span
-        >
-        {#if selectedAgentInfo.role}
-          <span class="persona-role">{selectedAgentInfo.role}</span>
-        {/if}
-        {#if selectedAgentInfo.capabilities && selectedAgentInfo.capabilities.length > 0}
-          <ul class="persona-caps" aria-label="Capabilities">
-            <!-- Unkeyed: capabilities are display-only and the registry doesn't
-                 dedupe them, so a value key would throw each_key_duplicate. The
-                 list is re-derived wholesale per selection, so there's no identity
-                 to preserve across mutations anyway. -->
-            {#each selectedAgentInfo.capabilities as capability}
-              <li>{capability}</li>
-            {/each}
-          </ul>
-        {/if}
-      </header>
-    {/if}
+    <PersonaHeader
+      info={selectedAgentInfo}
+      {dmChannelId}
+      onViewInTimeline={viewInTimeline}
+    />
 
     {#if historyLoading}
       <p class="loading" role="status">Loading conversation history…</p>
@@ -399,33 +420,7 @@
 
     <ol class="transcript" aria-label="Conversation">
       {#each transcript as msg (msg.id)}
-        <li class="msg">
-          <p
-            class:from-user={msg.fromUser}
-            class:from-agent={!msg.fromUser}
-            class:reply-error={msg.status === "error"}
-          >
-            <strong>{msg.who}:</strong>
-            {#if !msg.fromUser && msg.status === "empty"}
-              <!-- reply_status:"empty" is a valid message (the agent had nothing
-                   to say, chat_handler.go) — show a placeholder so it doesn't
-                   read as a blank/broken line. -->
-              <em class="empty-reply">(no reply)</em>
-            {:else}
-              {msg.content}
-            {/if}
-          </p>
-          <p class="msg-meta">
-            {#if msg.timestamp}
-              <time datetime={msg.timestamp}>{formatTimestamp(msg.timestamp)}</time>
-            {/if}
-            <!-- Per-message isolation scope (RFC 0031 session / ISSUE-0085
-                 epoch). Only live turns carry it; seeded history shows no scope
-                 line (amendment §B caveat 2). -->
-            {#if msg.session}<span>session: {msg.session}</span>{/if}
-            {#if msg.epoch}<span>epoch: {msg.epoch}</span>{/if}
-          </p>
-        </li>
+        <ChatMessage {msg} />
       {/each}
     </ol>
 

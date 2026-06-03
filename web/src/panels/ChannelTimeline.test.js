@@ -35,6 +35,7 @@ import {
   publishMessage,
   ApiError,
 } from "../lib/api.js";
+import { nav } from "../lib/nav.svelte.js";
 
 const CHANNELS = [
   { id: "general", name: "General", channel_type: "group" },
@@ -69,6 +70,8 @@ beforeEach(() => {
   publishMessage.mockResolvedValue(
     msg("m3", "from me", "local", "2026-06-02T10:00:03Z"),
   );
+  // Reset the shared cross-panel nav intent (§F) so tests don't leak it.
+  nav.targetChannel = "";
 });
 
 afterEach(() => {
@@ -149,6 +152,10 @@ describe("Channel timeline panel", () => {
 
     expect(await screen.findByText(/no channels/i)).toBeTruthy();
   });
+
+  // §F onboarding empty state + cross-panel hand-off (nav.targetChannel) live in
+  // ChannelTimeline.crosspanel.test.js, split out to keep each spec under the
+  // review-size cap.
 
   it("shows a no-messages state for an empty channel", async () => {
     getChannelHistory.mockResolvedValue(historyOf());

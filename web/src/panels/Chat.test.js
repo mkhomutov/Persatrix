@@ -348,6 +348,9 @@ describe("Chat panel", () => {
     expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
   });
 
+  // §F onboarding empty state + cross-panel "view in timeline" hand-off live in
+  // Chat.crosspanel.test.js (kept separate for the review-size cap).
+
   it("annotates a non-healthy persona with its status in the picker", async () => {
     // GET /api/v1/agents returns agents of any status, but only a healthy one
     // can actually reply (chat_handler.go → 503 otherwise). Surface the status
