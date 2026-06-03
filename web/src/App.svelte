@@ -21,6 +21,11 @@
   let panels = $state([]);
   let userId = $state(null);
   let errorMessage = $state("");
+  // Build version from /ui/config (build.version) — surfaced in the topbar so an
+  // operator can tell at a glance which orchestrator build they're driving (RFC
+  // 0048 amendment §D). Empty when the payload omits it; the topbar then shows
+  // no version chip rather than a placeholder.
+  let version = $state("");
   let activeName = $state(hashPanelName());
 
   // The active panel is chosen by the hash route (#/chat, #/channels) so a
@@ -68,6 +73,7 @@
           return;
         }
         userId = id;
+        version = config?.build?.version ?? "";
         panels = selectPanels(config);
         activeName = hashPanelName();
         canonicalizeHash(activeName);
@@ -147,7 +153,10 @@
 </script>
 
 <header class="topbar">
-  <span class="brand">Persatrix console</span>
+  <span class="brand">
+    Persatrix console
+    {#if version}<span class="version" title="Orchestrator build">v{version}</span>{/if}
+  </span>
   {#if userId}
     <span class="principal" title="Identity from /api/v1/ui/context">
       {userId}

@@ -8,6 +8,8 @@
     listAgents,
     sendChat,
     getChatHistory,
+    listSessions,
+    createSession,
     ApiError,
   } from "../lib/api.js";
 
@@ -33,6 +35,18 @@
   let epochId = $state("");
   let sending = $state(false);
   let sendError = $state("");
+  // chatController backs the abortable turn (§D): a synchronous chat can block
+  // up to the 30s server timeout, so the in-flight turn is cancellable. Held
+  // across the await so the Cancel control can abort the live fetch.
+  let chatController = null;
+  // Session selector state (§C). sessions is the labeled list from
+  // /api/v1/sessions; sessionsAvailable flips false when the registry is unwired
+  // (503), and the control degrades to the free-text input bound to sessionId.
+  let sessions = $state([]);
+  let sessionsAvailable = $state(false);
+  let newSessionLabel = $state("");
+  let creatingSession = $state(false);
+  let sessionCreateError = $state("");
   // The transcript is a flat, conversational (oldest-top) message list — the
   // shape RFC 0048 amendment §B migrates to. Each entry is one message:
   //   { id, fromUser, who, content, status?, timestamp, session?, epoch? }
@@ -152,6 +166,74 @@
     return Number.isNaN(date.getTime()) ? ts : date.toLocaleString();
   }
 
+  // loadSessions populates the session dropdown from /api/v1/sessions (§C). A
+  // failure (notably 503 when the session registry is unwired) leaves
+  // sessionsAvailable false, so the control degrades to the existing free-text
+  // input rather than disappearing — the isolation override stays reachable.
+  function loadSessions() {
+    return listSessions()
+      .then((result) => {
+        sessions = (result.sessions ?? []).filter((s) => !s.archived);
+        sessionsAvailable = true;
+      })
+      .catch(() => {
+        sessionsAvailable = false;
+      });
+  }
+
+  $effect(() => {
+    loadSessions();
+  });
+
+  // createNewSession mints a labeled session and selects it, so a tester can
+  // scope a conversation without leaving the browser for the CLI. The label is
+  // required server-side; an empty one is a no-op here.
+  async function createNewSession() {
+    const label = newSessionLabel.trim();
+    if (!label || creatingSession) {
+      return;
+    }
+    sessionCreateError = "";
+    creatingSession = true;
+    try {
+      const created = await createSession(label);
+      sessions = [created, ...sessions];
+      sessionId = created.id;
+      newSessionLabel = "";
+    } catch (err) {
+      sessionCreateError =
+        err instanceof ApiError
+          ? err.message
+          : `Could not create session: ${err.message}`;
+    } finally {
+      creatingSession = false;
+    }
+  }
+
+  // sessionOptionLabel shows the human label, falling back to the id for a
+  // not-yet-named (auto-minted) session.
+  function sessionOptionLabel(session) {
+    return session.label ? session.label : session.id;
+  }
+
+  // onMessageKeydown wires the universal chat idiom (§D): Enter sends,
+  // Shift+Enter inserts a newline. Without this the <textarea> swallows Enter and
+  // the button is the only send path. IME composition (event.isComposing) is left
+  // alone so Enter can commit a candidate without firing a send.
+  function onMessageKeydown(event) {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      send();
+    }
+  }
+
+  // cancelSend aborts the in-flight turn (§D). The fetch rejects with an
+  // AbortError, which send() recognises and treats as a quiet cancellation
+  // rather than an error.
+  function cancelSend() {
+    chatController?.abort();
+  }
+
   // loadToken disambiguates concurrent/superseded loads: each call stamps a
   // token and only the latest may write state. This both guards against a
   // resolve-after-unmount (the effect cleanup bumps the token) and makes Retry
@@ -234,8 +316,9 @@
     }
 
     sending = true;
+    chatController = new AbortController();
     try {
-      const payload = { message: text, userId };
+      const payload = { message: text, userId, signal: chatController.signal };
       // Pass the optional isolation overrides through only when set, so an empty
       // selector leaves the orchestrator's boot defaults intact (the client
       // omits absent keys; see api.js sendChat).
@@ -279,16 +362,25 @@
       ];
       message = "";
     } catch (err) {
-      // The client surfaces the server's `{error, code}` envelope as the
-      // ApiError message (api.js), so showing err.message gives the operator the
-      // backend's own wording (e.g. the over-length rejection). A non-ApiError
-      // still degrades to its message rather than crashing the panel.
-      sendError =
-        err instanceof ApiError
-          ? err.message
-          : `The message could not be sent: ${err.message}`;
+      // A user-initiated cancel surfaces as an AbortError (fetch rejecting on
+      // the aborted signal, wrapped as a status-0 ApiError with the AbortError
+      // as its cause). That is not a failure — drop it silently rather than
+      // alarming the operator with an error over their own deliberate cancel.
+      if (chatController?.signal.aborted || err?.cause?.name === "AbortError") {
+        // intentionally no sendError
+      } else {
+        // The client surfaces the server's `{error, code}` envelope as the
+        // ApiError message (api.js), so showing err.message gives the operator
+        // the backend's own wording (e.g. the over-length rejection). A
+        // non-ApiError still degrades to its message rather than crashing.
+        sendError =
+          err instanceof ApiError
+            ? err.message
+            : `The message could not be sent: ${err.message}`;
+      }
     } finally {
       sending = false;
+      chatController = null;
     }
   }
 
@@ -388,7 +480,10 @@
     </ol>
 
     {#if sending}
-      <p class="thinking" role="status">Waiting for a reply…</p>
+      <p class="thinking" role="status">
+        Waiting for a reply…
+        <button type="button" class="cancel" onclick={cancelSend}>Cancel</button>
+      </p>
     {/if}
 
     {#if sendError}
@@ -420,25 +515,66 @@
         <textarea
           bind:value={message}
           rows="3"
-          placeholder="Say something to the persona…"
+          placeholder="Say something to the persona… (Enter to send, Shift+Enter for a new line)"
           disabled={sending}
+          onkeydown={onMessageKeydown}
         ></textarea>
       </label>
 
       <!-- Optional isolation overrides (RFC 0031 session / ISSUE-0085 epoch).
-           Free-text by design: these are operator-namespace ids, not identity —
-           the §F identity rule constrains user_id only, which is never typed. -->
+           The §F identity rule constrains user_id only (never typed); session
+           and epoch are operator-namespace ids. Session is a dropdown over the
+           labeled sessions API (§C); epoch stays free-text (no labeled-epoch
+           list exists). -->
       <details class="overrides">
         <summary>Scope (optional)</summary>
-        <label>
-          Session ID
-          <input
-            type="text"
-            bind:value={sessionId}
-            autocomplete="off"
-            disabled={sending}
-          />
-        </label>
+        {#if sessionsAvailable}
+          <label>
+            Session
+            <select bind:value={sessionId} disabled={sending}>
+              <!-- The empty value rides the orchestrator's boot-default session
+                   (the override is omitted on the wire when blank). -->
+              <option value="">(default session)</option>
+              {#each sessions as session (session.id)}
+                <option value={session.id}>{sessionOptionLabel(session)}</option>
+              {/each}
+            </select>
+          </label>
+          <div class="new-session">
+            <label>
+              New session
+              <input
+                type="text"
+                bind:value={newSessionLabel}
+                placeholder="label…"
+                autocomplete="off"
+                disabled={sending || creatingSession}
+              />
+            </label>
+            <button
+              type="button"
+              onclick={createNewSession}
+              disabled={sending || creatingSession || !newSessionLabel.trim()}
+            >
+              {creatingSession ? "Creating…" : "Create"}
+            </button>
+          </div>
+          {#if sessionCreateError}
+            <p class="poll-error" role="status">{sessionCreateError}</p>
+          {/if}
+        {:else}
+          <!-- Session registry unwired (503) — degrade to free-text id entry so
+               the override stays reachable (§C). -->
+          <label>
+            Session ID
+            <input
+              type="text"
+              bind:value={sessionId}
+              autocomplete="off"
+              disabled={sending}
+            />
+          </label>
+        {/if}
         <label>
           Epoch ID
           <input
