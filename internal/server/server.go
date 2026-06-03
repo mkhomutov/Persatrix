@@ -325,6 +325,8 @@ func (s *Server) registerRoutes() {
 	// TODO(v0.2): per-IP or per-session rate limiting — chat accepts unauthenticated
 	// traffic and has no request-rate controls beyond the 300s timeout cap.
 	s.mux.HandleFunc("POST /api/v1/agents/{id}/chat", s.handleChat)
+	// RFC 0048 amendment §B — read-only conversation resume for the web console.
+	s.mux.HandleFunc("GET /api/v1/agents/{id}/chat/history", s.handleGetChatHistory)
 
 	// Channels endpoints (RFC 0011 §C). DELETE handlers landed in PR 4b
 	// alongside the response gate; full §C surface is now implemented.

@@ -123,8 +123,19 @@ body {
   gap: 0.75rem;
 }
 
-.turn p {
+.turn p,
+.msg p {
   margin: 0.15rem 0;
+}
+
+/* msg-meta is the per-message footnote (timestamp + optional isolation scope) —
+   muted and small, like the channel timeline's timestamp. */
+.msg-meta {
+  opacity: 0.6;
+  font-size: 0.8rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .from-agent.reply-error {

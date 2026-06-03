@@ -114,6 +114,17 @@ type ChannelStore interface {
 	// MUST NOT build DM ids by hand.
 	GetOrCreateDM(ctx context.Context, a, b string) (Channel, error)
 
+	// LookupDM is the read-only sibling of [GetOrCreateDM]: it resolves the
+	// canonical DM channel between `a` and `b` *without* creating it, returning
+	// [ErrChannelNotFound] when the pair has never exchanged a message. It is
+	// the access-control equivalent of GetOrCreateDM minus the create half — the
+	// canonical id is derived from BOTH participants (via [CanonicalDMID]), so a
+	// caller can only resolve a DM it is itself a party to, exactly as the
+	// create path requires. Used by the read-only chat-history endpoint (RFC
+	// 0048 amendment §B) so a reload can resume a conversation without the
+	// side effect of materialising an empty DM for a persona never chatted with.
+	LookupDM(ctx context.Context, a, b string) (Channel, error)
+
 	// DeleteChannel removes `id` and its memberships and messages
 	// transactionally via the schema's `ON DELETE CASCADE` rules. Returns
 	// [ErrChannelNotFound] when the id does not exist.
