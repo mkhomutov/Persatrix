@@ -70,26 +70,6 @@ describe("App shell boot", () => {
     expect(screen.queryByRole("tab", { name: /cost/i })).toBeNull();
   });
 
-  it("surfaces the context principal and never shows a free-text user field", async () => {
-    loadBootstrap.mockResolvedValue({
-      config: { panels: { chat: { enabled: true, available: true } } },
-      context: { principal: "local", tenant: "local", authenticated: false },
-    });
-
-    const { container } = render(App);
-
-    // The topbar surfaces the principal coming from /ui/context (titled so the
-    // source is unambiguous and to disambiguate it from panels that also echo
-    // the derived user id).
-    await waitFor(() => {
-      const principal = screen.getByTitle("Identity from /api/v1/ui/context");
-      expect(principal.textContent.trim()).toBe("local");
-    });
-    // RFC §F rule 1: identity comes from /ui/context, so the shell offers no
-    // user-id input the operator could type into.
-    expect(container.querySelector('input[name="user_id"]')).toBeNull();
-  });
-
   it("surfaces the orchestrator build version from config.build.version", async () => {
     // The topbar shows which orchestrator build the operator is driving (RFC 0048
     // amendment §D), read from /ui/config's build.version. Titled so the chip's

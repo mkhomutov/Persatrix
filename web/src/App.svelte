@@ -19,8 +19,26 @@
   // single boot-error state rather than a half-configured console.
   let status = $state("loading");
   let panels = $state([]);
-  let userId = $state(null);
   let errorMessage = $state("");
+  // Identity (RFC 0048 §F + amendment §E). `principal` is the real /ui/context
+  // identity, shown verbatim and never overwritten. `authenticated` gates the
+  // §E carve-out. `actingAs` is the local tester override — it DEFAULTS to the
+  // principal and is layered on top of it (a single identity source, offset by
+  // an operator-visible value), so a tester can demonstrate per-user
+  // persistence ("greet me; now not-recognise a different user") without
+  // leaving the browser. The effective `userId` the panels act as is the
+  // override in local mode and the real principal once authenticated — at which
+  // point the override control disappears and can never mask a real principal.
+  let principal = $state(null);
+  let authenticated = $state(false);
+  let actingAs = $state("");
+  const userId = $derived(
+    principal == null
+      ? null
+      : authenticated
+        ? principal
+        : actingAs.trim() || principal,
+  );
   // Build version from /ui/config (build.version) — surfaced in the topbar so an
   // operator can tell at a glance which orchestrator build they're driving (RFC
   // 0048 amendment §D). Empty when the payload omits it; the topbar then shows
@@ -72,7 +90,9 @@
             "The console could not determine an identity (no principal in /ui/context).";
           return;
         }
-        userId = id;
+        principal = id;
+        authenticated = context?.authenticated === true;
+        actingAs = id; // the override defaults to the real principal
         version = config?.build?.version ?? "";
         panels = selectPanels(config);
         activeName = hashPanelName();
@@ -157,9 +177,27 @@
     Persatrix console
     {#if version}<span class="version" title="Orchestrator build">v{version}</span>{/if}
   </span>
-  {#if userId}
-    <span class="principal" title="Identity from /api/v1/ui/context">
-      {userId}
+  {#if principal}
+    <span class="identity">
+      <!-- The real /ui/context principal, shown verbatim — never the override.
+           Titled so its source is unambiguous (RFC 0048 §F rule 1). -->
+      <span class="principal" title="Identity from /api/v1/ui/context">
+        {principal}
+      </span>
+      {#if !authenticated}
+        <!-- §E tester identity override: a clearly-labelled LOCAL TESTING
+             control, not identity. Defaults to the principal; lets a tester act
+             as another user to make per-user persistence visible. Absent once
+             authenticated (RFC 0039) so a real principal can never be masked
+             from the browser. -->
+        <label
+          class="acting-as"
+          title="Local testing only — defaults to the principal and is ignored once authenticated"
+        >
+          acting as
+          <input name="acting_as" bind:value={actingAs} autocomplete="off" />
+        </label>
+      {/if}
     </span>
   {/if}
 </header>
