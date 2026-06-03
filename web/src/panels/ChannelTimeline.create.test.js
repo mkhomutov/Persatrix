@@ -150,7 +150,55 @@ describe("Channel creation affordance", () => {
     expect(payload.name).toBe("standup");
     // The client never prepends group: (server derives it).
     expect(payload.name).not.toMatch(/^group:/);
-    expect(payload.members).toEqual([{ id: "ada", respond: "when_mentioned" }]);
+    // The selected persona, plus the acting user appended so they can post.
+    expect(payload.members).toEqual([
+      { id: "ada", respond: "when_mentioned" },
+      { id: "local", respond: "never" },
+    ]);
+  });
+
+  it("lists only persona agents as members (task agents are excluded)", async () => {
+    // Only persona agents hold a conversation; a task agent (agents.yaml
+    // type:"task") runs workflow steps and is never a discussion participant, so
+    // it must not be selectable as a channel member.
+    listAgents.mockResolvedValue([
+      ...AGENTS,
+      { id: "runner", name: "Runner", type: "task", status: "healthy" },
+    ]);
+
+    render(ChannelTimeline, { props: { userId: "local", canCreate: true } });
+    await screen.findByRole("option", { name: "General" });
+    await openForm();
+
+    expect(await screen.findByRole("checkbox", { name: /ada/i })).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: /runner/i })).toBeNull();
+  });
+
+  it("adds the acting user as a member so they can post in the channel", async () => {
+    // The store rejects a publish from a non-member (ErrNotMember), so a channel
+    // made of only personas would leave the operator unable to post into it. The
+    // create call adds the acting user with respond:"never" — present to publish,
+    // never dispatched a turn like an agent.
+    render(ChannelTimeline, { props: { userId: "local", canCreate: true } });
+    await screen.findByRole("option", { name: "General" });
+    await openForm();
+
+    await fireEvent.input(
+      screen.getByRole("textbox", { name: /channel name/i }),
+      { target: { value: "standup" } },
+    );
+    await fireEvent.click(await screen.findByRole("checkbox", { name: /ada/i }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: /create channel/i }),
+    );
+
+    await waitFor(() => expect(createChannel).toHaveBeenCalledTimes(1));
+    const payload = createChannel.mock.calls[0][0];
+    expect(payload.members).toEqual(
+      expect.arrayContaining([{ id: "local", respond: "never" }]),
+    );
+    // The user is added for posting, never shown as a selectable member.
+    expect(screen.queryByRole("checkbox", { name: /local/i })).toBeNull();
   });
 
   it("passes a per-member respond policy and an optional description", async () => {
@@ -178,7 +226,10 @@ describe("Channel creation affordance", () => {
     await waitFor(() => expect(createChannel).toHaveBeenCalledTimes(1));
     const payload = createChannel.mock.calls[0][0];
     expect(payload.description).toBe("daily sync");
-    expect(payload.members).toEqual([{ id: "ada", respond: "always" }]);
+    expect(payload.members).toEqual([
+      { id: "ada", respond: "always" },
+      { id: "local", respond: "never" },
+    ]);
   });
 
   it("reloads the channel list and selects the newly-created channel", async () => {

@@ -65,8 +65,8 @@
   // free-typed (amendment §C).
   let agents = $state([]);
 
-  // showCreateForm toggles the collapsed "New channel" affordance (amendment
-  // §B); the form itself (CreateChannelForm) owns the draft state and the POST.
+  // showCreateForm toggles the collapsed "New channel" affordance (§B); the form
+  // (CreateChannelForm) owns the draft state and the POST.
   let showCreateForm = $state(false);
 
   // seenIds de-dupes the head poll against messages already shown (and a
@@ -97,8 +97,7 @@
   );
 
   // onChannelCreated lands the operator in the channel the form just made: it
-  // reuses loadChannels() via the one-shot nav.targetChannel select-this-channel
-  // hand-off (the same machinery the §F deep-link uses), then collapses the form.
+  // reuses loadChannels()'s one-shot nav.targetChannel select-this hand-off (§F).
   function onChannelCreated(channel) {
     nav.targetChannel = channel?.id ?? "";
     showCreateForm = false;
@@ -454,6 +453,7 @@
     {#if canCreate && showCreateForm}
       <CreateChannelForm
         {agents}
+        {userId}
         onCreated={onChannelCreated}
         onCancel={() => (showCreateForm = false)}
       />

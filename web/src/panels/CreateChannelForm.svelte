@@ -8,12 +8,21 @@
   // server derives the canonical group:<name> id, so the name is sent bare (the
   // preview shows what will actually be created).
   //
-  // agents    — the registered-agent list the member multi-select renders.
+  // agents    — the registered-agent list; only personas (not task agents) are
+  //             selectable members, since only personas hold a conversation.
+  // userId    — the acting principal; auto-added as a member (respond:"never")
+  //             so the operator can post into the channel — the store rejects a
+  //             publish from a non-member (ErrNotMember).
   // onCreated — called with the created channel on a 201 (panel reloads + selects).
   // onCancel  — collapse the form without creating.
   import { createChannel, ApiError } from "../lib/api.js";
+  import { isChattable } from "../lib/agents.js";
 
-  let { agents, onCreated, onCancel } = $props();
+  let { agents, userId, onCreated, onCancel } = $props();
+
+  // Only persona agents are eligible members — a task agent (agents.yaml
+  // type:"task") runs workflow steps and never participates in a discussion.
+  const personaAgents = $derived(agents.filter(isChattable));
 
   let name = $state("");
   let description = $state("");
@@ -26,13 +35,22 @@
   let error = $state("");
 
   const selectedMembers = $derived(
-    agents
+    personaAgents
       .filter((a) => memberChecked[a.id])
       .map((a) => ({ id: a.id, respond: respondById[a.id] ?? "when_mentioned" })),
   );
 
-  // Create needs a name AND at least one member — the endpoint rejects an empty
-  // members array with 400, so the form mirrors that precondition.
+  // The members the create call sends: the selected personas, plus the acting
+  // user (respond:"never" — present so they can publish, never dispatched a turn)
+  // unless a selected persona already carries that id.
+  const memberPayload = $derived(
+    userId && !selectedMembers.some((m) => m.id === userId)
+      ? [...selectedMembers, { id: userId, respond: "never" }]
+      : selectedMembers,
+  );
+
+  // Create needs a name AND at least one persona member — the endpoint rejects an
+  // empty members array, and a channel of just the user has no one to talk to.
   const canSubmit = $derived(
     name.trim().length > 0 && selectedMembers.length > 0 && !creating,
   );
@@ -49,7 +67,7 @@
       const channel = await createChannel({
         name: name.trim(),
         description: trimmed || undefined,
-        members: selectedMembers,
+        members: memberPayload,
       });
       onCreated?.(channel);
     } catch (err) {
@@ -86,10 +104,10 @@
   </label>
   <fieldset class="members">
     <legend>Members</legend>
-    {#if agents.length === 0}
-      <p class="empty">No agents are registered to add.</p>
+    {#if personaAgents.length === 0}
+      <p class="empty">No persona agents are registered to add.</p>
     {:else}
-      {#each agents as agent (agent.id)}
+      {#each personaAgents as agent (agent.id)}
         <div class="member">
           <label>
             <input type="checkbox" bind:checked={memberChecked[agent.id]} />

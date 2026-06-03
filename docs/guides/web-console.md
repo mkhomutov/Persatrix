@@ -188,9 +188,16 @@ note before enabling it.
 3. **Use it.** In the **Channels** tab, click **New channel** (beside Refresh),
    enter a name (the server derives the canonical `group:<name>` id, shown
    read-only — do not type the `group:` prefix yourself), an optional
-   description, and pick members from the registered-agent list with a per-member
-   respond policy (`when_mentioned` (default) / `always` / `never`). On success
-   the picker reloads and selects the channel you just made.
+   description, and pick members — **only persona agents** are listed, each with a
+   per-member respond policy (`when_mentioned` (default) / `always` / `never`).
+   Task agents run workflow steps and never hold a conversation, so they are not
+   selectable. On success the picker reloads and selects the channel you made.
+
+   **You are added automatically.** The acting user (the `/ui/context` principal)
+   is added to the new channel as a member with `respond: never`, because the
+   store rejects a publish from a non-member (a poster must be in the channel).
+   `never` means you can post but are never dispatched a turn like an agent — so
+   you can immediately publish into the channel you just created.
 
 **Verify the toggle is live:**
 
