@@ -6,7 +6,7 @@
 **Branch prefix**: `feature/v036-floor-control-`
 **Target**: `main`
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
-**Master plan**: [v0.3.6-plan.md](../v0.3.6-plan.md) (folded in as a release blocker; the plan's fold-in row is omitted only because that file is at its size-check word budget — this plan is the authoritative workstream)
+**Master plan**: [v0.3.6-plan.md](../v0.3.6-plan.md) (folded in as a release blocker — the plan carries the fold-in row, and `v0.3.6-plan.md` is on the `scripts/checks/file_size.py` allowlist to accommodate it; this plan remains the authoritative per-PR workstream)
 
 ---
 
