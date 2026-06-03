@@ -90,6 +90,40 @@ describe("App shell boot", () => {
     expect(container.querySelector('input[name="user_id"]')).toBeNull();
   });
 
+  it("surfaces the orchestrator build version from config.build.version", async () => {
+    // The topbar shows which orchestrator build the operator is driving (RFC 0048
+    // amendment §D), read from /ui/config's build.version. Titled so the chip's
+    // source is unambiguous.
+    loadBootstrap.mockResolvedValue({
+      config: {
+        build: { version: "0.3.6" },
+        panels: { chat: { enabled: true, available: true } },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    await waitFor(() => {
+      const chip = screen.getByTitle("Orchestrator build");
+      expect(chip.textContent.trim()).toBe("v0.3.6");
+    });
+  });
+
+  it("omits the version chip when the config carries no build version", async () => {
+    // build.version is optional; a payload without it shows no chip rather than a
+    // bare "v" placeholder.
+    loadBootstrap.mockResolvedValue({
+      config: { panels: { chat: { enabled: true, available: true } } },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    await screen.findByRole("tab", { name: /chat/i });
+    expect(screen.queryByTitle("Orchestrator build")).toBeNull();
+  });
+
   it("shows a boot-error state when the backend is unreachable", async () => {
     loadBootstrap.mockRejectedValue(new Error("boom"));
 
