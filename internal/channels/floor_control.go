@@ -1,6 +1,12 @@
 package channels
 
-import "sync"
+import (
+	"context"
+	"sync"
+	"time"
+
+	"go.uber.org/zap"
+)
 
 // floor_control.go — RFC 0030 Layer 2.5 (floor control / speaker
 // serialization). This file ships the *inert* primitives in PR 1: the
@@ -166,4 +172,125 @@ func orderResponders(members []Member, msg ChannelMessage, threadParentSenderID 
 
 	responders = append(mentionedResp, unmentionedResp...)
 	return responders, nonResponders
+}
+
+// channelFloorSettings is the resolved per-channel floor-control config held
+// by the router ([ChannelRouter.floorSettings]). `enabled` gates the
+// serialized round; `turnTimeout` is the per-speaker budget (amendment D2).
+type channelFloorSettings struct {
+	enabled     bool
+	turnTimeout time.Duration
+}
+
+// setFloorHolder / clearFloorHolder / isFloorHolderReply implement the
+// deferred-fanout seam (amendment D1). While a floor turn is in flight the
+// router records the speaker as the channel's floor-holder; [ChannelRouter.Publish]
+// reads it to recognise that speaker's reply and skip its re-fanout (the loop
+// is the sole dispatcher). All three take the shared floorMu.
+func (r *ChannelRouter) setFloorHolder(channelID, participantID string) {
+	r.floorMu.Lock()
+	r.floorHolders[channelID] = participantID
+	r.floorMu.Unlock()
+}
+
+func (r *ChannelRouter) clearFloorHolder(channelID string) {
+	r.floorMu.Lock()
+	delete(r.floorHolders, channelID)
+	r.floorMu.Unlock()
+}
+
+func (r *ChannelRouter) isFloorHolderReply(channelID, senderID string) bool {
+	r.floorMu.Lock()
+	defer r.floorMu.Unlock()
+	h, ok := r.floorHolders[channelID]
+	return ok && h == senderID
+}
+
+// floorRound runs the serialized speaker round for a channel with floor
+// control enabled (RFC 0030 Layer 2.5). The caller ([ChannelRouter.fanout])
+// has already split membership via [orderResponders] and confirmed there are
+// ≥2 responders.
+//
+// Sequence:
+//
+//  1. Deliver non-responders (`when_mentioned` & not mentioned) fire-and-
+//     forget, concurrently, off the floor — memory ingestion only, exactly
+//     as the pre-amendment fanout did. They never enter the serialized queue.
+//  2. Acquire the per-channel floor so only one round runs at a time
+//     (serializes concurrent stimuli on the same channel — D5).
+//  3. Grant the floor to each responder in turn ([runFloorTurn]); the loop
+//     waits for each speaker's reply to be persisted before dispatching the
+//     next, so speaker k reads speakers 1..k-1.
+//  4. Release the floor and clear the floor-holder.
+//
+// The whole round runs inline on the publish goroutine (as the concurrent
+// fanout does), so the stimulus publish blocks until the round completes —
+// the documented latency trade of serialization.
+func (r *ChannelRouter) floorRound(
+	ctx context.Context,
+	msg ChannelMessage,
+	ct ChannelType,
+	threadParentSenderID string,
+	responders, nonResponders []Member,
+	turnTimeout time.Duration,
+) {
+	detached := context.WithoutCancel(ctx)
+
+	if len(nonResponders) > 0 {
+		r.dispatchConcurrent(detached, msg, ct, threadParentSenderID, nonResponders)
+	}
+
+	r.floors.acquire(msg.ChannelID)
+	defer r.floors.release(msg.ChannelID)
+	defer r.clearFloorHolder(msg.ChannelID)
+
+	for _, speaker := range responders {
+		r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout)
+	}
+}
+
+// runFloorTurn grants the floor to one speaker: it records the speaker as the
+// floor-holder (so its reply's publish defers fanout — D1), registers the
+// reply waiter *before* dispatch (closing the replies-faster-than-register
+// race, mirroring [ChannelRouter.PublishAndAwait]), dispatches the stimulus
+// to that speaker alone, then waits for the speaker's reply to be persisted
+// or for the per-turn timeout (D2) before returning so the loop advances.
+func (r *ChannelRouter) runFloorTurn(
+	ctx context.Context,
+	msg ChannelMessage,
+	ct ChannelType,
+	threadParentSenderID string,
+	speaker Member,
+	turnTimeout time.Duration,
+) {
+	r.setFloorHolder(msg.ChannelID, speaker.ParticipantID)
+
+	replyCh, cancel, err := r.waiter.Register(msg.ChannelID, speaker.ParticipantID)
+	if err != nil {
+		// A waiter for this (channel, speaker) already exists — e.g. a
+		// re-entrant round, or a chat PublishAndAwait sharing the key space.
+		// Don't clobber it; dispatch and advance on the per-turn timeout
+		// alone (replyCh stays nil, so the select below cannot match it).
+		r.logger.Warn("channels: floor turn waiter already registered; advancing on timeout only",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("speaker", speaker.ParticipantID),
+			zap.Error(err))
+		replyCh = nil
+	} else {
+		defer cancel()
+	}
+
+	r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker)
+
+	timer := time.NewTimer(turnTimeout)
+	defer timer.Stop()
+	select {
+	case <-replyCh:
+		// Speaker's reply landed and was persisted; the next speaker will
+		// read it from history. Advance.
+	case <-timer.C:
+		// Speaker stayed silent past its turn budget; advance rather than
+		// stall the round (D2). A candidate the response gate ultimately
+		// suppressed reaches here too — harmless, the loop just moves on.
+	}
 }
