@@ -93,6 +93,31 @@ describe("selectPanels", () => {
     expect(panel.title).toBeTruthy();
     expect(panel.route).toMatch(/^#\//);
   });
+
+  it("carries the per-panel create capability through to the descriptor", () => {
+    // The channel-creation amendment §A adds a nested create {enabled, available}
+    // to the channel_timeline payload entry; the shell threads it to the panel so
+    // it can render the affordance only when create.enabled && create.available.
+    const config = {
+      panels: {
+        channel_timeline: {
+          enabled: true,
+          available: true,
+          create: { enabled: true, available: true },
+        },
+      },
+    };
+    const [panel] = selectPanels(config);
+    expect(panel.name).toBe("channel_timeline");
+    expect(panel.create).toEqual({ enabled: true, available: true });
+  });
+
+  it("leaves create undefined for a panel the server reports no create capability for", () => {
+    // chat carries no create object; the descriptor must not fabricate one.
+    const config = { panels: { chat: { enabled: true, available: true } } };
+    const [panel] = selectPanels(config);
+    expect(panel.create).toBeUndefined();
+  });
 });
 
 describe("KNOWN_PANELS", () => {

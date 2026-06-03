@@ -20,6 +20,11 @@
         "enabled": {
           "type": "boolean",
           "description": "Whether the console offers this panel. A panel renders only when it is both enabled here and reported available at runtime."
+        },
+        "create_enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt the panel into its structural-write (create) affordance (RFC 0048 channel-creation amendment §A). Today honoured only by channel_timeline — group-channel creation over the already-exposed POST /api/v1/channels; inert on other panels. Ships dark (default false). Its companion create.available is runtime-derived (the channel store must be wired) and reported in GET /api/v1/ui/config — like `available`, it MUST NOT be authored here."
         }
       }
     }

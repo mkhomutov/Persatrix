@@ -16,11 +16,19 @@
 #
 # Slice 1 (v0.3.6) ships the two hero panels on; memory_strip (Slice 2) and
 # cost (Slice 4) ship off so they land additively with no Slice-1 rework.
+#
+# A panel may also carry capability knobs. `create_enabled` (channel_timeline,
+# RFC 0048 channel-creation amendment §A) opts the console into creating group
+# channels from the browser — a structural write over the already-exposed
+# POST /api/v1/channels. It ships dark (false), and its companion
+# `create.available` is runtime-derived (the channel store must be wired),
+# never authored here, exactly like `available`.
 panels:
   chat:
     enabled: true
   channel_timeline:
     enabled: true
+    create_enabled: false
   memory_strip:
     enabled: false
   cost:

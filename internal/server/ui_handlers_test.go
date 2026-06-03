@@ -148,6 +148,14 @@ type uiConfigResponseBody struct {
 	Panels map[string]struct {
 		Enabled   bool `json:"enabled"`
 		Available bool `json:"available"`
+		// Create is the nested structural-write capability (RFC 0048
+		// channel-creation amendment §A). A pointer so the test can tell an
+		// absent `create` key (the panel exposes no create affordance) from a
+		// present one whose flags are both false. Only channel_timeline carries it.
+		Create *struct {
+			Enabled   bool `json:"enabled"`
+			Available bool `json:"available"`
+		} `json:"create"`
 	} `json:"panels"`
 	Build struct {
 		Version string `json:"version"`
@@ -201,6 +209,76 @@ func TestUIConfig_AvailabilityTracksChannels(t *testing.T) {
 		"channels absent → channel_timeline.available must be false")
 	assert.True(t, body.Panels["channel_timeline"].Enabled,
 		"the enabled toggle is independent of availability — it stays on, the client hides the slot")
+}
+
+// TestUIConfig_CreateCapabilityShape pins the channel-creation amendment §A
+// contract: the channel_timeline entry carries a nested `create {enabled,
+// available}` object mirroring the panel's own `{enabled, available}` shape;
+// create.enabled echoes the (default-off) toggle; create.available is
+// runtime-derived from the channel store being wired. No OTHER panel carries a
+// `create` object — the affordance is a capability of the timeline panel alone.
+func TestUIConfig_CreateCapabilityShape(t *testing.T) {
+	srv := uiTestServer(t, WithUI(uiAssetFS()), WithChannels(uiChannelStore(t), nil))
+
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/ui/config", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var body uiConfigResponseBody
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+
+	ct := body.Panels["channel_timeline"]
+	require.NotNil(t, ct.Create, "channel_timeline must carry a nested create capability")
+	assert.False(t, ct.Create.Enabled, "create ships dark (create_enabled defaults false)")
+	assert.True(t, ct.Create.Available, "channels wired → create.available is true")
+
+	assert.Nil(t, body.Panels["chat"].Create,
+		"only channel_timeline exposes a create affordance — chat carries no create object")
+}
+
+// TestUIConfig_CreateAvailabilityTracksChannels is the runtime-derivation proof
+// for the create capability (amendment §A/§D): create.available mirrors the
+// channel endpoints' 503 degradation — true exactly when the channel store is
+// wired. With no WithChannels the affordance is unavailable even if an operator
+// flips the toggle on, which is the forward-compat hook for the RFC 0039
+// capability gate.
+func TestUIConfig_CreateAvailabilityTracksChannels(t *testing.T) {
+	srv := uiTestServer(t, WithUI(uiAssetFS())) // no WithChannels
+
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/ui/config", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var body uiConfigResponseBody
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+
+	ct := body.Panels["channel_timeline"]
+	require.NotNil(t, ct.Create, "the create object is reported regardless of availability")
+	assert.False(t, ct.Create.Available,
+		"channels absent → create.available must be false")
+}
+
+// TestUIConfig_CreateEnabledEchoesToggle: an operator who opts in
+// (create_enabled:true) sees create.enabled:true in the payload, so the console
+// renders the affordance only on a conscious opt-in (gated on enabled &&
+// available client-side).
+func TestUIConfig_CreateEnabledEchoesToggle(t *testing.T) {
+	cfg := DefaultUIConfig()
+	cfg.Panels["channel_timeline"] = PanelToggle{Enabled: true, CreateEnabled: true}
+	srv := uiTestServer(t,
+		WithUI(uiAssetFS()),
+		WithChannels(uiChannelStore(t), nil),
+		WithUIConfig(cfg),
+	)
+
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/ui/config", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var body uiConfigResponseBody
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+
+	ct := body.Panels["channel_timeline"]
+	require.NotNil(t, ct.Create)
+	assert.True(t, ct.Create.Enabled, "create_enabled:true must surface as create.enabled:true")
+	assert.True(t, ct.Create.Available, "channels wired → create.available true")
 }
 
 // TestUIContext_Local pins the RFC 0048 §F identity contract for today's

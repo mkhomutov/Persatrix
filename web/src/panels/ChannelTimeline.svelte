@@ -11,15 +11,23 @@
     listChannels,
     getChannelHistory,
     publishMessage,
+    createChannel,
     ApiError,
   } from "../lib/api.js";
   import { channelLabel } from "../lib/format.js";
   import { nav } from "../lib/nav.svelte.js";
   import OnboardingEmpty from "./OnboardingEmpty.svelte";
   import PublishComposer from "./PublishComposer.svelte";
+  import CreateChannelForm from "./CreateChannelForm.svelte";
   import ChannelMessage from "./ChannelMessage.svelte";
 
-  let { userId } = $props();
+  // canCreate gates the structural-write "New channel" affordance (RFC 0048
+  // channel-creation amendment §A). The shell threads the server's create
+  // capability in already reduced to create.enabled && create.available, so the
+  // panel renders the affordance only on a conscious operator opt-in over a wired
+  // channel store. Defaults false — a client/shell that doesn't pass it shows no
+  // create affordance, the §C graceful-degradation contract.
+  let { userId, canCreate = false } = $props();
 
   // POLL_INTERVAL_MS is the steady-state cadence; on a poll error the delay
   // backs off exponentially up to MAX_BACKOFF_MS so an idle or erroring tab does
@@ -56,6 +64,23 @@
   // map empty, so senderLabel falls back to the raw id rather than blocking the
   // timeline (which is the panel's actual job) on the agent list.
   let agentsById = $state({});
+  // agents is the ordered list (same load as agentsById) the create form's
+  // member multi-select renders — member ids come from the server, never
+  // free-typed (amendment §C).
+  let agents = $state([]);
+
+  // Create-channel form state (amendment §B). The form is collapsed by default
+  // so it never crowds the newcomer's first-contact view. memberChecked and
+  // respondById are keyed by agent id and seeded when the agent list loads, so a
+  // checkbox/policy <select> binds to an existing key; presence-checked drives
+  // the non-empty members array the endpoint requires.
+  let showCreateForm = $state(false);
+  let createName = $state("");
+  let createDescription = $state("");
+  let memberChecked = $state({});
+  let respondById = $state({});
+  let creating = $state(false);
+  let createError = $state("");
 
   // seenIds de-dupes the head poll against messages already shown (and against a
   // just-published echo). Not reactive — it's bookkeeping the render reads
@@ -86,6 +111,83 @@
   const canPublish = $derived(
     Boolean(selectedChannel) && publishContent.trim().length > 0 && !publishing,
   );
+
+  // The members payload the create call sends: the checked agents, each with its
+  // chosen respond policy (defaulting to when_mentioned). Ids come from the
+  // server's agent list, so the console can never fabricate a participant the
+  // backend does not know (amendment §C).
+  const selectedMembers = $derived(
+    agents
+      .filter((a) => memberChecked[a.id])
+      .map((a) => ({ id: a.id, respond: respondById[a.id] ?? "when_mentioned" })),
+  );
+
+  // Create needs a name AND at least one member — the endpoint rejects an empty
+  // members array with 400, so the form mirrors that precondition rather than
+  // letting the operator submit a guaranteed failure.
+  const canCreateChannel = $derived(
+    createName.trim().length > 0 && selectedMembers.length > 0 && !creating,
+  );
+
+  function openCreate() {
+    createError = "";
+    showCreateForm = true;
+  }
+
+  function resetCreateForm() {
+    createName = "";
+    createDescription = "";
+    memberChecked = Object.fromEntries(agents.map((a) => [a.id, false]));
+    respondById = Object.fromEntries(agents.map((a) => [a.id, "when_mentioned"]));
+  }
+
+  function closeCreate() {
+    showCreateForm = false;
+    createError = "";
+    resetCreateForm();
+  }
+
+  // submitCreate POSTs the bare name (the server derives group:<name>; prefixing
+  // here would yield group:group:<name>), then on 201 lands the operator in the
+  // channel they just made: it reuses loadChannels() via the one-shot
+  // nav.targetChannel select-this-channel hand-off (the same machinery the §F
+  // deep-link uses), so the new channel is selected on the refreshed picker.
+  async function submitCreate() {
+    if (!canCreateChannel || creating) {
+      return;
+    }
+    const name = createName.trim();
+    const description = createDescription.trim();
+    createError = "";
+    creating = true;
+    try {
+      const channel = await createChannel({
+        name,
+        description: description || undefined,
+        members: selectedMembers,
+      });
+      // Select the newly-created channel on the reload (loadChannels consumes
+      // nav.targetChannel once), then collapse and reset the form.
+      nav.targetChannel = channel?.id ?? "";
+      showCreateForm = false;
+      resetCreateForm();
+      await loadChannels();
+    } catch (err) {
+      // Surface the server envelope verbatim (esp. 409 duplicate group:<name>);
+      // the form stays open so the operator can pick a different name.
+      createError =
+        err instanceof ApiError
+          ? err.message
+          : `The channel could not be created: ${err.message}`;
+    } finally {
+      creating = false;
+    }
+  }
+
+  function onCreateSubmit(event) {
+    event.preventDefault();
+    submitCreate();
+  }
 
   function clearPoll() {
     if (pollTimer !== null) {
@@ -268,6 +370,14 @@
       .then((list) => {
         if (cancelled) return;
         agentsById = Object.fromEntries(list.map((agent) => [agent.id, agent]));
+        agents = list;
+        // Seed the create-form member maps so each checkbox/policy select binds
+        // to an existing key (default: unchecked, when_mentioned — matching the
+        // server default in handleCreateChannel, amendment §B/OQ3).
+        memberChecked = Object.fromEntries(list.map((a) => [a.id, false]));
+        respondById = Object.fromEntries(
+          list.map((a) => [a.id, "when_mentioned"]),
+        );
       })
       .catch(() => {
         // Decoration only — leave the map empty and fall back to raw ids.
@@ -457,7 +567,33 @@
       <!-- Refresh the channel list without a full reload — a new channel (or DM)
            created since mount appears on demand (§D). -->
       <button type="button" class="refresh" onclick={loadChannels}>Refresh</button>
+      {#if canCreate}
+        <!-- Structural-write affordance (channel-creation amendment §B): opens
+             the collapsed create form. Off unless the server reports the create
+             capability enabled && available. -->
+        <button type="button" class="new-channel" onclick={openCreate}
+          >New channel</button
+        >
+      {/if}
     </div>
+
+    {#if canCreate && showCreateForm}
+      <!-- Create a group channel over the already-exposed POST /api/v1/channels
+           (amendment §B–§D). Collapsed by default; the panel owns the submit,
+           reload-and-select, and error envelope (see submitCreate). -->
+      <CreateChannelForm
+        {agents}
+        bind:name={createName}
+        bind:description={createDescription}
+        bind:memberChecked
+        bind:respondById
+        {creating}
+        canSubmit={canCreateChannel}
+        error={createError}
+        onSubmit={onCreateSubmit}
+        onCancel={closeCreate}
+      />
+    {/if}
 
     {#if pollError}
       <!-- Non-fatal: the loaded history stays visible while the poll backs off
