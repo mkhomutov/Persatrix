@@ -262,8 +262,10 @@ body {
   margin-right: 0.75rem;
 }
 
-/* A button styled as an inline link — for the "View in timeline" cross-panel
-   affordance, which is navigation, not a form action (§F). */
+/* Inline link styling for the "View in timeline" cross-panel affordance (§F),
+   which is navigation. It renders as an <a>; the button-chrome resets keep it
+   neutral should it ever style a <button> too. The pinned colours clear WCAG AA
+   on both themes and the underline adds a non-colour cue. */
 .link-like {
   border: none;
   background: none;

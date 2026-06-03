@@ -184,7 +184,15 @@
   // the hash route, so the freshly-mounted timeline opens on this conversation —
   // making "your chat is a real, watchable channel" a click, not an assertion.
   // Only reachable once a conversation exists (dmChannelId is set from history).
-  function viewInTimeline() {
+  //
+  // The affordance is a real <a href="#/channels"> (for link semantics), so we
+  // preventDefault and drive the route in JS: that guarantees the nav intent is
+  // recorded before the route changes, rather than racing the anchor's native
+  // navigation — and a modified click (new tab) would land on a fresh context
+  // without the intent anyway, so hijacking it to the in-place hand-off is the
+  // behaviour we want.
+  function viewInTimeline(event) {
+    event?.preventDefault();
     if (!dmChannelId) return;
     nav.targetChannel = dmChannelId;
     window.location.hash = "#/channels";

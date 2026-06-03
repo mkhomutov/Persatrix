@@ -6,7 +6,9 @@
   // live in one place rather than being duplicated per panel.
   //
   // DOCS_URL is an absolute GitHub URL: the console is served at /ui, but the
-  // docs are not served by the orchestrator.
+  // docs are not served by the orchestrator. It assumes a public repo and pins
+  // to main, so a private fork or a moved docs path would 404 — treat this as a
+  // best-effort pointer, not a guaranteed-resolving link.
   const DOCS_URL =
     "https://github.com/mkhomutov/Persatrix/blob/main/docs/guides/web-console.md";
 

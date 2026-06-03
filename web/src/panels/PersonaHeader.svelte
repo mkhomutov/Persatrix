@@ -32,11 +32,16 @@
     {/if}
     {#if dmChannelId}
       <!-- Cross-panel continuity (§F): this conversation is a persisted DM
-           channel — jump to the timeline to watch it as one. Only shown once
-           a conversation exists (dmChannelId resolved from history). -->
-      <button type="button" class="link-like" onclick={onViewInTimeline}>
+           channel — jump to the timeline to watch it as one. A real <a> (it
+           navigates to another view), so assistive tech announces it as a link
+           and the destination shows on hover; href is the timeline route.
+           onViewInTimeline records which DM the freshly-mounted timeline should
+           open and drives the route change (it preventDefaults the native nav
+           so the intent is always recorded first). Only shown once a
+           conversation exists (dmChannelId resolved from history). -->
+      <a href="#/channels" class="link-like" onclick={onViewInTimeline}>
         View in timeline ↗
-      </button>
+      </a>
     {/if}
   </header>
 {/if}

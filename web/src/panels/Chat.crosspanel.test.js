@@ -90,7 +90,7 @@ describe("Chat panel — §F onboarding + cross-panel continuity", () => {
     window.location.hash = "#/chat";
     render(Chat, { props: { userId: "local" } });
 
-    const link = await screen.findByRole("button", { name: /view in timeline/i });
+    const link = await screen.findByRole("link", { name: /view in timeline/i });
     await fireEvent.click(link);
 
     expect(nav.targetChannel).toBe("dm:alice:local");
@@ -103,7 +103,7 @@ describe("Chat panel — §F onboarding + cross-panel continuity", () => {
 
     await screen.findByRole("option", { name: "Alice" });
     expect(
-      screen.queryByRole("button", { name: /view in timeline/i }),
+      screen.queryByRole("link", { name: /view in timeline/i }),
     ).toBeNull();
   });
 
@@ -119,7 +119,7 @@ describe("Chat panel — §F onboarding + cross-panel continuity", () => {
     // Fresh start: history seeded empty, so no hand-off affordance yet.
     await waitFor(() => expect(getChatHistory).toHaveBeenCalledTimes(1));
     expect(
-      screen.queryByRole("button", { name: /view in timeline/i }),
+      screen.queryByRole("link", { name: /view in timeline/i }),
     ).toBeNull();
 
     // The send persists the message; the post-send capture reads back the
@@ -141,7 +141,7 @@ describe("Chat panel — §F onboarding + cross-panel continuity", () => {
     });
     await fireEvent.click(screen.getByRole("button", { name: /send/i }));
 
-    const link = await screen.findByRole("button", {
+    const link = await screen.findByRole("link", {
       name: /view in timeline/i,
     });
     await fireEvent.click(link);
