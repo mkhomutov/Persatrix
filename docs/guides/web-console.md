@@ -26,6 +26,7 @@ behind the `--enable-ui` flag (**default off**).
 - [Quick start (Docker demo)](#quick-start-docker-demo)
 - [The Chat panel](#the-chat-panel)
 - [The Channel-timeline panel](#the-channel-timeline-panel)
+- [Creating a channel (opt-in)](#creating-a-channel-opt-in)
 - [The feature-toggle model (`config/ui.yaml`)](#the-feature-toggle-model-configuiyaml)
 - [Security — do not expose beyond localhost](#security--do-not-expose-beyond-localhost)
 - [What is not in Slice 1](#what-is-not-in-slice-1)
@@ -151,6 +152,65 @@ Watch personas interact:
 
 ---
 
+## Creating a channel (opt-in)
+
+The Channels panel can also **create** a group channel from the browser — so you
+can spin one up, drop two personas in it, and watch them interact without leaving
+the console for the CLI or hand-editing
+[`config/channels.yaml`](../../config/channels.yaml). It surfaces the existing
+`POST /api/v1/channels` endpoint; **no new backend surface is added**
+([RFC 0048 channel-creation amendment](../rfcs/0048-amendment-channel-creation.md)).
+
+It ships **dark** and is a **structural write before auth**, so it is gated on
+two conditions — read the [Security](#security--do-not-expose-beyond-localhost)
+note before enabling it.
+
+**To enable it:**
+
+1. **Opt in** in [`config/ui.yaml`](../../config/ui.yaml) — add `create_enabled`
+   under the `channel_timeline` panel:
+
+   ```yaml
+   panels:
+     channel_timeline:
+       enabled: true
+       create_enabled: true   # NEW — ships false; this opts into channel creation
+   ```
+
+   `create_enabled` is the only new authored knob, and it defaults to `false`.
+
+2. **Run with channels wired.** Just like the panel's own `available` flag, the
+   create affordance's `create.available` is **runtime-derived** — true only when
+   the channel store is wired. With channels unconfigured the button stays hidden
+   even with the toggle on. (`create.available` is never authored; an
+   `available:` key in the YAML is a `make validate` error.)
+
+3. **Use it.** In the **Channels** tab, click **New channel** (beside Refresh),
+   enter a name (the server derives the canonical `group:<name>` id, shown
+   read-only — do not type the `group:` prefix yourself), an optional
+   description, and pick members from the registered-agent list with a per-member
+   respond policy (`when_mentioned` (default) / `always` / `never`). On success
+   the picker reloads and selects the channel you just made.
+
+**Verify the toggle is live:**
+
+```bash
+curl -s http://localhost:8080/api/v1/ui/config | jq '.panels.channel_timeline'
+# want: { "enabled": true, "available": true,
+#         "create": { "enabled": true, "available": true } }
+```
+
+Both `create.enabled` **and** `create.available` must be `true` for the **New
+channel** affordance to render — the same `enabled && available` rule every panel
+follows.
+
+> **Scope.** Only `group:` channels are creatable. DMs and threads are created
+> implicitly on first message ([RFC 0011](../rfcs/0011-channels-bridges.md)), so
+> there is nothing to "create" for those. Channel **deletion** and post-create
+> membership editing are not in Slice 1.
+
+---
+
 ## The feature-toggle model (`config/ui.yaml`)
 
 Panels ship "dark" in [`config/ui.yaml`](../../config/ui.yaml) and are flipped
@@ -163,6 +223,7 @@ panels:
     enabled: true
   channel_timeline:
     enabled: true
+    create_enabled: false   # opt-in to channel creation — see "Creating a channel"
   memory_strip:        # Slice 2 (v0.4.0+) — ships off
     enabled: false
   cost:                # Slice 4 (v0.4.0+) — ships off
@@ -171,8 +232,9 @@ panels:
 
 Two rules make this real:
 
-- **`enabled` is the only operator knob.** It decides whether the console
-  *offers* a panel.
+- **`enabled` is the operator knob** (and `create_enabled` is a per-panel
+  capability knob alongside it). They decide whether the console *offers* a panel
+  or affordance.
 - **`available` is runtime-derived and never authored.** The server computes,
   per request, whether each panel's backing subsystem is wired (e.g.
   `channel_timeline.available` is true exactly when channels are configured,
@@ -200,10 +262,15 @@ The mitigations the console ships with:
 
 - **`--enable-ui` defaults off.** You opt in explicitly.
 - **The orchestrator binds `127.0.0.1` by default** (`--http-bind 127.0.0.1`).
-- **The console is read-mostly.** Slice 1's only writes are chat and the
-  optional channel publish, both against existing endpoints; the destructive /
-  admin control plane is Slice 5 and is **hard-gated on RFC 0039 auth** — it
-  cannot be enabled before auth exists.
+- **The console is read-mostly.** Slice 1's writes are chat, the optional channel
+  publish, and — only when you opt in — [group-channel creation](#creating-a-channel-opt-in),
+  all against existing endpoints. Channel creation is a deliberate, signed-off
+  **structural-write-before-auth** carve-out: it adds **zero new reachability**
+  (the `POST /api/v1/channels` endpoint is already exposed unauthenticated, so the
+  console changes *discoverability*, not *reachability*), it is **off by default**,
+  and `create.available` becomes capability-gated once RFC 0039 auth lands. The
+  destructive / admin control plane is Slice 5 and is **hard-gated on RFC 0039
+  auth** — it cannot be enabled before auth exists.
 
 **The rule:** exposing the console (or the orchestrator's `:8080` REST surface
 at all) **beyond localhost requires fronting the orchestrator with an
@@ -248,6 +315,8 @@ Deferred by RFC decision (2026-06-02); each is its own later slice
 | The console shows a "run `make ui`" placeholder | The binary was built without the real bundle (`go build` / `make build-orchestrator` alone embeds the placeholder). Run `make ui` first, or use `make run-ui` / the Docker image. |
 | Every asset 404s under `/ui/` | A bundle built without Vite's `base: "/ui/"`. Use `make ui` (configured correctly); do not hand-build. |
 | The Channel-timeline panel is missing | `channel_timeline.available` is false — channels are not wired. Check the channel config; the panel hides itself when its subsystem is absent. |
+| The **New channel** button is missing | The create affordance needs **both** `channel_timeline.create_enabled: true` (you opted in) **and** `create.available: true` (the channel store is wired). Confirm with `curl -s localhost:8080/api/v1/ui/config \| jq '.panels.channel_timeline.create'`. See [Creating a channel](#creating-a-channel-opt-in). |
+| Creating a channel fails with a conflict | A `group:<name>` with that name already exists (`409`). Pick a different name; the form keeps your entries so you can retry. |
 | `make validate` fails on `config/ui.yaml` | You likely added an `available:` key (runtime-derived, not authored) or a malformed panel entry. See [§ feature-toggle model](#the-feature-toggle-model-configuiyaml). |
 
 ---
