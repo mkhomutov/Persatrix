@@ -13,6 +13,7 @@
     publishMessage,
     ApiError,
   } from "../lib/api.js";
+  import { formatTimestamp, channelLabel, senderLabel } from "../lib/format.js";
 
   let { userId } = $props();
 
@@ -302,28 +303,6 @@
     return () => document.removeEventListener("visibilitychange", onVisibility);
   });
 
-  // channelLabel mirrors Chat's persona label: the channel's name, falling back
-  // to its id (DMs/threads have no name — channel_types.go).
-  function channelLabel(channel) {
-    return channel.name ? channel.name : channel.id;
-  }
-
-  // senderLabel turns a raw sender_id into a readable name. The operator's own
-  // posts read as "You" (the human/agent distinction §D asks for); an agent
-  // resolves to "name — role" via the best-effort agent map; anything unknown
-  // falls back to the raw id rather than inventing a label.
-  function senderLabel(senderId) {
-    if (senderId === userId) {
-      return "You";
-    }
-    const agent = agentsById[senderId];
-    if (!agent) {
-      return senderId;
-    }
-    const name = agent.name || agent.id;
-    return agent.role ? `${name} — ${agent.role}` : name;
-  }
-
   async function publish() {
     if (publishing) {
       return;
@@ -388,16 +367,6 @@
   // new selection reads as if the new channel is already broken.
   function onChannelChange() {
     publishError = "";
-  }
-
-  // formatTimestamp renders the wire timestamp (RFC-3339 UTC) as a readable
-  // local date-time for the operator; the <time> element keeps the raw value in
-  // its machine-readable `datetime` attribute, so the human-facing text can be
-  // friendly without losing the parseable original. An unparseable value falls
-  // back to the raw string rather than rendering "Invalid Date".
-  function formatTimestamp(ts) {
-    const date = new Date(ts);
-    return Number.isNaN(date.getTime()) ? ts : date.toLocaleString();
   }
 
   // The wire/internal order is newest-first (poll prepends, publish echoes to the
@@ -491,7 +460,7 @@
       >
         {#each displayMessages as message (message.id)}
           <li class="message" class:from-self={message.sender_id === userId}>
-            <span class="sender">{senderLabel(message.sender_id)}</span>
+            <span class="sender">{senderLabel(message.sender_id, userId, agentsById)}</span>
             <span class="content">{message.content}</span>
             <time class="ts" datetime={message.timestamp}
               >{formatTimestamp(message.timestamp)}</time

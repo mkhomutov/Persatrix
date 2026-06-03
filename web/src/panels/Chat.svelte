@@ -4,14 +4,9 @@
   // pure render-over-existing-API. The shell threads in the /ui/context-derived
   // userId (RFC §F single identity source), so the panel never prompts for or
   // hard-codes a user.
-  import {
-    listAgents,
-    sendChat,
-    getChatHistory,
-    listSessions,
-    createSession,
-    ApiError,
-  } from "../lib/api.js";
+  import { listAgents, sendChat, getChatHistory, ApiError } from "../lib/api.js";
+  import { formatTimestamp } from "../lib/format.js";
+  import ScopeSelector from "./ScopeSelector.svelte";
 
   let { userId } = $props();
 
@@ -39,14 +34,6 @@
   // up to the 30s server timeout, so the in-flight turn is cancellable. Held
   // across the await so the Cancel control can abort the live fetch.
   let chatController = null;
-  // Session selector state (§C). sessions is the labeled list from
-  // /api/v1/sessions; sessionsAvailable flips false when the registry is unwired
-  // (503), and the control degrades to the free-text input bound to sessionId.
-  let sessions = $state([]);
-  let sessionsAvailable = $state(false);
-  let newSessionLabel = $state("");
-  let creatingSession = $state(false);
-  let sessionCreateError = $state("");
   // The transcript is a flat, conversational (oldest-top) message list — the
   // shape RFC 0048 amendment §B migrates to. Each entry is one message:
   //   { id, fromUser, who, content, status?, timestamp, session?, epoch? }
@@ -168,64 +155,6 @@
       historyToken++;
     };
   });
-
-  // formatTimestamp renders the wire timestamp (RFC-3339 UTC) as a readable
-  // local time, mirroring the channel timeline. An unparseable value falls back
-  // to the raw string rather than rendering "Invalid Date".
-  function formatTimestamp(ts) {
-    const date = new Date(ts);
-    return Number.isNaN(date.getTime()) ? ts : date.toLocaleString();
-  }
-
-  // loadSessions populates the session dropdown from /api/v1/sessions (§C). A
-  // failure (notably 503 when the session registry is unwired) leaves
-  // sessionsAvailable false, so the control degrades to the existing free-text
-  // input rather than disappearing — the isolation override stays reachable.
-  function loadSessions() {
-    return listSessions()
-      .then((result) => {
-        sessions = (result.sessions ?? []).filter((s) => !s.archived);
-        sessionsAvailable = true;
-      })
-      .catch(() => {
-        sessionsAvailable = false;
-      });
-  }
-
-  $effect(() => {
-    loadSessions();
-  });
-
-  // createNewSession mints a labeled session and selects it, so a tester can
-  // scope a conversation without leaving the browser for the CLI. The label is
-  // required server-side; an empty one is a no-op here.
-  async function createNewSession() {
-    const label = newSessionLabel.trim();
-    if (!label || creatingSession) {
-      return;
-    }
-    sessionCreateError = "";
-    creatingSession = true;
-    try {
-      const created = await createSession(label);
-      sessions = [created, ...sessions];
-      sessionId = created.id;
-      newSessionLabel = "";
-    } catch (err) {
-      sessionCreateError =
-        err instanceof ApiError
-          ? err.message
-          : `Could not create session: ${err.message}`;
-    } finally {
-      creatingSession = false;
-    }
-  }
-
-  // sessionOptionLabel shows the human label, falling back to the id for a
-  // not-yet-named (auto-minted) session.
-  function sessionOptionLabel(session) {
-    return session.label ? session.label : session.id;
-  }
 
   // onMessageKeydown wires the universal chat idiom (§D): Enter sends,
   // Shift+Enter inserts a newline. Without this the <textarea> swallows Enter and
@@ -536,70 +465,11 @@
         ></textarea>
       </label>
 
-      <!-- Optional isolation overrides (RFC 0031 session / ISSUE-0085 epoch).
-           The §F identity rule constrains user_id only (never typed); session
-           and epoch are operator-namespace ids. Session is a dropdown over the
-           labeled sessions API (§C); epoch stays free-text (no labeled-epoch
-           list exists). -->
-      <details class="overrides">
-        <summary>Scope (optional)</summary>
-        {#if sessionsAvailable}
-          <label>
-            Session
-            <select bind:value={sessionId} disabled={sending}>
-              <!-- The empty value rides the orchestrator's boot-default session
-                   (the override is omitted on the wire when blank). -->
-              <option value="">(default session)</option>
-              {#each sessions as session (session.id)}
-                <option value={session.id}>{sessionOptionLabel(session)}</option>
-              {/each}
-            </select>
-          </label>
-          <div class="new-session">
-            <label>
-              New session
-              <input
-                type="text"
-                bind:value={newSessionLabel}
-                placeholder="label…"
-                autocomplete="off"
-                disabled={sending || creatingSession}
-              />
-            </label>
-            <button
-              type="button"
-              onclick={createNewSession}
-              disabled={sending || creatingSession || !newSessionLabel.trim()}
-            >
-              {creatingSession ? "Creating…" : "Create"}
-            </button>
-          </div>
-          {#if sessionCreateError}
-            <p class="poll-error" role="status">{sessionCreateError}</p>
-          {/if}
-        {:else}
-          <!-- Session registry unwired (503) — degrade to free-text id entry so
-               the override stays reachable (§C). -->
-          <label>
-            Session ID
-            <input
-              type="text"
-              bind:value={sessionId}
-              autocomplete="off"
-              disabled={sending}
-            />
-          </label>
-        {/if}
-        <label>
-          Epoch ID
-          <input
-            type="text"
-            bind:value={epochId}
-            autocomplete="off"
-            disabled={sending}
-          />
-        </label>
-      </details>
+      <!-- Optional isolation overrides (RFC 0031 session / ISSUE-0085 epoch),
+           extracted to ScopeSelector. The §F identity rule constrains user_id
+           only (never typed); session and epoch are operator-namespace ids the
+           composer reads back via the bindings. -->
+      <ScopeSelector bind:sessionId bind:epochId {sending} />
 
       <button type="submit" disabled={!canSend}>
         {sending ? "Sending…" : "Send"}
