@@ -83,6 +83,25 @@ describe("Chat panel — task agents", () => {
     await waitFor(() => expect(sendChat).toHaveBeenCalled());
   });
 
+  it("treats an unknown non-task type as chattable (only `task` is gated)", async () => {
+    // The contract is "anything other than `task` is chattable", not an allow-list
+    // of known kinds — a future agent kind the console hasn't heard of must degrade
+    // to chattable, not silently lock. The backward-compat test above covers the
+    // *unset* path; this pins the *typed-but-unknown* path.
+    listAgents.mockResolvedValue([
+      { id: "ada", name: "Ada", type: "swarm", status: "healthy" },
+    ]);
+    render(Chat, { props: { userId: "local" } });
+
+    const option = await screen.findByRole("option", { name: "Ada" });
+    expect(option.disabled).toBe(false);
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "Hi" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+    await waitFor(() => expect(sendChat).toHaveBeenCalled());
+  });
+
   it("locks the composer and explains when only task agents exist", async () => {
     listAgents.mockResolvedValue([
       { id: "planner", name: "Planner", type: "task", status: "healthy" },
