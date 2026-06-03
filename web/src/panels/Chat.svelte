@@ -101,6 +101,13 @@
   // reversed. A fresh persona returns an empty list (200, not 404) — a clean
   // empty transcript, not an error. historyError is non-fatal: a failed seed
   // still leaves a usable (empty) composer rather than blocking the panel.
+  //
+  // Scope note: the seed fetches only the server's default-limit most-recent
+  // page (channelDefaultHistoryLimit, 50) and the panel has no "load earlier"
+  // affordance yet, so a conversation longer than that resumes from its tail
+  // with the oldest turns omitted. getChatHistory already plumbs limit/before
+  // for the paginating back-fill a later slice (§F) adds; until then the cap is
+  // intentional, not full resume.
   function loadHistory(agentID) {
     const token = ++historyToken;
     historyError = "";

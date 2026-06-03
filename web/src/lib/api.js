@@ -159,6 +159,14 @@ export async function sendChat(agentID, { message, userId, sessionId, epochId })
 // conversation rather than an error. `user_id` is required (it is half the DM
 // key); `limit`/`before` mirror getChannelHistory and ride only when supplied.
 export async function getChatHistory(agentID, { userId, limit, before } = {}) {
+  // user_id is half the DM key and has no sane default for a read (unlike the
+  // chat POST's shared-"local" fallback). Guard here so a missing principal
+  // fails at the call site rather than serialising to the literal string
+  // "user_id=undefined" — which the server would resolve as a real user named
+  // "undefined", answering 200-empty and silently masking the bug.
+  if (!userId) {
+    throw new Error("getChatHistory requires a userId");
+  }
   const params = new URLSearchParams();
   params.set("user_id", userId);
   if (limit) {

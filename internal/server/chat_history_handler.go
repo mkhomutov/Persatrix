@@ -22,6 +22,14 @@ import (
 // empty messages array, NOT 404 (Decision #2). The endpoint is read-only and
 // creates nothing: opening the history of a never-used persona must not
 // materialise an empty DM.
+//
+// TODO(v0.2): `user_id` is an unauthenticated *lookup key*, not an authorization
+// boundary. Like the chat POST above it (see the rate-limiting TODO in
+// registerRoutes), this endpoint trusts the query principal — so any caller can
+// read any user's conversation by supplying their id. The per-user scoping the
+// tests assert is isolation-by-key, not access control; a read that returns full
+// conversation history is a larger exposure than the write-only POST and needs a
+// real principal/auth check before this is anything but a single-tenant console.
 func (s *Server) handleGetChatHistory(w http.ResponseWriter, r *http.Request) {
 	if s.channelStore == nil {
 		writeError(w, "UNAVAILABLE", "channel store not configured", http.StatusServiceUnavailable)
