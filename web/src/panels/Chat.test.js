@@ -90,21 +90,14 @@ describe("Chat panel", () => {
   });
 
   it("renders duplicate capabilities without crashing the persona header", async () => {
-    // The registry doesn't dedupe capabilities (validateCapabilities checks names
-    // but stores/serves the slice verbatim), so ["search", "search"] is a reachable
-    // DTO. The chip list must render it as display data, not key on the value — a
-    // keyed each would throw a duplicate-key error and crash the whole panel.
+    // The registry doesn't dedupe capabilities, so ["search","search"] is a
+    // reachable DTO. A value-keyed chip list would throw each_key_duplicate and
+    // crash the panel; both chips must render and the panel must mount.
     listAgents.mockResolvedValue([
-      {
-        id: "ada",
-        name: "Ada",
-        capabilities: ["search", "search"],
-        status: "healthy",
-      },
+      { id: "ada", name: "Ada", capabilities: ["search", "search"], status: "healthy" },
     ]);
     render(Chat, { props: { userId: "local" } });
 
-    // Both chips render; the key fact is that the panel mounts at all.
     expect(await screen.findAllByText("search")).toHaveLength(2);
   });
 
