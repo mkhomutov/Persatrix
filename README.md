@@ -171,6 +171,25 @@ accrues against the `$5`/agent simulated budget. See [§ Cost Warning](#-cost-wa
 > ones). You still need the Docker + Go + Rust toolchain to build the stack
 > itself — a toolchain-free quickstart is on the roadmap.
 
+### Try it in the browser — web console 🖥️
+
+Prefer a UI over the CLI? The orchestrator ships an embedded **web console** —
+open a URL, pick a persona, chat with it, and watch a channel, with zero CLI
+knowledge (RFC 0048 Slice 1: Interactions, new in v0.3.6). The demo stack
+enables it out of the box:
+
+```bash
+make demo-offline                 # (or `make run-ui` for the local, non-Docker path)
+# open http://localhost:8080/ui
+```
+
+It is served same-origin from the Go binary (no separate web server), behind
+`--enable-ui` (**default off**). The console makes the *unauthenticated* REST
+surface browser-discoverable, so it binds `127.0.0.1` and **must not be exposed
+beyond localhost** without an authenticating reverse proxy until accounts/auth
+ship. Full walkthrough + security note: the
+[web console guide](docs/guides/web-console.md).
+
 ### Run a real local model — Ollama (no API key, no cloud cost) 🦙
 
 Want **real** inference — not canned replies — without a cloud API key or

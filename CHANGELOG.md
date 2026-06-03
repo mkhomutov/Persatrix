@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+> Curated into a dated `[0.3.6]` section at release-prep (version bump + tag, [v0.3.6 plan](docs/v0.3.6-plan.md) Phases 2–4).
+
+### Highlights
+
+- **Open a URL and talk — the embedded web console (RFC 0048 Slice 1: Interactions).** Run the orchestrator with `--enable-ui`, open `http://localhost:8080/ui`, pick a persona, chat with it, and watch a channel — with zero CLI knowledge. The console is a Svelte single-page app served same-origin from the Go binary (`embed.FS`, no separate web server, no Node runtime in the deployed binary), rendering over the existing chat / channels / agents REST API (RFC 0002 / 0011 / 0016). It boots off two read-only endpoints — `GET /api/v1/ui/config` (per-panel feature toggles, with a runtime-derived `available` flag) and `GET /api/v1/ui/context` (the `principal=local` forward-compat identity source) — and renders only panels that are both `enabled` (in `config/ui.yaml`) and `available` (subsystem wired). The Chat panel passes optional session/epoch selectors through (demonstrating the v0.3.5 isolation story from the browser); the Channel-timeline panel stays live by polling with visibility-pause + error-backoff + head-poll de-dupe, plus an optional human publish. See the [web console guide](docs/guides/web-console.md).
+- **Feature-toggled vertical slices.** `config/ui.yaml` ships Slice-1 panels on (`chat`, `channel_timeline`) and later-slice panels off (`memory_strip`, `cost`), so memory inspector / isolation verifier / cost / control-plane panels land additively in v0.4.0+ with no Slice-1 rework. The toggle file is schema-validated (`schemas/ui.schema.json`, wired into `make validate`); `available` is runtime-derived and authoring it is a validation error.
+- **Repo's first JS toolchain, isolated to `web/`.** A Svelte + Vite build (`make ui`) emits static assets embedded into the orchestrator. The Go-only build/test lane stays green against a committed placeholder embed (`go build ./...` needs no Node); only `make ui`, the Docker image build, and the CI release lane produce the real bundle. The demo compose stack (`make demo-offline` / `docker compose up --build`) bakes the bundle in-image, so the console works from a clean clone with no host JS toolchain.
+
+### Upgrade Notes
+
+| Notable change | Detail |
+|----------------|--------|
+| **[Feature]** Embedded web console (`--enable-ui`, **off by default**) | A new `--enable-ui` flag serves the RFC 0048 Slice 1 web console at `/ui`. It is **off by default**; with it off, `/ui/` is a clean 404 and no default runtime behaviour changes. New surfaces: the `/api/v1/ui/config` + `/api/v1/ui/context` endpoints, the `config/ui.yaml` toggle file (+ `schemas/ui.schema.json`), the `web/` JS toolchain, and the `make ui` / `make run-ui` build targets. |
+| **[Security — load-bearing]** Localhost-only until auth | The console makes the **unauthenticated** REST surface browser-discoverable. The orchestrator still binds `127.0.0.1` by default and the console is off by default, but **do not expose the console (or `:8080`) beyond localhost without fronting the orchestrator with an authenticating reverse proxy** until RFC 0039 (accounts/auth) ships. Slice 1 is interact-only (chat + optional channel publish); the destructive/admin control plane is Slice 5 and is hard-gated on RFC 0039. See [web console guide §Security](docs/guides/web-console.md#security--do-not-expose-beyond-localhost). |
+| **[Scope]** Slice 1 only — later panels deferred | v0.3.6 ships the Interactions slice (chat + channel timeline). The memory inspector, isolation verifier, cost/observability, and control-plane panels are deferred to v0.4.0+ / post-RFC 0039; their toggles ship **off**. Channel real-time push and chat token streaming are named later enhancements (Slice 1 polls + synchronous chat). |
+
 ## [0.3.5] - 2026-06-01
 
 > **Codename:** Session-Scoped Memory
