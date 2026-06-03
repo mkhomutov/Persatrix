@@ -3,7 +3,7 @@ id: RFC-0048
 title: "Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI)"
 summary: "Embedded same-origin web console for operators and testers, shipped as feature-toggled vertical slices; first slice is live interactions (chat + channels) to grow the community."
 type: feature
-status: implementing
+status: partially_implemented
 author: Maksim Khomutov
 created: 2026-06-01
 target: "v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5)"
@@ -311,6 +311,8 @@ Status is **Accepted** (review sign-off given 2026-06-02; Phase 1 PR plan author
 - **OQ4 (channel real-time) and OQ5 (chat token streaming): remain deferred** — Slice 1 polls and uses request/response chat.
 
 With these settled and review sign-off given (2026-06-02), the RFC advances to **Accepted** (the only legal successor to Proposed per the [lifecycle](README.md#rfc-lifecycle); implementation has not started). The Phase 1 PR plan — [`0048-phase1-pr-plan.md`](0048-phase1-pr-plan.md) — decomposes the scaffold + Interactions slice (chat + channel timeline) into six reviewable PRs and is the active tracker for the build. Status advances to **Implementing** when the first Phase 1 PR opens, and to **Partially Implemented** once Slice 1 lands (its closeout PR per the plan).
+
+**Phase 1 / Slice 1 implemented in v0.3.6** (status → ⚠️ Partially Implemented, 2026-06-03). The six-PR [Phase 1 plan](0048-phase1-pr-plan.md) landed the interact-only web console behind `--enable-ui` (off by default): the `WithUI` scaffold + embedded `/ui` serving ([#496](https://github.com/mkhomutov/Persatrix/pull/496)), the `/api/v1/ui/config` + `/api/v1/ui/context` endpoints + `config/ui.yaml` + schema ([#497](https://github.com/mkhomutov/Persatrix/pull/497)), the JS toolchain + Svelte shell ([#498](https://github.com/mkhomutov/Persatrix/pull/498)), the Chat panel ([#501](https://github.com/mkhomutov/Persatrix/pull/501)), the Channel-timeline panel ([#502](https://github.com/mkhomutov/Persatrix/pull/502)), Docker/demo enablement + in-image bundle ([#503](https://github.com/mkhomutov/Persatrix/pull/503)), and this docs/closeout PR ([`docs/guides/web-console.md`](../guides/web-console.md) + [`MT-CONSOLE-001`](../manual-tests/MT-CONSOLE-001.md)). **Slices 2–5** (memory inspector, isolation verifier, cost/observability, control plane) remain deferred to v0.4.0+ / post-RFC 0039, per [§E](#e-later-slices-roadmap).
 
 ## Related Documentation
 

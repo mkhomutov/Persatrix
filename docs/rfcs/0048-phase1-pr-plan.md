@@ -340,12 +340,13 @@ Tracking pointers only; each is its own design pass + PR plan ([RFC §E](0048-op
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 1 | `WithUI` ServerOption + embed package + static serving | `feature/v036-rfc0048p1-withui-scaffold` | 🔀 PR open | — | — |
-| 2 | UI config/context endpoints + `config/ui.yaml` + schema | `feature/v036-rfc0048p1-config-context` | ⬜ Not started | — | — |
-| 3 | JS toolchain + Svelte shell + build step | `feature/v036-rfc0048p1-spa-shell` | ⬜ Not started | — | — |
-| 4 | Chat panel | `feature/v036-rfc0048p1-chat-panel` | ⬜ Not started | — | — |
-| 5 | Channel timeline panel | `feature/v036-rfc0048p1-channel-timeline` | ⬜ Not started | — | — |
-| 6 | Docs + status closeout | `feature/v036-rfc0048p1-docs-closeout` | ⬜ Not started | — | — |
+| 1 | `WithUI` ServerOption + embed package + static serving | `feature/v036-rfc0048p1-withui-scaffold` | ✅ Merged | [#496](https://github.com/mkhomutov/Persatrix/pull/496) | 2026-06-02 |
+| 2 | UI config/context endpoints + `config/ui.yaml` + schema | `feature/v036-rfc0048p1-config-context` | ✅ Merged | [#497](https://github.com/mkhomutov/Persatrix/pull/497) | 2026-06-02 |
+| 3 | JS toolchain + Svelte shell + build step | `feature/v036-rfc0048p1-spa-shell` | ✅ Merged | [#498](https://github.com/mkhomutov/Persatrix/pull/498) | 2026-06-02 |
+| 4 | Chat panel | `feature/v036-rfc0048p1-chat-panel` | ✅ Merged | [#501](https://github.com/mkhomutov/Persatrix/pull/501) | 2026-06-02 |
+| 5 | Channel timeline panel | `feature/v036-rfc0048p1-channel-timeline` | ✅ Merged | [#502](https://github.com/mkhomutov/Persatrix/pull/502) | 2026-06-02 |
+| — | Docker/demo enablement + in-image bundle (fold-in, beyond the original 6) | `feature/v036-rfc0048p1-docker-enable-ui` | ✅ Merged | [#503](https://github.com/mkhomutov/Persatrix/pull/503) | 2026-06-02 |
+| 6 | Docs + status closeout | `feature/v036-rfc0048p1-docs-closeout` | 🔀 PR open | — (this PR) | — |
 
 ---
 
