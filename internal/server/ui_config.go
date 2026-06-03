@@ -38,13 +38,14 @@ type PanelToggle struct {
 }
 
 // DefaultUIConfig is the Slice-1 default applied when config/ui.yaml is absent:
-// the chat and channel-timeline hero panels ship enabled; memory_strip (Slice 2)
-// and cost (Slice 4) ship off so they land additively with no Slice-1 rework
+// the consolidated channel-timeline conversation panel ships enabled (group
+// channels + DMs over one surface — RFC 0048 chat-panel-retirement amendment, so
+// the standalone chat panel is retired); memory_strip (Slice 2) and cost
+// (Slice 4) ship off so they land additively with no Slice-1 rework
 // (RFC 0048 §C / §D.3).
 func DefaultUIConfig() *UIConfig {
 	return &UIConfig{
 		Panels: map[string]PanelToggle{
-			"chat":             {Enabled: true},
 			"channel_timeline": {Enabled: true},
 			"memory_strip":     {Enabled: false},
 			"cost":             {Enabled: false},

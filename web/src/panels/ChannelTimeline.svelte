@@ -350,17 +350,12 @@
     }
   }
 
-  // onChannelCreated lands the operator in the new conversation: a GROUP channel
-  // via the one-shot pendingSelectId; a DIRECT result by opening DM mode for the
-  // persona (the dm: channel is filtered out of the group picker, so it can't be
-  // selected there — the persona entry point owns it).
-  function onChannelCreated(result) {
+  // onChannelCreated lands the operator in the just-created group channel via the
+  // one-shot pendingSelectId hand-off (§C). (DMs are started from the persona
+  // entry point, not the create form — so there's no direct-mode result here.)
+  function onChannelCreated(channel) {
     showCreateForm = false;
-    if (result?.direct && result?.agentId) {
-      openDM(result.agentId);
-      return;
-    }
-    pendingSelectId = result?.id ?? "";
+    pendingSelectId = channel?.id ?? "";
     loadChannels();
   }
 </script>

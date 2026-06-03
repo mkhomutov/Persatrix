@@ -14,8 +14,10 @@
 # `available:` key in this file is a validation error (schema
 # additionalProperties:false) — it would have no effect and misleads the reader.
 #
-# Slice 1 (v0.3.6) ships the two hero panels on; memory_strip (Slice 2) and
-# cost (Slice 4) ship off so they land additively with no Slice-1 rework.
+# Slice 1 (v0.3.6) ships the single consolidated conversation panel
+# (channel_timeline — group channels + DMs over one surface, RFC 0048
+# chat-panel-retirement amendment) on; memory_strip (Slice 2) and cost (Slice 4)
+# ship off so they land additively with no Slice-1 rework.
 #
 # A panel may also carry capability knobs. `create_enabled` (channel_timeline,
 # RFC 0048 channel-creation amendment §A) opts the console into creating group
@@ -24,8 +26,6 @@
 # `create.available` is runtime-derived (the channel store must be wired),
 # never authored here, exactly like `available`.
 panels:
-  chat:
-    enabled: true
   channel_timeline:
     enabled: true
     create_enabled: false

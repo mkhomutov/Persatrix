@@ -1,5 +1,5 @@
 <script>
-  // Persona switcher + Exit + lobby (extracted from Chat.svelte to keep the panel
+  // Persona switcher + Exit + lobby (extracted to keep the conversation panel
   // under the review-size cap, mirroring PublishComposer). Pinned at the top of
   // the panel (like the channel timeline's selector-at-top layout) so it stays
   // reachable above a growing transcript rather than buried in the composer.

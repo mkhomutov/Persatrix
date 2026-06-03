@@ -24,8 +24,9 @@ behind the `--enable-ui` flag (**default off**).
 - [What it is](#what-it-is)
 - [Quick start (local binary)](#quick-start-local-binary)
 - [Quick start (Docker demo)](#quick-start-docker-demo)
-- [The Chat panel](#the-chat-panel)
-- [The Channel-timeline panel](#the-channel-timeline-panel)
+- [The conversation panel](#the-conversation-panel)
+  - [Direct-message a persona](#direct-message-a-persona)
+  - [Watch a group channel](#watch-a-group-channel)
 - [Creating a channel (opt-in)](#creating-a-channel-opt-in)
 - [The feature-toggle model (`config/ui.yaml`)](#the-feature-toggle-model-configuiyaml)
 - [Security — do not expose beyond localhost](#security--do-not-expose-beyond-localhost)
@@ -51,7 +52,7 @@ On load the app boots off two read-only endpoints:
   subsystem is wired) plus the build version.
 - `GET /api/v1/ui/context` — who the principal is. Today this is the degenerate
   single-tenant case `{"principal":"local","tenant":"local","authenticated":false}`;
-  the Chat panel derives its `user_id` from this `principal` — it is **never**
+  the conversation panel derives its `user_id` from this `principal` — it is **never**
   hard-coded or free-text typed (the [RFC §F](../rfcs/0048-operator-tester-web-console.md#f-auth--multi-tenancy-forward-compatibility)
   single-identity-source rule, so the console composes with RFC 0039 auth later).
 
@@ -111,15 +112,25 @@ publish or the bind address.
 
 ---
 
-## The Chat panel
+## The conversation panel
+
+The console has **one** conversation surface — the **Channels** panel. A chat
+*is* a `dm:` channel server-side (`GetOrCreateDM`), so both kinds of conversation
+live on one panel: **direct messages** with a single persona and **group
+channels** where personas interact. (The earlier separate "Chat" panel was
+retired — [RFC 0048 chat-panel-retirement amendment](../rfcs/0048-amendment-chat-panel-retirement.md).)
+
+### Direct-message a persona
 
 The hero moment — talk to a persona over the synchronous chat API:
 
-1. Pick a persona from the list (`GET /api/v1/agents`).
+1. Pick a persona from the **persona picker** at the top of the panel
+   (`GET /api/v1/agents`). The conversation opens with a persona header
+   (name — role — capabilities); a reload resumes the persisted history.
 2. Type a message and send it (`POST /api/v1/agents/{id}/chat` with
-   `participant_type:"user"` and the `user_id` derived from `/ui/context`).
-3. Read the reply (the `reply` field of the response). A "thinking…"
-   affordance shows until the reply lands or a client timeout surfaces a retry.
+   `participant_type:"user"` and the `user_id` derived from `/ui/context`). A
+   "thinking…" affordance shows until the reply lands (an in-flight turn is
+   cancellable), then the turn appears on the timeline.
 
 **Optional session / epoch selectors** pass `session_id` / `epoch_id` through
 to the request, so you can demonstrate the v0.3.5 isolation story from the
@@ -131,13 +142,11 @@ Over-length messages are caught client-side (mirroring the server's
 4 000-character limit) and the server's error envelope is surfaced as a
 user-visible message rather than crashing the panel.
 
----
+### Watch a group channel
 
-## The Channel-timeline panel
-
-Watch personas interact:
-
-1. Pick a channel (`GET /api/v1/channels`).
+1. Pick a channel from the **channel picker** (`GET /api/v1/channels`; DMs are
+   reached through the persona picker, so the channel picker lists group
+   channels only).
 2. History renders newest-first (`GET /api/v1/channels/{id}/messages`).
 3. The timeline stays **live by polling** (no channel push API exists yet —
    [OQ4](../rfcs/0048-operator-tester-web-console.md#open-questions) is deferred):
@@ -199,17 +208,12 @@ note before enabling it.
    `never` means you can post but are never dispatched a turn like an agent — so
    you can immediately publish into the channel you just created.
 
-**Group vs. Direct.** The form has a **channel type** choice:
-
-- **Group channel** — the multi-persona discussion described above (`group:<name>`,
-  created via `POST /api/v1/channels`).
-- **Direct message** — a 1:1 DM with a single persona. A DM is not made through
-  the channels endpoint (it is group-only); instead it is born by *chatting* the
-  persona (`GetOrCreateDM` on the first message). So direct mode asks for **one
-  persona** and an **opening message**, sends it through the chat façade
-  (`POST /api/v1/agents/{id}/chat`), and lands you in the resulting `dm:` channel
-  on the timeline. (This is the same DM you'd get from the Chat panel — the create
-  form just gives you a second entry point to it.)
+> **Group channels only.** This form creates `group:` channels. To start a **DM**
+> with a persona, use the **persona picker** at the top of the panel
+> ([Direct-message a persona](#direct-message-a-persona)) — that is the single DM
+> entry point. DMs and threads are created implicitly on first message
+> ([RFC 0011](../rfcs/0011-channels-bridges.md)), so there is nothing to "create"
+> for those.
 
 **Verify the toggle is live:**
 
@@ -223,23 +227,19 @@ Both `create.enabled` **and** `create.available` must be `true` for the **New
 channel** affordance to render — the same `enabled && available` rule every panel
 follows.
 
-> **Scope.** Only `group:` channels are creatable. DMs and threads are created
-> implicitly on first message ([RFC 0011](../rfcs/0011-channels-bridges.md)), so
-> there is nothing to "create" for those. Channel **deletion** and post-create
-> membership editing are not in Slice 1.
+> **Scope.** Channel **deletion** and post-create membership editing are not in
+> Slice 1.
 
 ---
 
 ## The feature-toggle model (`config/ui.yaml`)
 
 Panels ship "dark" in [`config/ui.yaml`](../../config/ui.yaml) and are flipped
-on per deployment. Slice 1 ships the two hero panels on; later slices ship off
-so they land additively:
+on per deployment. Slice 1 ships the single consolidated conversation panel on;
+later slices ship off so they land additively:
 
 ```yaml
 panels:
-  chat:
-    enabled: true
   channel_timeline:
     enabled: true
     create_enabled: false   # opt-in to channel creation — see "Creating a channel"
@@ -345,6 +345,6 @@ Deferred by RFC decision (2026-06-02); each is its own later slice
 - [RFC 0048 — Operator & Tester Web Console](../rfcs/0048-operator-tester-web-console.md) — canonical spec.
 - [RFC 0048 Phase 1 PR plan](../rfcs/0048-phase1-pr-plan.md) — the six-PR implementation workstream.
 - [MT-CONSOLE-001](../manual-tests/MT-CONSOLE-001.md) — fresh-stack manual test for the console.
-- [Sessions guide](sessions.md) / [Epochs guide](epochs.md) — the isolation axes the Chat panel's selectors pass through.
+- [Sessions guide](sessions.md) / [Epochs guide](epochs.md) — the isolation axes the conversation panel's DM scope selectors pass through.
 - [Channels guide](channels.md) — the channel fan-out the timeline panel renders.
 - [Persona agents guide](persona-agents.md) — the personas you chat with.

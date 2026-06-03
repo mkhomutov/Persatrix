@@ -13,8 +13,8 @@ import App from "./App.svelte";
 // the /ui/context principal — so a tester can switch the effective user and
 // watch per-user persistence follow the identity. Split out of App.test.js to
 // keep each spec under the review-size cap; the boot/routing smoke stays there.
-// The shell mounts the real Chat panel, whose mount effects call the client, so
-// the full api surface is stubbed (mirrors App.test.js).
+// The shell mounts the real channel_timeline panel, whose mount effects call the
+// client, so the full api surface is stubbed (mirrors App.test.js).
 vi.mock("./lib/api.js", () => ({
   ApiError: class ApiError extends Error {},
   loadBootstrap: vi.fn(),
@@ -46,7 +46,7 @@ afterEach(() => {
 describe("App shell — §E tester identity override", () => {
   it("surfaces the real principal verbatim and offers the §E testing override in local mode", async () => {
     loadBootstrap.mockResolvedValue({
-      config: { panels: { chat: { enabled: true, available: true } } },
+      config: { panels: { channel_timeline: { enabled: true, available: true } } },
       context: { principal: "local", tenant: "local", authenticated: false },
     });
 
@@ -79,7 +79,7 @@ describe("App shell — §E tester identity override", () => {
     // principal (RFC 0039), the override disappears so a real identity can never
     // be masked from the browser.
     loadBootstrap.mockResolvedValue({
-      config: { panels: { chat: { enabled: true, available: true } } },
+      config: { panels: { channel_timeline: { enabled: true, available: true } } },
       context: { principal: "alice@example.com", tenant: "t", authenticated: true },
     });
 
@@ -103,7 +103,7 @@ describe("App shell — §E tester identity override", () => {
     // value ("b", "bo", "bob"). The contract here is the observable side of
     // that: typing alone must NOT move the effective identity; the change does.
     loadBootstrap.mockResolvedValue({
-      config: { panels: { chat: { enabled: true, available: true } } },
+      config: { panels: { channel_timeline: { enabled: true, available: true } } },
       context: { principal: "local", tenant: "local", authenticated: false },
     });
 
@@ -118,8 +118,8 @@ describe("App shell — §E tester identity override", () => {
     const effectiveIds = () =>
       [...container.querySelectorAll("code")].map((c) => c.textContent.trim());
 
-    // The chat panel echoes the effective identity it acts as; it starts at the
-    // principal.
+    // The conversation panel echoes the effective identity it acts as; it starts
+    // at the principal.
     await waitFor(() => expect(effectiveIds()).toContain("local"));
 
     // Typing into the box edits the draft but must not yet move the effective
