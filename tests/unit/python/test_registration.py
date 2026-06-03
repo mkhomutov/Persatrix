@@ -72,6 +72,9 @@ class TestSelfRegistration:
         # RFC 0048 §A DTO: type is sent (empty here — the stub config has none) so the
         # web console can disable chat for task agents.
         assert payload["type"] == ""
+        # RFC 0048 §A DTO: role rides the same payload (empty here) so the console can
+        # render the persona header — collected/stored server-side but inert without it.
+        assert payload["role"] == ""
         # P1: status is NOT sent in payload
         assert "status" not in payload
 
@@ -99,6 +102,33 @@ class TestSelfRegistration:
 
         payload = mock_session.post.call_args[1]["json"]
         assert payload["type"] == "task"
+
+    async def test_registration_sends_agent_role(self):
+        """RFC 0048 §A DTO — a persona's `role` rides the register payload so the
+        console can render the persona header (name — role) in the Docker/web
+        deployment, not just in-process."""
+        server = AgentServer(
+            host="127.0.0.1",
+            port=0,
+            shutdown_grace=1,
+            orchestrator_url="http://127.0.0.1:8080",
+            advertise_address="127.0.0.1:50051",
+        )
+        server.register_agent(
+            _StubAgent(agent_id="ada", config={"role": "Researcher"})
+        )
+        mock_resp = AsyncMock()
+        mock_resp.status = 201
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.post = MagicMock(return_value=mock_resp)
+        server._session = mock_session
+
+        await server._self_register()
+
+        payload = mock_session.post.call_args[1]["json"]
+        assert payload["role"] == "Researcher"
 
     async def test_successful_registration_200(self):
         """Registration succeeds on HTTP 200 (not just 201)."""
