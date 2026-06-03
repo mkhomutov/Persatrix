@@ -163,9 +163,10 @@ type uiConfigResponseBody struct {
 }
 
 // TestUIConfig_Shape pins the RFC 0048 §C config contract: the Slice-1 panel
-// toggles default on for chat/channel_timeline and off for memory_strip/cost,
-// and a non-empty build.version ships so the console can show what it is
-// rendering. channels wired → channel_timeline is available.
+// toggle defaults on for the consolidated channel_timeline panel (the standalone
+// chat panel is retired — chat-panel-retirement amendment) and off for
+// memory_strip/cost, and a non-empty build.version ships so the console can show
+// what it is rendering. channels wired → channel_timeline is available.
 func TestUIConfig_Shape(t *testing.T) {
 	srv := uiTestServer(t, WithUI(uiAssetFS()), WithChannels(uiChannelStore(t), nil))
 
@@ -175,17 +176,15 @@ func TestUIConfig_Shape(t *testing.T) {
 	var body uiConfigResponseBody
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 
-	require.Contains(t, body.Panels, "chat")
 	require.Contains(t, body.Panels, "channel_timeline")
 	require.Contains(t, body.Panels, "memory_strip")
 	require.Contains(t, body.Panels, "cost")
+	require.NotContains(t, body.Panels, "chat", "the standalone chat panel is retired")
 
-	assert.True(t, body.Panels["chat"].Enabled, "chat ships enabled in Slice 1")
 	assert.True(t, body.Panels["channel_timeline"].Enabled, "channel_timeline ships enabled in Slice 1")
 	assert.False(t, body.Panels["memory_strip"].Enabled, "memory_strip ships off (Slice 2)")
 	assert.False(t, body.Panels["cost"].Enabled, "cost ships off (Slice 4)")
 
-	assert.True(t, body.Panels["chat"].Available, "chat is always wired")
 	assert.True(t, body.Panels["channel_timeline"].Available, "channels wired → channel_timeline available")
 	assert.False(t, body.Panels["memory_strip"].Available, "memory_strip has no backing subsystem yet (Slice 2)")
 
@@ -214,7 +213,7 @@ func TestUIConfig_AvailabilityTracksChannels(t *testing.T) {
 // TestUIConfig_CreateCapabilityShape pins the channel-creation amendment §A
 // contract: the channel_timeline entry carries a nested `create {enabled,
 // available}` object mirroring the panel's own `{enabled, available}` shape;
-// create.enabled echoes the (default-off) toggle; create.available is
+// create.enabled echoes the (default-on) toggle; create.available is
 // runtime-derived from the channel store being wired. No OTHER panel carries a
 // `create` object — the affordance is a capability of the timeline panel alone.
 func TestUIConfig_CreateCapabilityShape(t *testing.T) {
@@ -228,11 +227,11 @@ func TestUIConfig_CreateCapabilityShape(t *testing.T) {
 
 	ct := body.Panels["channel_timeline"]
 	require.NotNil(t, ct.Create, "channel_timeline must carry a nested create capability")
-	assert.False(t, ct.Create.Enabled, "create ships dark (create_enabled defaults false)")
+	assert.True(t, ct.Create.Enabled, "create ships enabled by default (create_enabled defaults true)")
 	assert.True(t, ct.Create.Available, "channels wired → create.available is true")
 
-	assert.Nil(t, body.Panels["chat"].Create,
-		"only channel_timeline exposes a create affordance — chat carries no create object")
+	assert.Nil(t, body.Panels["memory_strip"].Create,
+		"only channel_timeline exposes a create affordance — other panels carry no create object")
 }
 
 // TestUIConfig_CreateAvailabilityTracksChannels is the runtime-derivation proof
@@ -283,8 +282,8 @@ func TestUIConfig_CreateEnabledEchoesToggle(t *testing.T) {
 
 // TestUIContext_Local pins the RFC 0048 §F identity contract for today's
 // no-auth localhost mode: the single-tenant degenerate case reports
-// principal=tenant=local and authenticated=false. PR 4's chat panel derives
-// user_id from this endpoint, never a hard-coded or free-text user.
+// principal=tenant=local and authenticated=false. The console derives user_id
+// from this endpoint, never a hard-coded or free-text user.
 func TestUIContext_Local(t *testing.T) {
 	srv := uiTestServer(t, WithUI(uiAssetFS()))
 

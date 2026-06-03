@@ -1,7 +1,7 @@
-// Persona/agent display helpers shared by the Chat panel and its PersonaPicker
-// (extracted so the two render identical option labels and chattability rules
-// without the panel re-deriving them — and to keep Chat.svelte under the
-// review-size cap, the same reason PublishComposer was split out).
+// Persona/agent display helpers shared by the conversation panel and its
+// PersonaPicker (extracted so they render identical option labels and
+// chattability rules without the panel re-deriving them — and to keep the panel
+// under the review-size cap, the same reason PublishComposer was split out).
 
 // isChattable: task agents (agents.yaml `type: "task"`) run workflow steps and
 // never hold a conversation, so a chat turn dead-ends in a timeout. They show in

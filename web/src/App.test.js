@@ -12,12 +12,11 @@ import App from "./App.svelte";
 // running orchestrator. This is the PR-3 smoke: the shell fetches config +
 // context, renders only the enabled && available panels, hides the rest, and
 // derives identity from the context principal — never a hard-coded user.
-// The shell mounts the real Chat / ChannelTimeline panels for the enabled tabs,
-// whose mount effects call listAgents() / listChannels(); stub the panels' API
-// surface so the boot wiring under test doesn't reach a real backend or throw on
-// an undefined export. The list calls resolve empty — these tests assert the
-// shell's tab/identity wiring, not the panels' contents. (A deep-link / hashchange
-// to #/channels mounts ChannelTimeline, so its calls must be stubbed too.)
+// Slice 1 ships only the consolidated `channel_timeline` panel as a real one
+// (the Chat panel was retired — RFC 0048 chat-panel-retirement amendment); its
+// mount effects call listChannels()/listAgents(), so stub the panel's API
+// surface. Multi-tab cases enable `memory_strip` as a second (component-less)
+// tab to exercise the shell's panel-agnostic tab scaffold.
 vi.mock("./lib/api.js", () => ({
   ApiError: class ApiError extends Error {},
   loadBootstrap: vi.fn(),
@@ -51,7 +50,6 @@ describe("App shell boot", () => {
     loadBootstrap.mockResolvedValue({
       config: {
         panels: {
-          chat: { enabled: true, available: true },
           channel_timeline: { enabled: true, available: true },
           memory_strip: { enabled: true, available: false },
           cost: { enabled: false, available: false },
@@ -63,9 +61,10 @@ describe("App shell boot", () => {
     render(App);
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /chat/i })).toBeTruthy();
+      expect(screen.getByRole("tab", { name: /channels/i })).toBeTruthy();
     });
-    expect(screen.getByRole("tab", { name: /channels/i })).toBeTruthy();
+    // The retired Chat panel must not reappear, and the deferred panels stay dark.
+    expect(screen.queryByRole("tab", { name: /chat/i })).toBeNull();
     expect(screen.queryByRole("tab", { name: /memory/i })).toBeNull();
     expect(screen.queryByRole("tab", { name: /cost/i })).toBeNull();
   });
@@ -77,7 +76,7 @@ describe("App shell boot", () => {
     loadBootstrap.mockResolvedValue({
       config: {
         build: { version: "0.3.6" },
-        panels: { chat: { enabled: true, available: true } },
+        panels: { channel_timeline: { enabled: true, available: true } },
       },
       context: { principal: "local", tenant: "local", authenticated: false },
     });
@@ -94,13 +93,13 @@ describe("App shell boot", () => {
     // build.version is optional; a payload without it shows no chip rather than a
     // bare "v" placeholder.
     loadBootstrap.mockResolvedValue({
-      config: { panels: { chat: { enabled: true, available: true } } },
+      config: { panels: { channel_timeline: { enabled: true, available: true } } },
       context: { principal: "local", tenant: "local", authenticated: false },
     });
 
     render(App);
 
-    await screen.findByRole("tab", { name: /chat/i });
+    await screen.findByRole("tab", { name: /channels/i });
     expect(screen.queryByTitle("Orchestrator build")).toBeNull();
   });
 
@@ -132,7 +131,7 @@ describe("App shell boot", () => {
     // backend that returns an empty principal is still unusable — the shell must
     // surface the identity error rather than render panels with a null user.
     loadBootstrap.mockResolvedValue({
-      config: { panels: { chat: { enabled: true, available: true } } },
+      config: { panels: { channel_timeline: { enabled: true, available: true } } },
       context: { principal: "", tenant: "local", authenticated: false },
     });
 
@@ -149,76 +148,13 @@ describe("App shell boot", () => {
     // The APG tabs pattern is more than roles: exactly one tab is in the Tab
     // sequence (roving tabindex), and Left/Right/Home/End move focus *and*
     // selection between tabs (automatic activation — cheap here, panels are
-    // local). Without this, the role=tab markup advertises a keyboard contract
-    // the shell doesn't honour.
+    // local). With only one real Slice-1 panel, memory_strip rides along as a
+    // second tab so the shell's panel-agnostic keyboard contract stays covered.
     loadBootstrap.mockResolvedValue({
       config: {
         panels: {
-          chat: { enabled: true, available: true },
           channel_timeline: { enabled: true, available: true },
-        },
-      },
-      context: { principal: "local", tenant: "local", authenticated: false },
-    });
-
-    render(App);
-
-    const chatTab = await screen.findByRole("tab", { name: /chat/i });
-    const channelsTab = screen.getByRole("tab", { name: /channels/i });
-
-    // Roving tabindex: only the active (chat) tab is Tab-reachable.
-    expect(chatTab.getAttribute("tabindex")).toBe("0");
-    expect(channelsTab.getAttribute("tabindex")).toBe("-1");
-
-    // ArrowRight: focus + selection move to the next tab.
-    await fireEvent.keyDown(chatTab, { key: "ArrowRight" });
-    expect(channelsTab.getAttribute("aria-selected")).toBe("true");
-    expect(chatTab.getAttribute("aria-selected")).toBe("false");
-    expect(channelsTab.getAttribute("tabindex")).toBe("0");
-    expect(chatTab.getAttribute("tabindex")).toBe("-1");
-    expect(document.activeElement).toBe(channelsTab);
-
-    // ArrowRight wraps from the last tab back to the first.
-    await fireEvent.keyDown(channelsTab, { key: "ArrowRight" });
-    expect(chatTab.getAttribute("aria-selected")).toBe("true");
-    expect(document.activeElement).toBe(chatTab);
-
-    // End jumps to the last tab, Home back to the first.
-    await fireEvent.keyDown(chatTab, { key: "End" });
-    expect(document.activeElement).toBe(channelsTab);
-    await fireEvent.keyDown(channelsTab, { key: "Home" });
-    expect(document.activeElement).toBe(chatTab);
-  });
-
-  it("exposes the active content region as a labelled tabpanel", async () => {
-    // The tabs advertise role=tab/aria-selected; the content region they drive
-    // must be a matching role=tabpanel labelled by the active tab so the
-    // tab/panel relationship is complete for assistive tech.
-    loadBootstrap.mockResolvedValue({
-      config: { panels: { chat: { enabled: true, available: true } } },
-      context: { principal: "local", tenant: "local", authenticated: false },
-    });
-
-    render(App);
-
-    const tabpanel = await screen.findByRole("tabpanel");
-    const tab = screen.getByRole("tab", { name: /chat/i });
-    expect(tab.getAttribute("aria-controls")).toBe(tabpanel.id);
-    expect(tabpanel.getAttribute("aria-labelledby")).toBe(tab.id);
-  });
-
-  it("does not leave a dangling aria-controls on inactive tabs", async () => {
-    // Only the active panel is mounted (lazy single-panel render — PRs 4-5'
-    // panels poll, so mounting all tabpanels hidden would start background work
-    // for tabs the operator isn't looking at). An inactive tab therefore has no
-    // panel in the DOM to control; advertising aria-controls to a missing id is
-    // a dangling ARIA reference, so the attribute is present only on the active
-    // tab (whose panel exists).
-    loadBootstrap.mockResolvedValue({
-      config: {
-        panels: {
-          chat: { enabled: true, available: true },
-          channel_timeline: { enabled: true, available: true },
+          memory_strip: { enabled: true, available: true },
         },
       },
       context: { principal: "local", tenant: "local", authenticated: false },
@@ -227,12 +163,74 @@ describe("App shell boot", () => {
     render(App);
 
     const channelsTab = await screen.findByRole("tab", { name: /channels/i });
-    const chatTab = screen.getByRole("tab", { name: /chat/i });
+    const memoryTab = screen.getByRole("tab", { name: /memory/i });
+
+    // Roving tabindex: only the active (first) tab is Tab-reachable.
+    expect(channelsTab.getAttribute("tabindex")).toBe("0");
+    expect(memoryTab.getAttribute("tabindex")).toBe("-1");
+
+    // ArrowRight: focus + selection move to the next tab.
+    await fireEvent.keyDown(channelsTab, { key: "ArrowRight" });
+    expect(memoryTab.getAttribute("aria-selected")).toBe("true");
+    expect(channelsTab.getAttribute("aria-selected")).toBe("false");
+    expect(memoryTab.getAttribute("tabindex")).toBe("0");
+    expect(channelsTab.getAttribute("tabindex")).toBe("-1");
+    expect(document.activeElement).toBe(memoryTab);
+
+    // ArrowRight wraps from the last tab back to the first.
+    await fireEvent.keyDown(memoryTab, { key: "ArrowRight" });
+    expect(channelsTab.getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(channelsTab);
+
+    // End jumps to the last tab, Home back to the first.
+    await fireEvent.keyDown(channelsTab, { key: "End" });
+    expect(document.activeElement).toBe(memoryTab);
+    await fireEvent.keyDown(memoryTab, { key: "Home" });
+    expect(document.activeElement).toBe(channelsTab);
+  });
+
+  it("exposes the active content region as a labelled tabpanel", async () => {
+    // The tabs advertise role=tab/aria-selected; the content region they drive
+    // must be a matching role=tabpanel labelled by the active tab so the
+    // tab/panel relationship is complete for assistive tech.
+    loadBootstrap.mockResolvedValue({
+      config: { panels: { channel_timeline: { enabled: true, available: true } } },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    const tabpanel = await screen.findByRole("tabpanel");
+    const tab = screen.getByRole("tab", { name: /channels/i });
+    expect(tab.getAttribute("aria-controls")).toBe(tabpanel.id);
+    expect(tabpanel.getAttribute("aria-labelledby")).toBe(tab.id);
+  });
+
+  it("does not leave a dangling aria-controls on inactive tabs", async () => {
+    // Only the active panel is mounted (lazy single-panel render — panels poll,
+    // so mounting all tabpanels hidden would start background work for tabs the
+    // operator isn't looking at). An inactive tab therefore has no panel in the
+    // DOM to control; advertising aria-controls to a missing id is a dangling
+    // ARIA reference, so the attribute is present only on the active tab.
+    loadBootstrap.mockResolvedValue({
+      config: {
+        panels: {
+          channel_timeline: { enabled: true, available: true },
+          memory_strip: { enabled: true, available: true },
+        },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    const memoryTab = await screen.findByRole("tab", { name: /memory/i });
+    const channelsTab = screen.getByRole("tab", { name: /channels/i });
     const tabpanel = screen.getByRole("tabpanel");
-    // chat is the default-active tab: its panel is mounted and controlled.
-    expect(chatTab.getAttribute("aria-controls")).toBe(tabpanel.id);
-    // channels is inactive: no panel mounted, so no aria-controls to dangle.
-    expect(channelsTab.getAttribute("aria-controls")).toBeNull();
+    // channel_timeline is the default-active tab: its panel is mounted + controlled.
+    expect(channelsTab.getAttribute("aria-controls")).toBe(tabpanel.id);
+    // memory is inactive: no panel mounted, so no aria-controls to dangle.
+    expect(memoryTab.getAttribute("aria-controls")).toBeNull();
   });
 
   it("renders a plain empty state (no tab scaffolding) when no panels are enabled", async () => {
@@ -241,7 +239,7 @@ describe("App shell boot", () => {
     // role=tablist (invalid ARIA: a tablist with no tabs) or a tabpanel labelled
     // by a tab that doesn't exist — just the empty-state copy.
     loadBootstrap.mockResolvedValue({
-      config: { panels: { chat: { enabled: false, available: true } } },
+      config: { panels: { channel_timeline: { enabled: false, available: true } } },
       context: { principal: "local", tenant: "local", authenticated: false },
     });
 
@@ -263,31 +261,8 @@ describe("App shell boot", () => {
     loadBootstrap.mockResolvedValue({
       config: {
         panels: {
-          chat: { enabled: true, available: true },
           channel_timeline: { enabled: true, available: true },
-        },
-      },
-      context: { principal: "local", tenant: "local", authenticated: false },
-    });
-
-    render(App);
-
-    const chatTab = await screen.findByRole("tab", { name: /chat/i });
-    const replaceSpy = vi.spyOn(window.history, "replaceState");
-
-    await fireEvent.keyDown(chatTab, { key: "ArrowRight" });
-
-    expect(replaceSpy).toHaveBeenCalled();
-    expect(window.location.hash).toBe("#/channels");
-    replaceSpy.mockRestore();
-  });
-
-  it("pushes a history entry when a tab is clicked (deep-linkable navigation)", async () => {
-    loadBootstrap.mockResolvedValue({
-      config: {
-        panels: {
-          chat: { enabled: true, available: true },
-          channel_timeline: { enabled: true, available: true },
+          memory_strip: { enabled: true, available: true },
         },
       },
       context: { principal: "local", tenant: "local", authenticated: false },
@@ -298,9 +273,32 @@ describe("App shell boot", () => {
     const channelsTab = await screen.findByRole("tab", { name: /channels/i });
     const replaceSpy = vi.spyOn(window.history, "replaceState");
 
-    await fireEvent.click(channelsTab);
+    await fireEvent.keyDown(channelsTab, { key: "ArrowRight" });
 
-    expect(window.location.hash).toBe("#/channels");
+    expect(replaceSpy).toHaveBeenCalled();
+    expect(window.location.hash).toBe("#/memory");
+    replaceSpy.mockRestore();
+  });
+
+  it("pushes a history entry when a tab is clicked (deep-linkable navigation)", async () => {
+    loadBootstrap.mockResolvedValue({
+      config: {
+        panels: {
+          channel_timeline: { enabled: true, available: true },
+          memory_strip: { enabled: true, available: true },
+        },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    const memoryTab = await screen.findByRole("tab", { name: /memory/i });
+    const replaceSpy = vi.spyOn(window.history, "replaceState");
+
+    await fireEvent.click(memoryTab);
+
+    expect(window.location.hash).toBe("#/memory");
     expect(replaceSpy).not.toHaveBeenCalled();
     replaceSpy.mockRestore();
   });
@@ -309,12 +307,12 @@ describe("App shell boot", () => {
     // A reload / shared link lands directly on a panel via the hash. The first
     // rendered tab must be the one the hash names, not the default-first tab —
     // this is the whole point of the D1 hash-mode routing decision.
-    window.location.hash = "#/channels";
+    window.location.hash = "#/memory";
     loadBootstrap.mockResolvedValue({
       config: {
         panels: {
-          chat: { enabled: true, available: true },
           channel_timeline: { enabled: true, available: true },
+          memory_strip: { enabled: true, available: true },
         },
       },
       context: { principal: "local", tenant: "local", authenticated: false },
@@ -322,10 +320,10 @@ describe("App shell boot", () => {
 
     render(App);
 
-    const channelsTab = await screen.findByRole("tab", { name: /channels/i });
-    expect(channelsTab.getAttribute("aria-selected")).toBe("true");
+    const memoryTab = await screen.findByRole("tab", { name: /memory/i });
+    expect(memoryTab.getAttribute("aria-selected")).toBe("true");
     const tabpanel = screen.getByRole("tabpanel");
-    expect(tabpanel.getAttribute("aria-labelledby")).toBe(channelsTab.id);
+    expect(tabpanel.getAttribute("aria-labelledby")).toBe(memoryTab.id);
   });
 
   it("rewrites a stale/unavailable deep-link hash to the resolved fallback route", async () => {
@@ -339,7 +337,7 @@ describe("App shell boot", () => {
     loadBootstrap.mockResolvedValue({
       config: {
         panels: {
-          chat: { enabled: true, available: true },
+          channel_timeline: { enabled: true, available: true },
           memory_strip: { enabled: true, available: false },
         },
       },
@@ -348,24 +346,24 @@ describe("App shell boot", () => {
 
     render(App);
 
-    await screen.findByRole("tab", { name: /chat/i });
-    await waitFor(() => expect(window.location.hash).toBe("#/chat"));
-    expect(replaceSpy).toHaveBeenCalledWith(null, "", "#/chat");
+    await screen.findByRole("tab", { name: /channels/i });
+    await waitFor(() => expect(window.location.hash).toBe("#/channels"));
+    expect(replaceSpy).toHaveBeenCalledWith(null, "", "#/channels");
     replaceSpy.mockRestore();
   });
 
   it("does not append a hash on a clean load with no deep link", async () => {
     // The canonicalisation above must fire only for a non-empty stale hash. A
-    // bare /ui/ visit (no hash) is left untouched — we don't want to push
-    // #/chat onto every clean load.
+    // bare /ui/ visit (no hash) is left untouched — we don't want to push a
+    // panel route onto every clean load.
     loadBootstrap.mockResolvedValue({
-      config: { panels: { chat: { enabled: true, available: true } } },
+      config: { panels: { channel_timeline: { enabled: true, available: true } } },
       context: { principal: "local", tenant: "local", authenticated: false },
     });
 
     render(App);
 
-    await screen.findByRole("tab", { name: /chat/i });
+    await screen.findByRole("tab", { name: /channels/i });
     expect(window.location.hash).toBe("");
   });
 
@@ -376,8 +374,8 @@ describe("App shell boot", () => {
     loadBootstrap.mockResolvedValue({
       config: {
         panels: {
-          chat: { enabled: true, available: true },
           channel_timeline: { enabled: true, available: true },
+          memory_strip: { enabled: true, available: true },
         },
       },
       context: { principal: "local", tenant: "local", authenticated: false },
@@ -385,17 +383,17 @@ describe("App shell boot", () => {
 
     render(App);
 
-    const chatTab = await screen.findByRole("tab", { name: /chat/i });
-    expect(chatTab.getAttribute("aria-selected")).toBe("true");
+    const channelsTab = await screen.findByRole("tab", { name: /channels/i });
+    expect(channelsTab.getAttribute("aria-selected")).toBe("true");
 
-    window.location.hash = "#/channels";
+    window.location.hash = "#/memory";
     await fireEvent(window, new HashChangeEvent("hashchange"));
 
-    const channelsTab = screen.getByRole("tab", { name: /channels/i });
+    const memoryTab = screen.getByRole("tab", { name: /memory/i });
     await waitFor(() =>
-      expect(channelsTab.getAttribute("aria-selected")).toBe("true"),
+      expect(memoryTab.getAttribute("aria-selected")).toBe("true"),
     );
-    expect(chatTab.getAttribute("aria-selected")).toBe("false");
+    expect(channelsTab.getAttribute("aria-selected")).toBe("false");
   });
 
   it("canonicalises a stale hash reached after load, not just on initial boot", async () => {
@@ -408,7 +406,7 @@ describe("App shell boot", () => {
     loadBootstrap.mockResolvedValue({
       config: {
         panels: {
-          chat: { enabled: true, available: true },
+          channel_timeline: { enabled: true, available: true },
           memory_strip: { enabled: true, available: false },
         },
       },
@@ -417,15 +415,15 @@ describe("App shell boot", () => {
 
     render(App);
 
-    const chatTab = await screen.findByRole("tab", { name: /chat/i });
-    expect(chatTab.getAttribute("aria-selected")).toBe("true");
+    const channelsTab = await screen.findByRole("tab", { name: /channels/i });
+    expect(channelsTab.getAttribute("aria-selected")).toBe("true");
 
     // Navigate to a known-but-unavailable panel after boot.
     window.location.hash = "#/memory";
     await fireEvent(window, new HashChangeEvent("hashchange"));
 
-    // The active tab falls back to chat AND the URL is rewritten to match it.
-    await waitFor(() => expect(window.location.hash).toBe("#/chat"));
-    expect(chatTab.getAttribute("aria-selected")).toBe("true");
+    // The active tab falls back to channels AND the URL is rewritten to match it.
+    await waitFor(() => expect(window.location.hash).toBe("#/channels"));
+    expect(channelsTab.getAttribute("aria-selected")).toBe("true");
   });
 });

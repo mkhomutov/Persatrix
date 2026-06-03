@@ -9,15 +9,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestDefaultUIConfig pins the Slice-1 panel defaults (RFC 0048 §C): chat and
-// channel_timeline ship enabled; memory_strip (Slice 2) and cost (Slice 4) ship
-// off so they land additively with no Slice-1 rework.
+// TestDefaultUIConfig pins the Slice-1 panel defaults (RFC 0048 §C): the
+// consolidated channel_timeline panel ships enabled (the standalone chat panel
+// is retired — chat-panel-retirement amendment); memory_strip (Slice 2) and cost
+// (Slice 4) ship off so they land additively with no Slice-1 rework.
 func TestDefaultUIConfig(t *testing.T) {
 	cfg := DefaultUIConfig()
 	require.NotNil(t, cfg)
 
-	assert.True(t, cfg.PanelEnabled("chat"), "chat ships enabled in Slice 1")
 	assert.True(t, cfg.PanelEnabled("channel_timeline"), "channel_timeline ships enabled in Slice 1")
+	assert.False(t, cfg.PanelEnabled("chat"), "the standalone chat panel is retired")
 	assert.False(t, cfg.PanelEnabled("memory_strip"), "memory_strip ships off (Slice 2)")
 	assert.False(t, cfg.PanelEnabled("cost"), "cost ships off (Slice 4)")
 }
@@ -30,8 +31,8 @@ func TestLoadUIConfig_AbsentReturnsDefaults(t *testing.T) {
 	require.NoError(t, err, "an absent ui.yaml must soft-degrade to defaults, not error")
 	require.NotNil(t, cfg)
 
-	assert.True(t, cfg.PanelEnabled("chat"))
 	assert.True(t, cfg.PanelEnabled("channel_timeline"))
+	assert.False(t, cfg.PanelEnabled("chat"), "the retired chat panel is not a default")
 	assert.False(t, cfg.PanelEnabled("memory_strip"))
 }
 
@@ -40,40 +41,40 @@ func TestLoadUIConfig_AbsentReturnsDefaults(t *testing.T) {
 func TestLoadUIConfig_ParsesToggles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ui.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(
-		"panels:\n  chat:\n    enabled: false\n  channel_timeline:\n    enabled: true\n"), 0o600))
+		"panels:\n  memory_strip:\n    enabled: true\n  channel_timeline:\n    enabled: false\n"), 0o600))
 
 	cfg, err := LoadUIConfig(path)
 	require.NoError(t, err)
 
-	assert.False(t, cfg.PanelEnabled("chat"), "an explicit enabled:false must turn the panel off")
-	assert.True(t, cfg.PanelEnabled("channel_timeline"))
+	assert.False(t, cfg.PanelEnabled("channel_timeline"), "an explicit enabled:false must turn the panel off")
+	assert.True(t, cfg.PanelEnabled("memory_strip"))
 }
 
-// TestDefaultUIConfig_ChannelCreateOffByDefault pins the channel-creation
-// amendment §A default: the channel_timeline panel's structural-write affordance
-// (group-channel creation) ships dark. The operator must consciously opt in by
-// authoring create_enabled:true, exactly as Slices 2/4 ship off.
-func TestDefaultUIConfig_ChannelCreateOffByDefault(t *testing.T) {
+// TestDefaultUIConfig_ChannelCreateOnByDefault pins the channel-creation default:
+// the channel_timeline panel's structural-write affordance (group-channel
+// creation) ships ON, so a console-on deployment can create channels out of the
+// box. (create.available still gates it on the channel store being wired.)
+func TestDefaultUIConfig_ChannelCreateOnByDefault(t *testing.T) {
 	cfg := DefaultUIConfig()
 	require.NotNil(t, cfg)
 
-	assert.False(t, cfg.Panels["channel_timeline"].CreateEnabled,
-		"channel creation ships dark (create_enabled defaults false) — RFC 0048 channel-creation amendment §A")
+	assert.True(t, cfg.Panels["channel_timeline"].CreateEnabled,
+		"channel creation ships enabled by default — RFC 0048 channel-creation amendment §A")
 }
 
-// TestLoadUIConfig_ParsesCreateEnabled: an operator opting into channel creation
-// authors create_enabled:true under channel_timeline, and the loader carries it
+// TestLoadUIConfig_ParsesCreateEnabled: an operator turning channel creation OFF
+// authors create_enabled:false under channel_timeline, and the loader carries it
 // through alongside the panel's own enabled toggle.
 func TestLoadUIConfig_ParsesCreateEnabled(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ui.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(
-		"panels:\n  channel_timeline:\n    enabled: true\n    create_enabled: true\n"), 0o600))
+		"panels:\n  channel_timeline:\n    enabled: true\n    create_enabled: false\n"), 0o600))
 
 	cfg, err := LoadUIConfig(path)
 	require.NoError(t, err)
 
-	assert.True(t, cfg.Panels["channel_timeline"].CreateEnabled,
-		"an explicit create_enabled:true must turn the create affordance on")
+	assert.False(t, cfg.Panels["channel_timeline"].CreateEnabled,
+		"an explicit create_enabled:false must turn the create affordance off")
 	assert.True(t, cfg.Panels["channel_timeline"].Enabled,
 		"the panel's own enabled toggle is independent of create_enabled")
 }

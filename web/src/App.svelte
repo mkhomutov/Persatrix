@@ -1,16 +1,16 @@
 <script>
   import { loadBootstrap } from "./lib/api.js";
   import { selectPanels, deriveUserId } from "./lib/bootstrap.js";
-  import Chat from "./panels/Chat.svelte";
   import ChannelTimeline from "./panels/ChannelTimeline.svelte";
 
   // Known panel name → its Svelte component. selectPanels already filters to
   // panels the client knows and the server reports enabled && available, so an
-  // entry here exists for every panel that can reach this map. memory_strip /
-  // cost have no component in Slice 1 and can never be `available`, so they are
-  // filtered out upstream and intentionally absent here.
+  // entry here exists for every panel that can reach this map. Slice 1 ships only
+  // channel_timeline (the consolidated conversation panel, RFC 0048
+  // chat-panel-retirement amendment); memory_strip / cost have no component yet
+  // and can never be `available`, so they are filtered out upstream and
+  // intentionally absent here.
   const COMPONENTS = {
-    chat: Chat,
     channel_timeline: ChannelTimeline,
   };
 
@@ -54,10 +54,10 @@
   let version = $state("");
   let activeName = $state(hashPanelName());
 
-  // The active panel is chosen by the hash route (#/chat, #/channels) so a
-  // deep link / reload lands on the right panel; falls back to the first
-  // rendered panel. Hash-mode keeps the static file server a plain
-  // http.FileServer with no SPA-fallback shim (PR plan D1).
+  // The active panel is chosen by the hash route (e.g. #/channels) so a deep
+  // link / reload lands on the right panel; falls back to the first rendered
+  // panel. Hash-mode keeps the static file server a plain http.FileServer with
+  // no SPA-fallback shim (PR plan D1).
   function hashPanelName() {
     const route = window.location.hash;
     const match = panels.find((p) => p.route === route);
@@ -70,7 +70,7 @@
   // hashPanelName; rewrite the hash to that panel's route so the address bar
   // matches the tab actually shown. replaceState (not push) keeps it a silent
   // correction, and the guard leaves a bare /ui/ (empty hash) untouched so a
-  // clean load isn't forced to #/chat.
+  // clean load isn't forced to the first panel's route.
   function canonicalizeHash(name) {
     const panel = panels.find((p) => p.name === name);
     if (panel && window.location.hash && window.location.hash !== panel.route) {
@@ -86,7 +86,7 @@
   // the active panel's create capability both enabled (operator opt-in) and
   // available (subsystem wired) — the same enabled && available gate panels use
   // (RFC 0048 channel-creation amendment §A). Panels without a create capability
-  // (e.g. chat) get false and ignore the prop.
+  // (e.g. a future memory_strip) get false and ignore the prop.
   const canCreate = $derived(
     Boolean(activePanel?.create?.enabled && activePanel?.create?.available),
   );
@@ -196,8 +196,8 @@
   </span>
   {#if principal}
     <!-- `identity-block` (not `identity`): the bare `.identity` class is the
-         Chat panel's identity line, a global rule that would otherwise also
-         match this wrapper and bleed Chat's styling into the topbar. This
+         conversation panel's identity line, a global rule that would otherwise
+         also match this wrapper and bleed that styling into the topbar. This
          wrapper is a *group* (principal + override), so it gets its own name. -->
     <span class="identity-block">
       <!-- The real /ui/context principal, shown verbatim — never the override.

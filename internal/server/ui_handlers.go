@@ -97,13 +97,11 @@ func (s *Server) handleUIContext(w http.ResponseWriter, _ *http.Request) {
 // not know a panel cannot vouch for its backing subsystem).
 func (s *Server) panelAvailable(name string) bool {
 	switch name {
-	case "chat":
-		// The chat/agents surface is always registered (registry + planner are
-		// required New args), so chat is always serveable.
-		return true
 	case "channel_timeline":
-		// Mirrors the channel endpoints' 503 degradation: available exactly when
-		// the channel store is wired (WithChannels).
+		// The consolidated conversation panel (RFC 0048 chat-panel-retirement
+		// amendment — it hosts both group channels and DMs). Mirrors the channel
+		// endpoints' 503 degradation: available exactly when the channel store is
+		// wired (WithChannels).
 		return s.channelStore != nil
 	case "cost":
 		return s.costReporter != nil

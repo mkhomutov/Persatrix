@@ -1,15 +1,15 @@
 <script>
-  // Persona switcher + Exit + lobby (extracted from Chat.svelte to keep the panel
-  // under the review-size cap, mirroring PublishComposer). Pinned at the top of
-  // the panel (like the channel timeline's selector-at-top layout) so it stays
-  // reachable above a growing transcript rather than buried in the composer.
+  // Persona switcher + Exit (extracted to keep the conversation panel under the
+  // review-size cap, mirroring PublishComposer). Pinned at the top of the panel
+  // (like the channel timeline's selector-at-top layout) so it stays reachable
+  // above a growing transcript rather than buried in the composer.
   //
   // selectedAgent — bound to the panel's selection ("" = no conversation open).
   // agents — the persona list to offer.
   // sending — true while a turn is in flight; locks the controls so a switch or
   //   exit can't strand the pending reply.
   // onChange — user-driven persona change (records the sticky selection upstream).
-  // onExit — leave the conversation for the lobby.
+  // onExit — leave the conversation (clears the selection back to the empty state).
   import { isChattable, agentLabel } from "../lib/agents.js";
 
   let {
@@ -47,10 +47,3 @@
     >
   {/if}
 </div>
-
-{#if !selectedAgent}
-  <!-- Lobby: no persona selected. Prompt the operator to pick one; the picker
-       above is the entry point. No header / transcript / composer until a
-       conversation is open. -->
-  <p class="lobby" role="status">Select a persona to start a conversation.</p>
-{/if}

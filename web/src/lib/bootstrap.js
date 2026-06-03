@@ -10,12 +10,13 @@
 // /ui/config payload is authoritative about enabled/available, but the client
 // renders only panels it actually knows how to draw — so an older binary
 // serving a newer bundle (or vice versa) degrades gracefully instead of
-// throwing on an unrecognised panel name (RFC §C unknown-panel rule). The four
-// names match config/ui.yaml + schemas/ui.schema.json; Slice 1 ships only chat
-// and channel_timeline as real panels (PRs 4–5), memory_strip (Slice 2) and
+// throwing on an unrecognised panel name (RFC §C unknown-panel rule). The names
+// match config/ui.yaml + schemas/ui.schema.json; Slice 1 ships only
+// channel_timeline as a real panel — the single consolidated conversation
+// surface hosting group channels + DMs (RFC 0048 chat-panel-retirement
+// amendment; the standalone Chat panel was retired). memory_strip (Slice 2) and
 // cost (Slice 4) are placeholders that ship dark.
 export const KNOWN_PANELS = [
-  { name: "chat", title: "Chat", route: "#/chat" },
   { name: "channel_timeline", title: "Channels", route: "#/channels" },
   { name: "memory_strip", title: "Memory", route: "#/memory" },
   { name: "cost", title: "Cost", route: "#/cost" },

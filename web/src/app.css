@@ -185,12 +185,6 @@ body {
   opacity: 0.6;
 }
 
-/* Lobby prompt — shown when no persona is selected (a fresh start or after
-   Exit), in place of the conversation. Muted, like the other status lines. */
-.lobby {
-  opacity: 0.7;
-}
-
 .transcript {
   list-style: none;
   margin: 0 0 1rem;
@@ -307,21 +301,6 @@ body {
 .onboarding .retry {
   margin-top: 0;
   margin-right: 0.75rem;
-}
-
-/* Inline link styling for the "View in timeline" cross-panel affordance (§F),
-   which is navigation. It renders as an <a>; the button-chrome resets keep it
-   neutral should it ever style a <button> too. The pinned colours clear WCAG AA
-   on both themes and the underline adds a non-colour cue. */
-.link-like {
-  border: none;
-  background: none;
-  padding: 0;
-  font: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-  color: light-dark(#1565c0, #82b1ff);
-  text-decoration: underline;
 }
 
 .retry {
