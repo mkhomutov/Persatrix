@@ -70,6 +70,15 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "BAD_REQUEST", "role exceeds maximum length of 100 characters", http.StatusBadRequest)
 		return
 	}
+	// RFC 0048 amendment §A DTO — type is a short agent-kind token ("task"/"persona"/…)
+	// used as display/affordance metadata only. Cap it tightly (a token, not prose)
+	// on the same registry-pollution rationale. An unknown or empty value is not
+	// rejected: the console treats anything other than "task" as chattable, so a
+	// new kind degrades safely without a server change.
+	if len(req.Type) > 32 {
+		writeError(w, "BAD_REQUEST", "type exceeds maximum length of 32 characters", http.StatusBadRequest)
+		return
+	}
 	// TODO(v0.2): validate address format (host:port or URI scheme).
 	// Currently any non-empty string up to 253 characters is accepted per RFC 0002 v0.1 scope.
 	if req.Address == "" {
@@ -127,6 +136,7 @@ func (s *Server) handleRegisterAgent(w http.ResponseWriter, r *http.Request) {
 		ID:           req.ID,
 		Name:         req.Name,
 		Role:         req.Role, // RFC 0048 amendment §A — optional persona role, "" when unset
+		Type:         req.Type, // RFC 0048 amendment §A DTO — optional agent kind, "" when unset
 		Address:      req.Address,
 		Capabilities: req.Capabilities,
 		Status:       registry.StatusHealthy, // reachable until first health check fails
@@ -374,6 +384,7 @@ func agentToResponse(a *registry.AgentInfo) agentResponse {
 		ID:      a.ID,
 		Name:    a.Name,
 		Role:    a.Role, // RFC 0048 amendment §A — persona role; "" when unset
+		Type:    a.Type, // RFC 0048 amendment §A DTO — agent kind; "" when unset
 		Address: a.Address,
 		Status:  agentStatusString(a.Status),
 	}

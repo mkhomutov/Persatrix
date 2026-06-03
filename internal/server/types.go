@@ -32,6 +32,7 @@ type registerAgentRequest struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
 	Role         string   `json:"role"` // RFC 0048 amendment §A — optional persona role; "" when unset
+	Type         string   `json:"type"` // RFC 0048 amendment §A DTO — agent kind ("task"|"persona"|…); "" when unset
 	Address      string   `json:"address"`
 	Capabilities []string `json:"capabilities"`
 }
@@ -43,6 +44,7 @@ type agentResponse struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
 	Role         string   `json:"role"` // RFC 0048 amendment §A — from registry.AgentInfo.Role; "" when unset
+	Type         string   `json:"type"` // RFC 0048 amendment §A DTO — from registry.AgentInfo.Type; "" when unset
 	Address      string   `json:"address"`
 	Capabilities []string `json:"capabilities"`
 	Status       string   `json:"status"`
