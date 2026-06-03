@@ -32,11 +32,31 @@ type Config struct {
 	MaxCascadeDepth int `yaml:"max_cascade_depth"`
 }
 
+// DefaultFloorTurnTimeoutSeconds is the per-speaker turn timeout for floor
+// control when a declared channel omits `floor_turn_timeout_seconds` (RFC
+// 0030 amendment decision D2). It is distinct from the 5s
+// `channelFanoutPerRecipientTimeout` — a floor turn waits for the speaker to
+// compose and publish a full reply, which is LLM-latency-bound, so 45s is
+// the generous-but-bounded default. PR 1 only parses/normalizes the knob;
+// PR 2's serialized loop consumes it.
+const DefaultFloorTurnTimeoutSeconds = 45
+
 // ChannelConfig is a single declared group channel.
 type ChannelConfig struct {
 	Name        string         `yaml:"name"`
 	Description string         `yaml:"description"`
 	Members     []MemberConfig `yaml:"members"`
+	// FloorControl opts this channel into RFC 0030 Layer 2.5 speaker
+	// serialization: candidate responders take the floor one at a time,
+	// each reading the prior speaker's reply, instead of replying
+	// concurrently and mutually-blind. Default off in PR 1 (the schema
+	// default); PR 3 flips the resolved default on for group channels.
+	FloorControl bool `yaml:"floor_control"`
+	// FloorTurnTimeoutSeconds caps how long the floor loop waits for a
+	// single speaker's reply before advancing to the next responder
+	// (amendment D2). Zero/absent normalizes to
+	// [DefaultFloorTurnTimeoutSeconds] at load; negative is rejected.
+	FloorTurnTimeoutSeconds int `yaml:"floor_turn_timeout_seconds"`
 }
 
 // MemberConfig is a `(participant_id, respond_policy)` pair declared in
@@ -102,6 +122,16 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.MaxChannels <= 0 {
 		cfg.MaxChannels = DefaultMaxChannels
 	}
+	// Normalize the per-channel floor-turn timeout: zero/absent means "use
+	// the default" (mirroring the max_cascade_depth sentinel). Negative
+	// values are left as-is so Validate rejects them loudly rather than
+	// silently falling back. PR 1 keeps the knob inert; the normalization
+	// just guarantees PR 2's loop reads a populated value.
+	for i := range cfg.Channels {
+		if cfg.Channels[i].FloorTurnTimeoutSeconds == 0 {
+			cfg.Channels[i].FloorTurnTimeoutSeconds = DefaultFloorTurnTimeoutSeconds
+		}
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -148,6 +178,15 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("channels[%d]: duplicate name %q", i, ch.Name)
 		}
 		seenName[ch.Name] = true
+
+		// Reject a negative floor-turn timeout (the schema's `minimum: 1`
+		// catches it at `make validate`; this is the belt-and-suspenders
+		// for operators who skipped that step). Zero never reaches here —
+		// LoadConfig normalizes it to the default before Validate runs.
+		if ch.FloorTurnTimeoutSeconds < 0 {
+			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 1)",
+				i, ch.Name, ErrInvalidFloorTurnTimeout, ch.FloorTurnTimeoutSeconds)
+		}
 
 		if len(ch.Members) == 0 {
 			return fmt.Errorf("channels[%d=%s]: at least one member required", i, ch.Name)

@@ -151,6 +151,13 @@ var (
 	// — it is the loader's documented "use the default" sentinel
 	// honored by [ChannelRouter.SetMaxCascadeDepth].
 	ErrInvalidMaxCascadeDepth = errors.New("channels: invalid max_cascade_depth")
+	// ErrInvalidFloorTurnTimeout — a declared channel carried a negative
+	// `floor_turn_timeout_seconds:` (RFC 0030 amendment). Belt-and-
+	// suspenders for the operator who skipped `make validate` (the JSON
+	// schema's `minimum: 1` rejects this earlier). Zero is NOT an error —
+	// it is the loader's "use the default" sentinel normalized to
+	// [DefaultFloorTurnTimeoutSeconds] at load time.
+	ErrInvalidFloorTurnTimeout = errors.New("channels: invalid floor_turn_timeout_seconds")
 )
 
 // participantIDPattern is the single source of truth for legal participant
