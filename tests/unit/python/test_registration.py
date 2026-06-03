@@ -69,8 +69,36 @@ class TestSelfRegistration:
         assert payload["name"] == "test-agent"  # S-19: name included in payload
         assert payload["address"] == "127.0.0.1:50051"
         assert payload["capabilities"] == ["planning"]
+        # RFC 0048 §A DTO: type is sent (empty here — the stub config has none) so the
+        # web console can disable chat for task agents.
+        assert payload["type"] == ""
         # P1: status is NOT sent in payload
         assert "status" not in payload
+
+    async def test_registration_sends_agent_type(self):
+        """RFC 0048 §A DTO — a typed agent's `type` rides the register payload."""
+        server = AgentServer(
+            host="127.0.0.1",
+            port=0,
+            shutdown_grace=1,
+            orchestrator_url="http://127.0.0.1:8080",
+            advertise_address="127.0.0.1:50051",
+        )
+        server.register_agent(
+            _StubAgent(agent_id="planner", config={"type": "task"})
+        )
+        mock_resp = AsyncMock()
+        mock_resp.status = 201
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+        mock_session = AsyncMock(spec=aiohttp.ClientSession)
+        mock_session.post = MagicMock(return_value=mock_resp)
+        server._session = mock_session
+
+        await server._self_register()
+
+        payload = mock_session.post.call_args[1]["json"]
+        assert payload["type"] == "task"
 
     async def test_successful_registration_200(self):
         """Registration succeeds on HTTP 200 (not just 201)."""

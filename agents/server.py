@@ -230,7 +230,7 @@ class AgentServer:
     async def _self_register(self) -> None:
         """Register all hosted agents with the orchestrator (best-effort).
 
-        POST /api/v1/agents/register with id, address, capabilities.
+        POST /api/v1/agents/register with id, name, type, address, capabilities.
         Status is NOT sent — the orchestrator sets ``healthy`` on registration
         (review-fix P1).
         """
@@ -241,6 +241,11 @@ class AgentServer:
             payload = {
                 "id": agent_id,
                 "name": agent.name,
+                # RFC 0048 amendment §A DTO — the agent kind ("task"/"persona") so the
+                # web console can disable chat for non-conversational task agents.
+                # Omitted by older agents; the orchestrator stores "" and the
+                # console treats that as chattable, so this is purely additive.
+                "type": agent.agent_type,
                 "address": address,
                 "capabilities": agent.capabilities,
             }

@@ -18,9 +18,15 @@ var (
 
 // AgentInfo holds metadata about a registered agent.
 type AgentInfo struct {
-	ID           string
-	Name         string
-	Role         string
+	ID   string
+	Name string
+	Role string
+	// Type is the agent kind from config/agents.yaml (`task` | `persona` | …),
+	// "" when the registrant predates the field. It extends the RFC 0048
+	// amendment §A agent DTO and is display/affordance metadata only — routing
+	// and chat dispatch never read it. The web console uses it to disable chat
+	// for task agents, which execute workflow steps and do not hold a conversation.
+	Type         string
 	Capabilities []string
 	Address      string // gRPC address (host:port)
 	NodeID       string // empty for local deployment
@@ -91,6 +97,7 @@ func (r *InMemoryRegistry) Register(_ context.Context, agent AgentInfo) error {
 		ID:             agent.ID,
 		Name:           agent.Name,
 		Role:           agent.Role,
+		Type:           agent.Type,
 		Address:        agent.Address,
 		NodeID:         agent.NodeID,
 		Status:         agent.Status,
@@ -190,6 +197,7 @@ func deepCopyAgent(agent *AgentInfo) *AgentInfo {
 		ID:             agent.ID,
 		Name:           agent.Name,
 		Role:           agent.Role,
+		Type:           agent.Type,
 		Address:        agent.Address,
 		NodeID:         agent.NodeID,
 		Status:         agent.Status,

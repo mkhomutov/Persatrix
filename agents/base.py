@@ -71,11 +71,9 @@ class BaseAgent(ABC):
         For task agents this is a :class:`MemoryStore` opened by
         :meth:`initialize_memory` when ``memory.enabled`` is set in
         ``config/agents.yaml`` (deny-by-default; RFC 0008 PR plan PR 2).
-        Persona-runtime subclasses override this property to expose a
-        ``MemoryNamespace`` over the three persona-memory tiers.
-
-        Read-only — internal code mutates ``self._memory``; tests that
-        need to inject a mock should do the same.
+        Persona-runtime subclasses override it to expose a ``MemoryNamespace``
+        over the three persona-memory tiers. Read-only — internal code mutates
+        ``self._memory``, and tests that inject a mock should do the same.
         """
         return self._memory
 
@@ -85,11 +83,10 @@ class BaseAgent(ABC):
 
     @abstractmethod
     async def handle(self, task: TaskInput) -> TaskOutput:
-        """
-        Process a task and return a result.
+        """Process a task and return a result.
 
-        This is the primary interface for v0.1 task agents and
-        backward-compatible entry point for persona agents.
+        The primary interface for v0.1 task agents and the backward-compatible
+        entry point for persona agents.
         """
         ...
 
@@ -130,6 +127,15 @@ class BaseAgent(ABC):
         result: str = self.config.get("role", "")
         return result
 
+    @property
+    def agent_type(self) -> str:
+        """Agent kind from config (``task``|``persona``|…), ``""`` when unset; sent
+        to the orchestrator at registration so the console can disable chat for
+        task agents (extends the RFC 0048 §A agent DTO). Display metadata only.
+        """
+        result: str = self.config.get("type", "")
+        return result
+
     async def health_check(self) -> bool:
         """Returns True if the agent is healthy and ready to accept tasks."""
         return True
@@ -143,10 +149,9 @@ class BaseAgent(ABC):
     async def initialize_memory(
         self, *, shared_pools: SharedPoolRegistry | None = None,
     ) -> None:
-        """Create and open the agent's :class:`MemoryStore` if enabled.
-
-        No-op when ``memory.enabled`` is false.  Idempotent.
-        ``shared_pools`` (RFC 0008 PR 4) wires named cross-agent pools.
+        """Create and open the agent's :class:`MemoryStore` if enabled (no-op when
+        ``memory.enabled`` is false; idempotent). ``shared_pools`` (RFC 0008 PR 4)
+        wires named cross-agent pools.
         """
         if self.memory is not None:
             return
@@ -167,15 +172,13 @@ class BaseAgent(ABC):
         await store.initialize()
         self._memory = store
         logger.info(
-            "Initialised MemoryStore for task agent %s (db=%s)",
-            self.agent_id, db_path,
+            "Initialised MemoryStore for task agent %s (db=%s)", self.agent_id, db_path
         )
 
     async def close_memory(self) -> None:
         """Close the agent's :class:`MemoryStore` if it was opened.
 
-        Persona-runtime subclasses override this to close their own
-        per-tier memory state.
+        Persona-runtime subclasses override this to close their per-tier state.
         """
         if not isinstance(self.memory, MemoryStore):
             return
@@ -189,16 +192,15 @@ class BaseAgent(ABC):
     def _build_tool_definitions(self) -> list[dict[str, Any]]:
         """Build normalized tool definitions from the tool registry.
 
-        S-12: Filters to only tools listed in agent's ``tools`` config.
-        An empty list means no tools are exposed (e.g. planner agent).
+        S-12: filters to only tools in the agent's ``tools`` config; an empty
+        list exposes no tools (e.g. planner agent).
         """
-        # F-04: early return avoids iterating the full registry when no
-        # tools are configured for this agent.
+        # F-04: early return avoids iterating the full registry when no tools
+        # are configured for this agent.
         allowed = self.config.get("tools", [])
         if not allowed:
             return []
-        # N-04: convert to set for O(1) membership checks (matters when
-        # the tool registry grows beyond the v0.1 built-in set of 4).
+        # N-04: set for O(1) membership checks as the tool registry grows.
         allowed_set = set(allowed)
         return [
             {
@@ -251,11 +253,9 @@ class BaseAgent(ABC):
                     )
                 )
             except PermissionError as exc:
-                # Defense-in-depth: normally unreachable because the @tool
-                # wrapper catches all exceptions.  Retained for MCP/custom
-                # tools that may bypass the decorator.
-                # SF-06: log full details but return generic message to the LLM
-                # (consistent with S-11 pattern for _run_llm_loop exceptions).
+                # Defense-in-depth: normally unreachable (the @tool wrapper catches
+                # all exceptions), retained for MCP/custom tools that bypass the
+                # decorator. SF-06: log full details, return a generic LLM message.
                 logger.warning("Permission denied in tool %s: %s", call.name, exc)
                 results.append(
                     LLMToolResult(

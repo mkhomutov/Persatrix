@@ -14,11 +14,10 @@
   let { userId } = $props();
 
   // chatMaxMessageLength mirrors the server's constant (chat_handler.go) so an
-  // over-length message is rejected with immediate feedback instead of burning a
-  // round-trip; the server still enforces it — this is a courtesy guard, not the
-  // authority. The server measures in runes (utf8.RuneCountInString), so the
-  // guard counts code points too (`[...text].length`) — a UTF-16 `.length` would
-  // over-count astral characters and falsely block a message the server accepts.
+  // over-length message is rejected with immediate feedback; the server still
+  // enforces it — this is a courtesy guard. It measures in runes
+  // (utf8.RuneCountInString), so the guard counts code points too
+  // (`[...text].length`) rather than over-counting astral chars via UTF-16.
   const MAX_MESSAGE_LENGTH = 4000;
 
   let agents = $state([]);
@@ -33,17 +32,14 @@
   let epochId = $state("");
   let sending = $state(false);
   let sendError = $state("");
-  // chatController backs the abortable turn (§D): a synchronous chat can block
-  // up to the 30s server timeout, so the in-flight turn is cancellable. Held
-  // across the await so the Cancel control can abort the live fetch.
+  // chatController backs the abortable turn (§D): a synchronous chat can block up
+  // to the 30s server timeout, so it is held across the await for Cancel to abort.
   let chatController = null;
-  // The transcript is a flat, conversational (oldest-top) message list — the
-  // shape RFC 0048 amendment §B migrates to. Each entry is one message:
+  // The transcript is a flat, conversational (oldest-top) message list (RFC 0048
+  // amendment §B). Each entry is one message:
   //   { id, fromUser, who, content, status?, timestamp, session?, epoch? }
   // On persona-select it is SEEDED from the persisted DM history (so a reload
-  // resumes the conversation rather than presenting as stateless), then live
-  // turns append to the bottom. A flat list (vs {prompt,reply} pairs) handles
-  // the persisted ordering and any non-paired messages naturally.
+  // resumes the conversation), then live turns append to the bottom.
   let transcript = $state([]);
   // Live (this-session) messages get a locally-minted id; seeded history uses
   // the server message id. The `local-` prefix can never collide with a server
@@ -67,12 +63,22 @@
   // selectedAgentInfo is the full persona record behind the picker selection, so
   // the panel can render a persona header (name — role, capabilities) above the
   // transcript rather than leaving the persona a bare dropdown entry. The DTO
-  // already carries role (RFC 0048 amendment §A) and capabilities/address
-  // (always served) — "faceless" was the client throwing those away, not the API
-  // withholding them.
+  // already carries role (RFC 0048 amendment §A) and capabilities/address.
   const selectedAgentInfo = $derived(
     agents.find((agent) => agent.id === selectedAgent) ?? null,
   );
+
+  // Task agents (agents.yaml `type: "task"`) run workflow steps and never hold a
+  // conversation, so a chat turn dead-ends in a timeout. They show in the picker
+  // but disabled (extends the §A agent DTO); any non-"task" type — incl. an unset
+  // one from an agent predating the field — stays chattable, so the guard can
+  // never regress a real conversation.
+  function isChattable(agent) {
+    return agent?.type !== "task";
+  }
+  // selectedAgentChattable gates the composer: false only when a task agent is
+  // selected (reachable just when the deployment has no persona to fall back to).
+  const selectedAgentChattable = $derived(isChattable(selectedAgentInfo));
 
   // personaName is the label shown for the agent's own messages — its name (or
   // id), mirroring agentLabel's fallback.
@@ -100,18 +106,14 @@
   }
 
   // loadHistory seeds the transcript from the selected persona's persisted DM,
-  // making a reload resume the conversation (the point of §B). The wire order is
-  // newest-first; the panel renders oldest-top (conversational), so the seed is
-  // reversed. A fresh persona returns an empty list (200, not 404) — a clean
-  // empty transcript, not an error. historyError is non-fatal: a failed seed
-  // still leaves a usable (empty) composer rather than blocking the panel.
+  // making a reload resume the conversation (§B). The wire order is newest-first;
+  // the panel renders oldest-top, so the seed is reversed. A fresh persona returns
+  // an empty list (200, not 404) — a clean empty transcript, not an error.
+  // historyError is non-fatal: a failed seed still leaves a usable composer.
   //
-  // Scope note: the seed fetches only the server's default-limit most-recent
-  // page (channelDefaultHistoryLimit, 50) and the panel has no "load earlier"
-  // affordance yet, so a conversation longer than that resumes from its tail
-  // with the oldest turns omitted. getChatHistory already plumbs limit/before
-  // for the paginating back-fill a later slice (§F) adds; until then the cap is
-  // intentional, not full resume.
+  // Scope note: the seed fetches only the server's default-limit page (50) and the
+  // panel has no "load earlier" yet, so a longer conversation resumes from its
+  // tail; getChatHistory already plumbs limit/before for the §F back-fill.
   function loadHistory(agentID) {
     const token = ++historyToken;
     historyError = "";
@@ -181,16 +183,12 @@
 
   // viewInTimeline hands the current conversation to the Channel Timeline (§F):
   // it records the resolved DM channel id as the pending selection and switches
-  // the hash route, so the freshly-mounted timeline opens on this conversation —
-  // making "your chat is a real, watchable channel" a click, not an assertion.
+  // the hash route, so the freshly-mounted timeline opens on this conversation.
   // Only reachable once a conversation exists (dmChannelId is set from history).
   //
-  // The affordance is a real <a href="#/channels"> (for link semantics), so we
-  // preventDefault and drive the route in JS: that guarantees the nav intent is
-  // recorded before the route changes, rather than racing the anchor's native
-  // navigation — and a modified click (new tab) would land on a fresh context
-  // without the intent anyway, so hijacking it to the in-place hand-off is the
-  // behaviour we want.
+  // The affordance is a real <a href="#/channels">, so we preventDefault and drive
+  // the route in JS: that records the nav intent before the route changes rather
+  // than racing the anchor's native navigation.
   function viewInTimeline(event) {
     event?.preventDefault();
     if (!dmChannelId) return;
@@ -214,15 +212,17 @@
       .then((list) => {
         if (token !== loadToken) return;
         agents = list;
-        // Default the picker to the first *healthy* persona so a newcomer can
-        // send immediately and the default landing isn't a guaranteed 503 (the
-        // chat route only answers for a healthy persona; an offline one is a dead
-        // end). Fall back to the first entry when none are healthy — there's
-        // nothing more sendable to offer, and the status annotation already warns
-        // why a send may fail.
+        // Default to the first persona that is BOTH chattable and healthy so a
+        // newcomer lands on a sendable conversation — never a disabled task agent
+        // (a task agent) or a guaranteed-503 offline one. Degrade to any chattable,
+        // then to any agent at all (the composer then explains why it's locked).
         if (list.length > 0) {
-          const healthy = list.find((agent) => agent.status === "healthy");
-          selectedAgent = (healthy ?? list[0]).id;
+          const chattable = list.filter(isChattable);
+          selectedAgent = (
+            chattable.find((agent) => agent.status === "healthy") ??
+            chattable[0] ??
+            list[0]
+          ).id;
         }
       })
       .catch((err) => {
@@ -255,6 +255,12 @@
     // ("Ada — Researcher") rather than a list of bare names (RFC 0048 §A). Role
     // is optional; omit the separator when unset.
     const named = agent.role ? `${name} — ${agent.role}` : name;
+    // A task agent's row carries the why ("show but explain") rather than its
+    // health — a disabled row can't be sent regardless of status, so the reason
+    // it's disabled is the useful annotation.
+    if (!isChattable(agent)) {
+      return `${named} (task agent — not chattable)`;
+    }
     return agent.status && agent.status !== "healthy"
       ? `${named} (${agent.status})`
       : named;
@@ -272,6 +278,11 @@
     sendError = "";
     const text = message.trim();
     if (!selectedAgent || text.length === 0) {
+      return;
+    }
+    // Enter-to-send bypasses the disabled button (canSend gates the button, not
+    // send()), so re-check chattability here: a task agent can never be sent to.
+    if (!isChattable(selectedAgentInfo)) {
       return;
     }
     if ([...text].length > MAX_MESSAGE_LENGTH) {
@@ -326,12 +337,10 @@
       ];
       message = "";
       // First message of a fresh conversation creates the DM server-side (§F);
-      // chatResponse omits its id, so re-resolve it from history (the source of
-      // truth — DM ids are never hand-built, see channels.CanonicalDMID) to light
-      // up the hand-off this turn. Fire-and-forget + token-guarded: it neither
-      // blocks the composer nor outlives a persona switch, and a failed capture
-      // just leaves the link hidden until the next reseed. Guarded to the first
-      // turn (dmChannelId empty) so steady-state chatting adds no extra fetch.
+      // chatResponse omits its id, so re-resolve it from history (DM ids are never
+      // hand-built — see channels.CanonicalDMID) to light up the hand-off this
+      // turn. Fire-and-forget + token-guarded, and guarded to the first turn
+      // (dmChannelId empty) so steady-state chatting adds no extra fetch.
       if (!dmChannelId && selectedAgent) {
         const token = historyToken;
         getChatHistory(selectedAgent, { userId })
@@ -450,7 +459,9 @@
           disabled={sending}
         >
           {#each agents as agent (agent.id)}
-            <option value={agent.id}>{agentLabel(agent)}</option>
+            <option value={agent.id} disabled={!isChattable(agent)}
+              >{agentLabel(agent)}</option
+            >
           {/each}
         </select>
       </label>
@@ -472,7 +483,16 @@
            composer reads back via the bindings. -->
       <ScopeSelector bind:sessionId bind:epochId {sending} />
 
-      <button type="submit" disabled={!canSend}>
+      {#if selectedAgentInfo && !selectedAgentChattable}
+        <!-- Only reachable when the deployment has no persona to fall back to:
+             explain why the composer is locked rather than leaving a dead Send. -->
+        <p class="poll-error" role="status">
+          Task agents run workflow steps and don't hold conversations — pick a
+          persona to chat.
+        </p>
+      {/if}
+
+      <button type="submit" disabled={!canSend || !selectedAgentChattable}>
         {sending ? "Sending…" : "Send"}
       </button>
     </form>
