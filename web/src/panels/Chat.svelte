@@ -372,7 +372,7 @@
 
     <ol class="transcript" aria-label="Conversation">
       {#each transcript as msg (msg.id)}
-        <li class="msg" class:from-self={msg.fromUser}>
+        <li class="msg">
           <p
             class:from-user={msg.fromUser}
             class:from-agent={!msg.fromUser}
