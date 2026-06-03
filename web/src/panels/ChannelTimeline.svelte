@@ -180,12 +180,16 @@
         }
         channels = result.channels ?? [];
         // Honour a cross-panel hand-off (§F): if the chat panel asked to open a
-        // specific DM and it's in the list, select it; the request is one-shot,
-        // so clear it once consumed. Otherwise default to the first channel.
+        // specific DM, select it. The request is one-shot, scoped to the mount
+        // it triggered, so consume it on this successful load whether or not the
+        // channel turned up — leaving a stale intent would surface an unexpected
+        // jump on a later, unrelated mount/Refresh. (A failed load never reaches
+        // here, so the intent still survives to a Retry.) Otherwise default to
+        // the first channel.
         const requested = nav.targetChannel;
+        nav.targetChannel = "";
         if (requested && channels.some((c) => c.id === requested)) {
           selectedChannel = requested;
-          nav.targetChannel = "";
         } else if (channels.length > 0 && !selectedChannel) {
           selectedChannel = channels[0].id;
         }

@@ -181,6 +181,27 @@ describe("Channel timeline panel", () => {
     expect(picker.value).toBe("ops");
   });
 
+  it("consumes a stale hand-off intent even when its channel is absent (§F)", async () => {
+    // The hand-off intent is one-shot, scoped to the mount it triggered. If the
+    // requested DM isn't in the list (a race where it hasn't surfaced yet), the
+    // intent must still be consumed on this load — otherwise it leaks and would
+    // surface an unexpected jump on a later, unrelated mount/Refresh. The load
+    // falls back to the first channel.
+    nav.targetChannel = "missing-dm";
+
+    render(ChannelTimeline, { props: { userId: "local" } });
+
+    await waitFor(() =>
+      expect(getChannelHistory).toHaveBeenCalledWith(
+        "general",
+        expect.anything(),
+      ),
+    );
+    expect(nav.targetChannel).toBe("");
+    const picker = screen.getByRole("combobox", { name: /channel/i });
+    expect(picker.value).toBe("general");
+  });
+
   it("shows a no-messages state for an empty channel", async () => {
     getChannelHistory.mockResolvedValue(historyOf());
 
