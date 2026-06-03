@@ -31,7 +31,15 @@
   // point the override control disappears and can never mask a real principal.
   let principal = $state(null);
   let authenticated = $state(false);
+  // `actingAs` is the *committed* override that drives the effective identity;
+  // `actingAsDraft` is what's in the box. The draft commits to `actingAs` only
+  // on `change` (blur/Enter), never per-keystroke — persistence is keyed on
+  // (user, agent) and the panels reseed history when the identity changes, so a
+  // per-keystroke commit would blank+refetch the transcript for every
+  // intermediate value ("b", "bo", "bob"). Deferring the commit reseeds once,
+  // on the value the tester actually meant.
   let actingAs = $state("");
+  let actingAsDraft = $state("");
   const userId = $derived(
     principal == null
       ? null
@@ -93,6 +101,7 @@
         principal = id;
         authenticated = context?.authenticated === true;
         actingAs = id; // the override defaults to the real principal
+        actingAsDraft = id; // and the box shows that default
         version = config?.build?.version ?? "";
         panels = selectPanels(config);
         activeName = hashPanelName();
@@ -178,7 +187,11 @@
     {#if version}<span class="version" title="Orchestrator build">v{version}</span>{/if}
   </span>
   {#if principal}
-    <span class="identity">
+    <!-- `identity-block` (not `identity`): the bare `.identity` class is the
+         Chat panel's identity line, a global rule that would otherwise also
+         match this wrapper and bleed Chat's styling into the topbar. This
+         wrapper is a *group* (principal + override), so it gets its own name. -->
+    <span class="identity-block">
       <!-- The real /ui/context principal, shown verbatim — never the override.
            Titled so its source is unambiguous (RFC 0048 §F rule 1). -->
       <span class="principal" title="Identity from /api/v1/ui/context">
@@ -195,7 +208,17 @@
           title="Local testing only — defaults to the principal and is ignored once authenticated"
         >
           acting as
-          <input name="acting_as" bind:value={actingAs} autocomplete="off" />
+          <!-- Commit on `change` (blur/Enter), not per-keystroke, so the panels
+               reseed once on the intended value. The placeholder echoes the
+               principal so a cleared box reads as "acting as the principal"
+               (the userId derivation falls back to it) rather than no identity. -->
+          <input
+            name="acting_as"
+            bind:value={actingAsDraft}
+            onchange={() => (actingAs = actingAsDraft)}
+            placeholder={principal}
+            autocomplete="off"
+          />
         </label>
       {/if}
     </span>

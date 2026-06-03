@@ -4,14 +4,9 @@
   // pure render-over-existing-API. The shell threads in the /ui/context-derived
   // userId (RFC §F single identity source), so the panel never prompts for or
   // hard-codes a user.
-  import {
-    listAgents,
-    sendChat,
-    getChatHistory,
-    listSessions,
-    createSession,
-    ApiError,
-  } from "../lib/api.js";
+  import { listAgents, sendChat, getChatHistory, ApiError } from "../lib/api.js";
+  import { formatTimestamp } from "../lib/format.js";
+  import ScopeSelector from "./ScopeSelector.svelte";
   import { nav } from "../lib/nav.svelte.js";
 
   let { userId } = $props();
@@ -46,14 +41,6 @@
   // up to the 30s server timeout, so the in-flight turn is cancellable. Held
   // across the await so the Cancel control can abort the live fetch.
   let chatController = null;
-  // Session selector state (§C). sessions is the labeled list from
-  // /api/v1/sessions; sessionsAvailable flips false when the registry is unwired
-  // (503), and the control degrades to the free-text input bound to sessionId.
-  let sessions = $state([]);
-  let sessionsAvailable = $state(false);
-  let newSessionLabel = $state("");
-  let creatingSession = $state(false);
-  let sessionCreateError = $state("");
   // The transcript is a flat, conversational (oldest-top) message list — the
   // shape RFC 0048 amendment §B migrates to. Each entry is one message:
   //   { id, fromUser, who, content, status?, timestamp, session?, epoch? }
@@ -74,7 +61,11 @@
   let historyToken = 0;
   // The resolved DM channel id, captured from seeded history when present, for
   // the §F "view this conversation in the timeline" deep-link (PR F). Empty
-  // until a conversation exists (a fresh persona has no DM yet).
+  // until a conversation exists (a fresh persona has no DM yet). NOTE for §F: a
+  // live send into a fresh persona creates the DM server-side but does NOT
+  // populate this — chatResponse carries no channel id — so the deep-link stays
+  // empty until the next reload reseeds from history. §F should surface the id
+  // on the chat response (or re-resolve) rather than rely on a reload.
   let dmChannelId = $state("");
 
   const canSend = $derived(
@@ -122,6 +113,13 @@
   // reversed. A fresh persona returns an empty list (200, not 404) — a clean
   // empty transcript, not an error. historyError is non-fatal: a failed seed
   // still leaves a usable (empty) composer rather than blocking the panel.
+  //
+  // Scope note: the seed fetches only the server's default-limit most-recent
+  // page (channelDefaultHistoryLimit, 50) and the panel has no "load earlier"
+  // affordance yet, so a conversation longer than that resumes from its tail
+  // with the oldest turns omitted. getChatHistory already plumbs limit/before
+  // for the paginating back-fill a later slice (§F) adds; until then the cap is
+  // intentional, not full resume.
   function loadHistory(agentID) {
     const token = ++historyToken;
     historyError = "";
@@ -144,7 +142,7 @@
       })
       .catch((err) => {
         if (token !== historyToken) return;
-        historyError = `Could not load earlier messages: ${err.message}`;
+        historyError = `Could not load conversation history: ${err.message}`;
       })
       .finally(() => {
         if (token !== historyToken) return;
@@ -170,64 +168,6 @@
       historyToken++;
     };
   });
-
-  // formatTimestamp renders the wire timestamp (RFC-3339 UTC) as a readable
-  // local time, mirroring the channel timeline. An unparseable value falls back
-  // to the raw string rather than rendering "Invalid Date".
-  function formatTimestamp(ts) {
-    const date = new Date(ts);
-    return Number.isNaN(date.getTime()) ? ts : date.toLocaleString();
-  }
-
-  // loadSessions populates the session dropdown from /api/v1/sessions (§C). A
-  // failure (notably 503 when the session registry is unwired) leaves
-  // sessionsAvailable false, so the control degrades to the existing free-text
-  // input rather than disappearing — the isolation override stays reachable.
-  function loadSessions() {
-    return listSessions()
-      .then((result) => {
-        sessions = (result.sessions ?? []).filter((s) => !s.archived);
-        sessionsAvailable = true;
-      })
-      .catch(() => {
-        sessionsAvailable = false;
-      });
-  }
-
-  $effect(() => {
-    loadSessions();
-  });
-
-  // createNewSession mints a labeled session and selects it, so a tester can
-  // scope a conversation without leaving the browser for the CLI. The label is
-  // required server-side; an empty one is a no-op here.
-  async function createNewSession() {
-    const label = newSessionLabel.trim();
-    if (!label || creatingSession) {
-      return;
-    }
-    sessionCreateError = "";
-    creatingSession = true;
-    try {
-      const created = await createSession(label);
-      sessions = [created, ...sessions];
-      sessionId = created.id;
-      newSessionLabel = "";
-    } catch (err) {
-      sessionCreateError =
-        err instanceof ApiError
-          ? err.message
-          : `Could not create session: ${err.message}`;
-    } finally {
-      creatingSession = false;
-    }
-  }
-
-  // sessionOptionLabel shows the human label, falling back to the id for a
-  // not-yet-named (auto-minted) session.
-  function sessionOptionLabel(session) {
-    return session.label ? session.label : session.id;
-  }
 
   // onMessageKeydown wires the universal chat idiom (§D): Enter sends,
   // Shift+Enter inserts a newline. Without this the <textarea> swallows Enter and
@@ -467,7 +407,11 @@
         {/if}
         {#if selectedAgentInfo.capabilities && selectedAgentInfo.capabilities.length > 0}
           <ul class="persona-caps" aria-label="Capabilities">
-            {#each selectedAgentInfo.capabilities as capability (capability)}
+            <!-- Unkeyed: capabilities are display-only and the registry doesn't
+                 dedupe them, so a value key would throw each_key_duplicate. The
+                 list is re-derived wholesale per selection, so there's no identity
+                 to preserve across mutations anyway. -->
+            {#each selectedAgentInfo.capabilities as capability}
               <li>{capability}</li>
             {/each}
           </ul>
@@ -484,7 +428,7 @@
     {/if}
 
     {#if historyLoading}
-      <p class="loading" role="status">Loading earlier messages…</p>
+      <p class="loading" role="status">Loading conversation history…</p>
     {/if}
     {#if historyError}
       <!-- Non-fatal: a failed history seed still leaves a usable (empty)
@@ -495,7 +439,7 @@
 
     <ol class="transcript" aria-label="Conversation">
       {#each transcript as msg (msg.id)}
-        <li class="msg" class:from-self={msg.fromUser}>
+        <li class="msg">
           <p
             class:from-user={msg.fromUser}
             class:from-agent={!msg.fromUser}
@@ -567,70 +511,11 @@
         ></textarea>
       </label>
 
-      <!-- Optional isolation overrides (RFC 0031 session / ISSUE-0085 epoch).
-           The §F identity rule constrains user_id only (never typed); session
-           and epoch are operator-namespace ids. Session is a dropdown over the
-           labeled sessions API (§C); epoch stays free-text (no labeled-epoch
-           list exists). -->
-      <details class="overrides">
-        <summary>Scope (optional)</summary>
-        {#if sessionsAvailable}
-          <label>
-            Session
-            <select bind:value={sessionId} disabled={sending}>
-              <!-- The empty value rides the orchestrator's boot-default session
-                   (the override is omitted on the wire when blank). -->
-              <option value="">(default session)</option>
-              {#each sessions as session (session.id)}
-                <option value={session.id}>{sessionOptionLabel(session)}</option>
-              {/each}
-            </select>
-          </label>
-          <div class="new-session">
-            <label>
-              New session
-              <input
-                type="text"
-                bind:value={newSessionLabel}
-                placeholder="label…"
-                autocomplete="off"
-                disabled={sending || creatingSession}
-              />
-            </label>
-            <button
-              type="button"
-              onclick={createNewSession}
-              disabled={sending || creatingSession || !newSessionLabel.trim()}
-            >
-              {creatingSession ? "Creating…" : "Create"}
-            </button>
-          </div>
-          {#if sessionCreateError}
-            <p class="poll-error" role="status">{sessionCreateError}</p>
-          {/if}
-        {:else}
-          <!-- Session registry unwired (503) — degrade to free-text id entry so
-               the override stays reachable (§C). -->
-          <label>
-            Session ID
-            <input
-              type="text"
-              bind:value={sessionId}
-              autocomplete="off"
-              disabled={sending}
-            />
-          </label>
-        {/if}
-        <label>
-          Epoch ID
-          <input
-            type="text"
-            bind:value={epochId}
-            autocomplete="off"
-            disabled={sending}
-          />
-        </label>
-      </details>
+      <!-- Optional isolation overrides (RFC 0031 session / ISSUE-0085 epoch),
+           extracted to ScopeSelector. The §F identity rule constrains user_id
+           only (never typed); session and epoch are operator-namespace ids the
+           composer reads back via the bindings. -->
+      <ScopeSelector bind:sessionId bind:epochId {sending} />
 
       <button type="submit" disabled={!canSend}>
         {sending ? "Sending…" : "Send"}

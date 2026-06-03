@@ -122,3 +122,36 @@ func TestHandleGetChatHistory_BadLimitIs400(t *testing.T) {
 		"/api/v1/agents/ember-owl/chat/history?user_id=alice&limit=nope", nil)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
+
+// The `before` keyset cursor is plumbed straight through to GetHistory (strict
+// `timestamp < before`), so the endpoint paginates exactly like the
+// channel-history surface it mirrors. The §F back-fill relies on this, so guard
+// it: a `before` at the newer message's timestamp returns only the older one.
+func TestHandleGetChatHistory_BeforePaginates(t *testing.T) {
+	srv, reg, router, store := chatTestServer(t)
+	registerHealthyAgent(t, reg, "ember-owl", "Ember Owl")
+
+	base := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
+	seedDM(t, store, router, "alice", "ember-owl", "alice", "first", base)
+	seedDM(t, store, router, "alice", "ember-owl", "ember-owl", "second", base.Add(time.Second))
+
+	rec := doRequest(srv.Handler(), http.MethodGet,
+		"/api/v1/agents/ember-owl/chat/history?user_id=alice&before=2026-06-02T10:00:01Z", nil)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	var resp historyResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp.Messages, 1, "only the message strictly before the cursor")
+	assert.Equal(t, "first", resp.Messages[0].Content)
+}
+
+// A malformed `before` cursor errors loudly (RFC 3339 only), reusing the
+// channel-history validation rather than silently ignoring the bad value.
+func TestHandleGetChatHistory_BadBeforeIs400(t *testing.T) {
+	srv, reg, _, _ := chatTestServer(t)
+	registerHealthyAgent(t, reg, "ember-owl", "Ember Owl")
+
+	rec := doRequest(srv.Handler(), http.MethodGet,
+		"/api/v1/agents/ember-owl/chat/history?user_id=alice&before=nope", nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}

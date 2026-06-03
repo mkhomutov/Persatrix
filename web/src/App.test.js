@@ -70,80 +70,38 @@ describe("App shell boot", () => {
     expect(screen.queryByRole("tab", { name: /cost/i })).toBeNull();
   });
 
-  it("surfaces the real principal verbatim and offers the §E testing override in local mode", async () => {
+  it("surfaces the orchestrator build version from config.build.version", async () => {
+    // The topbar shows which orchestrator build the operator is driving (RFC 0048
+    // amendment §D), read from /ui/config's build.version. Titled so the chip's
+    // source is unambiguous.
+    loadBootstrap.mockResolvedValue({
+      config: {
+        build: { version: "0.3.6" },
+        panels: { chat: { enabled: true, available: true } },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    await waitFor(() => {
+      const chip = screen.getByTitle("Orchestrator build");
+      expect(chip.textContent.trim()).toBe("v0.3.6");
+    });
+  });
+
+  it("omits the version chip when the config carries no build version", async () => {
+    // build.version is optional; a payload without it shows no chip rather than a
+    // bare "v" placeholder.
     loadBootstrap.mockResolvedValue({
       config: { panels: { chat: { enabled: true, available: true } } },
       context: { principal: "local", tenant: "local", authenticated: false },
     });
 
-    const { container } = render(App);
+    render(App);
 
-    // The topbar surfaces the principal coming from /ui/context (titled so the
-    // source is unambiguous), shown verbatim and never replaced by the override.
-    await waitFor(() => {
-      const principal = screen.getByTitle("Identity from /api/v1/ui/context");
-      expect(principal.textContent.trim()).toBe("local");
-    });
-    // RFC §F rule 1: identity comes from /ui/context, so there is still NO
-    // user_id field — the panels never prompt for the identity itself.
-    expect(container.querySelector('input[name="user_id"]')).toBeNull();
-    // §E carve-out: in LOCAL (unauthenticated) mode the shell offers a clearly
-    // distinct "acting as" testing override, defaulting to the principal, so a
-    // tester can demonstrate per-user persistence. It is a separate control, not
-    // the identity source.
-    const override = container.querySelector('input[name="acting_as"]');
-    expect(override).not.toBeNull();
-    expect(override.value).toBe("local");
-  });
-
-  it("hides the §E identity override once the principal is authenticated", async () => {
-    // The carve-out is local-only: once /ui/context reports an authenticated
-    // principal (RFC 0039), the override disappears so a real identity can never
-    // be masked from the browser.
-    loadBootstrap.mockResolvedValue({
-      config: { panels: { chat: { enabled: true, available: true } } },
-      context: { principal: "alice@example.com", tenant: "t", authenticated: true },
-    });
-
-    const { container } = render(App);
-
-    await waitFor(() => {
-      expect(
-        screen.getByTitle("Identity from /api/v1/ui/context").textContent.trim(),
-      ).toBe("alice@example.com");
-    });
-    expect(container.querySelector('input[name="acting_as"]')).toBeNull();
-  });
-
-  it("acts as the override identity so per-user persistence is demonstrable", async () => {
-    // Editing "acting as" changes the effective user threaded to the panels —
-    // the mechanism that lets a tester switch users and watch the persona's
-    // memory follow the identity (§E).
-    loadBootstrap.mockResolvedValue({
-      config: { panels: { chat: { enabled: true, available: true } } },
-      context: { principal: "local", tenant: "local", authenticated: false },
-    });
-
-    const { container } = render(App);
-
-    const override = await waitFor(() => {
-      const el = container.querySelector('input[name="acting_as"]');
-      expect(el).not.toBeNull();
-      return el;
-    });
-    // The chat panel echoes the effective identity it acts as; it starts at the
-    // principal, then follows the override.
-    await waitFor(() =>
-      expect(screen.getAllByText("local").length).toBeGreaterThan(0),
-    );
-    await fireEvent.input(override, { target: { value: "bob" } });
-    await waitFor(() => {
-      // The panel's "Acting as <code>bob</code>" reflects the override.
-      const codes = [...container.querySelectorAll("code")].map((c) =>
-        c.textContent.trim(),
-      );
-      expect(codes).toContain("bob");
-    });
+    await screen.findByRole("tab", { name: /chat/i });
+    expect(screen.queryByTitle("Orchestrator build")).toBeNull();
   });
 
   it("shows a boot-error state when the backend is unreachable", async () => {

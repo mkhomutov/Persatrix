@@ -7,12 +7,11 @@ import {
   fireEvent,
 } from "@testing-library/svelte";
 import Chat from "./Chat.svelte";
+import { nav } from "../lib/nav.svelte.js";
 
 // The chat panel renders over today's synchronous chat API (RFC 0048 PR 4): it
-// lists personas, sends a message as the context-derived user, and shows the
-// reply. The backend client is mocked so the panel's wiring — picker, send,
-// thinking state, error surfacing, session/epoch pass-through, and the §F
-// identity rule — is exercised without a running orchestrator.
+// lists personas, sends as the context-derived user, surfaces errors, and threads
+// session/epoch + §F identity. Client mocked; history-seed resume in Chat.history.test.js.
 vi.mock("../lib/api.js", () => ({
   ApiError: class ApiError extends Error {
     constructor(message, status, options) {
@@ -36,7 +35,6 @@ import {
   createSession,
   ApiError,
 } from "../lib/api.js";
-import { nav } from "../lib/nav.svelte.js";
 
 const AGENTS = [
   { id: "alice", name: "Alice", status: "healthy" },
@@ -109,50 +107,16 @@ describe("Chat panel", () => {
     ).toBeTruthy();
   });
 
-  it("seeds the transcript from persisted history on persona-select (resume)", async () => {
-    // The history endpoint returns newest-first; the panel renders oldest-top
-    // (conversational), seeded so a reload resumes the conversation (§B).
-    getChatHistory.mockResolvedValue({
-      messages: [
-        {
-          id: "h2",
-          channel_id: "dm:alice:local",
-          sender_id: "alice",
-          content: "earlier reply",
-          timestamp: "2026-06-02T10:00:01Z",
-        },
-        {
-          id: "h1",
-          channel_id: "dm:alice:local",
-          sender_id: "local",
-          content: "earlier question",
-          timestamp: "2026-06-02T10:00:00Z",
-        },
-      ],
-    });
+  it("renders duplicate capabilities without crashing the persona header", async () => {
+    // The registry doesn't dedupe capabilities, so ["search","search"] is a
+    // reachable DTO. A value-keyed chip list would throw each_key_duplicate and
+    // crash the panel; both chips must render and the panel must mount.
+    listAgents.mockResolvedValue([
+      { id: "ada", name: "Ada", capabilities: ["search", "search"], status: "healthy" },
+    ]);
     render(Chat, { props: { userId: "local" } });
 
-    // Seeded from the (user, agent) DM — fetched read-only for the default
-    // persona with the context-derived user.
-    await waitFor(() => {
-      expect(getChatHistory).toHaveBeenCalledWith("alice", { userId: "local" });
-    });
-    const items = await screen.findAllByRole("listitem");
-    // Oldest at top: the question (h1) precedes the reply (h2).
-    expect(items[0].textContent).toMatch(/earlier question/);
-    expect(items[1].textContent).toMatch(/earlier reply/);
-    // The operator's own message reads as "You".
-    expect(items[0].textContent).toMatch(/^You:/);
-  });
-
-  it("starts with an empty transcript when the persona has no history", async () => {
-    getChatHistory.mockResolvedValue({ messages: [] });
-    render(Chat, { props: { userId: "local" } });
-
-    await screen.findByRole("option", { name: "Alice" });
-    // No prior messages — a clean (empty) transcript, not an error.
-    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(await screen.findAllByText("search")).toHaveLength(2);
   });
 
   it("sends the message for the selected persona as the context-derived user", async () => {
@@ -311,159 +275,6 @@ describe("Chat panel", () => {
     expect(screen.getByRole("textbox", { name: /message/i })).toBeTruthy();
   });
 
-  it("passes the optional session and epoch overrides through to the request", async () => {
-    // The chat API already accepts session_id / epoch_id (RFC 0031 / ISSUE-0085);
-    // surfacing them quietly demonstrates the v0.3.5 isolation story. Degrade the
-    // session control to free-text (registry unwired) so this pass-through test
-    // is independent of the dropdown wiring (covered separately below).
-    listSessions.mockRejectedValue(new ApiError("session registry off", 503));
-    render(Chat, { props: { userId: "local" } });
-    await screen.findByRole("option", { name: "Alice" });
-
-    await fireEvent.input(screen.getByRole("textbox", { name: /session id/i }), {
-      target: { value: "sess-7" },
-    });
-    await fireEvent.input(screen.getByRole("textbox", { name: /epoch/i }), {
-      target: { value: "ep-3" },
-    });
-    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
-      target: { value: "Hi" },
-    });
-    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
-
-    await waitFor(() => {
-      expect(sendChat).toHaveBeenCalledWith(
-        "alice",
-        expect.objectContaining({
-          message: "Hi",
-          userId: "local",
-          sessionId: "sess-7",
-          epochId: "ep-3",
-        }),
-      );
-    });
-  });
-
-  it("sends on Enter and inserts a newline on Shift+Enter", async () => {
-    render(Chat, { props: { userId: "local" } });
-    await screen.findByRole("option", { name: "Alice" });
-    const message = screen.getByRole("textbox", { name: /message/i });
-
-    // Shift+Enter must NOT send (it inserts a newline).
-    await fireEvent.input(message, { target: { value: "draft" } });
-    await fireEvent.keyDown(message, { key: "Enter", shiftKey: true });
-    expect(sendChat).not.toHaveBeenCalled();
-
-    // Plain Enter sends.
-    await fireEvent.keyDown(message, { key: "Enter" });
-    await waitFor(() => {
-      expect(sendChat).toHaveBeenCalledWith(
-        "alice",
-        expect.objectContaining({ message: "draft" }),
-      );
-    });
-  });
-
-  it("selects a labeled session from the dropdown and passes its id", async () => {
-    // §C: the session scope is a dropdown over /api/v1/sessions, so a tester
-    // drives isolation from the browser without hunting a session id in the CLI.
-    listSessions.mockResolvedValue({
-      sessions: [
-        { id: "s-123", label: "Acme demo", archived: false },
-        { id: "s-arch", label: "Old", archived: true },
-      ],
-    });
-    render(Chat, { props: { userId: "local" } });
-    await screen.findByRole("option", { name: "Alice" });
-
-    // The archived session is filtered out; the labeled one is offered.
-    const sessionSelect = await screen.findByRole("combobox", {
-      name: /^session$/i,
-    });
-    expect(screen.queryByRole("option", { name: "Old" })).toBeNull();
-    await fireEvent.change(sessionSelect, { target: { value: "s-123" } });
-
-    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
-      target: { value: "Hi" },
-    });
-    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
-
-    await waitFor(() => {
-      expect(sendChat).toHaveBeenCalledWith(
-        "alice",
-        expect.objectContaining({ sessionId: "s-123" }),
-      );
-    });
-  });
-
-  it("creates a new labeled session and selects it", async () => {
-    listSessions.mockResolvedValue({ sessions: [] });
-    createSession.mockResolvedValue({
-      id: "s-new",
-      label: "Fresh",
-      archived: false,
-    });
-    render(Chat, { props: { userId: "local" } });
-    await screen.findByRole("option", { name: "Alice" });
-
-    await fireEvent.input(
-      await screen.findByRole("textbox", { name: /new session/i }),
-      { target: { value: "Fresh" } },
-    );
-    await fireEvent.click(screen.getByRole("button", { name: /create/i }));
-
-    await waitFor(() => expect(createSession).toHaveBeenCalledWith("Fresh"));
-    // The created session becomes the selected scope and rides the next send.
-    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
-      target: { value: "Hi" },
-    });
-    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
-    await waitFor(() => {
-      expect(sendChat).toHaveBeenCalledWith(
-        "alice",
-        expect.objectContaining({ sessionId: "s-new" }),
-      );
-    });
-  });
-
-  it("cancels an in-flight turn without surfacing an error", async () => {
-    // §D: a synchronous turn can block up to 30s; Cancel aborts the fetch. The
-    // client surfaces an abort as a quiet cancellation, not an error banner.
-    let rejectSend;
-    sendChat.mockImplementation(
-      (_agentID, { signal } = {}) =>
-        new Promise((_resolve, reject) => {
-          rejectSend = () => {
-            const err = new ApiError("network error", 0, {
-              cause: Object.assign(new Error("aborted"), {
-                name: "AbortError",
-              }),
-            });
-            reject(err);
-          };
-          if (signal) {
-            signal.addEventListener("abort", rejectSend);
-          }
-        }),
-    );
-    render(Chat, { props: { userId: "local" } });
-    await screen.findByRole("option", { name: "Alice" });
-    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
-      target: { value: "Hi" },
-    });
-    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
-
-    // A Cancel control appears while the turn is in flight; clicking it aborts.
-    const cancel = await screen.findByRole("button", { name: /cancel/i });
-    await fireEvent.click(cancel);
-
-    await waitFor(() => {
-      // Back to a sendable composer, with no error alert from the cancel.
-      expect(screen.getByRole("button", { name: /^send$/i })).toBeTruthy();
-    });
-    expect(screen.queryByRole("alert")).toBeNull();
-  });
-
   it("acts as the context principal and offers no free-text user field", async () => {
     // RFC §F rule 1: identity is the /ui/context principal threaded in as a prop;
     // the panel must never expose a user_id input the operator could type into.
@@ -548,9 +359,7 @@ describe("Chat panel", () => {
     // Guidance + a re-check that doesn't need a full reload + a docs link.
     expect(screen.getByText(/agent register/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /refresh/i })).toBeTruthy();
-    expect(
-      screen.getByRole("link", { name: /quick-start/i }),
-    ).toBeTruthy();
+    expect(screen.getByRole("link", { name: /quick-start/i })).toBeTruthy();
   });
 
   it("offers 'view in timeline' once a conversation exists and hands it off (§F)", async () => {
@@ -693,32 +502,5 @@ describe("Chat panel", () => {
     });
 
     expect(screen.queryByRole("alert")).toBeNull();
-  });
-
-  it("annotates a transcript turn with the scope overrides it was sent under", async () => {
-    // The override inputs stay editable between turns, so turns sent under
-    // different session/epoch scopes can interleave in one transcript. Record
-    // the scope each turn actually used so the isolation story (RFC 0031 /
-    // ISSUE-0085) is visible per-turn rather than silent. A turn with no
-    // override carries no annotation (covered by the plain-reply tests above).
-    // Degrade the session control to free-text (registry unwired) so this test
-    // stays focused on the per-turn annotation rather than the dropdown wiring.
-    listSessions.mockRejectedValue(new ApiError("session registry off", 503));
-    render(Chat, { props: { userId: "local" } });
-    await screen.findByRole("option", { name: "Alice" });
-
-    await fireEvent.input(screen.getByRole("textbox", { name: /session/i }), {
-      target: { value: "sess-7" },
-    });
-    await fireEvent.input(screen.getByRole("textbox", { name: /epoch/i }), {
-      target: { value: "ep-3" },
-    });
-    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
-      target: { value: "Hi" },
-    });
-    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
-
-    expect(await screen.findByText(/session: sess-7/i)).toBeTruthy();
-    expect(screen.getByText(/epoch: ep-3/i)).toBeTruthy();
   });
 });

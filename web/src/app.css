@@ -41,8 +41,10 @@ body {
   opacity: 0.6;
 }
 
-/* Identity block: the real principal plus the §E local-testing override. */
-.topbar .identity {
+/* Identity block: the real principal plus the §E local-testing override.
+   Named distinctly from the Chat panel's global `.identity` rule so that
+   single-class rule can't cascade into this topbar group. */
+.topbar .identity-block {
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -156,7 +158,6 @@ body {
   gap: 0.75rem;
 }
 
-.turn p,
 .msg p {
   margin: 0.15rem 0;
 }
@@ -185,15 +186,6 @@ body {
   /* A reply_status:"empty" turn — the agent had nothing to say. Muted so the
      placeholder reads as an annotation, not as the agent's actual words. */
   opacity: 0.7;
-}
-
-.turn-scope {
-  /* Per-turn isolation scope (session/epoch override). Muted and small — it's
-     metadata about the turn, not part of the conversation. */
-  opacity: 0.7;
-  font-size: 0.8rem;
-  display: flex;
-  gap: 0.75rem;
 }
 
 /* The chat composer and the channel-timeline publish form are the same kind of
