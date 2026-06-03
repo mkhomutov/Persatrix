@@ -68,6 +68,10 @@ describe("App shell — §E tester identity override", () => {
     const override = container.querySelector('input[name="acting_as"]');
     expect(override).not.toBeNull();
     expect(override.value).toBe("local");
+    // The placeholder echoes the principal so that, once a tester clears the
+    // box, the field visibly communicates "empty ⇒ acting as the principal"
+    // rather than reading as no identity at all.
+    expect(override.getAttribute("placeholder")).toBe("local");
   });
 
   it("hides the §E identity override once the principal is authenticated", async () => {
@@ -89,10 +93,15 @@ describe("App shell — §E tester identity override", () => {
     expect(container.querySelector('input[name="acting_as"]')).toBeNull();
   });
 
-  it("acts as the override identity so per-user persistence is demonstrable", async () => {
+  it("commits the override on change (not per-keystroke) so the effective identity follows it", async () => {
     // Editing "acting as" changes the effective user threaded to the panels —
     // the mechanism that lets a tester switch users and watch the persona's
-    // memory follow the identity (§E).
+    // memory follow the identity (§E). The commit is deferred to `change`
+    // (blur/Enter), not every keystroke: persistence is keyed on (user, agent)
+    // and the panels reseed history on an identity change, so committing
+    // per-keystroke would blank+refetch the transcript for each intermediate
+    // value ("b", "bo", "bob"). The contract here is the observable side of
+    // that: typing alone must NOT move the effective identity; the change does.
     loadBootstrap.mockResolvedValue({
       config: { panels: { chat: { enabled: true, available: true } } },
       context: { principal: "local", tenant: "local", authenticated: false },
@@ -105,18 +114,31 @@ describe("App shell — §E tester identity override", () => {
       expect(el).not.toBeNull();
       return el;
     });
+
+    const effectiveIds = () =>
+      [...container.querySelectorAll("code")].map((c) => c.textContent.trim());
+
     // The chat panel echoes the effective identity it acts as; it starts at the
-    // principal, then follows the override.
-    await waitFor(() =>
-      expect(screen.getAllByText("local").length).toBeGreaterThan(0),
-    );
+    // principal.
+    await waitFor(() => expect(effectiveIds()).toContain("local"));
+
+    // Typing into the box edits the draft but must not yet move the effective
+    // identity — no premature reseed.
     await fireEvent.input(override, { target: { value: "bob" } });
+    expect(effectiveIds()).not.toContain("bob");
+    expect(effectiveIds()).toContain("local");
+
+    // Committing (blur/Enter ⇒ `change`) threads the new identity to the panels.
+    await fireEvent.change(override, { target: { value: "bob" } });
+    await waitFor(() => expect(effectiveIds()).toContain("bob"));
+
+    // Clearing the override and committing falls back to the real principal —
+    // the empty box means "act as the principal", never "no identity".
+    await fireEvent.input(override, { target: { value: "" } });
+    await fireEvent.change(override, { target: { value: "" } });
     await waitFor(() => {
-      // The panel's "Acting as <code>bob</code>" reflects the override.
-      const codes = [...container.querySelectorAll("code")].map((c) =>
-        c.textContent.trim(),
-      );
-      expect(codes).toContain("bob");
+      expect(effectiveIds()).toContain("local");
+      expect(effectiveIds()).not.toContain("bob");
     });
   });
 });
