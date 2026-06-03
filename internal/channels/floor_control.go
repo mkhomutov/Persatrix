@@ -242,6 +242,14 @@ func (r *ChannelRouter) isFloorSpeakerReply(channelID, senderID string) bool {
 // The whole round runs inline on the publish goroutine (as the concurrent
 // fanout does), so the stimulus publish blocks until the round completes —
 // the documented latency trade of serialization.
+//
+// Worst-case latency is additive in the silent candidates: a responder that
+// stays silent — or whose receiver-side response gate ultimately suppresses it
+// (the harmless false-positive in [orderResponders]) — consumes its full
+// `turnTimeout` before the loop advances. A round of N candidates where M stay
+// silent therefore blocks the publish path for up to M×`turnTimeout`. Size
+// `floor_turn_timeout_seconds` (default [DefaultFloorTurnTimeoutSeconds], 45s)
+// against the expected silent-candidate count before enabling per channel (PR 3).
 func (r *ChannelRouter) floorRound(
 	ctx context.Context,
 	msg ChannelMessage,
@@ -272,6 +280,17 @@ func (r *ChannelRouter) floorRound(
 // race, mirroring [ChannelRouter.PublishAndAwait]), dispatches the stimulus
 // to that speaker alone, then waits for the speaker's reply to be persisted
 // or for the per-turn timeout (D2) before returning so the loop advances.
+//
+// Per-message turn boundary: the turn advances on the *first* reply the speaker
+// publishes, because the waiter is single-shot ([replyWaiter.Notify]). An agent
+// that splits one logical turn across several SEND_CHANNEL_MESSAGE publishes
+// (e.g. tool_call → tool_result → final_answer) advances the floor on its first
+// message, so a later speaker may read history before the trailing messages
+// persist — the mutual-visibility guarantee holds per *message*, not per
+// multi-message turn. Persist-happens-before-Notify still guarantees that first
+// message is in history before the next speaker dispatches; the agent-side
+// contract is to fold a turn into a single publish. Multi-message reply
+// semantics are deferred to v0.4 (docs/issues/ISSUE-0033).
 func (r *ChannelRouter) runFloorTurn(
 	ctx context.Context,
 	msg ChannelMessage,
