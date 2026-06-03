@@ -53,7 +53,11 @@
   let historyToken = 0;
   // The resolved DM channel id, captured from seeded history when present, for
   // the §F "view this conversation in the timeline" deep-link (PR F). Empty
-  // until a conversation exists (a fresh persona has no DM yet).
+  // until a conversation exists (a fresh persona has no DM yet). NOTE for §F: a
+  // live send into a fresh persona creates the DM server-side but does NOT
+  // populate this — chatResponse carries no channel id — so the deep-link stays
+  // empty until the next reload reseeds from history. §F should surface the id
+  // on the chat response (or re-resolve) rather than rely on a reload.
   let dmChannelId = $state("");
 
   const canSend = $derived(
@@ -130,7 +134,7 @@
       })
       .catch((err) => {
         if (token !== historyToken) return;
-        historyError = `Could not load earlier messages: ${err.message}`;
+        historyError = `Could not load conversation history: ${err.message}`;
       })
       .finally(() => {
         if (token !== historyToken) return;
@@ -357,7 +361,7 @@
     {/if}
 
     {#if historyLoading}
-      <p class="loading" role="status">Loading earlier messages…</p>
+      <p class="loading" role="status">Loading conversation history…</p>
     {/if}
     {#if historyError}
       <!-- Non-fatal: a failed history seed still leaves a usable (empty)

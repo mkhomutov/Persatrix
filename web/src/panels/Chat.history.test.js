@@ -85,4 +85,23 @@ describe("Chat panel — history resume (§B)", () => {
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  it("reseeds when the identity (userId) changes, not just the persona", async () => {
+    // The DM is keyed on (userId, agent), so the transcript belongs to the
+    // identity as much as the persona. If the shell rethreads a different
+    // context-derived userId, the seed must re-resolve for the new principal —
+    // otherwise the panel would keep showing the previous identity's history.
+    const { rerender } = render(Chat, { props: { userId: "alice" } });
+
+    await waitFor(() => {
+      expect(getChatHistory).toHaveBeenCalledWith("alice", { userId: "alice" });
+    });
+    getChatHistory.mockClear();
+
+    await rerender({ userId: "bob" });
+
+    await waitFor(() => {
+      expect(getChatHistory).toHaveBeenCalledWith("alice", { userId: "bob" });
+    });
+  });
 });
