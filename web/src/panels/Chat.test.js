@@ -34,6 +34,7 @@ import {
   createSession,
   ApiError,
 } from "../lib/api.js";
+import { selection } from "../lib/selection.svelte.js";
 
 const AGENTS = [
   { id: "alice", name: "Alice", status: "healthy" },
@@ -62,6 +63,10 @@ beforeEach(() => {
   // the free-text degradation reject this instead.
   listSessions.mockResolvedValue({ sessions: [] });
   createSession.mockResolvedValue({ id: "sess-new", label: "New" });
+  // Reset the sticky cross-mount persona selection so a persona switch in one
+  // spec can't leak into another's default-selection assertion (the module-level
+  // $state outlives a single render by design — selection.svelte.js).
+  selection.chatAgent = "";
 });
 
 afterEach(() => {
