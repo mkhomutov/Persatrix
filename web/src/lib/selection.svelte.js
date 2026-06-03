@@ -17,3 +17,28 @@ export const selection = $state({
   // gets the smart healthy-first default rather than a frozen first selection.
   chatAgent: "",
 });
+
+// pickInitialAgent resolves which persona a freshly-mounted Chat panel opens on.
+// It prefers the operator's last deliberately-chosen persona (rememberedId, from
+// selection.chatAgent) when that persona is still in the list, so a Chat↔Channels
+// round-trip resumes where they left off rather than snapping to the default.
+// Otherwise it falls to the first persona that is BOTH chattable and healthy — a
+// newcomer lands on a sendable conversation, never a disabled task agent or a
+// guaranteed-503 offline one — then any chattable, then any agent at all (the
+// composer then explains why it's locked). A remembered persona that has since
+// deregistered isn't in the list, so it degrades to this default too. The caller
+// passes its own isChattable predicate so the policy stays UI-agnostic. Returns
+// null for an empty list.
+export function pickInitialAgent(list, isChattable, rememberedId) {
+  if (list.length === 0) return null;
+  const chattable = list.filter(isChattable);
+  const remembered = rememberedId
+    ? list.find((agent) => agent.id === rememberedId)
+    : null;
+  return (
+    remembered ??
+    chattable.find((agent) => agent.status === "healthy") ??
+    chattable[0] ??
+    list[0]
+  );
+}

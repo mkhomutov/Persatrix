@@ -10,7 +10,7 @@
   import PersonaHeader from "./PersonaHeader.svelte";
   import ChatMessage from "./ChatMessage.svelte";
   import { nav } from "../lib/nav.svelte.js";
-  import { selection } from "../lib/selection.svelte.js";
+  import { selection, pickInitialAgent } from "../lib/selection.svelte.js";
 
   let { userId } = $props();
 
@@ -214,28 +214,11 @@
         if (token !== loadToken) return;
         agents = list;
         // Resume the operator's last deliberately-chosen persona across a tab
-        // switch: the inactive panel unmounts (App.svelte mounts only the active
-        // one), so the local selection is lost on every Chat↔Channels round-trip
-        // and this re-runs. selection.svelte.js outlives the unmount, so honour a
-        // remembered persona when it's still in the list.
-        //
-        // Otherwise default to the first persona that is BOTH chattable and
-        // healthy so a newcomer lands on a sendable conversation — never a
-        // disabled task agent or a guaranteed-503 offline one. Degrade to any
-        // chattable, then to any agent at all (the composer then explains why
-        // it's locked). A remembered persona that has since deregistered isn't in
-        // the list, so it falls through to this default too.
-        if (list.length > 0) {
-          const chattable = list.filter(isChattable);
-          const remembered = selection.chatAgent
-            ? list.find((agent) => agent.id === selection.chatAgent)
-            : null;
-          selectedAgent = (
-            remembered ??
-            chattable.find((agent) => agent.status === "healthy") ??
-            chattable[0] ??
-            list[0]
-          ).id;
+        // switch (selection.svelte.js outlives the unmount that destroys the local
+        // selection), else apply the healthy-first default — see pickInitialAgent.
+        const initial = pickInitialAgent(list, isChattable, selection.chatAgent);
+        if (initial) {
+          selectedAgent = initial.id;
         }
       })
       .catch((err) => {
@@ -398,11 +381,10 @@
   // value reads as if the new persona is already broken. The transcript and the
   // in-progress message are left intact — only the transient error is dropped.
   // Scoped to the user-driven change event so the programmatic default-selection
-  // during load doesn't clear an unrelated error. It also records the choice as
-  // the sticky cross-mount selection (selection.svelte.js) so switching to
-  // Channels and back resumes THIS persona rather than snapping to the default —
-  // recording only here (not on the programmatic default) means a never-chosen
-  // panel still re-evaluates the healthy-first default on each mount.
+  // during load doesn't clear an unrelated error. Recording the choice as the
+  // sticky cross-mount selection here (not on the programmatic default) is what
+  // lets a Channels round-trip resume THIS persona while a never-chosen panel
+  // still re-evaluates the healthy-first default on each mount (pickInitialAgent).
   function onPersonaChange() {
     sendError = "";
     selection.chatAgent = selectedAgent;
