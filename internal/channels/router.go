@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -141,6 +142,33 @@ type ChannelRouter struct {
 	// `Notify` unconditionally without a nil check.
 	waiter *replyWaiter
 
+	// floors is the RFC 0030 Layer 2.5 per-channel floor registry —
+	// serializes concurrent speaker rounds on the same channel so at most
+	// one round runs at a time. Always non-nil (init in [NewChannelRouter]).
+	floors *floorRegistry
+
+	// floorMu guards floorSettings and floorSpeakers.
+	//
+	// floorSettings is the resolved per-channel floor-control config
+	// (enabled + per-turn timeout), keyed by channel id. Populated via
+	// [ChannelRouter.SetFloorControl] at startup; a channel absent from the
+	// map is floor-control-off (the PR-2 default — PR 3 flips the resolved
+	// default on for group channels and wires the setter from config).
+	//
+	// floorSpeakers records, per channel, the set of speakers that have been
+	// granted the floor during the *currently active* round — the seam the
+	// deferred-fanout skip (D1) reads in [ChannelRouter.Publish] to recognise
+	// a floor-turn reply and suppress its re-fanout. It is a set, not a single
+	// holder, on purpose: a speaker that exhausts its turn budget (D2) and then
+	// replies late — while a *later* speaker holds the floor — is still a
+	// participant of this round, so its reply must be suppressed too rather
+	// than spawn a competing fanout. Cleared as a whole when the round ends, so
+	// a reply that genuinely arrives after the round re-fanouts normally
+	// (bounded by `cascade_depth`). Empty when no round is active on a channel.
+	floorMu       sync.Mutex
+	floorSettings map[string]channelFloorSettings
+	floorSpeakers map[string]map[string]struct{}
+
 	// maxCascadeDepth — see cascade_depth.go; defaultSessionID — see router_session.go (RFC 0031 Phase 1).
 	maxCascadeDepth  int
 	defaultSessionID string
@@ -163,8 +191,38 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		logger:          logger,
 		metrics:         metrics,
 		waiter:          newReplyWaiter(),
+		floors:          newFloorRegistry(),
+		floorSettings:   make(map[string]channelFloorSettings),
+		floorSpeakers:   make(map[string]map[string]struct{}),
 		maxCascadeDepth: defaults.DefaultMaxCascadeDepth,
 	}
+}
+
+// SetFloorControl resolves RFC 0030 Layer 2.5 floor control for `channelID`:
+// when `enabled`, a publish to this channel with ≥2 candidate responders runs
+// the serialized speaker round instead of the concurrent fanout. A
+// non-positive `turnTimeout` normalizes to [DefaultFloorTurnTimeoutSeconds].
+//
+// Like [SetMaxCascadeDepth], this is a startup-time resolver: PR 3 wires it
+// from `config/channels.yaml` (default on for group channels). It is
+// concurrency-safe so tests and a future runtime-reload path can call it, but
+// the v0.3.6 contract is "set before traffic".
+func (r *ChannelRouter) SetFloorControl(channelID string, enabled bool, turnTimeout time.Duration) {
+	if turnTimeout <= 0 {
+		turnTimeout = time.Duration(DefaultFloorTurnTimeoutSeconds) * time.Second
+	}
+	r.floorMu.Lock()
+	defer r.floorMu.Unlock()
+	r.floorSettings[channelID] = channelFloorSettings{enabled: enabled, turnTimeout: turnTimeout}
+}
+
+// floorSettingsFor returns the resolved floor config for `channelID` and
+// whether any was set. A missing entry means floor control is off.
+func (r *ChannelRouter) floorSettingsFor(channelID string) (channelFloorSettings, bool) {
+	r.floorMu.Lock()
+	defer r.floorMu.Unlock()
+	s, ok := r.floorSettings[channelID]
+	return s, ok
 }
 
 // SetMaxCascadeDepth overrides the default cap. Non-positive values
@@ -269,6 +327,23 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 	// any subscriber receives — install the waiter on the OTHER
 	// participant's id, never on the publisher's.
 	r.waiter.Notify(msg)
+
+	// RFC 0030 Layer 2.5 deferred fanout (amendment D1): when a serialized
+	// floor round is active on this channel and this inbound message is a
+	// reply from a speaker that round granted the floor, the round loop is the
+	// sole dispatcher. The reply has been persisted (above) and — when the
+	// speaker is still its current turn-holder — has just satisfied the loop's
+	// waiter via Notify, so the loop advances with the reply now in history.
+	// Running fanout here would re-introduce the N-way amplification floor
+	// control exists to prevent. The set membership (not just the current
+	// turn-holder) also covers a speaker that exhausted its turn budget (D2)
+	// and replies late while a later speaker holds the floor: still a
+	// participant of this round, so suppressed rather than spawning a competing
+	// round. Cross-*round* cascade stays bounded by `cascade_depth` (Layer 0,
+	// enforced above).
+	if r.isFloorSpeakerReply(msg.ChannelID, msg.SenderID) {
+		return nil
+	}
 
 	r.fanout(ctx, msg, derivedType, threadParentSenderID)
 	return nil
@@ -391,109 +466,3 @@ func channelTypeFromID(id string) (ChannelType, error) {
 		return "", fmt.Errorf("%w: unknown channel_id prefix in %q", ErrInvalidChannelType, id)
 	}
 }
-
-// ReconcileConfig applies a loaded [Config] against the store at startup.
-//
-// v0.3.0 §B coexistence rules:
-//
-//   - Channels declared in config but absent from the store are created.
-//   - Channels in the store but not in config are preserved untouched
-//     (REST is allowed to create channels at runtime).
-//   - Memberships declared in config are inserted (idempotent re-add for
-//     existing rows).
-//   - When a config-declared channel exists in the store with a
-//     **different** member set than the config declares, that is a loud
-//     failure: `ErrConfigStoreMembershipDivergence` is returned listing
-//     the divergent participant ids. Operators must reconcile by editing
-//     `config/channels.yaml` or running `DELETE /api/v1/channels/{id}`.
-//
-// Returns nil on a clean reconcile; the only non-nil error path is the
-// divergence case above (and unrecoverable store errors).
-func (r *ChannelRouter) ReconcileConfig(ctx context.Context, cfg *Config) error {
-	if cfg == nil {
-		return nil
-	}
-	for _, decl := range cfg.Channels {
-		canonicalID := decl.CanonicalID()
-		_, err := r.store.GetChannel(ctx, canonicalID)
-		switch {
-		case err == nil:
-			// Channel already in store — verify membership parity.
-			storeMembers, mErr := r.store.GetMembers(ctx, canonicalID)
-			if mErr != nil {
-				return fmt.Errorf("channels: reconcile %s: %w", canonicalID, mErr)
-			}
-			if div := membershipDivergence(decl, storeMembers); len(div) > 0 {
-				return fmt.Errorf("%w: channel=%s divergent_participants=%v",
-					ErrConfigStoreMembershipDivergence, canonicalID, div)
-			}
-			r.logger.Debug("channels: config channel present in store",
-				zap.String("channel_id", canonicalID))
-		case errors.Is(err, ErrChannelNotFound):
-			// PR #245 re-review (Med): the previous implementation called
-			// CreateChannel followed by an N-call AddMember loop. A failure
-			// mid-loop (transient store error or an invalid declared
-			// member that bypassed Config.Validate) left the channel row
-			// committed with only a prefix of the declared membership;
-			// the next startup then tripped
-			// ErrConfigStoreMembershipDivergence and required manual
-			// operator cleanup. The handler-side fix already adopted
-			// CreateChannelWithMembers for atomicity (PR #245 review High);
-			// reconcile is now consistent with that contract.
-			members := make([]Member, 0, len(decl.Members))
-			for _, m := range decl.Members {
-				members = append(members, Member{
-					ParticipantID: m.ID,
-					RespondPolicy: m.RespondPolicy,
-				})
-			}
-			if err := r.store.CreateChannelWithMembers(ctx, Channel{
-				ID:          canonicalID,
-				Name:        decl.Name,
-				Type:        ChannelTypeGroup,
-				Description: decl.Description,
-				// RFC 0031 Phase 1: tag config-declared channels with
-				// the boot session_id. Empty falls through to legacy.
-				SessionID: r.defaultSessionID,
-			}, members); err != nil {
-				return fmt.Errorf("channels: reconcile create %s: %w", canonicalID, err)
-			}
-		default:
-			return fmt.Errorf("channels: reconcile lookup %s: %w", canonicalID, err)
-		}
-	}
-	return nil
-}
-
-// membershipDivergence returns the symmetric-difference participant ids
-// between the declared config and the live store. Id-set divergence
-// only; policy drift OQ-deferred to PR 7 (ISSUE-0010).
-func membershipDivergence(decl ChannelConfig, store []Member) []string {
-	declSet := make(map[string]struct{}, len(decl.Members))
-	for _, m := range decl.Members {
-		declSet[m.ID] = struct{}{}
-	}
-	storeSet := make(map[string]struct{}, len(store))
-	for _, m := range store {
-		storeSet[m.ParticipantID] = struct{}{}
-	}
-	var diff []string
-	for id := range declSet {
-		if _, ok := storeSet[id]; !ok {
-			diff = append(diff, "-"+id) // declared but missing in store
-		}
-	}
-	for id := range storeSet {
-		if _, ok := declSet[id]; !ok {
-			diff = append(diff, "+"+id) // present in store but undeclared
-		}
-	}
-	return diff
-}
-
-// ErrConfigStoreMembershipDivergence is returned by [ChannelRouter.ReconcileConfig]
-// when a config-declared channel has a member set in the store that
-// disagrees with the declaration. RFC 0011 §B coexistence rules treat
-// this as a loud-failure to surface ad-hoc REST additions that were not
-// rolled into config.
-var ErrConfigStoreMembershipDivergence = errors.New("channels: config-vs-store membership divergence")

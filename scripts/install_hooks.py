@@ -70,7 +70,12 @@ def main(argv: list[str] | None = None) -> int:
         print("Use --force to overwrite.")
         return 1
 
-    HOOK_PATH.write_text(HOOK_CONTENT, encoding="utf-8", newline="\n")
+    # newline="\n" keeps the hook LF-terminated (a CRLF shebang line breaks the
+    # hook under Git for Windows' bash). Path.open() rather than
+    # Path.write_text(newline=...) so this installer runs under a 3.9 `python3`
+    # too — the kwarg form is 3.10+.
+    with HOOK_PATH.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(HOOK_CONTENT)
 
     if os.name != "nt":
         st = HOOK_PATH.stat()

@@ -27,25 +27,32 @@ const channelFanoutMaxConcurrency = 16
 // fire-and-forget so the deadline only protects against a stuck dial.
 const channelFanoutPerRecipientTimeout = 5 * time.Second
 
-// fanout looks up subscribers, filters the sender, and dispatches with
-// bounded concurrency (ISSUE-0014). The publish call BLOCKS on fanout
-// completion — Publish only returns once every recipient has either been
-// dispatched or hit `channelFanoutPerRecipientTimeout` — but in-flight
-// dispatches are capped at `channelFanoutMaxConcurrency` so a single
-// stalled recipient cannot starve the tail and a 1000-member channel
-// does not spawn 1000 goroutines.
+// fanout looks up subscribers, filters the sender, and dispatches the
+// message to the remaining recipients. It chooses between two paths:
+//
+//   - **Serialized floor round** (RFC 0030 Layer 2.5) when floor control is
+//     enabled for the channel and there are ≥2 candidate responders: the
+//     responders take the floor one at a time, each reading the prior
+//     speaker's reply (see [ChannelRouter.floorRound]). Non-responders are
+//     delivered fire-and-forget for memory ingestion only, off the floor.
+//   - **Concurrent fanout** otherwise (flag off, DM, or a single responder):
+//     the pre-amendment path — every non-sender, non-`never` member is
+//     dispatched with bounded concurrency (ISSUE-0014).
+//
+// Either way the publish call BLOCKS on fanout completion — Publish only
+// returns once fanout is done. For the concurrent path that is bounded at
+// O(ceil(N / `channelFanoutMaxConcurrency`) × `channelFanoutPerRecipientTimeout`);
+// for the floor path it is the round duration (responders go serial, each
+// bounded by the per-turn timeout) — the documented latency trade.
 //
 // Detaches the request context (`context.WithoutCancel`) so a client
 // disconnect mid-fanout does not silently drop later subscribers — the
-// HTTP response has already been written by the time we are here, so the
-// caller's deadline is no longer the right shape.
+// HTTP response shape is no longer the caller's deadline by the time we are
+// here.
 //
 // History: PR #245 added a per-recipient timeout to fix intra-publish
 // starvation; ISSUE-0014 added the concurrency bound once the PR-4 gRPC
-// dispatcher made the worst-case tail visible (a stalled recipient ties
-// up the publish path for `channelFanoutPerRecipientTimeout` whether or
-// not the loop is concurrent — but a sequential loop multiplies that by
-// N).
+// dispatcher made the worst-case tail visible.
 func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string) {
 	members, err := r.store.GetMembers(ctx, msg.ChannelID)
 	if err != nil {
@@ -55,8 +62,30 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 		return
 	}
 
-	detached := context.WithoutCancel(ctx)
+	// RFC 0030 Layer 2.5: serialize when floor control is on for this channel
+	// and the candidate responder set is large enough to overlap. A DM or a
+	// single responder cannot collide, so it falls through to the concurrent
+	// path with no per-turn latency.
+	if settings, ok := r.floorSettingsFor(msg.ChannelID); ok && settings.enabled {
+		responders, nonResponders := orderResponders(members, msg, threadParentSenderID)
+		if len(responders) >= 2 {
+			r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout)
+			return
+		}
+	}
 
+	r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members)
+}
+
+// dispatchConcurrent fans `msg` out to every member of `members` other than
+// the sender and `never` participants, with peak in-flight dispatches capped
+// at `channelFanoutMaxConcurrency` (ISSUE-0014). Blocks until every selected
+// recipient has been dispatched or hit `channelFanoutPerRecipientTimeout`.
+//
+// `ctx` is expected to already be detached from the request lifetime by the
+// caller (so the floor path can reuse it for off-floor non-responder
+// delivery without re-detaching).
+func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, members []Member) {
 	// Buffered channel as a semaphore: each goroutine acquires a slot
 	// before starting and releases it on exit, so peak in-flight
 	// dispatches never exceed `channelFanoutMaxConcurrency`. The
@@ -84,28 +113,35 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-
-			dispatchCtx, cancel := context.WithTimeout(detached, channelFanoutPerRecipientTimeout)
-			defer cancel()
-			err := r.dispatcher.Dispatch(dispatchCtx, DispatchEnvelope{
-				Recipient:            m,
-				ThreadParentSenderID: threadParentSenderID,
-			}, msg)
-			status := "ok"
-			if err != nil {
-				status = "error"
-				r.logger.Warn("channels: dispatch failed",
-					zap.String("channel_id", msg.ChannelID),
-					zap.String("recipient", m.ParticipantID),
-					zap.Error(err))
-			}
-			if r.metrics != nil && r.metrics.MessagesDelivered != nil {
-				r.metrics.MessagesDelivered.Add(detached, 1, metric.WithAttributes(
-					attribute.String("channel_type", string(ct)),
-					attribute.String("status", status),
-				))
-			}
+			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m)
 		}()
 	}
 	wg.Wait()
+}
+
+// dispatchTo delivers `msg` to a single recipient with the per-recipient
+// timeout and emits the `channel.messages.delivered` counter. Shared by the
+// concurrent path ([dispatchConcurrent]) and the serialized floor turn
+// ([runFloorTurn]) so both honour the same deadline + metric contract.
+func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member) {
+	dispatchCtx, cancel := context.WithTimeout(ctx, channelFanoutPerRecipientTimeout)
+	defer cancel()
+	err := r.dispatcher.Dispatch(dispatchCtx, DispatchEnvelope{
+		Recipient:            m,
+		ThreadParentSenderID: threadParentSenderID,
+	}, msg)
+	status := "ok"
+	if err != nil {
+		status = "error"
+		r.logger.Warn("channels: dispatch failed",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("recipient", m.ParticipantID),
+			zap.Error(err))
+	}
+	if r.metrics != nil && r.metrics.MessagesDelivered != nil {
+		r.metrics.MessagesDelivered.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("channel_type", string(ct)),
+			attribute.String("status", status),
+		))
+	}
 }

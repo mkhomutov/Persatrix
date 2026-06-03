@@ -157,7 +157,11 @@ def run_index_cli(
             return 1
         return 0
 
-    index_file.write_text(new_content, encoding="utf-8", newline="\n")
+    # Path.open() rather than Path.write_text(newline=...) — the kwarg form is
+    # 3.10+, but these regen scripts run under whatever `python3` the pre-commit
+    # hook finds on PATH (which can be 3.9). newline="\n" forces LF on write.
+    with index_file.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(new_content)
     print(f"wrote {rel} ({row_count} row(s))")
     if args.print_table:
         print()
