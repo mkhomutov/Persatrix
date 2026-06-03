@@ -48,6 +48,12 @@ func newFloorRegistry() *floorRegistry {
 // available state) on first use. Guarded by the registry mutex; the
 // returned chan is then operated on outside the lock so a parked [acquire]
 // never holds the registry mutex.
+//
+// Entries are never evicted, but the key space is `channel_id` — bounded by
+// the declared channel count (itself capped by `max_channels`) — so the map
+// cannot grow without bound. The post-v0.3.6 re-key onto `interaction_id`
+// noted on [floorRegistry] would make the key space unbounded; that follow-up
+// must add eviction (e.g. drop a floor once its round completes).
 func (f *floorRegistry) floorFor(channelID string) chan struct{} {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -63,6 +69,12 @@ func (f *floorRegistry) floorFor(channelID string) chan struct{} {
 // acquire blocks until this channel's floor is free, then takes it. Pair
 // every acquire with exactly one [release] (the redundant-release case is a
 // safe no-op).
+//
+// acquire takes no [context.Context] and so cannot be cancelled or
+// time-bounded: it parks until a [release] frees the floor. That is
+// deliberate for the primitive — the per-turn timeout and any cancellation
+// are the caller's responsibility (PR 2's serialized loop wraps the round in
+// the `floor_turn_timeout_seconds` budget), not the registry's.
 func (f *floorRegistry) acquire(channelID string) {
 	<-f.floorFor(channelID)
 }
@@ -97,10 +109,21 @@ func (f *floorRegistry) release(channelID string) {
 // and `never` members are excluded from both sets (they read history on
 // demand and never receive a dispatch, matching today's fanout).
 //
-// Correctness does not depend on perfectly replicating the receiver-side
-// response gate: a candidate the gate ultimately suppresses simply yields no
-// reply and the per-turn timeout advances the loop (amendment §"Candidate
-// responder set vs. delivery").
+// This candidate set is a *superset* of the receiver-side response gate's
+// respond-true set ([agents/response_gate.py] — always; when_mentioned &
+// mentioned; when_mentioned & thread-reply-to-self), which is what matters
+// for correctness in both directions:
+//   - No false negatives: a member the gate would let respond is never
+//     dropped from the round, so nobody is silently denied the floor. The
+//     thread-reply-to-self branch looks looser here (`threadParentSenderID
+//     != ""` vs. the gate's `thread_id != "" && parent == self`), but the
+//     router only resolves a non-empty `threadParentSenderID` for thread
+//     events ([ChannelRouter.resolveThreadParentSenderID] returns "" when
+//     `msg.ThreadID == ""`), so the two conditions are equivalent in
+//     practice — do not let that invariant rot.
+//   - False positives are harmless: a candidate the gate ultimately
+//     suppresses simply yields no reply and the per-turn timeout advances
+//     the loop (amendment §"Candidate responder set vs. delivery").
 func orderResponders(members []Member, msg ChannelMessage, threadParentSenderID string) (responders, nonResponders []Member) {
 	mentioned := make(map[string]bool, len(msg.Mentions))
 	for _, id := range msg.Mentions {
