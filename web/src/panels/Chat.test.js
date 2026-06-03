@@ -65,6 +65,30 @@ describe("Chat panel", () => {
     expect(listAgents).toHaveBeenCalledOnce();
   });
 
+  it("shows a persona header with role and capabilities for the selected persona", async () => {
+    listAgents.mockResolvedValue([
+      {
+        id: "ada",
+        name: "Ada",
+        role: "Researcher",
+        capabilities: ["search", "summarize"],
+        status: "healthy",
+      },
+    ]);
+    render(Chat, { props: { userId: "local" } });
+
+    // The header gives the conversation a face: name, role, and capability chips
+    // — all from fields the agent DTO already serves (RFC 0048 amendment §A).
+    await screen.findByText("Ada");
+    expect(screen.getByText("Researcher")).toBeTruthy();
+    expect(screen.getByText("search")).toBeTruthy();
+    expect(screen.getByText("summarize")).toBeTruthy();
+    // The picker option folds the role in too.
+    expect(
+      screen.getByRole("option", { name: "Ada — Researcher" }),
+    ).toBeTruthy();
+  });
+
   it("sends the message for the selected persona as the context-derived user", async () => {
     render(Chat, { props: { userId: "local" } });
 

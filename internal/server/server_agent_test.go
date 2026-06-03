@@ -125,6 +125,45 @@ func TestRegisterAgentWithName(t *testing.T) {
 	assert.Equal(t, []string{"code_generation"}, resp.Capabilities)
 }
 
+// RFC 0048 amendment §A — role round-trips through register → response so the
+// console picker can show the persona's role, not just its name.
+func TestRegisterAgentWithRole(t *testing.T) {
+	srv, _ := testServer(t)
+	body := []byte(`{"id": "code-writer", "name": "Code Writer", "role": "Senior Engineer", "address": "localhost:50051"}`)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp agentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "Senior Engineer", resp.Role)
+}
+
+// An omitted role is valid (not every agent declares one) and serializes as an
+// empty string — the client falls back to showing no role, matching name→id.
+func TestRegisterAgentRoleDefaultsEmpty(t *testing.T) {
+	srv, _ := testServer(t)
+	body := []byte(`{"id": "no-role", "address": "localhost:50051"}`)
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp agentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Empty(t, resp.Role)
+	assert.Contains(t, rec.Body.String(), `"role":""`)
+}
+
+// Role is display-only and capped like name to prevent registry pollution.
+func TestRegisterAgentRoleTooLong(t *testing.T) {
+	srv, _ := testServer(t)
+	body, _ := json.Marshal(registerAgentRequest{
+		ID:      "long-role",
+		Role:    strings.Repeat("x", 101),
+		Address: "localhost:50051",
+	})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/agents/register", body)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
 func TestRegisterAgentNilCapabilities(t *testing.T) {
 	srv, _ := testServer(t)
 	body := []byte(`{"id": "test-agent", "address": "localhost:50051"}`)

@@ -44,6 +44,16 @@
     Boolean(selectedAgent) && message.trim().length > 0 && !sending,
   );
 
+  // selectedAgentInfo is the full persona record behind the picker selection, so
+  // the panel can render a persona header (name — role, capabilities) above the
+  // transcript rather than leaving the persona a bare dropdown entry. The DTO
+  // already carries role (RFC 0048 amendment §A) and capabilities/address
+  // (always served) — "faceless" was the client throwing those away, not the API
+  // withholding them.
+  const selectedAgentInfo = $derived(
+    agents.find((agent) => agent.id === selectedAgent) ?? null,
+  );
+
   // loadToken disambiguates concurrent/superseded loads: each call stamps a
   // token and only the latest may write state. This both guards against a
   // resolve-after-unmount (the effect cleanup bumps the token) and makes Retry
@@ -97,9 +107,13 @@
   // operator sees that before spending a send, not after.
   function agentLabel(agent) {
     const name = agent.name ? agent.name : agent.id;
+    // Fold the role into the option so the picker reads as a cast of personas
+    // ("Ada — Researcher") rather than a list of bare names (RFC 0048 §A). Role
+    // is optional; omit the separator when unset.
+    const named = agent.role ? `${name} — ${agent.role}` : name;
     return agent.status && agent.status !== "healthy"
-      ? `${name} (${agent.status})`
-      : name;
+      ? `${named} (${agent.status})`
+      : named;
   }
 
   async function send() {
@@ -200,6 +214,27 @@
   {:else if agents.length === 0}
     <p class="empty">No personas are registered yet.</p>
   {:else}
+    {#if selectedAgentInfo}
+      <!-- Persona header: gives the conversation a face. Name + role identify
+           the persona; the capability chips say what it's for — all from fields
+           the agent DTO already carries (RFC 0048 amendment §A). -->
+      <header class="persona">
+        <span class="persona-name"
+          >{selectedAgentInfo.name || selectedAgentInfo.id}</span
+        >
+        {#if selectedAgentInfo.role}
+          <span class="persona-role">{selectedAgentInfo.role}</span>
+        {/if}
+        {#if selectedAgentInfo.capabilities && selectedAgentInfo.capabilities.length > 0}
+          <ul class="persona-caps" aria-label="Capabilities">
+            {#each selectedAgentInfo.capabilities as capability (capability)}
+              <li>{capability}</li>
+            {/each}
+          </ul>
+        {/if}
+      </header>
+    {/if}
+
     <ol class="transcript" aria-label="Conversation">
       {#each transcript as turn (turn.id)}
         <li class="turn">
