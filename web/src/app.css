@@ -149,6 +149,48 @@ body {
 
 /* Chat panel (RFC 0048 Phase 1 PR 4). Still deliberately minimal — enough
    structure to read a conversation and reach the composer, no design system. */
+/* Persona switcher row — pinned at the top of the chat panel, mirroring the
+   channel timeline's .channel-picker, so it stays reachable above a growing
+   transcript rather than being buried at the bottom of the composer. The
+   selector and its Exit control sit on one row. */
+.persona-picker {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  max-width: 40rem;
+  margin-bottom: 1rem;
+}
+
+.persona-picker label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.9rem;
+}
+
+.persona-picker select {
+  font: inherit;
+  padding: 0.3rem;
+}
+
+.persona-picker button {
+  font: inherit;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+}
+
+.persona-picker button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Lobby prompt — shown when no persona is selected (a fresh start or after
+   Exit), in place of the conversation. Muted, like the other status lines. */
+.lobby {
+  opacity: 0.7;
+}
+
 .transcript {
   list-style: none;
   margin: 0 0 1rem;
@@ -156,6 +198,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  /* An independent scroll region (like the channel timeline's .timeline) so a
+     long conversation scrolls within the transcript instead of pushing the
+     composer and the top persona switcher out of reach. */
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 .msg p {

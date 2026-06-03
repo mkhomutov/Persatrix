@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 
 	"go.uber.org/zap"
@@ -152,6 +153,14 @@ func (r *InMemoryRegistry) List(_ context.Context) ([]AgentInfo, error) {
 	for _, agent := range r.agents {
 		result = append(result, *deepCopyAgent(agent))
 	}
+	// Sort by ID so List returns a deterministic order. The agents map has a
+	// randomized Go iteration order, so without this the sequence differed on
+	// every call — the web console re-fetches the persona list on each tab switch
+	// (RFC 0048), which reshuffled the dropdown each time. A stable order serves
+	// every consumer (web picker, channel decoration, CLI) from one place.
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].ID < result[j].ID
+	})
 	return result, nil
 }
 
