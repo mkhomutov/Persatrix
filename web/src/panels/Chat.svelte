@@ -8,9 +8,11 @@
   import ScopeSelector from "./ScopeSelector.svelte";
   import OnboardingEmpty from "./OnboardingEmpty.svelte";
   import PersonaHeader from "./PersonaHeader.svelte";
+  import PersonaPicker from "./PersonaPicker.svelte";
   import ChatMessage from "./ChatMessage.svelte";
   import { nav } from "../lib/nav.svelte.js";
   import { selection, pickInitialAgent } from "../lib/selection.svelte.js";
+  import { isChattable } from "../lib/agents.js";
 
   let { userId } = $props();
 
@@ -69,14 +71,7 @@
     agents.find((agent) => agent.id === selectedAgent) ?? null,
   );
 
-  // Task agents (agents.yaml `type: "task"`) run workflow steps and never hold a
-  // conversation, so a chat turn dead-ends in a timeout. They show in the picker
-  // but disabled (extends the §A agent DTO); any non-"task" type — incl. an unset
-  // one from an agent predating the field — stays chattable, so the guard can
-  // never regress a real conversation.
-  function isChattable(agent) {
-    return agent?.type !== "task";
-  }
+  // isChattable / agentLabel live in lib/agents.js, shared with PersonaPicker.
   // selectedAgentChattable gates the composer: false only when a task agent is
   // selected (reachable just when the deployment has no persona to fall back to).
   const selectedAgentChattable = $derived(isChattable(selectedAgentInfo));
@@ -239,28 +234,6 @@
       loadToken++;
     };
   });
-
-  // agentLabel is the picker's display text: the persona's name, falling back to
-  // its id when unnamed (matching the server's own display-name fallback in
-  // chat_handler.go). A non-healthy persona is annotated with its status, since
-  // only a healthy one can actually reply (the chat route 503s otherwise) — the
-  // operator sees that before spending a send, not after.
-  function agentLabel(agent) {
-    const name = agent.name ? agent.name : agent.id;
-    // Fold the role into the option so the picker reads as a cast of personas
-    // ("Ada — Researcher") rather than a list of bare names (RFC 0048 §A). Role
-    // is optional; omit the separator when unset.
-    const named = agent.role ? `${name} — ${agent.role}` : name;
-    // A task agent's row carries the why ("show but explain") rather than its
-    // health — a disabled row can't be sent regardless of status, so the reason
-    // it's disabled is the useful annotation.
-    if (!isChattable(agent)) {
-      return `${named} (task agent — not chattable)`;
-    }
-    return agent.status && agent.status !== "healthy"
-      ? `${named} (${agent.status})`
-      : named;
-  }
 
   async function send() {
     // Guard re-entrancy: the Send button is disabled while a reply is in flight,
@@ -428,55 +401,18 @@
       <code>config/agents.yaml</code> and restart), then re-check.
     </OnboardingEmpty>
   {:else}
-    <!-- Persona switcher pinned at the top of the panel (mirrors the channel
-         timeline's selector-at-top layout). It used to live at the bottom inside
-         the composer, below the transcript — once a conversation grew, the only
-         way to switch persona scrolled off-screen. Kept above the transcript and
-         outside the composer so it stays reachable however long the chat runs.
-         Still `disabled={sending}`: switching persona out from under an in-flight
-         synchronous turn would misattribute the pending reply. -->
-    <div class="persona-picker">
-      <label>
-        Persona
-        <select
-          bind:value={selectedAgent}
-          onchange={onPersonaChange}
-          disabled={sending}
-        >
-          {#if !selectedAgent}
-            <!-- Lobby placeholder: no conversation is open (a fresh start or
-                 after Exit). Disabled so it isn't a re-pickable value; it just
-                 labels the empty selection until the operator chooses a persona. -->
-            <option value="" disabled>Select a persona…</option>
-          {/if}
-          {#each agents as agent (agent.id)}
-            <option value={agent.id} disabled={!isChattable(agent)}
-              >{agentLabel(agent)}</option
-            >
-          {/each}
-        </select>
-      </label>
-      {#if selectedAgent}
-        <!-- Exit leaves the conversation for the persona lobby — the web analogue
-             of quitting the CLI chat REPL. Locked during a turn so it can't
-             strand an in-flight reply. -->
-        <button
-          type="button"
-          class="exit-chat"
-          onclick={exitChat}
-          disabled={sending}>Exit</button
-        >
-      {/if}
-    </div>
+    <!-- Persona switcher + Exit + lobby, pinned at the top of the panel so the
+         switcher stays reachable above a growing transcript (it used to be buried
+         in the composer). Extracted to PersonaPicker for the review-size cap. -->
+    <PersonaPicker
+      bind:selectedAgent
+      {agents}
+      {sending}
+      onChange={onPersonaChange}
+      onExit={exitChat}
+    />
 
-    {#if !selectedAgent}
-      <!-- Lobby: no persona selected (a fresh start, or after Exit). Prompt the
-           operator to pick one; the picker above is the entry point. No header /
-           transcript / composer until a conversation is open. -->
-      <p class="lobby" role="status">
-        Select a persona to start a conversation.
-      </p>
-    {:else}
+    {#if selectedAgent}
       <PersonaHeader
         info={selectedAgentInfo}
         {dmChannelId}
