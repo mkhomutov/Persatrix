@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/svelte";
+import {
+  render,
+  screen,
+  cleanup,
+  fireEvent,
+  waitFor,
+} from "@testing-library/svelte";
 import Chat from "./Chat.svelte";
 import { nav } from "../lib/nav.svelte.js";
 
@@ -99,5 +105,48 @@ describe("Chat panel — §F onboarding + cross-panel continuity", () => {
     expect(
       screen.queryByRole("button", { name: /view in timeline/i }),
     ).toBeNull();
+  });
+
+  it("surfaces 'view in timeline' on the same turn as the first message (§F)", async () => {
+    // The first message of a fresh conversation creates the canonical DM channel
+    // server-side, but the chat response doesn't carry its id. The panel captures
+    // it from history on that turn so the hand-off lights up immediately —
+    // without it, the affordance would stay hidden until the next reseed (a
+    // persona switch or reload), defeating the first-contact goal.
+    window.location.hash = "#/chat";
+    render(Chat, { props: { userId: "local" } });
+
+    // Fresh start: history seeded empty, so no hand-off affordance yet.
+    await waitFor(() => expect(getChatHistory).toHaveBeenCalledTimes(1));
+    expect(
+      screen.queryByRole("button", { name: /view in timeline/i }),
+    ).toBeNull();
+
+    // The send persists the message; the post-send capture reads back the
+    // canonical DM channel id from history (the only source of truth).
+    getChatHistory.mockResolvedValue({
+      messages: [
+        {
+          id: "h1",
+          channel_id: "dm:alice:local",
+          sender_id: "local",
+          content: "hi",
+          timestamp: "2026-06-02T10:00:00Z",
+        },
+      ],
+    });
+
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "hi" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    const link = await screen.findByRole("button", {
+      name: /view in timeline/i,
+    });
+    await fireEvent.click(link);
+
+    expect(nav.targetChannel).toBe("dm:alice:local");
+    expect(window.location.hash).toBe("#/channels");
   });
 });

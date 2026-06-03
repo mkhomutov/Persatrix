@@ -55,13 +55,9 @@
   let historyLoading = $state(false);
   let historyError = $state("");
   let historyToken = 0;
-  // The resolved DM channel id, captured from seeded history when present, for
-  // the §F "view this conversation in the timeline" deep-link (PR F). Empty
-  // until a conversation exists (a fresh persona has no DM yet). NOTE for §F: a
-  // live send into a fresh persona creates the DM server-side but does NOT
-  // populate this — chatResponse carries no channel id — so the deep-link stays
-  // empty until the next reload reseeds from history. §F should surface the id
-  // on the chat response (or re-resolve) rather than rely on a reload.
+  // The resolved DM channel id, for the §F "view in timeline" deep-link. Empty
+  // until a conversation exists; seeded from history on reseed (loadHistory) and
+  // re-resolved after the first live send (see send()).
   let dmChannelId = $state("");
 
   const canSend = $derived(
@@ -321,6 +317,23 @@
         },
       ];
       message = "";
+      // First message of a fresh conversation creates the DM server-side (§F);
+      // chatResponse omits its id, so re-resolve it from history (the source of
+      // truth — DM ids are never hand-built, see channels.CanonicalDMID) to light
+      // up the hand-off this turn. Fire-and-forget + token-guarded: it neither
+      // blocks the composer nor outlives a persona switch, and a failed capture
+      // just leaves the link hidden until the next reseed. Guarded to the first
+      // turn (dmChannelId empty) so steady-state chatting adds no extra fetch.
+      if (!dmChannelId && selectedAgent) {
+        const token = historyToken;
+        getChatHistory(selectedAgent, { userId })
+          .then((r) => {
+            const m = r.messages ?? [];
+            if (token === historyToken && m.length > 0)
+              dmChannelId = m[0].channel_id ?? "";
+          })
+          .catch(() => {});
+      }
     } catch (err) {
       // A user-initiated cancel surfaces as an AbortError (fetch rejecting on
       // the aborted signal, wrapped as a status-0 ApiError with the AbortError
