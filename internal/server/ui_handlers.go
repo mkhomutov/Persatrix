@@ -18,7 +18,22 @@ type uiConfigResponse struct {
 // uiPanelStatus pairs the operator-authored `enabled` toggle with the
 // server-derived `available` flag. `available` is never read from YAML — see
 // [Server.panelAvailable] and the config/ui.yaml schema's additionalProperties:false.
+// `Create` is the optional nested structural-write capability (RFC 0048
+// channel-creation amendment §A): present only for a panel that exposes a create
+// affordance (today, channel_timeline) and omitted (omitempty) everywhere else,
+// so an older client that does not know the key simply shows no create
+// affordance — the §C graceful-degradation contract, unchanged.
 type uiPanelStatus struct {
+	Enabled   bool            `json:"enabled"`
+	Available bool            `json:"available"`
+	Create    *uiCreateStatus `json:"create,omitempty"`
+}
+
+// uiCreateStatus mirrors the panel `{enabled, available}` shape one level down
+// for the create affordance (RFC 0048 channel-creation amendment §A). `Enabled`
+// echoes the operator's create_enabled toggle; `Available` is runtime-derived
+// (the console renders the affordance only when both are true), never authored.
+type uiCreateStatus struct {
 	Enabled   bool `json:"enabled"`
 	Available bool `json:"available"`
 }
@@ -53,6 +68,7 @@ func (s *Server) handleUIConfig(w http.ResponseWriter, _ *http.Request) {
 		panels[name] = uiPanelStatus{
 			Enabled:   toggle.Enabled,
 			Available: s.panelAvailable(name),
+			Create:    s.panelCreate(name, toggle),
 		}
 	}
 
@@ -98,6 +114,26 @@ func (s *Server) panelAvailable(name string) bool {
 		return false
 	default:
 		return false
+	}
+}
+
+// panelCreate reports a panel's structural-write (create) capability, or nil for
+// panels that expose none (RFC 0048 channel-creation amendment §A). Today only
+// channel_timeline carries one — group-channel creation over the already-exposed
+// POST /api/v1/channels. `enabled` echoes the operator's create_enabled toggle;
+// `available` is runtime-derived, mirroring channel_timeline's own availability:
+// true exactly when the channel store is wired (WithChannels). That derivation
+// is the forward-compat hook the amendment §D calls out — pre-auth it rides the
+// localhost surface, and once /ui/context reports authenticated:true (RFC 0039)
+// it becomes the seam where create.available is driven by a capability hint, so
+// the toggle alone can never re-open creation to an unprivileged principal.
+func (s *Server) panelCreate(name string, toggle PanelToggle) *uiCreateStatus {
+	if name != "channel_timeline" {
+		return nil
+	}
+	return &uiCreateStatus{
+		Enabled:   toggle.CreateEnabled,
+		Available: s.channelStore != nil,
 	}
 }
 

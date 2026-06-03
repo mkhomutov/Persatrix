@@ -82,6 +82,14 @@
   const ActiveComponent = $derived(
     activePanel ? COMPONENTS[activePanel.name] : null,
   );
+  // The structural-write (create) affordance renders only when the server reports
+  // the active panel's create capability both enabled (operator opt-in) and
+  // available (subsystem wired) — the same enabled && available gate panels use
+  // (RFC 0048 channel-creation amendment §A). Panels without a create capability
+  // (e.g. chat) get false and ignore the prop.
+  const canCreate = $derived(
+    Boolean(activePanel?.create?.enabled && activePanel?.create?.available),
+  );
 
   $effect(() => {
     let cancelled = false;
@@ -284,7 +292,7 @@
       tabindex="0"
     >
       {#if ActiveComponent}
-        <ActiveComponent {userId} />
+        <ActiveComponent {userId} {canCreate} />
       {:else}
         <p class="boot">This panel isn’t available in this build.</p>
       {/if}

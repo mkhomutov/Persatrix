@@ -242,6 +242,24 @@ export async function getChannelHistory(channelID, { limit, before } = {}) {
   );
 }
 
+// createChannel creates a group channel (POST /api/v1/channels) and returns the
+// stored channel. The server derives the canonical id `group:<name>` from
+// `name` (channel_handlers.go handleCreateChannel), so the caller passes the
+// bare name — prepending `group:` here would yield `group:group:<name>` (RFC
+// 0048 channel-creation amendment §B). `members` is the non-empty
+// `[{ id, respond }]` array the endpoint requires (each id comes from the
+// server's own agent list, never free-typed — amendment §C); `description`
+// rides only when supplied. A `409 CONFLICT` (the `group:<name>` already exists)
+// surfaces as an ApiError whose message carries the server's wording, so the
+// form can show a duplicate-name retry as a clear conflict.
+export async function createChannel({ name, description, members }) {
+  const body = { name, members };
+  if (description) {
+    body.description = description;
+  }
+  return postJSON("/api/v1/channels", body);
+}
+
 // publishMessage posts a human message into a channel
 // (POST /api/v1/channels/{id}/messages) and returns the stored
 // `channelMessageResponse`. `sender_id` is REQUIRED by the handler

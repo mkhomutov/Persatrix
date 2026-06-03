@@ -21,10 +21,20 @@ type UIConfig struct {
 	Panels map[string]PanelToggle `yaml:"panels"`
 }
 
-// PanelToggle is the per-panel YAML entry. Only `enabled` is authored; see
-// [UIConfig] for why `available` lives on the server, not here.
+// PanelToggle is the per-panel YAML entry. `enabled` is the operator's
+// render-the-panel toggle; `create_enabled` is the per-panel structural-write
+// opt-in (RFC 0048 channel-creation amendment §A) — today only the
+// channel_timeline panel honours it (group-channel creation), and it ships dark
+// (defaults false) so an operator must consciously opt in. Both are
+// operator-authored; the companion runtime-derived flags (`available`,
+// `create.available`) live on the server, never here — see [UIConfig].
 type PanelToggle struct {
 	Enabled bool `yaml:"enabled"`
+	// CreateEnabled gates the panel's create affordance. Defined on the shared
+	// toggle (mirroring the shared schema `panel` definition) but read only for
+	// channel_timeline — see [Server.panelCreate]; on any other panel an authored
+	// create_enabled is inert.
+	CreateEnabled bool `yaml:"create_enabled"`
 }
 
 // DefaultUIConfig is the Slice-1 default applied when config/ui.yaml is absent:

@@ -451,6 +451,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		Timestamp:        replyTimestamp.Unix(),
 		AgentDisplayName: displayName,
 		ReplyStatus:      replyStatus,
+		ChannelID:        dm.ID, // resolved DM channel id (GetOrCreateDM) so clients can open it
 	}
 
 	writeJSON(w, resp, http.StatusOK)
