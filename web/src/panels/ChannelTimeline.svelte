@@ -11,7 +11,6 @@
     listChannels,
     getChannelHistory,
     publishMessage,
-    createChannel,
     ApiError,
   } from "../lib/api.js";
   import { channelLabel } from "../lib/format.js";
@@ -21,12 +20,9 @@
   import CreateChannelForm from "./CreateChannelForm.svelte";
   import ChannelMessage from "./ChannelMessage.svelte";
 
-  // canCreate gates the structural-write "New channel" affordance (RFC 0048
-  // channel-creation amendment §A). The shell threads the server's create
-  // capability in already reduced to create.enabled && create.available, so the
-  // panel renders the affordance only on a conscious operator opt-in over a wired
-  // channel store. Defaults false — a client/shell that doesn't pass it shows no
-  // create affordance, the §C graceful-degradation contract.
+  // canCreate gates the "New channel" affordance: the shell passes the create
+  // capability already reduced to create.enabled && create.available (RFC 0048
+  // channel-creation amendment §A). Defaults false — graceful degradation (§C).
   let { userId, canCreate = false } = $props();
 
   // POLL_INTERVAL_MS is the steady-state cadence; on a poll error the delay
@@ -69,26 +65,14 @@
   // free-typed (amendment §C).
   let agents = $state([]);
 
-  // Create-channel form state (amendment §B). The form is collapsed by default
-  // so it never crowds the newcomer's first-contact view. memberChecked and
-  // respondById are keyed by agent id and seeded when the agent list loads, so a
-  // checkbox/policy <select> binds to an existing key; presence-checked drives
-  // the non-empty members array the endpoint requires.
+  // showCreateForm toggles the collapsed "New channel" affordance (amendment
+  // §B); the form itself (CreateChannelForm) owns the draft state and the POST.
   let showCreateForm = $state(false);
-  let createName = $state("");
-  let createDescription = $state("");
-  let memberChecked = $state({});
-  let respondById = $state({});
-  let creating = $state(false);
-  let createError = $state("");
 
-  // seenIds de-dupes the head poll against messages already shown (and against a
-  // just-published echo). Not reactive — it's bookkeeping the render reads
-  // through `messages`, reset whenever the active channel changes. Both it and
-  // `messages` grow unbounded across a long-lived session on a busy channel
-  // (only a channel switch clears them); left uncapped on purpose for Slice 1's
-  // low-traffic localhost surface — a retention cap rides with the keyset
-  // back-fill / push channel later (OQ4), rather than silently dropping the tail.
+  // seenIds de-dupes the head poll against messages already shown (and a
+  // just-published echo). Not reactive; reset on channel switch. Left uncapped on
+  // purpose for Slice 1's low-traffic localhost surface (a retention cap rides
+  // with the keyset back-fill / push channel later, OQ4).
   let seenIds = new Set();
   // pollTimer holds the pending setTimeout; backoffMs is the current poll delay,
   // reset to the base interval on every success.
@@ -112,81 +96,13 @@
     Boolean(selectedChannel) && publishContent.trim().length > 0 && !publishing,
   );
 
-  // The members payload the create call sends: the checked agents, each with its
-  // chosen respond policy (defaulting to when_mentioned). Ids come from the
-  // server's agent list, so the console can never fabricate a participant the
-  // backend does not know (amendment §C).
-  const selectedMembers = $derived(
-    agents
-      .filter((a) => memberChecked[a.id])
-      .map((a) => ({ id: a.id, respond: respondById[a.id] ?? "when_mentioned" })),
-  );
-
-  // Create needs a name AND at least one member — the endpoint rejects an empty
-  // members array with 400, so the form mirrors that precondition rather than
-  // letting the operator submit a guaranteed failure.
-  const canCreateChannel = $derived(
-    createName.trim().length > 0 && selectedMembers.length > 0 && !creating,
-  );
-
-  function openCreate() {
-    createError = "";
-    showCreateForm = true;
-  }
-
-  function resetCreateForm() {
-    createName = "";
-    createDescription = "";
-    memberChecked = Object.fromEntries(agents.map((a) => [a.id, false]));
-    respondById = Object.fromEntries(agents.map((a) => [a.id, "when_mentioned"]));
-  }
-
-  function closeCreate() {
+  // onChannelCreated lands the operator in the channel the form just made: it
+  // reuses loadChannels() via the one-shot nav.targetChannel select-this-channel
+  // hand-off (the same machinery the §F deep-link uses), then collapses the form.
+  function onChannelCreated(channel) {
+    nav.targetChannel = channel?.id ?? "";
     showCreateForm = false;
-    createError = "";
-    resetCreateForm();
-  }
-
-  // submitCreate POSTs the bare name (the server derives group:<name>; prefixing
-  // here would yield group:group:<name>), then on 201 lands the operator in the
-  // channel they just made: it reuses loadChannels() via the one-shot
-  // nav.targetChannel select-this-channel hand-off (the same machinery the §F
-  // deep-link uses), so the new channel is selected on the refreshed picker.
-  async function submitCreate() {
-    if (!canCreateChannel || creating) {
-      return;
-    }
-    const name = createName.trim();
-    const description = createDescription.trim();
-    createError = "";
-    creating = true;
-    try {
-      const channel = await createChannel({
-        name,
-        description: description || undefined,
-        members: selectedMembers,
-      });
-      // Select the newly-created channel on the reload (loadChannels consumes
-      // nav.targetChannel once), then collapse and reset the form.
-      nav.targetChannel = channel?.id ?? "";
-      showCreateForm = false;
-      resetCreateForm();
-      await loadChannels();
-    } catch (err) {
-      // Surface the server envelope verbatim (esp. 409 duplicate group:<name>);
-      // the form stays open so the operator can pick a different name.
-      createError =
-        err instanceof ApiError
-          ? err.message
-          : `The channel could not be created: ${err.message}`;
-    } finally {
-      creating = false;
-    }
-  }
-
-  function onCreateSubmit(event) {
-    event.preventDefault();
-    submitCreate();
+    loadChannels();
   }
 
   function clearPoll() {
@@ -196,9 +112,9 @@
     }
   }
 
-  // scheduleNext arms the next poll, unless the tab is backgrounded — a hidden
-  // tab parks polling entirely (Page Visibility API) and the visibility handler
-  // resumes it. Always clears any pending timer first so callers can't stack two.
+  // scheduleNext arms the next poll, unless the tab is backgrounded (a hidden tab
+  // parks polling; the visibility handler resumes it). Clears any pending timer
+  // first so callers can't stack two.
   function scheduleNext(delay) {
     clearPoll();
     if (typeof document !== "undefined" && document.hidden) {
@@ -212,21 +128,17 @@
   // off delay on error. The token guard drops a result whose channel was
   // switched out mid-flight.
   async function poll() {
-    // Clear (not just null) any armed tick: poll() is invoked both by its own
-    // setTimeout and directly by the visibility handler on resume. A repeat
-    // 'visible' event while a tick is already armed would otherwise orphan that
-    // tick — leaving the browser to fire it later as one extra poll. clearPoll()
-    // is a no-op on the already-elapsed handle when poll() runs from the timer.
+    // Clear (not just null) any armed tick: poll() runs from both its own timer
+    // and the visibility handler, so a repeat 'visible' event would otherwise
+    // orphan an already-armed tick into one extra poll.
     clearPoll();
     const channel = selectedChannel;
     const token = loadToken;
     if (!channel) {
       return;
     }
-    // A tick is already awaiting its fetch (the visibility handler can call
-    // poll() directly mid-flight). Don't fire a second concurrent request — the
-    // in-flight tick reschedules the loop when it settles, so the duplicate buys
-    // nothing and only adds load to the unauthenticated localhost surface.
+    // A tick is already awaiting its fetch; don't fire a second concurrent
+    // request — the in-flight tick reschedules the loop when it settles.
     if (polling) {
       return;
     }
@@ -238,14 +150,10 @@
       if (token !== loadToken) {
         return;
       }
-      // head is newest-first; the unseen ones are the newest, so prepending them
-      // (in their newest-first order) ahead of the existing list keeps the shown
-      // timeline newest-first without re-rendering or re-sorting what's shown.
-      // Note the bound: if more than HEAD_LIMIT messages land between two ticks,
-      // the ones past the head's window (older than the head, newer than what's
-      // shown) are never re-fetched — an acceptable gap for Slice 1's poll-based,
-      // low-traffic localhost surface, to be closed by keyset back-fill or a
-      // push channel later (OQ4).
+      // head is newest-first; prepend the unseen (newest) ones to keep the shown
+      // timeline newest-first without re-sorting. Bound: if more than HEAD_LIMIT
+      // land between two ticks, the overflow is never re-fetched — an acceptable
+      // Slice 1 gap, closed by keyset back-fill / a push channel later (OQ4).
       const fresh = head.filter((m) => !seenIds.has(m.id));
       if (fresh.length > 0) {
         fresh.forEach((m) => seenIds.add(m.id));
@@ -268,9 +176,8 @@
     }
   }
 
-  // loadChannels fetches the channel list and is re-runnable (mount + Retry).
-  // The channelsToken guard drops a superseded resolution (a slow load that
-  // settles after a Retry, or after unmount), mirroring Chat's loadAgents.
+  // loadChannels fetches the channel list and is re-runnable (mount + Retry); the
+  // channelsToken guard drops a superseded resolution (slow load after Retry/unmount).
   function loadChannels() {
     const token = ++channelsToken;
     channelsError = "";
@@ -281,13 +188,9 @@
           return;
         }
         channels = result.channels ?? [];
-        // Honour a cross-panel hand-off (§F): if the chat panel asked to open a
-        // specific DM, select it. The request is one-shot, scoped to the mount
-        // it triggered, so consume it on this successful load whether or not the
-        // channel turned up — leaving a stale intent would surface an unexpected
-        // jump on a later, unrelated mount/Refresh. (A failed load never reaches
-        // here, so the intent still survives to a Retry.) Otherwise default to
-        // the first channel.
+        // Honour a one-shot cross-panel/create hand-off (§F): select the
+        // requested channel if present, consuming the intent on this successful
+        // load (a failed load leaves it for a Retry). Otherwise default to first.
         const requested = nav.targetChannel;
         nav.targetChannel = "";
         if (requested && channels.some((c) => c.id === requested)) {
@@ -310,9 +213,8 @@
       });
   }
 
-  // loadHistory replaces the timeline with the selected channel's history and
-  // (re)starts polling from a clean de-dupe set. Bumping loadToken invalidates
-  // any in-flight fetch/poll from the previous channel.
+  // loadHistory replaces the timeline with the channel's history and (re)starts
+  // polling from a clean de-dupe set; the loadToken bump invalidates prior work.
   function loadHistory(channel) {
     const token = ++loadToken;
     clearPoll();
@@ -322,10 +224,9 @@
     messages = [];
     seenIds = new Set();
     backoffMs = POLL_INTERVAL_MS;
-    // Clear the in-flight flag too: bumping loadToken just stranded any prior
-    // channel's poll (it bails on the token mismatch without rescheduling), so
-    // without this reset that stale tick's flag could make the new channel's
-    // first poll bail on the guard and leave the loop unarmed.
+    // Clear the in-flight flag too: the loadToken bump stranded any prior poll,
+    // so without this reset its stale flag could make the new channel's first
+    // poll bail on the guard and leave the loop unarmed.
     polling = false;
     return getChannelHistory(channel, { limit: HISTORY_LIMIT })
       .then(({ messages: history }) => {
@@ -351,19 +252,16 @@
   }
 
   // retryHistory re-runs the selected channel's load after an initial-load
-  // failure. The poll loop only arms on a successful load, and re-selecting the
-  // same channel fires no onchange, so without this a failed first history fetch
-  // is a dead end (a single-channel console would be stuck until reload). Mirrors
-  // the channel-list Retry; loadHistory's loadToken bump keeps it race-safe.
+  // failure: the poll loop only arms on success and re-selecting the same channel
+  // fires no onchange, so without this a failed first fetch is a dead end.
   function retryHistory() {
     if (selectedChannel) {
       loadHistory(selectedChannel);
     }
   }
 
-  // Load the agent list once for sender-name decoration. Best-effort and
-  // independent of the channel/poll lifecycle: a failure is swallowed (the
-  // timeline still renders raw ids), so this never gates the panel.
+  // Load the agent list once for sender-name decoration (and the create form's
+  // member list). Best-effort: a failure is swallowed and never gates the panel.
   $effect(() => {
     let cancelled = false;
     listAgents()
@@ -371,13 +269,6 @@
         if (cancelled) return;
         agentsById = Object.fromEntries(list.map((agent) => [agent.id, agent]));
         agents = list;
-        // Seed the create-form member maps so each checkbox/policy select binds
-        // to an existing key (default: unchecked, when_mentioned — matching the
-        // server default in handleCreateChannel, amendment §B/OQ3).
-        memberChecked = Object.fromEntries(list.map((a) => [a.id, false]));
-        respondById = Object.fromEntries(
-          list.map((a) => [a.id, "when_mentioned"]),
-        );
       })
       .catch(() => {
         // Decoration only — leave the map empty and fall back to raw ids.
@@ -397,9 +288,8 @@
     };
   });
 
-  // React to the selected channel: each change reloads history and restarts the
-  // poll loop; the cleanup invalidates the prior channel's in-flight work so a
-  // slow fetch can't write to the newly-selected channel.
+  // React to the selected channel: reload history and restart the poll loop; the
+  // cleanup invalidates the prior channel's in-flight work.
   $effect(() => {
     const channel = selectedChannel;
     if (!channel) {
@@ -413,9 +303,8 @@
   });
 
   // Pause polling while the tab is backgrounded and catch up when it returns —
-  // the load-protection contract the RFC calls out for the unauthenticated
-  // surface. Hiding clears the pending timer; revealing polls immediately (then
-  // resumes the cadence) so a returning operator sees fresh messages at once.
+  // the load-protection contract for the unauthenticated surface. Reveal polls
+  // immediately, then resumes the cadence.
   $effect(() => {
     function onVisibility() {
       if (document.hidden) {
@@ -436,14 +325,9 @@
     if (!selectedChannel || content.length === 0) {
       return;
     }
-    // Capture the active channel's load token before the await. The channel
-    // <select> stays enabled during a publish, so the operator can switch
-    // channels (or the panel can unmount) while this POST is in flight. The
-    // publish targets the channel it was issued against (publishMessage reads
-    // selectedChannel now, before the await); if the channel has since changed,
-    // the resolution must not echo the stored message into — nor seed its id
-    // against — the now-current channel. Mirrors the loadToken guard poll() /
-    // loadHistory() apply to their own resolutions.
+    // Capture the load token before the await: the <select> stays enabled during
+    // a publish, so a channel switch mid-flight must not echo this message into
+    // (nor seed its id against) the now-current channel. Mirrors poll()/loadHistory().
     const token = loadToken;
     publishError = "";
     publishing = true;
@@ -453,14 +337,12 @@
         content,
       });
       if (token !== loadToken) {
-        // Superseded by a channel switch (or unmount): drop the echo. The
-        // message persisted in its own channel and surfaces there on that
-        // channel's own load/poll — it must not appear under the new selection.
+        // Superseded by a channel switch: drop the echo (the message persisted
+        // and surfaces on its own channel's load/poll).
         return;
       }
-      // Echo the stored message immediately rather than waiting a poll interval;
-      // the de-dupe set keeps the upcoming poll from re-adding it. The agent
-      // mention fan-out (RFC 0011) still surfaces on a later poll.
+      // Echo the stored message immediately; the de-dupe set keeps the next poll
+      // from re-adding it. The agent mention fan-out (RFC 0011) surfaces later.
       if (stored && stored.id && !seenIds.has(stored.id)) {
         seenIds.add(stored.id);
         messages = [stored, ...messages];
@@ -468,9 +350,8 @@
       publishContent = "";
     } catch (err) {
       if (token !== loadToken) {
-        // A failure for a channel the operator already left is not actionable
-        // here — surfacing it over the new selection (which onChannelChange just
-        // cleared) would read as though the new channel is broken.
+        // A failure for a channel the operator already left isn't actionable —
+        // surfacing it over the new selection would read as if it were broken.
         return;
       }
       publishError =
@@ -487,23 +368,19 @@
     publish();
   }
 
-  // onChannelChange drops a stale publish error when the operator switches
-  // channel — it refers to the prior channel's attempt, so leaving it over the
-  // new selection reads as if the new channel is already broken.
+  // Drop a stale publish error on channel switch — it refers to the prior
+  // channel's attempt and would read as if the new selection were broken.
   function onChannelChange() {
     publishError = "";
   }
 
-  // The wire/internal order is newest-first (poll prepends, publish echoes to the
-  // front); the panel RENDERS oldest-top, newest-bottom — a conversation read
-  // top-down, with the newest message and the publish box co-located at the
-  // bottom (RFC 0048 amendment §D). Reverse a shallow copy for display; the
-  // internal newest-first model and its de-dupe are untouched.
+  // Internal order is newest-first (poll prepends, publish echoes to the front);
+  // the panel RENDERS oldest-top, newest-bottom (RFC 0048 amendment §D). Reverse
+  // a shallow copy for display; the internal model and its de-dupe are untouched.
   const displayMessages = $derived(messages.slice().reverse());
 
-  // Pinned-scroll autoscroll: a new message scrolls the timeline to the bottom
-  // ONLY when the operator is already there. If they have scrolled up to read
-  // history, autoscroll must not yank them back every poll tick (§D caveat).
+  // Pinned-scroll autoscroll: a new message scrolls to the bottom ONLY when the
+  // operator is already there, so reading history isn't yanked away (§D caveat).
   let timelineEl = $state(null);
   let pinnedToBottom = true;
   const PIN_EPSILON_PX = 40;
@@ -515,10 +392,8 @@
     pinnedToBottom = distance < PIN_EPSILON_PX;
   }
 
-  // After the message list changes, stick to the bottom if we were pinned. The
-  // effect reads displayMessages so it re-runs on every append; the pinned check
-  // reflects the scroll position as of the last user scroll, so a reader who
-  // scrolled up is left in place.
+  // After the list changes, stick to the bottom if we were pinned; a reader who
+  // scrolled up (pinnedToBottom false as of the last scroll) is left in place.
   $effect(() => {
     // Touch the reactive length so this effect tracks message changes.
     void displayMessages.length;
@@ -527,8 +402,7 @@
     }
   });
 
-  // onPublishKeydown mirrors the chat composer (§D): Enter posts, Shift+Enter
-  // inserts a newline, so the two write surfaces behave the same.
+  // Mirror the chat composer (§D): Enter posts, Shift+Enter inserts a newline.
   function onPublishKeydown(event) {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
@@ -564,34 +438,24 @@
           {/each}
         </select>
       </label>
-      <!-- Refresh the channel list without a full reload — a new channel (or DM)
-           created since mount appears on demand (§D). -->
+      <!-- Refresh the channel list without a full reload (§D). -->
       <button type="button" class="refresh" onclick={loadChannels}>Refresh</button>
       {#if canCreate}
         <!-- Structural-write affordance (channel-creation amendment §B): opens
-             the collapsed create form. Off unless the server reports the create
-             capability enabled && available. -->
-        <button type="button" class="new-channel" onclick={openCreate}
-          >New channel</button
+             the collapsed create form. -->
+        <button
+          type="button"
+          class="new-channel"
+          onclick={() => (showCreateForm = true)}>New channel</button
         >
       {/if}
     </div>
 
     {#if canCreate && showCreateForm}
-      <!-- Create a group channel over the already-exposed POST /api/v1/channels
-           (amendment §B–§D). Collapsed by default; the panel owns the submit,
-           reload-and-select, and error envelope (see submitCreate). -->
       <CreateChannelForm
         {agents}
-        bind:name={createName}
-        bind:description={createDescription}
-        bind:memberChecked
-        bind:respondById
-        {creating}
-        canSubmit={canCreateChannel}
-        error={createError}
-        onSubmit={onCreateSubmit}
-        onCancel={closeCreate}
+        onCreated={onChannelCreated}
+        onCancel={() => (showCreateForm = false)}
       />
     {/if}
 
