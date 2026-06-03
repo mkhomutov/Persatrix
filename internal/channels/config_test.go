@@ -176,6 +176,60 @@ func TestLoadConfig_AcceptsPositiveMaxCascadeDepth(t *testing.T) {
 	assert.Equal(t, 3, cfg.MaxCascadeDepth)
 }
 
+// TestLoadConfig_FloorControlDefaults — absent floor-control knobs default
+// to off with the canonical 45s per-turn timeout (RFC 0030 amendment D2).
+// PR 1 keeps the knobs inert: nothing consumes them yet, but the loader
+// must produce the documented defaults so PR 2's loop reads a populated
+// value rather than a zero.
+func TestLoadConfig_FloorControlDefaults(t *testing.T) {
+	body := `
+channels:
+  - name: planning
+    members: [alice, bob]
+`
+	cfg, err := LoadConfig(writeYAML(t, body))
+	require.NoError(t, err)
+	require.Len(t, cfg.Channels, 1)
+	assert.False(t, cfg.Channels[0].FloorControl,
+		"floor_control defaults off in PR 1 (flipped on for groups in PR 3)")
+	assert.Equal(t, DefaultFloorTurnTimeoutSeconds, cfg.Channels[0].FloorTurnTimeoutSeconds,
+		"absent floor_turn_timeout_seconds normalizes to the 45s default")
+}
+
+// TestLoadConfig_FloorControlExplicit — operators can opt a channel in and
+// override the per-turn timeout; both pass through to the parsed config.
+func TestLoadConfig_FloorControlExplicit(t *testing.T) {
+	body := `
+channels:
+  - name: planning
+    floor_control: true
+    floor_turn_timeout_seconds: 30
+    members: [alice, bob]
+`
+	cfg, err := LoadConfig(writeYAML(t, body))
+	require.NoError(t, err)
+	require.Len(t, cfg.Channels, 1)
+	assert.True(t, cfg.Channels[0].FloorControl)
+	assert.Equal(t, 30, cfg.Channels[0].FloorTurnTimeoutSeconds)
+}
+
+// TestLoadConfig_RejectsNegativeFloorTurnTimeout — a negative per-turn
+// timeout is an operator typo; reject it at the loader (belt-and-suspenders
+// for the `make validate` minimum:1 schema check), mirroring the
+// max_cascade_depth posture. Zero is the "use default" sentinel and is
+// accepted (normalized to 45).
+func TestLoadConfig_RejectsNegativeFloorTurnTimeout(t *testing.T) {
+	body := `
+channels:
+  - name: planning
+    floor_turn_timeout_seconds: -1
+    members: [alice]
+`
+	_, err := LoadConfig(writeYAML(t, body))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidFloorTurnTimeout)
+}
+
 // TestLoadConfig_RejectsBadChannelName pins PR #231 review Should-Fix #6:
 // the loader's Validate() now compiles and applies the same `name` regex the
 // JSON Schema does (`schemas/channel.schema.json` →
