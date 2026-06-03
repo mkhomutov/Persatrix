@@ -24,7 +24,7 @@ The clean state is **one conversation panel**. The Channels panel already lists 
 - **It is** a console-UX consolidation: retire the Chat *panel*, absorb its DM ergonomics into the Channels panel. Client-side plus the `chat` toggle removal.
 - **It is not** removal of the chat backend façade. `POST /api/v1/agents/{id}/chat` and `GET /api/v1/agents/{id}/chat/history` (slice1-ux §B) **stay** — the consolidated panel uses them under the hood as the DM open/seed/synchronous-reply path. Whether the façade itself is ever deprecated is [RFC 0032](0032-channel-interaction-layer.md)'s OQ 1, sequenced to follow this panel retirement (this amendment removes the façade's in-tree *browser* consumer, leaving only the CLI and out-of-tree callers — which is exactly the precondition RFC 0032 §D's 3b branch needs).
 
-This is the deliberate seam the [console-now/0032-later decision] draws: **panel gone now (v0.3.x), façade fate decided later (RFC 0032, v0.4.0+).**
+This is the deliberate seam the console-now/0032-later decision draws: **panel gone now (v0.3.x), façade fate decided later (RFC 0032, v0.4.0+).**
 
 ## The amended contract
 

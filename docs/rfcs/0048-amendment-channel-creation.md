@@ -6,7 +6,7 @@
 **Trigger**: Operator/tester walk-through of the shipped Slice 1 console: a tester setting up a multi-agent scenario (the console's stated audience — *watch personas interact*) cannot create a group channel from the browser. They must either hand-edit [`config/channels.yaml`](../../config/channels.yaml) and restart the orchestrator, or leave the console for the CLI / a raw `POST`. The "watch personas interact" half of Slice 1 ([RFC 0048 §D](0048-operator-tester-web-console.md#d-slice-1--live-interactions-the-hero)) presupposes a channel exists, but the console offers no path to make one.
 **Supersedes**: nothing. It introduces the console's first **structural write** (channel creation) — a deliberate, scoped exception to [RFC 0048's Slice-1-is-read-and-interact Non-Goal](0048-operator-tester-web-console.md#non-goals) and [§F rule 5](0048-operator-tester-web-console.md#f-auth--multi-tenancy-forward-compatibility) ("write slices are auth-gated by construction"). The exception is documented as a local-mode-only carve-out (§D), ships dark behind a new toggle (§A), and **adds no backend endpoint** — it surfaces the `POST /api/v1/channels` handler that already exists ([`channel_handlers.go`](../../internal/server/channel_handlers.go) `handleCreateChannel`).
 
-> **Note on section references.** This document's own sections are lettered §A–§E. References to the base RFC are always written with the `RFC 0048` prefix (e.g. "RFC 0048 §F"). An unqualified "§D" means *this amendment's* §D.
+> **Note on section references.** This document's own sections are lettered §A–§D. References to the base RFC are always written with the `RFC 0048` prefix (e.g. "RFC 0048 §F"). An unqualified "§D" means *this amendment's* §D.
 
 ---
 
