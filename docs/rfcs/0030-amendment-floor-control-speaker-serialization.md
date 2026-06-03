@@ -4,6 +4,7 @@
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-06-03
+**Decisions**: all five open questions resolved 2026-06-03 — see [Decisions](#decisions-resolved). The design below is implementation-ready.
 **Target**: v0.3.6 (release blocker — brought forward ahead of RFC 0030's other Phase-1 layers)
 **Trigger**: Manual end-to-end testing of multi-persona group channels: when a single message lands in a channel with two or more responding personas, every responder is dispatched **concurrently** and composes its reply against a transcript snapshot that does **not** contain any peer's reply (none exist yet). The result is N overlapping, mutually-blind replies to the same stimulus — a "mess" — plus the re-fanout amplification that motivated the [cascade-depth amendment](0011-amendment-cascade-depth-wire-propagation.md) (F-1). Cascade depth and reply budgets bound *volume*; neither bounds *order*, so the conversation is incoherent even when it is bounded.
 **Supersedes**: RFC 0030 §A sub-problem **(c) "Fair turn-taking"** → *"Per-participant counter, deterministic — reply budget."* That row conflates two mechanisms. A reply **budget** answers "how many turns may a participant take"; it does **not** answer "in what order do concurrent responders speak, and does each see the others." This amendment splits (c) into its two halves and delivers the missing half — **floor control** — as Layer 2.5.
@@ -27,7 +28,7 @@
 - [Files touched (estimated)](#files-touched-estimated)
 - [Test strategy](#test-strategy)
 - [Security considerations](#security-considerations)
-- [Open questions](#open-questions)
+- [Decisions (resolved)](#decisions-resolved)
 - [Related documentation](#related-documentation)
 
 ---
@@ -129,12 +130,12 @@ Single-shot semantics (a persona emitting `tool_call → final_answer` as two pu
 
 A responder's reply re-enters `Publish` → which today calls `fanout` again. If left unchanged, each floor-turn reply would spawn its **own** competing fanout *while the round is still running* — re-introducing the very concurrency this amendment removes.
 
-The reply must be **persisted** (so later responders read it) but its fanout must be **driven by the round loop, not by a parallel re-entrant fanout.** Two candidate mechanisms:
+The reply must be **persisted** (so later responders read it) but its fanout must be **driven by the round loop, not by a parallel re-entrant fanout.** Two candidate mechanisms were considered:
 
-- **(Recommended) Defer fanout for floor-turn replies.** The orchestrator knows it dispatched `r` under an active round on this channel. It marks `r`'s expected reply so that when that reply hits `Publish`, the store commit and `waiter.Notify` still run but `fanout` is **skipped** — the round loop is the sole dispatcher, and it advances to the next responder with `r`'s reply now in history. Cross-*round* cascade (a reply that warrants a *new* round) remains bounded by `cascade_depth` (Layer 0).
-- **(Alternative) Per-channel floor mutex only.** Keep re-entrant fanout but guard all fanout with a per-channel floor lock so rounds cannot overlap. Simpler to reason about, but it serializes *rounds* rather than collapsing the first-round storm — replies still each trigger a fresh round, so the amplification is reduced, not eliminated.
+- **Defer fanout for floor-turn replies.** The orchestrator knows it dispatched `r` under an active round on this channel. It marks `r`'s expected reply so that when that reply hits `Publish`, the store commit and `waiter.Notify` still run but `fanout` is **skipped** — the round loop is the sole dispatcher, and it advances to the next responder with `r`'s reply now in history. Cross-*round* cascade (a reply that warrants a *new* round) remains bounded by `cascade_depth` (Layer 0).
+- **Per-channel floor mutex only.** Keep re-entrant fanout but guard all fanout with a per-channel floor lock so rounds cannot overlap. Simpler to reason about, but it serializes *rounds* rather than collapsing the first-round storm — replies still each trigger a fresh round, so the amplification is reduced, not eliminated.
 
-The recommended option is the one that actually delivers the invariant; the alternative is the fallback if reply-tagging proves fragile. **This is the single most important implementation decision and is called out as [OQ-1](#open-questions).**
+**Decision (D1): defer fanout for floor-turn replies** — it is the only option that actually delivers the [invariant](#the-invariant-this-amendment-establishes); the floor-mutex is the documented fallback if reply-correlation across the REST publish boundary proves fragile in PR 2. The correlation seam is the same `(channelID, senderID)` key `replyWaiter` already matches on, so the orchestrator can recognise a floor-turn reply with the state it already holds for the parked waiter — no new wire field. See [D1](#decisions-resolved).
 
 ## Ordering policy
 
@@ -164,7 +165,7 @@ RFC 0030 is 📋 Proposed (Draft) and its layers are sequenced across v0.3.x →
 
 - Serialized floor loop for multi-responder publishes (orchestrator-side).
 - Reuse of `replyWaiter` for the turn-completion edge; per-turn timeout backstop.
-- Deferred-fanout (or floor-mutex) handling of floor-turn replies (OQ-1).
+- Deferred-fanout handling of floor-turn replies ([D1](#decisions-resolved); floor-mutex fallback).
 - Deterministic ordering (mentioned-first, then existing member order).
 - A per-channel feature flag so the behaviour can be disabled if it regresses (default **on** for group channels, **n/a** for DMs).
 
@@ -184,7 +185,7 @@ A focused, mostly-orchestrator workstream. Each PR is independently reviewable; 
 New `internal/channels/floor_control.go`: a per-channel floor registry (acquire/release, one round at a time) and the deterministic responder-ordering helper (mentioned-first over the existing `GetMembers` order). Unit-tested in isolation. `fanout` not yet rewired. Flag plumbing added, default **off**.
 
 **PR 2 — The floor loop, behind the flag.**
-Rewire `fanout`: when the flag is on and `|responders| >= 2`, run the serialized floor loop (register waiter → dispatch one → await reply-or-timeout → advance) instead of concurrent dispatch. Implement the recommended deferred-fanout handling for floor-turn replies (OQ-1). Single-responder and DM paths unchanged. Integration tests assert ordering, mutual visibility, and no-concurrent-dispatch.
+Rewire `fanout`: when the flag is on and `|responders| >= 2`, run the serialized floor loop (register waiter → dispatch one → await reply-or-timeout → advance) instead of concurrent dispatch. Implement the deferred-fanout handling for floor-turn replies ([D1](#decisions-resolved)); the per-turn floor timeout defaults to **45s** ([D2](#decisions-resolved)). Single-responder and DM paths unchanged. Integration tests assert ordering, mutual visibility, and no-concurrent-dispatch.
 
 **PR 3 — Default the flag on for group channels + docs + manual test.**
 Flip the default; add the `docs/guides/channels.md` "Floor control" subsection; record `docs/manual-tests/MT-CHANNEL-GOV-002.md` (re-run the multi-persona scenario, observe ordered, mutually-aware replies). Update RFC 0030 §B layer table to reference Layer 2.5 as implemented.
@@ -202,7 +203,7 @@ Estimates, not commitments. A full per-PR breakdown lands in `docs/rfcs/0030-pr-
 | Go orchestrator | `internal/channels/fanout.go` | Multi-responder path → serialized floor loop (flag-gated) |
 | Go orchestrator | `internal/channels/router.go` | Defer fanout for floor-turn replies; wire the floor loop to `replyWaiter` |
 | Go orchestrator | `internal/channels/waiter.go` | None expected for the minimal cut (reused as-is) |
-| Config / schema | `config/channels.yaml`, `schemas/channel.schema.json` | Per-channel `floor_control` flag + per-turn timeout override |
+| Config / schema | `config/channels.yaml`, `schemas/channel.schema.json` | Per-channel `floor_control` flag + `floor_turn_timeout_seconds` (default 45s, D2) |
 | Observability | `internal/observability/metrics/channel_instruments.go` | PR 4: floor-turn / round-duration instruments |
 | Docs | `docs/guides/channels.md`, `docs/manual-tests/MT-CHANNEL-GOV-002.md` | Operator note + manual-test record |
 | Tests | `internal/channels/*_test.go` | Floor registry, ordering, loop, timeout, deferred-fanout |
@@ -226,25 +227,31 @@ Estimates, not commitments. A full per-PR breakdown lands in `docs/rfcs/0030-pr-
 
 ## Security considerations
 
-- **Floor stall / DoS.** A responder that holds the floor (slow or wedged LLM) must not freeze the channel. The per-turn timeout (reusing the [`channelFanoutPerRecipientTimeout`](../../internal/channels/fanout.go) shape) fail-opens by *advancing* the loop — a stalled responder loses its turn, the round continues. The floor is per-channel, so one channel's stall cannot block another.
+- **Floor stall / DoS.** A responder that holds the floor (slow or wedged LLM) must not freeze the channel. A dedicated `floor_turn_timeout_seconds` (default 45s — D2; distinct from the 5s [`channelFanoutPerRecipientTimeout`](../../internal/channels/fanout.go) stuck-dial guard) fail-opens by *advancing* the loop — a stalled responder loses its turn, the round continues. The floor is per-channel, so one channel's stall cannot block another.
 - **No new principal or permission.** Floor control is a delivery-ordering change inside the existing fanout path. It introduces no new role, capability, or trust boundary (contrast Layer 5's moderator).
 - **Latency is the explicit trade.** Responders go serial: round wall-clock is the *sum* of turn latencies, not the *max*. This is the deliberate price of coherence, bounded by the per-turn timeout and (future) a responder-per-round cap. It is observable via the PR 4 histogram and reversible via the feature flag.
 - **In-process floor state.** Like `replyWaiter` itself ([waiter.go scaling note](../../internal/channels/waiter.go)), the floor registry is in-process and single-replica — consistent with v0.3.x's single-orchestrator deployment. Horizontal scale would need a cross-process floor primitive, flagged for the same future rollout that `replyWaiter` already defers.
 
-## Open questions
+## Decisions (resolved)
 
-1. **OQ-1: Nested-reply handling — deferred-fanout vs floor-mutex.** The recommended deferred-fanout option collapses the first-round storm and delivers the invariant; the floor-mutex alternative is simpler but only reduces amplification. *Lean: deferred-fanout,* with floor-mutex as the fallback if reply-tagging proves fragile across the REST publish boundary. **Gates PR 2.**
-2. **OQ-2: Per-turn timeout default.** The existing per-recipient timeout is 5s (a stuck-dial guard). A floor turn includes a full LLM round-trip, so 5s is too tight. *Lean: a separate, larger floor-turn timeout (e.g. 30–60s), config-overridable;* calibrate from the PR 4 histogram.
-3. **OQ-3: Mid-round mention reordering.** If responder A's reply `@`-mentions a not-yet-spoken member D who is already later in the queue, should D be promoted? *Lean: no for v0.3.6* — keep the round's order fixed at round start; mention-driven promotion is a bidding-adjacent refinement for RFC 0030 proper.
-4. **OQ-4: Responder-per-round cap.** Should a round dispatch *all* eligible responders or cap at K to bound latency on large channels? *Lean: no hard cap in v0.3.6* (typical channels are small; Layer 0/2 still bound the worst case); revisit with the latency histogram.
-5. **OQ-5: Interaction scoping.** Floor control keys off `(channel_id, stimulus)` because RFC 0020 interactions are not wired on the Go side. When they land (RFC 0030 Phase 1 / OQ-10), floor state should re-key to `interaction_id` for consistency with Layers 1/2/4 — a clean follow-up, not a v0.3.6 dependency.
+The five open questions raised at proposal were resolved on 2026-06-03. The design above already reflects them; they are recorded here with rationale so the choices are reviewable and revisitable.
+
+**D1 — Nested-reply handling: defer fanout for floor-turn replies.** *(was OQ-1; gated PR 2.)* The round loop is the sole dispatcher; a floor-turn reply is persisted and `Notify`-ed but its `fanout` is skipped, so the first-round storm is *collapsed*, not merely bounded. The per-channel floor mutex is the documented fallback if reply-correlation proves fragile in PR 2. Rationale: only deferred-fanout delivers the [invariant](#the-invariant-this-amendment-establishes); the correlation reuses the `(channelID, senderID)` key `replyWaiter` already holds, so no new wire field is needed. See [§Nested-reply handling](#nested-reply-handling--the-central-decision).
+
+**D2 — Per-turn floor timeout: 45s default, config-overridable.** *(was OQ-2.)* The existing 5s per-recipient timeout is a stuck-dial guard and is far too tight for a turn that includes a full LLM round-trip. Floor control gets its own `floor_turn_timeout_seconds` (default **45s**) on the per-channel config, distinct from `channelFanoutPerRecipientTimeout`. Rationale: 45s comfortably covers a normal persona turn while still bounding a wedged floor-holder; the PR 4 round-duration histogram calibrates it against real workloads.
+
+**D3 — Mid-round mention reordering: no; order is fixed at round start.** *(was OQ-3.)* If responder A's reply `@`-mentions a not-yet-spoken member already later in the queue, that member is **not** promoted — the round's order is frozen when the round opens. Rationale: a stable, predictable order is the v0.3.6 contract; mention-driven promotion is a bidding-adjacent refinement that belongs with the relevance-ordering work deferred to RFC 0030 proper. (A mention of a member *not* in the round still reaches them as the next stimulus, unchanged.)
+
+**D4 — Responder-per-round cap: none in v0.3.6.** *(was OQ-4.)* A round dispatches *all* eligible responders. Rationale: typical channels are small, and Layers 0 (cascade depth) and 2 (reply budget, when it lands) already bound the worst case; a premature cap would silently truncate a legitimate multi-party round. The PR 4 latency histogram is the trigger to revisit — if large-channel round wall-clock becomes visible, a configurable `max_responders_per_round` is the additive follow-up.
+
+**D5 — Interaction scoping: deferred; key off `(channel_id, stimulus)` for v0.3.6.** *(was OQ-5.)* Floor state is keyed by `(channel_id, stimulus message)`, not `interaction_id`, because RFC 0020 interactions are not wired on the Go channel side. When they land (RFC 0030 Phase 1 / [OQ-10](0030-multi-agent-conversation-governance.md#open-questions)), floor state should re-key to `interaction_id` for consistency with Layers 1/2/4. Rationale: this is a clean, mechanical follow-up, not a v0.3.6 dependency — gating the blocker fix on unbuilt interaction plumbing would defeat the purpose of bringing it forward.
 
 ## Related documentation
 
 - [RFC 0030 — Multi-Agent Conversation Governance](0030-multi-agent-conversation-governance.md) — the parent RFC; this amendment adds its Layer 2.5 and splits sub-problem (c).
 - [RFC 0011 Amendment — Cascade-Depth Wire Propagation](0011-amendment-cascade-depth-wire-propagation.md) — Layer 0; the precedent for a manual-testing-driven blocker amendment landed ahead of its parent RFC.
 - [RFC 0011 — Channels & Internal Agent Messaging](0011-channels-bridges.md) — the channels stack and the response gate (Layer 3).
-- [RFC 0020 — Interaction Lifecycle](0020-interaction-lifecycle.md) — the scope floor state will re-key to once it is wired on the Go side (OQ-5).
+- [RFC 0020 — Interaction Lifecycle](0020-interaction-lifecycle.md) — the scope floor state will re-key to once it is wired on the Go side ([D5](#decisions-resolved)).
 - [`internal/channels/fanout.go`](../../internal/channels/fanout.go) — the concurrent dispatch this amendment serializes.
 - [`internal/channels/waiter.go`](../../internal/channels/waiter.go) — the `replyWaiter` reused as the turn-completion edge.
 - [`internal/channels/sqlite_query.go`](../../internal/channels/sqlite_query.go) — `GetMembers`, the deterministic member order the floor loop reuses.
