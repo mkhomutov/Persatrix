@@ -386,7 +386,7 @@
   {:else}
     {#if agents.length > 0}
       <!-- DM entry point (§B): pick a persona to start/open a direct message.
-           The lobby prompt is suppressed — the channel timeline fills the body
+           No lobby prompt over the picker — the channel timeline fills the body
            when no DM is open. -->
       <PersonaPicker
         bind:selectedAgent
@@ -394,7 +394,6 @@
         {sending}
         onChange={onPersonaPick}
         onExit={exitDM}
-        showLobby={false}
       />
     {/if}
 

@@ -234,6 +234,21 @@ describe("Channels panel — DM mode (§B)", () => {
     expect(screen.getByRole("button", { name: /post/i })).toBeTruthy();
   });
 
+  it("never shows the standalone-Chat lobby prompt — the timeline fills the body (§B)", async () => {
+    // The consolidated panel has two entry points, so an unselected persona is
+    // NOT a dead end: the group timeline shows, not the Chat panel's "pick a
+    // persona" lobby. Guards the showLobby removal — this state must stay
+    // lobby-free however the picker is built.
+    render(ChannelTimeline, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "General" });
+
+    // Persona picker present (an entry point), but no lobby prompt over it.
+    expect(screen.getByRole("combobox", { name: /persona/i })).toBeTruthy();
+    expect(
+      screen.queryByText(/select a persona to start a conversation/i),
+    ).toBeNull();
+  });
+
   it("resumes a remembered DM across a remount (sticky selection §B)", async () => {
     // The rehomed sticky selection re-opens a deliberately-chosen DM after the
     // unmount a tab switch causes, rather than snapping back to the group view.

@@ -1,20 +1,15 @@
 <script>
-  // Persona switcher + Exit + lobby (extracted to keep the conversation panel
-  // under the review-size cap, mirroring PublishComposer). Pinned at the top of
-  // the panel (like the channel timeline's selector-at-top layout) so it stays
-  // reachable above a growing transcript rather than buried in the composer.
+  // Persona switcher + Exit (extracted to keep the conversation panel under the
+  // review-size cap, mirroring PublishComposer). Pinned at the top of the panel
+  // (like the channel timeline's selector-at-top layout) so it stays reachable
+  // above a growing transcript rather than buried in the composer.
   //
   // selectedAgent — bound to the panel's selection ("" = no conversation open).
   // agents — the persona list to offer.
   // sending — true while a turn is in flight; locks the controls so a switch or
   //   exit can't strand the pending reply.
   // onChange — user-driven persona change (records the sticky selection upstream).
-  // onExit — leave the conversation for the lobby.
-  // showLobby — render the "select a persona" lobby prompt + placeholder option
-  //   when no persona is selected (true for the standalone Chat panel, where the
-  //   picker IS the panel). The consolidated Channels panel passes false: there
-  //   the picker is one of two entry points and the group-channel timeline (not a
-  //   lobby prompt) fills the body when no DM is open.
+  // onExit — leave the conversation (clears the selection back to the empty state).
   import { isChattable, agentLabel } from "../lib/agents.js";
 
   let {
@@ -23,7 +18,6 @@
     sending,
     onChange,
     onExit,
-    showLobby = true,
   } = $props();
 </script>
 
@@ -53,11 +47,3 @@
     >
   {/if}
 </div>
-
-{#if showLobby && !selectedAgent}
-  <!-- Lobby: no persona selected. Prompt the operator to pick one; the picker
-       above is the entry point. No header / transcript / composer until a
-       conversation is open. Suppressed on the consolidated Channels panel
-       (showLobby=false), where the group-channel timeline fills the body. -->
-  <p class="lobby" role="status">Select a persona to start a conversation.</p>
-{/if}

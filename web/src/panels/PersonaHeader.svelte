@@ -2,7 +2,7 @@
   // Persona header (RFC 0048 amendment §A): gives the conversation a face. Name +
   // role identify the persona and the capability chips say what it's for — all
   // from fields the agent DTO already carries (§A). Rendered above a DM in the
-  // consolidated Channels panel (and the standalone Chat panel until it retires).
+  // consolidated Channels panel — the sole conversation surface now.
   //
   // The §F "view in timeline" deep-link this header used to carry is gone
   // (RFC 0048 chat-panel-retirement amendment §C): a DM IS a channel selection in
