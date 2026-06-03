@@ -179,6 +179,8 @@ RFC 0030 is 📋 Proposed (Draft) and its layers are sequenced across v0.3.x →
 
 ## Implementation plan (PR sequence)
 
+> The authoritative, per-PR breakdown — file lists, scope tables, test obligations, and status hygiene — lives in **[`0030-amendment-floor-control-pr-plan.md`](0030-amendment-floor-control-pr-plan.md)**. The summary below is the shape; the plan doc is the workstream.
+
 A focused, mostly-orchestrator workstream. Each PR is independently reviewable; the feature is dark until PR 3 flips the flag default.
 
 **PR 1 — Floor registry + ordering (no behaviour change).**
@@ -195,7 +197,7 @@ Flip the default; add the `docs/guides/channels.md` "Floor control" subsection; 
 
 ## Files touched (estimated)
 
-Estimates, not commitments. A full per-PR breakdown lands in `docs/rfcs/0030-pr-plan.md` if RFC 0030's broader Phase 1 proceeds; this amendment's PRs can also stand alone.
+Estimates, not commitments. The authoritative per-PR breakdown is in [`0030-amendment-floor-control-pr-plan.md`](0030-amendment-floor-control-pr-plan.md).
 
 | Component | Files | Change |
 |-----------|-------|--------|
@@ -248,6 +250,7 @@ The five open questions raised at proposal were resolved on 2026-06-03. The desi
 
 ## Related documentation
 
+- [RFC 0030 Floor-Control Amendment — PR Implementation Plan](0030-amendment-floor-control-pr-plan.md) — the authoritative per-PR workstream implementing this amendment.
 - [RFC 0030 — Multi-Agent Conversation Governance](0030-multi-agent-conversation-governance.md) — the parent RFC; this amendment adds its Layer 2.5 and splits sub-problem (c).
 - [RFC 0011 Amendment — Cascade-Depth Wire Propagation](0011-amendment-cascade-depth-wire-propagation.md) — Layer 0; the precedent for a manual-testing-driven blocker amendment landed ahead of its parent RFC.
 - [RFC 0011 — Channels & Internal Agent Messaging](0011-channels-bridges.md) — the channels stack and the response gate (Layer 3).

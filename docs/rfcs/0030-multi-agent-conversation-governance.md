@@ -560,7 +560,7 @@ This RFC is a **draft for discussion**. Before any PRs land:
 
 - [RFC 0011 — Channels & Internal Agent Messaging](0011-channels-bridges.md) — the channels stack this RFC governs.
 - [RFC 0011 Amendment — Cascade-Depth Wire Propagation](0011-amendment-cascade-depth-wire-propagation.md) — Layer 0 of this RFC.
-- [RFC 0030 Amendment — Floor Control / Speaker Serialization](0030-amendment-floor-control-speaker-serialization.md) — Layer 2.5; the ordering half of sub-problem (c), brought forward to v0.3.6.
+- [RFC 0030 Amendment — Floor Control / Speaker Serialization](0030-amendment-floor-control-speaker-serialization.md) — Layer 2.5; the ordering half of sub-problem (c), brought forward to v0.3.6. Its [PR plan](0030-amendment-floor-control-pr-plan.md) is the implementation workstream.
 - [RFC 0020 — Interaction Lifecycle](0020-interaction-lifecycle.md) — defines the scope ("conversation") this RFC governs.
 - [RFC 0023 — LLM Call Leasing](0023-llm-call-leasing.md) — provides the cost-ceiling primitive (Layer 1).
 - [RFC 0024 — Event-Driven Agent Scheduling](0024-event-driven-scheduling.md) — provides the moderator wake mechanism (Phase 2).
