@@ -74,13 +74,18 @@ async function getJSON(path) {
 // envelope is surfaced as the ApiError (so the panel shows the backend's
 // wording); a transport failure is status 0 with the cause preserved, matching
 // getJSON's boot-path contract.
-async function postJSON(path, body) {
+async function postJSON(path, body, { signal } = {}) {
   let response;
   try {
     response = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      // An optional AbortSignal lets a caller cancel an in-flight request (the
+      // chat panel wires this to a Cancel control so a 30 s synchronous turn is
+      // escapable — RFC 0048 amendment §D). When the caller aborts, fetch
+      // rejects with an AbortError, surfaced below as a status-0 ApiError.
+      signal,
     });
   } catch (cause) {
     throw new ApiError(`network error posting ${path}`, 0, { cause });
@@ -134,7 +139,10 @@ export async function listAgents() {
 //   - `session_id` / `epoch_id` ride only when supplied, so an unset selector
 //     leaves the orchestrator's boot defaults intact (RFC 0031 / ISSUE-0085)
 //     rather than pinning the conversation to an empty override.
-export async function sendChat(agentID, { message, userId, sessionId, epochId }) {
+export async function sendChat(
+  agentID,
+  { message, userId, sessionId, epochId, signal },
+) {
   const body = { message, user_id: userId, participant_type: "user" };
   if (sessionId) {
     body.session_id = sessionId;
@@ -146,7 +154,26 @@ export async function sendChat(agentID, { message, userId, sessionId, epochId })
   // own agent list today (a constrained registry key), but encoding keeps the
   // request pinned to the /agents/{id}/chat route for any id, instead of
   // relying on that assumption holding.
-  return postJSON(`/api/v1/agents/${encodeURIComponent(agentID)}/chat`, body);
+  return postJSON(`/api/v1/agents/${encodeURIComponent(agentID)}/chat`, body, {
+    signal,
+  });
+}
+
+// listSessions fetches the labeled operator sessions (GET /api/v1/sessions) the
+// chat panel offers as a dropdown, so the v0.3.5 isolation story is drivable
+// from the browser without leaving for the CLI to find a session id (RFC 0048
+// amendment §C). Returns the `listSessionsResponse` envelope ({sessions}); each
+// entry is {id, label?, created_at, archived}. A 503 (session registry unwired)
+// surfaces as an ApiError so the panel can degrade to free-text entry.
+export async function listSessions() {
+  return getJSON("/api/v1/sessions");
+}
+
+// createSession mints a labeled session (POST /api/v1/sessions) and returns the
+// stored `sessionResponse`. `label` is required server-side; the panel selects
+// the returned id after creating.
+export async function createSession(label) {
+  return postJSON("/api/v1/sessions", { label });
 }
 
 // getChatHistory resumes a conversation read-only

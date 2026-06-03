@@ -22,12 +22,16 @@ vi.mock("../lib/api.js", () => ({
   listAgents: vi.fn(),
   sendChat: vi.fn(),
   getChatHistory: vi.fn(),
+  listSessions: vi.fn(),
+  createSession: vi.fn(),
 }));
 
 import {
   listAgents,
   sendChat,
   getChatHistory,
+  listSessions,
+  createSession,
   ApiError,
 } from "../lib/api.js";
 
@@ -51,8 +55,13 @@ function reply(overrides = {}) {
 beforeEach(() => {
   listAgents.mockResolvedValue(AGENTS);
   sendChat.mockResolvedValue(reply());
-  // No prior conversation by default (200-empty fresh start, §B).
+  // Default to no prior conversation (200-empty fresh start, §B). Tests that
+  // exercise resume override this with a seeded history.
   getChatHistory.mockResolvedValue({ messages: [] });
+  // Default to an available-but-empty session registry (§C). Tests that need
+  // the free-text degradation reject this instead.
+  listSessions.mockResolvedValue({ sessions: [] });
+  createSession.mockResolvedValue({ id: "sess-new", label: "New" });
 });
 
 afterEach(() => {
@@ -118,10 +127,10 @@ describe("Chat panel", () => {
     await fireEvent.click(screen.getByRole("button", { name: /send/i }));
 
     await waitFor(() => {
-      expect(sendChat).toHaveBeenCalledWith("bob", {
-        message: "Hi Bob",
-        userId: "local",
-      });
+      expect(sendChat).toHaveBeenCalledWith(
+        "bob",
+        expect.objectContaining({ message: "Hi Bob", userId: "local" }),
+      );
     });
   });
 
@@ -261,33 +270,6 @@ describe("Chat panel", () => {
     expect(alert.textContent).toMatch(/maximum length/i);
     // The panel stays usable: the message box and send control are still there.
     expect(screen.getByRole("textbox", { name: /message/i })).toBeTruthy();
-  });
-
-  it("passes the optional session and epoch overrides through to the request", async () => {
-    // The chat API already accepts session_id / epoch_id (RFC 0031 / ISSUE-0085);
-    // surfacing them quietly demonstrates the v0.3.5 isolation story.
-    render(Chat, { props: { userId: "local" } });
-    await screen.findByRole("option", { name: "Alice" });
-
-    await fireEvent.input(screen.getByRole("textbox", { name: /session/i }), {
-      target: { value: "sess-7" },
-    });
-    await fireEvent.input(screen.getByRole("textbox", { name: /epoch/i }), {
-      target: { value: "ep-3" },
-    });
-    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
-      target: { value: "Hi" },
-    });
-    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
-
-    await waitFor(() => {
-      expect(sendChat).toHaveBeenCalledWith("alice", {
-        message: "Hi",
-        userId: "local",
-        sessionId: "sess-7",
-        epochId: "ep-3",
-      });
-    });
   });
 
   it("acts as the context principal and offers no free-text user field", async () => {
@@ -472,29 +454,5 @@ describe("Chat panel", () => {
     });
 
     expect(screen.queryByRole("alert")).toBeNull();
-  });
-
-  it("annotates a transcript turn with the scope overrides it was sent under", async () => {
-    // The override inputs stay editable between turns, so turns sent under
-    // different session/epoch scopes can interleave in one transcript. Record
-    // the scope each turn actually used so the isolation story (RFC 0031 /
-    // ISSUE-0085) is visible per-turn rather than silent. A turn with no
-    // override carries no annotation (covered by the plain-reply tests above).
-    render(Chat, { props: { userId: "local" } });
-    await screen.findByRole("option", { name: "Alice" });
-
-    await fireEvent.input(screen.getByRole("textbox", { name: /session/i }), {
-      target: { value: "sess-7" },
-    });
-    await fireEvent.input(screen.getByRole("textbox", { name: /epoch/i }), {
-      target: { value: "ep-3" },
-    });
-    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
-      target: { value: "Hi" },
-    });
-    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
-
-    expect(await screen.findByText(/session: sess-7/i)).toBeTruthy();
-    expect(screen.getByText(/epoch: ep-3/i)).toBeTruthy();
   });
 });

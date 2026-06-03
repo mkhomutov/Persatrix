@@ -88,14 +88,15 @@ describe("Channel timeline panel", () => {
     expect(listChannels).toHaveBeenCalledOnce();
   });
 
-  it("renders the selected channel's history newest-first", async () => {
+  it("renders the channel's history conversational (oldest-top, newest-bottom)", async () => {
     render(ChannelTimeline, { props: { userId: "local" } });
 
-    // The default channel's history loads; the two messages render with the
-    // newest (m2/"second") before the older (m1/"first").
+    // The wire is newest-first (m2/"second" before m1/"first"); the panel
+    // renders it conversational — oldest at the top, newest at the bottom
+    // (RFC 0048 amendment §D).
     const items = await screen.findAllByRole("listitem");
-    expect(items[0].textContent).toMatch(/second/);
-    expect(items[1].textContent).toMatch(/first/);
+    expect(items[0].textContent).toMatch(/first/);
+    expect(items[1].textContent).toMatch(/second/);
   });
 
   it("maps sender ids to names and marks the operator's own posts as 'You'", async () => {
@@ -276,9 +277,11 @@ describe("Channel timeline panel", () => {
     expect(getChannelHistory.mock.calls.length).toBeGreaterThan(initialCalls);
     await vi.waitFor(() => {
       const items = screen.getAllByRole("listitem");
-      // m3 prepended ahead of the existing two; still newest-first; no dup.
+      // m3 is the newest, so in conversational (oldest-top) render it lands at
+      // the BOTTOM; no duplicate of the already-seen m2/m1.
       expect(items.length).toBe(3);
-      expect(items[0].textContent).toMatch(/third/);
+      expect(items[2].textContent).toMatch(/third/);
+      expect(items[0].textContent).toMatch(/first/);
     });
     // The head poll passes a limit (does not re-fetch unbounded history).
     const lastCall = getChannelHistory.mock.calls.at(-1);

@@ -34,6 +34,13 @@ body {
   opacity: 0.8;
 }
 
+.version {
+  margin-left: 0.5rem;
+  font-weight: 400;
+  font-size: 0.8rem;
+  opacity: 0.6;
+}
+
 .tabs {
   display: flex;
   gap: 0.25rem;
@@ -254,6 +261,69 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  /* An independent scroll region so the conversational order (oldest-top) can
+     autoscroll to the newest at the bottom without scrolling the whole page,
+     and the pinned-scroll guard has a container to measure (§D). */
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* Channel picker row: the selector and its Refresh control side by side. */
+.channel-picker {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  max-width: 40rem;
+  margin-bottom: 1rem;
+}
+
+.channel-picker label,
+.new-session label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.9rem;
+}
+
+.channel-picker label {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.channel-picker select,
+.new-session input {
+  font: inherit;
+  padding: 0.3rem;
+}
+
+.refresh,
+.cancel {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+}
+
+.cancel {
+  margin-left: 0.5rem;
+}
+
+/* Inline "new session" create (§C): a label input beside its Create button. */
+.new-session {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.new-session label {
+  flex: 1;
+}
+
+.new-session button {
+  font: inherit;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
 }
 
 .message {

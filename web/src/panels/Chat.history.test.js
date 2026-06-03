@@ -17,9 +17,17 @@ vi.mock("../lib/api.js", () => ({
   listAgents: vi.fn(),
   sendChat: vi.fn(),
   getChatHistory: vi.fn(),
+  listSessions: vi.fn(),
+  createSession: vi.fn(),
 }));
 
-import { listAgents, sendChat, getChatHistory } from "../lib/api.js";
+import {
+  listAgents,
+  sendChat,
+  getChatHistory,
+  listSessions,
+  createSession,
+} from "../lib/api.js";
 
 const AGENTS = [
   { id: "alice", name: "Alice", status: "healthy" },
@@ -32,6 +40,10 @@ beforeEach(() => {
   // Default to no prior conversation (200-empty fresh start, §B); the resume
   // test overrides this with a seeded history.
   getChatHistory.mockResolvedValue({ messages: [] });
+  // The composer's session selector (§C) loads on mount; an available-but-empty
+  // registry keeps these history-seed tests independent of the dropdown wiring.
+  listSessions.mockResolvedValue({ sessions: [] });
+  createSession.mockResolvedValue({ id: "sess-new", label: "New" });
 });
 
 afterEach(() => {

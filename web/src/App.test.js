@@ -23,6 +23,9 @@ vi.mock("./lib/api.js", () => ({
   loadBootstrap: vi.fn(),
   listAgents: vi.fn(() => Promise.resolve([])),
   sendChat: vi.fn(),
+  getChatHistory: vi.fn(() => Promise.resolve({ messages: [] })),
+  listSessions: vi.fn(() => Promise.resolve({ sessions: [] })),
+  createSession: vi.fn(),
   listChannels: vi.fn(() => Promise.resolve({ channels: [] })),
   getChannelHistory: vi.fn(() => Promise.resolve({ messages: [] })),
   publishMessage: vi.fn(),
@@ -85,6 +88,40 @@ describe("App shell boot", () => {
     // RFC §F rule 1: identity comes from /ui/context, so the shell offers no
     // user-id input the operator could type into.
     expect(container.querySelector('input[name="user_id"]')).toBeNull();
+  });
+
+  it("surfaces the orchestrator build version from config.build.version", async () => {
+    // The topbar shows which orchestrator build the operator is driving (RFC 0048
+    // amendment §D), read from /ui/config's build.version. Titled so the chip's
+    // source is unambiguous.
+    loadBootstrap.mockResolvedValue({
+      config: {
+        build: { version: "0.3.6" },
+        panels: { chat: { enabled: true, available: true } },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    await waitFor(() => {
+      const chip = screen.getByTitle("Orchestrator build");
+      expect(chip.textContent.trim()).toBe("v0.3.6");
+    });
+  });
+
+  it("omits the version chip when the config carries no build version", async () => {
+    // build.version is optional; a payload without it shows no chip rather than a
+    // bare "v" placeholder.
+    loadBootstrap.mockResolvedValue({
+      config: { panels: { chat: { enabled: true, available: true } } },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    await screen.findByRole("tab", { name: /chat/i });
+    expect(screen.queryByTitle("Orchestrator build")).toBeNull();
   });
 
   it("shows a boot-error state when the backend is unreachable", async () => {

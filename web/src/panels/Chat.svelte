@@ -4,12 +4,9 @@
   // pure render-over-existing-API. The shell threads in the /ui/context-derived
   // userId (RFC §F single identity source), so the panel never prompts for or
   // hard-codes a user.
-  import {
-    listAgents,
-    sendChat,
-    getChatHistory,
-    ApiError,
-  } from "../lib/api.js";
+  import { listAgents, sendChat, getChatHistory, ApiError } from "../lib/api.js";
+  import { formatTimestamp } from "../lib/format.js";
+  import ScopeSelector from "./ScopeSelector.svelte";
 
   let { userId } = $props();
 
@@ -33,6 +30,10 @@
   let epochId = $state("");
   let sending = $state(false);
   let sendError = $state("");
+  // chatController backs the abortable turn (§D): a synchronous chat can block
+  // up to the 30s server timeout, so the in-flight turn is cancellable. Held
+  // across the await so the Cancel control can abort the live fetch.
+  let chatController = null;
   // The transcript is a flat, conversational (oldest-top) message list — the
   // shape RFC 0048 amendment §B migrates to. Each entry is one message:
   //   { id, fromUser, who, content, status?, timestamp, session?, epoch? }
@@ -155,12 +156,22 @@
     };
   });
 
-  // formatTimestamp renders the wire timestamp (RFC-3339 UTC) as a readable
-  // local time, mirroring the channel timeline. An unparseable value falls back
-  // to the raw string rather than rendering "Invalid Date".
-  function formatTimestamp(ts) {
-    const date = new Date(ts);
-    return Number.isNaN(date.getTime()) ? ts : date.toLocaleString();
+  // onMessageKeydown wires the universal chat idiom (§D): Enter sends,
+  // Shift+Enter inserts a newline. Without this the <textarea> swallows Enter and
+  // the button is the only send path. IME composition (event.isComposing) is left
+  // alone so Enter can commit a candidate without firing a send.
+  function onMessageKeydown(event) {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      send();
+    }
+  }
+
+  // cancelSend aborts the in-flight turn (§D). The fetch rejects with an
+  // AbortError, which send() recognises and treats as a quiet cancellation
+  // rather than an error.
+  function cancelSend() {
+    chatController?.abort();
   }
 
   // loadToken disambiguates concurrent/superseded loads: each call stamps a
@@ -245,8 +256,9 @@
     }
 
     sending = true;
+    chatController = new AbortController();
     try {
-      const payload = { message: text, userId };
+      const payload = { message: text, userId, signal: chatController.signal };
       // Pass the optional isolation overrides through only when set, so an empty
       // selector leaves the orchestrator's boot defaults intact (the client
       // omits absent keys; see api.js sendChat).
@@ -290,16 +302,25 @@
       ];
       message = "";
     } catch (err) {
-      // The client surfaces the server's `{error, code}` envelope as the
-      // ApiError message (api.js), so showing err.message gives the operator the
-      // backend's own wording (e.g. the over-length rejection). A non-ApiError
-      // still degrades to its message rather than crashing the panel.
-      sendError =
-        err instanceof ApiError
-          ? err.message
-          : `The message could not be sent: ${err.message}`;
+      // A user-initiated cancel surfaces as an AbortError (fetch rejecting on
+      // the aborted signal, wrapped as a status-0 ApiError with the AbortError
+      // as its cause). That is not a failure — drop it silently rather than
+      // alarming the operator with an error over their own deliberate cancel.
+      if (chatController?.signal.aborted || err?.cause?.name === "AbortError") {
+        // intentionally no sendError
+      } else {
+        // The client surfaces the server's `{error, code}` envelope as the
+        // ApiError message (api.js), so showing err.message gives the operator
+        // the backend's own wording (e.g. the over-length rejection). A
+        // non-ApiError still degrades to its message rather than crashing.
+        sendError =
+          err instanceof ApiError
+            ? err.message
+            : `The message could not be sent: ${err.message}`;
+      }
     } finally {
       sending = false;
+      chatController = null;
     }
   }
 
@@ -403,7 +424,10 @@
     </ol>
 
     {#if sending}
-      <p class="thinking" role="status">Waiting for a reply…</p>
+      <p class="thinking" role="status">
+        Waiting for a reply…
+        <button type="button" class="cancel" onclick={cancelSend}>Cancel</button>
+      </p>
     {/if}
 
     {#if sendError}
@@ -435,35 +459,17 @@
         <textarea
           bind:value={message}
           rows="3"
-          placeholder="Say something to the persona…"
+          placeholder="Say something to the persona… (Enter to send, Shift+Enter for a new line)"
           disabled={sending}
+          onkeydown={onMessageKeydown}
         ></textarea>
       </label>
 
-      <!-- Optional isolation overrides (RFC 0031 session / ISSUE-0085 epoch).
-           Free-text by design: these are operator-namespace ids, not identity —
-           the §F identity rule constrains user_id only, which is never typed. -->
-      <details class="overrides">
-        <summary>Scope (optional)</summary>
-        <label>
-          Session ID
-          <input
-            type="text"
-            bind:value={sessionId}
-            autocomplete="off"
-            disabled={sending}
-          />
-        </label>
-        <label>
-          Epoch ID
-          <input
-            type="text"
-            bind:value={epochId}
-            autocomplete="off"
-            disabled={sending}
-          />
-        </label>
-      </details>
+      <!-- Optional isolation overrides (RFC 0031 session / ISSUE-0085 epoch),
+           extracted to ScopeSelector. The §F identity rule constrains user_id
+           only (never typed); session and epoch are operator-namespace ids the
+           composer reads back via the bindings. -->
+      <ScopeSelector bind:sessionId bind:epochId {sending} />
 
       <button type="submit" disabled={!canSend}>
         {sending ? "Sending…" : "Send"}

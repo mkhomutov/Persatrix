@@ -13,6 +13,7 @@
     publishMessage,
     ApiError,
   } from "../lib/api.js";
+  import { formatTimestamp, channelLabel, senderLabel } from "../lib/format.js";
 
   let { userId } = $props();
 
@@ -302,28 +303,6 @@
     return () => document.removeEventListener("visibilitychange", onVisibility);
   });
 
-  // channelLabel mirrors Chat's persona label: the channel's name, falling back
-  // to its id (DMs/threads have no name — channel_types.go).
-  function channelLabel(channel) {
-    return channel.name ? channel.name : channel.id;
-  }
-
-  // senderLabel turns a raw sender_id into a readable name. The operator's own
-  // posts read as "You" (the human/agent distinction §D asks for); an agent
-  // resolves to "name — role" via the best-effort agent map; anything unknown
-  // falls back to the raw id rather than inventing a label.
-  function senderLabel(senderId) {
-    if (senderId === userId) {
-      return "You";
-    }
-    const agent = agentsById[senderId];
-    if (!agent) {
-      return senderId;
-    }
-    const name = agent.name || agent.id;
-    return agent.role ? `${name} — ${agent.role}` : name;
-  }
-
   async function publish() {
     if (publishing) {
       return;
@@ -390,14 +369,46 @@
     publishError = "";
   }
 
-  // formatTimestamp renders the wire timestamp (RFC-3339 UTC) as a readable
-  // local date-time for the operator; the <time> element keeps the raw value in
-  // its machine-readable `datetime` attribute, so the human-facing text can be
-  // friendly without losing the parseable original. An unparseable value falls
-  // back to the raw string rather than rendering "Invalid Date".
-  function formatTimestamp(ts) {
-    const date = new Date(ts);
-    return Number.isNaN(date.getTime()) ? ts : date.toLocaleString();
+  // The wire/internal order is newest-first (poll prepends, publish echoes to the
+  // front); the panel RENDERS oldest-top, newest-bottom — a conversation read
+  // top-down, with the newest message and the publish box co-located at the
+  // bottom (RFC 0048 amendment §D). Reverse a shallow copy for display; the
+  // internal newest-first model and its de-dupe are untouched.
+  const displayMessages = $derived(messages.slice().reverse());
+
+  // Pinned-scroll autoscroll: a new message scrolls the timeline to the bottom
+  // ONLY when the operator is already there. If they have scrolled up to read
+  // history, autoscroll must not yank them back every poll tick (§D caveat).
+  let timelineEl = $state(null);
+  let pinnedToBottom = true;
+  const PIN_EPSILON_PX = 40;
+
+  function onTimelineScroll() {
+    if (!timelineEl) return;
+    const distance =
+      timelineEl.scrollHeight - timelineEl.scrollTop - timelineEl.clientHeight;
+    pinnedToBottom = distance < PIN_EPSILON_PX;
+  }
+
+  // After the message list changes, stick to the bottom if we were pinned. The
+  // effect reads displayMessages so it re-runs on every append; the pinned check
+  // reflects the scroll position as of the last user scroll, so a reader who
+  // scrolled up is left in place.
+  $effect(() => {
+    // Touch the reactive length so this effect tracks message changes.
+    void displayMessages.length;
+    if (timelineEl && pinnedToBottom) {
+      timelineEl.scrollTop = timelineEl.scrollHeight;
+    }
+  });
+
+  // onPublishKeydown mirrors the chat composer (§D): Enter posts, Shift+Enter
+  // inserts a newline, so the two write surfaces behave the same.
+  function onPublishKeydown(event) {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      publish();
+    }
   }
 </script>
 
@@ -413,14 +424,19 @@
   {:else if channels.length === 0}
     <p class="empty">No channels exist yet.</p>
   {:else}
-    <label>
-      Channel
-      <select bind:value={selectedChannel} onchange={onChannelChange}>
-        {#each channels as channel (channel.id)}
-          <option value={channel.id}>{channelLabel(channel)}</option>
-        {/each}
-      </select>
-    </label>
+    <div class="channel-picker">
+      <label>
+        Channel
+        <select bind:value={selectedChannel} onchange={onChannelChange}>
+          {#each channels as channel (channel.id)}
+            <option value={channel.id}>{channelLabel(channel)}</option>
+          {/each}
+        </select>
+      </label>
+      <!-- Refresh the channel list without a full reload — a new channel (or DM)
+           created since mount appears on demand (§D). -->
+      <button type="button" class="refresh" onclick={loadChannels}>Refresh</button>
+    </div>
 
     {#if pollError}
       <!-- Non-fatal: the loaded history stays visible while the poll backs off
@@ -436,10 +452,15 @@
     {:else if messages.length === 0}
       <p class="empty">No messages yet.</p>
     {:else}
-      <ol class="timeline" aria-label="Channel messages">
-        {#each messages as message (message.id)}
+      <ol
+        class="timeline"
+        aria-label="Channel messages"
+        bind:this={timelineEl}
+        onscroll={onTimelineScroll}
+      >
+        {#each displayMessages as message (message.id)}
           <li class="message" class:from-self={message.sender_id === userId}>
-            <span class="sender">{senderLabel(message.sender_id)}</span>
+            <span class="sender">{senderLabel(message.sender_id, userId, agentsById)}</span>
             <span class="content">{message.content}</span>
             <time class="ts" datetime={message.timestamp}
               >{formatTimestamp(message.timestamp)}</time
@@ -462,8 +483,9 @@
         <textarea
           bind:value={publishContent}
           rows="2"
-          placeholder="Post a message to this channel…"
+          placeholder="Post a message to this channel… (Enter to post, Shift+Enter for a new line)"
           disabled={publishing}
+          onkeydown={onPublishKeydown}
         ></textarea>
       </label>
       <button type="submit" disabled={!canPublish}>
