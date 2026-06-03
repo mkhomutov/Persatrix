@@ -211,6 +211,8 @@ Estimates are structural, not commitments — they shift with OQ resolutions.
 
 1. **Chat façade fate.** Keep `POST /api/v1/agents/{id}/chat` and `AgentService.SendChatMessage` as the ergonomic synchronous-reply path (3a), or deprecate in favor of a generic `AwaitChannelReply` primitive (3b)? Trade-off: ergonomic loss vs. one less special case. Resolution required before Phase 3 can sequence.
 
+   **Resolution (2026-06-03): 3b — deprecate the chat-specific façade.** The chat surface is being removed as a *concept* across the product: a chat is already a `dm:` channel ([chat-as-DM amendment](0011-amendment-chat-as-dm.md)), and everything it does is expressible over channel primitives. The web console retires its Chat *panel* first ([RFC 0048 amendment — Retire the Chat Panel](0048-amendment-chat-panel-retirement.md)), which removes the façade's only in-tree *browser* consumer and leaves just the Rust CLI and out-of-tree callers — precisely the precondition this branch needs. 3b is **not "no synchronous primitive"**: it keeps the generic `AwaitChannelReply` (or equivalent) on `AgentService` for one-round-trip ergonomics — the [§D tentative framing](#d-chat-façade-unification) — and re-expresses `persatrix chat` as a thin wrapper over it + channel publish. What is deprecated is the *chat-specific* REST route and gRPC RPC, on the project's standard deprecation arc (the auth checkpoint at DM creation, [§D cost 2](#d-chat-façade-unification), moves onto the generic primitive's publish-with-create path and is preserved, not dropped). This re-shapes [Phase 3](#phase-3-sketch-façade-decision-oq-1) to the **3b** branch. **Still blocking promotion:** OQ 2 (the generic primitive's reply-correlation field name rides on the `interaction_id` name decision) and OQ 3 — 3b settles *whether* the chat façade goes, not the wire-identifier shape the rest of the RFC turns on.
+
 2. **Field name.** `interaction_id` (matches RFC 0020), `conversation_id` (more familiar to API consumers), `session_id` (collides with RFC 0031 — rejected), or `thread_id` (collides with RFC 0011's reply-pointer — rejected)? Decision affects every wire surface and structured-log key.
 
 3. **Relationship to RFC 0020 internal `interaction_id`.** RFC 0020 §D defines a per-agent `interaction_id` on the `interactions` table. Is the wire id the same value (one id flowing wire→agent), or two distinct ids cross-referenced (wire id and agent-local id)? The former is simpler; the latter preserves per-agent independence if two agents need to close at different turns.
@@ -227,9 +229,11 @@ Estimates are structural, not commitments — they shift with OQ resolutions.
 
 This RFC is **🔨 Draft (stub)**. Before moving to `📋 Proposed`:
 
-1. Resolve **Open Question 1** (chat façade fate). This determines whether the RFC is additive (3a) or deprecating (3b) and re-shapes the phased plan accordingly.
-2. Resolve **Open Question 2** (field name). Touches every wire surface.
+1. ~~Resolve **Open Question 1** (chat façade fate).~~ **Resolved 2026-06-03 → 3b (deprecate the chat-specific façade)**; see [OQ 1](#open-questions). The RFC is now on the **deprecating** branch: Phase 3 sequences as 3b, keeping a generic `AwaitChannelReply` primitive and retiring the chat-specific REST/gRPC surface on the standard deprecation arc. The web console's Chat-panel retirement ([RFC 0048 amendment](0048-amendment-chat-panel-retirement.md)) removes the in-tree browser consumer first.
+2. Resolve **Open Question 2** (field name). Touches every wire surface — and, post-OQ1, the generic primitive's reply-correlation field too.
 3. Confirm **Open Question 3** (wire-id ↔ RFC 0020 per-agent id relationship) with the memory subsystem owner. Composes with [RFC 0029](0029-personal-society-storage-split.md) facade signatures.
+
+With OQ 1 settled, **OQ 2 and OQ 3 are the remaining blockers to `📋 Proposed`.**
 
 Open Questions 4–7 may be resolved during phased-implementation review without blocking promotion to `📋 Proposed`. Note that OQ 4 (generator/identifier shape) and OQ 7 (historical-row migration) gate **Phase 1 implementation** even though they do not gate proposal — they must land before Phase 1 ships, not before the document promotes.
 
@@ -240,6 +244,7 @@ This stub does not commit to wire field numbers, schema deltas, or migration seq
 - [RFC 0011 — Channels + Bridges](0011-channels-bridges.md)
 - [RFC 0011 amendment — Chat as DM](0011-amendment-chat-as-dm.md)
 - [RFC 0016 — Human-Participant Chat Interface](0016-human-participant-chat-interface.md)
+- [RFC 0048 amendment — Retire the Chat Panel](0048-amendment-chat-panel-retirement.md) — removes the façade's in-tree browser consumer; the sequencing precondition for OQ 1's 3b branch
 - [RFC 0020 — Interaction Lifecycle](0020-interaction-lifecycle.md)
 - [RFC 0029 — Personal/Society Storage Split](0029-personal-society-storage-split.md)
 - [RFC 0031 — Per-Session Namespacing for Channels and Persona Memory](0031-per-session-namespacing-channels.md)
