@@ -15,6 +15,9 @@ export const selection = $state({
   // The chat panel's last deliberately-selected persona id. Set on a user-driven
   // persona change (not the programmatic default), so a never-chosen panel still
   // gets the smart healthy-first default rather than a frozen first selection.
+  // Three states: an id (resume it), "" (never chose — apply the default), and
+  // null (the operator hit Exit — stay in the lobby across a tab switch). See
+  // pickInitialAgent.
   chatAgent: "",
 });
 
@@ -27,10 +30,16 @@ export const selection = $state({
 // guaranteed-503 offline one — then any chattable, then any agent at all (the
 // composer then explains why it's locked). A remembered persona that has since
 // deregistered isn't in the list, so it degrades to this default too. The caller
-// passes its own isChattable predicate so the policy stays UI-agnostic. Returns
-// null for an empty list.
+// passes its own isChattable predicate so the policy stays UI-agnostic.
+//
+// rememberedId === null is the EXITED sentinel: the operator deliberately left
+// the conversation (the Exit affordance), so the panel must open on no persona
+// (the lobby) and not snap to a default — that exit has to survive the unmount a
+// tab switch causes. "" is the distinct never-chosen state, which still defaults.
+// Returns null for an empty list or an explicit exit.
 export function pickInitialAgent(list, isChattable, rememberedId) {
   if (list.length === 0) return null;
+  if (rememberedId === null) return null;
   const chattable = list.filter(isChattable);
   const remembered = rememberedId
     ? list.find((agent) => agent.id === rememberedId)

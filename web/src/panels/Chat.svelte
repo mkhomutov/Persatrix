@@ -389,6 +389,41 @@
     sendError = "";
     selection.chatAgent = selectedAgent;
   }
+
+  // startNewChat begins a fresh conversation with the SAME persona, mirroring the
+  // CLI's exit-and-restart used to test memory: it clears the on-screen
+  // transcript (and the in-progress message / transient errors) while leaving the
+  // identity, persona, and isolation scope (session/epoch) untouched — so the
+  // agent's persisted memory is intact and the next turn tests whether it recalls
+  // the operator from MEMORY rather than from on-screen context. Bumping
+  // historyToken invalidates any in-flight seed; the reseed effect keys on
+  // selectedAgent (unchanged here), so a cleared transcript is NOT repainted from
+  // the persisted DM — a clean slate, not a reload.
+  function startNewChat() {
+    historyToken++;
+    transcript = [];
+    dmChannelId = "";
+    message = "";
+    sendError = "";
+    historyError = "";
+  }
+
+  // exitChat leaves the conversation entirely, returning to the persona lobby (no
+  // persona selected) so the operator can start fresh or pick a different persona
+  // — the web analogue of quitting the CLI chat REPL. The null sentinel records a
+  // deliberate exit so it survives the unmount a tab switch causes (the panel
+  // would otherwise re-apply its healthy-first default on remount — see
+  // pickInitialAgent); clearing selectedAgent unmounts the composer/transcript.
+  function exitChat() {
+    selection.chatAgent = null;
+    selectedAgent = "";
+    historyToken++;
+    transcript = [];
+    dmChannelId = "";
+    message = "";
+    sendError = "";
+    historyError = "";
+  }
 </script>
 
 <section class="panel chat" aria-label="Chat">
@@ -411,11 +446,67 @@
       <code>config/agents.yaml</code> and restart), then re-check.
     </OnboardingEmpty>
   {:else}
-    <PersonaHeader
-      info={selectedAgentInfo}
-      {dmChannelId}
-      onViewInTimeline={viewInTimeline}
-    />
+    <!-- Persona switcher pinned at the top of the panel (mirrors the channel
+         timeline's selector-at-top layout). It used to live at the bottom inside
+         the composer, below the transcript — once a conversation grew, the only
+         way to switch persona scrolled off-screen. Kept above the transcript and
+         outside the composer so it stays reachable however long the chat runs.
+         Still `disabled={sending}`: switching persona out from under an in-flight
+         synchronous turn would misattribute the pending reply. -->
+    <div class="persona-picker">
+      <label>
+        Persona
+        <select
+          bind:value={selectedAgent}
+          onchange={onPersonaChange}
+          disabled={sending}
+        >
+          {#if !selectedAgent}
+            <!-- Lobby placeholder: no conversation is open (a fresh start or
+                 after Exit). Disabled so it isn't a re-pickable value; it just
+                 labels the empty selection until the operator chooses a persona. -->
+            <option value="" disabled>Select a persona…</option>
+          {/if}
+          {#each agents as agent (agent.id)}
+            <option value={agent.id} disabled={!isChattable(agent)}
+              >{agentLabel(agent)}</option
+            >
+          {/each}
+        </select>
+      </label>
+      {#if selectedAgent}
+        <!-- New chat / Exit, the web analogue of the CLI's restart / quit (used
+             to test memory). New chat keeps the persona and identity but clears
+             the conversation; Exit leaves to the lobby. Both lock during a turn
+             so they can't strand an in-flight reply. -->
+        <button
+          type="button"
+          class="new-chat"
+          onclick={startNewChat}
+          disabled={sending}>New chat</button
+        >
+        <button
+          type="button"
+          class="exit-chat"
+          onclick={exitChat}
+          disabled={sending}>Exit</button
+        >
+      {/if}
+    </div>
+
+    {#if !selectedAgent}
+      <!-- Lobby: no persona selected (a fresh start, or after Exit). Prompt the
+           operator to pick one; the picker above is the entry point. No header /
+           transcript / composer until a conversation is open. -->
+      <p class="lobby" role="status">
+        Select a persona to start a conversation.
+      </p>
+    {:else}
+      <PersonaHeader
+        info={selectedAgentInfo}
+        {dmChannelId}
+        onViewInTimeline={viewInTimeline}
+      />
 
     {#if historyLoading}
       <p class="loading" role="status">Loading conversation history…</p>
@@ -445,27 +536,12 @@
     {/if}
 
     <form class="composer" onsubmit={onSubmit}>
-      <!-- The whole composer locks while a turn is in flight (`sending`): the
-           chat call is synchronous, so leaving it editable lets the operator
-           keep typing into a message that the post-send reset then wipes, or
-           switch persona out from under the pending reply. Disabling for the
-           round-trip keeps the in-flight text and pins the turn to its persona;
-           the "Waiting for a reply…" status says why. -->
-      <label>
-        Persona
-        <select
-          bind:value={selectedAgent}
-          onchange={onPersonaChange}
-          disabled={sending}
-        >
-          {#each agents as agent (agent.id)}
-            <option value={agent.id} disabled={!isChattable(agent)}
-              >{agentLabel(agent)}</option
-            >
-          {/each}
-        </select>
-      </label>
-
+      <!-- The composer locks while a turn is in flight (`sending`): the chat call
+           is synchronous, so leaving it editable lets the operator keep typing
+           into a message that the post-send reset then wipes. Disabling for the
+           round-trip keeps the in-flight text; the "Waiting for a reply…" status
+           says why. The persona switcher (lifted to the top of the panel) is
+           disabled in lockstep so the turn stays pinned to its persona. -->
       <label>
         Message
         <textarea
@@ -496,5 +572,6 @@
         {sending ? "Sending…" : "Send"}
       </button>
     </form>
+    {/if}
   {/if}
 </section>
