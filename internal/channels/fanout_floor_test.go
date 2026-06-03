@@ -287,3 +287,95 @@ func TestFanout_FloorOff_ConcurrentDispatch(t *testing.T) {
 	order, _, _ := disp.snapshot()
 	assert.ElementsMatch(t, []string{"a", "b", "c"}, order, "all responders dispatched on the concurrent path")
 }
+
+// lateReplyDispatcher reproduces the in-round late-reply window for amendment
+// D1's re-fanout guard. Recipient "a" stays silent through its floor turn so
+// the loop advances on the per-turn timeout (D2); then, the moment "b" is
+// granted the floor, "a" publishes its reply *synchronously* — modelling a
+// slow agent whose REST publish lands while a later speaker still holds the
+// floor and the round is still in flight.
+//
+// The guard must recognise a's reply as belonging to a speaker this round
+// already granted the floor and skip its re-fanout. A regression that tracks
+// only the *current* turn-holder would treat a's reply as a fresh stimulus and
+// re-dispatch to b — the exact N-way amplification floor control exists to
+// prevent.
+type lateReplyDispatcher struct {
+	router *ChannelRouter
+
+	mu       sync.Mutex
+	order    []string
+	aReplied bool // a's late reply is published exactly once
+}
+
+func (d *lateReplyDispatcher) Dispatch(_ context.Context, env DispatchEnvelope, msg ChannelMessage) error {
+	rid := env.Recipient.ParticipantID
+	d.mu.Lock()
+	d.order = append(d.order, rid)
+	// Latch the flag BEFORE publishing, not via sync.Once: in the regression
+	// case a's reply re-fanouts straight back into Dispatch("b") on this same
+	// goroutine, and a sync.Once re-entered from within its own f deadlocks.
+	// Setting aReplied first makes that re-entrant call a no-op instead.
+	publishLate := rid == "b" && !d.aReplied
+	if publishLate {
+		d.aReplied = true
+	}
+	d.mu.Unlock()
+
+	if publishLate {
+		// b now holds the floor; a (already timed out) replies late. Publish
+		// synchronously so the reply is guaranteed to land mid-round, with b
+		// recorded as the current speaker and a as a prior one.
+		_ = d.router.Publish(context.Background(), ChannelMessage{
+			ID:        uuid.NewString(),
+			ChannelID: msg.ChannelID,
+			SenderID:  "a",
+			Content:   "a late reply",
+		}, "")
+	}
+	return nil
+}
+
+func (d *lateReplyDispatcher) snapshot() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.order...)
+}
+
+// TestFloorRound_LateReplyFromTimedOutSpeaker_NoReFanout pins the guard for a
+// timed-out speaker's late reply (amendment D1 + D2 interaction): "a" misses
+// its turn budget and replies only after the loop has advanced to "b". Because
+// "a" was granted the floor in this round, its late reply must be suppressed
+// (persisted, but no competing fanout) — so b is dispatched exactly once, not
+// re-dispatched by a's reply.
+func TestFloorRound_LateReplyFromTimedOutSpeaker_NoReFanout(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &lateReplyDispatcher{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	disp.router = router
+
+	id := mustCreateGroupWithPolicies(t, store, "planning", map[string]RespondPolicy{
+		"user": RespondNever, "a": RespondAlways, "b": RespondAlways,
+	}, "user", "a", "b")
+	router.SetFloorControl(id, true, 100*time.Millisecond)
+
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: id, SenderID: "user", Content: "kickoff",
+	}, ""))
+
+	order := disp.snapshot()
+	require.Equal(t, []string{"a", "b"}, order,
+		"a's late reply must not re-fanout — b is dispatched once, by the round only")
+
+	// The late reply is still durably persisted and visible to history readers
+	// — suppression skips the re-fanout, not the commit.
+	hist, err := store.GetHistory(context.Background(), id, 100, time.Time{})
+	require.NoError(t, err)
+	var sawA bool
+	for _, m := range hist {
+		if m.SenderID == "a" {
+			sawA = true
+		}
+	}
+	assert.True(t, sawA, "timed-out speaker's late reply is still persisted")
+}

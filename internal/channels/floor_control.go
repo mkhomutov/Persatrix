@@ -182,28 +182,44 @@ type channelFloorSettings struct {
 	turnTimeout time.Duration
 }
 
-// setFloorHolder / clearFloorHolder / isFloorHolderReply implement the
-// deferred-fanout seam (amendment D1). While a floor turn is in flight the
-// router records the speaker as the channel's floor-holder; [ChannelRouter.Publish]
-// reads it to recognise that speaker's reply and skip its re-fanout (the loop
-// is the sole dispatcher). All three take the shared floorMu.
-func (r *ChannelRouter) setFloorHolder(channelID, participantID string) {
+// recordFloorSpeaker / clearFloorSpeakers / isFloorSpeakerReply implement the
+// deferred-fanout seam (amendment D1). As each speaker is granted the floor the
+// round records it in the channel's floor-speaker set; [ChannelRouter.Publish]
+// reads that set to recognise a floor-turn reply and skip its re-fanout (the
+// loop is the sole dispatcher). All three take the shared floorMu.
+//
+// The set accumulates every speaker the *active* round has granted the floor —
+// not just the current turn-holder — so a speaker that exhausted its turn
+// budget (D2) and replies late, while a later speaker holds the floor, is still
+// recognised as belonging to this round and suppressed. [clearFloorSpeakers]
+// drops the whole set at round end, so a reply that genuinely arrives after the
+// round re-fanouts normally (bounded by `cascade_depth`).
+func (r *ChannelRouter) recordFloorSpeaker(channelID, participantID string) {
 	r.floorMu.Lock()
-	r.floorHolders[channelID] = participantID
+	speakers := r.floorSpeakers[channelID]
+	if speakers == nil {
+		speakers = make(map[string]struct{})
+		r.floorSpeakers[channelID] = speakers
+	}
+	speakers[participantID] = struct{}{}
 	r.floorMu.Unlock()
 }
 
-func (r *ChannelRouter) clearFloorHolder(channelID string) {
+func (r *ChannelRouter) clearFloorSpeakers(channelID string) {
 	r.floorMu.Lock()
-	delete(r.floorHolders, channelID)
+	delete(r.floorSpeakers, channelID)
 	r.floorMu.Unlock()
 }
 
-func (r *ChannelRouter) isFloorHolderReply(channelID, senderID string) bool {
+func (r *ChannelRouter) isFloorSpeakerReply(channelID, senderID string) bool {
 	r.floorMu.Lock()
 	defer r.floorMu.Unlock()
-	h, ok := r.floorHolders[channelID]
-	return ok && h == senderID
+	speakers, ok := r.floorSpeakers[channelID]
+	if !ok {
+		return false
+	}
+	_, held := speakers[senderID]
+	return held
 }
 
 // floorRound runs the serialized speaker round for a channel with floor
@@ -221,7 +237,7 @@ func (r *ChannelRouter) isFloorHolderReply(channelID, senderID string) bool {
 //  3. Grant the floor to each responder in turn ([runFloorTurn]); the loop
 //     waits for each speaker's reply to be persisted before dispatching the
 //     next, so speaker k reads speakers 1..k-1.
-//  4. Release the floor and clear the floor-holder.
+//  4. Release the floor and clear the round's floor-speaker set.
 //
 // The whole round runs inline on the publish goroutine (as the concurrent
 // fanout does), so the stimulus publish blocks until the round completes —
@@ -242,16 +258,17 @@ func (r *ChannelRouter) floorRound(
 
 	r.floors.acquire(msg.ChannelID)
 	defer r.floors.release(msg.ChannelID)
-	defer r.clearFloorHolder(msg.ChannelID)
+	defer r.clearFloorSpeakers(msg.ChannelID)
 
 	for _, speaker := range responders {
 		r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout)
 	}
 }
 
-// runFloorTurn grants the floor to one speaker: it records the speaker as the
-// floor-holder (so its reply's publish defers fanout — D1), registers the
-// reply waiter *before* dispatch (closing the replies-faster-than-register
+// runFloorTurn grants the floor to one speaker: it records the speaker in the
+// round's floor-speaker set (so its reply's publish defers fanout — D1, and
+// stays deferred even if the reply lands after this turn advances), registers
+// the reply waiter *before* dispatch (closing the replies-faster-than-register
 // race, mirroring [ChannelRouter.PublishAndAwait]), dispatches the stimulus
 // to that speaker alone, then waits for the speaker's reply to be persisted
 // or for the per-turn timeout (D2) before returning so the loop advances.
@@ -263,7 +280,7 @@ func (r *ChannelRouter) runFloorTurn(
 	speaker Member,
 	turnTimeout time.Duration,
 ) {
-	r.setFloorHolder(msg.ChannelID, speaker.ParticipantID)
+	r.recordFloorSpeaker(msg.ChannelID, speaker.ParticipantID)
 
 	replyCh, cancel, err := r.waiter.Register(msg.ChannelID, speaker.ParticipantID)
 	if err != nil {

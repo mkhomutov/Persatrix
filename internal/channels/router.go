@@ -147,7 +147,7 @@ type ChannelRouter struct {
 	// one round runs at a time. Always non-nil (init in [NewChannelRouter]).
 	floors *floorRegistry
 
-	// floorMu guards floorSettings and floorHolders.
+	// floorMu guards floorSettings and floorSpeakers.
 	//
 	// floorSettings is the resolved per-channel floor-control config
 	// (enabled + per-turn timeout), keyed by channel id. Populated via
@@ -155,13 +155,19 @@ type ChannelRouter struct {
 	// map is floor-control-off (the PR-2 default — PR 3 flips the resolved
 	// default on for group channels and wires the setter from config).
 	//
-	// floorHolders records the current floor-holder per channel while a
-	// round is in flight — the seam the deferred-fanout skip (D1) reads in
-	// [ChannelRouter.Publish] to recognise a floor-turn reply and suppress
-	// its re-fanout. Empty when no round is active on a channel.
+	// floorSpeakers records, per channel, the set of speakers that have been
+	// granted the floor during the *currently active* round — the seam the
+	// deferred-fanout skip (D1) reads in [ChannelRouter.Publish] to recognise
+	// a floor-turn reply and suppress its re-fanout. It is a set, not a single
+	// holder, on purpose: a speaker that exhausts its turn budget (D2) and then
+	// replies late — while a *later* speaker holds the floor — is still a
+	// participant of this round, so its reply must be suppressed too rather
+	// than spawn a competing fanout. Cleared as a whole when the round ends, so
+	// a reply that genuinely arrives after the round re-fanouts normally
+	// (bounded by `cascade_depth`). Empty when no round is active on a channel.
 	floorMu       sync.Mutex
 	floorSettings map[string]channelFloorSettings
-	floorHolders  map[string]string
+	floorSpeakers map[string]map[string]struct{}
 
 	// maxCascadeDepth — see cascade_depth.go; defaultSessionID — see router_session.go (RFC 0031 Phase 1).
 	maxCascadeDepth  int
@@ -187,7 +193,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		waiter:          newReplyWaiter(),
 		floors:          newFloorRegistry(),
 		floorSettings:   make(map[string]channelFloorSettings),
-		floorHolders:    make(map[string]string),
+		floorSpeakers:   make(map[string]map[string]struct{}),
 		maxCascadeDepth: defaults.DefaultMaxCascadeDepth,
 	}
 }
@@ -323,14 +329,19 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 	r.waiter.Notify(msg)
 
 	// RFC 0030 Layer 2.5 deferred fanout (amendment D1): when a serialized
-	// floor round is active on this channel and this inbound message is the
-	// current floor-holder's reply, the round loop is the sole dispatcher.
-	// The reply has been persisted (above) and has just satisfied the loop's
-	// waiter via Notify, so the loop will advance to the next speaker with
-	// the reply now in history — running fanout here would re-introduce the
-	// N-way amplification floor control exists to prevent. Cross-*round*
-	// cascade stays bounded by `cascade_depth` (Layer 0, enforced above).
-	if r.isFloorHolderReply(msg.ChannelID, msg.SenderID) {
+	// floor round is active on this channel and this inbound message is a
+	// reply from a speaker that round granted the floor, the round loop is the
+	// sole dispatcher. The reply has been persisted (above) and — when the
+	// speaker is still its current turn-holder — has just satisfied the loop's
+	// waiter via Notify, so the loop advances with the reply now in history.
+	// Running fanout here would re-introduce the N-way amplification floor
+	// control exists to prevent. The set membership (not just the current
+	// turn-holder) also covers a speaker that exhausted its turn budget (D2)
+	// and replies late while a later speaker holds the floor: still a
+	// participant of this round, so suppressed rather than spawning a competing
+	// round. Cross-*round* cascade stays bounded by `cascade_depth` (Layer 0,
+	// enforced above).
+	if r.isFloorSpeakerReply(msg.ChannelID, msg.SenderID) {
 		return nil
 	}
 
