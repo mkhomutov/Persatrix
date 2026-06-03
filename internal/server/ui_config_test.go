@@ -50,31 +50,31 @@ func TestLoadUIConfig_ParsesToggles(t *testing.T) {
 	assert.True(t, cfg.PanelEnabled("memory_strip"))
 }
 
-// TestDefaultUIConfig_ChannelCreateOffByDefault pins the channel-creation
-// amendment §A default: the channel_timeline panel's structural-write affordance
-// (group-channel creation) ships dark. The operator must consciously opt in by
-// authoring create_enabled:true, exactly as Slices 2/4 ship off.
-func TestDefaultUIConfig_ChannelCreateOffByDefault(t *testing.T) {
+// TestDefaultUIConfig_ChannelCreateOnByDefault pins the channel-creation default:
+// the channel_timeline panel's structural-write affordance (group-channel
+// creation) ships ON, so a console-on deployment can create channels out of the
+// box. (create.available still gates it on the channel store being wired.)
+func TestDefaultUIConfig_ChannelCreateOnByDefault(t *testing.T) {
 	cfg := DefaultUIConfig()
 	require.NotNil(t, cfg)
 
-	assert.False(t, cfg.Panels["channel_timeline"].CreateEnabled,
-		"channel creation ships dark (create_enabled defaults false) — RFC 0048 channel-creation amendment §A")
+	assert.True(t, cfg.Panels["channel_timeline"].CreateEnabled,
+		"channel creation ships enabled by default — RFC 0048 channel-creation amendment §A")
 }
 
-// TestLoadUIConfig_ParsesCreateEnabled: an operator opting into channel creation
-// authors create_enabled:true under channel_timeline, and the loader carries it
+// TestLoadUIConfig_ParsesCreateEnabled: an operator turning channel creation OFF
+// authors create_enabled:false under channel_timeline, and the loader carries it
 // through alongside the panel's own enabled toggle.
 func TestLoadUIConfig_ParsesCreateEnabled(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ui.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(
-		"panels:\n  channel_timeline:\n    enabled: true\n    create_enabled: true\n"), 0o600))
+		"panels:\n  channel_timeline:\n    enabled: true\n    create_enabled: false\n"), 0o600))
 
 	cfg, err := LoadUIConfig(path)
 	require.NoError(t, err)
 
-	assert.True(t, cfg.Panels["channel_timeline"].CreateEnabled,
-		"an explicit create_enabled:true must turn the create affordance on")
+	assert.False(t, cfg.Panels["channel_timeline"].CreateEnabled,
+		"an explicit create_enabled:false must turn the create affordance off")
 	assert.True(t, cfg.Panels["channel_timeline"].Enabled,
 		"the panel's own enabled toggle is independent of create_enabled")
 }

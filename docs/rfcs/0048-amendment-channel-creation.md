@@ -4,7 +4,7 @@
 **Status**: ✅ Accepted (decisions locked 2026-06-03 — the §D structural-write carve-out is **signed off**; see §D and [Open Questions](#open-questions))
 **Date**: 2026-06-03
 **Trigger**: Operator/tester walk-through of the shipped Slice 1 console: a tester setting up a multi-agent scenario (the console's stated audience — *watch personas interact*) cannot create a group channel from the browser. They must either hand-edit [`config/channels.yaml`](../../config/channels.yaml) and restart the orchestrator, or leave the console for the CLI / a raw `POST`. The "watch personas interact" half of Slice 1 ([RFC 0048 §D](0048-operator-tester-web-console.md#d-slice-1--live-interactions-the-hero)) presupposes a channel exists, but the console offers no path to make one.
-**Supersedes**: nothing. It introduces the console's first **structural write** (channel creation) — a deliberate, scoped exception to [RFC 0048's Slice-1-is-read-and-interact Non-Goal](0048-operator-tester-web-console.md#non-goals) and [§F rule 5](0048-operator-tester-web-console.md#f-auth--multi-tenancy-forward-compatibility) ("write slices are auth-gated by construction"). The exception is documented as a local-mode-only carve-out (§D), ships dark behind a new toggle (§A), and **adds no backend endpoint** — it surfaces the `POST /api/v1/channels` handler that already exists ([`channel_handlers.go`](../../internal/server/channel_handlers.go) `handleCreateChannel`).
+**Supersedes**: nothing. It introduces the console's first **structural write** (channel creation) — a deliberate, scoped exception to [RFC 0048's Slice-1-is-read-and-interact Non-Goal](0048-operator-tester-web-console.md#non-goals) and [§F rule 5](0048-operator-tester-web-console.md#f-auth--multi-tenancy-forward-compatibility) ("write slices are auth-gated by construction"). The exception is documented as a local-mode-only carve-out (§D), rides a new per-panel toggle (§A — `create_enabled`, default on as of 2026-06-03), and **adds no backend endpoint** — it surfaces the `POST /api/v1/channels` handler that already exists ([`channel_handlers.go`](../../internal/server/channel_handlers.go) `handleCreateChannel`).
 
 > **Note on section references.** This document's own sections are lettered §A–§D. References to the base RFC are always written with the `RFC 0048` prefix (e.g. "RFC 0048 §F"). An unqualified "§D" means *this amendment's* §D.
 
@@ -38,11 +38,13 @@ Channel creation ships **dark** behind a new per-panel capability flag, consiste
 ```yaml
 channel_timeline:
   enabled: true          # the panel itself (Slice 1, unchanged)
-  create_enabled: false  # NEW — channel creation affordance; ships dark
+  create_enabled: true   # channel creation affordance (default true; set false to hide)
 ```
 
-- `create_enabled` is the **only new authored key**. Default **`false`** — creation is off until an operator opts in, exactly as Slices 2/4 ship off.
-- It is additive and namespaced under the panel it extends; the schema ([`schemas/ui.schema.json`](../../schemas/ui.schema.json)) gains `create_enabled` (boolean, default `false`) under `channel_timeline`, keeping `additionalProperties: false`.
+- `create_enabled` is the **only new authored key**.
+- It is additive and namespaced under the panel it extends; the schema ([`schemas/ui.schema.json`](../../schemas/ui.schema.json)) gains `create_enabled` (boolean) under `channel_timeline`, keeping `additionalProperties: false`.
+
+> **Default revised 2026-06-03: `create_enabled` ships `true`.** This amendment originally shipped channel creation **dark** (`create_enabled: false`, opt-in). The default was flipped **on** so a console-on deployment can create channels out of the box. The security posture is unchanged: the console is still off by default (`--enable-ui`) and localhost-bound, `create.available` still gates on the channel store being wired, and surfacing creation adds **zero new reachability** (§Security #1) — the carve-out (§D) holds, only its default changed.
 - As with `available`, **`create_available` is never authored** — it is runtime-derived (§D) and reported by the server.
 
 **`GET /api/v1/ui/config`** — the `channel_timeline` panel entry carries the capability as a nested object, mirroring the existing `{ enabled, available }` shape:
@@ -98,7 +100,7 @@ This is the single genuine product decision in the amendment, and it bends two b
 
 **Guardrails (normative for the implementing PR):**
 
-- The affordance is **off by default** (`create_enabled: false`) and **gated by both** the toggle and runtime availability (§A). An operator must consciously enable it.
+- The affordance is **on by default** (`create_enabled: true`, revised 2026-06-03 — see §A) but still **gated by runtime availability** (`create.available`, §A): it never renders where the channel store is unwired, and the whole console is off by default (`--enable-ui`) and localhost-bound. An operator sets `create_enabled: false` to hide it.
 - **`create.available` becomes the forward-compat hook.** Today it is `channelStore != nil`. Once `/ui/context` reports `authenticated: true` (RFC 0039), `create.available` must be driven by a **capability hint** — creation is offered only to a principal whose capabilities include channel creation, never open to any authenticated browser session. This is what keeps §D a *local-mode carve-out* rather than a permanent hole in the future auth model: pre-auth it rides the toggle on the unauthenticated localhost surface; post-auth it becomes capability-gated, and the toggle alone can never re-open it to an unprivileged principal.
 - **No new endpoint, no new privileged surface.** The console only calls the create endpoint that already exists, with the identity it already carries — exactly what a CLI caller does today. The new `/ui/config` `create` flags are read-only and ride the existing middleware.
 - **CSRF posture is inherited, and flagged.** Like the chat/publish `POST`s [RFC 0048 §Security](0048-operator-tester-web-console.md#security-considerations) already calls out, this browser-issued `POST` becomes a CSRF target the moment a fronting proxy adds cookie/session auth; the create call must send whatever CSRF mitigation the auth layer chooses, on the same footing as the existing writes.
@@ -117,7 +119,7 @@ This is the single genuine product decision in the amendment, and it bends two b
 Single shippable PR (the backend deltas are thin; the bulk is the Svelte form):
 
 1. **PR — Console channel creation (§A–§D).**
-   - Backend: add `create_enabled` to `config/ui.yaml` (default `false`) + `schemas/ui.schema.json`; compute and return the `channel_timeline.create` `{ enabled, available }` object in [`ui_handlers.go`](../../internal/server/ui_handlers.go) (`create.available = channelStore != nil` today; structured for the RFC 0039 capability hint per §D). No change to `handleCreateChannel`. Handler/unit test for the new config shape and availability derivation, per the [RFC 0048 test strategy](0048-operator-tester-web-console.md#test-strategy).
+   - Backend: add `create_enabled` to `config/ui.yaml` (default `true`) + `schemas/ui.schema.json`; compute and return the `channel_timeline.create` `{ enabled, available }` object in [`ui_handlers.go`](../../internal/server/ui_handlers.go) (`create.available = channelStore != nil` today; structured for the RFC 0039 capability hint per §D). No change to `handleCreateChannel`. Handler/unit test for the new config shape and availability derivation, per the [RFC 0048 test strategy](0048-operator-tester-web-console.md#test-strategy).
    - Client: a collapsed **"New channel"** form in [`ChannelTimeline.svelte`](../../web/src/panels/ChannelTimeline.svelte) (name → read-only `group:<name>` preview, optional description, member multi-select over `GET /api/v1/agents` with per-member respond policy); `POST /api/v1/channels`; on `201` reuse `loadChannels()` + `nav.targetChannel` to select the new channel; surface the server error envelope (esp. `409` duplicate). Gated on `create.enabled && create.available`. Exercised by the Svelte component tests already established for the panel.
 
 PR D's [slice1-ux §E](0048-amendment-slice1-ux.md) "Acting as" override already lives on this panel's publish box; the create form inherits the same acting principal with no extra work.

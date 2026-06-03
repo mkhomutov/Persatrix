@@ -27,7 +27,7 @@ behind the `--enable-ui` flag (**default off**).
 - [The conversation panel](#the-conversation-panel)
   - [Direct-message a persona](#direct-message-a-persona)
   - [Watch a group channel](#watch-a-group-channel)
-- [Creating a channel (opt-in)](#creating-a-channel-opt-in)
+- [Creating a channel](#creating-a-channel)
 - [The feature-toggle model (`config/ui.yaml`)](#the-feature-toggle-model-configuiyaml)
 - [Security — do not expose beyond localhost](#security--do-not-expose-beyond-localhost)
 - [What is not in Slice 1](#what-is-not-in-slice-1)
@@ -161,7 +161,7 @@ user-visible message rather than crashing the panel.
 
 ---
 
-## Creating a channel (opt-in)
+## Creating a channel
 
 The Channels panel can also **create** a group channel from the browser — so you
 can spin one up, drop two personas in it, and watch them interact without leaving
@@ -170,37 +170,36 @@ the console for the CLI or hand-editing
 `POST /api/v1/channels` endpoint; **no new backend surface is added**
 ([RFC 0048 channel-creation amendment](../rfcs/0048-amendment-channel-creation.md)).
 
-It ships **dark** and is a **structural write before auth**, so it is gated on
-two conditions — read the [Security](#security--do-not-expose-beyond-localhost)
-note before enabling it.
+It is **on by default** when the console is running with channels wired. It is a
+**structural write before auth**, so read the
+[Security](#security--do-not-expose-beyond-localhost) note before exposing the
+console beyond localhost. To **hide** the affordance, set `create_enabled: false`
+under the `channel_timeline` panel in [`config/ui.yaml`](../../config/ui.yaml):
 
-**To enable it:**
+```yaml
+panels:
+  channel_timeline:
+    enabled: true
+    create_enabled: false   # default true — set false to hide channel creation
+```
 
-1. **Opt in** in [`config/ui.yaml`](../../config/ui.yaml) — add `create_enabled`
-   under the `channel_timeline` panel:
+**It renders only when two conditions hold:**
 
-   ```yaml
-   panels:
-     channel_timeline:
-       enabled: true
-       create_enabled: true   # NEW — ships false; this opts into channel creation
-   ```
+1. **`create_enabled` is on** (the default; the snippet above turns it off).
 
-   `create_enabled` is the only new authored knob, and it defaults to `false`.
-
-2. **Run with channels wired.** Just like the panel's own `available` flag, the
+2. **Channels are wired.** Just like the panel's own `available` flag, the
    create affordance's `create.available` is **runtime-derived** — true only when
    the channel store is wired. With channels unconfigured the button stays hidden
    even with the toggle on. (`create.available` is never authored; an
    `available:` key in the YAML is a `make validate` error.)
 
-3. **Use it.** In the **Channels** tab, click **New channel** (beside Refresh),
-   enter a name (the server derives the canonical `group:<name>` id, shown
-   read-only — do not type the `group:` prefix yourself), an optional
-   description, and pick members — **only persona agents** are listed, each with a
-   per-member respond policy (`when_mentioned` (default) / `always` / `never`).
-   Task agents run workflow steps and never hold a conversation, so they are not
-   selectable. On success the picker reloads and selects the channel you made.
+**Using it.** In the **Channels** tab, click **New channel** (beside Refresh),
+enter a name (the server derives the canonical `group:<name>` id, shown
+read-only — do not type the `group:` prefix yourself), an optional description,
+and pick members — **only persona agents** are listed, each with a per-member
+respond policy (`when_mentioned` (default) / `always` / `never`). Task agents run
+workflow steps and never hold a conversation, so they are not selectable. On
+success the picker reloads and selects the channel you made.
 
    **You are added automatically.** The acting user (the `/ui/context` principal)
    is added to the new channel as a member with `respond: never`, because the
@@ -242,7 +241,7 @@ later slices ship off so they land additively:
 panels:
   channel_timeline:
     enabled: true
-    create_enabled: false   # opt-in to channel creation — see "Creating a channel"
+    create_enabled: true    # default true — group-channel creation; see "Creating a channel"
   memory_strip:        # Slice 2 (v0.4.0+) — ships off
     enabled: false
   cost:                # Slice 4 (v0.4.0+) — ships off
@@ -282,12 +281,14 @@ The mitigations the console ships with:
 - **`--enable-ui` defaults off.** You opt in explicitly.
 - **The orchestrator binds `127.0.0.1` by default** (`--http-bind 127.0.0.1`).
 - **The console is read-mostly.** Slice 1's writes are chat, the optional channel
-  publish, and — only when you opt in — [group-channel creation](#creating-a-channel-opt-in),
-  all against existing endpoints. Channel creation is a deliberate, signed-off
+  publish, and [group-channel creation](#creating-a-channel), all against existing
+  endpoints. Channel creation is a deliberate, signed-off
   **structural-write-before-auth** carve-out: it adds **zero new reachability**
   (the `POST /api/v1/channels` endpoint is already exposed unauthenticated, so the
-  console changes *discoverability*, not *reachability*), it is **off by default**,
-  and `create.available` becomes capability-gated once RFC 0039 auth lands. The
+  console changes *discoverability*, not *reachability*); it is **on by default**
+  when the console is enabled (itself off by default), set `create_enabled: false`
+  to hide it, and `create.available` becomes capability-gated once RFC 0039 auth
+  lands. The
   destructive / admin control plane is Slice 5 and is **hard-gated on RFC 0039
   auth** — it cannot be enabled before auth exists.
 
@@ -334,7 +335,7 @@ Deferred by RFC decision (2026-06-02); each is its own later slice
 | The console shows a "run `make ui`" placeholder | The binary was built without the real bundle (`go build` / `make build-orchestrator` alone embeds the placeholder). Run `make ui` first, or use `make run-ui` / the Docker image. |
 | Every asset 404s under `/ui/` | A bundle built without Vite's `base: "/ui/"`. Use `make ui` (configured correctly); do not hand-build. |
 | The Channel-timeline panel is missing | `channel_timeline.available` is false — channels are not wired. Check the channel config; the panel hides itself when its subsystem is absent. |
-| The **New channel** button is missing | The create affordance needs **both** `channel_timeline.create_enabled: true` (you opted in) **and** `create.available: true` (the channel store is wired). Confirm with `curl -s localhost:8080/api/v1/ui/config \| jq '.panels.channel_timeline.create'`. See [Creating a channel](#creating-a-channel-opt-in). |
+| The **New channel** button is missing | The create affordance needs **both** `channel_timeline.create_enabled: true` (the default — confirm it wasn't set false) **and** `create.available: true` (the channel store is wired). Confirm with `curl -s localhost:8080/api/v1/ui/config \| jq '.panels.channel_timeline.create'`. See [Creating a channel](#creating-a-channel). |
 | Creating a channel fails with a conflict | A `group:<name>` with that name already exists (`409`). Pick a different name; the form keeps your entries so you can retry. |
 | `make validate` fails on `config/ui.yaml` | You likely added an `available:` key (runtime-derived, not authored) or a malformed panel entry. See [§ feature-toggle model](#the-feature-toggle-model-configuiyaml). |
 

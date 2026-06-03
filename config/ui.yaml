@@ -22,13 +22,17 @@
 # A panel may also carry capability knobs. `create_enabled` (channel_timeline,
 # RFC 0048 channel-creation amendment §A) opts the console into creating group
 # channels from the browser — a structural write over the already-exposed
-# POST /api/v1/channels. It ships dark (false), and its companion
-# `create.available` is runtime-derived (the channel store must be wired),
-# never authored here, exactly like `available`.
+# POST /api/v1/channels. It ships ON (true) so a console-on deployment can create
+# channels out of the box; set it to `false` to hide the affordance. Its
+# companion `create.available` is runtime-derived (the channel store must be
+# wired) and never authored here, exactly like `available` — so it still won't
+# render where channels are unconfigured. (Console exposure is still gated by
+# --enable-ui + the localhost bind; see the security note in the web-console
+# guide before exposing the console beyond localhost.)
 panels:
   channel_timeline:
     enabled: true
-    create_enabled: false
+    create_enabled: true
   memory_strip:
     enabled: false
   cost:

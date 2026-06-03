@@ -213,7 +213,7 @@ func TestUIConfig_AvailabilityTracksChannels(t *testing.T) {
 // TestUIConfig_CreateCapabilityShape pins the channel-creation amendment §A
 // contract: the channel_timeline entry carries a nested `create {enabled,
 // available}` object mirroring the panel's own `{enabled, available}` shape;
-// create.enabled echoes the (default-off) toggle; create.available is
+// create.enabled echoes the (default-on) toggle; create.available is
 // runtime-derived from the channel store being wired. No OTHER panel carries a
 // `create` object — the affordance is a capability of the timeline panel alone.
 func TestUIConfig_CreateCapabilityShape(t *testing.T) {
@@ -227,7 +227,7 @@ func TestUIConfig_CreateCapabilityShape(t *testing.T) {
 
 	ct := body.Panels["channel_timeline"]
 	require.NotNil(t, ct.Create, "channel_timeline must carry a nested create capability")
-	assert.False(t, ct.Create.Enabled, "create ships dark (create_enabled defaults false)")
+	assert.True(t, ct.Create.Enabled, "create ships enabled by default (create_enabled defaults true)")
 	assert.True(t, ct.Create.Available, "channels wired → create.available is true")
 
 	assert.Nil(t, body.Panels["memory_strip"].Create,

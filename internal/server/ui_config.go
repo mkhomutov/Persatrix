@@ -23,9 +23,10 @@ type UIConfig struct {
 
 // PanelToggle is the per-panel YAML entry. `enabled` is the operator's
 // render-the-panel toggle; `create_enabled` is the per-panel structural-write
-// opt-in (RFC 0048 channel-creation amendment §A) — today only the
-// channel_timeline panel honours it (group-channel creation), and it ships dark
-// (defaults false) so an operator must consciously opt in. Both are
+// knob (RFC 0048 channel-creation amendment §A) — today only the channel_timeline
+// panel honours it (group-channel creation). The shipped config + DefaultUIConfig
+// turn it ON for channel_timeline so a console-on deployment can create channels
+// out of the box; an operator sets it false to hide the affordance. Both are
 // operator-authored; the companion runtime-derived flags (`available`,
 // `create.available`) live on the server, never here — see [UIConfig].
 type PanelToggle struct {
@@ -46,7 +47,7 @@ type PanelToggle struct {
 func DefaultUIConfig() *UIConfig {
 	return &UIConfig{
 		Panels: map[string]PanelToggle{
-			"channel_timeline": {Enabled: true},
+			"channel_timeline": {Enabled: true, CreateEnabled: true},
 			"memory_strip":     {Enabled: false},
 			"cost":             {Enabled: false},
 		},
