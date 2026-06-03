@@ -227,7 +227,11 @@
         {/if}
         {#if selectedAgentInfo.capabilities && selectedAgentInfo.capabilities.length > 0}
           <ul class="persona-caps" aria-label="Capabilities">
-            {#each selectedAgentInfo.capabilities as capability (capability)}
+            <!-- Unkeyed: capabilities are display-only and the registry doesn't
+                 dedupe them, so a value key would throw each_key_duplicate. The
+                 list is re-derived wholesale per selection, so there's no identity
+                 to preserve across mutations anyway. -->
+            {#each selectedAgentInfo.capabilities as capability}
               <li>{capability}</li>
             {/each}
           </ul>
