@@ -126,10 +126,13 @@ Six layers, ordered by cheap-and-unfailable → expensive-and-judgement-based:
 | **0** | Cascade-depth cap | None — counter compare | ~free | ✅ Shipped (RFC 0011 amendment) |
 | **1** | Per-interaction cost ceiling (lease budget) | None — wallet rejects | wallet RPC, p99 ≤ 5 ms (RFC 0023) | 📋 This RFC, Phase 1 |
 | **2** | Per-participant reply budget | None — counter compare | hashmap lookup | 📋 This RFC, Phase 1 |
+| **2.5** | Floor control / speaker serialization | Floor-holder stalls → per-turn timeout advances | one in-flight dispatch + a parked waiter | 📋 [Floor-control amendment](0030-amendment-floor-control-speaker-serialization.md), v0.3.6 |
 | **3** | Per-membership response gate (`respond_policy`) | None — config lookup | ~free | ✅ Shipped (RFC 0011 §D) |
 | **4** | End-of-interaction signal (K consecutive votes) | Agent must opt in; falls back to lower layers | message accounting | 📋 This RFC, Phase 1 |
 | **5** | Moderator role | Moderator can be wrong or time out; falls back to lower layers | ~1 LLM call per N turns | 📋 This RFC, Phase 2 (v0.4.0) |
 | **6** | Declarative conversation type / phases | N/A for runtime termination — sets defaults for Layers 1–5 | trivial | 📋 This RFC, Phase 3 (v0.5.0+) |
+
+> **Layer 2.5 note (added by the [floor-control amendment](0030-amendment-floor-control-speaker-serialization.md)).** Layers 0–2 and 4–6 all answer *volume / termination* questions ("how many," "how much," "are we done"). None answers *ordering* — "who speaks next, and does each responder see the previous one." Sub-problem §A(c) conflated that with the reply *budget*; the amendment splits it and adds **Layer 2.5**, which serializes concurrent responders into a deterministic, mutually-visible speaker round. It is brought forward to **v0.3.6** as a usability blocker, ahead of the rest of this RFC's Phase 1.
 
 **Composition rule.** A publish proceeds only if every layer admits it. Any layer's drop terminates fanout for that publish and emits a `governance_drop{layer}` counter increment. Lower-layer drops short-circuit higher-layer evaluation (no point asking the moderator if the cost ceiling already said no).
 
@@ -557,6 +560,7 @@ This RFC is a **draft for discussion**. Before any PRs land:
 
 - [RFC 0011 — Channels & Internal Agent Messaging](0011-channels-bridges.md) — the channels stack this RFC governs.
 - [RFC 0011 Amendment — Cascade-Depth Wire Propagation](0011-amendment-cascade-depth-wire-propagation.md) — Layer 0 of this RFC.
+- [RFC 0030 Amendment — Floor Control / Speaker Serialization](0030-amendment-floor-control-speaker-serialization.md) — Layer 2.5; the ordering half of sub-problem (c), brought forward to v0.3.6. Its [PR plan](0030-amendment-floor-control-pr-plan.md) is the implementation workstream.
 - [RFC 0020 — Interaction Lifecycle](0020-interaction-lifecycle.md) — defines the scope ("conversation") this RFC governs.
 - [RFC 0023 — LLM Call Leasing](0023-llm-call-leasing.md) — provides the cost-ceiling primitive (Layer 1).
 - [RFC 0024 — Event-Driven Agent Scheduling](0024-event-driven-scheduling.md) — provides the moderator wake mechanism (Phase 2).
