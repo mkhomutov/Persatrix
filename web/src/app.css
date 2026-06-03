@@ -41,8 +41,10 @@ body {
   opacity: 0.6;
 }
 
-/* Identity block: the real principal plus the §E local-testing override. */
-.topbar .identity {
+/* Identity block: the real principal plus the §E local-testing override.
+   Named distinctly from the Chat panel's global `.identity` rule so that
+   single-class rule can't cascade into this topbar group. */
+.topbar .identity-block {
   display: flex;
   align-items: center;
   gap: 0.6rem;

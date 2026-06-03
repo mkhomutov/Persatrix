@@ -187,7 +187,11 @@
     {#if version}<span class="version" title="Orchestrator build">v{version}</span>{/if}
   </span>
   {#if principal}
-    <span class="identity">
+    <!-- `identity-block` (not `identity`): the bare `.identity` class is the
+         Chat panel's identity line, a global rule that would otherwise also
+         match this wrapper and bleed Chat's styling into the topbar. This
+         wrapper is a *group* (principal + override), so it gets its own name. -->
+    <span class="identity-block">
       <!-- The real /ui/context principal, shown verbatim — never the override.
            Titled so its source is unambiguous (RFC 0048 §F rule 1). -->
       <span class="principal" title="Identity from /api/v1/ui/context">
