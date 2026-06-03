@@ -13,8 +13,14 @@
     publishMessage,
     ApiError,
   } from "../lib/api.js";
+  import { nav } from "../lib/nav.svelte.js";
 
   let { userId } = $props();
+
+  // DOCS_URL backs the onboarding empty state (RFC 0048 amendment §F) — same
+  // quick-start the chat panel links, so a fresh stack isn't a dead end.
+  const DOCS_URL =
+    "https://github.com/mkhomutov/Persatrix/blob/main/docs/guides/web-console.md";
 
   // POLL_INTERVAL_MS is the steady-state cadence; on a poll error the delay
   // backs off exponentially up to MAX_BACKOFF_MS so an idle or erroring tab does
@@ -174,7 +180,14 @@
           return;
         }
         channels = result.channels ?? [];
-        if (channels.length > 0 && !selectedChannel) {
+        // Honour a cross-panel hand-off (§F): if the chat panel asked to open a
+        // specific DM and it's in the list, select it; the request is one-shot,
+        // so clear it once consumed. Otherwise default to the first channel.
+        const requested = nav.targetChannel;
+        if (requested && channels.some((c) => c.id === requested)) {
+          selectedChannel = requested;
+          nav.targetChannel = "";
+        } else if (channels.length > 0 && !selectedChannel) {
           selectedChannel = channels[0].id;
         }
       })
@@ -453,7 +466,22 @@
   {:else if !channelsLoaded}
     <p class="loading" role="status">Loading channels…</p>
   {:else if channels.length === 0}
-    <p class="empty">No channels exist yet.</p>
+    <!-- Onboarding, not a dead end (§F): no channels yet on a fresh stack. A
+         human↔persona chat creates a DM channel, and group channels come from
+         config; say so and offer a re-check. -->
+    <div class="empty onboarding">
+      <p>No channels exist yet.</p>
+      <p>
+        Chat with a persona to start a DM, or define group channels in
+        <code>config/channels.yaml</code>, then re-check.
+      </p>
+      <p>
+        <button type="button" class="retry" onclick={loadChannels}>Refresh</button>
+        <a href={DOCS_URL} target="_blank" rel="noopener noreferrer"
+          >Web console quick-start ↗</a
+        >
+      </p>
+    </div>
   {:else}
     <div class="channel-picker">
       <label>

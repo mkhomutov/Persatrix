@@ -35,6 +35,7 @@ import {
   publishMessage,
   ApiError,
 } from "../lib/api.js";
+import { nav } from "../lib/nav.svelte.js";
 
 const CHANNELS = [
   { id: "general", name: "General", channel_type: "group" },
@@ -69,6 +70,8 @@ beforeEach(() => {
   publishMessage.mockResolvedValue(
     msg("m3", "from me", "local", "2026-06-02T10:00:03Z"),
   );
+  // Reset the shared cross-panel nav intent (§F) so tests don't leak it.
+  nav.targetChannel = "";
 });
 
 afterEach(() => {
@@ -148,6 +151,34 @@ describe("Channel timeline panel", () => {
     render(ChannelTimeline, { props: { userId: "local" } });
 
     expect(await screen.findByText(/no channels/i)).toBeTruthy();
+  });
+
+  it("makes the no-channels empty state an on-ramp, not a dead end (§F)", async () => {
+    listChannels.mockResolvedValue({ channels: [] });
+    render(ChannelTimeline, { props: { userId: "local" } });
+
+    await screen.findByText(/no channels/i);
+    expect(screen.getByRole("button", { name: /refresh/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /quick-start/i })).toBeTruthy();
+  });
+
+  it("opens on the channel handed off from the chat panel (§F)", async () => {
+    // The chat panel records a target DM; the freshly-mounted timeline selects
+    // it (if present) and consumes the one-shot intent.
+    nav.targetChannel = "ops";
+    getChannelHistory.mockResolvedValue(
+      historyOf(msg("o1", "ops message", "alice")),
+    );
+
+    render(ChannelTimeline, { props: { userId: "local" } });
+
+    // History loaded for the handed-off channel, and the intent is cleared.
+    await waitFor(() =>
+      expect(getChannelHistory).toHaveBeenCalledWith("ops", expect.anything()),
+    );
+    expect(nav.targetChannel).toBe("");
+    const picker = screen.getByRole("combobox", { name: /channel/i });
+    expect(picker.value).toBe("ops");
   });
 
   it("shows a no-messages state for an empty channel", async () => {

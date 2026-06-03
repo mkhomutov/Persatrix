@@ -12,8 +12,15 @@
     createSession,
     ApiError,
   } from "../lib/api.js";
+  import { nav } from "../lib/nav.svelte.js";
 
   let { userId } = $props();
+
+  // DOCS_URL points at the web-console quick-start so the empty states are an
+  // on-ramp, not a dead end (RFC 0048 amendment §F). An absolute GitHub URL
+  // (the console is served at /ui; the docs are not served by the orchestrator).
+  const DOCS_URL =
+    "https://github.com/mkhomutov/Persatrix/blob/main/docs/guides/web-console.md";
 
   // chatMaxMessageLength mirrors the server's constant (chat_handler.go) so an
   // over-length message is rejected with immediate feedback instead of burning a
@@ -240,6 +247,17 @@
     chatController?.abort();
   }
 
+  // viewInTimeline hands the current conversation to the Channel Timeline (§F):
+  // it records the resolved DM channel id as the pending selection and switches
+  // the hash route, so the freshly-mounted timeline opens on this conversation —
+  // making "your chat is a real, watchable channel" a click, not an assertion.
+  // Only reachable once a conversation exists (dmChannelId is set from history).
+  function viewInTimeline() {
+    if (!dmChannelId) return;
+    nav.targetChannel = dmChannelId;
+    window.location.hash = "#/channels";
+  }
+
   // loadToken disambiguates concurrent/superseded loads: each call stamps a
   // token and only the latest may write state. This both guards against a
   // resolve-after-unmount (the effect cleanup bumps the token) and makes Retry
@@ -420,7 +438,21 @@
          dropdown). agentsLoaded gates both this and the empty state below. -->
     <p class="loading" role="status">Loading personas…</p>
   {:else if agents.length === 0}
-    <p class="empty">No personas are registered yet.</p>
+    <!-- Onboarding, not a dead end (§F): a fresh stack has no personas yet, so
+         say how to add one and offer a way to re-check without a full reload. -->
+    <div class="empty onboarding">
+      <p>No personas are registered yet.</p>
+      <p>
+        Register one with <code>persatrix agent register</code> (or add it to
+        <code>config/agents.yaml</code> and restart), then re-check.
+      </p>
+      <p>
+        <button type="button" class="retry" onclick={loadAgents}>Refresh</button>
+        <a href={DOCS_URL} target="_blank" rel="noopener noreferrer"
+          >Web console quick-start ↗</a
+        >
+      </p>
+    </div>
   {:else}
     {#if selectedAgentInfo}
       <!-- Persona header: gives the conversation a face. Name + role identify
@@ -439,6 +471,14 @@
               <li>{capability}</li>
             {/each}
           </ul>
+        {/if}
+        {#if dmChannelId}
+          <!-- Cross-panel continuity (§F): this conversation is a persisted DM
+               channel — jump to the timeline to watch it as one. Only shown once
+               a conversation exists (dmChannelId resolved from history). -->
+          <button type="button" class="link-like" onclick={viewInTimeline}>
+            View in timeline ↗
+          </button>
         {/if}
       </header>
     {/if}
