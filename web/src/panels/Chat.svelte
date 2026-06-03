@@ -151,6 +151,12 @@
   // so a slow load can't write into a persona the operator already switched off.
   $effect(() => {
     const agent = selectedAgent;
+    // Track userId too: the §E "acting as" override changes the effective
+    // identity, and persistence is keyed on (user, agent) — so switching the
+    // acting-as user must reseed the transcript with THAT user's conversation
+    // (the whole point of the override — different user, different/empty
+    // history). Reading it here makes the effect re-run on an identity change.
+    void userId;
     if (!agent) return;
     loadHistory(agent);
     return () => {
