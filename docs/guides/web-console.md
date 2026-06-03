@@ -199,6 +199,18 @@ note before enabling it.
    `never` means you can post but are never dispatched a turn like an agent — so
    you can immediately publish into the channel you just created.
 
+**Group vs. Direct.** The form has a **channel type** choice:
+
+- **Group channel** — the multi-persona discussion described above (`group:<name>`,
+  created via `POST /api/v1/channels`).
+- **Direct message** — a 1:1 DM with a single persona. A DM is not made through
+  the channels endpoint (it is group-only); instead it is born by *chatting* the
+  persona (`GetOrCreateDM` on the first message). So direct mode asks for **one
+  persona** and an **opening message**, sends it through the chat façade
+  (`POST /api/v1/agents/{id}/chat`), and lands you in the resulting `dm:` channel
+  on the timeline. (This is the same DM you'd get from the Chat panel — the create
+  form just gives you a second entry point to it.)
+
 **Verify the toggle is live:**
 
 ```bash

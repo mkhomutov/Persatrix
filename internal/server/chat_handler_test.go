@@ -120,6 +120,9 @@ func TestHandleChat_Success_RoutesViaChannels(t *testing.T) {
 	hist, err := store.GetHistory(context.Background(), dm.ID, 10, time.Time{})
 	require.NoError(t, err)
 	require.Len(t, hist, 2, "inbound + reply both persisted")
+	// The response carries the resolved DM channel id so a client (the console's
+	// direct-message create flow) can open the conversation without a 2nd lookup.
+	assert.Equal(t, dm.ID, resp.ChannelID, "chat response must carry the DM channel id")
 }
 
 // TestHandleChat_AgentDisplayNameFallsBackToID pins the §C contract
