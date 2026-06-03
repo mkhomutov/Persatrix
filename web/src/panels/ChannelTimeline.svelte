@@ -13,15 +13,13 @@
     publishMessage,
     ApiError,
   } from "../lib/api.js";
-  import { formatTimestamp, channelLabel, senderLabel } from "../lib/format.js";
+  import { channelLabel } from "../lib/format.js";
   import { nav } from "../lib/nav.svelte.js";
+  import OnboardingEmpty from "./OnboardingEmpty.svelte";
+  import PublishComposer from "./PublishComposer.svelte";
+  import ChannelMessage from "./ChannelMessage.svelte";
 
   let { userId } = $props();
-
-  // DOCS_URL backs the onboarding empty state (RFC 0048 amendment §F) — same
-  // quick-start the chat panel links, so a fresh stack isn't a dead end.
-  const DOCS_URL =
-    "https://github.com/mkhomutov/Persatrix/blob/main/docs/guides/web-console.md";
 
   // POLL_INTERVAL_MS is the steady-state cadence; on a poll error the delay
   // backs off exponentially up to MAX_BACKOFF_MS so an idle or erroring tab does
@@ -438,19 +436,10 @@
     <!-- Onboarding, not a dead end (§F): no channels yet on a fresh stack. A
          human↔persona chat creates a DM channel, and group channels come from
          config; say so and offer a re-check. -->
-    <div class="empty onboarding">
-      <p>No channels exist yet.</p>
-      <p>
-        Chat with a persona to start a DM, or define group channels in
-        <code>config/channels.yaml</code>, then re-check.
-      </p>
-      <p>
-        <button type="button" class="retry" onclick={loadChannels}>Refresh</button>
-        <a href={DOCS_URL} target="_blank" rel="noopener noreferrer"
-          >Web console quick-start ↗</a
-        >
-      </p>
-    </div>
+    <OnboardingEmpty title="No channels exist yet." onRetry={loadChannels}>
+      Chat with a persona to start a DM, or define group channels in
+      <code>config/channels.yaml</code>, then re-check.
+    </OnboardingEmpty>
   {:else}
     <div class="channel-picker">
       <label>
@@ -487,13 +476,7 @@
         onscroll={onTimelineScroll}
       >
         {#each displayMessages as message (message.id)}
-          <li class="message" class:from-self={message.sender_id === userId}>
-            <span class="sender">{senderLabel(message.sender_id, userId, agentsById)}</span>
-            <span class="content">{message.content}</span>
-            <time class="ts" datetime={message.timestamp}
-              >{formatTimestamp(message.timestamp)}</time
-            >
-          </li>
+          <ChannelMessage {message} {userId} {agentsById} />
         {/each}
       </ol>
     {/if}
@@ -502,23 +485,12 @@
       <p class="boot error" role="alert">{publishError}</p>
     {/if}
 
-    <!-- The optional human publish: a clearly-labelled write action so it reads
-         as deliberate, not a search box. The sender is the /ui/context principal
-         (userId) — never a free-text field (RFC §F rule 1). -->
-    <form class="publish" onsubmit={onPublishSubmit}>
-      <label>
-        Message
-        <textarea
-          bind:value={publishContent}
-          rows="2"
-          placeholder="Post a message to this channel… (Enter to post, Shift+Enter for a new line)"
-          disabled={publishing}
-          onkeydown={onPublishKeydown}
-        ></textarea>
-      </label>
-      <button type="submit" disabled={!canPublish}>
-        {publishing ? "Posting…" : "Post"}
-      </button>
-    </form>
+    <PublishComposer
+      bind:content={publishContent}
+      {publishing}
+      {canPublish}
+      onSubmit={onPublishSubmit}
+      onKeydown={onPublishKeydown}
+    />
   {/if}
 </section>

@@ -7,7 +7,6 @@ import {
   fireEvent,
 } from "@testing-library/svelte";
 import Chat from "./Chat.svelte";
-import { nav } from "../lib/nav.svelte.js";
 
 // The chat panel renders over today's synchronous chat API (RFC 0048 PR 4): it
 // lists personas, sends as the context-derived user, surfaces errors, and threads
@@ -63,8 +62,6 @@ beforeEach(() => {
   // the free-text degradation reject this instead.
   listSessions.mockResolvedValue({ sessions: [] });
   createSession.mockResolvedValue({ id: "sess-new", label: "New" });
-  // Reset the shared cross-panel nav intent (§F) so tests don't leak it.
-  nav.targetChannel = "";
 });
 
 afterEach(() => {
@@ -351,50 +348,8 @@ describe("Chat panel", () => {
     expect(screen.queryByRole("button", { name: /send/i })).toBeNull();
   });
 
-  it("makes the no-personas empty state an on-ramp, not a dead end (§F)", async () => {
-    listAgents.mockResolvedValue([]);
-    render(Chat, { props: { userId: "local" } });
-
-    await screen.findByText(/no personas/i);
-    // Guidance + a re-check that doesn't need a full reload + a docs link.
-    expect(screen.getByText(/agent register/i)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /refresh/i })).toBeTruthy();
-    expect(screen.getByRole("link", { name: /quick-start/i })).toBeTruthy();
-  });
-
-  it("offers 'view in timeline' once a conversation exists and hands it off (§F)", async () => {
-    // A seeded history carries the DM channel id; the cross-panel link records it
-    // as the pending selection and switches the hash route to the timeline.
-    getChatHistory.mockResolvedValue({
-      messages: [
-        {
-          id: "h1",
-          channel_id: "dm:alice:local",
-          sender_id: "local",
-          content: "hi",
-          timestamp: "2026-06-02T10:00:00Z",
-        },
-      ],
-    });
-    window.location.hash = "#/chat";
-    render(Chat, { props: { userId: "local" } });
-
-    const link = await screen.findByRole("button", { name: /view in timeline/i });
-    await fireEvent.click(link);
-
-    expect(nav.targetChannel).toBe("dm:alice:local");
-    expect(window.location.hash).toBe("#/channels");
-  });
-
-  it("shows no 'view in timeline' link before a conversation exists (§F)", async () => {
-    getChatHistory.mockResolvedValue({ messages: [] });
-    render(Chat, { props: { userId: "local" } });
-
-    await screen.findByRole("option", { name: "Alice" });
-    expect(
-      screen.queryByRole("button", { name: /view in timeline/i }),
-    ).toBeNull();
-  });
+  // §F onboarding empty state + cross-panel "view in timeline" hand-off live in
+  // Chat.crosspanel.test.js (kept separate for the review-size cap).
 
   it("annotates a non-healthy persona with its status in the picker", async () => {
     // GET /api/v1/agents returns agents of any status, but only a healthy one

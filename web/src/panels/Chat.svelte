@@ -7,15 +7,11 @@
   import { listAgents, sendChat, getChatHistory, ApiError } from "../lib/api.js";
   import { formatTimestamp } from "../lib/format.js";
   import ScopeSelector from "./ScopeSelector.svelte";
+  import OnboardingEmpty from "./OnboardingEmpty.svelte";
+  import PersonaHeader from "./PersonaHeader.svelte";
   import { nav } from "../lib/nav.svelte.js";
 
   let { userId } = $props();
-
-  // DOCS_URL points at the web-console quick-start so the empty states are an
-  // on-ramp, not a dead end (RFC 0048 amendment §F). An absolute GitHub URL
-  // (the console is served at /ui; the docs are not served by the orchestrator).
-  const DOCS_URL =
-    "https://github.com/mkhomutov/Persatrix/blob/main/docs/guides/web-console.md";
 
   // chatMaxMessageLength mirrors the server's constant (chat_handler.go) so an
   // over-length message is rejected with immediate feedback instead of burning a
@@ -380,52 +376,16 @@
   {:else if agents.length === 0}
     <!-- Onboarding, not a dead end (§F): a fresh stack has no personas yet, so
          say how to add one and offer a way to re-check without a full reload. -->
-    <div class="empty onboarding">
-      <p>No personas are registered yet.</p>
-      <p>
-        Register one with <code>persatrix agent register</code> (or add it to
-        <code>config/agents.yaml</code> and restart), then re-check.
-      </p>
-      <p>
-        <button type="button" class="retry" onclick={loadAgents}>Refresh</button>
-        <a href={DOCS_URL} target="_blank" rel="noopener noreferrer"
-          >Web console quick-start ↗</a
-        >
-      </p>
-    </div>
+    <OnboardingEmpty title="No personas are registered yet." onRetry={loadAgents}>
+      Register one with <code>persatrix agent register</code> (or add it to
+      <code>config/agents.yaml</code> and restart), then re-check.
+    </OnboardingEmpty>
   {:else}
-    {#if selectedAgentInfo}
-      <!-- Persona header: gives the conversation a face. Name + role identify
-           the persona; the capability chips say what it's for — all from fields
-           the agent DTO already carries (RFC 0048 amendment §A). -->
-      <header class="persona">
-        <span class="persona-name"
-          >{selectedAgentInfo.name || selectedAgentInfo.id}</span
-        >
-        {#if selectedAgentInfo.role}
-          <span class="persona-role">{selectedAgentInfo.role}</span>
-        {/if}
-        {#if selectedAgentInfo.capabilities && selectedAgentInfo.capabilities.length > 0}
-          <ul class="persona-caps" aria-label="Capabilities">
-            <!-- Unkeyed: capabilities are display-only and the registry doesn't
-                 dedupe them, so a value key would throw each_key_duplicate. The
-                 list is re-derived wholesale per selection, so there's no identity
-                 to preserve across mutations anyway. -->
-            {#each selectedAgentInfo.capabilities as capability}
-              <li>{capability}</li>
-            {/each}
-          </ul>
-        {/if}
-        {#if dmChannelId}
-          <!-- Cross-panel continuity (§F): this conversation is a persisted DM
-               channel — jump to the timeline to watch it as one. Only shown once
-               a conversation exists (dmChannelId resolved from history). -->
-          <button type="button" class="link-like" onclick={viewInTimeline}>
-            View in timeline ↗
-          </button>
-        {/if}
-      </header>
-    {/if}
+    <PersonaHeader
+      info={selectedAgentInfo}
+      {dmChannelId}
+      onViewInTimeline={viewInTimeline}
+    />
 
     {#if historyLoading}
       <p class="loading" role="status">Loading conversation history…</p>
