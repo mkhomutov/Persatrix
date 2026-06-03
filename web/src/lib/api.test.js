@@ -5,6 +5,7 @@ import {
   sendChat,
   listChannels,
   getChannelHistory,
+  getChatHistory,
   publishMessage,
   ApiError,
 } from "./api.js";
@@ -333,6 +334,89 @@ describe("getChannelHistory", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(getChannelHistory("missing")).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("getChatHistory", () => {
+  // Resolves the (user_id, agent_id) DM read-only, returning the same {messages}
+  // envelope as getChannelHistory (RFC 0048 §B). user_id is REQUIRED — half the
+  // DM key, with no shared default the way the chat POST falls back to "local".
+  function history(overrides = {}) {
+    return {
+      messages: [
+        {
+          id: "h2",
+          channel_id: "dm:alice:ember-owl",
+          sender_id: "ember-owl",
+          content: "second",
+          timestamp: "2026-06-02T10:00:02Z",
+          mentions: [],
+        },
+        {
+          id: "h1",
+          channel_id: "dm:alice:ember-owl",
+          sender_id: "alice",
+          content: "first",
+          timestamp: "2026-06-02T10:00:01Z",
+          mentions: [],
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  it("fetches the (user, agent) DM history and returns the parsed envelope", async () => {
+    const body = history();
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(body)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getChatHistory("ember-owl", { userId: "alice" });
+
+    expect(result).toEqual(body);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/agents/ember-owl/chat/history?user_id=alice",
+    );
+  });
+
+  it("appends limit and before as query params only when supplied", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(history())));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getChatHistory("ember-owl", {
+      userId: "alice",
+      limit: 50,
+      before: "2026-06-02T10:00:00Z",
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/v1/agents/ember-owl/chat/history?user_id=alice&limit=50&before=2026-06-02T10%3A00%3A00Z",
+    );
+
+    await getChatHistory("ember-owl", { userId: "alice" });
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      "/api/v1/agents/ember-owl/chat/history?user_id=alice",
+    );
+  });
+
+  it("rejects without calling fetch when userId is absent", async () => {
+    // A missing principal must fail at the call site, NOT serialise to the
+    // literal "user_id=undefined": the server would read that as a real user
+    // named "undefined" and answer 200-empty, silently masking the bug rather
+    // than surfacing it. Guarding here keeps the failure close to its cause.
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getChatHistory("ember-owl", {})).rejects.toBeInstanceOf(Error);
+    await expect(getChatHistory("ember-owl")).rejects.toBeInstanceOf(Error);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("throws an ApiError when history responds non-2xx", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({}, false, 400)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getChatHistory("ember-owl", { userId: "alice" }),
+    ).rejects.toBeInstanceOf(ApiError);
   });
 });
 

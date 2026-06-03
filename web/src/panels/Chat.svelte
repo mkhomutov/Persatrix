@@ -67,7 +67,11 @@
   let historyToken = 0;
   // The resolved DM channel id, captured from seeded history when present, for
   // the §F "view this conversation in the timeline" deep-link (PR F). Empty
-  // until a conversation exists (a fresh persona has no DM yet).
+  // until a conversation exists (a fresh persona has no DM yet). NOTE for §F: a
+  // live send into a fresh persona creates the DM server-side but does NOT
+  // populate this — chatResponse carries no channel id — so the deep-link stays
+  // empty until the next reload reseeds from history. §F should surface the id
+  // on the chat response (or re-resolve) rather than rely on a reload.
   let dmChannelId = $state("");
 
   const canSend = $derived(
@@ -115,6 +119,13 @@
   // reversed. A fresh persona returns an empty list (200, not 404) — a clean
   // empty transcript, not an error. historyError is non-fatal: a failed seed
   // still leaves a usable (empty) composer rather than blocking the panel.
+  //
+  // Scope note: the seed fetches only the server's default-limit most-recent
+  // page (channelDefaultHistoryLimit, 50) and the panel has no "load earlier"
+  // affordance yet, so a conversation longer than that resumes from its tail
+  // with the oldest turns omitted. getChatHistory already plumbs limit/before
+  // for the paginating back-fill a later slice (§F) adds; until then the cap is
+  // intentional, not full resume.
   function loadHistory(agentID) {
     const token = ++historyToken;
     historyError = "";
@@ -137,7 +148,7 @@
       })
       .catch((err) => {
         if (token !== historyToken) return;
-        historyError = `Could not load earlier messages: ${err.message}`;
+        historyError = `Could not load conversation history: ${err.message}`;
       })
       .finally(() => {
         if (token !== historyToken) return;
@@ -429,7 +440,11 @@
         {/if}
         {#if selectedAgentInfo.capabilities && selectedAgentInfo.capabilities.length > 0}
           <ul class="persona-caps" aria-label="Capabilities">
-            {#each selectedAgentInfo.capabilities as capability (capability)}
+            <!-- Unkeyed: capabilities are display-only and the registry doesn't
+                 dedupe them, so a value key would throw each_key_duplicate. The
+                 list is re-derived wholesale per selection, so there's no identity
+                 to preserve across mutations anyway. -->
+            {#each selectedAgentInfo.capabilities as capability}
               <li>{capability}</li>
             {/each}
           </ul>
@@ -438,7 +453,7 @@
     {/if}
 
     {#if historyLoading}
-      <p class="loading" role="status">Loading earlier messages…</p>
+      <p class="loading" role="status">Loading conversation history…</p>
     {/if}
     {#if historyError}
       <!-- Non-fatal: a failed history seed still leaves a usable (empty)
@@ -449,7 +464,7 @@
 
     <ol class="transcript" aria-label="Conversation">
       {#each transcript as msg (msg.id)}
-        <li class="msg" class:from-self={msg.fromUser}>
+        <li class="msg">
           <p
             class:from-user={msg.fromUser}
             class:from-agent={!msg.fromUser}

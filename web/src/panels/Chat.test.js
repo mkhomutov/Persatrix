@@ -9,10 +9,8 @@ import {
 import Chat from "./Chat.svelte";
 
 // The chat panel renders over today's synchronous chat API (RFC 0048 PR 4): it
-// lists personas, sends a message as the context-derived user, and shows the
-// reply. The backend client is mocked so the panel's wiring — picker, send,
-// thinking state, error surfacing, session/epoch pass-through, and the §F
-// identity rule — is exercised without a running orchestrator.
+// lists personas, sends as the context-derived user, surfaces errors, and threads
+// session/epoch + §F identity. Client mocked; history-seed resume in Chat.history.test.js.
 vi.mock("../lib/api.js", () => ({
   ApiError: class ApiError extends Error {
     constructor(message, status, options) {
@@ -106,50 +104,16 @@ describe("Chat panel", () => {
     ).toBeTruthy();
   });
 
-  it("seeds the transcript from persisted history on persona-select (resume)", async () => {
-    // The history endpoint returns newest-first; the panel renders oldest-top
-    // (conversational), seeded so a reload resumes the conversation (§B).
-    getChatHistory.mockResolvedValue({
-      messages: [
-        {
-          id: "h2",
-          channel_id: "dm:alice:local",
-          sender_id: "alice",
-          content: "earlier reply",
-          timestamp: "2026-06-02T10:00:01Z",
-        },
-        {
-          id: "h1",
-          channel_id: "dm:alice:local",
-          sender_id: "local",
-          content: "earlier question",
-          timestamp: "2026-06-02T10:00:00Z",
-        },
-      ],
-    });
+  it("renders duplicate capabilities without crashing the persona header", async () => {
+    // The registry doesn't dedupe capabilities, so ["search","search"] is a
+    // reachable DTO. A value-keyed chip list would throw each_key_duplicate and
+    // crash the panel; both chips must render and the panel must mount.
+    listAgents.mockResolvedValue([
+      { id: "ada", name: "Ada", capabilities: ["search", "search"], status: "healthy" },
+    ]);
     render(Chat, { props: { userId: "local" } });
 
-    // Seeded from the (user, agent) DM — fetched read-only for the default
-    // persona with the context-derived user.
-    await waitFor(() => {
-      expect(getChatHistory).toHaveBeenCalledWith("alice", { userId: "local" });
-    });
-    const items = await screen.findAllByRole("listitem");
-    // Oldest at top: the question (h1) precedes the reply (h2).
-    expect(items[0].textContent).toMatch(/earlier question/);
-    expect(items[1].textContent).toMatch(/earlier reply/);
-    // The operator's own message reads as "You".
-    expect(items[0].textContent).toMatch(/^You:/);
-  });
-
-  it("starts with an empty transcript when the persona has no history", async () => {
-    getChatHistory.mockResolvedValue({ messages: [] });
-    render(Chat, { props: { userId: "local" } });
-
-    await screen.findByRole("option", { name: "Alice" });
-    // No prior messages — a clean (empty) transcript, not an error.
-    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(await screen.findAllByText("search")).toHaveLength(2);
   });
 
   it("sends the message for the selected persona as the context-derived user", async () => {

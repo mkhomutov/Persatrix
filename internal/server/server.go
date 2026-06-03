@@ -321,11 +321,9 @@ func (s *Server) registerRoutes() {
 	// Cost summary endpoint (RFC 0006 PR 4b)
 	s.mux.HandleFunc("GET /api/v1/cost/summary", s.handleGetCostSummaryImpl)
 
-	// Chat endpoint (RFC 0016 PR 4)
-	// TODO(v0.2): per-IP or per-session rate limiting — chat accepts unauthenticated
-	// traffic and has no request-rate controls beyond the 300s timeout cap.
+	// Chat endpoints (RFC 0016 PR 4; history GET = RFC 0048 §B web-console resume).
+	// TODO(v0.2): per-IP/per-session rate limiting — chat is unauthenticated with no rate controls beyond the 300s timeout cap.
 	s.mux.HandleFunc("POST /api/v1/agents/{id}/chat", s.handleChat)
-	// RFC 0048 amendment §B — read-only conversation resume for the web console.
 	s.mux.HandleFunc("GET /api/v1/agents/{id}/chat/history", s.handleGetChatHistory)
 
 	// Channels endpoints (RFC 0011 §C). DELETE handlers landed in PR 4b

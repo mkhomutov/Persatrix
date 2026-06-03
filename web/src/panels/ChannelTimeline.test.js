@@ -121,6 +121,28 @@ describe("Channel timeline panel", () => {
     expect(screen.getByText("ghost")).toBeTruthy();
   });
 
+  it("maps sender ids to names and marks the operator's own posts as 'You'", async () => {
+    // The agent list decorates senders (RFC 0048 §A/§D): an agent id resolves to
+    // "name — role", the operator's own id reads as "You", and an unknown id
+    // falls back to its raw value.
+    listAgents.mockResolvedValue([
+      { id: "ada", name: "Ada", role: "Researcher", status: "healthy" },
+    ]);
+    getChannelHistory.mockResolvedValue(
+      historyOf(
+        msg("m3", "from the human", "local", "2026-06-02T10:00:02Z"),
+        msg("m2", "from ada", "ada", "2026-06-02T10:00:01Z"),
+        msg("m1", "from a stranger", "ghost", "2026-06-02T10:00:00Z"),
+      ),
+    );
+
+    render(ChannelTimeline, { props: { userId: "local" } });
+
+    expect(await screen.findByText("Ada — Researcher")).toBeTruthy();
+    expect(screen.getByText("You")).toBeTruthy();
+    expect(screen.getByText("ghost")).toBeTruthy();
+  });
+
   it("renders a human-readable timestamp but keeps the raw value machine-readable", async () => {
     // The wire timestamp is RFC-3339 UTC (e.g. 2026-06-02T10:00:00Z) — readable
     // by a machine, not by an operator scanning the timeline. The visible text
