@@ -75,6 +75,43 @@ body {
   padding: 1.5rem;
 }
 
+/* Persona header (RFC 0048 amendment §A) — gives the conversation a face:
+   name + role + capability chips, all from fields the agent DTO already serves. */
+.persona {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.persona-name {
+  font-weight: 600;
+}
+
+.persona-role {
+  opacity: 0.8;
+  font-size: 0.9rem;
+}
+
+.persona-caps {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+}
+
+.persona-caps li {
+  font-size: 0.75rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
 /* Chat panel (RFC 0048 Phase 1 PR 4). Still deliberately minimal — enough
    structure to read a conversation and reach the composer, no design system. */
 .transcript {
@@ -227,6 +264,12 @@ body {
 
 .message .sender {
   font-weight: 600;
+}
+
+.message.from-self .sender {
+  /* The operator's own posts, distinguished from agents' (RFC 0048 §D) the same
+     way the chat panel bolds "You:" — a subtle accent, not a loud highlight. */
+  color: light-dark(#1565c0, #82b1ff);
 }
 
 .message .ts {

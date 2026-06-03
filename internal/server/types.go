@@ -31,6 +31,7 @@ type workflowRunResponse struct {
 type registerAgentRequest struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
+	Role         string   `json:"role"` // RFC 0048 amendment §A — optional persona role; "" when unset
 	Address      string   `json:"address"`
 	Capabilities []string `json:"capabilities"`
 }
@@ -41,6 +42,7 @@ type registerAgentRequest struct {
 type agentResponse struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
+	Role         string   `json:"role"` // RFC 0048 amendment §A — from registry.AgentInfo.Role; "" when unset
 	Address      string   `json:"address"`
 	Capabilities []string `json:"capabilities"`
 	Status       string   `json:"status"`

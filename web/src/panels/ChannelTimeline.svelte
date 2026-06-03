@@ -7,6 +7,7 @@
   // the /ui/context-derived userId (RFC §F single identity source), so the panel
   // never prompts for or hard-codes a sender.
   import {
+    listAgents,
     listChannels,
     getChannelHistory,
     publishMessage,
@@ -43,6 +44,13 @@
   let publishContent = $state("");
   let publishing = $state(false);
   let publishError = $state("");
+
+  // agentsById maps sender_id → persona record so the timeline can show
+  // "Ada — Researcher" instead of a raw id (RFC 0048 amendment §A / §D). It is
+  // best-effort decoration: the load is fire-and-forget and a failure leaves the
+  // map empty, so senderLabel falls back to the raw id rather than blocking the
+  // timeline (which is the panel's actual job) on the agent list.
+  let agentsById = $state({});
 
   // seenIds de-dupes the head poll against messages already shown (and against a
   // just-published echo). Not reactive — it's bookkeeping the render reads
@@ -235,6 +243,24 @@
     }
   }
 
+  // Load the agent list once for sender-name decoration. Best-effort and
+  // independent of the channel/poll lifecycle: a failure is swallowed (the
+  // timeline still renders raw ids), so this never gates the panel.
+  $effect(() => {
+    let cancelled = false;
+    listAgents()
+      .then((list) => {
+        if (cancelled) return;
+        agentsById = Object.fromEntries(list.map((agent) => [agent.id, agent]));
+      })
+      .catch(() => {
+        // Decoration only — leave the map empty and fall back to raw ids.
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
   $effect(() => {
     loadChannels();
     return () => {
@@ -280,6 +306,22 @@
   // to its id (DMs/threads have no name — channel_types.go).
   function channelLabel(channel) {
     return channel.name ? channel.name : channel.id;
+  }
+
+  // senderLabel turns a raw sender_id into a readable name. The operator's own
+  // posts read as "You" (the human/agent distinction §D asks for); an agent
+  // resolves to "name — role" via the best-effort agent map; anything unknown
+  // falls back to the raw id rather than inventing a label.
+  function senderLabel(senderId) {
+    if (senderId === userId) {
+      return "You";
+    }
+    const agent = agentsById[senderId];
+    if (!agent) {
+      return senderId;
+    }
+    const name = agent.name || agent.id;
+    return agent.role ? `${name} — ${agent.role}` : name;
   }
 
   async function publish() {
@@ -396,8 +438,8 @@
     {:else}
       <ol class="timeline" aria-label="Channel messages">
         {#each messages as message (message.id)}
-          <li class="message">
-            <span class="sender">{message.sender_id}</span>
+          <li class="message" class:from-self={message.sender_id === userId}>
+            <span class="sender">{senderLabel(message.sender_id)}</span>
             <span class="content">{message.content}</span>
             <time class="ts" datetime={message.timestamp}
               >{formatTimestamp(message.timestamp)}</time
