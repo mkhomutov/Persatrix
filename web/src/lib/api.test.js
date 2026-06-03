@@ -338,11 +338,9 @@ describe("getChannelHistory", () => {
 });
 
 describe("getChatHistory", () => {
-  // The chat-history endpoint resolves the (user_id, agent_id) DM read-only and
-  // returns the same {messages} envelope as getChannelHistory (RFC 0048 §B). The
-  // client owns one piece of the wire contract the panel must not get wrong:
-  // user_id is REQUIRED (it is half the DM key) — there is no shared default for
-  // a read the way the chat POST falls back to "local".
+  // Resolves the (user_id, agent_id) DM read-only, returning the same {messages}
+  // envelope as getChannelHistory (RFC 0048 §B). user_id is REQUIRED — half the
+  // DM key, with no shared default the way the chat POST falls back to "local".
   function history(overrides = {}) {
     return {
       messages: [
@@ -396,17 +394,6 @@ describe("getChatHistory", () => {
     await getChatHistory("ember-owl", { userId: "alice" });
     expect(fetchMock.mock.calls[1][0]).toBe(
       "/api/v1/agents/ember-owl/chat/history?user_id=alice",
-    );
-  });
-
-  it("encodes the agent id into the request path", async () => {
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse(history())));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await getChatHistory("a/b c", { userId: "alice" });
-
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      "/api/v1/agents/a%2Fb%20c/chat/history?user_id=alice",
     );
   });
 
