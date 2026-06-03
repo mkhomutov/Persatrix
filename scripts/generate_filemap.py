@@ -157,7 +157,12 @@ def main(argv: list[str] | None = None) -> int:
         print("[OK] FILEMAP.md is up-to-date.")
         return 0
 
-    OUTPUT_FILE.write_text(content, encoding="utf-8", newline="\n")
+    # newline="\n" forces LF on write regardless of platform. Use Path.open()
+    # rather than Path.write_text(newline=...) — the latter kwarg is 3.10+, but
+    # the pre-commit hook resolves whatever `python3` is on PATH (which can be
+    # 3.9). Path.open() has accepted `newline` for far longer.
+    with OUTPUT_FILE.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(content)
     print(f"[OK] FILEMAP.md updated ({len(content)} bytes)")
     return 0
 
