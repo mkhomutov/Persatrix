@@ -10,6 +10,11 @@
   //   exit can't strand the pending reply.
   // onChange — user-driven persona change (records the sticky selection upstream).
   // onExit — leave the conversation for the lobby.
+  // showLobby — render the "select a persona" lobby prompt + placeholder option
+  //   when no persona is selected (true for the standalone Chat panel, where the
+  //   picker IS the panel). The consolidated Channels panel passes false: there
+  //   the picker is one of two entry points and the group-channel timeline (not a
+  //   lobby prompt) fills the body when no DM is open.
   import { isChattable, agentLabel } from "../lib/agents.js";
 
   let {
@@ -18,6 +23,7 @@
     sending,
     onChange,
     onExit,
+    showLobby = true,
   } = $props();
 </script>
 
@@ -48,9 +54,10 @@
   {/if}
 </div>
 
-{#if !selectedAgent}
+{#if showLobby && !selectedAgent}
   <!-- Lobby: no persona selected. Prompt the operator to pick one; the picker
        above is the entry point. No header / transcript / composer until a
-       conversation is open. -->
+       conversation is open. Suppressed on the consolidated Channels panel
+       (showLobby=false), where the group-channel timeline fills the body. -->
   <p class="lobby" role="status">Select a persona to start a conversation.</p>
 {/if}

@@ -27,6 +27,8 @@ vi.mock("../lib/api.js", () => ({
   listAgents: vi.fn(),
   listChannels: vi.fn(),
   getChannelHistory: vi.fn(),
+  getChatHistory: vi.fn(),
+  sendChat: vi.fn(),
   publishMessage: vi.fn(),
   createChannel: vi.fn(),
 }));
@@ -35,10 +37,11 @@ import {
   listAgents,
   listChannels,
   getChannelHistory,
+  getChatHistory,
   createChannel,
   ApiError,
 } from "../lib/api.js";
-import { nav } from "../lib/nav.svelte.js";
+import { selection } from "../lib/selection.svelte.js";
 
 const CHANNELS = [{ id: "general", name: "General", channel_type: "group" }];
 
@@ -64,12 +67,13 @@ beforeEach(() => {
   listAgents.mockResolvedValue(AGENTS);
   listChannels.mockResolvedValue({ channels: CHANNELS });
   getChannelHistory.mockResolvedValue(historyOf());
+  getChatHistory.mockResolvedValue(historyOf());
   createChannel.mockResolvedValue({
     id: "group:standup",
     name: "standup",
     channel_type: "group",
   });
-  nav.targetChannel = "";
+  selection.dmAgent = "";
 });
 
 afterEach(() => {
@@ -252,7 +256,8 @@ describe("Channel creation affordance", () => {
     );
 
     // On 201 the panel reuses loadChannels() (a second listChannels call) and
-    // lands the operator in the channel they just made (nav.targetChannel).
+    // lands the operator in the channel they just made (the in-panel
+    // pendingSelectId hand-off — amendment §C).
     await waitFor(() =>
       expect(screen.getByRole("option", { name: "standup" })).toBeTruthy(),
     );

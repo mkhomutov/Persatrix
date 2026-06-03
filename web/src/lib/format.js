@@ -19,6 +19,17 @@ export function channelLabel(channel) {
   return channel.name ? channel.name : channel.id;
 }
 
+// isDMChannel marks a `dm:` channel so the consolidated Channels panel can keep
+// DMs OUT of the group-channel picker — a DM is reached through the persona
+// entry point (which resolves it as a conversation), never as a raw
+// `dm:user:agent` row (RFC 0048 chat-panel-retirement amendment §B). The server
+// DTO carries `channel_type` ("group" | "dm" | "thread"); the id-prefix check is
+// a belt-and-suspenders fallback for a payload that omits the type, since the
+// canonical DM id always starts with `dm:` (channels.CanonicalDMID).
+export function isDMChannel(channel) {
+  return channel?.channel_type === "dm" || (channel?.id ?? "").startsWith("dm:");
+}
+
 // senderLabel turns a raw sender_id into a readable name. The operator's own
 // posts read as "You" (the human/agent distinction §D asks for); an agent
 // resolves to "name — role" via the best-effort agent map; anything unknown

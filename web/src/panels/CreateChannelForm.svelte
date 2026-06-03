@@ -1,20 +1,24 @@
 <script>
   // Self-contained "New channel" form (RFC 0048 channel-creation amendment §B),
   // extracted from ChannelTimeline.svelte so the panel keeps only the open/close
-  // glue and the post-create reload-and-select. Two modes:
+  // glue and the post-create land-in-it hand-off. Two modes:
   //   - Group  — POST /api/v1/channels creates group:<name> with persona members
   //              (the server derives the id, so the name is sent bare); the acting
   //              user is seeded as a member so they can post (ErrNotMember).
   //   - Direct — a DM is born by chatting (GetOrCreateDM on first message), so
   //              direct mode picks one persona + an opening message and sends it
-  //              via the chat façade; the response's channel_id is the dm: channel
-  //              the panel then opens. Member ids always come from the agent list
-  //              (§C), filtered to personas — only personas hold a conversation.
-  // On success either path hands the resulting channel back via onCreated so the
-  // panel lands the operator in it.
+  //              via the chat façade; the panel then opens that DM. This is the
+  //              "create a fresh conversation with an opening line" cousin of the
+  //              consolidated panel's persona entry point (chat-panel-retirement
+  //              amendment §B). Member ids always come from the agent list (§C),
+  //              filtered to personas — only personas hold a conversation.
+  // On success either path hands the result back via onCreated so the panel lands
+  // the operator in it: a group channel by id, a DM by persona (the panel resolves
+  // the dm: channel and opens DM mode — chat-panel-retirement amendment §C, which
+  // retired the old nav.targetChannel hand-off in favour of in-panel selection).
   //
   // agents/userId — the persona list and the acting principal.
-  // onCreated     — called with the created/opened channel ({ id }).
+  // onCreated     — group: { id }; direct: { direct: true, agentId }.
   // onCancel      — collapse the form without creating.
   import { createChannel, sendChat, ApiError } from "../lib/api.js";
   import { isChattable } from "../lib/agents.js";
@@ -83,14 +87,15 @@
   }
 
   // Open a DM by sending the opening message through the chat façade
-  // (GetOrCreateDM creates the channel + adds both members); the response's
-  // channel_id is the dm: channel the panel opens.
+  // (GetOrCreateDM creates the channel + adds both members). The panel takes the
+  // persona id and opens DM mode (resolving the dm: channel), rather than landing
+  // a dm: row in the group-channel picker (which filters DMs out — §B/§C).
   async function submitDirect() {
-    const res = await sendChat(directAgentId, {
+    await sendChat(directAgentId, {
       message: openingMessage.trim(),
       userId,
     });
-    onCreated?.({ id: res?.channel_id ?? "" });
+    onCreated?.({ direct: true, agentId: directAgentId });
   }
 
   async function submit(event) {
@@ -174,8 +179,11 @@
     </fieldset>
   {:else}
     <label>
-      Persona
-      <select aria-label="Persona" bind:value={directAgentId}>
+      <!-- A distinct accessible name from the panel's top persona picker
+           ("Persona"), so the two DM entry points stay individually addressable
+           while the create form is open. -->
+      Direct-message persona
+      <select aria-label="Direct-message persona" bind:value={directAgentId}>
         <option value="" disabled>Choose a persona…</option>
         {#each personaAgents as agent (agent.id)}
           <option value={agent.id}>{agent.name ?? agent.id}</option>

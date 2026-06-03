@@ -7,10 +7,10 @@
 // Channels round-trip. This module holds those choices in module-level $state,
 // which outlives an unmount, so a panel can resume where the operator left it.
 //
-// A `.svelte.js` module so the `$state` rune is reactive across components,
-// mirroring nav.svelte.js. "" means no remembered choice — the panel then
-// applies its own default. Persistence is in-memory (per page load), matching
-// the bug it fixes (a tab switch, not a reload).
+// A `.svelte.js` module so the `$state` rune is reactive across components. ""
+// means no remembered choice — the panel then applies its own default.
+// Persistence is in-memory (per page load), matching the bug it fixes (a tab
+// switch, not a reload).
 export const selection = $state({
   // The chat panel's last deliberately-selected persona id. Set on a user-driven
   // persona change (not the programmatic default), so a never-chosen panel still
@@ -18,7 +18,21 @@ export const selection = $state({
   // Three states: an id (resume it), "" (never chose — apply the default), and
   // null (the operator hit Exit — stay in the lobby across a tab switch). See
   // pickInitialAgent.
+  //
+  // chatAgent backs the standalone Chat panel; it is retired with that panel in
+  // chat-panel-retirement PR 2. dmAgent (below) is its successor on the
+  // consolidated Channels panel.
   chatAgent: "",
+
+  // The consolidated Channels panel's last deliberately-opened DM persona id
+  // (RFC 0048 chat-panel-retirement amendment §B — the rehomed sticky selection).
+  // Same three-state contract as chatAgent: an id resumes that DM across the tab
+  // unmount, "" means "never opened a DM — show no DM by default" (the panel
+  // opens on its group-channel selection instead), and null is the explicit
+  // "exited the DM" sentinel that must survive a tab switch (so a remount lands
+  // in the channel lobby, not back in a DM). Held here rather than in the panel's
+  // local $state, which is destroyed on every Channels↔(other tab) round-trip.
+  dmAgent: "",
 });
 
 // pickInitialAgent resolves which persona a freshly-mounted Chat panel opens on.

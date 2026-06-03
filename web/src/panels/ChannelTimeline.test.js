@@ -3,6 +3,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
   cleanup,
   fireEvent,
 } from "@testing-library/svelte";
@@ -25,6 +26,8 @@ vi.mock("../lib/api.js", () => ({
   listAgents: vi.fn(),
   listChannels: vi.fn(),
   getChannelHistory: vi.fn(),
+  getChatHistory: vi.fn(),
+  sendChat: vi.fn(),
   publishMessage: vi.fn(),
 }));
 
@@ -32,10 +35,11 @@ import {
   listAgents,
   listChannels,
   getChannelHistory,
+  getChatHistory,
   publishMessage,
   ApiError,
 } from "../lib/api.js";
-import { nav } from "../lib/nav.svelte.js";
+import { selection } from "../lib/selection.svelte.js";
 
 const CHANNELS = [
   { id: "general", name: "General", channel_type: "group" },
@@ -67,11 +71,15 @@ beforeEach(() => {
   getChannelHistory.mockResolvedValue(
     historyOf(msg("m2", "second"), msg("m1", "first")),
   );
+  // DM resolution defaults to an empty conversation; DM-specific behaviour lives
+  // in ChannelTimeline.dm.test.js.
+  getChatHistory.mockResolvedValue(historyOf());
   publishMessage.mockResolvedValue(
     msg("m3", "from me", "local", "2026-06-02T10:00:03Z"),
   );
-  // Reset the shared cross-panel nav intent (§F) so tests don't leak it.
-  nav.targetChannel = "";
+  // Reset the rehomed sticky DM selection (amendment §B) so a DM opened by one
+  // test doesn't auto-resume in the next (module-level $state outlives a mount).
+  selection.dmAgent = "";
 });
 
 afterEach(() => {
@@ -119,9 +127,16 @@ describe("Channel timeline panel", () => {
 
     render(ChannelTimeline, { props: { userId: "local" } });
 
-    expect(await screen.findByText("Ada — Researcher")).toBeTruthy();
-    expect(screen.getByText("You")).toBeTruthy();
-    expect(screen.getByText("ghost")).toBeTruthy();
+    // Scope to the timeline list: the persona picker also renders "Ada —
+    // Researcher" as an option (the DM entry point), so assert on the message
+    // rows specifically — which also waits for the history load to settle.
+    const timeline = await screen.findByRole("list", {
+      name: /channel messages/i,
+    });
+    const rows = within(timeline);
+    expect(rows.getByText("Ada — Researcher")).toBeTruthy();
+    expect(rows.getByText("You")).toBeTruthy();
+    expect(rows.getByText("ghost")).toBeTruthy();
   });
 
   it("renders a human-readable timestamp but keeps the raw value machine-readable", async () => {
@@ -145,17 +160,19 @@ describe("Channel timeline panel", () => {
     expect(timeEl.textContent).not.toMatch(/\dT\d/);
   });
 
-  it("shows an empty state when no channels exist", async () => {
+  it("shows the merged onboarding state when neither personas nor channels exist", async () => {
+    // With the consolidated panel a fresh stack is a dead end only when BOTH
+    // entry points are empty (amendment §D); listAgents already defaults to [].
     listChannels.mockResolvedValue({ channels: [] });
 
     render(ChannelTimeline, { props: { userId: "local" } });
 
-    expect(await screen.findByText(/no channels/i)).toBeTruthy();
+    expect(await screen.findByText(/no personas or channels/i)).toBeTruthy();
   });
 
-  // §F onboarding empty state + cross-panel hand-off (nav.targetChannel) live in
-  // ChannelTimeline.crosspanel.test.js, split out to keep each spec under the
-  // review-size cap.
+  // The merged onboarding on-ramp (§D) and in-panel create-selection (§C) live in
+  // ChannelTimeline.crosspanel.test.js; the DM entry point lives in
+  // ChannelTimeline.dm.test.js — split out to keep each spec under the review cap.
 
   it("shows a no-messages state for an empty channel", async () => {
     getChannelHistory.mockResolvedValue(historyOf());

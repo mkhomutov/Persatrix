@@ -13,8 +13,8 @@ import { selection } from "../lib/selection.svelte.js";
 // and destroys its local `selectedAgent` state; switching back remounts it and
 // re-runs the default-selection logic. Without a cross-mount memory, a deliberate
 // persona choice is silently reset to the default on every round-trip — the bug
-// these specs pin. selection.svelte.js survives the unmount (module-level $state,
-// the nav.svelte.js pattern); loadAgents honours a remembered persona.
+// these specs pin. selection.svelte.js survives the unmount (module-level
+// $state); loadAgents honours a remembered persona.
 vi.mock("../lib/api.js", () => ({
   ApiError: class ApiError extends Error {
     constructor(message, status, options) {

@@ -10,7 +10,6 @@
   import PersonaHeader from "./PersonaHeader.svelte";
   import PersonaPicker from "./PersonaPicker.svelte";
   import ChatMessage from "./ChatMessage.svelte";
-  import { nav } from "../lib/nav.svelte.js";
   import { selection, pickInitialAgent } from "../lib/selection.svelte.js";
   import { isChattable } from "../lib/agents.js";
 
@@ -54,10 +53,6 @@
   let historyLoading = $state(false);
   let historyError = $state("");
   let historyToken = 0;
-  // The resolved DM channel id, for the §F "view in timeline" deep-link. Empty
-  // until a conversation exists; seeded from history on reseed (loadHistory) and
-  // re-resolved after the first live send (see send()).
-  let dmChannelId = $state("");
 
   const canSend = $derived(
     Boolean(selectedAgent) && message.trim().length > 0 && !sending,
@@ -115,7 +110,6 @@
     historyError = "";
     historyLoading = true;
     transcript = [];
-    dmChannelId = "";
     return getChatHistory(agentID, { userId })
       .then((result) => {
         if (token !== historyToken) return;
@@ -124,11 +118,6 @@
           .slice()
           .reverse()
           .map(historyToEntry);
-        // The history messages carry the canonical DM channel id; capture it for
-        // the §F timeline deep-link. Empty history leaves it unset (no DM yet).
-        if (messages.length > 0) {
-          dmChannelId = messages[0].channel_id ?? "";
-        }
       })
       .catch((err) => {
         if (token !== historyToken) return;
@@ -175,21 +164,6 @@
   // rather than an error.
   function cancelSend() {
     chatController?.abort();
-  }
-
-  // viewInTimeline hands the current conversation to the Channel Timeline (§F):
-  // it records the resolved DM channel id as the pending selection and switches
-  // the hash route, so the freshly-mounted timeline opens on this conversation.
-  // Only reachable once a conversation exists (dmChannelId is set from history).
-  //
-  // The affordance is a real <a href="#/channels">, so we preventDefault and drive
-  // the route in JS: that records the nav intent before the route changes rather
-  // than racing the anchor's native navigation.
-  function viewInTimeline(event) {
-    event?.preventDefault();
-    if (!dmChannelId) return;
-    nav.targetChannel = dmChannelId;
-    window.location.hash = "#/channels";
   }
 
   // loadToken disambiguates concurrent/superseded loads: each call stamps a
@@ -305,21 +279,6 @@
         },
       ];
       message = "";
-      // First message of a fresh conversation creates the DM server-side (§F);
-      // chatResponse omits its id, so re-resolve it from history (DM ids are never
-      // hand-built — see channels.CanonicalDMID) to light up the hand-off this
-      // turn. Fire-and-forget + token-guarded, and guarded to the first turn
-      // (dmChannelId empty) so steady-state chatting adds no extra fetch.
-      if (!dmChannelId && selectedAgent) {
-        const token = historyToken;
-        getChatHistory(selectedAgent, { userId })
-          .then((r) => {
-            const m = r.messages ?? [];
-            if (token === historyToken && m.length > 0)
-              dmChannelId = m[0].channel_id ?? "";
-          })
-          .catch(() => {});
-      }
     } catch (err) {
       // A user-initiated cancel surfaces as an AbortError (fetch rejecting on
       // the aborted signal, wrapped as a status-0 ApiError with the AbortError
@@ -374,7 +333,6 @@
     selectedAgent = "";
     historyToken++;
     transcript = [];
-    dmChannelId = "";
     message = "";
     sendError = "";
     historyError = "";
@@ -413,11 +371,7 @@
     />
 
     {#if selectedAgent}
-      <PersonaHeader
-        info={selectedAgentInfo}
-        {dmChannelId}
-        onViewInTimeline={viewInTimeline}
-      />
+      <PersonaHeader info={selectedAgentInfo} />
 
     {#if historyLoading}
       <p class="loading" role="status">Loading conversation history…</p>

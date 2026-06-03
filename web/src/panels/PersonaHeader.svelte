@@ -1,16 +1,16 @@
 <script>
-  // Persona header (RFC 0048 amendment §A + §F): gives the conversation a face.
-  // Name + role identify the persona and the capability chips say what it's for
-  // — all from fields the agent DTO already carries (§A). Once a conversation
-  // exists, a "View in timeline" affordance hands the persisted DM channel to
-  // the timeline panel (§F). Extracted from Chat.svelte so the panel stays
-  // under the review-size cap.
+  // Persona header (RFC 0048 amendment §A): gives the conversation a face. Name +
+  // role identify the persona and the capability chips say what it's for — all
+  // from fields the agent DTO already carries (§A). Rendered above a DM in the
+  // consolidated Channels panel (and the standalone Chat panel until it retires).
   //
-  // info — the persona record behind the picker selection; nothing renders
-  //        until it resolves.
-  // dmChannelId — the resolved DM channel id; gates the §F hand-off affordance.
-  // onViewInTimeline — handler invoked to hand this conversation to the timeline.
-  let { info, dmChannelId, onViewInTimeline } = $props();
+  // The §F "view in timeline" deep-link this header used to carry is gone
+  // (RFC 0048 chat-panel-retirement amendment §C): a DM IS a channel selection in
+  // the one conversation panel now, so there is no second panel to hand off to.
+  //
+  // info — the persona record behind the picker selection; nothing renders until
+  //        it resolves.
+  let { info } = $props();
 </script>
 
 {#if info}
@@ -29,19 +29,6 @@
           <li>{capability}</li>
         {/each}
       </ul>
-    {/if}
-    {#if dmChannelId}
-      <!-- Cross-panel continuity (§F): this conversation is a persisted DM
-           channel — jump to the timeline to watch it as one. A real <a> (it
-           navigates to another view), so assistive tech announces it as a link
-           and the destination shows on hover; href is the timeline route.
-           onViewInTimeline records which DM the freshly-mounted timeline should
-           open and drives the route change (it preventDefaults the native nav
-           so the intent is always recorded first). Only shown once a
-           conversation exists (dmChannelId resolved from history). -->
-      <a href="#/channels" class="link-like" onclick={onViewInTimeline}>
-        View in timeline ↗
-      </a>
     {/if}
   </header>
 {/if}
