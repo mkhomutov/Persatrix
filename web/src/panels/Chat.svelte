@@ -390,24 +390,6 @@
     selection.chatAgent = selectedAgent;
   }
 
-  // startNewChat begins a fresh conversation with the SAME persona, mirroring the
-  // CLI's exit-and-restart used to test memory: it clears the on-screen
-  // transcript (and the in-progress message / transient errors) while leaving the
-  // identity, persona, and isolation scope (session/epoch) untouched — so the
-  // agent's persisted memory is intact and the next turn tests whether it recalls
-  // the operator from MEMORY rather than from on-screen context. Bumping
-  // historyToken invalidates any in-flight seed; the reseed effect keys on
-  // selectedAgent (unchanged here), so a cleared transcript is NOT repainted from
-  // the persisted DM — a clean slate, not a reload.
-  function startNewChat() {
-    historyToken++;
-    transcript = [];
-    dmChannelId = "";
-    message = "";
-    sendError = "";
-    historyError = "";
-  }
-
   // exitChat leaves the conversation entirely, returning to the persona lobby (no
   // persona selected) so the operator can start fresh or pick a different persona
   // — the web analogue of quitting the CLI chat REPL. The null sentinel records a
@@ -475,16 +457,9 @@
         </select>
       </label>
       {#if selectedAgent}
-        <!-- New chat / Exit, the web analogue of the CLI's restart / quit (used
-             to test memory). New chat keeps the persona and identity but clears
-             the conversation; Exit leaves to the lobby. Both lock during a turn
-             so they can't strand an in-flight reply. -->
-        <button
-          type="button"
-          class="new-chat"
-          onclick={startNewChat}
-          disabled={sending}>New chat</button
-        >
+        <!-- Exit leaves the conversation for the persona lobby — the web analogue
+             of quitting the CLI chat REPL. Locked during a turn so it can't
+             strand an in-flight reply. -->
         <button
           type="button"
           class="exit-chat"

@@ -152,7 +152,7 @@ body {
 /* Persona switcher row — pinned at the top of the chat panel, mirroring the
    channel timeline's .channel-picker, so it stays reachable above a growing
    transcript rather than being buried at the bottom of the composer. The
-   selector and its New chat / Exit controls sit on one row. */
+   selector and its Exit control sit on one row. */
 .persona-picker {
   display: flex;
   align-items: flex-end;

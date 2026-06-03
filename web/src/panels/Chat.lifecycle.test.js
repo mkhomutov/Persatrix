@@ -1,22 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  render,
-  screen,
-  cleanup,
-  fireEvent,
-  waitFor,
-} from "@testing-library/svelte";
+import { render, screen, cleanup, fireEvent } from "@testing-library/svelte";
 import Chat from "./Chat.svelte";
 import { selection } from "../lib/selection.svelte.js";
 
-// True "exit chat" and "start new" (mirrors the CLI exit/restart used for memory
-// testing). Two affordances beside the persona switcher:
-//   - Exit     → leave the conversation entirely, back to a persona lobby (no
-//                conversation open). Survives a tab round-trip (selection sentinel).
-//   - New chat → clear the on-screen conversation but keep the SAME persona and
-//                identity/epoch, so the next turn is a fresh conversation while
-//                the agent's persisted memory is intact — the persistence test
-//                ("greet me" → New chat → "do you remember me?").
+// True "exit chat": leave the conversation entirely, back to a persona lobby (no
+// conversation open) — the web analogue of quitting the CLI chat REPL. The exit
+// survives a Chat↔Channels tab round-trip (selection sentinel), and the lobby is
+// the entry point for starting a conversation or switching persona.
 vi.mock("../lib/api.js", () => ({
   ApiError: class ApiError extends Error {
     constructor(message, status, options) {
@@ -101,52 +91,5 @@ describe("Chat panel — exit to lobby", () => {
     // Picking a persona enters the conversation: the composer returns.
     expect(await screen.findByRole("button", { name: /send/i })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: /persona/i }).value).toBe("bob");
-  });
-});
-
-describe("Chat panel — start a new conversation", () => {
-  it("clears the transcript but keeps the persona and composer on New chat", async () => {
-    render(Chat, { props: { userId: "local" } });
-    await screen.findByRole("option", { name: "Alice" });
-
-    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
-      target: { value: "Hi" },
-    });
-    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
-    await screen.findByText(/remembered reply\./i);
-
-    await fireEvent.click(screen.getByRole("button", { name: /new chat/i }));
-
-    // The prior turn is cleared from view, but the persona and composer stay —
-    // it's a fresh conversation with the same persona, not an exit.
-    await waitFor(() =>
-      expect(screen.queryByText(/remembered reply\./i)).toBeNull(),
-    );
-    expect(screen.getByRole("combobox", { name: /persona/i }).value).toBe(
-      "alice",
-    );
-    expect(screen.getByRole("button", { name: /send/i })).toBeTruthy();
-  });
-
-  it("keeps the same identity and does not reseed server history on New chat", async () => {
-    render(Chat, { props: { userId: "local" } });
-    await screen.findByRole("option", { name: "Alice" });
-
-    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
-      target: { value: "Hi" },
-    });
-    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
-    await screen.findByText(/remembered reply\./i);
-
-    getChatHistory.mockClear();
-    await fireEvent.click(screen.getByRole("button", { name: /new chat/i }));
-
-    // A fresh conversation is a clean slate, not a reload of the persisted DM —
-    // re-seeding would repaint the very turns we just cleared. Same persona, so
-    // the selected-agent effect must not re-fire a history fetch.
-    await waitFor(() =>
-      expect(screen.queryByText(/remembered reply\./i)).toBeNull(),
-    );
-    expect(getChatHistory).not.toHaveBeenCalled();
   });
 });
