@@ -149,6 +149,37 @@ export async function sendChat(agentID, { message, userId, sessionId, epochId })
   return postJSON(`/api/v1/agents/${encodeURIComponent(agentID)}/chat`, body);
 }
 
+// getChatHistory resumes a conversation read-only
+// (GET /api/v1/agents/{id}/chat/history?user_id=…), returning the `historyResponse`
+// envelope ({messages}) — the SAME shape as getChannelHistory, newest-first, so
+// the chat panel reuses that parsing to seed its transcript on reload (RFC 0048
+// amendment §B). The server resolves the canonical DM for (user_id, agent_id)
+// without creating it; a persona never chatted with returns `200` with an empty
+// messages array (not 404), so the caller treats no-history as a normal empty
+// conversation rather than an error. `user_id` is required (it is half the DM
+// key); `limit`/`before` mirror getChannelHistory and ride only when supplied.
+export async function getChatHistory(agentID, { userId, limit, before } = {}) {
+  // user_id is half the DM key and has no sane default for a read (unlike the
+  // chat POST's shared-"local" fallback). Guard here so a missing principal
+  // fails at the call site rather than serialising to the literal string
+  // "user_id=undefined" — which the server would resolve as a real user named
+  // "undefined", answering 200-empty and silently masking the bug.
+  if (!userId) {
+    throw new Error("getChatHistory requires a userId");
+  }
+  const params = new URLSearchParams();
+  params.set("user_id", userId);
+  if (limit) {
+    params.set("limit", String(limit));
+  }
+  if (before) {
+    params.set("before", before);
+  }
+  return getJSON(
+    `/api/v1/agents/${encodeURIComponent(agentID)}/chat/history?${params.toString()}`,
+  );
+}
+
 // listChannels fetches the channels the timeline panel offers in its picker
 // (GET /api/v1/channels). It returns the server's `listChannelsResponse`
 // envelope ({channels, next_cursor}) verbatim rather than unwrapping to a bare

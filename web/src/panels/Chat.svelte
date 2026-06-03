@@ -4,7 +4,12 @@
   // pure render-over-existing-API. The shell threads in the /ui/context-derived
   // userId (RFC §F single identity source), so the panel never prompts for or
   // hard-codes a user.
-  import { listAgents, sendChat, ApiError } from "../lib/api.js";
+  import {
+    listAgents,
+    sendChat,
+    getChatHistory,
+    ApiError,
+  } from "../lib/api.js";
 
   let { userId } = $props();
 
@@ -28,17 +33,32 @@
   let epochId = $state("");
   let sending = $state(false);
   let sendError = $state("");
-  // The transcript is the panel's local view of the conversation: each turn is
-  // the human prompt and the agent's reply. Slice 1 keeps it in-memory (no
-  // history fetch) — a reload starts a fresh transcript, which is the expected
-  // shape for a synchronous chat panel.
+  // The transcript is a flat, conversational (oldest-top) message list — the
+  // shape RFC 0048 amendment §B migrates to. Each entry is one message:
+  //   { id, fromUser, who, content, status?, timestamp, session?, epoch? }
+  // On persona-select it is SEEDED from the persisted DM history (so a reload
+  // resumes the conversation rather than presenting as stateless), then live
+  // turns append to the bottom. A flat list (vs {prompt,reply} pairs) handles
+  // the persisted ordering and any non-paired messages naturally.
   let transcript = $state([]);
-  // Each turn carries a stable id for the {#each} key. The transcript is
-  // append-only today, so an array-index key would render identically — but a
-  // monotonic id keeps the keyed list correct if a later slice ever inserts,
-  // reorders, or rolls back a turn (e.g. an optimistic send), with no behavioural
-  // change now.
-  let nextTurnId = 0;
+  // Live (this-session) messages get a locally-minted id; seeded history uses
+  // the server message id. The `local-` prefix can never collide with a server
+  // id, keeping the {#each} key stable across a seed-then-send sequence.
+  let nextLocalId = 0;
+  // History-seed state, separate from the agent-list load: a persona switch
+  // reloads THAT persona's conversation. historyError is non-fatal (you can
+  // still send into a fresh transcript); historyToken guards superseded loads.
+  let historyLoading = $state(false);
+  let historyError = $state("");
+  let historyToken = 0;
+  // The resolved DM channel id, captured from seeded history when present, for
+  // the §F "view this conversation in the timeline" deep-link (PR F). Empty
+  // until a conversation exists (a fresh persona has no DM yet). NOTE for §F: a
+  // live send into a fresh persona creates the DM server-side but does NOT
+  // populate this — chatResponse carries no channel id — so the deep-link stays
+  // empty until the next reload reseeds from history. §F should surface the id
+  // on the chat response (or re-resolve) rather than rely on a reload.
+  let dmChannelId = $state("");
 
   const canSend = $derived(
     Boolean(selectedAgent) && message.trim().length > 0 && !sending,
@@ -53,6 +73,95 @@
   const selectedAgentInfo = $derived(
     agents.find((agent) => agent.id === selectedAgent) ?? null,
   );
+
+  // personaName is the label shown for the agent's own messages — its name (or
+  // id), mirroring agentLabel's fallback.
+  const personaName = $derived(
+    selectedAgentInfo
+      ? selectedAgentInfo.name || selectedAgentInfo.id
+      : selectedAgent,
+  );
+
+  // historyToEntry maps a persisted DM message into a flat transcript entry. The
+  // operator's own messages (sender_id === userId) render as "You"; everything
+  // else in a DM is the persona. Seeded history carries no per-turn scope
+  // annotation (a persisted message does not record the session/epoch override),
+  // so by amendment §B caveat 2 the scope line is shown only on live turns.
+  function historyToEntry(m) {
+    const fromUser = m.sender_id === userId;
+    return {
+      id: m.id,
+      fromUser,
+      who: fromUser ? "You" : personaName,
+      content: m.content,
+      status: m.metadata?.reply_status,
+      timestamp: m.timestamp,
+    };
+  }
+
+  // loadHistory seeds the transcript from the selected persona's persisted DM,
+  // making a reload resume the conversation (the point of §B). The wire order is
+  // newest-first; the panel renders oldest-top (conversational), so the seed is
+  // reversed. A fresh persona returns an empty list (200, not 404) — a clean
+  // empty transcript, not an error. historyError is non-fatal: a failed seed
+  // still leaves a usable (empty) composer rather than blocking the panel.
+  //
+  // Scope note: the seed fetches only the server's default-limit most-recent
+  // page (channelDefaultHistoryLimit, 50) and the panel has no "load earlier"
+  // affordance yet, so a conversation longer than that resumes from its tail
+  // with the oldest turns omitted. getChatHistory already plumbs limit/before
+  // for the paginating back-fill a later slice (§F) adds; until then the cap is
+  // intentional, not full resume.
+  function loadHistory(agentID) {
+    const token = ++historyToken;
+    historyError = "";
+    historyLoading = true;
+    transcript = [];
+    dmChannelId = "";
+    return getChatHistory(agentID, { userId })
+      .then((result) => {
+        if (token !== historyToken) return;
+        const messages = result.messages ?? [];
+        transcript = messages
+          .slice()
+          .reverse()
+          .map(historyToEntry);
+        // The history messages carry the canonical DM channel id; capture it for
+        // the §F timeline deep-link. Empty history leaves it unset (no DM yet).
+        if (messages.length > 0) {
+          dmChannelId = messages[0].channel_id ?? "";
+        }
+      })
+      .catch((err) => {
+        if (token !== historyToken) return;
+        historyError = `Could not load conversation history: ${err.message}`;
+      })
+      .finally(() => {
+        if (token !== historyToken) return;
+        historyLoading = false;
+      });
+  }
+
+  // Reseed the transcript whenever the selected persona changes (including the
+  // initial default selection): each persona is its own conversation, so the
+  // transcript must follow the picker. The cleanup invalidates an in-flight seed
+  // so a slow load can't write into a persona the operator already switched off.
+  $effect(() => {
+    const agent = selectedAgent;
+    if (!agent) return;
+    loadHistory(agent);
+    return () => {
+      historyToken++;
+    };
+  });
+
+  // formatTimestamp renders the wire timestamp (RFC-3339 UTC) as a readable
+  // local time, mirroring the channel timeline. An unparseable value falls back
+  // to the raw string rather than rendering "Invalid Date".
+  function formatTimestamp(ts) {
+    const date = new Date(ts);
+    return Number.isNaN(date.getTime()) ? ts : date.toLocaleString();
+  }
 
   // loadToken disambiguates concurrent/superseded loads: each call stamps a
   // token and only the latest may write state. This both guards against a
@@ -150,21 +259,33 @@
         payload.epochId = usedEpoch;
       }
       const response = await sendChat(selectedAgent, payload);
+      // A live turn appends two flat messages — the operator's prompt then the
+      // persona's reply — keeping the conversational oldest-top order. The user
+      // message carries the scope it was actually sent under (the overrides stay
+      // editable between turns, so pinning the scope per message keeps the
+      // isolation story visible — RFC 0031 / ISSUE-0085). The reply timestamp
+      // comes from the server when present, else the local clock.
+      const now = new Date().toISOString();
       transcript = [
         ...transcript,
         {
-          id: nextTurnId++,
-          prompt: text,
-          reply: response.reply,
-          agent: response.agent_display_name || selectedAgent,
-          status: response.reply_status,
-          // Record the scope this turn was actually sent under. The overrides
-          // stay editable between turns, so turns under different session/epoch
-          // scopes can interleave in one transcript; pinning the scope per turn
-          // keeps the isolation story (RFC 0031 / ISSUE-0085) visible rather
-          // than silent. Empty when the turn rode the orchestrator's defaults.
+          id: `local-${nextLocalId++}`,
+          fromUser: true,
+          who: "You",
+          content: text,
+          timestamp: now,
           session: usedSession,
           epoch: usedEpoch,
+        },
+        {
+          id: `local-${nextLocalId++}`,
+          fromUser: false,
+          who: response.agent_display_name || personaName,
+          content: response.reply,
+          status: response.reply_status,
+          timestamp: response.timestamp
+            ? new Date(response.timestamp * 1000).toISOString()
+            : now,
         },
       ];
       message = "";
@@ -239,33 +360,44 @@
       </header>
     {/if}
 
+    {#if historyLoading}
+      <p class="loading" role="status">Loading conversation history…</p>
+    {/if}
+    {#if historyError}
+      <!-- Non-fatal: a failed history seed still leaves a usable (empty)
+           transcript, so the operator can start a fresh conversation rather than
+           being blocked. Muted, not an alarming alert. -->
+      <p class="poll-error" role="status">{historyError}</p>
+    {/if}
+
     <ol class="transcript" aria-label="Conversation">
-      {#each transcript as turn (turn.id)}
-        <li class="turn">
-          <p class="from-user"><strong>You:</strong> {turn.prompt}</p>
+      {#each transcript as msg (msg.id)}
+        <li class="msg">
           <p
-            class="from-agent"
-            class:reply-error={turn.status === "error"}
+            class:from-user={msg.fromUser}
+            class:from-agent={!msg.fromUser}
+            class:reply-error={msg.status === "error"}
           >
-            <strong>{turn.agent}:</strong>
-            {#if turn.status === "empty"}
-              <!-- reply_status:"empty" is a valid turn (the agent had nothing to
-                   say, chat_handler.go) — show a placeholder so it doesn't read
-                   as a blank/broken line. -->
+            <strong>{msg.who}:</strong>
+            {#if !msg.fromUser && msg.status === "empty"}
+              <!-- reply_status:"empty" is a valid message (the agent had nothing
+                   to say, chat_handler.go) — show a placeholder so it doesn't
+                   read as a blank/broken line. -->
               <em class="empty-reply">(no reply)</em>
             {:else}
-              {turn.reply}
+              {msg.content}
             {/if}
           </p>
-          {#if turn.session || turn.epoch}
-            <!-- Annotate the isolation scope this turn rode (RFC 0031 session /
-                 ISSUE-0085 epoch). Only shown when an override was set; a
-                 default-scope turn carries no annotation. -->
-            <p class="turn-scope">
-              {#if turn.session}<span>session: {turn.session}</span>{/if}
-              {#if turn.epoch}<span>epoch: {turn.epoch}</span>{/if}
-            </p>
-          {/if}
+          <p class="msg-meta">
+            {#if msg.timestamp}
+              <time datetime={msg.timestamp}>{formatTimestamp(msg.timestamp)}</time>
+            {/if}
+            <!-- Per-message isolation scope (RFC 0031 session / ISSUE-0085
+                 epoch). Only live turns carry it; seeded history shows no scope
+                 line (amendment §B caveat 2). -->
+            {#if msg.session}<span>session: {msg.session}</span>{/if}
+            {#if msg.epoch}<span>epoch: {msg.epoch}</span>{/if}
+          </p>
         </li>
       {/each}
     </ol>

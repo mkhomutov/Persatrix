@@ -304,6 +304,20 @@ func (s *sqliteStore) IsMember(ctx context.Context, channelID, participantID str
 	return true, nil
 }
 
+// LookupDM implements [ChannelStore.LookupDM]: a read-only resolve of the
+// canonical DM between `a` and `b`. It derives the canonical id (which validates
+// the pair and is the same access boundary GetOrCreateDM uses) and returns the
+// existing channel, or [ErrChannelNotFound] when the DM has never been created.
+// No mutation, no membership insert — the fresh-start case is a clean not-found,
+// not a side-effecting create.
+func (s *sqliteStore) LookupDM(ctx context.Context, a, b string) (Channel, error) {
+	id, err := CanonicalDMID(a, b)
+	if err != nil {
+		return Channel{}, err
+	}
+	return s.GetChannel(ctx, id)
+}
+
 // GetOrCreateDM implements [ChannelStore.GetOrCreateDM].
 func (s *sqliteStore) GetOrCreateDM(ctx context.Context, a, b string) (Channel, error) {
 	id, err := CanonicalDMID(a, b)

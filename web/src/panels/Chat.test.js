@@ -9,10 +9,8 @@ import {
 import Chat from "./Chat.svelte";
 
 // The chat panel renders over today's synchronous chat API (RFC 0048 PR 4): it
-// lists personas, sends a message as the context-derived user, and shows the
-// reply. The backend client is mocked so the panel's wiring — picker, send,
-// thinking state, error surfacing, session/epoch pass-through, and the §F
-// identity rule — is exercised without a running orchestrator.
+// lists personas, sends as the context-derived user, surfaces errors, and threads
+// session/epoch + §F identity. Client mocked; history-seed resume in Chat.history.test.js.
 vi.mock("../lib/api.js", () => ({
   ApiError: class ApiError extends Error {
     constructor(message, status, options) {
@@ -23,9 +21,15 @@ vi.mock("../lib/api.js", () => ({
   },
   listAgents: vi.fn(),
   sendChat: vi.fn(),
+  getChatHistory: vi.fn(),
 }));
 
-import { listAgents, sendChat, ApiError } from "../lib/api.js";
+import {
+  listAgents,
+  sendChat,
+  getChatHistory,
+  ApiError,
+} from "../lib/api.js";
 
 const AGENTS = [
   { id: "alice", name: "Alice", status: "healthy" },
@@ -47,6 +51,8 @@ function reply(overrides = {}) {
 beforeEach(() => {
   listAgents.mockResolvedValue(AGENTS);
   sendChat.mockResolvedValue(reply());
+  // No prior conversation by default (200-empty fresh start, §B).
+  getChatHistory.mockResolvedValue({ messages: [] });
 });
 
 afterEach(() => {
