@@ -108,6 +108,16 @@ type RouterMetrics struct {
 	// recipient — directly comparable to MessagesDelivered. Labelled by
 	// `channel_type`; `channel_id` lives on the structured log line.
 	MessagesCascadeCapped metric.Int64Counter
+	// FloorTurn counts each completed RFC 0030 Layer 2.5 floor-control
+	// speaker turn, labelled by `channel_type` and `outcome`
+	// (`replied`|`timeout`). The `timeout` share is the stalled-floor-holder
+	// rate that calibrates the per-turn timeout default (amendment D2).
+	FloorTurn metric.Int64Counter
+	// FloorRoundDuration records the wall-clock duration of a serialized
+	// floor round in milliseconds, labelled by `channel_type` — the
+	// serialization latency trade made observable (the trigger to revisit
+	// the no-cap decision, amendment D4).
+	FloorRoundDuration metric.Float64Histogram
 }
 
 // ChannelRouter is the publish-and-fanout entry point used by the REST

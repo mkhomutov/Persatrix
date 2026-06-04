@@ -6,7 +6,16 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
+)
+
+// floorTurn outcome label values for the
+// `channel.conversation.floor_turn{outcome}` counter (amendment PR 4).
+const (
+	floorOutcomeReplied = "replied"
+	floorOutcomeTimeout = "timeout"
 )
 
 // floor_control.go — RFC 0030 Layer 2.5 (floor control / speaker
@@ -269,9 +278,36 @@ func (r *ChannelRouter) floorRound(
 	defer r.floors.release(msg.ChannelID)
 	defer r.clearFloorSpeakers(msg.ChannelID)
 
+	// Time the round from floor acquisition (after non-responder fanout and
+	// the inter-round wait) so the histogram measures the serialization cost
+	// the responders actually impose, not queueing behind a prior round.
+	start := time.Now()
 	for _, speaker := range responders {
 		r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout)
 	}
+	r.recordFloorRound(detached, ct, time.Since(start))
+}
+
+// recordFloorTurn / recordFloorRound emit the RFC 0030 Layer 2.5 floor-control
+// telemetry (amendment PR 4). Both are nil-safe — a router built without a
+// metrics handle (unit tests, minimal deployments) records nothing — matching
+// the contract every other channel instrument honours.
+func (r *ChannelRouter) recordFloorTurn(ctx context.Context, ct ChannelType, outcome string) {
+	if r.metrics == nil || r.metrics.FloorTurn == nil {
+		return
+	}
+	r.metrics.FloorTurn.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("channel_type", string(ct)),
+		attribute.String("outcome", outcome),
+	))
+}
+
+func (r *ChannelRouter) recordFloorRound(ctx context.Context, ct ChannelType, d time.Duration) {
+	if r.metrics == nil || r.metrics.FloorRoundDuration == nil {
+		return
+	}
+	r.metrics.FloorRoundDuration.Record(ctx, float64(d)/float64(time.Millisecond),
+		metric.WithAttributes(attribute.String("channel_type", string(ct))))
 }
 
 // runFloorTurn grants the floor to one speaker: it records the speaker in the
@@ -325,10 +361,15 @@ func (r *ChannelRouter) runFloorTurn(
 	case <-replyCh:
 		// Speaker's reply landed and was persisted; the next speaker will
 		// read it from history. Advance.
+		r.recordFloorTurn(ctx, ct, floorOutcomeReplied)
 	case <-timer.C:
 		// Speaker stayed silent past its turn budget; advance rather than
 		// stall the round (D2). A candidate the response gate ultimately
 		// suppressed reaches here too — harmless, the loop just moves on.
+		// The waiter-already-registered path (replyCh == nil) also lands
+		// here: the loop never saw this speaker's reply, so it is a timeout
+		// for telemetry purposes.
+		r.recordFloorTurn(ctx, ct, floorOutcomeTimeout)
 	}
 }
 

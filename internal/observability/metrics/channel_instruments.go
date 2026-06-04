@@ -43,6 +43,42 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	); err != nil {
 		return fmt.Errorf("create channel.messages.cascade_capped: %w", err)
 	}
+	// RFC 0030 Layer 2.5 (floor control / speaker serialization). Two
+	// instruments under the `channel.conversation` namespace make the
+	// serialization's latency cost and timeout rate observable, so the
+	// per-turn timeout default (amendment D2, 45s) and the no-cap decision
+	// (D4) become data-driven rather than guesses.
+	//
+	// `floor_turn{channel_type, outcome}` (outcome ∈ {replied, timeout})
+	// counts one per completed speaker turn; the timeout share is the
+	// stalled-floor-holder rate that calibrates D2. `floor_round_duration`
+	// is the per-round wall-clock (ms; RFC 0019 §F histogram unit) — the
+	// serialization latency trade made visible, and the trigger to revisit
+	// D4 if large-channel rounds become slow.
+	if i.ChannelConversationFloorTurn, err = m.Int64Counter(
+		"channel.conversation.floor_turn",
+		metric.WithUnit("{turn}"),
+		metric.WithDescription(
+			"Completed RFC 0030 floor-control speaker turns, labelled by channel_type and outcome (replied|timeout).",
+		),
+	); err != nil {
+		return fmt.Errorf("create channel.conversation.floor_turn: %w", err)
+	}
+	// Buckets span a sub-second single-speaker round through a multi-minute
+	// round where several candidates each burn the full 45s turn timeout
+	// (a round of N silent candidates blocks for up to N×timeout).
+	if i.ChannelConversationFloorRoundDuration, err = m.Float64Histogram(
+		"channel.conversation.floor_round_duration",
+		metric.WithUnit("ms"),
+		metric.WithDescription(
+			"Wall-clock duration of a serialized RFC 0030 floor-control round, labelled by channel_type.",
+		),
+		metric.WithExplicitBucketBoundaries(
+			50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000,
+		),
+	); err != nil {
+		return fmt.Errorf("create channel.conversation.floor_round_duration: %w", err)
+	}
 	// RFC 0031 Phase 1: per-session write counter. Increments once per
 	// CreateChannel / CreateChannelWithMembers / GetOrCreateDM /
 	// PublishMessage on the channels store. Labelled by `session_id`.

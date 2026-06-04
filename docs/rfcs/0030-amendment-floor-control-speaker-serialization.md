@@ -1,7 +1,7 @@
 # RFC 0030 Amendment — Floor Control / Speaker Serialization
 
 **Type**: amendment to [RFC 0030](0030-multi-agent-conversation-governance.md) §A / §B / §F
-**Status**: ⚠️ Partially Implemented — the floor registry, serialized loop, and the v0.3.6 group-channel default flip shipped via PRs 1–3 (the [PR plan](0030-amendment-floor-control-pr-plan.md)); floor telemetry (PR 4) is an independently-mergeable fast-follow that may trail the v0.3.6 tag.
+**Status**: ✅ Implemented — the floor registry, serialized loop, the v0.3.6 group-channel default flip, and floor telemetry shipped via PRs 1–4 (the [PR plan](0030-amendment-floor-control-pr-plan.md)).
 **Author**: Maksim Khomutov
 **Date**: 2026-06-03
 **Decisions**: all five open questions resolved 2026-06-03 — see [Decisions](#decisions-resolved). The design below is implementation-ready.
@@ -81,7 +81,7 @@ A new layer slots into RFC 0030 §B **between Layer 2 (reply budget) and Layer 3
 | Layer | Mechanism | Failure mode | Cost per check | Status |
 |-------|-----------|--------------|----------------|--------|
 | 2 | Per-participant reply budget | None — counter compare | hashmap lookup | 📋 RFC 0030 Phase 1 |
-| **2.5** | **Floor control / speaker serialization** | **Floor-holder stalls → per-turn timeout advances** | **one in-flight dispatch + a parked waiter** | **✅ Shipped — this amendment, v0.3.6 (telemetry PR 4 fast-follow)** |
+| **2.5** | **Floor control / speaker serialization** | **Floor-holder stalls → per-turn timeout advances** | **one in-flight dispatch + a parked waiter** | **✅ Shipped — this amendment, v0.3.6 (incl. telemetry, PR 4)** |
 | 3 | Per-membership response gate | None — config lookup | ~free | ✅ Shipped (RFC 0011 §D) |
 
 Floor control changes **how** a multi-responder publish is delivered — from concurrent fan-out to a serialized speaker round. It does not change *whether* a given persona is eligible to respond (that stays Layer 3) or *how many* turns it gets (that stays Layer 2).
@@ -192,8 +192,8 @@ Rewire `fanout`: when the flag is on and `|responders| >= 2`, run the serialized
 **PR 3 — Default the flag on for group channels + docs + manual test.**
 Flip the default; add the `docs/guides/channels.md` "Floor control" subsection; record `docs/manual-tests/MT-CHANNEL-GOV-002.md` (re-run the multi-persona scenario, observe ordered, mutually-aware replies). Update RFC 0030 §B layer table to reference Layer 2.5 as implemented.
 
-**PR 4 (optional, fast-follow) — per-turn timeout tuning + telemetry.**
-`channel.conversation.floor_turn{outcome=replied|timeout}` counter and a floor-round-duration histogram (RFC 0019 naming), so the latency cost is observable and the timeout default is data-driven.
+**PR 4 (fast-follow, ✅ shipped) — per-turn timeout tuning + telemetry.**
+`channel.conversation.floor_turn{channel_type, outcome=replied|timeout}` counter and a `channel.conversation.floor_round_duration{channel_type}` histogram (ms; RFC 0019 §F naming), so the latency cost is observable and the timeout default ([D2](#decisions-resolved)) and the no-cap decision ([D4](#decisions-resolved)) are data-driven. Both are nil-safe and emitted from [`internal/channels/floor_control.go`](../../internal/channels/floor_control.go).
 
 ## Files touched (estimated)
 
