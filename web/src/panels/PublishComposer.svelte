@@ -43,6 +43,13 @@
   const LISTBOX_ID = "publish-mention-listbox";
   const optionId = (i) => `publish-mention-option-${i}`;
 
+  // Caret-only keys edit nothing, so they fire no input event — but they can
+  // carry the caret out of (or back into) an `@token`. We resync the menu on
+  // their keyup. ArrowUp/Down are deliberately excluded: while the menu is open
+  // they drive its selection (handled in keydown), and resyncing would reset the
+  // highlighted row out from under the operator.
+  const CARET_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
+
   function closeMenu() {
     menuOpen = false;
     candidates = [];
@@ -54,7 +61,7 @@
   // caret: open + filtered when the caret sits in an `@token` that has at least
   // one matching member, closed otherwise.
   function refreshMenu() {
-    const caret = textareaEl ? textareaEl.selectionStart : content.length;
+    const caret = textareaEl ? textareaEl.selectionStart : (content?.length ?? 0);
     active = findActiveMention(content, caret);
     if (!active) {
       closeMenu();
@@ -76,7 +83,7 @@
     if (!active || !candidate) {
       return;
     }
-    const caret = textareaEl ? textareaEl.selectionStart : content.length;
+    const caret = textareaEl ? textareaEl.selectionStart : (content?.length ?? 0);
     const next = applyMention(content, active.start, caret, candidate.id);
     content = next.text;
     closeMenu();
@@ -90,6 +97,15 @@
 
   function onInput() {
     refreshMenu();
+  }
+
+  // A caret-only move (arrow keys, Home/End) or a click reposition leaves the
+  // open/closed state stale because no input event fires — resync from the new
+  // caret. refreshMenu opens, filters, or closes as the caret warrants.
+  function onComposerKeyup(event) {
+    if (CARET_KEYS.has(event.key)) {
+      refreshMenu();
+    }
   }
 
   function onComposerKeydown(event) {
@@ -141,6 +157,8 @@
       disabled={publishing}
       oninput={onInput}
       onkeydown={onComposerKeydown}
+      onkeyup={onComposerKeyup}
+      onclick={refreshMenu}
       onblur={closeMenu}
       aria-controls={menuOpen ? LISTBOX_ID : undefined}
       aria-activedescendant={menuOpen ? optionId(activeIndex) : undefined}

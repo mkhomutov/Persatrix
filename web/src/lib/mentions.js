@@ -20,6 +20,11 @@ export const MAX_CANDIDATES = 8;
 // `nova-sparrow`. The token regex anchors `@` to a boundary (start-of-string or
 // whitespace) so an email's `@` or a mid-word `@` never reads as a mention. The
 // boundary is captured separately (group 1) so callers can keep it as plain text.
+//
+// Shared across extractMentions + segmentMentions to keep the anchoring single-
+// sourced. It carries the `g` flag (and thus mutable `lastIndex`), so every user
+// MUST reset `lastIndex = 0` before iterating and run to completion synchronously
+// — it is NOT safe to drive lazily or re-enter mid-scan.
 const TOKEN_RE = /(^|\s)@([A-Za-z0-9][A-Za-z0-9_-]*)/g;
 
 // ID_CHAR matches a single id body character — used to walk a token under the

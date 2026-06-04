@@ -137,4 +137,48 @@ describe("PublishComposer @-mention typeahead", () => {
       "Ember Owl",
     );
   });
+
+  // A caret-only move (arrow keys / Home / End) fires no input event, so the
+  // menu must be resynced on keyup or it lingers stale after the caret leaves
+  // the token — or stays shut after it re-enters one.
+  function moveCaretTo(textarea, pos) {
+    textarea.selectionStart = pos;
+    textarea.selectionEnd = pos;
+  }
+
+  it("closes the menu when an arrow key carries the caret out of the @token", async () => {
+    const { textarea } = setup();
+    await typeInto(textarea, "@em");
+    expect(screen.queryByRole("listbox")).not.toBeNull();
+
+    moveCaretTo(textarea, 0); // ArrowLeft past the '@'
+    await fireEvent.keyUp(textarea, { key: "ArrowLeft" });
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("reopens the menu when an arrow key carries the caret back into an @token", async () => {
+    const { textarea } = setup();
+    await typeInto(textarea, "@ember-owl done", 15); // caret after a completed token → closed
+    expect(screen.queryByRole("listbox")).toBeNull();
+
+    moveCaretTo(textarea, 4); // back inside "@emb|er-owl"
+    await fireEvent.keyUp(textarea, { key: "ArrowLeft" });
+
+    const menu = screen.getByRole("listbox");
+    expect(within(menu).getByRole("option").textContent).toContain("Ember Owl");
+  });
+
+  it("does not reset arrow-key navigation on keyup", async () => {
+    // Regression guard for the caret resync: ArrowUp/Down drive the menu (handled
+    // in keydown) and must NOT be treated as caret moves that reset activeIndex.
+    const { textarea } = setup();
+    await typeInto(textarea, "@");
+
+    await fireEvent.keyDown(textarea, { key: "ArrowDown" }); // ember-owl -> iron-fox
+    await fireEvent.keyUp(textarea, { key: "ArrowDown" }); // must not refresh
+    await fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(textarea.value).toBe("@iron-fox ");
+  });
 });
