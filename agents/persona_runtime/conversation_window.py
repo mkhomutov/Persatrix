@@ -32,7 +32,7 @@ Design anchors (see ``docs/rfcs/0034-persona-conversational-working-memory.md``)
   message ahead of the current turn (see
   :func:`_drop_rows_newer_than_current`).
 * **§C — role mapping.** ``sender_id == agent_id`` ⇒ ``assistant``; any
-  other sender ⇒ ``user``. Phase 1 is DM-only (exactly one peer).
+  other sender ⇒ ``user``, prefixed inline ``[<peer_id>]: `` (Phase 2).
 * **§D — sanitization.** Replayed peer turns are formatted through
   ``_PromptAssemblyMixin._format_event``'s ``CHANNEL_MESSAGE`` branch so
   the ``"<|" -> "\\<|"`` / ``"|>" -> "\\|>"`` escape is inherited by
@@ -407,12 +407,26 @@ def _format_peer_turn(sender_id: Any, content: str) -> str:
 
     Builds a synthetic ``CHANNEL_MESSAGE`` event and runs it through
     ``_format_event`` so the replayed turn inherits the exact
-    ``<|user_message|>`` delimiter escape the in-flight event gets —
-    the escape is never duplicated here (RFC §D).
+    ``<|user_message|>`` delimiter escape, never duplicated here (RFC §D).
+
+    RFC 0034 Phase 2 §C/§G: the peer's identity also rides **inline** as a
+    ``[<peer_id>]: `` prefix ahead of the body — the wrapper ``user_id``
+    attribute alone is weak disambiguation once several peers share one
+    window. It is prepended **before** ``_format_event``, so the §D escape
+    covers the combined string by construction (``[``/``]`` are not
+    delimiter sequences — no hole); the persona's own ``assistant`` turns
+    never take this path and stay unprefixed. ``peer_label`` mirrors the
+    wrapper rendering in *both* steps — the ``sender_id or "unknown"``
+    fallback (no bare ``[]: ``) and the ``"`` strip on ``safe_sender``
+    (PR #120 F-2) — so label and attribute are one id and cannot diverge.
+    Replayed turns only; the current event is left unprefixed (RFC §G).
     """
+    peer_label = (
+        sender_id if isinstance(sender_id, str) and sender_id else "unknown"
+    ).replace('"', "")
     synthetic = AgentEvent(
         event_type=EventType.CHANNEL_MESSAGE,
-        payload={"content": content},
+        payload={"content": f"[{peer_label}]: {content}"},
         sender_id=sender_id if isinstance(sender_id, str) else None,
         # Always "user", never the row's real participant type — this is
         # deliberate, not a stub. It forces ``_format_event`` down its §D

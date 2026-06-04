@@ -344,6 +344,30 @@ disambiguate speakers without adding a non-standard `name` field.
 RFC 0030 (multi-agent conversation governance) builds on top of this
 substrate; nothing in §G blocks it.
 
+Two consequences of the prefix riding *inside* the content are worth
+pinning, both intentional:
+
+* **Replayed/current asymmetry.** The prefix is applied only to the
+  **replayed** peer turns the window reconstructs. The *current* event —
+  the turn the persona is answering — is formatted by the call site and
+  carries the `<|user_message user_id="…"|>` wrapper but **no** inline
+  `[<peer_id>]: ` label. It needs none: there is exactly one current
+  speaker and the wrapper attribute already names them, so the inline
+  label would add nothing the model cannot already see. The asymmetry is
+  also self-correcting — on the next turn that same message is replayed
+  from history and *does* carry the prefix. Phase 2 deliberately does not
+  reach into the call site to label the current event.
+* **Label/attribute parity.** The inline `peer_label` is the *same*
+  rendering of the sender id as the wrapper's `user_id` attribute — it
+  applies both the `sender_id or "unknown"` fallback (§C) and the `"`
+  strip §D applies to `safe_sender` (the PR #120 F-2 attribute-injection
+  guard). A sender id carrying a `"` therefore reads identically in the
+  label and the attribute (`[ironfox]: …` / `user_id="ironfox"`), never
+  `[iron"fox]: …` against `user_id="ironfox"`. The strip on the label is
+  for parity, not safety — a literal `"` in the body is inert (it is not
+  a delimiter sequence) — but a divergent label/attribute pair is a
+  needless disambiguation hazard once several peers share the window.
+
 ### H. Replay-mode interaction
 
 `channel_catchup.py` events carry `metadata["replay_mode"] = True`
