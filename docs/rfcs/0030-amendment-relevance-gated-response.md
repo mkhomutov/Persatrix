@@ -24,7 +24,7 @@
 - [Composition with the existing layers](#composition-with-the-existing-layers)
 - [What is prompt, what is architecture](#what-is-prompt-what-is-architecture)
 - [Dependencies and sequencing](#dependencies-and-sequencing)
-- [Scope — v0.3.x vs v0.4.0](#scope--v03x-vs-v04o)
+- [Scope — v0.3.x vs v0.4.0](#scope--v03x-vs-v040)
 - [Open questions](#open-questions)
 - [Files touched (estimated)](#files-touched-estimated)
 - [Test strategy](#test-strategy)
