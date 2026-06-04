@@ -64,6 +64,17 @@ describe("extractMentions", () => {
     expect(extractMentions("", MEMBERS)).toEqual([]);
     expect(extractMentions(undefined, MEMBERS)).toEqual([]);
   });
+
+  it("excludes a hand-typed self-mention (symmetry with the typeahead)", () => {
+    // The typeahead never offers the operator's own id; a manually-typed
+    // `@<self>` must not be lifted either — you can't @-mention yourself for the
+    // fan-out gate (you're the sender). Other resolved mentions are unaffected.
+    expect(
+      extractMentions("@ember-owl @iron-fox ping", MEMBERS, {
+        exclude: "ember-owl",
+      }),
+    ).toEqual(["iron-fox"]);
+  });
 });
 
 describe("findActiveMention", () => {
@@ -171,6 +182,29 @@ describe("buildPublishPayload", () => {
     expect(buildPublishPayload("local", "status update", MEMBERS)).toEqual({
       senderId: "local",
       content: "status update",
+    });
+  });
+
+  it("drops a hand-typed self-mention but keeps the rest", () => {
+    // The sender is a channel member (`operator`); typing their own id resolves
+    // but must not be lifted — symmetric with the typeahead excluding self.
+    const members = [{ id: "operator" }, { id: "iron-fox" }];
+    expect(
+      buildPublishPayload("operator", "@operator @iron-fox sync?", members),
+    ).toEqual({
+      senderId: "operator",
+      content: "@operator @iron-fox sync?",
+      mentions: ["iron-fox"],
+    });
+  });
+
+  it("omits the mentions key when the only mention is the sender", () => {
+    const members = [{ id: "operator" }, { id: "iron-fox" }];
+    expect(
+      buildPublishPayload("operator", "note to @operator self", members),
+    ).toEqual({
+      senderId: "operator",
+      content: "note to @operator self",
     });
   });
 });

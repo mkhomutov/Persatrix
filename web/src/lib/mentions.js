@@ -43,8 +43,10 @@ function idSet(members) {
 // de-duplicated, capped at MAX_MENTIONS. A token that matches no member (a typo,
 // or `@everyone`) is left as plain text rather than sent: the server would
 // reject an unknown participant, and silently dropping it keeps the human prose
-// intact while only the resolvable mentions drive the fan-out gate.
-export function extractMentions(content, members) {
+// intact while only the resolvable mentions drive the fan-out gate. `exclude`
+// drops one id (the sender's) so a hand-typed `@<self>` is not lifted — symmetric
+// with the typeahead never offering the operator's own id (mentionCandidates).
+export function extractMentions(content, members, { exclude } = {}) {
   const valid = idSet(members);
   const out = [];
   const seen = new Set();
@@ -52,7 +54,7 @@ export function extractMentions(content, members) {
   let m;
   while ((m = TOKEN_RE.exec(content ?? "")) !== null) {
     const id = m[2];
-    if (valid.has(id) && !seen.has(id)) {
+    if (id !== exclude && valid.has(id) && !seen.has(id)) {
       seen.add(id);
       out.push(id);
       if (out.length >= MAX_MENTIONS) {
@@ -136,9 +138,11 @@ export function mentionCandidates(query, members, { agentsById = {}, exclude } =
 // buildPublishPayload assembles the publishMessage argument: always the sender +
 // content, plus a `mentions` array only when `@id` tokens resolved to members of
 // THIS channel — keeping the no-mention call shape byte-identical to the
-// pre-feature wire (the API client + server field are both optional).
+// pre-feature wire (the API client + server field are both optional). The sender
+// is excluded so a hand-typed `@<self>` never rides along (you can't mention
+// yourself for the fan-out gate), mirroring the typeahead's self-exclusion.
 export function buildPublishPayload(senderId, content, members) {
-  const mentions = extractMentions(content, members);
+  const mentions = extractMentions(content, members, { exclude: senderId });
   return mentions.length > 0
     ? { senderId, content, mentions }
     : { senderId, content };
