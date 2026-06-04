@@ -203,10 +203,13 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 // the serialized speaker round instead of the concurrent fanout. A
 // non-positive `turnTimeout` normalizes to [DefaultFloorTurnTimeoutSeconds].
 //
-// Like [SetMaxCascadeDepth], this is a startup-time resolver: PR 3 wires it
-// from `config/channels.yaml` (default on for group channels). It is
-// concurrency-safe so tests and a future runtime-reload path can call it, but
-// the v0.3.6 contract is "set before traffic".
+// PR 3 wires it two ways: at startup via [ChannelRouter.ResolveFloorControl]
+// (config-declared + store-resident group channels, default on for groups),
+// and at runtime via [Server.handleCreateChannel] when a group channel is
+// created through `POST /api/v1/channels` (the RFC 0048 console "New channel"
+// path). The runtime call lands post-startup on the live router concurrently
+// with traffic — the floorMu guard below makes that safe, so "set before
+// traffic" is the contract for the *config* defaults, not a hard precondition.
 func (r *ChannelRouter) SetFloorControl(channelID string, enabled bool, turnTimeout time.Duration) {
 	if turnTimeout <= 0 {
 		turnTimeout = time.Duration(DefaultFloorTurnTimeoutSeconds) * time.Second
@@ -223,6 +226,17 @@ func (r *ChannelRouter) floorSettingsFor(channelID string) (channelFloorSettings
 	defer r.floorMu.Unlock()
 	s, ok := r.floorSettings[channelID]
 	return s, ok
+}
+
+// FloorControlFor reports the resolved RFC 0030 Layer 2.5 floor-control
+// settings for `channelID`: whether floor control is enabled, the per-turn
+// timeout, and whether any settings were resolved at all (`set` false means no
+// entry — floor control is off). Exposed for tests and ops introspection,
+// mirroring [ChannelRouter.MaxCascadeDepth]; the runtime hot path reads the
+// unexported [ChannelRouter.floorSettingsFor].
+func (r *ChannelRouter) FloorControlFor(channelID string) (enabled bool, turnTimeout time.Duration, set bool) {
+	s, ok := r.floorSettingsFor(channelID)
+	return s.enabled, s.turnTimeout, ok
 }
 
 // SetMaxCascadeDepth overrides the default cap. Non-positive values

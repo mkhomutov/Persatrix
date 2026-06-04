@@ -1,7 +1,7 @@
 # RFC 0030 Amendment — Floor Control / Speaker Serialization
 
 **Type**: amendment to [RFC 0030](0030-multi-agent-conversation-governance.md) §A / §B / §F
-**Status**: 📋 Proposed
+**Status**: ⚠️ Partially Implemented — the floor registry, serialized loop, and the v0.3.6 group-channel default flip shipped via PRs 1–3 (the [PR plan](0030-amendment-floor-control-pr-plan.md)); floor telemetry (PR 4) is an independently-mergeable fast-follow that may trail the v0.3.6 tag.
 **Author**: Maksim Khomutov
 **Date**: 2026-06-03
 **Decisions**: all five open questions resolved 2026-06-03 — see [Decisions](#decisions-resolved). The design below is implementation-ready.
@@ -81,7 +81,7 @@ A new layer slots into RFC 0030 §B **between Layer 2 (reply budget) and Layer 3
 | Layer | Mechanism | Failure mode | Cost per check | Status |
 |-------|-----------|--------------|----------------|--------|
 | 2 | Per-participant reply budget | None — counter compare | hashmap lookup | 📋 RFC 0030 Phase 1 |
-| **2.5** | **Floor control / speaker serialization** | **Floor-holder stalls → per-turn timeout advances** | **one in-flight dispatch + a parked waiter** | **📋 This amendment — v0.3.6** |
+| **2.5** | **Floor control / speaker serialization** | **Floor-holder stalls → per-turn timeout advances** | **one in-flight dispatch + a parked waiter** | **✅ Shipped — this amendment, v0.3.6 (telemetry PR 4 fast-follow)** |
 | 3 | Per-membership response gate | None — config lookup | ~free | ✅ Shipped (RFC 0011 §D) |
 
 Floor control changes **how** a multi-responder publish is delivered — from concurrent fan-out to a serialized speaker round. It does not change *whether* a given persona is eligible to respond (that stays Layer 3) or *how many* turns it gets (that stays Layer 2).

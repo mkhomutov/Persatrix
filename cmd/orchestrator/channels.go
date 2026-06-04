@@ -153,6 +153,21 @@ func initChannels(
 		cleanup()
 		return nil, noop, rErr
 	}
+	// RFC 0030 Layer 2.5 (floor control / speaker serialization) — PR 3
+	// behaviour flip. Resolve the per-channel flag for every group channel
+	// known at startup: config-declared channels use their resolved value (an
+	// explicit `floor_control: false` opts back out), and any group channel
+	// only present in the store — a runtime-created channel persisted by a
+	// prior process — defaults ON so it does not silently revert to the
+	// pre-amendment concurrent "shout" after a restart. Runs after
+	// ReconcileConfig so the config channels exist in the store. Non-fatal:
+	// a store-enumeration failure leaves the already-resolved config channels
+	// (the shipped `planning` demo) in place; channels startup must not hinge
+	// on the floor-resolution scan.
+	if fErr := router.ResolveFloorControl(context.Background(), chanCfg); fErr != nil {
+		logger.Warn("channels: floor-control resolution incomplete; config channels resolved, store-resident channels may default off until next create/restart",
+			zap.Error(fErr))
+	}
 
 	logger.Info("channels: subsystem ready",
 		zap.String("db", dbPath),

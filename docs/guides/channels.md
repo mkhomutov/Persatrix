@@ -324,6 +324,75 @@ read-your-writes-before-replying ordering, treat the channel as advisory and
 gate the action externally. RFC 0011 [OQ #5](../rfcs/0011-channels-bridges.md#open-questions)
 documents this.
 
+> The closely related but distinct problem — a **single** stimulus fanned out
+> to several responders, each replying blind to its peers — is solved by
+> **floor control** (below), on by default for group channels as of v0.3.6.
+
+### Floor control (RFC 0030 Layer 2.5) — on by default in v0.3.6
+
+Before v0.3.6, a message landing in a channel with two or more responders was
+fanned out to all of them **concurrently and fire-and-forget**. Each persona
+composed against a transcript containing **none** of its peers' replies — N
+overlapping, mutually-blind replies to one prompt. Cascade depth and reply
+budgets bounded the *volume* but never the *order*, so the channel read as a
+shout, not a conversation.
+
+**Floor control** serializes the responders into a deterministic speaker round.
+For a message with ≥2 candidate responders on a floor-controlled channel:
+
+1. The responders are ordered **mentioned-first, then existing member order**
+   (frozen at round start — no mid-round promotion).
+2. They take the floor **one at a time**. Each is dispatched only after the
+   previous speaker's reply has landed in history, so every persona composes
+   against a transcript that already contains its predecessors' replies.
+3. If a speaker does not reply within **`floor_turn_timeout_seconds`**
+   (default **45 s** — distinct from the 5 s per-recipient fanout timeout; a
+   floor turn waits for a full LLM-composed reply), the loop advances rather
+   than stalling the round.
+
+Non-responders this round (un-mentioned `when_mentioned` members) are still
+delivered the message concurrently for memory ingestion — off the floor, no
+added latency.
+
+**The trade is latency.** Responders that used to compose in parallel now go
+serial: a round of three costs roughly three reply-compositions end-to-end
+instead of one — the intended cost of a coherent, mutually-aware conversation,
+bounded per turn by the 45 s timeout and per round by the responder count.
+
+**Configuration.** Floor control is resolved **on by default for every group
+channel** — both those declared in `config/channels.yaml` and those created at
+runtime (`POST /api/v1/channels` / the console "New channel" form) — and is a
+no-op below two responders (a DM is single-responder),
+so the default is free for one-on-one conversations. Per channel:
+
+```yaml
+channels:
+  - name: planning
+    floor_control: true            # resolved group default; omit to inherit
+    floor_turn_timeout_seconds: 60 # optional; default 45
+    members: [ember-owl, iron-fox, nova-sparrow]
+  - name: firehose
+    floor_control: false           # explicit opt-out — keep concurrent fanout
+    members: [a, b, c]
+```
+
+Omitting the key inherits the on-by-default; an explicit `false` opts the channel
+back out (the knob is a tri-state internally so a deliberate opt-out is
+distinguishable from "said nothing"). It is resolved once at startup — the
+v0.3.6 contract is "set before traffic." **Opt-out is config-only:** a
+runtime-created channel (`POST /api/v1/channels` / the console form) always
+resolves ON — there is no create-time field and the store persists no floor
+flag, so a restart re-forces it ON; create-time opt-out plus persistence is one
+post-v0.3.6 follow-up.
+
+> **Single-replica only.** Floor state lives in-process (like the chat
+> reply-waiter, §3); a horizontally-scaled orchestrator would not serialize
+> correctly. v0.3.x ships single-replica; a cross-process primitive is a
+> post-v0.3.6 follow-up.
+
+See the [floor-control amendment](../rfcs/0030-amendment-floor-control-speaker-serialization.md)
+for the design and locked decisions (D1–D5).
+
 ---
 
 ## 8. Trust boundary (v0.3.0)
@@ -458,6 +527,7 @@ orchestrator + four agents via the MT-CHANNEL series:
 - [MT-CHANNEL-004](../manual-tests/MT-CHANNEL-004.md) — human-mentions-agent end-to-end (live LLM)
 - [MT-CHANNEL-005](../manual-tests/MT-CHANNEL-005.md) — DM canonicalization round-trip
 - [MT-CHANNEL-006](../manual-tests/MT-CHANNEL-006.md) — channel deletion + cascade
+- [MT-CHANNEL-GOV-002](../manual-tests/MT-CHANNEL-GOV-002.md) — floor control: ordered, mutually-aware multi-persona replies (live LLM)
 
 ---
 

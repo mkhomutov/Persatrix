@@ -128,6 +128,66 @@ func containsSender(senders []string, id string) bool {
 	return false
 }
 
+// TestResolveFloorControl_ConfigAndStoreResident pins the startup resolution
+// (RFC 0030 Layer 2.5 — the runtime-channel follow-up). Every group channel
+// known at startup must end up floor-controlled the same way regardless of how
+// it was born: config-declared channels honour their per-channel value
+// (including an explicit opt-out), and a group channel that exists only in the
+// store — a runtime-created channel persisted by a prior process — defaults ON
+// so it does not revert to the concurrent "shout" after a restart. DMs are
+// skipped (single-responder; floor control is a no-op).
+func TestResolveFloorControl_ConfigAndStoreResident(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	ctx := context.Background()
+
+	// A group channel that exists only in the store — the persisted
+	// runtime-created channel a restart would otherwise leave floor-off.
+	require.NoError(t, store.CreateChannel(ctx, Channel{
+		ID: "group:adhoc", Name: "adhoc", Type: ChannelTypeGroup,
+	}))
+	// A DM — must be skipped.
+	require.NoError(t, store.CreateChannel(ctx, Channel{
+		ID: "dm:alice:bob", Name: "alice:bob", Type: ChannelTypeDM,
+	}))
+
+	router := NewChannelRouter(store, NoopDispatcher{}, zap.NewNop(), nil)
+
+	// Config declares two channels: one inheriting the default (nil → ON) and
+	// one explicitly opted out (false → OFF). ReconcileConfig would create
+	// these in the store at startup; here we pass them straight to the
+	// resolver, which sets them from config regardless of store presence.
+	optOut := false
+	cfg := &Config{Channels: []ChannelConfig{
+		{Name: "planning", FloorTurnTimeoutSeconds: DefaultFloorTurnTimeoutSeconds,
+			Members: []MemberConfig{{ID: "a", RespondPolicy: RespondAlways}}},
+		{Name: "muted", FloorControl: &optOut, FloorTurnTimeoutSeconds: 30,
+			Members: []MemberConfig{{ID: "a", RespondPolicy: RespondAlways}}},
+	}}
+
+	require.NoError(t, router.ResolveFloorControl(ctx, cfg))
+
+	// Config channel inheriting the default → ON, 45s.
+	enabled, timeout, set := router.FloorControlFor("group:planning")
+	require.True(t, set)
+	assert.True(t, enabled, "config channel with no floor_control inherits the group default ON")
+	assert.Equal(t, time.Duration(DefaultFloorTurnTimeoutSeconds)*time.Second, timeout)
+
+	// Config channel with an explicit opt-out → OFF (honoured over the default).
+	enabled, _, set = router.FloorControlFor("group:muted")
+	require.True(t, set)
+	assert.False(t, enabled, "an explicit floor_control: false opt-out is honoured")
+
+	// Store-resident runtime-created group channel → ON by default.
+	enabled, timeout, set = router.FloorControlFor("group:adhoc")
+	require.True(t, set, "a persisted runtime-created group channel must be resolved at startup")
+	assert.True(t, enabled, "a store-resident group channel defaults ON")
+	assert.Equal(t, time.Duration(DefaultFloorTurnTimeoutSeconds)*time.Second, timeout)
+
+	// DM is skipped entirely — floor control is a no-op for a single responder.
+	_, _, set = router.FloorControlFor("dm:alice:bob")
+	assert.False(t, set, "DMs are not floor-controlled")
+}
+
 // TestFloorRound_SerializesResponders_MutualVisibility is the core PR-2
 // assertion: with floor control on and three `always` responders, the loop
 // dispatches one at a time, and each speaker reads its predecessors' replies

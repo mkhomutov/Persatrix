@@ -176,11 +176,14 @@ func TestLoadConfig_AcceptsPositiveMaxCascadeDepth(t *testing.T) {
 	assert.Equal(t, 3, cfg.MaxCascadeDepth)
 }
 
-// TestLoadConfig_FloorControlDefaults — absent floor-control knobs default
-// to off with the canonical 45s per-turn timeout (RFC 0030 amendment D2).
-// PR 1 keeps the knobs inert: nothing consumes them yet, but the loader
-// must produce the documented defaults so PR 2's loop reads a populated
-// value rather than a zero.
+// TestLoadConfig_FloorControlDefaults — an absent `floor_control` key parses
+// as the nil tri-state sentinel (operator said nothing), and the resolved
+// default for a declared (group) channel is ON in PR 3 (RFC 0030 amendment
+// Layer 2.5). The per-turn timeout still normalizes to the canonical 45s
+// default (amendment D2). The raw field stays nil so the resolver — not the
+// loader — owns the group-default policy; a DM (single responder, never
+// declared here) is unaffected because floor control no-ops below 2
+// responders regardless.
 func TestLoadConfig_FloorControlDefaults(t *testing.T) {
 	body := `
 channels:
@@ -190,14 +193,17 @@ channels:
 	cfg, err := LoadConfig(writeYAML(t, body))
 	require.NoError(t, err)
 	require.Len(t, cfg.Channels, 1)
-	assert.False(t, cfg.Channels[0].FloorControl,
-		"floor_control defaults off in PR 1 (flipped on for groups in PR 3)")
+	assert.Nil(t, cfg.Channels[0].FloorControl,
+		"an absent floor_control key parses as nil (the 'operator said nothing' tri-state)")
+	assert.True(t, cfg.Channels[0].FloorControlEnabled(),
+		"PR 3: the resolved default for a declared group channel is floor-control ON")
 	assert.Equal(t, DefaultFloorTurnTimeoutSeconds, cfg.Channels[0].FloorTurnTimeoutSeconds,
 		"absent floor_turn_timeout_seconds normalizes to the 45s default")
 }
 
 // TestLoadConfig_FloorControlExplicit — operators can opt a channel in and
-// override the per-turn timeout; both pass through to the parsed config.
+// override the per-turn timeout; both pass through to the parsed config, and
+// the resolver agrees with the explicit `true`.
 func TestLoadConfig_FloorControlExplicit(t *testing.T) {
 	body := `
 channels:
@@ -209,8 +215,33 @@ channels:
 	cfg, err := LoadConfig(writeYAML(t, body))
 	require.NoError(t, err)
 	require.Len(t, cfg.Channels, 1)
-	assert.True(t, cfg.Channels[0].FloorControl)
+	require.NotNil(t, cfg.Channels[0].FloorControl)
+	assert.True(t, *cfg.Channels[0].FloorControl)
+	assert.True(t, cfg.Channels[0].FloorControlEnabled())
 	assert.Equal(t, 30, cfg.Channels[0].FloorTurnTimeoutSeconds)
+}
+
+// TestLoadConfig_FloorControlExplicitFalse — PR 3 makes the group default ON,
+// so the override that now matters is opting a channel back OUT. An explicit
+// `floor_control: false` must survive as a non-nil false and resolve to OFF,
+// proving the group-default-on resolver still honours an operator's deliberate
+// opt-out (the reason the field is a `*bool` tri-state, not a plain bool — a
+// plain bool cannot distinguish "absent" from "explicitly off").
+func TestLoadConfig_FloorControlExplicitFalse(t *testing.T) {
+	body := `
+channels:
+  - name: planning
+    floor_control: false
+    members: [alice, bob]
+`
+	cfg, err := LoadConfig(writeYAML(t, body))
+	require.NoError(t, err)
+	require.Len(t, cfg.Channels, 1)
+	require.NotNil(t, cfg.Channels[0].FloorControl,
+		"an explicit floor_control: false must survive as a non-nil sentinel, not collapse to the absent case")
+	assert.False(t, *cfg.Channels[0].FloorControl)
+	assert.False(t, cfg.Channels[0].FloorControlEnabled(),
+		"an explicit opt-out resolves to floor-control OFF even though the group default is ON")
 }
 
 // TestLoadConfig_RejectsNegativeFloorTurnTimeout — a negative per-turn

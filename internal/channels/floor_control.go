@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -329,4 +330,51 @@ func (r *ChannelRouter) runFloorTurn(
 		// stall the round (D2). A candidate the response gate ultimately
 		// suppressed reaches here too — harmless, the loop just moves on.
 	}
+}
+
+// ResolveFloorControl applies RFC 0030 Layer 2.5 floor-control settings to
+// every group channel known at startup, so a channel behaves the same whether
+// it was declared in `config/channels.yaml` or created at runtime via
+// `POST /api/v1/channels` (the path the RFC 0048 console "New channel" form
+// drives) — including a runtime-created channel that was persisted in the store
+// by a prior process and is therefore present at startup but absent from config.
+//
+// Resolution, config taking precedence:
+//   - Each config-declared channel uses its per-channel resolved value
+//     ([ChannelConfig.FloorControlEnabled]), so an explicit `floor_control: false`
+//     opt-out is honoured.
+//   - Every other group channel present in the store defaults ON (the group
+//     default), with the canonical 45s per-turn timeout.
+//
+// DM and thread channels are skipped: floor control is a no-op below two
+// responders, and these are single-responder / sub-conversation contexts. The
+// per-process create handler ([Server.handleCreateChannel]) resolves channels
+// created *after* startup; this method covers the startup snapshot. Call once
+// after [ChannelRouter.ReconcileConfig]; it is idempotent.
+func (r *ChannelRouter) ResolveFloorControl(ctx context.Context, cfg *Config) error {
+	configured := make(map[string]bool)
+	if cfg != nil {
+		for _, decl := range cfg.Channels {
+			id := decl.CanonicalID()
+			configured[id] = true
+			r.SetFloorControl(id, decl.FloorControlEnabled(),
+				time.Duration(decl.FloorTurnTimeoutSeconds)*time.Second)
+		}
+	}
+	// limit <= 0 returns every row; the group-channel count is bounded by
+	// `max_channels` (default 50), so the single unpaged scan is cheap.
+	all, err := r.store.ListChannels(ctx, 0, "")
+	if err != nil {
+		return fmt.Errorf("channels: resolve floor control: list channels: %w", err)
+	}
+	for _, ch := range all {
+		if ch.Type != ChannelTypeGroup || configured[ch.ID] {
+			continue
+		}
+		// Store-resident group channel not in config — a runtime-created
+		// channel that survived a restart. Default ON (SetFloorControl
+		// normalizes the zero timeout to the 45s default).
+		r.SetFloorControl(ch.ID, true, 0)
+	}
+	return nil
 }
