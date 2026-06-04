@@ -6,7 +6,7 @@ type: feature
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-16
-target: v0.3.x
+target: v0.3.9
 depends_on:
   - RFC-0011
   - RFC-0034
@@ -19,7 +19,7 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
-**Target**: v0.3.x
+**Target**: v0.3.9
 **Depends on**: RFC 0011 (Channels — the durable `messages` store and the REST channel surface), RFC 0034 (Persona Conversational Working Memory — the conversation window this RFC retrofits, and the `_format_event` delimiter-escape sanitization this RFC reuses), RFC 0035 (Channel Membership Interval Ledger — recall scoping is a SQL join against the `membership_intervals` table)
 **Relates to**: RFC 0005 / RFC 0008 (Persona memory tiers — recall is a verbatim sibling of the episodic *summary* tier), RFC 0009 (Agent Identity, Security & Sandboxing — the audit subsystem and the REST-surface auth model), RFC 0026 (Declarative Facts Tier — another consumer of past-conversation content)
 

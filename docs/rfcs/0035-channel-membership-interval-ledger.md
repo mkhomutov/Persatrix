@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-16
-target: v0.3.x
+target: v0.3.9
 depends_on:
   - RFC-0011
 ---
@@ -17,7 +17,7 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
-**Target**: v0.3.x
+**Target**: v0.3.9
 **Depends on**: RFC 0011 (Channels — provides the `memberships` table and the SQLite channel store this RFC extends)
 **Relates to**: RFC 0009 (Agent Identity, Security & Sandboxing — the audit subsystem that records add/remove events at the orchestrator level), RFC 0036 (Persona Verbatim Message Recall — the first consumer; recall scoping is a SQL join against this ledger)
 

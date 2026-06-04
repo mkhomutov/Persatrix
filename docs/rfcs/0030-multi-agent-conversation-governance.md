@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-11
-target: v0.3.x (Phase 1); v0.4.0 (Phase 2); v0.5.0+ (Phase 3)
+target: v0.3.6 (Layer 2.5 — shipped); v0.3.7–v0.3.9 (Phase 1 — relevance gate + deterministic layers); v0.4.0 (Phase 2 — moderator); v0.5.0+ (Phase 3)
 depends_on:
   - RFC-0011
   - RFC-0020
@@ -18,7 +18,7 @@ depends_on:
 **Status**: 📋 Proposed (Draft)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-11
-**Target**: v0.3.x (Phase 1 — deterministic layers); v0.4.0 (Phase 2 — moderator role); v0.5.0+ (Phase 3 — declarative conversation types + topic-drift)
+**Target**: v0.3.6 (Layer 2.5 — floor control, shipped); v0.3.7–v0.3.9 (Phase 1 — [relevance gate](0030-amendment-relevance-gated-response.md) + cost/reply-budget/end-of-interaction layers); v0.4.0 (Phase 2 — moderator role / bid-and-select); v0.5.0+ (Phase 3 — declarative conversation types + topic-drift)
 **Depends on**: RFC 0011 (Channels), RFC 0011 amendment (Cascade-Depth Wire Propagation), RFC 0020 (Interaction Lifecycle)
 **Integrates with**: RFC 0023 (LLM Call Leasing), RFC 0028 (Agent Decision Policy Engine), RFC 0024 (Event-Driven Scheduling) — composition, not hard gates
 
@@ -247,6 +247,8 @@ On every publish to a channel with an open Interaction, the router:
 Already implemented per [RFC 0011 §D](0011-channels-bridges.md). The per-membership `respond_policy` (`always` | `when_mentioned` | `never`) is the structural admission gate that fires *receiver-side* in the response gate before any LLM call. Unchanged by this RFC.
 
 The gate is necessary but not sufficient — it admits every event for `always` members, and `when_mentioned` for any mentioned event. The higher layers exist precisely because Layer 3 cannot distinguish "good cascade" from "loop."
+
+> **Graduated-gate note (added by the [relevance-gated-response amendment](0030-amendment-relevance-gated-response.md)).** Layer 3 as shipped is a static admission *switch* — `always` literally admits every message, and neither value represents *directedness* (a message aimed at another participant) or *relevance* (whether this persona has anything to add). End-to-end testing showed both failures: a question to one persona drew replies from every `always` member, and open-floor prompts produced pile-on. The amendment evolves Layer 3 into a **three-tier relevance decision** — free addressing-aware eligibility (Tier A) → a cheap, leased `fast`-model salience bid (Tier B) → the quality turn (Tier C) — and reframes `respond_policy` as a *disposition / threshold* (`observer` / `addressed` / `participant`) rather than a trigger. The idle-cost invariant (RFC 0023/0024) is preserved: Tier A is free and Tier B fires only on ambiguous open-floor traffic. Targets v0.3.x (pairs with RFC 0034 P2 group working memory); the **bid-and-select** generalization is the Layer 5 (§I) moderator target.
 
 ### H. Layer 4 — End-of-interaction signal
 

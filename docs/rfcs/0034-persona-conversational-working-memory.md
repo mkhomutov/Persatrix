@@ -6,7 +6,7 @@ type: architecture
 status: partially_implemented
 author: Maksim Khomutov
 created: 2026-05-15
-target: v0.3.1 (Phase 1) + v0.3.x (Phases 2–3)
+target: v0.3.1 (Phase 1) + v0.3.7 (Phase 2 — group working memory) + v0.3.x (Phase 3)
 depends_on:
   - RFC-0011
   - RFC-0017
@@ -20,7 +20,7 @@ depends_on:
 **Status**: ⚠️ Partially Implemented (Phase 1)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-15
-**Target**: v0.3.1 (Phase 1) + v0.3.x (Phases 2–3)
+**Target**: v0.3.1 (Phase 1) + v0.3.7 (Phase 2 — group working memory) + v0.3.x (Phase 3)
 **Depends on**: RFC 0011 (Channels — provides the persistent message store and `GET /channels/{id}/messages` history endpoint), RFC 0017 (Memory Injection Token Budget — defines the budget surface this RFC must coexist with), RFC 0020 (Interaction Lifecycle — defines the episode/interaction boundary the transcript window aligns with), RFC 0031 Phase 1 (Per-Session Namespacing — provides the `chat_session_id` / `persatrix_session_id` columns this RFC filters on)
 **Relates to**: RFC 0026 (Declarative Facts Tier — fact extraction will inherit the same conversational context surface as a follow-up), RFC 0030 (Multi-Agent Conversation Governance — group-channel role-mapping problem space)
 

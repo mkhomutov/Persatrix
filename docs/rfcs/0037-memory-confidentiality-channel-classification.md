@@ -6,7 +6,7 @@ type: feature
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-16
-target: v0.3.x
+target: v0.4.0 (on-ramp — confidentiality substrate for organizations; deferred from v0.3.x)
 depends_on:
   - RFC-0011
   - RFC-0036
@@ -18,7 +18,7 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
-**Target**: v0.3.x
+**Target**: v0.4.0 (on-ramp — confidentiality substrate for organizations; deferred from v0.3.x per the [2026-06-04 sequencing amendment](../v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040))
 **Depends on**: RFC 0011 (Channels — the `channels` table and the `channels.yaml` config surface a classification is added to), RFC 0036 (Persona Verbatim Message Recall — §F retrofits its server-side scoped-search query with the acting-channel classification filter)
 **Relates to**: RFC 0034 (Persona Conversational Working Memory — the conversation window, shown in §H to be classification-safe by construction), RFC 0017 (Persona Memory Injection Token Budget — the injection layer the §D hard gate extends), RFC 0005 / RFC 0008 / RFC 0026 (the episodic, notes, and facts memory tiers that gain a protection level), RFC 0020 / RFC 0027 (Interaction Lifecycle / Reflection-Driven Consolidation — where protection levels are stamped and §E projections are generated), RFC 0009 (Agent Identity, Security & Sandboxing — the audit subsystem), RFC 0029 (Personal/Society Storage Split — protection levels must survive the migration to the society store), RFC 0012 (Protocols & Organizations — the *authority* axis and the enforced egress gate that this RFC's logging-only tripwire becomes), RFC 0038 (Persona Concurrent-Context Awareness & Cross-Channel Relay — enforces the single-channel-turn property §D and §H rely on, and gives cross-channel flow a §D-gated path)
 
