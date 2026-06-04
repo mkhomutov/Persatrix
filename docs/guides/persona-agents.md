@@ -297,6 +297,20 @@ prompt
 > hatch is `conversation_window.enabled: false`. See
 > [RFC 0034](../rfcs/0034-persona-conversational-working-memory.md).
 
+> **v0.3.7 — the conversation window reads group channels too.** On a
+> multi-peer group channel the runtime now reconstructs the transcript
+> with **per-peer attribution**: every replayed peer turn is prefixed
+> inline `[<peer_id>]: ` so the persona sees *who said what* this round
+> and can attribute and build on a *specific* peer's contribution — the
+> group-channel residual of ISSUE-0052 the DM-only Phase 1 left open.
+> The persona's own turns map to `assistant` and stay unprefixed; the
+> §D delimiter escape still wraps every replayed turn. Same `max_turns`
+> / `max_tokens` bounds and the same `conversation_window.enabled: false`
+> escape hatch apply. (*Which* members reply to an `@`-mention is the
+> separate RFC 0030 relevance-gate surface, not the working memory.) See
+> [RFC 0034 §G](../rfcs/0034-persona-conversational-working-memory.md#g-group-channel-handling)
+> and [MT-PERSONA-CONVERSATION-002](../manual-tests/MT-PERSONA-CONVERSATION-002.md).
+
 > **v0.3.2 — the memory facade is frozen as `MemoryStore`.** The single
 > entry point to every memory tier above is the `MemoryStore` class
 > ([agents/memory/store.py](../../agents/memory/store.py)) — promoted
