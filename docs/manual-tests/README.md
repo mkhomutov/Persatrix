@@ -48,6 +48,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | ID | Title | Status |
 |----|-------|--------|
 | [MT-CONSOLE-001](MT-CONSOLE-001.md) | Web Console fresh-stack Interactions slice (`--enable-ui` → chat + channel timeline) | Active |
+| [MT-CONSOLE-002](MT-CONSOLE-002.md) | Web Console `@`-mention compose & fan-out (typeahead → `mentions` → highlight) | Active |
 
 ## Session
 
