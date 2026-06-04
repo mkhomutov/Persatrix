@@ -16,6 +16,7 @@
   } from "../lib/api.js";
   import { channelLabel, isDMChannel } from "../lib/format.js";
   import { isChattable } from "../lib/agents.js";
+  import { buildPublishPayload } from "../lib/mentions.js";
   import { selection } from "../lib/selection.svelte.js";
   import OnboardingEmpty from "./OnboardingEmpty.svelte";
   import PublishComposer from "./PublishComposer.svelte";
@@ -74,6 +75,9 @@
   // DMs are filtered OUT of the channel picker — reached via the persona entry
   // point, never as a raw `dm:` row (amendment §B).
   const groupChannels = $derived(channels.filter((c) => !isDMChannel(c)));
+  // Members of the watched channel — `@`-mention source + resolve set (RFC 0011).
+  const selectedChannelMembers = $derived(
+    groupChannels.find((c) => c.id === selectedChannel)?.members ?? []);
 
   const selectedAgentInfo = $derived(
     agents.find((agent) => agent.id === selectedAgent) ?? null,
@@ -225,13 +229,12 @@
     // Capture the target: the picker stays enabled during a publish, so a switch
     // mid-flight must not echo into the now-current conversation.
     const target = selectedChannel;
+    // Lift `@id` tokens resolving to a member of THIS channel (RFC 0011).
+    const payload = buildPublishPayload(userId, content, selectedChannelMembers);
     publishError = "";
     publishing = true;
     try {
-      const stored = await publishMessage(target, {
-        senderId: userId,
-        content,
-      });
+      const stored = await publishMessage(target, payload);
       // Superseded by a switch (channel or into a DM): drop the echo — the
       // message persisted and surfaces on its own conversation's poll.
       if (isDM || selectedChannel !== target) {
@@ -486,6 +489,9 @@
         bind:content={publishContent}
         {publishing}
         {canPublish}
+        {userId}
+        {agentsById}
+        members={selectedChannelMembers}
         onSubmit={onPublishSubmit}
         onKeydown={onPublishKeydown}
       />
