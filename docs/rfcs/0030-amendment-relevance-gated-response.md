@@ -1,10 +1,10 @@
 # RFC 0030 Amendment — Relevance-Gated Response (Graduated Response Gate)
 
 **Type**: amendment to [RFC 0030](0030-multi-agent-conversation-governance.md) §A / §G (Layer 3) / §I (Layer 5)
-**Status**: 📋 Proposed — design captured for future implementation; not scheduled. Open questions below are unresolved.
+**Status**: 🚧 Scheduled — Tier A (addressing-aware eligibility) + the `respond_policy → disposition` reframe land in **v0.3.7** ([v0.3.7 plan](../v0.3.7-plan.md)); Tier B (cheap salience bid) lands in **v0.3.8** with the convergence layers. The two version-split scoping questions are resolved in the [v0.3.7 plan §Open-question status](../v0.3.7-plan.md#open-question-status); the remaining open questions below are version-routed (Tier B / v0.4.0), not blocking.
 **Author**: Maksim Khomutov
 **Date**: 2026-06-04
-**Target**: v0.3.x (the graduated gate + disposition membership — pairs with [RFC 0034](0034-persona-conversational-working-memory.md) Phase 2 group working memory) + v0.4.0 (bid-and-select moderator — RFC 0030 Layer 5; principled home [RFC 0028](0028-agent-decision-policy-engine.md))
+**Target**: v0.3.7 (Tier A eligibility + `respond_policy → disposition` reframe — pairs with [RFC 0034](0034-persona-conversational-working-memory.md) Phase 2 group working memory, also v0.3.7) + v0.3.8 (Tier B cheap salience bid + `chair` disposition + natural-language addressing) + v0.4.0 (bid-and-select moderator — RFC 0030 Layer 5; principled home [RFC 0028](0028-agent-decision-policy-engine.md))
 **Trigger**: Manual end-to-end testing of multi-persona group channels. Two distinct failures observed in the same session:
 1. A message addressed to one persona (`"how about you @ember-owl?"`, and an explicit `"question only to Iron Fox"`) drew replies from **every** `respond: always` member — including one that said *"I'm Nova Sparrow, not Ember Owl, but…"* and answered anyway. The gate has no notion of *directedness*.
 2. On open-floor prompts, every `always` member replies regardless of whether it has anything to add — bland convergence and pile-on, with no member ever choosing to stay out because *"someone already said that"* or *"that's not my lane."*
@@ -83,7 +83,7 @@ Layer 3 becomes a three-tier decision instead of a single switch:
 
 Tier A alone fixes the directedness defect from the Trigger and costs nothing. Tier B makes "reply when you need to" a real dynamic decision while only spending tokens on genuinely ambiguous, open-floor traffic — and even then on the cheap model, under a lease. Tier C is unchanged from today except that fewer members reach it.
 
-Tier B's quality depends on the persona seeing **what has already been said this round** (to judge novelty / "did someone already cover this") — i.e. on [RFC 0034](0034-persona-conversational-working-memory.md) Phase 2 group working memory. Judging relevance in a vacuum is hopeless, which is why this amendment's v0.3.x scope is sequenced to land *with* RFC 0034 P2 (the v0.3.8 "coherent group conversation" patch).
+Tier B's quality depends on the persona seeing **what has already been said this round** (to judge novelty / "did someone already cover this") — i.e. on [RFC 0034](0034-persona-conversational-working-memory.md) Phase 2 group working memory. Judging relevance in a vacuum is hopeless, which is why **Tier B is sequenced to v0.3.8**, after RFC 0034 P2 lands in v0.3.7. Tier A (this amendment's free, addressing-only stage) ships first in **v0.3.7** alongside RFC 0034 P2 — it needs no in-round transcript.
 
 ## Membership becomes a disposition, not a trigger
 
@@ -142,16 +142,20 @@ The gate handles the *cheap binary*; the peer-conversation **prompt** still carr
 
 ## Dependencies and sequencing
 
-- **Hard dependency for Tier B quality**: [RFC 0034](0034-persona-conversational-working-memory.md) Phase 2 (group working memory) — the salience judge needs the in-round transcript. Sequence the graduated gate *with* the v0.3.8 "coherent group conversation" patch.
+- **Hard dependency for Tier B quality**: [RFC 0034](0034-persona-conversational-working-memory.md) Phase 2 (group working memory) — the salience judge needs the in-round transcript. RFC 0034 P2 lands in **v0.3.7**; Tier B is therefore sequenced to **v0.3.8** (the convergence patch), one release behind. Tier A (addressing-only, no transcript) ships in v0.3.7 with RFC 0034 P2.
 - **Reuses**: RFC 0024 SalienceWake (threshold, rate-limit, default-off); RFC 0033 `fast` alias (the cheap bid model); RFC 0023 leasing (bounds and attributes the bid cost).
 - **Evolves into**: RFC 0030 Layer 5 moderator (bid-and-select); RFC 0028 decision engine (the principled checkpoint home, v0.4.0).
 
-## Scope — v0.3.x vs v0.4.0
+## Scope — v0.3.7 / v0.3.8 / v0.4.0
 
-**v0.3.x (pairs with RFC 0034 P2):**
-- Tier A eligibility with addressing-awareness (fixes the directedness defect — the smallest standalone fix, shippable even ahead of Tier B).
+**v0.3.7 (pairs with RFC 0034 P2 — realism):**
+- Tier A eligibility with addressing-awareness, **structured `@`-mentions only** (fixes the directedness defect — the smallest standalone fix, shippable ahead of Tier B; free, no LLM).
+- `respond_policy` reframed as disposition (`observer` / `addressed` / `participant`) with back-compat mapping. The per-disposition threshold field is reserved/no-op until Tier B.
+
+**v0.3.8 (convergence — pairs with the cost/reply-budget/end-of-interaction layers):**
 - Tier B cheap salience bid on the `fast` model, leased, bias-to-silence.
-- `respond_policy` reframed as disposition (`observer` / `addressed` / `participant`) with back-compat mapping.
+- The `chair` disposition (low threshold / floor-manager).
+- Natural-language recipient parsing ("only to Iron Fox") as a Tier-B salience signal (OQ #2).
 
 **v0.4.0 (RFC 0030 Layer 5 / RFC 0028):**
 - Bid-and-select with a `chair` selector / moderator.

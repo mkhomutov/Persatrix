@@ -110,6 +110,7 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # Remove each entry once its release ships and the plan is archived.
     "docs/v0.3.5-plan.md",
     "docs/v0.3.6-plan.md",
+    "docs/v0.3.7-plan.md",  # v0.3.7 master plan — same accumulator pattern as v0.3.5/v0.3.6 above (3-workstream realism cut); remove once shipped/archived.
     # docs/v0.3.x-sequencing.md orchestrates the v0.3.1 / v0.3.2 / v0.3.3
     # patch sequence and accumulates amendments as new v0.3.x-targeted
     # RFCs file (the 2026-05-12 amendment captured the RFC 0030 + RFC
