@@ -121,6 +121,9 @@ func initChannels(
 			MessagesDelivered:     orchMetrics.ChannelMessagesDelivered,
 			MessagesPublished:     orchMetrics.ChannelMessagesPublished,
 			MessagesCascadeCapped: orchMetrics.ChannelMessagesCascadeCapped,
+			// RFC 0030 Layer 2.5 floor-control telemetry (amendment PR 4).
+			FloorTurn:          orchMetrics.ChannelConversationFloorTurn,
+			FloorRoundDuration: orchMetrics.ChannelConversationFloorRoundDuration,
 		}
 	}
 	// ISSUE-0082 PR 2: build the per-request session resolver over the
