@@ -38,6 +38,10 @@ _AGENT_ID = "ember-owl"
 _CHANNEL = "dm:user:ember-owl"
 _TURN1_QUESTION = "What is your favourite season?"
 
+# RFC 0034 Phase 2 — a multi-peer group channel (two human peers + the
+# persona) for the cross-peer attribution gate.
+_GROUP_CHANNEL = "channel:standup"
+
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
@@ -177,6 +181,23 @@ def _dm_event(content: str, message_id: str) -> AgentEvent:
         },
         channel_id=_CHANNEL,
         sender_id="user",
+        message_id=message_id,
+    )
+
+
+def _group_event(content: str, message_id: str, sender_id: str) -> AgentEvent:
+    """A CHANNEL_MESSAGE on the multi-peer group channel (RFC 0034 §G)."""
+    return AgentEvent(
+        event_type=EventType.CHANNEL_MESSAGE,
+        payload={
+            "content": content,
+            "channel_type": "channel",
+            "respond_policy": "always",
+            "mentions": [],
+            "thread_parent_sender_id": "",
+        },
+        channel_id=_GROUP_CHANNEL,
+        sender_id=sender_id,
         message_id=message_id,
     )
 
@@ -418,3 +439,62 @@ async def test_disabled_config_degrades_to_current_event_only() -> None:
     # A disabled config short-circuits before the fetch — the wired
     # fetcher is never consulted.
     assert fetcher.calls == [], "disabled window must not consult the fetcher"
+
+
+@pytest.mark.asyncio
+async def test_persona_sees_a_named_peer_turn_on_a_group_channel() -> None:
+    """RFC 0034 Phase 2 §G cross-peer gate: on a multi-peer channel the
+    window carries each peer's prior turn attributed inline as
+    ``[<peer_id>]: …`` — the substrate a pronoun like "that" binds to the
+    *other* peer's statement. Asserts the turn-2 ``messages`` shape, not the
+    prose (prose-level acceptance is ``MT-PERSONA-CONVERSATION-002``).
+
+    Turn 1 — peer ``alice`` states a fact; the persona replies. Turn 2 —
+    peer ``bob`` asks a question whose pronoun refers to alice's fact; the
+    window reconstructs ``[user(alice), assistant(persona), user(bob)]``
+    with alice's turn prefixed ``[alice]: `` and the persona's own turn raw
+    and unprefixed (RFC §C).
+    """
+    provider = _RecordingProvider(
+        replies=[
+            '```json\n[{"action_type": "send_channel_message", '
+            f'"payload": {{"channel_id": "{_GROUP_CHANNEL}", '
+            '"content": "Noted."}}]\n```',
+            '```json\n[{"action_type": "do_nothing", "payload": {}}]\n```',
+        ],
+    )
+    agent = await _make_agent(provider)
+    # Turn-2 fetch is newest-first: bob's question (the current event),
+    # the persona's turn-1 reply, then alice's fact.
+    fetcher = _FakeChannelHistoryFetcher(
+        results=[
+            [],
+            [
+                _row("m3", "bob", "Does that change our forecast?"),
+                _row("m2", _AGENT_ID, "Noted."),
+                _row("m1", "alice", "The Q3 numbers are final."),
+            ],
+        ],
+    )
+    agent.set_history_fetcher(fetcher)
+
+    await agent.on_event(
+        _group_event("The Q3 numbers are final.", message_id="m1", sender_id="alice"),
+    )
+    await agent.on_event(
+        _group_event(
+            "Does that change our forecast?", message_id="m3", sender_id="bob",
+        ),
+    )
+
+    assert len(provider.recorded) == 2, "expected one LLM call per turn"
+    turn2 = provider.recorded[1]
+    assert len(turn2) == 3, f"expected [user, assistant, user]; got {turn2!r}"
+    # Alice's fact replays as a user turn attributed inline to alice; the
+    # persona's own prior turn is raw and unprefixed (RFC §C); bob's pronoun
+    # question is the current event the persona answers.
+    assert turn2[0]["role"] == "user"
+    assert "[alice]: The Q3 numbers are final." in turn2[0]["content"]
+    assert turn2[1] == {"role": "assistant", "content": "Noted."}
+    assert turn2[-1]["role"] == "user"
+    assert "Does that change our forecast?" in turn2[-1]["content"]
