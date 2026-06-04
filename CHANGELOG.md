@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.7] - Unreleased
+
+> **Codename:** Conversations worth watching (proposed)
+
+### 🚀 Features
+
+- *(RFC 0034 Phase 2 — group working memory)* The persona conversation window now reads **group channels**, not just DMs: every replayed peer turn is prefixed inline `[<peer_id>]: ` so a persona sees *who said what* this round and can attribute and build on a *specific* peer's contribution (its own turns stay unprefixed `assistant` turns; the §D delimiter escape composes by construction). The in-process fetch cache is re-keyed on `(channel_id, limit)` so a small-`max_turns` persona can no longer serve an undersized window to a large-`max_turns` peer on the same multi-persona channel. Group-channel acceptance walkthrough: [`MT-PERSONA-CONVERSATION-002`](docs/manual-tests/MT-PERSONA-CONVERSATION-002.md). See [RFC 0034 §G](docs/rfcs/0034-persona-conversational-working-memory.md#g-group-channel-handling) ([#533](https://github.com/mkhomutov/Persatrix/pull/533), [#534](https://github.com/mkhomutov/Persatrix/pull/534)).
+
 ## [0.3.6] - 2026-06-04
 
 > **Codename:** Web Console

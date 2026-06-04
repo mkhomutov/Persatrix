@@ -17,7 +17,7 @@ depends_on:
 # RFC 0034 — Persona Conversational Working Memory
 
 **Type**: architecture
-**Status**: ⚠️ Partially Implemented (Phase 1)
+**Status**: ⚠️ Partially Implemented (Phases 1–2)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-15
 **Target**: v0.3.1 (Phase 1) + v0.3.7 (Phase 2 — group working memory) + v0.3.x (Phase 3)
@@ -437,10 +437,24 @@ catchup-emitted event payload at
 
 ### Phase 2: Group channels and per-peer prefixing
 
-- Extend the role mapper to multi-peer channels (§C, §G).
-- Add the `[<peer_id>]: ` prefix at the sanitization step.
+**Implemented in v0.3.7** ([0034-phase2-pr-plan.md](0034-phase2-pr-plan.md)).
+The Phase 1 role split already mapped any non-self sender to a `user`
+turn, so the multi-peer mapper needed no change; the two real deltas
+landed:
+
+- Add the `[<peer_id>]: ` prefix at the sanitization step (§C, §G) so
+  several distinct peers in one window are disambiguated inline — the
+  persona's own turns stay unprefixed `assistant` turns and the §D
+  delimiter escape composes by construction.
+- Re-key the in-process fetch cache on `(channel_id, limit)` so a
+  small-`max_turns` persona can no longer serve an undersized window to
+  a large-`max_turns` peer on the same multi-persona channel.
 - Integration test: two peers + one persona; persona resolves a
-  pronoun referring to the *other* peer's prior turn.
+  pronoun referring to the *other* peer's prior turn
+  (`test_persona_sees_a_named_peer_turn_on_a_group_channel` in
+  [`tests/integration/test_conversational_continuity.py`](../../tests/integration/test_conversational_continuity.py));
+  group-channel acceptance walkthrough
+  [MT-PERSONA-CONVERSATION-002](../manual-tests/MT-PERSONA-CONVERSATION-002.md).
 
 ### Phase 3: Instrumentation and tuning
 
@@ -567,12 +581,14 @@ v0.3.1.
 ## Decision / Next Steps
 
 **Phase 1 implemented in v0.3.1** ([v0.3.1-plan.md](../v0.3.1-plan.md),
-[0034-pr-plan.md](0034-pr-plan.md)). Status flipped to
-`⚠️ Partially Implemented (Phase 1)` on the merge of PR 5 (closeout);
-the RFC remains open until Phases 2–3 land in subsequent v0.3.x
-patches. All four [Open Questions](#open-questions) were resolved at
+[0034-pr-plan.md](0034-pr-plan.md)); **Phase 2 implemented in v0.3.7**
+([0034-phase2-pr-plan.md](0034-phase2-pr-plan.md)). Status is
+`⚠️ Partially Implemented (Phases 1–2)`; the RFC remains open until
+Phase 3 (instrumentation/tuning + cache LRU bound) lands in a later
+v0.3.x patch. All four [Open Questions](#open-questions) were resolved at
 plan-authoring time before Phase 1 shipped its non-additive surface
-([0034-pr-plan.md §Open-question resolutions](0034-pr-plan.md#open-question-resolutions-locked-at-plan-authoring-time)).
+([0034-pr-plan.md §Open-question resolutions](0034-pr-plan.md#open-question-resolutions-locked-at-plan-authoring-time));
+OQ #3 (the inline `[<peer_id>]: ` prefix) was the Phase 2 deliverable.
 
 **Already done:**
 
@@ -584,18 +600,19 @@ plan-authoring time before Phase 1 shipped its non-additive surface
 4. Phase 1 (DM channels) implemented in v0.3.1 — PRs 1–5 of
    [0034-pr-plan.md](0034-pr-plan.md) merged. [ISSUE-0052](../issues/ISSUE-0052-persona-conversational-working-memory-gap.md)
    closed for DM channels.
+5. Phase 2 (group channels — per-peer `[<peer_id>]: ` attribution +
+   multi-persona fetch-cache correctness) implemented in v0.3.7 —
+   [0034-phase2-pr-plan.md](0034-phase2-pr-plan.md). The group-channel
+   residual of ISSUE-0052 is closed.
 
 **Remaining before moving to `👍 Accepted`:**
 
-- Phase 2 — group-channel role mapping (per-peer disambiguation,
-  [§G](#g-group-channel-handling)). The group-channel residual of
-  ISSUE-0052 is tracked here.
 - Phase 3 — instrumentation and tuning of `max_turns` / `max_tokens`
-  from a dogfood telemetry sample.
+  from a dogfood telemetry sample, plus the cache LRU/eviction bound.
 
-Both Phases 2–3 are v0.3.x patches per
-[0034-pr-plan.md §Future Phases](0034-pr-plan.md#future-phases); neither
-blocks the v0.3.1 release.
+Phase 3 is a later v0.3.x patch per
+[0034-pr-plan.md §Future Phases](0034-pr-plan.md#future-phases); it does
+not block the v0.3.7 release.
 
 ## Related Documentation
 
