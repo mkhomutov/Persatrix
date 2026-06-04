@@ -134,3 +134,33 @@ class TestPeerPrefix:
         content = result[0]["content"]
         assert "[unknown]: a sourceless line" in content
         assert 'user_id="unknown"' in content
+
+    async def test_empty_str_sender_falls_back_to_unknown_prefix(self):
+        """An *empty-string* ``sender_id`` falls back to ``[unknown]: `` too
+        — the ``and sender_id`` guard rejects ``""`` before it can emit a
+        bare ``[]: ``, the same fallback ``_format_event`` makes for the
+        wrapper attribute (``"" or "unknown"``). Coverage for the empty
+        branch the ``None`` case above does not exercise."""
+        fetcher = _FakeChannelHistoryFetcher(
+            [{"id": "m1", "sender_id": "", "content": "an empty-id line"}],
+        )
+        result = await _build(fetcher)
+        content = result[0]["content"]
+        assert "[unknown]: an empty-id line" in content
+        assert 'user_id="unknown"' in content
+
+    async def test_peer_id_quote_is_stripped_to_match_wrapper(self):
+        """A ``sender_id`` carrying a ``"`` renders the *same* stripped id
+        in the inline label and the wrapper ``user_id`` attribute — the two
+        renderings of one speaker id never diverge. ``_format_event`` strips
+        ``"`` from the wrapper to block attribute injection (PR #120 F-2);
+        the inline label mirrors that strip so the model reads one id, not a
+        quoted variant inline and a stripped one in the attribute."""
+        fetcher = _FakeChannelHistoryFetcher(
+            [{"id": "m1", "sender_id": 'iron"fox', "content": "spoofed quote"}],
+        )
+        result = await _build(fetcher)
+        content = result[0]["content"]
+        assert "[ironfox]: spoofed quote" in content
+        assert 'user_id="ironfox"' in content
+        assert 'iron"fox' not in content

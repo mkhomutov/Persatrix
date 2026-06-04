@@ -407,23 +407,23 @@ def _format_peer_turn(sender_id: Any, content: str) -> str:
 
     Builds a synthetic ``CHANNEL_MESSAGE`` event and runs it through
     ``_format_event`` so the replayed turn inherits the exact
-    ``<|user_message|>`` delimiter escape the in-flight event gets —
-    the escape is never duplicated here (RFC §D).
+    ``<|user_message|>`` delimiter escape, never duplicated here (RFC §D).
 
-    RFC 0034 Phase 2 §C/§G: the peer's speaker identity also rides
-    **inline in the content** as a ``[<peer_id>]: `` prefix, ahead of the
-    body. The wrapper's ``user_id`` attribute alone is weak disambiguation
-    once several distinct peers share one window; the inline label lets the
-    model resolve "*the other peer's* prior turn." The prefix is prepended
-    **before** ``_format_event`` runs, so the §D delimiter escape applies
-    to the combined string by construction — the label cannot open a hole
-    in the sanitisation (``[``/``]`` are not delimiter sequences). The
-    persona's own ``role="assistant"`` turns never reach this path, so they
-    stay unprefixed. ``peer_label`` mirrors ``_format_event``'s wrapper
-    fallback (``sender_id or "unknown"``) so a missing / non-``str`` /
-    empty ``sender_id`` yields ``[unknown]: ``, not an empty ``[]: ``.
+    RFC 0034 Phase 2 §C/§G: the peer's identity also rides **inline** as a
+    ``[<peer_id>]: `` prefix ahead of the body — the wrapper ``user_id``
+    attribute alone is weak disambiguation once several peers share one
+    window. It is prepended **before** ``_format_event``, so the §D escape
+    covers the combined string by construction (``[``/``]`` are not
+    delimiter sequences — no hole); the persona's own ``assistant`` turns
+    never take this path and stay unprefixed. ``peer_label`` mirrors the
+    wrapper rendering in *both* steps — the ``sender_id or "unknown"``
+    fallback (no bare ``[]: ``) and the ``"`` strip on ``safe_sender``
+    (PR #120 F-2) — so label and attribute are one id and cannot diverge.
+    Replayed turns only; the current event is left unprefixed (RFC §G).
     """
-    peer_label = sender_id if isinstance(sender_id, str) and sender_id else "unknown"
+    peer_label = (
+        sender_id if isinstance(sender_id, str) and sender_id else "unknown"
+    ).replace('"', "")
     synthetic = AgentEvent(
         event_type=EventType.CHANNEL_MESSAGE,
         payload={"content": f"[{peer_label}]: {content}"},
