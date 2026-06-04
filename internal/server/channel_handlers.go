@@ -140,7 +140,9 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 	// zero timeout to the canonical 45s default (amendment D2). SetFloorControl
 	// is mutex-guarded, so calling it post-startup on the live router is safe.
 	// Opt-out at create time (a request-body `floor_control: false`) is a
-	// future enhancement — the wire shape carries no such field yet.
+	// future enhancement — the wire shape carries no such field yet. The nil
+	// branch needs no signpost (unlike the publish path): with no router,
+	// publishes never fan out, so floor control is moot here, not skipped.
 	if s.channelRouter != nil {
 		s.channelRouter.SetFloorControl(canonicalID, true, 0)
 	}

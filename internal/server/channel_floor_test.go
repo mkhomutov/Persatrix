@@ -40,3 +40,38 @@ func TestChannels_CreateChannel_EnablesFloorControl(t *testing.T) {
 	assert.Equal(t, time.Duration(channels.DefaultFloorTurnTimeoutSeconds)*time.Second, turnTimeout,
 		"the per-turn timeout defaults to the canonical 45s (amendment D2)")
 }
+
+// TestChannels_CreateChannel_RouterNil_Succeeds locks the nil-router guard in
+// handleCreateChannel's floor-control hook. When the channel store is wired
+// without a router (the WithChannels(store, nil) degraded/test config), creating
+// a group channel must still succeed: the floor-control call is correctly
+// skipped because, without a router, publishes to the channel take the
+// store-only fallback and never fan out — so there is no concurrent round to
+// serialize and floor control is *moot*, not silently dropped (contrast the
+// loud channelFallbackWarnOnce signpost on the publish path, which guards a
+// fallback that DOES skip load-bearing validation + metrics). This pins the
+// guard so a future refactor that removes the nil check (a panic via
+// SetFloorControl on a nil router) fails loudly here.
+func TestChannels_CreateChannel_RouterNil_Succeeds(t *testing.T) {
+	srv, _ := channelTestServerNoRouter(t)
+	body, _ := json.Marshal(createChannelRequest{
+		Name: "adhoc",
+		Members: []channelMemberRequest{
+			{ID: "alice", Respond: "always"},
+			{ID: "bob", Respond: "always"},
+		},
+	})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", body)
+	require.Equal(t, http.StatusCreated, rec.Code,
+		"create must succeed without a router wired: %s", rec.Body.String())
+
+	// The channel is persisted...
+	ch, err := srv.channelStore.GetChannel(t.Context(), "group:adhoc")
+	require.NoError(t, err)
+	assert.Equal(t, channels.ChannelTypeGroup, ch.Type)
+
+	// ...and there is no router to hold floor state — floor control is
+	// irrelevant on the store-only publish path, not skipped behaviour.
+	assert.Nil(t, srv.channelRouter,
+		"this config wires no router; the floor-control hook is a correct no-op")
+}
