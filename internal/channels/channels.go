@@ -40,18 +40,59 @@ func (ct ChannelType) Valid() bool {
 }
 
 // RespondPolicy is the per-membership response-gate policy (RFC 0011 §D).
+//
+// The canonical internal/wire representation is the legacy triple
+// (`when_mentioned`/`always`/`never`). RFC 0030's relevance amendment
+// (v0.3.7) reframes the same three intents as a **disposition**
+// vocabulary (`participant`/`addressed`/`observer`); the disposition
+// values are accepted at config load and collapsed back to the legacy
+// triple by [RespondPolicy.Normalize] so the fanout candidate set, floor
+// control, and the Python response gate keep reading the canonical three
+// values unchanged. The vocabulary addition is therefore behaviourally
+// inert — see docs/rfcs/0030-amendment-relevance-gated-response-pr-plan.md.
 type RespondPolicy string
 
 const (
 	RespondWhenMentioned RespondPolicy = "when_mentioned"
 	RespondAlways        RespondPolicy = "always"
 	RespondNever         RespondPolicy = "never"
+
+	// Disposition vocabulary (RFC 0030 relevance amendment, v0.3.7).
+	// Accepted at config load and normalized to the legacy triple above;
+	// never the canonical internal value.
+	RespondParticipant RespondPolicy = "participant"
+	RespondAddressed   RespondPolicy = "addressed"
+	RespondObserver    RespondPolicy = "observer"
 )
 
-// Valid reports whether p is one of the canonical respond policies.
+// Normalize collapses the disposition vocabulary to the canonical legacy
+// triple (`participant→always`, `addressed→when_mentioned`,
+// `observer→never`). A legacy value is returned unchanged; an unknown
+// value is returned as-is so [Config.Validate] surfaces it via
+// [RespondPolicy.Valid]. This is the single back-compat boundary: applied
+// once at config load, after which the rest of the stack sees only the
+// legacy triple.
+func (p RespondPolicy) Normalize() RespondPolicy {
+	switch p {
+	case RespondParticipant:
+		return RespondAlways
+	case RespondAddressed:
+		return RespondWhenMentioned
+	case RespondObserver:
+		return RespondNever
+	}
+	return p
+}
+
+// Valid reports whether p is one of the canonical respond policies or an
+// accepted disposition alias. Callers that need the canonical value
+// should call [RespondPolicy.Normalize] first (the loader does this at
+// config-load time), but Valid accepts both vocabularies so a value that
+// passes the JSON schema's widened enum also passes the loader.
 func (p RespondPolicy) Valid() bool {
 	switch p {
-	case RespondWhenMentioned, RespondAlways, RespondNever:
+	case RespondWhenMentioned, RespondAlways, RespondNever,
+		RespondParticipant, RespondAddressed, RespondObserver:
 		return true
 	}
 	return false

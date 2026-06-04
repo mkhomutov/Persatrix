@@ -68,9 +68,12 @@ from .persona_types import AgentEvent, EventType
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "POLICY_ADDRESSED",
     "POLICY_ALWAYS",
     "POLICY_DEFENSE_IN_DEPTH",
     "POLICY_NEVER",
+    "POLICY_OBSERVER",
+    "POLICY_PARTICIPANT",
     "POLICY_WHEN_MENTIONED",
     "GateDecision",
     "evaluate_response_gate",
@@ -82,6 +85,28 @@ __all__ = [
 POLICY_WHEN_MENTIONED: Final[str] = "when_mentioned"
 POLICY_ALWAYS: Final[str] = "always"
 POLICY_NEVER: Final[str] = "never"
+
+# Disposition vocabulary (RFC 0030 relevance amendment, v0.3.7). The Go
+# config loader normalizes these back to the legacy triple above, so the
+# gate normally never sees them on the wire. They are recognized here as
+# defence-in-depth: if a disposition value ever reaches the gate
+# un-normalized (a hand-edited membership row, a caller that bypasses the
+# loader), it is treated as an alias of its legacy equivalent rather than
+# falling through to the fail-closed ``unknown_policy`` branch. PR 1 of
+# the amendment is otherwise behaviourally inert — the legacy branches are
+# unchanged.
+POLICY_PARTICIPANT: Final[str] = "participant"
+POLICY_ADDRESSED: Final[str] = "addressed"
+POLICY_OBSERVER: Final[str] = "observer"
+
+# Disposition → legacy alias map, applied once to the incoming policy so
+# every downstream branch reads (and labels metrics with) the canonical
+# legacy value.
+_DISPOSITION_ALIASES: Final[dict[str, str]] = {
+    POLICY_PARTICIPANT: POLICY_ALWAYS,
+    POLICY_ADDRESSED: POLICY_WHEN_MENTIONED,
+    POLICY_OBSERVER: POLICY_NEVER,
+}
 # PR #252 review N-2: a synthetic policy value used on the
 # ``channel.messages.gated`` counter for self-sender suppressions —
 # both the DM self-sender and the non-DM defense-in-depth re-check.
@@ -153,6 +178,11 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
     payload = event.payload or {}
     raw_policy = payload.get("respond_policy", "")
     policy = raw_policy if isinstance(raw_policy, str) else ""
+    # Defence-in-depth: collapse a disposition value to its legacy alias so
+    # the branches below (and the metric ``policy`` label) read the
+    # canonical legacy value. Normally a no-op — the Go loader already
+    # normalized the wire value.
+    policy = _DISPOSITION_ALIASES.get(policy, policy)
 
     # DM channels override the per-membership policy: a DM with no reply
     # is broken by construction (RFC 0011 §D). The orchestrator-side
