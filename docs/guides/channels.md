@@ -330,14 +330,13 @@ documents this.
 
 ### Floor control (RFC 0030 Layer 2.5) — on by default in v0.3.6
 
-Before v0.3.6, when one message landed in a channel with two or more responders
-(`always` members, or `when_mentioned` members that were mentioned), the router
-fanned it out to all of them **concurrently and fire-and-forget**. Each persona
-composed its reply against a transcript snapshot that contained **none** of its
-peers' replies — they did not exist yet — producing N overlapping, mutually-blind
-replies to the same prompt. Cascade depth and reply budgets bounded the *volume*
-of that exchange but never its *order*, so a multi-persona channel read as a
-shout rather than a conversation.
+Before v0.3.6, a message landing in a channel with two or more responders
+(`always` members, or mentioned `when_mentioned` members) was fanned out to all
+of them **concurrently and fire-and-forget**. Each persona composed against a
+transcript that contained **none** of its peers' replies — producing N
+overlapping, mutually-blind replies to one prompt. Cascade depth and reply
+budgets bounded the *volume* but never the *order*, so a multi-persona channel
+read as a shout rather than a conversation.
 
 **Floor control** serializes the responders into a deterministic speaker round.
 For a message with ≥2 candidate responders on a floor-controlled channel:
@@ -363,9 +362,10 @@ mutually-aware conversation; it is bounded per turn by the 45 s timeout and per
 round by the responder count (itself bounded by cascade depth and reply budgets).
 
 **Configuration.** Floor control is resolved **on by default for every group
-channel** declared in `config/channels.yaml`, and is a no-op below two
-responders (a DM is single-responder), so the default is free for one-on-one
-conversations. Per channel:
+channel** — both those declared in `config/channels.yaml` and those created at
+runtime (`POST /api/v1/channels` / the console "New channel" form, resolved on
+restart too) — and is a no-op below two responders (a DM is single-responder),
+so the default is free for one-on-one conversations. Per channel:
 
 ```yaml
 channels:

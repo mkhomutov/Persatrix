@@ -129,6 +129,22 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RFC 0030 Layer 2.5 — resolve floor control for the freshly-created
+	// channel so a channel created at runtime (this REST path, which the RFC
+	// 0048 console "New channel" form drives) behaves like one declared in
+	// config/channels.yaml: its responders take the floor one at a time
+	// instead of replying concurrently and mutually-blind. Without this, a
+	// console-created group channel would silently fall back to the
+	// pre-amendment "shout". The resolved default is ON for group channels
+	// (this endpoint only creates groups); SetFloorControl normalizes the
+	// zero timeout to the canonical 45s default (amendment D2). SetFloorControl
+	// is mutex-guarded, so calling it post-startup on the live router is safe.
+	// Opt-out at create time (a request-body `floor_control: false`) is a
+	// future enhancement — the wire shape carries no such field yet.
+	if s.channelRouter != nil {
+		s.channelRouter.SetFloorControl(canonicalID, true, 0)
+	}
+
 	created, err := s.channelStore.GetChannel(r.Context(), canonicalID)
 	if err != nil {
 		s.logger.Error("channels: post-create lookup failed",

@@ -221,6 +221,17 @@ pre-amendment concurrent shout for that channel (the operator override path,
 asserted at the config layer by `TestLoadConfig_FloorControlExplicitFalse`).
 Useful as a side-by-side to *see* the baseline this MT contrasts against.
 
+### Edge Case 3: A channel created at runtime (console / REST)
+
+A group channel created **after** startup via the console "New channel" form or
+`POST /api/v1/channels` must also reply sequentially — not just channels declared
+in `config/channels.yaml`. Create a fresh group channel with two `always`
+personas from the console, post one prompt, and confirm the same ordered,
+mutually-aware round as Step 3. A persisted runtime channel is re-resolved on
+the next restart (it would otherwise revert to the concurrent shout). Asserted
+by `TestChannels_CreateChannel_EnablesFloorControl` (create path) and
+`TestResolveFloorControl_ConfigAndStoreResident` (restart path).
+
 ---
 
 ## Test Results
