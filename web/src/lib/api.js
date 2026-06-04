@@ -264,12 +264,20 @@ export async function createChannel({ name, description, members }) {
 // (POST /api/v1/channels/{id}/messages) and returns the stored
 // `channelMessageResponse`. `sender_id` is REQUIRED by the handler
 // (channel_handlers.go) and is the /ui/context-derived principal the caller
-// passes in — never free-text (RFC §F rule 1). This is the one write Slice 1's
-// timeline issues; the agent mention fan-out (RFC 0011) surfaces on the next
-// poll.
-export async function publishMessage(channelID, { senderId, content }) {
-  return postJSON(`/api/v1/channels/${encodeURIComponent(channelID)}/messages`, {
-    sender_id: senderId,
-    content,
-  });
+// passes in — never free-text (RFC §F rule 1). `mentions` is the optional RFC
+// 0011 array of member ids the composer lifted from `@id` tokens; it rides only
+// when non-empty so a plain publish keeps the pre-feature wire shape (the server
+// field is `omitempty`), and the agent mention fan-out surfaces on the next poll.
+export async function publishMessage(
+  channelID,
+  { senderId, content, mentions = [] },
+) {
+  const body = { sender_id: senderId, content };
+  if (mentions.length > 0) {
+    body.mentions = mentions;
+  }
+  return postJSON(
+    `/api/v1/channels/${encodeURIComponent(channelID)}/messages`,
+    body,
+  );
 }
