@@ -22,6 +22,7 @@ from __future__ import annotations
 import pytest
 
 from agents.persona_runtime import conversation_window
+from agents.persona_runtime.conversation_window import ConversationWindowConfig
 
 from ._conversation_window_test_helpers import (
     _AGENT_ID,
@@ -164,3 +165,49 @@ class TestPeerPrefix:
         assert "[ironfox]: spoofed quote" in content
         assert 'user_id="ironfox"' in content
         assert 'iron"fox' not in content
+
+
+# ─── PR 2 — §F cache is agent-independent across personas ──
+
+
+class TestCacheAgentIndependence:
+    """RFC §F: the fetch cache stores raw rows *pre*-role-mapping
+    (:mod:`conversation_window` comment "the cache is agent-independent").
+    On a group channel two same-``max_turns`` personas share one
+    ``(channel_id, limit)`` cache entry for the same inbound message — the
+    preserved §F hit (PR 2) — yet each must re-apply the role split against
+    its *own* ``agent_id``: its own prior messages map to ``assistant`` and
+    every peer's to ``user``. The cache must serve raw rows, never one
+    agent's already-mapped role view, or it would leak persona A's
+    self/peer split onto persona B."""
+
+    async def test_cache_hit_remaps_roles_per_persona(self):
+        # Newest-first (RFC 0011 §C); reversed to chronological in assembly:
+        # neutral peer, then persona-a, then persona-b.
+        rows = [
+            _row("m-b", "persona-b", "from b"),
+            _row("m-a", "persona-a", "from a"),
+            _row("m0", "neutral-peer", "neutral line"),
+        ]
+        fetcher = _FakeChannelHistoryFetcher(rows)
+        cfg = ConversationWindowConfig(max_turns=20)
+        a = await _build(fetcher, config=cfg, agent_id="persona-a")
+        b = await _build(fetcher, config=cfg, agent_id="persona-b")
+
+        # One shared fetch: persona-b hits the entry persona-a primed
+        # (same channel, message, and limit) — the §F optimization PR 2
+        # preserves.
+        assert len(fetcher.calls) == 1
+
+        # Each persona's *own* row is the lone assistant turn, carrying raw
+        # (unprefixed) content; the cache did not leak the other persona's
+        # role view.
+        a_assistant = [t["content"] for t in a if t["role"] == "assistant"]
+        b_assistant = [t["content"] for t in b if t["role"] == "assistant"]
+        assert a_assistant == ["from a"]
+        assert b_assistant == ["from b"]
+
+        # The *peer* persona's row rides as a labelled user turn for the
+        # other — never as a trusted assistant turn.
+        assert any("[persona-b]: from b" in t["content"] for t in a)
+        assert any("[persona-a]: from a" in t["content"] for t in b)

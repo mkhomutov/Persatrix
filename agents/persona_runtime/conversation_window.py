@@ -41,9 +41,12 @@ Design anchors (see ``docs/rfcs/0034-persona-conversational-working-memory.md``)
   separately from the RFC 0017 system-prompt memory budget. Per-turn
   admission applies token-overflow FIFO first, then count-overflow FIFO
   (OQ #2 resolution 2a — tighter bound wins).
-* **§F — caching.** An in-process cache keyed by ``(channel_id,
-  message_id)`` skips the network fetch when the same event is seen
-  twice (retries, sub-agent return paths). Steady-state turn-over-turn
+* **§F — caching.** An in-process cache keyed by ``(channel_id, limit)``
+  skips the network fetch when the same event is seen twice at the same
+  fetch limit (retries, sub-agent return paths). ``limit`` is in the key
+  so a group channel's small-``max_turns`` persona cannot serve an
+  undersized window to a large-``max_turns`` peer reacting to the same
+  message (RFC 0034 Phase 2 correctness). Steady-state turn-over-turn
   hit rate is low *by design* — the cache key advances with every
   inbound message; Phase 3 telemetry is the arbiter for any re-spec
   (RFC §F "Known gap" framing (a)). On any fetch failure the window
@@ -155,32 +158,28 @@ def resolve_conversation_window_config(
 
 # ─── In-process fetch cache (RFC §F) ───────────────────────
 #
-# Maps ``channel_id`` to the last ``(message_id, raw_fetched_rows)`` seen
-# for that channel. A call whose ``event.message_id`` matches the cached
-# id skips the network fetch and re-uses the raw rows. One entry per
-# channel — a newer ``message_id`` overwrites it (the "cheapest possible"
-# invalidation RFC §F specifies). Raw rows are stored *pre*-role-mapping,
-# so role mapping (`sender_id == agent_id`) is re-applied per call and
-# the cache is agent-independent.
+# Maps ``(channel_id, limit)`` to the last ``(message_id, raw_rows)`` seen
+# for that channel *at that fetch limit*. A call whose ``event.message_id``
+# matches the cached id **and** whose fetch limit matches skips the network
+# fetch and re-uses the raw rows; a newer ``message_id`` overwrites the
+# entry (the "cheapest possible" invalidation RFC §F specifies). Raw rows
+# are stored *pre*-role-mapping, so the cache is agent-independent.
 #
-# Eviction: there is none. A channel seen once keeps its entry for the
-# life of the process, so the dict grows with the number of *distinct*
-# channels a long-running orchestrator ever serves — not the number
-# concurrently active — and each entry holds up to ``max_turns + 1`` raw
-# row dicts. Acceptable for the Phase 1 DM dogfood (a handful of
-# channels); RFC 0034 Phase 3, which owns the cache-hit-rate telemetry,
-# is the place to add an LRU bound once a real channel-count
-# distribution exists to size it against.
+# ``limit`` is in the key for RFC 0034 Phase 2 multi-persona correctness
+# ([0034 PR plan §Future Phases carry-forward]). A DM channel has one
+# persona, so in Phase 1 the same ``(channel_id, message_id)`` was only
+# ever processed under one config and a constant fetch limit — keying on
+# ``channel_id`` alone was sound. A *group* channel hosts multiple personas
+# with independent configs reacting to the same message; under that old key
+# a small-``max_turns`` persona would prime the cache with an undersized
+# row set and serve it to a large-``max_turns`` peer, silently shrinking
+# its window. Keying on ``(channel_id, limit)`` makes a differing limit a
+# miss → the large caller refetches; the same-limit retry path still hits.
 #
-# Phase 2 caveat: the cached rows carry the *first* caller's
-# ``max_turns + 1`` fetch limit. A DM channel has exactly one persona, so
-# in Phase 1 the same ``(channel_id, message_id)`` is only ever processed
-# under one config and that limit is constant. Once a channel can host
-# multiple personas with independent ``conversation_window`` configs
-# (RFC 0034 Phase 2 — group channels), a small-``max_turns`` persona
-# could serve an undersized window to a large-``max_turns`` peer; Phase 2
-# must key the cache on the fetch limit or bypass it for such channels.
-_WINDOW_CACHE: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+# Eviction: there is none — the dict grows with the number of *distinct*
+# ``(channel, limit)`` pairs ever served. Fine at demo scale; RFC 0034
+# Phase 3 (hit-rate telemetry) adds an LRU bound sized from real data.
+_WINDOW_CACHE: dict[tuple[str, int], tuple[str, list[dict[str, Any]]]] = {}
 
 
 # ``_PromptAssemblyMixin._format_event`` is a bound method on the persona
@@ -275,8 +274,9 @@ async def _fetch_window(
     is its own already-logged best-effort failure and degrades to
     ``None`` silently (no double log).
     """
+    cache_key = (channel_id, limit)
     if message_id is not None:
-        cached = _WINDOW_CACHE.get(channel_id)
+        cached = _WINDOW_CACHE.get(cache_key)
         if cached is not None and cached[0] == message_id:
             return cached[1]
 
@@ -298,7 +298,7 @@ async def _fetch_window(
         return None
 
     if message_id is not None:
-        _WINDOW_CACHE[channel_id] = (message_id, raw)
+        _WINDOW_CACHE[cache_key] = (message_id, raw)
     return raw
 
 

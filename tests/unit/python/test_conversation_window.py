@@ -353,6 +353,60 @@ class TestCache:
         assert "older window" in first[0]["content"]
         assert "newer window" in second[0]["content"]
 
+    async def test_same_limit_repeat_hits_cache(self):
+        """Same ``(channel_id, message_id)`` *and* the same fetch limit is
+        still one fetch — the §F retry / sub-agent-return optimization is
+        preserved by the PR 2 multi-persona cache-key change."""
+        event = _event(message_id="m-same")
+        cfg = ConversationWindowConfig(max_turns=4)
+        fetcher = _FakeChannelHistoryFetcher([_row("m1", "user", "cached")])
+        first = await _build(fetcher, event=event, config=cfg)
+        second = await _build(fetcher, event=event, config=cfg)
+        assert len(fetcher.calls) == 1
+        assert first == second
+
+    async def test_larger_max_turns_is_not_served_undersized_cached_window(self):
+        """RFC 0034 Phase 2 multi-persona cache-key fix (0034 PR plan
+        §Future Phases carry-forward).
+
+        Two personas with independent ``conversation_window`` configs share
+        one group channel and react to the *same* inbound message. A
+        small-``max_turns`` persona primes the cache with a small fetch
+        ``limit``; a large-``max_turns`` peer reacting to the same
+        ``(channel_id, message_id)`` must **not** be served that undersized
+        cached window. It refetches at its own larger limit and gets a
+        full-size transcript.
+
+        The fake fetcher honours the limit by returning a different row set
+        per call (a real history endpoint caps at ``limit``); the bug — a
+        cache keyed on ``channel_id`` alone — would serve the small caller's
+        3 rows to the large caller.
+        """
+        small_rows = [_row(f"b{i}", "user", f"small-{i}") for i in range(3)]
+        large_rows = [_row(f"b{i}", "user", f"big-{i}") for i in range(21)]
+        fetcher = _FakeChannelHistoryFetcher(
+            results=[small_rows, large_rows],
+        )
+        event = _event(message_id="m-shared")
+        small = await _build(
+            fetcher, event=event, config=ConversationWindowConfig(max_turns=2),
+        )
+        large = await _build(
+            fetcher, event=event, config=ConversationWindowConfig(max_turns=20),
+        )
+        # The large-max_turns caller is a cache miss (different fetch limit)
+        # and refetches at its own larger limit.
+        assert len(fetcher.calls) == 2
+        assert fetcher.calls[0][1] == 3  # small persona: max_turns 2 + 1
+        assert fetcher.calls[1][1] == 21  # large persona: max_turns 20 + 1
+        # The small persona's window is bounded by its own max_turns; the
+        # large persona gets the full-size transcript, not the cached 3 rows.
+        assert len(small) == 2 + 1  # 2 replayed + current
+        assert len(large) == 20 + 1  # 20 replayed + current
+        large_joined = "".join(m["content"] for m in large)
+        assert "big-" in large_joined
+        assert "small-" not in large_joined
+
 
 # ─── Fetch-failure fall-back (RFC §F) ──────────────────────
 

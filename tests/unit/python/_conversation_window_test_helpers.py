@@ -95,10 +95,11 @@ async def _build(
     *,
     event: AgentEvent | None = None,
     config: ConversationWindowConfig | None = None,
+    agent_id: str = _AGENT_ID,
 ) -> list[dict[str, Any]]:
     return await build_conversation_messages(
         event=event or _event(),
-        agent_id=_AGENT_ID,
+        agent_id=agent_id,
         history_fetcher=fetcher,
         current_user_message=_CURRENT,
         config=config or ConversationWindowConfig(),
