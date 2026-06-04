@@ -37,6 +37,18 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-CHANNEL-005](MT-CHANNEL-005.md) | DM canonicalization round-trip | Active |
 | [MT-CHANNEL-006](MT-CHANNEL-006.md) | Channel deletion + cascade (REST DELETE pair) | Active |
 
+## Channel Governance (RFC 0030)
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-CHANNEL-GOV-002](MT-CHANNEL-GOV-002.md) | Floor control — ordered, mutually-aware multi-persona replies (RFC 0030 Layer 2.5) | Active |
+
+## Web Console (RFC 0048)
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-CONSOLE-001](MT-CONSOLE-001.md) | Web Console fresh-stack Interactions slice (`--enable-ui` → chat + channel timeline) | Active |
+
 ## Session
 
 | ID | Title | Status |
@@ -131,6 +143,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | v0.3.3 | [v0.3.3-execution-report.md](v0.3.3-execution-report.md) | ✅ Complete |
 | v0.3.4 | [v0.3.4-execution-report.md](v0.3.4-execution-report.md) | ✅ Complete |
 | v0.3.5 | [v0.3.5-execution-report.md](v0.3.5-execution-report.md) | 🔄 In progress |
+| v0.3.6 | [v0.3.6-execution-report.md](v0.3.6-execution-report.md) | ✅ Complete |
 
 ---
 

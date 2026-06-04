@@ -134,7 +134,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/healthz
 ### Step 4: Flag-on — boot endpoints return the expected shape
 
 **Action**: Restart with the console enabled (`make run-ui`, or
-`./bin/orchestrator --enable-ui`), then:
+`./bin/persatrix-server --enable-ui`), then:
 
 ```bash
 curl -s http://localhost:8080/api/v1/ui/config | python3 -m json.tool
@@ -143,15 +143,18 @@ curl -s http://localhost:8080/api/v1/ui/context | python3 -m json.tool
 
 **Expected Result**:
 
-`/api/v1/ui/config` — panels with `enabled` + runtime-derived `available`, plus a build version:
+`/api/v1/ui/config` — panels with `enabled` + runtime-derived `available`, plus a build version. Since the [chat-panel-retirement amendment (#516)](../rfcs/0048-operator-tester-web-console.md), chat is folded into a **single consolidated `channel_timeline` panel** (group channels + DMs over one surface) carrying a runtime-derived `create` capability — there is no separate `chat` panel key:
 
 ```json
 {
   "panels": {
-    "chat": { "enabled": true, "available": true },
-    "channel_timeline": { "enabled": true, "available": true },
+    "channel_timeline": {
+      "enabled": true,
+      "available": true,
+      "create": { "enabled": true, "available": true }
+    },
     "memory_strip": { "enabled": false, "available": false },
-    "cost": { "enabled": false, "available": false }
+    "cost": { "enabled": false, "available": true }
   },
   "build": { "version": "..." }
 }
@@ -164,9 +167,9 @@ curl -s http://localhost:8080/api/v1/ui/context | python3 -m json.tool
 ```
 
 **Verification**:
-- [ ] `chat` and `channel_timeline` are `enabled: true`; `memory_strip` and `cost` are `enabled: false`.
-- [ ] `channel_timeline.available` is `true` when channels are wired (and `false` if you run with channels disabled).
-- [ ] `build.version` is a non-empty string.
+- [ ] `channel_timeline` is `enabled: true` (the consolidated conversation panel); `memory_strip` and `cost` are `enabled: false`.
+- [ ] `channel_timeline.available` is `true` when channels are wired (and `false` if you run with channels disabled); `channel_timeline.create` reports the runtime-derived channel-creation capability.
+- [ ] `build.version` is a non-empty string (the compiled-in `defaultServiceVersion` when `PERSATRIX_SERVICE_VERSION` is unset).
 - [ ] `/api/v1/ui/context` returns `principal: "local"`, `authenticated: false`.
 
 ---
