@@ -79,7 +79,7 @@ it with `--enable-ui`. To wire the flag onto your own invocation instead:
 ```bash
 make ui                                   # build web/ → internal/ui/assets/
 make build-orchestrator                   # embed the bundle
-./bin/orchestrator --enable-ui            # serve /ui (still localhost-only)
+./bin/persatrix-server --enable-ui        # serve /ui (still localhost-only)
 ```
 
 > **Go-only contributors need no JS toolchain.** `go build ./...` and
