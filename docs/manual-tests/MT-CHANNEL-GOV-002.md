@@ -108,9 +108,14 @@ Post a single open question that the two `always` members (`iron-fox`,
 `nova-sparrow`) will answer, and `@`-mention `ember-owl` so the advisor
 (`when_mentioned`) joins the round as a third responder.
 
-**Action** (console composer in the `group:planning` timeline, or CLI):
+**Action** (console composer in the `group:planning` timeline, or CLI). The
+human sender must be a **member** of the channel first — a `channel send` from a
+non-member returns `403 Forbidden: sender is not a member of the channel`. Join
+once (the console composer joins implicitly; via CLI, run `channel join`), then
+send:
 
 ```bash
+./bin/persatrix channel join planning --as operator          # one-time; humans default respond=when_mentioned (no auto-reply)
 ./bin/persatrix channel send planning \
   "We need to pick a datastore for the v0.4 event log: Postgres or SQLite? @ember-owl what's your read?" \
   --as operator --mention ember-owl
@@ -238,7 +243,7 @@ by `TestChannels_CreateChannel_EnablesFloorControl` (create path) and
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| _pending_ | | | | First live run to be recorded against `feature/v036-floor-control-enable`. |
+| 2026-06-04 | Claude (Opus 4.8) | macOS | ✅ Pass | Live on the Anthropic stack (`claude-sonnet-4-6`), RC tip `83d478b`. Ordered round `ember-owl` (+9.3 s, mentioned-first) → `iron-fox` (+21.7 s) → `nova-sparrow` (+40.1 s), non-overlapping timestamps; iron-fox referenced ember-owl, nova-sparrow deferred/yielded the infra call to ember-owl. Steps 1–4 Pass; Step 5 optional (not run; pinned by `fanout_floor_test.go::TestFloorRound_TimeoutAdvances`). See [v0.3.6 execution report](v0.3.6-execution-report.md#mt-channel-gov-002--floor-control-ordered-mutually-aware-multi-persona-replies-live-anthropic). |
 
 ---
 
