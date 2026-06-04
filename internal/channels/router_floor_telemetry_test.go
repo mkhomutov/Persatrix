@@ -56,6 +56,17 @@ func TestFloorRound_Telemetry(t *testing.T) {
 		"the silent responder records one floor_turn{outcome=timeout}")
 	assert.Equal(t, uint64(1), floorRoundCount(t, rm, "group"),
 		"the round records exactly one round-duration observation")
+
+	// The single observation's value must be plausible: the silent responder
+	// alone holds the floor for its full 200ms turn timeout, so the round
+	// (timed from floor acquisition) is necessarily >= that, yet far below a
+	// minute. The paired bounds pin the millisecond unit conversion — a
+	// nanoseconds-as-ms regression would read ~2e8, a seconds-as-ms one ~0.2.
+	roundMillis := floorRoundSumMillis(t, rm, "group")
+	assert.GreaterOrEqual(t, roundMillis, 150.0,
+		"round duration spans at least the silent speaker's turn timeout (~200ms)")
+	assert.Less(t, roundMillis, 60000.0,
+		"round duration is recorded in milliseconds, not a smaller time unit")
 }
 
 // TestFloorRound_Telemetry_NilMetricsSafe pins that a router with no metrics
@@ -115,6 +126,28 @@ func floorRoundCount(t *testing.T, rm metricdata.ResourceMetrics, channelType st
 			for _, dp := range hist.DataPoints {
 				if ct, _ := dp.Attributes.Value("channel_type"); ct.AsString() == channelType {
 					return dp.Count
+				}
+			}
+		}
+	}
+	return 0
+}
+
+// floorRoundSumMillis returns the floor_round_duration histogram Sum for the
+// given channel_type, or 0 if no matching data point exists. With a single
+// observation per round, the Sum equals that round's recorded duration in ms.
+func floorRoundSumMillis(t *testing.T, rm metricdata.ResourceMetrics, channelType string) float64 {
+	t.Helper()
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "channel.conversation.floor_round_duration" {
+				continue
+			}
+			hist, ok := m.Data.(metricdata.Histogram[float64])
+			require.Truef(t, ok, "floor_round_duration: expected Histogram[float64], got %T", m.Data)
+			for _, dp := range hist.DataPoints {
+				if ct, _ := dp.Attributes.Value("channel_type"); ct.AsString() == channelType {
+					return dp.Sum
 				}
 			}
 		}
