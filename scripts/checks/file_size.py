@@ -277,27 +277,22 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # with full detail deferred to the grandfathered execution report. Written
     # against the v0.3.3 release; archive once the tag ships.
     "docs/v0.3.3-release-checklist.md",
-    # docs/v0.3.4-release-checklist.md is the v0.3.4 sibling of the v0.3.3
-    # checklist above — identical release-cycle-record pattern. It crossed the
-    # 3 000-word prose cap in release-prep PR 4 when the §1 gate checkboxes were
-    # filled with the post-bump re-certification evidence (per-gate results +
-    # the carried-forward Docker-smoke leg values) on top of the §3.1 Upgrade
-    # Notes table (7 rows — provider-agnostic aliases, no-default-provider,
-    # config-driven selection, provider-neutral onboarding, missing-price guard,
-    # alias-derived pricing + model_alias span, $0-local vs the wallet cap) and
-    # the §6 Known Gaps inventory, both inherently long for this provider-parity
-    # release. The PR 4 gate evidence is already condensed, with full detail
-    # deferred to the grandfathered execution report. Written against the v0.3.4
-    # release; archive once the tag ships.
+    # docs/v0.3.4-release-checklist.md — v0.3.4 sibling of the v0.3.3 checklist
+    # above; identical release-cycle-record pattern. Crossed the cap in
+    # release-prep PR 4 when §1 gate boxes were filled with post-bump re-cert
+    # evidence over the §3.1 Upgrade Notes (7 rows) + §6 Known Gaps. Archive at tag.
     "docs/v0.3.4-release-checklist.md",
-    # docs/v0.3.5-release-checklist.md is the v0.3.5 sibling of the v0.3.3 /
-    # v0.3.4 checklists above — identical release-cycle-record pattern. It
-    # crossed the 3 000-word prose cap in release-prep PR 4 when the §1/§2/§7
-    # gate boxes were filled with the post-bump re-certification evidence (+ the
-    # two §4 live hard-block legs reserved for Phase 6) on top of the §3.1
-    # Upgrade Notes table and §6 Known Gaps inventory. Written against the
-    # v0.3.5 release; archive once the tag ships.
+    # docs/v0.3.5-release-checklist.md — v0.3.5 sibling of the v0.3.3 / v0.3.4
+    # checklists above; identical release-cycle-record pattern. Crossed the cap
+    # in release-prep PR 4 when §1/§2/§7 were filled with post-bump re-cert
+    # evidence (+ the two §4 live hard-block legs) over the §3.1 Upgrade Notes +
+    # §6 Known Gaps. Archive once the tag ships.
     "docs/v0.3.5-release-checklist.md",
+    # docs/v0.3.6-release-checklist.md — v0.3.6 sibling of the v0.3.3–v0.3.5
+    # checklists above; same release-cycle-record pattern. Crossed the cap in
+    # release-prep PR 4 when §1/§2/§7 were filled with post-bump re-cert evidence
+    # over the §3.1 Upgrade Notes + §6 Known Gaps. Archive once the tag ships.
+    "docs/v0.3.6-release-checklist.md",
     # docs/v0.3.4-release-prep-plan.md is the v0.3.4 release-prep sequencer —
     # same release-cycle-accumulator pattern as the v0.3.0 / v0.3.1 plans and
     # the v0.3.3 checklist above. It crossed the 3 000-word prose cap when PR 1
@@ -309,6 +304,10 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # contract the sequence depends on. Remove this entry once v0.3.4 ships and
     # the plan is archived.
     "docs/v0.3.4-release-prep-plan.md",
+    # docs/v0.3.6-release-prep-plan.md — v0.3.6 release-prep sequencer; same
+    # accumulator pattern as the v0.3.4 plan above. Crossed the cap when PR 4
+    # flipped §Status + Progress Overview to ✅ Complete. Archive once tagged.
+    "docs/v0.3.6-release-prep-plan.md",
     # docs/guides/persona-agents.md was at 2 867 words on the v0.3.0
     # release-candidate tip; release-prep PR 2 added three §2 callouts
     # (interactions-not-messages per RFC 0020, now-anchor per RFC 0021,
