@@ -301,6 +301,7 @@ Persatrix is BUSL-1.1 licensed with no warranty. Use at your own risk
 | **v0.3.3** | A persona with no scheduled work and no inbound traffic costs nothing — its event loop parks until something wakes it (an inbound message, a scheduled timer, or a salience-triggered memory write) instead of polling on a fixed tick | ✅ Released |
 | **v0.3.4** | Run the same agents on any provider — Anthropic, OpenAI, a free local model (Ollama), or a $0 offline mock — by naming a logical model alias (`quality` / `fast` / `summarizer`); a vendor swap is a one-line config edit | ✅ Released |
 | **v0.3.5** | Persona-memory recall is session-scoped — a run reads only its own session's (room's) rows (plus the always-visible `legacy` rows), so concurrent conversations don't bleed; to re-run a scenario in a clean world (same room + user, inheriting nothing) bump the `epoch` run-isolation axis instead of nuking volumes with `make reset` | ✅ Released |
+| **v0.3.6** | Open a URL and talk to a persona — chat and watch a channel from the browser with zero CLI knowledge, via an embedded same-origin web console behind `--enable-ui` (off by default; RFC 0048 Slice 1: Interactions); group-channel personas now take turns instead of replying over each other (floor control, on by default) | 🚧 Release prep |
 | **v0.4.0** | Define a team, lab, or company with roles and hierarchy — and let it run | 📋 Planned |
 | **v0.5.0** | Bridge your agent society into Slack, Discord, or email | 📋 Planned |
 | **v0.6.0** | Run agent societies across multiple nodes and networks | 📋 Planned |
