@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-16
-target: v0.3.x
+target: v0.4.0 (on-ramp — cross-channel substrate for organizations; deferred from v0.3.x)
 depends_on:
   - RFC-0011
   - RFC-0034
@@ -20,7 +20,7 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
-**Target**: v0.3.x
+**Target**: v0.4.0 (on-ramp — cross-channel substrate for organizations; deferred from v0.3.x per the [2026-06-04 sequencing amendment](../v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040))
 **Depends on**: RFC 0011 (Channels — the channel surface, the event/action types, and the durable message store), RFC 0034 (Persona Conversational Working Memory — the conversation window this RFC generalises to multi-channel), RFC 0035 (Channel Membership Interval Ledger — the membership roster the awareness section is computed from), RFC 0037 (Memory Confidentiality & Channel Classification — the hard gate every relay turn re-runs; this RFC enforces the single-channel-turn property RFC 0037 §D/§H assume)
 **Relates to**: RFC 0012 (Protocols & Organizations — the *authority* axis that decides whether a relay *request* binds; the obligation half of this RFC's mechanism), RFC 0028 (Agent Decision Policy Engine — a relay request evaluated through accept/adapt/refuse, v0.4.0), RFC 0017 (Persona Memory Injection Token Budget — the awareness section is a budgeted prompt section), RFC 0022 (Persona Prompt Section Templating — the awareness section is a templated section), RFC 0024 (Event-Driven Agent Scheduling — the relay event rides the orchestrator's event-delivery path RFC 0024 may later generalise), RFC 0021 (Persona Temporal Awareness — a relay request received from a peer is a commitment), RFC 0009 (Agent Identity, Security & Sandboxing — the audit subsystem)
 

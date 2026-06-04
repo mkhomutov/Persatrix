@@ -14,11 +14,11 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0015](0015-process-automation-pattern-extraction.md) | 📋 Proposed | feature | v0.5.0 | 2026-04-19 | Process Automation & Pattern Extraction |
 | [RFC-0027](0027-reflection-driven-consolidation.md) | 📋 Proposed | feature | v0.4.0 | 2026-05-01 | Reflection-Driven Consolidation |
 | [RFC-0028](0028-agent-decision-policy-engine.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension) | 2026-05-02 | Agent Decision Policy Engine |
-| [RFC-0030](0030-multi-agent-conversation-governance.md) | 📋 Proposed | architecture | v0.3.x (Phase 1); v0.4.0 (Phase 2); v0.5.0+ (Phase 3) | 2026-05-11 | Multi-Agent Conversation Governance |
-| [RFC-0035](0035-channel-membership-interval-ledger.md) | 📋 Proposed | architecture | v0.3.x | 2026-05-16 | Channel Membership Interval Ledger |
-| [RFC-0036](0036-persona-message-recall.md) | 📋 Proposed | feature | v0.3.x | 2026-05-16 | Persona Verbatim Message Recall |
-| [RFC-0037](0037-memory-confidentiality-channel-classification.md) | 📋 Proposed | feature | v0.3.x | 2026-05-16 | Memory Confidentiality & Channel Classification |
-| [RFC-0038](0038-concurrent-context-awareness-relay.md) | 📋 Proposed | architecture | v0.3.x | 2026-05-16 | Persona Concurrent-Context Awareness & Cross-Channel Relay |
+| [RFC-0030](0030-multi-agent-conversation-governance.md) | 📋 Proposed | architecture | v0.3.6 (Layer 2.5 — shipped); v0.3.7–v0.3.9 (Phase 1 — relevance gate + deterministic layers); v0.4.0 (Phase 2 — moderator); v0.5.0+ (Phase 3) | 2026-05-11 | Multi-Agent Conversation Governance |
+| [RFC-0035](0035-channel-membership-interval-ledger.md) | 📋 Proposed | architecture | v0.3.9 | 2026-05-16 | Channel Membership Interval Ledger |
+| [RFC-0036](0036-persona-message-recall.md) | 📋 Proposed | feature | v0.3.9 | 2026-05-16 | Persona Verbatim Message Recall |
+| [RFC-0037](0037-memory-confidentiality-channel-classification.md) | 📋 Proposed | feature | v0.4.0 (on-ramp — confidentiality substrate for organizations; deferred from v0.3.x) | 2026-05-16 | Memory Confidentiality & Channel Classification |
+| [RFC-0038](0038-concurrent-context-awareness-relay.md) | 📋 Proposed | architecture | v0.4.0 (on-ramp — cross-channel substrate for organizations; deferred from v0.3.x) | 2026-05-16 | Persona Concurrent-Context Awareness & Cross-Channel Relay |
 | [RFC-0039](0039-user-accounts-authentication.md) | 📋 Proposed | architecture | v0.3.x (Phases 1–2) + v0.4.0 (Phase 3) | 2026-05-16 | User Accounts & Authentication |
 | [RFC-0045](0045-open-core-extraction-policy.md) | 📋 Proposed | process | v0.3.x (policy + dependency-direction CI gate) + v0.4.0+ (per-extraction RFCs) | 2026-05-24 | Open-Core Library Extraction Policy |
 | [RFC-0046](0046-budget-lease-extraction.md) | 📋 Proposed | architecture | v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate) | 2026-05-25 | Budget-Lease Library Extraction (persatrix-budget) |
@@ -34,7 +34,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0021](0021-persona-temporal-awareness.md) | ⚠️ Partially Implemented | architecture | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | 2026-04-25 | Persona Temporal Awareness |
 | [RFC-0024](0024-event-driven-scheduling.md) | ⚠️ Partially Implemented | architecture | v0.3.3 (Phases 1–4) + v0.4.0 (Phase 5) + v0.5+ (Phase 6) | 2026-05-09 | Event-Driven Agent Scheduling |
 | [RFC-0029](0029-personal-society-storage-split.md) | ⚠️ Partially Implemented | architecture | Phase 1 v0.3.2 (facade + tier rename); Phases 2–6 v0.4.0 — see docs/v0.3.2-plan.md and docs/rfcs/0029-pr-plan.md | 2026-05-10 | Personal/Society Storage Split |
-| [RFC-0034](0034-persona-conversational-working-memory.md) | ⚠️ Partially Implemented | architecture | v0.3.1 (Phase 1) + v0.3.x (Phases 2–3) | 2026-05-15 | Persona Conversational Working Memory |
+| [RFC-0034](0034-persona-conversational-working-memory.md) | ⚠️ Partially Implemented | architecture | v0.3.1 (Phase 1) + v0.3.7 (Phase 2 — group working memory) + v0.3.x (Phase 3) | 2026-05-15 | Persona Conversational Working Memory |
 | [RFC-0048](0048-operator-tester-web-console.md) | ⚠️ Partially Implemented | feature | v0.3.6 (Phase 1 / Slice 1) + v0.4.0+ (Phases 2–5) | 2026-06-01 | Operator & Tester Web Console (Vertical-Slice, Feature-Toggled UI) |
 | [RFC-0001](0001-core-orchestration-pipeline.md) | ✅ Implemented | architecture | v0.1 (MVP) | 2026-04-08 | Core Orchestration Pipeline (Planner + State + Registry) |
 | [RFC-0002](0002-rest-api-server.md) | ✅ Implemented | architecture | v0.1 (MVP) | 2026-04-09 | REST API Server (HTTP Layer + Workflow Submission) |
