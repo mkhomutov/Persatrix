@@ -126,7 +126,7 @@ Six layers, ordered by cheap-and-unfailable → expensive-and-judgement-based:
 | **0** | Cascade-depth cap | None — counter compare | ~free | ✅ Shipped (RFC 0011 amendment) |
 | **1** | Per-interaction cost ceiling (lease budget) | None — wallet rejects | wallet RPC, p99 ≤ 5 ms (RFC 0023) | 📋 This RFC, Phase 1 |
 | **2** | Per-participant reply budget | None — counter compare | hashmap lookup | 📋 This RFC, Phase 1 |
-| **2.5** | Floor control / speaker serialization | Floor-holder stalls → per-turn timeout advances | one in-flight dispatch + a parked waiter | 📋 [Floor-control amendment](0030-amendment-floor-control-speaker-serialization.md), v0.3.6 |
+| **2.5** | Floor control / speaker serialization | Floor-holder stalls → per-turn timeout advances | one in-flight dispatch + a parked waiter | ✅ Shipped ([floor-control amendment](0030-amendment-floor-control-speaker-serialization.md), v0.3.6; telemetry PR 4 fast-follow) |
 | **3** | Per-membership response gate (`respond_policy`) | None — config lookup | ~free | ✅ Shipped (RFC 0011 §D) |
 | **4** | End-of-interaction signal (K consecutive votes) | Agent must opt in; falls back to lower layers | message accounting | 📋 This RFC, Phase 1 |
 | **5** | Moderator role | Moderator can be wrong or time out; falls back to lower layers | ~1 LLM call per N turns | 📋 This RFC, Phase 2 (v0.4.0) |

@@ -10,17 +10,32 @@
 
 max_channels: 50
 
+# Floor control (RFC 0030 Layer 2.5) — ON by default for every group channel
+# declared here (the floor-control amendment, v0.3.6). When a message lands in a
+# channel with two or more responders, they take the floor one at a time — each
+# composes its reply against a transcript that already contains the prior
+# speaker's reply — instead of replying concurrently and mutually-blind. The
+# trade is latency: responders go serial, each turn waiting up to
+# `floor_turn_timeout_seconds` (default 45) for the speaker to compose before
+# advancing. To opt a channel back out, set `floor_control: false` on it.
+# See docs/guides/channels.md §7 "Floor control".
+
 # v0.3.0 demo channel — see docs/guides/v0.3.0-demo.md for the walkthrough.
 # Mixed-policy pattern from RFC 0011 §H: ember-owl is `when_mentioned` (advisor
 # mode — only chimes in when @-mentioned); iron-fox + nova-sparrow are `always`
 # (active collaborators that respond to every message). Cascade-depth backstop
 # (default 5) caps any single chain of reactive replies, so the two `always`
-# members cannot loop indefinitely. Cost expectation: a single human prompt
-# typically triggers 4–8 LLM calls across the two `always` members before the
-# cascade-depth backstop or natural conversation end stops it.
+# members cannot loop indefinitely. With floor control on (the default), the two
+# `always` members reply in a deterministic, mutually-aware round rather than
+# shouting over each other; cost expectation is unchanged — a single human
+# prompt typically triggers 4–8 LLM calls across the two `always` members before
+# the cascade-depth backstop or natural conversation end stops it.
 channels:
   - name: planning
     description: "v0.3.0 demo channel — engineering + product planning discussion"
+    # floor_control: true is the resolved default for group channels (v0.3.6);
+    # shown here for discoverability. Remove or set false to opt out.
+    floor_control: true
     members:
       - id: ember-owl
         respond: when_mentioned

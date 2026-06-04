@@ -37,8 +37,8 @@
         "description": { "type": "string" },
         "floor_control": {
           "type": "boolean",
-          "default": false,
-          "description": "Opt this channel into RFC 0030 Layer 2.5 speaker serialization (floor control): candidate responders take the floor one at a time, each reading the prior speaker's reply, instead of replying concurrently and mutually-blind. Default off; the resolved default flips on for group channels in the floor-control PR 3. DMs (single responder) are unaffected."
+          "default": true,
+          "description": "RFC 0030 Layer 2.5 speaker serialization (floor control): candidate responders take the floor one at a time, each reading the prior speaker's reply, instead of replying concurrently and mutually-blind. As of v0.3.6 the resolved default is ON for every declared (group) channel — omit the key to inherit it; set it false to opt a channel back out. Below two responders (e.g. a DM) it is a no-op regardless. The per-turn wait is floor_turn_timeout_seconds."
         },
         "floor_turn_timeout_seconds": {
           "type": "integer",

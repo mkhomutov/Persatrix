@@ -49,9 +49,20 @@ type ChannelConfig struct {
 	// FloorControl opts this channel into RFC 0030 Layer 2.5 speaker
 	// serialization: candidate responders take the floor one at a time,
 	// each reading the prior speaker's reply, instead of replying
-	// concurrently and mutually-blind. Default off in PR 1 (the schema
-	// default); PR 3 flips the resolved default on for group channels.
-	FloorControl bool `yaml:"floor_control"`
+	// concurrently and mutually-blind.
+	//
+	// It is a `*bool` tri-state on purpose. Every channel declared in
+	// `config/channels.yaml` is a group channel, and PR 3 makes the
+	// resolved default ON for group channels — but operators must still be
+	// able to opt a specific channel back OUT. A plain `bool` cannot
+	// express that: its zero value (`false`) is indistinguishable from an
+	// explicit `floor_control: false`, so a group default of ON would make
+	// opt-out impossible. With the pointer:
+	//   - nil   → operator said nothing → resolver applies the group default (ON)
+	//   - &true → explicit opt-in
+	//   - &false→ explicit opt-out (honoured over the group default)
+	// Read through [ChannelConfig.FloorControlEnabled], never directly.
+	FloorControl *bool `yaml:"floor_control"`
 	// FloorTurnTimeoutSeconds caps how long the floor loop waits for a
 	// single speaker's reply before advancing to the next responder
 	// (amendment D2). Zero/absent normalizes to
@@ -214,4 +225,23 @@ func (c *Config) Validate() error {
 // (`group:<name>`). The store-side `Channel.ID` PK uses the same value.
 func (cc ChannelConfig) CanonicalID() string {
 	return "group:" + cc.Name
+}
+
+// FloorControlEnabled resolves the RFC 0030 Layer 2.5 floor-control flag for
+// this declared channel (PR 3 — the behaviour flip). Every channel declared
+// in `config/channels.yaml` is a group channel, so the resolved default is
+// ON: serializing concurrent responders into a deterministic, mutually-aware
+// speaker round is the desired behaviour for multi-persona group channels.
+// An explicit `floor_control: false` opts a channel back out and is honoured
+// over the default (see the [ChannelConfig.FloorControl] tri-state doc).
+//
+// Floor control is a no-op below two candidate responders ([ChannelRouter.fanout]),
+// so a "DM-shaped" group (single responder) resolving ON costs nothing — the
+// concurrent path runs unchanged. The orchestrator feeds this value into
+// [ChannelRouter.SetFloorControl] at startup ([cmd/orchestrator/channels.go]).
+func (cc ChannelConfig) FloorControlEnabled() bool {
+	if cc.FloorControl == nil {
+		return true // group default ON (PR 3)
+	}
+	return *cc.FloorControl
 }

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -142,6 +143,21 @@ func initChannels(
 	// row in the YAML is ignored by SetMaxCascadeDepth (the backstop
 	// cannot be silently disabled — see the [RFC 0011 amendment]).
 	router.SetMaxCascadeDepth(chanCfg.MaxCascadeDepth)
+	// RFC 0030 Layer 2.5 (floor control / speaker serialization) — PR 3
+	// behaviour flip. Resolve the per-channel flag from config and feed it
+	// to the router before traffic. The resolved default is ON for every
+	// declared (group) channel; an explicit `floor_control: false` opts a
+	// channel back out (see [ChannelConfig.FloorControlEnabled]). The
+	// per-turn timeout is already normalized to its 45s default by
+	// LoadConfig (amendment D2). This loop is the sole wiring point — without
+	// it the loaded flag stays inert (the PR-1/PR-2 dark state).
+	for _, decl := range chanCfg.Channels {
+		router.SetFloorControl(
+			decl.CanonicalID(),
+			decl.FloorControlEnabled(),
+			time.Duration(decl.FloorTurnTimeoutSeconds)*time.Second,
+		)
+	}
 	// RFC 0031 Phase 1: stamp the per-process session id on router-
 	// internal writes (today only ReconcileConfig-created channels).
 	// Empty falls through to the store's `legacy` default.
