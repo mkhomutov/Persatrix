@@ -56,23 +56,30 @@ class TestSnippetLoader:
         # The contact-note convention PR 5 builds on stays in place.
         assert "contact:<user_id>" in load_snippet(_SNIPPET)
 
-    def test_false_cross_conversation_promise_removed(self) -> None:
-        """The blanket "memory persists across conversations" claim — false
-        while notes are room-scoped — must be gone, and not replaced with
-        an equally-unbacked "across rooms" promise ahead of PR 5.
+    def test_no_blanket_cross_conversation_promise(self) -> None:
+        """The original blanket "memory persists across conversations"
+        claim stays gone — F-3b makes *person facts* cross conversations,
+        not all memory wholesale.
         """
         lower = load_snippet(_SNIPPET).lower()
         assert "persists across conversations" not in lower
-        assert "across rooms" not in lower
-        assert "across conversations" not in lower
+        assert "all memory" not in lower
 
-    def test_honest_room_scoped_statement_present(self) -> None:
-        """The replacement states the current, true scope: notes persist
-        but are scoped to the conversation, and an empty recall should be
-        admitted plainly rather than guessed around.
+    def test_person_facts_cross_conversations(self) -> None:
+        """F-3b (PR 5): facts about a person — name, role, stable
+        preferences — are now recalled cross-room, so the snippet says so.
         """
         lower = load_snippet(_SNIPPET).lower()
-        assert "scoped to the conversation" in lower
+        assert "across conversations" in lower
+        assert "person" in lower
+
+    def test_other_notes_and_transcript_stay_per_conversation(self) -> None:
+        """The split must stay honest: only person facts cross; other notes
+        and the running transcript remain scoped to the conversation, and
+        an empty recall is admitted plainly rather than guessed around.
+        """
+        lower = load_snippet(_SNIPPET).lower()
+        assert "within the conversation you are in" in lower
         assert "say so plainly" in lower
 
 

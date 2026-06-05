@@ -24,6 +24,7 @@ from .channel_history import (
     recall_channel_episodes,
     render_channel_history_section,
 )
+from .contact_section import recall_notes_for_event
 from .facts_section import (
     DEFAULT_FACTS_BUDGET_TOKENS,
     FACTS_SECTION_NAME,
@@ -326,19 +327,16 @@ class _MemoryContextMixin:
         # missing FTS5 index fallback.  The fallback's recency query would
         # re-admit those low-signal notes, defeating the threshold.
         # (RFC 0017 §D; PR #131 F-1 fallback removed.)
-        try:
-            notes = await self._episodic_memory.recall_notes(
-                query,
-                limit=5,
-                min_score=DEFAULT_NOTES_MIN_SCORE,
-                sessions=None,  # PR 4: §D default; "*" pinned unreachable.
-            )
-        except Exception:
-            logger.warning(
-                "Agent %s: note recall failed, skipping",
-                self.agent_id, exc_info=True,
-            )
-            notes = []
+        # Notes tier: room-scoped query recall (§D default) + the sender's
+        # cross-room contact note prepended (F-3b). Encapsulated in
+        # ``contact_section`` like the other tiers' recall helpers.
+        notes = await recall_notes_for_event(
+            self._episodic_memory,
+            query=query,
+            event=event,
+            agent_id=self.agent_id,
+            min_score=DEFAULT_NOTES_MIN_SCORE,
+        )
 
         # ── Allocate-loop ──────────────────────────────────────────────────
         # Process tiers in fixed priority order (relationship=8 → episodic=7

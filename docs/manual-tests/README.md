@@ -81,6 +81,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-PERSONA-005](MT-PERSONA-005.md) | Benign user message is not deflected as a prompt-injection (external-data carve-out, F-1) | Active |
 | [MT-PERSONA-006](MT-PERSONA-006.md) | Persona describes its conversation window honestly — no memory denial, no invented count (F-2) | Active |
 | [MT-PERSONA-007](MT-PERSONA-007.md) | Persona does not over-promise cross-conversation memory; admits empty recall (F-3a) | Active |
+| [MT-PERSONA-008](MT-PERSONA-008.md) | A person introduced in one channel is recalled in another; room notes stay scoped (F-3b) | Active |
 | [MT-PERSONA-CONVERSATION-001](MT-PERSONA-CONVERSATION-001.md) | Persona conversational continuity (DM) | Active |
 
 ## Chat

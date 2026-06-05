@@ -156,6 +156,50 @@ async def _recall_notes_like(
         return list(await cursor.fetchall())
 
 
+async def _recall_contact_notes(
+    db: aiosqlite.Connection,
+    *,
+    agent_id: str,
+    topic: str,
+    limit: int,
+    note_cols: tuple[str, ...],
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
+) -> list[aiosqlite.Row]:
+    """Exact-topic, **cross-session** recall (RFC 0031 §D person-keyed
+    amendment, F-3b).
+
+    Deliberately omits the ``session_in_clause`` the other note-recall
+    helpers apply: a person-keyed ``contact:<id>`` note is recalled from
+    *every* room, since identity attaches to the person, not the venue
+    (``docs/memory-scope-axes.md``). ``principal_id`` / ``epoch_id`` are
+    still enforced — cross-*room*, never cross-tenant or cross-epoch — and
+    ``topic`` is matched exactly (no FTS/LIKE) so only that one person's
+    contact notes cross the room boundary, never arbitrary room notes.
+    """
+    princ_clause, princ_params = principal_eq_clause(
+        principal_id, column="principal_id",
+    )
+    epoch_clause, epoch_params = epoch_eq_clause(
+        epoch_id, column="epoch_id",
+    )
+    note_select = ", ".join(note_cols)
+    async with db.execute(
+        f"""
+        SELECT {note_select}
+        FROM notes
+        WHERE agent_id = ?
+          AND topic = ?
+          {princ_clause}
+          {epoch_clause}
+        ORDER BY updated_at DESC
+        LIMIT ?
+        """,
+        (agent_id, topic, *princ_params, *epoch_params, limit),
+    ) as cursor:
+        return list(await cursor.fetchall())
+
+
 async def _recall_notes_recency(
     db: aiosqlite.Connection,
     *,
