@@ -23,7 +23,7 @@ reaches the turn, so an open-floor message admits all participants here.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -185,3 +185,34 @@ async def test_broadcast_admits_all_participants() -> None:
     assert iron_calls.await_count >= 1, (
         "a broadcast admits the un-named participant too (D3)"
     )
+
+
+@pytest.mark.asyncio
+async def test_directed_elsewhere_member_still_remembers() -> None:
+    """A directed-elsewhere participant is silent but **not** amnesiac.
+
+    The gate decides *whether to respond*, not *whether to remember*: a
+    suppression whose policy is not ``defense_in_depth`` still drives
+    ``_store_event_episode`` (``agents/persona_runtime/action_loop.py``).
+    So iron-fox, gated ``directed_elsewhere`` on ``@ember-owl``, makes zero
+    LLM calls yet still ingests the turn into memory.
+
+    This is the load-bearing reason the Go concurrent-fanout path keeps
+    *dispatching* to un-addressed participants instead of pre-filtering them
+    the way the floor path does (``internal/channels/floor_control.go``):
+    the dispatch is what feeds their memory. A future change that folded
+    ``directed_elsewhere`` into the ingest-skip exception — or dropped these
+    members from concurrent fanout — would silently make un-addressed
+    participants forget everything said while they were not the target,
+    breaking cross-mention context. Pin it.
+    """
+    iron, iron_calls = await _make_agent("iron-fox")
+
+    with patch.object(iron, "_store_event_episode", new=AsyncMock()) as store_mock:
+        await _deliver(iron, mentions=["ember-owl"])
+
+    iron_calls.assert_not_awaited()  # gated: no reply, idle-cost zero (D5)
+    store_mock.assert_awaited_once()  # but the turn still lands in memory
+    ingested_event, ingested_actions = store_mock.await_args.args
+    assert ingested_event.payload["mentions"] == ["ember-owl"]
+    assert ingested_actions == []  # suppressed → no actions produced the turn

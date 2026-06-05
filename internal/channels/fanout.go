@@ -107,6 +107,18 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 			// knowledge and saves a wasted gRPC call.
 			continue
 		}
+		// RFC 0030 Tier A note: a directed-elsewhere `always` member (one
+		// the floor path's [orderResponders] drops to non-responder, see
+		// floor_control.go) is intentionally NOT short-circuited here. The
+		// receiver gate suppresses its *reply* (directed_elsewhere) but the
+		// dispatch still lands so the member *ingests* the message into
+		// memory — the gate decides whether to respond, not whether to
+		// remember (agents/persona_runtime/action_loop.py's ingest-on-
+		// suppress). Filtering it out to mirror the floor path would make
+		// un-addressed participants amnesiac. The floor path can drop it
+		// because it re-delivers non-responders fire-and-forget for exactly
+		// this ingestion; the concurrent path's single dispatch is that
+		// delivery.
 		m := m
 		sem <- struct{}{}
 		wg.Add(1)
