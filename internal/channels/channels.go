@@ -65,6 +65,22 @@ const (
 	RespondObserver    RespondPolicy = "observer"
 )
 
+// MentionEveryone is the broadcast sentinel for the RFC 0030 relevance
+// amendment Tier A directed-elsewhere filter (v0.3.7, decision D3). Its
+// presence in a message's `Mentions` list marks the message as addressed
+// to the whole room, disabling the directed-elsewhere suppression so every
+// `always`/`participant` member stays a candidate responder. The value
+// carries an `@`, which [validateParticipantID] forbids, so it can never
+// collide with a real participant id — a safe in-band sentinel reusing the
+// existing `mentions` plumbing with no new wire field. Mirrors the Python
+// gate's `MENTION_EVERYONE` (agents/response_gate.py); the two must stay in
+// lockstep. v0.3.7 wires the sentinel through the transport (this candidate
+// set, the receiver gate, and a persist-validation exemption in
+// sqlite_messages.go so it survives the wire); only the *producer* — the
+// console composer expanding a typed `@everyone`/`@here` into the sentinel —
+// is a follow-on.
+const MentionEveryone = "@everyone"
+
 // Normalize collapses the disposition vocabulary to the canonical legacy
 // triple (`participant→always`, `addressed→when_mentioned`,
 // `observer→never`). A legacy value is returned unchanged; an unknown

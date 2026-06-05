@@ -219,7 +219,12 @@ func TestFloorRound_SerializesResponders_MutualVisibility(t *testing.T) {
 }
 
 // TestFloorRound_MentionedFirst pins amendment D3's mentioned-first ordering:
-// a stimulus mentioning c grants c the floor before the earlier members.
+// a stimulus mentioning c grants c the floor before the earlier members. The
+// stimulus is a broadcast (`@everyone`) addressed to c so that, under the RFC
+// 0030 Tier A directed-elsewhere filter, the unmentioned `always` members a/b
+// stay candidate responders — on a message directed *only* at c they would be
+// suppressed (that pile-on is the v0.3.6 defect Tier A fixes). The broadcast
+// keeps all three in the round, which is what the ordering exercises.
 func TestFloorRound_MentionedFirst(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
 	disp := newFloorDispatcher(store, "a", "b", "c")
@@ -232,8 +237,8 @@ func TestFloorRound_MentionedFirst(t *testing.T) {
 	router.SetFloorControl(id, true, 2*time.Second)
 
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
-		ID: uuid.NewString(), ChannelID: id, SenderID: "user", Content: "hey @c",
-		Mentions: []string{"c"},
+		ID: uuid.NewString(), ChannelID: id, SenderID: "user", Content: "hey @everyone, esp @c",
+		Mentions: []string{MentionEveryone, "c"},
 	}, ""))
 
 	order, _, _ := disp.snapshot()

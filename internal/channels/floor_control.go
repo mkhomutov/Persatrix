@@ -146,6 +146,18 @@ func orderResponders(members []Member, msg ChannelMessage, threadParentSenderID 
 		mentioned[id] = true
 	}
 
+	// RFC 0030 relevance amendment Tier A (v0.3.7): a message that names
+	// specific recipients (`Mentions` non-empty) and is not an explicit
+	// broadcast (`MentionEveryone` absent) is *directed* — an `always`/
+	// `participant` member who is not named is suppressed by the receiver
+	// gate (directed_elsewhere). Mirror that here so floor control does not
+	// queue such a member into the serialized round only to have it stay
+	// silent and burn the per-turn timeout. This keeps the candidate set a
+	// superset of the gate's respond-true set: it now excludes exactly the
+	// members the gate now excludes, so no member the gate would admit is
+	// dropped (the no-false-negatives invariant above still holds).
+	directed := len(msg.Mentions) > 0 && !mentioned[MentionEveryone]
+
 	// Split into mentioned vs. unmentioned responders so the final
 	// concatenation is mentioned-first while preserving member order
 	// within each group (stable tie-break).
@@ -162,7 +174,8 @@ func orderResponders(members []Member, msg ChannelMessage, threadParentSenderID 
 		isCandidate := false
 		switch m.RespondPolicy {
 		case RespondAlways:
-			isCandidate = true
+			// Open-floor or broadcast → candidate; directed-elsewhere → not.
+			isCandidate = isMentioned || !directed
 		case RespondWhenMentioned:
 			// Mentioned, or a thread reply to a message this member sent.
 			isCandidate = isMentioned ||

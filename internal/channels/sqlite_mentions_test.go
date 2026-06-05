@@ -67,6 +67,39 @@ func TestSQLiteStore_PublishMessage_AcceptsValidMentions(t *testing.T) {
 	assert.Equal(t, []string{"bob", "User_1"}, hist[0].Mentions)
 }
 
+// RFC 0030 relevance amendment Tier A (v0.3.7): the broadcast sentinel
+// `@everyone` is exempt from the participant-id check (it addresses the room,
+// not a participant) so it survives the wire — the response gate / candidate
+// set read it as "disable the directed-elsewhere filter". It round-trips
+// alongside real mentions; every other non-participant value is still
+// rejected (the exemption is exact, not a prefix or `@`-wildcard).
+func TestSQLiteStore_PublishMessage_AcceptsBroadcastSentinel(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	ctx := context.Background()
+	id := mustCreateGroup(t, store, "planning", "alice", "bob")
+
+	require.NoError(t, store.PublishMessage(ctx, ChannelMessage{
+		ID: uuid.NewString(), ChannelID: id, SenderID: "alice",
+		Content:  "heads up",
+		Mentions: []string{MentionEveryone, "bob"},
+	}))
+
+	hist, err := store.GetHistory(ctx, id, 10, time.Time{})
+	require.NoError(t, err)
+	require.Len(t, hist, 1)
+	assert.Equal(t, []string{MentionEveryone, "bob"}, hist[0].Mentions,
+		"the sentinel round-trips unchanged alongside real mentions")
+
+	// The exemption is exact: a different `@`-prefixed value is still junk.
+	err = store.PublishMessage(ctx, ChannelMessage{
+		ID: uuid.NewString(), ChannelID: id, SenderID: "alice",
+		Content:  "hi",
+		Mentions: []string{"@someoneelse"},
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidParticipantID)
+}
+
 // PR #249 deep-review Nice-to-Have #3: pin the loop short-circuit
 // behavior. The implementation must reject on the FIRST invalid mention
 // and report its index, not scan the whole slice. Without this assertion

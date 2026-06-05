@@ -148,7 +148,12 @@ func TestOrderResponders_WhenMentionedSplit(t *testing.T) {
 
 // TestOrderResponders_MentionedFirst — among responders, mentioned members
 // take the floor before unmentioned `always` members; within each group the
-// original member order is preserved (D3 stable tie-break).
+// original member order is preserved (D3 stable tie-break). The stimulus is
+// a broadcast (`@everyone`) so the unmentioned `always` members alice/dave
+// stay candidates under the RFC 0030 Tier A directed-elsewhere filter — on a
+// *directed* message they would be suppressed (see
+// TestOrderResponders_DirectedElsewhere). The broadcast keeps a mixed
+// mentioned/unmentioned candidate set, which is what the ordering exercises.
 func TestOrderResponders_MentionedFirst(t *testing.T) {
 	members := []Member{
 		member("alice", RespondAlways),        // always, not mentioned
@@ -156,13 +161,58 @@ func TestOrderResponders_MentionedFirst(t *testing.T) {
 		member("carol", RespondWhenMentioned), // when_mentioned, mentioned
 		member("dave", RespondAlways),         // always, not mentioned
 	}
-	msg := ChannelMessage{SenderID: "user", Mentions: []string{"bob", "carol"}}
+	msg := ChannelMessage{
+		SenderID: "user",
+		Mentions: []string{MentionEveryone, "bob", "carol"},
+	}
 
 	responders, _ := orderResponders(members, msg, "")
 
 	// mentioned-first (bob, carol in member order), then the rest in
 	// member order (alice, dave).
 	assert.Equal(t, []string{"bob", "carol", "alice", "dave"}, ids(responders))
+}
+
+// TestOrderResponders_DirectedElsewhere — RFC 0030 relevance amendment Tier A
+// (v0.3.7): a message naming specific recipients (and not a broadcast) is
+// *directed*. An unnamed `always`/`participant` member is no longer a
+// candidate responder — it drops to the non-responder (ingestion-only) set
+// rather than being queued into the floor round only for the receiver gate
+// to suppress it (directed_elsewhere) and burn the per-turn timeout. The
+// named member, and any `when_mentioned` member that is named, are still
+// responders.
+func TestOrderResponders_DirectedElsewhere(t *testing.T) {
+	members := []Member{
+		member("ember-owl", RespondAlways), // participant, named
+		member("iron-fox", RespondAlways),  // participant, NOT named → drop
+		member("muted", RespondWhenMentioned),
+	}
+	msg := ChannelMessage{SenderID: "user", Mentions: []string{"ember-owl"}}
+
+	responders, nonResponders := orderResponders(members, msg, "")
+
+	assert.Equal(t, []string{"ember-owl"}, ids(responders),
+		"only the named participant takes the floor on a directed message")
+	assert.Equal(t, []string{"iron-fox", "muted"}, ids(nonResponders),
+		"the unnamed participant joins the unmentioned when_mentioned member off-floor")
+}
+
+// TestOrderResponders_BroadcastDisablesDirectedFilter — `@everyone` marks the
+// message as addressed to the room, so the directed-elsewhere filter is
+// disabled and every `always` member stays a candidate even though the list
+// is non-empty (decision D3).
+func TestOrderResponders_BroadcastDisablesDirectedFilter(t *testing.T) {
+	members := []Member{
+		member("ember-owl", RespondAlways),
+		member("iron-fox", RespondAlways),
+	}
+	msg := ChannelMessage{SenderID: "user", Mentions: []string{MentionEveryone}}
+
+	responders, nonResponders := orderResponders(members, msg, "")
+
+	assert.Equal(t, []string{"ember-owl", "iron-fox"}, ids(responders),
+		"a broadcast admits all participants in member order")
+	assert.Empty(t, nonResponders)
 }
 
 // TestOrderResponders_ThreadReplyToSelf — a `when_mentioned` member who is
