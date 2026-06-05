@@ -211,17 +211,18 @@ since-we-last-spoke:
 
 | Order | Action | Vehicle | Target |
 |------:|--------|---------|--------|
-| 1 | Land RFC 0020 P3 (channel-scoped interactions) | already on critical path | v0.3.0 |
+| 1 | Land RFC 0020 P3 (channel-scoped interactions) | critical path | v0.3.0 |
 | 2 | Pin [§D](#d-outcome-tagged-importance-not-turn-count-importance) (outcome tags) into RFC 0020 P2 PR plan | RFC 0020 OQ #6 resolution | v0.3.0 |
-| 3 | Ship [§B](#b-continuity-bridge-across-interaction-close) and [§F](#f-structured-since-we-last-spoke-prompt-header) as small follow-on PRs | no RFC; ~1 PR each | v0.3.0 or v0.3.x |
+| 3 | Ship [§B](#b-continuity-bridge-across-interaction-close) + [§F](#f-structured-since-we-last-spoke-prompt-header) as follow-on PRs | no RFC, ~1 PR each | v0.3.0 or v0.3.x |
 | 4 | Author [§G](#g-memory-of-context-dogfood-test) as a manual-test artifact | docs PR | v0.3.0 release-prep (Phase 4) |
-| 5 | Pull `key_facts` out of draft RFC 0023 into a "declarative-fact tier" RFC ([§A](#a-promote-key_facts-to-a-declarative-fact-tier)) | new RFC | v0.3.x |
-| 6 | Trim draft RFC 0023 to JSON-summary schema only; move recency boost to [`0008-calibration-review.md`](rfcs/0008-calibration-review.md) | scope amendment | v0.3.x |
+| 5 | Pull `key_facts` into a declarative-fact-tier RFC ([§A](#a-promote-key_facts-to-a-declarative-fact-tier)) | new RFC | v0.3.x |
+| 6 | Trim RFC 0023 to JSON-summary only; move recency boost to [`0008-calibration-review.md`](rfcs/0008-calibration-review.md) | scope amendment | v0.3.x |
 | 7 | Fold [§C](#c-salience-score-with-use-based-reinforcement) into the [RFC 0008 calibration review](rfcs/0008-calibration-review.md) | review-time formula change | v0.3.x (carve-out) |
-| 8 | Defer draft RFC 0024 (vector recall) until [§G](#g-memory-of-context-dogfood-test) data shows BM25 misses on multi-turn summaries | gate, not a deliverable | v0.3.x or v0.4.0 |
-| 9 | Replace draft RFC 0025 with [§E](#e-reflection-driven-consolidation-not-llm-clustering) | new RFC; supersede 0025 | v0.4.0 |
+| 8 | Defer RFC 0024 (vector recall) until [§G](#g-memory-of-context-dogfood-test) shows BM25 misses | gate, not a deliverable | v0.3.x or v0.4.0 |
+| 9 | Replace RFC 0025 with [§E](#e-reflection-driven-consolidation-not-llm-clustering) | new RFC; supersede 0025 | v0.4.0 |
+| 10 | Person identity → cross-room **relationship** tier; retire F-7 Option-A `contact:*` carve-out ([ISSUE-0093](issues/ISSUE-0093-person-identity-cross-room-tier.md)) | RFC amendment + eager capture | **v0.3.x** (not v0.3.8) |
 
-The throughline: stop treating memory as a retrieval problem and start treating it as a representation problem. Vectors don't fix prose; structure does.
+The throughline: treat memory as a representation problem, not a retrieval one — structure fixes prose; vectors don't.
 
 ---
 
