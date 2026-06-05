@@ -115,7 +115,10 @@ class TestSystemPromptIntegration:
             disc_pos = prompt.find(load_snippet("reply-discretion"))
             pace_pos = prompt.find(load_snippet("conversational-pacing"))
             peer_pos = prompt.find(load_snippet("peer-conversation-voice"))
-            mem_pos = prompt.find("store_note")
+            # Mark the memory snippet by its own rendered text, consistent
+            # with the other three markers, rather than an interior token
+            # like ``store_note`` that could drift if the prose changes.
+            mem_pos = prompt.find(load_snippet("memory-tool-usage"))
 
             assert -1 < disc_pos < pace_pos < peer_pos < mem_pos
         finally:
