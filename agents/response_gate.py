@@ -23,10 +23,16 @@ Policies (RFC 0011 §D table):
 * ``when_mentioned`` — fire the LLM if the agent's id is in
   ``event.payload["mentions"]`` OR the message is a thread reply to a
   message this agent authored (``thread_parent_sender_id == agent_id``).
-* ``always`` — fire the LLM unconditionally except when the agent is
-  the sender (the orchestrator's :class:`ChannelRouter` already filters
-  the sender on fanout, but the receiver re-checks for defence in depth
-  on the cleartext gRPC port).
+* ``always`` (a.k.a. the ``participant`` disposition) — fire the LLM
+  except when the agent is the sender (the orchestrator's
+  :class:`ChannelRouter` already filters the sender on fanout, but the
+  receiver re-checks for defence in depth on the cleartext gRPC port) or
+  when the message is **directed elsewhere** (RFC 0030 relevance
+  amendment Tier A, v0.3.7): a message naming specific other members via
+  ``mentions`` — and not an explicit ``@everyone`` broadcast — does not
+  draw a reply from a ``participant`` who is not among them. An open-floor
+  message (empty ``mentions``) or a broadcast still admits every
+  ``participant``.
 * ``never`` — always suppress. The orchestrator filters
   ``RespondNever`` members upstream of dispatch, so this branch should
   not normally fire; if it does, it surfaces a policy-routing
@@ -68,6 +74,7 @@ from .persona_types import AgentEvent, EventType
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "MENTION_EVERYONE",
     "POLICY_ADDRESSED",
     "POLICY_ALWAYS",
     "POLICY_DEFENSE_IN_DEPTH",
@@ -127,6 +134,25 @@ _DISPOSITION_ALIASES: Final[dict[str, str]] = {
 # gate. Keeping a distinct label preserves the diagnostic signal
 # without polluting the user-policy buckets.
 POLICY_DEFENSE_IN_DEPTH: Final[str] = "defense_in_depth"
+
+# RFC 0030 relevance amendment Tier A (v0.3.7), decision D3 / amendment
+# OQ #5 (adopted default): the broadcast sentinel. A message addressed to
+# the *room* rather than to specific members carries this reserved token in
+# its ``mentions`` list; the directed-elsewhere filter treats its presence
+# as "do not suppress" so every ``participant`` reaches the turn. The value
+# can never collide with a real participant id — ``validateParticipantID``
+# (internal/channels/channels.go) forbids ``@`` — so it is a safe in-band
+# sentinel that reuses the existing ``mentions`` plumbing end-to-end with no
+# new wire field (PR-plan §"Where the 'everyone' signal comes from", option
+# (a)). v0.3.7 wires the sentinel end-to-end on the *consumer + transport*
+# side — this gate, the Go candidate set, and a persist-validation exemption
+# (internal/channels/sqlite_messages.go) so it survives the wire. The only
+# piece deferred to a follow-on is the *producer*: the console composer
+# expanding a typed ``@everyone``/``@here`` into the sentinel. Until then the
+# open-floor (empty ``mentions``) path already admits all participants, so
+# directedness is fixed regardless; an explicit broadcast is an additive
+# affordance a programmatic caller can already use.
+MENTION_EVERYONE: Final[str] = "@everyone"
 
 _DM_CHANNEL_PREFIX: Final[str] = "dm:"
 
@@ -231,6 +257,33 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
         return GateDecision(respond=False, policy=POLICY_NEVER, reason="policy_never")
 
     if policy == POLICY_ALWAYS:
+        # RFC 0030 relevance amendment Tier A (v0.3.7): the directed-elsewhere
+        # filter. A ``participant`` (``always``) member no longer answers a
+        # message addressed to *other* members — that was the v0.3.6 pile-on
+        # defect ("how about you @ember-owl?" drew a reply from everyone).
+        # Suppress iff the message names specific recipients (``mentions``
+        # non-empty), this agent is not among them, and it is not an explicit
+        # broadcast (``MENTION_EVERYONE`` absent, decision D3). An open-floor
+        # message (empty ``mentions``) or a broadcast admits every participant
+        # — forwarded straight to the turn, since Tier B (the salience bid
+        # that decides who actually has something to add) is a v0.3.8 concern.
+        # The decision keeps ``policy=always``: a gated-counter fire with
+        # ``policy=always`` is, by construction, exactly a directed-elsewhere
+        # suppression (a self-sender ``always`` is labelled
+        # ``defense_in_depth``), so the RFC 0011 §D ``{channel_id, policy}``
+        # label set surfaces it without a new ``reason`` dimension.
+        mentions = payload.get("mentions") or []
+        if (
+            isinstance(mentions, list)
+            and mentions
+            and MENTION_EVERYONE not in mentions
+            and agent_id not in mentions
+        ):
+            return GateDecision(
+                respond=False,
+                policy=POLICY_ALWAYS,
+                reason="directed_elsewhere",
+            )
         return GateDecision(respond=True, policy=POLICY_ALWAYS, reason="policy_always")
 
     if policy == POLICY_WHEN_MENTIONED:

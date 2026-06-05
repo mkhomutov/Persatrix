@@ -69,6 +69,16 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 	// open — the rejection has no rollback cost and the caller (`Router`)
 	// surfaces it as 422 at the REST boundary.
 	for i, mention := range msg.Mentions {
+		// RFC 0030 relevance amendment Tier A (v0.3.7): the broadcast
+		// sentinel addresses the room rather than a participant, so it is
+		// exempt from the participant-id check (which forbids its `@`). The
+		// response gate / candidate set read it as "disable the directed-
+		// elsewhere filter"; persisting it keeps that signal on the row for
+		// history-driven re-fanout. It is the only non-participant value the
+		// mentions list admits — everything else still validates.
+		if mention == MentionEveryone {
+			continue
+		}
 		if err := validateParticipantID(mention); err != nil {
 			return fmt.Errorf("mentions[%d]: %w", i, err)
 		}
