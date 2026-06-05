@@ -21,13 +21,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import quote
 
 import aiohttp
 
 from ..channel_history_fetcher import DEFAULT_REQUEST_TIMEOUT_SECONDS
-from ..memory.working import ContextSection, estimate_tokens
+from ..memory.working import ContextSection, WorkingMemory, estimate_tokens
+
+if TYPE_CHECKING:
+    from ..persona_types import AgentEvent
 
 logger = logging.getLogger(__name__)
 
@@ -177,3 +180,56 @@ class HttpChannelRosterFetcher:
         if not isinstance(agents, list):
             return None
         return channel_meta, agents
+
+
+class ChannelRosterFetcher(Protocol):
+    """Seam the injection path depends on (the slice-B wiring sets an
+    :class:`HttpChannelRosterFetcher`; tests inject a fake)."""
+
+    async def fetch(
+        self, channel_id: str,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]] | None: ...
+
+
+async def inject_channel_roster(
+    working_memory: WorkingMemory,
+    fetcher: ChannelRosterFetcher | None,
+    event: AgentEvent,
+    agent_id: str,
+) -> None:
+    """Inject the channel roster for a **group**-channel event (F-4).
+
+    Clears any stale roster section first (so a roster from a prior group
+    event does not linger on a later DM turn), then — only for a
+    ``group:`` channel with a wired fetcher — fetches membership + the
+    agent directory, builds the roster, and adds the rendered section.
+
+    Group-only: a DM has two known participants and needs no roster.
+    Non-fatal throughout: a missing fetcher, a fetch failure, or an empty
+    roster simply leaves no roster section (the persona is no worse off
+    than before F-4). Not charged against ``MemoryBudget`` — the roster is
+    structural room context, not recalled memory; it rides
+    ``WorkingMemory``'s own priority-weighted retention (priority 9,
+    non-compressible) instead.
+    """
+    working_memory.remove_section(ROSTER_SECTION_NAME)
+    channel_id = getattr(event, "channel_id", None)
+    if not isinstance(channel_id, str) or not channel_id.startswith("group:"):
+        return
+    if fetcher is None:
+        return
+    try:
+        result = await fetcher.fetch(channel_id)
+    except Exception:
+        logger.warning(
+            "channels: roster injection failed for %s; skipping",
+            channel_id, exc_info=True,
+        )
+        return
+    if result is None:
+        return
+    channel_meta, agents = result
+    members = build_roster(channel_meta, agents, self_agent_id=agent_id)
+    section = render_roster_section(channel_meta, members)
+    if section is not None:
+        working_memory.add_section(section)

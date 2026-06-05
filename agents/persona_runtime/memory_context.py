@@ -18,13 +18,14 @@ from ..memory.episodic import (
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import ContextSection, WorkingMemory, estimate_tokens
 from ..observability.metrics import current_agent_id, try_get_instruments
-from ..temporal.rendering import format_duration, format_relative
 from .channel_history import (
     CHANNEL_HISTORY_SECTION_NAME,
     recall_channel_episodes,
     render_channel_history_section,
 )
+from .channel_roster import inject_channel_roster
 from .contact_section import recall_notes_for_event
+from .episodic_section import render_episodic_section
 from .facts_section import (
     DEFAULT_FACTS_BUDGET_TOKENS,
     FACTS_SECTION_NAME,
@@ -32,10 +33,8 @@ from .facts_section import (
     render_facts_section,
 )
 from .memory_budget import (
-    MAX_EPISODE_SUMMARY_CHARS,
     MAX_NOTE_CONTENT_CHARS,
     MEMORY_BUDGET_TOKENS,
-    MIN_TOKENS_EPISODIC,
     MIN_TOKENS_NOTES,
     MemoryBudget,
     _truncate_to_token_limit,
@@ -56,6 +55,7 @@ if TYPE_CHECKING:
     from ..clock import Clock
     from ..memory.facts import FactStore
     from ..persona_types import AgentEvent
+    from .channel_roster import ChannelRosterFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -190,10 +190,19 @@ class _MemoryContextMixin:
     _fact_store: FactStore | None = None
     _facts_enabled: bool = True
     _facts_budget_tokens: int = DEFAULT_FACTS_BUDGET_TOKENS
+    # F-4: channel-roster fetcher, wired in ``server_persona`` like the
+    # history fetcher. ``None`` (default) → no roster section, so the
+    # legacy mixin harnesses and DM-only paths are unaffected.
+    _roster_fetcher: ChannelRosterFetcher | None = None
 
     # Stub declaration for method provided by concrete class (via composition).
     if TYPE_CHECKING:
         def _format_event(self, event: AgentEvent) -> str: ...
+
+    def set_roster_fetcher(self, fetcher: ChannelRosterFetcher) -> None:
+        """Inject the F-4 channel-roster fetcher (wired in ``server_persona``
+        once the shared aiohttp session is open, like the history fetcher)."""
+        self._roster_fetcher = fetcher
 
     async def _inject_memory_context(
         self, event: AgentEvent, *, query: str | None = None,
@@ -395,67 +404,17 @@ class _MemoryContextMixin:
                             self.agent_id, exc_info=True,
                         )
 
-        # Episodic tier (priority 7).
-        if episodes:
-            ep_items: list[str] = []
-            for ep in episodes:
-                summary = _truncate_with_ellipsis(
-                    ep.summary, MAX_EPISODE_SUMMARY_CHARS,
-                )
-                # RFC 0021 §D: recency (+ duration on multi-turn rows) prefix.
-                anchor_ts = ep.closed_at if ep.closed_at is not None else ep.created_at
-                tag = format_relative(anchor_ts, now, self._timezone)
-                if (
-                    ep.turn_count is not None and ep.turn_count > 1
-                    and ep.started_at is not None and ep.closed_at is not None
-                ):
-                    dur = format_duration(max(0.0, ep.closed_at - ep.started_at))
-                    prefix = f"[{tag}, {dur}]"
-                else:
-                    prefix = f"[{tag}]"
-                remaining_before = budget.remaining
-                admitted = budget.try_add(
-                    f"- {prefix} {summary}", min_tokens=MIN_TOKENS_EPISODIC,
-                )
-                if admitted is not None:
-                    ep_items.append(admitted)
-                    # RFC 0026 PR 4 / MQ-11 — uniform per-tier provenance.
-                    budget.record_admission(
-                        tier="episodic", item_id=ep.id,
-                        tokens_admitted=remaining_before - budget.remaining,
-                    )
-                    # PR #260 review M-1: count one per admitted item
-                    # rather than ``len(episodes)`` after the loop.  The
-                    # recall set may include items the budget drops; the
-                    # counter description ("Recency tags rendered onto
-                    # recalled episodes…") implies actual renders, not
-                    # attempts.  Operators correlating this metric
-                    # against admitted token totals would otherwise see
-                    # a phantom delta whenever the budget tightens.
-                    if _inst is not None:
-                        _inst.temporal_recency_rendered.add(
-                            1,
-                            attributes={"agent.id": _agent_attr, "source": "episode"},
-                        )
-            if ep_items:
-                # NB: the ``"Relevant past episodes:\n"`` header is added
-                # AFTER the per-item budget loop and is not itself charged
-                # against the budget (~5 tokens of header overhead per
-                # non-empty tier).  ``memory_admitted_tokens`` therefore
-                # underreports actual injected tokens by a small constant.
-                # Acceptable for PR 5's empty-context check (the error
-                # direction is safe: zero stays zero); to be revisited if
-                # the budget needs to become a hard upper bound.
-                # (PR #146 review.)
-                text = "Relevant past episodes:\n" + "\n".join(ep_items)
-                self._working_memory.add_section(ContextSection(
-                    name="episodic_recall",
-                    content=text,
-                    priority=7,
-                    # See relationship tier for the accurate=True rationale.
-                    token_count=estimate_tokens(text, accurate=True),
-                    compressible=True,
-                ))
+        # Episodic tier (priority 7).  Extracted to
+        # ``episodic_section.render_episodic_section`` (F-4 slice B) so the
+        # episodic tier matches the other recall tiers' ``render_*`` shape;
+        # behaviour (recency tags, budget admission, MQ-11 provenance,
+        # ``source="episode"`` metric) is preserved there.
+        ep_section = render_episodic_section(
+            episodes, budget,
+            now=now, timezone=self._timezone, truncate=_truncate_with_ellipsis,
+        )
+        if ep_section is not None:
+            self._working_memory.add_section(ep_section)
 
         # Notes tier (priority 6).
         if notes:
@@ -487,6 +446,16 @@ class _MemoryContextMixin:
                     token_count=estimate_tokens(text, accurate=True),
                     compressible=True,
                 ))
+
+        # Channel-roster tier (F-4, priority 9 — highest). Group channels
+        # only; structural room context injected outside the recall budget
+        # (see ``inject_channel_roster``), so it does not affect
+        # ``memory_admitted_tokens`` below — group CHANNEL_MESSAGE events are
+        # never the TICK that the empty-context short-circuit guards. The
+        # helper clears its own stale section (incl. on a later DM turn).
+        await inject_channel_roster(
+            self._working_memory, self._roster_fetcher, event, self.agent_id,
+        )
 
         memory_admitted_tokens = MEMORY_BUDGET_TOKENS - budget.remaining
         # Consumed by ``_ActionLoopMixin._on_event_inner`` for the RFC 0017
