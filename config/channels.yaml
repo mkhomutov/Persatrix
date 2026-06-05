@@ -33,11 +33,14 @@ max_channels: 50
 # backstop (default 5) caps any single chain of reactive replies, so the two
 # `participant` members cannot loop indefinitely. With floor control on (the
 # default), the two `participant` members reply in a deterministic,
-# mutually-aware round rather than shouting over each other; cost expectation is
-# unchanged — a single human prompt typically triggers 4–8 LLM calls across the
-# two `participant` members before the cascade-depth backstop or natural
-# conversation end stops it. (The legacy `when_mentioned` / `always` values
-# still load and map to `addressed` / `participant` if you prefer them.)
+# mutually-aware round rather than shouting over each other; the call *count*
+# is unchanged — a single human prompt typically triggers 4–8 LLM calls across
+# the two `participant` members before the cascade-depth backstop or natural
+# conversation end stops it. (Per-call prompt size for these three personas did
+# grow with the v0.3.7 F-2b conversation-window bump to 40/4096 in
+# config/agents.yaml — interim group-channel sizing, not RFC 0034 Phase 3.)
+# (The legacy `when_mentioned` / `always` values still load and map to
+# `addressed` / `participant` if you prefer them.)
 channels:
   - name: planning
     description: "v0.3.0 demo channel — engineering + product planning discussion"

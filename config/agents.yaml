@@ -211,14 +211,21 @@ agents:
     # RFC 0034 Phase 1: per-agent override for the conversation-window
     # transcript reconstruction.  The persona runtime rebuilds the LLM
     # `messages` array from the channel store each turn so the model
-    # sees the in-progress conversation as a transcript.  Defaults match
-    # the top-level `conversation_window` block in
-    # config/optimization.yaml; removing this block changes nothing.
-    # Wired into the runtime by RFC 0034 Phase 1 PR 3.
+    # sees the in-progress conversation as a transcript.
+    #
+    # v0.3.7 F-2b (interim group-channel sizing): bumped to 40 turns /
+    # 4096 tokens. A 3-persona room stores ~4 rows per user message, so
+    # the 20/2048 default held only ~5 rounds and the conversation
+    # opening scrolled off (docs/v0.3.7-test-findings-pr-plan.md PR 3).
+    # This is an interim per-agent bump for the three group-demo personas,
+    # NOT the RFC 0034 Phase 3 tuning (participant-count-aware sizing +
+    # cache LRU + calibration). The global default in
+    # config/optimization.yaml stays 20/2048, so the DM/chat surface and
+    # DM-only personas are unchanged.
     conversation_window:
       enabled: true
-      max_turns: 20
-      max_tokens: 2048
+      max_turns: 40
+      max_tokens: 4096
     relationships:
       - agent_id: "iron-fox"
         type: "reports_to_me"
@@ -286,6 +293,12 @@ agents:
         max_notes: 500
         auto_reflect_after: 5
         inject_recent_notes: 3
+    # v0.3.7 F-2b (interim group-channel sizing) — see ember-owl's block
+    # and docs/v0.3.7-test-findings-pr-plan.md PR 3. NOT RFC 0034 Phase 3.
+    conversation_window:
+      enabled: true
+      max_turns: 40
+      max_tokens: 4096
     relationships:
       - agent_id: "ember-owl"
         type: "reports_to"
@@ -350,6 +363,12 @@ agents:
         max_notes: 500
         auto_reflect_after: 5
         inject_recent_notes: 3
+    # v0.3.7 F-2b (interim group-channel sizing) — see ember-owl's block
+    # and docs/v0.3.7-test-findings-pr-plan.md PR 3. NOT RFC 0034 Phase 3.
+    conversation_window:
+      enabled: true
+      max_turns: 40
+      max_tokens: 4096
     relationships:
       - agent_id: "ember-owl"
         type: "peer"
