@@ -271,6 +271,21 @@ class _PromptAssemblyMixin:
                 1, attributes={"agent.id": current_agent_id()},
             )
 
+        # Conversation-window self-awareness (v0.3.7 test-findings F-2).
+        # RFC 0034 reconstructs the in-progress conversation as a rolling
+        # transcript in the ``messages`` array, but the persona was never
+        # told that view exists — so it denied being able to read past
+        # messages and hedged on how many it could see, falling back on
+        # the generic "I don't retain conversations" disclaimer. This
+        # unconditional, perceptual nudge sits alongside the now-anchor
+        # (both ground the persona in its current situation: the time it
+        # is, and the recent conversation it can see) and tells it to
+        # describe the window honestly rather than deny memory or invent a
+        # message count. The window itself stays in the ``messages`` array
+        # (RFC 0034 §B), never the system prompt — this snippet only
+        # describes it.
+        rendered.append(load_snippet("conversation-window-awareness"))
+
         # Safety snippets live under ``prompts/runtime/safety/`` and load
         # through ``load_snippet`` rather than the persona section loader.
         # User-message delimiter contract is unconditional so the LLM
