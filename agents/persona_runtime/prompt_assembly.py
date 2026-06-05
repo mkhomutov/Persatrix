@@ -297,6 +297,17 @@ class _PromptAssemblyMixin:
         rendered.append(load_snippet("reply-discretion"))
         rendered.append(load_snippet("conversational-pacing"))
 
+        # Peer-voice nudge (v0.3.7, RFC 0030 relevance amendment §"What is
+        # prompt, what is architecture"). The Tier A gate decides *whether*
+        # a persona may speak on a group channel; this snippet shapes *how*
+        # — frame the persona as a colleague among peers, not an assistant
+        # serving a user (address people by name, build on the round's
+        # transcript, disagree/defer like a colleague). Unconditional like
+        # ``reply-discretion``: the assembler has no per-turn channel
+        # context, so the prose carries the DM carve-out inline rather than
+        # a code gate.
+        rendered.append(load_snippet("peer-conversation-voice"))
+
         # Memory-tool usage nudge — without this the LLM often responds
         # conversationally ("Got it, I'll remember that") instead of
         # actually calling the store_note / recall_notes tools.

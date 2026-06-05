@@ -11,6 +11,7 @@ Short prompt fragments loaded by the agent runtime via
 | `external-data-handling.md`   | [`agents/persona_runtime/prompt_assembly.py`](../../../agents/persona_runtime/prompt_assembly.py) | Persona system prompt — `<external_data>` envelope contract (RFC 0009). |
 | `reply-discretion.md`         | [`agents/persona_runtime/prompt_assembly.py`](../../../agents/persona_runtime/prompt_assembly.py) | Persona system prompt — silence is a valid outcome on group channels; DMs always reply. |
 | `conversational-pacing.md`    | [`agents/persona_runtime/prompt_assembly.py`](../../../agents/persona_runtime/prompt_assembly.py) | Persona system prompt — match the length and register of the inbound message. |
+| `peer-conversation-voice.md`  | [`agents/persona_runtime/prompt_assembly.py`](../../../agents/persona_runtime/prompt_assembly.py) | Persona system prompt — frame the persona as a colleague among peers in group channels, not an assistant serving a user (RFC 0030 relevance amendment, v0.3.7). |
 | `memory-tool-usage.md`        | [`agents/persona_runtime/prompt_assembly.py`](../../../agents/persona_runtime/prompt_assembly.py) | Persona system prompt — nudges the LLM to actually call memory tools.  |
 | `reflection-nudge.md`         | [`agents/tools/builtin.py`](../../../agents/tools/builtin.py)    | Periodic auto-reflection trigger appended to the next agent turn.      |
 | `episode-summarizer.md`       | [`agents/memory/episodic_retention.py`](../../../agents/memory/episodic_retention.py) | System prompt for the episodic-summary compression LLM call.           |
