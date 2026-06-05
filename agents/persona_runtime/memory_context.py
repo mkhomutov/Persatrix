@@ -17,7 +17,6 @@ from ..memory.episodic import (
 )
 from ..memory.relationship import RelationshipMemory
 from ..memory.working import ContextSection, WorkingMemory, estimate_tokens
-from ..observability.metrics import current_agent_id, try_get_instruments
 from .channel_history import (
     CHANNEL_HISTORY_SECTION_NAME,
     recall_channel_episodes,
@@ -354,8 +353,6 @@ class _MemoryContextMixin:
         budget = MemoryBudget(total_tokens=MEMORY_BUDGET_TOKENS)
         # RFC 0021 PR 2: snapshot the temporal seam once per event.
         now = self._clock.now()
-        _inst = try_get_instruments()
-        _agent_attr = current_agent_id()
 
         # Relationship tier (priority 8).  Admission, label formatting,
         # default-trust filtering, and the temporal-recency metric live

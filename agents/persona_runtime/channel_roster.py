@@ -27,9 +27,10 @@ from urllib.parse import quote
 import aiohttp
 
 from ..channel_history_fetcher import DEFAULT_REQUEST_TIMEOUT_SECONDS
-from ..memory.working import ContextSection, WorkingMemory, estimate_tokens
+from ..memory.working import ContextSection, estimate_tokens
 
 if TYPE_CHECKING:
+    from ..memory.working import WorkingMemory
     from ..persona_types import AgentEvent
 
 logger = logging.getLogger(__name__)
