@@ -23,6 +23,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import aiohttp
 from aiohttp import web
 
 from agents.persona_runtime.channel_roster import (
@@ -104,6 +105,17 @@ class TestRenderRosterSection:
         iron_line = next(ln for ln in body.splitlines() if "Iron Fox" in ln)
         assert "(you)" in iron_line
 
+    def test_section_is_non_compressible(self) -> None:
+        # The roster is a structured membership list, not recalled prose:
+        # summarizing it under budget pressure could drop members or mangle
+        # roles, reintroducing the very F-4 confabulation it exists to
+        # prevent. Pin it non-compressible so the summarizer never touches it
+        # (the lower conversation/history tiers absorb budget pressure first).
+        roster = build_roster(_CHANNEL, _AGENTS, self_agent_id="iron-fox")
+        section = render_roster_section(_CHANNEL, roster)
+        assert section is not None
+        assert section.compressible is False
+
     def test_member_without_role_omits_the_dash(self) -> None:
         roster = [RosterMember(id="ghost", name="ghost", role="", is_self=False)]
         section = render_roster_section(_CHANNEL, roster)
@@ -149,7 +161,6 @@ async def _serve(*, channel_status: int = 200,
 
 class TestHttpChannelRosterFetcher:
     async def test_fetch_returns_channel_meta_and_agents(self) -> None:
-        import aiohttp
         async with _serve() as base, aiohttp.ClientSession() as session:
             fetcher = HttpChannelRosterFetcher(
                 session=session, orchestrator_url=base,
@@ -163,7 +174,6 @@ class TestHttpChannelRosterFetcher:
         }
 
     async def test_channel_error_returns_none(self) -> None:
-        import aiohttp
         async with _serve(channel_status=404) as base, \
                 aiohttp.ClientSession() as session:
             fetcher = HttpChannelRosterFetcher(
@@ -172,7 +182,6 @@ class TestHttpChannelRosterFetcher:
             assert await fetcher.fetch("group:planning") is None
 
     async def test_agents_error_returns_none(self) -> None:
-        import aiohttp
         async with _serve(agents_status=500) as base, \
                 aiohttp.ClientSession() as session:
             fetcher = HttpChannelRosterFetcher(

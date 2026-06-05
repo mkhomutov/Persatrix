@@ -116,6 +116,12 @@ def render_roster_section(
         content=content,
         priority=ROSTER_SECTION_PRIORITY,
         token_count=estimate_tokens(content, accurate=True),
+        # Non-compressible: the roster is a structured membership list, not
+        # recalled prose. Summarizing it under budget pressure could drop
+        # members or mangle roles — reintroducing the F-4 confabulation this
+        # tier exists to prevent. The lower conversation/history tiers absorb
+        # budget pressure first.
+        compressible=False,
     )
 
 
