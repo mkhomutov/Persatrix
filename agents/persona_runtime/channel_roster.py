@@ -212,6 +212,14 @@ async def inject_channel_roster(
     structural room context, not recalled memory; it rides
     ``WorkingMemory``'s own priority-weighted retention (priority 9,
     non-compressible) instead.
+
+    Unlike the recall tiers (``render_episodic_section`` /
+    ``render_facts_section`` / …), which are pure ``render_*`` helpers the
+    mixin adds via ``add_section``, this is a full inject helper: it owns
+    the stale-section clear, the group gate, and the async fetch. That
+    keeps those three concerns out of ``_inject_memory_context`` (whose
+    module sits at the 500-line cap), at the cost of breaking the
+    ``render_*`` symmetry — a deliberate trade, not an oversight.
     """
     working_memory.remove_section(ROSTER_SECTION_NAME)
     channel_id = getattr(event, "channel_id", None)
