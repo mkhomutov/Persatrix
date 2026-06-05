@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import aiohttp
 from aiohttp import web
@@ -132,18 +133,25 @@ class TestRenderRosterSection:
 # ─── HttpChannelRosterFetcher (loopback server) ───────────────
 
 
+_SENTINEL = object()
+
+
 @asynccontextmanager
 async def _serve(*, channel_status: int = 200,
-                 agents_status: int = 200) -> AsyncIterator[str]:
+                 agents_status: int = 200,
+                 channel_body: Any = _SENTINEL,
+                 agents_body: Any = _SENTINEL) -> AsyncIterator[str]:
     async def get_channel(request: web.Request) -> web.Response:
         if channel_status != 200:
             return web.json_response({"error": "x"}, status=channel_status)
-        return web.json_response(_CHANNEL)
+        body = _CHANNEL if channel_body is _SENTINEL else channel_body
+        return web.json_response(body)
 
     async def list_agents(request: web.Request) -> web.Response:
         if agents_status != 200:
             return web.json_response({"error": "x"}, status=agents_status)
-        return web.json_response(_AGENTS)
+        body = _AGENTS if agents_body is _SENTINEL else agents_body
+        return web.json_response(body)
 
     app = web.Application()
     app.router.add_get("/api/v1/channels/{id}", get_channel)
@@ -183,6 +191,39 @@ class TestHttpChannelRosterFetcher:
 
     async def test_agents_error_returns_none(self) -> None:
         async with _serve(agents_status=500) as base, \
+                aiohttp.ClientSession() as session:
+            fetcher = HttpChannelRosterFetcher(
+                session=session, orchestrator_url=base,
+            )
+            assert await fetcher.fetch("group:planning") is None
+
+    async def test_transport_failure_returns_none(self) -> None:
+        # No server listening: the GET raises (connection refused) and the
+        # fetcher swallows it across the seam rather than propagating. Bind a
+        # server only to reserve a free port, then tear it down so the address
+        # is dead but deterministic (no flaky guessed port).
+        async with _serve() as base:
+            dead_base = base
+        async with aiohttp.ClientSession() as session:
+            fetcher = HttpChannelRosterFetcher(
+                session=session, orchestrator_url=dead_base,
+            )
+            assert await fetcher.fetch("group:planning") is None
+
+    async def test_non_dict_channel_body_returns_none(self) -> None:
+        # 200 OK but the channel payload is the wrong shape (a list, not the
+        # expected object): the isinstance(channel_meta, dict) guard rejects it.
+        async with _serve(channel_body=["not", "a", "dict"]) as base, \
+                aiohttp.ClientSession() as session:
+            fetcher = HttpChannelRosterFetcher(
+                session=session, orchestrator_url=base,
+            )
+            assert await fetcher.fetch("group:planning") is None
+
+    async def test_non_list_agents_body_returns_none(self) -> None:
+        # 200 OK but the agents payload is the wrong shape (an object, not the
+        # expected directory list): the isinstance(agents, list) guard rejects.
+        async with _serve(agents_body={"not": "a list"}) as base, \
                 aiohttp.ClientSession() as session:
             fetcher = HttpChannelRosterFetcher(
                 session=session, orchestrator_url=base,

@@ -32,11 +32,11 @@ from ..memory.working import ContextSection, estimate_tokens
 logger = logging.getLogger(__name__)
 
 #: Working-memory section name (slice B clears + re-adds it per event).
-ROSTER_SECTION_NAME = "channel_roster"
+ROSTER_SECTION_NAME: str = "channel_roster"
 #: Priority above the relationship tier (8): "who is in this room" is
 #: foundational context the other tiers build on. Pinned here so slice B's
 #: allocate-loop placement and this constant cannot drift apart.
-ROSTER_SECTION_PRIORITY = 9
+ROSTER_SECTION_PRIORITY: int = 9
 
 
 @dataclass(frozen=True)
