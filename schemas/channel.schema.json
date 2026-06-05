@@ -58,7 +58,7 @@
       "oneOf": [
         {
           "type": "string",
-          "description": "Shorthand: equivalent to {id: <string>, respond: when_mentioned}.",
+          "description": "Shorthand: equivalent to {id: <string>, respond: addressed}.",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
         },
         {
@@ -72,8 +72,15 @@
             },
             "respond": {
               "type": "string",
-              "enum": ["when_mentioned", "always", "never"],
-              "default": "when_mentioned"
+              "enum": ["participant", "addressed", "observer", "when_mentioned", "always", "never"],
+              "default": "addressed",
+              "description": "Member disposition (RFC 0030 relevance amendment, v0.3.7). Recommended vocabulary: `participant` (joins the open floor — speaks on un-addressed messages), `addressed` (speaks only when @-mentioned or replied to), `observer` (never speaks). The legacy values `always`/`when_mentioned`/`never` keep working and map to `participant`/`addressed`/`observer` respectively; the Go loader normalizes the disposition vocabulary back to the legacy three at load time, so the wire `respond_policy` and every downstream reader are unchanged."
+            },
+            "threshold": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "description": "RESERVED / no-op until v0.3.8 Tier B. Per-disposition salience threshold for the cheap relevance bid. The field is accepted by the schema in v0.3.7 so v0.3.8 is purely additive, but nothing reads it yet — setting it has no effect. Bounded to the `[0, 1]` salience range now (salience is clipped to `[0.0, 1.0]` per RFC 0024; mirrors `autonomy.salience_threshold` in agent.schema.json) so the bound is not a breaking tightening when Tier B starts reading it."
             }
           }
         }

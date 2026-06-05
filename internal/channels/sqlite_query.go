@@ -180,8 +180,15 @@ func (s *sqliteStore) RemoveMember(ctx context.Context, channelID, participantID
 // shape as [RemoveMember] so a concurrent `DeleteChannel` cannot race the
 // existence check between zero-rows-affected and the channel lookup.
 func (s *sqliteStore) SetMemberPolicy(ctx context.Context, channelID, participantID string, policy RespondPolicy) error {
-	if !policy.Valid() {
-		return fmt.Errorf("%w: %q", ErrInvalidRespondPolicy, policy)
+	// Normalize the RFC 0030 disposition vocabulary to the legacy triple
+	// before validating/persisting: the store is the second back-compat
+	// boundary (mirroring the config loader) so the REST write path and
+	// the membership-table CHECK constraint see only legacy values. An
+	// unknown value is returned unchanged by Normalize and rejected here
+	// (see [canonicalRespondPolicy]).
+	policy, err := canonicalRespondPolicy(policy)
+	if err != nil {
+		return err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -226,11 +233,15 @@ func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID st
 	if err := validateParticipantID(participantID); err != nil {
 		return err
 	}
-	if !policy.Valid() {
-		return fmt.Errorf("%w: %q", ErrInvalidRespondPolicy, policy)
+	// Normalize the disposition vocabulary to the legacy triple before
+	// validating/persisting (see [canonicalRespondPolicy]). Keeps the REST
+	// write path and the membership CHECK constraint on the legacy values.
+	policy, err := canonicalRespondPolicy(policy)
+	if err != nil {
+		return err
 	}
 	// Idempotent re-add: keep the existing joined_at and respond_policy.
-	_, err := s.db.ExecContext(ctx,
+	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at)
 		 VALUES (?, ?, ?, ?)
 		 ON CONFLICT(channel_id, participant_id) DO NOTHING`,

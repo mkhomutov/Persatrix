@@ -40,21 +40,96 @@ func (ct ChannelType) Valid() bool {
 }
 
 // RespondPolicy is the per-membership response-gate policy (RFC 0011 §D).
+//
+// The canonical internal/wire representation is the legacy triple
+// (`when_mentioned`/`always`/`never`). RFC 0030's relevance amendment
+// (v0.3.7) reframes the same three intents as a **disposition**
+// vocabulary (`participant`/`addressed`/`observer`); the disposition
+// values are accepted at config load and collapsed back to the legacy
+// triple by [RespondPolicy.Normalize] so the fanout candidate set, floor
+// control, and the Python response gate keep reading the canonical three
+// values unchanged. The vocabulary addition is therefore behaviourally
+// inert — see docs/rfcs/0030-amendment-relevance-gated-response-pr-plan.md.
 type RespondPolicy string
 
 const (
 	RespondWhenMentioned RespondPolicy = "when_mentioned"
 	RespondAlways        RespondPolicy = "always"
 	RespondNever         RespondPolicy = "never"
+
+	// Disposition vocabulary (RFC 0030 relevance amendment, v0.3.7).
+	// Accepted at config load and normalized to the legacy triple above;
+	// never the canonical internal value.
+	RespondParticipant RespondPolicy = "participant"
+	RespondAddressed   RespondPolicy = "addressed"
+	RespondObserver    RespondPolicy = "observer"
 )
 
-// Valid reports whether p is one of the canonical respond policies.
+// Normalize collapses the disposition vocabulary to the canonical legacy
+// triple (`participant→always`, `addressed→when_mentioned`,
+// `observer→never`). A legacy value is returned unchanged; an unknown
+// value is returned as-is so the caller surfaces it via
+// [RespondPolicy.Valid].
+//
+// The Python response gate keeps a mirror of this mapping
+// (`_DISPOSITION_ALIASES` in agents/response_gate.py) as defence-in-depth
+// for a disposition value that reaches the gate un-normalized; the two
+// encode the same disposition→legacy mapping in different languages and
+// must be kept in lockstep.
+//
+// Normalize is applied at every external write boundary so the membership
+// store, the wire value, and every downstream reader (fanout candidate
+// set, floor control, the Python response gate) see only the legacy
+// triple: the config loader normalizes in [MemberConfig.UnmarshalYAML],
+// and the REST/store write path normalizes in the [ChannelStore] write
+// methods (AddMember/SetMemberPolicy/CreateChannelWithMembers) before the
+// membership-table CHECK constraint, which only accepts the legacy three.
+func (p RespondPolicy) Normalize() RespondPolicy {
+	switch p {
+	case RespondParticipant:
+		return RespondAlways
+	case RespondAddressed:
+		return RespondWhenMentioned
+	case RespondObserver:
+		return RespondNever
+	}
+	return p
+}
+
+// Valid reports whether p is one of the canonical respond policies or an
+// accepted disposition alias. Callers that need the canonical value
+// should call [RespondPolicy.Normalize] first (the loader does this at
+// config-load time), but Valid accepts both vocabularies so a value that
+// passes the JSON schema's widened enum also passes the loader.
 func (p RespondPolicy) Valid() bool {
 	switch p {
-	case RespondWhenMentioned, RespondAlways, RespondNever:
+	case RespondWhenMentioned, RespondAlways, RespondNever,
+		RespondParticipant, RespondAddressed, RespondObserver:
 		return true
 	}
 	return false
+}
+
+// canonicalRespondPolicy is the single normalize-then-validate choke point
+// every store write path uses before persisting a membership row. It
+// collapses the disposition vocabulary to the legacy triple
+// ([RespondPolicy.Normalize]) and rejects an unknown value with
+// [ErrInvalidRespondPolicy].
+//
+// Centralizing the pair keeps the store's back-compat guarantee — that a
+// disposition value never reaches the membership-table CHECK constraint,
+// which only permits the legacy three — from depending on each write path
+// remembering to call Normalize before Valid. Because [RespondPolicy.Valid]
+// deliberately accepts both vocabularies (so a schema-valid value also
+// passes the loader), a forgotten Normalize would slip past Valid and then
+// surface as an opaque CHECK-constraint failure (HTTP 500) instead of
+// working. A new write path now has one obvious helper to reach for.
+func canonicalRespondPolicy(p RespondPolicy) (RespondPolicy, error) {
+	p = p.Normalize()
+	if !p.Valid() {
+		return "", fmt.Errorf("%w: %q", ErrInvalidRespondPolicy, p)
+	}
+	return p, nil
 }
 
 // Channel is a row in the `channels` table (RFC 0011 §B).

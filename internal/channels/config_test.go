@@ -130,6 +130,62 @@ channels:
 	assert.ErrorIs(t, err, ErrInvalidRespondPolicy)
 }
 
+// TestLoadConfig_NormalizesDispositionVocabulary pins the RFC 0030
+// relevance-amendment PR 1 contract (D1/D4): the disposition vocabulary
+// (`participant`/`addressed`/`observer`) loads and normalizes to the
+// legacy `respond_policy` the whole downstream stack already reads
+// (`always`/`when_mentioned`/`never`). Normalization happens at the
+// config-load boundary so the wire value, the fanout candidate set,
+// floor control, and the Python gate all keep seeing the canonical
+// three values — making the vocabulary addition behaviourally inert.
+func TestLoadConfig_NormalizesDispositionVocabulary(t *testing.T) {
+	body := `
+channels:
+  - name: planning
+    members:
+      - id: participant-member
+        respond: participant
+      - id: addressed-member
+        respond: addressed
+      - id: observer-member
+        respond: observer
+`
+	cfg, err := LoadConfig(writeYAML(t, body))
+	require.NoError(t, err)
+	require.Len(t, cfg.Channels, 1)
+	require.Len(t, cfg.Channels[0].Members, 3)
+	assert.Equal(t, RespondAlways, cfg.Channels[0].Members[0].RespondPolicy,
+		"participant normalizes to the legacy `always`")
+	assert.Equal(t, RespondWhenMentioned, cfg.Channels[0].Members[1].RespondPolicy,
+		"addressed normalizes to the legacy `when_mentioned`")
+	assert.Equal(t, RespondNever, cfg.Channels[0].Members[2].RespondPolicy,
+		"observer normalizes to the legacy `never`")
+}
+
+// TestLoadConfig_LegacyVocabularyPassesThroughUnchanged pins back-compat
+// (D4): an existing config that still uses `always`/`when_mentioned`/
+// `never` loads with those exact canonical values — the disposition
+// addition must not perturb the legacy path.
+func TestLoadConfig_LegacyVocabularyPassesThroughUnchanged(t *testing.T) {
+	body := `
+channels:
+  - name: planning
+    members:
+      - id: a
+        respond: always
+      - id: b
+        respond: when_mentioned
+      - id: c
+        respond: never
+`
+	cfg, err := LoadConfig(writeYAML(t, body))
+	require.NoError(t, err)
+	require.Len(t, cfg.Channels[0].Members, 3)
+	assert.Equal(t, RespondAlways, cfg.Channels[0].Members[0].RespondPolicy)
+	assert.Equal(t, RespondWhenMentioned, cfg.Channels[0].Members[1].RespondPolicy)
+	assert.Equal(t, RespondNever, cfg.Channels[0].Members[2].RespondPolicy)
+}
+
 func TestChannelConfig_CanonicalID(t *testing.T) {
 	cc := ChannelConfig{Name: "planning"}
 	assert.Equal(t, "group:planning", cc.CanonicalID())

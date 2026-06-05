@@ -5,8 +5,14 @@
 #   - group channels declared here address as `group:<name>`
 #   - DMs open on demand under `dm:<a>:<b>` (participants lexicographically sorted)
 #   - threads anchor to a parent message under `thread:<message_id>`
-# Per-membership `respond` policies (`when_mentioned` | `always` | `never`)
-# control the response gate; see RFC 0011 §D.
+# Per-membership `respond` dispositions control the response gate (RFC 0030
+# relevance amendment, v0.3.7). The recommended vocabulary is:
+#   - participant — joins the open floor; speaks on un-addressed messages
+#   - addressed   — speaks only when @-mentioned (or replied to in-thread)
+#   - observer    — never speaks
+# The legacy values `always` / `when_mentioned` / `never` still load and map
+# to `participant` / `addressed` / `observer` respectively, so existing
+# configs keep working unchanged; see RFC 0011 §D and RFC 0030.
 
 max_channels: 50
 
@@ -21,15 +27,17 @@ max_channels: 50
 # See docs/guides/channels.md §7 "Floor control".
 
 # v0.3.0 demo channel — see docs/guides/v0.3.0-demo.md for the walkthrough.
-# Mixed-policy pattern from RFC 0011 §H: ember-owl is `when_mentioned` (advisor
-# mode — only chimes in when @-mentioned); iron-fox + nova-sparrow are `always`
-# (active collaborators that respond to every message). Cascade-depth backstop
-# (default 5) caps any single chain of reactive replies, so the two `always`
-# members cannot loop indefinitely. With floor control on (the default), the two
-# `always` members reply in a deterministic, mutually-aware round rather than
-# shouting over each other; cost expectation is unchanged — a single human
-# prompt typically triggers 4–8 LLM calls across the two `always` members before
-# the cascade-depth backstop or natural conversation end stops it.
+# Mixed-disposition pattern from RFC 0011 §H: ember-owl is `addressed` (advisor
+# mode — only chimes in when @-mentioned); iron-fox + nova-sparrow are
+# `participant` (active collaborators that join the open floor). Cascade-depth
+# backstop (default 5) caps any single chain of reactive replies, so the two
+# `participant` members cannot loop indefinitely. With floor control on (the
+# default), the two `participant` members reply in a deterministic,
+# mutually-aware round rather than shouting over each other; cost expectation is
+# unchanged — a single human prompt typically triggers 4–8 LLM calls across the
+# two `participant` members before the cascade-depth backstop or natural
+# conversation end stops it. (The legacy `when_mentioned` / `always` values
+# still load and map to `addressed` / `participant` if you prefer them.)
 channels:
   - name: planning
     description: "v0.3.0 demo channel — engineering + product planning discussion"
@@ -38,8 +46,8 @@ channels:
     floor_control: true
     members:
       - id: ember-owl
-        respond: when_mentioned
+        respond: addressed
       - id: iron-fox
-        respond: always
+        respond: participant
       - id: nova-sparrow
-        respond: always
+        respond: participant

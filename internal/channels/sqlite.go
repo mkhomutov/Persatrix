@@ -403,8 +403,14 @@ func (s *sqliteStore) CreateChannelWithMembers(ctx context.Context, ch Channel, 
 		if policy == "" {
 			policy = RespondWhenMentioned
 		}
-		if !policy.Valid() {
-			return fmt.Errorf("%w: %q", ErrInvalidRespondPolicy, policy)
+		// Normalize the disposition vocabulary to the legacy triple before
+		// validating/persisting (see [canonicalRespondPolicy]). This is the
+		// REST create path; the membership CHECK constraint only allows the
+		// legacy values, so an un-normalized disposition would otherwise 500
+		// instead of working.
+		policy, err := canonicalRespondPolicy(policy)
+		if err != nil {
+			return err
 		}
 		joinedAt := m.JoinedAt
 		if joinedAt.IsZero() {

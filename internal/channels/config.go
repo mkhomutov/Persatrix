@@ -102,7 +102,12 @@ func (m *MemberConfig) UnmarshalYAML(value *yaml.Node) error {
 		if raw.Respond == "" {
 			m.RespondPolicy = RespondWhenMentioned
 		} else {
-			m.RespondPolicy = RespondPolicy(raw.Respond)
+			// Normalize the disposition vocabulary (RFC 0030 relevance
+			// amendment) to the canonical legacy triple at the load
+			// boundary, so every downstream reader sees only the legacy
+			// values. An unknown value passes through unchanged and is
+			// rejected by Validate via RespondPolicy.Valid.
+			m.RespondPolicy = RespondPolicy(raw.Respond).Normalize()
 		}
 		return nil
 	default:
