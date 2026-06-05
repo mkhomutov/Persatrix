@@ -44,6 +44,13 @@ async def merge_sender_contact_notes(
     if not sender_id:
         return room_notes
     try:
+        # ``limit=3`` deliberately, *not* the API default of 10: this is an
+        # auto-injection read on every inbound event, and these notes are
+        # prepended ahead of the room-scoped notes' own budget. A person
+        # normally has a single ``contact:<id>`` topic, but ``store_note``
+        # can append several notes under it — 3 gives headroom for a
+        # multi-fact identity while keeping "who is this" from crowding out
+        # room context. Keep this small; do not raise it to the API default.
         contact_notes = await episodic.recall_contact_notes(sender_id, limit=3)
     except Exception:
         logger.warning(
