@@ -24,6 +24,7 @@ from .memory.scheduled_wakes import ScheduledWakesCache
 from .optimization import model_aliases
 from .persona import create_persona_agent
 from .persona_runtime import _LLMPersonaAgent
+from .persona_runtime.channel_roster import HttpChannelRosterFetcher
 from .prompt_loader import PromptLoadError, resolve_instructions
 from .server_persona_timers import init_persona_timers, summarize_autonomy_cadence
 from .task_agent import TaskAgent
@@ -459,22 +460,22 @@ def wire_history_fetchers(
     session: aiohttp.ClientSession,
     orchestrator_url: str,
 ) -> None:
-    """Inject the RFC 0034 conversation-window history fetcher into personas.
-
-    Called from :meth:`agents.server.AgentServer.start` once the shared
-    ``aiohttp`` session is open — the agents are constructed in
-    :func:`load_agent` before that session exists.  One
-    :class:`HttpChannelHistoryFetcher` — stateless beyond (session, base
-    URL, timeout) — is shared across every hosted persona and reuses the
-    same session the channel publisher and on-startup catch-up share.
-    Task agents have no conversation-window path and are skipped.
+    """Inject the per-event channel fetchers into personas once the shared
+    ``aiohttp`` session is open (agents are built in :func:`load_agent`
+    before it exists): the RFC 0034 conversation-window history fetcher and
+    the F-4 channel-roster fetcher. Both are stateless and shared across
+    personas; task agents are skipped.
     """
     fetcher = HttpChannelHistoryFetcher(
+        session=session, orchestrator_url=orchestrator_url,
+    )
+    roster_fetcher = HttpChannelRosterFetcher(
         session=session, orchestrator_url=orchestrator_url,
     )
     for agent in agents.values():
         if isinstance(agent, _LLMPersonaAgent):
             agent.set_history_fetcher(fetcher)
+            agent.set_roster_fetcher(roster_fetcher)
 
 
 def wire_wallet_client(

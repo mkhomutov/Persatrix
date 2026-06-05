@@ -20,19 +20,23 @@ needs).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
+from unittest.mock import MagicMock
 
 import aiohttp
 from aiohttp import web
 
+from agents.memory.working import WorkingMemory
 from agents.persona_runtime.channel_roster import (
     ROSTER_SECTION_NAME,
     ROSTER_SECTION_PRIORITY,
     HttpChannelRosterFetcher,
     RosterMember,
     build_roster,
+    inject_channel_roster,
     render_roster_section,
 )
 
@@ -229,3 +233,112 @@ class TestHttpChannelRosterFetcher:
                 session=session, orchestrator_url=base,
             )
             assert await fetcher.fetch("group:planning") is None
+
+
+# ─── inject_channel_roster (injection wiring) ─────────────────
+
+
+def _event(channel_id: str) -> MagicMock:
+    """A stand-in AgentEvent — the helper only reads ``channel_id``."""
+    event = MagicMock()
+    event.channel_id = channel_id
+    return event
+
+
+class _FakeFetcher:
+    def __init__(self, result: object) -> None:
+        self._result = result
+
+    async def fetch(self, channel_id: str):  # noqa: ANN201
+        return self._result
+
+
+class _RaisingFetcher:
+    """A fetcher whose ``fetch`` raises — exercises the non-fatal
+    ``except Exception`` branch (distinct from a clean ``None`` return)."""
+
+    async def fetch(self, channel_id: str):  # noqa: ANN201
+        raise RuntimeError("orchestrator unreachable")
+
+
+class TestInjectChannelRoster:
+    async def test_group_event_injects_roster(self) -> None:
+        wm = WorkingMemory(max_tokens=8192)
+        fetcher = _FakeFetcher((_CHANNEL, _AGENTS))
+        await inject_channel_roster(
+            wm, fetcher, _event("group:planning"), "iron-fox",
+        )
+        section = wm.get_section(ROSTER_SECTION_NAME)
+        assert section is not None
+        assert "Ember Owl" in section.content
+        # The viewing persona (iron-fox) is flagged.
+        iron_line = next(
+            ln for ln in section.content.splitlines() if "Iron Fox" in ln
+        )
+        assert "(you)" in iron_line
+
+    async def test_dm_event_injects_no_roster(self) -> None:
+        wm = WorkingMemory(max_tokens=8192)
+        fetcher = _FakeFetcher((_CHANNEL, _AGENTS))
+        await inject_channel_roster(
+            wm, fetcher, _event("dm:local:iron-fox"), "iron-fox",
+        )
+        assert wm.get_section(ROSTER_SECTION_NAME) is None
+
+    async def test_no_fetcher_injects_no_roster(self) -> None:
+        wm = WorkingMemory(max_tokens=8192)
+        await inject_channel_roster(
+            wm, None, _event("group:planning"), "iron-fox",
+        )
+        assert wm.get_section(ROSTER_SECTION_NAME) is None
+
+    async def test_fetch_failure_injects_no_roster(self) -> None:
+        wm = WorkingMemory(max_tokens=8192)
+        await inject_channel_roster(
+            wm, _FakeFetcher(None), _event("group:planning"), "iron-fox",
+        )
+        assert wm.get_section(ROSTER_SECTION_NAME) is None
+
+    async def test_stale_roster_cleared_on_a_later_dm_turn(self) -> None:
+        wm = WorkingMemory(max_tokens=8192)
+        fetcher = _FakeFetcher((_CHANNEL, _AGENTS))
+        await inject_channel_roster(
+            wm, fetcher, _event("group:planning"), "iron-fox",
+        )
+        assert wm.get_section(ROSTER_SECTION_NAME) is not None
+        # A subsequent DM turn must not carry the prior group's roster.
+        await inject_channel_roster(
+            wm, fetcher, _event("dm:local:iron-fox"), "iron-fox",
+        )
+        assert wm.get_section(ROSTER_SECTION_NAME) is None
+
+    async def test_fetch_raising_is_non_fatal_and_warns(
+        self, caplog: Any,
+    ) -> None:
+        """A fetcher whose ``fetch`` *raises* (not just returns ``None``) is
+        swallowed: no roster section, and the failure is logged at WARNING
+        so operators can see it. Covers the ``except Exception`` branch the
+        ``None``-return case does not exercise."""
+        wm = WorkingMemory(max_tokens=8192)
+        with caplog.at_level(logging.WARNING):
+            await inject_channel_roster(
+                wm, _RaisingFetcher(), _event("group:planning"), "iron-fox",
+            )
+        assert wm.get_section(ROSTER_SECTION_NAME) is None
+        assert any(
+            "roster injection failed" in r.getMessage() for r in caplog.records
+        )
+
+    async def test_stale_roster_cleared_even_when_refresh_raises(self) -> None:
+        """The stale-section clear happens before the fetch, so a later group
+        turn whose refresh raises must not leave the prior roster lingering."""
+        wm = WorkingMemory(max_tokens=8192)
+        await inject_channel_roster(
+            wm, _FakeFetcher((_CHANNEL, _AGENTS)),
+            _event("group:planning"), "iron-fox",
+        )
+        assert wm.get_section(ROSTER_SECTION_NAME) is not None
+        await inject_channel_roster(
+            wm, _RaisingFetcher(), _event("group:planning"), "iron-fox",
+        )
+        assert wm.get_section(ROSTER_SECTION_NAME) is None
