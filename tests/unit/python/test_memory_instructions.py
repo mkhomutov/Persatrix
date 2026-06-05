@@ -41,7 +41,11 @@ class TestMemoryToolInstruction:
         prompt = agent._build_system_prompt()
         assert "MUST call store_note" in prompt
         assert "recall_notes" in prompt
-        assert "memory persists across conversations" in prompt.lower()
+        # F-3a (v0.3.7): the old blanket "memory persists across
+        # conversations" promise was false while notes are room-scoped;
+        # the honest replacement scopes saved notes to the conversation.
+        assert "memory persists across conversations" not in prompt.lower()
+        assert "scoped to the conversation you are in" in prompt.lower()
         await agent.close_memory()
 
     async def test_memory_instruction_mentions_all_tool_names(self):
