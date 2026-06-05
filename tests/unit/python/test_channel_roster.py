@@ -106,8 +106,11 @@ class TestRenderRosterSection:
 
     def test_member_without_role_omits_the_dash(self) -> None:
         roster = [RosterMember(id="ghost", name="ghost", role="", is_self=False)]
-        body = render_roster_section(_CHANNEL, roster).content
-        ghost_line = next(ln for ln in body.splitlines() if "ghost" in ln)
+        section = render_roster_section(_CHANNEL, roster)
+        assert section is not None
+        ghost_line = next(
+            ln for ln in section.content.splitlines() if "ghost" in ln
+        )
         assert "—" not in ghost_line
 
     def test_empty_members_returns_none(self) -> None:
