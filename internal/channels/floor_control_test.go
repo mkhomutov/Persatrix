@@ -197,6 +197,21 @@ func TestOrderResponders_DirectedElsewhere(t *testing.T) {
 		"the unnamed participant joins the unmentioned when_mentioned member off-floor")
 }
 
+// TestMentionEveryone_WireContract pins the broadcast sentinel to its literal
+// wire value. The sentinel is an in-band value carried in a message's
+// `Mentions` list across the gRPC/REST boundary, read by both this Go
+// transport (the candidate set here + the persist exemption in
+// sqlite_messages.go) and the Python receiver gate, whose `MENTION_EVERYONE`
+// (agents/response_gate.py) must stay byte-identical. The two constants are
+// coupled only by this literal — nothing else fails if one side is renamed —
+// so pin the value on each side (Python's
+// `TestBroadcastSentinelWireContract`). A change to either constant alone now
+// breaks its own suite loudly instead of silently splitting the broadcast
+// path (one side admits, the other suppresses).
+func TestMentionEveryone_WireContract(t *testing.T) {
+	assert.Equal(t, "@everyone", MentionEveryone)
+}
+
 // TestOrderResponders_BroadcastDisablesDirectedFilter — `@everyone` marks the
 // message as addressed to the room, so the directed-elsewhere filter is
 // disabled and every `always` member stays a candidate even though the list

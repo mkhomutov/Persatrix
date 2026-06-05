@@ -166,6 +166,25 @@ class TestBroadcast:
         assert evaluate_response_gate(evt, agent_id="iron-fox").respond is True
 
 
+# ─── cross-language wire-contract guard ───────────────────────────
+
+
+class TestBroadcastSentinelWireContract:
+    def test_sentinel_value_is_the_pinned_wire_literal(self):
+        # The broadcast sentinel is an *in-band wire value*: it travels in a
+        # message's ``mentions`` list across the gRPC/REST boundary and is
+        # read by both this gate and the Go transport (the candidate set in
+        # ``internal/channels/floor_control.go`` and the persist exemption in
+        # ``internal/channels/sqlite_messages.go``, whose ``MentionEveryone``
+        # const must stay byte-identical). The two constants are coupled only
+        # by this literal — nothing else fails if one side is renamed — so
+        # pin the wire value here (and in Go's
+        # ``TestMentionEveryone_WireContract``). A change to either constant
+        # alone now breaks its own suite loudly instead of silently splitting
+        # the broadcast path (one side admits, the other suppresses).
+        assert MENTION_EVERYONE == "@everyone"
+
+
 # ─── unchanged classes: addressed / observer / self ───────────────
 
 
