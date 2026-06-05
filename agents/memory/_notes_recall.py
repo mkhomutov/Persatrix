@@ -30,6 +30,43 @@ logger = logging.getLogger(__name__)
 # freeform queries — strip all non-alphanumeric characters except spaces.
 _FTS5_SPECIAL = re.compile(r'[^a-zA-Z0-9\s]+')
 
+#: Person-keyed note topics whose scope is the *person* (cross-room), not
+#: the room. Matches the convention ``NoteStore.recall_contact_notes``
+#: builds (``contact:<participant_id>``).
+CONTACT_TOPIC_PREFIX = "contact:"
+
+
+def _notes_session_clause(
+    sessions: list[str] | None, *, column: str,
+) -> tuple[str, list[str]]:
+    """Session predicate for **notes** recall (F-7 / Option A).
+
+    Like :func:`session_in_clause`, but person-keyed ``contact:*`` notes
+    bypass the session filter — their scope is the person, so they recall
+    cross-room — while every other note keeps the room scoping. This is
+    the single source of truth both recall paths obey (the auto-injection
+    query tier and the LLM-facing ``recall_notes`` tool), so an explicit
+    recall can never again be narrower than ambient injection.
+
+    ``principal_id`` / ``epoch_id`` are applied by separate clauses and
+    still strictly bound, so the widening is cross-*room* only — never
+    cross-tenant or cross-epoch. In ``"*"`` no-filter mode there is no
+    session predicate to widen.
+    """
+    sess_clause, sess_params = session_in_clause(sessions, column=column)
+    if not sess_clause:
+        return sess_clause, sess_params
+    topic_col = column.replace("session_id", "topic")
+    inner = sess_clause.lstrip()
+    if inner.startswith("AND "):
+        inner = inner[len("AND "):]
+    # The contact-prefix LIKE value is a parameter (not interpolated); its
+    # placeholder leads, so it prepends to ``sess_params`` in clause order.
+    return (
+        f" AND ({topic_col} LIKE ? OR {inner})",
+        [f"{CONTACT_TOPIC_PREFIX}%", *sess_params],
+    )
+
 
 async def _recall_notes_fts5(
     db: aiosqlite.Connection,
@@ -53,7 +90,7 @@ async def _recall_notes_fts5(
     no carve-out.  Falls back to LIKE on FTS5 parse failure or empty
     sanitized query.
     """
-    sess_clause, sess_params = session_in_clause(
+    sess_clause, sess_params = _notes_session_clause(
         sessions, column="n.session_id",
     )
     princ_clause, princ_params = principal_eq_clause(
@@ -122,7 +159,7 @@ async def _recall_notes_like(
     RFC 0017 Section C.  ``principal_id`` / ``epoch_id`` — see
     :func:`_recall_notes_fts5`.
     """
-    sess_clause, sess_params = session_in_clause(
+    sess_clause, sess_params = _notes_session_clause(
         sessions, column="session_id",
     )
     princ_clause, princ_params = principal_eq_clause(
@@ -214,7 +251,7 @@ async def _recall_notes_recency(
 
     ``principal_id`` / ``epoch_id`` — see :func:`_recall_notes_fts5`.
     """
-    sess_clause, sess_params = session_in_clause(
+    sess_clause, sess_params = _notes_session_clause(
         sessions, column="session_id",
     )
     princ_clause, princ_params = principal_eq_clause(
