@@ -68,10 +68,16 @@ const (
 // Normalize collapses the disposition vocabulary to the canonical legacy
 // triple (`participant→always`, `addressed→when_mentioned`,
 // `observer→never`). A legacy value is returned unchanged; an unknown
-// value is returned as-is so [Config.Validate] surfaces it via
-// [RespondPolicy.Valid]. This is the single back-compat boundary: applied
-// once at config load, after which the rest of the stack sees only the
-// legacy triple.
+// value is returned as-is so the caller surfaces it via
+// [RespondPolicy.Valid].
+//
+// Normalize is applied at every external write boundary so the membership
+// store, the wire value, and every downstream reader (fanout candidate
+// set, floor control, the Python response gate) see only the legacy
+// triple: the config loader normalizes in [MemberConfig.UnmarshalYAML],
+// and the REST/store write path normalizes in the [ChannelStore] write
+// methods (AddMember/SetMemberPolicy/CreateChannelWithMembers) before the
+// membership-table CHECK constraint, which only accepts the legacy three.
 func (p RespondPolicy) Normalize() RespondPolicy {
 	switch p {
 	case RespondParticipant:

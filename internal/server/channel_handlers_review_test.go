@@ -68,6 +68,63 @@ func TestChannels_AddMember_RejectsUnknownRespondPolicy(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+// TestChannels_CreateChannel_AcceptsDispositionVocabulary pins the RFC
+// 0030 relevance-amendment back-compat contract on the REST create path:
+// the disposition vocabulary (`participant`/`addressed`/`observer`) the
+// schema now recommends must be accepted and normalized to the legacy
+// triple the membership-table CHECK constraint allows. Before the store
+// write methods normalized, a disposition value passed the widened
+// RespondPolicy.Valid() guard at the handler, then hit the CHECK
+// constraint and surfaced as 500 INTERNAL — a regression from the prior
+// clean 400, and a half-implemented feature (config files accepted the
+// vocabulary, the equivalent REST call 500'd).
+func TestChannels_CreateChannel_AcceptsDispositionVocabulary(t *testing.T) {
+	srv, store := channelTestServer(t)
+	body, _ := json.Marshal(createChannelRequest{
+		Name: "planning",
+		Members: []channelMemberRequest{
+			{ID: "p", Respond: "participant"},
+			{ID: "a", Respond: "addressed"},
+			{ID: "o", Respond: "observer"},
+		},
+	})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", body)
+	require.Equal(t, http.StatusCreated, rec.Code,
+		"disposition vocabulary must be accepted (and normalized), not 500 from the store CHECK constraint")
+
+	members, err := store.GetMembers(t.Context(), "group:planning")
+	require.NoError(t, err)
+	got := map[string]channels.RespondPolicy{}
+	for _, m := range members {
+		got[m.ParticipantID] = m.RespondPolicy
+	}
+	assert.Equal(t, channels.RespondAlways, got["p"], "participant → always")
+	assert.Equal(t, channels.RespondWhenMentioned, got["a"], "addressed → when_mentioned")
+	assert.Equal(t, channels.RespondNever, got["o"], "observer → never")
+}
+
+// TestChannels_AddMember_AcceptsDispositionVocabulary pins the same
+// contract on the add-member endpoint.
+func TestChannels_AddMember_AcceptsDispositionVocabulary(t *testing.T) {
+	srv, store := channelTestServer(t)
+	createBody, _ := json.Marshal(createChannelRequest{
+		Name:    "planning",
+		Members: []channelMemberRequest{{ID: "alice"}},
+	})
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", createBody).Code)
+
+	addBody, _ := json.Marshal(addMemberRequest{ID: "carol", Respond: "observer"})
+	rec := doRequest(srv.Handler(), http.MethodPost,
+		"/api/v1/channels/group:planning/members", addBody)
+	require.Equal(t, http.StatusNoContent, rec.Code,
+		"disposition value on add-member must be accepted and normalized, not 500")
+
+	carol, err := store.GetMember(t.Context(), "group:planning", "carol")
+	require.NoError(t, err)
+	assert.Equal(t, channels.RespondNever, carol.RespondPolicy, "observer → never")
+}
+
 // TestChannels_ListChannels_MalformedLimit_400 pins finding "tighten
 // parseLimit": a non-empty malformed `?limit=` value should reject with
 // 400, not silently fall back to the default.

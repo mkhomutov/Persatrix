@@ -180,6 +180,12 @@ func (s *sqliteStore) RemoveMember(ctx context.Context, channelID, participantID
 // shape as [RemoveMember] so a concurrent `DeleteChannel` cannot race the
 // existence check between zero-rows-affected and the channel lookup.
 func (s *sqliteStore) SetMemberPolicy(ctx context.Context, channelID, participantID string, policy RespondPolicy) error {
+	// Normalize the RFC 0030 disposition vocabulary to the legacy triple
+	// before validating/persisting: the store is the second back-compat
+	// boundary (mirroring the config loader) so the REST write path and
+	// the membership-table CHECK constraint see only legacy values. An
+	// unknown value is returned unchanged by Normalize and rejected here.
+	policy = policy.Normalize()
 	if !policy.Valid() {
 		return fmt.Errorf("%w: %q", ErrInvalidRespondPolicy, policy)
 	}
@@ -226,6 +232,10 @@ func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID st
 	if err := validateParticipantID(participantID); err != nil {
 		return err
 	}
+	// Normalize the disposition vocabulary to the legacy triple before
+	// validating/persisting (see SetMemberPolicy). Keeps the REST write
+	// path and the membership CHECK constraint on the legacy values.
+	policy = policy.Normalize()
 	if !policy.Valid() {
 		return fmt.Errorf("%w: %q", ErrInvalidRespondPolicy, policy)
 	}
