@@ -199,55 +199,61 @@ async def upsert_identity(
     so cross-room is automatically never cross-tenant or cross-epoch — the
     read-back below and the upsert conflict target both bind them.
 
-    Returns the merged identity object that was persisted.
+    Empty / all-``None`` ``fields`` that merge to nothing are a no-op (no
+    phantom row, no NULL self-overwrite).  The read-merge-write is **not**
+    atomic — ``update_trust`` does its arithmetic in one ``ON CONFLICT``
+    statement, but the JSON union here cannot, so the facade
+    :meth:`RelationshipMemory.upsert_identity` serialises it under a lock to
+    prevent lost updates.  Returns the persisted identity (``{}`` on no-op).
     """
     validate_other_id(other_id)
     validate_participant_types(participant_type, other_participant_type)
 
-    existing = await get_identity(
-        db, agent_id, other_id,
-        participant_type=participant_type,
-        other_participant_type=other_participant_type,
-        principal_id=principal_id,
-        epoch_id=epoch_id,
-    ) or {}
-    merged = merge_identity(existing, fields)
-    identity_json = json.dumps(merged) if merged else None
+    attrs = {"agent.id": agent_id, "participant.id": other_id}
+    with _tracer.start_as_current_span(RELATIONSHIP_UPDATE_SPAN, attributes=attrs):
+        # Read-merge-write — NOT atomic; the facade serialises it under a lock
+        # (see docstring + ``RelationshipMemory.upsert_identity``).
+        existing = await get_identity(
+            db, agent_id, other_id,
+            participant_type=participant_type,
+            other_participant_type=other_participant_type,
+            principal_id=principal_id,
+            epoch_id=epoch_id,
+        ) or {}
+        merged = merge_identity(existing, fields)
+        if not merged:
+            # Empty / all-``None`` merge: persist nothing (no phantom row, no
+            # NULL self-overwrite) — see docstring.
+            return merged
+        identity_json = json.dumps(merged)
 
-    # Upsert the relationship row, writing ONLY the identity column.  The
-    # INSERT branch seeds a neutral row (default trust, no interactions,
-    # NULL notes) so identity can be the first thing learned about a peer;
-    # the conflict branch updates identity alone — trust / notes / counts
-    # are untouched.  ``session_id`` falls to the column default ('legacy')
-    # on INSERT, mirroring ``update_trust`` — identity recall is cross-room
-    # so the first-seen session tag is immaterial to it.
-    await db.execute(
-        """
-        INSERT INTO relationships
-            (participant_id, participant_type,
-             other_participant_id, other_participant_type,
-             trust_score, interaction_count,
-             last_interaction_at, notes, identity, principal_id, epoch_id)
-        VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?, ?)
-        ON CONFLICT(participant_id, participant_type,
-                    other_participant_id, other_participant_type,
-                    principal_id, epoch_id) DO UPDATE SET
-            identity = ?
-        """,
-        (
-            agent_id,
-            participant_type,
-            other_id,
-            other_participant_type,
-            _DEFAULT_TRUST,
-            identity_json,
-            principal_id,
-            epoch_id,
-            identity_json,
-        ),
-    )
-    await db.commit()
-    return merged
+        # Upsert writing ONLY the identity column: the INSERT branch seeds a
+        # neutral row (default trust, NULL notes) so identity can be the first
+        # thing learned about a peer; the conflict branch updates identity
+        # alone — trust / notes / counts untouched.  ``session_id`` falls to
+        # the column default ('legacy'), as in ``update_trust`` — identity
+        # recall is cross-room, so the first-seen session tag is immaterial.
+        await db.execute(
+            """
+            INSERT INTO relationships
+                (participant_id, participant_type,
+                 other_participant_id, other_participant_type,
+                 trust_score, interaction_count,
+                 last_interaction_at, notes, identity, principal_id, epoch_id)
+            VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?, ?)
+            ON CONFLICT(participant_id, participant_type,
+                        other_participant_id, other_participant_type,
+                        principal_id, epoch_id) DO UPDATE SET
+                identity = ?
+            """,
+            (
+                agent_id, participant_type, other_id, other_participant_type,
+                _DEFAULT_TRUST, identity_json, principal_id, epoch_id,
+                identity_json,
+            ),
+        )
+        await db.commit()
+        return merged
 
 
 async def apply_decay(

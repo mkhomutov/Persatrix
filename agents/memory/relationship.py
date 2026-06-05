@@ -11,6 +11,7 @@ write/mutation helpers live in :mod:`.relationship_mutations`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import aiosqlite
@@ -100,6 +101,13 @@ class RelationshipMemory:
         # ISSUE-0085 PR 3 — epoch snapshot; call-time ``epoch_scope`` wins
         # via ``resolve_active_epoch`` on recall + write paths.
         self._active_epoch_id = resolve_epoch_id_silent()
+        # RFC 0031 amendment (F-7 Option D) — serialises ``upsert_identity``'s
+        # read-merge-write critical section.  Single-op writers (``update_trust``
+        # et al.) need no lock — aiosqlite's queue serialises each statement
+        # (see ``MemoryStore``) — but identity's JSON union is a genuine
+        # multi-statement read-modify-write that the queue does NOT make
+        # atomic, so concurrent upserts would otherwise lose updates.
+        self._identity_write_lock = asyncio.Lock()
 
     @property
     def agent_id(self) -> str:
@@ -234,14 +242,20 @@ class RelationshipMemory:
         trust ``notes`` column**.  Identity lives on the relationship row
         (PK omits ``session_id``), so it is cross-room by construction.
         Returns the merged identity that was persisted.
+
+        The read-merge-write is serialised under ``_identity_write_lock`` so
+        concurrent identity writes on the shared connection cannot lose
+        updates (the JSON union can't be a single atomic statement the way
+        ``update_trust``'s arithmetic is).
         """
-        return await _upsert_identity(
-            self._ensure_db(), self._agent_id, other_id, fields,
-            participant_type=participant_type,
-            other_participant_type=other_participant_type,
-            principal_id=resolve_active_principal(self._active_principal_id),
-            epoch_id=resolve_active_epoch(self._active_epoch_id),
-        )
+        async with self._identity_write_lock:
+            return await _upsert_identity(
+                self._ensure_db(), self._agent_id, other_id, fields,
+                participant_type=participant_type,
+                other_participant_type=other_participant_type,
+                principal_id=resolve_active_principal(self._active_principal_id),
+                epoch_id=resolve_active_epoch(self._active_epoch_id),
+            )
 
     async def get_identity(
         self,

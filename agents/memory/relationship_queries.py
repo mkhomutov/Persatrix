@@ -158,15 +158,17 @@ async def get_identity(
     epoch_clause, epoch_params = epoch_eq_clause(
         epoch_id, column="epoch_id",
     )
-    async with db.execute(
-        "SELECT identity FROM relationships "
-        "WHERE participant_id = ? AND participant_type = ? "
-        "AND other_participant_id = ? AND other_participant_type = ?"
-        f"{princ_clause}{epoch_clause}",
-        (agent_id, participant_type, other_id, other_participant_type,
-         *princ_params, *epoch_params),
-    ) as cursor:
-        row = await cursor.fetchone()
+    attrs = {"agent.id": agent_id, "participant.id": other_id}
+    with _tracer.start_as_current_span(RELATIONSHIP_LOOKUP_SPAN, attributes=attrs):
+        async with db.execute(
+            "SELECT identity FROM relationships "
+            "WHERE participant_id = ? AND participant_type = ? "
+            "AND other_participant_id = ? AND other_participant_type = ?"
+            f"{princ_clause}{epoch_clause}",
+            (agent_id, participant_type, other_id, other_participant_type,
+             *princ_params, *epoch_params),
+        ) as cursor:
+            row = await cursor.fetchone()
     if row is None or row[0] is None:
         return None
     return cast("dict[str, Any]", json.loads(row[0]))

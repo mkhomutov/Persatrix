@@ -53,7 +53,11 @@ def merge_identity(
         if value is None:
             continue
         if key in _IDENTITY_LIST_KEYS:
-            base = list(merged.get(key, []))
+            current = merged.get(key, [])
+            # Defensive: a non-list existing value (legacy / hand-written
+            # JSON) is a single element, not an iterable to splat — ``list``
+            # of a ``str`` would explode it into characters.
+            base = list(current) if isinstance(current, list) else [current]
             items = value if isinstance(value, list) else [value]
             for item in items:
                 if item not in base:

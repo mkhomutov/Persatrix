@@ -27,6 +27,7 @@ behavior change yet (rendering is D2, retirement of the Option-A
 
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 
@@ -96,6 +97,13 @@ class TestMergeIdentity:
         merged = merge_identity({"prefs": ["Rust"]}, {"prefs": "Go"})
         assert merged == {"prefs": ["Rust", "Go"]}
 
+    def test_existing_scalar_prefs_not_exploded(self):
+        """A non-list *existing* ``prefs`` (legacy / hand-written JSON) is
+        treated as a single element, not split into characters by ``list()``.
+        """
+        merged = merge_identity({"prefs": "Rust"}, {"prefs": ["Go"]})
+        assert merged == {"prefs": ["Rust", "Go"]}
+
     def test_none_value_does_not_clobber(self):
         merged = merge_identity({"name": "Max"}, {"name": None})
         assert merged == {"name": "Max"}
@@ -163,6 +171,26 @@ class TestUpsertIdentity:
 
     async def test_get_identity_none_when_absent(self, memory):
         assert await memory.get_identity("nobody") is None
+
+    async def test_empty_fields_create_no_phantom_row(self, memory):
+        """An empty / all-``None`` identity write onto an absent pair
+        persists nothing — no phantom neutral relationship row, no
+        NULL-identity self-overwrite."""
+        await memory.upsert_identity("ghost", {})
+        await memory.upsert_identity("ghost", {"name": None})
+        assert await memory.get_identity("ghost") is None
+        async with memory._ensure_db().execute(
+            "SELECT COUNT(*) FROM relationships "
+            "WHERE other_participant_id = 'ghost'",
+        ) as cursor:
+            (count,) = await cursor.fetchone()
+        assert count == 0
+
+    async def test_empty_fields_preserve_existing_identity(self, memory):
+        """An empty write onto an *existing* identity is a no-op, not a wipe."""
+        await memory.upsert_identity("local", {"name": "Max"})
+        await memory.upsert_identity("local", {})
+        assert await memory.get_identity("local") == {"name": "Max"}
 
     async def test_upsert_does_not_set_trust_reason(self, memory):
         """Creating a row via identity leaves notes (trust reason) NULL."""
@@ -267,3 +295,39 @@ class TestIdentityScope:
             assert await mem_2.get_identity("local") is None
         finally:
             await mem_2.close()
+
+
+# ─── Concurrency (lost-update regression) ───────────────────
+
+
+class TestUpsertIdentityConcurrency:
+    """``upsert_identity``'s read → merge → write must not lose updates when
+    concurrent identity writes interleave on the shared connection.
+
+    ``RelationshipMemory`` shares one ``aiosqlite`` connection across an
+    agent's async tasks; aiosqlite's worker queue serialises individual
+    *statements* but NOT the multi-statement read-merge-write that
+    ``upsert_identity`` performs.  Two concurrent upserts can each read the
+    same ``existing`` identity, merge independently, and the later write
+    clobber the earlier — a lost update.  Unlike ``update_trust`` (whose
+    ``ON CONFLICT`` arithmetic is a single atomic statement), the JSON union
+    cannot be expressed as one statement, so the critical section is
+    serialised with an instance lock instead.  This test constructs that
+    concurrency on purpose — mirroring ``test_relationship_memory_
+    concurrent_writes.py`` — so the fix is locked in before D2 wires a
+    write-through caller.
+    """
+
+    async def test_concurrent_pref_upserts_do_not_lose_updates(self, memory):
+        """Eight concurrent upserts each contribute one distinct ``pref``;
+        all eight must survive in the unioned ``prefs`` list."""
+        n = 8
+        await asyncio.gather(*(
+            memory.upsert_identity("peer", {"prefs": [f"pref-{i}"]})
+            for i in range(n)
+        ))
+        identity = await memory.get_identity("peer")
+        assert identity is not None
+        assert sorted(identity["prefs"]) == sorted(
+            f"pref-{i}" for i in range(n)
+        )
