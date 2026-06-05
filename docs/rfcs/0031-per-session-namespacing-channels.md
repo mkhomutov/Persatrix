@@ -186,6 +186,8 @@ The `legacy` sentinel is *not* a real row in the `sessions` table — recall and
 
 ### D. Recall Semantics
 
+> **Amendment (v0.3.7):** person-keyed `contact:<participant_id>` notes recall **cross-room** (all sessions, still principal/epoch-scoped) — identity is the cross-room person axis, not the room axis. The session-scoped default below is unchanged for every other note. See [RFC 0031 Amendment — Person-Keyed Note Recall Crosses Rooms](0031-amendment-person-keyed-note-recall.md) (finding F-3b).
+
 Default recall is **session-scoped**:
 
 ```python
