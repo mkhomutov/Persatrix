@@ -79,6 +79,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-PERSONA-003](MT-PERSONA-003.md) | Empty-context TICK short-circuit suppresses LLM calls (RFC 0017 §F) | Active |
 | [MT-PERSONA-004](MT-PERSONA-004.md) | Persona does not adopt user-name in first person (grounding clause) | Active |
 | [MT-PERSONA-005](MT-PERSONA-005.md) | Benign user message is not deflected as a prompt-injection (external-data carve-out, F-1) | Active |
+| [MT-PERSONA-006](MT-PERSONA-006.md) | Persona describes its conversation window honestly — no memory denial, no invented count (F-2) | Active |
 | [MT-PERSONA-CONVERSATION-001](MT-PERSONA-CONVERSATION-001.md) | Persona conversational continuity (DM) | Active |
 
 ## Chat
