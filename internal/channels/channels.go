@@ -71,6 +71,12 @@ const (
 // value is returned as-is so the caller surfaces it via
 // [RespondPolicy.Valid].
 //
+// The Python response gate keeps a mirror of this mapping
+// (`_DISPOSITION_ALIASES` in agents/response_gate.py) as defence-in-depth
+// for a disposition value that reaches the gate un-normalized; the two
+// encode the same disposition→legacy mapping in different languages and
+// must be kept in lockstep.
+//
 // Normalize is applied at every external write boundary so the membership
 // store, the wire value, and every downstream reader (fanout candidate
 // set, floor control, the Python response gate) see only the legacy
@@ -102,6 +108,28 @@ func (p RespondPolicy) Valid() bool {
 		return true
 	}
 	return false
+}
+
+// canonicalRespondPolicy is the single normalize-then-validate choke point
+// every store write path uses before persisting a membership row. It
+// collapses the disposition vocabulary to the legacy triple
+// ([RespondPolicy.Normalize]) and rejects an unknown value with
+// [ErrInvalidRespondPolicy].
+//
+// Centralizing the pair keeps the store's back-compat guarantee — that a
+// disposition value never reaches the membership-table CHECK constraint,
+// which only permits the legacy three — from depending on each write path
+// remembering to call Normalize before Valid. Because [RespondPolicy.Valid]
+// deliberately accepts both vocabularies (so a schema-valid value also
+// passes the loader), a forgotten Normalize would slip past Valid and then
+// surface as an opaque CHECK-constraint failure (HTTP 500) instead of
+// working. A new write path now has one obvious helper to reach for.
+func canonicalRespondPolicy(p RespondPolicy) (RespondPolicy, error) {
+	p = p.Normalize()
+	if !p.Valid() {
+		return "", fmt.Errorf("%w: %q", ErrInvalidRespondPolicy, p)
+	}
+	return p, nil
 }
 
 // Channel is a row in the `channels` table (RFC 0011 §B).

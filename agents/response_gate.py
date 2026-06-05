@@ -101,7 +101,12 @@ POLICY_OBSERVER: Final[str] = "observer"
 
 # Disposition → legacy alias map, applied once to the incoming policy so
 # every downstream branch reads (and labels metrics with) the canonical
-# legacy value.
+# legacy value. This is the Python mirror of Go's
+# ``RespondPolicy.Normalize`` (internal/channels/channels.go) — the two
+# encode the same disposition→legacy mapping in different languages and
+# must be kept in lockstep; both sides are independently pinned by tests
+# (test_response_gate_disposition.py here; the channels package's
+# normalization tests there).
 _DISPOSITION_ALIASES: Final[dict[str, str]] = {
     POLICY_PARTICIPANT: POLICY_ALWAYS,
     POLICY_ADDRESSED: POLICY_WHEN_MENTIONED,

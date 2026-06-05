@@ -184,6 +184,32 @@ def test_member_threshold_rejects_non_number():
         _validate(_channel_with_member("participant", extra={"threshold": "high"}))
 
 
+@pytest.mark.parametrize("boundary", [0.0, 1.0])
+def test_member_threshold_accepts_unit_interval_boundaries(boundary: float):
+    """The reserved ``threshold`` accepts the ``[0, 1]`` salience range.
+
+    The field is a per-disposition *salience* threshold for the Tier B bid,
+    and salience is clipped to ``[0.0, 1.0]`` (RFC 0024 PR plan; mirrored by
+    ``autonomy.salience_threshold`` in ``agent.schema.json``, which is bounded
+    ``[0.0, 1.0]``). Both endpoints must validate.
+    """
+    _validate(_channel_with_member("participant", extra={"threshold": boundary}))
+
+
+@pytest.mark.parametrize("out_of_range", [-0.1, 1.5])
+def test_member_threshold_rejects_out_of_range(out_of_range: float):
+    """A ``threshold`` outside ``[0, 1]`` is wire-illegal even while reserved.
+
+    Pinning the range in v0.3.7 (rather than v0.3.8 when Tier B reads it)
+    keeps the field's stated contract — that v0.3.8 is "purely additive" —
+    honest: tightening the bound later would retroactively reject a config
+    that set ``threshold: 5`` under v0.3.7. A salience score lives in
+    ``[0, 1]``, so any value outside it is meaningless regardless of release.
+    """
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(_channel_with_member("participant", extra={"threshold": out_of_range}))
+
+
 def test_member_unknown_key_still_rejected():
     """The member object remains ``additionalProperties: false``.
 

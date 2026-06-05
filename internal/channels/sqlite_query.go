@@ -184,10 +184,11 @@ func (s *sqliteStore) SetMemberPolicy(ctx context.Context, channelID, participan
 	// before validating/persisting: the store is the second back-compat
 	// boundary (mirroring the config loader) so the REST write path and
 	// the membership-table CHECK constraint see only legacy values. An
-	// unknown value is returned unchanged by Normalize and rejected here.
-	policy = policy.Normalize()
-	if !policy.Valid() {
-		return fmt.Errorf("%w: %q", ErrInvalidRespondPolicy, policy)
+	// unknown value is returned unchanged by Normalize and rejected here
+	// (see [canonicalRespondPolicy]).
+	policy, err := canonicalRespondPolicy(policy)
+	if err != nil {
+		return err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -233,14 +234,14 @@ func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID st
 		return err
 	}
 	// Normalize the disposition vocabulary to the legacy triple before
-	// validating/persisting (see SetMemberPolicy). Keeps the REST write
-	// path and the membership CHECK constraint on the legacy values.
-	policy = policy.Normalize()
-	if !policy.Valid() {
-		return fmt.Errorf("%w: %q", ErrInvalidRespondPolicy, policy)
+	// validating/persisting (see [canonicalRespondPolicy]). Keeps the REST
+	// write path and the membership CHECK constraint on the legacy values.
+	policy, err := canonicalRespondPolicy(policy)
+	if err != nil {
+		return err
 	}
 	// Idempotent re-add: keep the existing joined_at and respond_policy.
-	_, err := s.db.ExecContext(ctx,
+	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at)
 		 VALUES (?, ?, ?, ?)
 		 ON CONFLICT(channel_id, participant_id) DO NOTHING`,

@@ -78,7 +78,9 @@
             },
             "threshold": {
               "type": "number",
-              "description": "RESERVED / no-op until v0.3.8 Tier B. Per-disposition salience threshold for the cheap relevance bid. The field is accepted by the schema in v0.3.7 so v0.3.8 is purely additive, but nothing reads it yet — setting it has no effect."
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "description": "RESERVED / no-op until v0.3.8 Tier B. Per-disposition salience threshold for the cheap relevance bid. The field is accepted by the schema in v0.3.7 so v0.3.8 is purely additive, but nothing reads it yet — setting it has no effect. Bounded to the `[0, 1]` salience range now (salience is clipped to `[0.0, 1.0]` per RFC 0024; mirrors `autonomy.salience_threshold` in agent.schema.json) so the bound is not a breaking tightening when Tier B starts reading it."
             }
           }
         }
