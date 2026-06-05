@@ -72,12 +72,13 @@ func TestChannels_AddMember_RejectsUnknownRespondPolicy(t *testing.T) {
 // 0030 relevance-amendment back-compat contract on the REST create path:
 // the disposition vocabulary (`participant`/`addressed`/`observer`) the
 // schema now recommends must be accepted and normalized to the legacy
-// triple the membership-table CHECK constraint allows. Before the store
-// write methods normalized, a disposition value passed the widened
-// RespondPolicy.Valid() guard at the handler, then hit the CHECK
-// constraint and surfaced as 500 INTERNAL — a regression from the prior
-// clean 400, and a half-implemented feature (config files accepted the
-// vocabulary, the equivalent REST call 500'd).
+// triple the membership-table CHECK constraint allows. The handler hands
+// the wire value straight to the store without validating; before the
+// store write methods normalized, a disposition value passed the store's
+// widened RespondPolicy.Valid() guard, then hit the CHECK constraint and
+// surfaced as 500 INTERNAL — a regression from the prior clean 400, and a
+// half-implemented feature (config files accepted the vocabulary, the
+// equivalent REST call 500'd).
 func TestChannels_CreateChannel_AcceptsDispositionVocabulary(t *testing.T) {
 	srv, store := channelTestServer(t)
 	body, _ := json.Marshal(createChannelRequest{
