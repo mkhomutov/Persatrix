@@ -34,6 +34,7 @@ from agents.memory._session_filter import (
     SESSIONS_ALL,
     _resolve_session_list,
     session_in_clause,
+    session_in_predicate,
 )
 from agents.session_id import LEGACY_SESSION_ID
 
@@ -167,6 +168,44 @@ class TestSessionInClauseListMode:
         _, params = session_in_clause(input_list, column="session_id")
         assert params == input_list
         assert params is not input_list
+
+
+# ─── session_in_predicate ───────────────────────────────────
+
+
+class TestSessionInPredicate:
+    """``session_in_predicate`` is the bare predicate (no leading
+    ``" AND "``) that :func:`session_in_clause` wraps.  Exposed so
+    callers that embed the session filter inside a larger boolean group
+    — e.g. ``_notes_recall._notes_session_clause`` (F-7 contact-note
+    widening) — can reuse the IN-clause shape without string-surgering
+    the ``" AND "`` prefix back off ``session_in_clause``'s output.
+    """
+
+    def test_none_returns_empty(self) -> None:
+        pred, params = session_in_predicate(None, column="session_id")
+        assert pred == ""
+        assert params == []
+
+    def test_list_has_no_leading_and(self) -> None:
+        pred, params = session_in_predicate(["run-a"], column="session_id")
+        assert pred == "session_id IN (?)"
+        assert params == ["run-a"]
+
+    def test_multiple_ids_one_placeholder_each(self) -> None:
+        pred, params = session_in_predicate(
+            ["run-a", "legacy"], column="session_id",
+        )
+        assert pred == "session_id IN (?,?)"
+        assert params == ["run-a", "legacy"]
+
+    def test_clause_is_predicate_with_and_prefix(self) -> None:
+        # The two helpers must not drift: ``session_in_clause`` is
+        # exactly ``" AND " + session_in_predicate`` for any list input.
+        clause, c_params = session_in_clause(["run-a", "legacy"], column="x")
+        pred, p_params = session_in_predicate(["run-a", "legacy"], column="x")
+        assert clause == f" AND {pred}"
+        assert c_params == p_params
 
 
 if __name__ == "__main__":

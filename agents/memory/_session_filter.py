@@ -65,6 +65,7 @@ __all__ = [
     "SESSIONS_ALL",
     "_resolve_session_list",
     "session_in_clause",
+    "session_in_predicate",
 ]
 
 #: The ``sessions="*"`` sentinel — CLI/debug mode only.  The
@@ -132,15 +133,20 @@ def _resolve_session_list(
     return ids
 
 
-def session_in_clause(
+def session_in_predicate(
     session_list: list[str] | None,
     *,
     column: str,
 ) -> tuple[str, list[str]]:
-    """Build the ``" AND col IN (?, ?, ...)"`` fragment + params.
+    """Build the bare ``"col IN (?, ?, ...)"`` predicate + params.
 
-    ``session_list=None`` → ``("", [])`` (no filter — ``"*"`` mode);
-    a resolved list → an IN-clause with one placeholder per id.
+    No leading ``" AND "`` — :func:`session_in_clause` adds that for the
+    common "append after an existing WHERE predicate" case, while
+    callers that embed the session filter inside a larger boolean group
+    (e.g. ``_notes_recall._notes_session_clause``, which ORs it with a
+    contact-topic carve-out) consume this shape directly rather than
+    string-surgering the prefix back off.  ``session_list=None`` →
+    ``("", [])`` (no filter — ``"*"`` mode).
 
     SECURITY: ``column`` is interpolated directly into the returned
     SQL fragment via f-string — it must be a **trusted internal
@@ -156,4 +162,25 @@ def session_in_clause(
     if session_list is None:
         return "", []
     placeholders = ",".join("?" for _ in session_list)
-    return f" AND {column} IN ({placeholders})", list(session_list)
+    return f"{column} IN ({placeholders})", list(session_list)
+
+
+def session_in_clause(
+    session_list: list[str] | None,
+    *,
+    column: str,
+) -> tuple[str, list[str]]:
+    """Build the ``" AND col IN (?, ?, ...)"`` fragment + params.
+
+    ``session_list=None`` → ``("", [])`` (no filter — ``"*"`` mode);
+    a resolved list → an IN-clause with one placeholder per id.  Thin
+    wrapper over :func:`session_in_predicate` — the leading ``" AND "``
+    is the only difference, so the two can never drift on the IN-clause
+    shape (pinned in
+    :file:`tests/unit/python/test_session_id_session_filter.py`).  See
+    that helper for the ``column`` interpolation security contract.
+    """
+    pred, params = session_in_predicate(session_list, column=column)
+    if not pred:
+        return "", []
+    return f" AND {pred}", params
