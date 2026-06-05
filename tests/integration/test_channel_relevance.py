@@ -213,6 +213,7 @@ async def test_directed_elsewhere_member_still_remembers() -> None:
 
     iron_calls.assert_not_awaited()  # gated: no reply, idle-cost zero (D5)
     store_mock.assert_awaited_once()  # but the turn still lands in memory
+    assert store_mock.await_args is not None  # narrow _Call | None for mypy
     ingested_event, ingested_actions = store_mock.await_args.args
     assert ingested_event.payload["mentions"] == ["ember-owl"]
     assert ingested_actions == []  # suppressed → no actions produced the turn
