@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 import aiosqlite
 from opentelemetry import trace
@@ -169,7 +169,7 @@ async def get_identity(
         row = await cursor.fetchone()
     if row is None or row[0] is None:
         return None
-    return json.loads(row[0])
+    return cast("dict[str, Any]", json.loads(row[0]))
 
 
 async def get_relationship_summary(
