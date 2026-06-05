@@ -48,7 +48,7 @@ Once identity is recalled cross-room from the relationship tier and verified, re
 
 - An eager identity-capture path (decision point 1) — the gating dependency.
 - An **RFC amendment** (RFC 0031 §C/§D person axis + RFC 0026), since this changes where identity is authored/recalled.
-- Sequenced on the [memory-quality roadmap](../memory-quality-roadmap.md); not blocking — F-7 is already functionally closed by Option A.
+- **Target: v0.3.x — after the capture-mechanism decision** (row 10 on the [memory-quality roadmap](../memory-quality-roadmap.md)). Deliberately **not v0.3.8** (that milestone is brainstorm convergence — RFC 0030 governance — and this adds no new *user* capability, since Option A already delivers cross-room recall functionally). Not blocking: F-7 is functionally closed by Option A; this is architectural cleanup.
 
 ## Test strategy (when implemented)
 
