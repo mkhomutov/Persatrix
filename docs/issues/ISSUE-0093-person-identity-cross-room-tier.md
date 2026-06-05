@@ -8,6 +8,7 @@ created: 2026-06-05
 closed:
 closed_pr:
 refs:
+  - docs/rfcs/0031-amendment-person-identity-cross-room-tier.md
   - docs/v0.3.7-f7-cross-room-recall-seam.md
   - docs/memory-scope-axes.md
   - docs/memory-quality-roadmap.md
@@ -35,6 +36,8 @@ Person identity (name, role, stable preferences) is **stored on, and recalled fr
 - The recall seam **cannot recur by construction**: there is no second, narrower path, because identity no longer lives in a room-scoped tier.
 
 ## Decision points (for the implementation RFC amendment)
+
+> **Resolved** in the draft amendment [RFC 0031 — Person Identity Lives on the Cross-Room Relationship Tier](../rfcs/0031-amendment-person-identity-cross-room-tier.md): (1) **write-through** from `store_note(contact:<id>)` to the relationship record (preserves immediacy, no new tool/latency); (2) **structured identity** (`{name, role, prefs}`) merged by key on a **dedicated `identity` column** (kept off the trust `notes` field so trust writes can't clobber it); (3) **facts stays session-scoped** — identity lives on the relationship tier only. The points below are the original open questions, retained for context.
 
 1. **Capture mechanism.** There is no LLM tool today for "record what I learned about this person" onto the relationship record. Options: (a) route the existing `store_note(contact:*)` call to *also/instead* write the relationship record; (b) a dedicated relationship-note tool; (c) eager identity extraction (not only at interaction close). Whichever is chosen must preserve today's *immediacy* (the persona knows your name within the first conversation), which extraction-at-close does not.
 2. **Structured vs prose.** The relationship record's `notes` is free text; decide whether identity is structured (name/role/prefs fields) or prose, and how it merges/supersedes across turns.
