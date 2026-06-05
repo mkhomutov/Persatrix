@@ -119,7 +119,7 @@ class TestRecallNotesScopeByTopic:
             assert "contact:bob" in topics
             assert "standup" in topics
 
-    async def test_contact_recall_still_principal_epoch_scoped(
+    async def test_contact_recall_still_principal_scoped(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Cross-room is not cross-tenant: a contact note under a different
@@ -141,3 +141,29 @@ class TestRecallNotesScopeByTopic:
             finally:
                 await mem_b.close()
             assert hits == [], "cross-room must not cross the principal boundary"
+
+    async def test_contact_recall_still_epoch_scoped(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Cross-room is not cross-epoch: a contact note from a prior epoch
+        is not recalled even though the session filter is relaxed. The
+        epoch boundary is a *separate* clause from principal — pin it
+        independently so the contact widening cannot quietly reach across
+        a fresh run/test epoch.
+        """
+        from agents.epoch_id import EPOCH_ID_ENV_VAR
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "m.db")
+            monkeypatch.setenv(EPOCH_ID_ENV_VAR, "epoch-1")
+            await _store(
+                path, session="room-a", topic="contact:dave",
+                content="Name: Dave. Favorite language: Elixir.",
+                monkeypatch=monkeypatch,
+            )
+            monkeypatch.setenv(EPOCH_ID_ENV_VAR, "epoch-2")
+            mem_b = await _open(path, session="room-b", monkeypatch=monkeypatch)
+            try:
+                hits = await mem_b.recall_notes("Elixir")
+            finally:
+                await mem_b.close()
+            assert hits == [], "cross-room must not cross the epoch boundary"

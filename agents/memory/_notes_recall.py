@@ -21,7 +21,7 @@ from ..epoch_id import DEFAULT_EPOCH_ID
 from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ._epoch_filter import epoch_eq_clause
 from ._principal_filter import principal_eq_clause
-from ._session_filter import session_in_clause
+from ._session_filter import session_in_predicate
 from .episodic_queries import resolve_min_score
 
 logger = logging.getLogger(__name__)
@@ -52,18 +52,29 @@ def _notes_session_clause(
     still strictly bound, so the widening is cross-*room* only — never
     cross-tenant or cross-epoch. In ``"*"`` no-filter mode there is no
     session predicate to widen.
+
+    Consumes the *bare* predicate from :func:`session_in_predicate` (not
+    :func:`session_in_clause`) so the session filter drops straight into
+    the ``OR`` group without re-deriving where its ``" AND "`` prefix
+    ends — the two helpers share one IN-clause shape by construction.
+
+    See :func:`_recall_contact_notes` for the sibling cross-room path:
+    that one is exact-topic (used by auto-injection); this widening lets
+    the freeform ``recall_notes`` tool reach the same ``contact:*`` notes.
     """
-    sess_clause, sess_params = session_in_clause(sessions, column=column)
-    if not sess_clause:
-        return sess_clause, sess_params
+    sess_pred, sess_params = session_in_predicate(sessions, column=column)
+    if not sess_pred:
+        return sess_pred, sess_params
+    # ``column`` is a trusted literal (``session_id`` / ``n.session_id``);
+    # the topic column shares its table-alias prefix, if any.
     topic_col = column.replace("session_id", "topic")
-    inner = sess_clause.lstrip()
-    if inner.startswith("AND "):
-        inner = inner[len("AND "):]
-    # The contact-prefix LIKE value is a parameter (not interpolated); its
-    # placeholder leads, so it prepends to ``sess_params`` in clause order.
+    # ``CONTACT_TOPIC_PREFIX`` is a constant with no LIKE metacharacters
+    # other than the intended trailing ``%`` wildcard, so no ESCAPE clause
+    # is needed (unlike the user-query LIKEs in ``_recall_notes_like``).
+    # The value is a parameter (not interpolated); its placeholder leads,
+    # so it prepends to ``sess_params`` in clause order.
     return (
-        f" AND ({topic_col} LIKE ? OR {inner})",
+        f" AND ({topic_col} LIKE ? OR {sess_pred})",
         [f"{CONTACT_TOPIC_PREFIX}%", *sess_params],
     )
 
