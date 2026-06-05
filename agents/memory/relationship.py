@@ -36,8 +36,14 @@ from .relationship_mutations import (
 from .relationship_mutations import (
     update_trust as _update_trust,
 )
+from .relationship_mutations import (
+    upsert_identity as _upsert_identity,
+)
 from .relationship_queries import (
     get_all_relationships as _get_all_relationships,
+)
+from .relationship_queries import (
+    get_identity as _get_identity,
 )
 from .relationship_queries import (
     get_relationship_summary as _get_relationship_summary,
@@ -203,6 +209,58 @@ class RelationshipMemory:
         """
         return await _update_trust(
             self._ensure_db(), self._agent_id, other_id, delta, reason,
+            participant_type=participant_type,
+            other_participant_type=other_participant_type,
+            principal_id=resolve_active_principal(self._active_principal_id),
+            epoch_id=resolve_active_epoch(self._active_epoch_id),
+        )
+
+    # ─── Person identity (cross-room) ───────────────────────
+
+    async def upsert_identity(
+        self,
+        other_id: str,
+        fields: dict[str, object],
+        *,
+        participant_type: str = "agent",
+        other_participant_type: str = "agent",
+    ) -> dict[str, object]:
+        """Merge person-identity ``fields`` onto the relationship record.
+
+        RFC 0031 amendment (F-7 Option D, ISSUE-0093) — the cross-room
+        write for person identity (name / role / stable preferences).
+        Non-destructive merge (scalar last-writer-wins; ``prefs`` union);
+        creates the row at neutral trust if absent; **never touches the
+        trust ``notes`` column**.  Identity lives on the relationship row
+        (PK omits ``session_id``), so it is cross-room by construction.
+        Returns the merged identity that was persisted.
+        """
+        return await _upsert_identity(
+            self._ensure_db(), self._agent_id, other_id, fields,
+            participant_type=participant_type,
+            other_participant_type=other_participant_type,
+            principal_id=resolve_active_principal(self._active_principal_id),
+            epoch_id=resolve_active_epoch(self._active_epoch_id),
+        )
+
+    async def get_identity(
+        self,
+        other_id: str,
+        *,
+        participant_type: str = "agent",
+        other_participant_type: str = "agent",
+    ) -> dict[str, object] | None:
+        """Read the structured person identity off the relationship record.
+
+        RFC 0031 amendment (F-7 Option D, ISSUE-0093) — the cross-room
+        read.  Applies principal/epoch strict equality but **no session
+        filter** (see :func:`agents.memory.relationship_queries.get_identity`)
+        so identity stated in one room surfaces in every room for the same
+        ``(principal, epoch)``.  Returns ``None`` when no identity is
+        recorded for the pair.
+        """
+        return await _get_identity(
+            self._ensure_db(), self._agent_id, other_id,
             participant_type=participant_type,
             other_participant_type=other_participant_type,
             principal_id=resolve_active_principal(self._active_principal_id),

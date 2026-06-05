@@ -1,7 +1,7 @@
 # RFC 0031 Amendment — Person Identity Lives on the Cross-Room Relationship Tier
 
 **Type**: amendment to [RFC 0031](0031-per-session-namespacing-channels.md) §C (Storage Model) + §D (Recall Semantics), and to [RFC 0026](0026-declarative-facts-tier.md) (facts-tier scope boundary)
-**Status**: 📝 Draft / Proposed — design only, not implemented. Target **v0.3.x** (deliberately not v0.3.8). Tracks [ISSUE-0093](../issues/ISSUE-0093-person-identity-cross-room-tier.md) (F-7 Option D).
+**Status**: 🚧 In progress — **PR D1 (storage foundation) implemented**; D2 (write-through + render) and D3 (backfill + Option-A retirement) remain. Target **v0.3.x** (deliberately not v0.3.8). Tracks [ISSUE-0093](../issues/ISSUE-0093-person-identity-cross-room-tier.md) (F-7 Option D).
 **Author**: Maksim Khomutov
 **Date**: 2026-06-05
 **Target**: v0.3.x — after this design is ratified; sequenced on [memory-quality-roadmap.md](../memory-quality-roadmap.md) row 10.
@@ -111,6 +111,8 @@ Remove the Option-A carve-out — sized at ~11 core lines + 3 test files:
 | **D3** | Backfill existing `contact:*` notes → relationship identity; **retire** the Option-A carve-out; revert RFC 0031 §D to single room-scoped shape; stop the legacy contact-note write. | D2 verified live |
 
 Roughly **3 PRs + this amendment**; the weight is design risk on D2 (parsing/merge + the dual-write→cutover) and the D1 migration, not lines of code.
+
+> **D1 status**: ✅ implemented. Migration **v13** adds a nullable `identity TEXT` (JSON) column to `relationships` ([`_migration_identity.py`](../../agents/memory/_migration_identity.py)) — additive, no PK rebuild (identity is per-row payload, not a key column, so it follows the simple v7 `ADD COLUMN` skeleton rather than the v11/v12 rebuild). The merge rule lives in the pure [`merge_identity`](../../agents/memory/relationship_types.py) (scalar last-writer-wins; `prefs` order-preserving union; `None` skipped). `RelationshipMemory.upsert_identity` writes only the `identity` column (never the trust `notes`), creating the row at neutral trust if absent; `RelationshipMemory.get_identity` reads it with principal/epoch strict equality but **no session filter** — the cross-room property by construction (no `sessions="*"` sentinel; the room axis is not part of the tier's key). No prompt-facing change yet (rendering is D2). Coverage: [`test_relationship_identity.py`](../../tests/unit/python/test_relationship_identity.py) (merge purity, migration schema/idempotency, upsert merge/supersede, notes↔identity non-clobber, cross-room recall, principal/epoch isolation) + the bumped migration-count discipline pins in `test_episodic_memory_core.py` / `test_episodic_memory_retention.py`.
 
 ## Test strategy
 

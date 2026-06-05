@@ -8,7 +8,9 @@ safe to call from any async context.
 
 from __future__ import annotations
 
+import json
 import logging
+from typing import Any
 
 import aiosqlite
 from opentelemetry import trace
@@ -31,6 +33,7 @@ _tracer = trace.get_tracer(__name__)
 
 __all__ = [
     "get_all_relationships",
+    "get_identity",
     "get_relationship_summary",
     "get_trust",
     "validate_other_id",
@@ -115,6 +118,58 @@ async def get_trust(
         ) as cursor:
             row = await cursor.fetchone()
         return row[0] if row is not None else _DEFAULT_TRUST
+
+
+async def get_identity(
+    db: aiosqlite.Connection,
+    agent_id: str,
+    other_id: str,
+    *,
+    participant_type: str = "agent",
+    other_participant_type: str = "agent",
+    principal_id: str = DEFAULT_PRINCIPAL_ID,
+    epoch_id: str = DEFAULT_EPOCH_ID,
+) -> dict[str, Any] | None:
+    """Read the structured person identity off the relationship record.
+
+    RFC 0031 amendment (F-7 Option D, ISSUE-0093) — the cross-room read for
+    person identity (name / role / stable preferences).
+
+    **No session filter, by design.**  Unlike :func:`get_trust` /
+    :func:`get_relationship_summary` (which apply the §D
+    :func:`session_in_clause` to the relationship row), identity recall
+    omits the session predicate entirely.  The relationship primary key
+    excludes ``session_id`` — there is exactly one row per ``(participant
+    tuple, principal, epoch)`` — so leaving the session axis out of the
+    query is precisely what makes identity *cross-room by construction*:
+    identity stated in room A surfaces in room B.  This is strictly narrower
+    than the Option-A ``contact:*`` carve-out (no ``sessions="*"`` sentinel
+    anywhere) — the room axis simply is not part of the tier's key.
+
+    ``principal_id`` / ``epoch_id`` remain strict equality (each part of the
+    PK), so cross-room is never cross-tenant or cross-epoch.
+
+    Returns the decoded identity object, or ``None`` if the row is absent or
+    has no identity recorded (a row created via trust / interaction only).
+    """
+    princ_clause, princ_params = principal_eq_clause(
+        principal_id, column="principal_id",
+    )
+    epoch_clause, epoch_params = epoch_eq_clause(
+        epoch_id, column="epoch_id",
+    )
+    async with db.execute(
+        "SELECT identity FROM relationships "
+        "WHERE participant_id = ? AND participant_type = ? "
+        "AND other_participant_id = ? AND other_participant_type = ?"
+        f"{princ_clause}{epoch_clause}",
+        (agent_id, participant_type, other_id, other_participant_type,
+         *princ_params, *epoch_params),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None or row[0] is None:
+        return None
+    return json.loads(row[0])
 
 
 async def get_relationship_summary(
