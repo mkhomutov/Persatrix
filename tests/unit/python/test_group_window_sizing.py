@@ -16,10 +16,12 @@ channel it speaks on; the **global default stays 20/2048**, so DM-only
 personas and the chat surface are unchanged.
 
 These tests pin the bumped values against the *shipped* ``config/agents.yaml``
-(not a synthetic fixture) so a future edit that drifts them — or a new
-group persona added without the block — is caught here. ``test_conversation_window``
-separately pins the global default; this module pins the per-agent
-override and the global-default-preserved intent together.
+(not a synthetic fixture) so a future edit that drifts them is caught here.
+The group membership under test is **derived from** ``config/channels.yaml``
+(every member of every ``channels:`` entry), not a hardcoded name list, so a
+new group persona added without the window block is caught too.
+``test_conversation_window`` separately pins the global default; this module
+pins the per-agent override and the global-default-preserved intent together.
 """
 
 from __future__ import annotations
@@ -36,11 +38,38 @@ from agents.persona_runtime.conversation_window import (
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _AGENTS_YAML = _REPO_ROOT / "config" / "agents.yaml"
 _OPTIMIZATION_YAML = _REPO_ROOT / "config" / "optimization.yaml"
+_CHANNELS_YAML = _REPO_ROOT / "config" / "channels.yaml"
 
-# The three group-demo personas (config/channels.yaml `group:planning`).
-_GROUP_PERSONAS = ("ember-owl", "iron-fox", "nova-sparrow")
 _EXPECTED_TURNS = 40
 _EXPECTED_TOKENS = 4096
+
+
+def _group_channel_personas() -> tuple[str, ...]:
+    """Persona ids that are members of a group channel, *derived* from the
+    shipped ``config/channels.yaml``.
+
+    Every entry under ``channels:`` is a group channel (addressed as
+    ``group:<name>``); its members share a multi-party room and so need
+    the interim larger window. Deriving the set here — rather than
+    hardcoding ``ember-owl``/``iron-fox``/``nova-sparrow`` — is what makes
+    the contract real: a persona added to a group channel *without* the
+    window block is then caught by
+    :meth:`test_group_personas_resolve_to_bumped_window`, instead of
+    silently escaping a static name list.
+    """
+    doc = yaml.safe_load(_CHANNELS_YAML.read_text(encoding="utf-8"))
+    ids: list[str] = []
+    for channel in doc.get("channels", []):
+        for member in channel.get("members", []):
+            mid = member.get("id")
+            if mid is not None and mid not in ids:
+                ids.append(mid)
+    return tuple(ids)
+
+
+# Resolved once at import from the shipped channel config (currently
+# `group:planning` → ember-owl, iron-fox, nova-sparrow).
+_GROUP_PERSONAS = _group_channel_personas()
 
 
 def _shipped_agents_by_id() -> dict[str, dict]:
@@ -49,10 +78,22 @@ def _shipped_agents_by_id() -> dict[str, dict]:
 
 
 class TestGroupPersonaWindowBump:
-    """The three group-demo personas resolve to the interim 40/4096
-    window; a persona without an override still inherits the global
-    default; and the global default block itself is untouched.
+    """Every group-channel member (derived from config/channels.yaml)
+    resolves to the interim 40/4096 window; a persona without an override
+    still inherits the global default; and the global default block itself
+    is untouched.
     """
+
+    def test_group_membership_is_nonempty(self) -> None:
+        """Guard: the contract iterates the derived group-channel
+        membership, so an empty set (a ``channels.yaml`` parse/shape
+        regression) would make the bump assertions pass *vacuously*.
+        Fail loudly instead.
+        """
+        assert _GROUP_PERSONAS, (
+            "no group-channel members derived from config/channels.yaml — "
+            "the bump contract would pass vacuously"
+        )
 
     def test_group_personas_resolve_to_bumped_window(self) -> None:
         agents = _shipped_agents_by_id()
