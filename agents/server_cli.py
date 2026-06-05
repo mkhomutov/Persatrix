@@ -21,7 +21,11 @@ from opentelemetry.instrumentation.grpc import GrpcAioInstrumentorServer
 
 from .model_aliases import validate_alias_pricing
 from .observability.logging import configure_logging
-from .observability.metrics import init_metrics, try_get_instruments
+from .observability.metrics import (
+    init_metrics,
+    set_current_agent_id,
+    try_get_instruments,
+)
 from .observability.metrics import shutdown as metrics_shutdown
 from .observability.tracing import init_tracing
 from .observability.tracing import shutdown as tracing_shutdown
@@ -112,6 +116,14 @@ def main() -> None:
         service_instance=args.agent,
         level=args.log_level,
     )
+
+    # F-5: agents launch with ``--agent <id>``, not ``PERSATRIX_AGENT_ID``,
+    # so the env-based ``current_agent_id()`` (used by the generic
+    # tool-registry metric path, which has no persona ``self.agent_id``)
+    # defaulted to "unknown". Bind the resolved id here — before
+    # ``init_metrics`` and any tool call — so every process-global
+    # observability consumer reports the real persona.
+    set_current_agent_id(args.agent)
 
     # Fail fast on a misconfigured alias map before any tracing / socket bind
     # (ISSUE-0071) — an unpriced non-local alias is a silent $0 budget hole the
