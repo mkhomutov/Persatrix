@@ -81,6 +81,15 @@ def current_agent_id() -> str:
     return _AGENT_ID
 
 
+def set_current_agent_id(agent_id: str) -> None:
+    """Bind this process's agent id for observability (F-5 — agents launch
+    with ``--agent``, not ``PERSATRIX_AGENT_ID``). Called once at startup;
+    overrides the lazy cache; blank → ``"unknown"`` like the env fallback.
+    """
+    global _AGENT_ID
+    _AGENT_ID = agent_id.strip() or "unknown"
+
+
 class _Instruments:
     """Registered instrument handles — one per documented metric.
 
