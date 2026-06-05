@@ -44,7 +44,7 @@ Rejected alternatives:
 
 Identity is stored as a **small structured object** (`{name, role, prefs: […]}`), JSON-encoded in a **new `identity` column** on `relationships`, **separate from the existing `notes` column**.
 
-- **Separate column, not `notes`.** `notes` is overwritten on every `update_trust(reason)` call ([relationship_mutations.py:106](../../agents/memory/relationship_mutations.py)) — it holds the latest *trust* reason. Co-locating identity there would let a trust change clobber the name. A dedicated column keeps affect (trust) and identity cleanly separated.
+- **Separate column, not `notes`.** `notes` is overwritten on every `update_trust(reason)` call (`notes = ?` in the upsert, [relationship_mutations.py:118](../../agents/memory/relationship_mutations.py)) — it holds the latest *trust* reason. Co-locating identity there would let a trust change clobber the name. A dedicated column keeps affect (trust) and identity cleanly separated.
 - **Structured, not prose.** A key/value object gives deterministic **supersede semantics**: a new `name` replaces the old `name` (last-writer-wins per key), a new preference unions into `prefs`. Free-text prose has no merge rule and grows unbounded. The structure stays small enough to render as one injected line (`Identity: Name Max; Role …`).
 - **Merge, never overwrite.** The write API is an **upsert that shallow-merges** the incoming keys into the existing object, so partial updates across turns accumulate instead of clobbering.
 
