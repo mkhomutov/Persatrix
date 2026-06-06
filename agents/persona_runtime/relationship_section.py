@@ -66,11 +66,14 @@ def _format_identity(identity: dict | None) -> str | None:
 
     RFC 0031 amendment (F-7 Option D, ISSUE-0093) PR D2.  Emits the
     structured fields in a fixed, readable order (``Name`` / ``Role`` /
-    ``Prefers``); falls back to the verbatim ``raw`` clause only when *no*
-    structured field parsed, so an unkeyed note is still surfaced rather
-    than dropped.  Returns ``None`` when the object carries nothing
-    renderable, letting the caller skip the line (and, for an
-    interaction-free relationship, the whole section).
+    ``Prefers``) followed by the verbatim ``raw`` remainder (the unkeyed
+    clauses the parser could not classify, e.g. "Lives in Berlin").  The
+    ``raw`` tail is appended *whether or not* a structured field parsed —
+    it is supplementary detail the model captured, so dropping it whenever
+    a name happened to parse would silently hide a stored fact from the
+    LLM.  Returns ``None`` when the object carries nothing renderable,
+    letting the caller skip the line (and, for an interaction-free
+    relationship, the whole section).
     """
     if not isinstance(identity, dict) or not identity:
         return None
@@ -86,10 +89,9 @@ def _format_identity(identity: dict | None) -> str | None:
         clean = [str(p).strip() for p in prefs if str(p).strip()]
         if clean:
             parts.append("Prefers: " + ", ".join(clean))
-    if not parts:
-        raw = identity.get("raw")
-        if isinstance(raw, str) and raw.strip():
-            parts.append(raw.strip())
+    raw = identity.get("raw")
+    if isinstance(raw, str) and raw.strip():
+        parts.append(raw.strip())
     return "; ".join(parts) if parts else None
 
 
@@ -196,6 +198,11 @@ def render_relationship_section(
     # Identity sits right after the header — it is the load-bearing "who is
     # this" signal, so it should survive the MIN_TOKENS_RELATIONSHIP floor
     # truncation (which snips from the end) for any realistic field sizes.
+    # TODO(v0.3): sanitize identity (same as rel.notes below) when A2A
+    # allows external agents — identity is parsed from peer-supplied
+    # contact-note content, so a compromised peer could smuggle prompt
+    # injection through name/role/raw. Bounded today only by the per-field
+    # truncate; mirror the rel.notes sanitize when that lands.
     if identity_line is not None:
         rel_lines.append(f"  Identity: {truncate(identity_line, REL_NOTES_INTERIM_CHARS)}")
     # The interaction-derived lines (trust / count / last seen / cadence)

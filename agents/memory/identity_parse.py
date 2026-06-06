@@ -85,6 +85,14 @@ def parse_identity_fields(content: str) -> dict[str, object]:
     scalar fields are last-writer-wins, ``prefs`` unions, and absent
     fields are simply omitted (so a partial note never nulls a stored
     value on merge).
+
+    Known limitation: ``.`` is a clause separator (so ``"Name: A. Role:
+    B."`` keys both fields), which means a ``.`` *inside* a value is also a
+    boundary — ``"Name: Dr. Smith"`` keys ``name="Dr"`` and spills
+    ``"Smith"`` to ``raw``. Acceptable for a deterministic parser: the
+    spilled remainder is preserved (and now rendered) under ``raw`` rather
+    than lost, and the multi-clause shape the model actually writes
+    dominates over abbreviations.
     """
     fields: dict[str, object] = {}
     prefs: list[str] = []

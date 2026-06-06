@@ -97,6 +97,25 @@ class TestRenderIdentity:
         assert "Alice" in section.content
         assert "Interactions: 3" in section.content
 
+    def test_raw_detail_renders_alongside_structured_fields(self):
+        """The unkeyed ``raw`` remainder is supplementary detail, not just a
+        fallback — it must still surface when a structured field also parsed,
+        else a captured user fact ("Lives in Berlin") is stored but never
+        shown to the LLM."""
+        rel = RelationshipSummary(
+            other_participant_id="user-alice",
+            other_participant_type="user",
+            trust_score=0.5,
+            interaction_count=0,
+            last_interaction_at=None,
+            notes=None,
+            identity={"name": "Max", "raw": "Lives in Berlin"},
+        )
+        section = _render(rel)
+        assert section is not None
+        assert "Name: Max" in section.content
+        assert "Lives in Berlin" in section.content
+
 
 # ─── Full path: immediacy + cross-room ──────────────────────
 

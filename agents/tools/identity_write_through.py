@@ -48,6 +48,19 @@ async def maybe_write_through_identity(
     :mod:`agents.sender_type`, so identity lands on the same relationship
     row the recall side later queries.
 
+    **Invariant — the note's subject is the inbound sender.**  The row
+    identity lands on is keyed by ``(other_id, other_participant_type)``:
+    ``other_id`` comes from the *topic*, but the type comes from the
+    *current event's* sender.  These agree only when the model writes the
+    ``contact:<id>`` note about the peer it is currently talking to — what
+    ``memory-tool-usage.md`` instructs.  A note about a *third party* of a
+    different participant type (e.g. an agent peer named while talking to a
+    user) would be written under the sender's type, and the cross-room read
+    for that third party would miss it.  We deliberately do not infer the
+    type from ``<id>`` — there is no reliable id→type convention — so the
+    prompt-enforced same-subject contract is what D2 relies on (revisit in
+    D3 if third-party capture becomes a goal).
+
     Best-effort: an identity failure must never fail the ``store_note``
     tool the model depends on, so it is logged and swallowed.
     """
