@@ -186,7 +186,7 @@ The `legacy` sentinel is *not* a real row in the `sessions` table — recall and
 
 ### D. Recall Semantics
 
-> **Amendment (v0.3.7):** person-keyed `contact:<participant_id>` notes recall **cross-room** (all sessions, still principal/epoch-scoped) — identity is the cross-room person axis, not the room axis. The session-scoped default below is unchanged for every other note. See [RFC 0031 Amendment — Person-Keyed Note Recall Crosses Rooms](0031-amendment-person-keyed-note-recall.md) (finding F-3b).
+> **Amendment (v0.3.7):** notes recall is uniformly **room-scoped** (`session_id IN (active, legacy)`) — the default below holds for *every* note, including person-keyed `contact:*`. Person identity that follows a person across rooms lives on the cross-room **relationship** tier, not on notes. An earlier amendment briefly recalled `contact:*` notes cross-room (F-3b / Option A); that carve-out was **retired** in F-7 Option D PR D3 once identity moved to the relationship tier — see [RFC 0031 Amendment — Person Identity Lives on the Cross-Room Relationship Tier](0031-amendment-person-identity-cross-room-tier.md) (which supersedes the [person-keyed note-recall amendment](0031-amendment-person-keyed-note-recall.md)).
 
 Default recall is **session-scoped**:
 

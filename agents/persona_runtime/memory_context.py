@@ -23,7 +23,6 @@ from .channel_history import (
     render_channel_history_section,
 )
 from .channel_roster import inject_channel_roster
-from .contact_section import recall_notes_for_event
 from .episodic_section import render_episodic_section
 from .facts_section import (
     DEFAULT_FACTS_BUDGET_TOKENS,
@@ -38,6 +37,7 @@ from .memory_budget import (
     MemoryBudget,
     _truncate_to_token_limit,
 )
+from .notes_section import recall_notes_for_event
 from .relationship_section import (
     RELATIONSHIP_SECTION_NAME,
     recall_relationship_summary,
@@ -335,9 +335,10 @@ class _MemoryContextMixin:
         # missing FTS5 index fallback.  The fallback's recency query would
         # re-admit those low-signal notes, defeating the threshold.
         # (RFC 0017 §D; PR #131 F-1 fallback removed.)
-        # Notes tier: room-scoped query recall (§D default) + the sender's
-        # cross-room contact note prepended (F-3b). Encapsulated in
-        # ``contact_section`` like the other tiers' recall helpers.
+        # Notes tier: room-scoped query recall (§D default). Person identity
+        # that follows a person across rooms now lives on the relationship
+        # tier (F-7 Option D / PR D3), not a cross-room contact note.
+        # Encapsulated in ``notes_section`` like the other tiers' helpers.
         notes = await recall_notes_for_event(
             self._episodic_memory,
             query=query,

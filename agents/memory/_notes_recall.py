@@ -21,7 +21,7 @@ from ..epoch_id import DEFAULT_EPOCH_ID
 from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ._epoch_filter import epoch_eq_clause
 from ._principal_filter import principal_eq_clause
-from ._session_filter import session_in_predicate
+from ._session_filter import session_in_clause
 from .episodic_queries import resolve_min_score
 
 logger = logging.getLogger(__name__)
@@ -29,54 +29,6 @@ logger = logging.getLogger(__name__)
 # FTS5 MATCH operator characters that cause parse errors when present in
 # freeform queries — strip all non-alphanumeric characters except spaces.
 _FTS5_SPECIAL = re.compile(r'[^a-zA-Z0-9\s]+')
-
-#: Person-keyed note topics whose scope is the *person* (cross-room), not
-#: the room. Matches the convention ``NoteStore.recall_contact_notes``
-#: builds (``contact:<participant_id>``).
-CONTACT_TOPIC_PREFIX = "contact:"
-
-
-def _notes_session_clause(
-    sessions: list[str] | None, *, column: str,
-) -> tuple[str, list[str]]:
-    """Session predicate for **notes** recall (F-7 / Option A).
-
-    Like :func:`session_in_clause`, but person-keyed ``contact:*`` notes
-    bypass the session filter — their scope is the person, so they recall
-    cross-room — while every other note keeps the room scoping. This is
-    the single source of truth both recall paths obey (the auto-injection
-    query tier and the LLM-facing ``recall_notes`` tool), so an explicit
-    recall can never again be narrower than ambient injection.
-
-    ``principal_id`` / ``epoch_id`` are applied by separate clauses and
-    still strictly bound, so the widening is cross-*room* only — never
-    cross-tenant or cross-epoch. In ``"*"`` no-filter mode there is no
-    session predicate to widen.
-
-    Consumes the *bare* predicate from :func:`session_in_predicate` (not
-    :func:`session_in_clause`) so the session filter drops straight into
-    the ``OR`` group without re-deriving where its ``" AND "`` prefix
-    ends — the two helpers share one IN-clause shape by construction.
-
-    See :func:`_recall_contact_notes` for the sibling cross-room path:
-    that one is exact-topic (used by auto-injection); this widening lets
-    the freeform ``recall_notes`` tool reach the same ``contact:*`` notes.
-    """
-    sess_pred, sess_params = session_in_predicate(sessions, column=column)
-    if not sess_pred:
-        return sess_pred, sess_params
-    # ``column`` is a trusted literal (``session_id`` / ``n.session_id``);
-    # the topic column shares its table-alias prefix, if any.
-    topic_col = column.replace("session_id", "topic")
-    # ``CONTACT_TOPIC_PREFIX`` is a constant with no LIKE metacharacters
-    # other than the intended trailing ``%`` wildcard, so no ESCAPE clause
-    # is needed (unlike the user-query LIKEs in ``_recall_notes_like``).
-    # The value is a parameter (not interpolated); its placeholder leads,
-    # so it prepends to ``sess_params`` in clause order.
-    return (
-        f" AND ({topic_col} LIKE ? OR {sess_pred})",
-        [f"{CONTACT_TOPIC_PREFIX}%", *sess_params],
-    )
 
 
 async def _recall_notes_fts5(
@@ -101,7 +53,7 @@ async def _recall_notes_fts5(
     no carve-out.  Falls back to LIKE on FTS5 parse failure or empty
     sanitized query.
     """
-    sess_clause, sess_params = _notes_session_clause(
+    sess_clause, sess_params = session_in_clause(
         sessions, column="n.session_id",
     )
     princ_clause, princ_params = principal_eq_clause(
@@ -170,7 +122,7 @@ async def _recall_notes_like(
     RFC 0017 Section C.  ``principal_id`` / ``epoch_id`` — see
     :func:`_recall_notes_fts5`.
     """
-    sess_clause, sess_params = _notes_session_clause(
+    sess_clause, sess_params = session_in_clause(
         sessions, column="session_id",
     )
     princ_clause, princ_params = principal_eq_clause(
@@ -204,50 +156,6 @@ async def _recall_notes_like(
         return list(await cursor.fetchall())
 
 
-async def _recall_contact_notes(
-    db: aiosqlite.Connection,
-    *,
-    agent_id: str,
-    topic: str,
-    limit: int,
-    note_cols: tuple[str, ...],
-    principal_id: str = DEFAULT_PRINCIPAL_ID,
-    epoch_id: str = DEFAULT_EPOCH_ID,
-) -> list[aiosqlite.Row]:
-    """Exact-topic, **cross-session** recall (RFC 0031 §D person-keyed
-    amendment, F-3b).
-
-    Deliberately omits the ``session_in_clause`` the other note-recall
-    helpers apply: a person-keyed ``contact:<id>`` note is recalled from
-    *every* room, since identity attaches to the person, not the venue
-    (``docs/memory-scope-axes.md``). ``principal_id`` / ``epoch_id`` are
-    still enforced — cross-*room*, never cross-tenant or cross-epoch — and
-    ``topic`` is matched exactly (no FTS/LIKE) so only that one person's
-    contact notes cross the room boundary, never arbitrary room notes.
-    """
-    princ_clause, princ_params = principal_eq_clause(
-        principal_id, column="principal_id",
-    )
-    epoch_clause, epoch_params = epoch_eq_clause(
-        epoch_id, column="epoch_id",
-    )
-    note_select = ", ".join(note_cols)
-    async with db.execute(
-        f"""
-        SELECT {note_select}
-        FROM notes
-        WHERE agent_id = ?
-          AND topic = ?
-          {princ_clause}
-          {epoch_clause}
-        ORDER BY updated_at DESC
-        LIMIT ?
-        """,
-        (agent_id, topic, *princ_params, *epoch_params, limit),
-    ) as cursor:
-        return list(await cursor.fetchall())
-
-
 async def _recall_notes_recency(
     db: aiosqlite.Connection,
     *,
@@ -262,7 +170,7 @@ async def _recall_notes_recency(
 
     ``principal_id`` / ``epoch_id`` — see :func:`_recall_notes_fts5`.
     """
-    sess_clause, sess_params = _notes_session_clause(
+    sess_clause, sess_params = session_in_clause(
         sessions, column="session_id",
     )
     princ_clause, princ_params = principal_eq_clause(

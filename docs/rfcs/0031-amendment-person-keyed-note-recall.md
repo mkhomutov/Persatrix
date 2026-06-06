@@ -1,12 +1,14 @@
 # RFC 0031 Amendment — Person-Keyed Note Recall Crosses Rooms
 
 **Type**: amendment to [RFC 0031](0031-per-session-namespacing-channels.md) §D (Recall Semantics)
-**Status**: ✅ Implemented — v0.3.7 ([v0.3.7 conversation test-findings PR plan](../v0.3.7-test-findings-pr-plan.md) PR 5, finding F-3b)
+**Status**: ⛔ **Superseded** (v0.3.7) by [RFC 0031 Amendment — Person Identity Lives on the Cross-Room Relationship Tier](0031-amendment-person-identity-cross-room-tier.md) (F-7 Option D, ISSUE-0093, **PR D3**). Shipped as Option A ([test-findings PR plan](../v0.3.7-test-findings-pr-plan.md) PR 5, finding F-3b), then retired. Kept for the design history.
 **Author**: Maksim Khomutov
 **Date**: 2026-06-05
 **Target**: v0.3.7
 **Trigger**: Manual end-to-end testing of the v0.3.7 stack. A persona was told a person's name and favourite language in one channel (it called `store_note` under topic `contact:local`, confirmed in the SQLite store), then in a **fresh channel** answered *"I don't have any notes about your name"*. Root cause: `contact:<id>` identity notes inherited the §D room-scoped recall default, so a person met in one room was invisible in another.
 **Supersedes**: nothing. **Narrows** the §D default for one note class (person-keyed `contact:*` topics), leaving every other note room-scoped.
+
+> **⛔ Superseded (PR D3).** This amendment shipped F-7 **Option A** — scope decided by a topic-prefix rule threaded through *recall* (`recall_contact_notes` + the `contact:*` widening in `NoteStore.recall_notes`). [Option D](0031-amendment-person-identity-cross-room-tier.md) re-homed person identity onto the genuinely cross-room **relationship** tier (PK omits `session_id`), and **PR D3 retired the Option-A carve-out**: `recall_contact_notes` is gone, `recall_notes` is room-scoped again, and the cross-room recall seam cannot recur by construction (identity no longer lives in a room-scoped tier). The narrative below describes the now-removed Option A and is retained only for design history.
 
 ---
 

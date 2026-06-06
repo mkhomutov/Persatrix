@@ -376,6 +376,13 @@ def create_memory_tools(
         """Store a note with a topic and content. Tags is a comma-separated string."""
         if not gate.check("memory:write"):
             return ToolResult(success=False, error="Permission denied: memory:write")
+        # RFC 0031 amendment (F-7 Option D, ISSUE-0093) PR D3 — a
+        # ``contact:<id>`` note's person identity now lives on the cross-room
+        # relationship tier *only* (D2's dual-write note is retired).  ``True``
+        # means identity was persisted, so skip the note; ``False`` falls
+        # through to the note write below as a safety net (see the helper).
+        if await maybe_write_through_identity(relationship, topic, content):
+            return ToolResult(success=True, data={"topic": topic, "identity_stored": True})
         tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
         try:
             note_id = await memory.store_note(
@@ -386,10 +393,6 @@ def create_memory_tools(
             )
         except ValueError as exc:
             return ToolResult(success=False, error=str(exc), error_type="ValueError")
-        # RFC 0031 amendment (F-7 Option D, ISSUE-0093) PR D2 — a
-        # ``contact:<id>`` note also upserts cross-room person identity onto
-        # the relationship tier (dual-write; best-effort — see the helper).
-        await maybe_write_through_identity(relationship, topic, content)
         return ToolResult(success=True, data={"note_id": note_id, "topic": topic})
 
     @tool(
