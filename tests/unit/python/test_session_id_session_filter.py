@@ -175,11 +175,12 @@ class TestSessionInClauseListMode:
 
 class TestSessionInPredicate:
     """``session_in_predicate`` is the bare predicate (no leading
-    ``" AND "``) that :func:`session_in_clause` wraps.  Exposed so
-    callers that embed the session filter inside a larger boolean group
-    — e.g. ``_notes_recall._notes_session_clause`` (F-7 contact-note
-    widening) — can reuse the IN-clause shape without string-surgering
-    the ``" AND "`` prefix back off ``session_in_clause``'s output.
+    ``" AND "``) that :func:`session_in_clause` wraps.  Exposed so a
+    caller that embeds the session filter inside a larger boolean group
+    can reuse the IN-clause shape without string-surgering the
+    ``" AND "`` prefix back off ``session_in_clause``'s output.  (The F-7
+    ``contact:*`` recall widening that once consumed it was retired in
+    ISSUE-0093 PR D3; the primitive stays — it is caller-independent.)
     """
 
     def test_none_returns_empty(self) -> None:

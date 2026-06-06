@@ -141,12 +141,13 @@ def session_in_predicate(
     """Build the bare ``"col IN (?, ?, ...)"`` predicate + params.
 
     No leading ``" AND "`` — :func:`session_in_clause` adds that for the
-    common "append after an existing WHERE predicate" case, while
-    callers that embed the session filter inside a larger boolean group
-    (e.g. ``_notes_recall._notes_session_clause``, which ORs it with a
-    contact-topic carve-out) consume this shape directly rather than
-    string-surgering the prefix back off.  ``session_list=None`` →
-    ``("", [])`` (no filter — ``"*"`` mode).
+    common "append after an existing WHERE predicate" case, while a
+    caller that needs to embed the session filter inside a larger boolean
+    group can consume this bare shape directly rather than string-surgering
+    the prefix back off.  ``session_list=None`` → ``("", [])`` (no filter —
+    ``"*"`` mode).  (A clean primitive kept independent of any one caller —
+    the F-7 ``contact:*`` recall carve-out that once used it was retired in
+    ISSUE-0093 PR D3.)
 
     SECURITY: ``column`` is interpolated directly into the returned
     SQL fragment via f-string — it must be a **trusted internal

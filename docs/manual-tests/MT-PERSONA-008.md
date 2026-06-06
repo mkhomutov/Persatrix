@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-PERSONA-008`
 **Feature Area**: Persona
-**Version**: 1.0
+**Version**: 2.0
 **Created**: 2026-06-05
-**Last Updated**: 2026-06-05
+**Last Updated**: 2026-06-06
 **Status**: Active
 
 ---
@@ -13,8 +13,16 @@
 > `store_note` under topic `contact:<id>`, confirmed in the store) said *"I
 > don't have any notes about your name"* in a fresh channel B —
 > person-identity notes inherited the room-scoped recall default. Tracked
-> as finding **F-3b** in the [v0.3.7 conversation test-findings PR plan §PR 5](../v0.3.7-test-findings-pr-plan.md);
-> resolved by the [RFC 0031 person-keyed note-recall amendment](../rfcs/0031-amendment-person-keyed-note-recall.md).
+> as finding **F-3b** in the [v0.3.7 conversation test-findings PR plan §PR 5](../v0.3.7-test-findings-pr-plan.md).
+>
+> **Mechanism updated (F-7 Option D, PR D3).** This was first fixed by
+> recalling `contact:*` *notes* cross-room (Option A); identity has since
+> been re-homed onto the cross-room **relationship** tier, and the
+> note carve-out was **retired** — see the [person-identity cross-room
+> tier amendment](../rfcs/0031-amendment-person-identity-cross-room-tier.md)
+> (which supersedes the [person-keyed note-recall amendment](../rfcs/0031-amendment-person-keyed-note-recall.md)).
+> The *user-facing* behaviour (Steps 2–3) is unchanged; only the gate test
+> and the storage path differ.
 
 ---
 
@@ -24,22 +32,27 @@
 different channel — identity (name, role, stable preferences) crosses
 rooms — while non-identity (room) notes stay scoped to their channel.
 
-**Scope**: `recall_contact_notes` (cross-session, principal/epoch-scoped,
-topic-exact) and its wiring into `_inject_memory_context`.
+**Scope**: cross-room person **identity** on the relationship tier
+(`upsert_identity` / `get_identity`, principal/epoch-scoped, no session
+filter), the `store_note(contact:*)` write-through that feeds it, and its
+render in `_inject_memory_context` via the relationship section.
 
 **Out of Scope**: Cross-tenant or cross-epoch recall (must **not** cross —
-see Step 3); re-homing identity onto the RFC 0026 facts tier (follow-up).
+see Edge Case 1); re-homing identity onto the RFC 0026 facts tier (the
+amendment leaves facts session-scoped).
 
 ---
 
 ## Related Documentation
 
-- [RFC 0031 person-keyed note-recall amendment](../rfcs/0031-amendment-person-keyed-note-recall.md)
+- [RFC 0031 person-identity cross-room tier amendment](../rfcs/0031-amendment-person-identity-cross-room-tier.md) (F-7 Option D)
 - [docs/memory-scope-axes.md](../memory-scope-axes.md) — session = room vs. cross-room person axis.
 - [docs/v0.3.7-test-findings-pr-plan.md §PR 5](../v0.3.7-test-findings-pr-plan.md) — F-3b.
 
 **Related Automated Tests**:
-- [`tests/unit/python/test_contact_note_cross_room_recall.py`](../../tests/unit/python/test_contact_note_cross_room_recall.py) — cross-room recall, topic-exactness, preserved room isolation, epoch scoping, and the injection wiring.
+- [`tests/unit/python/test_identity_render.py`](../../tests/unit/python/test_identity_render.py) — the full write-through → cross-room → immediacy path through the relationship tier (`TestIdentityImmediacyCrossRoom`).
+- [`tests/unit/python/test_contact_note_room_scoped.py`](../../tests/unit/python/test_contact_note_room_scoped.py) — the retirement contract: notes are uniformly room-scoped; a `contact:*` note does **not** cross rooms.
+- [`tests/unit/python/test_relationship_identity.py`](../../tests/unit/python/test_relationship_identity.py) — merge/supersede, principal/epoch isolation on the identity column.
 
 ---
 
@@ -59,12 +72,16 @@ see Step 3); re-homing identity onto the RFC 0026 facts tier (follow-up).
 **Action**:
 
 ```bash
-.venv/bin/python -m pytest tests/unit/python/test_contact_note_cross_room_recall.py -v
+.venv/bin/python -m pytest \
+  tests/unit/python/test_identity_render.py \
+  tests/unit/python/test_contact_note_room_scoped.py \
+  tests/unit/python/test_relationship_identity.py -v
 ```
 
-**Expected Result**: All pass — cross-room recall, topic-exact, room
-isolation preserved, epoch-scoped, and the injection test
-(`test_sender_contact_note_injected_despite_query_miss`).
+**Expected Result**: All pass — cross-room identity surfaces from the
+relationship tier (immediacy + cross-room), notes are uniformly
+room-scoped (the `contact:*` carve-out is gone), and principal/epoch
+isolation on the identity column holds.
 
 ---
 
@@ -98,8 +115,8 @@ question shares no wording with the stored note.
 Then in channel B ask about it.
 
 **Expected Result**: The room note does **not** cross — channel B does not
-surface "standup at 10am". Only person-identity (`contact:*`) notes cross
-rooms; general notes stay room-scoped.
+surface "standup at 10am". Notes are uniformly room-scoped; only person
+**identity** crosses rooms, and it rides the relationship tier, not notes.
 
 **Verification**:
 - [ ] Room-specific note from channel A is not recalled in channel B
@@ -125,7 +142,8 @@ run) or a different principal.
 
 **Expected Behavior**: The person fact is **not** recalled — cross-room is
 not cross-epoch or cross-tenant. This is the intended isolation, not a
-regression (pinned by `test_contact_recall_respects_epoch`).
+regression (pinned by the principal/epoch-isolation cases in
+`test_relationship_identity.py`).
 
 ---
 
@@ -142,6 +160,8 @@ regression (pinned by `test_contact_recall_respects_epoch`).
 - This is the substantive half of F-3 (PR 5); MT-PERSONA-007 (PR 4) made
   the prompt *honest* about scope, and its Step 3 "empty recall admitted"
   expectation is superseded here once cross-room recall lands.
-- Delivery is via **auto-injection** of the sender's contact note — the
-  persona does not need to call `recall_notes` for cross-room identity; the
-  fact is already in its context.
+- Delivery is via **auto-injection** of the sender's relationship-tier
+  identity (rendered in the relationship section) — the persona does not
+  need to call `recall_notes` for cross-room identity; the fact is already
+  in its context. (Pre-D3 this rode a cross-room `contact:*` note; the note
+  carve-out is now retired.)

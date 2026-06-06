@@ -1,17 +1,25 @@
-"""RFC 0031 amendment (F-7 Option D, ISSUE-0093) **PR D2** — the
-``store_note(contact:<id>)`` → ``upsert_identity`` write-through.
+"""RFC 0031 amendment (F-7 Option D, ISSUE-0093) **PR D3** — the
+``store_note(contact:<id>)`` → ``upsert_identity`` write-through, with the
+D2 dual-write retired: a contact note now lands on the cross-room
+relationship tier **only** — no room-scoped note row is written.
 
-D2 routes the contact note the model already writes onto the cross-room
-relationship tier (dual-write: the legacy room-scoped note is still
-written during the D2 transition; D3 drops it).  This file covers:
+D2 dual-wrote (relationship identity *and* the legacy room-scoped note) so
+cross-room recall could be migrated and verified before the note write was
+dropped.  D3 drops it: when a relationship handle is present and the
+structured parse yields identity, the contact note routes to the
+relationship tier alone.  The note write survives only as a **fallback
+safety net** — when there is no relationship handle, or the identity
+upsert raises — so nothing the model stored is ever silently lost.  This
+file covers:
 
 * the pure :func:`agents.memory.identity_parse.parse_identity_fields`
   structuring step (keyed / natural / unkeyed-to-``raw``);
 * the :data:`agents.sender_type` task-local participant-type binding;
 * the write-through at the ``store_note`` tool boundary — identity lands
-  on the relationship row with the bound participant type, the note is
-  still written (dual-write), non-contact topics are untouched, and an
-  absent relationship handle / a write failure never breaks the note tool;
+  on the relationship row with the bound participant type, **no note row
+  is written** for the contact topic, non-contact topics are untouched,
+  and the fallback note write fires when there is no relationship handle
+  or the identity write fails;
 * merge/supersede across two notes via the parser + ``merge_identity``.
 """
 
@@ -181,19 +189,52 @@ class TestIdentityWriteThrough:
         )
         assert identity == {"name": "Alice", "role": "engineer"}
 
-    async def test_dual_write_note_still_stored(
+    async def test_contact_note_not_written_to_notes_tier(
         self, episodic, relationship, gate_rw,
     ):
+        """D3: the legacy room-scoped note write is retired — a contact note
+        with a relationship handle lands on the relationship tier *only*, so
+        no row appears in the notes tier (the seam cannot recur because
+        identity no longer lives in a room-scoped tier)."""
         tools = create_memory_tools(episodic, gate_rw, relationship=relationship)
         store_note = _store_note(tools)
         with sender_type_scope_from_metadata({"sender_participant_type": "user"}):
-            await store_note.func(
+            result = await store_note.func(
                 topic="contact:user-alice", content="Name: Alice.",
             )
-        # The legacy room-scoped note is still written during the D2
-        # transition (retired in D3).
-        notes = await episodic.recall_notes("Alice", limit=10)
-        assert any("Alice" in n.content for n in notes)
+        assert result.success
+        # No note row was written (recall on any query is empty).
+        assert await episodic.recall_notes("Alice", limit=10) == []
+        assert await episodic.recall_notes("", limit=10) == []
+        # The identity still landed on the relationship tier.
+        assert await relationship.get_identity(
+            "user-alice", other_participant_type="user",
+        ) == {"name": "Alice"}
+
+    async def test_contact_note_with_tags_still_writes_identity_only(
+        self, episodic, relationship, gate_rw,
+    ):
+        """Tags on a contact note are *not* a reason to fall back to a note
+        write: the identity tier has no tag field, so a tagged ``contact:*``
+        note still lands on the relationship tier alone and writes no note
+        row (the tags are discarded). Pins the D3 invariant — nothing, not
+        even a tag, may reintroduce the room-scoped note the cross-room seam
+        lived in."""
+        tools = create_memory_tools(episodic, gate_rw, relationship=relationship)
+        store_note = _store_note(tools)
+        with sender_type_scope_from_metadata({"sender_participant_type": "user"}):
+            result = await store_note.func(
+                topic="contact:user-alice", content="Name: Alice.",
+                tags="vip,engineering",
+            )
+        assert result.success
+        # The tags did not cause a fallback note write.
+        assert await episodic.recall_notes("Alice", limit=10) == []
+        assert await episodic.recall_notes("", limit=10) == []
+        # Identity still landed on the relationship tier (tags discarded).
+        assert await relationship.get_identity(
+            "user-alice", other_participant_type="user",
+        ) == {"name": "Alice"}
 
     async def test_non_contact_topic_writes_no_identity(
         self, episodic, relationship, gate_rw,
@@ -207,21 +248,28 @@ class TestIdentityWriteThrough:
         )
         assert identity is None
 
-    async def test_no_relationship_handle_note_tool_unaffected(
+    async def test_no_relationship_handle_falls_back_to_note(
         self, episodic, gate_rw,
     ):
-        # Constructed without a relationship handle (pre-wiring / non-persona
-        # callers) — the note tool must still work, no crash.
+        """No relationship handle (pre-wiring / non-persona callers): the
+        identity tier is unreachable, so the contact note falls back to a
+        room-scoped note write — the tool succeeds and nothing is lost."""
         tools = create_memory_tools(episodic, gate_rw)
         store_note = _store_note(tools)
         result = await store_note.func(
             topic="contact:user-alice", content="Name: Alice.",
         )
         assert result.success
+        # Fallback safety net: the note was written since identity could not be.
+        notes = await episodic.recall_notes("Alice", limit=10)
+        assert any("Alice" in n.content for n in notes)
 
-    async def test_identity_write_failure_never_breaks_note_tool(
+    async def test_identity_write_failure_falls_back_to_note(
         self, episodic, relationship, gate_rw, monkeypatch,
     ):
+        """If the identity upsert raises, the contact note falls back to the
+        room-scoped note write so the model's data is never silently dropped —
+        the tool still succeeds."""
         async def _boom(*args, **kwargs):
             raise RuntimeError("identity backend down")
 
@@ -231,8 +279,10 @@ class TestIdentityWriteThrough:
         result = await store_note.func(
             topic="contact:user-alice", content="Name: Alice.",
         )
-        # The note write succeeded; the identity failure was swallowed.
         assert result.success
+        # Fallback: the note was written because the identity write failed.
+        notes = await episodic.recall_notes("Alice", limit=10)
+        assert any("Alice" in n.content for n in notes)
 
     async def test_merge_supersede_across_two_notes(
         self, episodic, relationship, gate_rw,

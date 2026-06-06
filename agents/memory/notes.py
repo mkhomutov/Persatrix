@@ -23,7 +23,6 @@ from ..session_id import LEGACY_SESSION_ID, normalize_session_id
 from ._epoch_filter import resolve_active_epoch
 from ._notes_recall import (
     _FTS5_SPECIAL,
-    _recall_contact_notes,
     _recall_notes_fts5,
     _recall_notes_like,
     _recall_notes_recency,
@@ -304,41 +303,6 @@ class NoteStore:
                 note.access_count += 1
 
         return notes
-
-    async def recall_contact_notes(
-        self, participant_id: str, *, limit: int = 10,
-    ) -> list[Note]:
-        """Recall a participant's ``contact:<id>`` notes across rooms.
-
-        RFC 0031 §D person-keyed amendment (v0.3.7 F-3b): a person's
-        identity notes are cross-room — recalled from every session — but
-        still scoped to the active ``principal_id`` / ``epoch_id``
-        (cross-*room*, never cross-tenant or cross-epoch). Distinct from
-        :meth:`recall_notes`, whose default stays room-scoped
-        (``session_id IN (active, legacy)``); this path matches the
-        ``contact:<participant_id>`` topic exactly, so only that one
-        person's notes cross the room boundary.
-
-        No ``access_count`` bump: this is an auto-injection read issued on
-        every inbound event with a sender, so bumping would write on every
-        turn for no recall-ranking benefit (the recency order is by
-        ``updated_at``).
-        """
-        if not participant_id:
-            return []
-        topic = f"contact:{participant_id}"
-        active_principal = resolve_active_principal(self._active_principal_id)
-        active_epoch = resolve_active_epoch(self._active_epoch_id)
-        rows = await _recall_contact_notes(
-            self._db,
-            agent_id=self._agent_id,
-            topic=topic,
-            limit=limit,
-            note_cols=_NOTE_COLS,
-            principal_id=active_principal,
-            epoch_id=active_epoch,
-        )
-        return [self._row_to_note(row) for row in rows]
 
     async def update_note(self, note_id: str, content: str) -> bool:
         """Update note content. Topic and tags preserved. Returns True if found.

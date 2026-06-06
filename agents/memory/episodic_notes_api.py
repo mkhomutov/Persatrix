@@ -92,19 +92,6 @@ class _EpisodicNotesAPIMixin:
             query, limit=limit, min_score=min_score, sessions=sessions,
         )
 
-    async def recall_contact_notes(
-        self, participant_id: str, *, limit: int = 10,
-    ) -> list[Note]:
-        """Recall a participant's ``contact:<id>`` notes across rooms.
-
-        RFC 0031 §D person-keyed amendment (F-3b) — cross-session,
-        principal/epoch-scoped. Delegates to
-        :meth:`NoteStore.recall_contact_notes`; see that method.
-        """
-        return await self._ensure_note_store().recall_contact_notes(
-            participant_id, limit=limit,
-        )
-
     async def update_note(self, note_id: str, content: str) -> bool:
         """Update note content. Topic and tags preserved. Returns True if found."""
         return await self._ensure_note_store().update_note(note_id, content)

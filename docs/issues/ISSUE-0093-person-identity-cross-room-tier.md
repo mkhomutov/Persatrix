@@ -45,7 +45,7 @@ Person identity (name, role, stable preferences) is **stored on, and recalled fr
 
 ## Retirement of the PR-A workaround
 
-Once identity is recalled cross-room from the relationship tier and verified, remove `_notes_recall._notes_session_clause` + the `contact:*` recall widening (revert `recall_notes` to `session_in_clause`), and drop the `recall_contact_notes` cross-room helper if no longer used. Keep `session_in_predicate` (it is a clean primitive independent of this).
+**✅ Done (PR D3).** Identity is recalled cross-room from the relationship tier, so the Option-A read carve-out was removed: `_notes_recall._notes_session_clause` + the `contact:*` recall widening are gone (the three recall helpers revert to `session_in_clause`), and `recall_contact_notes` (`NoteStore` + the `EpisodicMemory` delegate) is dropped. The D2 dual-write note is also dropped — `store_note(contact:*)` now writes identity only (falling back to a note on failure / no handle, so nothing is lost). `session_in_predicate` is kept (a clean primitive independent of this). **Remaining: the D4 backfill** of pre-cutover `contact:*` notes onto relationship identity rows (split out — it carries the participant-type design choice; notes don't record `other_participant_type`, which is part of the relationship PK).
 
 ## Dependencies & sequencing
 
