@@ -15,8 +15,7 @@ use serde_json::json;
 
 use crate::commands::channel_render::{fetch_agent_display_names, format_message_line};
 use crate::commands::channel_types::{
-    AddMemberRequest, ChannelMember, ChannelMessage, ChannelView, HistoryResponse,
-    ListChannelsResponse, PublishMessageRequest,
+    AddMemberRequest, ChannelMessage, HistoryResponse, ListChannelsResponse, PublishMessageRequest,
 };
 use crate::commands::channel_watch::{watch_seen_cap_for, WatchState, FULL_PAGE_WARNING_TEXT};
 use crate::types::{api_error_message, validate_path_param, validate_resource_id};
@@ -30,6 +29,15 @@ pub(crate) const DEFAULT_HISTORY_LIMIT: u32 = 50;
 /// Mirrors `channelMaxMentionsPerPublish` so the CLI fails fast with a
 /// clear message instead of round-tripping a generic 400.
 pub(crate) const MAX_MENTIONS_PER_PUBLISH: usize = 10;
+
+/// The broadcast sentinel (RFC 0030 relevance amendment Tier A, decision D3).
+/// `--mention-all` emits this rather than enumerating the roster: the server's
+/// directed-elsewhere filter keys on its presence to admit every `participant`,
+/// so the broadcast is roster-independent (no member fetch) and survives the
+/// server's mention cap. Mirrors `internal/channels/channels.go`'s
+/// `MentionEveryone` and `agents.response_gate.MENTION_EVERYONE`; it is NOT a
+/// participant id, so it is carved out of [`validate_send_inputs`].
+pub(crate) const MENTION_EVERYONE: &str = "@everyone";
 
 // ─── Pure helpers (testable without an HTTP server) ─────────────────────
 
@@ -48,15 +56,18 @@ pub(crate) fn canonicalize_channel_id(input: &str) -> String {
 
 /// Resolve the `mentions` array sent on a publish request.
 ///
-/// `--mention-all` resolves client-side (RFC 0011 PR plan PR 6) so the
-/// orchestrator surface stays unchanged. The sender is excluded — the
-/// gate would only fan the message back to the same actor. Order is
-/// stable: explicit flags first (input order), then remaining members
-/// (server order); duplicates collapse.
+/// `--mention-all` emits the roster-independent [`MENTION_EVERYONE`] broadcast
+/// sentinel (RFC 0030 Tier A, decision D3) rather than enumerating members:
+/// the server's directed-elsewhere filter keys on the sentinel's presence to
+/// admit every `participant`, so no member fetch is needed and the server's
+/// mention cap cannot be tripped by a large roster. The sender is dropped from
+/// the explicit list (the gate would only fan the message back to the same
+/// actor; on a broadcast the gate excludes the sender on its side). Order is
+/// stable: explicit flags first (input order, so the gate addresses them
+/// first), then the sentinel; duplicates collapse.
 pub(crate) fn expand_mentions(
     explicit: &[String],
     mention_all: bool,
-    members: &[ChannelMember],
     sender_id: &str,
 ) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::new();
@@ -67,13 +78,8 @@ pub(crate) fn expand_mentions(
         }
         out.push(m.clone());
     }
-    if mention_all {
-        for m in members {
-            if m.id == sender_id || !seen.insert(m.id.clone()) {
-                continue;
-            }
-            out.push(m.id.clone());
-        }
+    if mention_all && seen.insert(MENTION_EVERYONE.to_string()) {
+        out.push(MENTION_EVERYONE.to_string());
     }
     out
 }
@@ -100,6 +106,16 @@ pub(crate) fn validate_message_id(input: &str) -> Result<(), String> {
 pub(crate) fn validate_send_inputs(sender_id: &str, mentions: &[String]) -> Result<(), String> {
     validate_resource_id(sender_id, "sender id")?;
     for m in mentions {
+        // The `@everyone` broadcast sentinel (D3) is not a participant id —
+        // carve it out so an explicit `--mention @everyone` is not rejected
+        // client-side before it reaches the wire. (`--mention-all` does not
+        // rely on this branch: its sentinel is appended in `expand_mentions`
+        // *after* this check, which only ever sees the explicit inputs.)
+        // Mirrors the server-side carve-out (ISSUE-0094). `sender_id` carries a
+        // stronger trust claim and is intentionally NOT exempt.
+        if m == MENTION_EVERYONE {
+            continue;
+        }
         validate_resource_id(m, "mention")?;
     }
     Ok(())
@@ -107,10 +123,10 @@ pub(crate) fn validate_send_inputs(sender_id: &str, mentions: &[String]) -> Resu
 
 /// Reject mention arrays that exceed the server cap.
 ///
-/// `--mention-all` resolves to every channel member client-side; on a
-/// channel with > [`MAX_MENTIONS_PER_PUBLISH`] members the server's
-/// `BAD_REQUEST` is opaque. Failing fast names both the actual count
-/// and the cap so the user can pivot to explicit `--mention <id>`.
+/// `--mention-all` now emits a single `@everyone` sentinel so it cannot trip
+/// the cap on its own, but a caller can still pass > [`MAX_MENTIONS_PER_PUBLISH`]
+/// explicit `--mention <id>` flags; the server's `BAD_REQUEST` is opaque, so
+/// fail fast naming both the actual count and the cap.
 pub(crate) fn validate_mention_count(mentions: &[String]) -> Result<(), String> {
     if mentions.len() > MAX_MENTIONS_PER_PUBLISH {
         return Err(format!(
@@ -224,8 +240,8 @@ pub(crate) async fn cmd_channel_send(
 ) -> Result<(), String> {
     let canonical = canonicalize_channel_id(name);
     validate_path_param(&canonical, "channel id")?;
-    // `--mention-all` resolves from the server's member list (already
-    // validated at join time); only the explicit inputs need a check.
+    // `--mention-all` emits the `@everyone` sentinel client-side (no roster
+    // fetch); only the explicit `--mention` inputs need a shape check.
     validate_send_inputs(sender_id, explicit_mentions)?;
     // RFC 0031 Phase 3 `--session` override (OQ #6 precedence; see session_resolve).
     let session_id = crate::session_resolve::resolve_for_invocation(client, server, session_flag)
@@ -234,12 +250,7 @@ pub(crate) async fn cmd_channel_send(
     // ISSUE-0085 PR 5 `--epoch` override (flag > PERSATRIX_EPOCH env; see
     // epoch_resolve). No registry lookup — epoch has no lifecycle.
     let epoch_id = crate::epoch_resolve::resolve_epoch(epoch_flag).unwrap_or_default();
-    let mentions = if mention_all {
-        let members = fetch_channel_members(client, server, &canonical).await?;
-        expand_mentions(explicit_mentions, true, &members, sender_id)
-    } else {
-        expand_mentions(explicit_mentions, false, &[], sender_id)
-    };
+    let mentions = expand_mentions(explicit_mentions, mention_all, sender_id);
     // Server caps mentions at MAX_MENTIONS_PER_PUBLISH; failing fast
     // here surfaces a clear message instead of an opaque 400 from the
     // unauthenticated REST surface.
@@ -384,26 +395,6 @@ pub(crate) async fn cmd_channel_watch(
         first_poll = false;
         tokio::time::sleep(interval).await;
     }
-}
-
-async fn fetch_channel_members(
-    client: &reqwest::Client,
-    server: &str,
-    canonical_id: &str,
-) -> Result<Vec<ChannelMember>, String> {
-    let resp = client
-        .get(format!("{server}/api/v1/channels/{canonical_id}"))
-        .send()
-        .await
-        .map_err(|e| format!("connection failed: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(api_error_message(resp).await);
-    }
-    let view: ChannelView = resp
-        .json()
-        .await
-        .map_err(|e| format!("invalid response: {e}"))?;
-    Ok(view.members)
 }
 
 #[cfg(test)]
