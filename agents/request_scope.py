@@ -26,6 +26,7 @@ from contextlib import ExitStack, contextmanager
 
 from .epoch_id import epoch_scope_from_metadata
 from .principal_id import principal_scope_from_metadata
+from .sender_type import sender_type_scope_from_metadata
 from .session_id import session_scope_from_metadata
 
 
@@ -33,16 +34,25 @@ from .session_id import session_scope_from_metadata
 def request_scope_from_metadata(
     metadata: Mapping[str, object],
 ) -> Iterator[None]:
-    """Bind the session, principal **and** epoch scopes for an event's life.
+    """Bind the session, principal, epoch **and** sender-type scopes for an
+    event's life.
 
     Enters :func:`agents.session_id.session_scope_from_metadata`,
-    :func:`agents.principal_id.principal_scope_from_metadata` and
-    :func:`agents.epoch_id.epoch_scope_from_metadata` together via an
-    :class:`~contextlib.ExitStack` so all three are restored on exit
-    (including on exception).  A no-op for any axis whose key is absent.
+    :func:`agents.principal_id.principal_scope_from_metadata`,
+    :func:`agents.epoch_id.epoch_scope_from_metadata` and
+    :func:`agents.sender_type.sender_type_scope_from_metadata` together via
+    an :class:`~contextlib.ExitStack` so all are restored on exit (including
+    on exception).  A no-op for any axis whose key is absent.
+
+    The sender-type binding (RFC 0031 amendment, F-7 Option D, ISSUE-0093
+    PR D2) carries the inbound sender's participant type to the identity
+    write-through at the ``store_note`` tool boundary, so a ``contact:<id>``
+    note's identity lands on the same relationship row the recall side
+    later queries.
     """
     with ExitStack() as stack:
         stack.enter_context(session_scope_from_metadata(metadata))
         stack.enter_context(principal_scope_from_metadata(metadata))
         stack.enter_context(epoch_scope_from_metadata(metadata))
+        stack.enter_context(sender_type_scope_from_metadata(metadata))
         yield

@@ -20,12 +20,14 @@ import aiohttp
 
 from ..prompt_loader import load_snippet
 from ..session_id import current_session_id, resolve_session_id_silent
+from .identity_write_through import maybe_write_through_identity
 from .permissions import PermissionGate
 from .registry import ToolDefinition, ToolResult, get_tool, tool
 from .sandbox import PathValidator
 
 if TYPE_CHECKING:
     from ..memory.episodic import EpisodicMemory
+    from ..memory.relationship import RelationshipMemory
 
 logger = logging.getLogger(__name__)
 
@@ -334,11 +336,21 @@ def create_memory_tools(
     *,
     max_notes: int = 500,
     auto_reflect_after: int = 0,
+    relationship: RelationshipMemory | None = None,
 ) -> list[ToolDefinition]:
     """Create closure-based memory tools bound to a specific EpisodicMemory instance.
 
     The ``agent_id`` and DB connection are captured in the closure — they are
     NOT controllable by the LLM.
+
+    ``relationship`` (RFC 0031 amendment, F-7 Option D, ISSUE-0093 PR D2)
+    wires the person-identity write-through: a ``store_note`` call whose
+    topic is ``contact:<id>`` additionally upserts structured identity
+    (name / role / prefs) onto the cross-room relationship tier so it
+    surfaces in every room for that person, not just the room it was
+    stated in.  ``None`` (the default for non-persona callers and the
+    pre-wiring path) disables the write-through — the note tool behaves
+    exactly as before.
 
     Returns a list of registered ToolDefinition objects.
     """
@@ -374,6 +386,10 @@ def create_memory_tools(
             )
         except ValueError as exc:
             return ToolResult(success=False, error=str(exc), error_type="ValueError")
+        # RFC 0031 amendment (F-7 Option D, ISSUE-0093) PR D2 — a
+        # ``contact:<id>`` note also upserts cross-room person identity onto
+        # the relationship tier (dual-write; best-effort — see the helper).
+        await maybe_write_through_identity(relationship, topic, content)
         return ToolResult(success=True, data={"note_id": note_id, "topic": topic})
 
     @tool(

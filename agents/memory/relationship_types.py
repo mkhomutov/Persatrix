@@ -121,3 +121,13 @@ class RelationshipSummary:
     # seeded from config without any recorded interaction yet, or for
     # legacy rows with no interaction history.
     first_interaction_at: float | None = None
+    # RFC 0031 amendment (F-7 Option D, ISSUE-0093) PR D2: the structured
+    # cross-room person identity (``{name, role, prefs, raw}``) read off the
+    # relationship row's ``identity`` column.  Attached by
+    # :func:`agents.persona_runtime.relationship_section.recall_relationship_summary`
+    # via the dedicated, session-filter-free
+    # :meth:`RelationshipMemory.get_identity` read — *not* the
+    # session-filtered ``get_relationship_summary`` row read above — which is
+    # what makes identity cross-room while the rest of the summary stays
+    # room-scoped.  ``None`` when no identity is recorded for the pair.
+    identity: dict[str, Any] | None = None
