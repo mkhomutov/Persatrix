@@ -304,6 +304,7 @@ signal, not a memory bug.
 | Date | Tester | OS | Build | Result | Notes |
 |------|--------|----|-------|--------|-------|
 | 2026-06-06 | Claude (Opus 4.8) | macOS (Darwin 24.6.0) | RC tip `65303d7` (Anthropic) | ✅ **Pass** (both legs) | Leg 1 — `ember-owl` attributed *Iron Fox→Postgres, Nova Sparrow→SQLite* correctly (Edge Case 3 hit; re-seeded "opposite sides" per recipe). Leg 2 — bound *"their"* (operational simplicity) to Nova Sparrow and engaged her reasoning. See [v0.3.7-execution-report.md](v0.3.7-execution-report.md). |
+| 2026-06-06 | Claude (Opus 4.8) | macOS (Darwin 24.6.0) | tip `92a5a00` (Anthropic) | ✅ **Pass** (both legs) | Re-run on the post-fix tip. Leg 1 — `ember-owl`: *"Iron Fox took Postgres. Nova Sparrow took SQLite"* (opposite-sides seed). Leg 2 — first referent ("operational simplicity") was ambiguous (both peers used that framing) so `ember-owl` bound it to Iron Fox; per Edge Case 1, re-run with a referent unique to Nova Sparrow ("get us in front of customers fastest") → bound *"their"* to Nova Sparrow cleanly. See [v0.3.7-execution-report.md](v0.3.7-execution-report.md). |
 
 ---
 

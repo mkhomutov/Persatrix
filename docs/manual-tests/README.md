@@ -152,7 +152,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | v0.3.4 | [v0.3.4-execution-report.md](v0.3.4-execution-report.md) | ✅ Complete |
 | v0.3.5 | [v0.3.5-execution-report.md](v0.3.5-execution-report.md) | ✅ Complete |
 | v0.3.6 | [v0.3.6-execution-report.md](v0.3.6-execution-report.md) | ✅ Complete |
-| v0.3.7 | [v0.3.7-execution-report.md](v0.3.7-execution-report.md) | ⚠️ Complete — release-blocking finding ([ISSUE-0094](../issues/ISSUE-0094-everyone-broadcast-rejected-by-agent-inbound-validation.md), MT-CHANNEL-RELEVANCE-001 Step 4) |
+| v0.3.7 | [v0.3.7-execution-report.md](v0.3.7-execution-report.md) | ✅ Complete — clean pass on tip `92a5a00` (the first-run blocker [ISSUE-0094](../issues/ISSUE-0094-everyone-broadcast-rejected-by-agent-inbound-validation.md) / MT-CHANNEL-RELEVANCE-001 Step 4 fixed in [#562](https://github.com/mkhomutov/Persatrix/pull/562)/[#563](https://github.com/mkhomutov/Persatrix/pull/563), re-verified live) |
 
 ---
 
