@@ -399,3 +399,87 @@ class TestValidateChannelMessageDict:
             _msg_dict(sender_id=123), channel_type="group",
         )
         assert err is not None
+
+
+class TestEveryoneBroadcastSentinel:
+    """ISSUE-0094 (F-8): the ``@everyone`` broadcast sentinel
+    (RFC 0030 relevance amendment Tier A, decision D3) must pass inbound
+    envelope validation, not be rejected as a malformed participant id.
+
+    The orchestrator (``internal/channels/channels.go``'s ``MentionEveryone``,
+    the floor-control directed-filter bypass) and the receiver response gate
+    (``agents.response_gate.MENTION_EVERYONE``) both special-case the sentinel;
+    the inbound validators must agree, or a broadcast is dropped before the
+    gate runs (every persona stays silent; a floor-controlled publish blocks
+    N x 45s). See ``docs/issues/ISSUE-0094-…`` and the v0.3.7 execution report.
+    """
+
+    def test_event_accepts_everyone_alone(self):
+        err, ts = validate_channel_message_event(_event(mentions=["@everyone"]))
+        assert err is None
+        assert isinstance(ts, float)
+
+    def test_event_accepts_everyone_alongside_real_id(self):
+        # The live repro shape: a broadcast that also names a specific
+        # persona (`--mention-all` + an explicit @-mention).
+        err, ts = validate_channel_message_event(
+            _event(mentions=["ember-owl", "@everyone"]),
+        )
+        assert err is None
+        assert isinstance(ts, float)
+
+    def test_event_still_rejects_a_real_malformed_id_with_everyone_present(self):
+        # The sentinel carve-out must not become a hole: a genuinely
+        # malformed id alongside @everyone must still reject.
+        err, _ = validate_channel_message_event(
+            _event(mentions=["@everyone", "bad:id"]),
+        )
+        assert err is not None
+        assert "mentions" in err
+
+    def test_event_does_not_treat_everyone_as_the_sender(self):
+        # The carve-out is scoped to the mentions list only — sender_id
+        # carries a stronger trust claim and must still reject the sentinel.
+        err, _ = validate_channel_message_event(_event(sender_id="@everyone"))
+        assert err is not None
+        assert "sender_id" in err
+
+    def test_event_rejects_a_miscased_sentinel(self):
+        # The carve-out is an exact-string match, deliberately mirroring Go's
+        # ``const MentionEveryone = "@everyone"`` (channels.go) and the gate's
+        # ``MENTION_EVERYONE`` — none of which case-fold. A miscased ``@Everyone``
+        # is therefore NOT the sentinel: it fails the participant-id regex and
+        # must reject, so the three layers can never silently diverge on casing.
+        err, _ = validate_channel_message_event(_event(mentions=["@Everyone"]))
+        assert err is not None
+        assert "mentions" in err
+
+    def test_dict_accepts_everyone_alone(self):
+        err, ts = validate_channel_message_dict(
+            _msg_dict(mentions=["@everyone"]), channel_type="group",
+        )
+        assert err is None
+        assert isinstance(ts, float)
+
+    def test_dict_accepts_everyone_alongside_real_id(self):
+        err, ts = validate_channel_message_dict(
+            _msg_dict(mentions=["ember-owl", "@everyone"]), channel_type="group",
+        )
+        assert err is None
+        assert isinstance(ts, float)
+
+    def test_dict_still_rejects_a_real_malformed_id_with_everyone_present(self):
+        err, _ = validate_channel_message_dict(
+            _msg_dict(mentions=["@everyone", "bad:id"]), channel_type="group",
+        )
+        assert err is not None
+        assert "mentions" in err
+
+    def test_sentinel_constant_matches_the_response_gate(self):
+        # Drift guard: the validator pins the sentinel locally (hot-path
+        # import-light, mirroring the locally-pinned participant-id regex),
+        # so assert it stays equal to the canonical receiver-gate constant.
+        from agents.channel_validation import _MENTION_EVERYONE
+        from agents.response_gate import MENTION_EVERYONE
+
+        assert _MENTION_EVERYONE == MENTION_EVERYONE == "@everyone"

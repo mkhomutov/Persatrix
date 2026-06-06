@@ -188,6 +188,52 @@ async def test_broadcast_admits_all_participants() -> None:
 
 
 @pytest.mark.asyncio
+async def test_broadcast_passes_inbound_validation_then_admits() -> None:
+    """ISSUE-0094 (F-8): an ``@everyone`` broadcast must clear the inbound
+    envelope validator **and then** be admitted by the gate — the full
+    delivery chain, not just the gate in isolation.
+
+    The other tests drive ``_deliver`` → ``on_event`` directly, bypassing
+    ``validate_channel_message_event`` (the gRPC servicer's first gate). That
+    is exactly the layer that rejected ``@everyone`` as a malformed participant
+    id in the live v0.3.7 repro, silently dropping the broadcast before the
+    response gate ran. This test asserts the sentinel survives validation, then
+    that the gate admits — so the regression cannot recur at either layer.
+    """
+    from agents.channel_validation import validate_channel_message_event
+    from agents.generated import task_pb2
+
+    mentions = [MENTION_EVERYONE, "ember-owl"]
+    event = task_pb2.ChannelMessageEvent(
+        message_id="msg-bcast-001",
+        channel_id="group:planning",
+        channel_type="group",
+        sender_id="alice",
+        content="standup, everyone — one line each. @ember-owl you too",
+        timestamp="2026-06-06T00:00:00Z",
+        thread_id="",
+        mentions=mentions,
+        respond_policy="always",
+        thread_parent_sender_id="",
+    )
+
+    # Layer 1: the inbound validator must accept the broadcast envelope.
+    err, ts = validate_channel_message_event(event)
+    assert err is None, f"@everyone broadcast must pass inbound validation, got: {err}"
+    assert isinstance(ts, float)
+
+    # Layer 2: the gate must then admit every participant (D3).
+    ember, ember_calls = await _make_agent("ember-owl")
+    iron, iron_calls = await _make_agent("iron-fox")
+    await _deliver(ember, mentions=mentions)
+    await _deliver(iron, mentions=mentions)
+    assert ember_calls.await_count >= 1
+    assert iron_calls.await_count >= 1, (
+        "a validated broadcast admits the un-named participant too (D3)"
+    )
+
+
+@pytest.mark.asyncio
 async def test_directed_elsewhere_member_still_remembers() -> None:
     """A directed-elsewhere participant is silent but **not** amnesiac.
 
