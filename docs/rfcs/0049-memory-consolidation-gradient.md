@@ -220,12 +220,12 @@ All code is **v0.4.0**. The order is forced by §E.
 
 ## Amendments this RFC implies
 
-Stubs to be expanded into their own amendment files once this RFC is accepted:
+Stub amendment files (created; to be expanded into full implementation amendments when their v0.4.0 PR plans open):
 
-1. **RFC 0031 / ISSUE-0084 re-root** — fact scope is consolidation-level, not subject; L2 facts cross rooms, gated by 0037. Supersedes memory-scope-axes.md decision 4.
-2. **RFC 0027 amendment — cross-scope consolidation mode** — add the bounded agent-wide reflection pass that distils L1→L2 across rooms; tie the declassification projection to it.
-3. **RFC 0028 amendment — decisions as readable memory** — the `pre-act` retrieval of past decision→outcome records and their heuristic consolidation; storage in the RFC 0029 society tier.
-4. **(doc) memory-scope-axes.md** — annotate decision 4 as superseded by this RFC; keep decisions 1–3, 5–6.
+1. [**RFC 0031 amendment — fact scope by consolidation level**](0031-amendment-fact-scope-by-consolidation-level.md) — fact scope is consolidation-level, not subject; L2 facts cross rooms, gated by 0037. Re-roots [ISSUE-0084](../issues/ISSUE-0084-fact-scope-by-subject-not-uniform-session.md); supersedes memory-scope-axes.md decision 4.
+2. [**RFC 0027 amendment — cross-scope consolidation**](0027-amendment-cross-scope-consolidation.md) — the bounded agent-wide reflection pass that distils L1→L2 across rooms; ties the declassification projection to it.
+3. [**RFC 0028 amendment — decisions as readable memory**](0028-amendment-decisions-as-readable-memory.md) — the `pre-act` retrieval of past decision→outcome records and their heuristic consolidation; storage in the RFC 0029 society tier.
+4. **(doc) memory-scope-axes.md** — decision 4 annotated as superseded by this RFC; decisions 1–3, 5–6 unchanged. ✅ Done (PR [#559](https://github.com/mkhomutov/Persatrix/pull/559)).
 
 ## Risks
 
