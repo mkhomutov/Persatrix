@@ -270,6 +270,7 @@ answers every turn exactly as before.
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
 | _pending_ | | | ☐ | To be executed live at v0.3.7 release-prep (master-plan Phase 3) on the RC tip. |
+| 2026-06-06 | Claude (Opus 4.8) | macOS (Darwin 24.6.0) | ⚠️ **Steps 1–3 + idle-cost Pass; Step 4 (D3) Fail** | Live on Anthropic, RC tip `65303d7`. Directed→1, open→2, suppressed members zero-cost. **Step 4 `@everyone` broadcast draws 0 replies + 135 s publish block** — root-caused to `agents/channel_validation.py` rejecting the `@everyone` sentinel before the gate: [ISSUE-0094](../issues/ISSUE-0094-everyone-broadcast-rejected-by-agent-inbound-validation.md). See [v0.3.7-execution-report.md](v0.3.7-execution-report.md). |
 
 ---
 
