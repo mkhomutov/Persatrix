@@ -257,6 +257,13 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # release-prep PR 4 when §1/§2/§7 were filled with post-bump re-cert evidence
     # over the §3.1 Upgrade Notes + §6 Known Gaps. Archive once the tag ships.
     "docs/v0.3.6-release-checklist.md",
+    # docs/v0.3.7-release-checklist.md — v0.3.7 sibling of the v0.3.3–v0.3.6
+    # checklists above; same release-cycle-record pattern. Crossed the cap on
+    # creation (release-prep PR 2) carrying the three §3.1 Upgrade Notes (the
+    # respond_policy→disposition reframe, the addressing-aware directedness fix,
+    # and the v12→v14 person-identity migration) + §6 Known Gaps. Archive once
+    # the tag ships.
+    "docs/v0.3.7-release-checklist.md",
     # docs/v0.3.4-release-prep-plan.md is the v0.3.4 release-prep sequencer —
     # same release-cycle-accumulator pattern as the v0.3.0 / v0.3.1 plans and
     # the v0.3.3 checklist above. It crossed the 3 000-word prose cap when PR 1
