@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-06-06 (v0.3.7 released-status flip — final pre-tag verification (PR 4) green on the post-bump tip; Version Map → ✅ Released. Only the mechanical `v0.3.7` tag + GitHub Release remain.)
+> **Last updated**: 2026-06-06 (v0.3.7 *Conversations worth watching* tagged + [GitHub Release](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.7) published; post-release hygiene done. Next phase: **v0.3.8** — conversations that converge.)
 > **Current phase**: v0.3.7 (Conversations worth watching — RFC 0034 Phase 2 + RFC 0030 relevance Tier A + peer-voice prompt) — ✅ Released
 > **Current milestone**: v0.3.7 *Conversations worth watching* — ✅ Released. The headline user-facing story: **a group channel reads like colleagues, not bots** — several personas see and build on the running transcript ([RFC 0034 Phase 2](docs/rfcs/0034-persona-conversational-working-memory.md) group working memory), the right people speak, and a question aimed at one persona isn't answered by everyone ([RFC 0030 relevance gate Tier A](docs/rfcs/0030-amendment-relevance-gated-response.md) addressing-aware eligibility + the `respond` disposition vocabulary), with a peer-voice prompt that frames personas as colleagues rather than assistants. Tier B salience, natural-language addressing, the `chair` disposition, and RFC 0030 Layers 1/2/4/5 are deferred to v0.3.8+. The next phase is **v0.3.8** (conversations that converge — brainstorm).
 
@@ -1142,6 +1142,47 @@ v0.5.0 complete
 | [#525](https://github.com/mkhomutov/Persatrix/pull/525) | docs(v036): v0.3.6 release-prep PR 2 — README + ROADMAP + guide verification + release checklist | v0.3.6 release prep | 2026-06-04 |
 | [#526](https://github.com/mkhomutov/Persatrix/pull/526) | chore(v036): release-prep PR 3 — version bump 0.3.5 → 0.3.6 + changelog [0.3.6] | v0.3.6 release prep | 2026-06-04 |
 | [#527](https://github.com/mkhomutov/Persatrix/pull/527) | docs(v036): release-prep PR 4 — final pre-tag verification & release notes | v0.3.6 release prep | 2026-06-04 |
+| [#528](https://github.com/mkhomutov/Persatrix/pull/528) | docs(release): post-release follow-up for v0.3.6 | v0.3.6 post-release | 2026-06-04 |
+| [#529](https://github.com/mkhomutov/Persatrix/pull/529) | docs(v03x): re-sequence tail for conversation realism & usefulness ahead of v0.4.0 | v0.3.x sequencing | 2026-06-04 |
+| [#530](https://github.com/mkhomutov/Persatrix/pull/530) | docs(v0.3.7): open v0.3.7 plan — Conversations worth watching | v0.3.7 plan | 2026-06-04 |
+| [#531](https://github.com/mkhomutov/Persatrix/pull/531) | chore(checks): split file_size allowlist into its own module | checks/tooling | 2026-06-04 |
+| [#532](https://github.com/mkhomutov/Persatrix/pull/532) | docs(v037): author Phase 1 PR plans — RFC 0034 P2 + RFC 0030 relevance Tier A | v0.3.7 plan (Phase 1) | 2026-06-04 |
+| [#533](https://github.com/mkhomutov/Persatrix/pull/533) | feat(v037): RFC 0034 P2 PR 1 — inline `[<peer_id>]:` prefix on replayed peer turns | 0034 P2 (1/3) | 2026-06-04 |
+| [#534](https://github.com/mkhomutov/Persatrix/pull/534) | feat(v037): RFC 0034 P2 PR 2 — multi-persona fetch-cache correctness | 0034 P2 (2/3) | 2026-06-04 |
+| [#535](https://github.com/mkhomutov/Persatrix/pull/535) | docs(v037): RFC 0034 P2 PR 3 — group-channel working-memory closeout | 0034 P2 (3/close) | 2026-06-04 |
+| [#536](https://github.com/mkhomutov/Persatrix/pull/536) | feat(v037): RFC 0030 relevance PR 1 — disposition vocabulary + back-compat (inert) | 0030 relevance (1/3) | 2026-06-05 |
+| [#537](https://github.com/mkhomutov/Persatrix/pull/537) | feat(v037): RFC 0030 relevance PR 2 — Tier A directed-elsewhere eligibility | 0030 relevance (2/3) | 2026-06-05 |
+| [#538](https://github.com/mkhomutov/Persatrix/pull/538) | feat(v037): peer-voice prompt — frame personas as colleagues, not assistants | 0030 peer-voice (1c) | 2026-06-05 |
+| [#539](https://github.com/mkhomutov/Persatrix/pull/539) | docs(v037): conversation test-findings PR plan from live group-channel probing | v0.3.7 test-findings (plan) | 2026-06-05 |
+| [#540](https://github.com/mkhomutov/Persatrix/pull/540) | fix(v037): scope external-data safety guard to flagged envelopes (F-1) | v0.3.7 test-findings (F-1) | 2026-06-05 |
+| [#541](https://github.com/mkhomutov/Persatrix/pull/541) | fix(v037): conversation-window self-awareness snippet (F-2) | v0.3.7 test-findings (F-2a) | 2026-06-05 |
+| [#542](https://github.com/mkhomutov/Persatrix/pull/542) | fix(v037): interim group-channel window sizing — 40/4096 for demo personas (F-2b) | v0.3.7 test-findings (F-2b) | 2026-06-05 |
+| [#543](https://github.com/mkhomutov/Persatrix/pull/543) | fix(v037): correct memory-tool-usage cross-conversation promise (F-3a) | v0.3.7 test-findings (F-3a) | 2026-06-05 |
+| [#544](https://github.com/mkhomutov/Persatrix/pull/544) | fix(v037): person-keyed contact notes recall cross-room (F-3b) | v0.3.7 test-findings (F-3b) | 2026-06-05 |
+| [#545](https://github.com/mkhomutov/Persatrix/pull/545) | fix(v037): make the external-data carve-out sender-aware (F-6) | v0.3.7 test-findings (F-6) | 2026-06-05 |
+| [#546](https://github.com/mkhomutov/Persatrix/pull/546) | fix(v037): restore agent_id on the tool-invocation metric (F-5) | v0.3.7 test-findings (F-5) | 2026-06-05 |
+| [#547](https://github.com/mkhomutov/Persatrix/pull/547) | feat(v037): channel-roster fetch + render module (F-4, slice A) | v0.3.7 test-findings (F-4a) | 2026-06-05 |
+| [#548](https://github.com/mkhomutov/Persatrix/pull/548) | feat(v037): inject the channel roster into per-event context (F-4, slice B) | v0.3.7 test-findings (F-4b) | 2026-06-05 |
+| [#549](https://github.com/mkhomutov/Persatrix/pull/549) | docs(v037): F-7 cross-room recall seam — finding + fix plan (A now / D target) | v0.3.7 test-findings (F-7) | 2026-06-05 |
+| [#550](https://github.com/mkhomutov/Persatrix/pull/550) | fix(v037): unify recall scope — contact notes cross-room in recall_notes (F-7, Option A) | v0.3.7 test-findings (F-7 A) | 2026-06-05 |
+| [#551](https://github.com/mkhomutov/Persatrix/pull/551) | docs(v037): ISSUE-0093 — F-7 Option D design (person identity on the cross-room tier) | 0093 F-7 D (design) | 2026-06-05 |
+| [#552](https://github.com/mkhomutov/Persatrix/pull/552) | docs(v037): ISSUE-0093 — RFC amendment for F-7 Option D (person identity on the cross-room tier) | 0093 F-7 D (RFC) | 2026-06-05 |
+| [#553](https://github.com/mkhomutov/Persatrix/pull/553) | feat(v037): ISSUE-0093 D1 — identity column + upsert_identity on the relationship tier (F-7 Option D) | 0093 F-7 D (1/4) | 2026-06-06 |
+| [#554](https://github.com/mkhomutov/Persatrix/pull/554) | feat(v037): ISSUE-0093 D2 — store_note(contact:*) identity write-through + cross-room render (F-7 Option D) | 0093 F-7 D (2/4) | 2026-06-06 |
+| [#555](https://github.com/mkhomutov/Persatrix/pull/555) | feat(v037): ISSUE-0093 D3 — retire F-7 Option-A contact-note carve-out (identity on relationship tier only) | 0093 F-7 D (3/4) | 2026-06-06 |
+| [#556](https://github.com/mkhomutov/Persatrix/pull/556) | feat(v037): ISSUE-0093 D4 — backfill pre-cutover contact notes onto relationship identity (F-7 Option D) | 0093 F-7 D (4/4) | 2026-06-06 |
+| [#557](https://github.com/mkhomutov/Persatrix/pull/557) | docs(v037): RFC 0030 relevance PR 3 — Tier A closeout (MT + disposition docs + status) | 0030 relevance (3/close) | 2026-06-06 |
+| [#558](https://github.com/mkhomutov/Persatrix/pull/558) | docs(v037): author v0.3.7 release-prep plan (master-plan Phase 2) | v0.3.7 release prep | 2026-06-06 |
+| [#559](https://github.com/mkhomutov/Persatrix/pull/559) | docs(v037): RFC 0049 — memory consolidation gradient + scope reconciliation (ratify cross-room topic knowledge) | 0049 (RFC) | 2026-06-06 |
+| [#560](https://github.com/mkhomutov/Persatrix/pull/560) | docs(v037): RFC 0049 amendment stubs — fact-scope re-root, cross-scope consolidation, decisions-as-memory | 0049 amendments | 2026-06-06 |
+| [#561](https://github.com/mkhomutov/Persatrix/pull/561) | docs(v037): PR 1 — MT execution report (realism surface) + ISSUE-0094 `@everyone` broadcast defect | v0.3.7 release prep | 2026-06-06 |
+| [#562](https://github.com/mkhomutov/Persatrix/pull/562) | fix(v037): accept the `@everyone` broadcast sentinel in agent inbound validation (ISSUE-0094) | 0094 F-8 (agent) | 2026-06-06 |
+| [#563](https://github.com/mkhomutov/Persatrix/pull/563) | fix(v037): emit the `@everyone` sentinel for `channel send --mention-all` (D3) | 0094 F-8 (CLI) | 2026-06-06 |
+| [#564](https://github.com/mkhomutov/Persatrix/pull/564) | docs(v037): re-run MT execution report on post-fix tip 92a5a00 (F-8 resolved) | v0.3.7 release prep | 2026-06-06 |
+| [#565](https://github.com/mkhomutov/Persatrix/pull/565) | docs(v037): PR 2 — README + ROADMAP + guide verification + release checklist | v0.3.7 release prep | 2026-06-06 |
+| [#566](https://github.com/mkhomutov/Persatrix/pull/566) | chore(v037): release-prep PR 3 — version bump 0.3.6 → 0.3.7 + changelog `[0.3.7]` | v0.3.7 release prep | 2026-06-06 |
+| [#567](https://github.com/mkhomutov/Persatrix/pull/567) | docs(v037): release-prep PR 4 — final pre-tag verification & release notes | v0.3.7 release prep | 2026-06-06 |
+| [#568](https://github.com/mkhomutov/Persatrix/pull/568) | docs(release): post-release follow-up for v0.3.7 (this PR) | v0.3.7 post-release | 2026-06-06 |
 
 ---
 
