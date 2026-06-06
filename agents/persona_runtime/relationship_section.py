@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 
 from ..memory.working import ContextSection, estimate_tokens
 from ..observability.metrics import current_agent_id, try_get_instruments
+from ..sender_type import SENDER_PARTICIPANT_TYPE_KEY, normalize_sender_type
 from ..temporal.rendering import format_cadence, format_relative
 from .memory_budget import (
     MIN_TOKENS_RELATIONSHIP,
@@ -119,10 +120,14 @@ async def recall_relationship_summary(
     # into the LLM-visible label and could carry injection content
     # if/when external agents may register arbitrary IDs.
     # (PR #146 re-review: low-risk alignment with rel.notes TODO.)
-    sender_type = (
-        event.metadata.get("sender_participant_type", "agent")
+    # Resolve via the shared normalizer the write-through binds through, so
+    # the identity row this read queries is the same one the write landed on
+    # (PR #554 deep-review #3 — the two sides previously diverged on
+    # whitespace / non-string handling, which could silently miss the row).
+    sender_type = normalize_sender_type(
+        event.metadata.get(SENDER_PARTICIPANT_TYPE_KEY)
         if event.metadata
-        else "agent"
+        else None,
     )
     try:
         summary = await rel_memory.get_relationship_summary(
@@ -144,6 +149,11 @@ async def recall_relationship_summary(
     # as the summary read, so both resolve to the one relationship row.
     # Best-effort: an identity-read failure must not sink the relationship
     # tier, so it is logged and the summary returns without identity.
+    # Cost: this is an unconditional second indexed lookup per sender per
+    # event (including agent peers that will never have identity); it cannot
+    # fold into the summary row read above because that read is §D
+    # session-filtered and identity must not be — the separate, filter-free
+    # query is what makes identity cross-room.
     try:
         summary.identity = await rel_memory.get_identity(
             sender_id,

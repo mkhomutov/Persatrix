@@ -30,6 +30,7 @@ from contextvars import ContextVar
 __all__ = [
     "SENDER_PARTICIPANT_TYPE_KEY",
     "current_sender_type",
+    "normalize_sender_type",
     "sender_type_scope_from_metadata",
 ]
 
@@ -44,6 +45,26 @@ _DEFAULT_SENDER_TYPE = "agent"
 _ACTIVE_SENDER_TYPE: ContextVar[str | None] = ContextVar(
     "active_sender_type", default=None,
 )
+
+
+def normalize_sender_type(raw: object) -> str:
+    """Resolve a raw ``sender_participant_type`` metadata value to the
+    participant type used as the relationship-row key.
+
+    The single rule both sides of the identity flow funnel through — the
+    write side via :func:`sender_type_scope_from_metadata` (which binds the
+    normalized value), and the read side via
+    :func:`agents.persona_runtime.relationship_section.recall_relationship_summary`
+    (which normalizes ``event.metadata`` directly, since the recall runs
+    with the originating event in hand).  Sharing the rule guarantees the
+    write and the later read resolve to the *same* row: a non-string or
+    blank value falls back to :data:`_DEFAULT_SENDER_TYPE`, and surrounding
+    whitespace is stripped, so e.g. ``" user "`` and ``"user"`` are not two
+    different rows.
+    """
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return _DEFAULT_SENDER_TYPE
 
 
 def current_sender_type() -> str:
@@ -74,7 +95,7 @@ def sender_type_scope_from_metadata(
     if not isinstance(raw, str) or not raw.strip():
         yield
         return
-    token = _ACTIVE_SENDER_TYPE.set(raw.strip())
+    token = _ACTIVE_SENDER_TYPE.set(normalize_sender_type(raw))
     try:
         yield
     finally:

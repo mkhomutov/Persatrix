@@ -62,7 +62,9 @@ _KEYED_RE = re.compile(r"^([A-Za-z][A-Za-z ]*?)\s*[:=]\s*(.+)$")
 # is Max" / "I am Max" / "call me Max".  Deliberately narrow: name is the
 # one field the model frequently states without a ``Name:`` prefix, and
 # it is the load-bearing "who is this" signal.  Other fields fall through
-# to ``raw`` when unkeyed.
+# to ``raw`` when unkeyed.  The ``(.+)`` capture is greedy, so a match is
+# additionally gated by :func:`_is_namelike` to reject prose ("I am happy
+# to help") — see that helper.
 _NAME_PHRASE_RE = re.compile(
     r"^(?:my name is|name is|i am|i'm|call me)\s+(.+)$", re.IGNORECASE,
 )
@@ -70,6 +72,12 @@ _NAME_PHRASE_RE = re.compile(
 # Split a preference value into individual items: commas and a trailing
 # "and" ("Rust, Go and Python").
 _PREF_SPLIT_RE = re.compile(r"\s*,\s*|\s+and\s+", re.IGNORECASE)
+
+# Upper bound on the word count of an *inferred* (natural-phrase) name.  A
+# proper name is a short run; anything longer is prose that happened to
+# start with "I am" / "call me" and is rejected (kept under ``raw``).  The
+# keyed ``Name:`` path is unbounded — an explicit key is trusted as-is.
+_MAX_INFERRED_NAME_WORDS = 4
 
 
 def parse_identity_fields(content: str) -> dict[str, object]:
@@ -123,8 +131,10 @@ def parse_identity_fields(content: str) -> dict[str, object]:
             continue
         name_phrase = _NAME_PHRASE_RE.match(clause)
         if name_phrase is not None and "name" not in fields:
-            fields["name"] = name_phrase.group(1).strip()
-            continue
+            candidate = name_phrase.group(1).strip()
+            if _is_namelike(candidate):
+                fields["name"] = candidate
+                continue
         raw_parts.append(clause)
 
     if prefs:
@@ -137,3 +147,20 @@ def parse_identity_fields(content: str) -> dict[str, object]:
 def _split_prefs(value: str) -> list[str]:
     """Split a preference clause value into de-blanked individual items."""
     return [item.strip() for item in _PREF_SPLIT_RE.split(value) if item.strip()]
+
+
+def _is_namelike(value: str) -> bool:
+    """Whether an *inferred* natural-phrase capture is shaped like a name.
+
+    The natural-name phrases ("I am …", "call me …") match greedily to the
+    end of the clause, so prose like "I am happy to help" otherwise becomes
+    ``name="happy to help"`` — which renders as the load-bearing "who is
+    this" line and, since ``name`` is scalar last-writer-wins, can clobber a
+    real name (PR #554 deep-review #2).  A proper name is a *short* run whose
+    first character is uppercase, so we require both; non-matching prose
+    falls through to ``raw`` (preserved, not lost).  Only the *inferred*
+    path is gated — an explicit ``Name:`` key is trusted regardless of case.
+    """
+    if not value or not value[0].isupper():
+        return False
+    return len(value.split()) <= _MAX_INFERRED_NAME_WORDS

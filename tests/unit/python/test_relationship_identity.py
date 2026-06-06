@@ -140,6 +140,44 @@ class TestMergeIdentity:
         assert existing == {"name": "Max", "prefs": ["Rust"]}
         assert incoming == {"prefs": ["Go"]}
 
+    def test_raw_accumulates_across_merges_non_destructively(self):
+        """The unkeyed ``raw`` remainder unions clause-wise rather than
+        scalar last-writer-wins, so an unkeyed fact captured in one note
+        ("Lives in Berlin") is *not* dropped when a later note adds a
+        different unkeyed fact ("Speaks German").
+
+        Rationale (PR #554 deep-review #1): the parser preserves unkeyed
+        content under ``raw`` precisely so "nothing is lost", and the
+        render path now surfaces it — but if ``raw`` were last-writer-wins
+        the *second* contact note would silently clobber the first note's
+        detail, making the "non-destructive merge" claim false across the
+        very merge it describes. Clauses are the union unit (the parser
+        joins them with ``". "``), order-preserving and de-duplicated, like
+        ``prefs``."""
+        merged = merge_identity(
+            {"raw": "Lives in Berlin"}, {"raw": "Speaks German"},
+        )
+        assert merged == {"raw": "Lives in Berlin. Speaks German"}
+
+    def test_raw_union_is_order_preserving_dedup(self):
+        """A repeated unkeyed clause is not duplicated on re-merge (idempotent
+        for an unchanged note), matching ``prefs`` union semantics."""
+        merged = merge_identity(
+            {"raw": "Lives in Berlin. Likes hiking"},
+            {"raw": "Likes hiking. Works remotely"},
+        )
+        assert merged == {"raw": "Lives in Berlin. Likes hiking. Works remotely"}
+
+    def test_raw_absent_incoming_does_not_clobber(self):
+        """An empty / absent incoming ``raw`` leaves a stored ``raw`` intact —
+        same non-destructive rule the scalars and ``prefs`` follow."""
+        assert merge_identity({"raw": "Lives in Berlin"}, {"raw": ""}) == {
+            "raw": "Lives in Berlin",
+        }
+        assert merge_identity({"raw": "Lives in Berlin"}, {}) == {
+            "raw": "Lives in Berlin",
+        }
+
 
 # ─── Migration v13 ──────────────────────────────────────────
 

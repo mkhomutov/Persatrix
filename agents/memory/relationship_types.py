@@ -18,6 +18,15 @@ _MAX_TRUST_DELTA = 0.2
 # overwritten.  Everything else is scalar last-writer-wins.
 _IDENTITY_LIST_KEYS = ("prefs",)
 
+# Identity fields whose value is a ``". "``-joined *string* of clauses and
+# which union clause-wise across turns (the string form of the list-key
+# union).  ``raw`` holds the unkeyed remainder the parser could not classify
+# (e.g. "Lives in Berlin"); scalar last-writer-wins would let the next
+# contact note silently drop an earlier note's detail (PR #554 deep-review
+# #1), so it accumulates instead — order-preserving, de-duplicated.
+_IDENTITY_TEXT_UNION_KEYS = ("raw",)
+_TEXT_UNION_SEP = ". "
+
 # Default trust score for unknown agent pairs.
 _DEFAULT_TRUST = 0.5
 
@@ -39,6 +48,12 @@ def merge_identity(
     * **list keys** (:data:`_IDENTITY_LIST_KEYS`, currently ``prefs``)
       *union* — new entries append, order-preserving, de-duplicated, so a
       preference learned in a later turn accumulates rather than clobbers,
+    * **text-union keys** (:data:`_IDENTITY_TEXT_UNION_KEYS`, currently
+      ``raw`` — the unkeyed remainder) *union clause-wise* — the two
+      ``". "``-joined strings are split, unioned (order-preserving,
+      de-duplicated) and re-joined, so an unkeyed fact captured in one note
+      ("Lives in Berlin") survives a later note that adds a different
+      unkeyed fact rather than being clobbered (PR #554 deep-review #1),
     * an **absent** incoming value — ``None`` *or* an empty string ``""`` —
       is **skipped** so a partial update (e.g. learning a role without
       re-stating the name) or a failed extraction cannot null an existing
@@ -65,13 +80,42 @@ def merge_identity(
             # of a ``str`` would explode it into characters.
             base = list(current) if isinstance(current, list) else [current]
             items = value if isinstance(value, list) else [value]
-            for item in items:
-                if not _is_absent(item) and item not in base:
-                    base.append(item)
-            merged[key] = base
+            merged[key] = _union_preserving(
+                base, items if isinstance(items, list) else [items],
+            )
+        elif key in _IDENTITY_TEXT_UNION_KEYS:
+            # Clause-wise union of two ``". "``-joined strings: split, union
+            # (order-preserving, de-duped), re-join.  Round-trips cleanly
+            # because the parser only joins clauses that contain no ``.``.
+            existing_clauses = _split_clauses(merged.get(key))
+            incoming_clauses = _split_clauses(value)
+            joined = _union_preserving(existing_clauses, incoming_clauses)
+            merged[key] = _TEXT_UNION_SEP.join(joined)
         else:
             merged[key] = value
     return merged
+
+
+def _union_preserving(base: list[Any], items: list[Any]) -> list[Any]:
+    """Append ``items`` not already in ``base``, skipping absent values,
+    order-preserving and de-duplicated.  ``base`` is copied, not mutated."""
+    out = list(base)
+    for item in items:
+        if not _is_absent(item) and item not in out:
+            out.append(item)
+    return out
+
+
+def _split_clauses(value: Any) -> list[str]:
+    """Split a ``". "``-joined text-union value into its clauses.
+
+    A non-string (legacy / hand-written JSON) is treated as a single clause
+    rather than exploded; ``None`` / empty yields no clauses."""
+    if _is_absent(value):
+        return []
+    if not isinstance(value, str):
+        return [value]
+    return [c.strip() for c in value.split(_TEXT_UNION_SEP) if c.strip()]
 
 
 def _is_absent(value: Any) -> bool:

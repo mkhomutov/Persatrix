@@ -24,6 +24,7 @@ from agents.memory.identity_parse import parse_identity_fields
 from agents.memory.relationship import RelationshipMemory
 from agents.sender_type import (
     current_sender_type,
+    normalize_sender_type,
     sender_type_scope_from_metadata,
 )
 from agents.tools.builtin import create_memory_tools
@@ -87,6 +88,24 @@ class TestParseIdentityFields:
         assert parse_identity_fields("My name is Alice") == {"name": "Alice"}
         assert parse_identity_fields("call me Bob") == {"name": "Bob"}
 
+    def test_natural_name_phrase_rejects_prose(self):
+        """The narrow natural-name branch only fires for a proper-noun-shaped
+        capture (capitalized, short), so conversational prose is not
+        mis-stored as the contact's *name*.
+
+        Rationale (PR #554 deep-review #2): an unkeyed clause like "I am
+        happy to help" matched ``i am (.+)`` and became ``name="happy to
+        help"`` — which renders as the load-bearing "who is this" line and,
+        because ``name`` is scalar last-writer-wins, can clobber a real
+        name. The prose is still preserved verbatim under ``raw`` (nothing
+        lost), just not promoted to ``name``."""
+        assert parse_identity_fields("I am happy to help") == {
+            "raw": "I am happy to help",
+        }
+        assert parse_identity_fields("call me later when you can") == {
+            "raw": "call me later when you can",
+        }
+
     def test_unkeyed_detail_preserved_as_raw(self):
         out = parse_identity_fields("Name: Max. Lives in Berlin")
         assert out["name"] == "Max"
@@ -118,6 +137,24 @@ class TestSenderTypeScope:
     def test_absent_key_is_noop(self):
         with sender_type_scope_from_metadata({}):
             assert current_sender_type() == "agent"
+
+
+class TestNormalizeSenderType:
+    """The shared resolver both the write (scope-binding) and read (recall)
+    sides funnel a raw ``sender_participant_type`` value through, so the
+    identity write for an event and the identity read back for it always
+    resolve to the *same* relationship row (PR #554 deep-review #3 — the two
+    sides previously normalized differently; a whitespace-padded type would
+    write under ``"user"`` but read under ``" user "`` and silently miss)."""
+
+    def test_strips_surrounding_whitespace(self):
+        assert normalize_sender_type("  user  ") == "user"
+
+    def test_blank_or_non_string_falls_back_to_agent(self):
+        assert normalize_sender_type("") == "agent"
+        assert normalize_sender_type("   ") == "agent"
+        assert normalize_sender_type(None) == "agent"
+        assert normalize_sender_type(123) == "agent"
 
 
 # ─── Write-through at the tool boundary ─────────────────────
@@ -219,4 +256,31 @@ class TestIdentityWriteThrough:
             "name": "Alice",
             "prefs": ["Rust", "Go"],
             "role": "engineer",
+        }
+
+    async def test_unkeyed_raw_detail_survives_second_note(
+        self, episodic, relationship, gate_rw,
+    ):
+        """An unkeyed fact captured in note 1 ("Lives in Berlin") is still on
+        the identity row after note 2 adds a different unkeyed fact — the
+        cross-note ``raw`` union (PR #554 deep-review #1) end-to-end through
+        the write-through, not just the pure merge."""
+        tools = create_memory_tools(episodic, gate_rw, relationship=relationship)
+        store_note = _store_note(tools)
+        with sender_type_scope_from_metadata({"sender_participant_type": "user"}):
+            await store_note.func(
+                topic="contact:user-alice",
+                content="Name: Alice. Lives in Berlin",
+            )
+            await store_note.func(
+                topic="contact:user-alice",
+                content="Role: engineer. Speaks German",
+            )
+        identity = await relationship.get_identity(
+            "user-alice", other_participant_type="user",
+        )
+        assert identity == {
+            "name": "Alice",
+            "role": "engineer",
+            "raw": "Lives in Berlin. Speaks German",
         }
