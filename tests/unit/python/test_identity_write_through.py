@@ -211,6 +211,31 @@ class TestIdentityWriteThrough:
             "user-alice", other_participant_type="user",
         ) == {"name": "Alice"}
 
+    async def test_contact_note_with_tags_still_writes_identity_only(
+        self, episodic, relationship, gate_rw,
+    ):
+        """Tags on a contact note are *not* a reason to fall back to a note
+        write: the identity tier has no tag field, so a tagged ``contact:*``
+        note still lands on the relationship tier alone and writes no note
+        row (the tags are discarded). Pins the D3 invariant — nothing, not
+        even a tag, may reintroduce the room-scoped note the cross-room seam
+        lived in."""
+        tools = create_memory_tools(episodic, gate_rw, relationship=relationship)
+        store_note = _store_note(tools)
+        with sender_type_scope_from_metadata({"sender_participant_type": "user"}):
+            result = await store_note.func(
+                topic="contact:user-alice", content="Name: Alice.",
+                tags="vip,engineering",
+            )
+        assert result.success
+        # The tags did not cause a fallback note write.
+        assert await episodic.recall_notes("Alice", limit=10) == []
+        assert await episodic.recall_notes("", limit=10) == []
+        # Identity still landed on the relationship tier (tags discarded).
+        assert await relationship.get_identity(
+            "user-alice", other_participant_type="user",
+        ) == {"name": "Alice"}
+
     async def test_non_contact_topic_writes_no_identity(
         self, episodic, relationship, gate_rw,
     ):

@@ -47,8 +47,10 @@ async def maybe_write_through_identity(
     Returns ``True`` when identity was written to the relationship tier —
     the signal to the caller that **no room-scoped note should be written**
     (D3 retires the legacy note write; identity lives on the relationship
-    tier alone).  Returns ``False`` to mean "fall back to the note write",
-    which happens when:
+    tier alone).  On this path any ``tags`` the caller held are intentionally
+    dropped: the identity tier has no tag field, and re-adding a note to
+    carry them would reopen the cross-room seam D3 closes.  Returns ``False``
+    to mean "fall back to the note write", which happens when:
 
     * there is no relationship handle (non-persona callers / pre-wiring),
     * the topic is not a contact note,
