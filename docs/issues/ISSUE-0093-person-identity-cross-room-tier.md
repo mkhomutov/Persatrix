@@ -1,11 +1,11 @@
 ---
 id: ISSUE-0093
 summary: "F-7 Option D (architectural target) — re-home person identity off room-scoped notes onto a tier whose scope is intrinsic, so the F-7 cross-room recall seam cannot recur by construction. F-7 PR A (#550) closed the seam by special-casing `contact:*` note recall to bypass the session filter; that is a topic-prefix workaround threaded through recall, not a property of where identity lives. The genuinely cross-room tier is `relationships` (its primary key deliberately excludes `session_id`; already auto-injected via `recall_relationship_summary`); the `facts` tier (RFC 0026) is itself session-scoped today (recall uses `_resolve_session_list` + `session_in_clause`) so it is NOT an automatic cross-room home, and fact extraction only fires at interaction close (`persona_runtime/fact_extractor` via `summarize_close`) — which is why the live repro's facts table was empty (the probe conversations never closed). Re-homing identity onto the relationship record (cross-room core) lets `recall_notes` revert to purely room-scoped and retires the PR-A special-case. Implementation carries an RFC 0031 §C/§D + RFC 0026 amendment and depends on an eager identity-capture path; design captured here, sequenced on the memory-quality roadmap."
-status: open
+status: resolved
 severity: medium
 area: agents/memory
 created: 2026-06-05
-closed:
+closed: 2026-06-06
 closed_pr:
 refs:
   - docs/rfcs/0031-amendment-person-identity-cross-room-tier.md
@@ -15,6 +15,7 @@ refs:
   - docs/rfcs/0031-amendment-person-keyed-note-recall.md
   - agents/memory/_notes_recall.py
   - agents/memory/relationship.py
+  - agents/memory/_migration_identity_backfill.py
   - agents/persona_runtime/fact_extractor.py
 ---
 
@@ -45,7 +46,7 @@ Person identity (name, role, stable preferences) is **stored on, and recalled fr
 
 ## Retirement of the PR-A workaround
 
-**✅ Done (PR D3).** Identity is recalled cross-room from the relationship tier, so the Option-A read carve-out was removed: `_notes_recall._notes_session_clause` + the `contact:*` recall widening are gone (the three recall helpers revert to `session_in_clause`), and `recall_contact_notes` (`NoteStore` + the `EpisodicMemory` delegate) is dropped. The D2 dual-write note is also dropped — `store_note(contact:*)` now writes identity only (falling back to a note on failure / no handle, so nothing is lost). `session_in_predicate` is kept (a clean primitive independent of this). **Remaining: the D4 backfill** of pre-cutover `contact:*` notes onto relationship identity rows (split out — it carries the participant-type design choice; notes don't record `other_participant_type`, which is part of the relationship PK).
+**✅ Done (PR D3).** Identity is recalled cross-room from the relationship tier, so the Option-A read carve-out was removed: `_notes_recall._notes_session_clause` + the `contact:*` recall widening are gone (the three recall helpers revert to `session_in_clause`), and `recall_contact_notes` (`NoteStore` + the `EpisodicMemory` delegate) is dropped. The D2 dual-write note is also dropped — `store_note(contact:*)` now writes identity only (falling back to a note on failure / no handle, so nothing is lost). `session_in_predicate` is kept (a clean primitive independent of this). **✅ Done (PR D4).** The one-time backfill of pre-cutover `contact:*` notes onto relationship identity rows shipped as migration **v14** ([`_migration_identity_backfill.py`](../../agents/memory/_migration_identity_backfill.py)). The participant-type design choice it carried is resolved by not guessing: a note pins `(agent_id, principal_id, epoch_id, other_id)` + `participant_type='agent'`, leaving `other_participant_type` as the only unrecorded PK axis, so the backfill **inherits** it from existing relationship rows for that tuple (or, for an orphan with no such row, creates one under the default `"agent"` type at neutral trust). With D4, ISSUE-0093 (F-7 Option D) is complete.
 
 ## Dependencies & sequencing
 

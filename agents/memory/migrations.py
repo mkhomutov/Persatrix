@@ -37,6 +37,7 @@ from ._migration_handlers import (
     _apply_migration_11,
     _apply_migration_12,
     _apply_migration_13,
+    _apply_migration_14,
 )
 
 __all__ = [
@@ -56,6 +57,7 @@ __all__ = [
     "_apply_migration_11",
     "_apply_migration_12",
     "_apply_migration_13",
+    "_apply_migration_14",
     "_apply_migrations",
     "_fts5_available",
 ]
@@ -319,6 +321,26 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         13,
         "RFC 0031 amendment: identity column on relationships (F-7 Option D)",
         "",  # handled by _apply_migration_13()
+    ),
+    # Migration 14 (RFC 0031 amendment — F-7 Option D, ISSUE-0093, PR D4) is
+    # the one-time **data backfill** that follows v13's schema: it reads
+    # pre-cutover ``contact:<id>`` notes and merges their parsed identity
+    # onto the matching ``relationships`` row, so personas don't lose
+    # identity learned before D2/D3 moved it onto the cross-room tier.  A
+    # data transform (not DDL) — so it lives in a callable handler that
+    # reads/writes both tables with individual ``db.execute`` calls + one
+    # tail commit, never ``executescript`` (whose implicit COMMIT the
+    # ``_apply_migrations`` note warns off for non-idempotent transforms).
+    # It resolves the one relationship-PK axis a note does not record —
+    # ``other_participant_type`` — by inheriting it from existing rows, or
+    # defaulting an orphan to ``"agent"``.  Lives in
+    # :mod:`agents.memory._migration_identity_backfill`.  See
+    # docs/rfcs/0031-amendment-person-identity-cross-room-tier.md (PR D4).
+    (
+        14,
+        "RFC 0031 amendment: backfill contact notes to relationship identity "
+        "(F-7 Option D)",
+        "",  # handled by _apply_migration_14()
     ),
 ]
 

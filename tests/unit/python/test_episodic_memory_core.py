@@ -73,9 +73,10 @@ class TestMigrations:
         # Schema-version row count + per-row identity pin: every new
         # migration MUST bump both the count and add a (version,
         # description-substring) assertion here.  The count bumped from
-        # 12 → 13 alongside migration v13 (RFC 0031 amendment — F-7
-        # Option D, ISSUE-0093: identity column on relationships).
-        assert len(rows) == 13
+        # 13 → 14 alongside migration v14 (RFC 0031 amendment — F-7
+        # Option D, ISSUE-0093, PR D4: backfill contact notes onto
+        # relationship identity).
+        assert len(rows) == 14
         assert rows[0][0] == 1
         assert "Initial schema" in rows[0][1]
         assert rows[1][0] == 2
@@ -117,6 +118,11 @@ class TestMigrations:
         # carries it).
         assert rows[12][0] == 13
         assert "identity" in rows[12][1].lower()
+        # v14 backfills pre-cutover contact notes onto that identity —
+        # disambiguated by the ``backfill`` token (no other migration
+        # carries it).
+        assert rows[13][0] == 14
+        assert "backfill" in rows[13][1].lower()
 
     async def test_migrations_are_idempotent(self, memory: EpisodicMemory):
         """Re-running migrations does not error or duplicate rows."""
@@ -125,10 +131,11 @@ class TestMigrations:
         async with db.execute("SELECT COUNT(*) FROM schema_version") as cursor:
             row = await cursor.fetchone()
         assert row is not None
-        # Bumped from 12 → 13 alongside migration v13 (RFC 0031 amendment —
-        # F-7 Option D, ISSUE-0093: identity column on relationships).
+        # Bumped from 13 → 14 alongside migration v14 (RFC 0031 amendment —
+        # F-7 Option D, ISSUE-0093, PR D4: backfill contact notes onto
+        # relationship identity).
         # Same row-count discipline as ``test_migration_version_recorded``.
-        assert row[0] == 13
+        assert row[0] == 14
 
     async def test_wal_mode_enabled(self):
         """WAL mode is set on file-based databases (not :memory:)."""
