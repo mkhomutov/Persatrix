@@ -1,11 +1,11 @@
 ---
 id: ISSUE-0094
 summary: "F-8 — the `@everyone` broadcast sentinel (RFC 0030 relevance amendment Tier A, decision D3) is rejected by the agent-side inbound channel-message validator. The orchestrator special-cases `@everyone` everywhere it matters server-side (`channels.MentionEveryone`, the floor-control `orderResponders` directed-filter bypass, `sqlite_messages.go` mention persistence) and the Python receiver gate special-cases it (`response_gate.MENTION_EVERYONE`), but `agents/channel_validation.py` validates every element of the inbound `mentions` list against the participant-id regex `^[a-z0-9][a-z0-9-]*[a-z0-9]$` with NO sentinel carve-out. `@everyone` fails the regex, so the whole inbound CHANNEL_MESSAGE is rejected at the envelope boundary and dropped BEFORE the response gate runs. Every persona on a broadcast therefore stays silent; with floor control on, the publish blocks for N×45s (one per candidate turn timeout) and returns zero replies. Surfaced live during v0.3.7 release-prep MT execution (MT-CHANNEL-RELEVANCE-001 Step 4). The unit/integration gates pass because they exercise `orderResponders` / `should_respond` with synthetic mentions lists and never push an `@everyone` envelope through `validate_channel_message`."
-status: open
+status: resolved
 severity: high
 area: agents
 created: 2026-06-06
-closed:
+closed: 2026-06-06
 closed_pr:
 refs:
   - docs/manual-tests/MT-CHANNEL-RELEVANCE-001.md
@@ -106,3 +106,30 @@ constant so the carve-out stays single-sourced), and add the missing coverage:
    delivery-layer assertion).
 
 Forward-only; no schema or migration involvement.
+
+## Resolution
+
+Fixed by carving the `@everyone` broadcast sentinel out of mention-id validation
+in **both** inbound validators in `agents/channel_validation.py`
+(`validate_channel_message_event` — the gRPC path — and
+`validate_channel_message_dict` — the REST/catch-up path). A module-level
+`_MENTION_EVERYONE = "@everyone"` constant is pinned locally (mirroring the
+locally-pinned participant-id regex, keeping the hot path import-light); a
+drift-guard test asserts it stays equal to `agents.response_gate.MENTION_EVERYONE`.
+The carve-out is scoped to the `mentions` list only — `sender_id` still rejects
+the sentinel, and a genuinely malformed id alongside `@everyone` still rejects.
+
+Coverage added (TDD — written failing first):
+
+- `tests/unit/python/test_channel_validation.py::TestEveryoneBroadcastSentinel`
+  — both validators accept `@everyone` (alone and alongside a real id), still
+  reject a malformed id and a sentinel `sender_id`, plus the drift guard.
+- `tests/integration/test_channel_relevance.py::test_broadcast_passes_inbound_validation_then_admits`
+  — the **full delivery chain**: an `@everyone` `ChannelMessageEvent` clears
+  `validate_channel_message_event` *and then* the gate admits every participant
+  (the previously-missing assertion — the other directedness tests drive the
+  gate directly and bypassed the validator).
+
+Verified live on the rebuilt v0.3.7 Anthropic stack: an `@everyone` broadcast
+now draws all three persona replies (was zero + a ~135 s publish block). No
+schema/migration involvement; forward-only.

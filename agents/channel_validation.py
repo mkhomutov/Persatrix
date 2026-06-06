@@ -80,6 +80,19 @@ _CHANNEL_RESPOND_POLICIES = {"when_mentioned", "always"}
 # from a Go-side validator because the receiver runs in Python with no
 # direct dep on ``internal/channels``.
 _CHANNEL_PARTICIPANT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
+# The broadcast sentinel (RFC 0030 relevance amendment Tier A, decision D3): a
+# ``mentions`` entry of ``@everyone`` addresses the whole room and disables the
+# directed-elsewhere filter. It is NOT a participant id (the leading ``@`` fails
+# ``_CHANNEL_PARTICIPANT_ID_RE``), so it must be carved out of mention-id
+# validation or an inbound broadcast is rejected at the envelope boundary —
+# before the response gate that special-cases it ever runs (ISSUE-0094). Pinned
+# locally for the same reason the regex is (hot-path import-light, no dep on the
+# receiver gate); mirrors ``agents.response_gate.MENTION_EVERYONE`` and
+# ``internal/channels/channels.go``'s ``MentionEveryone`` — a drift-guard test
+# (``test_channel_validation.py``) keeps the three in lock-step. The carve-out
+# is scoped to ``mentions`` only: ``sender_id`` carries a stronger trust claim
+# and still rejects the sentinel.
+_MENTION_EVERYONE = "@everyone"
 # Channel-id prefix ↔ channel_type agreement table (RFC 0011 §B). Receivers
 # MUST reject mismatches as malformed (PR #246 deep review security finding).
 _CHANNEL_TYPE_PREFIXES = {
@@ -125,6 +138,8 @@ def validate_channel_message_event(
             f"(got {len(request.mentions)})"
         ), None
     for i, m in enumerate(request.mentions):
+        if m == _MENTION_EVERYONE:
+            continue  # broadcast sentinel (D3), not a participant id — ISSUE-0094
         if not _CHANNEL_PARTICIPANT_ID_RE.match(m):
             return f"mentions[{i}] is not a valid participant id: {_safe_repr(m)}", None
 
@@ -270,6 +285,8 @@ def validate_channel_message_dict(
             f"(got {len(mentions_raw)})"
         ), None
     for i, m in enumerate(mentions_raw):
+        if m == _MENTION_EVERYONE:
+            continue  # broadcast sentinel (D3), not a participant id — ISSUE-0094
         if not isinstance(m, str) or not _CHANNEL_PARTICIPANT_ID_RE.match(m):
             rendered = _safe_repr(m if isinstance(m, str) else str(m))
             return f"mentions[{i}] is not a valid participant id: {rendered}", None
