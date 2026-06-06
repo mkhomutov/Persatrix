@@ -108,6 +108,31 @@ class TestMergeIdentity:
         merged = merge_identity({"name": "Max"}, {"name": None})
         assert merged == {"name": "Max"}
 
+    def test_empty_string_scalar_does_not_clobber(self):
+        """An incoming empty-string scalar is treated as *absent* (like
+        ``None``) and skipped — it must not overwrite an existing field.
+
+        Rationale (PR #553 deep-review #2): an upstream extractor that emits
+        ``""`` for a field it could not resolve would otherwise wipe a good
+        value via scalar last-writer-wins. ``None`` is already skipped; an
+        empty string is the same "no value" signal and gets the same
+        treatment, so a partial/failed extraction is non-destructive
+        regardless of which empty sentinel the caller uses. This closes the
+        trap at the merge layer rather than relying on every future caller
+        (D2's write-through intercept) to remember to pass ``None``."""
+        merged = merge_identity({"name": "Max"}, {"name": ""})
+        assert merged == {"name": "Max"}
+
+    def test_empty_and_none_prefs_items_are_skipped(self):
+        """Empty-string / ``None`` items in an incoming ``prefs`` list are
+        skipped from the union — same "absent value" rule as scalars — so a
+        failed per-item extraction adds noise-free nothing rather than an
+        empty or ``None`` preference."""
+        merged = merge_identity(
+            {"prefs": ["Rust"]}, {"prefs": ["", "Go", None]},
+        )
+        assert merged == {"prefs": ["Rust", "Go"]}
+
     def test_does_not_mutate_inputs(self):
         existing = {"name": "Max", "prefs": ["Rust"]}
         incoming = {"prefs": ["Go"]}

@@ -107,6 +107,16 @@ class RelationshipMemory:
         # (see ``MemoryStore``) — but identity's JSON union is a genuine
         # multi-statement read-modify-write that the queue does NOT make
         # atomic, so concurrent upserts would otherwise lose updates.
+        #
+        # Scope: this is a per-instance ``asyncio.Lock``, so it serialises the
+        # async tasks of *one* ``RelationshipMemory`` (which share one
+        # ``aiosqlite`` connection).  That is the only concurrency the runtime
+        # produces today — one instance per agent.  It does NOT serialise two
+        # *separate* instances / processes writing the same relationship row
+        # (WAL permits concurrent connections and there is no SQLite-level
+        # optimistic-retry here); a future multi-instance deployment of the
+        # same agent would reopen the lost-update window and need a DB-level
+        # guard (e.g. ``json_patch`` in one statement, or a versioned CAS).
         self._identity_write_lock = asyncio.Lock()
 
     @property

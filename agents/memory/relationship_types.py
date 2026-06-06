@@ -39,9 +39,15 @@ def merge_identity(
     * **list keys** (:data:`_IDENTITY_LIST_KEYS`, currently ``prefs``)
       *union* — new entries append, order-preserving, de-duplicated, so a
       preference learned in a later turn accumulates rather than clobbers,
-    * a ``None`` incoming value is **skipped** so a partial update (e.g.
-      learning a role without re-stating the name) cannot null an existing
-      field.
+    * an **absent** incoming value — ``None`` *or* an empty string ``""`` —
+      is **skipped** so a partial update (e.g. learning a role without
+      re-stating the name) or a failed extraction cannot null an existing
+      field.  The empty string is treated identically to ``None`` because an
+      upstream extractor that emits ``""`` for a field it could not resolve
+      must be just as non-destructive as one that emits ``None`` — scalar
+      overwrite would otherwise wipe a good value (PR #553 deep-review #2).
+      The same rule drops empty / ``None`` *items* from a list-key union, so
+      a failed per-item extraction adds nothing rather than a blank pref.
 
     Pure: neither argument is mutated; a fresh dict is returned.  Lives
     here (no DB dependency) so the merge rule is unit-testable in isolation
@@ -50,7 +56,7 @@ def merge_identity(
     """
     merged = dict(existing)
     for key, value in incoming.items():
-        if value is None:
+        if _is_absent(value):
             continue
         if key in _IDENTITY_LIST_KEYS:
             current = merged.get(key, [])
@@ -60,12 +66,25 @@ def merge_identity(
             base = list(current) if isinstance(current, list) else [current]
             items = value if isinstance(value, list) else [value]
             for item in items:
-                if item not in base:
+                if not _is_absent(item) and item not in base:
                     base.append(item)
             merged[key] = base
         else:
             merged[key] = value
     return merged
+
+
+def _is_absent(value: Any) -> bool:
+    """An identity value that carries no information — skipped by
+    :func:`merge_identity` so it can never overwrite a stored field.
+
+    ``None`` and the empty string ``""`` are the two "no value" sentinels.
+    Deliberately a value/identity check, not general falsiness: ``0`` and
+    ``False`` are *meaningful* scalars and must survive (``0 == ""`` and
+    ``False == ""`` are both ``False`` in Python, so the equality test below
+    already excludes them — spelled out here so a future edit does not
+    "simplify" it to ``not value`` and start dropping legitimate zeros)."""
+    return value is None or value == ""
 
 
 @dataclass
