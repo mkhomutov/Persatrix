@@ -444,6 +444,16 @@ class TestEveryoneBroadcastSentinel:
         assert err is not None
         assert "sender_id" in err
 
+    def test_event_rejects_a_miscased_sentinel(self):
+        # The carve-out is an exact-string match, deliberately mirroring Go's
+        # ``const MentionEveryone = "@everyone"`` (channels.go) and the gate's
+        # ``MENTION_EVERYONE`` — none of which case-fold. A miscased ``@Everyone``
+        # is therefore NOT the sentinel: it fails the participant-id regex and
+        # must reject, so the three layers can never silently diverge on casing.
+        err, _ = validate_channel_message_event(_event(mentions=["@Everyone"]))
+        assert err is not None
+        assert "mentions" in err
+
     def test_dict_accepts_everyone_alone(self):
         err, ts = validate_channel_message_dict(
             _msg_dict(mentions=["@everyone"]), channel_type="group",
