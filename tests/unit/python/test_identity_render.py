@@ -18,11 +18,13 @@ Two layers:
 
 from __future__ import annotations
 
+from agents.memory.relationship import RelationshipMemory
 from agents.memory.relationship_types import RelationshipSummary
 from agents.persona import create_persona_agent
 from agents.persona_runtime.memory_budget import MemoryBudget
 from agents.persona_runtime.memory_context import _truncate_with_ellipsis
 from agents.persona_runtime.relationship_section import (
+    recall_relationship_summary,
     render_relationship_section,
 )
 from agents.persona_types import AgentEvent, EventType
@@ -161,3 +163,43 @@ class TestIdentityImmediacyCrossRoom:
         assert "Alice" in rel_section.content
         assert "engineer" in rel_section.content
         await agent.close_memory()
+
+
+# ─── Read-side best-effort resilience ───────────────────────
+
+
+class TestRecallIdentityResilience:
+    async def test_identity_read_failure_does_not_sink_summary(self, monkeypatch):
+        """A ``get_identity`` failure during recall is swallowed and the
+        relationship summary is still returned (without identity).
+
+        The read-side analogue of
+        ``test_identity_write_failure_never_breaks_note_tool``: the identity
+        attach in ``recall_relationship_summary`` is best-effort, so a backend
+        failure on the *second* (cross-room) lookup must not sink the
+        relationship tier — the summary read already succeeded. The code
+        asserts this contract only in a comment ("an identity-read failure
+        must not sink the relationship tier"); this pins it so a future
+        refactor that lets the exception escape regresses loudly."""
+        rel = RelationshipMemory(agent_id="ember-owl", db_path=":memory:")
+        await rel.initialize()
+        try:
+            async def _boom(*args, **kwargs):
+                raise RuntimeError("identity backend down")
+
+            monkeypatch.setattr(rel, "get_identity", _boom)
+            event = AgentEvent(
+                event_type=EventType.CHANNEL_MESSAGE,
+                payload={"content": "hi"},
+                sender_id="user-alice",
+                metadata={"sender_participant_type": "user"},
+            )
+            summary = await recall_relationship_summary(
+                rel, event, agent_id="ember-owl",
+            )
+            # The summary survived the failed identity attach; only the
+            # (best-effort) identity field was skipped.
+            assert summary is not None
+            assert summary.identity is None
+        finally:
+            await rel.close()
