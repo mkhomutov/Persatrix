@@ -107,8 +107,10 @@ pub(crate) fn validate_send_inputs(sender_id: &str, mentions: &[String]) -> Resu
     validate_resource_id(sender_id, "sender id")?;
     for m in mentions {
         // The `@everyone` broadcast sentinel (D3) is not a participant id —
-        // carve it out so `--mention-all` (and an explicit `--mention
-        // @everyone`) is not rejected client-side before it reaches the wire.
+        // carve it out so an explicit `--mention @everyone` is not rejected
+        // client-side before it reaches the wire. (`--mention-all` does not
+        // rely on this branch: its sentinel is appended in `expand_mentions`
+        // *after* this check, which only ever sees the explicit inputs.)
         // Mirrors the server-side carve-out (ISSUE-0094). `sender_id` carries a
         // stronger trust claim and is intentionally NOT exempt.
         if m == MENTION_EVERYONE {
