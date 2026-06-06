@@ -316,6 +316,10 @@ def create_persona_agent(
         gate,
         max_notes=notes_config.get("max_notes", 500),
         auto_reflect_after=notes_config.get("auto_reflect_after", 0),
+        # RFC 0031 amendment (F-7 Option D, ISSUE-0093) PR D2 — wire the
+        # relationship tier so a ``contact:<id>`` note also upserts
+        # cross-room person identity (write-through).
+        relationship=relationship_memory,
     )
 
     return _LLMPersonaAgent(
