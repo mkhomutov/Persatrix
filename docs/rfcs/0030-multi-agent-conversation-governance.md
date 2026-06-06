@@ -3,7 +3,7 @@ id: RFC-0030
 title: Multi-Agent Conversation Governance
 summary: Deterministic anti-thrash governance for multi-persona channel conversations — Phase 1 cascade depth/quiet windows in v0.3.x, moderator role in v0.4.0, declarative conversation types in v0.5.0+.
 type: architecture
-status: proposed
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-11
 target: v0.3.6 (Layer 2.5 — shipped); v0.3.7–v0.3.9 (Phase 1 — relevance gate + deterministic layers); v0.4.0 (Phase 2 — moderator); v0.5.0+ (Phase 3)
@@ -15,7 +15,7 @@ depends_on:
 # RFC 0030 — Multi-Agent Conversation Governance
 
 **Type**: architecture
-**Status**: 📋 Proposed (Draft)
+**Status**: 🚧 Implementing — Layer 2.5 (floor control) shipped v0.3.6; the relevance-gate **Tier A + `respond_policy → disposition` reframe** shipped v0.3.7 (the [relevance amendment](0030-amendment-relevance-gated-response.md)). Tier B + Layers 1/2/4 are v0.3.8; the moderator (Layer 5) is v0.4.0.
 **Author**: Maksim Khomutov
 **Date**: 2026-05-11
 **Target**: v0.3.6 (Layer 2.5 — floor control, shipped); v0.3.7–v0.3.9 (Phase 1 — [relevance gate](0030-amendment-relevance-gated-response.md) + cost/reply-budget/end-of-interaction layers); v0.4.0 (Phase 2 — moderator role / bid-and-select); v0.5.0+ (Phase 3 — declarative conversation types + topic-drift)

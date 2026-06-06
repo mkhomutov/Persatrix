@@ -42,6 +42,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | ID | Title | Status |
 |----|-------|--------|
 | [MT-CHANNEL-GOV-002](MT-CHANNEL-GOV-002.md) | Floor control — ordered, mutually-aware multi-persona replies (RFC 0030 Layer 2.5) | Active |
+| [MT-CHANNEL-RELEVANCE-001](MT-CHANNEL-RELEVANCE-001.md) | Relevance gate Tier A — addressing-aware directedness (a `@`-mention to one persona is not answered by everyone) (RFC 0030 Layer 3) | Active |
 
 ## Web Console (RFC 0048)
 

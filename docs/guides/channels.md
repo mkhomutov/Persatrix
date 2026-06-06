@@ -72,17 +72,17 @@ channels:
     description: "Strategy and planning discussions"
     members:
       - id: ember-owl
-        respond: when_mentioned
+        respond: addressed         # advisor — replies only when @-mentioned
       - id: alice                 # human users may join here too
-        respond: when_mentioned
+        respond: addressed
 
   - name: code-review
     description: "Tight-loop pair channel"
     members:
       - id: code-writer
-        respond: always
+        respond: participant       # active collaborator — joins the open floor
       - id: code-reviewer
-        respond: always
+        respond: participant
 ```
 
 Run `make validate` after any edit. The schema is
@@ -90,24 +90,37 @@ Run `make validate` after any edit. The schema is
 top-level disclaimer: *"Internal-only schema until v1.0; `$id` may break across
 v0.x bumps without notice."*
 
-### Per-membership `respond` policies
+### Per-membership `respond` dispositions
 
-The response gate fires per-event in the persona runtime (RFC 0011 §D). Pick
-the policy that matches each member's role in the channel:
+The response gate fires per-event in the persona runtime (RFC 0011 §D). As of
+v0.3.7 the `respond` field is a **disposition** — the member's role in the
+conversation — not a mechanical trigger (the [RFC 0030 relevance amendment](../rfcs/0030-amendment-relevance-gated-response.md),
+Tier A):
 
-- **`when_mentioned`** *(default)* — agent replies only when its id appears
-  in `mentions[]`. Quiet by default; cuts through on `@`-mention.
-- **`always`** — agent replies to every message it ingests. Reserve for
-  tight-loop pairs (e.g. writer ↔ reviewer); each `always` member multiplies
-  fanout linearly.
-- **`never`** — agent ingests history into memory but does not reply.
-  Listener role for broadcast / announcement channels.
+- **`addressed`** *(default)* — replies only when `@`-mentioned or replied to
+  in-thread. The quiet advisor role.
+- **`participant`** — joins the **open floor**: replies to un-addressed
+  messages, but a message `@`-mentioning *someone else* (not a broadcast)
+  **draws no reply from it** — the Tier A directedness fix
+  (`reason="directed_elsewhere"` in [`agents/response_gate.py`](../../agents/response_gate.py)).
+  Each one still multiplies open-floor fanout linearly.
+- **`observer`** — ingests history into memory but never replies. Listener role.
+
+> **Back-compat + scope.** The legacy `always` / `when_mentioned` / `never`
+> values still load (normalized to `participant` / `addressed` / `observer` at
+> the Go config boundary), so existing configs keep working; an unknown value is
+> a loud error. v0.3.7 Tier A fixes *addressing* only — a directed `@`-mention is
+> answered by exactly that persona, an un-addressed message admits all
+> `participant`s, and `@everyone` (`--mention-all`) disables the directed filter.
+> No-pile-on *salience* (a `participant` staying out because a point is covered)
+> and the reserved `threshold` field are [Tier B](../rfcs/0030-amendment-relevance-gated-response.md#scope--v037--v038--v040)
+> (v0.3.8). Acceptance: [MT-CHANNEL-RELEVANCE-001](../manual-tests/MT-CHANNEL-RELEVANCE-001.md).
 
 Channel-level patterns (Quiet group / Tight-loop pair / Broadcast /
-Incident) compose from member-level policies — see RFC 0011 §H for the
-table. RFC 0011 §H labels the all-`always` pattern "Always-respond / incident";
-this guide uses **Incident** consistently to name the role rather than the
-implementation.
+Incident) compose from member-level dispositions — see RFC 0011 §H for the
+table. RFC 0011 §H labels the all-`participant` pattern "Always-respond /
+incident"; this guide uses **Incident** consistently to name the role rather
+than the implementation.
 
 ---
 
@@ -264,8 +277,8 @@ max_channels: 50
 channels:
   - name: planning
     members:
-      - {id: alex, respond: always}
-      - {id: jordan, respond: always}
+      - {id: alex, respond: participant}
+      - {id: jordan, respond: participant}
 ```
 
 A zero or negative `max_cascade_depth:` row is ignored — the backstop

@@ -276,6 +276,16 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # (§5) subsections into the chat-specific guide once it exists, but
     # that is a separate refactor. Grandfather here until that lands.
     "docs/guides/persona-agents.md",
+    # docs/guides/channels.md was at 2 999 words (1 word under the cap — the
+    # same knife-edge as docs/ai-glossary.md below) when the v0.3.7 RFC 0030
+    # relevance Tier A closeout (PR 3) had to document the new per-membership
+    # `respond` disposition vocabulary (participant/addressed/observer) + its
+    # legacy back-compat mapping + the Tier A-vs-Tier B scope note in the
+    # operator-facing "§Per-membership respond dispositions" section. The new
+    # content is already trimmed (terse bullets + a single combined blockquote).
+    # A future maintenance PR can split the floor-control (§7) / memory (§5)
+    # subsections into their own pages; grandfather here until that lands.
+    "docs/guides/channels.md",
     # docs/ai-glossary.md was at 2 999 words (1 word under the cap) when
     # RFC 0020 PR 4 (PR #229) landed. The PR #229 review Should-Fix #5
     # required adding the canonical PR-4 terminology (closing-state
