@@ -183,15 +183,23 @@ un-named `participant`s on it (adopted default, amendment OQ #5).
 ```bash
 ./bin/persatrix channel send planning \
   "Standup, everyone: one line on what you're blocked on. @ember-owl you too." \
-  --as operator --mention-all
+  --as operator --mention ember-owl --mention-all
 ```
 
-> `--mention-all` resolves the channel roster and emits the `@everyone`
-> broadcast sentinel; the gate treats its presence as "do not suppress."
+> `--mention-all` emits the roster-independent `@everyone` broadcast sentinel
+> (no member fetch); the gate treats its presence as "do not suppress the
+> un-named `participant`s." The sentinel disables the directed-elsewhere filter
+> for `participant`s, but it is **not** an implicit mention of an `addressed`
+> (`when_mentioned`) member — `ember-owl` still needs its **explicit**
+> `--mention ember-owl` to reply. So `--mention-all` **alone** draws the two
+> `participant`s (`iron-fox`, `nova-sparrow`); add `--mention ember-owl` to draw
+> all three. (Both the Go candidate set and the receiver gate key an `addressed`
+> member on its own id, not on the sentinel.)
 
 **Expected**:
-- All three personas reply (`ember-owl` because it is mentioned; `iron-fox` and
-  `nova-sparrow` because the broadcast disables the directed-elsewhere filter).
+- All three personas reply (`ember-owl` because it is **explicitly** mentioned;
+  `iron-fox` and `nova-sparrow` because the broadcast disables the
+  directed-elsewhere filter).
 
 **Verification**:
 - [ ] All three personas reply on the broadcast (no `directed_elsewhere`

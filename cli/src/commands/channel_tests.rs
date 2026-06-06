@@ -5,20 +5,12 @@
 //! `tests/`.
 
 use super::*;
-use crate::commands::channel_types::{ChannelMember, ChannelMessage};
+use crate::commands::channel_types::ChannelMessage;
 // WatchState + watch-ring constants moved to `channel_watch` (RFC 0031 Phase 3
 // PR 4 size-cap relief); import them here so the watch tests keep resolving.
 use crate::commands::channel_watch::{
     watch_seen_cap_for, WatchState, FULL_PAGE_WARNING_TEXT, WATCH_SEEN_CAP, WATCH_SEEN_CAP_CEILING,
 };
-
-fn member(id: &str, respond: &str) -> ChannelMember {
-    ChannelMember {
-        id: id.to_string(),
-        respond_policy: respond.to_string(),
-        joined_at: "2026-05-09T10:00:00Z".to_string(),
-    }
-}
 
 fn message(id: &str, ts: &str) -> ChannelMessage {
     ChannelMessage {
@@ -54,33 +46,37 @@ fn canonicalize_passthrough_for_qualified_id() {
 
 #[test]
 fn expand_mentions_explicit_only() {
-    let mentions = expand_mentions(
-        &["bob".to_string(), "carol".to_string()],
-        false,
-        &[],
-        "alice",
+    let mentions = expand_mentions(&["bob".to_string(), "carol".to_string()], false, "alice");
+    assert_eq!(mentions, vec!["bob".to_string(), "carol".to_string()]);
+}
+
+#[test]
+fn expand_mentions_mention_all_emits_everyone_sentinel() {
+    // `--mention-all` is the broadcast: it emits the roster-independent
+    // `@everyone` sentinel (RFC 0030 Tier A, decision D3), NOT an
+    // enumerated member list. The server's directed-elsewhere filter keys
+    // on the sentinel's presence, so an un-named `participant` is admitted
+    // without the CLI having to fetch and list the roster.
+    let mentions = expand_mentions(&[], true, "alice");
+    assert_eq!(mentions, vec![MENTION_EVERYONE.to_string()]);
+}
+
+#[test]
+fn expand_mentions_mention_all_keeps_explicit_then_sentinel() {
+    // `--mention bob --mention-all`: the explicit id (addressed first under
+    // the gate's mentioned-first ordering) precedes the broadcast sentinel.
+    let mentions = expand_mentions(&["bob".to_string()], true, "alice");
+    assert_eq!(
+        mentions,
+        vec!["bob".to_string(), MENTION_EVERYONE.to_string()]
     );
-    assert_eq!(mentions, vec!["bob".to_string(), "carol".to_string()]);
 }
 
 #[test]
-fn expand_mentions_mention_all_excludes_sender() {
-    // `--mention-all` expands to every member except the sender.
-    let members = vec![
-        member("alice", "always"),
-        member("bob", "when_mentioned"),
-        member("carol", "when_mentioned"),
-    ];
-    let mentions = expand_mentions(&[], true, &members, "alice");
-    assert_eq!(mentions, vec!["bob".to_string(), "carol".to_string()]);
-}
-
-#[test]
-fn expand_mentions_dedupes_overlap() {
-    // `--mention bob --mention-all` does not list bob twice.
-    let members = vec![member("bob", "when_mentioned"), member("carol", "always")];
-    let mentions = expand_mentions(&["bob".to_string()], true, &members, "alice");
-    assert_eq!(mentions, vec!["bob".to_string(), "carol".to_string()]);
+fn expand_mentions_mention_all_dedupes_explicit_sentinel() {
+    // `--mention @everyone --mention-all` must not list the sentinel twice.
+    let mentions = expand_mentions(&[MENTION_EVERYONE.to_string()], true, "alice");
+    assert_eq!(mentions, vec![MENTION_EVERYONE.to_string()]);
 }
 
 #[test]
@@ -89,35 +85,24 @@ fn expand_mentions_explicit_dedupes_repeats() {
     let mentions = expand_mentions(
         &["bob".to_string(), "bob".to_string(), "carol".to_string()],
         false,
-        &[],
         "alice",
     );
     assert_eq!(mentions, vec!["bob".to_string(), "carol".to_string()]);
 }
 
 #[test]
-fn expand_mentions_drops_self_mention() {
-    // Sender cannot @-mention themselves — the gate would just fan the
-    // message back to the same actor.
-    let members = vec![member("alice", "always"), member("bob", "always")];
-    let mentions = expand_mentions(&["alice".to_string()], true, &members, "alice");
-    assert_eq!(mentions, vec!["bob".to_string()]);
+fn expand_mentions_mention_all_drops_self_then_adds_sentinel() {
+    // Sender cannot @-mention themselves; the broadcast sentinel still
+    // lands (the gate excludes the sender from a broadcast on its side).
+    let mentions = expand_mentions(&["alice".to_string()], true, "alice");
+    assert_eq!(mentions, vec![MENTION_EVERYONE.to_string()]);
 }
 
 #[test]
 fn expand_mentions_drops_explicit_self_mention_without_mention_all() {
-    // PR #302 deep-review finding N7: the explicit-self-drop branch
-    // (no `--mention-all`) was previously only covered transitively via
-    // `expand_mentions_drops_self_mention`, which exercises the
-    // `mention_all=true` path. The drop is unconditional in
-    // `expand_mentions` regardless of the flag, but assertions on the
-    // explicit-only path keep regressions visible.
-    let mentions = expand_mentions(
-        &["alice".to_string(), "bob".to_string()],
-        false,
-        &[],
-        "alice",
-    );
+    // PR #302 deep-review finding N7: the explicit-self-drop is
+    // unconditional in `expand_mentions`, independent of the flag.
+    let mentions = expand_mentions(&["alice".to_string(), "bob".to_string()], false, "alice");
     assert_eq!(
         mentions,
         vec!["bob".to_string()],
@@ -126,8 +111,8 @@ fn expand_mentions_drops_explicit_self_mention_without_mention_all() {
 }
 
 #[test]
-fn expand_mentions_no_flag_no_members_is_empty() {
-    let mentions = expand_mentions(&[], false, &[], "alice");
+fn expand_mentions_no_flag_is_empty() {
+    let mentions = expand_mentions(&[], false, "alice");
     assert!(mentions.is_empty());
 }
 
@@ -398,6 +383,18 @@ fn validate_send_inputs_rejects_invalid_mention() {
     let err =
         validate_send_inputs("alice", &["bob".to_string(), "not_valid".to_string()]).unwrap_err();
     assert!(err.contains("mention"), "label names the field: {err}");
+}
+
+#[test]
+fn validate_send_inputs_accepts_everyone_sentinel() {
+    // `@everyone` is the D3 broadcast sentinel, not a participant id — it
+    // must clear client-side validation (mirrors the server-side carve-out,
+    // ISSUE-0094) so `--mention-all` (and an explicit `--mention @everyone`)
+    // is not rejected before it reaches the wire.
+    assert!(validate_send_inputs("alice", &[MENTION_EVERYONE.to_string()]).is_ok());
+    assert!(
+        validate_send_inputs("alice", &["bob".to_string(), MENTION_EVERYONE.to_string()]).is_ok()
+    );
 }
 
 // ─── full_page_warning_text (PR #302 deep-review finding 5) ─────────
