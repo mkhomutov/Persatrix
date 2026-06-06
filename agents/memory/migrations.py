@@ -36,6 +36,7 @@ from ._migration_handlers import (
     _apply_migration_10,
     _apply_migration_11,
     _apply_migration_12,
+    _apply_migration_13,
 )
 
 __all__ = [
@@ -54,6 +55,7 @@ __all__ = [
     "_apply_migration_10",
     "_apply_migration_11",
     "_apply_migration_12",
+    "_apply_migration_13",
     "_apply_migrations",
     "_fts5_available",
 ]
@@ -301,6 +303,22 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         12,
         "ISSUE-0085: epoch_id on all five persona-memory tiers",
         "",  # handled by _apply_migration_12()
+    ),
+    # Migration 13 (RFC 0031 amendment — F-7 Option D, ISSUE-0093) adds a
+    # nullable ``identity TEXT`` (JSON) column to ``relationships`` so person
+    # identity (name / role / stable preferences) lives on the genuinely
+    # cross-room relationship tier (PK omits ``session_id``) instead of being
+    # retrofitted onto room-scoped ``contact:*`` notes by the F-7 Option-A
+    # recall carve-out.  Unlike v11/v12 this is **not** a table rebuild —
+    # ``identity`` is per-row payload, not a key column — so it uses the
+    # simple v7 ``ADD COLUMN`` skeleton with the same ``sqlite_master`` +
+    # ``PRAGMA table_info`` partial-restore / crash-replay guards.  Lives in
+    # :mod:`agents.memory._migration_identity`.  See
+    # docs/rfcs/0031-amendment-person-identity-cross-room-tier.md (PR D1).
+    (
+        13,
+        "RFC 0031 amendment: identity column on relationships (F-7 Option D)",
+        "",  # handled by _apply_migration_13()
     ),
 ]
 

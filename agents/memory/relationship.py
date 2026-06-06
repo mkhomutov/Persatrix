@@ -11,6 +11,7 @@ write/mutation helpers live in :mod:`.relationship_mutations`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import aiosqlite
@@ -36,8 +37,14 @@ from .relationship_mutations import (
 from .relationship_mutations import (
     update_trust as _update_trust,
 )
+from .relationship_mutations import (
+    upsert_identity as _upsert_identity,
+)
 from .relationship_queries import (
     get_all_relationships as _get_all_relationships,
+)
+from .relationship_queries import (
+    get_identity as _get_identity,
 )
 from .relationship_queries import (
     get_relationship_summary as _get_relationship_summary,
@@ -94,6 +101,23 @@ class RelationshipMemory:
         # ISSUE-0085 PR 3 — epoch snapshot; call-time ``epoch_scope`` wins
         # via ``resolve_active_epoch`` on recall + write paths.
         self._active_epoch_id = resolve_epoch_id_silent()
+        # RFC 0031 amendment (F-7 Option D) — serialises ``upsert_identity``'s
+        # read-merge-write critical section.  Single-op writers (``update_trust``
+        # et al.) need no lock — aiosqlite's queue serialises each statement
+        # (see ``MemoryStore``) — but identity's JSON union is a genuine
+        # multi-statement read-modify-write that the queue does NOT make
+        # atomic, so concurrent upserts would otherwise lose updates.
+        #
+        # Scope: this is a per-instance ``asyncio.Lock``, so it serialises the
+        # async tasks of *one* ``RelationshipMemory`` (which share one
+        # ``aiosqlite`` connection).  That is the only concurrency the runtime
+        # produces today — one instance per agent.  It does NOT serialise two
+        # *separate* instances / processes writing the same relationship row
+        # (WAL permits concurrent connections and there is no SQLite-level
+        # optimistic-retry here); a future multi-instance deployment of the
+        # same agent would reopen the lost-update window and need a DB-level
+        # guard (e.g. ``json_patch`` in one statement, or a versioned CAS).
+        self._identity_write_lock = asyncio.Lock()
 
     @property
     def agent_id(self) -> str:
@@ -203,6 +227,64 @@ class RelationshipMemory:
         """
         return await _update_trust(
             self._ensure_db(), self._agent_id, other_id, delta, reason,
+            participant_type=participant_type,
+            other_participant_type=other_participant_type,
+            principal_id=resolve_active_principal(self._active_principal_id),
+            epoch_id=resolve_active_epoch(self._active_epoch_id),
+        )
+
+    # ─── Person identity (cross-room) ───────────────────────
+
+    async def upsert_identity(
+        self,
+        other_id: str,
+        fields: dict[str, object],
+        *,
+        participant_type: str = "agent",
+        other_participant_type: str = "agent",
+    ) -> dict[str, object]:
+        """Merge person-identity ``fields`` onto the relationship record.
+
+        RFC 0031 amendment (F-7 Option D, ISSUE-0093) — the cross-room
+        write for person identity (name / role / stable preferences).
+        Non-destructive merge (scalar last-writer-wins; ``prefs`` union);
+        creates the row at neutral trust if absent; **never touches the
+        trust ``notes`` column**.  Identity lives on the relationship row
+        (PK omits ``session_id``), so it is cross-room by construction.
+        Returns the merged identity that was persisted.
+
+        The read-merge-write is serialised under ``_identity_write_lock`` so
+        concurrent identity writes on the shared connection cannot lose
+        updates (the JSON union can't be a single atomic statement the way
+        ``update_trust``'s arithmetic is).
+        """
+        async with self._identity_write_lock:
+            return await _upsert_identity(
+                self._ensure_db(), self._agent_id, other_id, fields,
+                participant_type=participant_type,
+                other_participant_type=other_participant_type,
+                principal_id=resolve_active_principal(self._active_principal_id),
+                epoch_id=resolve_active_epoch(self._active_epoch_id),
+            )
+
+    async def get_identity(
+        self,
+        other_id: str,
+        *,
+        participant_type: str = "agent",
+        other_participant_type: str = "agent",
+    ) -> dict[str, object] | None:
+        """Read the structured person identity off the relationship record.
+
+        RFC 0031 amendment (F-7 Option D, ISSUE-0093) — the cross-room
+        read.  Applies principal/epoch strict equality but **no session
+        filter** (see :func:`agents.memory.relationship_queries.get_identity`)
+        so identity stated in one room surfaces in every room for the same
+        ``(principal, epoch)``.  Returns ``None`` when no identity is
+        recorded for the pair.
+        """
+        return await _get_identity(
+            self._ensure_db(), self._agent_id, other_id,
             participant_type=participant_type,
             other_participant_type=other_participant_type,
             principal_id=resolve_active_principal(self._active_principal_id),

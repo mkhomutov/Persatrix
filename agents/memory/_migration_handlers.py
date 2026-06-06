@@ -9,7 +9,7 @@ rewrites tables with the 12-step ALTER TABLE pattern, performs an
 baselines where the migration must inspect the live schema before
 issuing DDL.  See each handler's docstring for per-version rationale.
 
-The registry currently covers ``v4`` through ``v12``.  Migration ``v8``
+The registry currently covers ``v4`` through ``v13``.  Migration ``v8``
 (RFC 0026 PR 1 — declarative-facts table) lives in
 :mod:`agents.memory._migration_facts`, migration ``v9`` (RFC 0031
 Phase 2 PR 1 — ``session_id`` on notes) lives in
@@ -17,11 +17,13 @@ Phase 2 PR 1 — ``session_id`` on notes) lives in
 (RFC 0031 Phase 2 PR 5 — ``session_id`` on interactions) lives in
 :mod:`agents.memory._migration_interactions_session`, migration
 ``v11`` (ISSUE-0081 PR 3 — ``principal_id`` on all five tiers) lives in
-:mod:`agents.memory._migration_principal`, and migration ``v12``
+:mod:`agents.memory._migration_principal`, migration ``v12``
 (ISSUE-0085 PR 2 — ``epoch_id`` on all five tiers) lives in
-:mod:`agents.memory._migration_epoch`; all are re-exported below so
-this module stays under the 500-line repo-wide soft cap.  The split
-mirrors :mod:`agents.observability._metrics_facts`.
+:mod:`agents.memory._migration_epoch`, and migration ``v13`` (RFC 0031
+amendment — F-7 Option D, ISSUE-0093: ``identity`` column on
+relationships) lives in :mod:`agents.memory._migration_identity`; all
+are re-exported below so this module stays under the 500-line repo-wide
+soft cap.  The split mirrors :mod:`agents.observability._metrics_facts`.
 
 Public API (``_MIGRATION_HANDLERS`` plus the ``_apply_migration_N``
 callables) is re-exported by :mod:`agents.memory.migrations` for
@@ -44,6 +46,7 @@ import aiosqlite
 # work without churn.
 from ._migration_epoch import _apply_migration_12
 from ._migration_facts import _apply_migration_8
+from ._migration_identity import _apply_migration_13
 from ._migration_interactions_session import _apply_migration_10
 from ._migration_notes_session import _apply_migration_9
 from ._migration_principal import _apply_migration_11
@@ -465,4 +468,5 @@ _MIGRATION_HANDLERS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]
     10: _apply_migration_10,
     11: _apply_migration_11,
     12: _apply_migration_12,
+    13: _apply_migration_13,
 }
