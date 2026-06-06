@@ -85,6 +85,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-PERSONA-008](MT-PERSONA-008.md) | A person introduced in one channel is recalled in another; room notes stay scoped (F-3b) | Active |
 | [MT-PERSONA-009](MT-PERSONA-009.md) | Group channel has a shared roster (who's here + roles); DM has none (F-4) | Active |
 | [MT-PERSONA-CONVERSATION-001](MT-PERSONA-CONVERSATION-001.md) | Persona conversational continuity (DM) | Active |
+| [MT-PERSONA-CONVERSATION-002](MT-PERSONA-CONVERSATION-002.md) | Persona conversational continuity (group channel — per-peer attribution + cross-peer pronoun binding, RFC 0034 Phase 2) | Active |
 
 ## Chat
 
@@ -151,6 +152,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | v0.3.4 | [v0.3.4-execution-report.md](v0.3.4-execution-report.md) | ✅ Complete |
 | v0.3.5 | [v0.3.5-execution-report.md](v0.3.5-execution-report.md) | ✅ Complete |
 | v0.3.6 | [v0.3.6-execution-report.md](v0.3.6-execution-report.md) | ✅ Complete |
+| v0.3.7 | [v0.3.7-execution-report.md](v0.3.7-execution-report.md) | ⚠️ Complete — release-blocking finding ([ISSUE-0094](../issues/ISSUE-0094-everyone-broadcast-rejected-by-agent-inbound-validation.md), MT-CHANNEL-RELEVANCE-001 Step 4) |
 
 ---
 

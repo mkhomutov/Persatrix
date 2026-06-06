@@ -225,6 +225,12 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     "docs/manual-tests/v0.3.5-execution-report.md",
     # v0.3.6 sibling — same per-release accumulator pattern; archive once tagged.
     "docs/manual-tests/v0.3.6-execution-report.md",
+    # v0.3.7 sibling — same per-release accumulator pattern (the realism surface:
+    # MT-CHANNEL-RELEVANCE-001 + MT-PERSONA-CONVERSATION-002 + the combined
+    # walkthrough + the carried-forward v0.3.6 surface + the structural-gate
+    # tables), and it carries the live root-cause analysis of the @everyone
+    # broadcast defect (ISSUE-0094) past the cap. Archive once the tag ships.
+    "docs/manual-tests/v0.3.7-execution-report.md",
     # docs/v0.3.3-release-checklist.md crossed the 3 000-word prose cap as a
     # release-cycle record: the §3.1 Upgrade Notes table (8 rows — event-driven
     # loop, fire-and-forget channel dispatch, autonomy.timers, scheduled_wakes

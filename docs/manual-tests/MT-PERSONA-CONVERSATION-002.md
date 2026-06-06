@@ -5,7 +5,7 @@
 **Version**: 1.0
 **Created**: 2026-06-04
 **Last Updated**: 2026-06-04
-**Status**: Draft scaffold (authored as the RFC 0034 Phase 2 closeout deliverable; promoted to Active when both legs pass in the [v0.3.7 combined realism MT execution](../v0.3.7-plan.md#phase-3--v037-release-prep-execution))
+**Status**: Active (promoted from Draft scaffold — both legs passed live on the v0.3.7 RC tip `65303d7`, [v0.3.7-execution-report.md](v0.3.7-execution-report.md), 2026-06-06)
 
 ---
 
@@ -303,6 +303,7 @@ signal, not a memory bug.
 
 | Date | Tester | OS | Build | Result | Notes |
 |------|--------|----|-------|--------|-------|
+| 2026-06-06 | Claude (Opus 4.8) | macOS (Darwin 24.6.0) | RC tip `65303d7` (Anthropic) | ✅ **Pass** (both legs) | Leg 1 — `ember-owl` attributed *Iron Fox→Postgres, Nova Sparrow→SQLite* correctly (Edge Case 3 hit; re-seeded "opposite sides" per recipe). Leg 2 — bound *"their"* (operational simplicity) to Nova Sparrow and engaged her reasoning. See [v0.3.7-execution-report.md](v0.3.7-execution-report.md). |
 
 ---
 
