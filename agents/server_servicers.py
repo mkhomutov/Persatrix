@@ -421,6 +421,12 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
                 # RFC 0011 PR 4b: gate inputs — see agents/response_gate.py.
                 "respond_policy": request.respond_policy,
                 "thread_parent_sender_id": request.thread_parent_sender_id,
+                # RFC 0030 Tier B (v0.3.8): salience-bid inputs the seam reads
+                # (tier_b_gate.py); `threshold` None-when-absent ≠ explicit 0.0.
+                "tier_b_active": request.tier_b_active,
+                "threshold": request.threshold if request.HasField("threshold") else None,
+                "channel_size": request.channel_size,
+                "tier_b_max_channel_members": request.tier_b_max_channel_members,
             },
             channel_id=request.channel_id,
             sender_id=request.sender_id,
@@ -428,11 +434,9 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             thread_id=request.thread_id or None,
             timestamp=publish_ts,
             # Seed cascade_depth from the typed proto field (RFC 0011
-            # cascade-depth wire-propagation amendment, PR 3) so the
-            # dispatcher sees the wire value instead of resetting to
-            # zero on every cross-process hop. Receiver-side advisory:
-            # the trust boundary is the Go orchestrator's outbound
-            # dispatch (PR 2), which clamps before populating.
+            # cascade-depth wire-propagation amendment, PR 3) so the dispatcher
+            # sees the wire value instead of resetting to zero on every hop.
+            # Receiver-side advisory: the Go orchestrator clamps on outbound.
             metadata={"cascade_depth": request.cascade_depth},
         )
 

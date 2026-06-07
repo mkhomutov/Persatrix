@@ -43,6 +43,13 @@ max_channels: 50
 # advancing. To opt a channel back out, set `floor_control: false` on it.
 # See docs/guides/channels.md §7 "Floor control".
 
+# Tier B salience bid (RFC 0030, v0.3.8) — `participant`/`chair` members run a
+# cheap leased relevance bid on ambiguous open-floor traffic and stay silent
+# unless they have something to add (no pile-on). `tier_b_max_channel_members`
+# (default 20) caps it: above that many candidate responders the bid is skipped
+# and open-floor members fall back to `addressed`-only, so the cost stays
+# bounded on a large channel. Shown per-channel below for discoverability.
+
 # v0.3.0 demo channel — see docs/guides/v0.3.0-demo.md for the walkthrough.
 # Mixed-disposition pattern from RFC 0011 §H: ember-owl is `addressed` (advisor
 # mode — only chimes in when @-mentioned); iron-fox + nova-sparrow are
@@ -64,6 +71,9 @@ channels:
     # floor_control: true is the resolved default for group channels (v0.3.6);
     # shown here for discoverability. Remove or set false to opt out.
     floor_control: true
+    # tier_b_max_channel_members: 20 is the default (RFC 0030 Tier B); shown
+    # for discoverability. Lower it to disable the salience bid on larger rooms.
+    tier_b_max_channel_members: 20
     members:
       - id: ember-owl
         respond: addressed

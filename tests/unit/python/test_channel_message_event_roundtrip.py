@@ -34,6 +34,8 @@ canonical proto.
 
 from __future__ import annotations
 
+import struct
+
 from agents.generated import task_pb2
 
 
@@ -57,6 +59,10 @@ def test_channel_message_event_roundtrips_all_fields():
         thread_parent_sender_id="dave",
         cascade_depth=3,
         sender_participant_type="user",
+        tier_b_active=True,
+        threshold=0.42,
+        channel_size=4,
+        tier_b_max_channel_members=20,
     )
 
     blob = event.SerializeToString()
@@ -79,6 +85,35 @@ def test_channel_message_event_roundtrips_all_fields():
     assert decoded.thread_parent_sender_id == "dave"
     assert decoded.cascade_depth == 3
     assert decoded.sender_participant_type == "user"
+    assert decoded.tier_b_active is True
+    assert decoded.HasField("threshold")
+    assert decoded.threshold == 0.42
+    assert decoded.channel_size == 4
+    assert decoded.tier_b_max_channel_members == 20
+
+
+def test_channel_message_event_threshold_presence_roundtrips():
+    """RFC 0030 Tier B: the `optional double threshold` tri-state survives.
+
+    The agent-side bid reads ``HasField("threshold")`` to distinguish an
+    unset threshold (bias-to-silence, demands a decisive score) from an
+    explicit ``0.0`` (a real floor every parseable score clears). An
+    accidental drop of the ``optional`` keyword collapses the two — unset
+    would decode as ``0.0`` and silently flip a conservative member into a
+    speak-on-anything one.
+    """
+    # Unset → not present after round-trip.
+    unset = task_pb2.ChannelMessageEvent(message_id="m", channel_id="group:eng")
+    decoded = task_pb2.ChannelMessageEvent.FromString(unset.SerializeToString())
+    assert not decoded.HasField("threshold")
+
+    # Explicit 0.0 → present and distinct from unset.
+    zero = task_pb2.ChannelMessageEvent(
+        message_id="m", channel_id="group:eng", threshold=0.0,
+    )
+    decoded = task_pb2.ChannelMessageEvent.FromString(zero.SerializeToString())
+    assert decoded.HasField("threshold")
+    assert decoded.threshold == 0.0
 
 
 def test_channel_message_event_cascade_depth_default_roundtrips():
@@ -230,6 +265,49 @@ def test_channel_message_event_mentions_field_number_pinned():
     ev = task_pb2.ChannelMessageEvent(mentions=["bob", "carol"])
     expected = _string_field_bytes(8, "bob") + _string_field_bytes(8, "carol")
     assert ev.SerializeToString() == expected
+
+
+def _varint(value: int) -> bytes:
+    """Encode an unsigned int as a base-128 varint (proto wire format)."""
+    out = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(byte | 0x80)
+        else:
+            out.append(byte)
+            return bytes(out)
+
+
+def test_channel_message_event_tier_b_field_numbers_pinned():
+    """RFC 0030 Tier B fields encode at their declared numbers / wire types.
+
+    A renumber or type flip on any of the four Tier B fields changes the
+    tag byte(s) and trips this assertion on the regenerating language —
+    the same cross-language drift guard the string/varint fields carry.
+    """
+    # `bool tier_b_active = 13` → varint, tag = (13<<3)|0 = 0x68, true = 0x01.
+    assert task_pb2.ChannelMessageEvent(tier_b_active=True).SerializeToString() == b"\x68\x01"
+    # False is the proto3 implicit zero → no bytes.
+    assert task_pb2.ChannelMessageEvent(tier_b_active=False).SerializeToString() == b""
+
+    # `optional double threshold = 14` → 64-bit, tag = (14<<3)|1 = 0x71.
+    blob = task_pb2.ChannelMessageEvent(threshold=0.5).SerializeToString()
+    assert blob == b"\x71" + struct.pack("<d", 0.5)
+    # `optional` → explicit 0.0 still emits the field (8 zero bytes), unlike
+    # an implicit-presence scalar which would omit it.
+    zero_blob = task_pb2.ChannelMessageEvent(threshold=0.0).SerializeToString()
+    assert zero_blob == b"\x71" + struct.pack("<d", 0.0)
+
+    # `int32 channel_size = 15` → varint, tag = (15<<3)|0 = 0x78.
+    assert task_pb2.ChannelMessageEvent(channel_size=4).SerializeToString() == b"\x78" + _varint(4)
+    # `int32 tier_b_max_channel_members = 16` → varint, tag = (16<<3)|0 = 128,
+    # whose tag itself needs a two-byte varint (0x80 0x01).
+    assert (
+        task_pb2.ChannelMessageEvent(tier_b_max_channel_members=20).SerializeToString()
+        == b"\x80\x01" + _varint(20)
+    )
 
 
 def test_task_ack_field_numbers_pinned():

@@ -119,9 +119,15 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		if m.Respond != "" {
 			policy = channels.RespondPolicy(m.Respond)
 		}
+		// RFC 0030 Tier B (v0.3.8): derive the per-member salience-bid signals
+		// from the declared disposition (the REST shape carries no explicit
+		// threshold) before the store normalizes it.
+		tierBActive, threshold := channels.ResolveTierBSignal(policy, nil)
 		members = append(members, channels.Member{
 			ParticipantID: m.ID,
 			RespondPolicy: policy,
+			TierBActive:   tierBActive,
+			Threshold:     threshold,
 		})
 	}
 	if err := s.channelStore.CreateChannelWithMembers(r.Context(), ch, members); err != nil {
@@ -129,22 +135,16 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// RFC 0030 Layer 2.5 — resolve floor control for the freshly-created
-	// channel so a runtime-created channel (this REST path, which the RFC 0048
-	// console "New channel" form drives) takes the floor one at a time like one
-	// declared in config/channels.yaml, instead of silently falling back to the
-	// pre-amendment concurrent "shout". This endpoint only creates groups, so
-	// the resolved default is ON; the mutex-guarded SetFloorControl is safe
-	// post-startup and normalizes the zero timeout to the canonical 45s (D2).
-	// Runtime opt-out is deliberately deferred, not just unbuilt: there is no
-	// `floor_control` wire field AND the store persists no floor flag, so the
-	// startup ResolveFloorControl scan re-forces runtime channels ON on restart.
-	// A create-time `floor_control: false` alone would be a footgun (appears to
-	// work, then reverts on restart); field + persistence are one post-v0.3.6
-	// follow-up, and config-declared channels can opt out today. The nil branch
-	// is a correct no-op: with no router, publishes never fan out (moot, not skipped).
+	// RFC 0030 Layer 2.5 — resolve floor control for the freshly-created group
+	// channel so it takes the floor like a config-declared one (default ON for
+	// groups). Runtime opt-out is deferred: no `floor_control` wire field and
+	// the store persists no flag, so startup ResolveFloorControl re-forces
+	// runtime channels ON on restart. RFC 0030 Tier B (v0.3.8) gives the
+	// salience-bid channel-size cap the same treatment — no REST field, so
+	// SetTierBMaxChannelMembers(_, 0) applies the default. Nil router → no-op.
 	if s.channelRouter != nil {
 		s.channelRouter.SetFloorControl(canonicalID, true, 0)
+		s.channelRouter.SetTierBMaxChannelMembers(canonicalID, 0)
 	}
 
 	created, err := s.channelStore.GetChannel(r.Context(), canonicalID)

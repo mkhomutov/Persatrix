@@ -395,5 +395,16 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		//
 		// [RFC 0011 amendment 'Participant-type wire propagation']: ../../docs/rfcs/0011-amendment-participant-type-wire-propagation.md
 		SenderParticipantType: readParticipantType(msg.Metadata),
+		// RFC 0030 Tier B (v0.3.8): the per-recipient salience-bid inputs. The
+		// bid-ness + threshold ride on the recipient's membership row
+		// (resolved at config load / REST add); the channel size + cap are
+		// per-publish values the router stamped on the envelope at fanout.
+		// `Threshold` is `*float64` → the optional proto field: nil leaves it
+		// absent (the agent reads "unset → bias-to-silence"), distinct from an
+		// explicit 0.0.
+		TierBActive:            env.Recipient.TierBActive,
+		Threshold:              env.Recipient.Threshold,
+		ChannelSize:            int32(env.ChannelSize),
+		TierBMaxChannelMembers: int32(env.TierBMaxChannelMembers),
 	}
 }

@@ -167,8 +167,10 @@ The **bid itself is an LLM call**, so the Layer 1 cost ceiling governs it: a bid
 ### PR 2b: `feature/v038-rfc0030-tierb-wire` — Carry `threshold` + channel size across the store/wire boundary (Go + proto)
 
 **Depends on**: PR 2a.
-**Status**: ⬜ Not started.
+**Status**: 🔀 PR open.
 **Purpose**: Flip the bid live. Carry the per-member `threshold` and the channel-size/cap inputs from the in-memory `Config` (PR 1) all the way to the Python bid, and land the no-pile-on integration story.
+
+> **Design decision (PR 2b, 2026-06-07).** "Tier-B-governed" is resolved **per-member**, not per-channel: a new nullable `memberships.tier_b_active` column (alongside `threshold`) records whether a member was declared with the open-floor participant vocabulary (`participant`/`chair`), and that boolean rides the `ChannelMessageEvent.tier_b_active` wire field. Only `participant`/`chair` members (or a legacy `always` carrying an explicit `threshold`, read as a deliberate opt-in) bid; a bare legacy `always` keeps replying unconditionally, so v0.3.7 channels are byte-identical. This is what survives the `participant`→`always` normalization that would otherwise erase the distinction. The only new *channel-level* knob is `tier_b_max_channel_members` (the TB6 cap).
 
 | File | Change |
 |------|--------|

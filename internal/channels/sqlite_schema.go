@@ -52,7 +52,15 @@ import (
 //	    a pure additive column, every existing row backfilled to `live` by the
 //	    SQL DEFAULT. No recall change and no non-default writer yet — the
 //	    producer lights up with the gRPC rail (PR 4).
-const channelStoreSchemaVersion = 6
+//	v7 — RFC 0030 Tier B PR 2b (v0.3.8): adds the per-member salience-bid
+//	    signals to `memberships` — a nullable `threshold REAL` (unset → NULL →
+//	    bias-to-silence) and `tier_b_active INTEGER NOT NULL DEFAULT 0` (1 iff
+//	    the member was declared with the open-floor `participant`/`chair`
+//	    vocabulary). The two carry, via the `ChannelMessageEvent` wire, the
+//	    inputs the agent-side relevance bid reads. A pure addition: every
+//	    pre-v7 row reads back as an un-gated legacy `always` member, so a
+//	    v0.3.7 database behaves byte-identically.
+const channelStoreSchemaVersion = 7
 
 // schemaV1SQL is the original schema shipped in PR #231. Applied verbatim
 // when opening a fresh database; the v1→v2 migration below uses

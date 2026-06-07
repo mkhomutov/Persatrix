@@ -19,37 +19,9 @@ import (
 // [cascade_depth.go] — pulled out of this file so the router stays
 // focused on publish + fanout topology.
 
-// DispatchEnvelope bundles the per-recipient inputs the dispatcher needs
-// to render a [taskpb.ChannelMessageEvent] without the router exposing the
-// raw proto type to the channels package boundary. The envelope is built
-// once per-recipient inside [ChannelRouter.fanout]:
-//
-//   - `Recipient` carries the per-recipient `RespondPolicy` so the
-//     receiver-side response gate can decide pre-LLM (RFC 0011 PR 4b).
-//   - `ThreadParentSenderID` is pre-resolved once per publish in
-//     [ChannelRouter.Publish] so a thread-heavy channel pays one
-//     `GetMessage` lookup per publish, not one per recipient (RFC 0011
-//     PR plan §PR 4 — "amortizes the lookup across fanout").
-//
-// Adding fields here is an additive change to the dispatcher contract
-// and does not require touching every test seam — both fields default
-// to their zero values when unset.
-type DispatchEnvelope struct {
-	// Recipient is the membership row of the agent receiving this
-	// dispatch. The router has already filtered the sender and any
-	// `RespondNever` entries upstream of [MessageDispatcher.Dispatch],
-	// so `Recipient.RespondPolicy` is always one of [RespondAlways]
-	// or [RespondWhenMentioned].
-	Recipient Member
-
-	// ThreadParentSenderID is the sender id of the message addressed
-	// by [ChannelMessage.ThreadID], pre-resolved by the router. Empty
-	// for non-thread events. The empty-string default for proto3
-	// strings is preserved on the wire so receivers can branch on
-	// `thread_id != "" && thread_parent_sender_id != ""` without a
-	// secondary lookup.
-	ThreadParentSenderID string
-}
+// DispatchEnvelope — the per-recipient dispatcher contract — lives in
+// dispatch_envelope.go (split out so router.go stays focused on publish +
+// fanout topology and under the 500-line cap).
 
 // MessageDispatcher is the gRPC seam through which the [ChannelRouter]
 // fans a published message out to every subscriber other than the sender.
@@ -179,6 +151,13 @@ type ChannelRouter struct {
 	floorSettings map[string]channelFloorSettings
 	floorSpeakers map[string]map[string]struct{}
 
+	// tierBMu guards tierBMaxMembers — the resolved RFC 0030 Tier B (v0.3.8)
+	// per-channel salience-bid channel-size cap, keyed by channel id. Populated
+	// via [ChannelRouter.SetTierBMaxChannelMembers]; methods live in
+	// router_tier_b.go. An absent channel resolves to [DefaultTierBMaxChannelMembers].
+	tierBMu         sync.Mutex
+	tierBMaxMembers map[string]int
+
 	// maxCascadeDepth — see cascade_depth.go; defaultSessionID — see router_session.go (RFC 0031 Phase 1).
 	maxCascadeDepth  int
 	defaultSessionID string
@@ -204,6 +183,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		floors:          newFloorRegistry(),
 		floorSettings:   make(map[string]channelFloorSettings),
 		floorSpeakers:   make(map[string]map[string]struct{}),
+		tierBMaxMembers: make(map[string]int),
 		maxCascadeDepth: defaults.DefaultMaxCascadeDepth,
 	}
 }

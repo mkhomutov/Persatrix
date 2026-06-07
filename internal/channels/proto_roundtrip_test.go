@@ -52,6 +52,11 @@ func TestChannelMessageEvent_RoundTripsAllFields(t *testing.T) {
 		ThreadParentSenderId:  "dave",
 		CascadeDepth:          3,
 		SenderParticipantType: "user",
+		// RFC 0030 Tier B (v0.3.8) — the per-recipient salience-bid inputs.
+		TierBActive:            true,
+		Threshold:              proto.Float64(0.42),
+		ChannelSize:            4,
+		TierBMaxChannelMembers: 20,
 	}
 
 	blob, err := proto.Marshal(original)
@@ -81,6 +86,36 @@ func TestChannelMessageEvent_RoundTripsAllFields(t *testing.T) {
 	assert.Equal(t, "dave", decoded.ThreadParentSenderId)
 	assert.Equal(t, int32(3), decoded.CascadeDepth)
 	assert.Equal(t, "user", decoded.SenderParticipantType)
+	assert.True(t, decoded.TierBActive)
+	require.NotNil(t, decoded.Threshold)
+	assert.Equal(t, 0.42, decoded.GetThreshold())
+	assert.Equal(t, int32(4), decoded.ChannelSize)
+	assert.Equal(t, int32(20), decoded.TierBMaxChannelMembers)
+}
+
+// TestChannelMessageEvent_ThresholdPresenceRoundTrips pins the proto3 explicit-
+// presence contract for the `optional double threshold` field: the tri-state
+// the bid depends on (unset vs an explicit 0.0) must survive the wire. An
+// accidental drop of the `optional` keyword would collapse "unset" into the
+// 0.0 zero value — which the agent-side seam reads as a real "speak on any
+// score" floor rather than the conservative bias-to-silence default.
+func TestChannelMessageEvent_ThresholdPresenceRoundTrips(t *testing.T) {
+	// Unset → decodes back to nil (HasThreshold false).
+	unset := &taskpb.ChannelMessageEvent{MessageId: "msg-thr-unset", ChannelId: "group:eng"}
+	blob, err := proto.Marshal(unset)
+	require.NoError(t, err)
+	decoded := &taskpb.ChannelMessageEvent{}
+	require.NoError(t, proto.Unmarshal(blob, decoded))
+	assert.Nil(t, decoded.Threshold, "unset threshold must decode to nil, not 0.0")
+
+	// Explicit 0.0 → present and distinct from unset.
+	zero := &taskpb.ChannelMessageEvent{MessageId: "msg-thr-zero", ChannelId: "group:eng", Threshold: proto.Float64(0.0)}
+	blob, err = proto.Marshal(zero)
+	require.NoError(t, err)
+	decoded = &taskpb.ChannelMessageEvent{}
+	require.NoError(t, proto.Unmarshal(blob, decoded))
+	require.NotNil(t, decoded.Threshold, "explicit 0.0 must survive as present, distinct from unset")
+	assert.Equal(t, 0.0, decoded.GetThreshold())
 }
 
 // TestChannelMessageEvent_CascadeDepthRoundTripsWithoutValue pins the proto3

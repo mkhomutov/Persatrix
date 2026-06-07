@@ -164,6 +164,53 @@ func canonicalRespondPolicy(p RespondPolicy) (RespondPolicy, error) {
 	return p, nil
 }
 
+// ResolveTierBSignal derives the persisted RFC 0030 Tier B per-member signals
+// from a member's *declared* disposition (before [RespondPolicy.Normalize]
+// collapses it to the legacy triple). It is the single derivation choke point
+// the disposition-aware write boundaries share — the config loader
+// ([MemberConfig.UnmarshalYAML]), the REST single-add path ([AddMember]), and
+// the REST policy-update path ([SetMemberPolicy]) — so the participant→bid and
+// chair→low-threshold mappings live in one place rather than being re-derived
+// per call site.
+//
+//   - tierBActive is true for the open-floor participant dispositions
+//     (`participant`/`chair`): they run the salience bid. A legacy `always`
+//     keeps replying unconditionally (false), so the feature stays additive.
+//   - threshold defaults to `explicit` (the operator's value, possibly nil for
+//     unset → bias-to-silence). A `chair` with no explicit value picks up the
+//     low [DefaultChairThreshold] — its whole facilitator identity, since on
+//     the wire a chair is just a participant.
+//
+// `explicit` lets a caller that already parsed an operator-supplied threshold
+// (the config object form) thread it through; pass nil where no explicit value
+// is available (the REST paths, which today carry only the disposition).
+func ResolveTierBSignal(p RespondPolicy, explicit *float64) (tierBActive bool, threshold *float64) {
+	threshold = explicit
+	if p == RespondChair && threshold == nil {
+		d := DefaultChairThreshold
+		threshold = &d
+	}
+	// `participant`/`chair` always run the bid. A legacy `always` opts in iff
+	// the operator set an explicit threshold — the only reason to put a
+	// salience bar on a member is to gate it — so `always` + `threshold` bids
+	// while a *bare* `always` keeps replying unconditionally (v0.3.7
+	// back-compat). `addressed`/`observer`/`when_mentioned`/`never` never reach
+	// the open-floor admit, so their bid-ness is moot (and a threshold on them
+	// is rejected at config load by [Config.Validate]).
+	tierBActive = p == RespondParticipant || p == RespondChair ||
+		(explicit != nil && p.Normalize() == RespondAlways)
+	return tierBActive, threshold
+}
+
+// boolToInt maps a Go bool to the 0/1 SQLite stores in an INTEGER column
+// (SQLite has no native boolean). Used for `memberships.tier_b_active`.
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 // Channel is a row in the `channels` table (RFC 0011 §B).
 //
 // RFC 0031 Phase 1: `SessionID` tags the row with the operator namespace
@@ -184,6 +231,25 @@ type Member struct {
 	ParticipantID string
 	RespondPolicy RespondPolicy
 	JoinedAt      time.Time
+
+	// TierBActive marks this member as an open-floor *participant* subject to
+	// the RFC 0030 Tier B salience bid (v0.3.8). It is true iff the member was
+	// declared with the participant vocabulary (`participant`/`chair`) — the
+	// dispositions that opt into the bid — and false for a legacy `always`
+	// member, which keeps replying unconditionally. Because the disposition
+	// vocabulary collapses to the legacy `always` wire value on
+	// [RespondPolicy.Normalize], this boolean is the *only* thing that
+	// survives to distinguish a salience-gated participant from a legacy
+	// always-replier past the store/wire boundary; it rides the
+	// `ChannelMessageEvent.tier_b_active` proto field to the agent-side seam.
+	TierBActive bool
+	// Threshold is the member's per-disposition salience `threshold` for the
+	// Tier B bid (the score it must clear to reach the quality turn). A
+	// `*float64` tri-state mirroring [MemberConfig.Threshold]: nil → unset →
+	// bias-to-silence; &0..1 → an explicit bar (a `chair` carries a low
+	// default). Persisted in the nullable `memberships.threshold` column and
+	// carried to the agent on the `optional double threshold` proto field.
+	Threshold *float64
 }
 
 // ChannelMessage is a row in the `messages` table (RFC 0011 §B).
@@ -285,6 +351,13 @@ var (
 	// it is the loader's "use the default" sentinel normalized to
 	// [DefaultFloorTurnTimeoutSeconds] at load time.
 	ErrInvalidFloorTurnTimeout = errors.New("channels: invalid floor_turn_timeout_seconds")
+	// ErrInvalidTierBMaxChannelMembers — a declared channel carried a negative
+	// `tier_b_max_channel_members:` (RFC 0030 Tier B, v0.3.8). Belt-and-
+	// suspenders for the operator who skipped `make validate` (the JSON
+	// schema's `minimum: 1` rejects this earlier). Zero is NOT an error — it
+	// is the loader's "use the default" sentinel normalized to
+	// [DefaultTierBMaxChannelMembers] at load time.
+	ErrInvalidTierBMaxChannelMembers = errors.New("channels: invalid tier_b_max_channel_members")
 )
 
 // participantIDPattern is the single source of truth for legal participant
