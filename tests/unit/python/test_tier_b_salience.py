@@ -30,6 +30,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock
 
+import grpc
+import grpc.aio
 import pytest
 
 from agents.generated import wallet_pb2 as walletpb
@@ -188,6 +190,36 @@ class TestBiasToSilence:
             client=_client(raises=RuntimeError("boom")),
             threshold=0.4,
         )
+        assert decision.speak is False
+        assert decision.reason == "llm_error"
+
+    async def test_resource_exhausted_lease_cap_is_lease_denied(self):
+        """TB3: the wallet's per-agent active-lease cap surfaces as a raw
+        ``AioRpcError(RESOURCE_EXHAUSTED)`` — ``WalletClient._acquire``
+        re-raises it *unwrapped* after exhausting its retry budget, so it
+        never becomes a ``BudgetExceededError``. It is wallet back-pressure
+        (a lease that could not be acquired), so it must fail closed and be
+        labelled ``lease_denied``, not the generic ``llm_error`` — matching
+        how the action loop's ``handle_llm_call_exception`` treats it."""
+        err = grpc.aio.AioRpcError(
+            grpc.StatusCode.RESOURCE_EXHAUSTED,
+            grpc.aio.Metadata(), grpc.aio.Metadata(),
+            details="active-lease cap",
+        )
+        decision = await _bid(client=_client(raises=err), threshold=0.4)
+        assert decision.speak is False
+        assert decision.reason == "lease_denied"
+
+    async def test_other_grpc_error_is_llm_error(self):
+        """A non-``RESOURCE_EXHAUSTED`` gRPC failure is a real provider/server
+        problem, not back-pressure — it degrades to ``llm_error`` so the two
+        operational signals stay distinct (mirrors the action loop)."""
+        err = grpc.aio.AioRpcError(
+            grpc.StatusCode.UNAVAILABLE,
+            grpc.aio.Metadata(), grpc.aio.Metadata(),
+            details="provider down",
+        )
+        decision = await _bid(client=_client(raises=err), threshold=0.4)
         assert decision.speak is False
         assert decision.reason == "llm_error"
 

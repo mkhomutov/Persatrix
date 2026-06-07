@@ -174,6 +174,23 @@ class TestBidRunsOnlyOnOpenFloorGoverned:
         bid.assert_not_called()
         assert quality.await_count >= 1
 
+    async def test_directed_mention_of_an_always_member_skips_the_bid(self):
+        """TB1 regression: a *participant* (``always``) member named
+        explicitly is its lane just as a ``when_mentioned`` member is — the
+        salience bid must not run on (and so can never silence) a
+        directly-asked persona, even on a governed channel. Before the gate
+        fix the ``always`` branch admitted this with ``reason=policy_always``,
+        so ``is_open_floor_admit`` matched and the bid ran."""
+        agent, quality = await _make_agent("iron-fox")
+        with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
+            await _deliver(agent, _payload(
+                respond_policy="always",
+                mentions=["iron-fox"],
+                tier_b_active=True,
+            ))
+        bid.assert_not_called()
+        assert quality.await_count >= 1
+
     async def test_observer_never_reaches_the_bid(self):
         """An ``observer`` (``never``) is gated before Tier B — cost zero."""
         agent, quality = await _make_agent()

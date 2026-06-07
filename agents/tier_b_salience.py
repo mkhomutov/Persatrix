@@ -37,9 +37,9 @@ Load-bearing invariants (amendment OQs / master-plan §Open-question status):
 ``threshold`` and the ``channel_size`` it consumes are carried across the
 store/wire boundary in PR 2b (the SQLite ``memberships.threshold`` migration
 + the ``ChannelMessageEvent`` proto field). Until then the action-loop seam
-(:meth:`_ActionLoopMixin._maybe_tier_b_silence`) is dormant — it fires only
-when the inbound event is flagged Tier-B-governed — so PR 2a is additive and
-the v0.3.7 response behaviour is unchanged.
+(:func:`agents.persona_runtime.tier_b_gate.run_tier_b_gate`) is dormant — it
+fires only when the inbound event is flagged Tier-B-governed — so PR 2a is
+additive and the v0.3.7 response behaviour is unchanged.
 """
 
 from __future__ import annotations
@@ -48,6 +48,9 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
+
+import grpc
+import grpc.aio
 
 from .generated import wallet_pb2 as walletpb
 from .model_aliases import resolve as resolve_model
@@ -117,7 +120,9 @@ class SalienceDecision:
         reason: Low-cardinality branch label for logs + the
             ``channel.messages.gated`` metric: ``salient`` / ``declined``
             (explicit ``speak: no`` veto) / ``below_threshold`` /
-            ``parse_failure`` / ``lease_denied`` / ``llm_error`` /
+            ``parse_failure`` / ``lease_denied`` (a denied/unreachable lease
+            **or** the wallet's ``RESOURCE_EXHAUSTED`` active-lease cap) /
+            ``llm_error`` (any other provider/gRPC failure) /
             ``model_unresolvable``.
     """
 
@@ -221,7 +226,8 @@ async def evaluate_salience(
 
     Returns a :class:`SalienceDecision`. Every non-``salient`` path resolves
     to ``speak=False`` (bias-to-silence, TB2). The call is leased on the
-    ``fast`` alias (TB3); a lease denial or any provider error fails closed.
+    ``fast`` alias (TB3); a lease denial, the wallet active-lease cap
+    (``RESOURCE_EXHAUSTED``), or any provider error all fail closed.
     """
     # Resolve the `fast` alias per-call (RFC 0033). An unconfigured/unknown
     # alias raises SystemExit (a BaseException) by design — swallow it here
@@ -258,6 +264,27 @@ async def evaluate_salience(
             agent_id,
         )
         return SalienceDecision(speak=False, score=None, reason="lease_denied")
+    except grpc.aio.AioRpcError as exc:
+        # The wallet's per-agent active-lease cap is re-raised *unwrapped* by
+        # ``WalletClient._acquire`` after its retry budget (ISSUE-0066) — it
+        # never becomes a ``BudgetExceededError``. Like
+        # :func:`agents.persona_runtime.llm_call_errors.handle_llm_call_exception`,
+        # treat ``RESOURCE_EXHAUSTED`` as wallet back-pressure (a lease that
+        # could not be acquired) and label it ``lease_denied``; any other
+        # gRPC code is a real provider/server problem and degrades to
+        # ``llm_error`` so the two signals stay distinct. Both fail closed.
+        if exc.code() == grpc.StatusCode.RESOURCE_EXHAUSTED:
+            logger.debug(
+                "Tier B salience bid: lease back-pressure (RESOURCE_EXHAUSTED) "
+                "for agent %s; staying silent",
+                agent_id,
+            )
+            return SalienceDecision(speak=False, score=None, reason="lease_denied")
+        logger.warning(
+            "Tier B salience bid: gRPC error (%s) for agent %s; staying silent",
+            exc.code(), agent_id,
+        )
+        return SalienceDecision(speak=False, score=None, reason="llm_error")
     except Exception as exc:  # noqa: BLE001 - any provider error → silence
         logger.warning(
             "Tier B salience bid: provider error for agent %s: %s; staying silent",

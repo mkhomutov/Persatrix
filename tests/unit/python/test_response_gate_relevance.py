@@ -88,14 +88,17 @@ class TestDirectedElsewhere:
 
     def test_mentioned_participant_responds(self):
         # The addressed participant is admitted — directedness suppresses
-        # *others*, never the target.
+        # *others*, never the target. It is admitted with the *directed*
+        # ``mentioned`` reason (not the open-floor ``policy_always``): an
+        # explicitly-named participant is in its lane, so RFC 0030 Tier B
+        # leaves it out of the salience bid (TB1, ``is_open_floor_admit``).
         evt = _channel_event(
             respond_policy="always", sender_id="alice", mentions=["ember-owl"]
         )
         d = evaluate_response_gate(evt, agent_id="ember-owl")
         assert d.respond is True
         assert d.policy == POLICY_ALWAYS
-        assert d.reason == "policy_always"
+        assert d.reason == "mentioned"
 
     def test_participant_among_several_mentions_responds(self):
         # Multiple explicit recipients: each addressed participant is in.
@@ -281,6 +284,36 @@ class TestIsOpenFloorAdmit:
         d = evaluate_response_gate(evt, agent_id="iron-fox")
         assert d.respond is True
         assert d.reason == "mentioned"
+        assert is_open_floor_admit(d) is False
+
+    def test_directed_mention_of_an_always_member_is_not_open_floor(self):
+        # TB1 regression. A *participant* (``always``) member who is named
+        # explicitly is being addressed directly — its lane, not the
+        # open-floor remainder. The gate must admit it with the *directed*
+        # ``mentioned`` reason (not the open-floor ``policy_always``) so the
+        # salience bid never runs on — and so can never silence — a
+        # directly-asked persona. Before the fix the ``always`` branch
+        # collapsed this case into ``policy_always`` and the bid ran on it.
+        evt = _channel_event(
+            respond_policy="always", sender_id="alice", mentions=["iron-fox"],
+        )
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert d.respond is True
+        assert d.reason == "mentioned"
+        assert is_open_floor_admit(d) is False
+
+    def test_always_member_named_within_a_broadcast_is_not_open_floor(self):
+        # "@everyone — and especially @iron-fox": iron-fox is named
+        # explicitly, so it is in its lane even though the broadcast sentinel
+        # is also present. Unnamed participants still treat @everyone as the
+        # open floor (``test_broadcast_admits_unmentioned_participant``).
+        evt = _channel_event(
+            respond_policy="always",
+            sender_id="alice",
+            mentions=[MENTION_EVERYONE, "iron-fox"],
+        )
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert d.respond is True
         assert is_open_floor_admit(d) is False
 
     def test_dm_admit_is_not_open_floor(self):
