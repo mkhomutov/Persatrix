@@ -41,6 +41,17 @@ type Config struct {
 // PR 2's serialized loop consumes it.
 const DefaultFloorTurnTimeoutSeconds = 45
 
+// DefaultChairThreshold is the low salience `threshold` applied to a `chair`
+// member when its config omits an explicit value (RFC 0030 Tier B, v0.3.8).
+// A low bar means the chair clears the cheap relevance bid readily and keeps
+// an open-floor discussion moving — the facilitator behaviour — without the
+// bias-to-silence an unset/zero threshold gives a plain `participant`. It is
+// deliberately conservative-low rather than zero (zero reads as "unset" to
+// the bid, which biases to silence — the opposite of a facilitator); the
+// exact value is calibration-post-soak per RFC 0030 amendment OQ #3. PR 1
+// only parses/normalizes the knob; the Tier B bid (a later PR) consumes it.
+const DefaultChairThreshold = 0.15
+
 // ChannelConfig is a single declared group channel.
 type ChannelConfig struct {
 	Name        string         `yaml:"name"`
@@ -76,6 +87,14 @@ type ChannelConfig struct {
 type MemberConfig struct {
 	ID            string
 	RespondPolicy RespondPolicy
+	// Threshold is the per-disposition salience `threshold` for the RFC 0030
+	// Tier B relevance bid (v0.3.8). It is a `*float64` tri-state on purpose:
+	//   - nil   → unset → bias-to-silence (the conservative default)
+	//   - &0..1 → explicit salience bar the bid must clear to reach the turn
+	// A `chair` member with no explicit value picks up [DefaultChairThreshold]
+	// at load (see [MemberConfig.UnmarshalYAML]). PR 1 only parses/validates
+	// the field; the Tier B bid (a later PR) is the first reader.
+	Threshold *float64
 }
 
 // UnmarshalYAML accepts either a string shorthand or an explicit
@@ -92,13 +111,15 @@ func (m *MemberConfig) UnmarshalYAML(value *yaml.Node) error {
 		return nil
 	case yaml.MappingNode:
 		var raw struct {
-			ID      string `yaml:"id"`
-			Respond string `yaml:"respond"`
+			ID        string   `yaml:"id"`
+			Respond   string   `yaml:"respond"`
+			Threshold *float64 `yaml:"threshold"`
 		}
 		if err := value.Decode(&raw); err != nil {
 			return err
 		}
 		m.ID = raw.ID
+		m.Threshold = raw.Threshold
 		if raw.Respond == "" {
 			m.RespondPolicy = RespondWhenMentioned
 		} else {
@@ -107,7 +128,15 @@ func (m *MemberConfig) UnmarshalYAML(value *yaml.Node) error {
 			// boundary, so every downstream reader sees only the legacy
 			// values. An unknown value passes through unchanged and is
 			// rejected by Validate via RespondPolicy.Valid.
-			m.RespondPolicy = RespondPolicy(raw.Respond).Normalize()
+			disposition := RespondPolicy(raw.Respond)
+			// A `chair` with no explicit threshold picks up the low default
+			// BEFORE normalization collapses it to `always` — chair-ness
+			// survives only as this low bar (RFC 0030 Tier B, v0.3.8).
+			if disposition == RespondChair && m.Threshold == nil {
+				d := DefaultChairThreshold
+				m.Threshold = &d
+			}
+			m.RespondPolicy = disposition.Normalize()
 		}
 		return nil
 	default:
@@ -220,6 +249,15 @@ func (c *Config) Validate() error {
 			if !m.RespondPolicy.Valid() {
 				return fmt.Errorf("channels[%d=%s].members[%d=%s]: %w: %q",
 					i, ch.Name, j, m.ID, ErrInvalidRespondPolicy, m.RespondPolicy)
+			}
+			// Reject an out-of-range salience threshold (RFC 0030 Tier B).
+			// The schema's `minimum: 0`/`maximum: 1` catches it at `make
+			// validate`; this is the belt-and-suspenders for an operator who
+			// skipped that step. Absent (nil) is the unset bias-to-silence
+			// default and is never an error.
+			if m.Threshold != nil && (*m.Threshold < 0.0 || *m.Threshold > 1.0) {
+				return fmt.Errorf("channels[%d=%s].members[%d=%s]: %w: %v (must be in [0, 1])",
+					i, ch.Name, j, m.ID, ErrInvalidThreshold, *m.Threshold)
 			}
 		}
 	}

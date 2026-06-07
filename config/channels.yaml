@@ -6,13 +6,30 @@
 #   - DMs open on demand under `dm:<a>:<b>` (participants lexicographically sorted)
 #   - threads anchor to a parent message under `thread:<message_id>`
 # Per-membership `respond` dispositions control the response gate (RFC 0030
-# relevance amendment, v0.3.7). The recommended vocabulary is:
+# relevance amendment). The recommended vocabulary is:
 #   - participant — joins the open floor; speaks on un-addressed messages
+#                   (subject to the v0.3.8 Tier B salience bid)
+#   - chair       — a low-threshold facilitator: a `participant` that clears
+#                   the salience bid readily and keeps the discussion moving
+#                   (v0.3.8). A chair CANNOT close an interaction — convergence
+#                   is owned by the governance layers — and its Layer 5
+#                   moderator hooks are reserved/inert until v0.4.0.
 #   - addressed   — speaks only when @-mentioned (or replied to in-thread)
 #   - observer    — never speaks
 # The legacy values `always` / `when_mentioned` / `never` still load and map
 # to `participant` / `addressed` / `observer` respectively, so existing
 # configs keep working unchanged; see RFC 0011 §D and RFC 0030.
+#
+# Per-disposition `threshold` (v0.3.8 Tier B): an optional salience bar in
+# [0, 1] that an open-floor `participant`'s cheap relevance bid must clear to
+# reach the (expensive) quality turn. Bias-to-silence — omit it and the member
+# stays conservative on ambiguous open-floor traffic. A `chair` gets a low
+# default (0.15) so it speaks readily; override per member if desired:
+#   - id: facilitator
+#     respond: chair
+#   - id: specialist
+#     respond: participant
+#     threshold: 0.6      # only speaks when the bid is clearly relevant
 
 max_channels: 50
 
