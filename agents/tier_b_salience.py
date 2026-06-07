@@ -99,8 +99,17 @@ DEFAULT_TIER_B_MAX_CHANNEL_MEMBERS: Final[int] = 20
 # missing ``speak:`` line falls through to the score alone. Parsing is
 # forgiving of surrounding prose, but a missing score is a parse failure
 # (→ silence, TB2).
+#
+# The trailing ``(?!\d)`` guards the *one* direction the parser could fail
+# *toward* speech: without it, a model answering on a 0-10 or 0-100 scale
+# (``score: 10`` / ``score: 100``) would partial-match the leading ``1``,
+# clamp to a clearing ``1.0``, and wrongly admit. The lookahead rejects a
+# would-be score immediately followed by another digit so it falls through
+# to ``parse_failure`` → silence (TB2). It deliberately forbids only a
+# trailing *digit*, not a trailing ``.`` — a sentence-final ``score: 0.5.``
+# still reads as ``0.5`` — and an in-range ``1.5`` still matches and clamps.
 _SCORE_RE: Final[re.Pattern[str]] = re.compile(
-    r"score\s*[:=]\s*(?P<score>[01](?:\.\d+)?|0?\.\d+)",
+    r"score\s*[:=]\s*(?P<score>[01](?:\.\d+)?|0?\.\d+)(?!\d)",
     re.IGNORECASE,
 )
 _SPEAK_RE: Final[re.Pattern[str]] = re.compile(

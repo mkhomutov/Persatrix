@@ -160,6 +160,8 @@ The **bid itself is an LLM call**, so the Layer 1 cost ceiling governs it: a bid
 
 **Acceptance**: the new unit + wiring suites pass; `make lint-python` (ruff + mypy) green. The Tier A **response behaviour** (whether each member speaks, i.e. `GateDecision.respond`) is unchanged in every case — additive proof, since the salience seam is dormant without `tier_b_active`. The pure gate's `reason` label *is* refined where it must be to keep explicit-address traffic out of Tier B (an individually-mentioned `always` member → `mentioned`; an explicit `@everyone` broadcast → `broadcast`; both formerly collapsed into the open-floor `policy_always`), so the two response-gate-relevance assertions that pinned those `reason` values moved with the gate. `reason` has no runtime consumer besides `is_open_floor_admit`, so this is inert for v0.3.7 behaviour.
 
+> **File-size-cap heads-up (carry into PR 2b/3/4).** This PR leaves both `agents/persona_runtime/action_loop.py` and `agents/observability/metrics.py` sitting at **exactly 500 lines — the `scripts/checks/file_size.py` ceiling, with zero headroom**. The next edit that *adds* a line to either (e.g. PR 2b's `server_servicers.py` unpack is separate, but any further action-loop seam wiring, or a new instrument in `metrics.py`) will trip the cap. Plan the split *before* writing the change rather than discovering it at lint time — the established move is to carve into a sibling helper (`tier_b_gate.py` / `_metrics_tier_b.py` are the precedents from this PR).
+
 ---
 
 ### PR 2b: `feature/v038-rfc0030-tierb-wire` — Carry `threshold` + channel size across the store/wire boundary (Go + proto)

@@ -176,6 +176,17 @@ class TestBiasToSilence:
         assert decision.speak is False
         assert decision.reason == "parse_failure"
 
+    @pytest.mark.parametrize("text", ["score: 10", "speak: yes\nscore: 100"])
+    async def test_out_of_grammar_integer_score_is_silence(self, text: str):
+        """An out-of-grammar integer (e.g. a model answering on a 0-10 or
+        0-100 scale) must *not* be truncated to a clearing ``1.0`` and
+        admitted — the one place the parser would otherwise fail *toward*
+        speech, against bias-to-silence (TB2). A score the grammar cannot
+        read as a ``[0, 1]`` value is a parse failure → silence."""
+        decision = await _bid(client=_client(text), threshold=0.4)
+        assert decision.speak is False
+        assert decision.reason == "parse_failure"
+
     async def test_lease_denial_is_silence(self):
         """TB3: a denied lease fails closed → no bid → silence."""
         decision = await _bid(
