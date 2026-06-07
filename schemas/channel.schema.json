@@ -80,7 +80,7 @@
               "type": "number",
               "minimum": 0.0,
               "maximum": 1.0,
-              "description": "Per-disposition salience threshold for the v0.3.8 Tier B relevance bid: an open-floor `participant` only reaches the (expensive) quality turn when its cheap salience bid clears this bar. Bias-to-silence — an absent/unset threshold biases toward NOT replying on ambiguous open-floor traffic (the conservative default; calibration is post-soak). `chair` members get a low default so they speak readily. Bounded to the `[0, 1]` salience range (salience is clipped to `[0.0, 1.0]` per RFC 0024; mirrors `autonomy.salience_threshold` in agent.schema.json)."
+              "description": "Per-disposition salience threshold for the v0.3.8 Tier B relevance bid: an open-floor `participant` only reaches the (expensive) quality turn when its cheap salience bid clears this bar. Only meaningful on an open-floor disposition (`participant`/`chair`/legacy `always`); the Go loader rejects a `threshold` set on `addressed`/`observer`/`when_mentioned`, where no bid runs — a cross-field rule JSON Schema cannot express, so a schema-valid config can still fail to load. Bias-to-silence — an absent/unset threshold biases toward NOT replying on ambiguous open-floor traffic (the conservative default; calibration is post-soak). `chair` members get a low default so they speak readily. Bounded to the `[0, 1]` salience range (salience is clipped to `[0.0, 1.0]` per RFC 0024; mirrors `autonomy.salience_threshold` in agent.schema.json)."
             }
           }
         }

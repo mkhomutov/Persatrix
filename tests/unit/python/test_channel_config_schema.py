@@ -225,6 +225,29 @@ def test_member_threshold_rejects_out_of_range(out_of_range: float):
         _validate(_channel_with_member("participant", extra={"threshold": out_of_range}))
 
 
+@pytest.mark.parametrize("non_open_floor", ["addressed", "observer", "when_mentioned"])
+def test_member_threshold_on_non_open_floor_disposition_passes_schema(non_open_floor: str):
+    """The schema deliberately does NOT enforce the cross-field invariant
+    that ``threshold`` is only meaningful on an open-floor disposition.
+
+    A ``threshold`` only has effect on ``participant``/``chair``/legacy
+    ``always`` (the open-floor speakers that run the Tier B salience bid);
+    on ``addressed``/``observer``/``when_mentioned`` no bid ever runs, so a
+    bar there is a silent no-op. JSON Schema cannot express that one field's
+    legality depends on another field's value, so such a config stays
+    schema-valid — the Go loader is the *sole* enforcement point and rejects
+    it with ``ErrThresholdNotApplicable`` (see ``internal/channels/config.go``
+    ``Validate`` and the companion
+    ``TestLoadConfig_RejectsThresholdOnNonOpenFloorDisposition``).
+
+    This test pins that split so a future edit does not silently assume the
+    schema already guards the invariant, nor tighten the schema in a way that
+    makes the loader's check unreachable. A schema-valid config can still fail
+    ``LoadConfig``; the schema ``threshold`` description says as much.
+    """
+    _validate(_channel_with_member(non_open_floor, extra={"threshold": 0.5}))
+
+
 def test_member_unknown_key_still_rejected():
     """The member object remains ``additionalProperties: false``.
 
