@@ -86,7 +86,16 @@ def _threshold(event: AgentEvent) -> float | None:
     silence, TB2). A non-numeric *or out-of-range* value degrades to
     ``None``: a threshold is a score floor in ``[0, 1]``, so a stray value
     (e.g. a future wire bug) becomes "unset" rather than permanently muting
-    (>1) or admitting everything (<0)."""
+    (>1) or admitting everything (<0).
+
+    Boundary note — ``0.0`` is a *valid, deliberate* floor, not unset: it
+    means "speak on any parseable score" (the bid still runs and can still
+    fail closed on parse/lease errors, but no score is too low to clear the
+    bar). It is the opposite extreme from ``None`` (which demands a decisive
+    ``_DECISIVE_SCORE``). The asymmetry is intentional — an operator setting
+    ``0.0`` is opting a member out of the no-pile-on dampening (e.g. a
+    facilitator), whereas an *absent* threshold must stay conservative — but
+    it is a sharp edge: ``0.0`` and "field omitted" are worlds apart."""
     raw = (event.payload or {}).get(_TIER_B_THRESHOLD_KEY)
     if isinstance(raw, bool):  # bool is an int subclass — never a threshold
         return None
@@ -148,12 +157,29 @@ async def run_tier_b_gate(
         await agent._store_event_episode(event, [])
         return TierBOutcome(silence=True)
 
+    # Cost note: reaching here (an open-floor admit of a governed channel)
+    # always pays a conversation-window fetch (``_build_seed_messages``, one
+    # history round-trip) **and** the leased ``fast`` bid below — the per-
+    # message price of Tier B. The "no-pile-on / idle-cost-zero" win is
+    # specifically about *not* paying the expensive half (memory recall + the
+    # quality LLM turn) when the bid stays silent; it is not zero-cost. The
+    # cheap-bid-vs-full-turn trade is the whole point, but a busy governed
+    # channel does see one extra fetch + bid per open-floor message.
     seed = await agent._build_seed_messages(event, user_message)
     salience = await evaluate_salience(
         llm_client=agent._llm_client,
         content=(event.payload or {}).get("content", ""),
         # The seed's last element is the current message — the bid receives
         # it via ``content``, so the transcript is everything *before* it.
+        #
+        # Known limitation (the dedup is window-bounded): ``seed`` is the RFC
+        # 0034 conversation window *after* admission/truncation (``max_turns``
+        # etc.), so the bid's "has this already been said?" judgement only
+        # sees turns inside that window. If the turn that already made the
+        # persona's point scrolled out of the window, the bias-to-silence
+        # dedup cannot see it and pile-on can recur on long threads. Accepted
+        # for the bid core (PR 2a); widening the bid's history independently
+        # of the quality window is a calibration concern (amendment OQ #3).
         transcript=seed[:-1],
         agent_id=agent.agent_id,
         persona_name=agent.name,

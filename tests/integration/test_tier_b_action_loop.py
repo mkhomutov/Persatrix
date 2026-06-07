@@ -191,6 +191,21 @@ class TestBidRunsOnlyOnOpenFloorGoverned:
         bid.assert_not_called()
         assert quality.await_count >= 1
 
+    async def test_governed_broadcast_skips_the_bid(self):
+        """An explicit ``@everyone`` broadcast is the personas' lane (the
+        v0.3.7 "do not suppress" sentinel contract) — like a directed mention
+        it must skip the salience bid even on a governed channel, so an
+        all-hands "everyone weigh in" is never bias-to-silenced. ``respond``
+        stays open, so the participant still reaches the quality turn."""
+        from agents.response_gate import MENTION_EVERYONE
+        agent, quality = await _make_agent()
+        with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
+            await _deliver(agent, _payload(
+                mentions=[MENTION_EVERYONE], tier_b_active=True,
+            ))
+        bid.assert_not_called()
+        assert quality.await_count >= 1, "a broadcast participant must reach the turn"
+
     async def test_observer_never_reaches_the_bid(self):
         """An ``observer`` (``never``) is gated before Tier B — cost zero."""
         agent, quality = await _make_agent()
