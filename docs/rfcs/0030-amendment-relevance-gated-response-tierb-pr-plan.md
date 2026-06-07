@@ -47,7 +47,31 @@ Resolved in the [master plan §Open-question status](../v0.3.8-plan.md#open-ques
 
 ## Sequencing
 
-**Merge order: PR 1 → PR 2 → PR 3 → PR 4.**
+**Merge order: PR 1 → PR 2a → PR 2b → PR 3 → PR 4.**
+
+> **PR 2 split (maintainer decision, 2026-06-07).** PR 2 is delivered as two
+> bisectable PRs so the genuinely novel bid logic lands and is fully tested
+> *before* the cross-language store/wire plumbing:
+> - **PR 2a — the bid core (Python only).** The leased `fast`-model bid
+>   module (`agents/tier_b_salience.py`), the `is_open_floor_admit` gate
+>   helper, the action-loop seam (`agents/persona_runtime/tier_b_gate.py`),
+>   the suppression metrics, and the unit + wiring + cost-regression tests.
+>   The seam is **dormant by construction**: it fires only when the inbound
+>   event is flagged `tier_b_active`, a flag nothing sets until PR 2b — so
+>   PR 2a is additive and the v0.3.7 response behaviour is unchanged (the
+>   same inertness discipline PR 1 used).
+> - **PR 2b — the store/wire boundary (Go + proto).** A nullable
+>   `threshold` column on the `memberships` table (SQLite migration), carried
+>   through `Member`/`AddMember`/`GetMembers`/reconcile → `DispatchEnvelope`
+>   → new `ChannelMessageEvent` proto fields (`tier_b_active`, `threshold`,
+>   `channel_size`, `tier_b_max_channel_members`) → the Python payload,
+>   plus the `tier_b_max_channel_members` channel knob in the schema/config.
+>   This **flips the bid live** and lands the no-pile-on integration tests
+>   (4-persona open question → small relevant set; redundant follow-up →
+>   silence; oversized channel → `addressed`-only). The durable-column
+>   approach (vs. an in-memory `Config` resolve at fanout) was chosen to
+>   mirror exactly how `respond_policy` already round-trips.
+
 
 - **PR 1** activates the per-disposition `threshold` field (schema + Go loader) and adds the `chair` disposition value, **inert by construction** — nothing reads `threshold` yet, and `chair` normalizes to `participant` with a low default threshold. (Mirrors the Tier A plan's inert PR 1.)
 - **PR 2** is the behaviour-defining PR: the leased `fast`-model salience bid stage downstream of the pure gate's open-floor admit, reading the in-round transcript, consuming `threshold`, with the channel-size cap and the cost-regression extension. The Trigger-style integration repro (open-floor → small relevant set, redundant follow-up → silence) lives here.
@@ -63,13 +87,16 @@ Every PR is **TDD-first**: author the failing test (red) — schema-accept-`thre
 ```
 PR 1 (threshold field activation + chair disposition value; schema + Go loader; INERT — nothing reads threshold)
   ↓
-PR 2 (Tier B leased fast-model salience bid downstream of the pure open-floor admit; reads in-round transcript;
-      consumes threshold; bias-to-silence; channel-size cap; cost-regression extension)
+PR 2a (Python bid core: leased fast-model salience bid downstream of the pure open-floor admit; reads in-round
+       transcript; consumes threshold; bias-to-silence; channel-size cap; action-loop seam; DORMANT until 2b)
+  ↓
+PR 2b (Go + proto: carry threshold + channel size across the store/wire boundary; flips the bid live;
+       no-pile-on integration tests)
   ↓                              ↓
 PR 3 (NL-addressing → bid signal)   PR 4 (chair low-threshold behaviour + inert Layer-5 hooks; MT; docs; status; CHANGELOG)
 ```
 
-PR 3 and PR 4 both build on PR 2 and are independent of each other; sequence PR 3 before PR 4 so the closeout PR documents the full Tier B surface (bid + NL signal + chair).
+PR 3 and PR 4 both build on PR 2b and are independent of each other; sequence PR 3 before PR 4 so the closeout PR documents the full Tier B surface (bid + NL signal + chair).
 
 ---
 
@@ -113,30 +140,51 @@ The **bid itself is an LLM call**, so the Layer 1 cost ceiling governs it: a bid
 
 ---
 
-### PR 2: `feature/v038-rfc0030-tierb-bid` — The leased salience bid (Tier B core)
+### PR 2a: `feature/v038-rfc0030-tierb-bid` — The leased salience bid core (Python; dormant)
 
 **Depends on**: PR 1.
-**Purpose**: The behaviour-defining PR — a `participant` admitted on open-floor traffic no longer always reaches the quality turn; it first runs a cheap, leased `fast`-model bid and stays silent unless the bid clears its `threshold`. This is the no-pile-on win.
+**Status**: 🔀 PR open.
+**Purpose**: Land the bid logic and its action-loop seam, fully TDD'd, **dormant** until PR 2b carries its inputs across the store/wire boundary. A `participant` admitted on open-floor traffic of a Tier-B-governed channel runs a cheap, leased `fast`-model bid and stays silent unless it clears its `threshold` (the no-pile-on win); the seam is gated on a `tier_b_active` flag that nothing sets until PR 2b, so PR 2a is additive (v0.3.7 behaviour unchanged).
 
 | File | Change |
 |------|--------|
-| `agents/tier_b_salience.py` (new) | The bid stage. `async def evaluate_salience(event, *, agent_id, threshold, transcript, channel_size) -> SalienceDecision`. Builds a compact prompt over the inbound message + the v0.3.7 in-round transcript (RFC 0034 P2 group working memory); calls the **`fast`** alias under an **RFC 0023 lease** (`cause=CAUSE_CHANNEL_MESSAGE`); parses a constrained `speak: yes/no` + salience score in `[0,1]`. **Bias-to-silence**: parse failure, lease denial, or `score < threshold` → `speak=False`. An unset/zero `threshold` → silence unless the score is decisively high (the conservative default, TB2). |
-| [`agents/response_gate.py`](../../agents/response_gate.py) | Tier B is **downstream of** the pure gate, not inside it. Expose a small helper (e.g. `is_open_floor_admit(decision)` → `decision.respond and decision.policy == POLICY_ALWAYS and decision.reason == "policy_always"`) so the caller can cheaply decide whether to invoke the bid. The pure function's branches are unchanged. |
-| [`internal/channels/`](../../internal/channels/) (store + wire) | **Carry the per-member `threshold` across the store/wire boundary** — the PR-1 prerequisite the bid depends on (PR 1 deliberately stops at `LoadConfig`; see its `PERSISTENCE/WIRE GAP` note). Persist it on the `Member`/`memberships` row (or resolve it via a load-time `Config` lookup at bid time) and put it on the `ChannelMessageEvent` the Python bid consumes, so `threshold` actually reaches `_on_event_inner`. Without this step the field dies at the `LoadConfig` boundary and the row below has nothing to resolve. |
-| [`agents/persona_runtime/action_loop.py`](../../agents/persona_runtime/action_loop.py) (`_ActionLoopMixin._on_event_inner` — the gate caller; **not** `agents/event_loop.py`, which is the unrelated wake/timer scheduler) | After the pure gate admits, gate the expensive turn behind the bid **only** for the open-floor admit (TB1): resolve the member `threshold` + channel size from the payload (now carried by the row above); if `channel_size > tier_b_max_channel_members` (TB6), **skip bidding and fall back to `addressed`-only** (i.e. an un-addressed `participant` stays silent on oversized channels) and emit a `tier_b_skipped{reason="channel_too_large"}` log; else run `evaluate_salience`; on `speak=False`, suppress the turn with a `channel.messages.gated{reason="low_salience"}` metric; on `speak=True`, proceed to recall + the quality turn unchanged. Reuse the RFC 0024 SalienceWake threshold/rate-limit machinery. |
-| `agents/model_aliases.py` | Consumer only — the bid uses the `fast` alias; no change (asserted by test). |
-| schema/config | Add `tier_b_max_channel_members` (channel-level, default e.g. `20`) to `schemas/channel.schema.json` + `config/channels.yaml` + the Go loader; absent → default. |
-| `tests/unit/python/test_tier_b_salience.py` (new) | **(TDD — write first.)** The bid returns `no` when the in-round transcript already contains the persona's point (redundant follow-up); `yes` when the message is in the persona's domain and unaddressed; an unset/zero `threshold` biases to `no`; a lease denial → `no` (fail-closed, TB3); a parse failure → `no`. The bid uses the `fast` alias. |
-| `tests/integration/...` (Tier B no-pile-on) | **(TDD — write first.)** A 4-`participant` channel given an open question produces a **small, relevant** reply set, not 4; a follow-up one persona already covered draws **no** duplicate; an oversized channel (`> tier_b_max_channel_members`) falls back to `addressed`-only (no bids fired). |
-| cost-regression gate (extend) | **(TDD — write first.)** Tier B **never bills idle/`observer`/self-sender personas** (they never reach the bid); every bid is **leased + attributable** (`cause=CAUSE_CHANNEL_MESSAGE`, `fast` model); an N-member all-`participant` channel spends N cheap bids + k full turns (k ≪ N), not N full turns — assert the Tier-C population shrank vs. the v0.3.7 all-admit baseline and total wallet spend did not rise on busy channels. |
+| `agents/tier_b_salience.py` (new) | The pure bid: `evaluate_salience(...) -> SalienceDecision`. Builds a compact prompt over the inbound message + the v0.3.7 in-round transcript; calls the **`fast`** alias under an **RFC 0023 lease** (`cause=CAUSE_CHANNEL_MESSAGE`); parses `speak`/`score`. **Bias-to-silence**: parse failure, lease denial, unresolvable alias, or `score < threshold` → silence; an unset (`None`) threshold demands a *decisive* score (TB2). Also the pure `skip_bid_for_channel_size(...)` predicate (TB6). |
+| `agents/response_gate.py` | `is_open_floor_admit(decision)` helper — the seam the caller uses to decide whether to layer the bid on a pure Tier-A admit (TB1); plus a `POLICY_LOW_SALIENCE` synthetic metric label. The pure gate's branches are unchanged. |
+| `agents/persona_runtime/tier_b_gate.py` (new) | The action-loop seam (`run_tier_b_gate`): reads the bid inputs off the inbound payload (`tier_b_active`/`threshold`/`channel_size`/`tier_b_max_channel_members`), enforces the TB6 cap, runs the bid, emits the suppression metrics, ingests a suppressed message, and hands the reusable formatted-message + conversation-window seed back on the speak path. Carved out of `action_loop.py` to respect the 500-line cap. |
+| `agents/persona_runtime/action_loop.py` | Invoke `run_tier_b_gate` right after the gate admits; on a silent verdict return `DO_NOTHING` *before* memory recall / the quality turn; reuse the seam's seed/message on the speak path. |
+| `agents/observability/metrics.py` | A `channel.messages.tier_b_skipped{reason}` counter (bid skipped, not run — TB6) + `tier_b_skip_attrs`; the low-salience suppression rides the existing `channel.messages.gated` counter with `policy=low_salience`. |
+| `tests/unit/python/test_tier_b_salience.py` (new) | **(TDD.)** redundant follow-up → silence; in-domain unaddressed → speak; unset threshold → decisive-only; lease denial / parse failure / unresolvable alias → silence; the bid is leased (`cause=CAUSE_CHANNEL_MESSAGE`) on the `fast` alias; the channel-size cap. |
+| `tests/integration/test_tier_b_action_loop.py` (new) | **(TDD — wiring + cost-regression.)** the bid runs only on the open-floor admit of a governed channel; an `observer`/self-sender/directed-mention/un-governed channel **never reaches the bid** (idle-cost-zero); a silent verdict suppresses *before* the quality turn; a speak verdict proceeds; the TB6 oversized-channel skip stays silent. |
+| `tests/unit/python/test_response_gate_relevance.py` | **(TDD.)** `is_open_floor_admit` is true for the open-floor/broadcast admit, false for directed/DM/suppressed/observer. |
 
-**Acceptance**: the redundant-follow-up bid test returns silence; the 4-persona open-question integration draws a small relevant set (not pile-on); the cost-regression gate confirms idle/`observer` cost zero, every bid is leased, and Tier-C population shrank; with `threshold` unset everywhere the channel is conservative (bias-to-silence) but a directed `@`-mention still draws exactly one reply (Tier A path, no bid).
+**Acceptance**: the new unit + wiring suites pass; the existing response-gate + Tier A + action-loop suites are unchanged (additive proof — the seam is dormant without `tier_b_active`); `make lint-python` (ruff + mypy) green.
+
+---
+
+### PR 2b: `feature/v038-rfc0030-tierb-wire` — Carry `threshold` + channel size across the store/wire boundary (Go + proto)
+
+**Depends on**: PR 2a.
+**Status**: ⬜ Not started.
+**Purpose**: Flip the bid live. Carry the per-member `threshold` and the channel-size/cap inputs from the in-memory `Config` (PR 1) all the way to the Python bid, and land the no-pile-on integration story.
+
+| File | Change |
+|------|--------|
+| [`internal/channels/sqlite_schema.go`](../../internal/channels/sqlite_schema.go) + `sqlite_migrations.go` | Add a **nullable `threshold REAL`** column to the `memberships` table via a versioned migration (back-compat: existing rows → `NULL` → unset → bias-to-silence). |
+| [`internal/channels/channels.go`](../../internal/channels/channels.go) (`Member`) + `sqlite.go`/`sqlite_query.go` | Add `Threshold *float64` to the `Member` struct; persist + read it in `AddMember` / `CreateChannelWithMembers` / `GetMembers`; carry it from `MemberConfig.Threshold` (PR 1) through `ReconcileConfig`. (Durable column over an in-memory `Config` resolve — mirrors `respond_policy`.) |
+| `proto/task.proto` (`ChannelMessageEvent`) + `make proto` | Add `bool tier_b_active`, `optional double threshold`, `int32 channel_size`, `int32 tier_b_max_channel_members`. Regenerate Go + Python stubs. |
+| [`internal/channels/grpc_dispatcher.go`](../../internal/channels/grpc_dispatcher.go) (`channelMessageToProto`) + `fanout.go` | Populate the new proto fields: `Threshold` from `env.Recipient.Threshold`, `ChannelSize` from the fanout member count, `TierBActive`/cap from the channel config. `tier_b_active` true iff the channel is Tier-B-governed. |
+| `agents/server_servicers.py` | Unpack the new fields into `event.payload` (`tier_b_active`/`threshold`/`channel_size`/`tier_b_max_channel_members`) so `run_tier_b_gate` (PR 2a) reads them. This is the line that **flips the dormant seam live**. |
+| `schemas/channel.schema.json` + `config/channels.yaml` + Go loader | Add `tier_b_max_channel_members` (channel-level, default `20`); absent → default. |
+| `internal/channels/*_test.go` | **(TDD.)** the migration preserves rows + adds the nullable column; `AddMember`/`GetMembers` round-trip a `*float64` threshold (incl. `NULL`); `ReconcileConfig` carries the PR-1 `MemberConfig.Threshold` to the store. |
+| `tests/integration/...` (Tier B no-pile-on) | **(TDD.)** A 4-`participant` governed channel given an open question produces a **small, relevant** reply set, not 4; a follow-up one persona already covered draws **no** duplicate; an oversized channel (`> tier_b_max_channel_members`) falls back to `addressed`-only (no bids fired). The bid-core cost invariants already hold from PR 2a. |
+
+**Acceptance**: the migration + store round-trip tests pass; the 4-persona open-question integration draws a small relevant set (not pile-on) on a governed channel; with `threshold` unset everywhere the channel is conservative (bias-to-silence) but a directed `@`-mention still draws exactly one reply (Tier A path, no bid); existing channels (no `tier_b_active`) behave exactly as v0.3.7 (back-compat).
 
 ---
 
 ### PR 3: `feature/v038-rfc0030-tierb-nl-addressing` — Natural-language addressing as a salience signal
 
-**Depends on**: PR 2.
+**Depends on**: PR 2b.
 **Purpose**: Free-text "let's hear from Iron Fox" biases the bid toward Iron Fox and away from others — **without** re-introducing a deterministic NL directed-elsewhere drop (TB4 / amendment OQ #2).
 
 | File | Change |

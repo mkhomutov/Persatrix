@@ -98,11 +98,9 @@ class _Instruments:
     parity test in ``test_observability_metrics.py`` asserts this.
     """
 
-    # Interaction-lifecycle + facts-tier counters are registered by
-    # :func:`agents.observability._metrics_interactions.register` and
-    # :func:`agents.observability._metrics_facts.register` (split out
-    # so this module stays under the 500-line cap).  The annotations
-    # below keep the attribute surface visible to mypy / IDEs.
+    # Interaction-lifecycle + facts-tier counters are registered by the
+    # ``_metrics_interactions`` / ``_metrics_facts`` helper modules (split out
+    # for the 500-line cap); the annotations keep them visible to mypy / IDEs.
     interactions_opened: Counter
     interactions_closed: Counter
     interactions_closed_by_idle_gap: Counter
@@ -126,6 +124,7 @@ class _Instruments:
     # RFC 0021 Phase 1 — registered by :mod:`._metrics_temporal`.
     temporal_now_anchor_emitted: Counter
     temporal_recency_rendered: Counter
+    channel_messages_tier_b_skipped: Counter  # RFC 0030 Tier B — _metrics_tier_b
 
     def __init__(self, meter: Meter) -> None:
         # ─── Counters ────────────────────────────────────────────────
@@ -203,8 +202,9 @@ class _Instruments:
         from . import _metrics_interactions as _mi
         from . import _metrics_persona_tick as _mp
         from . import _metrics_temporal as _mt
+        from . import _metrics_tier_b as _mtb
         from . import _metrics_wakes as _mw
-        for mod in (_mi, _mf, _mp, _mw, _mt):
+        for mod in (_mi, _mf, _mp, _mw, _mt, _mtb):
             mod.register(self, meter)
 
         # ─── Shared memory pools (RFC 0008 PR plan PR 4) ─────────────

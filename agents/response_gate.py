@@ -79,12 +79,14 @@ __all__ = [
     "POLICY_ALWAYS",
     "POLICY_CHAIR",
     "POLICY_DEFENSE_IN_DEPTH",
+    "POLICY_LOW_SALIENCE",
     "POLICY_NEVER",
     "POLICY_OBSERVER",
     "POLICY_PARTICIPANT",
     "POLICY_WHEN_MENTIONED",
     "GateDecision",
     "evaluate_response_gate",
+    "is_open_floor_admit",
 ]
 
 
@@ -150,6 +152,16 @@ _DISPOSITION_ALIASES: Final[dict[str, str]] = {
 # without polluting the user-policy buckets.
 POLICY_DEFENSE_IN_DEPTH: Final[str] = "defense_in_depth"
 
+# RFC 0030 Tier B (v0.3.8): a synthetic ``policy`` label for the
+# ``channel.messages.gated`` counter when the suppression came from the
+# salience bid (not a user-policy outcome) — the same precedent as
+# POLICY_DEFENSE_IN_DEPTH. The member's *effective* wire policy was
+# ``always`` (an open-floor admit), but a gated fire labelled ``always`` is,
+# by construction, a Tier-A directed-elsewhere drop; the Tier-B bias-to-
+# silence suppression is a distinct operational signal that an operator
+# breaking down ``gated`` by ``policy`` must be able to tell apart.
+POLICY_LOW_SALIENCE: Final[str] = "low_salience"
+
 # RFC 0030 relevance amendment Tier A (v0.3.7), decision D3 / amendment
 # OQ #5 (adopted default): the broadcast sentinel. A message addressed to
 # the *room* rather than to specific members carries this reserved token in
@@ -193,6 +205,31 @@ class GateDecision:
     respond: bool
     policy: str
     reason: str
+
+
+def is_open_floor_admit(decision: GateDecision) -> bool:
+    """Return ``True`` iff ``decision`` is the *open-floor* admit — the one
+    branch RFC 0030 Tier B refines.
+
+    Tier B (the leased salience bid, :mod:`agents.tier_b_salience`) runs
+    **only** on the ambiguous open-floor remainder Tier A leaves: a
+    ``participant`` (``always``) member admitted to an un-directed message
+    with ``reason="policy_always"``. Every *directed* admit — a
+    ``@``-mention (``reason="mentioned"``), a DM (``"dm"``), a
+    thread-reply-to-self (``"thread_reply_to_self"``) — is already the
+    persona's lane and skips the bid (TB1). A suppressed decision, an
+    ``observer``, and the self-sender never reach the bid either (the gate
+    returned ``respond=False`` for them).
+
+    This is the seam that keeps Tier A pure: the gate decides *eligibility*
+    with no LLM/IO; this predicate lets the action-loop caller decide
+    whether to layer the leased bid on top.
+    """
+    return (
+        decision.respond
+        and decision.policy == POLICY_ALWAYS
+        and decision.reason == "policy_always"
+    )
 
 
 def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:

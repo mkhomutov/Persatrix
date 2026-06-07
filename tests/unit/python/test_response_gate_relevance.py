@@ -36,6 +36,7 @@ from agents.response_gate import (
     POLICY_NEVER,
     POLICY_WHEN_MENTIONED,
     evaluate_response_gate,
+    is_open_floor_admit,
 )
 
 
@@ -251,3 +252,54 @@ class TestUnchangedDispositions:
         assert d.respond is False
         assert d.reason == "directed_elsewhere"
         assert d.policy == POLICY_ALWAYS
+
+
+class TestIsOpenFloorAdmit:
+    """RFC 0030 Tier B (v0.3.8): the open-floor-admit predicate is the seam
+    the action loop uses to decide whether to layer the leased salience bid
+    on top of a pure Tier-A admit (TB1)."""
+
+    def test_open_floor_participant_admit_is_open_floor(self):
+        evt = _channel_event(respond_policy="always", sender_id="alice", mentions=[])
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert d.reason == "policy_always"
+        assert is_open_floor_admit(d) is True
+
+    def test_broadcast_admit_is_open_floor(self):
+        # An explicit @everyone broadcast also admits via policy_always.
+        evt = _channel_event(
+            respond_policy="always", sender_id="alice", mentions=[MENTION_EVERYONE],
+        )
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert is_open_floor_admit(d) is True
+
+    def test_directed_mention_admit_is_not_open_floor(self):
+        # A directed @-mention is the persona's lane — it skips the bid.
+        evt = _channel_event(
+            respond_policy="when_mentioned", sender_id="alice", mentions=["iron-fox"],
+        )
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert d.respond is True
+        assert d.reason == "mentioned"
+        assert is_open_floor_admit(d) is False
+
+    def test_dm_admit_is_not_open_floor(self):
+        evt = _channel_event(
+            respond_policy="always", sender_id="alice", channel_id="dm:alice__iron-fox",
+        )
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert d.reason == "dm"
+        assert is_open_floor_admit(d) is False
+
+    def test_suppressed_decision_is_not_open_floor(self):
+        evt = _channel_event(
+            respond_policy="always", sender_id="alice", mentions=["ember-owl"],
+        )
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert d.respond is False
+        assert is_open_floor_admit(d) is False
+
+    def test_observer_is_not_open_floor(self):
+        evt = _channel_event(respond_policy="never", sender_id="alice", mentions=[])
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert is_open_floor_admit(d) is False

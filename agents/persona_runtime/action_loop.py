@@ -31,6 +31,7 @@ from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
 from .channel_reply import synthesize_channel_reply
 from .llm_call_errors import handle_llm_call_exception
+from .tier_b_gate import run_tier_b_gate
 from .wallet_cause import lease_attribution_for_event
 
 if TYPE_CHECKING:
@@ -277,10 +278,22 @@ class _ActionLoopMixin:
                 await self._store_event_episode(event, [])
             return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
 
+        # RFC 0030 Tier B (v0.3.8): the leased ``fast``-model salience-bid
+        # (no-pile-on) seam. Runs only on the open-floor admit of a
+        # Tier-B-governed channel — dormant in PR 2a until the bid inputs
+        # arrive on the wire in PR 2b (see tier_b_gate.py). A "stay silent"
+        # verdict suppresses before any recall / quality LLM call.
+        tier_b = await run_tier_b_gate(self, event, decision)
+        if tier_b is not None and tier_b.silence:
+            return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
+        # Reuse the artifacts the seam already built on the speak path.
+        seam_msg = tier_b.user_message if tier_b is not None else None
+        seam_seed = tier_b.seed if tier_b is not None else None
+
         # 0. Format event once and inject memory context.
         # _format_event() is pure; computing it here avoids a redundant call
         # inside _inject_memory_context().  (F-60-2: deduplicate _format_event.)
-        user_message = self._format_event(event)
+        user_message = seam_msg if seam_msg is not None else self._format_event(event)
 
         # Use raw event content for memory queries, not the formatted version.
         # _format_event() wraps user messages in <|user_message|> XML-style
@@ -372,8 +385,10 @@ class _ActionLoopMixin:
             memory_text = "\n\n".join(s["content"] for s in memory_sections)
             system_prompt += "\n\n" + memory_text
 
-        # 2. Multi-turn tool-use loop — RFC 0034 conversation-window seed.
-        messages = await self._build_seed_messages(event, user_message)
+        # 2. Multi-turn tool-use loop — RFC 0034 seed (reuse the seam's seed).
+        messages = seam_seed if seam_seed is not None else (
+            await self._build_seed_messages(event, user_message)
+        )
         tool_defs = self._llm_client.format_tool_definitions(
             self._build_tool_definitions()
         )
