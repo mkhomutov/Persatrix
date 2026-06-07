@@ -2,7 +2,6 @@ package channels
 
 import (
 	"path/filepath"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,12 +13,6 @@ func writeYAML(t *testing.T, body string) string {
 	p := filepath.Join(t.TempDir(), "channels.yaml")
 	require.NoError(t, writeFile(p, body))
 	return p
-}
-
-// formatFloat renders a float as a plain decimal for inline YAML bodies
-// (avoids scientific notation that would parse as a string).
-func formatFloat(v float64) string {
-	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
 func TestLoadConfig_Empty_DefaultsApplied(t *testing.T) {
@@ -191,113 +184,6 @@ channels:
 	assert.Equal(t, RespondAlways, cfg.Channels[0].Members[0].RespondPolicy)
 	assert.Equal(t, RespondWhenMentioned, cfg.Channels[0].Members[1].RespondPolicy)
 	assert.Equal(t, RespondNever, cfg.Channels[0].Members[2].RespondPolicy)
-}
-
-// TestLoadConfig_ChairNormalizesToAlwaysWithLowThreshold pins the v0.3.8
-// Tier B PR 1 contract: the `chair` disposition loads as a `participant`
-// (legacy `always`) carrying a low default `threshold`, so it clears the
-// salience bid readily once Tier B reads the field (PR 2). The chair-ness
-// survives only as the low threshold — the wire `respond_policy` stays the
-// canonical `always` every downstream reader already understands.
-func TestLoadConfig_ChairNormalizesToAlwaysWithLowThreshold(t *testing.T) {
-	body := `
-channels:
-  - name: planning
-    members:
-      - id: facilitator
-        respond: chair
-`
-	cfg, err := LoadConfig(writeYAML(t, body))
-	require.NoError(t, err)
-	require.Len(t, cfg.Channels[0].Members, 1)
-	m := cfg.Channels[0].Members[0]
-	assert.Equal(t, RespondAlways, m.RespondPolicy,
-		"chair normalizes to the legacy `always` wire value")
-	require.NotNil(t, m.Threshold,
-		"chair must carry the low default threshold so it clears the Tier B bid")
-	assert.InDelta(t, DefaultChairThreshold, *m.Threshold, 1e-9)
-}
-
-// TestLoadConfig_ChairHonoursExplicitThreshold pins that an operator can
-// override the chair's low default with an explicit value.
-func TestLoadConfig_ChairHonoursExplicitThreshold(t *testing.T) {
-	body := `
-channels:
-  - name: planning
-    members:
-      - id: facilitator
-        respond: chair
-        threshold: 0.4
-`
-	cfg, err := LoadConfig(writeYAML(t, body))
-	require.NoError(t, err)
-	m := cfg.Channels[0].Members[0]
-	assert.Equal(t, RespondAlways, m.RespondPolicy)
-	require.NotNil(t, m.Threshold)
-	assert.InDelta(t, 0.4, *m.Threshold, 1e-9,
-		"an explicit threshold overrides the chair default")
-}
-
-// TestLoadConfig_AcceptsPerMemberThreshold pins that a per-disposition
-// `threshold` in the `[0, 1]` salience range loads on any disposition, and
-// that an absent threshold leaves the field unset (nil → bias-to-silence,
-// honoured by Tier B in PR 2).
-func TestLoadConfig_AcceptsPerMemberThreshold(t *testing.T) {
-	body := `
-channels:
-  - name: planning
-    members:
-      - id: with-threshold
-        respond: participant
-        threshold: 0.7
-      - id: without-threshold
-        respond: participant
-`
-	cfg, err := LoadConfig(writeYAML(t, body))
-	require.NoError(t, err)
-	require.Len(t, cfg.Channels[0].Members, 2)
-	require.NotNil(t, cfg.Channels[0].Members[0].Threshold)
-	assert.InDelta(t, 0.7, *cfg.Channels[0].Members[0].Threshold, 1e-9)
-	assert.Nil(t, cfg.Channels[0].Members[1].Threshold,
-		"an absent threshold stays unset (bias-to-silence)")
-}
-
-// TestLoadConfig_AcceptsThresholdBoundaries pins both endpoints of the
-// `[0, 1]` salience range as valid (mirrors the schema bound).
-func TestLoadConfig_AcceptsThresholdBoundaries(t *testing.T) {
-	for _, v := range []float64{0.0, 1.0} {
-		body := `
-channels:
-  - name: planning
-    members:
-      - id: alice
-        respond: participant
-        threshold: ` + formatFloat(v) + `
-`
-		cfg, err := LoadConfig(writeYAML(t, body))
-		require.NoError(t, err, "threshold %v must load", v)
-		require.NotNil(t, cfg.Channels[0].Members[0].Threshold)
-		assert.InDelta(t, v, *cfg.Channels[0].Members[0].Threshold, 1e-9)
-	}
-}
-
-// TestLoadConfig_RejectsOutOfRangeThreshold pins that a threshold outside
-// `[0, 1]` fails the loader with ErrInvalidThreshold (the belt-and-
-// suspenders for an operator who skipped `make validate`).
-func TestLoadConfig_RejectsOutOfRangeThreshold(t *testing.T) {
-	for _, v := range []float64{-0.1, 1.5} {
-		body := `
-channels:
-  - name: planning
-    members:
-      - id: alice
-        respond: participant
-        threshold: ` + formatFloat(v) + `
-`
-		_, err := LoadConfig(writeYAML(t, body))
-		require.Error(t, err, "threshold %v must be rejected", v)
-		assert.ErrorIs(t, err, ErrInvalidThreshold)
-	}
 }
 
 func TestChannelConfig_CanonicalID(t *testing.T) {

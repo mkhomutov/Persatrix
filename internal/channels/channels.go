@@ -70,7 +70,9 @@ const (
 	// moving. It normalizes to the legacy `always` wire value (so every
 	// downstream reader is unchanged); its "chair-ness" survives only as the
 	// low [MemberConfig.Threshold] applied at config load
-	// ([DefaultChairThreshold]). A v0.3.8 `chair` CANNOT close an interaction
+	// ([DefaultChairThreshold]) — and only on the in-memory [Config] struct,
+	// not past the store/wire boundary (see the persistence/wire gap noted on
+	// [MemberConfig.Threshold]). A v0.3.8 `chair` CANNOT close an interaction
 	// — convergence is owned by the deterministic governance layers — and its
 	// Layer 5 moderator hooks are reserved/inert until v0.4.0.
 	RespondChair RespondPolicy = "chair"
@@ -243,12 +245,25 @@ var (
 	// outside the canonical vocabulary.
 	ErrInvalidRespondPolicy = errors.New("channels: invalid respond_policy")
 	// ErrInvalidThreshold — a member's per-disposition salience `threshold`
-	// (RFC 0030 Tier B, v0.3.8) fell outside the `[0, 1]` range. The JSON
-	// schema's `minimum`/`maximum` catches this at `make validate`; this
-	// Go-side check is the belt-and-suspenders for operators who skipped that
-	// step. An absent threshold is NOT an error — it is the unset (bias-to-
-	// silence) default.
+	// (RFC 0030 Tier B, v0.3.8) was not a finite value in the `[0, 1]` range.
+	// The JSON schema's `minimum`/`maximum` catches an out-of-range bound at
+	// `make validate`; this Go-side check is the belt-and-suspenders for
+	// operators who skipped that step, and additionally rejects a non-finite
+	// `.nan` — which slips past a bare range comparison (every comparison
+	// against NaN is false) and which the schema's numeric bound likewise
+	// fails to catch. An absent threshold is NOT an error — it is the unset
+	// (bias-to-silence) default.
 	ErrInvalidThreshold = errors.New("channels: invalid member threshold")
+	// ErrThresholdNotApplicable — a member carried a per-disposition
+	// `threshold` on a disposition that does not run the open-floor salience
+	// bid (RFC 0030 Tier B, v0.3.8). The bid only gates open-floor speakers —
+	// `participant`/`chair`/legacy `always`, all normalizing to RespondAlways.
+	// A threshold on an `addressed`/`observer` (or the default
+	// `when_mentioned`) member is a silent no-op, so the loader rejects it
+	// loudly rather than let an operator believe a bar is in force where no
+	// bid ever runs. This is a cross-field invariant the JSON schema cannot
+	// express, so unlike the range check it has no `make validate` mirror.
+	ErrThresholdNotApplicable = errors.New("channels: threshold not applicable to disposition")
 	// ErrChannelCapExceeded — CreateChannel would push named-group count past
 	// the configured `max_channels` cap. DMs and threads are not counted.
 	ErrChannelCapExceeded = errors.New("channels: max_channels exceeded")
