@@ -29,7 +29,12 @@ class _StubAgent(BaseAgent):
 
 
 def _make_servicer() -> tuple[AgentServiceServicer, MagicMock]:
-    agents = {"ember-owl": _StubAgent(agent_id="ember-owl", config={"model": "test"})}
+    # Annotated to the supertype so the dict literal is inferred as
+    # dict[str, BaseAgent] (dict is invariant) — AgentServiceServicer takes
+    # dict[str, BaseAgent], matching the sibling test_receive_channel_message.py.
+    agents: dict[str, BaseAgent] = {
+        "ember-owl": _StubAgent(agent_id="ember-owl", config={"model": "test"}),
+    }
     dispatcher = MagicMock(spec=EventDispatcher)
     dispatcher.enqueue_inbound = MagicMock(return_value=True)
     return AgentServiceServicer(agents, dispatcher), dispatcher

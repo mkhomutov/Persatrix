@@ -479,12 +479,15 @@ class ChannelMessageEvent(google.protobuf.message.Message):
     Mirrors the `*float64` tri-state on `internal/channels.Member.Threshold`.
     """
     channel_size: builtins.int
-    """The candidate-responder count of the channel at publish time (the fanout
-    member set). The bid uses it for the TB6 channel-size cap: above
-    `tier_b_max_channel_members` the seam skips the bid entirely and falls
-    back to `addressed`-only so a cheap bid × N members stays bounded on
-    large channels. Zero (proto3 implicit) reads as "unknown" and disables
-    the cap (the bid runs), so a pre-v0.3.8 publisher omitting it is safe.
+    """The channel's total member count at publish time — every membership row,
+    counted before the per-recipient sender/`never` filter, so it is an upper
+    bound on the candidate responders (over-counting only makes the cap below
+    fire sooner, which is the safe direction). The bid uses it for the TB6
+    channel-size cap: above `tier_b_max_channel_members` the seam skips the
+    bid entirely and falls back to `addressed`-only so a cheap bid × N members
+    stays bounded on large channels. Zero (proto3 implicit) reads as "unknown"
+    and disables the cap (the bid runs), so a pre-v0.3.8 publisher omitting it
+    is safe.
     """
     tier_b_max_channel_members: builtins.int
     """The channel's configured TB6 cap (RFC 0030 amendment OQ #4); zero/absent
