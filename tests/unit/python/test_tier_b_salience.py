@@ -111,6 +111,16 @@ class TestSpeakWhenSalient:
         )
         assert decision.speak is True
 
+    async def test_missing_speak_line_falls_through_to_score(self):
+        """The grammar is forgiving: a bare ``score:`` (no ``speak:`` line)
+        is governed by the score alone — a clearing score speaks."""
+        decision = await _bid(
+            client=_client("score: 0.9"),
+            threshold=0.4,
+        )
+        assert decision.speak is True
+        assert decision.reason == "salient"
+
 
 class TestBiasToSilence:
     async def test_redundant_followup_stays_silent(self):
@@ -138,6 +148,17 @@ class TestBiasToSilence:
             threshold=None,
         )
         assert decision.speak is True
+
+    async def test_speak_no_vetoes_a_clearing_score(self):
+        """TB2: an explicit ``speak: no`` is a one-way veto toward silence —
+        even a score that clears the threshold stays silent. The veto only
+        ever *adds* silence, so it cannot cause pile-on."""
+        decision = await _bid(
+            client=_client("speak: no\nscore: 0.95"),
+            threshold=0.4,
+        )
+        assert decision.speak is False
+        assert decision.reason == "declined"
 
     async def test_parse_failure_is_silence(self):
         """Unparseable bid output → fail-closed silence (TB2)."""

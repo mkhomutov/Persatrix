@@ -83,12 +83,16 @@ def _governed(event: AgentEvent) -> bool:
 
 def _threshold(event: AgentEvent) -> float | None:
     """The member's salience ``threshold`` (``None`` → unset → bias-to-
-    silence, TB2). A non-numeric value degrades to ``None``."""
+    silence, TB2). A non-numeric *or out-of-range* value degrades to
+    ``None``: a threshold is a score floor in ``[0, 1]``, so a stray value
+    (e.g. a future wire bug) becomes "unset" rather than permanently muting
+    (>1) or admitting everything (<0)."""
     raw = (event.payload or {}).get(_TIER_B_THRESHOLD_KEY)
     if isinstance(raw, bool):  # bool is an int subclass — never a threshold
         return None
     if isinstance(raw, (int, float)):
-        return float(raw)
+        value = float(raw)
+        return value if 0.0 <= value <= 1.0 else None
     return None
 
 

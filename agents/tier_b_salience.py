@@ -71,6 +71,9 @@ __all__ = [
 _BID_MODEL_ALIAS: Final[str] = "fast"
 
 # A short, structured output budget — the bid is a yes/no + score, not prose.
+# If a verbose model truncates before emitting ``score:`` the parse fails and
+# the bid stays silent — the fail-closed direction (TB2), so the tight budget
+# is safe.
 _BID_MAX_OUTPUT_TOKENS: Final[int] = 64
 # Low temperature: the bid is a judgement, not a creative turn.
 _BID_TEMPERATURE: Final[float] = 0.0
@@ -86,11 +89,18 @@ DEFAULT_TIER_B_MAX_CHANNEL_MEMBERS: Final[int] = 20
 # Bid output grammar. The bid is asked to answer on two lines:
 #   speak: yes|no
 #   score: 0.0-1.0
-# The score is authoritative for the threshold gate; ``speak:`` is parsed for
-# diagnostics and as a tie-break only. Parsing is forgiving of surrounding
-# prose but a missing score is a parse failure (→ silence, TB2).
+# The score governs the threshold gate. ``speak:`` is a one-way veto *toward
+# silence* (TB2): an explicit ``speak: no`` stays silent even when the score
+# clears the bar, but ``speak: yes`` never overrides a below-bar score. A
+# missing ``speak:`` line falls through to the score alone. Parsing is
+# forgiving of surrounding prose, but a missing score is a parse failure
+# (→ silence, TB2).
 _SCORE_RE: Final[re.Pattern[str]] = re.compile(
     r"score\s*[:=]\s*(?P<score>[01](?:\.\d+)?|0?\.\d+)",
+    re.IGNORECASE,
+)
+_SPEAK_RE: Final[re.Pattern[str]] = re.compile(
+    r"speak\s*[:=]\s*(?P<speak>yes|no)",
     re.IGNORECASE,
 )
 
@@ -105,9 +115,10 @@ class SalienceDecision:
         score: The parsed salience score in ``[0, 1]``, or ``None`` when the
             bid could not be scored (parse failure / lease denial / error).
         reason: Low-cardinality branch label for logs + the
-            ``channel.messages.gated`` metric: ``salient`` /
-            ``below_threshold`` / ``parse_failure`` / ``lease_denied`` /
-            ``llm_error`` / ``model_unresolvable``.
+            ``channel.messages.gated`` metric: ``salient`` / ``declined``
+            (explicit ``speak: no`` veto) / ``below_threshold`` /
+            ``parse_failure`` / ``lease_denied`` / ``llm_error`` /
+            ``model_unresolvable``.
     """
 
     speak: bool
@@ -185,6 +196,17 @@ def _parse_score(text: str | None) -> float | None:
     return max(0.0, min(1.0, score))
 
 
+def _parse_speak(text: str | None) -> bool | None:
+    """Extract the ``speak: yes|no`` verdict, or ``None`` when the line is
+    absent (the score then governs alone)."""
+    if not text:
+        return None
+    match = _SPEAK_RE.search(text)
+    if match is None:
+        return None
+    return match.group("speak").lower() == "yes"
+
+
 async def evaluate_salience(
     *,
     llm_client: LLMClient,
@@ -254,6 +276,19 @@ async def evaluate_salience(
     # TB2 — bias-to-silence. An unset threshold demands a decisive score;
     # an explicit threshold is an inclusive floor.
     bar = _DECISIVE_SCORE if threshold is None else threshold
-    if score >= bar:
-        return SalienceDecision(speak=True, score=score, reason="salient")
-    return SalienceDecision(speak=False, score=score, reason="below_threshold")
+    if score < bar:
+        return SalienceDecision(speak=False, score=score, reason="below_threshold")
+
+    # The score would speak — but ``speak: no`` is a one-way veto toward
+    # silence (TB2): honour an explicit decline even when the score clears the
+    # bar. (A below-bar score is already handled above, so the veto only ever
+    # *removes* a would-be turn; it can never add one.)
+    if _parse_speak(response.text) is False:
+        logger.debug(
+            "Tier B salience bid: explicit speak=no veto for agent %s "
+            "(score=%s cleared bar=%s); staying silent",
+            agent_id, score, bar,
+        )
+        return SalienceDecision(speak=False, score=score, reason="declined")
+
+    return SalienceDecision(speak=True, score=score, reason="salient")

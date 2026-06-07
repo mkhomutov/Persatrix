@@ -230,3 +230,25 @@ class TestChannelSizeCap:
                 tier_b_active=True, channel_size=4, max_members=20,
             ))
         bid.assert_awaited_once()
+
+
+class TestThresholdParsing:
+    """The seam parses the per-member ``threshold`` off the payload before
+    handing it to the bid. A valid value passes through; an out-of-range
+    value degrades to ``None`` (unset → the decisive bar), so a future wire
+    bug biases to silence rather than permanently muting (or over-admitting)
+    a persona."""
+
+    async def test_in_range_threshold_passes_through(self):
+        agent, _ = await _make_agent()
+        with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
+            await _deliver(agent, _payload(tier_b_active=True, threshold=0.4))
+        bid.assert_awaited_once()
+        assert bid.await_args.kwargs["threshold"] == pytest.approx(0.4)
+
+    async def test_out_of_range_threshold_degrades_to_unset(self):
+        agent, _ = await _make_agent()
+        with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
+            await _deliver(agent, _payload(tier_b_active=True, threshold=5.0))
+        bid.assert_awaited_once()
+        assert bid.await_args.kwargs["threshold"] is None
