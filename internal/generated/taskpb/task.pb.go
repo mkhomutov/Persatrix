@@ -807,16 +807,16 @@ type ChannelMessageEvent struct {
 	// RFC 0030 Tier B (v0.3.8) — the per-recipient salience-bid inputs. Carried
 	// as first-class fields for the same reason as `cascade_depth = 11`:
 	// `ChannelMessageEvent` has no metadata map. The agent-side seam
-	// (`agents/persona_runtime/tier_b_gate.py`) reads them off the inbound
+	// (`agents/persona_runtime/salience_gate.py`) reads them off the inbound
 	// payload to decide whether to run the leased `fast`-model relevance bid.
 	//
-	// `tier_b_active` is per-recipient: true iff this recipient was declared
+	// `salience_gated` is per-recipient: true iff this recipient was declared
 	// with the open-floor participant vocabulary (`participant`/`chair`) — the
 	// dispositions that opt into the bid. A legacy `always` member carries
 	// false and keeps replying unconditionally (v0.3.7 behaviour), so the
 	// feature is additive. proto3 implicit presence: false (the zero value) is
 	// the not-governed case, exactly right for every pre-v0.3.8 publisher.
-	TierBActive bool `protobuf:"varint,13,opt,name=tier_b_active,json=tierBActive,proto3" json:"tier_b_active,omitempty"`
+	SalienceGated bool `protobuf:"varint,13,opt,name=salience_gated,json=salienceGated,proto3" json:"salience_gated,omitempty"`
 	// The recipient's per-disposition salience `threshold` in `[0, 1]` (RFC
 	// 0030 Tier B). `optional` (explicit presence) on purpose: an unset
 	// threshold is a tri-state distinct from `0.0` — unset biases the bid to
@@ -828,18 +828,18 @@ type ChannelMessageEvent struct {
 	// counted before the per-recipient sender/`never` filter, so it is an upper
 	// bound on the candidate responders (over-counting only makes the cap below
 	// fire sooner, which is the safe direction). The bid uses it for the TB6
-	// channel-size cap: above `tier_b_max_channel_members` the seam skips the
+	// channel-size cap: above `salience_max_channel_members` the seam skips the
 	// bid entirely and falls back to `addressed`-only so a cheap bid × N members
 	// stays bounded on large channels. Zero (proto3 implicit) reads as "unknown"
 	// and disables the cap (the bid runs), so a pre-v0.3.8 publisher omitting it
 	// is safe.
 	ChannelSize int32 `protobuf:"varint,15,opt,name=channel_size,json=channelSize,proto3" json:"channel_size,omitempty"`
 	// The channel's configured TB6 cap (RFC 0030 amendment OQ #4); zero/absent
-	// → the agent-side default (`DEFAULT_TIER_B_MAX_CHANNEL_MEMBERS = 20`).
+	// → the agent-side default (`DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS = 20`).
 	// Channel-level, so it is identical across a fanout's recipients.
-	TierBMaxChannelMembers int32 `protobuf:"varint,16,opt,name=tier_b_max_channel_members,json=tierBMaxChannelMembers,proto3" json:"tier_b_max_channel_members,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	SalienceMaxChannelMembers int32 `protobuf:"varint,16,opt,name=salience_max_channel_members,json=salienceMaxChannelMembers,proto3" json:"salience_max_channel_members,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *ChannelMessageEvent) Reset() {
@@ -956,9 +956,9 @@ func (x *ChannelMessageEvent) GetSenderParticipantType() string {
 	return ""
 }
 
-func (x *ChannelMessageEvent) GetTierBActive() bool {
+func (x *ChannelMessageEvent) GetSalienceGated() bool {
 	if x != nil {
-		return x.TierBActive
+		return x.SalienceGated
 	}
 	return false
 }
@@ -977,9 +977,9 @@ func (x *ChannelMessageEvent) GetChannelSize() int32 {
 	return 0
 }
 
-func (x *ChannelMessageEvent) GetTierBMaxChannelMembers() int32 {
+func (x *ChannelMessageEvent) GetSalienceMaxChannelMembers() int32 {
 	if x != nil {
-		return x.TierBMaxChannelMembers
+		return x.SalienceMaxChannelMembers
 	}
 	return 0
 }
@@ -1104,7 +1104,7 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xf3\x04\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xfb\x04\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -1120,11 +1120,11 @@ const file_task_proto_rawDesc = "" +
 	"\x17thread_parent_sender_id\x18\n" +
 	" \x01(\tR\x14threadParentSenderId\x12#\n" +
 	"\rcascade_depth\x18\v \x01(\x05R\fcascadeDepth\x126\n" +
-	"\x17sender_participant_type\x18\f \x01(\tR\x15senderParticipantType\x12\"\n" +
-	"\rtier_b_active\x18\r \x01(\bR\vtierBActive\x12!\n" +
+	"\x17sender_participant_type\x18\f \x01(\tR\x15senderParticipantType\x12%\n" +
+	"\x0esalience_gated\x18\r \x01(\bR\rsalienceGated\x12!\n" +
 	"\tthreshold\x18\x0e \x01(\x01H\x00R\tthreshold\x88\x01\x01\x12!\n" +
-	"\fchannel_size\x18\x0f \x01(\x05R\vchannelSize\x12:\n" +
-	"\x1atier_b_max_channel_members\x18\x10 \x01(\x05R\x16tierBMaxChannelMembersB\f\n" +
+	"\fchannel_size\x18\x0f \x01(\x05R\vchannelSize\x12?\n" +
+	"\x1csalience_max_channel_members\x18\x10 \x01(\x05R\x19salienceMaxChannelMembersB\f\n" +
 	"\n" +
 	"_threshold\"H\n" +
 	"\aTaskAck\x12\x18\n" +

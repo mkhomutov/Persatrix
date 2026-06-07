@@ -28,7 +28,7 @@ Load-bearing invariants (amendment OQs / master-plan §Open-question status):
   event* (defaulting to ``CAUSE_CHANNEL_MESSAGE``) so the bid bills the same
   cause as the event's quality turn; the RFC 0023 wallet bounds + attributes
   it, and a denied lease fails *closed* (RFC 0023 §F).
-* **TB6 — channel-size cap.** Above ``tier_b_max_channel_members`` the caller
+* **TB6 — channel-size cap.** Above ``salience_max_channel_members`` the caller
   skips the bid and falls back to ``addressed``-only so bid fan-out stays
   small on large channels (amendment OQ #4). The pure
   :func:`skip_bid_for_channel_size` predicate lives here for testability;
@@ -38,7 +38,7 @@ Load-bearing invariants (amendment OQs / master-plan §Open-question status):
 ``threshold`` and the ``channel_size`` it consumes are carried across the
 store/wire boundary in PR 2b (the SQLite ``memberships.threshold`` migration
 + the ``ChannelMessageEvent`` proto field). Until then the action-loop seam
-(:func:`agents.persona_runtime.tier_b_gate.run_tier_b_gate`) is dormant — it
+(:func:`agents.persona_runtime.salience_gate.run_salience_gate`) is dormant — it
 fires only when the inbound event is flagged Tier-B-governed — so PR 2a is
 additive and the v0.3.7 response behaviour is unchanged.
 """
@@ -63,7 +63,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "DEFAULT_TIER_B_MAX_CHANNEL_MEMBERS",
+    "DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS",
     "SalienceDecision",
     "evaluate_salience",
     "skip_bid_for_channel_size",
@@ -88,7 +88,7 @@ _DECISIVE_SCORE: Final[float] = 0.8
 
 # TB6: default channel-member cap above which the bid is skipped (the channel
 # falls back to ``addressed``-only). A non-positive value disables the cap.
-DEFAULT_TIER_B_MAX_CHANNEL_MEMBERS: Final[int] = 20
+DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS: Final[int] = 20
 
 # Bid output grammar. The bid is asked to answer on two lines:
 #   speak: yes|no

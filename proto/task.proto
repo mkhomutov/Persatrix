@@ -218,16 +218,16 @@ message ChannelMessageEvent {
   // RFC 0030 Tier B (v0.3.8) — the per-recipient salience-bid inputs. Carried
   // as first-class fields for the same reason as `cascade_depth = 11`:
   // `ChannelMessageEvent` has no metadata map. The agent-side seam
-  // (`agents/persona_runtime/tier_b_gate.py`) reads them off the inbound
+  // (`agents/persona_runtime/salience_gate.py`) reads them off the inbound
   // payload to decide whether to run the leased `fast`-model relevance bid.
   //
-  // `tier_b_active` is per-recipient: true iff this recipient was declared
+  // `salience_gated` is per-recipient: true iff this recipient was declared
   // with the open-floor participant vocabulary (`participant`/`chair`) — the
   // dispositions that opt into the bid. A legacy `always` member carries
   // false and keeps replying unconditionally (v0.3.7 behaviour), so the
   // feature is additive. proto3 implicit presence: false (the zero value) is
   // the not-governed case, exactly right for every pre-v0.3.8 publisher.
-  bool tier_b_active = 13;
+  bool salience_gated = 13;
   // The recipient's per-disposition salience `threshold` in `[0, 1]` (RFC
   // 0030 Tier B). `optional` (explicit presence) on purpose: an unset
   // threshold is a tri-state distinct from `0.0` — unset biases the bid to
@@ -239,16 +239,16 @@ message ChannelMessageEvent {
   // counted before the per-recipient sender/`never` filter, so it is an upper
   // bound on the candidate responders (over-counting only makes the cap below
   // fire sooner, which is the safe direction). The bid uses it for the TB6
-  // channel-size cap: above `tier_b_max_channel_members` the seam skips the
+  // channel-size cap: above `salience_max_channel_members` the seam skips the
   // bid entirely and falls back to `addressed`-only so a cheap bid × N members
   // stays bounded on large channels. Zero (proto3 implicit) reads as "unknown"
   // and disables the cap (the bid runs), so a pre-v0.3.8 publisher omitting it
   // is safe.
   int32 channel_size = 15;
   // The channel's configured TB6 cap (RFC 0030 amendment OQ #4); zero/absent
-  // → the agent-side default (`DEFAULT_TIER_B_MAX_CHANNEL_MEMBERS = 20`).
+  // → the agent-side default (`DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS = 20`).
   // Channel-level, so it is identical across a fanout's recipients.
-  int32 tier_b_max_channel_members = 16;
+  int32 salience_max_channel_members = 16;
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)

@@ -3,7 +3,7 @@
 PR 2 of the Tier B PR plan
 (``docs/rfcs/0030-amendment-relevance-gated-response-tierb-pr-plan.md``).
 These are the **red** half of the TDD pair for
-:mod:`agents.tier_b_salience`: they pin the bid's bias-to-silence
+:mod:`agents.salience_bid`: they pin the bid's bias-to-silence
 contract before the module exists.
 
 The bid is the no-pile-on decision. On the open-floor remainder Tier A
@@ -22,7 +22,7 @@ plan §Open-question status):
 The bid is pure of runtime wiring: it takes the inbound content, the
 in-round transcript, and the resolved ``threshold`` and returns a
 :class:`SalienceDecision`. The action-loop seam (when it fires) is pinned
-separately in ``test_tier_b_action_loop.py``.
+separately in ``test_salience_action_loop.py``.
 """
 
 from __future__ import annotations
@@ -37,8 +37,8 @@ import pytest
 from agents.generated import wallet_pb2 as walletpb
 from agents.llm_client import LLMClient, LLMResponse
 from agents.model_aliases import use_alias_map
-from agents.tier_b_salience import (
-    DEFAULT_TIER_B_MAX_CHANNEL_MEMBERS,
+from agents.salience_bid import (
+    DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS,
     SalienceDecision,
     evaluate_salience,
     skip_bid_for_channel_size,
@@ -254,7 +254,7 @@ class TestBiasToSilence:
 
 
 class TestChannelSizeCap:
-    """TB6 — above ``tier_b_max_channel_members`` the bid is skipped and the
+    """TB6 — above ``salience_max_channel_members`` the bid is skipped and the
     channel falls back to ``addressed``-only, so bid fan-out stays small."""
 
     def test_under_cap_runs_the_bid(self):
@@ -277,7 +277,7 @@ class TestChannelSizeCap:
         assert skip_bid_for_channel_size(channel_size=999, max_members=0) is False
 
     def test_default_cap_constant_is_positive(self):
-        assert DEFAULT_TIER_B_MAX_CHANNEL_MEMBERS > 0
+        assert DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS > 0
 
 
 class TestLeasedAndFast:

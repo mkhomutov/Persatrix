@@ -1,7 +1,7 @@
 package channels
 
 // RFC 0030 Tier B (v0.3.8) PR 2b — the fanout→envelope half of the wire. The
-// grpc_dispatcher_tier_b_test.go sibling proves channelMessageToProto renders a
+// grpc_dispatcher_salience_test.go sibling proves channelMessageToProto renders a
 // hand-built envelope; this file closes the one remaining untested seam between
 // "cap resolved on the router" and "envelope stamped" — that fanout captures
 // the channel's member count and stamps the router-resolved cap onto every
@@ -48,7 +48,7 @@ func (d *envelopeRecorder) snapshot() []DispatchEnvelope {
 //     including the sender), not the filtered candidate-responder set — the
 //     contract the `channel_size` proto comment documents. A 3-member channel
 //     fans out to 2 recipients but each still sees ChannelSize == 3.
-//   - TierBMaxChannelMembers is whatever the router resolved for the channel
+//   - SalienceMaxChannelMembers is whatever the router resolved for the channel
 //     (here an explicit non-default cap), identical across recipients.
 func TestFanout_StampsChannelSizeAndCapOnEnvelope(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
@@ -64,8 +64,8 @@ func TestFanout_StampsChannelSizeAndCapOnEnvelope(t *testing.T) {
 		}, "alice", "bob", "carol")
 
 	// Resolve a non-default cap so the assertion proves the router value flows
-	// through, not just the DefaultTierBMaxChannelMembers fallback.
-	router.SetTierBMaxChannelMembers(id, 7)
+	// through, not just the DefaultSalienceMaxChannelMembers fallback.
+	router.SetSalienceMaxChannelMembers(id, 7)
 
 	require.NoError(t, router.Publish(ctx, ChannelMessage{
 		ID: uuid.NewString(), ChannelID: id, SenderID: "alice", Content: "hi",
@@ -78,13 +78,13 @@ func TestFanout_StampsChannelSizeAndCapOnEnvelope(t *testing.T) {
 		byID[c.Recipient.ParticipantID] = c
 		assert.Equal(t, 3, c.ChannelSize,
 			"channel_size is the total member count (sender included), identical across recipients")
-		assert.Equal(t, 7, c.TierBMaxChannelMembers,
+		assert.Equal(t, 7, c.SalienceMaxChannelMembers,
 			"the router-resolved cap rides every dispatch")
 	}
 	// And the per-recipient bid signals ride the recipient's membership row, so
 	// the gated participant and the legacy always recipient differ on the wire.
-	assert.True(t, byID["bob"].Recipient.TierBActive, "participant recipient is salience-gated")
-	assert.False(t, byID["carol"].Recipient.TierBActive, "legacy always recipient is not")
+	assert.True(t, byID["bob"].Recipient.SalienceGated, "participant recipient is salience-gated")
+	assert.False(t, byID["carol"].Recipient.SalienceGated, "legacy always recipient is not")
 }
 
 // TestFanout_StampsDefaultCapWhenUnresolved pins that a channel with no
@@ -97,7 +97,7 @@ func TestFanout_StampsDefaultCapWhenUnresolved(t *testing.T) {
 	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
 	ctx := context.Background()
 
-	// No SetTierBMaxChannelMembers / ResolveTierBCaps call for this channel.
+	// No SetSalienceMaxChannelMembers / ResolveSalienceCaps call for this channel.
 	id := mustCreateGroup(t, store, "planning", "alice", "bob")
 
 	require.NoError(t, router.Publish(ctx, ChannelMessage{
@@ -106,7 +106,7 @@ func TestFanout_StampsDefaultCapWhenUnresolved(t *testing.T) {
 
 	calls := disp.snapshot()
 	require.Len(t, calls, 1, "fanout to bob")
-	assert.Equal(t, DefaultTierBMaxChannelMembers, calls[0].TierBMaxChannelMembers,
+	assert.Equal(t, DefaultSalienceMaxChannelMembers, calls[0].SalienceMaxChannelMembers,
 		"an unresolved channel falls back to the default cap, never zero")
 	assert.Equal(t, 2, calls[0].ChannelSize)
 }

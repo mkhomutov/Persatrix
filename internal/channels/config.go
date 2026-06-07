@@ -42,15 +42,15 @@ type Config struct {
 // PR 2's serialized loop consumes it.
 const DefaultFloorTurnTimeoutSeconds = 45
 
-// DefaultTierBMaxChannelMembers is the channel-size cap (RFC 0030 amendment
+// DefaultSalienceMaxChannelMembers is the channel-size cap (RFC 0030 amendment
 // OQ #4 / TB6) applied when a declared channel omits
-// `tier_b_max_channel_members`. Above the cap the agent-side seam skips the
+// `salience_max_channel_members`. Above the cap the agent-side seam skips the
 // salience bid entirely and falls back to `addressed`-only, so a cheap bid × N
 // members stays bounded on a large channel. Kept in lock-step with the Python
-// `DEFAULT_TIER_B_MAX_CHANNEL_MEMBERS` (agents/tier_b_salience.py) — the value
+// `DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS` (agents/salience_bid.py) — the value
 // rides the wire, but a zero/absent field falls back to the Python default, so
 // the two must agree. Zero/absent normalizes to this value at load.
-const DefaultTierBMaxChannelMembers = 20
+const DefaultSalienceMaxChannelMembers = 20
 
 // DefaultChairThreshold is the low salience `threshold` applied to a `chair`
 // member when its config omits an explicit value (RFC 0030 Tier B, v0.3.8).
@@ -102,15 +102,15 @@ type ChannelConfig struct {
 	// (amendment D2). Zero/absent normalizes to
 	// [DefaultFloorTurnTimeoutSeconds] at load; negative is rejected.
 	FloorTurnTimeoutSeconds int `yaml:"floor_turn_timeout_seconds"`
-	// TierBMaxChannelMembers is the RFC 0030 Tier B (v0.3.8) channel-size cap
+	// SalienceMaxChannelMembers is the RFC 0030 Tier B (v0.3.8) channel-size cap
 	// (TB6 / amendment OQ #4): above this many candidate responders the
 	// agent-side seam skips the salience bid and falls back to `addressed`-
 	// only, keeping a cheap bid × N members bounded on a large channel.
-	// Zero/absent normalizes to [DefaultTierBMaxChannelMembers] at load;
+	// Zero/absent normalizes to [DefaultSalienceMaxChannelMembers] at load;
 	// negative is rejected. The resolved value rides the
-	// `ChannelMessageEvent.tier_b_max_channel_members` wire field; the router
+	// `ChannelMessageEvent.salience_max_channel_members` wire field; the router
 	// stamps it onto the dispatch envelope at fanout time.
-	TierBMaxChannelMembers int `yaml:"tier_b_max_channel_members"`
+	SalienceMaxChannelMembers int `yaml:"salience_max_channel_members"`
 }
 
 // MemberConfig is a `(participant_id, respond_policy)` pair declared in
@@ -127,19 +127,19 @@ type MemberConfig struct {
 	// at load (see [MemberConfig.UnmarshalYAML]).
 	//
 	// As of PR 2b the threshold round-trips end-to-end: [ReconcileConfig]
-	// carries it (and [TierBActive]) onto the store-side [Member], the
+	// carries it (and [SalienceGated]) onto the store-side [Member], the
 	// `memberships.threshold` column persists it, and the
 	// `ChannelMessageEvent.threshold` wire field delivers it to the agent-side
 	// bid. The PR-1 persistence/wire gap is closed.
 	Threshold *float64
-	// TierBActive marks this member as a salience-bid participant (RFC 0030
+	// SalienceGated marks this member as a salience-bid participant (RFC 0030
 	// Tier B, v0.3.8). Set at load from the *declared* disposition (before
 	// normalization collapses `participant`/`chair` to the legacy `always`
 	// wire value), so the bid-ness survives the normalization that would
 	// otherwise make a `participant` indistinguishable from a legacy `always`.
-	// Carried by [ReconcileConfig] onto the store-side [Member.TierBActive].
-	// See [ResolveTierBSignal] for the derivation rule.
-	TierBActive bool
+	// Carried by [ReconcileConfig] onto the store-side [Member.SalienceGated].
+	// See [ResolveSalienceSignal] for the derivation rule.
+	SalienceGated bool
 }
 
 // UnmarshalYAML accepts either a string shorthand or an explicit
@@ -177,9 +177,9 @@ func (m *MemberConfig) UnmarshalYAML(value *yaml.Node) error {
 			// Derive the Tier B signals from the *declared* disposition before
 			// it is normalized: `participant`/`chair` opt into the bid, a chair
 			// (or an `always` + explicit threshold) picks up the right bar.
-			// ResolveTierBSignal is the single choke point the store write
+			// ResolveSalienceSignal is the single choke point the store write
 			// paths share, so the mapping lives in one place (RFC 0030 Tier B).
-			m.TierBActive, m.Threshold = ResolveTierBSignal(disposition, raw.Threshold)
+			m.SalienceGated, m.Threshold = ResolveSalienceSignal(disposition, raw.Threshold)
 			m.RespondPolicy = disposition.Normalize()
 		}
 		return nil
@@ -223,8 +223,8 @@ func LoadConfig(path string) (*Config, error) {
 		// Same zero/absent → default sentinel for the RFC 0030 Tier B
 		// channel-size cap, so the dispatcher always has a populated value to
 		// stamp on the wire. Negative is left as-is for Validate to reject.
-		if cfg.Channels[i].TierBMaxChannelMembers == 0 {
-			cfg.Channels[i].TierBMaxChannelMembers = DefaultTierBMaxChannelMembers
+		if cfg.Channels[i].SalienceMaxChannelMembers == 0 {
+			cfg.Channels[i].SalienceMaxChannelMembers = DefaultSalienceMaxChannelMembers
 		}
 	}
 	if err := cfg.Validate(); err != nil {
@@ -291,9 +291,9 @@ func (c *Config) Validate() error {
 		// catches it at `make validate`; this is the belt-and-suspenders for
 		// operators who skipped that step). Zero never reaches here — LoadConfig
 		// normalizes it to the default before Validate runs.
-		if ch.TierBMaxChannelMembers < 0 {
+		if ch.SalienceMaxChannelMembers < 0 {
 			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 1)",
-				i, ch.Name, ErrInvalidTierBMaxChannelMembers, ch.TierBMaxChannelMembers)
+				i, ch.Name, ErrInvalidSalienceMaxChannelMembers, ch.SalienceMaxChannelMembers)
 		}
 
 		if len(ch.Members) == 0 {

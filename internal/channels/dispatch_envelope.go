@@ -6,13 +6,13 @@ package channels
 // once per-recipient inside [ChannelRouter.fanout]:
 //
 //   - `Recipient` carries the per-recipient `RespondPolicy` (and, since RFC
-//     0030 Tier B, `TierBActive`/`Threshold`) so the receiver-side response
+//     0030 Tier B, `SalienceGated`/`Threshold`) so the receiver-side response
 //     gate + salience bid can decide pre-LLM (RFC 0011 PR 4b / RFC 0030).
 //   - `ThreadParentSenderID` is pre-resolved once per publish in
 //     [ChannelRouter.Publish] so a thread-heavy channel pays one
 //     `GetMessage` lookup per publish, not one per recipient (RFC 0011
 //     PR plan §PR 4 — "amortizes the lookup across fanout").
-//   - `ChannelSize`/`TierBMaxChannelMembers` are per-publish values the
+//   - `ChannelSize`/`SalienceMaxChannelMembers` are per-publish values the
 //     router stamps once per fanout (identical across recipients).
 //
 // Adding fields here is an additive change to the dispatcher contract
@@ -40,9 +40,9 @@ type DispatchEnvelope struct {
 	// recipients), not per-recipient.
 	ChannelSize int
 
-	// TierBMaxChannelMembers (RFC 0030 Tier B) is the channel's resolved
-	// channel-size cap, carried on `ChannelMessageEvent.tier_b_max_channel_members`.
-	// The router resolves it from config at fanout ([ChannelRouter.tierBMaxFor]);
+	// SalienceMaxChannelMembers (RFC 0030 Tier B) is the channel's resolved
+	// channel-size cap, carried on `ChannelMessageEvent.salience_max_channel_members`.
+	// The router resolves it from config at fanout ([ChannelRouter.salienceMaxFor]);
 	// zero falls back to the agent-side default. Per-publish, like ChannelSize.
-	TierBMaxChannelMembers int
+	SalienceMaxChannelMembers int
 }

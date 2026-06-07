@@ -164,7 +164,7 @@ func canonicalRespondPolicy(p RespondPolicy) (RespondPolicy, error) {
 	return p, nil
 }
 
-// ResolveTierBSignal derives the persisted RFC 0030 Tier B per-member signals
+// ResolveSalienceSignal derives the persisted RFC 0030 Tier B per-member signals
 // from a member's *declared* disposition (before [RespondPolicy.Normalize]
 // collapses it to the legacy triple). It is the single derivation choke point
 // the disposition-aware write boundaries share — the config loader
@@ -173,7 +173,7 @@ func canonicalRespondPolicy(p RespondPolicy) (RespondPolicy, error) {
 // chair→low-threshold mappings live in one place rather than being re-derived
 // per call site.
 //
-//   - tierBActive is true for the open-floor participant dispositions
+//   - salienceGated is true for the open-floor participant dispositions
 //     (`participant`/`chair`): they run the salience bid. A legacy `always`
 //     keeps replying unconditionally (false), so the feature stays additive.
 //   - threshold defaults to `explicit` (the operator's value, possibly nil for
@@ -184,7 +184,7 @@ func canonicalRespondPolicy(p RespondPolicy) (RespondPolicy, error) {
 // `explicit` lets a caller that already parsed an operator-supplied threshold
 // (the config object form) thread it through; pass nil where no explicit value
 // is available (the REST paths, which today carry only the disposition).
-func ResolveTierBSignal(p RespondPolicy, explicit *float64) (tierBActive bool, threshold *float64) {
+func ResolveSalienceSignal(p RespondPolicy, explicit *float64) (salienceGated bool, threshold *float64) {
 	threshold = explicit
 	if p == RespondChair && threshold == nil {
 		d := DefaultChairThreshold
@@ -197,13 +197,13 @@ func ResolveTierBSignal(p RespondPolicy, explicit *float64) (tierBActive bool, t
 	// back-compat). `addressed`/`observer`/`when_mentioned`/`never` never reach
 	// the open-floor admit, so their bid-ness is moot (and a threshold on them
 	// is rejected at config load by [Config.Validate]).
-	tierBActive = p == RespondParticipant || p == RespondChair ||
+	salienceGated = p == RespondParticipant || p == RespondChair ||
 		(explicit != nil && p.Normalize() == RespondAlways)
-	return tierBActive, threshold
+	return salienceGated, threshold
 }
 
 // boolToInt maps a Go bool to the 0/1 SQLite stores in an INTEGER column
-// (SQLite has no native boolean). Used for `memberships.tier_b_active`.
+// (SQLite has no native boolean). Used for `memberships.salience_gated`.
 func boolToInt(b bool) int {
 	if b {
 		return 1
@@ -232,7 +232,7 @@ type Member struct {
 	RespondPolicy RespondPolicy
 	JoinedAt      time.Time
 
-	// TierBActive marks this member as an open-floor *participant* subject to
+	// SalienceGated marks this member as an open-floor *participant* subject to
 	// the RFC 0030 Tier B salience bid (v0.3.8). It is true iff the member was
 	// declared with the participant vocabulary (`participant`/`chair`) — the
 	// dispositions that opt into the bid — and false for a legacy `always`
@@ -241,8 +241,8 @@ type Member struct {
 	// [RespondPolicy.Normalize], this boolean is the *only* thing that
 	// survives to distinguish a salience-gated participant from a legacy
 	// always-replier past the store/wire boundary; it rides the
-	// `ChannelMessageEvent.tier_b_active` proto field to the agent-side seam.
-	TierBActive bool
+	// `ChannelMessageEvent.salience_gated` proto field to the agent-side seam.
+	SalienceGated bool
 	// Threshold is the member's per-disposition salience `threshold` for the
 	// Tier B bid (the score it must clear to reach the quality turn). A
 	// `*float64` tri-state mirroring [MemberConfig.Threshold]: nil → unset →
@@ -351,13 +351,13 @@ var (
 	// it is the loader's "use the default" sentinel normalized to
 	// [DefaultFloorTurnTimeoutSeconds] at load time.
 	ErrInvalidFloorTurnTimeout = errors.New("channels: invalid floor_turn_timeout_seconds")
-	// ErrInvalidTierBMaxChannelMembers — a declared channel carried a negative
-	// `tier_b_max_channel_members:` (RFC 0030 Tier B, v0.3.8). Belt-and-
+	// ErrInvalidSalienceMaxChannelMembers — a declared channel carried a negative
+	// `salience_max_channel_members:` (RFC 0030 Tier B, v0.3.8). Belt-and-
 	// suspenders for the operator who skipped `make validate` (the JSON
 	// schema's `minimum: 1` rejects this earlier). Zero is NOT an error — it
 	// is the loader's "use the default" sentinel normalized to
-	// [DefaultTierBMaxChannelMembers] at load time.
-	ErrInvalidTierBMaxChannelMembers = errors.New("channels: invalid tier_b_max_channel_members")
+	// [DefaultSalienceMaxChannelMembers] at load time.
+	ErrInvalidSalienceMaxChannelMembers = errors.New("channels: invalid salience_max_channel_members")
 )
 
 // participantIDPattern is the single source of truth for legal participant

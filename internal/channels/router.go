@@ -151,12 +151,12 @@ type ChannelRouter struct {
 	floorSettings map[string]channelFloorSettings
 	floorSpeakers map[string]map[string]struct{}
 
-	// tierBMu guards tierBMaxMembers — the resolved RFC 0030 Tier B (v0.3.8)
+	// salienceMu guards salienceMaxMembers — the resolved RFC 0030 Tier B (v0.3.8)
 	// per-channel salience-bid channel-size cap, keyed by channel id. Populated
-	// via [ChannelRouter.SetTierBMaxChannelMembers]; methods live in
-	// router_tier_b.go. An absent channel resolves to [DefaultTierBMaxChannelMembers].
-	tierBMu         sync.Mutex
-	tierBMaxMembers map[string]int
+	// via [ChannelRouter.SetSalienceMaxChannelMembers]; methods live in
+	// router_salience.go. An absent channel resolves to [DefaultSalienceMaxChannelMembers].
+	salienceMu         sync.Mutex
+	salienceMaxMembers map[string]int
 
 	// maxCascadeDepth — see cascade_depth.go; defaultSessionID — see router_session.go (RFC 0031 Phase 1).
 	maxCascadeDepth  int
@@ -175,16 +175,16 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		dispatcher = NoopDispatcher{}
 	}
 	return &ChannelRouter{
-		store:           store,
-		dispatcher:      dispatcher,
-		logger:          logger,
-		metrics:         metrics,
-		waiter:          newReplyWaiter(),
-		floors:          newFloorRegistry(),
-		floorSettings:   make(map[string]channelFloorSettings),
-		floorSpeakers:   make(map[string]map[string]struct{}),
-		tierBMaxMembers: make(map[string]int),
-		maxCascadeDepth: defaults.DefaultMaxCascadeDepth,
+		store:              store,
+		dispatcher:         dispatcher,
+		logger:             logger,
+		metrics:            metrics,
+		waiter:             newReplyWaiter(),
+		floors:             newFloorRegistry(),
+		floorSettings:      make(map[string]channelFloorSettings),
+		floorSpeakers:      make(map[string]map[string]struct{}),
+		salienceMaxMembers: make(map[string]int),
+		maxCascadeDepth:    defaults.DefaultMaxCascadeDepth,
 	}
 }
 

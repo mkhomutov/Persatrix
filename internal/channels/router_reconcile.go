@@ -74,8 +74,8 @@ func (r *ChannelRouter) ReconcileConfig(ctx context.Context, cfg *Config) error 
 					// re-derive bid-ness from it — these explicit fields are the
 					// only thing that distinguishes a `participant` from a legacy
 					// `always` past this boundary.
-					TierBActive: m.TierBActive,
-					Threshold:   m.Threshold,
+					SalienceGated: m.SalienceGated,
+					Threshold:     m.Threshold,
 				})
 			}
 			if err := r.store.CreateChannelWithMembers(ctx, Channel{

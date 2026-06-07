@@ -1,6 +1,6 @@
 """RFC 0030 Tier B (v0.3.8) — the action-loop seam for the salience bid.
 
-The pure bid lives in :mod:`agents.tier_b_salience`. This module is the
+The pure bid lives in :mod:`agents.salience_bid`. This module is the
 *runtime orchestration* around it: it reads the bid inputs off the inbound
 ``CHANNEL_MESSAGE`` payload, enforces the TB6 channel-size cap, runs the bid,
 emits the suppression metrics, and ingests a suppressed message into memory.
@@ -11,16 +11,16 @@ ingest sanitizer into ``channel_ingest.py`` and the LLM-error dispatch into
 
 The seam is invoked **only** on the open-floor admit
 (:func:`agents.response_gate.is_open_floor_admit`) — the action loop checks
-that before calling :func:`run_tier_b_gate`, so a directed ``@``-mention, a
+that before calling :func:`run_salience_gate`, so a directed ``@``-mention, a
 DM, an ``observer``, and the self-sender never reach the bid (TB1). Of that
 remainder, the bid runs only when the inbound event is **Tier-B-governed**
-(the channel-level ``tier_b_active`` flag).
+(the channel-level ``salience_gated`` flag).
 
-**Activation note (PR 2a):** the bid inputs (``tier_b_active``, per-member
+**Activation note (PR 2a):** the bid inputs (``salience_gated``, per-member
 ``threshold``, ``channel_size``) are carried across the store/wire boundary
 in **PR 2b** (the ``memberships.threshold`` SQLite migration + the
-``ChannelMessageEvent`` proto fields). Until then ``tier_b_active`` is never
-set, so :func:`run_tier_b_gate` short-circuits to "not applicable" and the
+``ChannelMessageEvent`` proto fields). Until then ``salience_gated`` is never
+set, so :func:`run_salience_gate` short-circuits to "not applicable" and the
 v0.3.7 response behaviour is unchanged — PR 2a is additive, mirroring the
 inertness of Tier B PR 1.
 """
@@ -31,11 +31,11 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..observability._metrics_tier_b import tier_b_gated_attrs, tier_b_skip_attrs
+from ..observability._metrics_salience import salience_gated_attrs, salience_skip_attrs
 from ..observability.metrics import try_get_instruments
 from ..response_gate import is_open_floor_admit
-from ..tier_b_salience import (
-    DEFAULT_TIER_B_MAX_CHANNEL_MEMBERS,
+from ..salience_bid import (
+    DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS,
     evaluate_salience,
     skip_bid_for_channel_size,
 )
@@ -47,18 +47,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["TierBOutcome", "run_tier_b_gate"]
+__all__ = ["SalienceOutcome", "run_salience_gate"]
 
 # Bid inputs carried on the inbound ``CHANNEL_MESSAGE`` payload alongside
 # ``respond_policy`` / ``mentions``. Populated by the Go dispatcher in PR 2b.
-_TIER_B_ACTIVE_KEY: str = "tier_b_active"
+_SALIENCE_GATED_KEY: str = "salience_gated"
 _TIER_B_THRESHOLD_KEY: str = "threshold"
 _TIER_B_CHANNEL_SIZE_KEY: str = "channel_size"
-_TIER_B_MAX_MEMBERS_KEY: str = "tier_b_max_channel_members"
+_SALIENCE_MAX_MEMBERS_KEY: str = "salience_max_channel_members"
 
 
 @dataclass(frozen=True, slots=True)
-class TierBOutcome:
+class SalienceOutcome:
     """What the action loop should do after the Tier B seam.
 
     Attributes:
@@ -79,7 +79,7 @@ class TierBOutcome:
 
 
 def _governed(event: AgentEvent) -> bool:
-    return bool((event.payload or {}).get(_TIER_B_ACTIVE_KEY))
+    return bool((event.payload or {}).get(_SALIENCE_GATED_KEY))
 
 
 def _threshold(event: AgentEvent) -> float | None:
@@ -114,21 +114,21 @@ def _channel_size(event: AgentEvent) -> int | None:
 
 
 def _max_members(event: AgentEvent) -> int:
-    raw = (event.payload or {}).get(_TIER_B_MAX_MEMBERS_KEY)
+    raw = (event.payload or {}).get(_SALIENCE_MAX_MEMBERS_KEY)
     if isinstance(raw, bool) or not isinstance(raw, int):
-        return DEFAULT_TIER_B_MAX_CHANNEL_MEMBERS
+        return DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS
     return raw
 
 
-async def run_tier_b_gate(
+async def run_salience_gate(
     agent: Any, event: AgentEvent, decision: GateDecision,
-) -> TierBOutcome | None:
+) -> SalienceOutcome | None:
     """Run the Tier B salience bid for one admitted event, if applicable.
 
     Returns:
         ``None`` when the bid does not apply (not an open-floor admit, or the
         channel is not Tier-B-governed) — the caller proceeds with the normal
-        turn. A :class:`TierBOutcome` otherwise: ``silence=True`` to suppress,
+        turn. A :class:`SalienceOutcome` otherwise: ``silence=True`` to suppress,
         or ``silence=False`` with the reusable ``user_message`` + ``seed``.
 
     ``agent`` is the :class:`_LLMPersonaAgent` (passed rather than bound as a
@@ -151,11 +151,11 @@ async def run_tier_b_gate(
     ):
         inst = try_get_instruments()
         if inst is not None:
-            inst.channel_messages_tier_b_skipped.add(
-                1, attributes=tier_b_skip_attrs(reason="channel_too_large"),
+            inst.channel_messages_salience_skipped.add(
+                1, attributes=salience_skip_attrs(reason="channel_too_large"),
             )
         await agent._store_event_episode(event, [])
-        return TierBOutcome(silence=True)
+        return SalienceOutcome(silence=True)
 
     # Formatted once here and handed back on the speak path so the action
     # loop does not re-format / re-fetch.
@@ -212,7 +212,7 @@ async def run_tier_b_gate(
             # the no-pile-on feature working.
             inst.channel_messages_gated.add(
                 1,
-                attributes=tier_b_gated_attrs(
+                attributes=salience_gated_attrs(
                     channel_id=event.channel_id or "",
                     reason=salience.reason,
                 ),
@@ -222,6 +222,6 @@ async def run_tier_b_gate(
             agent.agent_id, salience.reason, salience.score,
         )
         await agent._store_event_episode(event, [])
-        return TierBOutcome(silence=True)
+        return SalienceOutcome(silence=True)
 
-    return TierBOutcome(silence=False, user_message=user_message, seed=seed)
+    return SalienceOutcome(silence=False, user_message=user_message, seed=seed)

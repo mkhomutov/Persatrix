@@ -3,9 +3,9 @@ salience-bid proto fields into ``event.payload``.
 
 PR 2b flips the PR-2a-dormant seam live: the Go dispatcher now populates the
 Tier B ``ChannelMessageEvent`` fields, and this servicer must unpack them under
-the exact keys ``agents.persona_runtime.tier_b_gate`` reads
-(``tier_b_active`` / ``threshold`` / ``channel_size`` /
-``tier_b_max_channel_members``). Split out of
+the exact keys ``agents.persona_runtime.salience_gate`` reads
+(``salience_gated`` / ``threshold`` / ``channel_size`` /
+``salience_max_channel_members``). Split out of
 ``test_receive_channel_message.py`` so that file stays under the 500-line cap.
 """
 
@@ -62,23 +62,23 @@ def _enqueued_event(dispatcher: MagicMock) -> AgentEvent:
     return dispatcher.enqueue_inbound.call_args.args[1]
 
 
-class TestReceiveChannelMessageTierB:
-    async def test_unpacks_tier_b_fields_into_payload(self):
+class TestReceiveChannelMessageSalience:
+    async def test_unpacks_salience_fields_into_payload(self):
         servicer, dispatcher = _make_servicer()
         await servicer.ReceiveChannelMessage(
             _channel_event(
-                tier_b_active=True,
+                salience_gated=True,
                 threshold=0.3,
                 channel_size=4,
-                tier_b_max_channel_members=20,
+                salience_max_channel_members=20,
             ),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
         event = _enqueued_event(dispatcher)
-        assert event.payload["tier_b_active"] is True
+        assert event.payload["salience_gated"] is True
         assert event.payload["threshold"] == 0.3
         assert event.payload["channel_size"] == 4
-        assert event.payload["tier_b_max_channel_members"] == 20
+        assert event.payload["salience_max_channel_members"] == 20
 
     async def test_unset_threshold_unpacks_to_none(self):
         """The `optional double threshold` tri-state survives the unpack: an
@@ -86,9 +86,9 @@ class TestReceiveChannelMessageTierB:
         demands a decisive score), NOT proto3's 0.0 default (which the bid
         reads as a real "speak on any score" floor)."""
         servicer, dispatcher = _make_servicer()
-        # tier_b_active set, threshold omitted (a plain `participant`).
+        # salience_gated set, threshold omitted (a plain `participant`).
         await servicer.ReceiveChannelMessage(
-            _channel_event(tier_b_active=True, channel_size=4),
+            _channel_event(salience_gated=True, channel_size=4),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
         event = _enqueued_event(dispatcher)
@@ -100,19 +100,19 @@ class TestReceiveChannelMessageTierB:
         """An explicit 0.0 is distinct from unset and must survive as 0.0."""
         servicer, dispatcher = _make_servicer()
         await servicer.ReceiveChannelMessage(
-            _channel_event(tier_b_active=True, threshold=0.0, channel_size=4),
+            _channel_event(salience_gated=True, threshold=0.0, channel_size=4),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
         event = _enqueued_event(dispatcher)
         assert event.payload["threshold"] == 0.0
 
     async def test_legacy_event_defaults_keep_seam_dormant(self):
-        """A pre-v0.3.8 publisher omits every Tier B field: tier_b_active
+        """A pre-v0.3.8 publisher omits every Tier B field: salience_gated
         defaults False, so the seam stays "not applicable" — back-compat."""
         servicer, dispatcher = _make_servicer()
         await servicer.ReceiveChannelMessage(
             _channel_event(), MagicMock(spec=grpc.aio.ServicerContext)
         )
         event = _enqueued_event(dispatcher)
-        assert event.payload["tier_b_active"] is False
+        assert event.payload["salience_gated"] is False
         assert event.payload["threshold"] is None
