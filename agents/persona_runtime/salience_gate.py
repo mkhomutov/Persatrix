@@ -52,8 +52,8 @@ __all__ = ["SalienceOutcome", "run_salience_gate"]
 # Bid inputs carried on the inbound ``CHANNEL_MESSAGE`` payload alongside
 # ``respond_policy`` / ``mentions``. Populated by the Go dispatcher in PR 2b.
 _SALIENCE_GATED_KEY: str = "salience_gated"
-_TIER_B_THRESHOLD_KEY: str = "threshold"
-_TIER_B_CHANNEL_SIZE_KEY: str = "channel_size"
+_SALIENCE_THRESHOLD_KEY: str = "threshold"
+_SALIENCE_CHANNEL_SIZE_KEY: str = "channel_size"
 _SALIENCE_MAX_MEMBERS_KEY: str = "salience_max_channel_members"
 
 
@@ -97,7 +97,7 @@ def _threshold(event: AgentEvent) -> float | None:
     ``0.0`` is opting a member out of the no-pile-on dampening (e.g. a
     facilitator), whereas an *absent* threshold must stay conservative — but
     it is a sharp edge: ``0.0`` and "field omitted" are worlds apart."""
-    raw = (event.payload or {}).get(_TIER_B_THRESHOLD_KEY)
+    raw = (event.payload or {}).get(_SALIENCE_THRESHOLD_KEY)
     if isinstance(raw, bool):  # bool is an int subclass — never a threshold
         return None
     if isinstance(raw, (int, float)):
@@ -107,7 +107,7 @@ def _threshold(event: AgentEvent) -> float | None:
 
 
 def _channel_size(event: AgentEvent) -> int | None:
-    raw = (event.payload or {}).get(_TIER_B_CHANNEL_SIZE_KEY)
+    raw = (event.payload or {}).get(_SALIENCE_CHANNEL_SIZE_KEY)
     if isinstance(raw, bool) or not isinstance(raw, int):
         return None
     return raw
