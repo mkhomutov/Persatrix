@@ -31,7 +31,7 @@ from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
 from .channel_reply import synthesize_channel_reply
 from .llm_call_errors import handle_llm_call_exception
-from .tier_b_gate import run_tier_b_gate
+from .salience_gate import run_salience_gate
 from .wallet_cause import lease_attribution_for_event
 
 if TYPE_CHECKING:
@@ -281,14 +281,14 @@ class _ActionLoopMixin:
         # RFC 0030 Tier B (v0.3.8): the leased ``fast``-model salience-bid
         # (no-pile-on) seam. Runs only on the open-floor admit of a
         # Tier-B-governed channel — dormant in PR 2a until the bid inputs
-        # arrive on the wire in PR 2b (see tier_b_gate.py). A "stay silent"
+        # arrive on the wire in PR 2b (see salience_gate.py). A "stay silent"
         # verdict suppresses before any recall / quality LLM call.
-        tier_b = await run_tier_b_gate(self, event, decision)
-        if tier_b is not None and tier_b.silence:
+        salience = await run_salience_gate(self, event, decision)
+        if salience is not None and salience.silence:
             return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
         # Reuse the artifacts the seam already built on the speak path.
-        seam_msg = tier_b.user_message if tier_b is not None else None
-        seam_seed = tier_b.seed if tier_b is not None else None
+        seam_msg = salience.user_message if salience is not None else None
+        seam_seed = salience.seed if salience is not None else None
 
         # 0. Format event once and inject memory context.
         # _format_event() is pure; computing it here avoids a redundant call

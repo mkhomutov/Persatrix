@@ -191,8 +191,8 @@
 │   │   ├── _metrics_facts.py
 │   │   ├── _metrics_interactions.py
 │   │   ├── _metrics_persona_tick.py
+│   │   ├── _metrics_salience.py
 │   │   ├── _metrics_temporal.py
-│   │   ├── _metrics_tier_b.py
 │   │   ├── _metrics_wakes.py
 │   │   ├── grpc_logging.py
 │   │   ├── log_shipper.py
@@ -230,10 +230,10 @@
 │   │   ├── prompt_assembly.py
 │   │   ├── record_close.py
 │   │   ├── relationship_section.py
+│   │   ├── salience_gate.py
 │   │   ├── session_id.py
 │   │   ├── state_persistence.py
 │   │   ├── summarize_close.py
-│   │   ├── tier_b_gate.py
 │   │   └── wallet_cause.py
 │   ├── persona_types.py
 │   ├── principal_id.py
@@ -241,6 +241,7 @@
 │   ├── pyproject.toml
 │   ├── request_scope.py
 │   ├── response_gate.py
+│   ├── salience_bid.py
 │   ├── security.py
 │   ├── security_enums.py
 │   ├── security_patterns.py
@@ -310,7 +311,6 @@
 │   │   ├── test_wallet_client_cleanup.py
 │   │   └── test_wallet_client_defensive.py
 │   ├── tick.py
-│   ├── tier_b_salience.py
 │   ├── tools/
 │   │   ├── __init__.py
 │   │   ├── builtin.py
@@ -752,15 +752,15 @@
 │   │   ├── cascade_depth.go
 │   │   ├── channels.go
 │   │   ├── config.go
+│   │   ├── config_salience_test.go
 │   │   ├── config_test.go
 │   │   ├── config_threshold_test.go
-│   │   ├── config_tier_b_test.go
 │   │   ├── dispatch_envelope.go
 │   │   ├── epoch_override.go
 │   │   ├── fanout.go
 │   │   ├── fanout_floor_test.go
+│   │   ├── fanout_salience_test.go
 │   │   ├── fanout_test.go
-│   │   ├── fanout_tier_b_test.go
 │   │   ├── floor_control.go
 │   │   ├── floor_control_test.go
 │   │   ├── grpc_dispatcher.go
@@ -768,9 +768,9 @@
 │   │   ├── grpc_dispatcher_epoch_test.go
 │   │   ├── grpc_dispatcher_otel_test.go
 │   │   ├── grpc_dispatcher_participant_type_test.go
+│   │   ├── grpc_dispatcher_salience_test.go
 │   │   ├── grpc_dispatcher_session_test.go
 │   │   ├── grpc_dispatcher_test.go
-│   │   ├── grpc_dispatcher_tier_b_test.go
 │   │   ├── participant_type.go
 │   │   ├── participant_type_test.go
 │   │   ├── proto_roundtrip_test.go
@@ -780,9 +780,9 @@
 │   │   ├── router_metrics_test.go
 │   │   ├── router_pr4b_test.go
 │   │   ├── router_reconcile.go
+│   │   ├── router_salience.go
 │   │   ├── router_session.go
 │   │   ├── router_test.go
-│   │   ├── router_tier_b.go
 │   │   ├── session_binding.go
 │   │   ├── session_binding_test.go
 │   │   ├── session_override.go
@@ -804,6 +804,7 @@
 │   │   ├── sqlite_pr8_test.go
 │   │   ├── sqlite_query.go
 │   │   ├── sqlite_remove_member_test.go
+│   │   ├── sqlite_salience_migration_test.go
 │   │   ├── sqlite_schema.go
 │   │   ├── sqlite_schema_user_version_test.go
 │   │   ├── sqlite_session_bindings_migration_test.go
@@ -811,7 +812,6 @@
 │   │   ├── sqlite_session_test.go
 │   │   ├── sqlite_set_member_policy_test.go
 │   │   ├── sqlite_test.go
-│   │   ├── sqlite_tier_b_migration_test.go
 │   │   ├── store.go
 │   │   ├── testhelpers_test.go
 │   │   ├── waiter.go
@@ -1199,6 +1199,7 @@
 │   │   ├── test_persona_e2e_grpc_events.py
 │   │   ├── test_persona_e2e_scheduling_memory.py
 │   │   ├── test_persona_grounding_model_output.py
+│   │   ├── test_salience_action_loop.py
 │   │   ├── test_session_continuity.py
 │   │   ├── test_session_emission_isolation.py
 │   │   ├── test_session_id_cross_process.py
@@ -1213,7 +1214,6 @@
 │   │   ├── test_temporal_metrics.py
 │   │   ├── test_temporal_prompt_shape.py
 │   │   ├── test_tick_budget_denied_idle.py
-│   │   ├── test_tier_b_action_loop.py
 │   │   ├── test_trace_propagation.py
 │   │   ├── test_wallet_lease_workflow.py
 │   │   └── test_workflow.py
@@ -1258,7 +1258,7 @@
 │           ├── test_conversation_window_followups.py
 │           ├── test_conversation_window_group_channels.py
 │           ├── test_cross_language_max_cascade_depth_drift.py
-│           ├── test_cross_language_tier_b_max_channel_members_drift.py
+│           ├── test_cross_language_salience_max_channel_members_drift.py
 │           ├── test_current_agent_id.py
 │           ├── test_defaults.py
 │           ├── test_delegation_contract.py
@@ -1375,7 +1375,7 @@
 │           ├── test_pyproject_packages.py
 │           ├── test_receive_channel_message.py
 │           ├── test_receive_channel_message_review.py
-│           ├── test_receive_channel_message_tier_b.py
+│           ├── test_receive_channel_message_salience.py
 │           ├── test_registration.py
 │           ├── test_relationship_identity.py
 │           ├── test_relationship_last_interaction_session_scope.py
@@ -1392,6 +1392,7 @@
 │           ├── test_response_gate_disposition.py
 │           ├── test_response_gate_relevance.py
 │           ├── test_rfc0029_callsite_refactor.py
+│           ├── test_salience_bid.py
 │           ├── test_sandbox.py
 │           ├── test_scope_for_channel_event.py
 │           ├── test_scope_recall.py
@@ -1436,7 +1437,6 @@
 │           ├── test_tick_cascade_depth_default.py
 │           ├── test_tick_inbound_cascade_depth.py
 │           ├── test_tick_scheduler.py
-│           ├── test_tier_b_salience.py
 │           ├── test_tools.py
 │           ├── test_v02_channel_surface_removed.py
 │           ├── test_validate_agent_schema.py

@@ -435,36 +435,36 @@ func (r *ChannelRouter) ResolveFloorControl(ctx context.Context, cfg *Config) er
 	return nil
 }
 
-// ResolveTierBCaps applies the RFC 0030 Tier B (v0.3.8) channel-size cap to
+// ResolveSalienceCaps applies the RFC 0030 Tier B (v0.3.8) channel-size cap to
 // every group channel known at startup, the per-channel sibling of
 // [ChannelRouter.ResolveFloorControl]. Each config-declared channel uses its
-// resolved `tier_b_max_channel_members` (already normalized to
-// [DefaultTierBMaxChannelMembers] at load when omitted); every other group
+// resolved `salience_max_channel_members` (already normalized to
+// [DefaultSalienceMaxChannelMembers] at load when omitted); every other group
 // channel present in the store — e.g. a runtime-created channel that survived
 // a restart — picks up the default. The resolved cap is what the dispatcher
-// stamps on the `ChannelMessageEvent.tier_b_max_channel_members` wire field.
+// stamps on the `ChannelMessageEvent.salience_max_channel_members` wire field.
 //
 // DM and thread channels are skipped: the salience bid runs only on open-floor
 // group traffic. Call once after [ChannelRouter.ReconcileConfig]; idempotent.
-func (r *ChannelRouter) ResolveTierBCaps(ctx context.Context, cfg *Config) error {
+func (r *ChannelRouter) ResolveSalienceCaps(ctx context.Context, cfg *Config) error {
 	configured := make(map[string]bool)
 	if cfg != nil {
 		for _, decl := range cfg.Channels {
 			id := decl.CanonicalID()
 			configured[id] = true
-			r.SetTierBMaxChannelMembers(id, decl.TierBMaxChannelMembers)
+			r.SetSalienceMaxChannelMembers(id, decl.SalienceMaxChannelMembers)
 		}
 	}
 	all, err := r.store.ListChannels(ctx, 0, "")
 	if err != nil {
-		return fmt.Errorf("channels: resolve tier b caps: list channels: %w", err)
+		return fmt.Errorf("channels: resolve salience caps: list channels: %w", err)
 	}
 	for _, ch := range all {
 		if ch.Type != ChannelTypeGroup || configured[ch.ID] {
 			continue
 		}
-		// SetTierBMaxChannelMembers normalizes the zero to the default.
-		r.SetTierBMaxChannelMembers(ch.ID, 0)
+		// SetSalienceMaxChannelMembers normalizes the zero to the default.
+		r.SetSalienceMaxChannelMembers(ch.ID, 0)
 	}
 	return nil
 }

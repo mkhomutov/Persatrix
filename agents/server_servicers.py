@@ -422,11 +422,11 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
                 "respond_policy": request.respond_policy,
                 "thread_parent_sender_id": request.thread_parent_sender_id,
                 # RFC 0030 Tier B (v0.3.8): salience-bid inputs the seam reads
-                # (tier_b_gate.py); `threshold` None-when-absent ≠ explicit 0.0.
-                "tier_b_active": request.tier_b_active,
+                # (salience_gate.py); `threshold` None-when-absent ≠ explicit 0.0.
+                "salience_gated": request.salience_gated,
                 "threshold": request.threshold if request.HasField("threshold") else None,
                 "channel_size": request.channel_size,
-                "tier_b_max_channel_members": request.tier_b_max_channel_members,
+                "salience_max_channel_members": request.salience_max_channel_members,
             },
             channel_id=request.channel_id,
             sender_id=request.sender_id,

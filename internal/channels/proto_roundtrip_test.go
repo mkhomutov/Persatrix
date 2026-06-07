@@ -53,10 +53,10 @@ func TestChannelMessageEvent_RoundTripsAllFields(t *testing.T) {
 		CascadeDepth:          3,
 		SenderParticipantType: "user",
 		// RFC 0030 Tier B (v0.3.8) — the per-recipient salience-bid inputs.
-		TierBActive:            true,
-		Threshold:              proto.Float64(0.42),
-		ChannelSize:            4,
-		TierBMaxChannelMembers: 20,
+		SalienceGated:             true,
+		Threshold:                 proto.Float64(0.42),
+		ChannelSize:               4,
+		SalienceMaxChannelMembers: 20,
 	}
 
 	blob, err := proto.Marshal(original)
@@ -86,11 +86,11 @@ func TestChannelMessageEvent_RoundTripsAllFields(t *testing.T) {
 	assert.Equal(t, "dave", decoded.ThreadParentSenderId)
 	assert.Equal(t, int32(3), decoded.CascadeDepth)
 	assert.Equal(t, "user", decoded.SenderParticipantType)
-	assert.True(t, decoded.TierBActive)
+	assert.True(t, decoded.SalienceGated)
 	require.NotNil(t, decoded.Threshold)
 	assert.Equal(t, 0.42, decoded.GetThreshold())
 	assert.Equal(t, int32(4), decoded.ChannelSize)
-	assert.Equal(t, int32(20), decoded.TierBMaxChannelMembers)
+	assert.Equal(t, int32(20), decoded.SalienceMaxChannelMembers)
 }
 
 // TestChannelMessageEvent_ThresholdPresenceRoundTrips pins the proto3 explicit-

@@ -122,11 +122,11 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		// RFC 0030 Tier B (v0.3.8): derive the per-member salience-bid signals
 		// from the declared disposition (the REST shape carries no explicit
 		// threshold) before the store normalizes it.
-		tierBActive, threshold := channels.ResolveTierBSignal(policy, nil)
+		salienceGated, threshold := channels.ResolveSalienceSignal(policy, nil)
 		members = append(members, channels.Member{
 			ParticipantID: m.ID,
 			RespondPolicy: policy,
-			TierBActive:   tierBActive,
+			SalienceGated: salienceGated,
 			Threshold:     threshold,
 		})
 	}
@@ -141,10 +141,10 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 	// the store persists no flag, so startup ResolveFloorControl re-forces
 	// runtime channels ON on restart. RFC 0030 Tier B (v0.3.8) gives the
 	// salience-bid channel-size cap the same treatment — no REST field, so
-	// SetTierBMaxChannelMembers(_, 0) applies the default. Nil router → no-op.
+	// SetSalienceMaxChannelMembers(_, 0) applies the default. Nil router → no-op.
 	if s.channelRouter != nil {
 		s.channelRouter.SetFloorControl(canonicalID, true, 0)
-		s.channelRouter.SetTierBMaxChannelMembers(canonicalID, 0)
+		s.channelRouter.SetSalienceMaxChannelMembers(canonicalID, 0)
 	}
 
 	created, err := s.channelStore.GetChannel(r.Context(), canonicalID)

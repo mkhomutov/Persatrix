@@ -54,7 +54,7 @@ import (
 //	    producer lights up with the gRPC rail (PR 4).
 //	v7 — RFC 0030 Tier B PR 2b (v0.3.8): adds the per-member salience-bid
 //	    signals to `memberships` — a nullable `threshold REAL` (unset → NULL →
-//	    bias-to-silence) and `tier_b_active INTEGER NOT NULL DEFAULT 0` (1 iff
+//	    bias-to-silence) and `salience_gated INTEGER NOT NULL DEFAULT 0` (1 iff
 //	    the member was declared with the open-floor `participant`/`chair`
 //	    vocabulary). The two carry, via the `ChannelMessageEvent` wire, the
 //	    inputs the agent-side relevance bid reads. A pure addition: every

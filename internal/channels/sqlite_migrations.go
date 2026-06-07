@@ -57,7 +57,7 @@ func applyMigration(db *sql.DB, target int) error {
 //     default). A non-NULL default would be wrong here: there is no neutral
 //     numeric threshold, and 0.0 vs unset are deliberately distinct (see
 //     [MemberConfig.Threshold]).
-//   - `tier_b_active INTEGER NOT NULL DEFAULT 0` backfills every pre-v7 row to
+//   - `salience_gated INTEGER NOT NULL DEFAULT 0` backfills every pre-v7 row to
 //     0 — a legacy `always` member that keeps replying unconditionally — so a
 //     v0.3.7 database behaves byte-identically. Only members reconciled from
 //     the participant/chair vocabulary (or REST-added with it) write 1.
@@ -76,7 +76,7 @@ func migrateV6ToV7(db *sql.DB) error {
 
 	stmts := []string{
 		`ALTER TABLE memberships ADD COLUMN threshold REAL`,
-		`ALTER TABLE memberships ADD COLUMN tier_b_active INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE memberships ADD COLUMN salience_gated INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, q := range stmts {
 		if _, err := tx.Exec(q); err != nil {

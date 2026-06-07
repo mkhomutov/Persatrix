@@ -211,7 +211,7 @@ def is_open_floor_admit(decision: GateDecision) -> bool:
     """Return ``True`` iff ``decision`` is the *open-floor* admit — the one
     branch RFC 0030 Tier B refines.
 
-    Tier B (the leased salience bid, :mod:`agents.tier_b_salience`) runs
+    Tier B (the leased salience bid, :mod:`agents.salience_bid`) runs
     **only** on the ambiguous open-floor remainder Tier A leaves: a
     ``participant`` (``always``) member admitted to an *un-addressed* message
     (empty ``mentions``) with ``reason="policy_always"``. Every *directed*

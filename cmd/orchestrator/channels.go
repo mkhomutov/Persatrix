@@ -174,12 +174,12 @@ func initChannels(
 
 	// RFC 0030 Tier B (v0.3.8): resolve the per-channel salience-bid
 	// channel-size cap the same way — config channels use their declared (or
-	// default) `tier_b_max_channel_members`, store-resident channels pick up
+	// default) `salience_max_channel_members`, store-resident channels pick up
 	// the default. Same non-fatal posture as floor control: an enumeration
 	// failure leaves the config channels resolved, and any un-resolved channel
-	// falls back to the default cap on the wire ([ChannelRouter.tierBMaxFor]).
-	if tErr := router.ResolveTierBCaps(context.Background(), chanCfg); tErr != nil {
-		logger.Warn("channels: tier-b cap resolution incomplete; config channels resolved, store-resident channels fall back to the default cap until next create/restart",
+	// falls back to the default cap on the wire ([ChannelRouter.salienceMaxFor]).
+	if tErr := router.ResolveSalienceCaps(context.Background(), chanCfg); tErr != nil {
+		logger.Warn("channels: salience cap resolution incomplete; config channels resolved, store-resident channels fall back to the default cap until next create/restart",
 			zap.Error(tErr))
 	}
 

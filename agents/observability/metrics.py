@@ -124,7 +124,7 @@ class _Instruments:
     # RFC 0021 Phase 1 — registered by :mod:`._metrics_temporal`.
     temporal_now_anchor_emitted: Counter
     temporal_recency_rendered: Counter
-    channel_messages_tier_b_skipped: Counter  # RFC 0030 Tier B — _metrics_tier_b
+    channel_messages_salience_skipped: Counter  # RFC 0030 Tier B — _metrics_salience
 
     def __init__(self, meter: Meter) -> None:
         # ─── Counters ────────────────────────────────────────────────
@@ -201,10 +201,10 @@ class _Instruments:
         from . import _metrics_facts as _mf
         from . import _metrics_interactions as _mi
         from . import _metrics_persona_tick as _mp
+        from . import _metrics_salience as _msal
         from . import _metrics_temporal as _mt
-        from . import _metrics_tier_b as _mtb
         from . import _metrics_wakes as _mw
-        for mod in (_mi, _mf, _mp, _mw, _mt, _mtb):
+        for mod in (_mi, _mf, _mp, _mw, _mt, _msal):
             mod.register(self, meter)
 
         # ─── Shared memory pools (RFC 0008 PR plan PR 4) ─────────────

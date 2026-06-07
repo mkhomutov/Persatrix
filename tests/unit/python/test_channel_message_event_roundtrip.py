@@ -59,10 +59,10 @@ def test_channel_message_event_roundtrips_all_fields():
         thread_parent_sender_id="dave",
         cascade_depth=3,
         sender_participant_type="user",
-        tier_b_active=True,
+        salience_gated=True,
         threshold=0.42,
         channel_size=4,
-        tier_b_max_channel_members=20,
+        salience_max_channel_members=20,
     )
 
     blob = event.SerializeToString()
@@ -85,11 +85,11 @@ def test_channel_message_event_roundtrips_all_fields():
     assert decoded.thread_parent_sender_id == "dave"
     assert decoded.cascade_depth == 3
     assert decoded.sender_participant_type == "user"
-    assert decoded.tier_b_active is True
+    assert decoded.salience_gated is True
     assert decoded.HasField("threshold")
     assert decoded.threshold == 0.42
     assert decoded.channel_size == 4
-    assert decoded.tier_b_max_channel_members == 20
+    assert decoded.salience_max_channel_members == 20
 
 
 def test_channel_message_event_threshold_presence_roundtrips():
@@ -280,17 +280,17 @@ def _varint(value: int) -> bytes:
             return bytes(out)
 
 
-def test_channel_message_event_tier_b_field_numbers_pinned():
+def test_channel_message_event_salience_field_numbers_pinned():
     """RFC 0030 Tier B fields encode at their declared numbers / wire types.
 
     A renumber or type flip on any of the four Tier B fields changes the
     tag byte(s) and trips this assertion on the regenerating language —
     the same cross-language drift guard the string/varint fields carry.
     """
-    # `bool tier_b_active = 13` → varint, tag = (13<<3)|0 = 0x68, true = 0x01.
-    assert task_pb2.ChannelMessageEvent(tier_b_active=True).SerializeToString() == b"\x68\x01"
+    # `bool salience_gated = 13` → varint, tag = (13<<3)|0 = 0x68, true = 0x01.
+    assert task_pb2.ChannelMessageEvent(salience_gated=True).SerializeToString() == b"\x68\x01"
     # False is the proto3 implicit zero → no bytes.
-    assert task_pb2.ChannelMessageEvent(tier_b_active=False).SerializeToString() == b""
+    assert task_pb2.ChannelMessageEvent(salience_gated=False).SerializeToString() == b""
 
     # `optional double threshold = 14` → 64-bit, tag = (14<<3)|1 = 0x71.
     blob = task_pb2.ChannelMessageEvent(threshold=0.5).SerializeToString()
@@ -302,10 +302,10 @@ def test_channel_message_event_tier_b_field_numbers_pinned():
 
     # `int32 channel_size = 15` → varint, tag = (15<<3)|0 = 0x78.
     assert task_pb2.ChannelMessageEvent(channel_size=4).SerializeToString() == b"\x78" + _varint(4)
-    # `int32 tier_b_max_channel_members = 16` → varint, tag = (16<<3)|0 = 128,
+    # `int32 salience_max_channel_members = 16` → varint, tag = (16<<3)|0 = 128,
     # whose tag itself needs a two-byte varint (0x80 0x01).
     assert (
-        task_pb2.ChannelMessageEvent(tier_b_max_channel_members=20).SerializeToString()
+        task_pb2.ChannelMessageEvent(salience_max_channel_members=20).SerializeToString()
         == b"\x80\x01" + _varint(20)
     )
 

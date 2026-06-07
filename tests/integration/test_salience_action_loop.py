@@ -1,12 +1,12 @@
 """RFC 0030 Tier B (v0.3.8) — the action-loop seam for the salience bid.
 
-PR 2 of the Tier B PR plan. ``test_tier_b_salience.py`` pins the bid's
+PR 2 of the Tier B PR plan. ``test_salience_bid.py`` pins the bid's
 bias-to-silence decision in isolation; this file pins the *wiring* —
 **when** the leased bid runs and **what the action loop does** with its
 verdict — by driving the real ``_LLMPersonaAgent.on_event`` →
 ``_on_event_inner`` path.
 
-The bid (``agents.tier_b_salience.evaluate_salience``) is patched here so the
+The bid (``agents.salience_bid.evaluate_salience``) is patched here so the
 wiring assertions are deterministic and independent of the bid's prompt /
 model resolution. The observables:
 
@@ -17,7 +17,7 @@ model resolution. The observables:
   quality LLM call — the no-pile-on / idle-cost-zero win — while still
   ingesting the message.
 * A "speak" verdict proceeds to the quality turn (the provider is called).
-* TB6: above ``tier_b_max_channel_members`` the bid is skipped entirely and
+* TB6: above ``salience_max_channel_members`` the bid is skipped entirely and
   the un-addressed participant stays silent (``addressed``-only fallback).
 """
 
@@ -36,12 +36,12 @@ from agents.observability import metrics as pmetrics
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_types import ActionType, AgentEvent, EventType
-from agents.tier_b_salience import SalienceDecision
+from agents.salience_bid import SalienceDecision
 from agents.tools.registry import clear_registry
 
 pytestmark = pytest.mark.asyncio
 
-_BID_PATH = "agents.persona_runtime.tier_b_gate.evaluate_salience"
+_BID_PATH = "agents.persona_runtime.salience_gate.evaluate_salience"
 
 
 @pytest.fixture(autouse=True)
@@ -138,7 +138,7 @@ def _payload(
     *,
     respond_policy: str = "always",
     mentions: list[str] | None = None,
-    tier_b_active: bool | None = None,
+    salience_gated: bool | None = None,
     threshold: float | None = None,
     channel_size: int | None = None,
     max_members: int | None = None,
@@ -152,14 +152,14 @@ def _payload(
     }
     # The PR-2b wire fields. Omitted entirely by default so the seam is
     # dormant (the PR-2a additive default).
-    if tier_b_active is not None:
-        payload["tier_b_active"] = tier_b_active
+    if salience_gated is not None:
+        payload["salience_gated"] = salience_gated
     if threshold is not None:
         payload["threshold"] = threshold
     if channel_size is not None:
         payload["channel_size"] = channel_size
     if max_members is not None:
-        payload["tier_b_max_channel_members"] = max_members
+        payload["salience_max_channel_members"] = max_members
     return payload
 
 
@@ -187,15 +187,15 @@ class TestBidRunsOnlyOnOpenFloorGoverned:
     async def test_governed_open_floor_runs_the_bid(self):
         agent, _ = await _make_agent()
         with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
-            await _deliver(agent, _payload(tier_b_active=True))
+            await _deliver(agent, _payload(salience_gated=True))
         bid.assert_awaited_once()
 
     async def test_ungoverned_open_floor_is_dormant(self):
-        """PR-2a default: with no ``tier_b_active`` flag the bid never runs —
+        """PR-2a default: with no ``salience_gated`` flag the bid never runs —
         v0.3.7 behaviour (every open-floor participant replies)."""
         agent, quality = await _make_agent()
         with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
-            await _deliver(agent, _payload())  # no tier_b_active
+            await _deliver(agent, _payload())  # no salience_gated
         bid.assert_not_called()
         assert quality.await_count >= 1, "ungoverned persona still replies"
 
@@ -207,7 +207,7 @@ class TestBidRunsOnlyOnOpenFloorGoverned:
             await _deliver(agent, _payload(
                 respond_policy="when_mentioned",
                 mentions=["iron-fox"],
-                tier_b_active=True,
+                salience_gated=True,
             ))
         bid.assert_not_called()
         assert quality.await_count >= 1
@@ -224,7 +224,7 @@ class TestBidRunsOnlyOnOpenFloorGoverned:
             await _deliver(agent, _payload(
                 respond_policy="always",
                 mentions=["iron-fox"],
-                tier_b_active=True,
+                salience_gated=True,
             ))
         bid.assert_not_called()
         assert quality.await_count >= 1
@@ -239,7 +239,7 @@ class TestBidRunsOnlyOnOpenFloorGoverned:
         agent, quality = await _make_agent()
         with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
             await _deliver(agent, _payload(
-                mentions=[MENTION_EVERYONE], tier_b_active=True,
+                mentions=[MENTION_EVERYONE], salience_gated=True,
             ))
         bid.assert_not_called()
         assert quality.await_count >= 1, "a broadcast participant must reach the turn"
@@ -249,7 +249,7 @@ class TestBidRunsOnlyOnOpenFloorGoverned:
         agent, quality = await _make_agent()
         with patch(_BID_PATH, new=AsyncMock(return_value=_speak())) as bid:
             actions = await _deliver(agent, _payload(
-                respond_policy="never", tier_b_active=True,
+                respond_policy="never", salience_gated=True,
             ))
         bid.assert_not_called()
         assert quality.await_count == 0
@@ -258,7 +258,7 @@ class TestBidRunsOnlyOnOpenFloorGoverned:
     async def test_self_sender_never_reaches_the_bid(self):
         agent, quality = await _make_agent("alice")  # sender == agent
         with patch(_BID_PATH, new=AsyncMock(return_value=_speak())) as bid:
-            await _deliver(agent, _payload(tier_b_active=True))
+            await _deliver(agent, _payload(salience_gated=True))
         bid.assert_not_called()
         assert quality.await_count == 0
 
@@ -269,14 +269,14 @@ class TestBidVerdictRouting:
         LLM call never happens (idle-cost-zero on the quality turn)."""
         agent, quality = await _make_agent()
         with patch(_BID_PATH, new=AsyncMock(return_value=_silent())):
-            actions = await _deliver(agent, _payload(tier_b_active=True))
+            actions = await _deliver(agent, _payload(salience_gated=True))
         assert all(a.action_type is ActionType.DO_NOTHING for a in actions)
         assert quality.await_count == 0, "silent bid must not reach the quality turn"
 
     async def test_speak_proceeds_to_the_quality_turn(self):
         agent, quality = await _make_agent()
         with patch(_BID_PATH, new=AsyncMock(return_value=_speak())):
-            await _deliver(agent, _payload(tier_b_active=True))
+            await _deliver(agent, _payload(salience_gated=True))
         assert quality.await_count >= 1, "a speak verdict must reach the turn"
 
 
@@ -287,7 +287,7 @@ class TestChannelSizeCap:
         agent, quality = await _make_agent()
         with patch(_BID_PATH, new=AsyncMock(return_value=_speak())) as bid:
             actions = await _deliver(agent, _payload(
-                tier_b_active=True, channel_size=50, max_members=20,
+                salience_gated=True, channel_size=50, max_members=20,
             ))
         bid.assert_not_called()
         assert all(a.action_type is ActionType.DO_NOTHING for a in actions)
@@ -304,7 +304,7 @@ class TestChannelSizeCap:
                     agent, "_format_event", wraps=agent._format_event,
                 ) as fmt:
             await _deliver(agent, _payload(
-                tier_b_active=True, channel_size=50, max_members=20,
+                salience_gated=True, channel_size=50, max_members=20,
             ))
         fmt.assert_not_called()
 
@@ -312,7 +312,7 @@ class TestChannelSizeCap:
         agent, _ = await _make_agent()
         with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
             await _deliver(agent, _payload(
-                tier_b_active=True, channel_size=4, max_members=20,
+                salience_gated=True, channel_size=4, max_members=20,
             ))
         bid.assert_awaited_once()
 
@@ -327,14 +327,14 @@ class TestThresholdParsing:
     async def test_in_range_threshold_passes_through(self):
         agent, _ = await _make_agent()
         with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
-            await _deliver(agent, _payload(tier_b_active=True, threshold=0.4))
+            await _deliver(agent, _payload(salience_gated=True, threshold=0.4))
         bid.assert_awaited_once()
         assert bid.await_args.kwargs["threshold"] == pytest.approx(0.4)
 
     async def test_out_of_range_threshold_degrades_to_unset(self):
         agent, _ = await _make_agent()
         with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
-            await _deliver(agent, _payload(tier_b_active=True, threshold=5.0))
+            await _deliver(agent, _payload(salience_gated=True, threshold=5.0))
         bid.assert_awaited_once()
         assert bid.await_args.kwargs["threshold"] is None
 
@@ -349,7 +349,7 @@ class TestLeaseCauseDerivedFromEvent:
     async def test_channel_message_threads_channel_message_cause(self):
         agent, _ = await _make_agent()
         with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
-            await _deliver(agent, _payload(tier_b_active=True))
+            await _deliver(agent, _payload(salience_gated=True))
         bid.assert_awaited_once()
         assert bid.await_args.kwargs["cause"] == walletpb.CAUSE_CHANNEL_MESSAGE
 
@@ -362,7 +362,7 @@ class TestLeaseCauseDerivedFromEvent:
         with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
             await _deliver(
                 agent,
-                _payload(tier_b_active=True),
+                _payload(salience_gated=True),
                 metadata={"chat_session_id": "sess-1"},
             )
         bid.assert_awaited_once()
@@ -383,7 +383,7 @@ class TestSuppressionObservability:
         agent, _ = await _make_agent()
         decision = SalienceDecision(speak=False, score=None, reason="lease_denied")
         with patch(_BID_PATH, new=AsyncMock(return_value=decision)):
-            await _deliver(agent, _payload(tier_b_active=True))
+            await _deliver(agent, _payload(salience_gated=True))
         points = _gated_points(metric_reader)
         low_salience = [
             p for p in points if p.attributes.get("policy") == "low_salience"
@@ -397,7 +397,7 @@ class TestSuppressionObservability:
     ):
         agent, _ = await _make_agent()
         with patch(_BID_PATH, new=AsyncMock(return_value=_silent())):
-            await _deliver(agent, _payload(tier_b_active=True))
+            await _deliver(agent, _payload(salience_gated=True))
         points = _gated_points(metric_reader)
         low_salience = [
             p for p in points if p.attributes.get("policy") == "low_salience"

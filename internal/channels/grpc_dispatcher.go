@@ -402,9 +402,9 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		// `Threshold` is `*float64` → the optional proto field: nil leaves it
 		// absent (the agent reads "unset → bias-to-silence"), distinct from an
 		// explicit 0.0.
-		TierBActive:            env.Recipient.TierBActive,
-		Threshold:              env.Recipient.Threshold,
-		ChannelSize:            int32(env.ChannelSize),
-		TierBMaxChannelMembers: int32(env.TierBMaxChannelMembers),
+		SalienceGated:             env.Recipient.SalienceGated,
+		Threshold:                 env.Recipient.Threshold,
+		ChannelSize:               int32(env.ChannelSize),
+		SalienceMaxChannelMembers: int32(env.SalienceMaxChannelMembers),
 	}
 }

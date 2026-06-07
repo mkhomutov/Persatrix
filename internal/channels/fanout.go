@@ -148,10 +148,10 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		ThreadParentSenderID: threadParentSenderID,
 		// RFC 0030 Tier B (v0.3.8): the per-publish channel-size + resolved cap
 		// the agent-side seam reads for the TB6 channel-size gate. The
-		// per-recipient bid signals (tier_b_active/threshold) ride on
+		// per-recipient bid signals (salience_gated/threshold) ride on
 		// `m`/`Recipient`; these two are channel-wide.
-		ChannelSize:            channelSize,
-		TierBMaxChannelMembers: r.tierBMaxFor(msg.ChannelID),
+		ChannelSize:               channelSize,
+		SalienceMaxChannelMembers: r.salienceMaxFor(msg.ChannelID),
 	}, msg)
 	status := "ok"
 	if err != nil {
