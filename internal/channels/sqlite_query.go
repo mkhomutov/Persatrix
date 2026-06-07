@@ -186,6 +186,13 @@ func (s *sqliteStore) SetMemberPolicy(ctx context.Context, channelID, participan
 	// the membership-table CHECK constraint see only legacy values. An
 	// unknown value is returned unchanged by Normalize and rejected here
 	// (see [canonicalRespondPolicy]).
+	//
+	// RFC 0030 Tier B (v0.3.8): re-derive the salience-bid signals from the
+	// raw disposition before normalizing, so changing a member's disposition
+	// through this path (e.g. `addressed` → `participant`) turns the bid on or
+	// off and resets the chair threshold in lock-step with `respond_policy` —
+	// otherwise a re-disposition would leave a stale `tier_b_active`.
+	tierBActive, threshold := ResolveTierBSignal(policy, nil)
 	policy, err := canonicalRespondPolicy(policy)
 	if err != nil {
 		return err
@@ -197,9 +204,9 @@ func (s *sqliteStore) SetMemberPolicy(ctx context.Context, channelID, participan
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx,
-		`UPDATE memberships SET respond_policy = ?
+		`UPDATE memberships SET respond_policy = ?, threshold = ?, tier_b_active = ?
 		   WHERE channel_id = ? AND participant_id = ?`,
-		string(policy), channelID, participantID,
+		string(policy), threshold, boolToInt(tierBActive), channelID, participantID,
 	)
 	if err != nil {
 		return fmt.Errorf("channels: set member policy: %w", err)
@@ -233,6 +240,13 @@ func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID st
 	if err := validateParticipantID(participantID); err != nil {
 		return err
 	}
+	// RFC 0030 Tier B (v0.3.8): derive the per-member salience-bid signals from
+	// the *raw* disposition before it is normalized — `participant`/`chair`
+	// opt into the bid, a `chair` picks up the low default threshold. This is
+	// the REST single-add path, which (unlike the config reconcile path) still
+	// carries the disposition, so deriving here is correct; see
+	// [ResolveTierBSignal].
+	tierBActive, threshold := ResolveTierBSignal(policy, nil)
 	// Normalize the disposition vocabulary to the legacy triple before
 	// validating/persisting (see [canonicalRespondPolicy]). Keeps the REST
 	// write path and the membership CHECK constraint on the legacy values.
@@ -242,10 +256,10 @@ func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID st
 	}
 	// Idempotent re-add: keep the existing joined_at and respond_policy.
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at)
-		 VALUES (?, ?, ?, ?)
+		`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at, threshold, tier_b_active)
+		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(channel_id, participant_id) DO NOTHING`,
-		channelID, participantID, string(policy), time.Now().UTC(),
+		channelID, participantID, string(policy), time.Now().UTC(), threshold, boolToInt(tierBActive),
 	)
 	if err != nil {
 		if isForeignKeyViolation(err) {
@@ -259,7 +273,7 @@ func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID st
 // GetMembers implements [ChannelStore.GetMembers].
 func (s *sqliteStore) GetMembers(ctx context.Context, channelID string) ([]Member, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT participant_id, respond_policy, joined_at
+		`SELECT participant_id, respond_policy, joined_at, threshold, tier_b_active
 		   FROM memberships
 		  WHERE channel_id = ?
 		  ORDER BY joined_at ASC, participant_id ASC`, channelID)
@@ -272,24 +286,42 @@ func (s *sqliteStore) GetMembers(ctx context.Context, channelID string) ([]Membe
 	for rows.Next() {
 		var m Member
 		var policy string
-		if err := rows.Scan(&m.ParticipantID, &policy, &m.JoinedAt); err != nil {
+		var threshold sql.NullFloat64
+		var tierB int
+		if err := rows.Scan(&m.ParticipantID, &policy, &m.JoinedAt, &threshold, &tierB); err != nil {
 			return nil, fmt.Errorf("channels: scan member: %w", err)
 		}
 		m.RespondPolicy = RespondPolicy(policy)
+		m.Threshold, m.TierBActive = readTierBColumns(threshold, tierB)
 		out = append(out, m)
 	}
 	return out, rows.Err()
 }
 
+// readTierBColumns maps the raw `memberships` Tier B columns to the typed
+// [Member] fields: a NULL `threshold` → nil (*float64) → unset; the 0/1
+// `tier_b_active` INTEGER → bool. Shared by [GetMembers]/[GetMember] so the
+// nullable-decode lives in one place.
+func readTierBColumns(threshold sql.NullFloat64, tierB int) (*float64, bool) {
+	var t *float64
+	if threshold.Valid {
+		v := threshold.Float64
+		t = &v
+	}
+	return t, tierB != 0
+}
+
 // GetMember implements [ChannelStore.GetMember].
 func (s *sqliteStore) GetMember(ctx context.Context, channelID, participantID string) (Member, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT participant_id, respond_policy, joined_at
+		`SELECT participant_id, respond_policy, joined_at, threshold, tier_b_active
 		   FROM memberships WHERE channel_id = ? AND participant_id = ?`,
 		channelID, participantID)
 	var m Member
 	var policy string
-	if err := row.Scan(&m.ParticipantID, &policy, &m.JoinedAt); err != nil {
+	var threshold sql.NullFloat64
+	var tierB int
+	if err := row.Scan(&m.ParticipantID, &policy, &m.JoinedAt, &threshold, &tierB); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Member{}, fmt.Errorf("%w: channel=%s participant=%s",
 				ErrNotMember, channelID, participantID)
@@ -297,6 +329,7 @@ func (s *sqliteStore) GetMember(ctx context.Context, channelID, participantID st
 		return Member{}, fmt.Errorf("channels: get member: %w", err)
 	}
 	m.RespondPolicy = RespondPolicy(policy)
+	m.Threshold, m.TierBActive = readTierBColumns(threshold, tierB)
 	return m, nil
 }
 

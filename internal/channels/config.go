@@ -42,6 +42,16 @@ type Config struct {
 // PR 2's serialized loop consumes it.
 const DefaultFloorTurnTimeoutSeconds = 45
 
+// DefaultTierBMaxChannelMembers is the channel-size cap (RFC 0030 amendment
+// OQ #4 / TB6) applied when a declared channel omits
+// `tier_b_max_channel_members`. Above the cap the agent-side seam skips the
+// salience bid entirely and falls back to `addressed`-only, so a cheap bid × N
+// members stays bounded on a large channel. Kept in lock-step with the Python
+// `DEFAULT_TIER_B_MAX_CHANNEL_MEMBERS` (agents/tier_b_salience.py) — the value
+// rides the wire, but a zero/absent field falls back to the Python default, so
+// the two must agree. Zero/absent normalizes to this value at load.
+const DefaultTierBMaxChannelMembers = 20
+
 // DefaultChairThreshold is the low salience `threshold` applied to a `chair`
 // member when its config omits an explicit value (RFC 0030 Tier B, v0.3.8).
 // A low bar means the chair clears the cheap relevance bid readily and keeps
@@ -92,6 +102,15 @@ type ChannelConfig struct {
 	// (amendment D2). Zero/absent normalizes to
 	// [DefaultFloorTurnTimeoutSeconds] at load; negative is rejected.
 	FloorTurnTimeoutSeconds int `yaml:"floor_turn_timeout_seconds"`
+	// TierBMaxChannelMembers is the RFC 0030 Tier B (v0.3.8) channel-size cap
+	// (TB6 / amendment OQ #4): above this many candidate responders the
+	// agent-side seam skips the salience bid and falls back to `addressed`-
+	// only, keeping a cheap bid × N members bounded on a large channel.
+	// Zero/absent normalizes to [DefaultTierBMaxChannelMembers] at load;
+	// negative is rejected. The resolved value rides the
+	// `ChannelMessageEvent.tier_b_max_channel_members` wire field; the router
+	// stamps it onto the dispatch envelope at fanout time.
+	TierBMaxChannelMembers int `yaml:"tier_b_max_channel_members"`
 }
 
 // MemberConfig is a `(participant_id, respond_policy)` pair declared in
@@ -105,23 +124,22 @@ type MemberConfig struct {
 	//   - nil   → unset → bias-to-silence (the conservative default)
 	//   - &0..1 → explicit salience bar the bid must clear to reach the turn
 	// A `chair` member with no explicit value picks up [DefaultChairThreshold]
-	// at load (see [MemberConfig.UnmarshalYAML]). PR 1 only parses/validates
-	// the field; the Tier B bid (a later PR) is the first reader.
+	// at load (see [MemberConfig.UnmarshalYAML]).
 	//
-	// PERSISTENCE/WIRE GAP (PR 1 scope — read before building PR 2): this
-	// threshold lives ONLY on the in-memory [Config] returned by [LoadConfig].
-	// It is not persisted — both the store-side [Member] and the
-	// `memberships` table carry only the normalized `respond_policy` — and it
-	// is absent from the `ChannelMessageEvent` wire the Python gate/bid
-	// consume. So a `chair` reconciled into the store
-	// ([ChannelRouter.ReconcileConfig] drops everything but ID + policy) keeps
-	// only its `always` policy; the threshold — and thus its chair-ness — does
-	// not round-trip past load. Before the Tier B bid can read it, a later PR
-	// must carry the value to wherever the bid runs (a `memberships` column +
-	// a wire field, or a load-time [Config] lookup at bid time). The
-	// "chair-ness survives as the threshold" framing holds only at the
-	// [LoadConfig] boundary, not end-to-end.
+	// As of PR 2b the threshold round-trips end-to-end: [ReconcileConfig]
+	// carries it (and [TierBActive]) onto the store-side [Member], the
+	// `memberships.threshold` column persists it, and the
+	// `ChannelMessageEvent.threshold` wire field delivers it to the agent-side
+	// bid. The PR-1 persistence/wire gap is closed.
 	Threshold *float64
+	// TierBActive marks this member as a salience-bid participant (RFC 0030
+	// Tier B, v0.3.8). Set at load from the *declared* disposition (before
+	// normalization collapses `participant`/`chair` to the legacy `always`
+	// wire value), so the bid-ness survives the normalization that would
+	// otherwise make a `participant` indistinguishable from a legacy `always`.
+	// Carried by [ReconcileConfig] onto the store-side [Member.TierBActive].
+	// See [ResolveTierBSignal] for the derivation rule.
+	TierBActive bool
 }
 
 // UnmarshalYAML accepts either a string shorthand or an explicit
@@ -146,9 +164,9 @@ func (m *MemberConfig) UnmarshalYAML(value *yaml.Node) error {
 			return err
 		}
 		m.ID = raw.ID
-		m.Threshold = raw.Threshold
 		if raw.Respond == "" {
 			m.RespondPolicy = RespondWhenMentioned
+			m.Threshold = raw.Threshold
 		} else {
 			// Normalize the disposition vocabulary (RFC 0030 relevance
 			// amendment) to the canonical legacy triple at the load
@@ -156,13 +174,12 @@ func (m *MemberConfig) UnmarshalYAML(value *yaml.Node) error {
 			// values. An unknown value passes through unchanged and is
 			// rejected by Validate via RespondPolicy.Valid.
 			disposition := RespondPolicy(raw.Respond)
-			// A `chair` with no explicit threshold picks up the low default
-			// BEFORE normalization collapses it to `always` — chair-ness
-			// survives only as this low bar (RFC 0030 Tier B, v0.3.8).
-			if disposition == RespondChair && m.Threshold == nil {
-				d := DefaultChairThreshold
-				m.Threshold = &d
-			}
+			// Derive the Tier B signals from the *declared* disposition before
+			// it is normalized: `participant`/`chair` opt into the bid, a chair
+			// (or an `always` + explicit threshold) picks up the right bar.
+			// ResolveTierBSignal is the single choke point the store write
+			// paths share, so the mapping lives in one place (RFC 0030 Tier B).
+			m.TierBActive, m.Threshold = ResolveTierBSignal(disposition, raw.Threshold)
 			m.RespondPolicy = disposition.Normalize()
 		}
 		return nil
@@ -202,6 +219,12 @@ func LoadConfig(path string) (*Config, error) {
 	for i := range cfg.Channels {
 		if cfg.Channels[i].FloorTurnTimeoutSeconds == 0 {
 			cfg.Channels[i].FloorTurnTimeoutSeconds = DefaultFloorTurnTimeoutSeconds
+		}
+		// Same zero/absent → default sentinel for the RFC 0030 Tier B
+		// channel-size cap, so the dispatcher always has a populated value to
+		// stamp on the wire. Negative is left as-is for Validate to reject.
+		if cfg.Channels[i].TierBMaxChannelMembers == 0 {
+			cfg.Channels[i].TierBMaxChannelMembers = DefaultTierBMaxChannelMembers
 		}
 	}
 	if err := cfg.Validate(); err != nil {
@@ -262,6 +285,15 @@ func (c *Config) Validate() error {
 		if ch.FloorTurnTimeoutSeconds < 0 {
 			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 1)",
 				i, ch.Name, ErrInvalidFloorTurnTimeout, ch.FloorTurnTimeoutSeconds)
+		}
+
+		// Reject a negative Tier B channel-size cap (the schema's `minimum: 1`
+		// catches it at `make validate`; this is the belt-and-suspenders for
+		// operators who skipped that step). Zero never reaches here — LoadConfig
+		// normalizes it to the default before Validate runs.
+		if ch.TierBMaxChannelMembers < 0 {
+			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 1)",
+				i, ch.Name, ErrInvalidTierBMaxChannelMembers, ch.TierBMaxChannelMembers)
 		}
 
 		if len(ch.Members) == 0 {

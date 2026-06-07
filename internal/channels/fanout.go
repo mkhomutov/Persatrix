@@ -66,15 +66,20 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// and the candidate responder set is large enough to overlap. A DM or a
 	// single responder cannot collide, so it falls through to the concurrent
 	// path with no per-turn latency.
+	// RFC 0030 Tier B (v0.3.8): the channel's member count rides every dispatch
+	// so the agent-side seam can apply the TB6 channel-size cap. A per-publish
+	// value (identical across recipients), captured once here.
+	channelSize := len(members)
+
 	if settings, ok := r.floorSettingsFor(msg.ChannelID); ok && settings.enabled {
 		responders, nonResponders := orderResponders(members, msg, threadParentSenderID)
 		if len(responders) >= 2 {
-			r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout)
+			r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize)
 			return
 		}
 	}
 
-	r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members)
+	r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize)
 }
 
 // dispatchConcurrent fans `msg` out to every member of `members` other than
@@ -85,7 +90,7 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 // `ctx` is expected to already be detached from the request lifetime by the
 // caller (so the floor path can reuse it for off-floor non-responder
 // delivery without re-detaching).
-func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, members []Member) {
+func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, members []Member, channelSize int) {
 	// Buffered channel as a semaphore: each goroutine acquires a slot
 	// before starting and releases it on exit, so peak in-flight
 	// dispatches never exceed `channelFanoutMaxConcurrency`. The
@@ -125,7 +130,7 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m)
+			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize)
 		}()
 	}
 	wg.Wait()
@@ -135,12 +140,18 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 // timeout and emits the `channel.messages.delivered` counter. Shared by the
 // concurrent path ([dispatchConcurrent]) and the serialized floor turn
 // ([runFloorTurn]) so both honour the same deadline + metric contract.
-func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member) {
+func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member, channelSize int) {
 	dispatchCtx, cancel := context.WithTimeout(ctx, channelFanoutPerRecipientTimeout)
 	defer cancel()
 	err := r.dispatcher.Dispatch(dispatchCtx, DispatchEnvelope{
 		Recipient:            m,
 		ThreadParentSenderID: threadParentSenderID,
+		// RFC 0030 Tier B (v0.3.8): the per-publish channel-size + resolved cap
+		// the agent-side seam reads for the TB6 channel-size gate. The
+		// per-recipient bid signals (tier_b_active/threshold) ride on
+		// `m`/`Recipient`; these two are channel-wide.
+		ChannelSize:            channelSize,
+		TierBMaxChannelMembers: r.tierBMaxFor(msg.ChannelID),
 	}, msg)
 	status := "ok"
 	if err != nil {

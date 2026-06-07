@@ -42,9 +42,51 @@ func applyMigration(db *sql.DB, target int) error {
 		return migrateV4ToV5(db)
 	case 6:
 		return migrateV5ToV6(db)
+	case 7:
+		return migrateV6ToV7(db)
 	default:
 		return fmt.Errorf("no migration registered for v%d", target)
 	}
+}
+
+// migrateV6ToV7 adds the RFC 0030 Tier B (v0.3.8) per-member salience-bid
+// signals to `memberships`. Forward-only and a pure addition:
+//
+//   - `threshold REAL` is nullable with NO default, so every pre-v7 row reads
+//     back as NULL → unset → bias-to-silence (the conservative Tier B
+//     default). A non-NULL default would be wrong here: there is no neutral
+//     numeric threshold, and 0.0 vs unset are deliberately distinct (see
+//     [MemberConfig.Threshold]).
+//   - `tier_b_active INTEGER NOT NULL DEFAULT 0` backfills every pre-v7 row to
+//     0 — a legacy `always` member that keeps replying unconditionally — so a
+//     v0.3.7 database behaves byte-identically. Only members reconciled from
+//     the participant/chair vocabulary (or REST-added with it) write 1.
+//
+// SQLite ≥3.20 supports `ADD COLUMN ... DEFAULT <constant>` without a backfill
+// UPDATE, so both columns land in one statement each. The whole migration runs
+// in one transaction and stamps `user_version` inside it (PR #335 review L3)
+// so the schema change and its version bookkeeping commit atomically. No index
+// or table rebuild — the additive columns leave every existing index intact.
+func migrateV6ToV7(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []string{
+		`ALTER TABLE memberships ADD COLUMN threshold REAL`,
+		`ALTER TABLE memberships ADD COLUMN tier_b_active INTEGER NOT NULL DEFAULT 0`,
+	}
+	for _, q := range stmts {
+		if _, err := tx.Exec(q); err != nil {
+			return fmt.Errorf("exec %q: %w", firstLine(q), err)
+		}
+	}
+	if err := stampUserVersionTx(tx, 7); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // migrateV5ToV6 adds the run/test-isolation `epoch_id` axis (ISSUE-0085 PR 2)

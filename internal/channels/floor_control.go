@@ -280,11 +280,12 @@ func (r *ChannelRouter) floorRound(
 	threadParentSenderID string,
 	responders, nonResponders []Member,
 	turnTimeout time.Duration,
+	channelSize int,
 ) {
 	detached := context.WithoutCancel(ctx)
 
 	if len(nonResponders) > 0 {
-		r.dispatchConcurrent(detached, msg, ct, threadParentSenderID, nonResponders)
+		r.dispatchConcurrent(detached, msg, ct, threadParentSenderID, nonResponders, channelSize)
 	}
 
 	r.floors.acquire(msg.ChannelID)
@@ -296,7 +297,7 @@ func (r *ChannelRouter) floorRound(
 	// the responders actually impose, not queueing behind a prior round.
 	start := time.Now()
 	for _, speaker := range responders {
-		r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout)
+		r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout, channelSize)
 	}
 	r.recordFloorRound(detached, ct, time.Since(start))
 }
@@ -348,6 +349,7 @@ func (r *ChannelRouter) runFloorTurn(
 	threadParentSenderID string,
 	speaker Member,
 	turnTimeout time.Duration,
+	channelSize int,
 ) {
 	r.recordFloorSpeaker(msg.ChannelID, speaker.ParticipantID)
 
@@ -366,7 +368,7 @@ func (r *ChannelRouter) runFloorTurn(
 		defer cancel()
 	}
 
-	r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker)
+	r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker, channelSize)
 
 	timer := time.NewTimer(turnTimeout)
 	defer timer.Stop()
@@ -429,6 +431,40 @@ func (r *ChannelRouter) ResolveFloorControl(ctx context.Context, cfg *Config) er
 		// channel that survived a restart. Default ON (SetFloorControl
 		// normalizes the zero timeout to the 45s default).
 		r.SetFloorControl(ch.ID, true, 0)
+	}
+	return nil
+}
+
+// ResolveTierBCaps applies the RFC 0030 Tier B (v0.3.8) channel-size cap to
+// every group channel known at startup, the per-channel sibling of
+// [ChannelRouter.ResolveFloorControl]. Each config-declared channel uses its
+// resolved `tier_b_max_channel_members` (already normalized to
+// [DefaultTierBMaxChannelMembers] at load when omitted); every other group
+// channel present in the store — e.g. a runtime-created channel that survived
+// a restart — picks up the default. The resolved cap is what the dispatcher
+// stamps on the `ChannelMessageEvent.tier_b_max_channel_members` wire field.
+//
+// DM and thread channels are skipped: the salience bid runs only on open-floor
+// group traffic. Call once after [ChannelRouter.ReconcileConfig]; idempotent.
+func (r *ChannelRouter) ResolveTierBCaps(ctx context.Context, cfg *Config) error {
+	configured := make(map[string]bool)
+	if cfg != nil {
+		for _, decl := range cfg.Channels {
+			id := decl.CanonicalID()
+			configured[id] = true
+			r.SetTierBMaxChannelMembers(id, decl.TierBMaxChannelMembers)
+		}
+	}
+	all, err := r.store.ListChannels(ctx, 0, "")
+	if err != nil {
+		return fmt.Errorf("channels: resolve tier b caps: list channels: %w", err)
+	}
+	for _, ch := range all {
+		if ch.Type != ChannelTypeGroup || configured[ch.ID] {
+			continue
+		}
+		// SetTierBMaxChannelMembers normalizes the zero to the default.
+		r.SetTierBMaxChannelMembers(ch.ID, 0)
 	}
 	return nil
 }

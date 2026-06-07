@@ -416,11 +416,18 @@ func (s *sqliteStore) CreateChannelWithMembers(ctx context.Context, ch Channel, 
 		if joinedAt.IsZero() {
 			joinedAt = now
 		}
+		// RFC 0030 Tier B (v0.3.8): persist the per-member salience-bid signals
+		// verbatim. Unlike `respond_policy` (normalized here from the
+		// disposition), `TierBActive`/`Threshold` are resolved by the caller —
+		// the config loader off the declared disposition ([ResolveTierBSignal]
+		// in [MemberConfig.UnmarshalYAML]) or the REST create handler — because
+		// the config reconcile path passes an already-normalized `always`
+		// policy, so deriving them here would lose a participant's bid-ness.
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at)
-			 VALUES (?, ?, ?, ?)
+			`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at, threshold, tier_b_active)
+			 VALUES (?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(channel_id, participant_id) DO NOTHING`,
-			ch.ID, m.ParticipantID, string(policy), joinedAt,
+			ch.ID, m.ParticipantID, string(policy), joinedAt, m.Threshold, boolToInt(m.TierBActive),
 		); err != nil {
 			// FK violations are unexpected here \u2014 we just inserted the
 			// parent row in the same transaction \u2014 but classify them the
