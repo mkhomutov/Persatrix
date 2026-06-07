@@ -65,6 +65,30 @@ class TestParticipantAliasesAlways:
         assert d.reason == "self_sender"
 
 
+class TestChairAliasesAlways:
+    """The v0.3.8 Tier B ``chair`` disposition is a low-threshold
+    facilitator — a ``participant`` (legacy ``always``) at the gate. The Go
+    loader normalizes ``chair`` to ``always`` + a low threshold, so the gate
+    normally never sees ``chair`` on the wire; this pins the defence-in-depth
+    alias for a value that reaches the gate un-normalized. The chair's
+    low-threshold behaviour and its (inert) Layer-5 hooks land downstream in
+    later Tier B PRs — PR 1 is behaviourally inert here too.
+    """
+
+    def test_chair_responds_like_always(self):
+        evt = _channel_event(respond_policy="chair", sender_id="alice")
+        d = evaluate_response_gate(evt, agent_id="bob")
+        assert d.respond is True
+        assert d.policy == POLICY_ALWAYS
+        assert d.reason == "policy_always"
+
+    def test_chair_still_filters_self_sender(self):
+        evt = _channel_event(respond_policy="chair", sender_id="bob")
+        d = evaluate_response_gate(evt, agent_id="bob")
+        assert d.respond is False
+        assert d.reason == "self_sender"
+
+
 class TestObserverAliasesNever:
     def test_observer_suppresses_like_never(self):
         evt = _channel_event(respond_policy="observer")

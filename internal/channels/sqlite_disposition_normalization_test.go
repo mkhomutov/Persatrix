@@ -35,6 +35,11 @@ var dispositionNormalizationCases = []struct {
 	{RespondParticipant, RespondAlways},
 	{RespondAddressed, RespondWhenMentioned},
 	{RespondObserver, RespondNever},
+	// v0.3.8 Tier B: `chair` is a `participant` with a low default
+	// threshold, so it normalizes to the same legacy `always` wire value
+	// at every write boundary (the threshold rides on the config struct,
+	// not the membership CHECK constraint).
+	{RespondChair, RespondAlways},
 }
 
 func TestSQLiteStore_AddMember_NormalizesDisposition(t *testing.T) {

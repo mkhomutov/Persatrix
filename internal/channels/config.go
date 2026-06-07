@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -41,6 +42,29 @@ type Config struct {
 // PR 2's serialized loop consumes it.
 const DefaultFloorTurnTimeoutSeconds = 45
 
+// DefaultChairThreshold is the low salience `threshold` applied to a `chair`
+// member when its config omits an explicit value (RFC 0030 Tier B, v0.3.8).
+// A low bar means the chair clears the cheap relevance bid readily and keeps
+// an open-floor discussion moving — the facilitator behaviour. On the wire a
+// chair is just a `participant`, so this low default is its whole identity
+// (see [RespondChair]).
+//
+// Deliberately low-but-nonzero — both extremes are wrong for a facilitator,
+// and the two are distinct values under the nil-vs-&0.0 tri-state (see
+// [MemberConfig.Threshold]):
+//   - nil (the plain-`participant` default) reads as unset → bias-to-silence:
+//     the conservative "stay quiet on ambiguous open-floor traffic" stance,
+//     the opposite of a facilitator.
+//   - &0.0 is a real, explicit bar of zero that EVERY salience score clears,
+//     so the chair would pile onto literally every message and defeat the
+//     point of having a bid at all.
+//
+// 0.15 sits just above zero: the chair speaks readily but still respects a
+// minimal salience floor. The exact value is calibration-post-soak per RFC
+// 0030 amendment OQ #3. PR 1 only parses/normalizes the knob; the Tier B bid
+// (a later PR) is the first reader.
+const DefaultChairThreshold = 0.15
+
 // ChannelConfig is a single declared group channel.
 type ChannelConfig struct {
 	Name        string         `yaml:"name"`
@@ -76,6 +100,28 @@ type ChannelConfig struct {
 type MemberConfig struct {
 	ID            string
 	RespondPolicy RespondPolicy
+	// Threshold is the per-disposition salience `threshold` for the RFC 0030
+	// Tier B relevance bid (v0.3.8). It is a `*float64` tri-state on purpose:
+	//   - nil   → unset → bias-to-silence (the conservative default)
+	//   - &0..1 → explicit salience bar the bid must clear to reach the turn
+	// A `chair` member with no explicit value picks up [DefaultChairThreshold]
+	// at load (see [MemberConfig.UnmarshalYAML]). PR 1 only parses/validates
+	// the field; the Tier B bid (a later PR) is the first reader.
+	//
+	// PERSISTENCE/WIRE GAP (PR 1 scope — read before building PR 2): this
+	// threshold lives ONLY on the in-memory [Config] returned by [LoadConfig].
+	// It is not persisted — both the store-side [Member] and the
+	// `memberships` table carry only the normalized `respond_policy` — and it
+	// is absent from the `ChannelMessageEvent` wire the Python gate/bid
+	// consume. So a `chair` reconciled into the store
+	// ([ChannelRouter.ReconcileConfig] drops everything but ID + policy) keeps
+	// only its `always` policy; the threshold — and thus its chair-ness — does
+	// not round-trip past load. Before the Tier B bid can read it, a later PR
+	// must carry the value to wherever the bid runs (a `memberships` column +
+	// a wire field, or a load-time [Config] lookup at bid time). The
+	// "chair-ness survives as the threshold" framing holds only at the
+	// [LoadConfig] boundary, not end-to-end.
+	Threshold *float64
 }
 
 // UnmarshalYAML accepts either a string shorthand or an explicit
@@ -92,13 +138,15 @@ func (m *MemberConfig) UnmarshalYAML(value *yaml.Node) error {
 		return nil
 	case yaml.MappingNode:
 		var raw struct {
-			ID      string `yaml:"id"`
-			Respond string `yaml:"respond"`
+			ID        string   `yaml:"id"`
+			Respond   string   `yaml:"respond"`
+			Threshold *float64 `yaml:"threshold"`
 		}
 		if err := value.Decode(&raw); err != nil {
 			return err
 		}
 		m.ID = raw.ID
+		m.Threshold = raw.Threshold
 		if raw.Respond == "" {
 			m.RespondPolicy = RespondWhenMentioned
 		} else {
@@ -107,7 +155,15 @@ func (m *MemberConfig) UnmarshalYAML(value *yaml.Node) error {
 			// boundary, so every downstream reader sees only the legacy
 			// values. An unknown value passes through unchanged and is
 			// rejected by Validate via RespondPolicy.Valid.
-			m.RespondPolicy = RespondPolicy(raw.Respond).Normalize()
+			disposition := RespondPolicy(raw.Respond)
+			// A `chair` with no explicit threshold picks up the low default
+			// BEFORE normalization collapses it to `always` — chair-ness
+			// survives only as this low bar (RFC 0030 Tier B, v0.3.8).
+			if disposition == RespondChair && m.Threshold == nil {
+				d := DefaultChairThreshold
+				m.Threshold = &d
+			}
+			m.RespondPolicy = disposition.Normalize()
 		}
 		return nil
 	default:
@@ -161,6 +217,10 @@ func LoadConfig(path string) (*Config, error) {
 //   - declared channel names are unique across the file
 //   - the declared channel count does not exceed `MaxChannels`
 //   - every membership respond policy is in the canonical set
+//   - a per-disposition `threshold`, when present, is a finite value in
+//     `[0, 1]` and rides only on an open-floor disposition (the salience
+//     bid never runs on a non-open-floor member, so a threshold there is a
+//     silent no-op — RFC 0030 Tier B)
 //   - `max_cascade_depth` is non-negative (zero is the loader-default
 //     sentinel; negative is rejected — PR #319 deep review finding 5.2)
 func (c *Config) Validate() error {
@@ -220,6 +280,35 @@ func (c *Config) Validate() error {
 			if !m.RespondPolicy.Valid() {
 				return fmt.Errorf("channels[%d=%s].members[%d=%s]: %w: %q",
 					i, ch.Name, j, m.ID, ErrInvalidRespondPolicy, m.RespondPolicy)
+			}
+			// Validate the salience threshold (RFC 0030 Tier B). Absent
+			// (nil) is the unset bias-to-silence default and is never an
+			// error.
+			if m.Threshold != nil {
+				// Reject a non-finite or out-of-range bound. The schema's
+				// `minimum: 0`/`maximum: 1` catches an out-of-range value at
+				// `make validate`; this is the belt-and-suspenders for an
+				// operator who skipped that step. The explicit `IsNaN` guard
+				// closes a gap neither bound catches: `.nan` slips past a bare
+				// `< 0 || > 1` comparison (every comparison against NaN is
+				// false), and would otherwise reach the bid as a salience bar
+				// that no score can ever clear. (`±Inf` is already caught by
+				// the range bound.)
+				if math.IsNaN(*m.Threshold) || *m.Threshold < 0.0 || *m.Threshold > 1.0 {
+					return fmt.Errorf("channels[%d=%s].members[%d=%s]: %w: %v (must be a finite value in [0, 1])",
+						i, ch.Name, j, m.ID, ErrInvalidThreshold, *m.Threshold)
+				}
+				// Reject a threshold on a disposition that runs no open-floor
+				// bid. After normalization, only open-floor speakers
+				// (participant/chair/legacy always) carry RespondAlways; a
+				// threshold on when_mentioned/never is a silent no-op. This is
+				// a cross-field invariant the JSON schema cannot express, so
+				// it has no `make validate` mirror — the loader is the sole
+				// enforcement point.
+				if m.RespondPolicy != RespondAlways {
+					return fmt.Errorf("channels[%d=%s].members[%d=%s]: %w: %q carries threshold %v but only an open-floor disposition (participant/chair/always) runs the salience bid",
+						i, ch.Name, j, m.ID, ErrThresholdNotApplicable, m.RespondPolicy, *m.Threshold)
+				}
 			}
 		}
 	}

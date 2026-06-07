@@ -72,15 +72,15 @@
             },
             "respond": {
               "type": "string",
-              "enum": ["participant", "addressed", "observer", "when_mentioned", "always", "never"],
+              "enum": ["participant", "chair", "addressed", "observer", "when_mentioned", "always", "never"],
               "default": "addressed",
-              "description": "Member disposition (RFC 0030 relevance amendment, v0.3.7). Recommended vocabulary: `participant` (joins the open floor — speaks on un-addressed messages), `addressed` (speaks only when @-mentioned or replied to), `observer` (never speaks). The legacy values `always`/`when_mentioned`/`never` keep working and map to `participant`/`addressed`/`observer` respectively; the Go loader normalizes the disposition vocabulary back to the legacy three at load time, so the wire `respond_policy` and every downstream reader are unchanged."
+              "description": "Member disposition (RFC 0030 relevance amendment). Recommended vocabulary: `participant` (joins the open floor — speaks on un-addressed messages, subject to the Tier B salience bid), `chair` (a low-threshold facilitator: a `participant` that clears the salience bid readily and keeps the discussion moving — v0.3.8; it CANNOT close an interaction, convergence is owned by the governance layers, and its Layer 5 moderator hooks are reserved/inert until v0.4.0), `addressed` (speaks only when @-mentioned or replied to), `observer` (never speaks). The legacy values `always`/`when_mentioned`/`never` keep working and map to `participant`/`addressed`/`observer` respectively; the Go loader normalizes the disposition vocabulary back to the legacy three at load time (`chair` → `always` + a low default `threshold`), so the wire `respond_policy` and every downstream reader are unchanged."
             },
             "threshold": {
               "type": "number",
               "minimum": 0.0,
               "maximum": 1.0,
-              "description": "RESERVED / no-op until v0.3.8 Tier B. Per-disposition salience threshold for the cheap relevance bid. The field is accepted by the schema in v0.3.7 so v0.3.8 is purely additive, but nothing reads it yet — setting it has no effect. Bounded to the `[0, 1]` salience range now (salience is clipped to `[0.0, 1.0]` per RFC 0024; mirrors `autonomy.salience_threshold` in agent.schema.json) so the bound is not a breaking tightening when Tier B starts reading it."
+              "description": "Per-disposition salience threshold for the v0.3.8 Tier B relevance bid: an open-floor `participant` only reaches the (expensive) quality turn when its cheap salience bid clears this bar. Only meaningful on an open-floor disposition (`participant`/`chair`/legacy `always`); the Go loader rejects a `threshold` set on `addressed`/`observer`/`when_mentioned`, where no bid runs — a cross-field rule JSON Schema cannot express, so a schema-valid config can still fail to load. Bias-to-silence — an absent/unset threshold biases toward NOT replying on ambiguous open-floor traffic (the conservative default; calibration is post-soak). `chair` members get a low default so they speak readily. Bounded to the `[0, 1]` salience range (salience is clipped to `[0.0, 1.0]` per RFC 0024; mirrors `autonomy.salience_threshold` in agent.schema.json)."
             }
           }
         }

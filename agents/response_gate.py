@@ -77,6 +77,7 @@ __all__ = [
     "MENTION_EVERYONE",
     "POLICY_ADDRESSED",
     "POLICY_ALWAYS",
+    "POLICY_CHAIR",
     "POLICY_DEFENSE_IN_DEPTH",
     "POLICY_NEVER",
     "POLICY_OBSERVER",
@@ -106,6 +107,19 @@ POLICY_PARTICIPANT: Final[str] = "participant"
 POLICY_ADDRESSED: Final[str] = "addressed"
 POLICY_OBSERVER: Final[str] = "observer"
 
+# RFC 0030 Tier B (v0.3.8): `chair` is a low-threshold facilitator — a
+# `participant` whose low salience `threshold` lets it clear the relevance
+# bid readily. On the wire it is normalized to `always` by the Go loader
+# (the low threshold rides on the in-memory Go config struct — it is not on
+# this wire, nor in the membership row), so the gate normally never sees
+# `chair`; it is recognized here as defence-in-depth, the same as the other
+# disposition aliases. The chair's behaviour (the low-threshold bid + the
+# inert Layer 5 hooks) lives in the Tier B bid stage downstream of this pure
+# gate, not here — and that stage cannot read the threshold until a later PR
+# carries it across the store/wire boundary (see MemberConfig.Threshold in
+# internal/channels/config.go).
+POLICY_CHAIR: Final[str] = "chair"
+
 # Disposition → legacy alias map, applied once to the incoming policy so
 # every downstream branch reads (and labels metrics with) the canonical
 # legacy value. This is the Python mirror of Go's
@@ -116,6 +130,7 @@ POLICY_OBSERVER: Final[str] = "observer"
 # normalization tests there).
 _DISPOSITION_ALIASES: Final[dict[str, str]] = {
     POLICY_PARTICIPANT: POLICY_ALWAYS,
+    POLICY_CHAIR: POLICY_ALWAYS,
     POLICY_ADDRESSED: POLICY_WHEN_MENTIONED,
     POLICY_OBSERVER: POLICY_NEVER,
 }

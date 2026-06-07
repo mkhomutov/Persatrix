@@ -123,7 +123,7 @@ def _channel_with_member(respond: object = None, *, extra: dict | None = None) -
     ``respond`` is omitted from the member when ``None`` (exercising the
     shorthand default); otherwise it is set verbatim so the test can feed
     a disposition / legacy / unknown value through the real schema. ``extra``
-    merges additional member keys (e.g. the reserved ``threshold``).
+    merges additional member keys (e.g. the per-disposition ``threshold``).
     """
     member: dict = {"id": "alice"}
     if respond is not None:
@@ -143,6 +143,23 @@ def test_member_respond_accepts_disposition_vocabulary(disposition: str):
     the first gate an operator hits when they adopt the new surface.
     """
     _validate(_channel_with_member(disposition))
+
+
+def test_member_respond_accepts_chair_disposition():
+    """The v0.3.8 Tier B ``chair`` disposition MUST validate.
+
+    ``chair`` is a low-threshold facilitator: a ``participant`` (legacy
+    ``always``) carrying a low default ``threshold`` so it clears the Tier B
+    salience bid readily. The Go loader normalizes it to ``always`` + a low
+    threshold at load time, but ``make validate`` is the first gate an
+    operator hits when they adopt the new value.
+    """
+    _validate(_channel_with_member("chair"))
+
+
+def test_member_respond_accepts_chair_with_explicit_threshold():
+    """A ``chair`` with an explicit ``threshold`` override validates."""
+    _validate(_channel_with_member("chair", extra={"threshold": 0.4}))
 
 
 @pytest.mark.parametrize("legacy", ["always", "when_mentioned", "never"])
@@ -167,26 +184,25 @@ def test_member_respond_rejects_unknown_value():
         _validate(_channel_with_member("participent"))  # typo, not the real value
 
 
-def test_member_threshold_reserved_field_accepts_number():
-    """The reserved per-disposition ``threshold`` field accepts a number.
+def test_member_threshold_accepts_number():
+    """The per-disposition ``threshold`` field accepts a number.
 
-    The field exists in the schema so v0.3.8 Tier B is additive; nothing
-    reads it in v0.3.7 (it is documented reserved/no-op). It must validate
-    as a number when present so an early adopter who sets it does not trip
-    ``make validate``.
+    Activated in v0.3.8 Tier B (PR 2 reads it as the salience bid bar); the
+    schema admitted the field already in v0.3.7 so the activation is purely
+    additive. It must validate as a number when present.
     """
     _validate(_channel_with_member("participant", extra={"threshold": 0.5}))
 
 
 def test_member_threshold_rejects_non_number():
-    """A non-numeric ``threshold`` is wire-illegal even while reserved."""
+    """A non-numeric ``threshold`` is wire-illegal."""
     with pytest.raises(jsonschema.ValidationError):
         _validate(_channel_with_member("participant", extra={"threshold": "high"}))
 
 
 @pytest.mark.parametrize("boundary", [0.0, 1.0])
 def test_member_threshold_accepts_unit_interval_boundaries(boundary: float):
-    """The reserved ``threshold`` accepts the ``[0, 1]`` salience range.
+    """The ``threshold`` accepts the ``[0, 1]`` salience range.
 
     The field is a per-disposition *salience* threshold for the Tier B bid,
     and salience is clipped to ``[0.0, 1.0]`` (RFC 0024 PR plan; mirrored by
@@ -198,22 +214,44 @@ def test_member_threshold_accepts_unit_interval_boundaries(boundary: float):
 
 @pytest.mark.parametrize("out_of_range", [-0.1, 1.5])
 def test_member_threshold_rejects_out_of_range(out_of_range: float):
-    """A ``threshold`` outside ``[0, 1]`` is wire-illegal even while reserved.
+    """A ``threshold`` outside ``[0, 1]`` is wire-illegal.
 
-    Pinning the range in v0.3.7 (rather than v0.3.8 when Tier B reads it)
-    keeps the field's stated contract — that v0.3.8 is "purely additive" —
-    honest: tightening the bound later would retroactively reject a config
-    that set ``threshold: 5`` under v0.3.7. A salience score lives in
-    ``[0, 1]``, so any value outside it is meaningless regardless of release.
+    The range was pinned in v0.3.7 (before Tier B read the field) so the
+    v0.3.8 activation stays "purely additive": a config that set
+    ``threshold: 5`` would already have failed under v0.3.7. A salience
+    score lives in ``[0, 1]``, so any value outside it is meaningless.
     """
     with pytest.raises(jsonschema.ValidationError):
         _validate(_channel_with_member("participant", extra={"threshold": out_of_range}))
 
 
+@pytest.mark.parametrize("non_open_floor", ["addressed", "observer", "when_mentioned"])
+def test_member_threshold_on_non_open_floor_disposition_passes_schema(non_open_floor: str):
+    """The schema deliberately does NOT enforce the cross-field invariant
+    that ``threshold`` is only meaningful on an open-floor disposition.
+
+    A ``threshold`` only has effect on ``participant``/``chair``/legacy
+    ``always`` (the open-floor speakers that run the Tier B salience bid);
+    on ``addressed``/``observer``/``when_mentioned`` no bid ever runs, so a
+    bar there is a silent no-op. JSON Schema cannot express that one field's
+    legality depends on another field's value, so such a config stays
+    schema-valid — the Go loader is the *sole* enforcement point and rejects
+    it with ``ErrThresholdNotApplicable`` (see ``internal/channels/config.go``
+    ``Validate`` and the companion
+    ``TestLoadConfig_RejectsThresholdOnNonOpenFloorDisposition``).
+
+    This test pins that split so a future edit does not silently assume the
+    schema already guards the invariant, nor tighten the schema in a way that
+    makes the loader's check unreachable. A schema-valid config can still fail
+    ``LoadConfig``; the schema ``threshold`` description says as much.
+    """
+    _validate(_channel_with_member(non_open_floor, extra={"threshold": 0.5}))
+
+
 def test_member_unknown_key_still_rejected():
     """The member object remains ``additionalProperties: false``.
 
-    Adding the reserved ``threshold`` key must not open the member object
+    Adding the ``threshold`` key must not open the member object
     to arbitrary keys; a typo'd field still fails validation.
     """
     with pytest.raises(jsonschema.ValidationError):
