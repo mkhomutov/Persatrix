@@ -36,6 +36,7 @@ from agents.response_gate import (
     POLICY_NEVER,
     POLICY_WHEN_MENTIONED,
     evaluate_response_gate,
+    is_open_floor_admit,
 )
 
 
@@ -87,14 +88,17 @@ class TestDirectedElsewhere:
 
     def test_mentioned_participant_responds(self):
         # The addressed participant is admitted — directedness suppresses
-        # *others*, never the target.
+        # *others*, never the target. It is admitted with the *directed*
+        # ``mentioned`` reason (not the open-floor ``policy_always``): an
+        # explicitly-named participant is in its lane, so RFC 0030 Tier B
+        # leaves it out of the salience bid (TB1, ``is_open_floor_admit``).
         evt = _channel_event(
             respond_policy="always", sender_id="alice", mentions=["ember-owl"]
         )
         d = evaluate_response_gate(evt, agent_id="ember-owl")
         assert d.respond is True
         assert d.policy == POLICY_ALWAYS
-        assert d.reason == "policy_always"
+        assert d.reason == "mentioned"
 
     def test_participant_among_several_mentions_responds(self):
         # Multiple explicit recipients: each addressed participant is in.
@@ -146,6 +150,12 @@ class TestBroadcast:
         # D3 (amendment OQ #5, adopted): an explicit broadcast addresses the
         # room, so the directed-elsewhere filter is disabled even though
         # mentions is non-empty and this member is not individually named.
+        # RFC 0030 Tier B: a broadcast admits with the *directed* ``broadcast``
+        # reason (not the open-floor ``policy_always``) — the @everyone
+        # sentinel's documented contract is "do not suppress; every
+        # participant reaches the turn", so it is the personas' lane (like an
+        # individual @-mention, TB1) and must skip the salience bid rather
+        # than be re-suppressed by it.
         evt = _channel_event(
             respond_policy="always",
             sender_id="alice",
@@ -153,7 +163,7 @@ class TestBroadcast:
         )
         d = evaluate_response_gate(evt, agent_id="iron-fox")
         assert d.respond is True
-        assert d.reason == "policy_always"
+        assert d.reason == "broadcast"
 
     def test_broadcast_alongside_a_named_mention_still_admits_others(self):
         # "@everyone — and especially @ember-owl": the broadcast sentinel
@@ -251,3 +261,92 @@ class TestUnchangedDispositions:
         assert d.respond is False
         assert d.reason == "directed_elsewhere"
         assert d.policy == POLICY_ALWAYS
+
+
+class TestIsOpenFloorAdmit:
+    """RFC 0030 Tier B (v0.3.8): the open-floor-admit predicate is the seam
+    the action loop uses to decide whether to layer the leased salience bid
+    on top of a pure Tier-A admit (TB1)."""
+
+    def test_open_floor_participant_admit_is_open_floor(self):
+        evt = _channel_event(respond_policy="always", sender_id="alice", mentions=[])
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert d.reason == "policy_always"
+        assert is_open_floor_admit(d) is True
+
+    def test_broadcast_admit_is_not_open_floor(self):
+        # RFC 0030 Tier B: an explicit @everyone broadcast is *not* the
+        # ambiguous open-floor remainder — it is an explicit room-wide
+        # address whose v0.3.7 sentinel contract is "do not suppress". It
+        # admits with the directed ``broadcast`` reason so the salience bid
+        # never runs on it (it would otherwise bias-to-silence the very
+        # broadcast the sentinel exists to force through). ``respond`` stays
+        # True, so every participant still reaches the turn (v0.3.7 parity).
+        evt = _channel_event(
+            respond_policy="always", sender_id="alice", mentions=[MENTION_EVERYONE],
+        )
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert d.respond is True
+        assert d.reason == "broadcast"
+        assert is_open_floor_admit(d) is False
+
+    def test_directed_mention_admit_is_not_open_floor(self):
+        # A directed @-mention is the persona's lane — it skips the bid.
+        evt = _channel_event(
+            respond_policy="when_mentioned", sender_id="alice", mentions=["iron-fox"],
+        )
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert d.respond is True
+        assert d.reason == "mentioned"
+        assert is_open_floor_admit(d) is False
+
+    def test_directed_mention_of_an_always_member_is_not_open_floor(self):
+        # TB1 regression. A *participant* (``always``) member who is named
+        # explicitly is being addressed directly — its lane, not the
+        # open-floor remainder. The gate must admit it with the *directed*
+        # ``mentioned`` reason (not the open-floor ``policy_always``) so the
+        # salience bid never runs on — and so can never silence — a
+        # directly-asked persona. Before the fix the ``always`` branch
+        # collapsed this case into ``policy_always`` and the bid ran on it.
+        evt = _channel_event(
+            respond_policy="always", sender_id="alice", mentions=["iron-fox"],
+        )
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert d.respond is True
+        assert d.reason == "mentioned"
+        assert is_open_floor_admit(d) is False
+
+    def test_always_member_named_within_a_broadcast_is_not_open_floor(self):
+        # "@everyone — and especially @iron-fox": iron-fox is named
+        # explicitly, so it is in its lane even though the broadcast sentinel
+        # is also present. Unnamed participants still treat @everyone as the
+        # open floor (``test_broadcast_admits_unmentioned_participant``).
+        evt = _channel_event(
+            respond_policy="always",
+            sender_id="alice",
+            mentions=[MENTION_EVERYONE, "iron-fox"],
+        )
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert d.respond is True
+        assert is_open_floor_admit(d) is False
+
+    def test_dm_admit_is_not_open_floor(self):
+        evt = _channel_event(
+            respond_policy="always", sender_id="alice", channel_id="dm:alice__iron-fox",
+        )
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert d.reason == "dm"
+        assert is_open_floor_admit(d) is False
+
+    def test_suppressed_decision_is_not_open_floor(self):
+        evt = _channel_event(
+            respond_policy="always", sender_id="alice", mentions=["ember-owl"],
+        )
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert d.respond is False
+        assert is_open_floor_admit(d) is False
+
+    def test_observer_is_not_open_floor(self):
+        evt = _channel_event(respond_policy="never", sender_id="alice", mentions=[])
+        d = evaluate_response_gate(evt, agent_id="iron-fox")
+        assert is_open_floor_admit(d) is False

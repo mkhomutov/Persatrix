@@ -110,6 +110,15 @@ def _touch_all(inst: pmetrics._Instruments) -> None:
     inst.facts_envelope_parse_failed.add(
         1, attributes={"agent.id": "t", "reason": "truncated"},
     )
+    # RFC 0030 Tier B (v0.3.8) — the salience-bid skip counter, registered by
+    # the ``_metrics_tier_b`` split. Touched here so a rename or unit drift,
+    # or a future drop of ``_mtb`` from the ``register`` loop, trips the
+    # inventory/unit tests below rather than surfacing as an AttributeError at
+    # the first call site (the counter is a class annotation registered out of
+    # line, so mypy cannot catch the omission).
+    inst.channel_messages_tier_b_skipped.add(
+        1, attributes={"reason": "channel_too_large"},
+    )
 
 
 def _collect(reader: InMemoryMetricReader) -> dict[str, Any]:
@@ -173,6 +182,10 @@ class TestInstrumentInventory:
             "agent.wake.scheduled",
             "agent.wake.salience",
             "agent.wake.dropped",
+            # RFC 0030 Tier B (v0.3.8) — the salience-bid skip counter. Pinned
+            # here so the ``_metrics_tier_b`` split stays wired into the
+            # ``_Instruments`` registration loop.
+            "channel.messages.tier_b_skipped",
         }
         missing = expected - names
         assert not missing, f"Missing instruments: {missing}"
@@ -199,6 +212,7 @@ class TestInstrumentInventory:
             "agent.wake.scheduled": "{wake}",
             "agent.wake.salience": "{wake}",
             "agent.wake.dropped": "{wake}",
+            "channel.messages.tier_b_skipped": "{message}",
         }
         for name, unit in expected_units.items():
             assert seen.get(name) == unit, f"{name} unit={seen.get(name)!r} expected={unit!r}"
