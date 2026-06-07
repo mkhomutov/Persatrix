@@ -457,7 +457,7 @@ func (r *ChannelRouter) ResolveSalienceCaps(ctx context.Context, cfg *Config) er
 	}
 	all, err := r.store.ListChannels(ctx, 0, "")
 	if err != nil {
-		return fmt.Errorf("channels: resolve tier b caps: list channels: %w", err)
+		return fmt.Errorf("channels: resolve salience caps: list channels: %w", err)
 	}
 	for _, ch := range all {
 		if ch.Type != ChannelTypeGroup || configured[ch.ID] {

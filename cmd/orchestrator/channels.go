@@ -179,7 +179,7 @@ func initChannels(
 	// failure leaves the config channels resolved, and any un-resolved channel
 	// falls back to the default cap on the wire ([ChannelRouter.salienceMaxFor]).
 	if tErr := router.ResolveSalienceCaps(context.Background(), chanCfg); tErr != nil {
-		logger.Warn("channels: tier-b cap resolution incomplete; config channels resolved, store-resident channels fall back to the default cap until next create/restart",
+		logger.Warn("channels: salience cap resolution incomplete; config channels resolved, store-resident channels fall back to the default cap until next create/restart",
 			zap.Error(tErr))
 	}
 
