@@ -31,14 +31,15 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..observability._metrics_tier_b import tier_b_skip_attrs
-from ..observability.metrics import gate_attrs, try_get_instruments
-from ..response_gate import POLICY_LOW_SALIENCE, is_open_floor_admit
+from ..observability._metrics_tier_b import tier_b_gated_attrs, tier_b_skip_attrs
+from ..observability.metrics import try_get_instruments
+from ..response_gate import is_open_floor_admit
 from ..tier_b_salience import (
     DEFAULT_TIER_B_MAX_CHANNEL_MEMBERS,
     evaluate_salience,
     skip_bid_for_channel_size,
 )
+from .wallet_cause import cause_for_event
 
 if TYPE_CHECKING:
     from ..persona_types import AgentEvent
@@ -138,14 +139,13 @@ async def run_tier_b_gate(
     if not (is_open_floor_admit(decision) and _governed(event)):
         return None
 
-    # Formatted once here and handed back on the speak path so the action
-    # loop does not re-format / re-fetch.
-    user_message = agent._format_event(event)
-
     # TB6 — oversized channel: skip the bid entirely and fall back to
     # ``addressed``-only. An un-addressed open-floor participant therefore
     # stays silent on a channel above the cap (it was admitted only by the
-    # open-floor branch, which Tier B now declines to honour at scale).
+    # open-floor branch, which Tier B now declines to honour at scale). This
+    # cap check is a pure, cheap predicate and runs *before* ``_format_event``
+    # so an oversized governed channel pays nothing but the check + the ingest
+    # (the formatted message would only be discarded on this path).
     if skip_bid_for_channel_size(
         channel_size=_channel_size(event), max_members=_max_members(event),
     ):
@@ -156,6 +156,10 @@ async def run_tier_b_gate(
             )
         await agent._store_event_episode(event, [])
         return TierBOutcome(silence=True)
+
+    # Formatted once here and handed back on the speak path so the action
+    # loop does not re-format / re-fetch.
+    user_message = agent._format_event(event)
 
     # Cost note: reaching here (an open-floor admit of a governed channel)
     # always pays a conversation-window fetch (``_build_seed_messages``, one
@@ -185,6 +189,14 @@ async def run_tier_b_gate(
         persona_name=agent.name,
         persona_role=agent.role,
         threshold=_threshold(event),
+        # Bill the bid under the *same* wallet cause the quality turn would use
+        # for this event (e.g. CAUSE_CHAT for a chat-shaped message), rather
+        # than a hardcoded constant. The ISSUE-0064 sub-agent override that
+        # ``lease_attribution_for_event`` layers on top is a TASK_ASSIGNED-only
+        # concern and cannot reach an open-floor channel admit, so deriving the
+        # cause alone (and keeping ``agent_id`` as the resolving persona) is
+        # sufficient and matches the quality turn for every reachable case.
+        cause=cause_for_event(event),
     )
     if not salience.speak:
         # No-pile-on: suppress the turn before paying for memory recall or
@@ -192,11 +204,17 @@ async def run_tier_b_gate(
         # whether to remember — the gate-suppress discipline).
         inst = try_get_instruments()
         if inst is not None:
+            # Ride the existing ``gated`` counter with ``policy=low_salience``,
+            # but carry the bid ``reason`` so a fail-closed branch
+            # (lease_denied / llm_error / …) is distinguishable on a dashboard
+            # from genuine dampening (below_threshold / declined) — otherwise a
+            # ``fast``-model outage or wallet back-pressure looks exactly like
+            # the no-pile-on feature working.
             inst.channel_messages_gated.add(
                 1,
-                attributes=gate_attrs(
+                attributes=tier_b_gated_attrs(
                     channel_id=event.channel_id or "",
-                    policy=POLICY_LOW_SALIENCE,
+                    reason=salience.reason,
                 ),
             )
         logger.debug(

@@ -23,10 +23,11 @@ Load-bearing invariants (amendment OQs / master-plan §Open-question status):
   lease denial, an unresolvable ``fast`` alias, or ``score < threshold`` all
   resolve to ``speak=False``. Conservative by construction; calibration is a
   post-soak concern (amendment OQ #3).
-* **TB3 — every bid is leased + attributable.** The call carries
-  ``cause=CAUSE_CHANNEL_MESSAGE`` and the resolving ``agent_id`` so the RFC
-  0023 wallet bounds + attributes it; a denied lease fails *closed* (RFC
-  0023 §F).
+* **TB3 — every bid is leased + attributable.** The call carries the
+  resolving ``agent_id`` and a wallet ``cause`` *derived from the inbound
+  event* (defaulting to ``CAUSE_CHANNEL_MESSAGE``) so the bid bills the same
+  cause as the event's quality turn; the RFC 0023 wallet bounds + attributes
+  it, and a denied lease fails *closed* (RFC 0023 §F).
 * **TB6 — channel-size cap.** Above ``tier_b_max_channel_members`` the caller
   skips the bid and falls back to ``addressed``-only so bid fan-out stays
   small on large channels (amendment OQ #4). The pure
@@ -117,9 +118,13 @@ class SalienceDecision:
             quality turn; ``False`` to stay silent (the no-pile-on path).
         score: The parsed salience score in ``[0, 1]``, or ``None`` when the
             bid could not be scored (parse failure / lease denial / error).
-        reason: Low-cardinality branch label for logs + the
-            ``channel.messages.gated`` metric: ``salient`` / ``declined``
-            (explicit ``speak: no`` veto) / ``below_threshold`` /
+        reason: Low-cardinality branch label. For every *suppressing* verdict
+            the action-loop seam emits it as the ``reason`` attribute on the
+            ``channel.messages.gated`` counter (alongside
+            ``policy=low_salience``) so a fail-closed branch is distinguishable
+            on a dashboard from genuine no-pile-on dampening — not only in a
+            DEBUG log. Values: ``salient`` (a speak verdict — never gated) /
+            ``declined`` (explicit ``speak: no`` veto) / ``below_threshold`` /
             ``parse_failure`` / ``lease_denied`` (a denied/unreachable lease
             **or** the wallet's ``RESOURCE_EXHAUSTED`` active-lease cap) /
             ``llm_error`` (any other provider/gRPC failure) /
@@ -221,6 +226,7 @@ async def evaluate_salience(
     persona_name: str,
     persona_role: str,
     threshold: float | None,
+    cause: walletpb.Cause.ValueType = walletpb.CAUSE_CHANNEL_MESSAGE,
 ) -> SalienceDecision:
     """Run the Tier B salience bid for one open-floor admit.
 
@@ -228,6 +234,14 @@ async def evaluate_salience(
     to ``speak=False`` (bias-to-silence, TB2). The call is leased on the
     ``fast`` alias (TB3); a lease denial, the wallet active-lease cap
     (``RESOURCE_EXHAUSTED``), or any provider error all fail closed.
+
+    ``cause`` is the RFC 0023 wallet cause the lease is billed under. The
+    action-loop seam derives it from the inbound event
+    (:func:`agents.persona_runtime.wallet_cause.cause_for_event`) so the bid
+    bills the *same* cause as the quality turn for that event (e.g.
+    ``CAUSE_CHAT`` for a chat-shaped message); it defaults to
+    ``CAUSE_CHANNEL_MESSAGE`` for the common channel-message path and for
+    direct callers (TB3).
     """
     # Resolve the `fast` alias per-call (RFC 0033). An unconfigured/unknown
     # alias raises SystemExit (a BaseException) by design — swallow it here
@@ -254,7 +268,7 @@ async def evaluate_salience(
             tools=[],
             max_tokens=_BID_MAX_OUTPUT_TOKENS,
             temperature=_BID_TEMPERATURE,
-            cause=walletpb.CAUSE_CHANNEL_MESSAGE,
+            cause=cause,
             agent_id=agent_id,
         )
     except BudgetExceededError:

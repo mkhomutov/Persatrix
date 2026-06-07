@@ -165,9 +165,9 @@ class _Instruments:
             name="channel.messages.gated",
             unit="{message}",
             description=(
-                "Channel messages suppressed by the response gate before "
-                "reaching the LLM. Attributes: channel_id, policy "
-                "(RFC 0011 §D — subscriber_id excluded for cardinality)."
+                "Channel messages suppressed before the quality LLM turn. "
+                "Attrs: channel_id, policy (RFC 0011 §D); RFC 0030 Tier B "
+                "fires policy=low_salience after the cheap bid, +a reason attr."
             ),
         )
         # RFC 0011 PR 5 follow-up — separate from ``channel.messages.gated``

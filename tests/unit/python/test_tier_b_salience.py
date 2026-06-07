@@ -296,7 +296,7 @@ class TestLeasedAndFast:
         assert kwargs["tools"] == []
 
     async def test_bid_passes_channel_message_cause(self):
-        """The cause is asserted at the LLMClient seam: the bid threads
+        """The cause is asserted at the LLMClient seam: the bid defaults to
         ``CAUSE_CHANNEL_MESSAGE`` so the wallet attributes it."""
         client = _client("speak: no\nscore: 0.0")
         # Spy on the LLMClient.create_message wrapper to capture `cause`.
@@ -321,3 +321,30 @@ class TestLeasedAndFast:
         assert seen["cause"] == walletpb.CAUSE_CHANNEL_MESSAGE
         assert seen["agent_id"] == "ember-owl"
         assert seen["model_alias"] == "fast"
+
+    async def test_bid_threads_the_caller_supplied_cause(self):
+        """The caller (the action-loop seam) derives the wallet ``cause`` from
+        the event and passes it in, so the bid bills the same cause as the
+        quality turn (e.g. ``CAUSE_CHAT`` for a chat-shaped message). The bid
+        must thread the supplied value, not override it with a constant."""
+        client = _client("speak: no\nscore: 0.0")
+        seen: dict[str, Any] = {}
+        original = client.create_message
+
+        async def _spy(**kwargs: Any) -> LLMResponse:
+            seen.update(kwargs)
+            return await original(**kwargs)
+
+        client.create_message = _spy  # type: ignore[method-assign]
+        with use_alias_map(_FAST_ALIAS_MAP):
+            await evaluate_salience(
+                llm_client=client,
+                content="q",
+                transcript=_TRANSCRIPT,
+                agent_id="ember-owl",
+                persona_name="Ember Owl",
+                persona_role="VP of Engineering",
+                threshold=0.4,
+                cause=walletpb.CAUSE_CHAT,
+            )
+        assert seen["cause"] == walletpb.CAUSE_CHAT

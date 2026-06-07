@@ -23,11 +23,16 @@ model resolution. The observables:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
+from agents.generated import wallet_pb2 as walletpb
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
+from agents.observability import metrics as pmetrics
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_types import ActionType, AgentEvent, EventType
@@ -44,6 +49,36 @@ def _clean_registry():
     clear_registry()
     yield
     clear_registry()
+
+
+@pytest.fixture
+def metric_reader() -> Iterator[InMemoryMetricReader]:
+    """An ``InMemoryMetricReader`` wired into the global instrument bag so a
+    test can assert what the Tier B seam recorded. The reader needs no flush
+    (reads are synchronous), so teardown just clears the global bag — the
+    next test starts with ``try_get_instruments()`` returning ``None``
+    again, matching the metrics-uninitialised default the other tests rely
+    on."""
+    reader = InMemoryMetricReader()
+    pmetrics.init_metrics(reader=reader)
+    try:
+        yield reader
+    finally:
+        pmetrics._instruments = None
+
+
+def _gated_points(reader: InMemoryMetricReader) -> list[Any]:
+    """All data points recorded on the ``channel.messages.gated`` counter."""
+    data = reader.get_metrics_data()
+    points: list[Any] = []
+    if data is None:
+        return points
+    for rm in data.resource_metrics:
+        for sm in rm.scope_metrics:
+            for m in sm.metrics:
+                if m.name == "channel.messages.gated":
+                    points.extend(m.data.data_points)
+    return points
 
 
 def _persona_config(agent_id: str) -> dict:
@@ -128,12 +163,15 @@ def _payload(
     return payload
 
 
-async def _deliver(agent: _LLMPersonaAgent, payload: dict) -> list:
+async def _deliver(
+    agent: _LLMPersonaAgent, payload: dict, *, metadata: dict | None = None,
+) -> list:
     return await agent.on_event(AgentEvent(
         event_type=EventType.CHANNEL_MESSAGE,
         payload=payload,
         channel_id="group:planning",
         sender_id="alice",
+        metadata=metadata or {},
     ))
 
 
@@ -255,6 +293,21 @@ class TestChannelSizeCap:
         assert all(a.action_type is ActionType.DO_NOTHING for a in actions)
         assert quality.await_count == 0
 
+    async def test_oversized_skip_does_not_format_the_event(self):
+        """The TB6 size cap is a pure, cheap predicate — it must run *before*
+        the message is formatted, so an oversized governed channel pays
+        nothing beyond the cap check + the ingest. (Finding 3: ``_format_event``
+        was computed before the cap check and discarded on this path.)"""
+        agent, _ = await _make_agent()
+        with patch(_BID_PATH, new=AsyncMock(return_value=_speak())), \
+                patch.object(
+                    agent, "_format_event", wraps=agent._format_event,
+                ) as fmt:
+            await _deliver(agent, _payload(
+                tier_b_active=True, channel_size=50, max_members=20,
+            ))
+        fmt.assert_not_called()
+
     async def test_under_cap_still_runs_the_bid(self):
         agent, _ = await _make_agent()
         with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
@@ -284,3 +337,70 @@ class TestThresholdParsing:
             await _deliver(agent, _payload(tier_b_active=True, threshold=5.0))
         bid.assert_awaited_once()
         assert bid.await_args.kwargs["threshold"] is None
+
+
+class TestLeaseCauseDerivedFromEvent:
+    """Finding 4: the bid's wallet ``cause`` must be *derived from the event*
+    (via :func:`agents.persona_runtime.wallet_cause.cause_for_event`), exactly
+    like the quality turn's lease, rather than hardcoded to
+    ``CAUSE_CHANNEL_MESSAGE``. Otherwise the bid and the quality turn for the
+    same event could bill different causes."""
+
+    async def test_channel_message_threads_channel_message_cause(self):
+        agent, _ = await _make_agent()
+        with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
+            await _deliver(agent, _payload(tier_b_active=True))
+        bid.assert_awaited_once()
+        assert bid.await_args.kwargs["cause"] == walletpb.CAUSE_CHANNEL_MESSAGE
+
+    async def test_chat_shaped_event_threads_chat_cause(self):
+        """A ``chat_session_id`` in the event metadata is the chat servicer's
+        shape (``cause_for_event`` → ``CAUSE_CHAT``). The bid must follow the
+        event, not a hardcoded constant — a hardcoded ``CAUSE_CHANNEL_MESSAGE``
+        would fail this assertion."""
+        agent, _ = await _make_agent()
+        with patch(_BID_PATH, new=AsyncMock(return_value=_silent())) as bid:
+            await _deliver(
+                agent,
+                _payload(tier_b_active=True),
+                metadata={"chat_session_id": "sess-1"},
+            )
+        bid.assert_awaited_once()
+        assert bid.await_args.kwargs["cause"] == walletpb.CAUSE_CHAT
+
+
+class TestSuppressionObservability:
+    """Finding 1: a bid that ran and resolved to silence rides the
+    ``channel.messages.gated`` counter — but the *reason* (genuine
+    ``below_threshold`` decline vs. a fail-closed ``lease_denied`` /
+    ``llm_error``) must be a metric attribute, not a DEBUG-log-only field, so a
+    ``fast``-model outage or wallet back-pressure is distinguishable on a
+    dashboard from healthy no-pile-on dampening."""
+
+    async def test_low_salience_gated_fire_carries_the_reason(
+        self, metric_reader: InMemoryMetricReader,
+    ):
+        agent, _ = await _make_agent()
+        decision = SalienceDecision(speak=False, score=None, reason="lease_denied")
+        with patch(_BID_PATH, new=AsyncMock(return_value=decision)):
+            await _deliver(agent, _payload(tier_b_active=True))
+        points = _gated_points(metric_reader)
+        low_salience = [
+            p for p in points if p.attributes.get("policy") == "low_salience"
+        ]
+        assert len(low_salience) == 1, "expected one low-salience gated fire"
+        assert low_salience[0].attributes.get("reason") == "lease_denied"
+        assert low_salience[0].attributes.get("channel_id") == "group:planning"
+
+    async def test_genuine_decline_reason_is_recorded(
+        self, metric_reader: InMemoryMetricReader,
+    ):
+        agent, _ = await _make_agent()
+        with patch(_BID_PATH, new=AsyncMock(return_value=_silent())):
+            await _deliver(agent, _payload(tier_b_active=True))
+        points = _gated_points(metric_reader)
+        low_salience = [
+            p for p in points if p.attributes.get("policy") == "low_salience"
+        ]
+        assert len(low_salience) == 1
+        assert low_salience[0].attributes.get("reason") == "below_threshold"
