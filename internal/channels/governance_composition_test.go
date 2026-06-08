@@ -303,6 +303,54 @@ func TestGovernance_PostCloseSuppressionEmitsGovernanceDrop(t *testing.T) {
 		"the post-close drop stamped conversation.governance.layer on the publish span")
 }
 
+// replyCounterTracked reports whether the per-interaction reply-budget counter
+// map currently holds an entry for interactionID. Reads the unexported state
+// under its mutex so a leak test can assert the absence of a counter map, not
+// just observable behaviour.
+func replyCounterTracked(r *ChannelRouter, interactionID string) bool {
+	r.replyBudgetMu.Lock()
+	defer r.replyBudgetMu.Unlock()
+	_, ok := r.replyCounts[interactionID]
+	return ok
+}
+
+// TestGovernance_PostCloseReplyDoesNotLeakReplyCounter pins the lifecycle fix at
+// the Layer 4 → Layer 2 seam: a post-close non-vote reply runs enforceReplyBudget
+// (which lazily RE-CREATES replyCounts[interactionID] — it has no view of
+// closedInteractions) BEFORE processEndVote suppresses it. The close-time discard
+// already fired and never runs again, so without pruning on the post-close path
+// that re-created counter map would leak for the orchestrator's lifetime — the
+// very per-interaction growth the discard seam exists to bound. The post-close
+// suppression path must re-discard it.
+func TestGovernance_PostCloseReplyDoesNotLeakReplyCounter(t *testing.T) {
+	router, store, reader := routerWithGovernanceMetrics(t)
+	id := mustCreateGroup(t, store, "planning", "alice", "bob", "carol")
+	router.SetReplyBudget(id, 3)      // K=3 — Layer 2 active so counters are tracked.
+	router.SetEndVoteParams(id, 2, 3) // K=2, W=3.
+
+	// alice replies once, so the interaction has a live reply counter.
+	require.NoError(t, publishReply(t, router, id, "alice", "int-1", "agent"))
+	require.True(t, replyCounterTracked(router, "int-1"), "the reply created a counter")
+
+	// Two distinct votes close the interaction; the close discards the counters.
+	require.NoError(t, endVote(t, router, id, "alice", "int-1"))
+	require.NoError(t, endVote(t, router, id, "bob", "int-1"))
+	require.Equal(t, int64(1), interactionClosedCount(t, collect(t, reader), "group", endVotesTrigger),
+		"the interaction closed on votes")
+	require.False(t, replyCounterTracked(router, "int-1"), "close discarded the reply counter")
+
+	// A post-close non-vote reply from a participant who never replied (so it is
+	// admitted, not budget-rejected) runs enforceReplyBudget and re-creates the
+	// counter map; processEndVote then suppresses its fanout (post-close drop).
+	require.NoError(t, publishReply(t, router, id, "carol", "int-1", "agent"))
+	require.Equal(t, int64(1), governanceDropCount(t, collect(t, reader), "group", governanceLayerEndVote),
+		"the post-close reply was suppressed by Layer 4 (so it took the re-create path)")
+
+	// The re-created counter must not survive: the post-close path re-discards it.
+	assert.False(t, replyCounterTracked(router, "int-1"),
+		"post-close reply must not leak a re-created reply counter")
+}
+
 // TestGovernance_DropAnnotatesTraceSpan pins the §L trace-correlation contract:
 // a governance drop stamps `conversation.governance.layer=<layer>` on the
 // inbound publish span so an operator can find dropped publishes by a trace

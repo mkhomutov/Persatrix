@@ -264,6 +264,12 @@ func (r *ChannelRouter) publishWithReplyBudget(ctx context.Context, msg ChannelM
 // 128-byte, attacker-influenceable token, see interaction_id.go) leaks a counter
 // map for the orchestrator's lifetime. Inert today (no producer), so unbounded
 // growth cannot occur yet; the constraint binds when the producer lands.
+//
+// Also called on the post-close suppression path in [ChannelRouter.processEndVote]:
+// a post-close non-vote reply lazily re-creates this interaction's counter via
+// enforceReplyBudget (which has no view of closedInteractions), and the close-time
+// discard never runs again — so the post-close path re-discards it to keep that
+// re-created entry from leaking. Idempotent makes that re-call safe.
 func (r *ChannelRouter) DiscardInteractionReplyBudget(interactionID string) {
 	if interactionID == "" {
 		return

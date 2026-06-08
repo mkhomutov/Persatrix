@@ -146,6 +146,17 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 		// is expected, not anomalous (unlike a duplicate vote), so it is metered
 		// and traced but not logged. Fired outside the lock.
 		r.recordGovernanceDropEndVote(ctx, ct)
+		// Lifecycle: a post-close NON-vote reply ran enforceReplyBudget BEFORE this
+		// hook in Publish, which lazily RE-CREATES replyCounts[interactionID] (it
+		// gates on interaction_id, not on closedInteractions). The close-time
+		// DiscardInteractionReplyBudget already fired and never runs again for this
+		// interaction, so without re-pruning here that re-created counter map would
+		// leak for the orchestrator's lifetime — the per-interaction growth the
+		// discard seam exists to bound. Re-discard it: the interaction is terminated,
+		// so its reply budget is moot (final headroom was already recorded at close)
+		// and post-close fanout is suppressed regardless. Idempotent and a no-op when
+		// nothing was re-created (e.g. a post-close vote — votes never reserve a slot).
+		r.DiscardInteractionReplyBudget(interactionID)
 		return true
 	}
 	state := r.endVotes[interactionID]

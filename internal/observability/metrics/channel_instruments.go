@@ -81,9 +81,11 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	}
 	// RFC 0030 deterministic governance layers (v0.3.8). One increment per
 	// publish dropped by a governance layer, labelled by `channel_type` and
-	// `layer` (`reply_budget` in PR 3; `cost`/`depth`/`end_vote` join as PR 5
-	// wires the full composition surface). Feeds the governance-drop dashboard
-	// that makes "who got throttled and by which layer" observable (§L).
+	// `layer` (`reply_budget` in PR 3; `depth`/`end_vote` join as PR 5 wires the
+	// channel-owned composition surface; the wallet-side `cost` label is reserved
+	// and not yet emitted — it lands with the budget-stamping follow-up). Feeds the
+	// governance-drop dashboard that makes "who got throttled and by which layer"
+	// observable (§L).
 	if i.ChannelConversationGovernanceDrop, err = m.Int64Counter(
 		"channel.conversation.governance_drop",
 		metric.WithUnit("{message}"),
