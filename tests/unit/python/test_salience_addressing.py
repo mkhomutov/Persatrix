@@ -308,3 +308,66 @@ class TestCapitalizedProseGuard:
             content="let's hear from Iron Fox and Will", persona_name="Will",
         )
         assert a.self_named is True
+
+
+class TestOverToTopicPivot:
+    """Review finding #1 — ``over to`` is also a common topic-pivot phrasal verb
+    ("let's move over to caching", "switching over to production"), not only an
+    address. A *lowercase* capture after it is an ambiguous topic, not a clear
+    invitation, so it must classify as *neither* — never an ``other_named`` that
+    would bias **every** bystander persona toward silence on a message that named
+    no one. The capital is the signal that separates a clear address ("over to
+    Iron Fox") from a topic pivot; it gates only the suppressing direction."""
+
+    @pytest.mark.parametrize("content", [
+        "let's move over to caching",
+        "switching over to production now",
+        "ok let's hand this over to logging",
+        "what do we think — over to scaling",
+    ])
+    def test_lowercase_topic_pivot_suppresses_no_one(self, content):
+        # No persona is named, so no persona may be biased toward silence.
+        for persona in ("Iron Fox", "Ember Owl"):
+            a = detect_nl_addressing(content=content, persona_name=persona)
+            assert a == NLAddressing(self_named=False, other_named=False), (
+                content, persona,
+            )
+
+    def test_capitalized_name_after_over_to_still_registers_other(self):
+        """Recall guard: the precision fix must not over-correct — a genuinely
+        capitalised name after ``over to`` still biases an un-named bystander."""
+        a = detect_nl_addressing(content="over to Iron Fox", persona_name="Ember Owl")
+        assert a.other_named is True
+
+    def test_lowercase_self_address_still_pulls_the_named_persona_up(self):
+        """The capital gates only the suppressing ``other`` direction: a lowercase
+        self-address still lifts the *named* persona (a false speak is safe; a
+        false suppression is not)."""
+        a = detect_nl_addressing(content="over to iron fox", persona_name="Iron Fox")
+        assert a.self_named is True
+
+
+class TestPronounAnchoredListIsNotAName:
+    """Review finding #2 — a continuation after a *pronoun*-anchored "list" is not
+    a genuine invitee list: "let's hear from you and Postgres" names no specific
+    person (the anchor "you" dissolves to *neither*; "Postgres" is a trailing
+    topic, capitalised though it is). The dissolved anchor must not let the
+    continuation register an ``other_named`` that biases a bystander toward
+    silence. A list anchored by a *real* name is unaffected."""
+
+    def test_pronoun_anchor_with_capitalized_topic_is_neither(self):
+        a = detect_nl_addressing(
+            content="let's hear from you and Postgres",
+            persona_name="Ember Owl",
+        )
+        assert a == NLAddressing(self_named=False, other_named=False)
+
+    def test_real_name_anchor_still_biases_a_bystander(self):
+        """Recall guard: a list genuinely anchored by a real name still biases an
+        un-named bystander toward silence — the fix targets only the dissolved-
+        anchor case, not real multi-invitee lists."""
+        a = detect_nl_addressing(
+            content="let's hear from Iron Fox and Ember Owl",
+            persona_name="Gray Wolf",
+        )
+        assert a.other_named is True

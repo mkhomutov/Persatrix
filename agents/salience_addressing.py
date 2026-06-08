@@ -171,6 +171,26 @@ def _clean_name(captured: str) -> str:
     return " ".join(words)
 
 
+def _has_proper_name_capital(candidate: str) -> bool:
+    """True if the capture leads with a proper-name capital (its first non-filler
+    word is capitalised).
+
+    The capital is the signal that separates a *clear* address ("over to Iron
+    Fox") from an ambiguous lowercase topic pivot ("over to caching", "let's move
+    over to production") — ``over to`` and friends double as topic-transition
+    phrasal verbs (review finding #1). It gates **only** the ``other_named``
+    direction in :func:`detect_nl_addressing` — the one that can bias a bystander
+    toward silence — so a lowercase capture suppresses no one, while a lowercase
+    *self*-address still lifts the named persona (a false speak is safe; a false
+    suppression is not). The leading determiner is skipped so "the Iron Fox"
+    still reads as a name."""
+    for word in candidate.split():
+        if word.lower().strip(".,!?;:'\"") in _NAME_FILLERS:
+            continue
+        return word[:1].isupper()
+    return False
+
+
 def _split_names(captured: str) -> list[str]:
     """Split a captured name run ("Iron Fox and Ember Owl") into its invitees.
 
@@ -237,7 +257,12 @@ def detect_nl_addressing(*, content: str, persona_name: str) -> NLAddressing:
     other_named = False
     for pattern in _ADDRESS_CUES:
         for match in pattern.finditer(content):
-            for candidate in _split_names(match.group("name")):
+            # Whether a *real* name has anchored this cue's invitee list yet. A
+            # speculative continuation only registers ``other`` once the list is
+            # genuinely anchored — a pronoun anchor that dissolved to "neither"
+            # leaves it unset, so the continuation cannot suppress (finding #2).
+            saw_real_name = False
+            for index, candidate in enumerate(_split_names(match.group("name"))):
                 toks = _name_tokens(_clean_name(candidate))
                 # Strip leading determiners ("the team", "our folks") so a group
                 # reference is judged on its noun alone, not leaked through by a
@@ -255,7 +280,26 @@ def detect_nl_addressing(*, content: str, persona_name: str) -> NLAddressing:
                 # so it is safe for a signal that must never hard-drop a turn.
                 if persona_toks <= core or core <= persona_toks:
                     self_named = True
-                else:
+                    saw_real_name = True
+                    continue
+                # ``other_named`` is the *only* direction that can bias a
+                # bystander toward silence, so — unlike the lenient ``self``
+                # branch above — it demands a clear address. Two extra guards,
+                # both erring toward a false *speak*, never a false suppression:
+                #
+                #  * a proper-name capital on the capture — a lowercase phrase is
+                #    an ambiguous topic pivot ("let's move over to caching"), not
+                #    a clear invitation, and must not push the whole channel
+                #    toward silence (review finding #1); and
+                #  * a list genuinely anchored by a real name — a continuation
+                #    after a dissolved pronoun anchor ("let's hear from you and
+                #    Postgres") is trailing prose, not a second invitee (review
+                #    finding #2). The cue-anchored first capture (``index == 0``)
+                #    is always trusted; only later list members need the anchor.
+                if _has_proper_name_capital(candidate) and (
+                    index == 0 or saw_real_name
+                ):
                     other_named = True
+                    saw_real_name = True
 
     return NLAddressing(self_named=self_named, other_named=other_named)
