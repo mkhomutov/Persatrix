@@ -3,11 +3,11 @@ Persatrix Agent gRPC Servicers.
 
 Contains gRPC servicer implementations used by AgentServer:
 - AgentServiceServicer: ExecuteTask, HealthCheck, ExecuteTaskStream,
-  SendChatMessage, ReceiveChannelMessage
+  SendChatMessage, ReceiveChannelMessage, GetClosedInteractions
 
 Chat-reply extraction (``_extract_chat_reply``) lives in
-``agents/chat_reply.py`` since RFC 0011 PR 4a-i and is re-exported
-here for backward compatibility with existing import sites.
+``agents/chat_reply.py`` since RFC 0011 PR 4a-i and is re-exported here
+for backward compatibility with existing import sites.
 """
 
 # ruff: noqa: N802
@@ -26,6 +26,7 @@ from .channel_validation import validate_channel_message_event
 from .channel_wire_metadata import seed_wire_metadata
 from .chat_reply import chat_error_response as _chat_error_response
 from .chat_reply import extract_chat_reply as _extract_chat_reply
+from .closed_interactions_read import handle_get_closed_interactions
 from .dispatch import EventDispatcher
 from .epoch_id import EVENT_EPOCH_METADATA_KEY
 from .generated import task_pb2, task_pb2_grpc
@@ -47,12 +48,9 @@ logger = logging.getLogger("Persatrix.agent.server")
 
 
 class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
-    """gRPC servicer.
-
-    Methods: ExecuteTask, HealthCheck, ExecuteTaskStream, SendChatMessage,
-    ReceiveChannelMessage (real handler — RFC 0011 PR 4a; chat-path
-    rename to ``CHANNEL_MESSAGE`` and the ``SEND_CHANNEL_MESSAGE`` executor
-    land in a follow-up PR alongside the chat migration).
+    """gRPC servicer: ExecuteTask, HealthCheck, ExecuteTaskStream,
+    SendChatMessage, ReceiveChannelMessage (RFC 0011 PR 4a),
+    GetClosedInteractions (v0.3.8 interaction-summary surface).
     """
 
     def __init__(self, agents: dict[str, BaseAgent], dispatcher: EventDispatcher | None = None):
@@ -485,9 +483,17 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             )
         return task_pb2.TaskAck(success=True)
 
+    async def GetClosedInteractions(
+        self,
+        request: task_pb2.ClosedInteractionsRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> task_pb2.ClosedInteractionsResponse:
+        """Read closed-interaction summaries (v0.3.8 surface); thin seam over
+        ``closed_interactions_read.handle_get_closed_interactions``."""
+        return await handle_get_closed_interactions(self._agents, request, context)
+
 
 # ``_extract_chat_reply`` is re-exported (PR 4a-i) for back-compat with
-# ``agents/server.py`` and ``tests/unit/python/test_extract_chat_reply.py``.
-# Module-private (leading underscore) and absent from ``__all__``.
+# ``agents/server.py`` and ``test_extract_chat_reply.py``; module-private.
 __all__ = ["AgentServiceServicer"]
 

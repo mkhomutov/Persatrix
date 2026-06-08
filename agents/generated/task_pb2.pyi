@@ -591,3 +591,103 @@ class TaskAck(google.protobuf.message.Message):
     def ClearField(self, field_name: typing.Literal["error_message", b"error_message", "success", b"success"]) -> None: ...
 
 global___TaskAck = TaskAck
+
+@typing.final
+class ClosedInteractionsRequest(google.protobuf.message.Message):
+    """─── Closed-Interaction Summary Read (REST ↔ agent gRPC) ──────────
+    v0.3.8 interaction-summary surface. The RFC 0020 summary is persisted
+    to the agent's episodic store at interaction close (any trigger: idle,
+    structural/end-vote, or the RFC 0030 Layer 1 cost ceiling); this RPC
+    reads it back so the web console + CLI can show the synthesised
+    outcome. Surface-only — no summary is (re)generated here.
+    """
+
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    AGENT_ID_FIELD_NUMBER: builtins.int
+    SCOPE_FIELD_NUMBER: builtins.int
+    INTERACTION_ID_FIELD_NUMBER: builtins.int
+    LIMIT_FIELD_NUMBER: builtins.int
+    agent_id: builtins.str
+    scope: builtins.str
+    """Optional: restrict to a single RFC 0020 scope (e.g. "group:room-7").
+    Empty → the agent's most-recent closed interactions across scopes.
+    """
+    interaction_id: builtins.str
+    """Optional: fetch exactly one interaction by id. Empty → list mode."""
+    limit: builtins.int
+    """Max rows returned (recency order by closed_at). 0 → server default;
+    the server caps the value regardless.
+    """
+    def __init__(
+        self,
+        *,
+        agent_id: builtins.str = ...,
+        scope: builtins.str = ...,
+        interaction_id: builtins.str = ...,
+        limit: builtins.int = ...,
+    ) -> None: ...
+    def ClearField(self, field_name: typing.Literal["agent_id", b"agent_id", "interaction_id", b"interaction_id", "limit", b"limit", "scope", b"scope"]) -> None: ...
+
+global___ClosedInteractionsRequest = ClosedInteractionsRequest
+
+@typing.final
+class ClosedInteraction(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    INTERACTION_ID_FIELD_NUMBER: builtins.int
+    SCOPE_FIELD_NUMBER: builtins.int
+    STARTED_AT_FIELD_NUMBER: builtins.int
+    CLOSED_AT_FIELD_NUMBER: builtins.int
+    TURN_COUNT_FIELD_NUMBER: builtins.int
+    CLOSE_REASON_FIELD_NUMBER: builtins.int
+    SUMMARY_FIELD_NUMBER: builtins.int
+    interaction_id: builtins.str
+    scope: builtins.str
+    started_at: builtins.float
+    """Unix epoch seconds (REAL in the episodes table). For a closed
+    interaction `closed_at` is always populated.
+    """
+    closed_at: builtins.float
+    turn_count: builtins.int
+    close_reason: builtins.str
+    """The RFC 0020 close trigger this interaction ended on:
+    "idle_gap" | "structural" | "max_turns" | "cost" | "shutdown" | ...
+    Read from the persisted episode context; empty when a legacy row
+    predates close-reason capture.
+    """
+    summary: builtins.str
+    """The persisted per-interaction summary. The
+    "[interaction summary unavailable]" sentinel is surfaced verbatim so
+    a failed summary is shown honestly (never blanked or fabricated).
+    """
+    def __init__(
+        self,
+        *,
+        interaction_id: builtins.str = ...,
+        scope: builtins.str = ...,
+        started_at: builtins.float = ...,
+        closed_at: builtins.float = ...,
+        turn_count: builtins.int = ...,
+        close_reason: builtins.str = ...,
+        summary: builtins.str = ...,
+    ) -> None: ...
+    def ClearField(self, field_name: typing.Literal["close_reason", b"close_reason", "closed_at", b"closed_at", "interaction_id", b"interaction_id", "scope", b"scope", "started_at", b"started_at", "summary", b"summary", "turn_count", b"turn_count"]) -> None: ...
+
+global___ClosedInteraction = ClosedInteraction
+
+@typing.final
+class ClosedInteractionsResponse(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    INTERACTIONS_FIELD_NUMBER: builtins.int
+    @property
+    def interactions(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___ClosedInteraction]: ...
+    def __init__(
+        self,
+        *,
+        interactions: collections.abc.Iterable[global___ClosedInteraction] | None = ...,
+    ) -> None: ...
+    def ClearField(self, field_name: typing.Literal["interactions", b"interactions"]) -> None: ...
+
+global___ClosedInteractionsResponse = ClosedInteractionsResponse

@@ -21,6 +21,13 @@ service AgentService {
 
   // Deliver a channel message event to a subscribed agent (RFC 0011 §C).
   rpc ReceiveChannelMessage(ChannelMessageEvent) returns (TaskAck);
+
+  // Read closed-interaction summaries (v0.3.8 interaction-summary
+  // surface; RFC 0020 §C/§D). Surfaces the one-per-interaction summary
+  // persisted at close so a converged brainstorm hands back a readable
+  // result. Read-only; the summariser is unchanged.
+  rpc GetClosedInteractions(ClosedInteractionsRequest)
+      returns (ClosedInteractionsResponse);
 }
 
 message TaskRequest {
@@ -292,4 +299,45 @@ message ChannelMessageEvent {
 message TaskAck {
   bool success = 1;
   string error_message = 2;       // populated when success == false
+}
+
+// ─── Closed-Interaction Summary Read (REST ↔ agent gRPC) ──────────
+// v0.3.8 interaction-summary surface. The RFC 0020 summary is persisted
+// to the agent's episodic store at interaction close (any trigger: idle,
+// structural/end-vote, or the RFC 0030 Layer 1 cost ceiling); this RPC
+// reads it back so the web console + CLI can show the synthesised
+// outcome. Surface-only — no summary is (re)generated here.
+message ClosedInteractionsRequest {
+  string agent_id = 1;
+  // Optional: restrict to a single RFC 0020 scope (e.g. "group:room-7").
+  // Empty → the agent's most-recent closed interactions across scopes.
+  string scope = 2;
+  // Optional: fetch exactly one interaction by id. Empty → list mode.
+  string interaction_id = 3;
+  // Max rows returned (recency order by closed_at). 0 → server default;
+  // the server caps the value regardless.
+  int32 limit = 4;
+}
+
+message ClosedInteraction {
+  string interaction_id = 1;
+  string scope = 2;
+  // Unix epoch seconds (REAL in the episodes table). For a closed
+  // interaction `closed_at` is always populated.
+  double started_at = 3;
+  double closed_at = 4;
+  int32 turn_count = 5;
+  // The RFC 0020 close trigger this interaction ended on:
+  // "idle_gap" | "structural" | "max_turns" | "cost" | "shutdown" | ...
+  // Read from the persisted episode context; empty when a legacy row
+  // predates close-reason capture.
+  string close_reason = 6;
+  // The persisted per-interaction summary. The
+  // "[interaction summary unavailable]" sentinel is surfaced verbatim so
+  // a failed summary is shown honestly (never blanked or fabricated).
+  string summary = 7;
+}
+
+message ClosedInteractionsResponse {
+  repeated ClosedInteraction interactions = 1;
 }

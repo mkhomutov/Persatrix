@@ -1081,6 +1081,230 @@ func (x *TaskAck) GetErrorMessage() string {
 	return ""
 }
 
+// ─── Closed-Interaction Summary Read (REST ↔ agent gRPC) ──────────
+// v0.3.8 interaction-summary surface. The RFC 0020 summary is persisted
+// to the agent's episodic store at interaction close (any trigger: idle,
+// structural/end-vote, or the RFC 0030 Layer 1 cost ceiling); this RPC
+// reads it back so the web console + CLI can show the synthesised
+// outcome. Surface-only — no summary is (re)generated here.
+type ClosedInteractionsRequest struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	AgentId string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	// Optional: restrict to a single RFC 0020 scope (e.g. "group:room-7").
+	// Empty → the agent's most-recent closed interactions across scopes.
+	Scope string `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`
+	// Optional: fetch exactly one interaction by id. Empty → list mode.
+	InteractionId string `protobuf:"bytes,3,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
+	// Max rows returned (recency order by closed_at). 0 → server default;
+	// the server caps the value regardless.
+	Limit         int32 `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClosedInteractionsRequest) Reset() {
+	*x = ClosedInteractionsRequest{}
+	mi := &file_task_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClosedInteractionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClosedInteractionsRequest) ProtoMessage() {}
+
+func (x *ClosedInteractionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_task_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClosedInteractionsRequest.ProtoReflect.Descriptor instead.
+func (*ClosedInteractionsRequest) Descriptor() ([]byte, []int) {
+	return file_task_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ClosedInteractionsRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *ClosedInteractionsRequest) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *ClosedInteractionsRequest) GetInteractionId() string {
+	if x != nil {
+		return x.InteractionId
+	}
+	return ""
+}
+
+func (x *ClosedInteractionsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ClosedInteraction struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	InteractionId string                 `protobuf:"bytes,1,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
+	Scope         string                 `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`
+	// Unix epoch seconds (REAL in the episodes table). For a closed
+	// interaction `closed_at` is always populated.
+	StartedAt float64 `protobuf:"fixed64,3,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	ClosedAt  float64 `protobuf:"fixed64,4,opt,name=closed_at,json=closedAt,proto3" json:"closed_at,omitempty"`
+	TurnCount int32   `protobuf:"varint,5,opt,name=turn_count,json=turnCount,proto3" json:"turn_count,omitempty"`
+	// The RFC 0020 close trigger this interaction ended on:
+	// "idle_gap" | "structural" | "max_turns" | "cost" | "shutdown" | ...
+	// Read from the persisted episode context; empty when a legacy row
+	// predates close-reason capture.
+	CloseReason string `protobuf:"bytes,6,opt,name=close_reason,json=closeReason,proto3" json:"close_reason,omitempty"`
+	// The persisted per-interaction summary. The
+	// "[interaction summary unavailable]" sentinel is surfaced verbatim so
+	// a failed summary is shown honestly (never blanked or fabricated).
+	Summary       string `protobuf:"bytes,7,opt,name=summary,proto3" json:"summary,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClosedInteraction) Reset() {
+	*x = ClosedInteraction{}
+	mi := &file_task_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClosedInteraction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClosedInteraction) ProtoMessage() {}
+
+func (x *ClosedInteraction) ProtoReflect() protoreflect.Message {
+	mi := &file_task_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClosedInteraction.ProtoReflect.Descriptor instead.
+func (*ClosedInteraction) Descriptor() ([]byte, []int) {
+	return file_task_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ClosedInteraction) GetInteractionId() string {
+	if x != nil {
+		return x.InteractionId
+	}
+	return ""
+}
+
+func (x *ClosedInteraction) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *ClosedInteraction) GetStartedAt() float64 {
+	if x != nil {
+		return x.StartedAt
+	}
+	return 0
+}
+
+func (x *ClosedInteraction) GetClosedAt() float64 {
+	if x != nil {
+		return x.ClosedAt
+	}
+	return 0
+}
+
+func (x *ClosedInteraction) GetTurnCount() int32 {
+	if x != nil {
+		return x.TurnCount
+	}
+	return 0
+}
+
+func (x *ClosedInteraction) GetCloseReason() string {
+	if x != nil {
+		return x.CloseReason
+	}
+	return ""
+}
+
+func (x *ClosedInteraction) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+type ClosedInteractionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Interactions  []*ClosedInteraction   `protobuf:"bytes,1,rep,name=interactions,proto3" json:"interactions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClosedInteractionsResponse) Reset() {
+	*x = ClosedInteractionsResponse{}
+	mi := &file_task_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClosedInteractionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClosedInteractionsResponse) ProtoMessage() {}
+
+func (x *ClosedInteractionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_task_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClosedInteractionsResponse.ProtoReflect.Descriptor instead.
+func (*ClosedInteractionsResponse) Descriptor() ([]byte, []int) {
+	return file_task_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ClosedInteractionsResponse) GetInteractions() []*ClosedInteraction {
+	if x != nil {
+		return x.Interactions
+	}
+	return nil
+}
+
 var File_task_proto protoreflect.FileDescriptor
 
 const file_task_proto_rawDesc = "" +
@@ -1163,7 +1387,24 @@ const file_task_proto_rawDesc = "" +
 	"_threshold\"H\n" +
 	"\aTaskAck\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12#\n" +
-	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage*^\n" +
+	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\"\x89\x01\n" +
+	"\x19ClosedInteractionsRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x14\n" +
+	"\x05scope\x18\x02 \x01(\tR\x05scope\x12%\n" +
+	"\x0einteraction_id\x18\x03 \x01(\tR\rinteractionId\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x05R\x05limit\"\xe8\x01\n" +
+	"\x11ClosedInteraction\x12%\n" +
+	"\x0einteraction_id\x18\x01 \x01(\tR\rinteractionId\x12\x14\n" +
+	"\x05scope\x18\x02 \x01(\tR\x05scope\x12\x1d\n" +
+	"\n" +
+	"started_at\x18\x03 \x01(\x01R\tstartedAt\x12\x1b\n" +
+	"\tclosed_at\x18\x04 \x01(\x01R\bclosedAt\x12\x1d\n" +
+	"\n" +
+	"turn_count\x18\x05 \x01(\x05R\tturnCount\x12!\n" +
+	"\fclose_reason\x18\x06 \x01(\tR\vcloseReason\x12\x18\n" +
+	"\asummary\x18\a \x01(\tR\asummary\"a\n" +
+	"\x1aClosedInteractionsResponse\x12C\n" +
+	"\finteractions\x18\x01 \x03(\v2\x1f.persatrix.v1.ClosedInteractionR\finteractions*^\n" +
 	"\n" +
 	"TaskStatus\x12\v\n" +
 	"\aPENDING\x10\x00\x12\v\n" +
@@ -1176,13 +1417,14 @@ const file_task_proto_rawDesc = "" +
 	"\fHealthStatus\x12\v\n" +
 	"\aUNKNOWN\x10\x00\x12\v\n" +
 	"\aSERVING\x10\x01\x12\x0f\n" +
-	"\vNOT_SERVING\x10\x022\x93\x03\n" +
+	"\vNOT_SERVING\x10\x022\xff\x03\n" +
 	"\fAgentService\x12D\n" +
 	"\vExecuteTask\x12\x19.persatrix.v1.TaskRequest\x1a\x1a.persatrix.v1.TaskResponse\x12L\n" +
 	"\x11ExecuteTaskStream\x12\x19.persatrix.v1.TaskRequest\x1a\x1a.persatrix.v1.TaskProgress0\x01\x12R\n" +
 	"\vHealthCheck\x12 .persatrix.v1.HealthCheckRequest\x1a!.persatrix.v1.HealthCheckResponse\x12H\n" +
 	"\x0fSendChatMessage\x12\x19.persatrix.v1.ChatRequest\x1a\x1a.persatrix.v1.ChatResponse\x12Q\n" +
-	"\x15ReceiveChannelMessage\x12!.persatrix.v1.ChannelMessageEvent\x1a\x15.persatrix.v1.TaskAckB:Z8github.com/mkhomutov/persatrix/internal/generated/taskpbb\x06proto3"
+	"\x15ReceiveChannelMessage\x12!.persatrix.v1.ChannelMessageEvent\x1a\x15.persatrix.v1.TaskAck\x12j\n" +
+	"\x15GetClosedInteractions\x12'.persatrix.v1.ClosedInteractionsRequest\x1a(.persatrix.v1.ClosedInteractionsResponseB:Z8github.com/mkhomutov/persatrix/internal/generated/taskpbb\x06proto3"
 
 var (
 	file_task_proto_rawDescOnce sync.Once
@@ -1197,45 +1439,51 @@ func file_task_proto_rawDescGZIP() []byte {
 }
 
 var file_task_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_task_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_task_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_task_proto_goTypes = []any{
-	(TaskStatus)(0),             // 0: persatrix.v1.TaskStatus
-	(HealthStatus)(0),           // 1: persatrix.v1.HealthStatus
-	(*TaskRequest)(nil),         // 2: persatrix.v1.TaskRequest
-	(*TaskConfig)(nil),          // 3: persatrix.v1.TaskConfig
-	(*TaskResponse)(nil),        // 4: persatrix.v1.TaskResponse
-	(*TaskProgress)(nil),        // 5: persatrix.v1.TaskProgress
-	(*HealthCheckRequest)(nil),  // 6: persatrix.v1.HealthCheckRequest
-	(*HealthCheckResponse)(nil), // 7: persatrix.v1.HealthCheckResponse
-	(*ChatRequest)(nil),         // 8: persatrix.v1.ChatRequest
-	(*ChatResponse)(nil),        // 9: persatrix.v1.ChatResponse
-	(*ChannelMessageEvent)(nil), // 10: persatrix.v1.ChannelMessageEvent
-	(*TaskAck)(nil),             // 11: persatrix.v1.TaskAck
-	nil,                         // 12: persatrix.v1.TaskRequest.ContextEntry
-	nil,                         // 13: persatrix.v1.TaskResponse.MetadataEntry
+	(TaskStatus)(0),                    // 0: persatrix.v1.TaskStatus
+	(HealthStatus)(0),                  // 1: persatrix.v1.HealthStatus
+	(*TaskRequest)(nil),                // 2: persatrix.v1.TaskRequest
+	(*TaskConfig)(nil),                 // 3: persatrix.v1.TaskConfig
+	(*TaskResponse)(nil),               // 4: persatrix.v1.TaskResponse
+	(*TaskProgress)(nil),               // 5: persatrix.v1.TaskProgress
+	(*HealthCheckRequest)(nil),         // 6: persatrix.v1.HealthCheckRequest
+	(*HealthCheckResponse)(nil),        // 7: persatrix.v1.HealthCheckResponse
+	(*ChatRequest)(nil),                // 8: persatrix.v1.ChatRequest
+	(*ChatResponse)(nil),               // 9: persatrix.v1.ChatResponse
+	(*ChannelMessageEvent)(nil),        // 10: persatrix.v1.ChannelMessageEvent
+	(*TaskAck)(nil),                    // 11: persatrix.v1.TaskAck
+	(*ClosedInteractionsRequest)(nil),  // 12: persatrix.v1.ClosedInteractionsRequest
+	(*ClosedInteraction)(nil),          // 13: persatrix.v1.ClosedInteraction
+	(*ClosedInteractionsResponse)(nil), // 14: persatrix.v1.ClosedInteractionsResponse
+	nil,                                // 15: persatrix.v1.TaskRequest.ContextEntry
+	nil,                                // 16: persatrix.v1.TaskResponse.MetadataEntry
 }
 var file_task_proto_depIdxs = []int32{
-	12, // 0: persatrix.v1.TaskRequest.context:type_name -> persatrix.v1.TaskRequest.ContextEntry
+	15, // 0: persatrix.v1.TaskRequest.context:type_name -> persatrix.v1.TaskRequest.ContextEntry
 	3,  // 1: persatrix.v1.TaskRequest.config:type_name -> persatrix.v1.TaskConfig
 	0,  // 2: persatrix.v1.TaskResponse.status:type_name -> persatrix.v1.TaskStatus
-	13, // 3: persatrix.v1.TaskResponse.metadata:type_name -> persatrix.v1.TaskResponse.MetadataEntry
+	16, // 3: persatrix.v1.TaskResponse.metadata:type_name -> persatrix.v1.TaskResponse.MetadataEntry
 	0,  // 4: persatrix.v1.TaskProgress.status:type_name -> persatrix.v1.TaskStatus
 	1,  // 5: persatrix.v1.HealthCheckResponse.status:type_name -> persatrix.v1.HealthStatus
-	2,  // 6: persatrix.v1.AgentService.ExecuteTask:input_type -> persatrix.v1.TaskRequest
-	2,  // 7: persatrix.v1.AgentService.ExecuteTaskStream:input_type -> persatrix.v1.TaskRequest
-	6,  // 8: persatrix.v1.AgentService.HealthCheck:input_type -> persatrix.v1.HealthCheckRequest
-	8,  // 9: persatrix.v1.AgentService.SendChatMessage:input_type -> persatrix.v1.ChatRequest
-	10, // 10: persatrix.v1.AgentService.ReceiveChannelMessage:input_type -> persatrix.v1.ChannelMessageEvent
-	4,  // 11: persatrix.v1.AgentService.ExecuteTask:output_type -> persatrix.v1.TaskResponse
-	5,  // 12: persatrix.v1.AgentService.ExecuteTaskStream:output_type -> persatrix.v1.TaskProgress
-	7,  // 13: persatrix.v1.AgentService.HealthCheck:output_type -> persatrix.v1.HealthCheckResponse
-	9,  // 14: persatrix.v1.AgentService.SendChatMessage:output_type -> persatrix.v1.ChatResponse
-	11, // 15: persatrix.v1.AgentService.ReceiveChannelMessage:output_type -> persatrix.v1.TaskAck
-	11, // [11:16] is the sub-list for method output_type
-	6,  // [6:11] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	13, // 6: persatrix.v1.ClosedInteractionsResponse.interactions:type_name -> persatrix.v1.ClosedInteraction
+	2,  // 7: persatrix.v1.AgentService.ExecuteTask:input_type -> persatrix.v1.TaskRequest
+	2,  // 8: persatrix.v1.AgentService.ExecuteTaskStream:input_type -> persatrix.v1.TaskRequest
+	6,  // 9: persatrix.v1.AgentService.HealthCheck:input_type -> persatrix.v1.HealthCheckRequest
+	8,  // 10: persatrix.v1.AgentService.SendChatMessage:input_type -> persatrix.v1.ChatRequest
+	10, // 11: persatrix.v1.AgentService.ReceiveChannelMessage:input_type -> persatrix.v1.ChannelMessageEvent
+	12, // 12: persatrix.v1.AgentService.GetClosedInteractions:input_type -> persatrix.v1.ClosedInteractionsRequest
+	4,  // 13: persatrix.v1.AgentService.ExecuteTask:output_type -> persatrix.v1.TaskResponse
+	5,  // 14: persatrix.v1.AgentService.ExecuteTaskStream:output_type -> persatrix.v1.TaskProgress
+	7,  // 15: persatrix.v1.AgentService.HealthCheck:output_type -> persatrix.v1.HealthCheckResponse
+	9,  // 16: persatrix.v1.AgentService.SendChatMessage:output_type -> persatrix.v1.ChatResponse
+	11, // 17: persatrix.v1.AgentService.ReceiveChannelMessage:output_type -> persatrix.v1.TaskAck
+	14, // 18: persatrix.v1.AgentService.GetClosedInteractions:output_type -> persatrix.v1.ClosedInteractionsResponse
+	13, // [13:19] is the sub-list for method output_type
+	7,  // [7:13] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_task_proto_init() }
@@ -1250,7 +1498,7 @@ func file_task_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_task_proto_rawDesc), len(file_task_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   12,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

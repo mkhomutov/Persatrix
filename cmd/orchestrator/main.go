@@ -290,24 +290,23 @@ func main() {
 	exec := executor.NewGRPCExecutor(reg, logger, execOpts...)
 	defer exec.Close() //nolint:errcheck // no-op in v0.1; wired for connection pooling forward compatibility
 	logger.Info("executor initialized", zap.String("deadlineMode", *deadlineMode))
-	// RFC 0016 PR 4: Initialize chat executor for human→agent chat dispatch.
+	// RFC 0016 PR 4: chat executor for human→agent chat dispatch.
 	//
-	// TODO(post-PR-251): the chat REST handler now routes through the
-	// channels DM publish-and-await path (RFC 0011 PR 4a-ii-β-2) and
-	// no longer consults the gRPC chat executor at runtime. The wiring
-	// stays in place for one release window so that callers upgrading
-	// only the orchestrator binary do not see a sudden surface change
-	// (e.g. missing `WithChatExecutor` option triggering a nil
-	// dereference in any downstream test fixture). Remove this
-	// construction together with `executor.GRPCChatExecutor`,
-	// `server.WithChatExecutor`, and the corresponding gRPC
-	// `SendChatMessage` proto entry once the v0.3.0 upgrade window
-	// closes (tracked in the RFC 0011 follow-up plan).
+	// TODO(post-PR-251): the chat REST handler now routes through the channels
+	// DM publish-and-await path (RFC 0011 PR 4a-ii-β-2) and no longer consults
+	// the gRPC chat executor at runtime; the wiring stays one release window so
+	// orchestrator-only upgrades don't hit a nil `WithChatExecutor`. Remove with
+	// `executor.GRPCChatExecutor` / `server.WithChatExecutor` / the gRPC
+	// `SendChatMessage` proto entry once the upgrade window closes.
 	chatExec := executor.NewGRPCChatExecutor(reg, logger,
-		// Inject the otelgrpc client-side stats handler for chat gRPC calls.
 		executor.WithChatDialOptions(grpc.WithStatsHandler(otelgrpc.NewClientHandler())),
 	)
 	srvOpts = append(srvOpts, server.WithChatExecutor(chatExec))
+	// v0.3.8 interaction-summary surface — closed-interaction reader over gRPC.
+	interactionReader := executor.NewGRPCInteractionReader(reg, logger,
+		executor.WithInteractionDialOptions(grpc.WithStatsHandler(otelgrpc.NewClientHandler())),
+	)
+	srvOpts = append(srvOpts, server.WithInteractionReader(interactionReader))
 	// Wrap the HTTP handler with otelhttp so every inbound REST request is
 	// recorded as a server span (route attribute set by the pattern-based mux).
 	srvOpts = append(srvOpts, server.WithHandlerWrapper(func(h http.Handler) http.Handler {

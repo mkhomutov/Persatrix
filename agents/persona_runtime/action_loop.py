@@ -30,7 +30,7 @@ from ..tools.registry import ToolDefinition, get_tool, list_tools
 from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
 from .channel_reply import synthesize_channel_reply
-from .llm_call_errors import handle_llm_call_exception
+from .llm_call_errors import handle_llm_call_exception_with_cost_close
 from .salience_gate import run_salience_gate
 from .wallet_cause import lease_attribution_for_event
 
@@ -414,15 +414,15 @@ class _ActionLoopMixin:
                     agent_id=lease_agent_id,
                 )
             except Exception as exc:
-                # Wallet back-pressure (``BudgetExceededError`` /
-                # ``AioRpcError(RESOURCE_EXHAUSTED)``) and provider-side
-                # failures (other gRPC codes, network, etc.) — dispatch
-                # to :func:`handle_llm_call_exception` (extracted to
-                # ``llm_call_errors.py`` to keep this module under the
-                # 500-line review cap; see that module's docstring for
-                # the per-class contract).
-                result = handle_llm_call_exception(
-                    exc, event=event, agent_id=self.agent_id,
+                # Wallet back-pressure / provider failures dispatch to
+                # ``llm_call_errors`` (extracted to keep this module under
+                # the 500-line cap; see that module for the per-class
+                # contract). The ``_with_cost_close`` wrapper additionally
+                # closes + summarises the interaction on the RFC 0030
+                # Layer 1 cost-ceiling denial (v0.3.8 PR 1, SS2) before
+                # deciding to re-raise (chat/channel) or short-circuit (TICK).
+                result = await handle_llm_call_exception_with_cost_close(
+                    self, exc, event,
                 )
                 if result is None:
                     raise

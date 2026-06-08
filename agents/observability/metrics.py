@@ -99,8 +99,7 @@ class _Instruments:
     """
 
     # Interaction-lifecycle + facts-tier counters are registered by the
-    # ``_metrics_interactions`` / ``_metrics_facts`` helper modules (split out
-    # for the 500-line cap); the annotations keep them visible to mypy / IDEs.
+    # ``_metrics_interactions`` / ``_metrics_facts`` modules; annotations keep mypy happy.
     interactions_opened: Counter
     interactions_closed: Counter
     interactions_closed_by_idle_gap: Counter
@@ -108,6 +107,7 @@ class _Instruments:
     interactions_closed_by_max_turns: Counter
     interactions_closed_by_topic_shift: Counter
     interactions_closed_by_shutdown: Counter
+    interactions_closed_by_cost: Counter
     interactions_summary_failed: Counter
     interactions_janitor_failed: Counter
     facts_stored: Counter

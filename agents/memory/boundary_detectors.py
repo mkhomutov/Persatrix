@@ -50,6 +50,14 @@ REASON_IDLE_GAP: Literal["idle_gap"] = "idle_gap"
 REASON_TOPIC_SHIFT: Literal["topic_shift"] = "topic_shift"
 REASON_MAX_TURNS: Literal["max_turns"] = "max_turns"
 REASON_SHUTDOWN: Literal["shutdown"] = "shutdown"
+# RFC 0030 Layer 1 (v0.3.8): the per-interaction cost ceiling
+# (``interaction_budget_tokens``) exhausting mid-conversation is an
+# explicit close trigger — the brainstorm is bounded by spend, not by
+# idle/structural signals.  The persona runtime routes the wallet's
+# ``interaction_budget_exhausted`` denial through
+# :meth:`InteractionTracker.close` with this reason so the interaction
+# is summarised (RFC 0020 close path) rather than merely stopping fanout.
+REASON_COST: Literal["cost"] = "cost"
 
 # Closed value set for :meth:`InteractionTracker.close`'s ``reason``
 # kwarg.  Lives next to the constants so the Protocol below can
@@ -61,6 +69,7 @@ CloseReason = Literal[
     "max_turns",
     "topic_shift",
     "shutdown",
+    "cost",
 ]
 
 
@@ -259,6 +268,7 @@ __all__ = [
     "DEFAULT_MAX_INTERACTION_TURNS",
     "IdleGapDetector",
     "MaxTurnsDetector",
+    "REASON_COST",
     "REASON_IDLE_GAP",
     "REASON_MAX_TURNS",
     "REASON_SHUTDOWN",

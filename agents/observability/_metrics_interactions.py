@@ -60,6 +60,13 @@ def register(inst: _Instruments, meter: Meter) -> None:
         name="agent.interactions.closed.by_shutdown", unit="{interaction}",
         description="Interactions closed by process-shutdown drain (RFC 0020 §C).",
     )
+    inst.interactions_closed_by_cost = meter.create_counter(
+        name="agent.interactions.closed.by_cost", unit="{interaction}",
+        description=(
+            "Interactions closed by the RFC 0030 Layer 1 per-interaction "
+            "cost ceiling (interaction_budget_tokens exhausted)."
+        ),
+    )
     inst.interactions_summary_failed = meter.create_counter(
         name="agent.interactions.summary.failed", unit="{interaction}",
         description="Interactions whose close-time summary call failed (RFC 0020 §C).",
