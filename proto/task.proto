@@ -249,6 +249,26 @@ message ChannelMessageEvent {
   // → the agent-side default (`DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS = 20`).
   // Channel-level, so it is identical across a fanout's recipients.
   int32 salience_max_channel_members = 16;
+  // RFC 0030 deterministic governance layers (v0.3.8) — the RFC 0020
+  // `interaction_id` (ULID) of the open Interaction this message belongs to.
+  // Carried as a first-class field for the same reason as `cascade_depth = 11`:
+  // `ChannelMessageEvent` has no metadata map, so the
+  // `ChannelMessage.Metadata["interaction_id"]` the publish path sets is
+  // otherwise dropped at this boundary — and Layers 1/2/4 must attribute
+  // spend (Layer 1 cost ceiling), count replies (Layer 2 reply budget), and
+  // accumulate end-of-interaction votes (Layer 4) per interaction. The
+  // orchestrator stamps it from the publish metadata; the agent maps it onto
+  // the `interaction_id` event-metadata key and threads it toward the
+  // `AcquireLease` call (the wallet-side `interaction_budget_tokens` ceiling
+  // lands in the Layer 1 PR — this field is the substrate). Empty (proto3
+  // implicit presence) is the genuine pre-v0.3.8 / untracked case and leaves
+  // every layer at its uncapped default, so the field is additive. See
+  // `docs/rfcs/0030-governance-layers-pr-plan.md` (PR 1).
+  //
+  // Field 17, not 13: the Tier B salience PRs (#572–#575) took fields 13–16
+  // (`salience_gated`/`threshold`/`channel_size`/`salience_max_channel_members`)
+  // after the governance-layers plan named "field 13"; 17 is the next free tag.
+  string interaction_id = 17;
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)

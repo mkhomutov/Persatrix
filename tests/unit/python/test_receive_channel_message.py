@@ -435,3 +435,43 @@ class TestReceiveChannelMessageParticipantType:
             f"empty wire field must not seed the metadata key; "
             f"got metadata={event.metadata!r}"
         )
+
+
+class TestReceiveChannelMessageInteractionID:
+    """RFC 0030 deterministic governance layers (v0.3.8), PR 1.
+
+    The gRPC receive path reads ``request.interaction_id`` (typed proto
+    field, lifted from the publish metadata bag by the orchestrator) and
+    seeds the resulting ``AgentEvent.metadata["interaction_id"]`` so the
+    layers landing in later PRs (Layer 1 cost ceiling threads it toward the
+    ``AcquireLease`` call; Layers 2/4 key reply budgets and end-votes on it)
+    can attribute per interaction. Inert this PR — nothing reads the key
+    yet; this only proves the substrate survives the proto boundary.
+    """
+
+    async def test_wire_interaction_id_seeds_event_metadata(self):
+        servicer, dispatcher = _make_servicer()
+        await servicer.ReceiveChannelMessage(
+            _channel_event(interaction_id="01J9Z0K8INTERACTION0000000"),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        event = _enqueued_event(dispatcher)
+        assert event.metadata.get("interaction_id") == "01J9Z0K8INTERACTION0000000", (
+            f"servicer must seed metadata.interaction_id from the typed "
+            f"proto field; got metadata={event.metadata!r}"
+        )
+
+    async def test_empty_interaction_id_not_seeded(self):
+        """Empty wire field (untracked / pre-v0.3.8 publish) leaves the key
+        absent, so every governance layer stays at its uncapped default —
+        the additive behaviour the opt-in contract requires."""
+        servicer, dispatcher = _make_servicer()
+        await servicer.ReceiveChannelMessage(
+            _channel_event(interaction_id=""),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        event = _enqueued_event(dispatcher)
+        assert "interaction_id" not in event.metadata, (
+            f"empty wire field must not seed the metadata key; "
+            f"got metadata={event.metadata!r}"
+        )

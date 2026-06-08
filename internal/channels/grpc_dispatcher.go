@@ -406,5 +406,14 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		Threshold:                 env.Recipient.Threshold,
 		ChannelSize:               int32(env.ChannelSize),
 		SalienceMaxChannelMembers: int32(env.SalienceMaxChannelMembers),
+		// RFC 0030 deterministic governance layers (v0.3.8), PR 1: lift the
+		// publish-side `interaction_id` (RFC 0020 §G open-Interaction scope)
+		// onto the typed proto field so Layers 1/2/4 can attribute spend,
+		// count replies, and accumulate end-votes per interaction. Empty for
+		// an untracked publish — every layer stays at its uncapped default,
+		// so the field is additive. Inert this PR (no layer reads it yet).
+		//
+		// [RFC 0030 governance layers]: ../../docs/rfcs/0030-governance-layers-pr-plan.md
+		InteractionId: readInteractionID(msg.Metadata),
 	}
 }

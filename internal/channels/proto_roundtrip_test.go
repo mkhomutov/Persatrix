@@ -57,6 +57,8 @@ func TestChannelMessageEvent_RoundTripsAllFields(t *testing.T) {
 		Threshold:                 proto.Float64(0.42),
 		ChannelSize:               4,
 		SalienceMaxChannelMembers: 20,
+		// RFC 0030 governance layers (v0.3.8) — interaction attribution.
+		InteractionId: "01J9Z0K8INTERACTION0000000",
 	}
 
 	blob, err := proto.Marshal(original)
@@ -91,6 +93,7 @@ func TestChannelMessageEvent_RoundTripsAllFields(t *testing.T) {
 	assert.Equal(t, 0.42, decoded.GetThreshold())
 	assert.Equal(t, int32(4), decoded.ChannelSize)
 	assert.Equal(t, int32(20), decoded.SalienceMaxChannelMembers)
+	assert.Equal(t, "01J9Z0K8INTERACTION0000000", decoded.InteractionId)
 }
 
 // TestChannelMessageEvent_ThresholdPresenceRoundTrips pins the proto3 explicit-
@@ -221,11 +224,27 @@ func TestTaskAck_SuccessTrueRoundTrips(t *testing.T) {
 // a reader can verify the expectation without reaching for a hex chart.
 func stringFieldBytes(t *testing.T, fieldNumber int, value string) []byte {
 	t.Helper()
-	tag := byte((fieldNumber << 3) | 2) // wire-type 2 (length-delimited)
+	// tag = (fieldNumber << 3) | 2 (wire-type 2 = length-delimited),
+	// itself encoded as a base-128 varint. Field numbers ≥ 16 produce a
+	// tag value ≥ 128, so the tag spans more than one byte — encode it
+	// generically rather than truncating to a single byte (which silently
+	// dropped the continuation for field 17 / interaction_id).
+	out := appendVarint(nil, uint64(fieldNumber<<3)|2)
 	payload := []byte(value)
 	require.Less(t, len(payload), 128, "helper assumes single-byte length varint; raise the cap")
-	out := []byte{tag, byte(len(payload))}
+	out = append(out, byte(len(payload)))
 	return append(out, payload...)
+}
+
+// appendVarint encodes v as a base-128 varint (proto3 wire format) and
+// appends it to dst. Kept local to the roundtrip test so the field-number
+// pins remain self-contained and verifiable without the generated codec.
+func appendVarint(dst []byte, v uint64) []byte {
+	for v >= 0x80 {
+		dst = append(dst, byte(v)|0x80)
+		v >>= 7
+	}
+	return append(dst, byte(v))
 }
 
 func TestChannelMessageEvent_FieldNumbersPinned(t *testing.T) {
@@ -250,6 +269,10 @@ func TestChannelMessageEvent_FieldNumbersPinned(t *testing.T) {
 		// Field 11 is `int32 cascade_depth` (varint, not length-delimited);
 		// pinned in TestChannelMessageEvent_CascadeDepthFieldNumberPinned.
 		{12, "sender_participant_type", func(e *taskpb.ChannelMessageEvent, v string) { e.SenderParticipantType = v }, "user"},
+		// Fields 13–16 are the Tier B salience inputs (bool/optional double/
+		// int32 × 2) — non-string wire types, pinned in their own roundtrip
+		// tests above, so they are skipped in this string-field table.
+		{17, "interaction_id", func(e *taskpb.ChannelMessageEvent, v string) { e.InteractionId = v }, "01J9Z0K8INTERACTION0000000"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

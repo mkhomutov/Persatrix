@@ -838,8 +838,28 @@ type ChannelMessageEvent struct {
 	// → the agent-side default (`DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS = 20`).
 	// Channel-level, so it is identical across a fanout's recipients.
 	SalienceMaxChannelMembers int32 `protobuf:"varint,16,opt,name=salience_max_channel_members,json=salienceMaxChannelMembers,proto3" json:"salience_max_channel_members,omitempty"`
-	unknownFields             protoimpl.UnknownFields
-	sizeCache                 protoimpl.SizeCache
+	// RFC 0030 deterministic governance layers (v0.3.8) — the RFC 0020
+	// `interaction_id` (ULID) of the open Interaction this message belongs to.
+	// Carried as a first-class field for the same reason as `cascade_depth = 11`:
+	// `ChannelMessageEvent` has no metadata map, so the
+	// `ChannelMessage.Metadata["interaction_id"]` the publish path sets is
+	// otherwise dropped at this boundary — and Layers 1/2/4 must attribute
+	// spend (Layer 1 cost ceiling), count replies (Layer 2 reply budget), and
+	// accumulate end-of-interaction votes (Layer 4) per interaction. The
+	// orchestrator stamps it from the publish metadata; the agent maps it onto
+	// the `interaction_id` event-metadata key and threads it toward the
+	// `AcquireLease` call (the wallet-side `interaction_budget_tokens` ceiling
+	// lands in the Layer 1 PR — this field is the substrate). Empty (proto3
+	// implicit presence) is the genuine pre-v0.3.8 / untracked case and leaves
+	// every layer at its uncapped default, so the field is additive. See
+	// `docs/rfcs/0030-governance-layers-pr-plan.md` (PR 1).
+	//
+	// Field 17, not 13: the Tier B salience PRs (#572–#575) took fields 13–16
+	// (`salience_gated`/`threshold`/`channel_size`/`salience_max_channel_members`)
+	// after the governance-layers plan named "field 13"; 17 is the next free tag.
+	InteractionId string `protobuf:"bytes,17,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ChannelMessageEvent) Reset() {
@@ -984,6 +1004,13 @@ func (x *ChannelMessageEvent) GetSalienceMaxChannelMembers() int32 {
 	return 0
 }
 
+func (x *ChannelMessageEvent) GetInteractionId() string {
+	if x != nil {
+		return x.InteractionId
+	}
+	return ""
+}
+
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
 // whose response carries no payload beyond success/error. At-most-once delivery
 // in v0.3.0 — `success=false` signals the agent rejected or could not process
@@ -1104,7 +1131,7 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xfb\x04\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xa2\x05\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -1124,7 +1151,8 @@ const file_task_proto_rawDesc = "" +
 	"\x0esalience_gated\x18\r \x01(\bR\rsalienceGated\x12!\n" +
 	"\tthreshold\x18\x0e \x01(\x01H\x00R\tthreshold\x88\x01\x01\x12!\n" +
 	"\fchannel_size\x18\x0f \x01(\x05R\vchannelSize\x12?\n" +
-	"\x1csalience_max_channel_members\x18\x10 \x01(\x05R\x19salienceMaxChannelMembersB\f\n" +
+	"\x1csalience_max_channel_members\x18\x10 \x01(\x05R\x19salienceMaxChannelMembers\x12%\n" +
+	"\x0einteraction_id\x18\x11 \x01(\tR\rinteractionIdB\f\n" +
 	"\n" +
 	"_threshold\"H\n" +
 	"\aTaskAck\x12\x18\n" +
