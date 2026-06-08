@@ -72,7 +72,10 @@ type lease struct {
 	grantedInput, grantedOutput int64
 	cause                       walletpb.Cause
 	// interactionID attributes this lease to an RFC 0030 Layer 1 running
-	// total (empty = untracked); finalize reconciles it to actual usage.
+	// total. It is the request's interaction_id ONLY when a ceiling was in
+	// effect at acquire (interaction_id non-empty AND interaction_budget_tokens
+	// > 0); it is empty — untracked — for an uncapped lease, so finalize's
+	// reconcile is a no-op and uncapped traffic leaves no running-total residue.
 	interactionID string
 	issuedAt      time.Time
 	ttl           time.Duration
@@ -240,6 +243,18 @@ func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseReque
 		InputTokens:  req.GetEstimatedInputTokens(),
 		OutputTokens: req.GetEstimatedMaxOutputTokens(),
 	})
+	// RFC 0030 Layer 1: a lease is interaction-tracked only when a ceiling is
+	// actually in effect (a non-empty interaction_id AND a positive budget).
+	// An uncapped lease (budget 0 — all chat / TICK / non-channel traffic, and
+	// every channel until a ceiling is configured) is never checked against
+	// the running total, so folding it in would grow interactionTokens by one
+	// permanent entry per conversation with no enforcement benefit. Recording
+	// the gated id on the lease keeps acquire's fold and finalize's reconcile
+	// symmetric — both key off the same (possibly empty) tracked id.
+	trackedInteractionID := ""
+	if req.GetInteractionBudgetTokens() > 0 {
+		trackedInteractionID = req.GetInteractionId()
+	}
 	w.active[leaseID] = &lease{
 		workflowID:    req.GetWorkflowId(),
 		agentID:       req.GetAgentId(),
@@ -247,12 +262,12 @@ func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseReque
 		grantedInput:  req.GetEstimatedInputTokens(),
 		grantedOutput: req.GetEstimatedMaxOutputTokens(),
 		cause:         req.GetCause(),
-		interactionID: req.GetInteractionId(),
+		interactionID: trackedInteractionID,
 		issuedAt:      time.Now(),
 		ttl:           w.cfg.TTL,
 	}
 	// RFC 0030 Layer 1: fold the granted estimate into the interaction total.
-	w.recordInteractionGrantLocked(req.GetInteractionId(), estimatedTokens)
+	w.recordInteractionGrantLocked(trackedInteractionID, estimatedTokens)
 
 	w.logger.Debug("wallet: lease granted",
 		zap.String("lease_id", leaseID),

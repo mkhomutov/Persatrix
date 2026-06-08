@@ -13,6 +13,7 @@
 package wallet
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -170,6 +171,68 @@ func TestAcquireLease_InteractionBudget_SettleAdjustsRunningTotal(t *testing.T) 
 	second := acquireForInteraction(t, w, "int-1", 3000, 0, 2000)
 	require.NotNil(t, second.GetGrant(),
 		"settling below the estimate frees the difference back to the interaction")
+}
+
+// TestAcquireLease_InteractionBudget_UncappedDoesNotAccumulate is the
+// memory-bound guard: an uncapped lease (interaction_budget_tokens=0) carries
+// an interaction_id in production today (PR 1 stamps it on every channel
+// lease) but has no ceiling to be checked against, so the wallet must NOT
+// fold it into the per-interaction running total. Tracking it would grow
+// interactionTokens by one permanent entry per conversation — an unbounded
+// leak on a long-lived orchestrator — for zero enforcement benefit. After
+// many uncapped acquire/settle cycles across distinct interactions the
+// running-total map stays empty.
+func TestAcquireLease_InteractionBudget_UncappedDoesNotAccumulate(t *testing.T) {
+	w, _ := newTestWallet(t, testCostConfig(), interactionBudgetWalletCfg())
+
+	for i := 0; i < 32; i++ {
+		id := "conv-" + strconv.Itoa(i)
+		resp := acquireForInteraction(t, w, id, 0 /* uncapped */, 1000, 1000)
+		grant := resp.GetGrant()
+		require.NotNil(t, grant, "uncapped lease %d must grant", i)
+		ack, err := w.SettleLease(testContext(t), &walletpb.SettlementRequest{
+			LeaseId: grant.GetLeaseId(), ActualInputTokens: 1000, ActualOutputTokens: 1000,
+		})
+		require.NoError(t, err)
+		require.True(t, ack.GetSuccess())
+	}
+
+	w.mu.Lock()
+	residual := len(w.interactionTokens)
+	w.mu.Unlock()
+	assert.Zero(t, residual,
+		"uncapped (budget=0) interaction traffic must leave no per-interaction running-total residue")
+}
+
+// TestAcquireLease_InteractionBudget_TrackedInteractionFreedOnRelease proves
+// the converse for a capped interaction: once every lease in it is released
+// (its LLM call never happened), the running total returns to zero and the
+// entry is pruned — a fully-reversed interaction leaves no residue.
+func TestAcquireLease_InteractionBudget_TrackedInteractionFreedOnRelease(t *testing.T) {
+	w, _ := newTestWallet(t, testCostConfig(), interactionBudgetWalletCfg())
+
+	first := acquireForInteraction(t, w, "int-1", 8000, 1000, 1000)
+	second := acquireForInteraction(t, w, "int-1", 8000, 1000, 1000)
+	g1, g2 := first.GetGrant(), second.GetGrant()
+	require.NotNil(t, g1)
+	require.NotNil(t, g2)
+
+	w.mu.Lock()
+	tracked := len(w.interactionTokens)
+	w.mu.Unlock()
+	require.Equal(t, 1, tracked, "a capped interaction with live leases is tracked")
+
+	for _, id := range []string{g1.GetLeaseId(), g2.GetLeaseId()} {
+		ack, err := w.ReleaseLease(testContext(t), &walletpb.ReleaseRequest{LeaseId: id, Reason: "aborted"})
+		require.NoError(t, err)
+		require.True(t, ack.GetSuccess())
+	}
+
+	w.mu.Lock()
+	residual := len(w.interactionTokens)
+	w.mu.Unlock()
+	assert.Zero(t, residual,
+		"a fully-released capped interaction must leave no running-total residue")
 }
 
 // TestAcquireLease_ScopeDenialCarriesBudgetReason proves the existing RFC
