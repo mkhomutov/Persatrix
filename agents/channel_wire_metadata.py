@@ -15,6 +15,18 @@ from __future__ import annotations
 from .generated import task_pb2
 from .persona_types import AgentEvent
 
+# Byte bound on the lifted ``interaction_id``, the receive-side counterpart to
+# the Go publish boundary's ``interactionIDMaxChars`` (internal/channels/
+# interaction_id.go). The value is seeded onto the metadata the per-interaction
+# maps the layer PRs build (Layer 2 reply budget, Layer 4 end-of-interaction
+# votes) key on, so an unbounded id is an unbounded map-key growth vector — the
+# bound must hold at *this* seed point, not only at publish, because a non-Go
+# (or compromised) producer can deliver an oversized wire field straight here.
+# Measured in UTF-8 bytes to mirror Go's ``len()`` exactly (a value accepted at
+# one boundary is accepted at the other); 128 matches the agent receive path's
+# ``_CHANNEL_THREAD_ID_MAX_CHARS`` cap and is generous over the 36-byte uuid4.
+_INTERACTION_ID_MAX_BYTES = 128
+
 
 def seed_wire_metadata(
     event: AgentEvent, request: task_pb2.ChannelMessageEvent
@@ -22,10 +34,12 @@ def seed_wire_metadata(
     """Lift the typed ``ChannelMessageEvent`` wire fields onto the metadata
     keys the downstream read paths consume. ``cascade_depth`` is seeded at
     ``AgentEvent`` construction (it is always present as a proto3 scalar); the
-    fields here are conditional — only a non-empty value is seeded. Whether a
-    field actually carries a value depends on its producer: ``participant_type``
-    has one (the REST chat handler), ``interaction_id`` does not yet (see the
-    per-field note below), so today only the former is ever seeded.
+    fields here are conditional — only a non-empty value is seeded, and
+    ``interaction_id`` additionally only within ``_INTERACTION_ID_MAX_BYTES``
+    (an over-length claim degrades to untracked). Whether a field actually
+    carries a value depends on its producer: ``participant_type`` has one (the
+    REST chat handler), ``interaction_id`` does not yet (see the per-field note
+    below), so today only the former is ever seeded.
     """
     # ISSUE-0068: lift the sender's peer type off the typed proto field onto
     # the metadata key the episode-routing close path reads
@@ -49,9 +63,15 @@ def seed_wire_metadata(
     # agent-side), so ``request.interaction_id`` is empty on every publish
     # today and the branch below never fires. Only seed a non-empty value — an
     # empty field is the untracked / pre-v0.3.8 publish, which leaves every
-    # layer at its uncapped default (the additive opt-in contract).
-    if request.interaction_id:
-        event.metadata["interaction_id"] = request.interaction_id
+    # layer at its uncapped default (the additive opt-in contract). Drop an
+    # over-length claim to untracked (mirrors the Go publish boundary's
+    # ``readInteractionID``): a clipped opaque token would key a *different*
+    # interaction, so fall back to absent rather than truncate. See
+    # ``_INTERACTION_ID_MAX_BYTES`` for why the bound must hold at this seed
+    # point and not only at publish.
+    interaction_id = request.interaction_id
+    if interaction_id and len(interaction_id.encode("utf-8")) <= _INTERACTION_ID_MAX_BYTES:
+        event.metadata["interaction_id"] = interaction_id
 
 
 __all__ = ["seed_wire_metadata"]

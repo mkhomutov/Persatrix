@@ -440,13 +440,11 @@ class TestReceiveChannelMessageParticipantType:
 class TestReceiveChannelMessageInteractionID:
     """RFC 0030 deterministic governance layers (v0.3.8), PR 1.
 
-    The gRPC receive path reads ``request.interaction_id`` (typed proto
-    field, lifted from the publish metadata bag by the orchestrator) and
-    seeds the resulting ``AgentEvent.metadata["interaction_id"]`` so the
-    layers landing in later PRs (Layer 1 cost ceiling threads it toward the
-    ``AcquireLease`` call; Layers 2/4 key reply budgets and end-votes on it)
-    can attribute per interaction. Inert this PR — nothing reads the key
-    yet; this only proves the substrate survives the proto boundary.
+    The gRPC receive path reads ``request.interaction_id`` (typed proto field,
+    lifted from the publish metadata bag) and seeds
+    ``AgentEvent.metadata["interaction_id"]`` so later layer PRs (Layer 1 cost
+    ceiling; Layers 2/4 reply budgets / end-votes) can attribute per
+    interaction. Inert this PR — nothing reads the key yet.
     """
 
     async def test_wire_interaction_id_seeds_event_metadata(self):
@@ -457,14 +455,12 @@ class TestReceiveChannelMessageInteractionID:
         )
         event = _enqueued_event(dispatcher)
         assert event.metadata.get("interaction_id") == "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d", (
-            f"servicer must seed metadata.interaction_id from the typed "
-            f"proto field; got metadata={event.metadata!r}"
+            f"servicer must seed metadata.interaction_id from the typed proto "
+            f"field; got metadata={event.metadata!r}"
         )
 
     async def test_empty_interaction_id_not_seeded(self):
-        """Empty wire field (untracked / pre-v0.3.8 publish) leaves the key
-        absent, so every governance layer stays at its uncapped default —
-        the additive behaviour the opt-in contract requires."""
+        """Empty wire field (untracked publish) leaves the key absent."""
         servicer, dispatcher = _make_servicer()
         await servicer.ReceiveChannelMessage(
             _channel_event(interaction_id=""),
@@ -475,3 +471,29 @@ class TestReceiveChannelMessageInteractionID:
             f"empty wire field must not seed the metadata key; "
             f"got metadata={event.metadata!r}"
         )
+
+    async def test_overlong_interaction_id_not_seeded(self):
+        """An over-length wire id drops to untracked at the seed boundary (the
+        receive-side counterpart to the Go publish bound) — it is seeded onto
+        the metadata Layers 2/4 key maps on, so the bound must hold here too,
+        not only at publish. Absent, not truncated."""
+        servicer, dispatcher = _make_servicer()
+        await servicer.ReceiveChannelMessage(
+            _channel_event(interaction_id="x" * 129),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        event = _enqueued_event(dispatcher)
+        assert "interaction_id" not in event.metadata, (
+            f"over-length id MUST fall back to untracked; got {event.metadata!r}"
+        )
+
+    async def test_at_max_length_interaction_id_seeded(self):
+        """A value exactly at the byte cap is legitimate and must be seeded."""
+        servicer, dispatcher = _make_servicer()
+        at_cap = "x" * 128
+        await servicer.ReceiveChannelMessage(
+            _channel_event(interaction_id=at_cap),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        event = _enqueued_event(dispatcher)
+        assert event.metadata.get("interaction_id") == at_cap, event.metadata

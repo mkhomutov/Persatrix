@@ -30,6 +30,13 @@ const interactionIDMetadataKey = "interaction_id"
 // floor_control.go calls out for its session maps). 128 mirrors the agent
 // receive path's `_CHANNEL_THREAD_ID_MAX_CHARS` cap and leaves generous
 // headroom over the RFC 0020 id (a 36-char uuid4 / 26-char ULID).
+//
+// This publish-side bound is one of two: the value is also seeded onto agent
+// metadata at the receive boundary, where the per-interaction map key is
+// actually created, so the same byte cap is enforced there too
+// (`_INTERACTION_ID_MAX_BYTES` in agents/channel_wire_metadata.py). A
+// publish-only bound would leave a non-Go / compromised producer's oversized
+// id riding straight onto that metadata unbounded.
 const interactionIDMaxChars = 128
 
 // readInteractionID extracts the inbound interaction_id from a publish

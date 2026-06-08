@@ -141,9 +141,17 @@ def test_unknown_metadata_keys_are_permitted():
 
 # RFC 0030 deterministic governance layers (v0.3.8), PR 1 — the optional
 # ``metadata.interaction_id`` key. The amendment pins it as an optional opaque
-# string bounded at 128 chars; the orchestrator's ``readInteractionID`` treats
-# an over-length claim as untracked (empty), and this gate documents the same
-# bound at the REST publish surface.
+# string bounded at 128 chars. This is the *documentary* contract (the
+# ``messageMetadata`` definition is not ``$ref``'d into the validated config
+# tree, so it is not a runtime publish gate): it declares the valid range, and
+# a strict validator — like this test — rejects an out-of-range value. The
+# runtime boundaries enforce the same 128-byte cap but *tolerantly*: the Go
+# publish boundary (``readInteractionID``) and the agent receive seed
+# (``seed_wire_metadata``) degrade an over-length claim to untracked (drop the
+# value, keep dispatching) rather than failing — so a strict-reject here and a
+# silent-drop at runtime are two expressions of the same bound, not the same
+# behaviour. Char count here (JSON Schema ``maxLength`` counts code units);
+# the runtime bound counts UTF-8 bytes — equal for the ASCII uuid4/ULID id.
 
 
 def test_interaction_id_is_optional():
@@ -165,9 +173,12 @@ def test_interaction_id_at_max_length_accepted():
 
 
 def test_interaction_id_over_max_length_rejected():
-    """An over-length id is rejected at the schema gate, mirroring the Go
-    publish boundary's fall-back-to-untracked: an unbounded id is an
-    unbounded per-interaction map key for Layers 2/4."""
+    """An over-length id is rejected by the schema (the strict expression of
+    the bound). The runtime boundaries enforce the same cap but degrade an
+    over-length claim to untracked rather than rejecting it (see the Go
+    ``TestChannelMessageToProto_InteractionID_RejectsOverlong`` and the Python
+    ``test_overlong_interaction_id_not_seeded``). Either way an unbounded id
+    never reaches the per-interaction maps Layers 2/4 key on."""
     with pytest.raises(jsonschema.ValidationError):
         _validate({"interaction_id": "x" * 129})
 
