@@ -41,11 +41,14 @@ type RouterMetrics struct {
 	// GovernanceDrop counts each publish dropped by an RFC 0030 deterministic
 	// governance layer (v0.3.8), labelled by `channel_type` and `layer`. The
 	// channels package emits `depth` (cascade cap), `reply_budget` (Layer 2), and
-	// `end_vote` (a redundant in-window duplicate vote whose fanout is suppressed);
+	// `end_vote` (Layer 4 — both a redundant in-window duplicate vote and any
+	// publish to an already-closed interaction, each suppressed from fanout);
 	// `cost` (Layer 1) is wallet-side and lands with the budget-stamping wiring.
-	// The per-drop attribution (channel, interaction, participant) is on the Warn
-	// line, and the `conversation.governance.layer` span attribute correlates it in
-	// a trace (governance.go).
+	// Where a drop is anomalous (reply-budget exhaustion, duplicate vote) the
+	// per-drop attribution (channel, interaction, participant) is on a Warn line;
+	// expected suppression (post-close traffic) is metered without a log. The
+	// `conversation.governance.layer` span attribute correlates every drop in a
+	// trace (governance.go).
 	GovernanceDrop metric.Int64Counter
 	// InteractionClosed counts each interaction closed by a governance layer
 	// (RFC 0030 Layer 4, v0.3.8), labelled by `channel_type` and `trigger`

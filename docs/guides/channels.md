@@ -291,9 +291,10 @@ model](../rfcs/0030-multi-agent-conversation-governance.md#b-layered-architectur
 the always-on net that stops runaway loops. v0.3.8 adds three **opt-in,
 default-off** deterministic layers that let a multi-persona brainstorm
 *converge, stay bounded, and terminate* — without a moderator. Each is scoped to
-an **interaction** (the RFC 0020 conversation unit), and **every one defaults to
-uncapped**, so a config that sets none of them behaves exactly as it did in
-v0.3.7.
+an **interaction** (the RFC 0020 conversation unit). Layers 1 and 2 **default to
+uncapped** (`0`); Layer 4 carries non-zero `K`/`W` defaults but is **dormant
+until a persona actually emits an `END_INTERACTION_VOTE`** — so a config that
+sets none of these layers behaves exactly as it did in v0.3.7.
 
 | Layer | Knob | Default | What it bounds |
 |-------|------|---------|----------------|
@@ -336,8 +337,11 @@ channels:
 
 - `governance_drop{channel_type, layer}` — one increment per publish a layer
   dropped. `layer ∈ {depth, reply_budget, end_vote}` (the channel-owned layers;
-  `cost` is logged wallet-side). Pairs with the per-drop Warn line carrying
-  `channel_id` / `interaction_id` / `participant_id`.
+  the `cost` label is reserved for the wallet-side Layer 1 drop counter, **not yet
+  emitted** — it lands with the budget-stamping follow-up). Anomalous drops
+  (reply-budget exhaustion, duplicate vote) also carry a Warn line with
+  `channel_id` / `interaction_id` / `participant_id`; expected suppression
+  (post-close traffic) is metered without a log.
 - `interaction_closed{channel_type, trigger}` — one per closed interaction;
   `trigger=end_votes` today.
 - `end_vote_emitted{channel_type}` — one per vote action (vote volume vs. the

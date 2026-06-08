@@ -124,7 +124,7 @@ Six layers, ordered by cheap-and-unfailable → expensive-and-judgement-based:
 | Layer | Mechanism | Failure mode | Cost per check | Status |
 |-------|-----------|--------------|----------------|--------|
 | **0** | Cascade-depth cap | None — counter compare | ~free | ✅ Shipped (RFC 0011 amendment) |
-| **1** | Per-interaction cost ceiling (lease budget) | None — wallet rejects | wallet RPC, p99 ≤ 5 ms (RFC 0023) | ✅ Phase 1 (v0.3.8) |
+| **1** | Per-interaction cost ceiling (lease budget) | None — wallet rejects | wallet RPC, p99 ≤ 5 ms (RFC 0023) | ✅ Phase 1 (v0.3.8) — wallet enforcement wired; `governance_drop{layer=cost}` + budget-stamping deferred to a follow-up |
 | **2** | Per-participant reply budget | None — counter compare | hashmap lookup | ✅ Phase 1 (v0.3.8) |
 | **2.5** | Floor control / speaker serialization | Floor-holder stalls → per-turn timeout advances | one in-flight dispatch + a parked waiter | ✅ Shipped ([floor-control amendment](0030-amendment-floor-control-speaker-serialization.md), v0.3.6; telemetry PR 4 fast-follow) |
 | **3** | Per-membership response gate (`respond_policy`) | None — config lookup | ~free | ✅ Shipped (RFC 0011 §D) |

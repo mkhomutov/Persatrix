@@ -259,6 +259,50 @@ func TestGovernance_ReplyBudgetRemainingRecordedAtClose(t *testing.T) {
 	assert.Equal(t, float64(3), sum, "alice left 1 + bob left 2 = 3 leftover replies")
 }
 
+// TestGovernance_PostCloseSuppressionEmitsGovernanceDrop pins Layer 4's dominant
+// effect: once an interaction has closed, EVERY later publish to it is suppressed
+// from fanout — and that suppression IS a governance drop. Without attributing
+// it, a converged conversation's post-close traffic (the bulk of Layer 4 drops in
+// steady state) is invisible to `governance_drop{layer=end_vote}`, contradicting
+// the counter's contract ("each publish dropped by a deterministic layer") and
+// breaking symmetry with Layer 2 (which counts every rejected publish). The close
+// event itself is NOT a drop — it is the `interaction_closed` signal.
+func TestGovernance_PostCloseSuppressionEmitsGovernanceDrop(t *testing.T) {
+	exporter := installSpanRecorder(t)
+	router, store, reader := routerWithGovernanceMetrics(t)
+	disp := router.dispatcher.(*recordingDispatcher)
+	id := mustCreateGroup(t, store, "planning", "alice", "bob", "carol")
+	router.SetEndVoteParams(id, 2, 3) // K=2, W=3
+
+	// Two distinct votes close the interaction. The first vote fans out; the
+	// closing vote suppresses its own fanout but is the close, not a drop.
+	require.NoError(t, endVote(t, router, id, "alice", "int-1"))
+	require.NoError(t, endVote(t, router, id, "bob", "int-1"))
+	require.Zero(t, governanceDropCount(t, collect(t, reader), "group", governanceLayerEndVote),
+		"reaching quorum is the interaction_closed signal, not a governance_drop")
+	fannedBeforePostClose := len(disp.snapshot())
+
+	// An ordinary (non-vote) reply to the now-closed interaction, carrying a
+	// publish span so the trace-correlation stamp is observable too.
+	ctx, span := otel.Tracer("test").Start(context.Background(), "publish")
+	require.NoError(t, router.Publish(ctx, ChannelMessage{
+		ID: uuid.NewString(), ChannelID: id, SenderID: "carol", Content: "late reply",
+		Metadata: map[string]any{interactionIDMetadataKey: "int-1"},
+	}, ""))
+	span.End()
+
+	assert.Len(t, disp.snapshot(), fannedBeforePostClose,
+		"the post-close publish was suppressed from fanout (Layer 4)")
+	rm := collect(t, reader)
+	assert.Equal(t, int64(1), governanceDropCount(t, rm, "group", governanceLayerEndVote),
+		"the post-close suppression is attributed on governance_drop{layer=end_vote}")
+
+	spans := filterSpansByName(exporter.GetSpans(), "publish")
+	require.Len(t, spans, 1, "the post-close publish span was recorded")
+	assert.Equal(t, governanceLayerEndVote, spanAttrMap(spans[0])[governanceSpanLayerAttr],
+		"the post-close drop stamped conversation.governance.layer on the publish span")
+}
+
 // TestGovernance_DropAnnotatesTraceSpan pins the §L trace-correlation contract:
 // a governance drop stamps `conversation.governance.layer=<layer>` on the
 // inbound publish span so an operator can find dropped publishes by a trace
