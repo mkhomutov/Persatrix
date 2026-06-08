@@ -1,19 +1,16 @@
 // Package wallet implements the orchestrator-side WalletService — the
 // in-line gatekeeper every LLM call acquires a lease from before issuing.
 //
-// RFC 0023 PR 1 landed the always-grant skeleton. PR 2 makes the wallet
-// enforce: AcquireLease composes cost.BudgetEnforcer.CheckBudget under a
-// coarse mutex and records a provisional charge against cost.TokenCounter;
-// SettleLease / ReleaseLease reconcile that charge against the actual
-// usage; and a background reaper settles leases abandoned past their TTL
-// at the granted (worst-case) amount so an agent crash can neither leak a
-// provisional hold nor silently free spend.
-//
-// Call-site wiring — the Python agent acquiring leases around its LLM
-// calls — lands in PRs 3–6. PR 2 leaves the wallet unit-tested in isolation.
+// AcquireLease composes cost.BudgetEnforcer.CheckBudget under a coarse mutex
+// and records a provisional charge against cost.TokenCounter; SettleLease /
+// ReleaseLease reconcile that charge against the actual usage; and a
+// background reaper settles leases abandoned past their TTL at the granted
+// (worst-case) amount so an agent crash can neither leak a provisional hold
+// nor silently free spend. The RFC 0030 Layer 1 per-interaction cost ceiling
+// (interaction_budget.go) is enforced inline in AcquireLease.
 //
 // See docs/rfcs/0023-llm-call-leasing.md (§ B, § D, § F) and
-// docs/rfcs/0023-pr-plan.md.
+// docs/rfcs/0030-multi-agent-conversation-governance.md (§ E).
 package wallet
 
 import (
@@ -30,18 +27,6 @@ import (
 	"github.com/mkhomutov/persatrix/internal/cost"
 	"github.com/mkhomutov/persatrix/internal/generated/walletpb"
 )
-
-// maxTokenCount bounds every agent-supplied token-count field the wallet
-// accepts — estimated_input_tokens / estimated_max_output_tokens on a
-// LeaseRequest, actual_input_tokens / actual_output_tokens on a
-// SettlementRequest. It is a fat-finger / pre-auth guard, not a product
-// limit: at ~500× the largest production context window no legitimate call
-// approaches it. The bound also (a) keeps estimated_input_tokens +
-// estimated_max_output_tokens — summed for the budget check — far clear of
-// an int64 overflow, and (b) caps the worst-case provisional charge a single
-// malformed lease can record. RFC 0023 Security Considerations: agent inputs
-// are untrusted until RFC 0009 auth lands, so the wallet range-checks them.
-const maxTokenCount int64 = 1_000_000_000
 
 // WalletService is the gRPC WalletService implementation registered on the
 // orchestrator's agent-facing gRPC server (the listener that already hosts
@@ -62,13 +47,19 @@ type WalletService struct {
 	// production uses ulid.Make.
 	newID func() string
 
-	// mu guards active. AcquireLease holds it across CheckBudget +
-	// RecordProvisional so the read-then-write is atomic — two concurrent
-	// acquires cannot both pass the budget check and both provision past
-	// the limit. RFC 0023 § D documents this as the parallel-step optimism
-	// (scheduler/stage_runner.go) the wallet must not inherit.
+	// mu guards active and interactionTokens. AcquireLease holds it across
+	// CheckBudget + the interaction-ceiling check + RecordProvisional so the
+	// read-then-write is atomic — two concurrent acquires cannot both pass
+	// the checks and both provision past a limit. RFC 0023 § D documents
+	// this as the parallel-step optimism (scheduler/stage_runner.go) the
+	// wallet must not inherit.
 	mu     sync.Mutex
 	active map[string]*lease
+
+	// interactionTokens is the RFC 0030 Layer 1 per-interaction running token
+	// total, keyed by the RFC 0020 interaction_id. Read/written under mu by
+	// the helpers in interaction_budget.go. A zero/absent entry is uncapped.
+	interactionTokens map[string]int64
 }
 
 // lease is an in-flight (or recently-closed) lease tracked for settlement
@@ -80,9 +71,12 @@ type lease struct {
 	workflowID, agentID, model  string
 	grantedInput, grantedOutput int64
 	cause                       walletpb.Cause
-	issuedAt                    time.Time
-	ttl                         time.Duration
-	settled                     bool
+	// interactionID attributes this lease to an RFC 0030 Layer 1 running
+	// total (empty = untracked); finalize reconciles it to actual usage.
+	interactionID string
+	issuedAt      time.Time
+	ttl           time.Duration
+	settled       bool
 }
 
 // Option customises a WalletService at construction.
@@ -141,40 +135,18 @@ func NewWalletService(
 		logger = zap.NewNop()
 	}
 	w := &WalletService{
-		counter:  counter,
-		enforcer: enforcer,
-		cfg:      cfg,
-		logger:   logger,
-		newID:    func() string { return ulid.Make().String() },
-		active:   make(map[string]*lease),
+		counter:           counter,
+		enforcer:          enforcer,
+		cfg:               cfg,
+		logger:            logger,
+		newID:             func() string { return ulid.Make().String() },
+		active:            make(map[string]*lease),
+		interactionTokens: make(map[string]int64),
 	}
 	for _, opt := range opts {
 		opt(w)
 	}
 	return w
-}
-
-// validateTokenCount range-checks an agent-supplied token-count field,
-// returning a codes.InvalidArgument status error when it falls outside
-// [0, maxTokenCount]. A negative count is the load-bearing case: cost
-// estimation is unclamped arithmetic (cost.EstimateCost), so a negative
-// count produces a negative charge that RecordProvisional / Reconcile would
-// subtract from the budget scope totals — silently freeing budget and
-// defeating the enforcement the wallet exists to apply. An oversized count
-// is the mirror DoS. The wallet rejects both at the RPC boundary rather than
-// feeding them into the cost counter; the cost primitives stay pure
-// arithmetic, shared unchanged with the trusted scheduler RecordUsage path.
-func (w *WalletService) validateTokenCount(field string, n int64) error {
-	if n < 0 || n > maxTokenCount {
-		w.logger.Warn("wallet: request rejected — token count out of range",
-			zap.String("field", field),
-			zap.Int64("value", n),
-			zap.Int64("max", maxTokenCount),
-		)
-		return status.Errorf(codes.InvalidArgument,
-			"%s must be in [0, %d], got %d", field, maxTokenCount, n)
-	}
-	return nil
 }
 
 // AcquireLease issues a lease for an LLM call, or denies it. It validates
@@ -214,12 +186,16 @@ func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseReque
 			req.GetAgentId(), n, w.cfg.MaxActiveLeases)
 	}
 
-	// Budget check. CheckBudget prices the combined estimate as output
-	// tokens — its single-number API is intentionally pessimistic; the
-	// provisional charge below uses the honest input/output split. Both
-	// estimates were range-checked to [0, maxTokenCount] above, so the sum
-	// here cannot overflow int64.
+	// estimatedTokens (range-checked, cannot overflow int64) feeds both the
+	// RFC 0030 Layer 1 interaction ceiling and the RFC 0023 dollar-budget check.
 	estimatedTokens := req.GetEstimatedInputTokens() + req.GetEstimatedMaxOutputTokens()
+
+	// RFC 0030 Layer 1 — per-interaction cost ceiling (§E), fail-closed.
+	if denied := w.interactionCeilingDenialLocked(req, estimatedTokens); denied != nil {
+		return denied, nil
+	}
+
+	// Budget check (RFC 0023). Both estimates were range-checked above.
 	decision := w.enforcer.CheckBudget(req.GetWorkflowId(), req.GetAgentId(), req.GetModel(), estimatedTokens)
 	if decision.Decision == cost.BudgetReject {
 		be := decision.Error
@@ -240,6 +216,7 @@ func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseReque
 					LimitUsd:     be.Limit,
 					EstimatedUsd: be.Estimated,
 					Message:      be.Error(),
+					Reason:       walletpb.LeaseDeniedReason_LEASE_DENIED_REASON_BUDGET,
 				},
 			},
 		}, nil
@@ -270,9 +247,12 @@ func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseReque
 		grantedInput:  req.GetEstimatedInputTokens(),
 		grantedOutput: req.GetEstimatedMaxOutputTokens(),
 		cause:         req.GetCause(),
+		interactionID: req.GetInteractionId(),
 		issuedAt:      time.Now(),
 		ttl:           w.cfg.TTL,
 	}
+	// RFC 0030 Layer 1: fold the granted estimate into the interaction total.
+	w.recordInteractionGrantLocked(req.GetInteractionId(), estimatedTokens)
 
 	w.logger.Debug("wallet: lease granted",
 		zap.String("lease_id", leaseID),
@@ -365,6 +345,10 @@ func (w *WalletService) finalize(leaseID string, actualInput, actualOutput int64
 			zap.Error(err))
 		return &walletpb.SettlementAck{Success: true, ErrorMessage: "noop: provisional already cleared"}
 	}
+	// RFC 0030 Layer 1: reconcile the interaction total from granted estimate
+	// to actuals (a Release (0,0) fully reverses the hold).
+	w.adjustInteractionTokensLocked(ls.interactionID,
+		(actualInput+actualOutput)-(ls.grantedInput+ls.grantedOutput))
 	ls.settled = true
 	w.logger.Debug("wallet: lease finalized",
 		zap.String("op", op),

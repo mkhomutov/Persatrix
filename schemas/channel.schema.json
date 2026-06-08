@@ -18,6 +18,12 @@
       "default": 5,
       "description": "Primary-enforcement cap on the cooperative-path cascade-depth backstop (RFC 0011 amendment 'Cascade-depth wire propagation', PR 2). Default is 5, aligned with the Python dispatcher's `max_cascade_depth` (agents/dispatch.py). The Go loader treats a zero or absent value as 'use the orchestrator default' so the backstop cannot be silently disabled from config (ChannelRouter.SetMaxCascadeDepth ignores non-positive overrides). Negative values are not permitted by the schema so an operator typo surfaces at `make validate` time rather than as a silent fall-back at startup."
     },
+    "default_interaction_budget_tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "RFC 0030 Layer 1 (v0.3.8) fleet-wide per-interaction cost ceiling in tokens, applied to any channel that omits its own `interaction_budget_tokens`. Opt-in: 0 (the default) means uncapped, so the ceiling is additive and existing channels are unchanged. Once an interaction's running token total would cross the resolved ceiling, the wallet denies further leases in that interaction (`INTERACTION_BUDGET_EXHAUSTED`, fail-closed — the LLM call does not happen). Negative is rejected at load time."
+    },
     "channels": {
       "type": "array",
       "items": { "$ref": "#/definitions/channel" }
@@ -51,6 +57,12 @@
           "minimum": 1,
           "default": 20,
           "description": "RFC 0030 Tier B (v0.3.8) channel-size cap (TB6 / amendment OQ #4): above this many candidate responders, the agent-side salience bid is skipped entirely and open-floor `participant`/`chair` members fall back to `addressed`-only, keeping a cheap bid × N members bounded on a large channel. Absent uses the 20 default (kept in lock-step with the agent-side DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS); the Go loader treats a zero/absent value as 'use the default' and rejects negatives at load time. The resolved value is carried to the agent on the ChannelMessageEvent wire."
+        },
+        "interaction_budget_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "RFC 0030 Layer 1 (v0.3.8) per-interaction cost ceiling in tokens for this channel. Once an interaction on this channel would cross the ceiling, the wallet denies further leases (`INTERACTION_BUDGET_EXHAUSTED`, fail-closed). Opt-in: absent or 0 inherits `default_interaction_budget_tokens` (itself 0 = uncapped) — unlike `salience_max_channel_members`, 0 is NOT normalized to a non-zero default, because uncapped is a meaningful value. Negative is rejected at load time. The channel-over-fleet precedence is resolved at read time."
         },
         "members": {
           "type": "array",

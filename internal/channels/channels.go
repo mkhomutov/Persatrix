@@ -358,6 +358,14 @@ var (
 	// is the loader's "use the default" sentinel normalized to
 	// [DefaultSalienceMaxChannelMembers] at load time.
 	ErrInvalidSalienceMaxChannelMembers = errors.New("channels: invalid salience_max_channel_members")
+	// ErrInvalidInteractionBudgetTokens — a declared channel (or the
+	// top-level `default_interaction_budget_tokens`) carried a negative
+	// `interaction_budget_tokens:` (RFC 0030 Layer 1 cost ceiling, v0.3.8).
+	// Belt-and-suspenders for the operator who skipped `make validate` (the
+	// JSON schema's `minimum: 0` rejects this earlier). Zero is NOT an error
+	// — it is the opt-in default meaning "uncapped", so the ceiling is
+	// additive and existing channels are unaffected.
+	ErrInvalidInteractionBudgetTokens = errors.New("channels: invalid interaction_budget_tokens")
 )
 
 // participantIDPattern is the single source of truth for legal participant

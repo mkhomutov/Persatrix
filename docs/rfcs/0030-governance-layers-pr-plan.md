@@ -115,7 +115,12 @@ The join points this plan must keep green: **(a)** the Tier B bid is itself an L
 ### PR 2: `feature/v038-rfc0030-layers-cost-ceiling` — Layer 1 per-interaction cost ceiling
 
 **Depends on**: PR 1; RFC 0023 leasing (shipped v0.3.2).
+**Status**: 🔀 PR open.
 **Purpose**: A channel with `interaction_budget_tokens=N` denies further leases in the same interaction once the running total crosses N — bounding cost, fail-closed.
+
+> **Field-number note (2026-06-08).** `LeaseRequest` had `trace_id = 7` as its max, so the new fields landed as **`string interaction_id = 8`** and **`int64 interaction_budget_tokens = 9`**. `LeaseDenied` had no denial-reason enum, so a typed **`LeaseDeniedReason reason = 6`** was added (`UNSPECIFIED = 0` for back-compat, `BUDGET = 1` for the existing RFC 0023 per-scope denial, `INTERACTION_BUDGET_EXHAUSTED = 2` for this layer). The wallet's per-interaction running total is a self-contained `map[interaction_id]int64` on `WalletService` (guarded by the existing `mu`), **not** a fourth scope threaded into the shared `cost.TokenCounter` — it accumulates the granted estimate at acquire and reconciles to actuals on settle/release (a released bid frees its hold), keeping the cost primitives unchanged on the trusted scheduler path. Layer 1 logic is carved into `internal/wallet/interaction_budget.go` to keep `wallet.go` under the file-size cap.
+>
+> **Scope note — what PR 2 lands vs. defers.** PR 2 is the **enforcement substrate + opt-in surface**, mirroring PR 1's inert-substrate pattern: the wallet enforces the ceiling (fully unit-tested), the proto carries the fields + typed reason, the channel schema/config + Go loader expose `interaction_budget_tokens` (channel-level) and `default_interaction_budget_tokens` (fleet) with channel-over-fleet precedence (`ChannelConfig.ResolveInteractionBudgetTokens`), and the Python `WalletClient.lease()` forwards both fields and maps the typed denial like a workflow-budget denial (fail-closed). Two pieces are **deferred to PR 5 (composition)**, where they belong: **(a)** delivering the resolved channel budget down to the agent's `LeaseRequest` at fanout (the orchestrator→agent stamping — PR 5 wires the publish path); and **(b)** the `governance_drop{layer=cost}` **counter** — the wallet holds no metrics handle and the counter's natural emission point is the channel publish path PR 5 instruments. PR 2 makes the denial fully observable via the typed wire `reason` + a dedicated `layer=cost` structured wallet log; PR 5 adds the counter.
 
 | File | Change |
 |------|--------|

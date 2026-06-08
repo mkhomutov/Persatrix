@@ -17,6 +17,43 @@ else:
 
 DESCRIPTOR: google.protobuf.descriptor.FileDescriptor
 
+class _LeaseDeniedReason:
+    ValueType = typing.NewType("ValueType", builtins.int)
+    V: typing_extensions.TypeAlias = ValueType
+
+class _LeaseDeniedReasonEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[_LeaseDeniedReason.ValueType], builtins.type):
+    DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor
+    LEASE_DENIED_REASON_UNSPECIFIED: _LeaseDeniedReason.ValueType  # 0
+    LEASE_DENIED_REASON_BUDGET: _LeaseDeniedReason.ValueType  # 1
+    """The RFC 0023 per-scope (global / per_workflow / per_agent) budget check
+    rejected the lease — the original and still the default denial.
+    """
+    LEASE_DENIED_REASON_INTERACTION_BUDGET_EXHAUSTED: _LeaseDeniedReason.ValueType  # 2
+    """The RFC 0030 Layer 1 per-interaction cost ceiling rejected the lease:
+    the running token total for this interaction_id would cross
+    interaction_budget_tokens. Fail-closed — the LLM call does not happen.
+    """
+
+class LeaseDeniedReason(_LeaseDeniedReason, metaclass=_LeaseDeniedReasonEnumTypeWrapper):
+    """LeaseDeniedReason machine-distinguishes why a lease was denied so the
+    agent can branch without parsing the human-readable `message`. The zero
+    value is UNSPECIFIED for back-compat: a denial emitted before this field
+    existed (or by a server that does not set it) reads as UNSPECIFIED and is
+    handled as the generic budget denial it has always been.
+    """
+
+LEASE_DENIED_REASON_UNSPECIFIED: LeaseDeniedReason.ValueType  # 0
+LEASE_DENIED_REASON_BUDGET: LeaseDeniedReason.ValueType  # 1
+"""The RFC 0023 per-scope (global / per_workflow / per_agent) budget check
+rejected the lease — the original and still the default denial.
+"""
+LEASE_DENIED_REASON_INTERACTION_BUDGET_EXHAUSTED: LeaseDeniedReason.ValueType  # 2
+"""The RFC 0030 Layer 1 per-interaction cost ceiling rejected the lease:
+the running token total for this interaction_id would cross
+interaction_budget_tokens. Fail-closed — the LLM call does not happen.
+"""
+global___LeaseDeniedReason = LeaseDeniedReason
+
 class _Cause:
     ValueType = typing.NewType("ValueType", builtins.int)
     V: typing_extensions.TypeAlias = ValueType
@@ -53,6 +90,8 @@ class LeaseRequest(google.protobuf.message.Message):
     ESTIMATED_MAX_OUTPUT_TOKENS_FIELD_NUMBER: builtins.int
     CAUSE_FIELD_NUMBER: builtins.int
     TRACE_ID_FIELD_NUMBER: builtins.int
+    INTERACTION_ID_FIELD_NUMBER: builtins.int
+    INTERACTION_BUDGET_TOKENS_FIELD_NUMBER: builtins.int
     workflow_id: builtins.str
     """empty for chat / TICK"""
     agent_id: builtins.str
@@ -64,6 +103,21 @@ class LeaseRequest(google.protobuf.message.Message):
     """origin attribution"""
     trace_id: builtins.str
     """for span linking; OTEL baggage"""
+    interaction_id: builtins.str
+    """RFC 0030 Layer 1 — per-interaction cost ceiling (§E). interaction_id
+    is the RFC 0020 conversation scope this lease is attributed to (empty
+    for non-channel traffic — chat / TICK / workflow tasks — which is the
+    untracked, always-uncapped case). interaction_budget_tokens is the
+    ceiling carried from the channel's `interaction_budget_tokens` config:
+    once the running token total for interaction_id would cross it, the
+    wallet denies further leases in that interaction with
+    LeaseDeniedReason LEASE_DENIED_REASON_INTERACTION_BUDGET_EXHAUSTED.
+    Default 0 (uncapped) — an absent/zero budget never denies, preserving
+    pre-v0.3.8 behaviour. The budget is supplied per-request (it is the
+    same channel config on every lease of one interaction) so the wallet
+    need not hold channel state.
+    """
+    interaction_budget_tokens: builtins.int
     def __init__(
         self,
         *,
@@ -74,8 +128,10 @@ class LeaseRequest(google.protobuf.message.Message):
         estimated_max_output_tokens: builtins.int = ...,
         cause: global___Cause.ValueType = ...,
         trace_id: builtins.str = ...,
+        interaction_id: builtins.str = ...,
+        interaction_budget_tokens: builtins.int = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["agent_id", b"agent_id", "cause", b"cause", "estimated_input_tokens", b"estimated_input_tokens", "estimated_max_output_tokens", b"estimated_max_output_tokens", "model", b"model", "trace_id", b"trace_id", "workflow_id", b"workflow_id"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["agent_id", b"agent_id", "cause", b"cause", "estimated_input_tokens", b"estimated_input_tokens", "estimated_max_output_tokens", b"estimated_max_output_tokens", "interaction_budget_tokens", b"interaction_budget_tokens", "interaction_id", b"interaction_id", "model", b"model", "trace_id", b"trace_id", "workflow_id", b"workflow_id"]) -> None: ...
 
 global___LeaseRequest = LeaseRequest
 
@@ -137,13 +193,16 @@ class LeaseDenied(google.protobuf.message.Message):
     LIMIT_USD_FIELD_NUMBER: builtins.int
     ESTIMATED_USD_FIELD_NUMBER: builtins.int
     MESSAGE_FIELD_NUMBER: builtins.int
+    REASON_FIELD_NUMBER: builtins.int
     scope: builtins.str
-    """"global" | "per_workflow" | "per_agent" """
+    """"global" | "per_workflow" | "per_agent" | "interaction" """
     spent_usd: builtins.float
     limit_usd: builtins.float
     estimated_usd: builtins.float
     message: builtins.str
     """human-readable reason"""
+    reason: global___LeaseDeniedReason.ValueType
+    """machine-distinguishable denial cause"""
     def __init__(
         self,
         *,
@@ -152,8 +211,9 @@ class LeaseDenied(google.protobuf.message.Message):
         limit_usd: builtins.float = ...,
         estimated_usd: builtins.float = ...,
         message: builtins.str = ...,
+        reason: global___LeaseDeniedReason.ValueType = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["estimated_usd", b"estimated_usd", "limit_usd", b"limit_usd", "message", b"message", "scope", b"scope", "spent_usd", b"spent_usd"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["estimated_usd", b"estimated_usd", "limit_usd", b"limit_usd", "message", b"message", "reason", b"reason", "scope", b"scope", "spent_usd", b"spent_usd"]) -> None: ...
 
 global___LeaseDenied = LeaseDenied
 
