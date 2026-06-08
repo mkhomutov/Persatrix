@@ -138,14 +138,14 @@ type Instruments struct {
 	// delivery attempts, not publish events. Pair with the `error`
 	// label to alert on a wedged dispatcher.
 	ChannelMessagesDelivered metric.Int64Counter
-	// ChannelMessagesPublished pairs with ChannelMessagesDelivered for
-	// the delivered/published ratio (ISSUE-0013).
+	// ChannelMessagesPublished pairs with ChannelMessagesDelivered for the delivered/published ratio (ISSUE-0013).
 	ChannelMessagesPublished metric.Int64Counter
 	// ChannelMessagesCascadeCapped — RFC 0011 cascade-depth amendment; see channel_instruments.go.
 	ChannelMessagesCascadeCapped metric.Int64Counter
-	// ChannelConversation* — RFC 0030 Layer 2.5 floor-control telemetry; see channel_instruments.go.
+	// ChannelConversation* — RFC 0030 Layer 2.5 floor-control + v0.3.8 governance-layer telemetry; see channel_instruments.go.
 	ChannelConversationFloorTurn          metric.Int64Counter
 	ChannelConversationFloorRoundDuration metric.Float64Histogram
+	ChannelConversationGovernanceDrop     metric.Int64Counter
 	// SessionsWrites — RFC 0031 Phase 1; see channel_instruments.go.
 	SessionsWrites metric.Int64Counter
 }

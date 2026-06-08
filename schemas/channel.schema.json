@@ -24,6 +24,25 @@
       "default": 0,
       "description": "RFC 0030 Layer 1 (v0.3.8) fleet-wide per-interaction cost ceiling in tokens, applied to any channel that omits its own `interaction_budget_tokens`. Opt-in: 0 (the default) means uncapped, so the ceiling is additive and existing channels are unchanged. Once an interaction's running token total would cross the resolved ceiling, the wallet denies further leases in that interaction (`INTERACTION_BUDGET_EXHAUSTED`, fail-closed — the LLM call does not happen). Negative is rejected at load time."
     },
+    "default_max_replies_per_participant": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "RFC 0030 Layer 2 (v0.3.8) fleet-wide per-participant reply budget, applied to any channel that omits its own `max_replies_per_participant_per_interaction`. Opt-in: 0 (the default) means uncapped, so fair-turn-taking is additive and existing channels are unchanged. With K>0, a participant's (K+1)th publish in one interaction is rejected pre-persistence (HTTP 429); a human principal listed in `governance.exempt_principals` is exempt. Negative is rejected at load time."
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "RFC 0030 (v0.3.8) fleet-wide governance settings that are not per-channel.",
+      "properties": {
+        "exempt_principals": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["human"] },
+          "default": [],
+          "description": "Principal classes exempt from the Layer 2 per-participant reply budget (§OQ-7). The only recognised value is `human`, which maps to the `user` participant type on the wire so a human driving a conversation is never throttled by the budget meant to keep agents from dominating. An entry with no mapping is ignored (fails open to 'not exempt')."
+        }
+      }
+    },
     "channels": {
       "type": "array",
       "items": { "$ref": "#/definitions/channel" }
@@ -63,6 +82,12 @@
           "minimum": 0,
           "default": 0,
           "description": "RFC 0030 Layer 1 (v0.3.8) per-interaction cost ceiling in tokens for this channel. Once an interaction on this channel would cross the ceiling, the wallet denies further leases (`INTERACTION_BUDGET_EXHAUSTED`, fail-closed). Opt-in: absent or 0 inherits `default_interaction_budget_tokens` (itself 0 = uncapped) — unlike `salience_max_channel_members`, 0 is NOT normalized to a non-zero default, because uncapped is a meaningful value. Negative is rejected at load time. The channel-over-fleet precedence is resolved at read time."
+        },
+        "max_replies_per_participant_per_interaction": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "RFC 0030 Layer 2 (v0.3.8) per-participant reply budget for this channel: a participant's (K+1)th publish in one interaction on this channel is rejected pre-persistence (HTTP 429 + `ErrParticipantBudgetExhausted`), so the dropped message never enters channel history. Opt-in: absent or 0 inherits `default_max_replies_per_participant` (itself 0 = uncapped) — like `interaction_budget_tokens`, 0 is NOT normalized to a non-zero default, because uncapped is a meaningful value. A human principal in `governance.exempt_principals` is exempt. Negative is rejected at load time. The channel-over-fleet precedence is resolved at read time."
         },
         "members": {
           "type": "array",

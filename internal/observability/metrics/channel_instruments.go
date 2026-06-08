@@ -79,6 +79,20 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	); err != nil {
 		return fmt.Errorf("create channel.conversation.floor_round_duration: %w", err)
 	}
+	// RFC 0030 deterministic governance layers (v0.3.8). One increment per
+	// publish dropped by a governance layer, labelled by `channel_type` and
+	// `layer` (`reply_budget` in PR 3; `cost`/`depth`/`end_vote` join as PR 5
+	// wires the full composition surface). Feeds the governance-drop dashboard
+	// that makes "who got throttled and by which layer" observable (§L).
+	if i.ChannelConversationGovernanceDrop, err = m.Int64Counter(
+		"channel.conversation.governance_drop",
+		metric.WithUnit("{message}"),
+		metric.WithDescription(
+			"Channel publishes dropped by an RFC 0030 deterministic governance layer, labelled by channel_type and layer.",
+		),
+	); err != nil {
+		return fmt.Errorf("create channel.conversation.governance_drop: %w", err)
+	}
 	// RFC 0031 Phase 1: per-session write counter. Increments once per
 	// CreateChannel / CreateChannelWithMembers / GetOrCreateDM /
 	// PublishMessage on the channels store. Labelled by `session_id`.

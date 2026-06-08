@@ -75,6 +75,8 @@ func TestInstrumentInventory(t *testing.T) {
 	// RFC 0030 Layer 2.5 — floor-control telemetry inventory.
 	inst.ChannelConversationFloorTurn.Add(ctx, 0)
 	inst.ChannelConversationFloorRoundDuration.Record(ctx, 0)
+	// RFC 0030 deterministic governance layers (v0.3.8).
+	inst.ChannelConversationGovernanceDrop.Add(ctx, 0)
 	// RFC 0031 Phase 1 — sessions subsystem instrument inventory.
 	inst.SessionsWrites.Add(ctx, 0)
 
@@ -105,6 +107,8 @@ func TestInstrumentInventory(t *testing.T) {
 		// RFC 0030 Layer 2.5 — floor-control telemetry inventory.
 		"channel.conversation.floor_turn":           "{turn}",
 		"channel.conversation.floor_round_duration": "ms",
+		// RFC 0030 deterministic governance layers (v0.3.8).
+		"channel.conversation.governance_drop": "{message}",
 		// RFC 0031 Phase 1 — sessions subsystem instrument inventory.
 		"sessions.writes": "{write}",
 	}

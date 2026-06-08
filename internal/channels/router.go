@@ -90,6 +90,11 @@ type RouterMetrics struct {
 	// serialization latency trade made observable (the trigger to revisit
 	// the no-cap decision, amendment D4).
 	FloorRoundDuration metric.Float64Histogram
+	// GovernanceDrop counts each publish dropped by an RFC 0030 deterministic
+	// governance layer (v0.3.8), labelled by `channel_type` and `layer`
+	// (`reply_budget` in this PR; `cost`/`depth`/`end_vote` join in PR 5). The
+	// per-drop attribution (channel, interaction, participant) is on the Warn line.
+	GovernanceDrop metric.Int64Counter
 }
 
 // ChannelRouter is the publish-and-fanout entry point used by the REST
@@ -158,6 +163,20 @@ type ChannelRouter struct {
 	salienceMu         sync.Mutex
 	salienceMaxMembers map[string]int
 
+	// replyBudgetMu guards the RFC 0030 Layer 2 (v0.3.8) per-participant reply
+	// budget state; methods + the full field contracts live in reply_budget.go.
+	// replyBudgets: channel id → resolved K (0 = uncapped). replyCounts:
+	// interaction id → participant id → publishes so far (discarded on close).
+	// exemptParticipantTypes: participant types exempt from the budget
+	// (governance.exempt_principals → `user`). defaultReplyBudget: fleet
+	// `default_max_replies_per_participant`, captured for runtime inheritance.
+	// All guarded by replyBudgetMu.
+	replyBudgetMu          sync.Mutex
+	replyBudgets           map[string]int
+	replyCounts            map[string]map[string]int
+	exemptParticipantTypes map[string]struct{}
+	defaultReplyBudget     int
+
 	// maxCascadeDepth — see cascade_depth.go; defaultSessionID — see router_session.go (RFC 0031 Phase 1).
 	maxCascadeDepth  int
 	defaultSessionID string
@@ -184,6 +203,8 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		floorSettings:      make(map[string]channelFloorSettings),
 		floorSpeakers:      make(map[string]map[string]struct{}),
 		salienceMaxMembers: make(map[string]int),
+		replyBudgets:       make(map[string]int),
+		replyCounts:        make(map[string]map[string]int),
 		maxCascadeDepth:    defaults.DefaultMaxCascadeDepth,
 	}
 }
@@ -289,7 +310,12 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 		msg.Metadata[cascadeDepthMetadataKey] = clampedDepth
 	}
 
-	if err := r.store.PublishMessage(ctx, msg); err != nil {
+	// RFC 0030 Layer 2 (v0.3.8) per-participant reply budget + store commit:
+	// reserve the sender's slot, persist, and release the reservation if the
+	// persist fails — so a throttled (K+1)th publish never enters channel
+	// history (§F) and a store-rejected publish never erodes the allowance.
+	// Additive: a no-op when uncapped, untracked, or an exempt human.
+	if err := r.publishWithReplyBudget(ctx, msg, derivedType); err != nil {
 		return err
 	}
 

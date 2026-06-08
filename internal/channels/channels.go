@@ -366,6 +366,19 @@ var (
 	// — it is the opt-in default meaning "uncapped", so the ceiling is
 	// additive and existing channels are unaffected.
 	ErrInvalidInteractionBudgetTokens = errors.New("channels: invalid interaction_budget_tokens")
+	// ErrInvalidMaxRepliesPerParticipant — a declared channel (or the
+	// top-level `default_max_replies_per_participant`) carried a negative
+	// `max_replies_per_participant_per_interaction:` (RFC 0030 Layer 2 reply
+	// budget, v0.3.8). Belt-and-suspenders for the operator who skipped
+	// `make validate` (the JSON schema's `minimum: 0` rejects this earlier).
+	// Zero is NOT an error — it is the opt-in default meaning "uncapped".
+	ErrInvalidMaxRepliesPerParticipant = errors.New("channels: invalid max_replies_per_participant_per_interaction")
+	// ErrParticipantBudgetExhausted — the publish was rejected by the RFC 0030
+	// Layer 2 reply budget (§F, v0.3.8): the sender already published its
+	// allotted `max_replies_per_participant_per_interaction` replies in this
+	// interaction. Surfaced pre-persistence so the dropped message never enters
+	// channel history; the REST publish handler maps it to HTTP 429.
+	ErrParticipantBudgetExhausted = errors.New("channels: participant reply budget exhausted for this interaction")
 )
 
 // participantIDPattern is the single source of truth for legal participant
