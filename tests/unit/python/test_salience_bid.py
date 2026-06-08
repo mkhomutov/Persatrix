@@ -411,6 +411,46 @@ class TestNLAddressingBiasesTheBid:
         assert decision.speak is True
         assert decision.reason == "salient"
 
+    async def test_unset_threshold_addressed_elsewhere_still_clears_decisive(self):
+        """Finding #1 — on the bias-to-silence (``threshold=None``) path the
+        someone-else-invited penalty must not become a *hard drop*. With an
+        unset threshold the bar is the decisive score (0.8); naively adding the
+        0.2 penalty clamps it to 1.0, so only a literal perfect score clears —
+        the hard pre-filter TB4 forbids. A decisive contribution must still
+        clear even when someone else was invited by name."""
+        decision = await _bid(
+            client=_client("speak: yes\nscore: 0.85"),
+            threshold=None,
+            content="let's hear from Iron Fox on this",
+        )
+        assert decision.speak is True
+        assert decision.reason == "salient"
+
+    async def test_unset_threshold_addressed_elsewhere_still_biases_to_silence(self):
+        """The companion to the above: capping the penalty must not neuter the
+        bias entirely — a middling score on the unset-threshold path still
+        stays silent (the decisive bar is unchanged at 0.8)."""
+        decision = await _bid(
+            client=_client("speak: yes\nscore: 0.5"),
+            threshold=None,
+            content="let's hear from Iron Fox on this",
+        )
+        assert decision.speak is False
+        assert decision.reason == "below_threshold"
+
+    async def test_addressed_elsewhere_score_exactly_at_shifted_bar_clears(self):
+        """Finding #3 — the shifted bar must stay an *inclusive* floor. With
+        ``threshold=0.4`` the someone-else penalty lifts the bar to 0.6; a
+        float-naive ``0.4 + 0.2`` lands at 0.6000000000000001, so a score of
+        exactly 0.6 would be silenced by an epsilon. It must clear."""
+        decision = await _bid(
+            client=_client("speak: yes\nscore: 0.6"),
+            threshold=0.4,
+            content="let's hear from Iron Fox on this",
+        )
+        assert decision.speak is True
+        assert decision.reason == "salient"
+
     async def test_addressed_elsewhere_still_runs_the_bid(self):
         """No pre-filter short-circuit: the leased bid is still issued for a
         non-named persona (it is the bid's score, not a deterministic NL drop,

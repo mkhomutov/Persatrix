@@ -80,3 +80,59 @@ class TestDetectNLAddressing:
             persona_name="Ember Owl",
         )
         assert a.self_named is True
+
+
+class TestCompoundInvitation:
+    """A single cue can invite *several* people ("let's hear from Iron Fox and
+    Ember Owl"). Every invitee must read as ``self``; only a genuinely un-named
+    persona reads as ``other``. The first PR-3 cut captured only the first name
+    in the list, so the second invitee was wrongly penalised as *other_named* —
+    the opposite of the intent (an invitee biased toward silence)."""
+
+    _LIST = "let's hear from Iron Fox and Ember Owl on this"
+
+    def test_first_listed_invitee_is_self(self):
+        a = detect_nl_addressing(content=self._LIST, persona_name="Iron Fox")
+        assert a.self_named is True
+
+    def test_second_listed_invitee_is_self_not_other_only(self):
+        """The regression guard for finding #2: the second name in an
+        ``A and B`` invitation is an invitee, so it reads ``self`` (which wins
+        precedence in the bar). The first cut captured only the first name, so
+        this persona was ``self_named=False, other_named=True`` — an invitee
+        biased *toward silence*, the opposite of the intent."""
+        a = detect_nl_addressing(content=self._LIST, persona_name="Ember Owl")
+        assert a.self_named is True
+
+    def test_comma_separated_list_classifies_each_invitee(self):
+        content = "what do Iron Fox, Ember Owl, Gray Wolf think about Redis?"
+        for name in ("Iron Fox", "Ember Owl", "Gray Wolf"):
+            assert detect_nl_addressing(
+                content=content, persona_name=name,
+            ).self_named is True, name
+
+    def test_uninvited_third_party_is_other_for_a_list(self):
+        a = detect_nl_addressing(content=self._LIST, persona_name="Gray Wolf")
+        assert a == NLAddressing(self_named=False, other_named=True)
+
+    def test_list_does_not_swallow_trailing_prose(self):
+        """Precision guard: a lower-cased continuation after ``and`` is prose,
+        not a name, so it must not manufacture a phantom invitee. "ask Redis"
+        following "and" must NOT register persona "Redis" as invited."""
+        a = detect_nl_addressing(
+            content="let's hear from Iron Fox and ask Redis",
+            persona_name="Redis",
+        )
+        assert a.self_named is False
+
+
+class TestSmartApostrophe:
+    """Chat clients autocorrect ``let's`` to a curly apostrophe (U+2019). The
+    flagship cue must still fire (finding #4) — otherwise the headline
+    invitation silently misses on the most common real-world rendering."""
+
+    def test_curly_apostrophe_invitation_still_fires(self):
+        a = detect_nl_addressing(
+            content="let’s hear from Iron Fox", persona_name="Iron Fox",
+        )
+        assert a.self_named is True

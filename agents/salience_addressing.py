@@ -32,10 +32,27 @@ __all__ = ["NLAddressing", "detect_nl_addressing"]
 # deliberately absent — they are Tier A's deterministic filter, not this soft
 # signal.
 #
-# ``_NAME_RUN`` captures up to three whitespace-separated word tokens after a
-# cue; trailing connective/stop words are trimmed before classification so
-# "Iron Fox on this" reads as the name "Iron Fox".
-_NAME_RUN: Final[str] = r"(?P<name>[A-Za-z][\w'\-]*(?:\s+[A-Za-z][\w'\-]*){0,2})"
+# ``_ONE_NAME`` captures up to three whitespace-separated word tokens; trailing
+# connective/stop words are trimmed before classification so "Iron Fox on this"
+# reads as the name "Iron Fox". ``_NAME_RUN`` then allows an explicit
+# ``and``/``&``/``,`` list of such names ("Iron Fox and Ember Owl") so a
+# multi-person invitation classifies *every* invitee, not just the first — the
+# list is split back apart in :func:`_split_names`.
+# A name word, excluding the bare connective words ``and``/``or`` so a greedy
+# capture stops at the list separator ("Iron Fox| and |Ember Owl") instead of
+# swallowing it — the (?:and|or)\b lookahead matches only the *whole* word, so
+# a real name like "Andie" or "Ori" is still allowed.
+_NAME_WORD: Final[str] = r"(?!(?:and|or)\b)[A-Za-z][\w'\-]*"
+_ONE_NAME: Final[str] = rf"{_NAME_WORD}(?:\s+{_NAME_WORD}){{0,2}}"
+_LIST_CONNECTIVE: Final[str] = r"(?:\s*,\s*|\s+and\s+|\s*&\s*|\s*\+\s*)"
+_NAME_RUN: Final[str] = (
+    rf"(?P<name>{_ONE_NAME}(?:{_LIST_CONNECTIVE}{_ONE_NAME})*)"
+)
+# Splits a captured name run back into its individual invitees on the same
+# connectives ``_NAME_RUN`` joined them with.
+_LIST_SPLIT: Final[re.Pattern[str]] = re.compile(
+    r"\s*,\s*|\s+and\s+|\s*&\s*|\s*\+\s*", re.IGNORECASE,
+)
 _ADDRESS_CUES: Final[tuple[re.Pattern[str], ...]] = (
     re.compile(r"let'?s\s+hear\s+from\s+" + _NAME_RUN, re.IGNORECASE),
     re.compile(r"let\s+us\s+hear\s+from\s+" + _NAME_RUN, re.IGNORECASE),
@@ -100,6 +117,28 @@ def _clean_name(captured: str) -> str:
     return " ".join(words)
 
 
+def _split_names(captured: str) -> list[str]:
+    """Split a captured name run ("Iron Fox and Ember Owl") into its invitees.
+
+    The first name is *anchored* by the cue, so it is always kept. Subsequent
+    list members are speculative — the connective could equally introduce
+    trailing prose ("... and we should pick Redis") — so a continuation is kept
+    only when it is Title-cased (a plausible name), and the list stops at the
+    first lower-cased continuation. This recovers the genuine multi-invitee case
+    without manufacturing phantom recipients out of prose (high precision)."""
+    parts = _LIST_SPLIT.split(captured)
+    if not parts:
+        return []
+    names = [parts[0]]
+    for part in parts[1:]:
+        stripped = part.strip()
+        if stripped[:1].isupper():
+            names.append(stripped)
+        else:
+            break
+    return names
+
+
 def detect_nl_addressing(*, content: str, persona_name: str) -> NLAddressing:
     """Extract the free-text addressing signal from the inbound message (PR 3).
 
@@ -115,6 +154,11 @@ def detect_nl_addressing(*, content: str, persona_name: str) -> NLAddressing:
     if not content or not persona_name:
         return NLAddressing(self_named=False, other_named=False)
 
+    # Normalise the curly apostrophe chat clients autocorrect ``let's`` into
+    # (U+2019 / U+02BC) to a straight ``'`` so the ``let'?s`` cue still fires on
+    # the most common real-world rendering of the headline invitation.
+    content = content.replace("’", "'").replace("ʼ", "'")
+
     persona_toks = _name_tokens(persona_name)
     if not persona_toks:
         return NLAddressing(self_named=False, other_named=False)
@@ -123,16 +167,17 @@ def detect_nl_addressing(*, content: str, persona_name: str) -> NLAddressing:
     other_named = False
     for pattern in _ADDRESS_CUES:
         for match in pattern.finditer(content):
-            toks = _name_tokens(_clean_name(match.group("name")))
-            # A pronoun / group reference or an empty capture is not a named
-            # recipient — ignore it (no one is suppressed on an ambiguity).
-            if not toks or toks <= _NON_NAME_TOKENS:
-                continue
-            # Subset either way: a first-name invitation ("Fox") matches the
-            # full-name persona ("Iron Fox"), and vice-versa.
-            if persona_toks <= toks or toks <= persona_toks:
-                self_named = True
-            else:
-                other_named = True
+            for candidate in _split_names(match.group("name")):
+                toks = _name_tokens(_clean_name(candidate))
+                # A pronoun / group reference or an empty capture is not a named
+                # recipient — ignore it (no one is suppressed on an ambiguity).
+                if not toks or toks <= _NON_NAME_TOKENS:
+                    continue
+                # Subset either way: a first-name invitation ("Fox") matches the
+                # full-name persona ("Iron Fox"), and vice-versa.
+                if persona_toks <= toks or toks <= persona_toks:
+                    self_named = True
+                else:
+                    other_named = True
 
     return NLAddressing(self_named=self_named, other_named=other_named)

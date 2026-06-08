@@ -99,6 +99,10 @@ _DECISIVE_SCORE: Final[float] = 0.8
 # a non-named persona with a genuinely strong contribution still clears.
 _ADDRESSED_SELF_BONUS: Final[float] = 0.2
 _ADDRESSED_OTHER_PENALTY: Final[float] = 0.2
+# Decimal places the shifted bar is rounded to so float drift (e.g.
+# ``0.4 + 0.2 == 0.6000000000000001``) cannot turn the inclusive floor into an
+# epsilon-exclusive one.
+_BAR_PRECISION: Final[int] = 6
 
 # TB6: default channel-member cap above which the bid is skipped (the channel
 # falls back to ``addressed``-only). A non-positive value disables the cap.
@@ -235,13 +239,28 @@ def _bar_for(threshold: float | None, addressing: NLAddressing) -> float:
     Starts from the configured ``threshold`` (or :data:`_DECISIVE_SCORE` when
     unset — bias-to-silence), then applies the NL-addressing shift: invited-by-
     name lowers the bar, someone-else-invited raises it. ``self`` wins when
-    both fire. Clamped to ``[0, 1]`` so the shift can never invert the gate."""
-    bar = _DECISIVE_SCORE if threshold is None else threshold
+    both fire.
+
+    The someone-else-invited *penalty* is a **bias, never a hard filter** (TB4
+    / amendment OQ #2): it is capped so a decisive contribution still clears
+    even when someone else was invited. Without the cap, the unset-threshold
+    path (base bar :data:`_DECISIVE_SCORE` = 0.8) plus the 0.2 penalty would
+    clamp the bar to 1.0 — a de-facto hard drop where only a literal perfect
+    score speaks. The ceiling is the decisive score, or the operator's own bar
+    when they deliberately set one higher (we never lift a turn further out of
+    reach than the configured threshold already places it).
+
+    Rounded to :data:`_BAR_PRECISION` so the shift stays an *inclusive* floor:
+    a float-naive ``0.4 + 0.2`` lands at 0.6000000000000001 and would silence a
+    score of exactly 0.6 by an epsilon. Clamped to ``[0, 1]`` so the shift can
+    never invert the gate."""
+    base = _DECISIVE_SCORE if threshold is None else threshold
+    bar = base
     if addressing.self_named:
         bar -= _ADDRESSED_SELF_BONUS
     elif addressing.other_named:
-        bar += _ADDRESSED_OTHER_PENALTY
-    return max(0.0, min(1.0, bar))
+        bar = min(bar + _ADDRESSED_OTHER_PENALTY, max(_DECISIVE_SCORE, base))
+    return round(max(0.0, min(1.0, bar)), _BAR_PRECISION)
 
 
 def _bid_system_prompt(*, persona_name: str, persona_role: str) -> str:
