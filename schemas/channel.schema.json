@@ -89,6 +89,18 @@
           "default": 0,
           "description": "RFC 0030 Layer 2 (v0.3.8) per-participant reply budget for this channel: a participant's (K+1)th publish in one interaction on this channel is rejected pre-persistence (HTTP 429 + `ErrParticipantBudgetExhausted`), so the dropped message never enters channel history. Opt-in: absent or 0 inherits `default_max_replies_per_participant` (itself 0 = uncapped) — like `interaction_budget_tokens`, 0 is NOT normalized to a non-zero default, because uncapped is a meaningful value. A human principal in `governance.exempt_principals` is exempt. Negative is rejected at load time. The channel-over-fleet precedence is resolved at read time."
         },
+        "end_vote_threshold": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2,
+          "description": "RFC 0030 Layer 4 (v0.3.8) end-of-interaction quorum (K) for this channel: when K distinct participants emit an `END_INTERACTION_VOTE` action within `end_vote_window` consecutive turns, the interaction closes on its own and the orchestrator stops fanning out new replies (§H). Absent uses the K=2 default (one agent saying 'done' is not consensus; two distinct agents in close succession is); the Go loader treats a zero/absent value as 'use the default' — unlike `interaction_budget_tokens`, 0 is NOT a meaningful 'uncapped' value here — and rejects negatives at load time. Still opt-in: with no agent emitting the vote action, a populated K never fires, so existing channels are unchanged."
+        },
+        "end_vote_window": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "RFC 0030 Layer 4 (v0.3.8) end-of-interaction recency window (W) for this channel: an end-vote counts toward the `end_vote_threshold` quorum only while it is within W consecutive turns of the current turn, so a stale vote from much earlier no longer counts ('votes must be recent'). Absent uses the W=3 default (wide enough to survive an intervening one-off comment); the Go loader treats a zero/absent value as 'use the default' and rejects negatives at load time."
+        },
         "members": {
           "type": "array",
           "minItems": 1,
@@ -142,6 +154,10 @@
           "type": "string",
           "maxLength": 128,
           "description": "RFC 0020 interaction_id of the open Interaction this message belongs to (RFC 0030 deterministic governance layers, v0.3.8). Opaque string token — RFC 0020 §D names it a ULID, but the agent-side implementation mints a uuid4 (agents/memory/interactions.py), so do not assume ULID sortability. Optional: absent is the untracked / pre-v0.3.8 case, which leaves every governance layer (Layer 1 cost ceiling, Layer 2 reply budget, Layer 4 end-of-interaction votes) at its uncapped default, so the field is additive. When a publisher supplies this key the orchestrator lifts it onto the typed `string interaction_id = 17` field on `ChannelMessageEvent` (proto/task.proto) so the value survives the publish→fanout boundary that has no metadata map. Bounded at 128 (mirrors the agent receive path's thread_id cap, generous over the 36-char uuid4) — the layer PRs key per-interaction maps on this value, so an over-length claim is treated as untracked (the value dropped) rather than riding an unbounded map key through. This schema is the documentary expression of that bound (`maxLength` counts code units); the runtime enforcement counts UTF-8 bytes and lives at BOTH boundaries that touch the value — the orchestrator publish boundary (`readInteractionID`, internal/channels/interaction_id.go) and the agent receive seed (`seed_wire_metadata`, agents/channel_wire_metadata.py), each degrading to untracked rather than failing the dispatch. (No publisher populates the key yet — interaction tracking is agent-side; a producer lands in a later PR.)"
+        },
+        "end_interaction_vote": {
+          "type": "boolean",
+          "description": "RFC 0030 Layer 4 (v0.3.8) end-of-interaction vote flag: when an agent emits an `END_INTERACTION_VOTE` action, the publish that carries it sets this to `true` so the orchestrator counts it toward the channel's `end_vote_threshold` quorum (scoped by `interaction_id`; a vote with no `interaction_id` is ignored). Absent/false is an ordinary message. The orchestrator reads it at the publish boundary (`readEndInteractionVote`, internal/channels/end_vote.go) and, once K distinct participants have voted within `end_vote_window` consecutive turns, closes the interaction and suppresses further fanout. Optional and additive: no producer sets the key yet (the Python `END_INTERACTION_VOTE` action is recognised but not yet wired to publish), so the layer is inert in production until the interaction_id + vote producer lands."
         }
       }
     }

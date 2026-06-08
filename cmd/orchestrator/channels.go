@@ -126,6 +126,8 @@ func initChannels(
 			FloorRoundDuration: orchMetrics.ChannelConversationFloorRoundDuration,
 			// RFC 0030 deterministic governance-layer drop counter (v0.3.8).
 			GovernanceDrop: orchMetrics.ChannelConversationGovernanceDrop,
+			// RFC 0030 Layer 4 end-of-interaction close counter (v0.3.8).
+			InteractionClosed: orchMetrics.ChannelConversationInteractionClosed,
 		}
 	}
 	// ISSUE-0082 PR 2: build the per-request session resolver over the
@@ -196,6 +198,15 @@ func initChannels(
 	if bErr := router.ResolveReplyBudgets(context.Background(), chanCfg); bErr != nil {
 		logger.Warn("channels: reply-budget resolution incomplete; config channels resolved, store-resident channels stay uncapped until next create/restart",
 			zap.Error(bErr))
+	}
+
+	// RFC 0030 Layer 4 (v0.3.8): resolve the per-channel end-of-interaction vote
+	// quorum (K) and recency window (W) for every config-declared channel —
+	// store-resident channels fall back to the K=2 / W=3 defaults at read time,
+	// so (unlike the reply budget) there is no store enumeration to fail.
+	if vErr := router.ResolveEndVotes(context.Background(), chanCfg); vErr != nil {
+		logger.Warn("channels: end-vote resolution incomplete; channels fall back to the default quorum until next restart",
+			zap.Error(vErr))
 	}
 
 	logger.Info("channels: subsystem ready",

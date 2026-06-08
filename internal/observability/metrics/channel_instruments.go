@@ -93,6 +93,20 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	); err != nil {
 		return fmt.Errorf("create channel.conversation.governance_drop: %w", err)
 	}
+	// RFC 0030 Layer 4 (v0.3.8) end-of-interaction signal. One increment per
+	// interaction closed by a governance layer, labelled by `channel_type` and
+	// `trigger` (`end_votes` in PR 4; `idle`/`structural`/`cost` join as PR 5
+	// wires the other close paths). Feeds the convergence dashboard that makes
+	// "how did this conversation end" observable (§L).
+	if i.ChannelConversationInteractionClosed, err = m.Int64Counter(
+		"channel.conversation.interaction_closed",
+		metric.WithUnit("{interaction}"),
+		metric.WithDescription(
+			"Interactions closed by an RFC 0030 governance layer, labelled by channel_type and trigger.",
+		),
+	); err != nil {
+		return fmt.Errorf("create channel.conversation.interaction_closed: %w", err)
+	}
 	// RFC 0031 Phase 1: per-session write counter. Increments once per
 	// CreateChannel / CreateChannelWithMembers / GetOrCreateDM /
 	// PublishMessage on the channels store. Labelled by `session_id`.

@@ -179,6 +179,22 @@ class TestActionExecutor:
         ])
         assert results[0]["status"] == "not_implemented"
 
+    async def test_end_interaction_vote_recognised(self):
+        # RFC 0030 Layer 4 (v0.3.8): the vote action is in the vocabulary and the
+        # executor handles it explicitly (not the defensive "unhandled" arm). The
+        # producer wiring is deferred, so the status is "not_implemented" today.
+        executor = ActionExecutor()
+        results = await executor.execute("ember-owl", [
+            AgentAction(ActionType.END_INTERACTION_VOTE, {}),
+        ])
+        assert results[0]["action_type"] == "end_interaction_vote"
+        assert results[0]["status"] == "not_implemented"
+
+    async def test_end_interaction_vote_parses_from_action_string(self):
+        # The action_parser maps a raw "action_type" string straight through the
+        # Enum, so the new vocabulary value is parseable end-to-end.
+        assert ActionType("end_interaction_vote") is ActionType.END_INTERACTION_VOTE
+
     async def test_multiple_actions(self):
         executor = ActionExecutor()
         results = await executor.execute("ember-owl", [
