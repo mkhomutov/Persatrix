@@ -37,11 +37,14 @@ func exemptPrincipalParticipantType(principal string) (string, bool) {
 // `channelID`: a participant's (K+1)th publish in one interaction on this
 // channel is rejected pre-persistence. `k <= 0` means uncapped (the opt-in
 // default) and is stored verbatim — unlike the salience cap, zero is a
-// meaningful value, not a "use the default" sentinel. Wired two ways like
-// [ChannelRouter.SetSalienceMaxChannelMembers]: at startup via
-// [ChannelRouter.ResolveReplyBudgets] and at runtime when a group channel is
-// created through `POST /api/v1/channels`. The mutex makes the runtime call
-// safe concurrently with traffic.
+// meaningful value, not a "use the default" sentinel. Driven at startup by
+// [ChannelRouter.ResolveReplyBudgets] (with the per-channel resolved value) and
+// at runtime by [ChannelRouter.ApplyDefaultReplyBudget] when a group channel is
+// created through `POST /api/v1/channels`. Because zero is meaningful, the
+// runtime path CANNOT inherit the fleet default via Set(_, 0) the way the
+// salience cap does — it must be handed the resolved default, which is why
+// ApplyDefaultReplyBudget exists rather than a bare SetReplyBudget(_, 0) call.
+// The mutex makes the runtime call safe concurrently with traffic.
 func (r *ChannelRouter) SetReplyBudget(channelID string, k int) {
 	if k < 0 {
 		k = 0
@@ -49,6 +52,23 @@ func (r *ChannelRouter) SetReplyBudget(channelID string, k int) {
 	r.replyBudgetMu.Lock()
 	defer r.replyBudgetMu.Unlock()
 	r.replyBudgets[channelID] = k
+}
+
+// ApplyDefaultReplyBudget stamps the fleet-wide
+// `default_max_replies_per_participant` (captured at
+// [ChannelRouter.ResolveReplyBudgets]) onto a freshly-created group channel —
+// the reply-budget sibling of the `SetSalienceMaxChannelMembers(_, 0)` /
+// `SetFloorControl` calls in the channel-create handler. It is a distinct
+// method because reply-budget zero is uncapped-as-a-value rather than a
+// "use the default" sentinel: a runtime channel cannot inherit the default by
+// passing 0, so the handler delegates the lookup here instead of duplicating
+// the fleet-default field. No-op-safe before ResolveReplyBudgets has run (the
+// captured default is then 0 = uncapped, the opt-in default).
+func (r *ChannelRouter) ApplyDefaultReplyBudget(channelID string) {
+	r.replyBudgetMu.Lock()
+	d := r.defaultReplyBudget
+	r.replyBudgetMu.Unlock()
+	r.SetReplyBudget(channelID, d)
 }
 
 // ReplyBudgetFor returns the resolved Layer 2 reply budget for `channelID`
@@ -92,19 +112,32 @@ func (r *ChannelRouter) isExemptParticipantType(participantType string) bool {
 // budget K>0 and the publish carries an `interaction_id`, it counts the
 // sender's publishes in that interaction and rejects the (K+1)th with
 // [ErrParticipantBudgetExhausted] — so the dropped message never reaches the
-// store. Returns nil (admits the publish) when:
+// store.
+//
+// On admission it returns a `release` closure and a nil error. `release` is
+// non-nil ONLY when a reply slot was actually reserved (a capped, tracked,
+// non-exempt publish); the caller MUST invoke it if the subsequent
+// [ChannelStore.PublishMessage] fails, so a store-rejected publish (oversized
+// content, non-member, …) does not consume the sender's allowance. The §F
+// counter must track messages that entered channel history, not publish
+// attempts — incrementing pre-persistence with no rollback would lock out a
+// well-behaved participant after K rejected attempts that never persisted.
+// `release` is nil (a no-op for the caller) when the publish is admitted
+// without reserving a slot:
 //
 //   - the channel is uncapped (K<=0) — the opt-in default;
 //   - the publish has no `interaction_id` — nothing to scope a counter to, so
 //     the layer stays at its uncapped default (the untracked / pre-v0.3.8 case);
 //   - the sender is an exempt principal (a human, per governance.exempt_principals).
 //
-// The check-and-increment is atomic under replyBudgetMu so two concurrent
-// publishes from the same participant cannot both slip past the boundary.
-func (r *ChannelRouter) enforceReplyBudget(ctx context.Context, msg ChannelMessage, ct ChannelType) error {
+// The check-and-reserve is atomic under replyBudgetMu so two concurrent
+// publishes from the same participant cannot both slip past the boundary; the
+// reservation keeps that atomicity (the slot is held the instant the gate
+// admits) while still reconciling to actual persistence on the error path.
+func (r *ChannelRouter) enforceReplyBudget(ctx context.Context, msg ChannelMessage, ct ChannelType) (func(), error) {
 	interactionID := readInteractionID(msg.Metadata)
 	if interactionID == "" {
-		return nil // untracked — no interaction to scope the budget to.
+		return nil, nil // untracked — no interaction to scope the budget to.
 	}
 	participantType := readParticipantType(msg.Metadata)
 
@@ -112,13 +145,13 @@ func (r *ChannelRouter) enforceReplyBudget(ctx context.Context, msg ChannelMessa
 	k := r.replyBudgets[msg.ChannelID]
 	if k <= 0 || r.isExemptParticipantType(participantType) {
 		r.replyBudgetMu.Unlock()
-		return nil
+		return nil, nil
 	}
 	counts := r.replyCounts[interactionID]
 	if counts != nil && counts[msg.SenderID] >= k {
 		r.replyBudgetMu.Unlock()
 		r.recordReplyBudgetDrop(ctx, msg, ct, interactionID, k)
-		return fmt.Errorf("%w: participant %q reached %d replies in interaction %q",
+		return nil, fmt.Errorf("%w: participant %q reached %d replies in interaction %q",
 			ErrParticipantBudgetExhausted, msg.SenderID, k, interactionID)
 	}
 	if counts == nil {
@@ -127,6 +160,54 @@ func (r *ChannelRouter) enforceReplyBudget(ctx context.Context, msg ChannelMessa
 	}
 	counts[msg.SenderID]++
 	r.replyBudgetMu.Unlock()
+
+	// Slot reserved but not yet durable. The caller releases it iff the
+	// persist fails, so the counter only ever reflects messages in history.
+	sender := msg.SenderID
+	return func() { r.releaseReplyReservation(interactionID, sender) }, nil
+}
+
+// releaseReplyReservation rolls back the reply-slot reservation taken by
+// [ChannelRouter.enforceReplyBudget] when the subsequent persist failed,
+// keeping the §F counter equal to what entered channel history. Atomic under
+// replyBudgetMu and idempotent: a missing interaction (already discarded on
+// close) or a sender already at zero is a no-op. Prunes the entry on the way
+// down so a released reservation leaves no residue.
+func (r *ChannelRouter) releaseReplyReservation(interactionID, sender string) {
+	r.replyBudgetMu.Lock()
+	defer r.replyBudgetMu.Unlock()
+	counts := r.replyCounts[interactionID]
+	if counts == nil || counts[sender] == 0 {
+		return
+	}
+	counts[sender]--
+	if counts[sender] == 0 {
+		delete(counts, sender)
+	}
+	if len(counts) == 0 {
+		delete(r.replyCounts, interactionID)
+	}
+}
+
+// publishWithReplyBudget wraps the store commit in the Layer 2 reservation: it
+// runs the [ChannelRouter.enforceReplyBudget] gate, persists via
+// [ChannelStore.PublishMessage], and releases the reservation if the persist
+// fails. Keeping the reserve/persist/release triple together here (rather than
+// inlined in [ChannelRouter.Publish]) keeps router.go under the file-size cap
+// and makes the "counter tracks history, not attempts" invariant local: a
+// throttled (K+1)th publish never reaches the store, and a store-rejected
+// publish (oversized content, non-member, …) never consumes a slot.
+func (r *ChannelRouter) publishWithReplyBudget(ctx context.Context, msg ChannelMessage, ct ChannelType) error {
+	release, err := r.enforceReplyBudget(ctx, msg, ct)
+	if err != nil {
+		return err
+	}
+	if err := r.store.PublishMessage(ctx, msg); err != nil {
+		if release != nil {
+			release()
+		}
+		return err
+	}
 	return nil
 }
 
@@ -188,6 +269,12 @@ func (r *ChannelRouter) ResolveReplyBudgets(ctx context.Context, cfg *Config) er
 		fleetDefault = cfg.DefaultMaxRepliesPerParticipant
 		r.SetExemptPrincipals(cfg.Governance.ExemptPrincipals)
 	}
+	// Capture the fleet default so a runtime-created channel can inherit it via
+	// [ChannelRouter.ApplyDefaultReplyBudget] (zero is meaningful, so it cannot
+	// ride a Set(_, 0) sentinel the way the salience cap does).
+	r.replyBudgetMu.Lock()
+	r.defaultReplyBudget = fleetDefault
+	r.replyBudgetMu.Unlock()
 	configured := make(map[string]bool)
 	if cfg != nil {
 		for _, decl := range cfg.Channels {

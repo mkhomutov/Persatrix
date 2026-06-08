@@ -168,11 +168,14 @@ type ChannelRouter struct {
 	// replyBudgets: channel id → resolved K (0 = uncapped). replyCounts:
 	// interaction id → participant id → publishes so far (discarded on close).
 	// exemptParticipantTypes: participant types exempt from the budget
-	// (governance.exempt_principals → `user`). All guarded by replyBudgetMu.
+	// (governance.exempt_principals → `user`). defaultReplyBudget: fleet
+	// `default_max_replies_per_participant`, captured for runtime inheritance.
+	// All guarded by replyBudgetMu.
 	replyBudgetMu          sync.Mutex
 	replyBudgets           map[string]int
 	replyCounts            map[string]map[string]int
 	exemptParticipantTypes map[string]struct{}
+	defaultReplyBudget     int
 
 	// maxCascadeDepth — see cascade_depth.go; defaultSessionID — see router_session.go (RFC 0031 Phase 1).
 	maxCascadeDepth  int
@@ -307,16 +310,12 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 		msg.Metadata[cascadeDepthMetadataKey] = clampedDepth
 	}
 
-	// RFC 0030 Layer 2 (v0.3.8) per-participant reply budget: reject the
-	// sender's (K+1)th publish in this interaction BEFORE the store commit, so
-	// a throttled message never enters channel history (§F). A no-op when the
-	// channel is uncapped, the publish is untracked (no interaction_id), or the
-	// sender is an exempt human principal — so the layer is additive.
-	if err := r.enforceReplyBudget(ctx, msg, derivedType); err != nil {
-		return err
-	}
-
-	if err := r.store.PublishMessage(ctx, msg); err != nil {
+	// RFC 0030 Layer 2 (v0.3.8) per-participant reply budget + store commit:
+	// reserve the sender's slot, persist, and release the reservation if the
+	// persist fails — so a throttled (K+1)th publish never enters channel
+	// history (§F) and a store-rejected publish never erodes the allowance.
+	// Additive: a no-op when uncapped, untracked, or an exempt human.
+	if err := r.publishWithReplyBudget(ctx, msg, derivedType); err != nil {
 		return err
 	}
 

@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,6 +57,43 @@ func TestReplyBudget_KPlusOneRejectedPrePersistence(t *testing.T) {
 	hist, herr := store.GetHistory(context.Background(), id, 100, time.Time{})
 	require.NoError(t, herr)
 	assert.Len(t, hist, 2, "the rejected (K+1)th publish must not be persisted")
+}
+
+// TestReplyBudget_StoreRejectedPublishDoesNotConsumeBudget pins that the §F
+// counter only ever reflects messages that actually entered channel history: a
+// publish the store rejects post-gate (here oversized content → 413) must NOT
+// erode the sender's allowance. Regression — enforceReplyBudget once
+// incremented the counter pre-persistence, so a member who tripped a store
+// rejection K times was locked out (429) with zero messages in history.
+func TestReplyBudget_StoreRejectedPublishDoesNotConsumeBudget(t *testing.T) {
+	router, _, store := newRouterTest(t)
+	id := mustCreateGroup(t, store, "planning", "alice", "bob")
+	router.SetReplyBudget(id, 1)
+
+	// alice's first publish is rejected by the store (oversized content) AFTER
+	// the budget gate runs, so it never enters history — and must not consume
+	// her single reply slot.
+	oversized := strings.Repeat("x", MaxMessageContentBytes+1)
+	err := router.Publish(context.Background(), ChannelMessage{
+		ID:        uuid.NewString(),
+		ChannelID: id,
+		SenderID:  "alice",
+		Content:   oversized,
+		Metadata: map[string]any{
+			interactionIDMetadataKey:   "int-1",
+			participantTypeMetadataKey: "agent",
+		},
+	}, "")
+	require.ErrorIs(t, err, ErrMessageContentTooLarge)
+
+	// Budget intact: alice's first *valid* publish still lands.
+	require.NoError(t, publishReply(t, router, id, "alice", "int-1", "agent"))
+	// And only now is she at her cap — the next is correctly denied.
+	assert.ErrorIs(t, publishReply(t, router, id, "alice", "int-1", "agent"), ErrParticipantBudgetExhausted)
+
+	hist, herr := store.GetHistory(context.Background(), id, 100, time.Time{})
+	require.NoError(t, herr)
+	assert.Len(t, hist, 1, "only the one valid publish is in history")
 }
 
 // TestReplyBudget_PerParticipantAndPerInteraction proves the counter is keyed

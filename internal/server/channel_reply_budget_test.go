@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"path/filepath"
@@ -82,6 +83,25 @@ func TestChannels_ReplyBudget_KPlusOne_429(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Len(t, resp.Messages, 2, "the rejected (K+1)th publish must not be persisted")
+}
+
+// TestChannels_ReplyBudget_RuntimeChannelInheritsFleetDefault pins that a
+// channel created at runtime via POST /api/v1/channels inherits the fleet-wide
+// `default_max_replies_per_participant`, the reply-budget sibling of the
+// floor/salience resolution the create handler already does. Regression — the
+// create path resolved floor control and the salience cap but never stamped the
+// reply budget, so a runtime channel stayed uncapped until the next restart,
+// contradicting the documented fleet-default inheritance.
+func TestChannels_ReplyBudget_RuntimeChannelInheritsFleetDefault(t *testing.T) {
+	srv, router := replyBudgetTestServer(t)
+	// Resolve a fleet default of 2 (empty store, no config channels).
+	require.NoError(t, router.ResolveReplyBudgets(context.Background(), &channels.Config{
+		DefaultMaxRepliesPerParticipant: 2,
+	}))
+
+	mustCreateChannelHTTP(t, srv, "planning", "alice", "bob")
+	assert.Equal(t, 2, router.ReplyBudgetFor("group:planning"),
+		"a runtime-created channel must inherit default_max_replies_per_participant")
 }
 
 // TestChannels_ReplyBudget_DefaultUncapped pins the opt-in default: with no

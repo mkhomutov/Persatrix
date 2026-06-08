@@ -135,16 +135,16 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// RFC 0030 Layer 2.5 — resolve floor control for the freshly-created group
-	// channel so it takes the floor like a config-declared one (default ON for
-	// groups). Runtime opt-out is deferred: no `floor_control` wire field and
-	// the store persists no flag, so startup ResolveFloorControl re-forces
-	// runtime channels ON on restart. RFC 0030 Tier B (v0.3.8) gives the
-	// salience-bid channel-size cap the same treatment — no REST field, so
-	// SetSalienceMaxChannelMembers(_, 0) applies the default. Nil router → no-op.
+	// RFC 0030 — resolve per-channel governance for the freshly-created group
+	// channel so it matches a config-declared one: floor control (default ON),
+	// the Tier B salience cap (Set(_, 0) applies the default), and the Layer 2
+	// reply budget (ApplyDefaultReplyBudget — zero is meaningful, so it can't
+	// ride a Set(_, 0) sentinel). None has a REST field, so startup resolution
+	// re-forces them on restart. Nil router → no-op.
 	if s.channelRouter != nil {
 		s.channelRouter.SetFloorControl(canonicalID, true, 0)
 		s.channelRouter.SetSalienceMaxChannelMembers(canonicalID, 0)
+		s.channelRouter.ApplyDefaultReplyBudget(canonicalID)
 	}
 
 	created, err := s.channelStore.GetChannel(r.Context(), canonicalID)
