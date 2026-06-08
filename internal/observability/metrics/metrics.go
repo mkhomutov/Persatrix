@@ -138,10 +138,12 @@ type Instruments struct {
 	// ChannelMessagesCascadeCapped — RFC 0011 cascade-depth amendment; see channel_instruments.go.
 	ChannelMessagesCascadeCapped metric.Int64Counter
 	// ChannelConversation* — RFC 0030 Layer 2.5 floor-control + v0.3.8 governance-layer telemetry; see channel_instruments.go.
-	ChannelConversationFloorTurn          metric.Int64Counter
-	ChannelConversationFloorRoundDuration metric.Float64Histogram
-	ChannelConversationGovernanceDrop     metric.Int64Counter
-	ChannelConversationInteractionClosed  metric.Int64Counter
+	ChannelConversationFloorTurn            metric.Int64Counter
+	ChannelConversationFloorRoundDuration   metric.Float64Histogram
+	ChannelConversationGovernanceDrop       metric.Int64Counter
+	ChannelConversationInteractionClosed    metric.Int64Counter
+	ChannelConversationEndVoteEmitted       metric.Int64Counter
+	ChannelConversationReplyBudgetRemaining metric.Float64Histogram
 	// SessionsWrites — RFC 0031 Phase 1; see channel_instruments.go.
 	SessionsWrites metric.Int64Counter
 }

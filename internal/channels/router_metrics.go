@@ -39,14 +39,32 @@ type RouterMetrics struct {
 	// the no-cap decision, amendment D4).
 	FloorRoundDuration metric.Float64Histogram
 	// GovernanceDrop counts each publish dropped by an RFC 0030 deterministic
-	// governance layer (v0.3.8), labelled by `channel_type` and `layer`
-	// (`reply_budget` in this PR; `cost`/`depth`/`end_vote` join in PR 5). The
-	// per-drop attribution (channel, interaction, participant) is on the Warn line.
+	// governance layer (v0.3.8), labelled by `channel_type` and `layer`. The
+	// channels package emits `depth` (cascade cap), `reply_budget` (Layer 2), and
+	// `end_vote` (a redundant in-window duplicate vote whose fanout is suppressed);
+	// `cost` (Layer 1) is wallet-side and lands with the budget-stamping wiring.
+	// The per-drop attribution (channel, interaction, participant) is on the Warn
+	// line, and the `conversation.governance.layer` span attribute correlates it in
+	// a trace (governance.go).
 	GovernanceDrop metric.Int64Counter
 	// InteractionClosed counts each interaction closed by a governance layer
 	// (RFC 0030 Layer 4, v0.3.8), labelled by `channel_type` and `trigger`
-	// (`end_votes` in this PR; `idle`/`structural`/`cost` join as PR 5 wires the
-	// other close paths). The per-close attribution (channel, interaction, the
-	// vote count) is on the structured log line.
+	// (`end_votes` today; `idle`/`structural`/`cost` join as their close paths are
+	// wired). The per-close attribution (channel, interaction, the vote count) is
+	// on the structured log line.
 	InteractionClosed metric.Int64Counter
+	// EndVoteEmitted counts each RFC 0030 Layer 4 end-of-interaction vote action,
+	// labelled by `channel_type` (§L). Pairs with InteractionClosed to make
+	// "votes cast vs. interactions that actually converged" observable on the
+	// convergence dashboard. Every vote increments it once — the first vote, a
+	// stale re-vote, and a deduped in-window re-vote alike — so it measures vote
+	// VOLUME, distinct from the quorum the close counter measures.
+	EndVoteEmitted metric.Int64Counter
+	// ReplyBudgetRemaining records, at interaction close, each tracked
+	// participant's leftover Layer 2 reply allowance (`K - replies_used`) for a
+	// capped channel, labelled by `channel_type` (§L). A tail concentrated near
+	// zero says the budget is too tight (participants routinely hit the cap); a
+	// fat tail near K says it is slack. Recorded on the close path before the
+	// per-interaction counters are discarded, so it observes the final state.
+	ReplyBudgetRemaining metric.Float64Histogram
 }

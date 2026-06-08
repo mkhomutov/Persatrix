@@ -79,6 +79,19 @@ func clampCascadeDepth(inbound, max int) int {
 //     fabricated zero that conflates with "every recipient was
 //     filtered upstream".
 func (r *ChannelRouter) recordCascadeCap(ctx context.Context, msg ChannelMessage, ct ChannelType, depth int) {
+	// RFC 0030 §B composition: the cascade cap is Layer 0. Attribute it on the
+	// shared governance_drop{layer=depth} counter + the trace span (governance.go)
+	// so every layer's drops land on one dashboard / trace query — one increment
+	// per capped publish, distinct from the per-recipient cascade_capped counter
+	// below (which the cap-rate dashboard has used since the RFC 0011 amendment).
+	if r.metrics != nil && r.metrics.GovernanceDrop != nil {
+		r.metrics.GovernanceDrop.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("channel_type", string(ct)),
+			attribute.String("layer", governanceLayerDepth),
+		))
+	}
+	annotateGovernanceDropSpan(ctx, governanceLayerDepth)
+
 	members, err := r.store.GetMembers(ctx, msg.ChannelID)
 	if err != nil {
 		// Lookup failure: emit the cap Warn WITHOUT a suppressed count.
