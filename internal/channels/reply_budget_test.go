@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
@@ -228,4 +230,59 @@ func TestResolveReplyBudgets_NoWarnWhenCapped(t *testing.T) {
 	require.NoError(t, router.ResolveReplyBudgets(context.Background(), cfg))
 	assert.Empty(t, logs.FilterMessageSnippet("reply budget").All(), "a capped channel must not warn")
 	assert.Equal(t, 3, router.ReplyBudgetFor("group:planning"))
+}
+
+// TestReplyBudget_GovernanceDropCounter pins the telemetry contract for the
+// drop path: a Layer 2 rejection fires the shared
+// `channel.conversation.governance_drop` counter exactly once, labelled
+// `channel_type` + `layer=reply_budget` — the instrument PR 5 reuses for the
+// `cost`/`depth`/`end_vote` layers, so the label is the join point the
+// governance-drop dashboard keys on. The accepted publish that precedes the
+// drop must NOT increment it (value is 1, not 2), so the counter tracks drops,
+// not publishes. Mirrors the floor-control telemetry test's manual-reader shape.
+func TestReplyBudget_GovernanceDropCounter(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+	dropCtr, err := mp.Meter("test").Int64Counter("channel.conversation.governance_drop")
+	require.NoError(t, err)
+
+	store := newTestStore(t, SQLiteOptions{})
+	router := NewChannelRouter(store, &recordingDispatcher{}, zap.NewNop(), &RouterMetrics{
+		GovernanceDrop: dropCtr,
+	})
+	id := mustCreateGroup(t, store, "planning", "alice", "bob")
+	router.SetReplyBudget(id, 1)
+
+	// One accepted publish (no drop), then the (K+1)th is rejected (one drop).
+	require.NoError(t, publishReply(t, router, id, "alice", "int-1", "agent"))
+	assert.ErrorIs(t, publishReply(t, router, id, "alice", "int-1", "agent"), ErrParticipantBudgetExhausted)
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	assert.Equal(t, int64(1), governanceDropCount(t, rm, "group", "reply_budget"),
+		"exactly one governance_drop{channel_type=group,layer=reply_budget} for the single (K+1)th drop")
+}
+
+// governanceDropCount returns the governance_drop counter value for the given
+// channel_type + layer attribute pair, or 0 if no matching data point exists.
+func governanceDropCount(t *testing.T, rm metricdata.ResourceMetrics, channelType, layer string) int64 {
+	t.Helper()
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "channel.conversation.governance_drop" {
+				continue
+			}
+			sum, ok := m.Data.(metricdata.Sum[int64])
+			require.Truef(t, ok, "governance_drop: expected Sum[int64], got %T", m.Data)
+			for _, dp := range sum.DataPoints {
+				ct, _ := dp.Attributes.Value("channel_type")
+				ly, _ := dp.Attributes.Value("layer")
+				if ct.AsString() == channelType && ly.AsString() == layer {
+					return dp.Value
+				}
+			}
+		}
+	}
+	return 0
 }
