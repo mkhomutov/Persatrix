@@ -359,3 +359,75 @@ class TestLeasedAndFast:
                 cause=walletpb.CAUSE_CHAT,
             )
         assert seen["cause"] == walletpb.CAUSE_CHAT
+
+
+class TestNLAddressingBiasesTheBid:
+    """PR 3 / TB4 — NL addressing shifts the bid's *bar*, it is never a hard
+    pre-filter. A non-named persona with a genuinely decisive contribution
+    still clears the bid; structured ``@``-mentions remain the only
+    deterministic directed-elsewhere drop (Tier A)."""
+
+    async def test_baseline_middling_score_speaks(self):
+        """Control: with no addressing, a score clearing the threshold speaks."""
+        decision = await _bid(
+            client=_client("speak: yes\nscore: 0.5"),
+            threshold=0.4,
+            content="What database should we use for the cache?",
+        )
+        assert decision.speak is True
+
+    async def test_addressed_elsewhere_raises_the_bar_to_silence(self):
+        """The same middling score that *would* clear the bar now stays silent
+        when the message invites someone else by name — a shift, not a drop."""
+        decision = await _bid(
+            client=_client("speak: yes\nscore: 0.5"),
+            threshold=0.4,
+            content="let's hear from Iron Fox on this",
+        )
+        assert decision.speak is False
+        assert decision.reason == "below_threshold"
+
+    async def test_addressed_self_lowers_the_bar_to_speak(self):
+        """A score that would normally stay silent speaks when the persona is
+        invited by name."""
+        decision = await _bid(
+            client=_client("speak: yes\nscore: 0.3"),
+            threshold=0.4,
+            content="let's hear from Ember Owl on this",
+        )
+        assert decision.speak is True
+        assert decision.reason == "salient"
+
+    async def test_addressed_elsewhere_is_not_a_hard_filter(self):
+        """The invariant: a non-named persona with a *decisive* in-domain
+        contribution still clears the bid even when someone else was invited —
+        proving NL addressing biases the bid rather than pre-dropping the
+        turn (TB4 / amendment OQ #2)."""
+        decision = await _bid(
+            client=_client("speak: yes\nscore: 0.95"),
+            threshold=0.4,
+            content="let's hear from Iron Fox on this",
+        )
+        assert decision.speak is True
+        assert decision.reason == "salient"
+
+    async def test_addressed_elsewhere_still_runs_the_bid(self):
+        """No pre-filter short-circuit: the leased bid is still issued for a
+        non-named persona (it is the bid's score, not a deterministic NL drop,
+        that decides)."""
+        provider = AsyncMock()
+        provider.create_message = AsyncMock(
+            return_value=LLMResponse(text="speak: no\nscore: 0.1"),
+        )
+        client = LLMClient(provider)
+        with use_alias_map(_FAST_ALIAS_MAP):
+            await evaluate_salience(
+                llm_client=client,
+                content="let's hear from Iron Fox on this",
+                transcript=_TRANSCRIPT,
+                agent_id="ember-owl",
+                persona_name="Ember Owl",
+                persona_role="VP of Engineering",
+                threshold=0.4,
+            )
+        provider.create_message.assert_awaited_once()
