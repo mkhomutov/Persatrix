@@ -441,10 +441,10 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             metadata={"cascade_depth": request.cascade_depth},
         )
 
-        # Lift the typed wire fields the orchestrator stamped (sender peer
-        # type — ISSUE-0068; RFC 0020 interaction_id — RFC 0030 governance
-        # layers PR 1) onto the event-metadata keys the downstream read paths
-        # consume. See ``channel_wire_metadata.seed_wire_metadata``.
+        # Lift the typed wire fields (sender peer type — ISSUE-0068, which has
+        # a real producer; RFC 0020 interaction_id — RFC 0030 governance layers
+        # PR 1, no producer yet) onto the event-metadata keys the downstream
+        # read paths consume. See ``channel_wire_metadata.seed_wire_metadata``.
         seed_wire_metadata(event, request)
 
         # ISSUE-0081 PR 2: carry the per-request session through to the

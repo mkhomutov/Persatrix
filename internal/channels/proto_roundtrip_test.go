@@ -25,6 +25,8 @@ package channels
 // home for the wire-shape pin.
 
 import (
+	"encoding/binary"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -274,8 +276,9 @@ func TestChannelMessageEvent_FieldNumbersPinned(t *testing.T) {
 		// pinned in TestChannelMessageEvent_CascadeDepthFieldNumberPinned.
 		{12, "sender_participant_type", func(e *taskpb.ChannelMessageEvent, v string) { e.SenderParticipantType = v }, "user"},
 		// Fields 13–16 are the Tier B salience inputs (bool/optional double/
-		// int32 × 2) — non-string wire types, pinned in their own roundtrip
-		// tests above, so they are skipped in this string-field table.
+		// int32 × 2) — non-string wire types, so they cannot ride this
+		// string-field table; their tag bytes are pinned in
+		// TestChannelMessageEvent_SalienceFieldNumbersPinned below.
 		{17, "interaction_id", func(e *taskpb.ChannelMessageEvent, v string) { e.InteractionId = v }, "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d"},
 	}
 	for _, tc := range cases {
@@ -309,6 +312,46 @@ func TestChannelMessageEvent_CascadeDepthFieldNumberPinned(t *testing.T) {
 	blobZero, err := proto.Marshal(&taskpb.ChannelMessageEvent{CascadeDepth: 0})
 	require.NoError(t, err)
 	assert.Empty(t, blobZero, "cascade_depth=0 must marshal to zero bytes under proto3 implicit presence")
+}
+
+func TestChannelMessageEvent_SalienceFieldNumbersPinned(t *testing.T) {
+	// RFC 0030 Tier B fields encode at their declared numbers / wire types.
+	// A renumber or type flip on any of the four Tier B fields changes the
+	// tag byte(s) and trips an assertion here — the cross-language drift
+	// guard the string/varint fields already carry, mirroring the Python
+	// test_channel_message_event_salience_field_numbers_pinned. Note that
+	// TestChannelMessageEvent_RoundTripsAllFields exercises these values but,
+	// encoding and decoding with the same generated codec, would NOT catch a
+	// renumber — only a byte-level tag pin like this one does.
+
+	// `bool salience_gated = 13` → varint, tag = (13<<3)|0 = 0x68, true = 0x01.
+	blob, err := proto.Marshal(&taskpb.ChannelMessageEvent{SalienceGated: true})
+	require.NoError(t, err)
+	assert.Equal(t, []byte{0x68, 0x01}, blob)
+	// False is the proto3 implicit zero → no bytes.
+	blob, err = proto.Marshal(&taskpb.ChannelMessageEvent{SalienceGated: false})
+	require.NoError(t, err)
+	assert.Empty(t, blob, "salience_gated=false must marshal to zero bytes (proto3 implicit presence)")
+
+	// `optional double threshold = 14` → 64-bit (wire-type 1), tag = (14<<3)|1 = 0x71.
+	doubleLE := make([]byte, 8)
+	binary.LittleEndian.PutUint64(doubleLE, math.Float64bits(0.5))
+	blob, err = proto.Marshal(&taskpb.ChannelMessageEvent{Threshold: proto.Float64(0.5)})
+	require.NoError(t, err)
+	assert.Equal(t, append([]byte{0x71}, doubleLE...), blob)
+
+	// `int32 channel_size = 15` → varint, tag = (15<<3)|0 = 0x78.
+	blob, err = proto.Marshal(&taskpb.ChannelMessageEvent{ChannelSize: 4})
+	require.NoError(t, err)
+	assert.Equal(t, append([]byte{0x78}, appendVarint(nil, 4)...), blob)
+
+	// `int32 salience_max_channel_members = 16` → varint; the tag (16<<3)|0 =
+	// 128 itself needs a two-byte varint (0x80 0x01), the same multi-byte-tag
+	// case interaction_id = 17 exercises.
+	blob, err = proto.Marshal(&taskpb.ChannelMessageEvent{SalienceMaxChannelMembers: 20})
+	require.NoError(t, err)
+	expectedTag := appendVarint(nil, uint64(16<<3)|0)
+	assert.Equal(t, append(expectedTag, appendVarint(nil, 20)...), blob)
 }
 
 func TestChannelMessageEvent_MentionsFieldNumberPinned(t *testing.T) {

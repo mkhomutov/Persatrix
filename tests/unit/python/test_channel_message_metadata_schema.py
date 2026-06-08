@@ -137,3 +137,42 @@ def test_unknown_metadata_keys_are_permitted():
     """
     _validate({"cascade_depth": 3, "unknown_future_key": "tolerated"})
     _validate({"cascadedepth": 3})  # typo passes — degrades to zero downstream
+
+
+# RFC 0030 deterministic governance layers (v0.3.8), PR 1 — the optional
+# ``metadata.interaction_id`` key. The amendment pins it as an optional opaque
+# string bounded at 128 chars; the orchestrator's ``readInteractionID`` treats
+# an over-length claim as untracked (empty), and this gate documents the same
+# bound at the REST publish surface.
+
+
+def test_interaction_id_is_optional():
+    """A publish without ``interaction_id`` is the untracked / pre-v0.3.8
+    case and must pass — the feature is additive."""
+    _validate({})
+
+
+def test_interaction_id_valid_token_accepted():
+    """A normal uuid4-shaped id rides the schema unchanged."""
+    _validate({"interaction_id": "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d"})
+
+
+def test_interaction_id_at_max_length_accepted():
+    """A value exactly at the 128-char bound is legitimate and must pass —
+    the bound rejects only strictly longer values (mirrors the Go
+    ``TestChannelMessageToProto_InteractionID_AcceptsAtCap`` boundary)."""
+    _validate({"interaction_id": "x" * 128})
+
+
+def test_interaction_id_over_max_length_rejected():
+    """An over-length id is rejected at the schema gate, mirroring the Go
+    publish boundary's fall-back-to-untracked: an unbounded id is an
+    unbounded per-interaction map key for Layers 2/4."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate({"interaction_id": "x" * 129})
+
+
+def test_interaction_id_non_string_rejected():
+    """A non-string claim violates ``type: string``."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate({"interaction_id": 1234})

@@ -22,16 +22,32 @@ package channels
 // [RFC 0030 governance layers]: ../../docs/rfcs/0030-governance-layers-pr-plan.md
 const interactionIDMetadataKey = "interaction_id"
 
+// interactionIDMaxChars bounds the inbound interaction_id (byte length). The
+// id is an attacker-influenceable opaque token off the untrusted publish
+// metadata bag, and the layer PRs that consume it (Layer 2 reply budget,
+// Layer 4 end-of-interaction votes) key per-interaction maps on the value —
+// an unbounded id is an unbounded map-key growth vector (the same concern
+// floor_control.go calls out for its session maps). 128 mirrors the agent
+// receive path's `_CHANNEL_THREAD_ID_MAX_CHARS` cap and leaves generous
+// headroom over the RFC 0020 id (a 36-char uuid4 / 26-char ULID).
+const interactionIDMaxChars = 128
+
 // readInteractionID extracts the inbound interaction_id from a publish
-// metadata bag. Returns "" when absent or non-string — a malformed claim
-// is treated as the untracked case (every governance layer stays at its
-// uncapped default) rather than failing the dispatch, mirroring
-// readParticipantType's tolerance.
+// metadata bag. Returns "" when absent, non-string, or longer than
+// interactionIDMaxChars — a malformed or oversized claim is treated as the
+// untracked case (every governance layer stays at its uncapped default)
+// rather than failing the dispatch, mirroring readParticipantType's
+// tolerance. Over-length falls back to empty rather than truncating: a
+// clipped opaque token would key a *different* interaction, which is worse
+// than treating the publish as untracked.
 func readInteractionID(metadata map[string]any) string {
 	if metadata == nil {
 		return ""
 	}
 	if v, ok := metadata[interactionIDMetadataKey].(string); ok {
+		if len(v) > interactionIDMaxChars {
+			return ""
+		}
 		return v
 	}
 	return ""

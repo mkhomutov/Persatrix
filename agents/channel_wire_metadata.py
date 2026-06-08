@@ -19,10 +19,13 @@ from .persona_types import AgentEvent
 def seed_wire_metadata(
     event: AgentEvent, request: task_pb2.ChannelMessageEvent
 ) -> None:
-    """Lift the typed wire fields the orchestrator stamped onto the metadata
+    """Lift the typed ``ChannelMessageEvent`` wire fields onto the metadata
     keys the downstream read paths consume. ``cascade_depth`` is seeded at
     ``AgentEvent`` construction (it is always present as a proto3 scalar); the
-    fields here are conditional — only a non-empty value is seeded.
+    fields here are conditional — only a non-empty value is seeded. Whether a
+    field actually carries a value depends on its producer: ``participant_type``
+    has one (the REST chat handler), ``interaction_id`` does not yet (see the
+    per-field note below), so today only the former is ever seeded.
     """
     # ISSUE-0068: lift the sender's peer type off the typed proto field onto
     # the metadata key the episode-routing close path reads

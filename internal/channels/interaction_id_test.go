@@ -1,6 +1,7 @@
 package channels
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -67,4 +68,44 @@ func TestChannelMessageToProto_InteractionID_IgnoresNonString(t *testing.T) {
 
 	assert.Empty(t, ev.InteractionId,
 		"non-string interaction_id metadata MUST fall back to empty, not panic")
+}
+
+// TestChannelMessageToProto_InteractionID_RejectsOverlong pins the length
+// bound: an oversized interaction_id is an attacker-influenced unbounded
+// string that Layers 2/4 would later use as a map key (per-interaction reply
+// budgets / vote tallies), so an over-cap claim is treated as the untracked
+// case (empty) rather than rode through unbounded. Truncating is wrong for an
+// opaque token — a clipped id keys a *different* interaction — so the malformed
+// claim falls back to empty, mirroring the non-string tolerance above.
+func TestChannelMessageToProto_InteractionID_RejectsOverlong(t *testing.T) {
+	d := &GRPCMessageDispatcher{logger: zap.NewNop()}
+	overlong := strings.Repeat("x", interactionIDMaxChars+1)
+	ev := d.channelMessageToProto(ChannelMessage{
+		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
+		Content: "hi", Timestamp: time.Now().UTC(),
+		Metadata: map[string]any{"interaction_id": overlong},
+	}, DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
+	})
+
+	assert.Empty(t, ev.InteractionId,
+		"interaction_id exceeding interactionIDMaxChars MUST fall back to empty (untracked), not ride through unbounded")
+}
+
+// TestChannelMessageToProto_InteractionID_AcceptsAtCap pins the boundary: a
+// value exactly at the cap is still a legitimate id and must survive — the
+// bound rejects only what is strictly longer.
+func TestChannelMessageToProto_InteractionID_AcceptsAtCap(t *testing.T) {
+	d := &GRPCMessageDispatcher{logger: zap.NewNop()}
+	atCap := strings.Repeat("x", interactionIDMaxChars)
+	ev := d.channelMessageToProto(ChannelMessage{
+		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
+		Content: "hi", Timestamp: time.Now().UTC(),
+		Metadata: map[string]any{"interaction_id": atCap},
+	}, DispatchEnvelope{
+		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
+	})
+
+	assert.Equal(t, atCap, ev.InteractionId,
+		"interaction_id exactly at interactionIDMaxChars MUST be preserved — the bound rejects only strictly longer values")
 }
