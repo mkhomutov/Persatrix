@@ -90,6 +90,11 @@ type RouterMetrics struct {
 	// serialization latency trade made observable (the trigger to revisit
 	// the no-cap decision, amendment D4).
 	FloorRoundDuration metric.Float64Histogram
+	// GovernanceDrop counts each publish dropped by an RFC 0030 deterministic
+	// governance layer (v0.3.8), labelled by `channel_type` and `layer`
+	// (`reply_budget` in this PR; `cost`/`depth`/`end_vote` join in PR 5). The
+	// per-drop attribution (channel, interaction, participant) is on the Warn line.
+	GovernanceDrop metric.Int64Counter
 }
 
 // ChannelRouter is the publish-and-fanout entry point used by the REST
@@ -158,6 +163,17 @@ type ChannelRouter struct {
 	salienceMu         sync.Mutex
 	salienceMaxMembers map[string]int
 
+	// replyBudgetMu guards the RFC 0030 Layer 2 (v0.3.8) per-participant reply
+	// budget state; methods + the full field contracts live in reply_budget.go.
+	// replyBudgets: channel id → resolved K (0 = uncapped). replyCounts:
+	// interaction id → participant id → publishes so far (discarded on close).
+	// exemptParticipantTypes: participant types exempt from the budget
+	// (governance.exempt_principals → `user`). All guarded by replyBudgetMu.
+	replyBudgetMu          sync.Mutex
+	replyBudgets           map[string]int
+	replyCounts            map[string]map[string]int
+	exemptParticipantTypes map[string]struct{}
+
 	// maxCascadeDepth — see cascade_depth.go; defaultSessionID — see router_session.go (RFC 0031 Phase 1).
 	maxCascadeDepth  int
 	defaultSessionID string
@@ -184,6 +200,8 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		floorSettings:      make(map[string]channelFloorSettings),
 		floorSpeakers:      make(map[string]map[string]struct{}),
 		salienceMaxMembers: make(map[string]int),
+		replyBudgets:       make(map[string]int),
+		replyCounts:        make(map[string]map[string]int),
 		maxCascadeDepth:    defaults.DefaultMaxCascadeDepth,
 	}
 }
@@ -287,6 +305,15 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 			msg.Metadata = map[string]any{}
 		}
 		msg.Metadata[cascadeDepthMetadataKey] = clampedDepth
+	}
+
+	// RFC 0030 Layer 2 (v0.3.8) per-participant reply budget: reject the
+	// sender's (K+1)th publish in this interaction BEFORE the store commit, so
+	// a throttled message never enters channel history (§F). A no-op when the
+	// channel is uncapped, the publish is untracked (no interaction_id), or the
+	// sender is an exempt human principal — so the layer is additive.
+	if err := r.enforceReplyBudget(ctx, msg, derivedType); err != nil {
+		return err
 	}
 
 	if err := r.store.PublishMessage(ctx, msg); err != nil {

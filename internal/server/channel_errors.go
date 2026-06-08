@@ -30,6 +30,8 @@ func (s *Server) writeChannelError(w http.ResponseWriter, err error) {
 		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
 	case errors.Is(err, channels.ErrMessageContentTooLarge): // ISSUE-0050
 		writeError(w, "PAYLOAD_TOO_LARGE", err.Error(), http.StatusRequestEntityTooLarge)
+	case errors.Is(err, channels.ErrParticipantBudgetExhausted): // RFC 0030 Layer 2
+		writeError(w, "TOO_MANY_REQUESTS", err.Error(), http.StatusTooManyRequests)
 	default:
 		s.logger.Error("channels: unexpected error", zap.Error(err))
 		writeError(w, "INTERNAL", "channel store error", http.StatusInternalServerError)

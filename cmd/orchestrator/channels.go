@@ -124,6 +124,8 @@ func initChannels(
 			// RFC 0030 Layer 2.5 floor-control telemetry (amendment PR 4).
 			FloorTurn:          orchMetrics.ChannelConversationFloorTurn,
 			FloorRoundDuration: orchMetrics.ChannelConversationFloorRoundDuration,
+			// RFC 0030 deterministic governance-layer drop counter (v0.3.8).
+			GovernanceDrop: orchMetrics.ChannelConversationGovernanceDrop,
 		}
 	}
 	// ISSUE-0082 PR 2: build the per-request session resolver over the
@@ -181,6 +183,19 @@ func initChannels(
 	if tErr := router.ResolveSalienceCaps(context.Background(), chanCfg); tErr != nil {
 		logger.Warn("channels: salience cap resolution incomplete; config channels resolved, store-resident channels fall back to the default cap until next create/restart",
 			zap.Error(tErr))
+	}
+
+	// RFC 0030 Layer 2 (v0.3.8): resolve the per-channel per-participant reply
+	// budget the same way — config channels use their declared (or fleet-
+	// default) `max_replies_per_participant_per_interaction`, store-resident
+	// channels pick up the fleet default — and resolve the fleet-wide
+	// `governance.exempt_principals` set once. The resolver also emits the
+	// advisory all-`participant`+uncapped startup Warn. Same non-fatal posture:
+	// an enumeration failure leaves the config channels resolved, and any
+	// un-resolved channel stays uncapped (the opt-in default) until next restart.
+	if bErr := router.ResolveReplyBudgets(context.Background(), chanCfg); bErr != nil {
+		logger.Warn("channels: reply-budget resolution incomplete; config channels resolved, store-resident channels stay uncapped until next create/restart",
+			zap.Error(bErr))
 	}
 
 	logger.Info("channels: subsystem ready",

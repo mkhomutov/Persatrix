@@ -38,6 +38,30 @@ type Config struct {
 	// unchanged. Resolved per-channel via
 	// [ChannelConfig.ResolveInteractionBudgetTokens]. Negative is rejected.
 	DefaultInteractionBudgetTokens int64 `yaml:"default_interaction_budget_tokens"`
+	// DefaultMaxRepliesPerParticipant is the fleet-wide RFC 0030 Layer 2
+	// per-participant reply budget (§F, v0.3.8) applied to any channel that
+	// omits its own `max_replies_per_participant_per_interaction`. Opt-in:
+	// zero or absent means uncapped, so fair-turn-taking is additive and
+	// existing channels are unchanged. Resolved per-channel via
+	// [ChannelConfig.ResolveMaxRepliesPerParticipant]. Negative is rejected.
+	DefaultMaxRepliesPerParticipant int `yaml:"default_max_replies_per_participant"`
+	// Governance holds the fleet-wide RFC 0030 governance knobs that are not
+	// per-channel (§OQ-7). Currently just the exempt-principals list that
+	// removes human principals from the Layer 2 reply budget.
+	Governance GovernanceConfig `yaml:"governance"`
+}
+
+// GovernanceConfig is the `governance:` block of `config/channels.yaml` —
+// fleet-wide RFC 0030 governance settings (§OQ-7, v0.3.8).
+type GovernanceConfig struct {
+	// ExemptPrincipals lists the principal classes that are exempt from the
+	// Layer 2 per-participant reply budget. The only recognised value is
+	// `human`, which maps to the `user` participant type on the wire: a human
+	// driving a conversation should never be throttled by the budget meant to
+	// keep agents from dominating (GL4 / §OQ-7). An unrecognised entry is
+	// ignored (no participant type maps to it), so a typo silently fails open
+	// to "not exempt" rather than failing the load.
+	ExemptPrincipals []string `yaml:"exempt_principals"`
 }
 
 // DefaultFloorTurnTimeoutSeconds is the per-speaker turn timeout for floor
@@ -128,6 +152,30 @@ type ChannelConfig struct {
 	// non-zero default at load: zero is a meaningful value (uncapped), so the
 	// channel-vs-fleet precedence is resolved at read time, not load time.
 	InteractionBudgetTokens int64 `yaml:"interaction_budget_tokens"`
+	// MaxRepliesPerParticipantPerInteraction is the RFC 0030 Layer 2 (v0.3.8)
+	// per-participant reply budget for this channel: a participant's (K+1)th
+	// publish in one interaction on this channel is rejected pre-persistence
+	// (HTTP 429 + `ErrParticipantBudgetExhausted`). Opt-in — zero or absent
+	// inherits [Config.DefaultMaxRepliesPerParticipant] (itself zero =
+	// uncapped) via [ChannelConfig.ResolveMaxRepliesPerParticipant]. Negative
+	// is rejected. Like the cost ceiling and unlike the salience cap, this is
+	// NOT normalized to a non-zero default at load: zero is a meaningful value
+	// (uncapped), so the channel-vs-fleet precedence is resolved at read time.
+	MaxRepliesPerParticipantPerInteraction int `yaml:"max_replies_per_participant_per_interaction"`
+}
+
+// ResolveMaxRepliesPerParticipant returns the effective RFC 0030 Layer 2 reply
+// budget for this channel: the channel's own
+// `max_replies_per_participant_per_interaction` when set (non-zero), otherwise
+// the fleet-wide `default_max_replies_per_participant`. A zero result means
+// uncapped. This is the single source of truth for the precedence — the
+// startup resolver stamps the resolved value onto the router so the publish
+// path enforces one number.
+func (c ChannelConfig) ResolveMaxRepliesPerParticipant(fleetDefault int) int {
+	if c.MaxRepliesPerParticipantPerInteraction > 0 {
+		return c.MaxRepliesPerParticipantPerInteraction
+	}
+	return fleetDefault
 }
 
 // ResolveInteractionBudgetTokens returns the effective RFC 0030 Layer 1 cost
@@ -294,6 +342,13 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("%w: default_interaction_budget_tokens=%d (must be >= 0)",
 			ErrInvalidInteractionBudgetTokens, c.DefaultInteractionBudgetTokens)
 	}
+	// RFC 0030 Layer 2: the fleet-wide default reply budget. Zero is the
+	// uncapped opt-in default; negative is a typo the loader rejects loudly
+	// (the schema's `minimum: 0` catches it at `make validate`).
+	if c.DefaultMaxRepliesPerParticipant < 0 {
+		return fmt.Errorf("%w: default_max_replies_per_participant=%d (must be >= 0)",
+			ErrInvalidMaxRepliesPerParticipant, c.DefaultMaxRepliesPerParticipant)
+	}
 	if len(c.Channels) > c.MaxChannels {
 		return fmt.Errorf("%w: declared=%d cap=%d",
 			ErrChannelCapExceeded, len(c.Channels), c.MaxChannels)
@@ -340,6 +395,15 @@ func (c *Config) Validate() error {
 		if ch.InteractionBudgetTokens < 0 {
 			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 0)",
 				i, ch.Name, ErrInvalidInteractionBudgetTokens, ch.InteractionBudgetTokens)
+		}
+
+		// Reject a negative per-channel RFC 0030 Layer 2 reply budget. Zero is
+		// valid (uncapped → inherits the fleet default); only negative is an
+		// error. The schema's `minimum: 0` catches it at `make validate`; this
+		// is the belt-and-suspenders for operators who skipped it.
+		if ch.MaxRepliesPerParticipantPerInteraction < 0 {
+			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 0)",
+				i, ch.Name, ErrInvalidMaxRepliesPerParticipant, ch.MaxRepliesPerParticipantPerInteraction)
 		}
 
 		if len(ch.Members) == 0 {

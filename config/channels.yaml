@@ -43,6 +43,24 @@ max_channels: 50
 # channel that omits it inherits this default).
 default_interaction_budget_tokens: 0
 
+# Per-participant reply budget (RFC 0030 Layer 2, v0.3.8) — fair, finite
+# turn-taking so no single participant dominates a brainstorm. With K>0, a
+# participant's (K+1)th publish in one interaction is rejected pre-persistence
+# (HTTP 429) and never enters channel history. Opt-in and additive: 0 (the
+# default) means uncapped, so existing channels are unchanged. Set a fleet-wide
+# default here and/or override per channel with
+# `max_replies_per_participant_per_interaction:` (the per-channel value wins).
+default_max_replies_per_participant: 0
+
+# Governance (RFC 0030, v0.3.8) — fleet-wide knobs that are not per-channel.
+# `exempt_principals: [human]` removes human principals (participant_type
+# "user") from the Layer 2 reply budget, so a human steering the conversation
+# is never throttled by the budget meant to keep agents from dominating
+# (§OQ-7). Omit the block to govern everyone; the only recognised value is
+# `human`.
+governance:
+  exempt_principals: [human]
+
 # Floor control (RFC 0030 Layer 2.5) — ON by default for every group channel
 # declared here (the floor-control amendment, v0.3.6). When a message lands in a
 # channel with two or more responders, they take the floor one at a time — each
@@ -89,6 +107,11 @@ channels:
     # cost of one interaction on this channel; omit it to inherit
     # default_interaction_budget_tokens above.
     interaction_budget_tokens: 0
+    # max_replies_per_participant_per_interaction: 0 (uncapped) is the default
+    # (RFC 0030 Layer 2); shown for discoverability. Set K>0 to bound how many
+    # times one participant may publish in a single interaction; omit it to
+    # inherit default_max_replies_per_participant above.
+    max_replies_per_participant_per_interaction: 0
     members:
       - id: ember-owl
         respond: addressed

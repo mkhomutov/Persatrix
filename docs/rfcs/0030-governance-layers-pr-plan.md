@@ -93,7 +93,7 @@ The join points this plan must keep green: **(a)** the Tier B bid is itself an L
 ### PR 1: `feature/v038-rfc0030-layers-interaction-id-wire` — `interaction_id` propagation (substrate, inert)
 
 **Depends on**: RFC 0020 Interaction (shipped); RFC 0011 channels (shipped).
-**Status**: 🔀 PR open.
+**Status**: ✅ Merged ([#576](https://github.com/mkhomutov/Persatrix/pull/576)).
 **Purpose**: Pin the RFC 0020 `interaction_id` on the wire so Layers 1/2/4 can attribute spend, count replies, and accumulate votes per interaction. Mirror the `cascade_depth` / `sender_participant_type` amendment pattern (a publish-metadata bag value lifted onto a typed proto field, then onto the agent's event metadata). No layer behaviour yet.
 
 > **Field-number correction (2026-06-08).** This plan named `interaction_id = 13`, but the Tier B salience PRs ([#572](https://github.com/mkhomutov/Persatrix/pull/572)–[#575](https://github.com/mkhomutov/Persatrix/pull/575)) landed fields **13–16** (`salience_gated`/`threshold`/`channel_size`/`salience_max_channel_members`) on `ChannelMessageEvent` after this doc was authored. **The shipped field is `string interaction_id = 17`** — the next free tag. The string-field-pin tests (Go + Python) needed a multi-byte-varint tag helper since field 17's tag (`(17<<3)|2 = 138`) exceeds one byte.
@@ -115,7 +115,7 @@ The join points this plan must keep green: **(a)** the Tier B bid is itself an L
 ### PR 2: `feature/v038-rfc0030-layers-cost-ceiling` — Layer 1 per-interaction cost ceiling
 
 **Depends on**: PR 1; RFC 0023 leasing (shipped v0.3.2).
-**Status**: 🔀 PR open.
+**Status**: ✅ Merged ([#577](https://github.com/mkhomutov/Persatrix/pull/577)).
 **Purpose**: A channel with `interaction_budget_tokens=N` denies further leases in the same interaction once the running total crosses N — bounding cost, fail-closed.
 
 > **Field-number note (2026-06-08).** `LeaseRequest` had `trace_id = 7` as its max, so the new fields landed as **`string interaction_id = 8`** and **`int64 interaction_budget_tokens = 9`**. `LeaseDenied` had no denial-reason enum, so a typed **`LeaseDeniedReason reason = 6`** was added (`UNSPECIFIED = 0` for back-compat, `BUDGET = 1` for the existing RFC 0023 per-scope denial, `INTERACTION_BUDGET_EXHAUSTED = 2` for this layer). The wallet's per-interaction running total is a self-contained `map[interaction_id]int64` on `WalletService` (guarded by the existing `mu`), **not** a fourth scope threaded into the shared `cost.TokenCounter` — it accumulates the granted estimate at acquire and reconciles to actuals on settle/release (a released bid frees its hold), keeping the cost primitives unchanged on the trusted scheduler path. Layer 1 logic is carved into `internal/wallet/interaction_budget.go` to keep `wallet.go` under the file-size cap.
@@ -137,7 +137,10 @@ The join points this plan must keep green: **(a)** the Tier B bid is itself an L
 ### PR 3: `feature/v038-rfc0030-layers-reply-budget` — Layer 2 per-participant reply budget
 
 **Depends on**: PR 1.
+**Status**: 🔀 PR open.
 **Purpose**: With `max_replies_per_participant_per_interaction=K`, a participant's `(K+1)`th publish in one interaction is rejected pre-persistence — fair, finite turn-taking with no LLM judge.
+
+> **Implementation note (2026-06-08).** Landed in the orchestrator router (the publish-admission path), not a free-standing `interactionReplyBudget` struct: the per-channel cap (`replyBudgets`) and the per-interaction counters (`replyCounts map[interaction_id]map[participant_id]int`) live on `ChannelRouter` under `replyBudgetMu`, with the methods carved into the new [`internal/channels/reply_budget.go`](../../internal/channels/reply_budget.go) to keep `router.go` under the file-size cap (mirroring `router_salience.go`). `enforceReplyBudget` runs in `ChannelRouter.Publish` immediately before `store.PublishMessage`, so a denied (K+1)th publish never persists. The check-and-increment is atomic under the mutex. A publish with **no `interaction_id`** is never gated (nothing to scope the counter to — the untracked/pre-v0.3.8 case stays uncapped), matching PR 2's empty-interaction posture. `governance.exempt_principals: [human]` resolves to the `user` participant type (`exemptPrincipalParticipantType`); the resolved set is fleet-wide. The `governance_drop{layer=reply_budget}` counter ships **in this PR** (the router holds the metrics handle, unlike PR 2's wallet) as the new `channel.conversation.governance_drop{channel_type, layer}` instrument — the shared instrument PR 5 reuses for `cost`/`depth`/`end_vote`. The §F close/reset seam is `ChannelRouter.DiscardInteractionReplyBudget(interaction_id)`, wired by the Layer 4 / RFC 0020 close path in PR 4.
 
 | File | Change |
 |------|--------|
