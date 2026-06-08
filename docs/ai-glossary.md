@@ -131,10 +131,12 @@ This file is referenced by both `.github/CLAUDE.md` and
 - **Definition:** A channel member's **role in the conversation** — the `respond`
   field on a membership (RFC 0030 relevance amendment): `participant` (open
   floor), `addressed` (replies only when `@`-mentioned), `observer` (never
-  replies), or `chair` (a low-threshold facilitator). It declares *how eager* a
-  member is; the response gate makes the per-message call. Reframed in v0.3.7
-  from the mechanical `respond_policy` trigger; the legacy `always` /
-  `when_mentioned` / `never` values still load and normalize.
+  replies), or `chair` (a low-threshold facilitator, added v0.3.8). It declares
+  *how eager* a member is; the response gate makes the per-message call. The
+  reframe from the mechanical `respond_policy` trigger shipped in v0.3.7
+  (`participant` / `addressed` / `observer`); the `chair` disposition followed in
+  v0.3.8. The legacy `always` / `when_mentioned` / `never` values still load and
+  normalize.
 - **Example:** "Give the demo personas the `participant` disposition so they join
   the open floor."
 

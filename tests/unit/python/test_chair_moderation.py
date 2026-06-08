@@ -195,12 +195,25 @@ class TestLayer5SeamIsInert:
                 and not p.name.endswith("_test.py")
             )
 
+        runtime_files = [p for p in Path("agents").rglob("*.py") if _is_runtime(p)]
+        # Guard against a vacuous pass: this assertion is a *tripwire* for a
+        # future PR wiring Layer 5, so it is only meaningful if it actually
+        # scanned the package. The paths here are repo-root-relative (as in the
+        # ``DefaultChairThreshold`` drift parse above); if pytest's cwd is not
+        # the repo root the glob comes back empty and the offender check below
+        # would pass for the wrong reason. Fail loudly on an empty scan instead
+        # — the seam module excludes *itself*, so a healthy tree always leaves
+        # other runtime modules here.
+        assert runtime_files, (
+            "scanned no runtime modules under agents/ — the inert-seam check "
+            "cannot run. Is pytest's working directory the repo root?"
+        )
+
         offenders = sorted(
             str(p)
-            for p in Path("agents").rglob("*.py")
-            if _is_runtime(p)
-            and ("evaluate_chair_moderation" in (src := p.read_text(encoding="utf-8"))
-                 or "chair_moderation" in src)
+            for p in runtime_files
+            if "evaluate_chair_moderation" in (src := p.read_text(encoding="utf-8"))
+            or "chair_moderation" in src
         )
         assert not offenders, (
             "the Layer-5 chair-moderation seam is meant to be inert in v0.3.8 "
