@@ -79,7 +79,7 @@ func TestChannelMessageToProto_InteractionID_IgnoresNonString(t *testing.T) {
 // claim falls back to empty, mirroring the non-string tolerance above.
 func TestChannelMessageToProto_InteractionID_RejectsOverlong(t *testing.T) {
 	d := &GRPCMessageDispatcher{logger: zap.NewNop()}
-	overlong := strings.Repeat("x", interactionIDMaxChars+1)
+	overlong := strings.Repeat("x", interactionIDMaxBytes+1)
 	ev := d.channelMessageToProto(ChannelMessage{
 		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
 		Content: "hi", Timestamp: time.Now().UTC(),
@@ -89,7 +89,7 @@ func TestChannelMessageToProto_InteractionID_RejectsOverlong(t *testing.T) {
 	})
 
 	assert.Empty(t, ev.InteractionId,
-		"interaction_id exceeding interactionIDMaxChars MUST fall back to empty (untracked), not ride through unbounded")
+		"interaction_id exceeding interactionIDMaxBytes MUST fall back to empty (untracked), not ride through unbounded")
 }
 
 // TestChannelMessageToProto_InteractionID_AcceptsAtCap pins the boundary: a
@@ -97,7 +97,7 @@ func TestChannelMessageToProto_InteractionID_RejectsOverlong(t *testing.T) {
 // bound rejects only what is strictly longer.
 func TestChannelMessageToProto_InteractionID_AcceptsAtCap(t *testing.T) {
 	d := &GRPCMessageDispatcher{logger: zap.NewNop()}
-	atCap := strings.Repeat("x", interactionIDMaxChars)
+	atCap := strings.Repeat("x", interactionIDMaxBytes)
 	ev := d.channelMessageToProto(ChannelMessage{
 		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
 		Content: "hi", Timestamp: time.Now().UTC(),
@@ -107,5 +107,5 @@ func TestChannelMessageToProto_InteractionID_AcceptsAtCap(t *testing.T) {
 	})
 
 	assert.Equal(t, atCap, ev.InteractionId,
-		"interaction_id exactly at interactionIDMaxChars MUST be preserved — the bound rejects only strictly longer values")
+		"interaction_id exactly at interactionIDMaxBytes MUST be preserved — the bound rejects only strictly longer values")
 }

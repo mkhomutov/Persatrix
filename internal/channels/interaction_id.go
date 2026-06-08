@@ -22,7 +22,7 @@ package channels
 // [RFC 0030 governance layers]: ../../docs/rfcs/0030-governance-layers-pr-plan.md
 const interactionIDMetadataKey = "interaction_id"
 
-// interactionIDMaxChars bounds the inbound interaction_id (byte length). The
+// interactionIDMaxBytes bounds the inbound interaction_id by UTF-8 byte length. The
 // id is an attacker-influenceable opaque token off the untrusted publish
 // metadata bag, and the layer PRs that consume it (Layer 2 reply budget,
 // Layer 4 end-of-interaction votes) key per-interaction maps on the value —
@@ -37,11 +37,11 @@ const interactionIDMetadataKey = "interaction_id"
 // (`_INTERACTION_ID_MAX_BYTES` in agents/channel_wire_metadata.py). A
 // publish-only bound would leave a non-Go / compromised producer's oversized
 // id riding straight onto that metadata unbounded.
-const interactionIDMaxChars = 128
+const interactionIDMaxBytes = 128
 
 // readInteractionID extracts the inbound interaction_id from a publish
 // metadata bag. Returns "" when absent, non-string, or longer than
-// interactionIDMaxChars — a malformed or oversized claim is treated as the
+// interactionIDMaxBytes — a malformed or oversized claim is treated as the
 // untracked case (every governance layer stays at its uncapped default)
 // rather than failing the dispatch, mirroring readParticipantType's
 // tolerance. Over-length falls back to empty rather than truncating: a
@@ -52,7 +52,7 @@ func readInteractionID(metadata map[string]any) string {
 		return ""
 	}
 	if v, ok := metadata[interactionIDMetadataKey].(string); ok {
-		if len(v) > interactionIDMaxChars {
+		if len(v) > interactionIDMaxBytes {
 			return ""
 		}
 		return v
