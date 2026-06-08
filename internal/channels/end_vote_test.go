@@ -223,6 +223,53 @@ func TestEndVote_StaleRevoteNotSpam(t *testing.T) {
 	assert.Empty(t, spam, "a re-vote after the prior one went stale is not vote-spam")
 }
 
+// TestEndVote_DuplicateLiveVoteSuppressesFanout pins the hardening that closes
+// the reply-budget bypass opened by the Layer 2 exemption. An end-vote is exempt
+// from the reply budget (so a budget-exhausted participant can still cast the
+// terminating vote — see TestEndVote_ExemptFromReplyBudget), but a participant
+// must not be able to weaponise that exemption by flagging every publish as a
+// vote to flood the channel past their cap. A participant's FIRST vote is a real
+// signal and fans out (others must see it); a duplicate IN-WINDOW vote is
+// redundant for the quorum (deduped) and is suppressed from fanout, so repeated
+// votes draw no new N-way amplification.
+func TestEndVote_DuplicateLiveVoteSuppressesFanout(t *testing.T) {
+	router, store, _ := routerWithInteractionClosedMetric(t)
+	disp := router.dispatcher.(*recordingDispatcher)
+	id := mustCreateGroup(t, store, "planning", "alice", "bob", "carol")
+	router.SetEndVoteParams(id, 5, 10) // high K so nothing closes; wide W so the re-vote stays live
+
+	// The first end-vote is a real signal — it fans out to the other members.
+	require.NoError(t, endVote(t, router, id, "alice", "int-1"))
+	afterFirst := len(disp.snapshot())
+	require.Positive(t, afterFirst, "the first end-vote fans out to the other members")
+
+	// A duplicate live vote is deduped to a no-op for the quorum; it must not
+	// re-fan-out, or the vote-exemption from the reply budget becomes a bypass.
+	require.NoError(t, endVote(t, router, id, "alice", "int-1"))
+	assert.Equal(t, afterFirst, len(disp.snapshot()),
+		"a duplicate in-window end-vote is suppressed from fanout (no Layer 2 bypass)")
+}
+
+// TestEndVote_StaleRevoteStillFansOut pins the other side of the suppression: a
+// re-vote cast AFTER the prior one fell out of the recency window is legitimate
+// re-engagement (not spam — see TestEndVote_StaleRevoteNotSpam), so it is a fresh
+// signal and DOES fan out. Only a redundant in-window duplicate is suppressed.
+func TestEndVote_StaleRevoteStillFansOut(t *testing.T) {
+	router, store, _ := routerWithInteractionClosedMetric(t)
+	disp := router.dispatcher.(*recordingDispatcher)
+	id := mustCreateGroup(t, store, "planning", "alice", "bob")
+	router.SetEndVoteParams(id, 5, 3) // high K so nothing closes; W=3
+
+	require.NoError(t, endVote(t, router, id, "alice", "int-1")) // turn 1, fans out
+	require.NoError(t, plainTurn(t, router, id, "bob", "int-1")) // turn 2
+	require.NoError(t, plainTurn(t, router, id, "bob", "int-1")) // turn 3
+	beforeRevote := len(disp.snapshot())
+	require.NoError(t, endVote(t, router, id, "alice", "int-1")) // turn 4 — prior (turn 1) is stale
+
+	assert.Greater(t, len(disp.snapshot()), beforeRevote,
+		"a stale (out-of-window) re-vote is legitimate re-engagement and still fans out")
+}
+
 // TestEndVote_CloseDiscardsReplyBudget pins that the close path drives the
 // §F reset seam (DiscardInteractionReplyBudget): once the interaction closes
 // on votes, a previously-exhausted participant regains its reply allowance.

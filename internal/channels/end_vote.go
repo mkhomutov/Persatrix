@@ -112,9 +112,15 @@ func (r *ChannelRouter) resolvedEndVoteParamsLocked(channelID string) (k, w int)
 // interaction's turn counter, records an end-vote (if this publish carries one),
 // and closes the interaction when K distinct participants have voted within W
 // consecutive turns. It returns true to tell [ChannelRouter.Publish] to
-// SUPPRESS fanout — for the closing publish and for any later publish to an
-// already-closed interaction — so a converged conversation stops drawing new
-// replies.
+// SUPPRESS fanout in three cases, so neither a converged conversation nor a
+// vote-flag abuser draws new replies:
+//   - the closing publish (the quorum was just reached);
+//   - any later publish to an already-closed interaction;
+//   - a redundant in-window duplicate vote — deduped to a no-op for the quorum,
+//     so re-fanning it out is pure amplification and (because votes are exempt
+//     from the Layer 2 reply budget) would let a participant flood the channel
+//     past their reply cap. A first vote and a stale (out-of-window) re-vote are
+//     real signals and still fan out.
 //
 // It is a no-op (returns false) for untracked traffic (no `interaction_id`) and
 // for any tracked publish to an interaction that has not yet seen a vote — so
@@ -188,7 +194,20 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 		r.DiscardInteractionReplyBudget(interactionID)
 		return true
 	}
-	return false
+	// Suppress fanout of a redundant in-window duplicate vote. An end-vote is
+	// exempt from the Layer 2 reply budget (enforceReplyBudget) so a budget-
+	// exhausted participant can still cast the terminating signal — but without
+	// this, that exemption is a budget BYPASS: a participant could flag every
+	// publish as a vote and flood the channel with fanned-out messages past their
+	// cap. The vote is already deduped to a no-op for the quorum (the stamp was
+	// just overwritten) and logged as spam for audit, so re-fanning it out adds
+	// only N-way amplification with no signal. A participant's FIRST vote (spam
+	// false) still fans out — others must see the terminal signal — and a STALE
+	// re-vote (legitimate re-engagement, spam false by the in-window check above)
+	// fans out as a fresh signal; only the redundant live duplicate is dropped
+	// from fanout. (It is still persisted as a real message — history growth is
+	// bounded by the per-channel message cap, not the reply budget.)
+	return spam
 }
 
 // recordInteractionClosed fires the structured close log + the

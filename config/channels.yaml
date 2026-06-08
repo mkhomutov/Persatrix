@@ -56,7 +56,8 @@ default_max_replies_per_participant: 0
 # terminate on its own. When K distinct participants emit an END_INTERACTION_VOTE
 # action within W consecutive turns, the interaction closes and the orchestrator
 # stops fanning out new replies. The quorum is per channel: `end_vote_threshold`
-# (K, default 2) and `end_vote_window` (W, default 3). Still opt-in and additive:
+# (K, default 2) and `end_vote_window` (W, default 3, counted in tracked
+# publishes — every message, not only votes). Still opt-in and additive:
 # with no agent emitting the vote action, a populated K/W never fires, so
 # existing channels are unchanged. (A `chair` cannot close an interaction — only
 # this vote quorum, the cost ceiling, and the depth cap can.)
