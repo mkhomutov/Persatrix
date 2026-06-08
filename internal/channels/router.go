@@ -59,43 +59,8 @@ func (NoopDispatcher) Dispatch(_ context.Context, _ DispatchEnvelope, _ ChannelM
 	return nil
 }
 
-// RouterMetrics is the subset of orchestrator OTEL handles the router
-// needs. Defined locally (rather than imported from the metrics package)
-// so the channels package does not take a dependency on the orchestrator-
-// wide instrument struct — that would invert the dependency direction
-// (channels is consumed *by* server, not the other way around).
-//
-// Nil-safe: a nil RouterMetrics value disables metric emission so unit
-// tests and minimal deployments can run without OTEL wiring.
-type RouterMetrics struct {
-	// MessagesDelivered counts each per-subscriber dispatch attempt with
-	// labels `channel_type` and `status` (`ok` | `error`). One increment
-	// per recipient, not per publish. Sender filtering happens before the
-	// counter fires, so the count reflects effective delivery attempts.
-	MessagesDelivered metric.Int64Counter
-	MessagesPublished metric.Int64Counter // pairs with MessagesDelivered (ISSUE-0013)
-	// MessagesCascadeCapped counts per-recipient fanout dispatches
-	// suppressed by the cascade-depth cap (RFC 0011 amendment
-	// 'Cascade-depth wire propagation'). One increment per suppressed
-	// recipient — directly comparable to MessagesDelivered. Labelled by
-	// `channel_type`; `channel_id` lives on the structured log line.
-	MessagesCascadeCapped metric.Int64Counter
-	// FloorTurn counts each completed RFC 0030 Layer 2.5 floor-control
-	// speaker turn, labelled by `channel_type` and `outcome`
-	// (`replied`|`timeout`). The `timeout` share is the stalled-floor-holder
-	// rate that calibrates the per-turn timeout default (amendment D2).
-	FloorTurn metric.Int64Counter
-	// FloorRoundDuration records the wall-clock duration of a serialized
-	// floor round in milliseconds, labelled by `channel_type` — the
-	// serialization latency trade made observable (the trigger to revisit
-	// the no-cap decision, amendment D4).
-	FloorRoundDuration metric.Float64Histogram
-	// GovernanceDrop counts each publish dropped by an RFC 0030 deterministic
-	// governance layer (v0.3.8), labelled by `channel_type` and `layer`
-	// (`reply_budget` in this PR; `cost`/`depth`/`end_vote` join in PR 5). The
-	// per-drop attribution (channel, interaction, participant) is on the Warn line.
-	GovernanceDrop metric.Int64Counter
-}
+// RouterMetrics — the router's OTEL-handle struct — lives in router_metrics.go
+// (split out so this file stays under the 500-line review cap).
 
 // ChannelRouter is the publish-and-fanout entry point used by the REST
 // `POST /api/v1/channels/{id}/messages` handler and (in PR 4) the
@@ -177,6 +142,20 @@ type ChannelRouter struct {
 	exemptParticipantTypes map[string]struct{}
 	defaultReplyBudget     int
 
+	// endVoteMu guards the RFC 0030 Layer 4 (v0.3.8) end-of-interaction vote
+	// state; methods + the full field contracts live in end_vote.go.
+	// endVoteThresholds/endVoteWindows: channel id → resolved K / W (absent
+	// falls back to [DefaultEndVoteThreshold]/[DefaultEndVoteWindow]). endVotes:
+	// interaction id → per-interaction vote accumulator (created on the first
+	// vote, discarded on close). closedInteractions: interactions already closed
+	// by an end-vote quorum, so a late publish stays suppressed and the close is
+	// emitted once. All guarded by endVoteMu.
+	endVoteMu          sync.Mutex
+	endVoteThresholds  map[string]int
+	endVoteWindows     map[string]int
+	endVotes           map[string]*interactionEndVotes
+	closedInteractions map[string]struct{}
+
 	// maxCascadeDepth — see cascade_depth.go; defaultSessionID — see router_session.go (RFC 0031 Phase 1).
 	maxCascadeDepth  int
 	defaultSessionID string
@@ -205,6 +184,10 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		salienceMaxMembers: make(map[string]int),
 		replyBudgets:       make(map[string]int),
 		replyCounts:        make(map[string]map[string]int),
+		endVoteThresholds:  make(map[string]int),
+		endVoteWindows:     make(map[string]int),
+		endVotes:           make(map[string]*interactionEndVotes),
+		closedInteractions: make(map[string]struct{}),
 		maxCascadeDepth:    defaults.DefaultMaxCascadeDepth,
 	}
 }
@@ -321,6 +304,17 @@ func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declare
 
 	if r.metrics != nil && r.metrics.MessagesPublished != nil {
 		r.metrics.MessagesPublished.Add(ctx, 1, metric.WithAttributes(attribute.String("channel_type", string(derivedType))))
+	}
+
+	// RFC 0030 Layer 4 (v0.3.8) end-of-interaction signal: accumulate this
+	// publish's end-vote (if any) into the interaction's quorum and, when K
+	// distinct participants have voted within W consecutive turns, close the
+	// interaction — suppressing fanout so the conversation stops drawing new
+	// replies (§H). Runs post-persistence (the vote is a real message) and is
+	// orthogonal to cascade_depth. Inert when untracked (no interaction_id) or
+	// when no producer emits the vote, so it is additive over v0.3.7.
+	if r.processEndVote(ctx, msg, derivedType) {
+		return nil
 	}
 
 	// Primary cascade-depth enforcement: drop fanout when at/over cap.

@@ -221,6 +221,21 @@ class ActionExecutor:
             case ActionType.DENY_APPROVAL:
                 logger.info("Agent %s denied approval (not yet implemented)", agent_id)
                 return {"action_type": "deny_approval", "status": "not_implemented"}
+            case ActionType.END_INTERACTION_VOTE:
+                # RFC 0030 Layer 4 (v0.3.8) — the agent votes its contribution
+                # to the current interaction complete. Recognised in the action
+                # vocabulary; the producer that publishes the vote flag onto the
+                # channel message (so the orchestrator-side accumulator in
+                # internal/channels/end_vote.go can count it toward the quorum)
+                # lands with the interaction_id producer, so this stays a no-op
+                # for now — mirroring the inert Layer 2 reply budget. Until then
+                # the orchestrator never sees the vote and the layer is inert.
+                logger.info(
+                    "Agent %s voted to end the interaction "
+                    "(RFC 0030 Layer 4; producer wiring not yet enabled)",
+                    agent_id,
+                )
+                return {"action_type": "end_interaction_vote", "status": "not_implemented"}
             case _:
                 # Defensive catch-all: Python match is not exhaustive at the
                 # type level. Without this, a new ActionType variant would

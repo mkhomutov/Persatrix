@@ -131,12 +131,7 @@ type Instruments struct {
 	AuditChainRecoveredTotal metric.Int64Counter
 	AuditEmitLatencySeconds  metric.Float64Histogram
 
-	// Channel router fanout (RFC 0011 §C / RFC 0019 §F). One increment
-	// per per-subscriber dispatch attempt, labelled by `channel_type`
-	// (`group|dm|thread`) and `status` (`ok|error`). Sender filtering
-	// happens before the increment, so the counter reflects effective
-	// delivery attempts, not publish events. Pair with the `error`
-	// label to alert on a wedged dispatcher.
+	// ChannelMessagesDelivered — per-subscriber channel-router dispatch attempts, labelled by `channel_type` + `status` (RFC 0011 §C / RFC 0019 §F); see channel_instruments.go.
 	ChannelMessagesDelivered metric.Int64Counter
 	// ChannelMessagesPublished pairs with ChannelMessagesDelivered for the delivered/published ratio (ISSUE-0013).
 	ChannelMessagesPublished metric.Int64Counter
@@ -146,6 +141,7 @@ type Instruments struct {
 	ChannelConversationFloorTurn          metric.Int64Counter
 	ChannelConversationFloorRoundDuration metric.Float64Histogram
 	ChannelConversationGovernanceDrop     metric.Int64Counter
+	ChannelConversationInteractionClosed  metric.Int64Counter
 	// SessionsWrites — RFC 0031 Phase 1; see channel_instruments.go.
 	SessionsWrites metric.Int64Counter
 }

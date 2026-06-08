@@ -154,6 +154,26 @@ func (r *ChannelRouter) enforceReplyBudget(ctx context.Context, msg ChannelMessa
 	if interactionID == "" {
 		return nil, nil // untracked — no interaction to scope the budget to.
 	}
+	// RFC 0030 Layer 4 end-of-interaction votes are exempt from the Layer 2
+	// reply budget. A vote is a terminal meta-signal (deduped to one per
+	// participant in processEndVote), not a content reply, and gating it behind
+	// the budget would let Layer 2 STARVE Layer 4: a participant who has spent
+	// their reply allowance could never cast the vote that converges the
+	// interaction, so a budget-saturated brainstorm could never reach the quorum
+	// and never close on its own. The two layers compose on the close path
+	// (processEndVote → DiscardInteractionReplyBudget); they must not collide on
+	// the admission path. The vote is still persisted into history — it is only
+	// exempt from consuming/being-rejected-by a reply slot.
+	//
+	// This exemption is bounded so it cannot become a reply-budget BYPASS: a
+	// participant who flags every publish as a vote to dodge the cap is caught
+	// downstream by processEndVote, which suppresses the fanout of a redundant
+	// in-window duplicate vote (it is deduped to a no-op for the quorum). So the
+	// exemption buys exactly one fanned-out terminal signal past the cap (the
+	// participant's first vote), not unbounded amplification.
+	if readEndInteractionVote(msg.Metadata) {
+		return nil, nil
+	}
 	participantType := readParticipantType(msg.Metadata)
 
 	r.replyBudgetMu.Lock()

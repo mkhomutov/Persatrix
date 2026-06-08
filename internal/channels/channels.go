@@ -379,6 +379,20 @@ var (
 	// interaction. Surfaced pre-persistence so the dropped message never enters
 	// channel history; the REST publish handler maps it to HTTP 429.
 	ErrParticipantBudgetExhausted = errors.New("channels: participant reply budget exhausted for this interaction")
+	// ErrInvalidEndVoteThreshold — a declared channel carried a negative
+	// `end_vote_threshold:` (RFC 0030 Layer 4 end-of-interaction signal, §H,
+	// v0.3.8). Belt-and-suspenders for the operator who skipped `make validate`
+	// (the JSON schema's `minimum: 1` rejects this earlier). Zero is NOT an
+	// error — it is the loader's "use the default" sentinel normalized to
+	// [DefaultEndVoteThreshold] at load time (K=2).
+	ErrInvalidEndVoteThreshold = errors.New("channels: invalid end_vote_threshold")
+	// ErrInvalidEndVoteWindow — a declared channel carried a negative
+	// `end_vote_window:` (RFC 0030 Layer 4 end-of-interaction signal, §H,
+	// v0.3.8). Belt-and-suspenders for the operator who skipped `make validate`
+	// (the JSON schema's `minimum: 1` rejects this earlier). Zero is NOT an
+	// error — it is the loader's "use the default" sentinel normalized to
+	// [DefaultEndVoteWindow] at load time (W=3).
+	ErrInvalidEndVoteWindow = errors.New("channels: invalid end_vote_window")
 )
 
 // participantIDPattern is the single source of truth for legal participant

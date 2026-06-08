@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -82,6 +81,22 @@ const DefaultFloorTurnTimeoutSeconds = 45
 // rides the wire, but a zero/absent field falls back to the Python default, so
 // the two must agree. Zero/absent normalizes to this value at load.
 const DefaultSalienceMaxChannelMembers = 20
+
+// DefaultEndVoteThreshold (K) and DefaultEndVoteWindow (W) are the RFC 0030
+// Layer 4 (§H, v0.3.8) end-of-interaction quorum applied when a declared
+// channel omits `end_vote_threshold` / `end_vote_window`. K distinct
+// participants emitting `END_INTERACTION_VOTE` within W consecutive turns close
+// the interaction. K=2 because one agent saying "done" is not consensus and two
+// distinct agents in close succession is; W=3 lets the signal survive an
+// intervening one-off comment. Like the floor-turn timeout and the salience cap
+// — and unlike the cost ceiling / reply budget, where zero is the meaningful
+// "uncapped" value — a zero/absent K or W normalizes to these defaults at load
+// (a zero threshold or window is not a meaningful value). The layer is still
+// opt-in: with no producer emitting the vote, a populated K/W never fires.
+const (
+	DefaultEndVoteThreshold = 2
+	DefaultEndVoteWindow    = 3
+)
 
 // DefaultChairThreshold is the low salience `threshold` applied to a `chair`
 // member when its config omits an explicit value (RFC 0030 Tier B, v0.3.8).
@@ -162,6 +177,21 @@ type ChannelConfig struct {
 	// NOT normalized to a non-zero default at load: zero is a meaningful value
 	// (uncapped), so the channel-vs-fleet precedence is resolved at read time.
 	MaxRepliesPerParticipantPerInteraction int `yaml:"max_replies_per_participant_per_interaction"`
+	// EndVoteThreshold (K) is the RFC 0030 Layer 4 (§H, v0.3.8) end-of-
+	// interaction quorum for this channel: K distinct participants emitting
+	// `END_INTERACTION_VOTE` within `EndVoteWindow` consecutive turns close the
+	// interaction. Zero/absent normalizes to [DefaultEndVoteThreshold] (K=2) at
+	// load — unlike the cost ceiling / reply budget, zero is not a meaningful
+	// "uncapped" value here; negative is rejected. Like the floor-turn timeout
+	// and salience cap, the normalized value is the resolved value (there is no
+	// fleet default to fall back to).
+	EndVoteThreshold int `yaml:"end_vote_threshold"`
+	// EndVoteWindow (W) is the RFC 0030 Layer 4 (§H, v0.3.8) recency window: an
+	// end-vote counts toward the quorum only while it is within W consecutive
+	// turns of the current turn (so a stale vote from much earlier no longer
+	// counts). Zero/absent normalizes to [DefaultEndVoteWindow] (W=3) at load;
+	// negative is rejected.
+	EndVoteWindow int `yaml:"end_vote_window"`
 }
 
 // ResolveMaxRepliesPerParticipant returns the effective RFC 0030 Layer 2 reply
@@ -304,6 +334,16 @@ func LoadConfig(path string) (*Config, error) {
 		if cfg.Channels[i].SalienceMaxChannelMembers == 0 {
 			cfg.Channels[i].SalienceMaxChannelMembers = DefaultSalienceMaxChannelMembers
 		}
+		// Same zero/absent → default sentinel for the RFC 0030 Layer 4 end-vote
+		// quorum (K) and recency window (W): a zero threshold or window is not a
+		// meaningful "uncapped" value the way a zero budget is, so normalize to
+		// the K=2 / W=3 defaults here. Negative is left as-is for Validate to reject.
+		if cfg.Channels[i].EndVoteThreshold == 0 {
+			cfg.Channels[i].EndVoteThreshold = DefaultEndVoteThreshold
+		}
+		if cfg.Channels[i].EndVoteWindow == 0 {
+			cfg.Channels[i].EndVoteWindow = DefaultEndVoteWindow
+		}
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -311,151 +351,8 @@ func LoadConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// Validate enforces the cross-field invariants the JSON Schema cannot
-// express alone:
-//   - participant ids satisfy `validateParticipantID` (no `:`, no whitespace)
-//   - declared `members` entries are unique within a channel
-//   - declared channel names are unique across the file
-//   - the declared channel count does not exceed `MaxChannels`
-//   - every membership respond policy is in the canonical set
-//   - a per-disposition `threshold`, when present, is a finite value in
-//     `[0, 1]` and rides only on an open-floor disposition (the salience
-//     bid never runs on a non-open-floor member, so a threshold there is a
-//     silent no-op — RFC 0030 Tier B)
-//   - `max_cascade_depth` is non-negative (zero is the loader-default
-//     sentinel; negative is rejected — PR #319 deep review finding 5.2)
-func (c *Config) Validate() error {
-	// MaxCascadeDepth: reject negative early so an operator typo surfaces
-	// as a loader error rather than as a silent fall-back to the default.
-	// The JSON schema's `minimum: 0` catches this at `make validate` time;
-	// this Go-side check is the belt-and-suspenders for operators who
-	// skipped that step. Zero is intentionally accepted — it is the
-	// loader-default sentinel honored by [ChannelRouter.SetMaxCascadeDepth].
-	if c.MaxCascadeDepth < 0 {
-		return fmt.Errorf("%w: %d (must be >= 0)",
-			ErrInvalidMaxCascadeDepth, c.MaxCascadeDepth)
-	}
-	// RFC 0030 Layer 1: the fleet-wide default cost ceiling. Zero is the
-	// uncapped opt-in default; negative is a typo the loader rejects loudly
-	// (the schema's `minimum: 0` catches it at `make validate`).
-	if c.DefaultInteractionBudgetTokens < 0 {
-		return fmt.Errorf("%w: default_interaction_budget_tokens=%d (must be >= 0)",
-			ErrInvalidInteractionBudgetTokens, c.DefaultInteractionBudgetTokens)
-	}
-	// RFC 0030 Layer 2: the fleet-wide default reply budget. Zero is the
-	// uncapped opt-in default; negative is a typo the loader rejects loudly
-	// (the schema's `minimum: 0` catches it at `make validate`).
-	if c.DefaultMaxRepliesPerParticipant < 0 {
-		return fmt.Errorf("%w: default_max_replies_per_participant=%d (must be >= 0)",
-			ErrInvalidMaxRepliesPerParticipant, c.DefaultMaxRepliesPerParticipant)
-	}
-	if len(c.Channels) > c.MaxChannels {
-		return fmt.Errorf("%w: declared=%d cap=%d",
-			ErrChannelCapExceeded, len(c.Channels), c.MaxChannels)
-	}
-	seenName := make(map[string]bool, len(c.Channels))
-	for i, ch := range c.Channels {
-		if ch.Name == "" {
-			return fmt.Errorf("channels[%d]: name is required", i)
-		}
-		// Mirror `schemas/channel.schema.json` → `definitions.channel.name.pattern`
-		// so a value that passes the loader also passes `make validate`. See
-		// channelNamePattern (channels.go) and PR #231 review Should-Fix #6.
-		if !channelNamePattern.MatchString(ch.Name) {
-			return fmt.Errorf("channels[%d]: name %q does not match %s",
-				i, ch.Name, channelNamePattern.String())
-		}
-		if seenName[ch.Name] {
-			return fmt.Errorf("channels[%d]: duplicate name %q", i, ch.Name)
-		}
-		seenName[ch.Name] = true
-
-		// Reject a negative floor-turn timeout (the schema's `minimum: 1`
-		// catches it at `make validate`; this is the belt-and-suspenders
-		// for operators who skipped that step). Zero never reaches here —
-		// LoadConfig normalizes it to the default before Validate runs.
-		if ch.FloorTurnTimeoutSeconds < 0 {
-			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 1)",
-				i, ch.Name, ErrInvalidFloorTurnTimeout, ch.FloorTurnTimeoutSeconds)
-		}
-
-		// Reject a negative Tier B channel-size cap (the schema's `minimum: 1`
-		// catches it at `make validate`; this is the belt-and-suspenders for
-		// operators who skipped that step). Zero never reaches here — LoadConfig
-		// normalizes it to the default before Validate runs.
-		if ch.SalienceMaxChannelMembers < 0 {
-			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 1)",
-				i, ch.Name, ErrInvalidSalienceMaxChannelMembers, ch.SalienceMaxChannelMembers)
-		}
-
-		// Reject a negative per-channel RFC 0030 Layer 1 cost ceiling. Zero
-		// is valid (uncapped → inherits the fleet default); only negative is
-		// an error. The schema's `minimum: 0` catches it at `make validate`;
-		// this is the belt-and-suspenders for operators who skipped it.
-		if ch.InteractionBudgetTokens < 0 {
-			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 0)",
-				i, ch.Name, ErrInvalidInteractionBudgetTokens, ch.InteractionBudgetTokens)
-		}
-
-		// Reject a negative per-channel RFC 0030 Layer 2 reply budget. Zero is
-		// valid (uncapped → inherits the fleet default); only negative is an
-		// error. The schema's `minimum: 0` catches it at `make validate`; this
-		// is the belt-and-suspenders for operators who skipped it.
-		if ch.MaxRepliesPerParticipantPerInteraction < 0 {
-			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 0)",
-				i, ch.Name, ErrInvalidMaxRepliesPerParticipant, ch.MaxRepliesPerParticipantPerInteraction)
-		}
-
-		if len(ch.Members) == 0 {
-			return fmt.Errorf("channels[%d=%s]: at least one member required", i, ch.Name)
-		}
-		seenMember := make(map[string]bool, len(ch.Members))
-		for j, m := range ch.Members {
-			if err := validateParticipantID(m.ID); err != nil {
-				return fmt.Errorf("channels[%d=%s].members[%d]: %w", i, ch.Name, j, err)
-			}
-			if seenMember[m.ID] {
-				return fmt.Errorf("channels[%d=%s].members[%d]: duplicate id %q",
-					i, ch.Name, j, m.ID)
-			}
-			seenMember[m.ID] = true
-			if !m.RespondPolicy.Valid() {
-				return fmt.Errorf("channels[%d=%s].members[%d=%s]: %w: %q",
-					i, ch.Name, j, m.ID, ErrInvalidRespondPolicy, m.RespondPolicy)
-			}
-			// Validate the salience threshold (RFC 0030 Tier B). Absent
-			// (nil) is the unset bias-to-silence default and is never an
-			// error.
-			if m.Threshold != nil {
-				// Reject a non-finite or out-of-range bound. The schema's
-				// `minimum: 0`/`maximum: 1` catches an out-of-range value at
-				// `make validate`; this is the belt-and-suspenders for an
-				// operator who skipped that step. The explicit `IsNaN` guard
-				// closes a gap neither bound catches: `.nan` slips past a bare
-				// `< 0 || > 1` comparison (every comparison against NaN is
-				// false), and would otherwise reach the bid as a salience bar
-				// that no score can ever clear. (`±Inf` is already caught by
-				// the range bound.)
-				if math.IsNaN(*m.Threshold) || *m.Threshold < 0.0 || *m.Threshold > 1.0 {
-					return fmt.Errorf("channels[%d=%s].members[%d=%s]: %w: %v (must be a finite value in [0, 1])",
-						i, ch.Name, j, m.ID, ErrInvalidThreshold, *m.Threshold)
-				}
-				// Reject a threshold on a disposition that runs no open-floor
-				// bid. After normalization, only open-floor speakers
-				// (participant/chair/legacy always) carry RespondAlways; a
-				// threshold on when_mentioned/never is a silent no-op. This is
-				// a cross-field invariant the JSON schema cannot express, so
-				// it has no `make validate` mirror — the loader is the sole
-				// enforcement point.
-				if m.RespondPolicy != RespondAlways {
-					return fmt.Errorf("channels[%d=%s].members[%d=%s]: %w: %q carries threshold %v but only an open-floor disposition (participant/chair/always) runs the salience bid",
-						i, ch.Name, j, m.ID, ErrThresholdNotApplicable, m.RespondPolicy, *m.Threshold)
-				}
-			}
-		}
-	}
-	return nil
-}
+// Validate — the cross-field loader invariants — lives in config_validate.go
+// (split out so this file stays under the 500-line review cap).
 
 // CanonicalID returns the canonical address for this declared channel
 // (`group:<name>`). The store-side `Channel.ID` PK uses the same value.

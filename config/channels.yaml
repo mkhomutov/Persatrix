@@ -52,6 +52,16 @@ default_interaction_budget_tokens: 0
 # `max_replies_per_participant_per_interaction:` (the per-channel value wins).
 default_max_replies_per_participant: 0
 
+# End-of-interaction signal (RFC 0030 Layer 4, v0.3.8) — let a brainstorm
+# terminate on its own. When K distinct participants emit an END_INTERACTION_VOTE
+# action within W consecutive turns, the interaction closes and the orchestrator
+# stops fanning out new replies. The quorum is per channel: `end_vote_threshold`
+# (K, default 2) and `end_vote_window` (W, default 3, counted in tracked
+# publishes — every message, not only votes). Still opt-in and additive:
+# with no agent emitting the vote action, a populated K/W never fires, so
+# existing channels are unchanged. (A `chair` cannot close an interaction — only
+# this vote quorum, the cost ceiling, and the depth cap can.)
+
 # Governance (RFC 0030, v0.3.8) — fleet-wide knobs that are not per-channel.
 # `exempt_principals: [human]` removes human principals (participant_type
 # "user") from the Layer 2 reply budget, so a human steering the conversation
@@ -112,6 +122,11 @@ channels:
     # times one participant may publish in a single interaction; omit it to
     # inherit default_max_replies_per_participant above.
     max_replies_per_participant_per_interaction: 0
+    # end_vote_threshold: 2 / end_vote_window: 3 are the defaults (RFC 0030
+    # Layer 4); shown for discoverability. K distinct participants emitting
+    # END_INTERACTION_VOTE within W consecutive turns close the interaction.
+    end_vote_threshold: 2
+    end_vote_window: 3
     members:
       - id: ember-owl
         respond: addressed

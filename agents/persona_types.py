@@ -93,6 +93,17 @@ class ActionType(Enum):
     GRANT_APPROVAL = "grant_approval"
     DENY_APPROVAL = "deny_approval"
     DO_NOTHING = "do_nothing"
+    # RFC 0030 Layer 4 (v0.3.8) — end-of-interaction vote. An agent emits this
+    # when it judges its contribution to the current interaction complete; the
+    # orchestrator accumulates votes per interaction and closes it once K
+    # distinct participants vote within W consecutive turns (§H). Distinct from
+    # RFC 0020's structural ``END_INTERACTION`` — a vote is advisory input to the
+    # deterministic quorum, not a unilateral close. Recognised here as the
+    # action vocabulary; the producer wiring (publishing the vote flag onto the
+    # channel message + prompting the LLM to emit it) lands with the
+    # ``interaction_id`` producer, so the orchestrator-side accumulator stays
+    # inert in production until then — mirroring the Layer 2 reply budget.
+    END_INTERACTION_VOTE = "end_interaction_vote"
 
 
 @dataclass
