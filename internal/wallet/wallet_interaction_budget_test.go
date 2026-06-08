@@ -235,6 +235,50 @@ func TestAcquireLease_InteractionBudget_TrackedInteractionFreedOnRelease(t *test
 		"a fully-released capped interaction must leave no running-total residue")
 }
 
+// TestAcquireLease_InteractionBudget_SettledSpendRetainsResidue pins the
+// deliberate counterpart to the fully-released case: a capped interaction that
+// settles real (non-zero) spend KEEPS a positive running-total entry after its
+// lease closes — it is not evicted just because no lease is outstanding. This
+// is load-bearing, not a leak: the ceiling bounds cumulative spend across an
+// interaction's whole life, so spend from a settled lease must still count
+// against a later sibling. Evicting at zero outstanding leases would reset the
+// cap and let one interaction spend its budget over and over. interaction_
+// budget.go documents this; PR 5 owns lifecycle eviction keyed on an actual
+// interaction-closed signal. The assertion guards that intended design against
+// a naive future "fix".
+func TestAcquireLease_InteractionBudget_SettledSpendRetainsResidue(t *testing.T) {
+	w, _ := newTestWallet(t, testCostConfig(), interactionBudgetWalletCfg())
+
+	first := acquireForInteraction(t, w, "int-1", 3000, 0, 2000) // estimate 2000 → running 2000
+	grant := first.GetGrant()
+	require.NotNil(t, grant)
+
+	// Settle at 1800 actual output tokens — below the 2000 estimate, so the
+	// reconcile frees 200 but leaves a positive (1800) residue.
+	ack, err := w.SettleLease(testContext(t), &walletpb.SettlementRequest{
+		LeaseId: grant.GetLeaseId(), ActualInputTokens: 0, ActualOutputTokens: 1800,
+	})
+	require.NoError(t, err)
+	require.True(t, ack.GetSuccess())
+
+	// No lease is outstanding, yet the entry persists at the settled actual —
+	// the residue must outlive its leases for the ceiling to bound cumulative
+	// spend across the interaction.
+	w.mu.Lock()
+	residue := w.interactionTokens["int-1"]
+	entries := len(w.interactionTokens)
+	w.mu.Unlock()
+	require.Equal(t, 1, entries, "a capped interaction with settled spend retains its entry")
+	assert.Equal(t, int64(1800), residue, "the retained residue is the settled actual, not the estimate")
+
+	// And it is enforced: a later lease that would fit under a fresh cap
+	// (1800 + 1500 = 3300 > 3000) is denied — settled spend from a closed
+	// lease still counts against the interaction ceiling.
+	denied := acquireForInteraction(t, w, "int-1", 3000, 0, 1500)
+	require.NotNil(t, denied.GetDenied(),
+		"settled spend from a closed lease still counts against the interaction ceiling")
+}
+
 // TestAcquireLease_ScopeDenialCarriesBudgetReason proves the existing RFC
 // 0023 per-scope budget denial now carries the typed
 // LEASE_DENIED_REASON_BUDGET, so consumers can machine-distinguish it from

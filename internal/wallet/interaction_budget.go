@@ -66,10 +66,18 @@ func (w *WalletService) interactionCeilingDenialLocked(req *walletpb.LeaseReques
 // spend across every lease of one interaction, so a lease arriving after its
 // siblings settled must still count against what they already spent. There is
 // no "interaction closed" signal at this layer, so a capped interaction that
-// retains real (settled) spend keeps its entry until ResetDaily-style state
-// turnover. That residue is bounded in VALUE by the budget and is opt-in
-// (capped channels only); a fleet-wide eviction keyed on an interaction-
-// lifecycle event belongs with the PR 5 composition wiring.
+// retains real (settled) spend keeps its entry for the orchestrator's process
+// lifetime — nothing currently evicts it. The only prune path is
+// adjustInteractionTokensLocked dropping an entry that reconciles to <= 0
+// (a fully-released interaction); a capped interaction that settled non-zero
+// spend never reaches zero and so is never pruned. (interactionTokens is the
+// wallet's own map, deliberately NOT a cost.TokenCounter scope, so the cost
+// counter's ResetDaily — which turns over the dollar scopes — does not touch
+// it.) The per-entry residue is bounded in VALUE by the budget, but the entry
+// COUNT grows by one per distinct capped interaction. An interaction-lifecycle
+// eviction keyed on an actual interaction-closed signal belongs with the PR 5
+// composition wiring; until PR 5 stamps a positive budget no production lease
+// is tracked, so this map stays empty and the growth is latent, not live.
 func (w *WalletService) recordInteractionGrantLocked(interactionID string, estimatedTokens int64) {
 	if interactionID == "" {
 		return
