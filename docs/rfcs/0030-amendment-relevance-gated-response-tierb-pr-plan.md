@@ -192,13 +192,16 @@ The **bid itself is an LLM call**, so the Layer 1 cost ceiling governs it: a bid
 ### PR 3: `feature/v038-rfc0030-tierb-nl-addressing` — Natural-language addressing as a salience signal
 
 **Depends on**: PR 2b.
+**Status**: 🔀 PR open.
 **Purpose**: Free-text "let's hear from Iron Fox" biases the bid toward Iron Fox and away from others — **without** re-introducing a deterministic NL directed-elsewhere drop (TB4 / amendment OQ #2).
 
 | File | Change |
 |------|--------|
-| `agents/tier_b_salience.py` | Add a light recipient-extraction signal to the bid prompt/scoring: when the inbound message names a participant in free text (e.g. "to Iron Fox", "let's hear from …"), raise that persona's salience and lower others'. The signal is an **input to the bid**, never a hard pre-filter — structured `@`-mentions remain the only deterministic Tier-A drop. Keep extraction conservative (high precision; an ambiguous name does not suppress anyone). |
-| `tests/unit/python/test_tier_b_salience.py` | **(TDD — write first.)** NL addressing shifts bid outcomes: the named persona's `speak` flips toward `yes`, a non-named persona toward `no` — **without** a deterministic drop (a non-named `participant` with a genuinely novel, in-domain contribution can still clear the bid). Assert no new hard NL filter exists (a non-named persona is never suppressed *before* the bid). |
-| `tests/integration/...` | **(TDD — write first.)** "let's hear from Iron Fox on this" on a multi-`participant` channel draws primarily Iron Fox; the others mostly defer but are not hard-dropped. |
+| `agents/salience_addressing.py` (new) | The pure recipient-extraction signal — `detect_nl_addressing(content, persona_name) -> NLAddressing`. A curated, high-precision set of free-text invitation cues ("let's hear from …", "over to …", "what does … think") captures the named recipient and classifies it as *this* persona (`self_named`) or *another* (`other_named`); a pronoun / ambiguous capture / no cue → neither, so no one is suppressed. Carved into its own module so `salience_bid.py` stays under the 500-line cap. |
+| `agents/salience_bid.py` | Consume the signal in `evaluate_salience`: invited-by-name lowers the effective score bar (`_ADDRESSED_SELF_BONUS`), someone-else-invited raises it (`_ADDRESSED_OTHER_PENALTY`); `self` wins when both fire; the bar is clamped to `[0,1]`. A short advisory note is added to the bid prompt. The signal is an **input to the bid**, never a hard pre-filter — structured `@`-mentions remain the only deterministic Tier-A drop, and a decisive score still clears even when someone else was invited. |
+| `tests/unit/python/test_salience_addressing.py` (new) | **(TDD — write first.)** The pure extractor: self/other classification, first-name subset match, pronoun → neither, no-cue → neither, empty inputs, self-precedence-when-both-named. |
+| `tests/unit/python/test_salience_bid.py` | **(TDD — write first.)** NL addressing shifts bid outcomes: a middling score that clears the bar stays silent when someone else is invited, and a sub-bar score speaks when the persona is invited — **without** a deterministic drop (a decisive score still clears; the bid still runs, no pre-filter short-circuit). |
+| `tests/integration/test_salience_nl_addressing.py` (new) | **(TDD — write first.)** "let's hear from Iron Fox on this" on a governed channel draws Iron Fox to the quality turn while an un-named persona defers on the same bid score; an un-named persona with a decisive score still speaks (no hard filter). Drives the *real* bid through the action-loop seam. |
 
 **Acceptance**: NL addressing biases the bid (named persona up, others down) without a deterministic directed-elsewhere drop; structured `@`-mention behaviour from Tier A is unchanged; the unit suite proves the no-hard-filter invariant.
 

@@ -55,6 +55,7 @@ import grpc.aio
 
 from .generated import wallet_pb2 as walletpb
 from .model_aliases import resolve as resolve_model
+from .salience_addressing import NLAddressing, detect_nl_addressing
 from .wallet_client import BudgetExceededError
 
 if TYPE_CHECKING:
@@ -64,7 +65,9 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS",
+    "NLAddressing",
     "SalienceDecision",
+    "detect_nl_addressing",
     "evaluate_salience",
     "skip_bid_for_channel_size",
 ]
@@ -85,6 +88,32 @@ _BID_TEMPERATURE: Final[float] = 0.0
 # TB2: the implicit bar an *unset* (``None``) threshold must clear. An unset
 # threshold biases to silence, so only a decisively-high score speaks.
 _DECISIVE_SCORE: Final[float] = 0.8
+
+# PR 3 — natural-language addressing (TB4 / amendment OQ #2). A free-text
+# invitation of a named person ("let's hear from Iron Fox") biases the bid's
+# *bar* toward or away from the bidding persona — it is **never** a hard
+# pre-filter (structured ``@``-mentions remain the only deterministic
+# directed-elsewhere drop, owned by Tier A). Being invited by name lowers the
+# bar (lean toward speaking); seeing someone *else* invited raises it (defer
+# unless decisively novel). The shift is deliberately modest so a non-named
+# persona with a genuinely strong contribution still clears. It is *not* exactly
+# symmetric: the self-bonus only ever floors at 0, while the someone-else
+# penalty additionally ceilings at :data:`_ADDRESSED_OTHER_CEILING` (below) so
+# it can never become a hard drop.
+_ADDRESSED_SELF_BONUS: Final[float] = 0.2
+_ADDRESSED_OTHER_PENALTY: Final[float] = 0.2
+# The bar a someone-else-invited penalty may lift *to* — but never past. It sits
+# *above* the decisive score (:data:`_DECISIVE_SCORE` = 0.8) so the penalty
+# genuinely bites even on the bias-to-silence / unset-threshold path (base 0.8 →
+# 0.9 — without this the ceiling collapsed to the base and the "away from
+# others" bias was inert there), yet strictly *below* 1.0 so a near-certain
+# contribution (≥ 0.9) still clears — a bias, never a hard drop (TB4). It is
+# never pulled below an operator's own threshold when they set one higher.
+_ADDRESSED_OTHER_CEILING: Final[float] = 0.9
+# Decimal places the shifted bar is rounded to so float drift (e.g.
+# ``0.4 + 0.2 == 0.6000000000000001``) cannot turn the inclusive floor into an
+# epsilon-exclusive one.
+_BAR_PRECISION: Final[int] = 6
 
 # TB6: default channel-member cap above which the bid is skipped (the channel
 # falls back to ``addressed``-only). A non-positive value disables the cap.
@@ -162,8 +191,31 @@ def skip_bid_for_channel_size(
     return channel_size > max_members
 
 
+def _addressing_note(addressing: NLAddressing) -> str:
+    """A short bid-prompt nudge reflecting the NL-addressing signal (PR 3).
+
+    The note is advisory only — it never instructs the model to stay silent
+    outright (that would re-introduce a hard NL filter); it leans the
+    judgement, and the deterministic bar shift in :func:`evaluate_salience`
+    carries the load that does not depend on the model honouring prose."""
+    if addressing.self_named:
+        return (
+            "\n\nNote: you appear to be invited by name to weigh in — if you "
+            "have anything useful, lean toward speaking."
+        )
+    if addressing.other_named:
+        return (
+            "\n\nNote: someone else appears to be invited by name — defer "
+            "unless you have something genuinely new they would miss."
+        )
+    return ""
+
+
 def _build_bid_messages(
-    *, content: str, transcript: list[dict[str, Any]],
+    *,
+    content: str,
+    transcript: list[dict[str, Any]],
+    addressing: NLAddressing,
 ) -> list[dict[str, Any]]:
     """Compact the in-round transcript + the inbound message into the bid
     prompt. The transcript is the RFC 0034 group working memory the caller
@@ -178,17 +230,54 @@ def _build_bid_messages(
         speaker = "Me" if role == "assistant" else "Thread"
         lines.append(f"{speaker}: {text}")
     transcript_block = "\n".join(lines) if lines else "(no prior turns this round)"
+    # With no addressing cue the note slot collapses to the original single
+    # space, so a non-addressing bid prompt is byte-identical to PR 2b (review
+    # finding #4); a present note rides on its own paragraph instead.
+    note = _addressing_note(addressing)
+    note_tail = f"{note}\n\n" if note else " "
     user = (
         "Conversation so far this round:\n"
         f"{transcript_block}\n\n"
         f"New message:\n{content}\n\n"
         "Decide whether you have something genuinely new and relevant to add "
-        "that has not already been said. Bias toward staying silent. "
+        "that has not already been said. Bias toward staying silent."
+        f"{note_tail}"
         "Answer on exactly two lines:\n"
         "speak: yes|no\n"
         "score: <a number from 0.0 to 1.0 for how much you have to add>"
     )
     return [{"role": "user", "content": user}]
+
+
+def _bar_for(threshold: float | None, addressing: NLAddressing) -> float:
+    """The effective score bar for this bid (TB2 + PR 3).
+
+    Starts from the configured ``threshold`` (or :data:`_DECISIVE_SCORE` when
+    unset — bias-to-silence), then applies the NL-addressing shift: invited-by-
+    name lowers the bar, someone-else-invited raises it. ``self`` wins when
+    both fire.
+
+    The someone-else-invited *penalty* is a **bias, never a hard filter** (TB4
+    / amendment OQ #2): it is capped at :data:`_ADDRESSED_OTHER_CEILING` (0.9)
+    so a near-certain contribution still clears even when someone else was
+    invited. The ceiling sits *above* the decisive score (0.8) so the penalty
+    still bites on the bias-to-silence (unset-threshold) path — base 0.8 → 0.9,
+    rather than collapsing back to 0.8 and going inert — yet stays strictly
+    below 1.0 so a ≥ 0.9 score speaks (no de-facto hard drop). When the operator
+    sets a threshold higher than the ceiling we honour *that* instead, never
+    lifting a turn further out of reach than they already placed it.
+
+    Rounded to :data:`_BAR_PRECISION` so the shift stays an *inclusive* floor:
+    a float-naive ``0.4 + 0.2`` lands at 0.6000000000000001 and would silence a
+    score of exactly 0.6 by an epsilon. Clamped to ``[0, 1]`` so the shift can
+    never invert the gate."""
+    base = _DECISIVE_SCORE if threshold is None else threshold
+    bar = base
+    if addressing.self_named:
+        bar -= _ADDRESSED_SELF_BONUS
+    elif addressing.other_named:
+        bar = min(bar + _ADDRESSED_OTHER_PENALTY, max(_ADDRESSED_OTHER_CEILING, base))
+    return round(max(0.0, min(1.0, bar)), _BAR_PRECISION)
 
 
 def _bid_system_prompt(*, persona_name: str, persona_role: str) -> str:
@@ -266,11 +355,17 @@ async def evaluate_salience(
         )
         return SalienceDecision(speak=False, score=None, reason="model_unresolvable")
 
+    # PR 3 — free-text addressing signal. Computed before the call so it both
+    # nudges the prompt and shifts the deterministic score bar below.
+    addressing = detect_nl_addressing(content=content, persona_name=persona_name)
+
     try:
         response = await llm_client.create_message(
             model=resolved.model,
             model_alias=resolved.alias,
-            messages=_build_bid_messages(content=content, transcript=transcript),
+            messages=_build_bid_messages(
+                content=content, transcript=transcript, addressing=addressing,
+            ),
             system=_bid_system_prompt(
                 persona_name=persona_name, persona_role=persona_role,
             ),
@@ -323,9 +418,11 @@ async def evaluate_salience(
         )
         return SalienceDecision(speak=False, score=None, reason="parse_failure")
 
-    # TB2 — bias-to-silence. An unset threshold demands a decisive score;
-    # an explicit threshold is an inclusive floor.
-    bar = _DECISIVE_SCORE if threshold is None else threshold
+    # TB2 — bias-to-silence. An unset threshold demands a decisive score; an
+    # explicit threshold is an inclusive floor. PR 3 then shifts the bar for
+    # NL addressing (invited-by-name lowers it; someone-else-invited raises it)
+    # — a bias, never a hard drop, so a decisive score still clears.
+    bar = _bar_for(threshold, addressing)
     if score < bar:
         return SalienceDecision(speak=False, score=score, reason="below_threshold")
 
