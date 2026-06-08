@@ -259,6 +259,39 @@ func TestGovernance_ReplyBudgetRemainingRecordedAtClose(t *testing.T) {
 	assert.Equal(t, float64(3), sum, "alice left 1 + bob left 2 = 3 leftover replies")
 }
 
+// TestGovernance_ReplyBudgetRemainingExcludesNonReplyingParticipants pins the
+// histogram's cardinality contract: reply_budget_remaining samples one point per
+// participant who actually CONSUMED reply budget, NOT one per channel member.
+// A member who never published (carol) and a participant who only cast an
+// end-vote (bob — votes are Layer-2-exempt, so they reserve no reply slot and
+// create no counter entry) both have their full allowance and are deliberately
+// absent from the histogram. This keeps the "tail near zero ⇒ budget too tight"
+// reading honest: padding it with full-headroom samples from silent members
+// would mask the saturated tail the metric exists to surface. Companion to
+// TestGovernance_ReplyBudgetRemainingRecordedAtClose (which covers the recorded
+// participants); this one pins who is excluded.
+func TestGovernance_ReplyBudgetRemainingExcludesNonReplyingParticipants(t *testing.T) {
+	router, store, reader := routerWithGovernanceMetrics(t)
+	id := mustCreateGroup(t, store, "planning", "alice", "bob", "carol")
+	router.SetReplyBudget(id, 3) // K=3 — Layer 2 active so replies are tracked.
+	router.SetEndVoteParams(id, 2, 3)
+
+	// alice is the only one to spend reply budget (1 of 3 → remaining 2). bob
+	// only ever votes (exempt → no reply counter); carol stays silent.
+	require.NoError(t, publishReply(t, router, id, "alice", "int-1", "agent"))
+
+	// alice + bob vote → two distinct votes within the window close the interaction.
+	require.NoError(t, endVote(t, router, id, "alice", "int-1"))
+	require.NoError(t, endVote(t, router, id, "bob", "int-1"))
+
+	rm := collect(t, reader)
+	require.Equal(t, int64(1), interactionClosedCount(t, rm, "group", endVotesTrigger), "the interaction closed on votes")
+
+	cnt, sum := replyBudgetRemainingHist(t, rm, "group")
+	assert.Equal(t, uint64(1), cnt, "only the one replying participant (alice) is sampled — bob (vote-only) and carol (silent) are excluded")
+	assert.Equal(t, float64(2), sum, "alice left 2 of 3; no full-allowance samples from non-repliers")
+}
+
 // TestGovernance_PostCloseSuppressionEmitsGovernanceDrop pins Layer 4's dominant
 // effect: once an interaction has closed, EVERY later publish to it is suppressed
 // from fanout — and that suppression IS a governance drop. Without attributing

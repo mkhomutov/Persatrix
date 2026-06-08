@@ -346,9 +346,11 @@ channels:
   `trigger=end_votes` today.
 - `end_vote_emitted{channel_type}` — one per vote action (vote volume vs. the
   quorum the close counter measures).
-- `reply_budget_remaining{channel_type}` — histogram of each participant's
-  leftover allowance at interaction close; a tail near zero says the budget is
-  too tight.
+- `reply_budget_remaining{channel_type}` — histogram of each **replying**
+  participant's leftover allowance at interaction close (one sample per
+  participant who consumed reply budget; members who stayed silent or only cast
+  an end-vote are not sampled, so full-headroom samples never mask the tail); a
+  tail near zero says the budget is too tight.
 - Trace correlation: every drop stamps `conversation.governance.layer=<layer>` on
   the inbound publish span, so "all publishes dropped by Layer 2 in #planning
   today" is one trace query, not a log grep.
