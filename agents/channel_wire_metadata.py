@@ -16,15 +16,17 @@ from .generated import task_pb2
 from .persona_types import AgentEvent
 
 # Byte bound on the lifted ``interaction_id``, the receive-side counterpart to
-# the Go publish boundary's ``interactionIDMaxChars`` (internal/channels/
+# the Go publish boundary's ``interactionIDMaxBytes`` (internal/channels/
 # interaction_id.go). The value is seeded onto the metadata the per-interaction
 # maps the layer PRs build (Layer 2 reply budget, Layer 4 end-of-interaction
 # votes) key on, so an unbounded id is an unbounded map-key growth vector — the
 # bound must hold at *this* seed point, not only at publish, because a non-Go
 # (or compromised) producer can deliver an oversized wire field straight here.
 # Measured in UTF-8 bytes to mirror Go's ``len()`` exactly (a value accepted at
-# one boundary is accepted at the other); 128 matches the agent receive path's
-# ``_CHANNEL_THREAD_ID_MAX_CHARS`` cap and is generous over the 36-byte uuid4.
+# one boundary is accepted at the other); 128 reuses the *value* of the agent
+# receive path's ``_CHANNEL_THREAD_ID_MAX_CHARS`` cap (that cap counts code
+# points, this bound counts bytes — equal for the ASCII id) and is generous
+# over the 36-byte uuid4.
 _INTERACTION_ID_MAX_BYTES = 128
 
 

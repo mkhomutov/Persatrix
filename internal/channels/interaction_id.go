@@ -27,9 +27,10 @@ const interactionIDMetadataKey = "interaction_id"
 // metadata bag, and the layer PRs that consume it (Layer 2 reply budget,
 // Layer 4 end-of-interaction votes) key per-interaction maps on the value —
 // an unbounded id is an unbounded map-key growth vector (the same concern
-// floor_control.go calls out for its session maps). 128 mirrors the agent
-// receive path's `_CHANNEL_THREAD_ID_MAX_CHARS` cap and leaves generous
-// headroom over the RFC 0020 id (a 36-char uuid4 / 26-char ULID).
+// floor_control.go calls out for its session maps). 128 reuses the *value* of
+// the agent receive path's `_CHANNEL_THREAD_ID_MAX_CHARS` cap (that cap counts
+// code points, this bound counts bytes — equal for the ASCII id) and leaves
+// generous headroom over the RFC 0020 id (a 36-char uuid4 / 26-char ULID).
 //
 // This publish-side bound is one of two: the value is also seeded onto agent
 // metadata at the receive boundary, where the per-interaction map key is
