@@ -28,6 +28,37 @@ message LeaseRequest {
   int64 estimated_max_output_tokens = 5;
   Cause cause = 6;                   // origin attribution
   string trace_id = 7;               // for span linking; OTEL baggage
+
+  // RFC 0030 Layer 1 — per-interaction cost ceiling (§E). interaction_id
+  // is the RFC 0020 conversation scope this lease is attributed to (empty
+  // for non-channel traffic — chat / TICK / workflow tasks — which is the
+  // untracked, always-uncapped case). interaction_budget_tokens is the
+  // ceiling carried from the channel's `interaction_budget_tokens` config:
+  // once the running token total for interaction_id would cross it, the
+  // wallet denies further leases in that interaction with
+  // LeaseDeniedReason LEASE_DENIED_REASON_INTERACTION_BUDGET_EXHAUSTED.
+  // Default 0 (uncapped) — an absent/zero budget never denies, preserving
+  // pre-v0.3.8 behaviour. The budget is supplied per-request (it is the
+  // same channel config on every lease of one interaction) so the wallet
+  // need not hold channel state.
+  string interaction_id = 8;
+  int64 interaction_budget_tokens = 9;
+}
+
+// LeaseDeniedReason machine-distinguishes why a lease was denied so the
+// agent can branch without parsing the human-readable `message`. The zero
+// value is UNSPECIFIED for back-compat: a denial emitted before this field
+// existed (or by a server that does not set it) reads as UNSPECIFIED and is
+// handled as the generic budget denial it has always been.
+enum LeaseDeniedReason {
+  LEASE_DENIED_REASON_UNSPECIFIED = 0;
+  // The RFC 0023 per-scope (global / per_workflow / per_agent) budget check
+  // rejected the lease — the original and still the default denial.
+  LEASE_DENIED_REASON_BUDGET = 1;
+  // The RFC 0030 Layer 1 per-interaction cost ceiling rejected the lease:
+  // the running token total for this interaction_id would cross
+  // interaction_budget_tokens. Fail-closed — the LLM call does not happen.
+  LEASE_DENIED_REASON_INTERACTION_BUDGET_EXHAUSTED = 2;
 }
 
 enum Cause {
@@ -60,11 +91,12 @@ message LeaseGrant {
 }
 
 message LeaseDenied {
-  string scope = 1;                  // "global" | "per_workflow" | "per_agent"
+  string scope = 1;                  // "global" | "per_workflow" | "per_agent" | "interaction"
   double spent_usd = 2;
   double limit_usd = 3;
   double estimated_usd = 4;
   string message = 5;                // human-readable reason
+  LeaseDeniedReason reason = 6;      // machine-distinguishable denial cause
 }
 
 message SettlementRequest {

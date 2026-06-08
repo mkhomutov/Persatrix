@@ -33,6 +33,16 @@
 
 max_channels: 50
 
+# Interaction cost ceiling (RFC 0030 Layer 1, v0.3.8) — bound the total LLM
+# spend of a single brainstorm so a conversation cannot cost unboundedly. Once
+# an interaction's running token total would cross the ceiling, the wallet
+# denies further leases in that interaction (fail-closed — the LLM call does not
+# happen). Opt-in and additive: 0 (the default) means uncapped, so existing
+# channels are unchanged. Set a fleet-wide default here and/or override per
+# channel with `interaction_budget_tokens:` (the per-channel value wins; a
+# channel that omits it inherits this default).
+default_interaction_budget_tokens: 0
+
 # Floor control (RFC 0030 Layer 2.5) — ON by default for every group channel
 # declared here (the floor-control amendment, v0.3.6). When a message lands in a
 # channel with two or more responders, they take the floor one at a time — each
@@ -74,6 +84,11 @@ channels:
     # salience_max_channel_members: 20 is the default (RFC 0030 Tier B); shown
     # for discoverability. Lower it to disable the salience bid on larger rooms.
     salience_max_channel_members: 20
+    # interaction_budget_tokens: 0 (uncapped) is the default (RFC 0030 Layer 1);
+    # shown for discoverability. Set a positive token ceiling to bound the total
+    # cost of one interaction on this channel; omit it to inherit
+    # default_interaction_budget_tokens above.
+    interaction_budget_tokens: 0
     members:
       - id: ember-owl
         respond: addressed

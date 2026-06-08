@@ -76,11 +76,13 @@ _UNREACHABLE_CODES: frozenset[grpc.StatusCode] = frozenset({
 class BudgetExceededError(Exception):
     """The wallet refused to fund an LLM call.
 
-    Raised for an in-band ``LeaseDenied`` (``reason="budget_exceeded"``)
-    and for a wallet that could not be reached (``reason="wallet_unreachable"``)
-    — both block the call. The ``scope`` / ``spent_usd`` / ``limit_usd`` /
-    ``estimated_usd`` fields mirror today's Go-side ``BudgetError`` shape
-    and are populated only for the budget-denial case.
+    Raised for an in-band ``LeaseDenied`` (``reason="budget_exceeded"`` for an
+    RFC 0023 per-scope denial, ``reason="interaction_budget_exhausted"`` for an
+    RFC 0030 Layer 1 per-interaction cost-ceiling denial) and for a wallet that
+    could not be reached (``reason="wallet_unreachable"``) — all block the call.
+    The ``scope`` / ``spent_usd`` / ``limit_usd`` / ``estimated_usd`` fields
+    mirror today's Go-side ``BudgetError`` shape and are populated only for the
+    per-scope budget-denial case.
     """
 
     def __init__(
@@ -225,11 +227,21 @@ class WalletClient:
         cause: walletpb.Cause.ValueType,
         workflow_id: str = "",
         trace_id: str = "",
+        interaction_id: str = "",
+        interaction_budget_tokens: int = 0,
     ) -> AsyncIterator[Lease]:
         """Acquire a lease, yield it, and close it on exit.
 
         Raises :class:`BudgetExceededError` if the wallet denies the lease
         or is unreachable — in either case the ``with`` body never runs.
+
+        ``interaction_id`` / ``interaction_budget_tokens`` carry the RFC 0030
+        Layer 1 per-interaction cost ceiling (§E). When both are set, the
+        wallet denies the lease once the interaction's running token total
+        would cross the ceiling, raising :class:`BudgetExceededError` with
+        ``reason="interaction_budget_exhausted"`` — fail-closed, exactly like
+        a workflow-budget denial. Empty id / zero budget is the uncapped
+        default and never gates (chat / TICK / pre-v0.3.8 channel traffic).
         """
         request = walletpb.LeaseRequest(
             workflow_id=workflow_id,
@@ -241,6 +253,10 @@ class WalletClient:
             estimated_max_output_tokens=max(0, int(estimated_max_output_tokens)),
             cause=cause,
             trace_id=trace_id,
+            interaction_id=interaction_id,
+            # Clamp defensively — a negative ceiling is meaningless; treat it
+            # as uncapped rather than letting it deny every lease.
+            interaction_budget_tokens=max(0, int(interaction_budget_tokens)),
         )
         lease = await self._acquire(request)
         try:
@@ -342,18 +358,36 @@ class WalletClient:
             outcome = response.WhichOneof("outcome")
             if outcome == "denied":
                 d = response.denied
-                logger.warning(
-                    "wallet: lease denied — %s budget exceeded "
-                    "(spent=$%.4f limit=$%.4f)",
-                    d.scope, d.spent_usd, d.limit_usd,
-                )
+                # Map the typed wire reason to the agent-facing reason string.
+                # An RFC 0030 Layer 1 interaction-ceiling denial is handled
+                # exactly like a workflow-budget denial (fail-closed, no LLM
+                # call) but is distinguishable for telemetry / governance_drop
+                # attribution. An UNSPECIFIED reason (a pre-field server, or
+                # the default) reads as the generic budget denial it has
+                # always been.
+                if (
+                    d.reason
+                    == walletpb.LeaseDeniedReason.LEASE_DENIED_REASON_INTERACTION_BUDGET_EXHAUSTED
+                ):
+                    reason = "interaction_budget_exhausted"
+                    logger.warning(
+                        "wallet: lease denied — interaction cost ceiling "
+                        "exceeded (%s)", d.message,
+                    )
+                else:
+                    reason = "budget_exceeded"
+                    logger.warning(
+                        "wallet: lease denied — %s budget exceeded "
+                        "(spent=$%.4f limit=$%.4f)",
+                        d.scope, d.spent_usd, d.limit_usd,
+                    )
                 raise BudgetExceededError(
                     d.message or f"{d.scope} budget exceeded",
                     scope=d.scope,
                     spent_usd=d.spent_usd,
                     limit_usd=d.limit_usd,
                     estimated_usd=d.estimated_usd,
-                    reason="budget_exceeded",
+                    reason=reason,
                 )
             if outcome == "grant":
                 grant = response.grant

@@ -21,6 +21,65 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// LeaseDeniedReason machine-distinguishes why a lease was denied so the
+// agent can branch without parsing the human-readable `message`. The zero
+// value is UNSPECIFIED for back-compat: a denial emitted before this field
+// existed (or by a server that does not set it) reads as UNSPECIFIED and is
+// handled as the generic budget denial it has always been.
+type LeaseDeniedReason int32
+
+const (
+	LeaseDeniedReason_LEASE_DENIED_REASON_UNSPECIFIED LeaseDeniedReason = 0
+	// The RFC 0023 per-scope (global / per_workflow / per_agent) budget check
+	// rejected the lease — the original and still the default denial.
+	LeaseDeniedReason_LEASE_DENIED_REASON_BUDGET LeaseDeniedReason = 1
+	// The RFC 0030 Layer 1 per-interaction cost ceiling rejected the lease:
+	// the running token total for this interaction_id would cross
+	// interaction_budget_tokens. Fail-closed — the LLM call does not happen.
+	LeaseDeniedReason_LEASE_DENIED_REASON_INTERACTION_BUDGET_EXHAUSTED LeaseDeniedReason = 2
+)
+
+// Enum value maps for LeaseDeniedReason.
+var (
+	LeaseDeniedReason_name = map[int32]string{
+		0: "LEASE_DENIED_REASON_UNSPECIFIED",
+		1: "LEASE_DENIED_REASON_BUDGET",
+		2: "LEASE_DENIED_REASON_INTERACTION_BUDGET_EXHAUSTED",
+	}
+	LeaseDeniedReason_value = map[string]int32{
+		"LEASE_DENIED_REASON_UNSPECIFIED":                  0,
+		"LEASE_DENIED_REASON_BUDGET":                       1,
+		"LEASE_DENIED_REASON_INTERACTION_BUDGET_EXHAUSTED": 2,
+	}
+)
+
+func (x LeaseDeniedReason) Enum() *LeaseDeniedReason {
+	p := new(LeaseDeniedReason)
+	*p = x
+	return p
+}
+
+func (x LeaseDeniedReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (LeaseDeniedReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_wallet_proto_enumTypes[0].Descriptor()
+}
+
+func (LeaseDeniedReason) Type() protoreflect.EnumType {
+	return &file_wallet_proto_enumTypes[0]
+}
+
+func (x LeaseDeniedReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use LeaseDeniedReason.Descriptor instead.
+func (LeaseDeniedReason) EnumDescriptor() ([]byte, []int) {
+	return file_wallet_proto_rawDescGZIP(), []int{0}
+}
+
 type Cause int32
 
 const (
@@ -63,11 +122,11 @@ func (x Cause) String() string {
 }
 
 func (Cause) Descriptor() protoreflect.EnumDescriptor {
-	return file_wallet_proto_enumTypes[0].Descriptor()
+	return file_wallet_proto_enumTypes[1].Descriptor()
 }
 
 func (Cause) Type() protoreflect.EnumType {
-	return &file_wallet_proto_enumTypes[0]
+	return &file_wallet_proto_enumTypes[1]
 }
 
 func (x Cause) Number() protoreflect.EnumNumber {
@@ -76,7 +135,7 @@ func (x Cause) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Cause.Descriptor instead.
 func (Cause) EnumDescriptor() ([]byte, []int) {
-	return file_wallet_proto_rawDescGZIP(), []int{0}
+	return file_wallet_proto_rawDescGZIP(), []int{1}
 }
 
 type LeaseRequest struct {
@@ -88,8 +147,22 @@ type LeaseRequest struct {
 	EstimatedMaxOutputTokens int64                  `protobuf:"varint,5,opt,name=estimated_max_output_tokens,json=estimatedMaxOutputTokens,proto3" json:"estimated_max_output_tokens,omitempty"`
 	Cause                    Cause                  `protobuf:"varint,6,opt,name=cause,proto3,enum=persatrix.v1.Cause" json:"cause,omitempty"` // origin attribution
 	TraceId                  string                 `protobuf:"bytes,7,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`       // for span linking; OTEL baggage
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	// RFC 0030 Layer 1 — per-interaction cost ceiling (§E). interaction_id
+	// is the RFC 0020 conversation scope this lease is attributed to (empty
+	// for non-channel traffic — chat / TICK / workflow tasks — which is the
+	// untracked, always-uncapped case). interaction_budget_tokens is the
+	// ceiling carried from the channel's `interaction_budget_tokens` config:
+	// once the running token total for interaction_id would cross it, the
+	// wallet denies further leases in that interaction with
+	// LeaseDeniedReason LEASE_DENIED_REASON_INTERACTION_BUDGET_EXHAUSTED.
+	// Default 0 (uncapped) — an absent/zero budget never denies, preserving
+	// pre-v0.3.8 behaviour. The budget is supplied per-request (it is the
+	// same channel config on every lease of one interaction) so the wallet
+	// need not hold channel state.
+	InteractionId           string `protobuf:"bytes,8,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
+	InteractionBudgetTokens int64  `protobuf:"varint,9,opt,name=interaction_budget_tokens,json=interactionBudgetTokens,proto3" json:"interaction_budget_tokens,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *LeaseRequest) Reset() {
@@ -169,6 +242,20 @@ func (x *LeaseRequest) GetTraceId() string {
 		return x.TraceId
 	}
 	return ""
+}
+
+func (x *LeaseRequest) GetInteractionId() string {
+	if x != nil {
+		return x.InteractionId
+	}
+	return ""
+}
+
+func (x *LeaseRequest) GetInteractionBudgetTokens() int64 {
+	if x != nil {
+		return x.InteractionBudgetTokens
+	}
+	return 0
 }
 
 type LeaseResponse struct {
@@ -323,11 +410,12 @@ func (x *LeaseGrant) GetTtlSeconds() int32 {
 
 type LeaseDenied struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Scope         string                 `protobuf:"bytes,1,opt,name=scope,proto3" json:"scope,omitempty"` // "global" | "per_workflow" | "per_agent"
+	Scope         string                 `protobuf:"bytes,1,opt,name=scope,proto3" json:"scope,omitempty"` // "global" | "per_workflow" | "per_agent" | "interaction"
 	SpentUsd      float64                `protobuf:"fixed64,2,opt,name=spent_usd,json=spentUsd,proto3" json:"spent_usd,omitempty"`
 	LimitUsd      float64                `protobuf:"fixed64,3,opt,name=limit_usd,json=limitUsd,proto3" json:"limit_usd,omitempty"`
 	EstimatedUsd  float64                `protobuf:"fixed64,4,opt,name=estimated_usd,json=estimatedUsd,proto3" json:"estimated_usd,omitempty"`
-	Message       string                 `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"` // human-readable reason
+	Message       string                 `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`                                    // human-readable reason
+	Reason        LeaseDeniedReason      `protobuf:"varint,6,opt,name=reason,proto3,enum=persatrix.v1.LeaseDeniedReason" json:"reason,omitempty"` // machine-distinguishable denial cause
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -395,6 +483,13 @@ func (x *LeaseDenied) GetMessage() string {
 		return x.Message
 	}
 	return ""
+}
+
+func (x *LeaseDenied) GetReason() LeaseDeniedReason {
+	if x != nil {
+		return x.Reason
+	}
+	return LeaseDeniedReason_LEASE_DENIED_REASON_UNSPECIFIED
 }
 
 type SettlementRequest struct {
@@ -565,7 +660,7 @@ var File_wallet_proto protoreflect.FileDescriptor
 
 const file_wallet_proto_rawDesc = "" +
 	"\n" +
-	"\fwallet.proto\x12\fpersatrix.v1\"\x9b\x02\n" +
+	"\fwallet.proto\x12\fpersatrix.v1\"\xfe\x02\n" +
 	"\fLeaseRequest\x12\x1f\n" +
 	"\vworkflow_id\x18\x01 \x01(\tR\n" +
 	"workflowId\x12\x19\n" +
@@ -574,7 +669,9 @@ const file_wallet_proto_rawDesc = "" +
 	"\x16estimated_input_tokens\x18\x04 \x01(\x03R\x14estimatedInputTokens\x12=\n" +
 	"\x1bestimated_max_output_tokens\x18\x05 \x01(\x03R\x18estimatedMaxOutputTokens\x12)\n" +
 	"\x05cause\x18\x06 \x01(\x0e2\x13.persatrix.v1.CauseR\x05cause\x12\x19\n" +
-	"\btrace_id\x18\a \x01(\tR\atraceId\"\x81\x01\n" +
+	"\btrace_id\x18\a \x01(\tR\atraceId\x12%\n" +
+	"\x0einteraction_id\x18\b \x01(\tR\rinteractionId\x12:\n" +
+	"\x19interaction_budget_tokens\x18\t \x01(\x03R\x17interactionBudgetTokens\"\x81\x01\n" +
 	"\rLeaseResponse\x120\n" +
 	"\x05grant\x18\x01 \x01(\v2\x18.persatrix.v1.LeaseGrantH\x00R\x05grant\x123\n" +
 	"\x06denied\x18\x02 \x01(\v2\x19.persatrix.v1.LeaseDeniedH\x00R\x06deniedB\t\n" +
@@ -585,13 +682,14 @@ const file_wallet_proto_rawDesc = "" +
 	"\x14granted_input_tokens\x18\x02 \x01(\x03R\x12grantedInputTokens\x122\n" +
 	"\x15granted_output_tokens\x18\x03 \x01(\x03R\x13grantedOutputTokens\x12\x1f\n" +
 	"\vttl_seconds\x18\x04 \x01(\x05R\n" +
-	"ttlSeconds\"\x9c\x01\n" +
+	"ttlSeconds\"\xd5\x01\n" +
 	"\vLeaseDenied\x12\x14\n" +
 	"\x05scope\x18\x01 \x01(\tR\x05scope\x12\x1b\n" +
 	"\tspent_usd\x18\x02 \x01(\x01R\bspentUsd\x12\x1b\n" +
 	"\tlimit_usd\x18\x03 \x01(\x01R\blimitUsd\x12#\n" +
 	"\restimated_usd\x18\x04 \x01(\x01R\festimatedUsd\x12\x18\n" +
-	"\amessage\x18\x05 \x01(\tR\amessage\"\x90\x01\n" +
+	"\amessage\x18\x05 \x01(\tR\amessage\x127\n" +
+	"\x06reason\x18\x06 \x01(\x0e2\x1f.persatrix.v1.LeaseDeniedReasonR\x06reason\"\x90\x01\n" +
 	"\x11SettlementRequest\x12\x19\n" +
 	"\blease_id\x18\x01 \x01(\tR\aleaseId\x12.\n" +
 	"\x13actual_input_tokens\x18\x02 \x01(\x03R\x11actualInputTokens\x120\n" +
@@ -601,7 +699,11 @@ const file_wallet_proto_rawDesc = "" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\"N\n" +
 	"\rSettlementAck\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12#\n" +
-	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage*\x92\x01\n" +
+	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage*\x8e\x01\n" +
+	"\x11LeaseDeniedReason\x12#\n" +
+	"\x1fLEASE_DENIED_REASON_UNSPECIFIED\x10\x00\x12\x1e\n" +
+	"\x1aLEASE_DENIED_REASON_BUDGET\x10\x01\x124\n" +
+	"0LEASE_DENIED_REASON_INTERACTION_BUDGET_EXHAUSTED\x10\x02*\x92\x01\n" +
 	"\x05Cause\x12\x15\n" +
 	"\x11CAUSE_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13CAUSE_WORKFLOW_TASK\x10\x01\x12\x0e\n" +
@@ -627,33 +729,35 @@ func file_wallet_proto_rawDescGZIP() []byte {
 	return file_wallet_proto_rawDescData
 }
 
-var file_wallet_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_wallet_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_wallet_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_wallet_proto_goTypes = []any{
-	(Cause)(0),                // 0: persatrix.v1.Cause
-	(*LeaseRequest)(nil),      // 1: persatrix.v1.LeaseRequest
-	(*LeaseResponse)(nil),     // 2: persatrix.v1.LeaseResponse
-	(*LeaseGrant)(nil),        // 3: persatrix.v1.LeaseGrant
-	(*LeaseDenied)(nil),       // 4: persatrix.v1.LeaseDenied
-	(*SettlementRequest)(nil), // 5: persatrix.v1.SettlementRequest
-	(*ReleaseRequest)(nil),    // 6: persatrix.v1.ReleaseRequest
-	(*SettlementAck)(nil),     // 7: persatrix.v1.SettlementAck
+	(LeaseDeniedReason)(0),    // 0: persatrix.v1.LeaseDeniedReason
+	(Cause)(0),                // 1: persatrix.v1.Cause
+	(*LeaseRequest)(nil),      // 2: persatrix.v1.LeaseRequest
+	(*LeaseResponse)(nil),     // 3: persatrix.v1.LeaseResponse
+	(*LeaseGrant)(nil),        // 4: persatrix.v1.LeaseGrant
+	(*LeaseDenied)(nil),       // 5: persatrix.v1.LeaseDenied
+	(*SettlementRequest)(nil), // 6: persatrix.v1.SettlementRequest
+	(*ReleaseRequest)(nil),    // 7: persatrix.v1.ReleaseRequest
+	(*SettlementAck)(nil),     // 8: persatrix.v1.SettlementAck
 }
 var file_wallet_proto_depIdxs = []int32{
-	0, // 0: persatrix.v1.LeaseRequest.cause:type_name -> persatrix.v1.Cause
-	3, // 1: persatrix.v1.LeaseResponse.grant:type_name -> persatrix.v1.LeaseGrant
-	4, // 2: persatrix.v1.LeaseResponse.denied:type_name -> persatrix.v1.LeaseDenied
-	1, // 3: persatrix.v1.WalletService.AcquireLease:input_type -> persatrix.v1.LeaseRequest
-	5, // 4: persatrix.v1.WalletService.SettleLease:input_type -> persatrix.v1.SettlementRequest
-	6, // 5: persatrix.v1.WalletService.ReleaseLease:input_type -> persatrix.v1.ReleaseRequest
-	2, // 6: persatrix.v1.WalletService.AcquireLease:output_type -> persatrix.v1.LeaseResponse
-	7, // 7: persatrix.v1.WalletService.SettleLease:output_type -> persatrix.v1.SettlementAck
-	7, // 8: persatrix.v1.WalletService.ReleaseLease:output_type -> persatrix.v1.SettlementAck
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	1, // 0: persatrix.v1.LeaseRequest.cause:type_name -> persatrix.v1.Cause
+	4, // 1: persatrix.v1.LeaseResponse.grant:type_name -> persatrix.v1.LeaseGrant
+	5, // 2: persatrix.v1.LeaseResponse.denied:type_name -> persatrix.v1.LeaseDenied
+	0, // 3: persatrix.v1.LeaseDenied.reason:type_name -> persatrix.v1.LeaseDeniedReason
+	2, // 4: persatrix.v1.WalletService.AcquireLease:input_type -> persatrix.v1.LeaseRequest
+	6, // 5: persatrix.v1.WalletService.SettleLease:input_type -> persatrix.v1.SettlementRequest
+	7, // 6: persatrix.v1.WalletService.ReleaseLease:input_type -> persatrix.v1.ReleaseRequest
+	3, // 7: persatrix.v1.WalletService.AcquireLease:output_type -> persatrix.v1.LeaseResponse
+	8, // 8: persatrix.v1.WalletService.SettleLease:output_type -> persatrix.v1.SettlementAck
+	8, // 9: persatrix.v1.WalletService.ReleaseLease:output_type -> persatrix.v1.SettlementAck
+	7, // [7:10] is the sub-list for method output_type
+	4, // [4:7] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_wallet_proto_init() }
@@ -670,7 +774,7 @@ func file_wallet_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_wallet_proto_rawDesc), len(file_wallet_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,

@@ -31,6 +31,13 @@ type Config struct {
 	//
 	// [RFC 0011 amendment 'Cascade-depth wire propagation']: ../../docs/rfcs/0011-amendment-cascade-depth-wire-propagation.md
 	MaxCascadeDepth int `yaml:"max_cascade_depth"`
+	// DefaultInteractionBudgetTokens is the fleet-wide RFC 0030 Layer 1
+	// per-interaction cost ceiling (§E, v0.3.8) applied to any channel that
+	// omits its own `interaction_budget_tokens`. Opt-in: zero or absent means
+	// uncapped, so the ceiling is additive and existing channels are
+	// unchanged. Resolved per-channel via
+	// [ChannelConfig.ResolveInteractionBudgetTokens]. Negative is rejected.
+	DefaultInteractionBudgetTokens int64 `yaml:"default_interaction_budget_tokens"`
 }
 
 // DefaultFloorTurnTimeoutSeconds is the per-speaker turn timeout for floor
@@ -111,6 +118,29 @@ type ChannelConfig struct {
 	// `ChannelMessageEvent.salience_max_channel_members` wire field; the router
 	// stamps it onto the dispatch envelope at fanout time.
 	SalienceMaxChannelMembers int `yaml:"salience_max_channel_members"`
+	// InteractionBudgetTokens is the RFC 0030 Layer 1 (v0.3.8) per-interaction
+	// cost ceiling for this channel: once the running token total for an
+	// interaction on this channel would cross it, the wallet denies further
+	// leases (`INTERACTION_BUDGET_EXHAUSTED`, fail-closed). Opt-in — zero or
+	// absent inherits [Config.DefaultInteractionBudgetTokens] (itself zero =
+	// uncapped) via [ChannelConfig.ResolveInteractionBudgetTokens]. Negative
+	// is rejected. Unlike the salience cap this is NOT normalized to a
+	// non-zero default at load: zero is a meaningful value (uncapped), so the
+	// channel-vs-fleet precedence is resolved at read time, not load time.
+	InteractionBudgetTokens int64 `yaml:"interaction_budget_tokens"`
+}
+
+// ResolveInteractionBudgetTokens returns the effective RFC 0030 Layer 1 cost
+// ceiling for this channel: the channel's own `interaction_budget_tokens`
+// when set (non-zero), otherwise the fleet-wide
+// `default_interaction_budget_tokens`. A zero result means uncapped. This is
+// the single source of truth for the precedence — the dispatcher stamps the
+// resolved value onto the lease request so the wallet enforces one number.
+func (c ChannelConfig) ResolveInteractionBudgetTokens(fleetDefault int64) int64 {
+	if c.InteractionBudgetTokens > 0 {
+		return c.InteractionBudgetTokens
+	}
+	return fleetDefault
 }
 
 // MemberConfig is a `(participant_id, respond_policy)` pair declared in
@@ -257,6 +287,13 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("%w: %d (must be >= 0)",
 			ErrInvalidMaxCascadeDepth, c.MaxCascadeDepth)
 	}
+	// RFC 0030 Layer 1: the fleet-wide default cost ceiling. Zero is the
+	// uncapped opt-in default; negative is a typo the loader rejects loudly
+	// (the schema's `minimum: 0` catches it at `make validate`).
+	if c.DefaultInteractionBudgetTokens < 0 {
+		return fmt.Errorf("%w: default_interaction_budget_tokens=%d (must be >= 0)",
+			ErrInvalidInteractionBudgetTokens, c.DefaultInteractionBudgetTokens)
+	}
 	if len(c.Channels) > c.MaxChannels {
 		return fmt.Errorf("%w: declared=%d cap=%d",
 			ErrChannelCapExceeded, len(c.Channels), c.MaxChannels)
@@ -294,6 +331,15 @@ func (c *Config) Validate() error {
 		if ch.SalienceMaxChannelMembers < 0 {
 			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 1)",
 				i, ch.Name, ErrInvalidSalienceMaxChannelMembers, ch.SalienceMaxChannelMembers)
+		}
+
+		// Reject a negative per-channel RFC 0030 Layer 1 cost ceiling. Zero
+		// is valid (uncapped → inherits the fleet default); only negative is
+		// an error. The schema's `minimum: 0` catches it at `make validate`;
+		// this is the belt-and-suspenders for operators who skipped it.
+		if ch.InteractionBudgetTokens < 0 {
+			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 0)",
+				i, ch.Name, ErrInvalidInteractionBudgetTokens, ch.InteractionBudgetTokens)
 		}
 
 		if len(ch.Members) == 0 {
