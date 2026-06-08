@@ -136,7 +136,28 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 	r.endVoteMu.Lock()
 	if _, done := r.closedInteractions[interactionID]; done {
 		r.endVoteMu.Unlock()
-		return true // already closed — keep suppressing fanout for late traffic.
+		// Already closed — keep suppressing fanout for late traffic. That
+		// suppression IS a Layer 4 governance drop (the conversation has
+		// terminated and this publish is barred from cascading), so attribute it
+		// like every other layer's drop. In a converged interaction this is the
+		// BULK of Layer 4's effect — without it, governance_drop{layer=end_vote}
+		// would see only the rare in-window duplicate vote and miss the steady-
+		// state post-close suppression entirely. No Warn here: post-close traffic
+		// is expected, not anomalous (unlike a duplicate vote), so it is metered
+		// and traced but not logged. Fired outside the lock.
+		r.recordGovernanceDropEndVote(ctx, ct)
+		// Lifecycle: a post-close NON-vote reply ran enforceReplyBudget BEFORE this
+		// hook in Publish, which lazily RE-CREATES replyCounts[interactionID] (it
+		// gates on interaction_id, not on closedInteractions). The close-time
+		// DiscardInteractionReplyBudget already fired and never runs again for this
+		// interaction, so without re-pruning here that re-created counter map would
+		// leak for the orchestrator's lifetime — the per-interaction growth the
+		// discard seam exists to bound. Re-discard it: the interaction is terminated,
+		// so its reply budget is moot (final headroom was already recorded at close)
+		// and post-close fanout is suppressed regardless. Idempotent and a no-op when
+		// nothing was re-created (e.g. a post-close vote — votes never reserve a slot).
+		r.DiscardInteractionReplyBudget(interactionID)
+		return true
 	}
 	state := r.endVotes[interactionID]
 	if state == nil {
@@ -183,11 +204,27 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 	}
 	r.endVoteMu.Unlock()
 
+	// Vote-volume telemetry (§L): every vote action against a LIVE interaction
+	// counts once — first vote, stale re-vote, and deduped in-window re-vote alike
+	// — so end_vote_emitted measures how many votes were cast, paired with
+	// interaction_closed (how many reached quorum) on the convergence dashboard. A
+	// vote arriving AFTER the interaction has closed returned early above (it is a
+	// post-close governance drop, not a fresh vote toward any quorum), so it is
+	// deliberately not counted here. Fired outside the lock.
+	if isVote && r.metrics != nil && r.metrics.EndVoteEmitted != nil {
+		r.metrics.EndVoteEmitted.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("channel_type", string(ct)),
+		))
+	}
 	if spam {
-		r.recordEndVoteSpam(msg, interactionID)
+		r.recordEndVoteSpam(ctx, msg, ct, interactionID)
 	}
 	if closed {
 		r.recordInteractionClosed(ctx, msg, ct, interactionID, recent)
+		// Layer 4 → Layer 2 composition seam: record each tracked participant's
+		// leftover reply allowance BEFORE discarding the counters, so the
+		// reply_budget_remaining histogram observes the interaction's final state.
+		r.recordReplyBudgetRemainingAtClose(ctx, msg.ChannelID, interactionID, ct)
 		// Wire the §F reset seam: the interaction is closing, so its per-
 		// participant reply counters are discarded (the seam reply_budget.go
 		// reserved for the Layer 4 close path).
@@ -237,13 +274,36 @@ func (r *ChannelRouter) recordInteractionClosed(ctx context.Context, msg Channel
 // a LIVE (in-window) re-vote is logged — a re-vote after the prior one went
 // stale is legitimate re-engagement (see the spam check in processEndVote), so a
 // participant voting every turn is what collapses to one logged spam per re-vote.
-func (r *ChannelRouter) recordEndVoteSpam(msg ChannelMessage, interactionID string) {
+func (r *ChannelRouter) recordEndVoteSpam(ctx context.Context, msg ChannelMessage, ct ChannelType, interactionID string) {
 	r.logger.Warn("channels: duplicate end-of-interaction vote (deduped; possible vote-spam)",
 		zap.String("channel_id", msg.ChannelID),
 		zap.String("interaction_id", interactionID),
 		zap.String("participant_id", msg.SenderID),
-		zap.String("layer", "end_vote"),
+		zap.String("layer", governanceLayerEndVote),
 	)
+	// A redundant in-window duplicate vote has its fanout suppressed
+	// (processEndVote returns true), so it IS a Layer 4 governance drop:
+	// attribute it on the shared counter + trace span so vote-spam is visible on
+	// the same governance-drop dashboard as the other layers (§B/§L).
+	r.recordGovernanceDropEndVote(ctx, ct)
+}
+
+// recordGovernanceDropEndVote attributes a single Layer 4 fanout suppression on
+// the shared `governance_drop{layer=end_vote}` counter and stamps the publish
+// trace span. It is the one emission point for the two ways Layer 4 drops a
+// publish — a redundant in-window duplicate vote ([ChannelRouter.recordEndVoteSpam])
+// and any publish to an already-closed interaction (the post-close path in
+// [ChannelRouter.processEndVote]) — so both land on the identical dashboard /
+// trace query as the other layers. Nil-safe and cheap on a span-less/unsampled
+// publish (see annotateGovernanceDropSpan).
+func (r *ChannelRouter) recordGovernanceDropEndVote(ctx context.Context, ct ChannelType) {
+	if r.metrics != nil && r.metrics.GovernanceDrop != nil {
+		r.metrics.GovernanceDrop.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("channel_type", string(ct)),
+			attribute.String("layer", governanceLayerEndVote),
+		))
+	}
+	annotateGovernanceDropSpan(ctx, governanceLayerEndVote)
 }
 
 // DiscardInteractionEndVotes drops the Layer 4 accumulator and the closed-marker

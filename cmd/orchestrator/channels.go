@@ -128,6 +128,10 @@ func initChannels(
 			GovernanceDrop: orchMetrics.ChannelConversationGovernanceDrop,
 			// RFC 0030 Layer 4 end-of-interaction close counter (v0.3.8).
 			InteractionClosed: orchMetrics.ChannelConversationInteractionClosed,
+			// RFC 0030 v0.3.8 governance-layer composition telemetry (PR 5):
+			// Layer 4 vote volume + Layer 2 reply-budget headroom at close.
+			EndVoteEmitted:       orchMetrics.ChannelConversationEndVoteEmitted,
+			ReplyBudgetRemaining: orchMetrics.ChannelConversationReplyBudgetRemaining,
 		}
 	}
 	// ISSUE-0082 PR 2: build the per-request session resolver over the

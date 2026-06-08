@@ -81,9 +81,11 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	}
 	// RFC 0030 deterministic governance layers (v0.3.8). One increment per
 	// publish dropped by a governance layer, labelled by `channel_type` and
-	// `layer` (`reply_budget` in PR 3; `cost`/`depth`/`end_vote` join as PR 5
-	// wires the full composition surface). Feeds the governance-drop dashboard
-	// that makes "who got throttled and by which layer" observable (§L).
+	// `layer` (`reply_budget` in PR 3; `depth`/`end_vote` join as PR 5 wires the
+	// channel-owned composition surface; the wallet-side `cost` label is reserved
+	// and not yet emitted — it lands with the budget-stamping follow-up). Feeds the
+	// governance-drop dashboard that makes "who got throttled and by which layer"
+	// observable (§L).
 	if i.ChannelConversationGovernanceDrop, err = m.Int64Counter(
 		"channel.conversation.governance_drop",
 		metric.WithUnit("{message}"),
@@ -95,9 +97,9 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	}
 	// RFC 0030 Layer 4 (v0.3.8) end-of-interaction signal. One increment per
 	// interaction closed by a governance layer, labelled by `channel_type` and
-	// `trigger` (`end_votes` in PR 4; `idle`/`structural`/`cost` join as PR 5
-	// wires the other close paths). Feeds the convergence dashboard that makes
-	// "how did this conversation end" observable (§L).
+	// `trigger` (`end_votes` today; `idle`/`structural`/`cost` join as their close
+	// paths are wired). Feeds the convergence dashboard that makes "how did this
+	// conversation end" observable (§L).
 	if i.ChannelConversationInteractionClosed, err = m.Int64Counter(
 		"channel.conversation.interaction_closed",
 		metric.WithUnit("{interaction}"),
@@ -106,6 +108,35 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 		),
 	); err != nil {
 		return fmt.Errorf("create channel.conversation.interaction_closed: %w", err)
+	}
+	// RFC 0030 Layer 4 (v0.3.8) vote-volume counter. One increment per
+	// end-of-interaction vote action, labelled by `channel_type`. Paired with
+	// interaction_closed it shows how many votes were cast versus how many
+	// interactions actually reached quorum and converged (§L).
+	if i.ChannelConversationEndVoteEmitted, err = m.Int64Counter(
+		"channel.conversation.end_vote_emitted",
+		metric.WithUnit("{vote}"),
+		metric.WithDescription(
+			"RFC 0030 Layer 4 end-of-interaction vote actions, labelled by channel_type.",
+		),
+	); err != nil {
+		return fmt.Errorf("create channel.conversation.end_vote_emitted: %w", err)
+	}
+	// RFC 0030 Layer 2 (v0.3.8) reply-budget headroom histogram. At interaction
+	// close, each tracked participant's leftover allowance (K - replies_used) on a
+	// capped channel is recorded, labelled by `channel_type`. A tail near zero
+	// diagnoses a too-tight budget; a tail near K diagnoses a slack one (§L). The
+	// bucket boundaries span a handful of leftover replies (typical small caps)
+	// through a generous double-digit headroom.
+	if i.ChannelConversationReplyBudgetRemaining, err = m.Float64Histogram(
+		"channel.conversation.reply_budget_remaining",
+		metric.WithUnit("{reply}"),
+		metric.WithDescription(
+			"Per-participant leftover RFC 0030 Layer 2 reply allowance at interaction close, labelled by channel_type.",
+		),
+		metric.WithExplicitBucketBoundaries(0, 1, 2, 3, 5, 8, 13, 21, 34),
+	); err != nil {
+		return fmt.Errorf("create channel.conversation.reply_budget_remaining: %w", err)
 	}
 	// RFC 0031 Phase 1: per-session write counter. Increments once per
 	// CreateChannel / CreateChannelWithMembers / GetOrCreateDM /

@@ -284,6 +284,84 @@ channels:
 A zero or negative `max_cascade_depth:` row is ignored — the backstop
 cannot be silently disabled from config.
 
+### Conversation governance (RFC 0030 Layers 1/2/4) — v0.3.8
+
+The cascade-depth backstop above is **Layer 0** of the [RFC 0030 governance
+model](../rfcs/0030-multi-agent-conversation-governance.md#b-layered-architecture):
+the always-on net that stops runaway loops. v0.3.8 adds three **opt-in,
+default-off** deterministic layers that let a multi-persona brainstorm
+*converge, stay bounded, and terminate* — without a moderator. Each is scoped to
+an **interaction** (the RFC 0020 conversation unit). Layers 1 and 2 **default to
+uncapped** (`0`); Layer 4 carries non-zero `K`/`W` defaults but is **dormant
+until a persona actually emits an `END_INTERACTION_VOTE`** — so a config that
+sets none of these layers behaves exactly as it did in v0.3.7.
+
+| Layer | Knob | Default | What it bounds |
+|-------|------|---------|----------------|
+| **1 — cost ceiling** | `interaction_budget_tokens` (per-channel) · `default_interaction_budget_tokens` (fleet) | `0` (uncapped) | Total LLM tokens leased across one interaction. Once the running total would cross the budget, further leases are **denied** (`INTERACTION_BUDGET_EXHAUSTED`) — **fail-closed**: the LLM call does not happen, so the persona produces no reply. Enforced in the wallet on the lease path (RFC 0023), upstream of the channel publish. |
+| **2 — reply budget** | `max_replies_per_participant_per_interaction` (per-channel) · `default_max_replies_per_participant` (fleet) | `0` (uncapped) | How many times one participant may publish in one interaction. The `(K+1)`th publish is rejected **pre-persistence** (HTTP **429**, `ErrParticipantBudgetExhausted`) so an over-budget message never enters channel history and never pollutes future recall. Human principals are exempt — see `governance.exempt_principals` below. |
+| **4 — end-of-interaction vote** | `end_vote_threshold` (K) · `end_vote_window` (W), per-channel | K=`2`, W=`3` | A persona emits an `END_INTERACTION_VOTE` action when it judges its contribution complete. When **K distinct** participants vote within **W consecutive** turns, the interaction **closes** and stops drawing new replies. Votes are deduped per `(participant, interaction)`; an end-vote is exempt from the Layer 2 reply budget so a budget-saturated participant can still cast the terminating signal. |
+
+**Composition + failure-down ([RFC 0030 §B](../rfcs/0030-multi-agent-conversation-governance.md#b-layered-architecture)).**
+A publish proceeds only if **every active layer admits it**; a lower-layer drop
+short-circuits the higher layers (no point asking later layers once the cost
+ceiling or reply budget has already said no), and higher layers fail safely down
+to the always-on Layer 0 cap. Concretely: Layer 1 fails closed before a reply is
+even generated; Layer 2 rejects before persistence; Layer 4 and Layer 0 suppress
+fanout after the message persists.
+
+**Human exemption.** `governance.exempt_principals: [human]` (fleet-wide) exempts
+human participants from the Layer 2 reply budget, so a person steering the
+conversation is never throttled. The end-vote (Layer 4) has no such exemption — a
+human who explicitly votes that the interaction is done counts toward the quorum.
+
+```yaml
+# config/channels.yaml
+default_interaction_budget_tokens: 0       # fleet default (uncapped)
+default_max_replies_per_participant: 0     # fleet default (uncapped)
+governance:
+  exempt_principals: [human]               # humans bypass the Layer 2 reply budget
+channels:
+  - name: brainstorm
+    interaction_budget_tokens: 50000       # Layer 1: ~50k tokens per interaction
+    max_replies_per_participant_per_interaction: 3   # Layer 2: at most 3 turns each
+    end_vote_threshold: 2                  # Layer 4: 2 distinct votes …
+    end_vote_window: 3                     # … within 3 consecutive turns closes it
+    members:
+      - {id: alex, respond: participant}
+      - {id: jordan, respond: participant}
+      - {id: sam, respond: participant}
+```
+
+**Operator-facing telemetry** (RFC 0019 naming; all under `channel.conversation.*`):
+
+- `governance_drop{channel_type, layer}` — one increment per publish a layer
+  dropped. `layer ∈ {depth, reply_budget, end_vote}` (the channel-owned layers;
+  the `cost` label is reserved for the wallet-side Layer 1 drop counter, **not yet
+  emitted** — it lands with the budget-stamping follow-up). Anomalous drops
+  (reply-budget exhaustion, duplicate vote) also carry a Warn line with
+  `channel_id` / `interaction_id` / `participant_id`; expected suppression
+  (post-close traffic) is metered without a log.
+- `interaction_closed{channel_type, trigger}` — one per closed interaction;
+  `trigger=end_votes` today.
+- `end_vote_emitted{channel_type}` — one per vote action (vote volume vs. the
+  quorum the close counter measures).
+- `reply_budget_remaining{channel_type}` — histogram of each **replying**
+  participant's leftover allowance at interaction close (one sample per
+  participant who consumed reply budget; members who stayed silent or only cast
+  an end-vote are not sampled, so full-headroom samples never mask the tail); a
+  tail near zero says the budget is too tight.
+- Trace correlation: every drop stamps `conversation.governance.layer=<layer>` on
+  the inbound publish span, so "all publishes dropped by Layer 2 in #planning
+  today" is one trace query, not a log grep.
+
+> **Calibration.** No normative non-zero defaults ship in v0.3.8 — sensible
+> per-workload budgets need observed-usage data ([§OQ-5](../rfcs/0030-multi-agent-conversation-governance.md#open-questions)).
+> Start uncapped, watch `reply_budget_remaining` / `cost_tokens_per_interaction`,
+> then set bounds. The `chair` disposition and the Layer 5 moderator (a persona
+> that can actively wrap up a conversation) are **v0.4.0** — v0.3.8 convergence is
+> deliberately deterministic (Layers 1/2/4), so it needs no moderator.
+
 ---
 
 ## 5. Memory integration

@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.8] - Unreleased
+
+> **Codename:** Conversations that converge
+
+### Upgrade Notes
+
+| Notable change | Detail |
+|----------------|--------|
+| **[Config — additive, opt-in, back-compat]** Deterministic conversation governance (RFC 0030 Layers 1/2/4) | New **opt-in, default-off** per-channel knobs let a multi-persona brainstorm converge, stay bounded, and terminate without a moderator. **Layer 1 — cost ceiling**: `interaction_budget_tokens` (+ fleet `default_interaction_budget_tokens`) caps total LLM tokens leased per interaction; an over-budget lease is denied (`INTERACTION_BUDGET_EXHAUSTED`) **fail-closed** in the wallet. **Layer 2 — reply budget**: `max_replies_per_participant_per_interaction` (+ fleet `default_max_replies_per_participant`) bounds how many times one participant publishes in an interaction; the `(K+1)`th publish is rejected **pre-persistence** (HTTP 429); `governance.exempt_principals: [human]` exempts human participants. **Layer 4 — end-of-interaction vote**: an `END_INTERACTION_VOTE` action plus per-channel `end_vote_threshold` (K, default 2) / `end_vote_window` (W, default 3) — K distinct participants voting within W consecutive turns closes the interaction. **Every knob defaults to uncapped/off, so existing `config/channels.yaml` files behave exactly as in v0.3.7.** The layers compose per [RFC 0030 §B](docs/rfcs/0030-multi-agent-conversation-governance.md#b-layered-architecture): a publish proceeds only if every active layer admits it; a lower-layer drop short-circuits the higher layers and increments `governance_drop{layer}`. New telemetry under `channel.conversation.*`: `governance_drop{layer}`, `interaction_closed{trigger}`, `end_vote_emitted`, `reply_budget_remaining`, plus a `conversation.governance.layer` trace-span attribute. The `chair` disposition and the Layer 5 moderator remain **v0.4.0**. See the [channels guide](docs/guides/channels.md#conversation-governance-rfc-0030-layers-124--v038). |
+
 ## [0.3.7] - 2026-06-06
 
 > **Codename:** Conversations worth watching

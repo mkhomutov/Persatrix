@@ -264,6 +264,12 @@ func (r *ChannelRouter) publishWithReplyBudget(ctx context.Context, msg ChannelM
 // 128-byte, attacker-influenceable token, see interaction_id.go) leaks a counter
 // map for the orchestrator's lifetime. Inert today (no producer), so unbounded
 // growth cannot occur yet; the constraint binds when the producer lands.
+//
+// Also called on the post-close suppression path in [ChannelRouter.processEndVote]:
+// a post-close non-vote reply lazily re-creates this interaction's counter via
+// enforceReplyBudget (which has no view of closedInteractions), and the close-time
+// discard never runs again — so the post-close path re-discards it to keep that
+// re-created entry from leaking. Idempotent makes that re-call safe.
 func (r *ChannelRouter) DiscardInteractionReplyBudget(interactionID string) {
 	if interactionID == "" {
 		return
@@ -285,13 +291,54 @@ func (r *ChannelRouter) recordReplyBudgetDrop(ctx context.Context, msg ChannelMe
 		zap.String("interaction_id", interactionID),
 		zap.String("participant_id", msg.SenderID),
 		zap.Int("max_replies_per_participant", k),
-		zap.String("layer", "reply_budget"),
+		zap.String("layer", governanceLayerReplyBudget),
 	)
 	if r.metrics != nil && r.metrics.GovernanceDrop != nil {
 		r.metrics.GovernanceDrop.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("channel_type", string(ct)),
-			attribute.String("layer", "reply_budget"),
+			attribute.String("layer", governanceLayerReplyBudget),
 		))
+	}
+	annotateGovernanceDropSpan(ctx, governanceLayerReplyBudget)
+}
+
+// recordReplyBudgetRemainingAtClose records, for each participant tracked in a
+// closing interaction's reply counters, the leftover Layer 2 allowance
+// (K - replies_used) on the `reply_budget_remaining` histogram (§L). It is the
+// Layer 4 → Layer 2 composition seam: the end-vote close (end_vote.go) calls it
+// just BEFORE [ChannelRouter.DiscardInteractionReplyBudget] prunes the counters,
+// so the histogram observes the final per-participant state of the interaction.
+//
+// No-op (and zero hot-path cost) on the inert/default path: when no metric handle
+// is wired, the channel is uncapped (K<=0), or the interaction was untracked
+// (no reply counters). Only participants who actually replied are tracked, so the
+// sample is per-replying-participant — a member who never spoke has the full
+// allowance and is not counted. The counts are snapshotted under replyBudgetMu so
+// the Record calls happen outside the lock.
+func (r *ChannelRouter) recordReplyBudgetRemainingAtClose(ctx context.Context, channelID, interactionID string, ct ChannelType) {
+	if r.metrics == nil || r.metrics.ReplyBudgetRemaining == nil {
+		return
+	}
+	r.replyBudgetMu.Lock()
+	k := r.replyBudgets[channelID]
+	var remaining []float64
+	if k > 0 {
+		if counts := r.replyCounts[interactionID]; counts != nil {
+			remaining = make([]float64, 0, len(counts))
+			for _, used := range counts {
+				rem := k - used
+				if rem < 0 {
+					rem = 0 // a clamp: counts never exceed K, but never emit a negative headroom.
+				}
+				remaining = append(remaining, float64(rem))
+			}
+		}
+	}
+	r.replyBudgetMu.Unlock()
+
+	for _, rem := range remaining {
+		r.metrics.ReplyBudgetRemaining.Record(ctx, rem,
+			metric.WithAttributes(attribute.String("channel_type", string(ct))))
 	}
 }
 

@@ -15,7 +15,7 @@ depends_on:
 # RFC 0030 — Multi-Agent Conversation Governance
 
 **Type**: architecture
-**Status**: 🚧 Implementing — Layer 2.5 (floor control) shipped v0.3.6; the relevance-gate **Tier A + `respond_policy → disposition` reframe** shipped v0.3.7 (the [relevance amendment](0030-amendment-relevance-gated-response.md)). Tier B + Layers 1/2/4 are v0.3.8; the moderator (Layer 5) is v0.4.0.
+**Status**: 🚧 Implementing — Layer 2.5 (floor control) shipped v0.3.6; the relevance-gate **Tier A + `respond_policy → disposition` reframe** shipped v0.3.7 (the [relevance amendment](0030-amendment-relevance-gated-response.md)). **Deterministic Layers 1/2/4 (cost ceiling + reply budget + end-of-interaction vote) landed v0.3.8** — wired, composed, and tested behind opt-in/uncapped defaults ahead of the `interaction_id` producer; Tier B salience is the sibling v0.3.8 workstream. The moderator (Layer 5) and declarative conversation types (Layer 6) remain v0.4.0 / v0.5.0+.
 **Author**: Maksim Khomutov
 **Date**: 2026-05-11
 **Target**: v0.3.6 (Layer 2.5 — floor control, shipped); v0.3.7–v0.3.9 (Phase 1 — [relevance gate](0030-amendment-relevance-gated-response.md) + cost/reply-budget/end-of-interaction layers); v0.4.0 (Phase 2 — moderator role / bid-and-select); v0.5.0+ (Phase 3 — declarative conversation types + topic-drift)
@@ -124,11 +124,11 @@ Six layers, ordered by cheap-and-unfailable → expensive-and-judgement-based:
 | Layer | Mechanism | Failure mode | Cost per check | Status |
 |-------|-----------|--------------|----------------|--------|
 | **0** | Cascade-depth cap | None — counter compare | ~free | ✅ Shipped (RFC 0011 amendment) |
-| **1** | Per-interaction cost ceiling (lease budget) | None — wallet rejects | wallet RPC, p99 ≤ 5 ms (RFC 0023) | 📋 This RFC, Phase 1 |
-| **2** | Per-participant reply budget | None — counter compare | hashmap lookup | 📋 This RFC, Phase 1 |
+| **1** | Per-interaction cost ceiling (lease budget) | None — wallet rejects | wallet RPC, p99 ≤ 5 ms (RFC 0023) | ✅ Phase 1 (v0.3.8) — wallet enforcement wired; `governance_drop{layer=cost}` + budget-stamping deferred to a follow-up |
+| **2** | Per-participant reply budget | None — counter compare | hashmap lookup | ✅ Phase 1 (v0.3.8) |
 | **2.5** | Floor control / speaker serialization | Floor-holder stalls → per-turn timeout advances | one in-flight dispatch + a parked waiter | ✅ Shipped ([floor-control amendment](0030-amendment-floor-control-speaker-serialization.md), v0.3.6; telemetry PR 4 fast-follow) |
 | **3** | Per-membership response gate (`respond_policy`) | None — config lookup | ~free | ✅ Shipped (RFC 0011 §D) |
-| **4** | End-of-interaction signal (K consecutive votes) | Agent must opt in; falls back to lower layers | message accounting | 📋 This RFC, Phase 1 |
+| **4** | End-of-interaction signal (K consecutive votes) | Agent must opt in; falls back to lower layers | message accounting | ✅ Phase 1 (v0.3.8) |
 | **5** | Moderator role | Moderator can be wrong or time out; falls back to lower layers | ~1 LLM call per N turns | 📋 This RFC, Phase 2 (v0.4.0) |
 | **6** | Declarative conversation type / phases | N/A for runtime termination — sets defaults for Layers 1–5 | trivial | 📋 This RFC, Phase 3 (v0.5.0+) |
 
@@ -435,9 +435,9 @@ channels:
 
 Phasing matches the user's request: Phase 1 in v0.3.x, Phase 2 in v0.4.0, Phase 3 in v0.5.0+. Phases ship independently; each is useful on its own.
 
-### Phase 1 — Deterministic layers (v0.3.x)
+### Phase 1 — Deterministic layers (v0.3.x) — ✅ landed v0.3.8
 
-**Summary.** Layers 1, 2, 4 — the cheap, deterministic, fail-safe-by-construction layers. No new LLM-judgement code paths; opt-in via config.
+**Summary.** Layers 1, 2, 4 — the cheap, deterministic, fail-safe-by-construction layers. No new LLM-judgement code paths; opt-in via config. **Landed in v0.3.8** ([governance-layers PR plan](0030-governance-layers-pr-plan.md)): `interaction_id` wire propagation, the wallet cost ceiling, the per-participant reply budget, the `END_INTERACTION_VOTE` accumulator, and the composition + telemetry closeout. All ship opt-in/uncapped and are inert until the `interaction_id` producer lands; the `governance_drop{layer=cost}` counter + orchestrator→agent budget-stamping are the one deferred follow-up (the wallet holds no metrics handle today).
 
 **Deliverables.**
 1. `interaction_id` propagation on the wire (REST metadata bag + proto field #12). Mirror the cascade-depth amendment pattern.
