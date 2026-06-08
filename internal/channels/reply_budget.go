@@ -26,6 +26,21 @@ import (
 // the `user` participant type the REST chat handler stamps for a human peer
 // (chat_handler.go). An unrecognised label has no mapping, so it silently fails
 // open to "not exempt" — a typo cannot accidentally exempt agents.
+//
+// SECURITY (exemption trust boundary): the exemption decision in
+// [ChannelRouter.enforceReplyBudget] reads the sender's `participant_type` from
+// the publish metadata bag, which is caller-asserted. The REST chat handler
+// stamps/validates it for the human path (chat_handler.go), but the raw publish
+// path (`POST /channels/{id}/messages`) forwards the bag verbatim — it is NOT
+// re-derived from an authenticated identity. So a caller that self-asserts
+// `participant_type: "user"` would be treated as exempt (see the contract pinned
+// by `TestReplyBudget_HumanPrincipalExempt`). This is harmless while the layer
+// is inert (no producer writes `interaction_id`, so `enforceReplyBudget` never
+// reaches the exemption check on real traffic — see interaction_id.go), but
+// BEFORE the layer becomes load-bearing (the producer lands in PR 4+), the
+// exemption must derive the principal from a trusted/authenticated source rather
+// than the untrusted bag, or an agent could opt out of the cap meant to keep it
+// from dominating. Tracked as a hardening follow-up in the RFC 0030 PR plan.
 func exemptPrincipalParticipantType(principal string) (string, bool) {
 	if principal == "human" {
 		return "user", true
@@ -143,6 +158,9 @@ func (r *ChannelRouter) enforceReplyBudget(ctx context.Context, msg ChannelMessa
 
 	r.replyBudgetMu.Lock()
 	k := r.replyBudgets[msg.ChannelID]
+	// `participantType` is caller-asserted off the publish bag; the exemption it
+	// drives is only as trustworthy as its source — see the SECURITY note on
+	// [exemptPrincipalParticipantType] before this gate becomes load-bearing.
 	if k <= 0 || r.isExemptParticipantType(participantType) {
 		r.replyBudgetMu.Unlock()
 		return nil, nil
@@ -217,6 +235,15 @@ func (r *ChannelRouter) publishWithReplyBudget(ctx context.Context, msg ChannelM
 // end-vote path (PR 4) calls when an interaction ends; idempotent — discarding
 // an unknown interaction is a no-op. Bounds `replyCounts` so a long-lived
 // orchestrator does not accumulate a counter map per interaction forever.
+//
+// ORDERING (forward dependency): this is the ONLY seam that prunes a live
+// interaction's entry (a failed-persist release prunes only its own reservation).
+// `replyCounts` therefore grows one map per distinct `interaction_id` until this
+// is called. So the `interaction_id` producer MUST NOT be enabled before PR 4
+// wires this discard into the close path — otherwise every distinct id (a
+// 128-byte, attacker-influenceable token, see interaction_id.go) leaks a counter
+// map for the orchestrator's lifetime. Inert today (no producer), so unbounded
+// growth cannot occur yet; the constraint binds when the producer lands.
 func (r *ChannelRouter) DiscardInteractionReplyBudget(interactionID string) {
 	if interactionID == "" {
 		return

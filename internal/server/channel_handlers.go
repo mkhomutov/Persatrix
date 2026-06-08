@@ -135,17 +135,10 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// RFC 0030 — resolve per-channel governance for the freshly-created group
-	// channel so it matches a config-declared one: floor control (default ON),
-	// the Tier B salience cap (Set(_, 0) applies the default), and the Layer 2
-	// reply budget (ApplyDefaultReplyBudget — zero is meaningful, so it can't
-	// ride a Set(_, 0) sentinel). None has a REST field, so startup resolution
-	// re-forces them on restart. Nil router → no-op.
-	if s.channelRouter != nil {
-		s.channelRouter.SetFloorControl(canonicalID, true, 0)
-		s.channelRouter.SetSalienceMaxChannelMembers(canonicalID, 0)
-		s.channelRouter.ApplyDefaultReplyBudget(canonicalID)
-	}
+	// RFC 0030 — stamp the default governance bundle (floor control, the Tier B
+	// salience cap, and the Layer 2 reply budget) so a runtime-created group
+	// channel matches a config-declared one; see applyRuntimeGroupGovernance.
+	s.applyRuntimeGroupGovernance(canonicalID)
 
 	created, err := s.channelStore.GetChannel(r.Context(), canonicalID)
 	if err != nil {
