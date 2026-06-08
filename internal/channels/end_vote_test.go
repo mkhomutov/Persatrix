@@ -202,6 +202,27 @@ func TestEndVote_SpamLogged(t *testing.T) {
 	assert.Equal(t, "int-1", spam[0].ContextMap()["interaction_id"])
 }
 
+// TestEndVote_StaleRevoteNotSpam pins that re-voting AFTER the prior vote has
+// fallen out of the recency window is legitimate re-engagement, not vote
+// tampering (§H) — so it must NOT be logged as spam. Only a still-live (in-
+// window) duplicate is spam; otherwise a participant who votes early, waits out
+// the window, and votes again pollutes the audit signal the layer exists to give.
+func TestEndVote_StaleRevoteNotSpam(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	store := newTestStore(t, SQLiteOptions{})
+	router := NewChannelRouter(store, &recordingDispatcher{}, zap.New(core), nil)
+	id := mustCreateGroup(t, store, "planning", "alice", "bob")
+	router.SetEndVoteParams(id, 5, 3) // high K so nothing closes; W=3
+
+	require.NoError(t, endVote(t, router, id, "alice", "int-1")) // turn 1
+	require.NoError(t, plainTurn(t, router, id, "bob", "int-1")) // turn 2
+	require.NoError(t, plainTurn(t, router, id, "bob", "int-1")) // turn 3
+	require.NoError(t, endVote(t, router, id, "alice", "int-1")) // turn 4 — prior (turn 1) is stale
+
+	spam := logs.FilterMessageSnippet("vote").All()
+	assert.Empty(t, spam, "a re-vote after the prior one went stale is not vote-spam")
+}
+
 // TestEndVote_CloseDiscardsReplyBudget pins that the close path drives the
 // §F reset seam (DiscardInteractionReplyBudget): once the interaction closes
 // on votes, a previously-exhausted participant regains its reply allowance.
@@ -222,6 +243,33 @@ func TestEndVote_CloseDiscardsReplyBudget(t *testing.T) {
 	// carol's allowance is reset by the close.
 	require.NoError(t, plainTurn(t, router, id, "carol", "int-1"),
 		"the end-vote close must discard the per-interaction reply counters")
+}
+
+// TestEndVote_ExemptFromReplyBudget pins that an end-vote is never rejected by
+// the Layer 2 reply budget: a vote is a terminal meta-signal, not a content
+// reply, so a participant who has spent their reply allowance can still vote to
+// terminate. Otherwise Layer 2 could starve Layer 4 — a budget-saturated
+// brainstorm could never reach the quorum and never converge.
+func TestEndVote_ExemptFromReplyBudget(t *testing.T) {
+	router, store, reader := routerWithInteractionClosedMetric(t)
+	id := mustCreateGroup(t, store, "planning", "alice", "bob", "carol")
+	router.SetReplyBudget(id, 1)
+	router.SetEndVoteParams(id, 2, 3)
+
+	// alice and bob each spend their single reply slot on ordinary traffic.
+	require.NoError(t, plainTurn(t, router, id, "alice", "int-1"))
+	require.NoError(t, plainTurn(t, router, id, "bob", "int-1"))
+
+	// Both are now at their reply cap, yet each must still be able to vote.
+	require.NoError(t, endVote(t, router, id, "alice", "int-1"),
+		"a budget-exhausted participant must still be able to vote to end")
+	require.NoError(t, endVote(t, router, id, "bob", "int-1"),
+		"a budget-exhausted participant must still be able to vote to end")
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	assert.Equal(t, int64(1), interactionClosedCount(t, rm, "group", "end_votes"),
+		"votes are exempt from the reply budget, so the quorum still closes the interaction")
 }
 
 // TestEndVote_DiscardClearsAccumulator pins DiscardInteractionEndVotes: after a

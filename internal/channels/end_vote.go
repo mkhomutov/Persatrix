@@ -142,12 +142,28 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 		r.endVotes[interactionID] = state
 	}
 	state.turn++
+	k, w := r.resolvedEndVoteParamsLocked(msg.ChannelID)
 	spam := false
 	if isVote {
-		_, spam = state.votes[msg.SenderID]
+		// Spam only if the participant already has a LIVE (in-window) vote. A
+		// re-vote cast after the prior one fell out of the recency window
+		// (state.turn-prev >= w) is legitimate re-engagement, not vote tampering
+		// (§H), so it must not be logged as spam — otherwise a participant who
+		// votes early, waits out the window, and votes again pollutes the very
+		// audit signal this layer exists to provide. Re-voting overwrites the
+		// stamp either way, so the per-(participant, interaction) dedupe holds.
+		prev, existed := state.votes[msg.SenderID]
+		spam = existed && state.turn-prev < w
 		state.votes[msg.SenderID] = state.turn
 	}
-	k, w := r.resolvedEndVoteParamsLocked(msg.ChannelID)
+	// Count distinct participants with a live (in-window) vote. There is
+	// deliberately NO principal exemption here, unlike the Layer 2 reply budget
+	// (which exempts `governance.exempt_principals` → `user`): the budget is a
+	// throttle a human steering the conversation should bypass, whereas an
+	// end-vote is an explicit terminal signal — if a human bothers to vote that
+	// the interaction is done, that intent counts toward the quorum. The vote is
+	// an agent action (END_INTERACTION_VOTE) in practice, so a human voter is the
+	// rare deliberate case, not an accident of ordinary traffic.
 	recent := 0
 	for _, voteTurn := range state.votes {
 		if state.turn-voteTurn < w {
@@ -198,8 +214,10 @@ func (r *ChannelRouter) recordInteractionClosed(ctx context.Context, msg Channel
 
 // recordEndVoteSpam logs a duplicate end-vote so an adversarial vote-spam
 // pattern is visible in audit (§H vote tampering). The duplicate is already
-// deduped in the accumulator (it counts once); this only surfaces the rate. A
-// participant voting every turn collapses to one vote here per re-vote, logged.
+// deduped in the accumulator (it counts once); this only surfaces the rate. Only
+// a LIVE (in-window) re-vote is logged — a re-vote after the prior one went
+// stale is legitimate re-engagement (see the spam check in processEndVote), so a
+// participant voting every turn is what collapses to one logged spam per re-vote.
 func (r *ChannelRouter) recordEndVoteSpam(msg ChannelMessage, interactionID string) {
 	r.logger.Warn("channels: duplicate end-of-interaction vote (deduped; possible vote-spam)",
 		zap.String("channel_id", msg.ChannelID),
@@ -214,15 +232,21 @@ func (r *ChannelRouter) recordEndVoteSpam(msg ChannelMessage, interactionID stri
 // [ChannelRouter.DiscardInteractionReplyBudget]). Idempotent — discarding an
 // unknown interaction is a no-op.
 //
-// ORDERING (forward dependency, mirrors reply_budget.go): a vote-triggered close
-// frees the accumulator but leaves a `closedInteractions` marker so late traffic
-// stays suppressed; that marker is pruned only here. `closedInteractions`
-// therefore grows one entry per closed interaction until the RFC 0020 close path
-// drives this discard. So the `interaction_id` + end-vote producer MUST wire this
-// into the close path before it is enabled on real traffic — otherwise each
-// distinct id (a 128-byte, attacker-influenceable token, see interaction_id.go)
-// leaks a marker for the orchestrator's lifetime. Inert today (no producer), so
-// unbounded growth cannot occur yet; the constraint binds when the producer lands.
+// ORDERING (forward dependency, mirrors reply_budget.go): this seam prunes BOTH
+// per-interaction maps, and both grow without it:
+//   - `closedInteractions`: a vote-triggered close frees the accumulator but
+//     leaves a marker so late traffic stays suppressed — one entry per closed
+//     interaction, pruned only here.
+//   - `endVotes`: an interaction that casts a vote but never reaches quorum
+//     keeps its accumulator (votes go stale but are never removed; close is the
+//     only inline free) — one entry per voting-but-not-closing interaction,
+//     pruned only here.
+//
+// So the `interaction_id` + end-vote producer MUST wire this into the close path
+// before it is enabled on real traffic — otherwise each distinct id (a 128-byte,
+// attacker-influenceable token, see interaction_id.go) leaks an entry for the
+// orchestrator's lifetime. Inert today (no producer), so unbounded growth cannot
+// occur yet; the constraint binds when the producer lands.
 func (r *ChannelRouter) DiscardInteractionEndVotes(interactionID string) {
 	if interactionID == "" {
 		return
