@@ -124,6 +124,7 @@ The **bid itself is an LLM call**, so the Layer 1 cost ceiling governs it: a bid
 ### PR 1: `feature/v038-rfc0030-tierb-threshold` — Activate `threshold` + `chair` disposition (inert)
 
 **Depends on**: the v0.3.7 Tier A slice (disposition vocabulary + reserved `threshold`).
+**Status**: ✅ Merged ([#571](https://github.com/mkhomutov/Persatrix/pull/571)).
 **Purpose**: Land the per-disposition `threshold` activation and the `chair` disposition value with a low-threshold mapping, **inert** — nothing reads `threshold` yet and `chair` normalizes to a `participant`-equivalent so the gate is unchanged. Reviewable and bisectable before the bid lands.
 
 | File | Change |
@@ -143,7 +144,7 @@ The **bid itself is an LLM call**, so the Layer 1 cost ceiling governs it: a bid
 ### PR 2a: `feature/v038-rfc0030-tierb-bid` — The leased salience bid core (Python; dormant)
 
 **Depends on**: PR 1.
-**Status**: 🔀 PR open.
+**Status**: ✅ Merged ([#572](https://github.com/mkhomutov/Persatrix/pull/572)).
 **Purpose**: Land the bid logic and its action-loop seam, fully TDD'd, **dormant** until PR 2b carries its inputs across the store/wire boundary. A `participant` admitted on open-floor traffic of a Tier-B-governed channel runs a cheap, leased `fast`-model bid and stays silent unless it clears its `threshold` (the no-pile-on win); the seam is gated on a `tier_b_active` flag that nothing sets until PR 2b, so PR 2a is additive (v0.3.7 behaviour unchanged).
 
 | File | Change |
@@ -167,7 +168,7 @@ The **bid itself is an LLM call**, so the Layer 1 cost ceiling governs it: a bid
 ### PR 2b: `feature/v038-rfc0030-tierb-wire` — Carry `threshold` + channel size across the store/wire boundary (Go + proto)
 
 **Depends on**: PR 2a.
-**Status**: 🔀 PR open.
+**Status**: ✅ Merged ([#573](https://github.com/mkhomutov/Persatrix/pull/573); identifier rename to `salience` in [#574](https://github.com/mkhomutov/Persatrix/pull/574)).
 **Purpose**: Flip the bid live. Carry the per-member `threshold` and the channel-size/cap inputs from the in-memory `Config` (PR 1) all the way to the Python bid, and land the no-pile-on integration story.
 
 > **Design decision (PR 2b, 2026-06-07).** "Tier-B-governed" is resolved **per-member**, not per-channel: a new nullable `memberships.tier_b_active` column (alongside `threshold`) records whether a member was declared with the open-floor participant vocabulary (`participant`/`chair`), and that boolean rides the `ChannelMessageEvent.tier_b_active` wire field. Only `participant`/`chair` members (or a legacy `always` carrying an explicit `threshold`, read as a deliberate opt-in) bid; a bare legacy `always` keeps replying unconditionally, so v0.3.7 channels are byte-identical. This is what survives the `participant`→`always` normalization that would otherwise erase the distinction. The only new *channel-level* knob is `tier_b_max_channel_members` (the TB6 cap).
@@ -192,7 +193,7 @@ The **bid itself is an LLM call**, so the Layer 1 cost ceiling governs it: a bid
 ### PR 3: `feature/v038-rfc0030-tierb-nl-addressing` — Natural-language addressing as a salience signal
 
 **Depends on**: PR 2b.
-**Status**: 🔀 PR open.
+**Status**: ✅ Merged ([#575](https://github.com/mkhomutov/Persatrix/pull/575)).
 **Purpose**: Free-text "let's hear from Iron Fox" biases the bid toward Iron Fox and away from others — **without** re-introducing a deterministic NL directed-elsewhere drop (TB4 / amendment OQ #2).
 
 | File | Change |
@@ -210,6 +211,7 @@ The **bid itself is an LLM call**, so the Layer 1 cost ceiling governs it: a bid
 ### PR 4: `feature/v038-rfc0030-tierb-chair-closeout` — `chair` facilitator (Layer-5-inert) + MT + docs + status
 
 **Depends on**: PR 3.
+**Status**: 🔀 PR open (this PR).
 **Purpose**: Light up the `chair` low-threshold behaviour, wire the inert Layer-5 hooks, and land the operator-facing surface + the acceptance record.
 
 | File | Change |

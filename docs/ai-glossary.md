@@ -125,6 +125,59 @@ This file is referenced by both `.github/CLAUDE.md` and
   messages (RFC 0011). v0.3.0 channels are internal only.
 - **Example:** "Agents subscribed to the `#planning` channel receive the message."
 
+### Disposition
+- **Aliases:** "respond disposition", "respond policy" (legacy)
+- **Disallowed:** "respond mode", "reply trigger"
+- **Definition:** A channel member's **role in the conversation** — the `respond`
+  field on a membership (RFC 0030 relevance amendment): `participant` (open
+  floor), `addressed` (replies only when `@`-mentioned), `observer` (never
+  replies), or `chair` (a low-threshold facilitator, added v0.3.8). It declares
+  *how eager* a member is; the response gate makes the per-message call. The
+  reframe from the mechanical `respond_policy` trigger shipped in v0.3.7
+  (`participant` / `addressed` / `observer`); the `chair` disposition followed in
+  v0.3.8. The legacy `always` / `when_mentioned` / `never` values still load and
+  normalize.
+- **Example:** "Give the demo personas the `participant` disposition so they join
+  the open floor."
+
+### Salience Bid
+- **Aliases:** "salience gate", "Tier B bid"
+- **Disallowed:** "relevance gate" (that is the whole RFC 0030 Layer 3 surface;
+  the bid is its Tier B), "salience wake" (the RFC 0024 *autonomy* trigger — a
+  distinct concept)
+- **Definition:** The cheap `fast`-model, leased call (v0.3.8, RFC 0030 Tier B) a
+  `participant`/`chair` runs on an un-addressed open-floor message to decide
+  *whether to speak*: "do I have something genuinely new to add that hasn't
+  already been said?" It reads the in-round transcript and stays **silent**
+  unless its score clears the member's **disposition threshold** — the
+  no-pile-on mechanism. Bias-to-silence by default; fails closed to silence on a
+  parse/lease error.
+- **Example:** "On the open-floor question the salience bid kept three of the
+  four participants silent — only the one with something new spoke."
+
+### Disposition Threshold
+- **Aliases:** "salience threshold", "the `threshold` field"
+- **Disallowed:** "salience-wake threshold" (RFC 0024 autonomy), "min_score"
+  (the recall relevance floor — a different gate)
+- **Definition:** The per-member salience-score floor (`[0, 1]`) the **salience
+  bid** must clear to speak (v0.3.8). **Unset → bias-to-silence** (only a decisive
+  score speaks); a `chair` defaults to a low value so it clears readily. A
+  threshold on a non-open-floor disposition is a config error.
+- **Example:** "Lower the chair's disposition threshold so it facilitates more
+  actively."
+
+### Chair
+- **Aliases:** "chair disposition", "facilitator"
+- **Disallowed:** "moderator" (the v0.4.0 Layer 5 role that can *close* a
+  conversation — the chair's deferred active half), "admin", "owner"
+- **Definition:** A channel **disposition** (v0.3.8): a `participant` with a low
+  **disposition threshold**, so it clears the **salience bid** readily and keeps a
+  discussion moving. In v0.3.8 a chair is a *facilitator only* — it **cannot**
+  close, wrap up, or terminate an interaction (that is the Layer 5 moderator,
+  v0.4.0). Convergence comes from the governance layers, not the chair.
+- **Example:** "Mark the lead persona as `chair` so it nudges the brainstorm
+  along without dominating it."
+
 ### Channel Bridge
 - **Aliases:** —
 - **Disallowed:** "bridge" (when ambiguous with **MCP Bridge**), "connector",

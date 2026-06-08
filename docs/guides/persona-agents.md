@@ -311,6 +311,24 @@ prompt
 > [RFC 0034 §G](../rfcs/0034-persona-conversational-working-memory.md#g-group-channel-handling)
 > and [MT-PERSONA-CONVERSATION-002](../manual-tests/MT-PERSONA-CONVERSATION-002.md).
 
+> **v0.3.8 — *whether* the persona speaks on the open floor: the salience
+> bid.** A persona's role on a group channel is its **disposition** (the
+> channel-config `respond` field). A `participant`/`chair` admitted on an
+> un-addressed open-floor message first runs one cheap `fast`-model
+> **salience bid** ([agents/salience_bid.py](../../agents/salience_bid.py)):
+> reading the in-round transcript above, it answers "do I have something
+> genuinely new to add?" and stays **silent** unless the score clears its
+> `threshold` — the no-pile-on win. An **unset** threshold biases to silence
+> (only a decisive score speaks); a free-text invitation ("let's hear from
+> X") *nudges* the bar but is never a hard filter. A **`chair`** is a
+> `participant` with a low default threshold — it clears the bid readily and
+> keeps a discussion moving, but **cannot close, wrap up, or terminate** a
+> conversation in v0.3.8 (that moderator half is Layer 5, v0.4.0). The bid is
+> downstream of the free Tier A directedness gate and leased like any LLM
+> call (fails closed to silence on a denied lease). See the
+> [channels guide §2](channels.md#per-membership-respond-dispositions) and
+> [MT-CHANNEL-RELEVANCE-002](../manual-tests/MT-CHANNEL-RELEVANCE-002.md).
+
 > **v0.3.2 — the memory facade is frozen as `MemoryStore`.** The single
 > entry point to every memory tier above is the `MemoryStore` class
 > ([agents/memory/store.py](../../agents/memory/store.py)) — promoted

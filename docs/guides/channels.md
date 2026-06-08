@@ -95,7 +95,7 @@ v0.x bumps without notice."*
 The response gate fires per-event in the persona runtime (RFC 0011 §D). As of
 v0.3.7 the `respond` field is a **disposition** — the member's role in the
 conversation — not a mechanical trigger (the [RFC 0030 relevance amendment](../rfcs/0030-amendment-relevance-gated-response.md),
-Tier A):
+Tier A + Tier B):
 
 - **`addressed`** *(default)* — replies only when `@`-mentioned or replied to
   in-thread. The quiet advisor role.
@@ -103,18 +103,53 @@ Tier A):
   messages, but a message `@`-mentioning *someone else* (not a broadcast)
   **draws no reply from it** — the Tier A directedness fix
   (`reason="directed_elsewhere"` in [`agents/response_gate.py`](../../agents/response_gate.py)).
-  Each one still multiplies open-floor fanout linearly.
+  On an open-floor message a `participant` then runs the **Tier B salience bid**
+  (below) and stays out unless it has something genuinely new to add.
+- **`chair`** *(v0.3.8)* — a `participant` with a **low salience `threshold`**
+  (the facilitator). It clears the salience bid readily and so keeps a
+  discussion moving, where a default `participant` would more often stay silent.
+  A `chair` is **not a moderator** in v0.3.8: it *cannot* close, wrap up, or
+  terminate a conversation — that is Layer 5, deferred to v0.4.0. Convergence
+  comes from the governance layers (§4), not the chair.
 - **`observer`** — ingests history into memory but never replies. Listener role.
+
+**Tier B — the salience bid (v0.3.8, opt-in).** On the open-floor remainder Tier
+A leaves, a `participant`/`chair` runs one cheap `fast`-model bid ("do I have
+something worth adding that hasn't already been said?", reading the in-round
+transcript) and speaks only if the score clears its `threshold`
+([`agents/salience_bid.py`](../../agents/salience_bid.py)). This is the
+**no-pile-on** win — a redundant follow-up draws silence instead of every
+`participant` repeating the point.
+
+- **`threshold`** *(per-member, `[0, 1]`, now live in v0.3.8)* — the salience
+  score floor. **Unset → bias-to-silence**: only a *decisive* score speaks
+  (conservative by default). A `chair` with no explicit value picks up the low
+  default (~`0.15`). A `threshold` on a non-open-floor disposition
+  (`addressed`/`observer`) is a config error (`ErrThresholdNotApplicable`) — the
+  bid never runs there. A bid that fails (parse failure, denied/exhausted wallet
+  lease, unresolvable `fast` alias) **fails closed** to silence.
+- **Natural-language addressing** — a free-text invitation ("let's hear from
+  Iron Fox") *biases* the bid (lowers the bar for the named persona, raises it
+  for others). It is a **signal, never a hard filter**: only structured
+  `@`-mentions deterministically drop a member (Tier A).
+- **`salience_max_channel_members`** *(channel-level, default `20`)* — above this
+  member count the bid is skipped and the channel falls back to `addressed`-only,
+  so bid fan-out stays small on large channels.
 
 > **Back-compat + scope.** The legacy `always` / `when_mentioned` / `never`
 > values still load (normalized to `participant` / `addressed` / `observer` at
 > the Go config boundary), so existing configs keep working; an unknown value is
-> a loud error. v0.3.7 Tier A fixes *addressing* only — a directed `@`-mention is
-> answered by exactly that persona, an un-addressed message admits all
-> `participant`s, and `@everyone` (`--mention-all`) disables the directed filter.
-> No-pile-on *salience* (a `participant` staying out because a point is covered)
-> and the reserved `threshold` field are [Tier B](../rfcs/0030-amendment-relevance-gated-response.md#scope--v037--v038--v040)
-> (v0.3.8). Acceptance: [MT-CHANNEL-RELEVANCE-001](../manual-tests/MT-CHANNEL-RELEVANCE-001.md).
+> a loud error. The bid is keyed on the **declared vocabulary**: a member written
+> with the new `participant`/`chair` disposition runs the salience bid (so a
+> brainstorm stops piling on), while a member written with the **literal `always`
+> keyword keeps replying unconditionally** as in v0.3.7 — a *bare* `always` is
+> never bid-governed (it opts into the bid only if you also give it an explicit
+> `threshold`). So a config that never adopted the disposition vocabulary
+> behaves exactly as before; one that uses `participant` gets no-pile-on
+> dampening, biased to silence until you tune the `threshold`. Acceptance:
+> [MT-CHANNEL-RELEVANCE-001](../manual-tests/MT-CHANNEL-RELEVANCE-001.md) (Tier A)
+> and [MT-CHANNEL-RELEVANCE-002](../manual-tests/MT-CHANNEL-RELEVANCE-002.md)
+> (Tier B salience + `chair`).
 
 Channel-level patterns (Quiet group / Tight-loop pair / Broadcast /
 Incident) compose from member-level dispositions — see RFC 0011 §H for the
@@ -358,9 +393,11 @@ channels:
 > **Calibration.** No normative non-zero defaults ship in v0.3.8 — sensible
 > per-workload budgets need observed-usage data ([§OQ-5](../rfcs/0030-multi-agent-conversation-governance.md#open-questions)).
 > Start uncapped, watch `reply_budget_remaining` / `cost_tokens_per_interaction`,
-> then set bounds. The `chair` disposition and the Layer 5 moderator (a persona
-> that can actively wrap up a conversation) are **v0.4.0** — v0.3.8 convergence is
-> deliberately deterministic (Layers 1/2/4), so it needs no moderator.
+> then set bounds. The `chair` disposition ships in v0.3.8 as a low-threshold
+> **facilitator** (§2) — it keeps a discussion moving but **cannot** close it.
+> The Layer 5 **moderator** (a persona that reads the transcript and actively
+> wraps up / terminates) is **v0.4.0** — v0.3.8 convergence is deliberately
+> deterministic (Layers 1/2/4), so it needs no moderator.
 
 ---
 
@@ -596,6 +633,12 @@ deferrals, not implementation oversights:
 - **Per-channel `cascade_depth` overrides** → v0.3.x; see
   [OQ #11](../rfcs/0011-channels-bridges.md#open-questions).
 - **Persona name discovery / dynamic membership** → v0.4.0 (RFC 0011 OQ #1).
+- **The Layer 5 moderator** (the `chair`'s *active* half — a persona that reads
+  the transcript and decides to wrap up / terminate) → v0.4.0. v0.3.8 ships the
+  `chair` as a low-threshold **facilitator** only (§2); its moderator seam is
+  present but inert — a typed attach point no runtime path calls
+  ([RFC 0030 §"Layer 5"](../rfcs/0030-multi-agent-conversation-governance.md)).
+- **Declarative conversation types** (Layer 6) → v0.5.0+.
 - ~~**Whole-world run/test isolation** (the `epoch` axis)~~ → **shipped in
   v0.3.5** ([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md),
   [RFC 0031](../rfcs/0031-per-session-namespacing-channels.md) Phase 3b): a
