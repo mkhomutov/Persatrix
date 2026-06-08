@@ -178,22 +178,30 @@ class TestLayer5SeamIsInert:
         assert evaluate_chair_moderation().action is ModeratorAction.CONTINUE
 
     def test_seam_is_not_invoked_by_any_runtime_path(self):
-        """Structural inertness: no runtime module imports or calls the seam in
-        v0.3.8. If a future PR wires Layer 5, it lands as a *deliberate* failure
-        here (update this list when the moderator is no longer inert)."""
-        runtime_files = [
-            Path("agents/persona_runtime/salience_gate.py"),
-            Path("agents/persona_runtime/action_loop.py"),
-            Path("agents/salience_bid.py"),
-            Path("agents/response_gate.py"),
-        ]
-        offenders = [
+        """Structural inertness: *nothing* under ``agents/`` imports or calls the
+        seam in v0.3.8 — the seam module itself is the only file allowed to name
+        it. Scanning the whole package (rather than a hand-picked file list)
+        means a future PR that wires Layer 5 from *any* runtime module — not just
+        the few the bid happens to touch today — lands as a *deliberate* failure
+        here. If Layer 5 is intentionally being wired (v0.4.0), update this test."""
+        seam_module = Path("agents/chair_moderation.py")
+
+        def _is_runtime(p: Path) -> bool:
+            # The seam module names itself; test files are not a runtime path.
+            return (
+                p != seam_module
+                and "tests" not in p.parts
+                and not p.name.startswith("test_")
+                and not p.name.endswith("_test.py")
+            )
+
+        offenders = sorted(
             str(p)
-            for p in runtime_files
-            if p.exists()
-            and ("evaluate_chair_moderation" in p.read_text(encoding="utf-8")
-                 or "chair_moderation" in p.read_text(encoding="utf-8"))
-        ]
+            for p in Path("agents").rglob("*.py")
+            if _is_runtime(p)
+            and ("evaluate_chair_moderation" in (src := p.read_text(encoding="utf-8"))
+                 or "chair_moderation" in src)
+        )
         assert not offenders, (
             "the Layer-5 chair-moderation seam is meant to be inert in v0.3.8 "
             f"but is referenced by a runtime path: {offenders}. If Layer 5 is "

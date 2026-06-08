@@ -113,13 +113,24 @@ ENABLE_UI=1 docker compose up --build   # or `make run-ui` for the local-binary 
 `Invoke-RestMethod http://127.0.0.1:8080/api/v1/channels/group:planning`).
 
 **Expected**:
-- `group:planning` lists `ember-owl` (`participant`), `iron-fox`
-  (`participant`), `nova-sparrow` (`chair`). (The disposition is normalized to
-  the legacy `always` on the wire; the `chair` is distinguished by its low
-  resolved `threshold` / `salience_gated`.)
+- `group:planning` lists all three members — `ember-owl`, `iron-fox`,
+  `nova-sparrow` — and each shows **`respond: always`** on the REST surface. The
+  disposition vocabulary is **normalized to the legacy triple at the store
+  boundary** (`channels.RespondPolicy.Normalize`: `participant`/`chair` →
+  `always`), so `participant` and `chair` are *both* indistinguishable from
+  `always` in the membership listing. The chair's low `threshold` /
+  `salience_gated` ride the config struct, **not** the membership row, and the
+  member shape (`id` / `respond` / `joined_at`) does not surface them — so this
+  endpoint **cannot** show the declared dispositions back. They are confirmed at
+  config time (the Preconditions edit to `config/channels.yaml`) and
+  **behaviourally** by Steps 2–5; Step 1 only confirms the three members are
+  present and resolve to the open-floor (`always`) wire value.
 
 **Verification**:
-- [ ] Three open-floor members with the dispositions above.
+- [ ] All three members present; each resolves to `respond: always` on REST (the
+  normalized open-floor value — the back-compat collapse). The
+  `participant`/`chair` distinction is a config-time + behavioural check
+  (Steps 2–5), not visible in the member listing.
 
 ---
 
@@ -261,7 +272,7 @@ Invoke-RestMethod "http://127.0.0.1:8080/api/v1/cost/summary"
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | `group:planning` lists `ember-owl`/`iron-fox`: `participant`, `nova-sparrow`: `chair` | ☐ |
+| 1 | `group:planning` lists all three members; each resolves to `respond: always` on REST (dispositions normalized at the store boundary — the `chair` is not REST-distinguishable) | ☐ |
 | 2 | An open-floor question draws a **small relevant set** (not all three); the `chair` speaks | ☐ |
 | 3 | A redundant follow-up draws **silence** (or only a brief `chair` nudge) — no pile-on | ☐ |
 | 4 | NL "let's hear from Iron Fox" biases toward `iron-fox`; others defer but are not hard-dropped | ☐ |

@@ -142,7 +142,7 @@ transcript) and speaks only if the score clears its `threshold`
 > a loud error. The bid is keyed on the **declared vocabulary**: a member written
 > with the new `participant`/`chair` disposition runs the salience bid (so a
 > brainstorm stops piling on), while a member written with the **literal `always`
-> keyword keeps replying unconditionally** as in v0.3.7 — a `bare` `always` is
+> keyword keeps replying unconditionally** as in v0.3.7 — a *bare* `always` is
 > never bid-governed (it opts into the bid only if you also give it an explicit
 > `threshold`). So a config that never adopted the disposition vocabulary
 > behaves exactly as before; one that uses `participant` gets no-pile-on
@@ -636,7 +636,8 @@ deferrals, not implementation oversights:
 - **The Layer 5 moderator** (the `chair`'s *active* half — a persona that reads
   the transcript and decides to wrap up / terminate) → v0.4.0. v0.3.8 ships the
   `chair` as a low-threshold **facilitator** only (§2); its moderator seam is
-  wired but inert ([RFC 0030 §"Layer 5"](../rfcs/0030-multi-agent-conversation-governance.md)).
+  present but inert — a typed attach point no runtime path calls
+  ([RFC 0030 §"Layer 5"](../rfcs/0030-multi-agent-conversation-governance.md)).
 - **Declarative conversation types** (Layer 6) → v0.5.0+.
 - ~~**Whole-world run/test isolation** (the `epoch` axis)~~ → **shipped in
   v0.3.5** ([ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md),
