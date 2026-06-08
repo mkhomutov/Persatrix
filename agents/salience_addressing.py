@@ -35,23 +35,27 @@ __all__ = ["NLAddressing", "detect_nl_addressing"]
 # ``_ONE_NAME`` captures up to three whitespace-separated word tokens; trailing
 # connective/stop words are trimmed before classification so "Iron Fox on this"
 # reads as the name "Iron Fox". ``_NAME_RUN`` then allows an explicit
-# ``and``/``&``/``,`` list of such names ("Iron Fox and Ember Owl") so a
-# multi-person invitation classifies *every* invitee, not just the first — the
-# list is split back apart in :func:`_split_names`.
+# ``and``/``or``/``&``/``,`` list of such names ("Iron Fox and Ember Owl",
+# "Iron Fox or Ember Owl") so a multi-person invitation classifies *every*
+# invitee, not just the first — the list is split back apart in
+# :func:`_split_names`.
 # A name word, excluding the bare connective words ``and``/``or`` so a greedy
 # capture stops at the list separator ("Iron Fox| and |Ember Owl") instead of
 # swallowing it — the (?:and|or)\b lookahead matches only the *whole* word, so
-# a real name like "Andie" or "Ori" is still allowed.
+# a real name like "Andie" or "Ori" is still allowed. Both connectives are
+# excluded here *and* listed in ``_LIST_CONNECTIVE`` below — keep the two in
+# lock-step, or a separator excluded from a name word but absent from the list
+# (the original ``or`` gap) drops every invitee after it and mis-penalises them.
 _NAME_WORD: Final[str] = r"(?!(?:and|or)\b)[A-Za-z][\w'\-]*"
 _ONE_NAME: Final[str] = rf"{_NAME_WORD}(?:\s+{_NAME_WORD}){{0,2}}"
-_LIST_CONNECTIVE: Final[str] = r"(?:\s*,\s*|\s+and\s+|\s*&\s*|\s*\+\s*)"
+_LIST_CONNECTIVE: Final[str] = r"(?:\s*,\s*|\s+and\s+|\s+or\s+|\s*&\s*|\s*\+\s*)"
 _NAME_RUN: Final[str] = (
     rf"(?P<name>{_ONE_NAME}(?:{_LIST_CONNECTIVE}{_ONE_NAME})*)"
 )
 # Splits a captured name run back into its individual invitees on the same
 # connectives ``_NAME_RUN`` joined them with.
 _LIST_SPLIT: Final[re.Pattern[str]] = re.compile(
-    r"\s*,\s*|\s+and\s+|\s*&\s*|\s*\+\s*", re.IGNORECASE,
+    r"\s*,\s*|\s+and\s+|\s+or\s+|\s*&\s*|\s*\+\s*", re.IGNORECASE,
 )
 _ADDRESS_CUES: Final[tuple[re.Pattern[str], ...]] = (
     re.compile(r"let'?s\s+hear\s+from\s+" + _NAME_RUN, re.IGNORECASE),
@@ -120,6 +124,23 @@ _PROSE_LEADERS: Final[frozenset[str]] = _NON_NAME_TOKENS | frozenset({
     "take", "give", "pick", "use", "add", "maybe", "perhaps", "please", "just",
 })
 
+# Words that are *never* a name even when capitalised — so a Title-cased
+# continuation led by one of them is prose, not an invitee, regardless of
+# casing (review finding #2). Without this, the ``_split_names`` Title-case
+# branch trusted any capital: a sentence-initial cap ("... and Maybe Redis"),
+# the always-capitalised pronoun "I" ("... and I think Redis"), or a leading
+# verb ("... and Add Redis") all manufactured a phantom recipient — and an
+# un-named bystander matching that phantom's words was wrongly biased toward
+# silence, breaking the "suppresses no one on an ambiguity" invariant.
+#
+# This is the whole prose-leader set *minus* the handful of words that double as
+# real given names ("Will", "May") — those keep the Title-case rescue so a
+# genuine second invitee is not dropped (a drop would, symmetrically, suppress
+# *that* persona). Everything else is treated as prose the moment it leads a
+# continuation, capital or not.
+_NAMELIKE_PROSE_WORDS: Final[frozenset[str]] = frozenset({"will", "may"})
+_NEVER_NAME_LEADERS: Final[frozenset[str]] = _PROSE_LEADERS - _NAMELIKE_PROSE_WORDS
+
 
 @dataclass(frozen=True, slots=True)
 class NLAddressing:
@@ -155,13 +176,19 @@ def _split_names(captured: str) -> list[str]:
 
     The first name is *anchored* by the cue, so it is always kept. Subsequent
     list members are speculative — the connective could equally introduce
-    trailing prose ("... and we should pick Redis"). A continuation is kept when
-    it is either Title-cased (a plausible name, incl. an English-word name like
-    "Will"/"Grace") *or* — for an all-lowercase chat list where casing carries
-    no signal — when it is not led by a prose/discourse word (review finding
-    #2). A lower-cased, prose-led continuation stops the list. This recovers the
-    genuine multi-invitee case, in either casing, without manufacturing phantom
-    recipients out of prose (high precision)."""
+    trailing prose ("... and we should pick Redis"). A continuation is kept when:
+
+    * it is **not** led by a never-a-name word — a pronoun, discourse marker,
+      article, or copula is prose whatever its casing ("... and I think ...",
+      "... and Maybe ...", review finding #2); then
+    * it is either Title-cased (a plausible name, incl. an English-word name
+      like "Will") *or* — for an all-lowercase chat list where casing carries no
+      signal — not led by any prose/discourse word.
+
+    A lower-cased prose-led continuation, or *any* never-a-name leader, stops
+    the list. This recovers the genuine multi-invitee case, in either casing,
+    without trusting a sentence-initial capital as a name and manufacturing a
+    phantom recipient out of prose (high precision)."""
     parts = _LIST_SPLIT.split(captured)
     if not parts:
         return []
@@ -171,6 +198,10 @@ def _split_names(captured: str) -> list[str]:
         if not stripped:
             break
         first_tok = stripped.split()[0].lower().strip(".,!?;:'\"")
+        # A never-a-name leader is prose regardless of capitalisation — the
+        # Title-case rescue below applies only to words that might be names.
+        if first_tok in _NEVER_NAME_LEADERS:
+            break
         if stripped[:1].isupper() or first_tok not in _PROSE_LEADERS:
             names.append(stripped)
         else:

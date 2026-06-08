@@ -17,7 +17,11 @@ from __future__ import annotations
 
 import pytest
 
-from agents.salience_addressing import NLAddressing, detect_nl_addressing
+from agents.salience_addressing import (
+    NLAddressing,
+    _split_names,
+    detect_nl_addressing,
+)
 
 
 class TestDetectNLAddressing:
@@ -216,5 +220,91 @@ class TestGroupReferenceIsNotAName:
         is still Iron Fox (high precision is not bought with false negatives)."""
         a = detect_nl_addressing(
             content="over to the Iron Fox", persona_name="Iron Fox",
+        )
+        assert a.self_named is True
+
+
+class TestOrListInvitees:
+    """Review finding #1 — an ``A or B`` invitation ("let's hear from Iron Fox
+    or Ember Owl") names *both* people, exactly like ``A and B``. The first cut
+    handled ``and`` / ``,`` / ``&`` / ``+`` but not ``or``: ``or`` was excluded
+    from a name *word* (the ``(?!(?:and|or)\\b)`` lookahead, anticipating it as a
+    separator) yet never added to the list connective, so the second invitee was
+    dropped *and* the persona was mis-read as ``other_named`` — biased *toward
+    silence*, the precise opposite of being invited."""
+
+    _OR = "let's hear from Iron Fox or Ember Owl"
+
+    def test_or_first_invitee_is_self(self):
+        assert detect_nl_addressing(
+            content=self._OR, persona_name="Iron Fox",
+        ).self_named is True
+
+    def test_or_second_invitee_is_self_not_other(self):
+        """The regression guard for finding #1: the name after ``or`` is an
+        invitee, so it reads ``self`` (which wins bar precedence). The first cut
+        produced ``self_named=False, other_named=True`` — an invitee biased
+        *toward silence*."""
+        assert detect_nl_addressing(
+            content=self._OR, persona_name="Ember Owl",
+        ).self_named is True
+
+    def test_or_uninvited_third_party_is_other(self):
+        a = detect_nl_addressing(content=self._OR, persona_name="Gray Wolf")
+        assert a == NLAddressing(self_named=False, other_named=True)
+
+    def test_lowercase_or_list_classifies_each_invitee(self):
+        content = "what do iron fox or ember owl think about redis?"
+        for name in ("Iron Fox", "Ember Owl"):
+            assert detect_nl_addressing(
+                content=content, persona_name=name,
+            ).self_named is True, name
+
+
+class TestCapitalizedProseGuard:
+    """Review finding #2 — the ``_split_names`` Title-case branch trusted *any*
+    capitalised continuation as a name. But a sentence-initial capital ("... and
+    Maybe we use Redis") and the always-capitalised pronoun "I" ("... and I think
+    Redis is great") are prose, not invitees. Trusting their capital manufactured
+    a *phantom* recipient — and when an un-named bystander persona happened to
+    match that phantom's words, it was mis-read as ``other_named`` and biased
+    *toward silence*, violating the module's "suppresses no one on an ambiguity"
+    invariant. The original precision test only used a *lowercase* continuation
+    ("ask Redis"), so the Title-case path went unguarded."""
+
+    def test_capitalized_pronoun_continuation_is_not_a_name(self):
+        """"... and I think Redis is great" must NOT register persona Redis: the
+        continuation is prose led by the pronoun "I", not an invitation."""
+        a = detect_nl_addressing(
+            content="let's hear from Iron Fox and I think Redis is great",
+            persona_name="Redis",
+        )
+        assert a.self_named is False
+
+    def test_capitalized_discourse_continuation_is_not_a_name(self):
+        """"... and Maybe Redis" must NOT register persona Redis: a capitalised
+        discourse word ("Maybe") leading the continuation is prose, not a name.
+        (Kept inside the 3-word name-capture window so the phantom is reached —
+        a longer run would be truncated by ``_ONE_NAME`` for unrelated reasons
+        and would mask the guard under test.)"""
+        a = detect_nl_addressing(
+            content="let's hear from Iron Fox and Maybe Redis",
+            persona_name="Redis",
+        )
+        assert a.self_named is False
+
+    def test_split_drops_capitalized_prose_continuation(self):
+        """Direct precision guard on the splitter: a capitalised prose run after
+        ``and`` is not an invitee, so it must not be extracted (otherwise an
+        un-named bystander matching its words is wrongly biased to silence)."""
+        assert _split_names("Iron Fox and Maybe we use Redis") == ["Iron Fox"]
+        assert _split_names("Iron Fox and I disagree") == ["Iron Fox"]
+
+    def test_capitalized_namelike_word_is_still_kept(self):
+        """Recall guard: a word that doubles as a real given name ("Will") is
+        still a valid second invitee when capitalised — the precision fix must
+        not over-correct and drop genuine names."""
+        a = detect_nl_addressing(
+            content="let's hear from Iron Fox and Will", persona_name="Will",
         )
         assert a.self_named is True
