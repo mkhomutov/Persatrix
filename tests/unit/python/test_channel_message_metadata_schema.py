@@ -137,3 +137,53 @@ def test_unknown_metadata_keys_are_permitted():
     """
     _validate({"cascade_depth": 3, "unknown_future_key": "tolerated"})
     _validate({"cascadedepth": 3})  # typo passes — degrades to zero downstream
+
+
+# RFC 0030 deterministic governance layers (v0.3.8), PR 1 — the optional
+# ``metadata.interaction_id`` key. The amendment pins it as an optional opaque
+# string bounded at 128 chars. This is the *documentary* contract (the
+# ``messageMetadata`` definition is not ``$ref``'d into the validated config
+# tree, so it is not a runtime publish gate): it declares the valid range, and
+# a strict validator — like this test — rejects an out-of-range value. The
+# runtime boundaries enforce the same 128-byte cap but *tolerantly*: the Go
+# publish boundary (``readInteractionID``) and the agent receive seed
+# (``seed_wire_metadata``) degrade an over-length claim to untracked (drop the
+# value, keep dispatching) rather than failing — so a strict-reject here and a
+# silent-drop at runtime are two expressions of the same bound, not the same
+# behaviour. Char count here (JSON Schema ``maxLength`` counts code units);
+# the runtime bound counts UTF-8 bytes — equal for the ASCII uuid4/ULID id.
+
+
+def test_interaction_id_is_optional():
+    """A publish without ``interaction_id`` is the untracked / pre-v0.3.8
+    case and must pass — the feature is additive."""
+    _validate({})
+
+
+def test_interaction_id_valid_token_accepted():
+    """A normal uuid4-shaped id rides the schema unchanged."""
+    _validate({"interaction_id": "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d"})
+
+
+def test_interaction_id_at_max_length_accepted():
+    """A value exactly at the 128-char bound is legitimate and must pass —
+    the bound rejects only strictly longer values (mirrors the Go
+    ``TestChannelMessageToProto_InteractionID_AcceptsAtCap`` boundary)."""
+    _validate({"interaction_id": "x" * 128})
+
+
+def test_interaction_id_over_max_length_rejected():
+    """An over-length id is rejected by the schema (the strict expression of
+    the bound). The runtime boundaries enforce the same cap but degrade an
+    over-length claim to untracked rather than rejecting it (see the Go
+    ``TestChannelMessageToProto_InteractionID_RejectsOverlong`` and the Python
+    ``test_overlong_interaction_id_not_seeded``). Either way an unbounded id
+    never reaches the per-interaction maps Layers 2/4 key on."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate({"interaction_id": "x" * 129})
+
+
+def test_interaction_id_non_string_rejected():
+    """A non-string claim violates ``type: string``."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate({"interaction_id": 1234})

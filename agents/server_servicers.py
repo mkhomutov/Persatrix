@@ -23,6 +23,7 @@ import grpc.aio
 
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 from .channel_validation import validate_channel_message_event
+from .channel_wire_metadata import seed_wire_metadata
 from .chat_reply import chat_error_response as _chat_error_response
 from .chat_reply import extract_chat_reply as _extract_chat_reply
 from .dispatch import EventDispatcher
@@ -440,19 +441,11 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
             metadata={"cascade_depth": request.cascade_depth},
         )
 
-        # ISSUE-0068: lift the sender's peer type off the typed proto
-        # field onto the metadata key the episode-routing close path reads
-        # (``sender_participant_type``) so a channel-delivered (REST) chat
-        # peer is recorded as ``other_participant_type=user`` rather than
-        # the ``agent`` default. Only seed a non-empty value: an empty
-        # field is genuine agent-to-agent traffic, which the read path
-        # resolves to ``agent``. Reconciles the publish-side
-        # ``participant_type`` key with the read-side
-        # ``sender_participant_type`` key at this single boundary.
-        if request.sender_participant_type:
-            event.metadata["sender_participant_type"] = (
-                request.sender_participant_type
-            )
+        # Lift the typed wire fields (sender peer type — ISSUE-0068, which has
+        # a real producer; RFC 0020 interaction_id — RFC 0030 governance layers
+        # PR 1, no producer yet) onto the event-metadata keys the downstream
+        # read paths consume. See ``channel_wire_metadata.seed_wire_metadata``.
+        seed_wire_metadata(event, request)
 
         # ISSUE-0081 PR 2: carry the per-request session through to the
         # deferred EventLoop drain.  The fire-and-forget path processes the

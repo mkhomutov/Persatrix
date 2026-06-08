@@ -93,17 +93,22 @@ The join points this plan must keep green: **(a)** the Tier B bid is itself an L
 ### PR 1: `feature/v038-rfc0030-layers-interaction-id-wire` — `interaction_id` propagation (substrate, inert)
 
 **Depends on**: RFC 0020 Interaction (shipped); RFC 0011 channels (shipped).
-**Purpose**: Pin the RFC 0020 `interaction_id` on the wire so Layers 1/2/4 can attribute spend, count replies, and accumulate votes per interaction. Mirror the `cascade_depth` amendment pattern. No layer behaviour yet.
+**Status**: 🔀 PR open.
+**Purpose**: Pin the RFC 0020 `interaction_id` on the wire so Layers 1/2/4 can attribute spend, count replies, and accumulate votes per interaction. Mirror the `cascade_depth` / `sender_participant_type` amendment pattern (a publish-metadata bag value lifted onto a typed proto field, then onto the agent's event metadata). No layer behaviour yet.
+
+> **Field-number correction (2026-06-08).** This plan named `interaction_id = 13`, but the Tier B salience PRs ([#572](https://github.com/mkhomutov/Persatrix/pull/572)–[#575](https://github.com/mkhomutov/Persatrix/pull/575)) landed fields **13–16** (`salience_gated`/`threshold`/`channel_size`/`salience_max_channel_members`) on `ChannelMessageEvent` after this doc was authored. **The shipped field is `string interaction_id = 17`** — the next free tag. The string-field-pin tests (Go + Python) needed a multi-byte-varint tag helper since field 17's tag (`(17<<3)|2 = 138`) exceeds one byte.
+>
+> **Scope note.** "Resolve the open Interaction at publish" is implemented as the cascade_depth-style metadata pass-through: a publisher supplies `interaction_id` in the metadata bag and the orchestrator carries it to the proto field. There is no orchestrator-side Interaction tracker today (RFC 0020 tracking is agent-side), so building one is out of scope for this inert substrate PR — the layer PRs that consume the id own any richer resolution.
 
 | File | Change |
 |------|--------|
-| `schemas/channel.schema.json` | Extend `messageMetadata` (already carries `cascade_depth`) with an optional `interaction_id` (string, ULID). Back-compat: absent is allowed. |
-| [`proto/task.proto`](../../proto/task.proto) (channel event) | Add `string interaction_id = 13` to `ChannelMessageEvent`, typed scalar — same rationale as cascade_depth ([§M](0030-multi-agent-conversation-governance.md#m-wire-and-config-surfaces)). **Field 13, not 12**: `cascade_depth = 11` is followed by `sender_participant_type = 12` (ISSUE-0068 participant-type propagation), so 12 is taken and 13 is the next free tag. Regenerate Go + Python stubs. |
-| orchestrator (`internal/channels/…`, `cmd/orchestrator/…`) | Resolve the open Interaction (RFC 0020 §G scope rule) at publish and stamp `interaction_id` on the fanout event + REST metadata; thread it toward the lease request (Layer 1) and the reply tracker (Layer 2) — wired but unused this PR. |
-| `agents/…` (lease client) | Carry `interaction_id` through to the `AcquireLease` call site (field reserved/unset until PR 2). |
-| tests | **(TDD — write first.)** A publish stamps the resolved `interaction_id` on the event + metadata; a v0.3.0-shape publish without it still routes (back-compat); the proto round-trips field 12. |
+| `schemas/channel.schema.json` | Extend `messageMetadata` (already carries `cascade_depth`) with an optional `interaction_id` (opaque string; RFC 0020 §D calls it a ULID but the agent mints a uuid4, so don't assume ULID sortability). Back-compat: absent is allowed. |
+| [`proto/task.proto`](../../proto/task.proto) (channel event) | Add `string interaction_id = 17` to `ChannelMessageEvent`, typed scalar — same rationale as cascade_depth ([§M](0030-multi-agent-conversation-governance.md#m-wire-and-config-surfaces)). Regenerate Go + Python stubs (`_pb2.py`/`_pb2_grpc.py` with the Makefile relative-import rewrite, plus the `_pb2.pyi` mypy stub). |
+| [`internal/channels/interaction_id.go`](../../internal/channels/interaction_id.go) (new) + `grpc_dispatcher.go` | `interactionIDMetadataKey` const + `readInteractionID(metadata)` helper (mirrors `participant_type.go`); wired into `channelMessageToProto` so the publish-metadata value lands on the typed field. Tolerant: absent/non-string → empty (untracked). |
+| [`agents/channel_wire_metadata.py`](../../agents/channel_wire_metadata.py) (new) + `server_servicers.py` | Lift `request.interaction_id` off the typed proto field onto `event.metadata["interaction_id"]` (only when non-empty), alongside the existing `sender_participant_type` lift. Carved into a sibling helper so `server_servicers.py` stays under the 500-line cap. |
+| tests | **(TDD — write first.)** A dispatch stamps the metadata `interaction_id` on the proto field (`interaction_id_test.go`); absent/non-string → empty; the servicer lifts a non-empty wire field onto event metadata and leaves an empty one absent; the proto round-trips field 17 (Go + Python pin tests). |
 
-**Acceptance**: `make proto` (or repo equivalent) regenerates cleanly; `interaction_id` rides the event + metadata; existing publishes without it are unaffected; **no layer behaviour change**.
+**Acceptance**: `make proto` regenerates cleanly; `interaction_id` rides the event + metadata; existing publishes without it are unaffected; **no layer behaviour change**; strict file-size + proto-freshness/pyi-parity gates green.
 
 ---
 
@@ -178,7 +183,7 @@ The join points this plan must keep green: **(a)** the Tier B bid is itself an L
 
 ## Test Strategy (summary)
 
-- **Unit (PR 1)**: `interaction_id` stamped on event + metadata; proto field 12 round-trips; back-compat for publishes without it.
+- **Unit (PR 1)**: `interaction_id` stamped on event + metadata; proto field 17 round-trips; back-compat for publishes without it.
 - **Unit (PR 2)**: small budget denies later leases (`INTERACTION_BUDGET_EXHAUSTED`, fail-closed, no LLM call); wallet timeout fails closed; default `0` never denies; `governance_drop{layer=cost}`.
 - **Unit (PR 3)**: `(K+1)`th publish → 429 + `ErrParticipantBudgetExhausted`, not persisted; human exempt; default `0` unchanged; counters reset on close; startup Warn.
 - **Unit (PR 4)**: K distinct votes within W → close (`trigger=end_votes`); double-vote dedupes; out-of-window votes don't accumulate; vote-spam logged; cascade_depth untouched.
