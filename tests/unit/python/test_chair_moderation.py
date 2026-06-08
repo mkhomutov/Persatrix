@@ -27,6 +27,7 @@ The `chair` ships in v0.3.8 as a low-threshold **facilitator only**:
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 from typing import Any
@@ -146,6 +147,83 @@ class TestChairClearsBidReadily:
         assert 0.0 < chair_threshold < _DECISIVE_SCORE
 
 
+_SEAM_MODULE_STEM = "chair_moderation"
+_SEAM_FUNCTION = "evaluate_chair_moderation"
+
+
+def _references_seam(source: str) -> bool:
+    """True if ``source`` actually *imports the seam module* or *names its entry
+    point in code* — not merely mentions it in a docstring or comment.
+
+    The inert-seam tripwire must fire on real Layer-5 wiring (an import or a
+    call) but a plain-text substring scan also trips on a legitimate
+    documentation cross-reference (e.g. a ``:func:`agents.chair_moderation``` link
+    in a sibling module's docstring), which is not wiring. Parsing to an AST and
+    inspecting only import / name / attribute nodes drops comments and string
+    literals (a docstring is an ``ast.Constant``), so a doc reference no longer
+    reads as an invocation while every real import or call still does.
+
+    Accepted gap: a *dynamic* string import
+    (``importlib.import_module("agents.chair_moderation")``) hides in a string
+    literal and is invisible here. Wiring an inert seam that way would be a
+    deliberate, bizarre act; the realistic mechanisms — a static import or a
+    direct call — are both caught.
+    """
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom):
+            if node.module and _SEAM_MODULE_STEM in node.module:
+                return True
+        elif isinstance(node, ast.Import):
+            if any(_SEAM_MODULE_STEM in alias.name for alias in node.names):
+                return True
+        elif isinstance(node, ast.Name) and node.id == _SEAM_FUNCTION:
+            return True
+        elif isinstance(node, ast.Attribute) and node.attr == _SEAM_FUNCTION:
+            return True
+    return False
+
+
+class TestSeamReferenceDetection:
+    """Unit tests for the reference check the inert-seam tripwire relies on.
+
+    The tripwire must fire on real Layer-5 *wiring* (an import or a call of the
+    seam) but **not** on a mere docstring / comment cross-reference, which is
+    documentation, not invocation. A plain-substring scan cannot tell the two
+    apart — a sibling module that grows a ``:func:`agents.chair_moderation``` doc
+    link would trip the tripwire spuriously. These tests pin the distinction so
+    the check can't regress to that substring behaviour."""
+
+    def test_docstring_mention_is_not_a_reference(self):
+        src = '"""See agents.chair_moderation.evaluate_chair_moderation for v0.4.0."""\n'
+        assert _references_seam(src) is False
+
+    def test_comment_mention_is_not_a_reference(self):
+        src = "# evaluate_chair_moderation lives in chair_moderation (inert seam)\nx = 1\n"
+        assert _references_seam(src) is False
+
+    def test_from_import_is_a_reference(self):
+        src = "from agents.chair_moderation import evaluate_chair_moderation\n"
+        assert _references_seam(src) is True
+
+    def test_plain_import_is_a_reference(self):
+        src = "import agents.chair_moderation\n"
+        assert _references_seam(src) is True
+
+    def test_bare_call_is_a_reference(self):
+        src = "def f():\n    return evaluate_chair_moderation()\n"
+        assert _references_seam(src) is True
+
+    def test_attribute_call_is_a_reference(self):
+        # An attribute access of the entry point through a handle obtained
+        # elsewhere — no static import to trip on first, isolating the
+        # attribute branch.
+        src = "def f(mod):\n    return mod.evaluate_chair_moderation()\n"
+        assert _references_seam(src) is True
+
+    def test_unrelated_source_is_not_a_reference(self):
+        assert _references_seam("def f():\n    return 42\n") is False
+
+
 class TestLayer5SeamIsInert:
     """The moderator half (TB5): the seam exists, only ever returns CONTINUE,
     and is not wired into any runtime path in v0.3.8."""
@@ -179,11 +257,14 @@ class TestLayer5SeamIsInert:
 
     def test_seam_is_not_invoked_by_any_runtime_path(self):
         """Structural inertness: *nothing* under ``agents/`` imports or calls the
-        seam in v0.3.8 — the seam module itself is the only file allowed to name
+        seam in v0.3.8 — the seam module itself is the only file allowed to wire
         it. Scanning the whole package (rather than a hand-picked file list)
         means a future PR that wires Layer 5 from *any* runtime module — not just
         the few the bid happens to touch today — lands as a *deliberate* failure
-        here. If Layer 5 is intentionally being wired (v0.4.0), update this test."""
+        here. The check is AST-based (see :func:`_references_seam`), so a
+        legitimate doc cross-reference to the seam does not read as wiring; only a
+        real import or call does. If Layer 5 is intentionally being wired
+        (v0.4.0), update this test."""
         seam_module = Path("agents/chair_moderation.py")
 
         def _is_runtime(p: Path) -> bool:
@@ -212,8 +293,7 @@ class TestLayer5SeamIsInert:
         offenders = sorted(
             str(p)
             for p in runtime_files
-            if "evaluate_chair_moderation" in (src := p.read_text(encoding="utf-8"))
-            or "chair_moderation" in src
+            if _references_seam(p.read_text(encoding="utf-8"))
         )
         assert not offenders, (
             "the Layer-5 chair-moderation seam is meant to be inert in v0.3.8 "
