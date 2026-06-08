@@ -73,18 +73,51 @@ _ADDRESS_CUES: Final[tuple[re.Pattern[str], ...]] = (
 
 # Words that, although they can be *captured* by a cue, are not a named
 # recipient — second-person/group references address no specific persona, so
-# they resolve to "no addressing" rather than suppressing anyone.
+# they resolve to "no addressing" rather than suppressing anyone. Includes the
+# common group nouns ("team", "folks", "group", "guys", "crew") so addressing
+# the whole channel ("over to the team") invites everyone / no one rather than
+# registering a phantom recipient that would bias others toward silence.
 _NON_NAME_TOKENS: Final[frozenset[str]] = frozenset({
     "you", "u", "we", "us", "all", "everyone", "everybody", "anyone",
     "someone", "anybody", "somebody", "them", "they", "folks", "team",
     "people", "yall", "me", "i", "myself", "here", "there",
+    "group", "guys", "gang", "crew", "squad", "others", "channel",
+    "room", "chat", "two", "both",
+})
+
+# Determiners / possessives / quantifiers that can precede a group noun ("the
+# team", "our folks", "the whole crew", "both of you") or a name ("the Iron
+# Fox"). Stripped before the non-name test so a leading article cannot leak a
+# group reference through as a phantom named recipient (review finding #3),
+# while a genuine name after the article still survives the strip.
+_NAME_FILLERS: Final[frozenset[str]] = frozenset({
+    "the", "a", "an", "our", "my", "your", "their", "his", "her", "its",
+    "whole", "entire", "rest", "of", "both", "all",
 })
 
 # Trailing connective/stop words trimmed off a captured name run so a greedy
-# capture ("Iron Fox on this") collapses to the bare name ("Iron Fox").
+# capture ("Iron Fox on this") collapses to the bare name ("Iron Fox"). ("and"
+# is deliberately absent — ``_NAME_WORD``'s ``(?!(?:and|or)\b)`` lookahead means
+# a captured name can never *end* in a bare "and", so trimming it would be dead.)
 _NAME_TRAILERS: Final[frozenset[str]] = frozenset({
     "on", "about", "regarding", "re", "for", "this", "that", "here",
-    "please", "think", "thinks", "say", "says", "and", "too", "as",
+    "please", "think", "thinks", "say", "says", "too", "as",
+})
+
+# Words that, at the *start* of a list continuation, mark it as trailing prose
+# rather than another invitee ("Iron Fox and ask Redis", "... and we should pick
+# Redis"). Used by :func:`_split_names` to stop the invitee list at a prose run
+# *regardless of casing* — so an all-lowercase chat list ("iron fox and ember
+# owl") still recovers every invitee (review finding #2) while a verb/discourse-
+# led continuation is still rejected (the precision the Title-case rule bought).
+_PROSE_LEADERS: Final[frozenset[str]] = _NON_NAME_TOKENS | frozenset({
+    "and", "or", "but", "so", "then", "also", "plus", "if", "when", "while",
+    "because", "the", "a", "an", "this", "that", "these", "those",
+    "is", "are", "was", "were", "be", "been",
+    "do", "does", "did", "can", "could", "should", "would", "will",
+    "may", "might", "must", "shall",
+    "ask", "tell", "see", "check", "get", "let", "lets", "go", "make",
+    "take", "give", "pick", "use", "add", "maybe", "perhaps", "please", "just",
 })
 
 
@@ -122,17 +155,23 @@ def _split_names(captured: str) -> list[str]:
 
     The first name is *anchored* by the cue, so it is always kept. Subsequent
     list members are speculative — the connective could equally introduce
-    trailing prose ("... and we should pick Redis") — so a continuation is kept
-    only when it is Title-cased (a plausible name), and the list stops at the
-    first lower-cased continuation. This recovers the genuine multi-invitee case
-    without manufacturing phantom recipients out of prose (high precision)."""
+    trailing prose ("... and we should pick Redis"). A continuation is kept when
+    it is either Title-cased (a plausible name, incl. an English-word name like
+    "Will"/"Grace") *or* — for an all-lowercase chat list where casing carries
+    no signal — when it is not led by a prose/discourse word (review finding
+    #2). A lower-cased, prose-led continuation stops the list. This recovers the
+    genuine multi-invitee case, in either casing, without manufacturing phantom
+    recipients out of prose (high precision)."""
     parts = _LIST_SPLIT.split(captured)
     if not parts:
         return []
     names = [parts[0]]
     for part in parts[1:]:
         stripped = part.strip()
-        if stripped[:1].isupper():
+        if not stripped:
+            break
+        first_tok = stripped.split()[0].lower().strip(".,!?;:'\"")
+        if stripped[:1].isupper() or first_tok not in _PROSE_LEADERS:
             names.append(stripped)
         else:
             break
@@ -169,13 +208,21 @@ def detect_nl_addressing(*, content: str, persona_name: str) -> NLAddressing:
         for match in pattern.finditer(content):
             for candidate in _split_names(match.group("name")):
                 toks = _name_tokens(_clean_name(candidate))
+                # Strip leading determiners ("the team", "our folks") so a group
+                # reference is judged on its noun alone, not leaked through by a
+                # bare article (review finding #3).
+                core = toks - _NAME_FILLERS
                 # A pronoun / group reference or an empty capture is not a named
                 # recipient — ignore it (no one is suppressed on an ambiguity).
-                if not toks or toks <= _NON_NAME_TOKENS:
+                if not core or core <= _NON_NAME_TOKENS:
                     continue
                 # Subset either way: a first-name invitation ("Fox") matches the
-                # full-name persona ("Iron Fox"), and vice-versa.
-                if persona_toks <= toks or toks <= persona_toks:
+                # full-name persona ("Iron Fox"), and vice-versa. NOTE: this is
+                # deliberately lenient on a shared token — a persona named "Fox"
+                # also matches an invitation of a *different* "Fox Hound". That
+                # ambiguity favours a false *speak* (never a false suppression),
+                # so it is safe for a signal that must never hard-drop a turn.
+                if persona_toks <= core or core <= persona_toks:
                     self_named = True
                 else:
                     other_named = True

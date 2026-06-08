@@ -37,9 +37,11 @@ import pytest
 from agents.generated import wallet_pb2 as walletpb
 from agents.llm_client import LLMClient, LLMResponse
 from agents.model_aliases import use_alias_map
+from agents.salience_addressing import NLAddressing
 from agents.salience_bid import (
     DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS,
     SalienceDecision,
+    _build_bid_messages,
     evaluate_salience,
     skip_bid_for_channel_size,
 )
@@ -362,10 +364,8 @@ class TestLeasedAndFast:
 
 
 class TestNLAddressingBiasesTheBid:
-    """PR 3 / TB4 — NL addressing shifts the bid's *bar*, it is never a hard
-    pre-filter. A non-named persona with a genuinely decisive contribution
-    still clears the bid; structured ``@``-mentions remain the only
-    deterministic directed-elsewhere drop (Tier A)."""
+    """PR 3 / TB4 — NL addressing shifts the bid's *bar*, never a hard
+    pre-filter: a non-named persona with a decisive contribution still clears."""
 
     async def test_baseline_middling_score_speaks(self):
         """Control: with no addressing, a score clearing the threshold speaks."""
@@ -388,8 +388,7 @@ class TestNLAddressingBiasesTheBid:
         assert decision.reason == "below_threshold"
 
     async def test_addressed_self_lowers_the_bar_to_speak(self):
-        """A score that would normally stay silent speaks when the persona is
-        invited by name."""
+        """A normally-silent score speaks when the persona is invited by name."""
         decision = await _bid(
             client=_client("speak: yes\nscore: 0.3"),
             threshold=0.4,
@@ -400,9 +399,7 @@ class TestNLAddressingBiasesTheBid:
 
     async def test_addressed_elsewhere_is_not_a_hard_filter(self):
         """The invariant: a non-named persona with a *decisive* in-domain
-        contribution still clears the bid even when someone else was invited —
-        proving NL addressing biases the bid rather than pre-dropping the
-        turn (TB4 / amendment OQ #2)."""
+        contribution still clears even when someone else was invited (TB4)."""
         decision = await _bid(
             client=_client("speak: yes\nscore: 0.95"),
             threshold=0.4,
@@ -412,24 +409,31 @@ class TestNLAddressingBiasesTheBid:
         assert decision.reason == "salient"
 
     async def test_unset_threshold_addressed_elsewhere_still_clears_decisive(self):
-        """Finding #1 — on the bias-to-silence (``threshold=None``) path the
-        someone-else-invited penalty must not become a *hard drop*. With an
-        unset threshold the bar is the decisive score (0.8); naively adding the
-        0.2 penalty clamps it to 1.0, so only a literal perfect score clears —
-        the hard pre-filter TB4 forbids. A decisive contribution must still
-        clear even when someone else was invited by name."""
+        """Finding #1 — on the unset-threshold path the someone-else penalty is
+        capped at ``_ADDRESSED_OTHER_CEILING`` (0.9, strictly below 1.0), so a
+        near-certain 0.95 still clears (no hard drop)."""
         decision = await _bid(
-            client=_client("speak: yes\nscore: 0.85"),
+            client=_client("speak: yes\nscore: 0.95"),
             threshold=None,
             content="let's hear from Iron Fox on this",
         )
         assert decision.speak is True
         assert decision.reason == "salient"
 
+    async def test_unset_threshold_addressed_elsewhere_biases_away_from_others(self):
+        """Finding #1 regression guard — on the unset-threshold path the penalty
+        must still *bite* (the old ceiling collapsed to 0.8, going inert). A
+        merely-decisive 0.85 now defers; a near-certain 0.95 (above) clears."""
+        decision = await _bid(
+            client=_client("speak: yes\nscore: 0.85"),
+            threshold=None,
+            content="let's hear from Iron Fox on this",
+        )
+        assert decision.speak is False
+        assert decision.reason == "below_threshold"
+
     async def test_unset_threshold_addressed_elsewhere_still_biases_to_silence(self):
-        """The companion to the above: capping the penalty must not neuter the
-        bias entirely — a middling score on the unset-threshold path still
-        stays silent (the decisive bar is unchanged at 0.8)."""
+        """The companion: a middling score on the unset path still stays silent."""
         decision = await _bid(
             client=_client("speak: yes\nscore: 0.5"),
             threshold=None,
@@ -439,10 +443,9 @@ class TestNLAddressingBiasesTheBid:
         assert decision.reason == "below_threshold"
 
     async def test_addressed_elsewhere_score_exactly_at_shifted_bar_clears(self):
-        """Finding #3 — the shifted bar must stay an *inclusive* floor. With
-        ``threshold=0.4`` the someone-else penalty lifts the bar to 0.6; a
-        float-naive ``0.4 + 0.2`` lands at 0.6000000000000001, so a score of
-        exactly 0.6 would be silenced by an epsilon. It must clear."""
+        """The shifted bar stays an *inclusive* floor: with ``threshold=0.4`` the
+        penalty lifts it to 0.6, and a float-naive ``0.4 + 0.2`` =
+        0.6000000000000001 must not silence a score of exactly 0.6."""
         decision = await _bid(
             client=_client("speak: yes\nscore: 0.6"),
             threshold=0.4,
@@ -453,8 +456,7 @@ class TestNLAddressingBiasesTheBid:
 
     async def test_addressed_elsewhere_still_runs_the_bid(self):
         """No pre-filter short-circuit: the leased bid is still issued for a
-        non-named persona (it is the bid's score, not a deterministic NL drop,
-        that decides)."""
+        non-named persona (the score decides, not a deterministic NL drop)."""
         provider = AsyncMock()
         provider.create_message = AsyncMock(
             return_value=LLMResponse(text="speak: no\nscore: 0.1"),
@@ -471,3 +473,28 @@ class TestNLAddressingBiasesTheBid:
                 threshold=0.4,
             )
         provider.create_message.assert_awaited_once()
+
+
+class TestBidPromptShape:
+    """Review finding #4 — with no addressing cue the bid prompt must be
+    byte-identical to PR 2b (the note slot collapses to the original single
+    space, not a paragraph break); a present note rides its own paragraph."""
+
+    def test_no_addressing_prompt_keeps_the_pre_pr3_spacing(self):
+        body = _build_bid_messages(
+            content="hi", transcript=[], addressing=NLAddressing(False, False),
+        )[0]["content"]
+        assert "Bias toward staying silent. Answer on exactly two lines:" in body
+        assert "staying silent.\n\nAnswer" not in body
+
+    @pytest.mark.parametrize("addressing,marker", [
+        (NLAddressing(True, False), "invited by name"),
+        (NLAddressing(False, True), "someone else appears to be invited"),
+    ])
+    def test_addressing_note_rides_its_own_paragraph(self, addressing, marker):
+        body = _build_bid_messages(
+            content="hi", transcript=[], addressing=addressing,
+        )[0]["content"]
+        assert marker in body
+        assert "staying silent.\n\nNote:" in body
+        assert "\n\nAnswer on exactly two lines:" in body

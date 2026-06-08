@@ -95,10 +95,21 @@ _DECISIVE_SCORE: Final[float] = 0.8
 # pre-filter (structured ``@``-mentions remain the only deterministic
 # directed-elsewhere drop, owned by Tier A). Being invited by name lowers the
 # bar (lean toward speaking); seeing someone *else* invited raises it (defer
-# unless decisively novel). The shift is symmetric and deliberately modest so
-# a non-named persona with a genuinely strong contribution still clears.
+# unless decisively novel). The shift is deliberately modest so a non-named
+# persona with a genuinely strong contribution still clears. It is *not* exactly
+# symmetric: the self-bonus only ever floors at 0, while the someone-else
+# penalty additionally ceilings at :data:`_ADDRESSED_OTHER_CEILING` (below) so
+# it can never become a hard drop.
 _ADDRESSED_SELF_BONUS: Final[float] = 0.2
 _ADDRESSED_OTHER_PENALTY: Final[float] = 0.2
+# The bar a someone-else-invited penalty may lift *to* — but never past. It sits
+# *above* the decisive score (:data:`_DECISIVE_SCORE` = 0.8) so the penalty
+# genuinely bites even on the bias-to-silence / unset-threshold path (base 0.8 →
+# 0.9 — without this the ceiling collapsed to the base and the "away from
+# others" bias was inert there), yet strictly *below* 1.0 so a near-certain
+# contribution (≥ 0.9) still clears — a bias, never a hard drop (TB4). It is
+# never pulled below an operator's own threshold when they set one higher.
+_ADDRESSED_OTHER_CEILING: Final[float] = 0.9
 # Decimal places the shifted bar is rounded to so float drift (e.g.
 # ``0.4 + 0.2 == 0.6000000000000001``) cannot turn the inclusive floor into an
 # epsilon-exclusive one.
@@ -219,13 +230,18 @@ def _build_bid_messages(
         speaker = "Me" if role == "assistant" else "Thread"
         lines.append(f"{speaker}: {text}")
     transcript_block = "\n".join(lines) if lines else "(no prior turns this round)"
+    # With no addressing cue the note slot collapses to the original single
+    # space, so a non-addressing bid prompt is byte-identical to PR 2b (review
+    # finding #4); a present note rides on its own paragraph instead.
+    note = _addressing_note(addressing)
+    note_tail = f"{note}\n\n" if note else " "
     user = (
         "Conversation so far this round:\n"
         f"{transcript_block}\n\n"
         f"New message:\n{content}\n\n"
         "Decide whether you have something genuinely new and relevant to add "
         "that has not already been said. Bias toward staying silent."
-        f"{_addressing_note(addressing)}\n\n"
+        f"{note_tail}"
         "Answer on exactly two lines:\n"
         "speak: yes|no\n"
         "score: <a number from 0.0 to 1.0 for how much you have to add>"
@@ -242,13 +258,14 @@ def _bar_for(threshold: float | None, addressing: NLAddressing) -> float:
     both fire.
 
     The someone-else-invited *penalty* is a **bias, never a hard filter** (TB4
-    / amendment OQ #2): it is capped so a decisive contribution still clears
-    even when someone else was invited. Without the cap, the unset-threshold
-    path (base bar :data:`_DECISIVE_SCORE` = 0.8) plus the 0.2 penalty would
-    clamp the bar to 1.0 — a de-facto hard drop where only a literal perfect
-    score speaks. The ceiling is the decisive score, or the operator's own bar
-    when they deliberately set one higher (we never lift a turn further out of
-    reach than the configured threshold already places it).
+    / amendment OQ #2): it is capped at :data:`_ADDRESSED_OTHER_CEILING` (0.9)
+    so a near-certain contribution still clears even when someone else was
+    invited. The ceiling sits *above* the decisive score (0.8) so the penalty
+    still bites on the bias-to-silence (unset-threshold) path — base 0.8 → 0.9,
+    rather than collapsing back to 0.8 and going inert — yet stays strictly
+    below 1.0 so a ≥ 0.9 score speaks (no de-facto hard drop). When the operator
+    sets a threshold higher than the ceiling we honour *that* instead, never
+    lifting a turn further out of reach than they already placed it.
 
     Rounded to :data:`_BAR_PRECISION` so the shift stays an *inclusive* floor:
     a float-naive ``0.4 + 0.2`` lands at 0.6000000000000001 and would silence a
@@ -259,7 +276,7 @@ def _bar_for(threshold: float | None, addressing: NLAddressing) -> float:
     if addressing.self_named:
         bar -= _ADDRESSED_SELF_BONUS
     elif addressing.other_named:
-        bar = min(bar + _ADDRESSED_OTHER_PENALTY, max(_DECISIVE_SCORE, base))
+        bar = min(bar + _ADDRESSED_OTHER_PENALTY, max(_ADDRESSED_OTHER_CEILING, base))
     return round(max(0.0, min(1.0, bar)), _BAR_PRECISION)
 
 

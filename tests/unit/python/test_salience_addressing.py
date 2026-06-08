@@ -15,6 +15,8 @@ all think?") classifies as *neither*, so it suppresses no one. Structured
 
 from __future__ import annotations
 
+import pytest
+
 from agents.salience_addressing import NLAddressing, detect_nl_addressing
 
 
@@ -134,5 +136,85 @@ class TestSmartApostrophe:
     def test_curly_apostrophe_invitation_still_fires(self):
         a = detect_nl_addressing(
             content="let’s hear from Iron Fox", persona_name="Iron Fox",
+        )
+        assert a.self_named is True
+
+
+class TestLowercaseListInvitees:
+    """Review finding #2 — a multi-invitee list typed in casual all-lowercase
+    chat ("let's hear from iron fox and ember owl") must still classify *every*
+    invitee as ``self``. The first PR-3 cut kept a list continuation only when
+    it was Title-cased, so the second invitee in a lowercase list was dropped
+    and the persona mis-read as ``other_named`` — biased *toward silence*, the
+    exact opposite of being invited."""
+
+    _LOWER = "let's hear from iron fox and ember owl on this"
+
+    def test_lowercase_first_invitee_is_self(self):
+        a = detect_nl_addressing(content=self._LOWER, persona_name="Iron Fox")
+        assert a.self_named is True
+
+    def test_lowercase_second_invitee_is_self_not_other(self):
+        """The regression guard: the second name in a lowercase ``a and b``
+        invitation is still an invitee, so it reads ``self`` (which wins bar
+        precedence). The Title-case-only rule dropped it and produced
+        ``self_named=False`` — an invitee biased *toward silence*. (``other``
+        may also be set by the co-invitee Iron Fox; ``self`` precedence is what
+        matters and is asserted here, matching the mixed-case sibling test.)"""
+        a = detect_nl_addressing(content=self._LOWER, persona_name="Ember Owl")
+        assert a.self_named is True
+
+    def test_lowercase_comma_list_classifies_each_invitee(self):
+        content = "what do iron fox, ember owl, gray wolf think about redis?"
+        for name in ("Iron Fox", "Ember Owl", "Gray Wolf"):
+            assert detect_nl_addressing(
+                content=content, persona_name=name,
+            ).self_named is True, name
+
+    def test_mixed_case_prose_guard_still_holds(self):
+        """Precision is preserved for the mixed-case case: "Iron Fox and ask
+        Redis" must NOT register persona Redis — the continuation is a verb
+        phrase, not an invitee (the original Title-case guard's intent)."""
+        a = detect_nl_addressing(
+            content="let's hear from Iron Fox and ask Redis", persona_name="Redis",
+        )
+        assert a.self_named is False
+
+    def test_lowercase_prose_led_continuation_still_guarded(self):
+        """Even all-lowercase, a continuation led by a discourse/verb word is
+        prose, not a name: "... and we should ask redis" must not invite
+        Redis (precision holds regardless of casing)."""
+        a = detect_nl_addressing(
+            content="let's hear from iron fox and we should ask redis",
+            persona_name="Redis",
+        )
+        assert a.self_named is False
+
+
+class TestGroupReferenceIsNotAName:
+    """Review finding #3 — a determiner + group noun ("the team", "the folks",
+    "the group", "you guys") addresses no specific persona, so it must classify
+    as *neither*: it invites everyone / no one, never a someone-else penalty
+    that would bias the whole channel toward silence. The non-name filter
+    originally fired only when *every* captured token was a stop-word, so a
+    leading article ("the") leaked the phrase through as a phantom recipient."""
+
+    @pytest.mark.parametrize("content", [
+        "hand this over to the team",
+        "over to the folks",
+        "let's hear from the group",
+        "over to you guys",
+        "over to the whole team",
+        "over to the rest of the team",
+    ])
+    def test_group_reference_is_neither(self, content):
+        a = detect_nl_addressing(content=content, persona_name="Iron Fox")
+        assert a == NLAddressing(self_named=False, other_named=False), content
+
+    def test_a_real_name_after_an_article_still_registers(self):
+        """The determiner strip must not swallow a genuine name: "the Iron Fox"
+        is still Iron Fox (high precision is not bought with false negatives)."""
+        a = detect_nl_addressing(
+            content="over to the Iron Fox", persona_name="Iron Fox",
         )
         assert a.self_named is True
