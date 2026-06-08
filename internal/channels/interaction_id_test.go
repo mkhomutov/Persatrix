@@ -25,12 +25,12 @@ func TestChannelMessageToProto_InteractionID_PropagatedFromMetadata(t *testing.T
 	ev := d.channelMessageToProto(ChannelMessage{
 		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
 		Content: "hi", Timestamp: time.Now().UTC(),
-		Metadata: map[string]any{"interaction_id": "01J9Z0K8INTERACTION"},
+		Metadata: map[string]any{"interaction_id": "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d"},
 	}, DispatchEnvelope{
 		Recipient: Member{ParticipantID: "agent-b", RespondPolicy: RespondAlways},
 	})
 
-	assert.Equal(t, "01J9Z0K8INTERACTION", ev.InteractionId,
+	assert.Equal(t, "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d", ev.InteractionId,
 		"interaction_id from msg.Metadata MUST land on the typed proto field")
 }
 

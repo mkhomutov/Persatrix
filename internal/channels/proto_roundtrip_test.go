@@ -58,7 +58,7 @@ func TestChannelMessageEvent_RoundTripsAllFields(t *testing.T) {
 		ChannelSize:               4,
 		SalienceMaxChannelMembers: 20,
 		// RFC 0030 governance layers (v0.3.8) — interaction attribution.
-		InteractionId: "01J9Z0K8INTERACTION0000000",
+		InteractionId: "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d",
 	}
 
 	blob, err := proto.Marshal(original)
@@ -93,7 +93,7 @@ func TestChannelMessageEvent_RoundTripsAllFields(t *testing.T) {
 	assert.Equal(t, 0.42, decoded.GetThreshold())
 	assert.Equal(t, int32(4), decoded.ChannelSize)
 	assert.Equal(t, int32(20), decoded.SalienceMaxChannelMembers)
-	assert.Equal(t, "01J9Z0K8INTERACTION0000000", decoded.InteractionId)
+	assert.Equal(t, "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d", decoded.InteractionId)
 }
 
 // TestChannelMessageEvent_ThresholdPresenceRoundTrips pins the proto3 explicit-
@@ -227,8 +227,12 @@ func stringFieldBytes(t *testing.T, fieldNumber int, value string) []byte {
 	// tag = (fieldNumber << 3) | 2 (wire-type 2 = length-delimited),
 	// itself encoded as a base-128 varint. Field numbers ≥ 16 produce a
 	// tag value ≥ 128, so the tag spans more than one byte — encode it
-	// generically rather than truncating to a single byte (which silently
-	// dropped the continuation for field 17 / interaction_id).
+	// generically. The previous single-byte form was never exercised (all
+	// prior string fields are ≤ 12), but it would have emitted a malformed
+	// tag for field 17 / interaction_id: tag (17<<3)|2 = 138 = 0x8A has the
+	// 0x80 continuation bit set, so a lone 0x8A is an unterminated varint a
+	// decoder would mis-read into the following length byte. The varint
+	// encoding below (0x8A 0x01) is the correct two-byte form.
 	out := appendVarint(nil, uint64(fieldNumber<<3)|2)
 	payload := []byte(value)
 	require.Less(t, len(payload), 128, "helper assumes single-byte length varint; raise the cap")
@@ -272,7 +276,7 @@ func TestChannelMessageEvent_FieldNumbersPinned(t *testing.T) {
 		// Fields 13–16 are the Tier B salience inputs (bool/optional double/
 		// int32 × 2) — non-string wire types, pinned in their own roundtrip
 		// tests above, so they are skipped in this string-field table.
-		{17, "interaction_id", func(e *taskpb.ChannelMessageEvent, v string) { e.InteractionId = v }, "01J9Z0K8INTERACTION0000000"},
+		{17, "interaction_id", func(e *taskpb.ChannelMessageEvent, v string) { e.InteractionId = v }, "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -497,19 +497,25 @@ class ChannelMessageEvent(google.protobuf.message.Message):
     """
     interaction_id: builtins.str
     """RFC 0030 deterministic governance layers (v0.3.8) — the RFC 0020
-    `interaction_id` (ULID) of the open Interaction this message belongs to.
-    Carried as a first-class field for the same reason as `cascade_depth = 11`:
-    `ChannelMessageEvent` has no metadata map, so the
-    `ChannelMessage.Metadata["interaction_id"]` the publish path sets is
-    otherwise dropped at this boundary — and Layers 1/2/4 must attribute
+    `interaction_id` of the open Interaction this message belongs to. Opaque
+    string id (RFC 0020 §D names it a ULID, but the agent-side implementation
+    mints `str(uuid.uuid4())` — see `agents/memory/interactions.py`; treat the
+    value as an opaque token, not a sortable ULID). Carried as a first-class
+    field for the same reason as `cascade_depth = 11`: `ChannelMessageEvent`
+    has no metadata map, so a `ChannelMessage.Metadata["interaction_id"]` would
+    otherwise be dropped at this boundary — and Layers 1/2/4 must attribute
     spend (Layer 1 cost ceiling), count replies (Layer 2 reply budget), and
-    accumulate end-of-interaction votes (Layer 4) per interaction. The
-    orchestrator stamps it from the publish metadata; the agent maps it onto
-    the `interaction_id` event-metadata key and threads it toward the
-    `AcquireLease` call (the wallet-side `interaction_budget_tokens` ceiling
-    lands in the Layer 1 PR — this field is the substrate). Empty (proto3
-    implicit presence) is the genuine pre-v0.3.8 / untracked case and leaves
-    every layer at its uncapped default, so the field is additive. See
+    accumulate end-of-interaction votes (Layer 4) per interaction. Contract:
+    when a publisher supplies `interaction_id` on the publish metadata bag the
+    orchestrator lifts it here, and the agent maps it onto the
+    `interaction_id` event-metadata key; the Layer 1 PR will thread that key
+    toward the `AcquireLease` call (the wallet-side `interaction_budget_tokens`
+    ceiling lands there too — this field is only the substrate). NOTE: no
+    publisher populates the key yet (RFC 0020 interaction tracking is
+    agent-side; there is no orchestrator-side resolver), so in practice the
+    field is empty on every publish until a later PR adds a producer. Empty
+    (proto3 implicit presence) is the genuine pre-v0.3.8 / untracked case and
+    leaves every layer at its uncapped default, so the field is additive. See
     `docs/rfcs/0030-governance-layers-pr-plan.md` (PR 1).
 
     Field 17, not 13: the Tier B salience PRs (#572–#575) took fields 13–16

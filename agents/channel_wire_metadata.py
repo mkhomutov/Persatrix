@@ -36,14 +36,17 @@ def seed_wire_metadata(
         event.metadata["sender_participant_type"] = request.sender_participant_type
 
     # RFC 0030 deterministic governance layers (v0.3.8), PR 1: lift the RFC
-    # 0020 ``interaction_id`` off the typed proto field (stamped by the
-    # orchestrator from the publish metadata) onto the event-metadata key the
-    # governance layers will read — Layer 1 threads it toward the
-    # ``AcquireLease`` cost ceiling, Layers 2/4 key reply budgets and end-votes
-    # on it. Inert this PR: nothing reads the key yet. Only seed a non-empty
-    # value — an empty field is the untracked / pre-v0.3.8 publish, which
-    # leaves every layer at its uncapped default (the additive opt-in
-    # contract).
+    # 0020 ``interaction_id`` (an opaque uuid4 token, not a ULID despite RFC
+    # 0020 §D's wording — see ``agents/memory/interactions.py``) off the typed
+    # proto field onto the event-metadata key the governance layers will read:
+    # the Layer 1 PR will thread it toward the ``AcquireLease`` cost ceiling,
+    # Layers 2/4 will key reply budgets and end-votes on it. Inert this PR:
+    # nothing reads the key, and nothing populates the wire field either (no
+    # orchestrator-side producer exists yet — interaction tracking is
+    # agent-side), so ``request.interaction_id`` is empty on every publish
+    # today and the branch below never fires. Only seed a non-empty value — an
+    # empty field is the untracked / pre-v0.3.8 publish, which leaves every
+    # layer at its uncapped default (the additive opt-in contract).
     if request.interaction_id:
         event.metadata["interaction_id"] = request.interaction_id
 

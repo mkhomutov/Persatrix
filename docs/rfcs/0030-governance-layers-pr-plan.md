@@ -102,7 +102,7 @@ The join points this plan must keep green: **(a)** the Tier B bid is itself an L
 
 | File | Change |
 |------|--------|
-| `schemas/channel.schema.json` | Extend `messageMetadata` (already carries `cascade_depth`) with an optional `interaction_id` (string, ULID). Back-compat: absent is allowed. |
+| `schemas/channel.schema.json` | Extend `messageMetadata` (already carries `cascade_depth`) with an optional `interaction_id` (opaque string; RFC 0020 §D calls it a ULID but the agent mints a uuid4, so don't assume ULID sortability). Back-compat: absent is allowed. |
 | [`proto/task.proto`](../../proto/task.proto) (channel event) | Add `string interaction_id = 17` to `ChannelMessageEvent`, typed scalar — same rationale as cascade_depth ([§M](0030-multi-agent-conversation-governance.md#m-wire-and-config-surfaces)). Regenerate Go + Python stubs (`_pb2.py`/`_pb2_grpc.py` with the Makefile relative-import rewrite, plus the `_pb2.pyi` mypy stub). |
 | [`internal/channels/interaction_id.go`](../../internal/channels/interaction_id.go) (new) + `grpc_dispatcher.go` | `interactionIDMetadataKey` const + `readInteractionID(metadata)` helper (mirrors `participant_type.go`); wired into `channelMessageToProto` so the publish-metadata value lands on the typed field. Tolerant: absent/non-string → empty (untracked). |
 | [`agents/channel_wire_metadata.py`](../../agents/channel_wire_metadata.py) (new) + `server_servicers.py` | Lift `request.interaction_id` off the typed proto field onto `event.metadata["interaction_id"]` (only when non-empty), alongside the existing `sender_participant_type` lift. Carved into a sibling helper so `server_servicers.py` stays under the 500-line cap. |

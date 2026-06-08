@@ -63,7 +63,7 @@ def test_channel_message_event_roundtrips_all_fields():
         threshold=0.42,
         channel_size=4,
         salience_max_channel_members=20,
-        interaction_id="01J9Z0K8INTERACTION0000000",
+        interaction_id="4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d",
     )
 
     blob = event.SerializeToString()
@@ -91,7 +91,7 @@ def test_channel_message_event_roundtrips_all_fields():
     assert decoded.threshold == 0.42
     assert decoded.channel_size == 4
     assert decoded.salience_max_channel_members == 20
-    assert decoded.interaction_id == "01J9Z0K8INTERACTION0000000"
+    assert decoded.interaction_id == "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d"
 
 
 def test_channel_message_event_threshold_presence_roundtrips():
@@ -201,8 +201,12 @@ def _string_field_bytes(field_number: int, value: str) -> bytes:
     """
     # tag = (field_number << 3) | 2, itself a base-128 varint. Field
     # numbers >= 16 make the tag value >= 128, so it spans more than one
-    # byte — encode it generically rather than truncating (which silently
-    # dropped the continuation byte for field 17 / interaction_id).
+    # byte — encode it generically. The previous single-byte form was never
+    # exercised (all prior string fields are <= 12) but would have emitted a
+    # malformed tag for field 17 / interaction_id: tag (17<<3)|2 = 138 = 0x8A
+    # has the 0x80 continuation bit set, so a lone 0x8A is an unterminated
+    # varint a decoder mis-reads into the length byte. _varint emits the
+    # correct two-byte form (0x8A 0x01).
     tag = _varint((field_number << 3) | 2)  # wire-type 2 (length-delimited)
     payload = value.encode("utf-8")
     if len(payload) >= 128:
@@ -236,7 +240,7 @@ def test_channel_message_event_field_numbers_pinned():
         (12, "sender_participant_type", "user"),
         # Fields 13–16 are the Tier B salience inputs (non-string wire
         # types), pinned in test_channel_message_event_salience_field_numbers_pinned.
-        (17, "interaction_id", "01J9Z0K8INTERACTION0000000"),
+        (17, "interaction_id", "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d"),
     ]
     for field_number, attr, value in cases:
         ev = task_pb2.ChannelMessageEvent(**{attr: value})

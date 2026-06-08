@@ -452,11 +452,11 @@ class TestReceiveChannelMessageInteractionID:
     async def test_wire_interaction_id_seeds_event_metadata(self):
         servicer, dispatcher = _make_servicer()
         await servicer.ReceiveChannelMessage(
-            _channel_event(interaction_id="01J9Z0K8INTERACTION0000000"),
+            _channel_event(interaction_id="4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d"),
             MagicMock(spec=grpc.aio.ServicerContext),
         )
         event = _enqueued_event(dispatcher)
-        assert event.metadata.get("interaction_id") == "01J9Z0K8INTERACTION0000000", (
+        assert event.metadata.get("interaction_id") == "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d", (
             f"servicer must seed metadata.interaction_id from the typed "
             f"proto field; got metadata={event.metadata!r}"
         )
