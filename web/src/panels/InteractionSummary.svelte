@@ -42,10 +42,14 @@
   // `ids.map` below), so a group channel issues N requests every REFRESH_MS.
   // Left unbounded it kept saturating the bucket even while the message feed
   // was already backing off a 429, so the "Live updates paused" banner never
-  // cleared. The error-backoff below mirrors ConversationFeed: on a failed
-  // refresh the cadence doubles toward MAX_BACKOFF_MS and resets to REFRESH_MS
-  // on the next success, so a rate-limited console relieves the pressure
-  // instead of amplifying it.
+  // cleared. The backoff below borrows ConversationFeed's shape — double toward
+  // MAX_BACKOFF_MS, reset to REFRESH_MS on success — but narrows the *trigger*:
+  // it backs off only on a 429, not on any error as ConversationFeed does. That
+  // feed issues a single request, so any failure can fairly slow it; this
+  // refresh fans out N requests and already holds-vs-shows on a partial failure
+  // (see `refresh`), so a lone flaky agent must not slow the whole set. Only a
+  // 429 — actual bucket saturation — should stretch the cadence and relieve the
+  // pressure instead of amplifying it.
   const REFRESH_MS = 5000;
   const MAX_BACKOFF_MS = 30000;
   // Single newest closed interaction per agent — the surface only shows one.
