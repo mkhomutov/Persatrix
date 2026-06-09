@@ -174,6 +174,14 @@ type ChannelRouter struct {
 	// [defaultMaxInFlightFanout] and [ChannelRouter.SetMaxInFlightFanout].
 	fanoutInFlight    atomic.Int64
 	maxInFlightFanout int
+
+	// activityMu guards channelActivity: channel_id → (participant_id → marked-at).
+	// The router's in-flight "thinking" set powers the RFC 0048 console presence
+	// Tier 1 read (`GET /channels/{id}/activity`). activityNow is the clock used
+	// for the TTL prune, overridable in tests. See activity.go for the lifecycle.
+	activityMu      sync.Mutex
+	channelActivity map[string]map[string]time.Time
+	activityNow     func() time.Time
 }
 
 // NewChannelRouter wires a router around a store, dispatcher, logger, and
@@ -205,6 +213,8 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		closedInteractions: make(map[string]struct{}),
 		maxCascadeDepth:    defaults.DefaultMaxCascadeDepth,
 		maxInFlightFanout:  defaultMaxInFlightFanout,
+		channelActivity:    make(map[string]map[string]time.Time),
+		activityNow:        time.Now,
 	}
 }
 

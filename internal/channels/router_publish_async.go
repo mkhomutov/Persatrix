@@ -264,6 +264,12 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// participant's id, never on the publisher's.
 	r.waiter.Notify(msg)
 
+	// Presence Tier 1 (RFC 0048): this publish IS the sender's reply, so clear
+	// it from the channel's in-flight "thinking" set. Keyed on sender id and run
+	// on every publish, this covers the chat, floor, and fire-and-forget paths
+	// uniformly — an inbound user publish clears the (unmarked) user as a no-op.
+	r.clearActivity(msg.ChannelID, msg.SenderID)
+
 	// RFC 0030 Layer 2.5 deferred fanout (amendment D1): when a serialized
 	// floor round is active on this channel and this inbound message is a
 	// reply from a speaker that round granted the floor, the round loop is the

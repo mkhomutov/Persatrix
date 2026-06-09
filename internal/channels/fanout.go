@@ -71,8 +71,16 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// value (identical across recipients), captured once here.
 	channelSize := len(members)
 
+	// Mark the responders as having an in-flight turn for the console presence
+	// signal (RFC 0048 Tier 1) — exactly the members [orderResponders] expects
+	// to reply, not the ingestion-only recipients dispatchConcurrent also
+	// delivers to (marking those would strand a "thinking" line on a member that
+	// will never answer). Cleared per-member when its reply re-enters
+	// (publishCommit) or by the TTL backstop. See activity.go.
+	responders, nonResponders := orderResponders(members, msg, threadParentSenderID)
+	r.markActivity(msg.ChannelID, responderIDs(responders))
+
 	if settings, ok := r.floorSettingsFor(msg.ChannelID); ok && settings.enabled {
-		responders, nonResponders := orderResponders(members, msg, threadParentSenderID)
 		if len(responders) >= 2 {
 			r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize)
 			return
