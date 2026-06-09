@@ -14,7 +14,12 @@ exception.
 
 from __future__ import annotations
 
+from _otel_test_helpers import build_meter, counter_total
+
+from agents.memory.boundary_detectors import REASON_COST
+from agents.memory.interactions import SCOPE_TICK, Interaction, InteractionTracker
 from agents.persona_runtime import llm_call_errors
+from agents.persona_runtime.cost_close import close_interaction_on_cost
 from agents.persona_types import AgentEvent, EventType
 from agents.wallet_client import BudgetExceededError
 
@@ -67,3 +72,65 @@ async def test_cost_close_invoked_only_for_interaction_budget(monkeypatch):
         ev,
     )
     assert calls == ["channel_message"]
+
+
+class _CostCloseAgent:
+    """Minimal surface ``close_interaction_on_cost`` needs (the Protocol).
+
+    A TICK event takes the single-turn ``SCOPE_TICK`` branch of
+    ``_scope_for_cost_close``, so ``_MULTI_TURN_EVENT_TYPES`` is empty and
+    ``_scope_for_multi_turn_event`` is never reached here.
+    """
+
+    _MULTI_TURN_EVENT_TYPES: frozenset[EventType] = frozenset()
+
+    def __init__(self, tracker: InteractionTracker) -> None:
+        self._interaction_tracker = tracker
+        self.persisted: list[Interaction] = []
+
+    async def _persist_closed_interaction(self, interaction: Interaction) -> None:
+        self.persisted.append(interaction)
+
+
+async def test_cost_close_dispatch_emits_by_cost_counter():
+    """The real dispatch path closes with REASON_COST → ``by_cost`` counter.
+
+    ``test_interaction_tracker`` pins ``close(reason=REASON_COST)`` → the
+    ``by_cost`` subtotal, and the cost-close *dispatch* is otherwise mocked
+    out in the tests above. This drives the production
+    ``close_interaction_on_cost`` against a real tracker with metrics live,
+    closing the gap between "dispatch is invoked" and "dispatch actually
+    closes the scope's interaction with REASON_COST and persists it".
+    """
+    reader, metrics_mod = build_meter()
+    try:
+        tracker = InteractionTracker()
+        tracker.add_turn(SCOPE_TICK)  # open an interaction in the tick scope
+        agent = _CostCloseAgent(tracker)
+
+        await close_interaction_on_cost(
+            agent, AgentEvent(event_type=EventType.TICK),
+        )
+
+        # The scope's interaction is closed, persisted once, and tagged cost.
+        assert tracker.get(SCOPE_TICK) is None
+        assert len(agent.persisted) == 1
+        assert agent.persisted[0].close_reason == REASON_COST
+        assert counter_total(reader, "agent.interactions.closed.by_cost") == 1
+    finally:
+        await metrics_mod.shutdown()
+
+
+async def test_cost_close_dispatch_no_open_interaction_is_noop():
+    """The ceiling tripping before any interaction opened → no persist.
+
+    Mirrors ``InteractionTracker.close``'s unknown-scope contract: a cost
+    denial on the very first turn (no open interaction in the scope yet)
+    must not fabricate or persist an empty interaction.
+    """
+    tracker = InteractionTracker()  # nothing open
+    agent = _CostCloseAgent(tracker)
+
+    await close_interaction_on_cost(agent, AgentEvent(event_type=EventType.TICK))
+
+    assert agent.persisted == []

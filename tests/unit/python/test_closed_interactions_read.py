@@ -279,6 +279,52 @@ async def test_handler_threads_min_turns(memory):
     assert [it.interaction_id for it in resp.interactions] == ["i-multi"]
 
 
+async def test_handler_threads_scope_interaction_id_and_default_limit(monkeypatch):
+    """scope / interaction_id thread to the query; an omitted limit defaults.
+
+    ``test_handler_threads_min_turns`` pins ``min_turns`` end-to-end, but the
+    remaining request fields the handler forwards — ``scope``,
+    ``interaction_id``, and the ``limit or DEFAULT`` substitution — are only
+    covered Go-side. Capture the kwargs the handler hands ``closed_interactions``
+    so the full request→query plumbing is pinned in Python too. The empty-string
+    proto defaults must arrive as ``None`` (the query's "no filter" sentinel),
+    not as literal empty-string filters that would match nothing.
+    """
+    import agents.closed_interactions_read as mod
+
+    captured: dict[str, object] = {}
+
+    async def _fake_closed_interactions(_episodic, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(mod, "closed_interactions", _fake_closed_interactions)
+    agents = {"agent-x": _fake_agent(MagicMock())}
+
+    # interaction_id + scope present, limit omitted → DEFAULT.
+    await handle_get_closed_interactions(
+        agents,
+        task_pb2.ClosedInteractionsRequest(
+            agent_id="agent-x", scope="group:room-7", interaction_id="i-42",
+        ),
+        MagicMock(),
+    )
+    assert captured["scope"] == "group:room-7"
+    assert captured["interaction_id"] == "i-42"
+    assert captured["limit"] == mod.DEFAULT_CLOSED_INTERACTION_LIMIT
+
+    # Absent scope / interaction_id (proto empty string) → None, not "".
+    captured.clear()
+    await handle_get_closed_interactions(
+        agents,
+        task_pb2.ClosedInteractionsRequest(agent_id="agent-x", limit=7),
+        MagicMock(),
+    )
+    assert captured["scope"] is None
+    assert captured["interaction_id"] is None
+    assert captured["limit"] == 7
+
+
 async def test_handler_missing_agent_is_not_found():
     ctx = MagicMock()
     resp = await handle_get_closed_interactions(

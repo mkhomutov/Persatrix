@@ -145,6 +145,34 @@ func TestHandleGetClosedInteractions_ThreadsInteractionIDAndDefaultLimit(t *test
 	assert.Empty(t, reader.gotReq.GetScope(), "an omitted scope must stay empty, not be defaulted")
 }
 
+// A row with no recorded participants (a legacy row predating turn
+// capture, or an autonomous TICK with no sender) must serialize its
+// participants as an empty JSON array, not `null`. The proto getter
+// returns a nil slice for the absent repeated field, and a nil []string
+// marshals to `null` unless normalized — which would force every web /
+// CLI consumer to special-case `null` vs `[]`. Assert on the raw bytes
+// because unmarshaling into []string collapses both null and [] to nil.
+func TestHandleGetClosedInteractions_EmptyParticipantsSerializeAsArray(t *testing.T) {
+	reader := &fakeInteractionReader{resp: &taskpb.ClosedInteractionsResponse{
+		Interactions: []*taskpb.ClosedInteraction{{
+			InteractionId: "i-1",
+			Scope:         "tick",
+			Summary:       "autonomous tick",
+			TurnCount:     1,
+			// Participants left nil (absent repeated field).
+		}},
+	}}
+	srv := interactionTestServer(t, reader)
+
+	req := httptest.NewRequest("GET", "/api/v1/agents/agent-x/interactions/closed", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	require.Equal(t, 200, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"participants":[]`)
+	assert.NotContains(t, rec.Body.String(), `"participants":null`)
+}
+
 func TestHandleGetClosedInteractions_AgentNotFound(t *testing.T) {
 	reader := &fakeInteractionReader{err: registry.ErrAgentNotFound}
 	srv := interactionTestServer(t, reader)

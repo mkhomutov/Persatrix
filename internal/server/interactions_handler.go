@@ -127,6 +127,14 @@ func (s *Server) handleGetClosedInteractions(w http.ResponseWriter, r *http.Requ
 		Interactions: make([]closedInteractionDTO, 0, len(resp.GetInteractions())),
 	}
 	for _, it := range resp.GetInteractions() {
+		// Normalize the absent repeated field (nil → empty slice) so a row
+		// with no recorded participants serializes as `[]`, not `null`,
+		// matching the always-array outer `interactions` field. Otherwise
+		// every web / CLI consumer would have to special-case `null`.
+		participants := it.GetParticipants()
+		if participants == nil {
+			participants = []string{}
+		}
 		out.Interactions = append(out.Interactions, closedInteractionDTO{
 			InteractionID: it.GetInteractionId(),
 			Scope:         it.GetScope(),
@@ -135,7 +143,7 @@ func (s *Server) handleGetClosedInteractions(w http.ResponseWriter, r *http.Requ
 			TurnCount:     it.GetTurnCount(),
 			CloseReason:   it.GetCloseReason(),
 			Summary:       it.GetSummary(),
-			Participants:  it.GetParticipants(),
+			Participants:  participants,
 		})
 	}
 	writeJSON(w, out, http.StatusOK)
@@ -146,6 +154,13 @@ func (s *Server) handleGetClosedInteractions(w http.ResponseWriter, r *http.Requ
 // including single-turn rows). Present must be a positive integer; a
 // caller passes 2 to exclude the degenerate single-turn tick/task
 // envelopes from an unscoped list.
+//
+// Note the REST surface is deliberately stricter than the wire contract:
+// the proto documents min_turns=0 as the default sentinel (valid over
+// gRPC), but an *explicit* ?min_turns=0 from a client is nonsensical
+// input (no interaction has fewer than one turn), so it is rejected here
+// with a 400 rather than silently coerced. Only an omitted param forwards
+// the 0 sentinel.
 func parseMinTurns(r *http.Request) (int, error) {
 	raw := r.URL.Query().Get("min_turns")
 	if raw == "" {
