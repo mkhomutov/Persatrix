@@ -108,6 +108,26 @@ pub(crate) struct PublishMessageRequest {
     pub(crate) epoch_id: String,
 }
 
+/// One `{id, respond}` member entry in a [`CreateChannelRequest`], mirroring
+/// the Go `channelMemberRequest` (internal/server/channel_types.go). The
+/// `respond` token is a `channels.RespondPolicy` wire string validated CLI-side
+/// via [`crate::commands::channel_dispatch::RespondPolicy`].
+#[derive(Serialize, Clone, Debug)]
+pub(crate) struct CreateChannelMember {
+    pub(crate) id: String,
+    pub(crate) respond: String,
+}
+
+/// Request body for `POST /api/v1/channels`. Mirrors the Go `createChannelRequest`
+/// — the `name` is sent BARE (the server derives the canonical `group:<name>`
+/// id), and at least one member is required (the server 400s otherwise).
+#[derive(Serialize)]
+pub(crate) struct CreateChannelRequest {
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) members: Vec<CreateChannelMember>,
+}
+
 #[derive(Serialize)]
 pub(crate) struct AddMemberRequest {
     pub(crate) id: String,
