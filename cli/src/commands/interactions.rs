@@ -36,8 +36,10 @@ pub(crate) const SUMMARY_UNAVAILABLE_TEXT: &str = "[interaction summary unavaila
 
 /// One closed-interaction row. Mirrors `closedInteractionDTO`
 /// (`internal/server/interactions_handler.go`). `#[serde(default)]` on every
-/// field keeps deserialization tolerant of an older server that omits one — the
-/// CLI never sets `deny_unknown_fields`, so newer server fields are dropped.
+/// field keeps deserialization tolerant of an older server that omits one. The
+/// typed struct drops fields it doesn't name (no `deny_unknown_fields`), but
+/// that loss is confined to the human renderer — `--json` prints the server's
+/// rows verbatim via [`raw_interactions_json`], so a newer field still survives.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct ClosedInteraction {
     #[serde(default)]
@@ -144,16 +146,20 @@ pub(crate) fn is_summary_unavailable(summary: &str) -> bool {
 /// or the honest "summary unavailable" line (SS3).
 pub(crate) fn format_interaction(it: &ClosedInteraction) -> String {
     let mut lines: Vec<String> = Vec::new();
-    let turns = if it.turn_count == 1 {
-        "1 turn".to_string()
-    } else {
-        format!("{} turns", it.turn_count)
+    // Append the turn count only when it is meaningful. A non-positive count
+    // only arises from a forward-compat default (the read path guarantees
+    // turn_count >= 1); mirror the web surface (`{#if record.turn_count}`),
+    // which hides the count when falsy, rather than print "(0 turns)".
+    let turns_suffix = match it.turn_count {
+        1 => " (1 turn)".to_string(),
+        n if n > 1 => format!(" ({n} turns)"),
+        _ => String::new(),
     };
     lines.push(format!(
-        "{}  {} ({})",
+        "{}  {}{}",
         it.interaction_id.cyan().bold(),
         format!("Conversation {}", close_trigger_label(&it.close_reason)).bold(),
-        turns
+        turns_suffix
     ));
     if !it.scope.is_empty() {
         lines.push(format!("  {} {}", "scope:".dimmed(), it.scope));
@@ -178,6 +184,67 @@ pub(crate) fn format_interaction(it: &ClosedInteraction) -> String {
     lines.join("\n")
 }
 
+/// Reject the two numeric filters the REST surface would bounce with a 400
+/// (`parseLimit` / `parseMinTurns` in `internal/server/interactions_handler.go`):
+/// a `limit` of 0 and an *explicit* `min_turns` of 0. A page of zero rows is
+/// meaningless and no interaction has fewer than one turn, so catch these
+/// locally with a clear message rather than round-trip a generic 400 — the same
+/// fail-fast contract the `agent_id` check follows. (The web sibling gets this
+/// for free from JS falsy-0: `if (limit)` / `if (minTurns)` in `api.js`.) An
+/// omitted `min_turns` (`None`) is fine — it forwards the server's 0 sentinel.
+pub(crate) fn validate_interactions_filters(
+    limit: u32,
+    min_turns: Option<u32>,
+) -> Result<(), String> {
+    if limit == 0 {
+        return Err("--limit must be a positive integer (≥ 1)".to_string());
+    }
+    if min_turns == Some(0) {
+        return Err("--min-turns must be a positive integer (≥ 1)".to_string());
+    }
+    Ok(())
+}
+
+/// Compose the trailing note for the empty-state line so it names *every*
+/// active filter, not just scope — otherwise a query that came up empty because
+/// of `--interaction-id` / `--min-turns` reads as though the agent simply has no
+/// closed interactions at all. Returns `""` when no filter is active.
+pub(crate) fn empty_state_filters(
+    scope: Option<&str>,
+    interaction_id: Option<&str>,
+    min_turns: Option<u32>,
+) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(s) = scope.filter(|s| !s.is_empty()) {
+        parts.push(format!("scope {s}"));
+    }
+    if let Some(id) = interaction_id.filter(|s| !s.is_empty()) {
+        parts.push(format!("interaction {id}"));
+    }
+    if let Some(mt) = min_turns {
+        parts.push(format!("min-turns {mt}"));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" (filtered by {})", parts.join(", "))
+    }
+}
+
+/// Extract the `interactions` array from the raw response body verbatim, so a
+/// field a newer server adds to a row survives `--json` (the flag promises the
+/// raw row list, not a lossy re-encode through [`ClosedInteraction`]). Returns
+/// `None` when the body isn't the expected `{interactions: [...]}` shape, so the
+/// caller can fall back to the typed re-serialization.
+pub(crate) fn raw_interactions_json(body_text: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(body_text).ok()?;
+    let rows = v.get("interactions")?;
+    if !rows.is_array() {
+        return None;
+    }
+    serde_json::to_string(rows).ok()
+}
+
 // ─── Subcommand entry point ─────────────────────────────────────────────
 
 /// `persatrix agent interactions <agent_id> [--scope] [--interaction-id]
@@ -196,8 +263,10 @@ pub(crate) async fn cmd_agent_interactions(
 ) -> Result<(), String> {
     // Agent IDs follow the same cross-component contract as the other agent
     // subcommands; reject locally with a clear message rather than round-trip a
-    // generic 400 from the unauthenticated REST surface.
+    // generic 400 from the unauthenticated REST surface. The numeric filters get
+    // the same treatment (the server 400s a 0 limit / explicit 0 min_turns).
     validate_resource_id(agent_id, "agent ID")?;
+    validate_interactions_filters(limit, min_turns)?;
 
     let suffix = build_closed_interactions_query(scope, interaction_id, limit, min_turns);
     let url = format!("{server}/api/v1/agents/{agent_id}/interactions/closed{suffix}");
@@ -209,26 +278,32 @@ pub(crate) async fn cmd_agent_interactions(
     if !resp.status().is_success() {
         return Err(api_error_message(resp).await);
     }
-    let body: ClosedInteractionsResponse = resp
-        .json()
+    // Keep the raw body so `--json` can forward rows verbatim (lossless); the
+    // human path deserializes the same text into the typed envelope.
+    let body_text = resp
+        .text()
         .await
         .map_err(|e| format!("invalid response: {e}"))?;
+    let body: ClosedInteractionsResponse =
+        serde_json::from_str(&body_text).map_err(|e| format!("invalid response: {e}"))?;
 
     if json_out {
-        // Single-line (not pretty-printed): keeps `--json` consistent with the
-        // other subcommands so `jq` / line-counting consumers see one shape.
-        println!("{}", serde_json::to_string(&body.interactions).unwrap());
+        // Print the server's `interactions` array verbatim so a field a newer
+        // server adds survives (the flag promises the raw row list); fall back to
+        // the typed re-serialization only if the body isn't the envelope shape.
+        // Single-line, like the other subcommands so `jq` / line-counting agree.
+        let rows = raw_interactions_json(&body_text)
+            .unwrap_or_else(|| serde_json::to_string(&body.interactions).unwrap());
+        println!("{rows}");
         return Ok(());
     }
 
     if body.interactions.is_empty() {
         // A valid query with no closed interaction yet is not an error — mirror
-        // `channel history`'s empty-state message and exit 0.
-        let scope_note = scope
-            .filter(|s| !s.is_empty())
-            .map(|s| format!(" in scope {s}"))
-            .unwrap_or_default();
-        println!("No closed interactions for {agent_id}{scope_note}.");
+        // `channel history`'s empty-state message and exit 0. The note names
+        // every active filter so an empty result isn't mistaken for "none exist".
+        let note = empty_state_filters(scope, interaction_id, min_turns);
+        println!("No closed interactions for {agent_id}{note}.");
         return Ok(());
     }
 

@@ -127,6 +127,79 @@ fn format_singular_turn_label() {
     assert!(!out.contains("1 turns"));
 }
 
+#[test]
+fn format_omits_turns_when_non_positive() {
+    // A non-positive turn_count only arises from a forward-compat default (the
+    // read path guarantees turn_count >= 1). Mirror the web surface, which hides
+    // the count when falsy, rather than print a nonsensical "(0 turns)".
+    let mut it = interaction("structural", "Done.");
+    it.turn_count = 0;
+    let out = format_interaction(&it);
+    assert!(!out.contains("turn"));
+    assert!(out.contains("Conversation ended"));
+}
+
+// ─── validate_interactions_filters ──────────────────────────────────────
+
+#[test]
+fn filters_reject_zero_limit() {
+    // The server's parseLimit bounces limit <= 0 with a 400; catch it locally.
+    assert!(validate_interactions_filters(0, None).is_err());
+}
+
+#[test]
+fn filters_reject_explicit_zero_min_turns() {
+    // parseMinTurns rejects an explicit min_turns=0 (no interaction has < 1
+    // turn). An omitted min_turns (None) is fine — it forwards the 0 sentinel.
+    assert!(validate_interactions_filters(20, Some(0)).is_err());
+}
+
+#[test]
+fn filters_accept_valid_and_absent_min_turns() {
+    assert!(validate_interactions_filters(20, None).is_ok());
+    assert!(validate_interactions_filters(1, Some(1)).is_ok());
+}
+
+// ─── empty_state_filters ────────────────────────────────────────────────
+
+#[test]
+fn empty_state_note_lists_every_active_filter() {
+    // A query that comes up empty *because of* --interaction-id / --min-turns
+    // must say so, not read as "the agent has no closed interactions at all".
+    let n = empty_state_filters(Some("group:planning"), Some("int-9"), Some(2));
+    assert!(n.contains("scope group:planning"));
+    assert!(n.contains("interaction int-9"));
+    assert!(n.contains("min-turns 2"));
+}
+
+#[test]
+fn empty_state_note_blank_when_no_filters() {
+    assert_eq!(empty_state_filters(None, None, None), "");
+    // Empty-string args (clap `--scope ""`) count as absent, like the query builder.
+    assert_eq!(empty_state_filters(Some(""), Some(""), None), "");
+}
+
+// ─── raw_interactions_json (lossless --json passthrough) ─────────────────
+
+#[test]
+fn raw_json_preserves_unknown_row_fields() {
+    // `--json` promises the raw row list, so a field a newer server adds must
+    // survive — the typed struct would otherwise drop it on re-serialization.
+    let raw = r#"{"interactions":[{"interaction_id":"int-1","future_field":true}]}"#;
+    let out = raw_interactions_json(raw).unwrap();
+    assert!(out.contains("future_field"));
+    assert!(out.starts_with('['));
+}
+
+#[test]
+fn raw_json_none_on_unexpected_shape() {
+    // Falls back to the typed re-serialization when the body isn't the envelope.
+    assert!(raw_interactions_json("{}").is_none());
+    assert!(raw_interactions_json("not json").is_none());
+    // `interactions` present but not an array → no safe passthrough.
+    assert!(raw_interactions_json(r#"{"interactions":42}"#).is_none());
+}
+
 // ─── DTO deserialization (forward-compat) ───────────────────────────────
 
 #[test]
