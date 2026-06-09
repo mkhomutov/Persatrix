@@ -10,7 +10,9 @@ use colored::Colorize;
 
 use crate::commands::channel::canonicalize_channel_id;
 use crate::commands::channel_dispatch::RespondPolicy;
-use crate::commands::channel_types::{ChannelView, CreateChannelMember, CreateChannelRequest};
+use crate::commands::channel_types::{
+    ChannelMember, ChannelView, CreateChannelMember, CreateChannelRequest,
+};
 use crate::types::{api_error_message, validate_path_param, validate_resource_id};
 
 // ─── Pure helpers (testable without an HTTP server) ─────────────────────
@@ -84,6 +86,30 @@ pub(crate) fn parse_member_spec(spec: &str) -> Result<CreateChannelMember, Strin
         id: id.to_string(),
         respond,
     })
+}
+
+/// Map a create request's members into display rows for the degraded fallback
+/// in [`cmd_channel_create`] when the read-after-write GET fails. The POST
+/// returned 201, so these members *were* accepted — we just couldn't fetch the
+/// normalized view. Rendering the create-201 body instead would print a false
+/// "(no members)" (the server omits members on create).
+///
+/// We echo the disposition the operator *requested*, verbatim and
+/// pre-normalization (no `salience_gated`/`threshold`, no `joined_at`), rather
+/// than guessing what the store's Normalize() produced — the accompanying
+/// stderr warning flags that this is the requested, not the read-back,
+/// membership.
+fn requested_members_view(req: &CreateChannelRequest) -> Vec<ChannelMember> {
+    req.members
+        .iter()
+        .map(|m| ChannelMember {
+            id: m.id.clone(),
+            respond_policy: m.respond.clone(),
+            joined_at: String::new(),
+            salience_gated: false,
+            threshold: None,
+        })
+        .collect()
 }
 
 /// Render a single channel's detail block (id, type, description, members).
@@ -210,8 +236,18 @@ pub(crate) async fn cmd_channel_create(
     let view = match fetch_channel(client, server, &canonical).await {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("warning: created #{canonical} but could not read back members: {e}");
-            post_view
+            // The 201 body omits members, so don't render it as-is — that would
+            // print a false "(no members)". Echo the membership we requested
+            // (unnormalized, unconfirmed) so the operator still sees who was
+            // added; the warning flags that the dispositions weren't read back.
+            eprintln!(
+                "warning: created #{canonical} but could not read it back ({e}); \
+                 showing the membership as requested (dispositions unconfirmed)"
+            );
+            ChannelView {
+                members: requested_members_view(&req),
+                ..post_view
+            }
         }
     };
     if json_out {
@@ -228,6 +264,10 @@ pub(crate) async fn cmd_channel_info(
     name: &str,
     json_out: bool,
 ) -> Result<(), String> {
+    // `info` reads an *existing* id, so — unlike `create`'s
+    // `validate_new_channel_name` — it uses the looser path-param guard, not the
+    // resource-id rule: legitimate ids carry `:` (`dm:a:b`, `thread:…`) that a
+    // resource-id check would reject. Here we only block traversal/injection.
     let canonical = canonicalize_channel_id(name);
     validate_path_param(&canonical, "channel id")?;
     let view = fetch_channel(client, server, &canonical).await?;
@@ -350,5 +390,40 @@ mod tests {
             "when_mentioned",
             "bare id (no colon) still defaults",
         );
+    }
+
+    // ─── requested_members_view (create read-after-write fallback) ──────
+
+    #[test]
+    fn requested_members_view_echoes_request_without_fabricating_state() {
+        // When the read-after-write GET fails, the create-201 body omits members
+        // (server contract), so rendering it would print a false "(no members)"
+        // for a channel that was just created with some. The fallback instead
+        // echoes the membership the operator *requested* — verbatim and
+        // pre-normalization, with no fabricated salience signal or join time
+        // (the stderr warning flags it as unconfirmed).
+        let req = CreateChannelRequest {
+            name: "planning".into(),
+            description: String::new(),
+            members: vec![
+                CreateChannelMember {
+                    id: "ada".into(),
+                    respond: "chair".into(),
+                },
+                CreateChannelMember {
+                    id: "rex".into(),
+                    respond: "when_mentioned".into(),
+                },
+            ],
+        };
+        let rows = requested_members_view(&req);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, "ada");
+        // Requested token shown verbatim — we have NOT round-tripped the store's
+        // Normalize(), so we must not invent `always`/`salience_gated`.
+        assert_eq!(rows[0].respond_policy, "chair");
+        assert!(!rows[0].salience_gated, "no fabricated salience signal");
+        assert_eq!(rows[0].threshold, None);
+        assert!(rows[0].joined_at.is_empty(), "no fabricated join time");
     }
 }
