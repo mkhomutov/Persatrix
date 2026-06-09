@@ -67,7 +67,9 @@
   // one-shot in-panel hand-off replacing the removed cross-panel nav (§C).
   let pendingSelectId = "";
 
-  // feed is the ConversationFeed handle — its echo()/pollNow() surface a write.
+  // feed is the ConversationFeed handle — echo()/pollNow() surface a write, and
+  // markThinking()/clearThinking() drive its live-presence indicator (Tier 0)
+  // from the send/publish seams below.
   let feed = $state(null);
 
   const isDM = $derived(Boolean(selectedAgent));
@@ -244,6 +246,9 @@
       }
       feed?.echo(stored);
       publishContent = "";
+      // Light the indicator for the agents this post @-addressed (the expected
+      // responders); a broadcast that names nobody shows nothing, not a guess.
+      feed?.markThinking((payload.mentions ?? []).filter((id) => id !== userId && agentsById[id]));
     } catch (err) {
       if (isDM || selectedChannel !== target) {
         return;
@@ -296,6 +301,8 @@
     const hadChannel = Boolean(dmChannelId);
     sending = true;
     chatController = new AbortController();
+    // The synchronous turn IS the DM's "thinking" signal (cleared below/finally).
+    feed?.markThinking([agentAtSend]);
     try {
       const payload = { message: text, userId, signal: chatController.signal };
       const usedSession = sessionId.trim();
@@ -308,6 +315,7 @@
         return;
       }
       message = "";
+      feed?.clearThinking([agentAtSend], { replied: true });
       if (hadChannel) {
         feed?.pollNow();
       } else {
@@ -327,6 +335,8 @@
     } finally {
       sending = false;
       chatController = null;
+      // Backstop for cancel/error/mid-turn switch — clears with no idle flash.
+      feed?.clearThinking([agentAtSend]);
     }
   }
 
@@ -451,16 +461,10 @@
         Select a persona to direct-message, or a channel to watch.
       </p>
     {:else}
-      <ConversationFeed bind:this={feed} channelId={activeChannel} {userId} {agentsById} {isDM} peerId={selectedAgent} members={selectedChannelMembers} />
+      <ConversationFeed bind:this={feed} channelId={activeChannel} {userId} {agentsById} {isDM} peerId={selectedAgent} members={selectedChannelMembers} onCancelTurn={isDM && sending ? cancelSend : null} />
     {/if}
 
     {#if isDM}
-      {#if sending}
-        <p class="thinking" role="status">
-          Waiting for a reply…
-          <button type="button" class="cancel" onclick={cancelSend}>Cancel</button>
-        </p>
-      {/if}
       {#if sendError}
         <p class="boot error" role="alert">{sendError}</p>
       {/if}

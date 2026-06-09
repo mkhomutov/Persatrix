@@ -150,13 +150,14 @@ describe("Channels panel — DM mode (§B)", () => {
     const [agentId, payload] = sendChat.mock.calls[0];
     expect(agentId).toBe("ada");
     expect(payload).toMatchObject({ message: "hi Ada", userId: "local" });
-    // The synchronous round-trip shows a cancellable "Waiting…" status.
-    expect(screen.getByText(/waiting for a reply/i)).toBeTruthy();
+    // The synchronous round-trip shows a cancellable live "thinking" status,
+    // named for the persona being addressed (presence Tier 0).
+    expect(screen.getByText(/ada is thinking/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /cancel/i })).toBeTruthy();
 
     resolveSend({ reply: "Hi!", agent_display_name: "Ada" });
     await waitFor(() =>
-      expect(screen.queryByText(/waiting for a reply/i)).toBeNull(),
+      expect(screen.queryByText(/ada is thinking/i)).toBeNull(),
     );
   });
 
