@@ -202,9 +202,13 @@ func TestChannelPublish_FullChain_RESTToGRPCFanout(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &pubResp))
 	require.NotEmpty(t, pubResp.ID, "publish response must echo orchestrator-assigned id")
 
-	// `ChannelRouter.fanout` BLOCKS on dispatch completion — by the time
-	// the 201 is written, every recipient gRPC server has received its
-	// event. No polling / Eventually loop needed.
+	// The REST handler publishes via `ChannelRouter.PublishAsync`: the 201 is
+	// written at the persistence boundary and fanout runs on a detached
+	// goroutine (RFC 0048 console publish-latency fix). Drain the in-flight
+	// fanout before snapshotting so the wire-shape assertions are
+	// deterministic — `WaitForPendingFanout` is the same drain a graceful
+	// shutdown uses.
+	router.WaitForPendingFanout()
 	bobEvents := recBob.snapshot()
 	carolEvents := recCarol.snapshot()
 

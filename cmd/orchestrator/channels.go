@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -20,6 +21,16 @@ import (
 // Defined here (next to [initChannels]) rather than in main.go's flag
 // block to keep all channels-specific wiring co-located.
 var channelsDB = flag.String("channels-db", "data/channels.db", "SQLite path for RFC 0011 channels")
+
+// channelFanoutDrainTimeout bounds how long shutdown waits for in-flight
+// detached fanout to complete before closing the channels store (see the
+// cleanup in [initChannels]). This drain runs in the deferred chanCleanup,
+// AFTER main's shutdownDrainTimeout (12s) wg.Wait() select returns — the two are
+// sequential, not nested — so it adds AT MOST this 10s on top rather than fitting
+// within the 12s. Sized as a standalone bound (under the main budget, so it reads
+// as the same order of magnitude) that still guarantees a finite exit: a round
+// wedged on a silent agent cannot hang the process indefinitely.
+const channelFanoutDrainTimeout = 10 * time.Second
 
 // initChannels brings the RFC 0011 channels subsystem online.
 //
@@ -147,6 +158,27 @@ func initChannels(
 	}
 	dispatcher := selectChannelDispatcher(reg, sessionResolver, epochID, logger)
 	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)
+	// Drain in-flight detached fanout (RFC 0048 console publish-latency fix:
+	// the REST handler returns at the persistence boundary and runs fanout on a
+	// tracked goroutine) before closing the store, so a shutdown mid-round
+	// completes its deliveries rather than abandoning them. The drain is BOUNDED
+	// by channelFanoutDrainTimeout: a round wedged on a silent agent (under
+	// floor control, up to M×turnTimeout — the fanout context is intentionally
+	// non-cancellable) must not hang process exit past the shutdown budget. On
+	// timeout the stragglers are abandoned and the store closes underneath them;
+	// they observe a closed-store error, which fanout already logs as a delivery
+	// warning rather than crashing.
+	cleanup = func() {
+		drainCtx, cancelDrain := context.WithTimeout(context.Background(), channelFanoutDrainTimeout)
+		defer cancelDrain()
+		if !router.DrainPendingFanout(drainCtx) {
+			logger.Warn("channels: fanout drain timed out; abandoning in-flight deliveries",
+				zap.Duration("timeout", channelFanoutDrainTimeout))
+		}
+		if cErr := chanStore.Close(); cErr != nil {
+			logger.Warn("channels: store close failed", zap.Error(cErr))
+		}
+	}
 	// `channels.yaml` may override the default cascade-depth cap. Apply
 	// after construction so the router's [defaults.DefaultMaxCascadeDepth]
 	// default stays the canonical "no config" value; a zero or negative
