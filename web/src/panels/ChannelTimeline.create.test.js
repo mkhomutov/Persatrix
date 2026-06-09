@@ -43,6 +43,27 @@ import {
   ApiError,
 } from "../lib/api.js";
 import { selection } from "../lib/selection.svelte.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+// Parse the disposition tokens straight out of the server's source of truth so
+// the picker-coverage guard fails when channels.go grows (or drops) a
+// disposition — the actual client-narrower-than-server drift class. The
+// constants read `RespondWhenMentioned RespondPolicy = "when_mentioned"`;
+// comment lines mentioning the type never carry `RespondPolicy = "<token>"`.
+function serverDispositionVocabulary() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(
+    resolve(here, "../../../internal/channels/channels.go"),
+    "utf8",
+  );
+  return new Set(
+    [...src.matchAll(/Respond\w+\s+RespondPolicy\s*=\s*"([a-z_]+)"/g)].map(
+      (m) => m[1],
+    ),
+  );
+}
 
 const CHANNELS = [{ id: "general", name: "General", channel_type: "group" }];
 
@@ -237,16 +258,35 @@ describe("Channel creation affordance", () => {
     ]);
   });
 
-  // Web mirror of the CLI lockstep guard
-  // (`respond_policy_wire_strings_match_server_vocabulary` in
-  // cli/src/commands/channel_dispatch.rs). The create-channel disposition
-  // picker MUST stay in lockstep with `channels.RespondPolicy`
-  // (internal/channels/channels.go): a picker narrower than the server's
-  // accepted vocabulary silently hides shipped behaviour (the v0.3.8 `chair`
-  // above all), and a wider one round-trips a 400. Without this guard the web
-  // half of the disposition surface had no protection against the exact drift
-  // class the CLI test pins.
-  it("offers exactly the server disposition vocabulary with when_mentioned first", async () => {
+  // TRUE lockstep guard (the web half of the CLI's
+  // `respond_policy_covers_server_vocabulary` in
+  // cli/src/commands/channel_dispatch.rs). A hardcoded expected list — like the
+  // order assertion below — cannot detect the server GROWING a disposition the
+  // picker never learns about, which is exactly the client-narrower-than-server
+  // regression this surface exists to prevent. So parse the dispositions out of
+  // internal/channels/channels.go and assert the picker offers exactly that
+  // set. Add a disposition server-side and forget the picker, and this fails.
+  it("offers exactly the channels.RespondPolicy vocabulary parsed from the Go source", async () => {
+    render(ChannelTimeline, { props: { userId: "local", canCreate: true } });
+    await screen.findByRole("option", { name: "General" });
+    await openForm();
+
+    const select = screen.getByRole("combobox", {
+      name: /respond policy for ada/i,
+    });
+    const offered = new Set(Array.from(select.options).map((o) => o.value));
+    const server = serverDispositionVocabulary();
+    expect(server.size).toBeGreaterThan(0);
+    expect(offered).toEqual(server);
+  });
+
+  // Order is a deliberate web UX choice (NOT the Go declaration order):
+  // `when_mentioned` MUST be first so the unset-fallback in CreateChannelForm
+  // (`respondById[id] ?? "when_mentioned"`) matches the option the browser
+  // shows for an untouched select — otherwise the form would display one value
+  // while sending another. Coverage of the vocabulary is pinned separately by
+  // the source-parsed guard above.
+  it("lists when_mentioned first, then the v0.3.8 dispositions, then always/never", async () => {
     render(ChannelTimeline, { props: { userId: "local", canCreate: true } });
     await screen.findByRole("option", { name: "General" });
     await openForm();
@@ -255,10 +295,6 @@ describe("Channel creation affordance", () => {
       name: /respond policy for ada/i,
     });
     const values = Array.from(select.options).map((o) => o.value);
-    // Order matters: `when_mentioned` must be first so the unset-fallback in
-    // CreateChannelForm (`respondById[id] ?? "when_mentioned"`) matches the
-    // option the browser shows for an untouched select — otherwise the form
-    // would display one value while sending another.
     expect(values).toEqual([
       "when_mentioned",
       "participant",
@@ -270,11 +306,14 @@ describe("Channel creation affordance", () => {
     ]);
   });
 
-  it("sends the v0.3.8 chair disposition verbatim to POST /api/v1/channels", async () => {
-    // End-to-end proof that the flagship `chair` facilitator disposition —
-    // unreachable from the web before this surface — now round-trips from the
-    // picker into the create payload unchanged (the server derives the salience
-    // signal from it; see channels.ResolveSalienceSignal).
+  it("puts the v0.3.8 chair disposition into the create-channel payload", async () => {
+    // Proves the picker threads the flagship `chair` facilitator disposition —
+    // unreachable from the web before this surface — into the create payload
+    // unchanged. The api client is mocked here, so this asserts the client
+    // boundary only; server-side acceptance + normalization of `chair` (to the
+    // legacy `always` wire value, with the salience signal derived from it) is
+    // covered by the Go store tests — CreateChannelWithMembers /
+    // channels.ResolveSalienceSignal.
     render(ChannelTimeline, { props: { userId: "local", canCreate: true } });
     await screen.findByRole("option", { name: "General" });
     await openForm();
