@@ -76,7 +76,10 @@ describe("removeChannelMember", () => {
     expect(path).toBe("/api/v1/channels/group%3Aplanning/members/ada");
     expect(init.method).toBe("DELETE");
     expect(init.body).toBeUndefined();
-    expect(init.headers).toBeUndefined();
+    // A bodyless DELETE sends no Content-Type, but still carries the console's
+    // X-Agent-ID so the write is attributed rather than anonymous (api.js
+    // consoleHeaders).
+    expect(init.headers).toEqual({ "X-Agent-ID": "web-console" });
   });
 
   it("surfaces an ApiError on a 404 (channel or member absent)", async () => {

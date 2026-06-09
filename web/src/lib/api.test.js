@@ -22,6 +22,8 @@ function jsonResponse(body, ok = true, status = 200) {
   };
 }
 
+// Requests carry a second fetch arg (init with the console X-Agent-ID; see
+// api.js CONSOLE_AGENT_ID), so path assertions read calls[i][0] and ignore it.
 describe("loadBootstrap", () => {
   it("fetches config and context and returns both", async () => {
     const config = { panels: { chat: { enabled: true, available: true } } };
@@ -38,8 +40,9 @@ describe("loadBootstrap", () => {
     const result = await loadBootstrap();
 
     expect(result).toEqual({ config, context });
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/ui/config");
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/ui/context");
+    const paths = fetchMock.mock.calls.map((c) => c[0]);
+    expect(paths).toContain("/api/v1/ui/config");
+    expect(paths).toContain("/api/v1/ui/context");
   });
 
   it("throws an ApiError when an endpoint responds non-2xx", async () => {
@@ -103,7 +106,7 @@ describe("listAgents", () => {
     const result = await listAgents();
 
     expect(result).toEqual(agents);
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/agents");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/agents");
   });
 
   it("throws an ApiError when the list endpoint responds non-2xx", async () => {
@@ -250,7 +253,7 @@ describe("listChannels", () => {
     const result = await listChannels();
 
     expect(result).toEqual(envelope);
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/channels");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/channels");
   });
 
   it("throws an ApiError when the list endpoint responds non-2xx", async () => {
@@ -294,7 +297,7 @@ describe("getChannelHistory", () => {
     const result = await getChannelHistory("general");
 
     expect(result).toEqual(body);
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/channels/general/messages");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/channels/general/messages");
   });
 
   it("appends limit and before as query params only when supplied", async () => {
@@ -373,9 +376,8 @@ describe("getChatHistory", () => {
     const result = await getChatHistory("ember-owl", { userId: "alice" });
 
     expect(result).toEqual(body);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/agents/ember-owl/chat/history?user_id=alice",
-    );
+    const path = fetchMock.mock.calls[0][0];
+    expect(path).toBe("/api/v1/agents/ember-owl/chat/history?user_id=alice");
   });
 
   it("appends limit and before as query params only when supplied", async () => {

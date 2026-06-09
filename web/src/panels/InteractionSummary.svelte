@@ -36,7 +36,18 @@
   // Re-poll cadence for a close that lands while the conversation is open. The
   // feed already head-polls messages; this is the parallel summary refresh,
   // paused while the tab is backgrounded.
+  //
+  // This refresh is the dominant load on the operator console's shared rate-
+  // limit budget: each tick fans out one request PER participant agent (the
+  // `ids.map` below), so a group channel issues N requests every REFRESH_MS.
+  // Left unbounded it kept saturating the bucket even while the message feed
+  // was already backing off a 429, so the "Live updates paused" banner never
+  // cleared. The error-backoff below mirrors ConversationFeed: on a failed
+  // refresh the cadence doubles toward MAX_BACKOFF_MS and resets to REFRESH_MS
+  // on the next success, so a rate-limited console relieves the pressure
+  // instead of amplifying it.
   const REFRESH_MS = 5000;
+  const MAX_BACKOFF_MS = 30000;
   // Single newest closed interaction per agent — the surface only shows one.
   const PER_AGENT_LIMIT = 1;
   // Skip the degenerate single-turn rows (per-event tick/task envelopes) the
@@ -45,6 +56,9 @@
 
   let record = $state(null);
   let loadToken = 0;
+  // Current inter-poll delay; doubles on a rate-limited refresh, resets on a
+  // clean one. Read by the rescheduling timer below.
+  let backoffMs = REFRESH_MS;
 
   // refresh fetches each candidate agent's latest closed interaction for the
   // scope and keeps the newest. A token guards against a stale resolution
@@ -64,6 +78,7 @@
     const ids = (agentIds ?? []).filter(Boolean);
     if (!scope || ids.length === 0) {
       record = null;
+      backoffMs = REFRESH_MS;
       return;
     }
     if (reset) {
@@ -82,6 +97,16 @@
     if (token !== loadToken) {
       return;
     }
+    // Back off only on a rate-limit (429) — the bucket is saturated, so doubling
+    // the cadence relieves it. Any other partial failure keeps the base cadence
+    // and falls through to the existing hold-vs-show logic. ApiError carries the
+    // HTTP status (api.js), so inspect the rejection reasons for a 429.
+    const rateLimited = settled.some(
+      (r) => r.status === "rejected" && r.reason?.status === 429,
+    );
+    backoffMs = rateLimited
+      ? Math.min(backoffMs * 2, MAX_BACKOFF_MS)
+      : REFRESH_MS;
     const fulfilled = settled.filter((r) => r.status === "fulfilled");
     const records = fulfilled.flatMap((r) => r.value?.interactions ?? []);
     const next = pickLatestClosed(records);
@@ -104,19 +129,38 @@
     refresh({ reset: true });
   });
 
-  // Catch a close that happens while the conversation stays open. One interval
-  // for the component lifetime; it reads the current props at fire time.
+  // Catch a close that happens while the conversation stays open. A
+  // self-rescheduling timer (not a fixed setInterval) so a rate-limited refresh
+  // can stretch the next delay via backoffMs; a backgrounded tab skips the
+  // fetch and rechecks at the base cadence. One chain for the component
+  // lifetime, reading the current props at fire time.
   $effect(() => {
     if (typeof window === "undefined") {
       return;
     }
-    const timer = setInterval(() => {
+    let timer = null;
+    let cancelled = false;
+    function arm(delay) {
+      timer = setTimeout(tick, delay);
+    }
+    async function tick() {
       if (typeof document !== "undefined" && document.hidden) {
+        arm(REFRESH_MS);
         return;
       }
-      refresh();
-    }, REFRESH_MS);
-    return () => clearInterval(timer);
+      await refresh();
+      if (cancelled) {
+        return;
+      }
+      arm(backoffMs);
+    }
+    arm(REFRESH_MS);
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+    };
   });
 
   const unavailable = $derived(

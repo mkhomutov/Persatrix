@@ -330,4 +330,56 @@ describe("InteractionSummary", () => {
       screen.queryByRole("status", { name: /interaction summary/i }),
     ).toBeNull();
   });
+
+  it("backs off its poll cadence after a 429 instead of hammering the shared bucket", async () => {
+    // The per-participant fan-out is the dominant load on the console's shared
+    // anonymous rate-limit budget. A 429 must stretch the next poll (doubling
+    // toward the cap) rather than keep firing every REFRESH_MS — otherwise the
+    // summary refresh keeps the bucket saturated while the message feed is
+    // already backing off, so the "Live updates paused" banner never clears.
+    vi.useFakeTimers();
+    let rateLimited = false;
+    // A real 429 is a RESOLVED non-ok response (api.js getJSON →
+    // errorFromResponse → ApiError with status 429), not a rejected fetch — a
+    // rejected fetch is a status-0 transport error, which must NOT trigger the
+    // rate-limit backoff.
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        rateLimited
+          ? jsonResponse(
+              { error: "rate limit exceeded", code: "RATE_LIMITED" },
+              false,
+              429,
+            )
+          : jsonResponse({ interactions: [record()] }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSummary();
+    await vi.waitFor(() => {
+      expect(
+        screen.queryByRole("status", { name: /interaction summary/i }),
+      ).not.toBeNull();
+    });
+
+    // Settle to a clean baseline: the mount refresh succeeded, so the chain is
+    // at the base 5s cadence. Clear the counter and start failing.
+    fetchMock.mockClear();
+    rateLimited = true;
+
+    // Window 1 (next 5s): the pending tick fires once and hits the 429, which
+    // doubles the cadence to 10s.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Window 2 (the following 5s): NO poll — the backoff stretched the next
+    // delay to 10s. On the old fixed setInterval this window would have fired.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Window 3: at the 10s mark the backed-off poll fires.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
