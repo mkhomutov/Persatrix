@@ -381,6 +381,8 @@ No proto changes. No Go orchestrator changes (interaction lifecycle is agent-loc
 
 **Next critical-path PR**: PR 5 (channel-recall via interaction-bounded reads), jointly delivered with **RFC 0011 PR 5** — channel messages flow through `InteractionTracker.add_turn` rather than per-event episodic writes (see §E and [0011-pr-plan.md PR 5](0011-pr-plan.md)). Both PRs unblocked as of 2026-05-06.
 
+**Update (2026-06-09) — interaction-summary *surface* landed in v0.3.8.** The per-interaction summary §C/§D has *persisted* at close since this RFC's PR 4; v0.3.8 **surfaces** it (the summariser is unchanged) so a converged brainstorm hands back a readable result. The [interaction-summary surface PR plan](0020-interaction-summary-surface-pr-plan.md) wired every new close *trigger* — the RFC 0030 Layer 4 end-vote (a `structural` close) and the Layer 1 cost ceiling (a new `cost` `CloseReason`) — through the same summarising close path, exposed the closed-interaction summary via `GET /api/v1/agents/{id}/interactions/closed`, and rendered it in the web console conversation view and the `persatrix agent interactions` CLI; the failure sentinel is surfaced honestly. Acceptance: [`MT-INTERACTION-SUMMARY-001`](../manual-tests/MT-INTERACTION-SUMMARY-001.md).
+
 ## Related Documentation
 
 - [RFC 0005](0005-persona-agent-memory.md) — Episode model, relationship memory, `record_interaction` (this RFC reinterprets the granularity of both).

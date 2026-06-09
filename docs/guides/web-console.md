@@ -159,6 +159,24 @@ user-visible message rather than crashing the panel.
    a group channel; the [RFC 0011](../rfcs/0011-channels-bridges.md) mention
    fan-out surfaces the agent replies on the next poll.
 
+### The interaction-summary affordance (v0.3.8)
+
+When a conversation **closes** — a group brainstorm ends on a Layer 4 end-vote,
+trips the Layer 1 cost ceiling, or goes idle — the conversation view renders an
+**"interaction closed" affordance** below the live turns, carrying the
+[RFC 0020](../rfcs/0020-interaction-lifecycle.md) one-per-interaction **summary**
+and the close trigger (*went idle* / *ended* / *cost limit reached*). This is the
+"a real result" half of the v0.3.8 *Conversations that converge* story: a
+terminated brainstorm hands back a readable synthesis, not just a stop.
+
+It is **additive and self-fetching** — an open interaction's live turns render
+exactly as before, and the affordance appears only at close (reading
+`GET /api/v1/agents/{id}/interactions/closed`, merged across the channel's
+participants). If the on-close summariser failed, the affordance shows an honest
+"summary unavailable" state rather than a blank. The same summary is readable
+from the terminal via `persatrix agent interactions <agent>` (see
+[channels.md §"The interaction-summary surface"](channels.md#the-interaction-summary-surface-rfc-0020--v038)).
+
 ---
 
 ## Creating a channel
