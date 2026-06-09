@@ -23,8 +23,7 @@
   //   channel the scope IS the `group:` id, scopes.py `scope_for_group`).
   // agentIds — the channel's participating personas to query (a DM's peer, or a
   //   group's members), already free of the human principal.
-  // agentsById — reserved for future participant decoration; unused today.
-  let { scope = "", agentIds = [], agentsById = {} } = $props();
+  let { scope = "", agentIds = [] } = $props();
 
   // Re-poll cadence for a close that lands while the conversation is open. The
   // feed already head-polls messages; this is the parallel summary refresh,

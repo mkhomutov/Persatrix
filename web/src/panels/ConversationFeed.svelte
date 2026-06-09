@@ -249,5 +249,5 @@
      interaction, below the live turns. Self-fetching + additive — renders
      nothing while the conversation is open. -->
 {#if channelId}
-  <InteractionSummary scope={channelId} agentIds={summaryAgentIds} {agentsById} />
+  <InteractionSummary scope={channelId} agentIds={summaryAgentIds} />
 {/if}

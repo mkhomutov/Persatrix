@@ -44,7 +44,6 @@ function renderSummary(props = {}) {
     props: {
       scope: "group:planning",
       agentIds: ["ember-owl"],
-      agentsById: {},
       ...props,
     },
   });
@@ -166,7 +165,6 @@ describe("InteractionSummary", () => {
     await rerender({
       scope: "group:other",
       agentIds: ["iron-fox"],
-      agentsById: {},
     });
 
     await vi.waitFor(() => {
@@ -193,7 +191,6 @@ describe("InteractionSummary", () => {
     await rerender({
       scope: "group:other",
       agentIds: ["iron-fox"],
-      agentsById: {},
     });
 
     await vi.waitFor(() => {

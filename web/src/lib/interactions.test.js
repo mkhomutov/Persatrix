@@ -28,10 +28,11 @@ describe("pickLatestClosed", () => {
     expect(pickLatestClosed(records)).toBe(newest);
   });
 
-  it("de-dupes the same interaction reported by multiple agents", () => {
+  it("collapses the same interaction reported by multiple agents to one record", () => {
     // Each participating agent persists its own summary row for the shared
-    // interaction; the surface shows one. Same interaction_id, same close ->
-    // a single record, not two.
+    // interaction. The reducer doesn't dedupe — it returns the single newest
+    // record, and two rows sharing an interaction_id + closed_at collapse to
+    // one indistinguishable result, so the surface shows one affordance.
     const records = [rec("shared", 200), rec("shared", 200)];
     const picked = pickLatestClosed(records);
     expect(picked.interaction_id).toBe("shared");
