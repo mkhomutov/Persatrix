@@ -24,8 +24,12 @@ var channelsDB = flag.String("channels-db", "data/channels.db", "SQLite path for
 
 // channelFanoutDrainTimeout bounds how long shutdown waits for in-flight
 // detached fanout to complete before closing the channels store (see the
-// cleanup in [initChannels]). Kept below main's shutdownDrainTimeout (12s) so a
-// wedged round cannot push total exit past the process-wide drain budget.
+// cleanup in [initChannels]). This drain runs in the deferred chanCleanup,
+// AFTER main's shutdownDrainTimeout (12s) wg.Wait() select returns — the two are
+// sequential, not nested — so it adds AT MOST this 10s on top rather than fitting
+// within the 12s. Sized as a standalone bound (under the main budget, so it reads
+// as the same order of magnitude) that still guarantees a finite exit: a round
+// wedged on a silent agent cannot hang the process indefinitely.
 const channelFanoutDrainTimeout = 10 * time.Second
 
 // initChannels brings the RFC 0011 channels subsystem online.

@@ -51,6 +51,13 @@ const defaultMaxInFlightFanout = 512
 // values survive; only cancellation is dropped). Spawned goroutines are
 // tracked by [ChannelRouter.fanoutWG]; drain them with
 // [ChannelRouter.WaitForPendingFanout] on shutdown or in tests.
+//
+// One exception: at the in-flight ceiling (see [defaultMaxInFlightFanout]) the
+// fanout runs INLINE on the caller's goroutine and is therefore NOT tracked by
+// [ChannelRouter.fanoutWG] — the drain cannot wait for it. That is correct (an
+// inline round completes before this call returns), but it means a graceful
+// shutdown relies on the HTTP server's own in-flight-request drain, not the
+// fanout drain, to bound that round. Only reachable under pathological traffic.
 func (r *ChannelRouter) PublishAsync(ctx context.Context, msg ChannelMessage, declaredType string) error {
 	plan, err := r.publishCommit(ctx, msg, declaredType)
 	if err != nil || plan == nil {
