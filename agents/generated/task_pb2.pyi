@@ -608,6 +608,7 @@ class ClosedInteractionsRequest(google.protobuf.message.Message):
     SCOPE_FIELD_NUMBER: builtins.int
     INTERACTION_ID_FIELD_NUMBER: builtins.int
     LIMIT_FIELD_NUMBER: builtins.int
+    MIN_TURNS_FIELD_NUMBER: builtins.int
     agent_id: builtins.str
     scope: builtins.str
     """Optional: restrict to a single RFC 0020 scope (e.g. "group:room-7").
@@ -619,6 +620,12 @@ class ClosedInteractionsRequest(google.protobuf.message.Message):
     """Max rows returned (recency order by closed_at). 0 → server default;
     the server caps the value regardless.
     """
+    min_turns: builtins.int
+    """Optional minimum turn_count. 0 / unset → 1 (return everything,
+    including the degenerate single-turn rows the plan keeps retrievable).
+    Set to 2 to list only genuine multi-turn interactions and exclude the
+    single-turn tick/task envelopes from an unscoped list.
+    """
     def __init__(
         self,
         *,
@@ -626,8 +633,9 @@ class ClosedInteractionsRequest(google.protobuf.message.Message):
         scope: builtins.str = ...,
         interaction_id: builtins.str = ...,
         limit: builtins.int = ...,
+        min_turns: builtins.int = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["agent_id", b"agent_id", "interaction_id", b"interaction_id", "limit", b"limit", "scope", b"scope"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["agent_id", b"agent_id", "interaction_id", b"interaction_id", "limit", b"limit", "min_turns", b"min_turns", "scope", b"scope"]) -> None: ...
 
 global___ClosedInteractionsRequest = ClosedInteractionsRequest
 
@@ -642,6 +650,7 @@ class ClosedInteraction(google.protobuf.message.Message):
     TURN_COUNT_FIELD_NUMBER: builtins.int
     CLOSE_REASON_FIELD_NUMBER: builtins.int
     SUMMARY_FIELD_NUMBER: builtins.int
+    PARTICIPANTS_FIELD_NUMBER: builtins.int
     interaction_id: builtins.str
     scope: builtins.str
     started_at: builtins.float
@@ -661,6 +670,15 @@ class ClosedInteraction(google.protobuf.message.Message):
     "[interaction summary unavailable]" sentinel is surfaced verbatim so
     a failed summary is shown honestly (never blanked or fabricated).
     """
+    @property
+    def participants(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]:
+        """Distinct participant ids (senders) seen across the interaction's
+        turns, in first-seen order. Derived from the persisted episode
+        context (multi-turn: each turn's `sender`; single-turn: the event
+        `sender`); empty for a legacy row that predates turn capture. The
+        owning agent is not included — these are the *other* parties.
+        """
+
     def __init__(
         self,
         *,
@@ -671,8 +689,9 @@ class ClosedInteraction(google.protobuf.message.Message):
         turn_count: builtins.int = ...,
         close_reason: builtins.str = ...,
         summary: builtins.str = ...,
+        participants: collections.abc.Iterable[builtins.str] | None = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["close_reason", b"close_reason", "closed_at", b"closed_at", "interaction_id", b"interaction_id", "scope", b"scope", "started_at", b"started_at", "summary", b"summary", "turn_count", b"turn_count"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["close_reason", b"close_reason", "closed_at", b"closed_at", "interaction_id", b"interaction_id", "participants", b"participants", "scope", b"scope", "started_at", b"started_at", "summary", b"summary", "turn_count", b"turn_count"]) -> None: ...
 
 global___ClosedInteraction = ClosedInteraction
 

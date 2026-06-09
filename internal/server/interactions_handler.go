@@ -2,7 +2,9 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -26,13 +28,14 @@ func WithInteractionReader(ir executor.InteractionReader) ServerOption {
 }
 
 type closedInteractionDTO struct {
-	InteractionID string  `json:"interaction_id"`
-	Scope         string  `json:"scope"`
-	StartedAt     float64 `json:"started_at"`
-	ClosedAt      float64 `json:"closed_at"`
-	TurnCount     int32   `json:"turn_count"`
-	CloseReason   string  `json:"close_reason"`
-	Summary       string  `json:"summary"`
+	InteractionID string   `json:"interaction_id"`
+	Scope         string   `json:"scope"`
+	StartedAt     float64  `json:"started_at"`
+	ClosedAt      float64  `json:"closed_at"`
+	TurnCount     int32    `json:"turn_count"`
+	CloseReason   string   `json:"close_reason"`
+	Summary       string   `json:"summary"`
+	Participants  []string `json:"participants"`
 }
 
 type closedInteractionsResponse struct {
@@ -71,11 +74,18 @@ func (s *Server) handleGetClosedInteractions(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	minTurns, err := parseMinTurns(r)
+	if err != nil {
+		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	req := &taskpb.ClosedInteractionsRequest{
 		AgentId:       agentID,
 		Scope:         r.URL.Query().Get("scope"),
 		InteractionId: r.URL.Query().Get("interaction_id"),
 		Limit:         int32(limit),
+		MinTurns:      int32(minTurns),
 	}
 	resp, err := s.interactionReader.GetClosedInteractions(r.Context(), agentID, req)
 	if err != nil {
@@ -125,7 +135,25 @@ func (s *Server) handleGetClosedInteractions(w http.ResponseWriter, r *http.Requ
 			TurnCount:     it.GetTurnCount(),
 			CloseReason:   it.GetCloseReason(),
 			Summary:       it.GetSummary(),
+			Participants:  it.GetParticipants(),
 		})
 	}
 	writeJSON(w, out, http.StatusOK)
+}
+
+// parseMinTurns reads the optional ?min_turns floor. Absent → 0 (the
+// agent-side query treats 0 as the default of 1, returning everything
+// including single-turn rows). Present must be a positive integer; a
+// caller passes 2 to exclude the degenerate single-turn tick/task
+// envelopes from an unscoped list.
+func parseMinTurns(r *http.Request) (int, error) {
+	raw := r.URL.Query().Get("min_turns")
+	if raw == "" {
+		return 0, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 1 {
+		return 0, fmt.Errorf("min_turns must be a positive integer: %s", raw)
+	}
+	return v, nil
 }

@@ -62,6 +62,7 @@ func TestHandleGetClosedInteractions_ProjectsResponse(t *testing.T) {
 			TurnCount:     5,
 			CloseReason:   "cost",
 			Summary:       "converged on Thursday",
+			Participants:  []string{"alice", "bob"},
 		}},
 	}}
 	srv := interactionTestServer(t, reader)
@@ -82,11 +83,45 @@ func TestHandleGetClosedInteractions_ProjectsResponse(t *testing.T) {
 	assert.Equal(t, int32(5), it.TurnCount)
 	assert.Equal(t, 10.0, it.StartedAt)
 	assert.Equal(t, 20.0, it.ClosedAt)
+	assert.Equal(t, []string{"alice", "bob"}, it.Participants)
 
 	// Query params are threaded onto the gRPC request.
 	assert.Equal(t, "agent-x", reader.gotAgent)
 	assert.Equal(t, "group:room-7", reader.gotReq.GetScope())
 	assert.Equal(t, int32(5), reader.gotReq.GetLimit())
+}
+
+// min_turns lets a caller drop the degenerate single-turn rows from an
+// unscoped list. Absent → 0 (the agent-side query defaults that to 1);
+// present must be a positive integer.
+func TestHandleGetClosedInteractions_ThreadsMinTurns(t *testing.T) {
+	t.Run("present → threaded", func(t *testing.T) {
+		reader := &fakeInteractionReader{resp: &taskpb.ClosedInteractionsResponse{}}
+		srv := interactionTestServer(t, reader)
+		req := httptest.NewRequest("GET", "/api/v1/agents/agent-x/interactions/closed?min_turns=2", nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		require.Equal(t, 200, rec.Code)
+		assert.Equal(t, int32(2), reader.gotReq.GetMinTurns())
+	})
+	t.Run("absent → 0 (server defaults to 1)", func(t *testing.T) {
+		reader := &fakeInteractionReader{resp: &taskpb.ClosedInteractionsResponse{}}
+		srv := interactionTestServer(t, reader)
+		req := httptest.NewRequest("GET", "/api/v1/agents/agent-x/interactions/closed", nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		require.Equal(t, 200, rec.Code)
+		assert.Equal(t, int32(0), reader.gotReq.GetMinTurns())
+	})
+	t.Run("non-positive → 400", func(t *testing.T) {
+		reader := &fakeInteractionReader{resp: &taskpb.ClosedInteractionsResponse{}}
+		srv := interactionTestServer(t, reader)
+		req := httptest.NewRequest("GET", "/api/v1/agents/agent-x/interactions/closed?min_turns=0", nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		assert.Equal(t, 400, rec.Code)
+		assert.Nil(t, reader.gotReq, "reader must not be called on a malformed min_turns")
+	})
 }
 
 // The single-interaction fetch (?interaction_id) and the default page size

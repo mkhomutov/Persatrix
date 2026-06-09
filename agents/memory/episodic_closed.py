@@ -39,29 +39,35 @@ async def recall_closed_interactions(
     limit: int,
     scope: str | None = None,
     interaction_id: str | None = None,
+    min_turns: int = 1,
 ) -> list[aiosqlite.Row]:
     """Return closed-interaction episode rows newest-first (by ``closed_at``).
 
     Filters: ``scope`` restricts to one RFC 0020 scope (``None`` spans all
     scopes for the agent); ``interaction_id`` fetches exactly one
-    interaction (``None`` lists). ``limit`` is clamped to
+    interaction (``None`` lists); ``min_turns`` drops rows below the given
+    ``turn_count`` (clamped to ``>= 1``; the default of 1 returns every
+    closed interaction, including the degenerate single-turn rows the plan
+    keeps retrievable — pass 2 to exclude the per-event tick/task
+    envelopes from an unscoped list). ``limit`` is clamped to
     :data:`MAX_RECALL_LIMIT`.
 
     Unfinalised Phase-1 ``closing`` rows (``summary ==
-    :data:`SUMMARY_PENDING_TEXT```) are excluded — they are an internal
-    placeholder written before the background summariser runs, not a
-    result, and surfacing "[summary pending]" on the read path would be
-    both a leak and a divergence from the normal recall chokepoint
-    (:meth:`EpisodicMemory.recall`), which drops them. The *finalised*
-    ``SUMMARY_UNAVAILABLE_TEXT`` failure sentinel is **not** filtered —
-    a failed summary is shown honestly (SS3).
+    :data:`SUMMARY_PENDING_TEXT```) and blank summaries (``summary == ''``,
+    per the RFC 0020 §D ``summary != ''`` read filter) are excluded — an
+    internal placeholder / a non-result, and surfacing them on the read
+    path would be both a leak and a divergence from the normal recall
+    chokepoint (:meth:`EpisodicMemory.recall`), which drops them. The
+    *finalised* ``SUMMARY_UNAVAILABLE_TEXT`` failure sentinel is **not**
+    filtered — a failed summary is shown honestly (SS3).
     """
     clamped = max(1, min(limit, MAX_RECALL_LIMIT))
+    clamped_min_turns = max(1, min_turns)
     filters = ""
-    # ``agent_id`` then the pending-row guard bind the two leading ``?``s;
-    # the optional scope / interaction_id filters and the trailing LIMIT
-    # are appended in SQL order below.
-    params: list[object] = [agent_id, SUMMARY_PENDING_TEXT]
+    # ``agent_id``, the pending-row guard, then the min-turn floor bind the
+    # three leading ``?``s; the optional scope / interaction_id filters and
+    # the trailing LIMIT are appended in SQL order below.
+    params: list[object] = [agent_id, SUMMARY_PENDING_TEXT, clamped_min_turns]
     if scope is not None:
         filters += " AND scope = ?"
         params.append(scope)
@@ -77,6 +83,8 @@ async def recall_closed_interactions(
           AND closed_at IS NOT NULL
           AND interaction_id IS NOT NULL
           AND summary != ?
+          AND summary != ''
+          AND turn_count >= ?
           {filters}
         ORDER BY closed_at DESC
         LIMIT ?
@@ -92,6 +100,7 @@ async def closed_interactions(
     limit: int = 20,
     scope: str | None = None,
     interaction_id: str | None = None,
+    min_turns: int = 1,
 ) -> list[Episode]:
     """Read an agent's closed-interaction summaries as :class:`Episode` rows.
 
@@ -104,5 +113,6 @@ async def closed_interactions(
     rows = await recall_closed_interactions(
         episodic._ensure_db(), episodic._agent_id,
         limit=limit, scope=scope, interaction_id=interaction_id,
+        min_turns=min_turns,
     )
     return [row_to_episode(row) for row in rows]

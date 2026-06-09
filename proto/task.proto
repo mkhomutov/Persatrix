@@ -317,6 +317,11 @@ message ClosedInteractionsRequest {
   // Max rows returned (recency order by closed_at). 0 → server default;
   // the server caps the value regardless.
   int32 limit = 4;
+  // Optional minimum turn_count. 0 / unset → 1 (return everything,
+  // including the degenerate single-turn rows the plan keeps retrievable).
+  // Set to 2 to list only genuine multi-turn interactions and exclude the
+  // single-turn tick/task envelopes from an unscoped list.
+  int32 min_turns = 5;
 }
 
 message ClosedInteraction {
@@ -336,6 +341,12 @@ message ClosedInteraction {
   // "[interaction summary unavailable]" sentinel is surfaced verbatim so
   // a failed summary is shown honestly (never blanked or fabricated).
   string summary = 7;
+  // Distinct participant ids (senders) seen across the interaction's
+  // turns, in first-seen order. Derived from the persisted episode
+  // context (multi-turn: each turn's `sender`; single-turn: the event
+  // `sender`); empty for a legacy row that predates turn capture. The
+  // owning agent is not included — these are the *other* parties.
+  repeated string participants = 8;
 }
 
 message ClosedInteractionsResponse {

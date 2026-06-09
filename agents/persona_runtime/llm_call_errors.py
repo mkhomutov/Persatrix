@@ -198,7 +198,22 @@ async def handle_llm_call_exception_with_cost_close(
         isinstance(exc, BudgetExceededError)
         and exc.reason == "interaction_budget_exhausted"
     ):
-        await close_interaction_on_cost(agent, event)
+        # Best-effort: the cost-close summarises the interaction, but it
+        # must never *replace* the wallet denial the caller is waiting on.
+        # ``persist_closed_interaction`` already guards its own write; the
+        # scope-resolution / tracker call ahead of it is guarded here so an
+        # unexpected failure degrades to "no summary" rather than masking
+        # the ``BudgetExceededError`` as an opaque internal error (PR-583
+        # review).
+        try:
+            await close_interaction_on_cost(agent, event)
+        except Exception:
+            logger.warning(
+                "Agent %s: cost-close failed after interaction-budget denial; "
+                "surfacing the wallet denial without a summary",
+                agent.agent_id,  # type: ignore[attr-defined]
+                exc_info=True,
+            )
     return handle_llm_call_exception(
         exc, event=event, agent_id=agent.agent_id,  # type: ignore[attr-defined]
     )

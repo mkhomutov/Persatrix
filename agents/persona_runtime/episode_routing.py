@@ -224,7 +224,16 @@ class _EpisodeRoutingMixin:
                     "call — tracker invariant violated.",
                 )
             await self._episodic_memory.store_episode(
-                summary=summary, context=ctx,
+                # Carry the close trigger in the context blob so the
+                # read surface (``GetClosedInteractions``) can report it.
+                # The two-phase multi-turn close path
+                # (:func:`close_path.persist_closed_interaction`) has
+                # always persisted ``close_reason``; the single-turn path
+                # used to drop it, so every tick/task/approval row surfaced
+                # an empty trigger (PR-583 review). Mirror the multi-turn
+                # shape here.
+                summary=summary,
+                context={**ctx, "close_reason": structural_close.close_reason},
                 interaction_id=structural_close.interaction_id,
                 started_at=structural_close.started_at,
                 closed_at=structural_close.closed_at,

@@ -141,6 +141,60 @@ async def test_recall_surfaces_failure_sentinel(memory):
     assert rows[0].summary == SUMMARY_UNAVAILABLE_TEXT
 
 
+async def test_recall_min_turns_excludes_single_turn(memory):
+    """``min_turns`` lets a caller drop the degenerate single-turn rows.
+
+    Single-turn closes (tick / task / approval) are legitimately closed
+    interactions and stay retrievable by default (``min_turns`` unset → 1,
+    per the plan's ``turn_count=1`` contract), but an unscoped list would
+    otherwise be flooded by their per-event envelopes. ``min_turns=2``
+    restricts the list to genuine multi-turn interactions.
+    """
+    await _store_closed(
+        memory, interaction_id="i-single", scope="group:a", summary="tick env",
+        close_reason="structural", started_at=1.0, closed_at=2.0, turn_count=1,
+    )
+    await _store_closed(
+        memory, interaction_id="i-multi", scope="group:a", summary="brainstorm",
+        close_reason="cost", started_at=3.0, closed_at=4.0, turn_count=4,
+    )
+    # Default (min_turns unset → 1): both rows, the single-turn included.
+    assert {ep.interaction_id for ep in await closed_interactions(memory, limit=10)} == {
+        "i-single", "i-multi",
+    }
+    # min_turns=2: only the multi-turn interaction.
+    only_multi = await closed_interactions(memory, limit=10, min_turns=2)
+    assert [ep.interaction_id for ep in only_multi] == ["i-multi"]
+
+
+async def test_recall_excludes_empty_summary(memory):
+    """A blank summary is excluded per the §D ``summary != ''`` filter.
+
+    ``store_episode`` itself rejects an empty summary, so this filter is
+    defense-in-depth against a raw row that bypasses that guard (a future
+    write path / a migration). We force the condition with a direct
+    ``UPDATE`` to prove the read query drops it. The failure sentinel
+    (non-empty) still surfaces (SS3); only a blank — which carries no
+    information and is not a result — is dropped.
+    """
+    await _store_closed(
+        memory, interaction_id="i-blank", scope="group:a", summary="placeholder",
+        close_reason="cost", started_at=1.0, closed_at=2.0,
+    )
+    await _store_closed(
+        memory, interaction_id="i-real", scope="group:a", summary="real",
+        close_reason="cost", started_at=3.0, closed_at=4.0,
+    )
+    db = memory._ensure_db()
+    await db.execute(
+        "UPDATE episodes SET summary = '' WHERE interaction_id = ?", ("i-blank",),
+    )
+    await db.commit()
+
+    rows = await closed_interactions(memory, limit=10)
+    assert [ep.interaction_id for ep in rows] == ["i-real"]
+
+
 # ─── gRPC handler layer ───────────────────────────────────────────────────────
 
 
@@ -168,7 +222,61 @@ async def test_handler_projects_summary_and_trigger(memory):
     assert it.summary == "converged"
     assert it.close_reason == "cost"
     assert it.turn_count == 5
+    assert it.started_at == 10.0
     assert it.closed_at == 20.0
+
+
+async def test_handler_projects_participants_from_multi_turn_context(memory):
+    """Participants are the distinct turn senders, first-seen order, deduped."""
+    await memory.store_episode(
+        summary="brainstorm", interaction_id="i-1", scope="group:room-7",
+        started_at=1.0, closed_at=2.0, turn_count=3,
+        context={
+            "scope": "group:room-7", "close_reason": "cost",
+            "turns": [
+                {"at": 1.0, "payload": {"sender": "alice"}},
+                {"at": 1.5, "payload": {"sender": "bob"}},
+                {"at": 1.9, "payload": {"sender": "alice"}},  # dup
+            ],
+        },
+    )
+    agents = {"agent-x": _fake_agent(memory)}
+    resp = await handle_get_closed_interactions(
+        agents, task_pb2.ClosedInteractionsRequest(agent_id="agent-x"), MagicMock(),
+    )
+    assert list(resp.interactions[0].participants) == ["alice", "bob"]
+
+
+async def test_handler_projects_participants_from_single_turn_context(memory):
+    """Single-turn rows carry the bare ``sender`` (no ``turns`` list)."""
+    await memory.store_episode(
+        summary="Event: mention → Actions: ['reply']", interaction_id="i-1",
+        scope="mention", started_at=1.0, closed_at=2.0, turn_count=1,
+        context={"event": {}, "sender": "carol", "close_reason": "structural"},
+    )
+    agents = {"agent-x": _fake_agent(memory)}
+    resp = await handle_get_closed_interactions(
+        agents, task_pb2.ClosedInteractionsRequest(agent_id="agent-x"), MagicMock(),
+    )
+    assert list(resp.interactions[0].participants) == ["carol"]
+
+
+async def test_handler_threads_min_turns(memory):
+    await _store_closed(
+        memory, interaction_id="i-single", scope="group:a", summary="env",
+        close_reason="structural", started_at=1.0, closed_at=2.0, turn_count=1,
+    )
+    await _store_closed(
+        memory, interaction_id="i-multi", scope="group:a", summary="brainstorm",
+        close_reason="cost", started_at=3.0, closed_at=4.0, turn_count=4,
+    )
+    agents = {"agent-x": _fake_agent(memory)}
+    resp = await handle_get_closed_interactions(
+        agents,
+        task_pb2.ClosedInteractionsRequest(agent_id="agent-x", min_turns=2),
+        MagicMock(),
+    )
+    assert [it.interaction_id for it in resp.interactions] == ["i-multi"]
 
 
 async def test_handler_missing_agent_is_not_found():

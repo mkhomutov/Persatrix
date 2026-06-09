@@ -35,6 +35,41 @@ logger = logging.getLogger("Persatrix.agent.server")
 DEFAULT_CLOSED_INTERACTION_LIMIT = 20
 
 
+def _participants_from_context(ctx: object) -> list[str]:
+    """Distinct participant ids (senders) from a persisted episode context.
+
+    Two persisted context shapes carry the sender(s) (see
+    :func:`agents.persona_runtime.close_path.persist_closed_interaction`
+    for the multi-turn shape and the single-turn branch of
+    :meth:`_EpisodeRoutingMixin._store_event_episode`):
+
+    * multi-turn — ``{"turns": [{"payload": {"sender": ...}}, ...]}``: one
+      id per turn, deduplicated in first-seen order.
+    * single-turn — ``{"sender": "..."}``: the bare event sender.
+
+    Empty / missing / non-string senders are skipped, so a legacy row that
+    predates turn capture (or an autonomous TICK with no sender) yields an
+    empty list rather than a ``[""]`` artefact.
+    """
+    if not isinstance(ctx, dict):
+        return []
+    out: list[str] = []
+
+    def _add(value: object) -> None:
+        if isinstance(value, str) and value and value not in out:
+            out.append(value)
+
+    turns = ctx.get("turns")
+    if isinstance(turns, list):
+        for turn in turns:
+            payload = turn.get("payload") if isinstance(turn, dict) else None
+            if isinstance(payload, dict):
+                _add(payload.get("sender"))
+    else:
+        _add(ctx.get("sender"))
+    return out
+
+
 async def handle_get_closed_interactions(
     agents: dict[str, BaseAgent],
     request: task_pb2.ClosedInteractionsRequest,
@@ -70,6 +105,9 @@ async def handle_get_closed_interactions(
         limit=request.limit or DEFAULT_CLOSED_INTERACTION_LIMIT,
         scope=request.scope or None,
         interaction_id=request.interaction_id or None,
+        # 0 / unset → 1 (everything); a caller passes 2 to drop the
+        # degenerate single-turn rows from an unscoped list.
+        min_turns=request.min_turns or 1,
     )
     return task_pb2.ClosedInteractionsResponse(
         interactions=[
@@ -88,6 +126,7 @@ async def handle_get_closed_interactions(
                     else ""
                 ),
                 summary=ep.summary,
+                participants=_participants_from_context(ep.context),
             )
             for ep in episodes
         ],
