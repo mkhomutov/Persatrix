@@ -237,6 +237,68 @@ describe("Channel creation affordance", () => {
     ]);
   });
 
+  // Web mirror of the CLI lockstep guard
+  // (`respond_policy_wire_strings_match_server_vocabulary` in
+  // cli/src/commands/channel_dispatch.rs). The create-channel disposition
+  // picker MUST stay in lockstep with `channels.RespondPolicy`
+  // (internal/channels/channels.go): a picker narrower than the server's
+  // accepted vocabulary silently hides shipped behaviour (the v0.3.8 `chair`
+  // above all), and a wider one round-trips a 400. Without this guard the web
+  // half of the disposition surface had no protection against the exact drift
+  // class the CLI test pins.
+  it("offers exactly the server disposition vocabulary with when_mentioned first", async () => {
+    render(ChannelTimeline, { props: { userId: "local", canCreate: true } });
+    await screen.findByRole("option", { name: "General" });
+    await openForm();
+
+    const select = screen.getByRole("combobox", {
+      name: /respond policy for ada/i,
+    });
+    const values = Array.from(select.options).map((o) => o.value);
+    // Order matters: `when_mentioned` must be first so the unset-fallback in
+    // CreateChannelForm (`respondById[id] ?? "when_mentioned"`) matches the
+    // option the browser shows for an untouched select — otherwise the form
+    // would display one value while sending another.
+    expect(values).toEqual([
+      "when_mentioned",
+      "participant",
+      "chair",
+      "addressed",
+      "observer",
+      "always",
+      "never",
+    ]);
+  });
+
+  it("sends the v0.3.8 chair disposition verbatim to POST /api/v1/channels", async () => {
+    // End-to-end proof that the flagship `chair` facilitator disposition —
+    // unreachable from the web before this surface — now round-trips from the
+    // picker into the create payload unchanged (the server derives the salience
+    // signal from it; see channels.ResolveSalienceSignal).
+    render(ChannelTimeline, { props: { userId: "local", canCreate: true } });
+    await screen.findByRole("option", { name: "General" });
+    await openForm();
+
+    await fireEvent.input(
+      screen.getByRole("textbox", { name: /channel name/i }),
+      { target: { value: "standup" } },
+    );
+    await fireEvent.click(await screen.findByRole("checkbox", { name: /ada/i }));
+    await fireEvent.change(
+      screen.getByRole("combobox", { name: /respond policy for ada/i }),
+      { target: { value: "chair" } },
+    );
+    await fireEvent.click(
+      screen.getByRole("button", { name: /create channel/i }),
+    );
+
+    await waitFor(() => expect(createChannel).toHaveBeenCalledTimes(1));
+    expect(createChannel.mock.calls[0][0].members).toEqual([
+      { id: "ada", respond: "chair" },
+      { id: "local", respond: "never" },
+    ]);
+  });
+
   it("reloads the channel list and selects the newly-created channel", async () => {
     const NEW = { id: "group:standup", name: "standup", channel_type: "group" };
     listChannels

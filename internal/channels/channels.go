@@ -68,11 +68,17 @@ const (
 	// `participant` carrying a low default salience `threshold` so it clears
 	// the cheap relevance bid readily and keeps an open-floor discussion
 	// moving. It normalizes to the legacy `always` wire value (so every
-	// downstream reader is unchanged); its "chair-ness" survives only as the
-	// low [MemberConfig.Threshold] applied at config load
-	// ([DefaultChairThreshold]) — and only on the in-memory [Config] struct,
-	// not past the store/wire boundary (see the persistence/wire gap noted on
-	// [MemberConfig.Threshold]). A v0.3.8 `chair` CANNOT close an interaction
+	// downstream reader of `respond_policy` is unchanged); its "chair-ness"
+	// rides instead on the low [MemberConfig.Threshold]
+	// ([DefaultChairThreshold]) plus [MemberConfig.SalienceGated], both derived
+	// from the *declared* disposition via [ResolveSalienceSignal] at every write
+	// boundary — config load ([MemberConfig.UnmarshalYAML]) and the REST
+	// add/create paths alike. As of PR 2b those signals round-trip end-to-end
+	// (the `memberships.threshold`/`salience_gated` columns persist them and the
+	// `ChannelMessageEvent` wire fields deliver them to the agent-side bid), so
+	// a `chair` is recoverable past the store/wire boundary — the PR-1
+	// persistence/wire gap noted on [MemberConfig.Threshold] is closed. A
+	// v0.3.8 `chair` CANNOT close an interaction
 	// — convergence is owned by the deterministic governance layers — and its
 	// Layer 5 moderator hooks are reserved/inert until v0.4.0.
 	RespondChair RespondPolicy = "chair"

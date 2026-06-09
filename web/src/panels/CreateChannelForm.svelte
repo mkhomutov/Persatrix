@@ -116,8 +116,9 @@
           <!--
             The disposition vocabulary mirrors channels.RespondPolicy
             (internal/channels/channels.go): the three legacy policies plus the
-            v0.3.8 "conversations that converge" set (participant/chair/
-            addressed/observer), all accepted verbatim by POST /api/v1/channels.
+            RFC 0030 relevance-amendment set (participant/addressed/observer,
+            v0.3.7) and the v0.3.8 chair facilitator, all accepted verbatim by
+            POST /api/v1/channels.
             `when_mentioned` MUST stay the first option: respondById[id] is unset
             until the operator picks, and selectedMembers falls back to
             "when_mentioned", so the first-shown option has to match that
