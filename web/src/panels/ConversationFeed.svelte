@@ -43,6 +43,20 @@
   const presence = createPresence();
   $effect(() => () => presence.dispose());
 
+  // The conversation this presence belongs to. A DM is keyed by its peer, NOT
+  // its channel id: a fresh DM resolves its channel id only after the first send
+  // (channelId "" → "dm:…"), and that same-turn fill-in must keep the optimistic
+  // state (including the "Waiting for you" idle flash) it just set. A group is
+  // keyed by its channel id directly. When the key changes the operator has
+  // switched conversations, so reset — the optimistic signal only ever describes
+  // turns triggered in the conversation it was triggered in, and must not bleed
+  // (nor merge a stale pending set) into the next one.
+  const conversationKey = $derived(isDM ? `dm:${peerId}` : channelId);
+  $effect(() => {
+    void conversationKey;
+    presence.reset();
+  });
+
   // markThinking/clearThinking are the owner's handles onto the indicator: the
   // panel lights a turn at send/publish and clears it on cancel/error (a reply
   // clears itself via the poll-tick pruneFrom below).

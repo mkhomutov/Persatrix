@@ -3,10 +3,12 @@
 // above the composer ("Ember Owl is thinking…", "Waiting for you") so the
 // operator can see a turn is in flight rather than staring at a silent timeline
 // between the 3s polls. Kept as pure functions (no component state) so the
-// phrasing, the optimistic clear, and the escalation thresholds are unit-tested
-// directly — the PresenceBar component and its ChannelTimeline owner render over
-// the same logic without re-deriving it (the lib/format.js + lib/agents.js +
-// lib/interactions.js pattern).
+// phrasing and the optimistic clear are unit-tested directly — the PresenceBar
+// component and its ChannelTimeline owner render over the same logic without
+// re-deriving it (the lib/format.js + lib/agents.js + lib/interactions.js
+// pattern). The escalation thresholds below are exported constants; the
+// controller (lib/presence.svelte.js) drives the transitions off setTimeout,
+// covered by the timer specs in ChannelTimeline.presence.test.js.
 //
 // Tier 0 is optimistic: a DM turn is driven by the synchronous send lifecycle,
 // and a group turn by the agents an outbound message @-addressed, cleared when
@@ -66,17 +68,4 @@ export function pruneThinking(thinkingIds = [], messages = []) {
     (messages ?? []).map((m) => m && m.sender_id).filter(Boolean),
   );
   return (thinkingIds ?? []).filter((id) => id && !senders.has(id));
-}
-
-// elapsedPhase maps how long a turn has been pending to the indicator's phase:
-// "active" → "slow" (soften the copy) → "expired" (self-clear). Pure over an
-// elapsed-ms input so the thresholds are tested without timers; the component
-// drives the actual transitions off setTimeout.
-export function elapsedPhase(
-  elapsedMs,
-  { slowAfterMs = SLOW_AFTER_MS, expireAfterMs = EXPIRE_AFTER_MS } = {},
-) {
-  if (elapsedMs >= expireAfterMs) return "expired";
-  if (elapsedMs >= slowAfterMs) return "slow";
-  return "active";
 }

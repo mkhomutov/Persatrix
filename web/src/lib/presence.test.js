@@ -4,9 +4,6 @@ import {
   nameList,
   thinkingPhrase,
   pruneThinking,
-  elapsedPhase,
-  SLOW_AFTER_MS,
-  EXPIRE_AFTER_MS,
 } from "./presence.js";
 
 const AGENTS = {
@@ -107,34 +104,5 @@ describe("pruneThinking", () => {
     expect(pruneThinking([], [msg("ember-owl")])).toEqual([]);
     expect(pruneThinking(["ember-owl"], [])).toEqual(["ember-owl"]);
     expect(pruneThinking(["ember-owl"], undefined)).toEqual(["ember-owl"]);
-  });
-});
-
-describe("elapsedPhase", () => {
-  it("is active before the slow threshold", () => {
-    expect(elapsedPhase(0)).toBe("active");
-    expect(elapsedPhase(SLOW_AFTER_MS - 1)).toBe("active");
-  });
-
-  it("becomes slow at the slow threshold", () => {
-    expect(elapsedPhase(SLOW_AFTER_MS)).toBe("slow");
-    expect(elapsedPhase(EXPIRE_AFTER_MS - 1)).toBe("slow");
-  });
-
-  it("expires at the ceiling", () => {
-    expect(elapsedPhase(EXPIRE_AFTER_MS)).toBe("expired");
-    expect(elapsedPhase(EXPIRE_AFTER_MS + 5000)).toBe("expired");
-  });
-
-  it("honours overridden thresholds", () => {
-    expect(elapsedPhase(50, { slowAfterMs: 100, expireAfterMs: 200 })).toBe(
-      "active",
-    );
-    expect(elapsedPhase(150, { slowAfterMs: 100, expireAfterMs: 200 })).toBe(
-      "slow",
-    );
-    expect(elapsedPhase(250, { slowAfterMs: 100, expireAfterMs: 200 })).toBe(
-      "expired",
-    );
   });
 });

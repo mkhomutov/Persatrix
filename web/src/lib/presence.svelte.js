@@ -119,6 +119,21 @@ export function createPresence({
       }
     },
 
+    // reset clears all state and timers for a conversation switch: the optimistic
+    // signal only describes turns THIS console triggered in the conversation it
+    // was triggered in, so it must not bleed across a switch (nor merge a stale
+    // pending set into the next conversation's `add`). Unlike `remove`, it also
+    // drops a lingering idle flash — that "Waiting for you" belongs to the turn
+    // just left. The controller stays usable afterwards (vs `dispose`).
+    reset() {
+      clearTurnTimers();
+      clearTimeout(idleTimer);
+      idleTimer = null;
+      thinking = [];
+      slow = false;
+      idle = false;
+    },
+
     // dispose tears the timers down on unmount so a backgrounded tab can't fire
     // a stray state write after the panel is gone.
     dispose() {
