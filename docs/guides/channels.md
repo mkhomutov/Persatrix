@@ -701,7 +701,7 @@ deferrals, not implementation oversights:
 ## 12. Manual tests
 
 The channels surface is exercised end-to-end against a docker-composed
-orchestrator + four agents via the MT-CHANNEL series:
+orchestrator + four agents via the channel manual-test series:
 
 - [MT-CHANNEL-001](../manual-tests/MT-CHANNEL-001.md) — `list` / `join` CLI
 - [MT-CHANNEL-002](../manual-tests/MT-CHANNEL-002.md) — `send` / `reply` / `history` CLI

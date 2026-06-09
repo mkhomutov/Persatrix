@@ -136,7 +136,7 @@ summary are real LLM calls), **plus**:
    short multi-turn DM (≥ 3 turns) on a concrete topic ("help me pick a name for
    a CLI tool — here are three candidates …"), then **stop replying**.
 2. ☐ Wait past the idle window for the interaction to close.
-3. ☐ **Web**: confirm an **"Conversation went idle"** affordance appears in the
+3. ☐ **Web**: confirm a **"Conversation went idle"** affordance appears in the
    conversation view, below the live turns, carrying a readable one-paragraph
    summary of the exchange.
 4. ☐ **CLI**: run
@@ -165,7 +165,7 @@ and the CLI, with the `went idle` / `idle_gap` trigger.
    ("what should we name the new budget-lease library?"). Let the personas hold a
    few turns until **K=2 distinct** personas emit an `END_INTERACTION_VOTE`
    within the W=3 window and the interaction closes.
-2. ☐ **Web**: confirm the conversation view shows an **"Conversation ended"**
+2. ☐ **Web**: confirm the conversation view shows a **"Conversation ended"**
    affordance with the synthesised summary (the structural close — the episode
    row does not distinguish a vote-close from a plain structural close, so
    "ended" is the honest label).
