@@ -12,15 +12,35 @@ use crate::commands::channel::{
     validate_message_id, DEFAULT_HISTORY_LIMIT, DEFAULT_WATCH_INTERVAL_SECS,
 };
 
-/// `--respond` value-parser. Uppercases to clap's snake_case wire form
-/// so the CLI rejects typos locally with a friendly `possible values`
-/// list instead of round-tripping a 400 from the server.
+/// `--respond` value-parser. clap renders each variant in its `snake_case`
+/// form (via `rename_all`), so `--respond` is validated against that set
+/// locally and a typo surfaces as a friendly `possible values` list instead
+/// of round-tripping a 400 from the server.
+///
+/// The full set MUST cover exactly the `channels.RespondPolicy` constants in
+/// `internal/channels/channels.go`: the three legacy dispositions plus the
+/// RFC 0030 relevance-amendment / v0.3.8 vocabulary (`participant`/`addressed`/
+/// `observer` and the `chair` facilitator). The REST add/create handlers accept
+/// every one of them — casting to `RespondPolicy`, then normalizing to the
+/// legacy triple at the store boundary — so an allowlist narrower than the
+/// server's silently hides shipped behaviour. (Declaration order here is a
+/// client concern, not the Go order; `respond_policy_covers_server_vocabulary`
+/// enforces set-equality against the Go source.)
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 #[clap(rename_all = "snake_case")]
 pub(crate) enum RespondPolicy {
     WhenMentioned,
     Always,
     Never,
+    /// Open-floor participant: runs the v0.3.8 salience bid, biased to silence.
+    Participant,
+    /// Low-threshold facilitator (a `participant` that clears the bid more
+    /// readily); cannot close interactions in v0.3.8.
+    Chair,
+    /// Responds only when directly addressed.
+    Addressed,
+    /// Never dispatched a turn, but present in the conversation.
+    Observer,
 }
 
 impl RespondPolicy {
@@ -31,6 +51,10 @@ impl RespondPolicy {
             RespondPolicy::WhenMentioned => "when_mentioned",
             RespondPolicy::Always => "always",
             RespondPolicy::Never => "never",
+            RespondPolicy::Participant => "participant",
+            RespondPolicy::Chair => "chair",
+            RespondPolicy::Addressed => "addressed",
+            RespondPolicy::Observer => "observer",
         }
     }
 }
@@ -52,9 +76,11 @@ pub(crate) enum ChannelCommands {
         /// User identity to add (defaults to OS username, normalized)
         #[arg(long)]
         r#as: Option<String>,
-        /// Response policy: `when_mentioned` (default), `always`, or `never`.
-        /// Validated client-side via the [`RespondPolicy`] enum so typos
-        /// surface as a clap error before the server round-trip.
+        /// Response policy: `when_mentioned` (default), `always`, `never`, or
+        /// the v0.3.8 conversation vocabulary `participant` / `chair` /
+        /// `addressed` / `observer`. Validated client-side via the
+        /// [`RespondPolicy`] enum so typos surface as a clap error before the
+        /// server round-trip.
         #[arg(long, value_enum, default_value_t = RespondPolicy::WhenMentioned)]
         respond: RespondPolicy,
         #[arg(long)]
@@ -217,5 +243,97 @@ pub(crate) async fn dispatch(
             limit,
             json,
         } => cmd_channel_watch(client, server, &name, interval, limit, json).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RespondPolicy;
+    use clap::ValueEnum;
+    use std::collections::BTreeSet;
+
+    // Internal-consistency check: every variant maps to its exact wire token,
+    // and the value set is the same size as the mapping table — so a variant
+    // added without a wire token (or vice versa) trips here. This pins the
+    // variant↔token mapping; on its own it does NOT detect the *server* growing
+    // a disposition (a hardcoded table stays green when channels.go gains one).
+    // That drift is caught by `respond_policy_covers_server_vocabulary` below.
+    #[test]
+    fn respond_policy_wire_strings_are_stable() {
+        let cases = [
+            (RespondPolicy::WhenMentioned, "when_mentioned"),
+            (RespondPolicy::Always, "always"),
+            (RespondPolicy::Never, "never"),
+            (RespondPolicy::Participant, "participant"),
+            (RespondPolicy::Chair, "chair"),
+            (RespondPolicy::Addressed, "addressed"),
+            (RespondPolicy::Observer, "observer"),
+        ];
+        for (policy, wire) in cases {
+            assert_eq!(policy.as_wire_str(), wire);
+        }
+        assert_eq!(RespondPolicy::value_variants().len(), cases.len());
+    }
+
+    // TRUE lockstep guard. The regression this surface exists to prevent is
+    // "the client allowlist is narrower than the server's RespondPolicy
+    // vocabulary". A hardcoded expected list cannot catch that — it stays green
+    // when the server grows a disposition the client never learns about. So we
+    // parse the disposition tokens straight out of the server's source of truth
+    // (internal/channels/channels.go) and assert the CLI covers exactly that
+    // set. Add a `chair`-like constant server-side and forget the CLI, and this
+    // fails with the missing token named.
+    #[test]
+    fn respond_policy_covers_server_vocabulary() {
+        // Resolved relative to the crate root so the path holds regardless of
+        // the test's working directory.
+        let go_src = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../internal/channels/channels.go"
+        ))
+        .expect(
+            "channels.go must be readable for the disposition lockstep guard; \
+             update the path if internal/channels/channels.go moved",
+        );
+
+        // The constants are declared one per line inside the `const (...)`
+        // block as `RespondWhenMentioned RespondPolicy = "when_mentioned"`.
+        // `//`-comment lines that mention the type (e.g. `[RespondPolicy.
+        // Normalize]`) never carry the literal `RespondPolicy = "<token>"`, and
+        // `type RespondPolicy string` starts with `type` — so a trimmed line
+        // that starts with `Respond` and bears a quoted token after
+        // `RespondPolicy =` selects exactly the const declarations.
+        let server: BTreeSet<String> = go_src
+            .lines()
+            .map(str::trim_start)
+            .filter(|l| {
+                l.starts_with("Respond") && l.contains("RespondPolicy") && l.contains("= \"")
+            })
+            .filter_map(|l| {
+                let start = l.find('"')? + 1;
+                let end = l[start..].find('"')? + start;
+                Some(l[start..end].to_string())
+            })
+            .collect();
+
+        assert!(
+            !server.is_empty(),
+            "parsed no RespondPolicy constants from channels.go — the const \
+             declaration format changed; update this guard's parser",
+        );
+
+        let client: BTreeSet<String> = RespondPolicy::value_variants()
+            .iter()
+            .map(|p| p.as_wire_str().to_string())
+            .collect();
+
+        assert_eq!(
+            client,
+            server,
+            "CLI --respond vocabulary drifted from channels.RespondPolicy: \
+             missing from CLI = {:?}, extra in CLI = {:?}",
+            server.difference(&client).collect::<Vec<_>>(),
+            client.difference(&server).collect::<Vec<_>>(),
+        );
     }
 }

@@ -44,9 +44,13 @@ pub(crate) struct AgentResponse {
     #[tabled(display("fmt_vec"))]
     pub(crate) capabilities: Vec<String>,
     pub(crate) status: String,
-    /// Agent type (e.g. "task", "persona"). Optional for forward-compatibility
-    /// with v0.1 servers that don't return this field.
-    #[serde(default)]
+    /// Agent type (e.g. "task", "persona"). The Go server serializes this
+    /// under the JSON key `type` (`agentResponse.Type`, internal/server/types.go),
+    /// so the field MUST carry `#[serde(rename = "type")]` — without it serde
+    /// looks for a non-existent `agent_type` key and silently yields `None` on
+    /// every server. `#[serde(default)]` keeps deserialization tolerant of v0.1
+    /// servers that omit the key entirely.
+    #[serde(default, rename = "type")]
     #[tabled(skip)]
     pub(crate) agent_type: Option<String>,
     /// Human-readable display name from `agents.yaml` (e.g. "Iron Fox").

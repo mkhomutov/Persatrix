@@ -113,13 +113,33 @@
             <input type="checkbox" bind:checked={memberChecked[agent.id]} />
             {agent.name ?? agent.id}
           </label>
+          <!--
+            The disposition vocabulary covers channels.RespondPolicy
+            (internal/channels/channels.go): the three legacy policies plus the
+            RFC 0030 relevance-amendment set (participant/addressed/observer,
+            v0.3.7) and the v0.3.8 chair facilitator. POST /api/v1/channels
+            accepts every one of them — the server normalizes the disposition to
+            the legacy triple and derives the per-member salience signal from it
+            (channels.ResolveSalienceSignal), so the value is NOT persisted
+            verbatim. Option ORDER below is a UX choice, not the Go declaration
+            order; coverage of the server vocabulary is pinned by the
+            source-parsed lockstep test in ChannelTimeline.create.test.js.
+            `when_mentioned` MUST stay the first option: respondById[id] is unset
+            until the operator picks, and selectedMembers falls back to
+            "when_mentioned", so the first-shown option has to match that
+            fallback or the select would display one value while sending another.
+          -->
           <select
             aria-label={`Respond policy for ${agent.name ?? agent.id}`}
             bind:value={respondById[agent.id]}
           >
             <option value="when_mentioned">When mentioned</option>
+            <option value="participant">Participant (salience bid)</option>
+            <option value="chair">Chair (facilitator)</option>
+            <option value="addressed">Addressed only</option>
+            <option value="observer">Observer (never replies)</option>
             <option value="always">Always</option>
-            <option value="never">Never</option>
+            <option value="never">Never (post-only)</option>
           </select>
         </div>
       {/each}
