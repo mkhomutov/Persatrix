@@ -5,6 +5,7 @@ pub(crate) mod channel_render;
 pub(crate) mod channel_types;
 pub(crate) mod channel_watch;
 pub(crate) mod chat;
+pub(crate) mod interactions;
 pub(crate) mod logs;
 pub(crate) mod session;
 pub(crate) mod validate;
