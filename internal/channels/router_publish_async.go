@@ -218,6 +218,18 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 		r.metrics.MessagesPublished.Add(ctx, 1, metric.WithAttributes(attribute.String("channel_type", string(derivedType))))
 	}
 
+	// Presence Tier 1 (RFC 0048): this publish IS the sender's reply, so clear it
+	// from the channel's in-flight "thinking" set. Keyed on sender id and run on
+	// every committed publish, this covers the chat, floor, and fire-and-forget
+	// paths uniformly — an inbound user publish clears the (unmarked) user as a
+	// no-op. It MUST run here, right after the store commit and BEFORE the
+	// fanout-suppression early returns below (end-vote close, post-close drop,
+	// cascade cap): the sender's reply has landed regardless of whether it draws
+	// further fanout, so deferring the clear past those returns would strand the
+	// agent that just ended the conversation in the indicator until the TTL. See
+	// activity.go.
+	r.clearActivity(msg.ChannelID, msg.SenderID)
+
 	// RFC 0030 Layer 4 (v0.3.8) end-of-interaction signal: accumulate this
 	// publish's end-vote (if any) into the interaction's quorum and, when K
 	// distinct participants have voted within W consecutive turns, close the
@@ -263,12 +275,6 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// any subscriber receives — install the waiter on the OTHER
 	// participant's id, never on the publisher's.
 	r.waiter.Notify(msg)
-
-	// Presence Tier 1 (RFC 0048): this publish IS the sender's reply, so clear
-	// it from the channel's in-flight "thinking" set. Keyed on sender id and run
-	// on every publish, this covers the chat, floor, and fire-and-forget paths
-	// uniformly — an inbound user publish clears the (unmarked) user as a no-op.
-	r.clearActivity(msg.ChannelID, msg.SenderID)
 
 	// RFC 0030 Layer 2.5 deferred fanout (amendment D1): when a serialized
 	// floor round is active on this channel and this inbound message is a

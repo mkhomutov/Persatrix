@@ -16,16 +16,22 @@ import (
 //   - mark   — [ChannelRouter.fanout] marks the message's responders (the
 //     members [orderResponders] expects to reply, NOT the ingestion-only
 //     recipients — marking those would strand a "thinking" line on a member
-//     that will never answer).
+//     that will never answer). [ChannelRouter.runFloorTurn] re-marks each
+//     speaker when its turn is granted: a serialized round dispatches the
+//     responders one at a time, so a late speaker's round-start mark is
+//     re-stamped from its actual dispatch rather than ageing out mid-queue.
 //   - clear  — [ChannelRouter.publishCommit] clears a participant the moment any
-//     message it sent re-enters (the reply), keyed on sender id. This runs on
-//     every publish and so covers the chat, floor, and fire-and-forget paths
-//     uniformly — wherever the reply lands, it lands through publishCommit.
+//     message it sent re-enters (the reply), keyed on sender id. It runs right
+//     after the store commit and BEFORE the fanout-suppression early returns
+//     (end-vote close, post-close drop, cascade cap), so a reply clears the
+//     sender whether or not it draws further fanout — covering the chat, floor,
+//     and fire-and-forget paths uniformly.
 //   - TTL    — a read-time prune drops entries older than [activityTTL]. The
 //     fire-and-forget fanout has no server-side await, so a responder that
 //     declines or never answers has no reply to clear it; the ceiling is its
-//     only backstop. Sized above the chat handler's 30s default and the floor
-//     turn budget so a slow-but-real reply still clears via its own publish.
+//     only backstop. Sized above the chat handler's 30s default and a single
+//     floor turn budget; because each floor turn re-marks (above), the TTL is
+//     measured per turn, not across the whole serialized round.
 //
 // Correlation is in-process (a map on the router), matching the replyWaiter's
 // single-process constraint; a horizontal-scale rollout needs the same
