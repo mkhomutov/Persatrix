@@ -18,12 +18,20 @@
     closeTriggerLabel,
     isSummaryUnavailable,
   } from "../lib/interactions.js";
+  import { senderLabel } from "../lib/format.js";
 
   // scope — the RFC 0020 scope to filter on (the active channel id; for a group
   //   channel the scope IS the `group:` id, scopes.py `scope_for_group`).
   // agentIds — the channel's participating personas to query (a DM's peer, or a
   //   group's members), already free of the human principal.
-  let { scope = "", agentIds = [] } = $props();
+  // agentsById — id → agent, to render the closed interaction's `participants`
+  //   as display names (falls back to the raw id when an agent is unknown).
+  // userId — the human principal id, so a participant that is the operator
+  //   renders as "You": `participants` is the turn-SENDER set, which includes
+  //   the human, not only agents (scopes.py / episode_routing stash
+  //   `payload.sender`), so the surface must decode it the same way the message
+  //   feed does.
+  let { scope = "", agentIds = [], agentsById = {}, userId = "" } = $props();
 
   // Re-poll cadence for a close that lands while the conversation is open. The
   // feed already head-polls messages; this is the parallel summary refresh,
@@ -117,6 +125,18 @@
   const triggerLabel = $derived(
     record ? closeTriggerLabel(record.close_reason) : "",
   );
+  // The closed-interaction DTO always carries `participants` as an array (the
+  // handler normalises null → []), so a converged brainstorm names who took
+  // part. `participants` is the turn-SENDER set — the human principal as well
+  // as the agents — so decode each id with the same `senderLabel` the message
+  // feed uses: the operator → "You", a known agent → "Name — Role" (a blank
+  // name still falls back to the id), an unknown id (e.g. a since-deregistered
+  // agent) → the raw id.
+  const participantNames = $derived(
+    (record?.participants ?? []).map((id) =>
+      senderLabel(id, userId, agentsById),
+    ),
+  );
 </script>
 
 {#if record}
@@ -135,6 +155,12 @@
       <p class="unavailable">Summary unavailable for this interaction.</p>
     {:else}
       <p class="summary">{record.summary}</p>
+    {/if}
+    {#if participantNames.length > 0}
+      <p class="participants">
+        <span class="participants-label">Participants:</span>
+        {participantNames.join(", ")}
+      </p>
     {/if}
   </aside>
 {/if}
@@ -173,5 +199,13 @@
     margin: 0;
     font-style: italic;
     color: var(--text-muted, #71717a);
+  }
+  .participants {
+    margin: 0.4rem 0 0;
+    font-size: 0.75rem;
+    color: var(--text-muted, #71717a);
+  }
+  .participants-label {
+    font-weight: 600;
   }
 </style>
