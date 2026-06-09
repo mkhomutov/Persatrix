@@ -24,6 +24,7 @@ const (
 	AgentService_HealthCheck_FullMethodName           = "/persatrix.v1.AgentService/HealthCheck"
 	AgentService_SendChatMessage_FullMethodName       = "/persatrix.v1.AgentService/SendChatMessage"
 	AgentService_ReceiveChannelMessage_FullMethodName = "/persatrix.v1.AgentService/ReceiveChannelMessage"
+	AgentService_GetClosedInteractions_FullMethodName = "/persatrix.v1.AgentService/GetClosedInteractions"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -40,6 +41,11 @@ type AgentServiceClient interface {
 	SendChatMessage(ctx context.Context, in *ChatRequest, opts ...grpc.CallOption) (*ChatResponse, error)
 	// Deliver a channel message event to a subscribed agent (RFC 0011 §C).
 	ReceiveChannelMessage(ctx context.Context, in *ChannelMessageEvent, opts ...grpc.CallOption) (*TaskAck, error)
+	// Read closed-interaction summaries (v0.3.8 interaction-summary
+	// surface; RFC 0020 §C/§D). Surfaces the one-per-interaction summary
+	// persisted at close so a converged brainstorm hands back a readable
+	// result. Read-only; the summariser is unchanged.
+	GetClosedInteractions(ctx context.Context, in *ClosedInteractionsRequest, opts ...grpc.CallOption) (*ClosedInteractionsResponse, error)
 }
 
 type agentServiceClient struct {
@@ -109,6 +115,16 @@ func (c *agentServiceClient) ReceiveChannelMessage(ctx context.Context, in *Chan
 	return out, nil
 }
 
+func (c *agentServiceClient) GetClosedInteractions(ctx context.Context, in *ClosedInteractionsRequest, opts ...grpc.CallOption) (*ClosedInteractionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClosedInteractionsResponse)
+	err := c.cc.Invoke(ctx, AgentService_GetClosedInteractions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -123,6 +139,11 @@ type AgentServiceServer interface {
 	SendChatMessage(context.Context, *ChatRequest) (*ChatResponse, error)
 	// Deliver a channel message event to a subscribed agent (RFC 0011 §C).
 	ReceiveChannelMessage(context.Context, *ChannelMessageEvent) (*TaskAck, error)
+	// Read closed-interaction summaries (v0.3.8 interaction-summary
+	// surface; RFC 0020 §C/§D). Surfaces the one-per-interaction summary
+	// persisted at close so a converged brainstorm hands back a readable
+	// result. Read-only; the summariser is unchanged.
+	GetClosedInteractions(context.Context, *ClosedInteractionsRequest) (*ClosedInteractionsResponse, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -147,6 +168,9 @@ func (UnimplementedAgentServiceServer) SendChatMessage(context.Context, *ChatReq
 }
 func (UnimplementedAgentServiceServer) ReceiveChannelMessage(context.Context, *ChannelMessageEvent) (*TaskAck, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReceiveChannelMessage not implemented")
+}
+func (UnimplementedAgentServiceServer) GetClosedInteractions(context.Context, *ClosedInteractionsRequest) (*ClosedInteractionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetClosedInteractions not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -252,6 +276,24 @@ func _AgentService_ReceiveChannelMessage_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_GetClosedInteractions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClosedInteractionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).GetClosedInteractions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_GetClosedInteractions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).GetClosedInteractions(ctx, req.(*ClosedInteractionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -274,6 +316,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReceiveChannelMessage",
 			Handler:    _AgentService_ReceiveChannelMessage_Handler,
+		},
+		{
+			MethodName: "GetClosedInteractions",
+			Handler:    _AgentService_GetClosedInteractions_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -21,6 +21,7 @@ from _otel_test_helpers import counter_total
 
 from agents.memory.boundary_detectors import (
     DEFAULT_IDLE_TIMEOUT_SEC,
+    REASON_COST,
     REASON_IDLE_GAP,
     REASON_MAX_TURNS,
     REASON_SHUTDOWN,
@@ -429,6 +430,7 @@ class TestMetricEmission:
             (REASON_MAX_TURNS, "agent.interactions.closed.by_max_turns"),
             (REASON_TOPIC_SHIFT, "agent.interactions.closed.by_topic_shift"),
             (REASON_SHUTDOWN, "agent.interactions.closed.by_shutdown"),
+            (REASON_COST, "agent.interactions.closed.by_cost"),
         ],
     )
     def test_close_emits_per_reason_subtotal(self, reason, subtotal_metric):

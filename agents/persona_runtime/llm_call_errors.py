@@ -44,6 +44,7 @@ the error).
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import grpc
 import grpc.aio
@@ -52,8 +53,12 @@ from ..observability._metrics_persona_tick import tick_idle_attrs
 from ..observability.metrics import try_get_instruments
 from ..persona_types import ActionType, AgentAction, AgentEvent, EventType
 from ..wallet_client import BudgetExceededError
+from .cost_close import close_interaction_on_cost
 
-__all__ = ["handle_llm_call_exception"]
+__all__ = [
+    "handle_llm_call_exception",
+    "handle_llm_call_exception_with_cost_close",
+]
 
 # Deliberately pinned to the caller's logger name (``action_loop``)
 # rather than ``__name__`` — operator dashboards and the
@@ -170,3 +175,45 @@ def handle_llm_call_exception(
 
     # Bare provider outage — same v0.2.3 degradation shape.
     return _generic_provider_error(agent_id, exc)
+
+
+async def handle_llm_call_exception_with_cost_close(
+    agent: Any,
+    exc: BaseException,
+    event: AgentEvent,
+) -> list[AgentAction] | None:
+    """Cost-close (RFC 0030 Layer 1) then dispatch the wallet/provider error.
+
+    The RFC 0030 Layer 1 cost ceiling exhausting
+    (``BudgetExceededError(reason="interaction_budget_exhausted")``) is an
+    explicit close trigger: terminate + summarise the interaction
+    (v0.3.8 PR 1, SS2) *before* the usual
+    :func:`handle_llm_call_exception` dispatch decides whether to
+    re-raise (chat/channel) or short-circuit (TICK). A per-agent
+    ``budget_exceeded`` denial is the agent's own RFC 0023 wallet and is
+    left to the normal dispatch untouched. Returns whatever
+    :func:`handle_llm_call_exception` returns (``None`` → caller re-raises).
+    """
+    if (
+        isinstance(exc, BudgetExceededError)
+        and exc.reason == "interaction_budget_exhausted"
+    ):
+        # Best-effort: the cost-close summarises the interaction, but it
+        # must never *replace* the wallet denial the caller is waiting on.
+        # ``persist_closed_interaction`` already guards its own write; the
+        # scope-resolution / tracker call ahead of it is guarded here so an
+        # unexpected failure degrades to "no summary" rather than masking
+        # the ``BudgetExceededError`` as an opaque internal error (PR-583
+        # review).
+        try:
+            await close_interaction_on_cost(agent, event)
+        except Exception:
+            logger.warning(
+                "Agent %s: cost-close failed after interaction-budget denial; "
+                "surfacing the wallet denial without a summary",
+                agent.agent_id,  # type: ignore[attr-defined]
+                exc_info=True,
+            )
+    return handle_llm_call_exception(
+        exc, event=event, agent_id=agent.agent_id,  # type: ignore[attr-defined]
+    )

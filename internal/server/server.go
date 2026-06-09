@@ -37,8 +37,10 @@ type Server struct {
 	// Cost components (optional — nil when cost tracking is not configured).
 	costReporter *cost.CostReporter
 
-	// Chat components (optional — nil when chat dispatch is not configured).
-	chatExecutor executor.ChatExecutor
+	// Optional, nil-safe: chatExecutor dispatches chat; interactionReader
+	// (v0.3.8) reads closed-interaction summaries (nil → 503).
+	chatExecutor      executor.ChatExecutor
+	interactionReader executor.InteractionReader
 
 	// handlerWrapper optionally wraps the composed HTTP handler (e.g. otelhttp).
 	handlerWrapper func(http.Handler) http.Handler
@@ -62,14 +64,11 @@ type Server struct {
 	rateLimiter    *security.RateLimiter
 	circuitBreaker *security.CircuitBreaker
 
-	// unquarantineToken is the optional shared-secret stop-gap that
-	// gates the operator-only unquarantine endpoint until token-based
-	// auth lands in RFC 0009 Phase 4 (PR #244 review H-02). When empty,
-	// the endpoint is unauthenticated (preserves pre-PR-244 behaviour
-	// and the documented "front with an authenticating reverse proxy"
-	// posture). When set, callers must present
-	// `Authorization: Bearer <token>` and the comparison runs in
-	// constant time via crypto/subtle.
+	// unquarantineToken is the optional shared-secret stop-gap gating the
+	// operator-only unquarantine endpoint until token-based auth lands in
+	// RFC 0009 Phase 4 (PR #244 review H-02). Empty → unauthenticated
+	// (pre-PR-244 "front with an authenticating reverse proxy" posture); set
+	// → callers present `Authorization: Bearer <token>` (crypto/subtle compare).
 	unquarantineToken string
 
 	// Channel components (RFC 0011 PR 2 — optional, nil-safe).
@@ -325,6 +324,7 @@ func (s *Server) registerRoutes() {
 	// TODO(v0.2): per-IP/per-session rate limiting — chat is unauthenticated with no rate controls beyond the 300s timeout cap.
 	s.mux.HandleFunc("POST /api/v1/agents/{id}/chat", s.handleChat)
 	s.mux.HandleFunc("GET /api/v1/agents/{id}/chat/history", s.handleGetChatHistory)
+	s.mux.HandleFunc("GET /api/v1/agents/{id}/interactions/closed", s.handleGetClosedInteractions)
 
 	// Channels endpoints (RFC 0011 §C). DELETE handlers landed in PR 4b
 	// alongside the response gate; full §C surface is now implemented.
