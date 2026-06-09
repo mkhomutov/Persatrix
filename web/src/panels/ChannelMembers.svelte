@@ -130,7 +130,7 @@
               type="button"
               class="remove"
               disabled={busy}
-              aria-label={`Remove ${member.id}`}
+              aria-label={`Remove ${displayName(member.id)}`}
               onclick={() => remove(member.id)}
             >
               {busyMember === member.id ? "Removing…" : "Remove"}

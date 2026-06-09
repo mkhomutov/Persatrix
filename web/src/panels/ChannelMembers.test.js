@@ -67,8 +67,11 @@ describe("ChannelMembers", () => {
 
   it("offers no Remove button for the acting user (self-removal would lock them out with no web re-add path)", () => {
     renderMembers();
-    // A persona member is removable...
-    expect(screen.getByLabelText("Remove ada")).toBeTruthy();
+    // A persona member is removable, and the button's accessible name uses the
+    // display name shown on the row ("Ada"), not the raw id — so a screen reader
+    // announces the same identity the sighted operator sees.
+    expect(screen.getByLabelText("Remove Ada")).toBeTruthy();
+    expect(screen.queryByLabelText("Remove ada")).toBeNull();
     // ...but the acting principal is not: they are not in the agent registry,
     // so the add picker could never re-add them, and a non-member sender is
     // rejected (403) on publish. Removing themselves is an unrecoverable
@@ -91,7 +94,7 @@ describe("ChannelMembers", () => {
     const onChanged = vi.fn(() => Promise.resolve());
     renderMembers({ onChanged });
 
-    await fireEvent.click(screen.getByLabelText("Remove ada"));
+    await fireEvent.click(screen.getByLabelText("Remove Ada"));
 
     await vi.waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
     const [path, init] = fetchMock.mock.calls[0];
