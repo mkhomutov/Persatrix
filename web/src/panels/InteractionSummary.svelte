@@ -18,6 +18,7 @@
     closeTriggerLabel,
     isSummaryUnavailable,
   } from "../lib/interactions.js";
+  import { senderLabel } from "../lib/format.js";
 
   // scope — the RFC 0020 scope to filter on (the active channel id; for a group
   //   channel the scope IS the `group:` id, scopes.py `scope_for_group`).
@@ -25,7 +26,12 @@
   //   group's members), already free of the human principal.
   // agentsById — id → agent, to render the closed interaction's `participants`
   //   as display names (falls back to the raw id when an agent is unknown).
-  let { scope = "", agentIds = [], agentsById = {} } = $props();
+  // userId — the human principal id, so a participant that is the operator
+  //   renders as "You": `participants` is the turn-SENDER set, which includes
+  //   the human, not only agents (scopes.py / episode_routing stash
+  //   `payload.sender`), so the surface must decode it the same way the message
+  //   feed does.
+  let { scope = "", agentIds = [], agentsById = {}, userId = "" } = $props();
 
   // Re-poll cadence for a close that lands while the conversation is open. The
   // feed already head-polls messages; this is the parallel summary refresh,
@@ -121,10 +127,15 @@
   );
   // The closed-interaction DTO always carries `participants` as an array (the
   // handler normalises null → []), so a converged brainstorm names who took
-  // part. Map ids to display names; fall back to the id for an agent the
-  // console doesn't know (e.g. one since deregistered).
+  // part. `participants` is the turn-SENDER set — the human principal as well
+  // as the agents — so decode each id with the same `senderLabel` the message
+  // feed uses: the operator → "You", a known agent → "Name — Role" (a blank
+  // name still falls back to the id), an unknown id (e.g. a since-deregistered
+  // agent) → the raw id.
   const participantNames = $derived(
-    (record?.participants ?? []).map((id) => agentsById[id]?.name ?? id),
+    (record?.participants ?? []).map((id) =>
+      senderLabel(id, userId, agentsById),
+    ),
   );
 </script>
 

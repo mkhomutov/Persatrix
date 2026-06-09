@@ -253,5 +253,6 @@
     scope={channelId}
     agentIds={summaryAgentIds}
     {agentsById}
+    {userId}
   />
 {/if}

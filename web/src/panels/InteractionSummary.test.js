@@ -80,6 +80,34 @@ describe("InteractionSummary", () => {
     expect(region.textContent).toContain("iron-fox"); // unknown id falls back
   });
 
+  it("renders the human principal as You, not its raw id", async () => {
+    // participants is the turn-sender set, which includes the human principal
+    // (sender_id === userId), not just agents. It must read "You", matching the
+    // ChannelMessage convention — never the raw principal id.
+    stubFetch({ interactions: [record({ participants: ["local", "iron-fox"] })] });
+
+    const { container } = renderSummary({ userId: "local" });
+
+    await screen.findByRole("status", { name: /interaction summary/i });
+    const line = container.querySelector(".participants");
+    expect(line.textContent).toContain("You");
+    expect(line.textContent).not.toContain("local");
+  });
+
+  it("falls back to the id for a known agent with a blank name", async () => {
+    // An agent present in agentsById but with an empty name must still render
+    // its id, never a blank token in the comma-joined list.
+    stubFetch({ interactions: [record({ participants: ["ember-owl"] })] });
+
+    const { container } = renderSummary({
+      agentsById: { "ember-owl": { id: "ember-owl", name: "" } },
+    });
+
+    await screen.findByRole("status", { name: /interaction summary/i });
+    const line = container.querySelector(".participants");
+    expect(line.textContent).toContain("ember-owl");
+  });
+
   it("renders participants even when the summary itself is unavailable", async () => {
     // The close happened and who took part is known; only the synthesis failed.
     stubFetch({
