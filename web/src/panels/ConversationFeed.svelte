@@ -12,11 +12,30 @@
   // re-fetch per tick). A loadToken invalidates in-flight work when the channel
   // switches, so a stale resolution can't write to the wrong conversation.
   import { getChannelHistory } from "../lib/api.js";
+  import { participantAgentIds } from "../lib/interactions.js";
   import ChannelMessage from "./ChannelMessage.svelte";
+  import InteractionSummary from "./InteractionSummary.svelte";
 
   // channelId — the conversation to show ("" = a clean empty view, e.g. a fresh
   //   DM with no channel yet); userId/agentsById — sender decoration.
-  let { channelId, userId, agentsById = {} } = $props();
+  // isDM/peerId/members — describe the active conversation's participants so the
+  //   v0.3.8 interaction-summary surface can query their closed-interaction
+  //   summaries (a DM's peer, or a group channel's members); the active channel
+  //   id doubles as the RFC 0020 scope.
+  let {
+    channelId,
+    userId,
+    agentsById = {},
+    isDM = false,
+    peerId = "",
+    members = [],
+  } = $props();
+
+  // The personas whose closed-interaction summaries the surface queries for this
+  // scope, with the human principal excluded. Empty → no affordance.
+  const summaryAgentIds = $derived(
+    participantAgentIds({ isDM, peerId, members, exclude: userId }),
+  );
 
   const POLL_INTERVAL_MS = 3000;
   const MAX_BACKOFF_MS = 30000;
@@ -224,4 +243,11 @@
       <ChannelMessage {message} {userId} {agentsById} />
     {/each}
   </ol>
+{/if}
+
+<!-- Interaction-summary surface (v0.3.8): the synthesised outcome of a closed
+     interaction, below the live turns. Self-fetching + additive — renders
+     nothing while the conversation is open. -->
+{#if channelId}
+  <InteractionSummary scope={channelId} agentIds={summaryAgentIds} {agentsById} />
 {/if}

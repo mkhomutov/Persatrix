@@ -457,7 +457,7 @@
         Select a persona to direct-message, or a channel to watch.
       </p>
     {:else}
-      <ConversationFeed bind:this={feed} channelId={activeChannel} {userId} {agentsById} />
+      <ConversationFeed bind:this={feed} channelId={activeChannel} {userId} {agentsById} {isDM} peerId={selectedAgent} members={selectedChannelMembers} />
     {/if}
 
     {#if isDM}
