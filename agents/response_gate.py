@@ -83,6 +83,7 @@ __all__ = [
     "POLICY_NEVER",
     "POLICY_OBSERVER",
     "POLICY_PARTICIPANT",
+    "POLICY_UNKNOWN",
     "POLICY_WHEN_MENTIONED",
     "GateDecision",
     "evaluate_response_gate",
@@ -111,15 +112,15 @@ POLICY_OBSERVER: Final[str] = "observer"
 
 # RFC 0030 Tier B (v0.3.8): `chair` is a low-threshold facilitator — a
 # `participant` whose low salience `threshold` lets it clear the relevance
-# bid readily. On the wire it is normalized to `always` by the Go loader
-# (the low threshold rides on the in-memory Go config struct — it is not on
-# this wire, nor in the membership row), so the gate normally never sees
-# `chair`; it is recognized here as defence-in-depth, the same as the other
-# disposition aliases. The chair's behaviour (the low-threshold bid + the
-# inert Layer 5 hooks) lives in the Tier B bid stage downstream of this pure
-# gate, not here — and that stage cannot read the threshold until a later PR
-# carries it across the store/wire boundary (see MemberConfig.Threshold in
-# internal/channels/config.go).
+# bid readily. The Go loader normalizes it to `always` on both the membership
+# row and the wire `respond_policy`, so the gate normally never sees `chair`;
+# it is recognized here as defence-in-depth, the same as the other disposition
+# aliases. The chair's distinguishing low `threshold` does not ride
+# `respond_policy` — it travels on the separate `memberships.threshold` column
+# and the `ChannelMessageEvent.threshold` proto field (PR 2b, landed). The
+# chair's behaviour (the low-threshold bid + the inert Layer 5 hooks) lives in
+# the Tier B bid stage downstream of this pure gate
+# (agents/persona_runtime/salience_gate.py), not here.
 POLICY_CHAIR: Final[str] = "chair"
 
 # Disposition → legacy alias map, applied once to the incoming policy so
@@ -162,6 +163,15 @@ POLICY_DEFENSE_IN_DEPTH: Final[str] = "defense_in_depth"
 # breaking down ``gated`` by ``policy`` must be able to tell apart.
 POLICY_LOW_SALIENCE: Final[str] = "low_salience"
 
+# A bounded sentinel label for the fail-closed unknown/empty-policy branch.
+# The wire-side validator already rejects unknown ``respond_policy`` values, so
+# this branch should not fire in production; if it does, the metric ``policy``
+# label must stay low-cardinality rather than echo the raw (attacker- or
+# bug-supplied) wire string onto ``channel.messages.gated`` — the same bounded-
+# label discipline as POLICY_DEFENSE_IN_DEPTH / POLICY_LOW_SALIENCE. The raw
+# value is not lost: it is logged at warn (``raw_policy``) for diagnosis.
+POLICY_UNKNOWN: Final[str] = "unknown"
+
 # RFC 0030 relevance amendment Tier A (v0.3.7), decision D3 / amendment
 # OQ #5 (adopted default): the broadcast sentinel. A message addressed to
 # the *room* rather than to specific members carries this reserved token in
@@ -192,11 +202,23 @@ class GateDecision:
         respond: ``True`` when the persona runtime should proceed with
             memory recall + LLM invocation for this event; ``False`` when
             the gate suppresses the response.
-        policy: The effective policy used for the decision (string
-            value of :data:`POLICY_WHEN_MENTIONED` /
-            :data:`POLICY_ALWAYS` / :data:`POLICY_NEVER`). Used as the
-            ``policy`` label on the ``channel.messages.gated`` metric so
-            operators can break suppression counts down by intent.
+        policy: The effective policy for the decision. The gate only ever
+            assigns a value from a **bounded** set — the canonical legacy
+            triple (:data:`POLICY_WHEN_MENTIONED` / :data:`POLICY_ALWAYS` /
+            :data:`POLICY_NEVER`), a synthetic routing-artifact label
+            (:data:`POLICY_DEFENSE_IN_DEPTH`, :data:`POLICY_UNKNOWN`), or the
+            empty string ``""`` on the two non-enforcing pass-through branches
+            (a non-CHANNEL_MESSAGE event or the legacy empty ``channel_id``,
+            both ``respond=True``); never a raw/unbounded wire string. On a
+            *suppressing* decision this value is the ``policy`` label on the
+            ``channel.messages.gated`` metric, so operators can break
+            suppression counts down by intent without a cardinality blow-up;
+            the ``""`` sentinel never reaches that counter because it only
+            fires when ``respond=False``. (The Tier-B salience suppression
+            rides the same counter with a :data:`POLICY_LOW_SALIENCE` label,
+            but that label is applied by the downstream salience stage in
+            :mod:`agents.observability._metrics_salience` — no
+            :class:`GateDecision` the gate returns ever carries it.)
         reason: Short, low-cardinality string explaining the branch.
             Suitable for log fields and span attributes; never a free-form
             error string.
@@ -413,4 +435,5 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
         "Agent %s: unknown respond_policy %r on channel %s; suppressing",
         agent_id, raw_policy, channel_id,
     )
-    return GateDecision(respond=False, policy=policy, reason="unknown_policy")
+    # Bounded metric label, not the raw ``policy`` string — see POLICY_UNKNOWN.
+    return GateDecision(respond=False, policy=POLICY_UNKNOWN, reason="unknown_policy")

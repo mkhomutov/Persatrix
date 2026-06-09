@@ -16,13 +16,17 @@ DM, an ``observer``, and the self-sender never reach the bid (TB1). Of that
 remainder, the bid runs only when the inbound event is **Tier-B-governed**
 (the channel-level ``salience_gated`` flag).
 
-**Activation note (PR 2a):** the bid inputs (``salience_gated``, per-member
-``threshold``, ``channel_size``) are carried across the store/wire boundary
-in **PR 2b** (the ``memberships.threshold`` SQLite migration + the
-``ChannelMessageEvent`` proto fields). Until then ``salience_gated`` is never
-set, so :func:`run_salience_gate` short-circuits to "not applicable" and the
-v0.3.7 response behaviour is unchanged — PR 2a is additive, mirroring the
-inertness of Tier B PR 1.
+**Activation (PR 2b, landed):** the bid inputs (``salience_gated``, per-member
+``threshold``, ``channel_size``) now cross the store/wire boundary end-to-end —
+the ``memberships.threshold``/``salience_gated`` SQLite columns persist them and
+the ``ChannelMessageEvent`` proto fields deliver them here (populated by the Go
+dispatcher in ``internal/channels/grpc_dispatcher.go``; lifted onto the event
+payload in ``agents/server_servicers.py``). :func:`run_salience_gate` therefore
+runs the bid for real on a Tier-B-governed open-floor admit. It still
+short-circuits to "not applicable" when the event is **not** governed
+(``salience_gated`` unset) — a bare legacy ``always`` member, which keeps
+replying unconditionally — so the feature stays additive over the v0.3.7
+response behaviour.
 """
 
 from __future__ import annotations
@@ -50,7 +54,8 @@ logger = logging.getLogger(__name__)
 __all__ = ["SalienceOutcome", "run_salience_gate"]
 
 # Bid inputs carried on the inbound ``CHANNEL_MESSAGE`` payload alongside
-# ``respond_policy`` / ``mentions``. Populated by the Go dispatcher in PR 2b.
+# ``respond_policy`` / ``mentions``. Populated by the Go dispatcher and lifted
+# onto the payload in ``server_servicers.py`` (RFC 0030 Tier B, PR 2b).
 _SALIENCE_GATED_KEY: str = "salience_gated"
 _SALIENCE_THRESHOLD_KEY: str = "threshold"
 _SALIENCE_CHANNEL_SIZE_KEY: str = "channel_size"

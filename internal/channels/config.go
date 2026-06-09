@@ -241,12 +241,14 @@ type MemberConfig struct {
 	// bid. The PR-1 persistence/wire gap is closed.
 	Threshold *float64
 	// SalienceGated marks this member as a salience-bid participant (RFC 0030
-	// Tier B, v0.3.8). Set at load from the *declared* disposition (before
-	// normalization collapses `participant`/`chair` to the legacy `always`
-	// wire value), so the bid-ness survives the normalization that would
-	// otherwise make a `participant` indistinguishable from a legacy `always`.
-	// Carried by [ReconcileConfig] onto the store-side [Member.SalienceGated].
-	// See [ResolveSalienceSignal] for the derivation rule.
+	// Tier B, v0.3.8). Derived at load by [ResolveSalienceSignal] from the
+	// *declared* disposition (before normalization collapses `participant`/
+	// `chair` to the legacy `always` wire value) together with any explicit
+	// `threshold`: the participant vocabulary opts in, as does a legacy `always`
+	// that carries an explicit threshold. Deriving it before normalization is
+	// what lets the bid-ness survive the collapse that would otherwise make a
+	// `participant` indistinguishable from a bare legacy `always`. Carried by
+	// [ReconcileConfig] onto the store-side [Member.SalienceGated].
 	SalienceGated bool
 }
 

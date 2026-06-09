@@ -239,15 +239,17 @@ type Member struct {
 	JoinedAt      time.Time
 
 	// SalienceGated marks this member as an open-floor *participant* subject to
-	// the RFC 0030 Tier B salience bid (v0.3.8). It is true iff the member was
-	// declared with the participant vocabulary (`participant`/`chair`) — the
-	// dispositions that opt into the bid — and false for a legacy `always`
-	// member, which keeps replying unconditionally. Because the disposition
-	// vocabulary collapses to the legacy `always` wire value on
-	// [RespondPolicy.Normalize], this boolean is the *only* thing that
-	// survives to distinguish a salience-gated participant from a legacy
-	// always-replier past the store/wire boundary; it rides the
-	// `ChannelMessageEvent.salience_gated` proto field to the agent-side seam.
+	// the RFC 0030 Tier B salience bid (v0.3.8). It is true when the member opts
+	// into the bid: declared with the participant vocabulary
+	// (`participant`/`chair`), OR a legacy `always` carrying an explicit
+	// `threshold` (the operator-set bar is itself the opt-in — see
+	// [ResolveSalienceSignal]). It is false for a *bare* legacy `always`, which
+	// keeps replying unconditionally. Because the disposition vocabulary
+	// collapses to the legacy `always` wire value on [RespondPolicy.Normalize],
+	// this boolean is the *only* thing that survives to distinguish a
+	// salience-gated participant from a bare-always replier past the store/wire
+	// boundary; it rides the `ChannelMessageEvent.salience_gated` proto field to
+	// the agent-side seam.
 	SalienceGated bool
 	// Threshold is the member's per-disposition salience `threshold` for the
 	// Tier B bid (the score it must clear to reach the quality turn). A

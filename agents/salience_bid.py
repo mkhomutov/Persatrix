@@ -34,13 +34,14 @@ Load-bearing invariants (amendment OQs / master-plan §Open-question status):
   :func:`skip_bid_for_channel_size` predicate lives here for testability;
   the caller owns the fallback.
 
-**Activation note (PR 2a):** this module is the bid *core*. The per-member
-``threshold`` and the ``channel_size`` it consumes are carried across the
-store/wire boundary in PR 2b (the SQLite ``memberships.threshold`` migration
-+ the ``ChannelMessageEvent`` proto field). Until then the action-loop seam
-(:func:`agents.persona_runtime.salience_gate.run_salience_gate`) is dormant — it
-fires only when the inbound event is flagged Tier-B-governed — so PR 2a is
-additive and the v0.3.7 response behaviour is unchanged.
+**Activation (PR 2b, landed):** this module is the bid *core*. The per-member
+``threshold`` and the ``channel_size`` it consumes now cross the store/wire
+boundary end-to-end (the SQLite ``memberships.threshold`` migration + the
+``ChannelMessageEvent`` proto fields). The action-loop seam
+(:func:`agents.persona_runtime.salience_gate.run_salience_gate`) therefore runs
+the bid for real, but only when the inbound event is flagged Tier-B-governed — a
+bare legacy ``always`` member is never governed, so the feature stays additive
+over the v0.3.7 response behaviour.
 """
 
 from __future__ import annotations
