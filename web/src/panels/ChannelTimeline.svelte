@@ -14,7 +14,7 @@
     sendChat,
     ApiError,
   } from "../lib/api.js";
-  import { channelLabel, isDMChannel } from "../lib/format.js";
+  import { isDMChannel } from "../lib/format.js";
   import { isChattable } from "../lib/agents.js";
   import { buildPublishPayload } from "../lib/mentions.js";
   import { selection } from "../lib/selection.svelte.js";
@@ -22,6 +22,8 @@
   import PublishComposer from "./PublishComposer.svelte";
   import DmComposer from "./DmComposer.svelte";
   import CreateChannelForm from "./CreateChannelForm.svelte";
+  import ChannelMembers from "./ChannelMembers.svelte";
+  import ChannelPicker from "./ChannelPicker.svelte";
   import ConversationFeed from "./ConversationFeed.svelte";
   import PersonaPicker from "./PersonaPicker.svelte";
   import PersonaHeader from "./PersonaHeader.svelte";
@@ -400,36 +402,14 @@
       />
     {/if}
 
-    {#if groupChannels.length > 0}
-      <div class="channel-picker">
-        <label>
-          Channel
-          <select bind:value={selectedChannel} onchange={onChannelChange}>
-            {#each groupChannels as channel (channel.id)}
-              <option value={channel.id}>{channelLabel(channel)}</option>
-            {/each}
-          </select>
-        </label>
-        <button type="button" class="refresh" onclick={loadChannels}>Refresh</button>
-        {#if canCreate}
-          <button
-            type="button"
-            class="new-channel"
-            onclick={() => (showCreateForm = true)}>New channel</button
-          >
-        {/if}
-      </div>
-    {:else if canCreate}
-      <!-- No group channels yet, but the operator can make one. -->
-      <div class="channel-picker">
-        <button
-          type="button"
-          class="new-channel"
-          onclick={() => (showCreateForm = true)}>New channel</button
-        >
-        <button type="button" class="refresh" onclick={loadChannels}>Refresh</button>
-      </div>
-    {/if}
+    <ChannelPicker
+      {groupChannels}
+      bind:selectedChannel
+      {canCreate}
+      {onChannelChange}
+      onRefresh={loadChannels}
+      onNewChannel={() => (showCreateForm = true)}
+    />
 
     {#if canCreate && showCreateForm}
       <CreateChannelForm
@@ -437,6 +417,20 @@
         {userId}
         onCreated={onChannelCreated}
         onCancel={() => (showCreateForm = false)}
+      />
+    {/if}
+
+    {#if canCreate && selectedChannel && !isDM}
+      <!-- Manage the watched group channel's roster (add/remove members,
+           set dispositions). Same management capability as create; hidden for
+           DMs (a DM's two members are fixed). -->
+      <ChannelMembers
+        channelId={selectedChannel}
+        members={selectedChannelMembers}
+        {agents}
+        {agentsById}
+        {userId}
+        onChanged={loadChannels}
       />
     {/if}
 
