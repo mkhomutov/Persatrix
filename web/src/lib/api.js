@@ -104,6 +104,29 @@ async function postJSON(path, body, { signal } = {}) {
   }
 }
 
+// sendNoBody issues a write whose success answer is `204 No Content` (the
+// member add/remove handlers return no body). It mirrors postJSON's error
+// contract — the server's `{error, code}` envelope on a non-2xx, a status-0
+// ApiError on a transport failure — but does NOT parse a success body. A JSON
+// `body` rides only when supplied (DELETE sends none); the Content-Type header
+// is set only then so a bodyless request doesn't claim a JSON payload.
+async function sendNoBody(method, path, body) {
+  const hasBody = body !== undefined;
+  let response;
+  try {
+    response = await fetch(path, {
+      method,
+      headers: hasBody ? { "Content-Type": "application/json" } : undefined,
+      body: hasBody ? JSON.stringify(body) : undefined,
+    });
+  } catch (cause) {
+    throw new ApiError(`network error on ${method} ${path}`, 0, { cause });
+  }
+  if (!response.ok) {
+    throw await errorFromResponse(path, response);
+  }
+}
+
 // loadBootstrap fetches the two read-only boot endpoints concurrently and
 // returns { config, context }. The SPA cannot render its panels without both
 // (config decides which panels, context supplies the principal the panels act
@@ -297,6 +320,36 @@ export async function createChannel({ name, description, members }) {
     body.description = description;
   }
   return postJSON("/api/v1/channels", body);
+}
+
+// addChannelMember adds a participant to an existing channel
+// (POST /api/v1/channels/{id}/members → 204). `respond` is one of the
+// `channels.RespondPolicy` tokens (when_mentioned/always/never plus the v0.3.8
+// participant/chair/addressed/observer vocabulary); the server normalizes the
+// open-floor dispositions to the legacy triple and stamps the salience signal,
+// so a re-list reads back `respond:"always"` + `salience_gated:true` for a
+// chair/participant (channel_handlers.go handleAddChannelMember). The add is
+// idempotent — the store inserts `ON CONFLICT DO NOTHING`, so re-adding an
+// existing member is a no-op 204 (keeping the original joined_at/policy), NOT a
+// conflict. Resolves with no value on success; the error paths are a 404 (no
+// such channel) and a 400 (missing id / unknown disposition), surfaced as an
+// ApiError carrying the server's wording.
+export async function addChannelMember(channelID, { id, respond }) {
+  await sendNoBody(
+    "POST",
+    `/api/v1/channels/${encodeURIComponent(channelID)}/members`,
+    { id, respond },
+  );
+}
+
+// removeChannelMember removes a participant from a channel
+// (DELETE /api/v1/channels/{id}/members/{participant_id} → 204). Resolves with
+// no value on success; a 404 (channel or member absent) surfaces as an ApiError.
+export async function removeChannelMember(channelID, participantID) {
+  await sendNoBody(
+    "DELETE",
+    `/api/v1/channels/${encodeURIComponent(channelID)}/members/${encodeURIComponent(participantID)}`,
+  );
 }
 
 // publishMessage posts a human message into a channel
