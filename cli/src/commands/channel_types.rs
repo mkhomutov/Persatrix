@@ -15,6 +15,20 @@ pub(crate) struct ChannelMember {
     #[serde(rename = "respond")]
     pub(crate) respond_policy: String,
     pub(crate) joined_at: String,
+    /// RFC 0030 Tier B (v0.3.8) salience signal. The store normalizes the
+    /// disposition vocabulary to the legacy triple before persisting
+    /// (`chair`/`participant` → `always`, `observer` → `never`), so
+    /// `respond_policy` alone cannot tell a salience-gated participant from a
+    /// legacy `always`-replier. `salience_gated` is the one bit that survives
+    /// — it's what lets `channel info` read back the disposition an operator
+    /// set. `#[serde(default)]` tolerates a pre-v0.3.8 server that omits it.
+    #[serde(default)]
+    pub(crate) salience_gated: bool,
+    /// Per-member salience `threshold` (the bid score to clear). Tri-state:
+    /// absent → unset (bias-to-silence); a `chair` carries the low server
+    /// default. Mirrors the Go `threshold,omitempty` pointer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) threshold: Option<f64>,
 }
 
 /// JSON shape returned by `GET /api/v1/channels` (list rows) and
@@ -22,7 +36,10 @@ pub(crate) struct ChannelMember {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct ChannelView {
     pub(crate) id: String,
-    #[serde(default)]
+    // `--json` re-serializes this view, so mirror the Go `name,omitempty`:
+    // a DM/thread row (and the create 201) carry an empty name that the
+    // server drops; emitting `"name":""` would diverge from the wire.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub(crate) name: String,
     #[serde(rename = "channel_type")]
     pub(crate) channel_type: String,
@@ -35,7 +52,12 @@ pub(crate) struct ChannelView {
     /// the field absent-tolerant for forward-compat with pre-#316
     /// servers, which omitted `members` on list rows entirely — see
     /// `channel_view_deserializes_list_row_without_members` below.
-    #[serde(default)]
+    ///
+    /// `skip_serializing_if` mirrors the Go `members,omitempty`: the create
+    /// 201 omits members (server contract), so re-serializing an empty Vec as
+    /// `"members":[]` under `--json` would falsely tell a script the channel
+    /// has none — see `channel_view_serialize_matches_server_omitempty`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) members: Vec<ChannelMember>,
 }
 
@@ -108,6 +130,26 @@ pub(crate) struct PublishMessageRequest {
     pub(crate) epoch_id: String,
 }
 
+/// One `{id, respond}` member entry in a [`CreateChannelRequest`], mirroring
+/// the Go `channelMemberRequest` (internal/server/channel_types.go). The
+/// `respond` token is a `channels.RespondPolicy` wire string validated CLI-side
+/// via [`crate::commands::channel_dispatch::RespondPolicy`].
+#[derive(Serialize, Clone, Debug)]
+pub(crate) struct CreateChannelMember {
+    pub(crate) id: String,
+    pub(crate) respond: String,
+}
+
+/// Request body for `POST /api/v1/channels`. Mirrors the Go `createChannelRequest`
+/// — the `name` is sent BARE (the server derives the canonical `group:<name>`
+/// id), and at least one member is required (the server 400s otherwise).
+#[derive(Serialize)]
+pub(crate) struct CreateChannelRequest {
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) members: Vec<CreateChannelMember>,
+}
+
 #[derive(Serialize)]
 pub(crate) struct AddMemberRequest {
     pub(crate) id: String,
@@ -168,6 +210,79 @@ mod tests {
         assert_eq!(ch.members[0].id, "alice");
         assert_eq!(ch.members[0].respond_policy, "always");
         assert_eq!(ch.members[1].respond_policy, "when_mentioned");
+    }
+
+    #[test]
+    fn channel_member_deserializes_salience_signal() {
+        // GET /api/v1/channels/{id} carries the v0.3.8 Tier B signal so a
+        // normalized `always` member can be told apart from a salience-gated
+        // participant/chair. A chair surfaces gated=true + the default threshold.
+        let json = serde_json::json!({
+            "id": "alice", "respond": "always", "joined_at": "2026-05-09T10:00:00Z",
+            "salience_gated": true, "threshold": 0.15,
+        });
+        let m: ChannelMember = serde_json::from_value(json).unwrap();
+        assert_eq!(m.respond_policy, "always");
+        assert!(m.salience_gated);
+        assert_eq!(m.threshold, Some(0.15));
+    }
+
+    #[test]
+    fn channel_member_defaults_salience_signal_when_absent() {
+        // A pre-v0.3.8 server (or a legacy `always` member) omits the fields;
+        // serde defaults keep the row absent-tolerant.
+        let json = serde_json::json!({
+            "id": "bob", "respond": "when_mentioned", "joined_at": "2026-05-09T10:00:00Z",
+        });
+        let m: ChannelMember = serde_json::from_value(json).unwrap();
+        assert!(!m.salience_gated);
+        assert_eq!(m.threshold, None);
+    }
+
+    #[test]
+    fn channel_view_serialize_matches_server_omitempty() {
+        // `--json` re-serializes the typed view, so it must mirror the Go
+        // `omitempty` tags: an empty `name` (DM/thread) and an empty `members`
+        // (the create 201, which omits members) must NOT appear as `""`/`[]`.
+        // Emitting `"members":[]` on create would tell a script the channel has
+        // no members when it was just created with some.
+        let view = ChannelView {
+            id: "group:planning".into(),
+            name: String::new(),
+            channel_type: "group".into(),
+            description: String::new(),
+            created_at: "2026-05-09T10:00:00Z".into(),
+            members: Vec::new(),
+        };
+        let v = serde_json::to_value(&view).unwrap();
+        assert!(
+            v.get("name").is_none(),
+            "empty name omitted (server omitempty)"
+        );
+        assert!(
+            v.get("members").is_none(),
+            "empty members omitted (server omitempty)"
+        );
+        // description has no omitempty on the server, so it stays present.
+        assert_eq!(v.get("description").and_then(|d| d.as_str()), Some(""));
+    }
+
+    #[test]
+    fn channel_member_serialize_omits_unset_threshold() {
+        let m = ChannelMember {
+            id: "bob".into(),
+            respond_policy: "when_mentioned".into(),
+            joined_at: "2026-05-09T10:00:00Z".into(),
+            salience_gated: false,
+            threshold: None,
+        };
+        let v = serde_json::to_value(&m).unwrap();
+        assert!(v.get("threshold").is_none(), "unset threshold omitted");
+        // round-trips under the `respond` wire name.
+        assert_eq!(
+            v.get("respond").and_then(|r| r.as_str()),
+            Some("when_mentioned")
+        );
     }
 
     #[test]

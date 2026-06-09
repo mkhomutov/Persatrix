@@ -11,6 +11,7 @@ use crate::commands::channel::{
     cmd_channel_history, cmd_channel_join, cmd_channel_list, cmd_channel_send, cmd_channel_watch,
     validate_message_id, DEFAULT_HISTORY_LIMIT, DEFAULT_WATCH_INTERVAL_SECS,
 };
+use crate::commands::channel_manage::{cmd_channel_create, cmd_channel_info};
 
 /// `--respond` value-parser. clap renders each variant in its `snake_case`
 /// form (via `rename_all`), so `--respond` is validated against that set
@@ -66,6 +67,28 @@ pub(crate) enum ChannelCommands {
     /// List channels visible to the orchestrator
     List {
         /// Emit JSON instead of human-readable rows
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create a new group channel (the server derives the `group:<name>` id)
+    Create {
+        /// Bare channel name (e.g. `planning`); the server derives `group:<name>`
+        name: String,
+        /// Optional channel description
+        #[arg(long)]
+        description: Option<String>,
+        /// Add a member as `<id>` or `<id>:<disposition>` (repeatable; at least
+        /// one required). Disposition ∈ when_mentioned (default) | always |
+        /// never | participant | chair | addressed | observer.
+        #[arg(long = "member")]
+        member: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a channel's metadata, members, and their dispositions
+    Info {
+        /// Channel name (`planning`) or fully-qualified id (`group:planning`, `dm:a:b`)
+        name: String,
         #[arg(long)]
         json: bool,
     },
@@ -167,6 +190,23 @@ pub(crate) async fn dispatch(
 ) -> Result<(), String> {
     match cmd {
         ChannelCommands::List { json } => cmd_channel_list(client, server, json).await,
+        ChannelCommands::Create {
+            name,
+            description,
+            member,
+            json,
+        } => {
+            cmd_channel_create(
+                client,
+                server,
+                &name,
+                description.as_deref().unwrap_or(""),
+                &member,
+                json,
+            )
+            .await
+        }
+        ChannelCommands::Info { name, json } => cmd_channel_info(client, server, &name, json).await,
         ChannelCommands::Join {
             name,
             r#as,

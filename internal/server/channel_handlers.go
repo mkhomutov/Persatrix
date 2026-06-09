@@ -457,6 +457,8 @@ func channelToResponse(ch channels.Channel, members []channels.Member) channelRe
 				ID:            m.ParticipantID,
 				RespondPolicy: string(m.RespondPolicy),
 				JoinedAt:      m.JoinedAt,
+				SalienceGated: m.SalienceGated,
+				Threshold:     m.Threshold,
 			})
 		}
 	}
