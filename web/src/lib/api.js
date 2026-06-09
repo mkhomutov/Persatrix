@@ -328,9 +328,12 @@ export async function createChannel({ name, description, members }) {
 // participant/chair/addressed/observer vocabulary); the server normalizes the
 // open-floor dispositions to the legacy triple and stamps the salience signal,
 // so a re-list reads back `respond:"always"` + `salience_gated:true` for a
-// chair/participant (channel_handlers.go handleAddChannelMember). Resolves with
-// no value on success; a 404 (no such channel) / 409 (already a member) surfaces
-// as an ApiError carrying the server's wording.
+// chair/participant (channel_handlers.go handleAddChannelMember). The add is
+// idempotent — the store inserts `ON CONFLICT DO NOTHING`, so re-adding an
+// existing member is a no-op 204 (keeping the original joined_at/policy), NOT a
+// conflict. Resolves with no value on success; the error paths are a 404 (no
+// such channel) and a 400 (missing id / unknown disposition), surfaced as an
+// ApiError carrying the server's wording.
 export async function addChannelMember(channelID, { id, respond }) {
   await sendNoBody(
     "POST",

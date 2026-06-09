@@ -39,23 +39,28 @@ describe("addChannelMember", () => {
     expect(JSON.parse(init.body)).toEqual({ id: "ada", respond: "chair" });
   });
 
-  it("surfaces the server error envelope on a non-2xx (409 already a member)", async () => {
+  // The add is idempotent server-side (memberships INSERT ... ON CONFLICT DO
+  // NOTHING → 204), so there is NO "already a member" 409 path — a duplicate add
+  // simply succeeds. The real non-2xx the client must surface is a 404 when the
+  // channel does not exist (the store reports a foreign-key violation as
+  // ErrChannelNotFound → NOT_FOUND).
+  it("surfaces the server error envelope on a non-2xx (404 no such channel)", async () => {
     const fetchMock = vi.fn(() =>
       Promise.resolve(
-        errorResponse({ error: "already a member", code: "CONFLICT" }, 409),
+        errorResponse({ error: "channel not found", code: "NOT_FOUND" }, 404),
       ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const err = await addChannelMember("group:planning", {
+    const err = await addChannelMember("group:ghost", {
       id: "ada",
       respond: "always",
     }).catch((e) => e);
 
     expect(err).toBeInstanceOf(ApiError);
-    expect(err.status).toBe(409);
-    expect(err.message).toBe("already a member");
-    expect(err.code).toBe("CONFLICT");
+    expect(err.status).toBe(404);
+    expect(err.message).toBe("channel not found");
+    expect(err.code).toBe("NOT_FOUND");
   });
 });
 

@@ -65,6 +65,17 @@ describe("ChannelMembers", () => {
     expect(screen.getByText("local (you)")).toBeTruthy();
   });
 
+  it("offers no Remove button for the acting user (self-removal would lock them out with no web re-add path)", () => {
+    renderMembers();
+    // A persona member is removable...
+    expect(screen.getByLabelText("Remove ada")).toBeTruthy();
+    // ...but the acting principal is not: they are not in the agent registry,
+    // so the add picker could never re-add them, and a non-member sender is
+    // rejected (403) on publish. Removing themselves is an unrecoverable
+    // lockout from this surface, so the affordance is withheld.
+    expect(screen.queryByLabelText("Remove local")).toBeNull();
+  });
+
   it("offers only non-member personas as add candidates (excludes members and task agents)", () => {
     renderMembers();
     const select = screen.getByLabelText("Add persona");
@@ -111,11 +122,14 @@ describe("ChannelMembers", () => {
   });
 
   it("surfaces the server error and does not re-list when an add fails", async () => {
+    // A plausible real failure: the watched channel was deleted between the
+    // list and the add, so the server reports 404 (the add is idempotent, so
+    // there is no "already a member" conflict to assert here).
     const fetchMock = vi.fn(() =>
       Promise.resolve({
         ok: false,
-        status: 409,
-        json: () => Promise.resolve({ error: "already a member" }),
+        status: 404,
+        json: () => Promise.resolve({ error: "channel not found" }),
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -128,7 +142,9 @@ describe("ChannelMembers", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Add member" }));
 
     await screen.findByRole("alert");
-    expect(screen.getByRole("alert").textContent).toContain("already a member");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "channel not found",
+    );
     expect(onChanged).not.toHaveBeenCalled();
   });
 });

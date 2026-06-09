@@ -15,7 +15,8 @@
   // members    — [{ id, respond, joined_at, salience_gated, threshold }] from the list row.
   // agents     — full agent list (the add picker offers personas not already members).
   // agentsById — id → agent, for display names.
-  // userId     — the acting principal (flagged "(you)"; also a member, respond:"never").
+  // userId     — the acting principal (flagged "(you)"; a member but NOT removable
+  //              here — see the per-row guard below).
   // onChanged  — async () => …; called after a successful mutation to re-list.
   import { addChannelMember, removeChannelMember, ApiError } from "../lib/api.js";
   import { isChattable } from "../lib/agents.js";
@@ -118,15 +119,23 @@
           {#if salienceNote(member)}
             <span class="member-salience">{salienceNote(member)}</span>
           {/if}
-          <button
-            type="button"
-            class="remove"
-            disabled={busy}
-            aria-label={`Remove ${member.id}`}
-            onclick={() => remove(member.id)}
-          >
-            {busyMember === member.id ? "Removing…" : "Remove"}
-          </button>
+          {#if member.id !== userId}
+            <!-- The acting user is deliberately not removable here: they are the
+                 /ui/context principal, not a registered agent, so the add picker
+                 (sourced from listAgents) could never re-add them, and a
+                 non-member sender is rejected on publish (ErrNotMember → 403).
+                 Withholding the button avoids a one-click, web-unrecoverable
+                 self-lockout. -->
+            <button
+              type="button"
+              class="remove"
+              disabled={busy}
+              aria-label={`Remove ${member.id}`}
+              onclick={() => remove(member.id)}
+            >
+              {busyMember === member.id ? "Removing…" : "Remove"}
+            </button>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -134,7 +143,7 @@
 
   <form class="add-member" aria-label="Add member" onsubmit={add}>
     {#if candidates.length === 0}
-      <p class="empty">All available personas are already members.</p>
+      <p class="empty">No personas available to add.</p>
     {:else}
       <label>
         Add persona
