@@ -65,6 +65,45 @@ describe("InteractionSummary", () => {
     expect(region.textContent).toMatch(/ended|concluded/i);
   });
 
+  it("names the participants, mapping ids to display names with an id fallback", async () => {
+    // record() has participants ["ember-owl", "iron-fox"]; only ember-owl is in
+    // agentsById, so iron-fox falls back to its raw id.
+    stubFetch({ interactions: [record()] });
+
+    renderSummary({ agentsById: { "ember-owl": { id: "ember-owl", name: "Ember Owl" } } });
+
+    const region = await screen.findByRole("status", {
+      name: /interaction summary/i,
+    });
+    expect(region.textContent).toContain("Participants:");
+    expect(region.textContent).toContain("Ember Owl"); // mapped to display name
+    expect(region.textContent).toContain("iron-fox"); // unknown id falls back
+  });
+
+  it("renders participants even when the summary itself is unavailable", async () => {
+    // The close happened and who took part is known; only the synthesis failed.
+    stubFetch({
+      interactions: [record({ summary: "[interaction summary unavailable]" })],
+    });
+
+    renderSummary();
+
+    const region = await screen.findByRole("status", {
+      name: /interaction summary/i,
+    });
+    expect(region.textContent).toMatch(/unavailable/i);
+    expect(region.textContent).toContain("Participants:");
+  });
+
+  it("omits the participants line when the interaction recorded none", async () => {
+    stubFetch({ interactions: [record({ participants: [] })] });
+
+    const { container } = renderSummary();
+
+    await screen.findByRole("status", { name: /interaction summary/i });
+    expect(container.querySelector(".participants")).toBeNull();
+  });
+
   it("renders the failure sentinel as an explicit unavailable state, not a blank", async () => {
     stubFetch({
       interactions: [record({ summary: "[interaction summary unavailable]" })],

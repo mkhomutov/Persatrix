@@ -23,7 +23,9 @@
   //   channel the scope IS the `group:` id, scopes.py `scope_for_group`).
   // agentIds — the channel's participating personas to query (a DM's peer, or a
   //   group's members), already free of the human principal.
-  let { scope = "", agentIds = [] } = $props();
+  // agentsById — id → agent, to render the closed interaction's `participants`
+  //   as display names (falls back to the raw id when an agent is unknown).
+  let { scope = "", agentIds = [], agentsById = {} } = $props();
 
   // Re-poll cadence for a close that lands while the conversation is open. The
   // feed already head-polls messages; this is the parallel summary refresh,
@@ -117,6 +119,13 @@
   const triggerLabel = $derived(
     record ? closeTriggerLabel(record.close_reason) : "",
   );
+  // The closed-interaction DTO always carries `participants` as an array (the
+  // handler normalises null → []), so a converged brainstorm names who took
+  // part. Map ids to display names; fall back to the id for an agent the
+  // console doesn't know (e.g. one since deregistered).
+  const participantNames = $derived(
+    (record?.participants ?? []).map((id) => agentsById[id]?.name ?? id),
+  );
 </script>
 
 {#if record}
@@ -135,6 +144,12 @@
       <p class="unavailable">Summary unavailable for this interaction.</p>
     {:else}
       <p class="summary">{record.summary}</p>
+    {/if}
+    {#if participantNames.length > 0}
+      <p class="participants">
+        <span class="participants-label">Participants:</span>
+        {participantNames.join(", ")}
+      </p>
     {/if}
   </aside>
 {/if}
@@ -173,5 +188,13 @@
     margin: 0;
     font-style: italic;
     color: var(--text-muted, #71717a);
+  }
+  .participants {
+    margin: 0.4rem 0 0;
+    font-size: 0.75rem;
+    color: var(--text-muted, #71717a);
+  }
+  .participants-label {
+    font-weight: 600;
   }
 </style>
