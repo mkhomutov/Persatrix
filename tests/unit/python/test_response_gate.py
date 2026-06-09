@@ -25,6 +25,7 @@ from agents.persona_types import AgentEvent, EventType
 from agents.response_gate import (
     POLICY_ALWAYS,
     POLICY_DEFENSE_IN_DEPTH,
+    POLICY_LOW_SALIENCE,
     POLICY_NEVER,
     POLICY_UNKNOWN,
     POLICY_WHEN_MENTIONED,
@@ -226,6 +227,11 @@ class TestNonChannelEvents:
         d = evaluate_response_gate(evt, agent_id="bob")
         assert d.respond is True
         assert d.reason == "not_channel_message"
+        # Non-enforcing pass-through: the gate carries the empty-string
+        # sentinel here (not a named policy constant). It never reaches the
+        # ``channel.messages.gated`` metric because that counter only fires on
+        # suppression — see TestPolicyContract for the field-vs-label split.
+        assert d.policy == ""
 
     def test_legacy_chat_path_with_no_channel_id_passes_through(self):
         # The legacy ``SendChatMessage`` RPC builds CHANNEL_MESSAGE
@@ -239,6 +245,120 @@ class TestNonChannelEvents:
         d = evaluate_response_gate(evt, agent_id="bob")
         assert d.respond is True
         assert d.reason == "no_channel_id"
+        # Same empty-string sentinel as the non-CHANNEL_MESSAGE pass-through.
+        assert d.policy == ""
+
+
+# ─── GateDecision.policy contract ──────────────────────────────────
+
+
+class TestPolicyContract:
+    """Pin the ``GateDecision.policy`` field contract its docstring documents.
+
+    The docstring must keep two sets distinct (an earlier revision conflated
+    them):
+
+    * **Field values** the gate assigns to ``GateDecision.policy`` — the
+      legacy triple, the synthetic routing-artifact labels
+      (``defense_in_depth`` / ``unknown``), and the empty-string sentinel
+      ``""`` for the non-enforcing pass-through branches.
+    * **Metric labels** that can land on ``channel.messages.gated``. That set
+      is *not* the same: ``""`` never appears (the counter fires only on
+      suppression, and the ``""`` branches return ``respond=True``), while
+      ``low_salience`` *does* — but it is applied by the downstream salience
+      stage (``agents/observability/_metrics_salience.py``), never by this
+      pure gate.
+    """
+
+    # Every value evaluate_response_gate can put on GateDecision.policy.
+    _FIELD_VALUES = frozenset(
+        {
+            "",
+            POLICY_ALWAYS,
+            POLICY_NEVER,
+            POLICY_WHEN_MENTIONED,
+            POLICY_DEFENSE_IN_DEPTH,
+            POLICY_UNKNOWN,
+        }
+    )
+
+    def _all_branch_decisions(self):
+        """One representative event per gate branch."""
+        yield evaluate_response_gate(
+            AgentEvent(event_type=EventType.TICK), agent_id="bob"
+        )
+        yield evaluate_response_gate(
+            AgentEvent(
+                event_type=EventType.CHANNEL_MESSAGE,
+                sender_id="user-1",
+                payload={"content": "hi"},
+            ),
+            agent_id="bob",
+        )
+        # DM self-sender (defense_in_depth) and DM peer (always).
+        yield evaluate_response_gate(
+            _channel_event(channel_id="dm:bob:carol", sender_id="bob"),
+            agent_id="bob",
+        )
+        yield evaluate_response_gate(
+            _channel_event(channel_id="dm:bob:carol", sender_id="carol"),
+            agent_id="bob",
+        )
+        # Group self-sender (defense_in_depth).
+        yield evaluate_response_gate(
+            _channel_event(respond_policy="always", sender_id="bob"),
+            agent_id="bob",
+        )
+        # never.
+        yield evaluate_response_gate(
+            _channel_event(respond_policy="never"), agent_id="bob"
+        )
+        # always: open-floor, directed-elsewhere, mentioned, broadcast.
+        yield evaluate_response_gate(
+            _channel_event(respond_policy="always", mentions=[]), agent_id="bob"
+        )
+        yield evaluate_response_gate(
+            _channel_event(respond_policy="always", mentions=["carol"]),
+            agent_id="bob",
+        )
+        yield evaluate_response_gate(
+            _channel_event(respond_policy="always", mentions=["bob"]),
+            agent_id="bob",
+        )
+        yield evaluate_response_gate(
+            _channel_event(respond_policy="always", mentions=["@everyone"]),
+            agent_id="bob",
+        )
+        # when_mentioned: mentioned and not.
+        yield evaluate_response_gate(
+            _channel_event(respond_policy="when_mentioned", mentions=["bob"]),
+            agent_id="bob",
+        )
+        yield evaluate_response_gate(
+            _channel_event(respond_policy="when_mentioned", mentions=["carol"]),
+            agent_id="bob",
+        )
+        # unknown / empty policy.
+        yield evaluate_response_gate(
+            _channel_event(respond_policy="weekly"), agent_id="bob"
+        )
+
+    def test_emitted_policies_are_a_subset_of_the_documented_field_values(self):
+        emitted = {d.policy for d in self._all_branch_decisions()}
+        assert emitted <= self._FIELD_VALUES, emitted - self._FIELD_VALUES
+
+    def test_gate_never_emits_low_salience(self):
+        # low_salience is a metric-only label applied outside the gate; no
+        # GateDecision the gate returns may carry it.
+        emitted = {d.policy for d in self._all_branch_decisions()}
+        assert POLICY_LOW_SALIENCE not in emitted
+
+    def test_empty_sentinel_only_on_non_suppressing_decisions(self):
+        # ``""`` is a field value but never a gated-metric label: every
+        # decision that carries it must be a respond=True pass-through.
+        for d in self._all_branch_decisions():
+            if d.policy == "":
+                assert d.respond is True
 
 
 # ─── Unknown / empty policy fail-closed ────────────────────────────

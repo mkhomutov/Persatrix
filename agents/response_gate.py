@@ -202,15 +202,23 @@ class GateDecision:
         respond: ``True`` when the persona runtime should proceed with
             memory recall + LLM invocation for this event; ``False`` when
             the gate suppresses the response.
-        policy: The effective policy used for the decision. Always one of a
-            **bounded** set of constants — the canonical legacy triple
-            (:data:`POLICY_WHEN_MENTIONED` / :data:`POLICY_ALWAYS` /
-            :data:`POLICY_NEVER`) or a synthetic routing-artifact label
-            (:data:`POLICY_DEFENSE_IN_DEPTH`, :data:`POLICY_LOW_SALIENCE`,
-            :data:`POLICY_UNKNOWN`); never a raw/unbounded wire string. Used as
-            the ``policy`` label on the ``channel.messages.gated`` metric so
-            operators can break suppression counts down by intent without a
-            cardinality blow-up.
+        policy: The effective policy for the decision. The gate only ever
+            assigns a value from a **bounded** set — the canonical legacy
+            triple (:data:`POLICY_WHEN_MENTIONED` / :data:`POLICY_ALWAYS` /
+            :data:`POLICY_NEVER`), a synthetic routing-artifact label
+            (:data:`POLICY_DEFENSE_IN_DEPTH`, :data:`POLICY_UNKNOWN`), or the
+            empty string ``""`` on the two non-enforcing pass-through branches
+            (a non-CHANNEL_MESSAGE event or the legacy empty ``channel_id``,
+            both ``respond=True``); never a raw/unbounded wire string. On a
+            *suppressing* decision this value is the ``policy`` label on the
+            ``channel.messages.gated`` metric, so operators can break
+            suppression counts down by intent without a cardinality blow-up;
+            the ``""`` sentinel never reaches that counter because it only
+            fires when ``respond=False``. (The Tier-B salience suppression
+            rides the same counter with a :data:`POLICY_LOW_SALIENCE` label,
+            but that label is applied by the downstream salience stage in
+            :mod:`agents.observability._metrics_salience` — no
+            :class:`GateDecision` the gate returns ever carries it.)
         reason: Short, low-cardinality string explaining the branch.
             Suitable for log fields and span attributes; never a free-form
             error string.
