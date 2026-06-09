@@ -41,13 +41,26 @@
 
   // refresh fetches each candidate agent's latest closed interaction for the
   // scope and keeps the newest. A token guards against a stale resolution
-  // writing after scope/agentIds changed. Best-effort: a transient all-failure
-  // keeps the last known record rather than flapping the affordance away.
-  async function refresh() {
+  // writing after scope/agentIds changed.
+  //
+  // `reset` distinguishes the two callers, which want opposite failure
+  // behaviour:
+  //   - reset (a scope / agent change): clear the record up front so the
+  //     previous conversation's summary never lingers — no flash while the new
+  //     reads are in flight, and nothing to wrongly hold if they fail. `next`
+  //     (possibly null) is authoritative.
+  //   - poll (the interval, same scope): an INCOMPLETE read (some agent failed)
+  //     that yields no record must not flap the affordance away — the failing
+  //     agent may be the very one holding the latest summary while a peer simply
+  //     has none. Hold the current record in that case only.
+  async function refresh({ reset = false } = {}) {
     const ids = (agentIds ?? []).filter(Boolean);
     if (!scope || ids.length === 0) {
       record = null;
       return;
+    }
+    if (reset) {
+      record = null;
     }
     const token = ++loadToken;
     const settled = await Promise.allSettled(
@@ -63,11 +76,16 @@
       return;
     }
     const fulfilled = settled.filter((r) => r.status === "fulfilled");
-    if (fulfilled.length === 0) {
-      return; // every read failed (agents down) — hold the current record
-    }
     const records = fulfilled.flatMap((r) => r.value?.interactions ?? []);
-    record = pickLatestClosed(records);
+    const next = pickLatestClosed(records);
+    // Same-scope poll with a partial failure and nothing to show: hold rather
+    // than flap. A complete read (all agents answered) is always authoritative,
+    // and a reset already cleared above.
+    const incomplete = fulfilled.length < settled.length;
+    if (!reset && next === null && incomplete) {
+      return;
+    }
+    record = next;
   }
 
   // Re-fetch whenever the scope or the candidate agent set changes (a channel
@@ -76,7 +94,7 @@
   $effect(() => {
     void scope;
     void agentIds;
-    refresh();
+    refresh({ reset: true });
   });
 
   // Catch a close that happens while the conversation stays open. One interval

@@ -11,6 +11,7 @@ import InteractionSummary from "./InteractionSummary.svelte";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 function jsonResponse(body, ok = true, status = 200) {
@@ -141,5 +142,125 @@ describe("InteractionSummary", () => {
     });
     expect(region.textContent).toContain("Final consensus reached.");
     expect(region.textContent).not.toContain("An earlier, stale summary.");
+  });
+
+  it("clears a prior summary when the conversation switches, even if the new channel's reads fail", async () => {
+    // Switching channels must never leave the previous conversation's summary on
+    // screen. Channel A has a closed interaction; channel B's reads all fail —
+    // the affordance must vanish, not "hold" A's summary in B's view.
+    const fetchMock = vi.fn((url) =>
+      url.includes("scope=group%3Aplanning")
+        ? Promise.resolve(jsonResponse({ interactions: [record()] }))
+        : Promise.reject(new Error("agent down")),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender } = renderSummary();
+    const region = await screen.findByRole("status", {
+      name: /interaction summary/i,
+    });
+    expect(region.textContent).toContain(
+      "The group agreed to ship the cache layer first.",
+    );
+
+    await rerender({
+      scope: "group:other",
+      agentIds: ["iron-fox"],
+      agentsById: {},
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        screen.queryByRole("status", { name: /interaction summary/i }),
+      ).toBeNull();
+    });
+  });
+
+  it("does not flash the previous summary while the new channel's fetch is pending", async () => {
+    // The clear must happen up front on a switch, not only once the new fetch
+    // resolves — otherwise A's summary flashes under B's feed for the duration
+    // of the request. B's fetch is left pending for the whole test.
+    const fetchMock = vi.fn((url) =>
+      url.includes("scope=group%3Aplanning")
+        ? Promise.resolve(jsonResponse({ interactions: [record()] }))
+        : new Promise(() => {}),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender } = renderSummary();
+    await screen.findByRole("status", { name: /interaction summary/i });
+
+    await rerender({
+      scope: "group:other",
+      agentIds: ["iron-fox"],
+      agentsById: {},
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        screen.queryByRole("status", { name: /interaction summary/i }),
+      ).toBeNull();
+    });
+  });
+
+  it("holds the summary on a poll when the holding agent fails but a peer responds empty", async () => {
+    // Multi-agent: iron-fox holds the latest summary, ember-owl has none. A poll
+    // where iron-fox transiently fails (but ember-owl still answers "none") must
+    // NOT flap the affordance away — a partial failure of the holder is not
+    // evidence the interaction is gone.
+    vi.useFakeTimers();
+    let holderFails = false;
+    const fetchMock = vi.fn((url) => {
+      if (url.includes("iron-fox")) {
+        return holderFails
+          ? Promise.reject(new Error("holder down"))
+          : Promise.resolve(
+              jsonResponse({ interactions: [record({ summary: "Held summary." })] }),
+            );
+      }
+      return Promise.resolve(jsonResponse({ interactions: [] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSummary({ agentIds: ["ember-owl", "iron-fox"] });
+    await vi.waitFor(() => {
+      expect(
+        screen.getByRole("status", { name: /interaction summary/i }).textContent,
+      ).toContain("Held summary.");
+    });
+
+    holderFails = true;
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(
+      screen.getByRole("status", { name: /interaction summary/i }).textContent,
+    ).toContain("Held summary.");
+  });
+
+  it("drops the summary on a poll when every agent successfully reports none", async () => {
+    // The counterpart to the hold: a complete poll (no failures) that returns no
+    // closed interaction is authoritative — the affordance is cleared, not held.
+    vi.useFakeTimers();
+    let closed = true;
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({ interactions: closed ? [record()] : [] }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSummary();
+    await vi.waitFor(() => {
+      expect(
+        screen.queryByRole("status", { name: /interaction summary/i }),
+      ).not.toBeNull();
+    });
+
+    closed = false;
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(
+      screen.queryByRole("status", { name: /interaction summary/i }),
+    ).toBeNull();
   });
 });
