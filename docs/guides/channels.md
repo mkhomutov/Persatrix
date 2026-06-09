@@ -399,6 +399,54 @@ channels:
 > wraps up / terminates) is **v0.4.0** — v0.3.8 convergence is deliberately
 > deterministic (Layers 1/2/4), so it needs no moderator.
 
+### The interaction-summary surface (RFC 0020) — v0.3.8
+
+Governance makes a brainstorm *converge and terminate*; the **summary surface**
+turns "terminated" into "here's the result". When an interaction closes — by an
+end-vote (Layer 4), by the cost ceiling (Layer 1), or by going idle — the persona
+persists a one-per-interaction summary to its `episodes` row
+([RFC 0020 §C/§D](../rfcs/0020-interaction-lifecycle.md#c-interaction-lifecycle-states)),
+and v0.3.8 **surfaces that already-persisted summary** so a converged
+conversation hands back something a human can read. The summariser itself is
+unchanged — this is a read surface, not a new synthesis step.
+
+**Where it appears:**
+
+- **Web console** — the conversation view renders an "interaction closed"
+  affordance below the live turns, carrying the summary and the close trigger
+  (see [web-console.md §"The conversation panel"](web-console.md#the-conversation-panel)).
+- **CLI** — read a persona's closed-interaction summaries newest-first:
+
+  ```bash
+  # newest closed interactions for a persona (any scope)
+  persatrix agent interactions iron-fox --limit 5
+
+  # restrict to one conversation scope; emit JSON for scripting
+  persatrix agent interactions iron-fox --scope group:planning --limit 1 --json
+
+  # a single interaction by id
+  persatrix agent interactions iron-fox --interaction-id <id>
+  ```
+
+  Both surfaces read `GET /api/v1/agents/{id}/interactions/closed` — the summary
+  is **per-agent** (each participating persona persists its own row), so the web
+  surface merges across the channel's participants and shows one affordance.
+
+**Close-trigger labels** (the RFC 0020 `close_reason`, rendered identically on
+both surfaces):
+
+| `close_reason` | Label | Meaning |
+|----------------|-------|---------|
+| `idle_gap` | *went idle* | the conversation went quiet past the idle window |
+| `structural` | *ended* | an explicit end — the Layer 4 end-vote close routes through the structural close; the row does not distinguish a vote-close from a plain structural close, so "ended" is the honest label |
+| `cost` | *cost limit reached* | the Layer 1 per-interaction cost ceiling tripped |
+
+**Honest failure.** When the on-close summariser fails, the persisted
+`"[interaction summary unavailable]"` sentinel is surfaced as an explicit
+"summary unavailable" state — never a blank, never a fabricated synthesis. A
+single-turn interaction degenerates to its per-event summary. Acceptance:
+[`MT-INTERACTION-SUMMARY-001`](../manual-tests/MT-INTERACTION-SUMMARY-001.md).
+
 ---
 
 ## 5. Memory integration
@@ -653,7 +701,7 @@ deferrals, not implementation oversights:
 ## 12. Manual tests
 
 The channels surface is exercised end-to-end against a docker-composed
-orchestrator + four agents via the MT-CHANNEL series:
+orchestrator + four agents via the channel manual-test series:
 
 - [MT-CHANNEL-001](../manual-tests/MT-CHANNEL-001.md) — `list` / `join` CLI
 - [MT-CHANNEL-002](../manual-tests/MT-CHANNEL-002.md) — `send` / `reply` / `history` CLI
@@ -662,6 +710,7 @@ orchestrator + four agents via the MT-CHANNEL series:
 - [MT-CHANNEL-005](../manual-tests/MT-CHANNEL-005.md) — DM canonicalization round-trip
 - [MT-CHANNEL-006](../manual-tests/MT-CHANNEL-006.md) — channel deletion + cascade
 - [MT-CHANNEL-GOV-002](../manual-tests/MT-CHANNEL-GOV-002.md) — floor control: ordered, mutually-aware multi-persona replies (live LLM)
+- [MT-INTERACTION-SUMMARY-001](../manual-tests/MT-INTERACTION-SUMMARY-001.md) — a closed interaction hands back a readable summary on web + CLI, on every close trigger (idle / end-vote / cost), with honest failure rendering (live LLM)
 
 ---
 

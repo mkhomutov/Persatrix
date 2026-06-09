@@ -144,9 +144,9 @@ PR 4 (MT readable-outcome + docs + status + CHANGELOG)
 
 Per [master-plan §ROADMAP hygiene](../v0.3.8-plan.md#roadmap-hygiene):
 
-- **PR 1 open** → no RFC status change (read path + close-trigger wiring; companion PR plans excluded from `INDEX.md`).
-- **PR 2 / PR 3 merge** → the surface lands; `Last updated` refresh.
-- **PR 4 merges** → CHANGELOG `[0.3.8]` Upgrade Note seeded; RFC 0020 note records the summary surface landing in v0.3.8.
+- **PR 1 open** → no RFC status change (read path + close-trigger wiring; companion PR plans excluded from `INDEX.md`). ✅ Merged ([#583](https://github.com/mkhomutov/Persatrix/pull/583)).
+- **PR 2 / PR 3 merge** → the surface lands; `Last updated` refresh. ✅ Merged ([#584](https://github.com/mkhomutov/Persatrix/pull/584), [#585](https://github.com/mkhomutov/Persatrix/pull/585)).
+- **PR 4 merges** → CHANGELOG `[0.3.8]` Upgrade Note seeded; RFC 0020 note records the summary surface landing in v0.3.8. 🔀 PR open (this PR — `MT-INTERACTION-SUMMARY-001` + channels/web-console docs + RFC 0020 status note + CHANGELOG Upgrade Note).
 - **v0.3.8 tag** → `MT-INTERACTION-SUMMARY-001` + the combined `MT-CONVERSATION-CONVERGENCE-001` re-run live on HEAD as release gates (master-plan Phase 3).
 
 ---
