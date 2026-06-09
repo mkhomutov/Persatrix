@@ -15,12 +15,28 @@ use crate::commands::channel::{
 /// `--respond` value-parser. Uppercases to clap's snake_case wire form
 /// so the CLI rejects typos locally with a friendly `possible values`
 /// list instead of round-tripping a 400 from the server.
+///
+/// The full set MUST stay in lockstep with the `channels.RespondPolicy`
+/// constants in `internal/channels/channels.go`: the three legacy
+/// dispositions plus the RFC 0030 relevance-amendment / v0.3.8 vocabulary
+/// (`participant`/`addressed`/`observer` and the `chair` facilitator). The
+/// REST add/create handlers cast the disposition string verbatim, so an
+/// allowlist narrower than the server's silently hides shipped behaviour.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 #[clap(rename_all = "snake_case")]
 pub(crate) enum RespondPolicy {
     WhenMentioned,
     Always,
     Never,
+    /// Open-floor participant: runs the v0.3.8 salience bid, biased to silence.
+    Participant,
+    /// Low-threshold facilitator (a `participant` that clears the bid more
+    /// readily); cannot close interactions in v0.3.8.
+    Chair,
+    /// Responds only when directly addressed.
+    Addressed,
+    /// Never dispatched a turn, but present in the conversation.
+    Observer,
 }
 
 impl RespondPolicy {
@@ -31,6 +47,10 @@ impl RespondPolicy {
             RespondPolicy::WhenMentioned => "when_mentioned",
             RespondPolicy::Always => "always",
             RespondPolicy::Never => "never",
+            RespondPolicy::Participant => "participant",
+            RespondPolicy::Chair => "chair",
+            RespondPolicy::Addressed => "addressed",
+            RespondPolicy::Observer => "observer",
         }
     }
 }
@@ -52,9 +72,11 @@ pub(crate) enum ChannelCommands {
         /// User identity to add (defaults to OS username, normalized)
         #[arg(long)]
         r#as: Option<String>,
-        /// Response policy: `when_mentioned` (default), `always`, or `never`.
-        /// Validated client-side via the [`RespondPolicy`] enum so typos
-        /// surface as a clap error before the server round-trip.
+        /// Response policy: `when_mentioned` (default), `always`, `never`, or
+        /// the v0.3.8 conversation vocabulary `participant` / `chair` /
+        /// `addressed` / `observer`. Validated client-side via the
+        /// [`RespondPolicy`] enum so typos surface as a clap error before the
+        /// server round-trip.
         #[arg(long, value_enum, default_value_t = RespondPolicy::WhenMentioned)]
         respond: RespondPolicy,
         #[arg(long)]
@@ -217,5 +239,34 @@ pub(crate) async fn dispatch(
             limit,
             json,
         } => cmd_channel_watch(client, server, &name, interval, limit, json).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RespondPolicy;
+    use clap::ValueEnum;
+
+    // Lockstep guard against the bug class where the client disposition
+    // allowlist silently drifts narrower than the server's
+    // channels.RespondPolicy vocabulary (internal/channels/channels.go).
+    // Every variant must map to the exact server wire token.
+    #[test]
+    fn respond_policy_wire_strings_match_server_vocabulary() {
+        let cases = [
+            (RespondPolicy::WhenMentioned, "when_mentioned"),
+            (RespondPolicy::Always, "always"),
+            (RespondPolicy::Never, "never"),
+            (RespondPolicy::Participant, "participant"),
+            (RespondPolicy::Chair, "chair"),
+            (RespondPolicy::Addressed, "addressed"),
+            (RespondPolicy::Observer, "observer"),
+        ];
+        for (policy, wire) in cases {
+            assert_eq!(policy.as_wire_str(), wire);
+        }
+        // The clap value set must cover exactly the seven dispositions above —
+        // a new variant added without a wire token (or vice versa) trips this.
+        assert_eq!(RespondPolicy::value_variants().len(), cases.len());
     }
 }

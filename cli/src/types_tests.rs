@@ -98,21 +98,45 @@ fn workflow_run_response_handles_null_timestamps() {
 
 #[test]
 fn agent_response_deserializes_correctly() {
-    // Matches Go agentResponse JSON tags in internal/server/types.go.
-    // Note: Go server does NOT include agent_type — CLI's #[serde(default)]
-    // correctly handles its absence.
+    // Matches Go agentResponse JSON tags in internal/server/types.go: the
+    // agent kind rides on the JSON key `type` (agentResponse.Type), which the
+    // CLI maps onto `agent_type` via `#[serde(rename = "type")]`. A regression
+    // dropping that rename would make `agent_type` deserialize to None on every
+    // server, breaking `test --persona` Check 3.
     let json = serde_json::json!({
-        "id": "code-reviewer",
+        "id": "iron-fox",
         "address": "localhost:50051",
         "capabilities": ["review", "lint"],
-        "status": "healthy"
+        "status": "healthy",
+        "type": "persona"
     });
     let resp: AgentResponse = serde_json::from_value(json).unwrap();
-    assert_eq!(resp.id, "code-reviewer");
+    assert_eq!(resp.id, "iron-fox");
     assert_eq!(resp.address, "localhost:50051");
     assert_eq!(resp.capabilities, vec!["review", "lint"]);
     assert_eq!(resp.status, "healthy");
-    assert!(resp.agent_type.is_none(), "Go server omits agent_type");
+    assert_eq!(
+        resp.agent_type.as_deref(),
+        Some("persona"),
+        "the `type` JSON key must deserialize into agent_type (serde rename)"
+    );
+}
+
+#[test]
+fn agent_response_tolerates_absent_type_field() {
+    // Forward-compat: a v0.1 server that omits the `type` key entirely must
+    // still deserialize (the field is `#[serde(default)]`), leaving None.
+    let json = serde_json::json!({
+        "id": "legacy-agent",
+        "address": "localhost:50051",
+        "capabilities": [],
+        "status": "healthy"
+    });
+    let resp: AgentResponse = serde_json::from_value(json).unwrap();
+    assert!(
+        resp.agent_type.is_none(),
+        "an absent `type` key falls back to None via #[serde(default)]"
+    );
 }
 
 #[test]

@@ -113,13 +113,27 @@
             <input type="checkbox" bind:checked={memberChecked[agent.id]} />
             {agent.name ?? agent.id}
           </label>
+          <!--
+            The disposition vocabulary mirrors channels.RespondPolicy
+            (internal/channels/channels.go): the three legacy policies plus the
+            v0.3.8 "conversations that converge" set (participant/chair/
+            addressed/observer), all accepted verbatim by POST /api/v1/channels.
+            `when_mentioned` MUST stay the first option: respondById[id] is unset
+            until the operator picks, and selectedMembers falls back to
+            "when_mentioned", so the first-shown option has to match that
+            fallback or the select would display one value while sending another.
+          -->
           <select
             aria-label={`Respond policy for ${agent.name ?? agent.id}`}
             bind:value={respondById[agent.id]}
           >
             <option value="when_mentioned">When mentioned</option>
+            <option value="participant">Participant (salience bid)</option>
+            <option value="chair">Chair (facilitator)</option>
+            <option value="addressed">Addressed only</option>
+            <option value="observer">Observer (never replies)</option>
             <option value="always">Always</option>
-            <option value="never">Never</option>
+            <option value="never">Never (post-only)</option>
           </select>
         </div>
       {/each}
