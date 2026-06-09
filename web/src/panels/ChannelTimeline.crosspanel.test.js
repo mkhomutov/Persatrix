@@ -26,6 +26,7 @@ vi.mock("../lib/api.js", () => ({
   getChatHistory: vi.fn(),
   sendChat: vi.fn(),
   publishMessage: vi.fn(),
+  getClosedInteractions: vi.fn(() => Promise.resolve({ interactions: [] })),
 }));
 
 import {

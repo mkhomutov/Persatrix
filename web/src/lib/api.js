@@ -242,6 +242,45 @@ export async function getChannelHistory(channelID, { limit, before } = {}) {
   );
 }
 
+// getClosedInteractions reads an agent's closed-interaction summaries
+// (GET /api/v1/agents/{id}/interactions/closed), returning the
+// `closedInteractionsResponse` envelope ({interactions}) newest-first
+// (interactions_handler.go). This is the read side of the v0.3.8
+// interaction-summary surface (RFC 0020 §C/§D): when an interaction closes (by
+// vote / cost / idle) the persona persists a synthesised summary, and the
+// conversation view surfaces it. The endpoint is per-agent — each participating
+// persona persists its own summary row — so the surface queries the channel's
+// agents and merges (see interactions.js `pickLatestClosed`). The optional
+// `scope` (the channel id / RFC 0020 scope), `interactionId`, `limit` and
+// `minTurns` ride only when supplied; the server forwards the
+// "[interaction summary unavailable]" sentinel verbatim so a failed summary is
+// shown honestly rather than blanked.
+export async function getClosedInteractions(
+  agentID,
+  { scope, interactionId, limit, minTurns } = {},
+) {
+  const params = new URLSearchParams();
+  if (scope) {
+    params.set("scope", scope);
+  }
+  if (interactionId) {
+    params.set("interaction_id", interactionId);
+  }
+  if (limit) {
+    params.set("limit", String(limit));
+  }
+  if (minTurns) {
+    params.set("min_turns", String(minTurns));
+  }
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
+  // Encode the id (DM ids carry colons) so the request stays pinned to the
+  // {id}/interactions/closed route for any agent id.
+  return getJSON(
+    `/api/v1/agents/${encodeURIComponent(agentID)}/interactions/closed${suffix}`,
+  );
+}
+
 // createChannel creates a group channel (POST /api/v1/channels) and returns the
 // stored channel. The server derives the canonical id `group:<name>` from
 // `name` (channel_handlers.go handleCreateChannel), so the caller passes the
