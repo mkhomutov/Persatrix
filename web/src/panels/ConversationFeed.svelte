@@ -15,6 +15,8 @@
   import { participantAgentIds } from "../lib/interactions.js";
   import ChannelMessage from "./ChannelMessage.svelte";
   import InteractionSummary from "./InteractionSummary.svelte";
+  import PresenceBar from "./PresenceBar.svelte";
+  import { createPresence } from "../lib/presence.svelte.js";
 
   // channelId — the conversation to show ("" = a clean empty view, e.g. a fresh
   //   DM with no channel yet); userId/agentsById — sender decoration.
@@ -22,6 +24,8 @@
   //   v0.3.8 interaction-summary surface can query their closed-interaction
   //   summaries (a DM's peer, or a group channel's members); the active channel
   //   id doubles as the RFC 0020 scope.
+  // onCancelTurn — when set (a DM send in flight), the PresenceBar offers a
+  //   Cancel for the synchronous round-trip.
   let {
     channelId,
     userId,
@@ -29,7 +33,39 @@
     isDM = false,
     peerId = "",
     members = [],
+    onCancelTurn = null,
   } = $props();
+
+  // The live-presence controller (RFC 0048 console, Tier 0). Owned here — beside
+  // the timeline it annotates and the poll that clears it — and driven by the
+  // panel through markThinking()/clearThinking(), the same handle pattern as
+  // echo()/pollNow(). See lib/presence.svelte.js for the optimism's limits.
+  const presence = createPresence();
+  $effect(() => () => presence.dispose());
+
+  // The conversation this presence belongs to. A DM is keyed by its peer, NOT
+  // its channel id: a fresh DM resolves its channel id only after the first send
+  // (channelId "" → "dm:…"), and that same-turn fill-in must keep the optimistic
+  // state (including the "Waiting for you" idle flash) it just set. A group is
+  // keyed by its channel id directly. When the key changes the operator has
+  // switched conversations, so reset — the optimistic signal only ever describes
+  // turns triggered in the conversation it was triggered in, and must not bleed
+  // (nor merge a stale pending set) into the next one.
+  const conversationKey = $derived(isDM ? `dm:${peerId}` : channelId);
+  $effect(() => {
+    void conversationKey;
+    presence.reset();
+  });
+
+  // markThinking/clearThinking are the owner's handles onto the indicator: the
+  // panel lights a turn at send/publish and clears it on cancel/error (a reply
+  // clears itself via the poll-tick pruneFrom below).
+  export function markThinking(ids) {
+    presence.add(ids);
+  }
+  export function clearThinking(ids, opts) {
+    presence.remove(ids, opts);
+  }
 
   // The personas whose closed-interaction summaries the surface queries for this
   // scope, with the human principal excluded. Empty → no affordance.
@@ -94,6 +130,7 @@
       if (fresh.length > 0) {
         fresh.forEach((m) => seenIds.add(m.id));
         messages = [...fresh, ...messages];
+        presence.pruneFrom(fresh);
       }
       pollError = "";
       backoffMs = POLL_INTERVAL_MS;
@@ -256,3 +293,14 @@
     {userId}
   />
 {/if}
+
+<!-- Live status, directly above the composer (presence Tier 0): "… is thinking",
+     softening to "taking a while", then a brief "Waiting for you" when the turn
+     returns. A DM round-trip can be cancelled from here. -->
+<PresenceBar
+  thinking={presence.thinking}
+  {agentsById}
+  slow={presence.slow}
+  idle={presence.idle}
+  onCancel={onCancelTurn}
+/>

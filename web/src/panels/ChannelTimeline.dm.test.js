@@ -150,14 +150,43 @@ describe("Channels panel — DM mode (§B)", () => {
     const [agentId, payload] = sendChat.mock.calls[0];
     expect(agentId).toBe("ada");
     expect(payload).toMatchObject({ message: "hi Ada", userId: "local" });
-    // The synchronous round-trip shows a cancellable "Waiting…" status.
-    expect(screen.getByText(/waiting for a reply/i)).toBeTruthy();
+    // The synchronous round-trip shows a cancellable live "thinking" status,
+    // named for the persona being addressed (presence Tier 0).
+    expect(screen.getByText(/ada is thinking/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /cancel/i })).toBeTruthy();
 
     resolveSend({ reply: "Hi!", agent_display_name: "Ada" });
     await waitFor(() =>
-      expect(screen.queryByText(/waiting for a reply/i)).toBeNull(),
+      expect(screen.queryByText(/ada is thinking/i)).toBeNull(),
     );
+  });
+
+  it("flashes 'Waiting for you' after a fresh DM resolves its channel id", async () => {
+    // The fresh-DM send hands the turn back with a brief "Waiting for you" idle
+    // flash, then resolveDM fills in the now-created channel id — switching the
+    // feed's channelId underneath the SAME conversation. The conversation-switch
+    // reset is keyed by the DM's peer, not its channel id, so this same-turn
+    // channel-id fill-in must NOT wipe the idle flash (regression guard for the
+    // presence scoping).
+    routeHistory(historyOf());
+    getChatHistory.mockReset();
+    // First resolve (on open) finds no channel yet; the post-send resolve returns
+    // the persisted turn carrying the freshly-created channel id.
+    getChatHistory
+      .mockResolvedValueOnce(historyOf())
+      .mockResolvedValue(historyOf(chanMsg("d1", "hi Ada", "local", DM_ID)));
+
+    render(ChannelTimeline, { props: { userId: "local" } });
+    await screen.findByRole("option", { name: "General" });
+    await pickPersona("ada");
+    await waitFor(() => expect(getChatHistory).toHaveBeenCalledTimes(1));
+
+    await fireEvent.input(screen.getByRole("textbox", { name: /message/i }), {
+      target: { value: "hi Ada" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(await screen.findByText(/waiting for you/i)).toBeTruthy();
   });
 
   it("passes the scope-selector overrides on a DM send", async () => {
