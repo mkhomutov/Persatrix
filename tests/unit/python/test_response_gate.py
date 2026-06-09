@@ -26,6 +26,7 @@ from agents.response_gate import (
     POLICY_ALWAYS,
     POLICY_DEFENSE_IN_DEPTH,
     POLICY_NEVER,
+    POLICY_UNKNOWN,
     POLICY_WHEN_MENTIONED,
     evaluate_response_gate,
 )
@@ -253,4 +254,11 @@ class TestUnknownPolicy:
             d = evaluate_response_gate(evt, agent_id="bob")
         assert d.respond is False
         assert d.reason == "unknown_policy"
+        # The metric ``policy`` label must be the bounded sentinel, not the
+        # raw unknown wire value — an arbitrary string here is an unbounded-
+        # cardinality vector on ``channel.messages.gated`` (same precedent as
+        # POLICY_DEFENSE_IN_DEPTH / POLICY_LOW_SALIENCE). The raw value is
+        # still preserved in the warning log for diagnosis.
+        assert d.policy == POLICY_UNKNOWN
         assert any("unknown respond_policy" in r.message for r in caplog.records)
+        assert any("weekly" in r.message for r in caplog.records)

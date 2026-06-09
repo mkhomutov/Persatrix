@@ -83,6 +83,7 @@ __all__ = [
     "POLICY_NEVER",
     "POLICY_OBSERVER",
     "POLICY_PARTICIPANT",
+    "POLICY_UNKNOWN",
     "POLICY_WHEN_MENTIONED",
     "GateDecision",
     "evaluate_response_gate",
@@ -162,6 +163,15 @@ POLICY_DEFENSE_IN_DEPTH: Final[str] = "defense_in_depth"
 # breaking down ``gated`` by ``policy`` must be able to tell apart.
 POLICY_LOW_SALIENCE: Final[str] = "low_salience"
 
+# A bounded sentinel label for the fail-closed unknown/empty-policy branch.
+# The wire-side validator already rejects unknown ``respond_policy`` values, so
+# this branch should not fire in production; if it does, the metric ``policy``
+# label must stay low-cardinality rather than echo the raw (attacker- or
+# bug-supplied) wire string onto ``channel.messages.gated`` — the same bounded-
+# label discipline as POLICY_DEFENSE_IN_DEPTH / POLICY_LOW_SALIENCE. The raw
+# value is not lost: it is logged at warn (``raw_policy``) for diagnosis.
+POLICY_UNKNOWN: Final[str] = "unknown"
+
 # RFC 0030 relevance amendment Tier A (v0.3.7), decision D3 / amendment
 # OQ #5 (adopted default): the broadcast sentinel. A message addressed to
 # the *room* rather than to specific members carries this reserved token in
@@ -192,11 +202,15 @@ class GateDecision:
         respond: ``True`` when the persona runtime should proceed with
             memory recall + LLM invocation for this event; ``False`` when
             the gate suppresses the response.
-        policy: The effective policy used for the decision (string
-            value of :data:`POLICY_WHEN_MENTIONED` /
-            :data:`POLICY_ALWAYS` / :data:`POLICY_NEVER`). Used as the
-            ``policy`` label on the ``channel.messages.gated`` metric so
-            operators can break suppression counts down by intent.
+        policy: The effective policy used for the decision. Always one of a
+            **bounded** set of constants — the canonical legacy triple
+            (:data:`POLICY_WHEN_MENTIONED` / :data:`POLICY_ALWAYS` /
+            :data:`POLICY_NEVER`) or a synthetic routing-artifact label
+            (:data:`POLICY_DEFENSE_IN_DEPTH`, :data:`POLICY_LOW_SALIENCE`,
+            :data:`POLICY_UNKNOWN`); never a raw/unbounded wire string. Used as
+            the ``policy`` label on the ``channel.messages.gated`` metric so
+            operators can break suppression counts down by intent without a
+            cardinality blow-up.
         reason: Short, low-cardinality string explaining the branch.
             Suitable for log fields and span attributes; never a free-form
             error string.
@@ -413,4 +427,5 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
         "Agent %s: unknown respond_policy %r on channel %s; suppressing",
         agent_id, raw_policy, channel_id,
     )
-    return GateDecision(respond=False, policy=policy, reason="unknown_policy")
+    # Bounded metric label, not the raw ``policy`` string — see POLICY_UNKNOWN.
+    return GateDecision(respond=False, policy=POLICY_UNKNOWN, reason="unknown_policy")
