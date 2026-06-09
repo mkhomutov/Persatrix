@@ -12,6 +12,7 @@ use colored::Colorize;
 use commands::agent::{cmd_agent_info, cmd_agent_list, cmd_agent_reload, cmd_test};
 use commands::channel_dispatch::{dispatch as dispatch_channel, ChannelCommands};
 use commands::chat::cmd_chat;
+use commands::interactions::cmd_agent_interactions;
 use commands::logs::{cmd_logs, LogsOptions};
 use commands::session::{dispatch as dispatch_session, SessionCommands};
 use commands::validate::cmd_validate;
@@ -209,6 +210,32 @@ enum AgentCommands {
         #[arg(long)]
         config: Option<String>,
     },
+    /// Show an agent's closed-interaction summaries (newest-first).
+    ///
+    /// The CLI half of the v0.3.8 interaction-summary surface (RFC 0020
+    /// §C/§D): when a brainstorm interaction closes — by end-vote, by the
+    /// RFC 0030 cost ceiling, or by going idle — the persona persists a
+    /// synthesised summary; this prints it so a converged conversation hands
+    /// back a readable outcome from the terminal.
+    Interactions {
+        /// Agent whose closed interactions to read
+        agent_id: String,
+        /// Restrict to one conversation scope (e.g. `group:planning`, a DM id)
+        #[arg(long)]
+        scope: Option<String>,
+        /// Show a single interaction by id
+        #[arg(long = "interaction-id")]
+        interaction_id: Option<String>,
+        /// Max interactions to fetch (default: 20; newest-first)
+        #[arg(long, default_value_t = commands::interactions::DEFAULT_CLOSED_INTERACTIONS_LIMIT)]
+        limit: u32,
+        /// Exclude degenerate rows below this turn count (server floor; must be ≥ 1)
+        #[arg(long)]
+        min_turns: Option<u32>,
+        /// Emit JSON instead of human-readable blocks
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -297,6 +324,26 @@ async fn main() {
                 agent_id,
                 config: _,
             } => cmd_agent_reload(&agent_id).await,
+            AgentCommands::Interactions {
+                agent_id,
+                scope,
+                interaction_id,
+                limit,
+                min_turns,
+                json,
+            } => {
+                cmd_agent_interactions(
+                    &client,
+                    server,
+                    &agent_id,
+                    scope.as_deref(),
+                    interaction_id.as_deref(),
+                    limit,
+                    min_turns,
+                    json,
+                )
+                .await
+            }
         },
         Commands::Logs {
             execution_id,
