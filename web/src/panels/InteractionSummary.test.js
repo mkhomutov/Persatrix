@@ -90,8 +90,11 @@ describe("InteractionSummary", () => {
 
     await screen.findByRole("status", { name: /interaction summary/i });
     const line = container.querySelector(".participants");
-    expect(line.textContent).toContain("You");
-    expect(line.textContent).not.toContain("local");
+    // Pin the exact rendered sequence: the principal decodes to "You" IN PLACE
+    // (first-seen order preserved), joined with ", ". This is strictly tighter
+    // than a "You" / not-"local" substring pair — it would also catch a mangled
+    // order or join, and inherently proves the raw principal id is gone.
+    expect(line.textContent).toMatch(/Participants:\s*You, iron-fox\b/);
   });
 
   it("falls back to the id for a known agent with a blank name", async () => {
