@@ -80,12 +80,34 @@ func TestHandleGetClosedInteractions_ProjectsResponse(t *testing.T) {
 	assert.Equal(t, "cost", it.CloseReason)
 	assert.Equal(t, "converged on Thursday", it.Summary)
 	assert.Equal(t, int32(5), it.TurnCount)
+	assert.Equal(t, 10.0, it.StartedAt)
 	assert.Equal(t, 20.0, it.ClosedAt)
 
 	// Query params are threaded onto the gRPC request.
 	assert.Equal(t, "agent-x", reader.gotAgent)
 	assert.Equal(t, "group:room-7", reader.gotReq.GetScope())
 	assert.Equal(t, int32(5), reader.gotReq.GetLimit())
+}
+
+// The single-interaction fetch (?interaction_id) and the default page size
+// (when ?limit is omitted) are the two request fields the projection test
+// above does not exercise. This pins both: interaction_id must reach the
+// gRPC request verbatim, and an omitted limit must become
+// defaultClosedInteractionsLimit rather than 0 (which the agent-side query
+// would otherwise have to special-case).
+func TestHandleGetClosedInteractions_ThreadsInteractionIDAndDefaultLimit(t *testing.T) {
+	reader := &fakeInteractionReader{resp: &taskpb.ClosedInteractionsResponse{}}
+	srv := interactionTestServer(t, reader)
+
+	req := httptest.NewRequest("GET", "/api/v1/agents/agent-x/interactions/closed?interaction_id=i-42", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	require.Equal(t, 200, rec.Code)
+	require.NotNil(t, reader.gotReq)
+	assert.Equal(t, "i-42", reader.gotReq.GetInteractionId())
+	assert.Equal(t, int32(defaultClosedInteractionsLimit), reader.gotReq.GetLimit())
+	assert.Empty(t, reader.gotReq.GetScope(), "an omitted scope must stay empty, not be defaulted")
 }
 
 func TestHandleGetClosedInteractions_AgentNotFound(t *testing.T) {
