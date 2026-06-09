@@ -130,6 +130,10 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
+			// These workers run off the request goroutine on both publish
+			// paths, so a panicking dispatch is not caught by the server's
+			// recoveryMiddleware — recover here or it crashes the process.
+			defer r.recoverFanout("dispatch", msg.ChannelID, msg.ID)
 			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize)
 		}()
 	}

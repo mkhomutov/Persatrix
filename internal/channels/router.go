@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -164,6 +165,15 @@ type ChannelRouter struct {
 	// half-delivered round. The synchronous [ChannelRouter.Publish] does not
 	// touch it (its fanout completes before the call returns). Zero value ready.
 	fanoutWG sync.WaitGroup
+
+	// fanoutInFlight counts the detached fanout goroutines currently running,
+	// and maxInFlightFanout caps that count (0 = unbounded). The async seam
+	// removed the backpressure the blocking POST used to apply, so without a
+	// ceiling a looping caller could spawn goroutines without bound. At the cap
+	// [ChannelRouter.PublishAsync] runs fanout inline instead — see
+	// [defaultMaxInFlightFanout] and [ChannelRouter.SetMaxInFlightFanout].
+	fanoutInFlight    atomic.Int64
+	maxInFlightFanout int
 }
 
 // NewChannelRouter wires a router around a store, dispatcher, logger, and
@@ -194,6 +204,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		endVotes:           make(map[string]*interactionEndVotes),
 		closedInteractions: make(map[string]struct{}),
 		maxCascadeDepth:    defaults.DefaultMaxCascadeDepth,
+		maxInFlightFanout:  defaultMaxInFlightFanout,
 	}
 }
 
