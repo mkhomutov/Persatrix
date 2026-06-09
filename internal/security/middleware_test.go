@@ -271,6 +271,51 @@ func TestRESTMiddleware_QuarantineActiveBlocksAnonymous(t *testing.T) {
 		"anonymous traffic must resume once quarantine is cleared")
 }
 
+// TestRESTMiddleware_ExemptConsoleStaysRateLimitedNeverQuarantined pins the
+// PR #592 review fix end-to-end. The web console attaches a stable, non-empty
+// X-Agent-ID, so — unlike an anonymous caller — its rate-limit denials feed
+// the breaker (the middleware records ViolationRateLimit for any non-empty
+// id). Under normal console load that tripped the per-agent cap repeatedly,
+// the breaker would quarantine `web-console` after 5/10min and 403 the
+// operator's own surface, with no automatic recovery (only the token-gated
+// Unquarantine, which has no console UI). Wiring the console id as a breaker
+// exemption keeps it rate-limited (429, self-clearing) but un-quarantinable.
+func TestRESTMiddleware_ExemptConsoleStaysRateLimitedNeverQuarantined(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	// CallsPerWindow=1: the first call passes, every later call in the window
+	// is a 429 — so each iteration after the first records a rate-limit
+	// violation against the console id.
+	rl := newTestRateLimiter(t, clk, func(c *RateLimitConfig) { c.CallsPerWindow = 1 })
+	cb, _ := newTestBreaker(t, clk, func(c *CircuitBreakerConfig) {
+		c.ExemptAgentIDs = []string{ConsoleAgentID}
+	})
+	mw := RESTRateLimitMiddleware(rl, cb)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Fire well past the breaker's rate-limit threshold (5) within the window.
+	// An un-exempt id would quarantine and start returning 403 partway through.
+	var codes []int
+	for i := 0; i < 12; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/channels", nil)
+		req.Header.Set("X-Agent-ID", ConsoleAgentID)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		codes = append(codes, rec.Code)
+	}
+
+	assert.False(t, cb.IsQuarantined(ConsoleAgentID),
+		"the console id must never be quarantined")
+	for i, code := range codes {
+		assert.NotEqual(t, http.StatusForbidden, code,
+			"call %d: a rate-limited console must get a self-clearing 429, never a sticky quarantine 403", i)
+	}
+	assert.Equal(t, http.StatusOK, codes[0], "first call within the window passes")
+	assert.Equal(t, http.StatusTooManyRequests, codes[len(codes)-1],
+		"over-limit console calls stay 429 even past the quarantine threshold")
+}
+
 // TestGRPCInterceptor_QuarantineActiveBlocksAnonymous mirrors
 // TestRESTMiddleware_QuarantineActiveBlocksAnonymous on the gRPC side.
 // Maps to canonical gRPC code `PermissionDenied` (parity with the

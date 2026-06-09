@@ -18,7 +18,11 @@
 // console traffic in one predictable bucket the operator surface owns, distinct
 // from real agents. It is self-reported (token validation lands in RFC 0009
 // Phase 4), which is acceptable for the localhost operator console. The value
-// must satisfy the server's id schema `^[a-z0-9][a-z0-9-]*[a-z0-9]$`.
+// must satisfy the server's id schema `^[a-z0-9][a-z0-9-]*[a-z0-9]$` and must
+// match the server's `security.ConsoleAgentID`: the orchestrator wires that id
+// as a circuit-breaker exemption so a console that trips its own rate limit
+// gets a self-clearing 429 rather than a sticky quarantine (a quarantine has no
+// automatic recovery and no console UI to clear it).
 const CONSOLE_AGENT_ID = "web-console";
 const AGENT_ID_HEADER = "X-Agent-ID";
 

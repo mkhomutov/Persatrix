@@ -80,8 +80,14 @@ func initRateLimiter(logger *zap.Logger, auditor security.AuditLogger) (*securit
 			security.ViolationRateLimit:  {Count: 5, Window: 10 * time.Minute},
 			security.ViolationInputFlag:  {Count: 5, Window: 10 * time.Minute},
 		},
-		Logger:  logger,
-		Auditor: auditor,
+		// The web console shares the per-agent rate limiter under a stable
+		// self-reported id but must never quarantine its own operator
+		// surface (quarantine has no automatic recovery). It stays rate-
+		// limited (429); it is only spared the breaker. See
+		// security.ConsoleAgentID.
+		ExemptAgentIDs: []string{security.ConsoleAgentID},
+		Logger:         logger,
+		Auditor:        auditor,
 	})
 	if err != nil {
 		return nil, nil, err

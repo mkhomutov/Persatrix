@@ -331,6 +331,30 @@ describe("InteractionSummary", () => {
     ).toBeNull();
   });
 
+  it("fans out one request per participant on each poll tick", async () => {
+    // The summary refresh queries each candidate agent's latest closed
+    // interaction independently (the read API is per-agent), so a tick issues
+    // exactly N requests for N participants. This multiplicative load is the
+    // reason the fan-out — not the message head-poll — dominates the console's
+    // shared rate-limit budget and is what the 429 backoff exists to relieve.
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(jsonResponse({ interactions: [record()] })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSummary({ agentIds: ["ember-owl", "iron-fox", "gray-hart"] });
+    // Drain the mount refresh: one request per participant.
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    // A subsequent poll tick fans out the same per-participant request set.
+    fetchMock.mockClear();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it("backs off its poll cadence after a 429 instead of hammering the shared bucket", async () => {
     // The per-participant fan-out is the dominant load on the console's shared
     // anonymous rate-limit budget. A 429 must stretch the next poll (doubling

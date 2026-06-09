@@ -47,9 +47,18 @@ type ThresholdRule struct {
 // deterministic tests.
 type CircuitBreakerConfig struct {
 	Thresholds map[ViolationType]ThresholdRule
-	Now        func() time.Time
-	Logger     *zap.Logger
-	Auditor    AuditLogger
+	// ExemptAgentIDs lists ids that are never quarantined: [RecordViolation]
+	// records nothing for them and the breaker can never open on them. This
+	// is for self-reported operator surfaces (the web console's
+	// [ConsoleAgentID]) that share the per-agent rate limiter but must not be
+	// able to lock themselves out — quarantine has no automatic recovery
+	// (only [Unquarantine]). Exempt ids are still rate-limited (429); they
+	// are only spared the breaker. An empty/nil list preserves prior
+	// behaviour. See [ConsoleAgentID] for the full justification.
+	ExemptAgentIDs []string
+	Now            func() time.Time
+	Logger         *zap.Logger
+	Auditor        AuditLogger
 }
 
 // CircuitBreaker tracks per-(agent, violationType) rolling counters and
@@ -62,6 +71,10 @@ type CircuitBreaker struct {
 	mu          sync.Mutex
 	violations  map[string]map[ViolationType][]time.Time
 	quarantined map[string]quarantineEntry
+
+	// exempt is the immutable set built from [CircuitBreakerConfig.ExemptAgentIDs]
+	// at construction. Read-only after NewCircuitBreaker, so it needs no lock.
+	exempt map[string]struct{}
 
 	// quarantinedCount mirrors len(quarantined) for lock-free reads on
 	// the request hot path (PR #244 round-2 review L-05). Without this,
@@ -111,10 +124,17 @@ func NewCircuitBreaker(cfg CircuitBreakerConfig) (*CircuitBreaker, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = zap.NewNop()
 	}
+	exempt := make(map[string]struct{}, len(cfg.ExemptAgentIDs))
+	for _, id := range cfg.ExemptAgentIDs {
+		if id != "" {
+			exempt[id] = struct{}{}
+		}
+	}
 	return &CircuitBreaker{
 		cfg:         cfg,
 		violations:  make(map[string]map[ViolationType][]time.Time),
 		quarantined: make(map[string]quarantineEntry),
+		exempt:      exempt,
 	}, nil
 }
 
@@ -129,6 +149,12 @@ func NewCircuitBreaker(cfg CircuitBreakerConfig) (*CircuitBreaker, error) {
 // back to [context.Background] for non-request paths.
 func (cb *CircuitBreaker) RecordViolation(ctx context.Context, agentID string, vt ViolationType) {
 	if agentID == "" {
+		return
+	}
+	if _, ok := cb.exempt[agentID]; ok {
+		// Exempt operator surfaces (the web console) never accrue
+		// violations and so can never be quarantined — see
+		// [CircuitBreakerConfig.ExemptAgentIDs] and [ConsoleAgentID].
 		return
 	}
 	rule, hasRule := cb.cfg.Thresholds[vt]

@@ -305,3 +305,36 @@ func TestCircuitBreaker_AuditEmitNotCancelledWithRequestCtx(t *testing.T) {
 	assert.NoError(t, emits[0].ctx.Err(),
 		"ISSUE-0007: auditor ctx must not inherit cancellation from the request ctx (use context.WithoutCancel)")
 }
+
+// TestCircuitBreaker_ExemptAgentNeverQuarantines pins the PR #592 review
+// fix: an id in CircuitBreakerConfig.ExemptAgentIDs (the self-reported
+// web-console operator surface) must never be quarantined no matter how
+// many violations it accrues — its violations are not recorded and the
+// breaker never opens on it — while non-exempt agents still quarantine
+// normally on the same breaker. Without the exemption the console, which
+// now sends a stable non-empty X-Agent-ID, would feed the breaker on every
+// rate-limit denial and lock its own surface out with no automatic recovery.
+func TestCircuitBreaker_ExemptAgentNeverQuarantines(t *testing.T) {
+	clk := newFakeClock(time.Unix(0, 0))
+	cb, auditor := newTestBreaker(t, clk, func(c *CircuitBreakerConfig) {
+		c.ExemptAgentIDs = []string{ConsoleAgentID}
+	})
+
+	// Far exceed the rate-limit threshold (5/10min in the test breaker).
+	for i := 0; i < 20; i++ {
+		cb.RecordViolation(context.Background(), ConsoleAgentID, ViolationRateLimit)
+	}
+	assert.False(t, cb.IsQuarantined(ConsoleAgentID),
+		"an exempt id must never be quarantined")
+	assert.False(t, cb.HasAnyQuarantined(),
+		"an exempt id must not register a quarantine (else it collaterally denies anonymous callers via the H-01 path)")
+	assert.Equal(t, 0, auditor.countByType(AuditAgentQuarantined),
+		"no quarantine event for an exempt id")
+
+	// The exemption is per-id: a normal agent on the same breaker still opens.
+	for i := 0; i < 5; i++ {
+		cb.RecordViolation(context.Background(), "agent-a", ViolationRateLimit)
+	}
+	assert.True(t, cb.IsQuarantined("agent-a"),
+		"exempting the console must not disable the breaker for other agents")
+}
