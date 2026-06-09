@@ -71,6 +71,16 @@ type memberResponse struct {
 	ID            string    `json:"id"`
 	RespondPolicy string    `json:"respond"`
 	JoinedAt      time.Time `json:"joined_at"`
+	// SalienceGated / Threshold surface the RFC 0030 Tier B signal (v0.3.8).
+	// The store normalizes the disposition vocabulary to the legacy triple
+	// before persisting (chair/participant → always, observer → never), so
+	// `respond` alone cannot distinguish a salience-gated participant from a
+	// legacy always-replier. These two fields are the only thing that survives
+	// the store boundary (see [channels.Member.SalienceGated]); without them an
+	// operator cannot read back the disposition they set. Threshold is a
+	// pointer/omitempty tri-state: absent → unset (bias-to-silence).
+	SalienceGated bool     `json:"salience_gated"`
+	Threshold     *float64 `json:"threshold,omitempty"`
 }
 
 // channelMessageResponse is the JSON shape for individual messages
