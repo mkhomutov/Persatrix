@@ -294,7 +294,21 @@ async def test_per_agent_denial_leaves_interaction_open() -> None:
         assert excinfo.value.reason == "budget_exceeded"
 
         # The interaction stays open — a per-agent wallet denial is not a
-        # cost-ceiling close — so no episode row is written.
+        # cost-ceiling close. Assert the tracker still holds the OPEN
+        # interaction (both admitted turns), pinning the
+        # ``reason == "interaction_budget_exhausted"`` gate in
+        # ``handle_llm_call_exception_with_cost_close`` directly. The
+        # empty-episodes check alone is too weak: an empty table is also
+        # consistent with a wrongly-closed interaction whose no-turn /
+        # failed persist simply wrote nothing.
+        open_interaction = agent._interaction_tracker.get("group:room-7")
+        assert open_interaction is not None, (
+            "per-agent denial must not close the interaction"
+        )
+        assert open_interaction.is_open
+        assert open_interaction.turn_count == 2
+
+        # And no episode row is written (the close path never ran).
         await agent.drain_pending_summaries()
         assert await _episode_rows(agent) == []
     finally:

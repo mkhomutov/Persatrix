@@ -24,7 +24,10 @@ from agents.closed_interactions_read import handle_get_closed_interactions
 from agents.generated import task_pb2
 from agents.memory.episodic import EpisodicMemory
 from agents.memory.episodic_closed import closed_interactions
-from agents.memory.interactions import SUMMARY_UNAVAILABLE_TEXT
+from agents.memory.interactions import (
+    SUMMARY_PENDING_TEXT,
+    SUMMARY_UNAVAILABLE_TEXT,
+)
 
 
 async def _store_closed(
@@ -96,6 +99,34 @@ async def test_recall_filters_by_scope_and_interaction_id(memory):
 
     by_id = await closed_interactions(memory, limit=10, interaction_id="i-1")
     assert [ep.interaction_id for ep in by_id] == ["i-1"]
+
+
+async def test_recall_excludes_unfinalised_pending_rows(memory):
+    """An unfinalised Phase-1 ``closing`` row must not surface.
+
+    The close path is a two-phase write: Phase 1 INSERTs the row with
+    ``closed_at`` populated but ``summary == SUMMARY_PENDING_TEXT``
+    ("[summary pending]"); Phase 2 UPDATEs the real summary in the
+    background. ``SUMMARY_PENDING_TEXT`` is an internal placeholder, not
+    a result — the normal recall chokepoint (``episodic.py``) drops it,
+    and this read surface must too, or the web console / CLI would show
+    "[summary pending]" during the (observable) summarise window and
+    indefinitely on a crash-before-Phase-2. The *finalised* failure
+    sentinel (``SUMMARY_UNAVAILABLE_TEXT``) stays visible (SS3) — that is
+    the separate ``test_recall_surfaces_failure_sentinel`` contract.
+    """
+    await _store_closed(
+        memory, interaction_id="i-pending", scope="group:a",
+        summary=SUMMARY_PENDING_TEXT, close_reason="cost",
+        started_at=1.0, closed_at=2.0,
+    )
+    await _store_closed(
+        memory, interaction_id="i-done", scope="group:a",
+        summary="real summary", close_reason="cost",
+        started_at=3.0, closed_at=4.0,
+    )
+    rows = await closed_interactions(memory, limit=10)
+    assert [ep.interaction_id for ep in rows] == ["i-done"]
 
 
 async def test_recall_surfaces_failure_sentinel(memory):

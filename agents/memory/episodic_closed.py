@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 import aiosqlite
 
 from .episodic_queries import EPISODE_SELECT, MAX_RECALL_LIMIT, row_to_episode
+from .interaction_janitor import SUMMARY_PENDING_TEXT
 
 if TYPE_CHECKING:
     from .episodic import EpisodicMemory
@@ -44,11 +45,23 @@ async def recall_closed_interactions(
     Filters: ``scope`` restricts to one RFC 0020 scope (``None`` spans all
     scopes for the agent); ``interaction_id`` fetches exactly one
     interaction (``None`` lists). ``limit`` is clamped to
-    :data:`MAX_RECALL_LIMIT`. The failure sentinel is included (SS3).
+    :data:`MAX_RECALL_LIMIT`.
+
+    Unfinalised Phase-1 ``closing`` rows (``summary ==
+    :data:`SUMMARY_PENDING_TEXT```) are excluded — they are an internal
+    placeholder written before the background summariser runs, not a
+    result, and surfacing "[summary pending]" on the read path would be
+    both a leak and a divergence from the normal recall chokepoint
+    (:meth:`EpisodicMemory.recall`), which drops them. The *finalised*
+    ``SUMMARY_UNAVAILABLE_TEXT`` failure sentinel is **not** filtered —
+    a failed summary is shown honestly (SS3).
     """
     clamped = max(1, min(limit, MAX_RECALL_LIMIT))
     filters = ""
-    params: list[object] = [agent_id]
+    # ``agent_id`` then the pending-row guard bind the two leading ``?``s;
+    # the optional scope / interaction_id filters and the trailing LIMIT
+    # are appended in SQL order below.
+    params: list[object] = [agent_id, SUMMARY_PENDING_TEXT]
     if scope is not None:
         filters += " AND scope = ?"
         params.append(scope)
@@ -63,6 +76,7 @@ async def recall_closed_interactions(
         WHERE agent_id = ?
           AND closed_at IS NOT NULL
           AND interaction_id IS NOT NULL
+          AND summary != ?
           {filters}
         ORDER BY closed_at DESC
         LIMIT ?

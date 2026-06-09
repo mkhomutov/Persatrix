@@ -58,8 +58,9 @@ async def handle_get_closed_interactions(
         context.set_details(f"Agent not found: {agent_id}")
         return task_pb2.ClosedInteractionsResponse()
 
-    # Persona agents expose ``memory.episodic`` (a MemoryNamespace);
-    # task agents expose a bare MemoryStore with no ``episodic`` tier.
+    # Persona agents expose ``memory`` as a ``MemoryNamespace`` whose
+    # ``.episodic`` is the ``EpisodicMemory`` tier; task agents expose a
+    # bare ``MemoryStore`` with no ``episodic`` attribute (→ empty).
     episodic = getattr(getattr(agent, "memory", None), "episodic", None)
     if episodic is None:
         return task_pb2.ClosedInteractionsResponse()

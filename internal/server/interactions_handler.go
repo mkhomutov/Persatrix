@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/mkhomutov/persatrix/internal/executor"
 	"github.com/mkhomutov/persatrix/internal/generated/taskpb"
@@ -83,6 +85,27 @@ func (s *Server) handleGetClosedInteractions(w http.ResponseWriter, r *http.Requ
 		case errors.Is(err, executor.ErrAgentNotReady):
 			writeError(w, "UNAVAILABLE", "agent not ready", http.StatusServiceUnavailable)
 		default:
+			// The reader makes a live gRPC call, so most errors arrive as
+			// gRPC *status* errors rather than the executor's Go sentinels:
+			// the agent-side servicer returns NOT_FOUND for an id unknown to
+			// the agent process / INVALID_ARGUMENT for a malformed request,
+			// and the transport returns Unavailable / DeadlineExceeded when
+			// the agent is down or slow. Map those to the matching HTTP
+			// status instead of a blanket 500 (which would mislabel an
+			// agent-down or not-found condition as an internal fault).
+			if st, ok := status.FromError(err); ok {
+				switch st.Code() {
+				case codes.NotFound:
+					writeError(w, "NOT_FOUND", "agent not found", http.StatusNotFound)
+					return
+				case codes.InvalidArgument:
+					writeError(w, "BAD_REQUEST", "invalid request", http.StatusBadRequest)
+					return
+				case codes.Unavailable, codes.DeadlineExceeded:
+					writeError(w, "UNAVAILABLE", "agent unavailable", http.StatusServiceUnavailable)
+					return
+				}
+			}
 			s.logger.Error("interactions: closed read failed",
 				zap.String("agent_id", agentID), zap.Error(err))
 			writeError(w, "INTERNAL", "failed to read closed interactions", http.StatusInternalServerError)

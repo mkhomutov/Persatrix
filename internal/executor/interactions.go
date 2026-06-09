@@ -110,5 +110,6 @@ func (r *GRPCInteractionReader) GetClosedInteractions(ctx context.Context, agent
 		span.SetStatus(otelcodes.Error, err.Error())
 		return nil, err
 	}
+	span.SetStatus(otelcodes.Ok, "closed interactions read")
 	return resp, nil
 }
