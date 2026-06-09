@@ -6,6 +6,34 @@
 // is served by the orchestrator under /ui), so paths are root-relative and no
 // base URL or CORS handling is required.
 
+// Every console request identifies as this agent id via the X-Agent-ID header
+// (server-side security.AgentIDHeader). Without it the orchestrator buckets the
+// ENTIRE UI — every panel, tab, and operator — into the shared `anonymous`
+// rate-limit bucket, alongside health probes and pre-Phase-4 callers. The
+// console's own polling (the 3 s message head-poll plus the per-participant
+// interaction-summary fan-out) then trips the per-agent 60-calls/60 s limit and
+// surfaces a spurious "Live updates paused: … responded 429" banner during
+// normal use — the limiter cannot tell the operator console from a misbehaving
+// agent because the console claims no identity. A single stable id parks all
+// console traffic in one predictable bucket the operator surface owns, distinct
+// from real agents. It is self-reported (token validation lands in RFC 0009
+// Phase 4), which is acceptable for the localhost operator console. The value
+// must satisfy the server's id schema `^[a-z0-9][a-z0-9-]*[a-z0-9]$` and must
+// match the server's `security.ConsoleAgentID`: the orchestrator wires that id
+// as a circuit-breaker exemption so a console that trips its own rate limit
+// gets a self-clearing 429 rather than a sticky quarantine (a quarantine has no
+// automatic recovery and no console UI to clear it).
+const CONSOLE_AGENT_ID = "web-console";
+const AGENT_ID_HEADER = "X-Agent-ID";
+
+// consoleHeaders merges the console's agent-id header into an optional base
+// header set, so every request out of this client is attributed rather than
+// anonymous. A `undefined` base (a bodyless request) yields just the agent-id
+// header.
+function consoleHeaders(base) {
+  return { ...base, [AGENT_ID_HEADER]: CONSOLE_AGENT_ID };
+}
+
 // ApiError carries the HTTP status of a non-2xx response so callers can
 // distinguish "console couldn't reach its own backend" (the boot path) from a
 // transport failure, and surface the server's error envelope to the user (the
@@ -46,7 +74,7 @@ async function errorFromResponse(path, response) {
 async function getJSON(path) {
   let response;
   try {
-    response = await fetch(path);
+    response = await fetch(path, { headers: consoleHeaders() });
   } catch (cause) {
     throw new ApiError(`network error fetching ${path}`, 0, { cause });
   }
@@ -79,7 +107,7 @@ async function postJSON(path, body, { signal } = {}) {
   try {
     response = await fetch(path, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: consoleHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
       // An optional AbortSignal lets a caller cancel an in-flight request (the
       // chat panel wires this to a Cancel control so a 30 s synchronous turn is
@@ -116,7 +144,9 @@ async function sendNoBody(method, path, body) {
   try {
     response = await fetch(path, {
       method,
-      headers: hasBody ? { "Content-Type": "application/json" } : undefined,
+      headers: consoleHeaders(
+        hasBody ? { "Content-Type": "application/json" } : undefined,
+      ),
       body: hasBody ? JSON.stringify(body) : undefined,
     });
   } catch (cause) {

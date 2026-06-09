@@ -43,6 +43,9 @@ describe("getClosedInteractions", () => {
     expect(result).toEqual(body);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/agents/ember-owl/interactions/closed",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "X-Agent-ID": "web-console" }),
+      }),
     );
   });
 
