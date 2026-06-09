@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 
 	"github.com/mkhomutov/persatrix/internal/defaults"
@@ -159,6 +157,13 @@ type ChannelRouter struct {
 	// maxCascadeDepth — see cascade_depth.go; defaultSessionID — see router_session.go (RFC 0031 Phase 1).
 	maxCascadeDepth  int
 	defaultSessionID string
+
+	// fanoutWG tracks the detached fanout goroutines spawned by
+	// [ChannelRouter.PublishAsync] so a graceful shutdown (or a test) can drain
+	// them via [ChannelRouter.WaitForPendingFanout] rather than racing a
+	// half-delivered round. The synchronous [ChannelRouter.Publish] does not
+	// touch it (its fanout completes before the call returns). Zero value ready.
+	fanoutWG sync.WaitGroup
 }
 
 // NewChannelRouter wires a router around a store, dispatcher, logger, and
@@ -268,108 +273,11 @@ func (r *ChannelRouter) MaxCascadeDepth() int {
 // Caller MUST set `msg.ID` (UUID); `msg.Timestamp` is derived by the
 // store when zero.
 func (r *ChannelRouter) Publish(ctx context.Context, msg ChannelMessage, declaredType string) error {
-	derivedType, err := channelTypeFromID(msg.ChannelID)
-	if err != nil {
+	plan, err := r.publishCommit(ctx, msg, declaredType)
+	if err != nil || plan == nil {
 		return err
 	}
-	if declaredType != "" && ChannelType(declaredType) != derivedType {
-		return fmt.Errorf("%w: channel_type=%q disagrees with channel_id prefix (%s)",
-			ErrInvalidChannelType, declaredType, derivedType)
-	}
-
-	// RFC 0011 amendment 'Cascade-depth wire propagation': clamp inbound
-	// `cascade_depth` to [0, maxCascadeDepth] BEFORE the store commit
-	// so `GET /messages` returns what was enforced, not the publisher's
-	// claim. Defends against over-cap poisoning (NOT reset-to-0, which
-	// needs parent-message lookup — see the amendment's Future work).
-	inboundDepth := readCascadeDepth(msg.Metadata)
-	clampedDepth := clampCascadeDepth(inboundDepth, r.maxCascadeDepth)
-	if clampedDepth != inboundDepth || (msg.Metadata != nil && msg.Metadata[cascadeDepthMetadataKey] != nil) {
-		// Canonicalise the persisted shape to int (REST decode yields
-		// float64 for every numeric).
-		if msg.Metadata == nil {
-			msg.Metadata = map[string]any{}
-		}
-		msg.Metadata[cascadeDepthMetadataKey] = clampedDepth
-	}
-
-	// RFC 0030 Layer 2 (v0.3.8) per-participant reply budget + store commit:
-	// reserve the sender's slot, persist, and release the reservation if the
-	// persist fails — so a throttled (K+1)th publish never enters channel
-	// history (§F) and a store-rejected publish never erodes the allowance.
-	// Additive: a no-op when uncapped, untracked, or an exempt human.
-	if err := r.publishWithReplyBudget(ctx, msg, derivedType); err != nil {
-		return err
-	}
-
-	if r.metrics != nil && r.metrics.MessagesPublished != nil {
-		r.metrics.MessagesPublished.Add(ctx, 1, metric.WithAttributes(attribute.String("channel_type", string(derivedType))))
-	}
-
-	// RFC 0030 Layer 4 (v0.3.8) end-of-interaction signal: accumulate this
-	// publish's end-vote (if any) into the interaction's quorum and, when K
-	// distinct participants have voted within W consecutive turns, close the
-	// interaction — suppressing fanout so the conversation stops drawing new
-	// replies (§H). Runs post-persistence (the vote is a real message) and is
-	// orthogonal to cascade_depth. Inert when untracked (no interaction_id) or
-	// when no producer emits the vote, so it is additive over v0.3.7.
-	if r.processEndVote(ctx, msg, derivedType) {
-		return nil
-	}
-
-	// Primary cascade-depth enforcement: drop fanout when at/over cap.
-	// The publish itself succeeded (2xx) — only the cascade is
-	// terminated. Python `EventDispatcher.max_cascade_depth=5`
-	// (agents/dispatch.py:108-114) remains as defense-in-depth.
-	if clampedDepth >= r.maxCascadeDepth {
-		r.recordCascadeCap(ctx, msg, derivedType, clampedDepth)
-		return nil
-	}
-
-	// RFC 0011 PR 4b: pre-resolve `thread_parent_sender_id` once per
-	// publish so a thread-heavy channel pays one [ChannelStore.GetMessage]
-	// lookup per publish, not one per recipient. Empty for non-thread
-	// events. A lookup miss (parent pruned by the per-channel cap before
-	// the reply lands) is logged at debug and surfaces as an empty
-	// string on the wire — receivers branch on
-	// `thread_id != "" && thread_parent_sender_id != ""` so the empty
-	// string is a benign signal rather than an error.
-	threadParentSenderID := r.resolveThreadParentSenderID(ctx, msg)
-
-	// Resolve any chat-as-DM waiter parked for this (channel, sender)
-	// pair before fanout (RFC 0011 PR 4a-ii-β-2). Notify is a non-
-	// blocking buffered send and a no-op when no waiter is registered,
-	// so the hot path stays cheap when no chat is in flight.
-	//
-	// Notify runs on EVERY publish — keyed by `(channelID, senderID)`.
-	// The chat handler registers waiters keyed by
-	// `(dm.ID, awaitFromAgentID)`, so an inbound user→agent publish
-	// (sender = user) cannot satisfy the waiter parked for the agent's
-	// reply (sender = agent). Future callers that install a waiter
-	// keyed by the user's id (e.g. echo-back semantics) MUST account
-	// for the fact that the inbound publish itself fires Notify before
-	// any subscriber receives — install the waiter on the OTHER
-	// participant's id, never on the publisher's.
-	r.waiter.Notify(msg)
-
-	// RFC 0030 Layer 2.5 deferred fanout (amendment D1): when a serialized
-	// floor round is active on this channel and this inbound message is a
-	// reply from a speaker that round granted the floor, the round loop is the
-	// sole dispatcher. The reply has been persisted (above) and — when the
-	// speaker is still its current turn-holder — has just satisfied the loop's
-	// waiter via Notify, so the loop advances with the reply now in history.
-	// Running fanout here would re-introduce the N-way amplification floor
-	// control exists to prevent. The set membership (not just the current
-	// turn-holder) also covers a speaker that exhausted its turn budget (D2)
-	// and replies late while a later speaker holds the floor: still a
-	// participant of this round, so suppressed rather than spawning a competing
-	// round. Cross-*round* cascade stays bounded by `cascade_depth` (Layer 0,
-	// enforced above).
-	if r.isFloorSpeakerReply(msg.ChannelID, msg.SenderID) {
-		return nil
-	}
-
-	r.fanout(ctx, msg, derivedType, threadParentSenderID)
+	r.fanout(ctx, plan.msg, plan.derivedType, plan.threadParentSenderID)
 	return nil
 }
 

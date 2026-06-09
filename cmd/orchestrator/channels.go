@@ -147,6 +147,16 @@ func initChannels(
 	}
 	dispatcher := selectChannelDispatcher(reg, sessionResolver, epochID, logger)
 	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)
+	// Drain in-flight detached fanout (RFC 0048 console publish-latency fix:
+	// the REST handler returns at the persistence boundary and runs fanout on a
+	// tracked goroutine) before closing the store, so a shutdown mid-round
+	// completes its deliveries rather than abandoning them.
+	cleanup = func() {
+		router.WaitForPendingFanout()
+		if cErr := chanStore.Close(); cErr != nil {
+			logger.Warn("channels: store close failed", zap.Error(cErr))
+		}
+	}
 	// `channels.yaml` may override the default cascade-depth cap. Apply
 	// after construction so the router's [defaults.DefaultMaxCascadeDepth]
 	// default stays the canonical "no config" value; a zero or negative

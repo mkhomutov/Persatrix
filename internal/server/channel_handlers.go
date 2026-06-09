@@ -310,7 +310,12 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 
 	var pubErr error
 	if s.channelRouter != nil {
-		pubErr = s.channelRouter.Publish(ctx, msg, req.ChannelType)
+		// PublishAsync (not Publish) returns at the persistence boundary and
+		// runs fanout on a detached goroutine — the synchronous Publish blocked
+		// this response on the full agent round (up to 45s/speaker under floor
+		// control), stranding the RFC 0048 console composer for 90-135s. Replies
+		// surface via the history poll; delivery errors are counted, not returned.
+		pubErr = s.channelRouter.PublishAsync(ctx, msg, req.ChannelType)
 	} else {
 		// PR #245 review (round 3) Should-Fix #3: signpost the
 		// router-nil fallback once per process. The fallback path
