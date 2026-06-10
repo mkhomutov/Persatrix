@@ -353,6 +353,15 @@ func (r *ChannelRouter) runFloorTurn(
 ) {
 	r.recordFloorSpeaker(msg.ChannelID, speaker.ParticipantID)
 
+	// Presence Tier 1 (RFC 0048): re-stamp the speaker as thinking at the moment
+	// its turn is granted. [ChannelRouter.fanout] marks every responder once at
+	// round start, but a serialized round dispatches them one at a time while the
+	// activity TTL is sized for a single turn — so a late speaker's round-start
+	// mark can age out of the indicator before its turn even begins. Re-marking
+	// here restarts its TTL from actual dispatch, so the console shows it thinking
+	// for its own turn rather than dropping it mid-queue. See activity.go.
+	r.markActivity(msg.ChannelID, []string{speaker.ParticipantID})
+
 	replyCh, cancel, err := r.waiter.Register(msg.ChannelID, speaker.ParticipantID)
 	if err != nil {
 		// A waiter for this (channel, speaker) already exists — e.g. a

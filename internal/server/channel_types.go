@@ -112,3 +112,12 @@ type listChannelsResponse struct {
 type historyResponse struct {
 	Messages []channelMessageResponse `json:"messages"`
 }
+
+// channelActivityResponse is the envelope for GET /api/v1/channels/{id}/activity
+// (RFC 0048 console presence Tier 1). `Thinking` is the set of participant ids
+// the orchestrator has an in-flight turn for — those it dispatched to and is
+// awaiting a reply from — and is always an array (never null) so the console
+// can treat an idle channel as an empty list without a special case.
+type channelActivityResponse struct {
+	Thinking []string `json:"thinking"`
+}
