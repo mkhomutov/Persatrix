@@ -188,7 +188,9 @@ POLICY_UNKNOWN: Final[str] = "unknown"
 # expanding a typed ``@everyone``/``@here`` into the sentinel. Until then the
 # open-floor (empty ``mentions``) path already admits all participants, so
 # directedness is fixed regardless; an explicit broadcast is an additive
-# affordance a programmatic caller can already use.
+# affordance a programmatic caller can already use. Mirrors Go's
+# ``MentionEveryone`` (internal/channels/channels.go); the two must stay in
+# lockstep (pinned by ``test_cross_language_respond_policy_drift.py``).
 MENTION_EVERYONE: Final[str] = "@everyone"
 
 _DM_CHANNEL_PREFIX: Final[str] = "dm:"
