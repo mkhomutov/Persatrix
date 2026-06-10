@@ -68,8 +68,9 @@
   let pendingSelectId = "";
 
   // feed is the ConversationFeed handle — echo()/pollNow() surface a write, and
-  // markThinking()/clearThinking() drive its live-presence indicator (Tier 0)
-  // from the send/publish seams below.
+  // markThinking()/clearThinking() drive the optimistic half of its
+  // live-presence indicator from the send/publish seams below (the feed's own
+  // /activity poll owns the authoritative half).
   let feed = $state(null);
 
   const isDM = $derived(Boolean(selectedAgent));
