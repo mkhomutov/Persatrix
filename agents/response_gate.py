@@ -242,8 +242,11 @@ def is_open_floor_admit(decision: GateDecision) -> bool:
 
     Tier B (the leased salience bid, :mod:`agents.salience_bid`) runs
     **only** on the ambiguous open-floor remainder Tier A leaves: a
-    ``participant`` (``always``) member admitted to an *un-addressed* message
-    (empty ``mentions``) with ``reason="policy_always"``. Every *directed*
+    ``participant`` (``always``) member admitted with
+    ``reason="policy_always"`` to a message that addresses nobody who could
+    take the floor — empty ``mentions``, or (since the v0.3.8
+    floor-capable-directedness amendment) mentions whose orchestrator-resolved
+    ``floor_mentions`` subset is empty. Every *directed*
     admit — a ``@``-mention (``reason="mentioned"``, whether the member's
     disposition is ``when_mentioned`` *or* ``always`` and it was named
     individually), an explicit ``@everyone`` broadcast (``"broadcast"`` — a
@@ -345,18 +348,22 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
         # filter. A ``participant`` (``always``) member no longer answers a
         # message addressed to *other* members — that was the v0.3.6 pile-on
         # defect ("how about you @ember-owl?" drew a reply from everyone).
-        # Suppress iff the message names specific recipients (``mentions``
-        # non-empty), this agent is not among them, and it is not an explicit
-        # broadcast (``MENTION_EVERYONE`` absent, decision D3). A participant
-        # named *individually* is addressed directly and admits with the
-        # ``mentioned`` reason (its lane — RFC 0030 Tier B TB1 keeps it out of
-        # the salience bid); an explicit ``@everyone`` broadcast admits with
-        # the directed ``broadcast`` reason (also TB1 — the sentinel's "do not
-        # suppress" contract is its lane). Only a genuinely un-addressed
-        # message (empty ``mentions``) admits with the open-floor
-        # ``policy_always`` — the ambiguous remainder Tier B (the v0.3.8
-        # salience bid that decides who actually has something to add)
-        # refines. The decision keeps ``policy=always`` in every branch: a
+        # Suppress iff the message names recipients the floor could actually
+        # pass to (the suppression *basis* below is non-empty — raw
+        # ``mentions`` pre-amendment, the resolved floor-capable subset since
+        # v0.3.8), this agent is not among the raw mentions, and it is not an
+        # explicit broadcast (``MENTION_EVERYONE`` absent, decision D3). A
+        # participant named *individually* is addressed directly and admits
+        # with the ``mentioned`` reason (its lane — RFC 0030 Tier B TB1 keeps
+        # it out of the salience bid); an explicit ``@everyone`` broadcast
+        # admits with the directed ``broadcast`` reason (also TB1 — the
+        # sentinel's "do not suppress" contract is its lane). Only a message
+        # that addresses nobody who could take the floor — empty ``mentions``,
+        # or (v0.3.8) mentions resolved to an empty floor-capable subset —
+        # admits with the open-floor ``policy_always``, the ambiguous
+        # remainder Tier B (the v0.3.8 salience bid that decides who actually
+        # has something to add) refines. The decision keeps ``policy=always``
+        # in every branch: a
         # gated-counter fire with ``policy=always`` is, by construction,
         # exactly a directed-elsewhere suppression (a self-sender ``always`` is
         # labelled ``defense_in_depth``), so the RFC 0011 §D

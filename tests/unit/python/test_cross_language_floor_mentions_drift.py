@@ -5,8 +5,9 @@ Mirrors the established per-topic drift-test pattern
 ``test_cross_language_salience_max_channel_members_drift.py``, PR #573;
 ``test_cross_language_respond_policy_drift.py``, PR #597 — its file
 would be the natural home for these pins per the amendment's §C item 4,
-but it sits at the 500-line review cap, so the pins live in this
-sibling instead).
+but these pins would push it past the 500-line review cap
+(``scripts/checks/file_size.py``), so they live in this sibling
+instead).
 
 The RFC 0030 floor-capable-directedness amendment
 (``docs/rfcs/0030-amendment-floor-capable-directedness.md``) routes the

@@ -112,12 +112,19 @@ func TestResolveFloorMentions_DedupesMentions(t *testing.T) {
 
 // TestOrderResponders_FloorIncapableMentionsAreOpenFloor — the §C item 3
 // basis flip, landed in the same change as the Python gate's (the §E "PR 2"
-// matrix; preserves candidate-set/gate parity at every commit). These three
-// rows are the inverted PR-1 interim parity pins: a message mentioning only
-// a floor-incapable party (the human, a non-member, the sender itself) is
-// open floor — every `always` member stays a candidate instead of dropping
-// to the ingestion-only set. The first row is the trigger defect ("@alex,
-// here's our recommendation…") that silenced the room pre-amendment.
+// matrix; preserves candidate-set/gate parity at every commit). The first
+// three rows are the inverted PR-1 interim parity pins: a message mentioning
+// only a floor-incapable party (the human, a non-member, the sender itself)
+// is open floor — every `always` member stays a candidate instead of
+// dropping to the ingestion-only set. The first row is the trigger defect
+// ("@alex, here's our recommendation…") that silenced the room
+// pre-amendment. The fourth row is §E's observer-mention case, pinned here
+// at the candidate-split level (not only in the resolver matrix) because it
+// is the row that depends on the basis *normalizing* the addressee's
+// disposition: drop the Normalize in [resolveFloorMentions] and an
+// observer-spelled membership row reads floor-capable, the message
+// classifies directed, and every `always` member drops to ingestion-only —
+// the guaranteed-silence defect class this file exists to fence.
 func TestOrderResponders_FloorIncapableMentionsAreOpenFloor(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -155,6 +162,17 @@ func TestOrderResponders_FloorIncapableMentionsAreOpenFloor(t *testing.T) {
 			},
 			msg:      ChannelMessage{SenderID: "ember-owl", Mentions: []string{"ember-owl"}},
 			wantResp: []string{"iron-fox"},
+			wantNon:  []string{},
+		},
+		{
+			name: "observer mention is open floor",
+			members: []Member{
+				member("watcher", RespondObserver), // → never: floor-incapable
+				member("ember-owl", RespondAlways),
+				member("iron-fox", RespondAlways),
+			},
+			msg:      ChannelMessage{SenderID: "user", Mentions: []string{"watcher"}},
+			wantResp: []string{"ember-owl", "iron-fox"},
 			wantNon:  []string{},
 		},
 	}
