@@ -25,7 +25,7 @@ package channels
 // to the first occurrence — the subset is a contract-bearing wire field that
 // receivers reason about as a set, and the publish path caps `mentions` at 10
 // without deduping. The [MentionEveryone] sentinel is never a member id
-// (`validateParticipantID` forbids `@`) so it never appears in the result —
+// ([ValidateParticipantID] forbids `@`) so it never appears in the result —
 // broadcast handling stays on the raw mentions list.
 //
 // Normalize matches every other policy read at this seam — [orderResponders]'
