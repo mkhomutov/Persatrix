@@ -148,17 +148,32 @@ def validate_channel_message_event(
     # here: the sentinel is never a member id, so the resolver never emits it;
     # an inbound sentinel (or any pattern violation) is a malformed or spoofed
     # producer and is rejected before the gate consumes the list as its
-    # suppression basis.
+    # suppression basis. The subset relation itself is enforced too: the
+    # resolver computes an intersection, so a conforming producer satisfies
+    # it by construction, and rejecting a violation restores the amendment's
+    # skew invariant against *spoofed* producers — a subset of ``mentions``
+    # can only ever narrow suppression relative to the raw basis, so a
+    # fabricated ``floor_mentions`` cannot silence a participant the raw
+    # mentions would not already have silenced. (The converse spoof — flag
+    # true with an empty list, widening admission — stays accepted:
+    # resolved-empty is the motivating human-mention case and is
+    # unverifiable here; the amendment's trust-extension paragraph owns
+    # that residue.) The entry cap still fires first: the subset rule
+    # alone cannot bound the list, since one legitimate mention id may be
+    # repeated without limit.
     if len(request.floor_mentions) > _CHANNEL_MAX_MENTIONS:
         return (
             f"floor_mentions list exceeds {_CHANNEL_MAX_MENTIONS} entries "
             f"(got {len(request.floor_mentions)})"
         ), None
+    raw_mentions = set(request.mentions)
     for i, m in enumerate(request.floor_mentions):
         if not _CHANNEL_PARTICIPANT_ID_RE.match(m):
             return (
                 f"floor_mentions[{i}] is not a valid participant id: {_safe_repr(m)}"
             ), None
+        if m not in raw_mentions:
+            return f"floor_mentions[{i}] not in mentions: {_safe_repr(m)}", None
 
     # ``sender_id`` carries a stronger trust claim than ``mentions[]`` (it
     # identifies the alleged author) yet rides the same cleartext gRPC

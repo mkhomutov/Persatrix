@@ -11,9 +11,9 @@ of the paired basis flip
   emptiness, which the wire cannot express (proto3 repeated fields have
   no presence; §C item 2).
 * Flag false or missing (an old orchestrator, the legacy in-process
-  path) — and a malformed non-list under a true flag — fall back to the
-  raw-mentions basis: the pre-amendment behaviour, degrading toward
-  *over*-suppression, never under-suppression.
+  path) — and a malformed non-list *or absent list* under a true flag —
+  fall back to the raw-mentions basis: the pre-amendment behaviour,
+  degrading toward *over*-suppression, never under-suppression.
 * Flag true with an empty list: open floor — the motivating case (a sole
   mention of the human operator), carrying the ``policy_always`` reason
   so :func:`is_open_floor_admit` routes it into the Tier B bid exactly
@@ -21,8 +21,11 @@ of the paired basis flip
 * The ``mentioned``/``broadcast`` admit paths read raw ``mentions``
   throughout (amendment OQ 3).
 
-The matrix deliberately has no present-vs-absent axis for the list
-itself — the flag is that distinction's wire-expressible replacement.
+The matrix deliberately has no *semantic* present-vs-absent axis for the
+list itself — the flag is that distinction's wire-expressible
+replacement. The absent-list-under-a-true-flag row is the
+malformed-producer fallback (a half-lifted payload), not a semantic
+state.
 """
 
 from __future__ import annotations
@@ -141,6 +144,19 @@ class TestResolvedBasis:
             floor_mentions="alex",  # str, not list
             floor_mentions_resolved=True,
         )
+        decision = evaluate_response_gate(event, agent_id="iron-fox")
+        assert decision.respond is False
+        assert decision.reason == "directed_elsewhere"
+
+    def test_absent_list_under_true_flag_falls_back_to_raw_basis(self) -> None:
+        """A true flag with no ``floor_mentions`` key at all — a producer
+        that set the flag but never stamped the list (a half-lifted
+        payload) — is the same malformed-producer class as a non-list:
+        fall back to the raw-mentions basis. The pin has teeth: drop the
+        gate's ``isinstance`` guard and the basis becomes ``None`` —
+        falsy — and the message *admits*, the under-suppression direction
+        the amendment forbids."""
+        event = _always_event(mentions=["alex"], floor_mentions_resolved=True)
         decision = evaluate_response_gate(event, agent_id="iron-fox")
         assert decision.respond is False
         assert decision.reason == "directed_elsewhere"

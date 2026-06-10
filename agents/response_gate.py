@@ -363,8 +363,8 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
         # admits with the open-floor ``policy_always``, the ambiguous
         # remainder Tier B (the v0.3.8 salience bid that decides who actually
         # has something to add) refines. The decision keeps ``policy=always``
-        # in every branch: a
-        # gated-counter fire with ``policy=always`` is, by construction,
+        # in every branch: a gated-counter fire with ``policy=always`` is, by
+        # construction,
         # exactly a directed-elsewhere suppression (a self-sender ``always`` is
         # labelled ``defense_in_depth``), so the RFC 0011 §D
         # ``{channel_id, policy}`` label set surfaces it without a new
@@ -416,8 +416,9 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
             # where the Tier B bid still applies (the amendment moves the
             # message between two existing lanes; no third lane). Flag
             # false/absent (an old orchestrator, the legacy in-process
-            # path) — and a malformed non-list under a true flag — fall
-            # back to the raw-mentions basis: today's behaviour, degrading
+            # path) — and a malformed non-list or absent list under a true
+            # flag — fall back to the raw-mentions basis: today's behaviour,
+            # degrading
             # toward *over*-suppression, never under-suppression. The
             # `mentioned`/`broadcast` admits above stay on raw `mentions`
             # (amendment OQ 3). `is True` is deliberate: the gRPC servicer
