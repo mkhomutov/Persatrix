@@ -8,13 +8,13 @@ import {
 } from "@testing-library/svelte";
 import ChannelTimeline from "./ChannelTimeline.svelte";
 
-// Live presence wiring (RFC 0048 console, Tier 0): a group publish that
-// @-addresses a persona lights the "thinking" indicator for that persona until
-// its reply lands; a broadcast that names nobody shows nothing (the optimistic
-// signal only knows whom THIS console addressed). The DM lifecycle —
-// thinking-while-sending, cleared on reply — is pinned in ChannelTimeline.dm.test.js;
-// this spec covers the group path and the no-guess case. The backend client is
-// mocked so the wiring runs without an orchestrator.
+// Live presence wiring (RFC 0048 console): a group lights the "thinking"
+// indicator from two sources — an optimistic add for the console's own
+// @-addressed publish (instant feedback) and the authoritative /activity poll
+// (Tier 1), which also surfaces turns this console did NOT trigger and is the
+// source of truth for clearing. The DM lifecycle — thinking-while-sending,
+// cleared on reply, no /activity poll — is pinned in ChannelTimeline.dm.test.js.
+// The backend client is mocked so the wiring runs without an orchestrator.
 vi.mock("../lib/api.js", () => ({
   ApiError: class ApiError extends Error {
     constructor(message, status, options) {
@@ -27,6 +27,7 @@ vi.mock("../lib/api.js", () => ({
   listAgents: vi.fn(),
   listChannels: vi.fn(),
   getChannelHistory: vi.fn(),
+  getChannelActivity: vi.fn(),
   getChatHistory: vi.fn(),
   sendChat: vi.fn(),
   publishMessage: vi.fn(),
@@ -37,11 +38,12 @@ import {
   listAgents,
   listChannels,
   getChannelHistory,
+  getChannelActivity,
   getChatHistory,
   publishMessage,
 } from "../lib/api.js";
 import { selection } from "../lib/selection.svelte.js";
-import { SLOW_AFTER_MS, EXPIRE_AFTER_MS } from "../lib/presence.js";
+import { SLOW_AFTER_MS } from "../lib/presence.js";
 
 const AGENTS = [{ id: "ember-owl", name: "Ember Owl", role: "Strategist", status: "healthy" }];
 
@@ -67,6 +69,7 @@ beforeEach(() => {
     channels: [channelWithMembers("local", "ember-owl")],
   });
   getChannelHistory.mockResolvedValue(historyOf());
+  getChannelActivity.mockResolvedValue({ thinking: [] });
   getChatHistory.mockResolvedValue(historyOf());
   publishMessage.mockResolvedValue({
     id: "m3",
@@ -85,7 +88,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("Channel timeline — live presence (Tier 0)", () => {
+describe("Channel timeline — live presence", () => {
   it("lights the thinking indicator for an @-addressed persona on publish", async () => {
     render(ChannelTimeline, { props: { userId: "local" } });
     await screen.findByRole("option", { name: "General" });
@@ -180,13 +183,13 @@ describe("Channel timeline — live presence (Tier 0)", () => {
     expect(screen.getByText(/waiting for you/i)).toBeTruthy();
   });
 
-  it("softens past the slow threshold, then self-clears at the ceiling", async () => {
-    // The optimistic timer machine in the controller (not the parallel pure
-    // helper): a still-pending mention softens to "taking a while…" so a slow
-    // reply doesn't read as a stall, and self-clears at the ceiling so an
-    // unanswered mention can't strand the line — the group path has no server
-    // bound, so this ceiling is its only backstop.
+  it("softens past the slow threshold while the server keeps confirming the turn", async () => {
+    // A turn the /activity poll keeps confirming softens to "taking a while…" so
+    // a slow reply doesn't read as a stall; when the server drops it the bar
+    // clears and hands back to the operator. (Server-confirmed, so it outlives
+    // the optimistic grace — unlike a wrong guess the server never confirms.)
     vi.useFakeTimers();
+    getChannelActivity.mockResolvedValue({ thinking: ["ember-owl"] });
     render(ChannelTimeline, { props: { userId: "local" } });
     await vi.waitFor(() =>
       expect(screen.getByRole("option", { name: "General" })).toBeTruthy(),
@@ -203,7 +206,29 @@ describe("Channel timeline — live presence (Tier 0)", () => {
     await vi.advanceTimersByTimeAsync(SLOW_AFTER_MS);
     expect(screen.getByText(/ember owl is taking a while/i)).toBeTruthy();
 
-    await vi.advanceTimersByTimeAsync(EXPIRE_AFTER_MS);
+    // The server drops the turn — the next poll clears the bar.
+    getChannelActivity.mockResolvedValue({ thinking: [] });
+    await vi.advanceTimersByTimeAsync(3000);
     expect(screen.queryByText(/ember owl is/i)).toBeNull();
+  });
+
+  it("shows a turn the console did NOT trigger, from the /activity poll (Tier 1)", async () => {
+    // The whole point of Tier 1: an agent dispatched by another participant (or
+    // an autonomous reply) surfaces from the authoritative server set, with no
+    // optimistic add from this console. It clears when the server drops it.
+    vi.useFakeTimers();
+    getChannelActivity.mockResolvedValue({ thinking: ["ember-owl"] });
+    render(ChannelTimeline, { props: { userId: "local" } });
+    await vi.waitFor(() =>
+      expect(screen.getByRole("option", { name: "General" })).toBeTruthy(),
+    );
+
+    // No publish from this console — the indicator comes purely from the poll.
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(screen.getByText(/ember owl is thinking/i)).toBeTruthy();
+
+    getChannelActivity.mockResolvedValue({ thinking: [] });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(screen.queryByText(/ember owl is thinking/i)).toBeNull();
   });
 });

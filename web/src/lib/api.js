@@ -295,6 +295,20 @@ export async function getChannelHistory(channelID, { limit, before } = {}) {
   );
 }
 
+// getChannelActivity reads a channel's in-flight "thinking" set
+// (GET /api/v1/channels/{id}/activity), returning the `channelActivityResponse`
+// envelope ({thinking}) — the participant ids the orchestrator has dispatched a
+// turn to and is awaiting a reply from (RFC 0048 console presence Tier 1). This
+// is the authoritative signal behind the "… is thinking" indicator: unlike the
+// optimistic client overlay it is accurate for every trigger and survives a
+// reload. `thinking` is always an array (the server marshals an idle channel as
+// []). Encode the id so DM colons stay pinned to the {id}/activity route.
+export async function getChannelActivity(channelID) {
+  return getJSON(
+    `/api/v1/channels/${encodeURIComponent(channelID)}/activity`,
+  );
+}
+
 // getClosedInteractions reads an agent's closed-interaction summaries
 // (GET /api/v1/agents/{id}/interactions/closed), returning the
 // `closedInteractionsResponse` envelope ({interactions}) newest-first

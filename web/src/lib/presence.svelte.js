@@ -1,74 +1,109 @@
 // The live-presence controller behind the conversation panel's PresenceBar
-// (RFC 0048 console, Tier 0). A `.svelte.js` module so the `$state` runes it
-// holds stay reactive across the component that renders them — the panel owns an
-// instance and reads its getters, keeping the optimistic state machine out of
-// ChannelTimeline (which is already at the review-size cap). The phrasing,
-// pruning, and escalation thresholds it composes are the pure, unit-tested
-// functions in lib/presence.js; this adds only the timers and the transitions.
+// (RFC 0048 console). A `.svelte.js` module so the `$state` runes it holds stay
+// reactive across the component that renders them — ConversationFeed owns an
+// instance and reads its getters. It fuses two sources into one displayed
+// "thinking" set (see lib/presence.js mergeThinking):
 //
-// Optimism, and its limits, are documented in lib/presence.js: the controller
-// only knows about turns this console triggered. Tier 1 (a server /activity
-// signal) will feed `set()` directly instead.
-import { pruneThinking, SLOW_AFTER_MS, EXPIRE_AFTER_MS } from "./presence.js";
+//   • server — the orchestrator's authoritative per-channel /activity set, fed
+//     in via set() on each group poll tick. Accurate for EVERY trigger (another
+//     participant, an autonomous reply, a cascade) and across reloads.
+//   • optimistic — a short overlay for the console's OWN just-fired turns,
+//     added via add() so the indicator lights instantly rather than waiting up
+//     to a poll interval for the server to confirm. A group add carries a grace
+//     expiry: if the server never confirms it (a wrong guess), it fades. A DM
+//     add is sticky (Infinity) — DMs don't poll /activity (single-trigger), so
+//     the synchronous send lifecycle drives it via add()/remove() alone.
+//
+// The displayed set drives edge-triggered UX: the "taking a while…" softening on
+// the leading edge, a "Waiting for you" flash when a turn hands back to the
+// operator, and a dead-poll backstop that self-clears a frozen indicator.
+import {
+  mergeThinking,
+  SLOW_AFTER_MS,
+  GRACE_MS,
+  STALE_AFTER_MS,
+} from "./presence.js";
 
 // How long the "Waiting for you" hint lingers after a turn returns to the
 // operator — long enough to register the hand-back, short enough not to become
 // permanent chrome.
 const IDLE_FLASH_MS = 4000;
 
-// createPresence builds one controller. Thresholds are injectable so a test can
-// drive the slow/expire/idle transitions without real-time waits.
+// createPresence builds one controller. Thresholds + clock are injectable so a
+// test can drive the transitions deterministically.
 export function createPresence({
   slowAfterMs = SLOW_AFTER_MS,
-  expireAfterMs = EXPIRE_AFTER_MS,
   idleFlashMs = IDLE_FLASH_MS,
+  graceMs = GRACE_MS,
+  staleAfterMs = STALE_AFTER_MS,
+  now = () => Date.now(),
 } = {}) {
-  let thinking = $state([]); // agent ids with an in-flight turn
+  let thinking = $state([]); // the fused, displayed set
   let slow = $state(false); // soften the copy once a turn drags on
   let idle = $state(false); // the brief "Waiting for you" flash
+  let serverIds = []; // last authoritative /activity set (plain)
+  const grace = new Map(); // optimistic id -> grace-expiry ms (Infinity = sticky)
   let slowTimer = null;
-  let expireTimer = null;
   let idleTimer = null;
+  let staleTimer = null;
 
-  function clearTurnTimers() {
+  function clearActiveTimers() {
     clearTimeout(slowTimer);
-    clearTimeout(expireTimer);
+    clearTimeout(staleTimer);
     slowTimer = null;
-    expireTimer = null;
+    staleTimer = null;
   }
 
-  // armTurnTimers (re)starts the slow + expiry countdowns for the current
-  // pending batch: soften the copy at the slow mark, self-clear at the ceiling
-  // so an unanswered turn can't strand the indicator.
-  function armTurnTimers() {
-    clearTurnTimers();
-    slowTimer = setTimeout(() => {
-      slow = true;
-    }, slowAfterMs);
-    expireTimer = setTimeout(() => {
-      thinking = [];
-      slow = false;
-      clearTurnTimers();
-    }, expireAfterMs);
+  function flashIdle() {
+    idle = true;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      idle = false;
+    }, idleFlashMs);
   }
 
-  // settle installs the remaining pending set; when it empties, the countdowns
-  // stop and — if a reply (not a timeout/cancel) emptied it — the brief
-  // "Waiting for you" hint flashes to mark the operator's turn.
-  function settle(next, { replied = false } = {}) {
+  // recompute folds the two sources into `thinking`, prunes lapsed optimistic
+  // entries, and drives the edge-triggered timers + idle flash off the
+  // empty/non-empty transition. flashOnEmpty distinguishes a real hand-back (a
+  // reply emptied the set) from a mere add.
+  function recompute({ flashOnEmpty = false } = {}) {
+    const entries = Array.from(grace, ([id, expiresAt]) => ({ id, expiresAt }));
+    const { ids, expired } = mergeThinking(serverIds, entries, now());
+    expired.forEach((id) => grace.delete(id));
+
     const wasActive = thinking.length > 0;
-    thinking = next;
-    if (next.length === 0) {
-      clearTurnTimers();
+    thinking = ids;
+
+    if (ids.length > 0) {
+      // Re-arm the dead-poll backstop every tick so a server-confirmed turn
+      // persists; only START the slow countdown on the leading edge so a long
+      // turn softens once, not never.
+      clearTimeout(staleTimer);
+      staleTimer = setTimeout(hardClear, staleAfterMs);
+      if (!wasActive) {
+        clearTimeout(slowTimer);
+        slowTimer = setTimeout(() => {
+          slow = true;
+        }, slowAfterMs);
+      }
+    } else {
+      clearActiveTimers();
       slow = false;
-      if (wasActive && replied) {
-        idle = true;
-        clearTimeout(idleTimer);
-        idleTimer = setTimeout(() => {
-          idle = false;
-        }, idleFlashMs);
+      if (wasActive && flashOnEmpty) {
+        flashIdle();
       }
     }
+  }
+
+  // hardClear is the dead-poll backstop: /activity stopped answering (or a DM
+  // reply never landed) long enough that the indicator would otherwise freeze.
+  // No idle flash — this is degradation, not a real hand-back.
+  function hardClear() {
+    serverIds = [];
+    grace.clear();
+    clearActiveTimers();
+    thinking = [];
+    slow = false;
   }
 
   return {
@@ -82,51 +117,64 @@ export function createPresence({
       return idle;
     },
 
-    // add marks personas as working (merging with any already pending) and
-    // restarts the countdowns; a fresh turn cancels a lingering idle flash. A
-    // call that adds nothing to an empty set is a no-op (a broadcast that
-    // addressed no agent shows nothing rather than guessing).
-    add(ids) {
-      const next = Array.from(
-        new Set([...thinking, ...(ids ?? []).filter(Boolean)]),
-      );
-      if (next.length === 0) return;
-      idle = false;
-      clearTimeout(idleTimer);
-      thinking = next;
-      slow = false;
-      armTurnTimers();
+    // set installs the authoritative server signal (one /activity read). A group
+    // turn handed back to the operator empties this and flashes "Waiting for you".
+    set(ids) {
+      serverIds = (ids ?? []).filter(Boolean);
+      recompute({ flashOnEmpty: true });
     },
 
-    // remove clears the given personas. Without `replied` it is a silent
-    // backstop (a cancel/error/mid-turn switch) — no idle flash, which belongs
-    // only to a turn that actually answered.
-    remove(ids, opts) {
+    // add lights the console's own turn instantly. graceMs bounds an unconfirmed
+    // group add; omit it (DM) for a sticky overlay the send lifecycle clears.
+    add(ids, { graceMs: g } = {}) {
+      const expiresAt = g == null ? Infinity : now() + g;
+      let any = false;
+      for (const id of (ids ?? []).filter(Boolean)) {
+        grace.set(id, expiresAt);
+        any = true;
+      }
+      if (!any) return;
+      idle = false;
+      clearTimeout(idleTimer);
+      recompute();
+    },
+
+    // remove clears the given ids from BOTH sources (a DM reply/cancel, or a
+    // mid-turn switch). With `replied` it flashes the hand-back; without, it is a
+    // silent backstop (cancel/error).
+    remove(ids, { replied = false } = {}) {
       const drop = new Set(ids ?? []);
-      settle(
-        thinking.filter((id) => !drop.has(id)),
-        opts,
-      );
+      drop.forEach((id) => grace.delete(id));
+      serverIds = serverIds.filter((id) => !drop.has(id));
+      recompute({ flashOnEmpty: replied });
     },
 
     // pruneFrom clears any pending persona whose reply just arrived on a poll
-    // tick (the group path, and any agent traffic surfaced after a DM send).
+    // tick — the instant local clear that bridges the gap before the next
+    // authoritative /activity read drops it server-side.
     pruneFrom(messages) {
-      if (thinking.length === 0) return;
-      const remaining = pruneThinking(thinking, messages);
-      if (remaining.length !== thinking.length) {
-        settle(remaining, { replied: true });
+      const senders = new Set(
+        (messages ?? []).map((m) => m && m.sender_id).filter(Boolean),
+      );
+      if (senders.size === 0) return;
+      let touched = false;
+      senders.forEach((s) => {
+        if (grace.delete(s)) touched = true;
+      });
+      const nextServer = serverIds.filter((id) => !senders.has(id));
+      if (nextServer.length !== serverIds.length) {
+        serverIds = nextServer;
+        touched = true;
       }
+      if (touched) recompute({ flashOnEmpty: true });
     },
 
-    // reset clears all state and timers for a conversation switch: the optimistic
-    // signal only describes turns THIS console triggered in the conversation it
-    // was triggered in, so it must not bleed across a switch (nor merge a stale
-    // pending set into the next conversation's `add`). Unlike `remove`, it also
-    // drops a lingering idle flash — that "Waiting for you" belongs to the turn
-    // just left. The controller stays usable afterwards (vs `dispose`).
+    // reset drops all state + timers for a conversation switch: the signal only
+    // describes the conversation it was gathered in, so nothing bleeds across.
     reset() {
-      clearTurnTimers();
+      serverIds = [];
+      grace.clear();
+      clearActiveTimers();
       clearTimeout(idleTimer);
       idleTimer = null;
       thinking = [];
@@ -137,7 +185,7 @@ export function createPresence({
     // dispose tears the timers down on unmount so a backgrounded tab can't fire
     // a stray state write after the panel is gone.
     dispose() {
-      clearTurnTimers();
+      clearActiveTimers();
       clearTimeout(idleTimer);
     },
   };

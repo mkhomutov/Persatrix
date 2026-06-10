@@ -11,8 +11,9 @@
   // exponential error-backoff, and a head-poll that de-dupes by id (never a full
   // re-fetch per tick). A loadToken invalidates in-flight work when the channel
   // switches, so a stale resolution can't write to the wrong conversation.
-  import { getChannelHistory } from "../lib/api.js";
+  import { getChannelHistory, getChannelActivity } from "../lib/api.js";
   import { participantAgentIds } from "../lib/interactions.js";
+  import { GRACE_MS } from "../lib/presence.js";
   import ChannelMessage from "./ChannelMessage.svelte";
   import InteractionSummary from "./InteractionSummary.svelte";
   import PresenceBar from "./PresenceBar.svelte";
@@ -36,10 +37,12 @@
     onCancelTurn = null,
   } = $props();
 
-  // The live-presence controller (RFC 0048 console, Tier 0). Owned here — beside
-  // the timeline it annotates and the poll that clears it — and driven by the
-  // panel through markThinking()/clearThinking(), the same handle pattern as
-  // echo()/pollNow(). See lib/presence.svelte.js for the optimism's limits.
+  // The live-presence controller (RFC 0048 console). Owned here — beside the
+  // timeline it annotates, the poll that feeds its server signal, and the one
+  // that clears it — and driven by the panel through markThinking()/
+  // clearThinking(), the same handle pattern as echo()/pollNow(). A group also
+  // polls the authoritative /activity set into it (Tier 1); a DM relies on the
+  // optimistic overlay alone. See lib/presence.svelte.js.
   const presence = createPresence();
   $effect(() => () => presence.dispose());
 
@@ -59,9 +62,11 @@
 
   // markThinking/clearThinking are the owner's handles onto the indicator: the
   // panel lights a turn at send/publish and clears it on cancel/error (a reply
-  // clears itself via the poll-tick pruneFrom below).
+  // clears itself via the poll-tick pruneFrom + /activity read below). A group
+  // add carries a grace window — the /activity poll confirms it within a tick,
+  // and a wrong guess fades; a DM add is sticky (no /activity poll backs it).
   export function markThinking(ids) {
-    presence.add(ids);
+    presence.add(ids, isDM ? undefined : { graceMs: GRACE_MS });
   }
   export function clearThinking(ids, opts) {
     presence.remove(ids, opts);
@@ -130,6 +135,12 @@
       if (fresh.length > 0) {
         fresh.forEach((m) => seenIds.add(m.id));
         messages = [...fresh, ...messages];
+      }
+      // Reconcile the authoritative thinking set, THEN prune locally-seen
+      // replies — pruneFrom trims the server set for an agent whose reply this
+      // tick surfaced, bridging the gap before the next /activity read drops it.
+      await pollActivity(channel, token);
+      if (fresh.length > 0) {
         presence.pruneFrom(fresh);
       }
       pollError = "";
@@ -144,6 +155,26 @@
       scheduleNext(backoffMs);
     } finally {
       polling = false;
+    }
+  }
+
+  // pollActivity reads the orchestrator's authoritative in-flight set and feeds
+  // it to the controller (Tier 1). Group channels only — a DM is single-trigger,
+  // fully covered by the optimistic overlay, so it skips the extra request.
+  // Self-guarded: an activity failure must NOT pause the message timeline or
+  // back the whole poll off, so it swallows its own error (and the
+  // unknown-in-test case where the mock omits getChannelActivity) — the
+  // optimistic overlay holds and the next tick recovers.
+  async function pollActivity(channel, token) {
+    if (isDM) return;
+    try {
+      const { thinking } = await getChannelActivity(channel);
+      if (token === loadToken) {
+        presence.set(thinking ?? []);
+      }
+    } catch {
+      // keep the last-known / optimistic set; the dead-poll backstop covers a
+      // sustained outage.
     }
   }
 
@@ -164,6 +195,9 @@
         if (token !== loadToken) return;
         messages = history;
         history.forEach((m) => seenIds.add(m.id));
+        // Surface an already-in-flight round the moment a group opens (a reload
+        // or a tab switch), rather than waiting for the first poll tick.
+        pollActivity(channel, token);
         scheduleNext(POLL_INTERVAL_MS);
       })
       .catch((err) => {

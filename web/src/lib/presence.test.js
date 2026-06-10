@@ -3,7 +3,7 @@ import {
   shortAgentName,
   nameList,
   thinkingPhrase,
-  pruneThinking,
+  mergeThinking,
 } from "./presence.js";
 
 const AGENTS = {
@@ -79,30 +79,51 @@ describe("thinkingPhrase", () => {
   });
 });
 
-describe("pruneThinking", () => {
-  const msg = (sender) => ({ id: `m-${sender}`, sender_id: sender });
+describe("mergeThinking", () => {
+  // The two-source reconciliation behind Tier 1: fold the server's authoritative
+  // /activity set together with the still-in-grace optimistic ids the console
+  // added for its own just-fired turns, and report which optimistic entries have
+  // expired so the controller can drop them.
+  const grace = (id, expiresAt) => ({ id, expiresAt });
 
-  it("drops a persona that has since posted", () => {
-    expect(
-      pruneThinking(["ember-owl", "crimson-fox"], [msg("ember-owl")]),
-    ).toEqual(["crimson-fox"]);
+  it("returns the server set alone, sorted, when there is no optimism", () => {
+    expect(mergeThinking(["ember-owl", "crimson-fox"], [], 100)).toEqual({
+      ids: ["crimson-fox", "ember-owl"],
+      expired: [],
+    });
   });
 
-  it("keeps everyone when no addressed persona has posted", () => {
-    expect(pruneThinking(["ember-owl"], [msg("local"), msg("crimson-fox")])).toEqual([
-      "ember-owl",
-    ]);
+  it("unions an unexpired optimistic id the server has not yet confirmed", () => {
+    expect(mergeThinking([], [grace("ember-owl", 200)], 100)).toEqual({
+      ids: ["ember-owl"],
+      expired: [],
+    });
   });
 
-  it("returns empty once every addressed persona has replied", () => {
-    expect(
-      pruneThinking(["ember-owl"], [msg("ember-owl")]),
-    ).toEqual([]);
+  it("drops and reports an optimistic id whose grace has lapsed", () => {
+    expect(mergeThinking([], [grace("ember-owl", 50)], 100)).toEqual({
+      ids: [],
+      expired: ["ember-owl"],
+    });
   });
 
-  it("tolerates empty inputs", () => {
-    expect(pruneThinking([], [msg("ember-owl")])).toEqual([]);
-    expect(pruneThinking(["ember-owl"], [])).toEqual(["ember-owl"]);
-    expect(pruneThinking(["ember-owl"], undefined)).toEqual(["ember-owl"]);
+  it("keeps a sticky (Infinity) optimistic id forever", () => {
+    // A DM add is sticky — no /activity poll confirms it, so it must not lapse.
+    expect(mergeThinking([], [grace("ada", Infinity)], 1e12)).toEqual({
+      ids: ["ada"],
+      expired: [],
+    });
+  });
+
+  it("de-dupes an id present in both the server set and grace", () => {
+    expect(mergeThinking(["ember-owl"], [grace("ember-owl", 200)], 100)).toEqual({
+      ids: ["ember-owl"],
+      expired: [],
+    });
+  });
+
+  it("tolerates empty / missing inputs", () => {
+    expect(mergeThinking()).toEqual({ ids: [], expired: [] });
+    expect(mergeThinking(null, null, 0)).toEqual({ ids: [], expired: [] });
   });
 });
