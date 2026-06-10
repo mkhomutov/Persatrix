@@ -98,6 +98,8 @@ The `respond_policy` enum (`schemas/channel.schema.json`) is reframed from a mec
 
 The type sets *how eager* a member is; the gate makes the *per-message call*. The demo personas should be `participant`. Back-compat: `always` maps to `participant` with a permissive threshold, `when_mentioned` → `addressed`, `never` → `observer`, so existing channel configs keep working while the new vocabulary becomes the recommended surface. The orchestrator's existing "all-`always` + uncapped reply budget" startup Warn (RFC 0030 §F) extends to flag all-`participant`-low-threshold channels.
 
+> **Correction (disposition-canonicalization amendment, 2026-06-10).** The "`always` maps to `participant` with a permissive threshold" sketch above did not survive implementation. The PR 2b design decision ([Tier B PR plan](0030-amendment-relevance-gated-response-tierb-pr-plan.md), 2026-06-07) kept a *bare* `always` replying unconditionally — no bid, no threshold — so v0.3.7 channels are byte-identical, with `always` + an explicit `threshold` as the deliberate bid opt-in ([`ResolveSalienceSignal`](../../internal/channels/channels.go)). `always` therefore has **no** disposition equivalent, which is why the [canonicalization amendment](0030-amendment-disposition-vocabulary-canonicalization.md) §B keeps it first-class while deprecating only the true synonyms `when_mentioned`/`never`. The `when_mentioned`→`addressed` and `never`→`observer` mappings above are accurate as stated; the open-ended "keep working" posture for those two is what that amendment terminates.
+
 ## Preserving the idle-cost invariant
 
 This is the constraint that shapes the whole design. The RFC 0023/0024 guarantee — *an uninvolved persona costs nothing* — must survive:
