@@ -59,15 +59,19 @@ import (
 // is inert until the `interaction_id` producer lands; see the governance-layers
 // PR plan).
 //
-// # Inert in production (today)
+// # Producer status
 //
-// Every layer keyed on `interaction_id` (cost, reply budget, end-vote) is inert
-// on real traffic because no orchestrator- or agent-side producer writes
-// `interaction_id` onto publish metadata yet (readInteractionID returns "" — see
-// interaction_id.go). The layers are wired, composed, and tested ahead of that
-// producer, not yet load-bearing. With every layer at its default
-// (uncapped/untracked/no votes) the publish path is behaviourally identical to
-// v0.3.7 — the back-compat invariant the composition tests pin (GL1).
+// The `interaction_id` producer is live (interaction_resolver.go — the
+// router's resolver stamps every publish, producer plan IP1), so the layers
+// keyed on it are load-bearing: the reply budget counts real publishes per
+// interaction, end-votes scope to the router-minted id, and idle rotation
+// closes interactions on quiet channels. Two pieces remain pending the
+// producer plan's PR 2: the agent-side vote action (no quorum forms on real
+// traffic until agents can vote) and the lease threading that activates the
+// cost ceiling's per-interaction attribution. With every knob at its default
+// (uncapped budgets, no votes) the publish path differs from v0.3.7 only by
+// the stamped id and the idle rotation — the back-compat invariant the
+// composition tests pin (GL1) holds for enforcement behaviour.
 
 // Governance-layer label values for the `channel.conversation.governance_drop`
 // counter's `layer` attribute and the matching structured-log / span field. One

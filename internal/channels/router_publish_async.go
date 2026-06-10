@@ -205,14 +205,32 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 		msg.Metadata[cascadeDepthMetadataKey] = clampedDepth
 	}
 
+	// RFC 0030 interaction-id producer (IP1/IP2): resolve the channel's open
+	// interaction and stamp it — replacing any inbound claim — BEFORE the
+	// reply-budget reservation and the end-vote hook below, both of which key
+	// on the stamped value. From here on, every tracked publish belongs to a
+	// router-minted interaction; the stamped id persists with the message and
+	// rides the existing fanout lift to `ChannelMessageEvent.interaction_id`.
+	// The settle hook reconciles the resolver to the persist outcome below —
+	// the resolver's half of the reply-reservation pattern, so a rejected
+	// publish neither retains a resolver entry nor advances the idle clock
+	// (see [ChannelRouter.settleInteraction]).
+	resolvedInteractionID, settleInteraction := r.resolveInteractionID(ctx, msg.ChannelID, derivedType, readInteractionID(msg.Metadata))
+	if msg.Metadata == nil {
+		msg.Metadata = map[string]any{}
+	}
+	msg.Metadata[interactionIDMetadataKey] = resolvedInteractionID
+
 	// RFC 0030 Layer 2 (v0.3.8) per-participant reply budget + store commit:
 	// reserve the sender's slot, persist, and release the reservation if the
 	// persist fails — so a throttled (K+1)th publish never enters channel
 	// history (§F) and a store-rejected publish never erodes the allowance.
 	// Additive: a no-op when uncapped, untracked, or an exempt human.
 	if err := r.publishWithReplyBudget(ctx, msg, derivedType); err != nil {
+		settleInteraction(false)
 		return nil, err
 	}
+	settleInteraction(true)
 
 	if r.metrics != nil && r.metrics.MessagesPublished != nil {
 		r.metrics.MessagesPublished.Add(ctx, 1, metric.WithAttributes(attribute.String("channel_type", string(derivedType))))

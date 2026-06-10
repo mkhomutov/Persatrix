@@ -30,6 +30,12 @@
       "default": 0,
       "description": "RFC 0030 Layer 2 (v0.3.8) fleet-wide per-participant reply budget, applied to any channel that omits its own `max_replies_per_participant_per_interaction`. Opt-in: 0 (the default) means uncapped, so fair-turn-taking is additive and existing channels are unchanged. With K>0, a participant's (K+1)th publish in one interaction is rejected pre-persistence (HTTP 429); a human principal listed in `governance.exempt_principals` is exempt. Negative is rejected at load time."
     },
+    "default_interaction_idle_timeout_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 600,
+      "description": "Fleet-wide interaction idle window in seconds (the RFC 0030 interaction-id producer, IP3), applied to any channel that omits its own `interaction_idle_timeout_seconds`: a publish arriving more than this long after the channel's last one retires the open interaction and mints a fresh one (`interaction_closed{trigger=idle}`). Absent means 600 — RFC 0020 §B's idle default, matching the agent-side `interaction_idle_timeout_sec` so governance and memory boundaries roughly coincide. An explicit 0 disables idle rotation fleet-wide (distinct from absent). Thread channels ignore the resolved value entirely — a thread IS its interaction. Negative is rejected at load time."
+    },
     "governance": {
       "type": "object",
       "additionalProperties": false,
@@ -100,6 +106,11 @@
           "minimum": 1,
           "default": 3,
           "description": "RFC 0030 Layer 4 (v0.3.8) end-of-interaction recency window (W) for this channel: an end-vote counts toward the `end_vote_threshold` quorum only while it is within W consecutive turns of the current turn, so a stale vote from much earlier no longer counts ('votes must be recent'). A 'turn' is any tracked publish in the interaction (every message, not only votes), so in a busy channel the K distinct votes must land within W publishes of each other — tune W up if intervening chatter is starving the quorum. Absent uses the W=3 default (wide enough to survive an intervening one-off comment); the Go loader treats a zero/absent value as 'use the default' and rejects negatives at load time."
+        },
+        "interaction_idle_timeout_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "This channel's interaction idle window in seconds (the RFC 0030 interaction-id producer, IP3): a publish arriving more than this long after the channel's last one retires the open interaction and mints a fresh one. Tri-state, unlike the integer knobs above: absent inherits `default_interaction_idle_timeout_seconds` (itself defaulting to 600), while an explicit 0 disables idle rotation for this channel — so no `default` is declared here (a schema default would erase the absent-vs-0 distinction the loader's pointer field preserves). Negative is rejected at load time."
         },
         "members": {
           "type": "array",

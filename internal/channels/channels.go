@@ -375,6 +375,12 @@ var (
 	// — it is the opt-in default meaning "uncapped", so the ceiling is
 	// additive and existing channels are unaffected.
 	ErrInvalidInteractionBudgetTokens = errors.New("channels: invalid interaction_budget_tokens")
+	// ErrInvalidInteractionIdleTimeout — a declared channel (or the top-level
+	// `default_interaction_idle_timeout_seconds`) carried a negative
+	// `interaction_idle_timeout_seconds:` (the RFC 0030 interaction-id
+	// producer's idle window, IP3). Zero is NOT an error — it is the explicit
+	// "idle rotation off" value, distinct from absent (inherit the default).
+	ErrInvalidInteractionIdleTimeout = errors.New("channels: invalid interaction_idle_timeout_seconds")
 	// ErrInvalidMaxRepliesPerParticipant — a declared channel (or the
 	// top-level `default_max_replies_per_participant`) carried a negative
 	// `max_replies_per_participant_per_interaction:` (RFC 0030 Layer 2 reply

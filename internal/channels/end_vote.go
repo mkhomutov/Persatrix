@@ -19,15 +19,15 @@ import (
 // file stays under the 500-line review cap, mirroring reply_budget.go; the
 // `endVoteMu` mutex + its maps are declared on [ChannelRouter] in router.go.
 //
-// PRODUCER CAVEAT (mirrors reply_budget.go): no orchestrator- or agent-side
-// producer writes `interaction_id` onto publish metadata yet, and the Python
-// `END_INTERACTION_VOTE` action is recognised but not yet wired to publish the
-// vote flag — so `readEndInteractionVote`/`readInteractionID` return their
-// empty values on real traffic and this layer is *inert in production*. It is
-// wired and tested ahead of the producer, not yet load-bearing. The producer
-// MUST land together with the `interaction_id` producer so a closing interaction
-// also drives the RFC 0020 structural close (see ORDERING on
-// [ChannelRouter.DiscardInteractionEndVotes]).
+// PRODUCER STATUS: the `interaction_id` producer is live — the router's
+// resolver (interaction_resolver.go) stamps every publish, so this layer is
+// load-bearing on the id side: every tracked publish advances the open
+// interaction, and a quorum close both fires the discard seams and notifies
+// the resolver via [ChannelRouter.markInteractionClosed] (IP8) so the next
+// publish mints fresh. The VOTE producer is still pending — the Python
+// `END_INTERACTION_VOTE` action is recognised but not yet wired to publish
+// the `end_interaction_vote` flag (producer plan PR 2) — so no quorum forms
+// on real traffic yet; interactions close by idle rotation until it lands.
 
 // endVoteMetadataKey is the wire-level publish-metadata flag a producer sets to
 // mark a publish as an RFC 0030 Layer 4 end-of-interaction vote. Centralised so
@@ -139,12 +139,17 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 		// Already closed — keep suppressing fanout for late traffic. That
 		// suppression IS a Layer 4 governance drop (the conversation has
 		// terminated and this publish is barred from cascading), so attribute it
-		// like every other layer's drop. In a converged interaction this is the
-		// BULK of Layer 4's effect — without it, governance_drop{layer=end_vote}
-		// would see only the rare in-window duplicate vote and miss the steady-
-		// state post-close suppression entirely. No Warn here: post-close traffic
-		// is expected, not anomalous (unlike a duplicate vote), so it is metered
-		// and traced but not logged. Fired outside the lock.
+		// like every other layer's drop. Since the producer's IP8 hook landed,
+		// ordinary post-close traffic cannot reach here via Publish — the close
+		// notified the resolver, so the channel's next publish mints fresh — and
+		// this path catches only a commit that resolved the closing id just
+		// before the quorum landed (the racing-commit window the tombstone
+		// exists to cover) or a caller bypassing the resolver. The metric's
+		// steady state is therefore ~zero; a sustained nonzero rate on
+		// governance_drop{layer=end_vote} outside vote-spam is a resolver-bypass
+		// signal, not converged-conversation noise. No Warn here: a racing
+		// commit is expected, not anomalous (unlike a duplicate vote), so it is
+		// metered and traced but not logged. Fired outside the lock.
 		r.recordGovernanceDropEndVote(ctx, ct)
 		// Lifecycle: a post-close NON-vote reply ran enforceReplyBudget BEFORE this
 		// hook in Publish, which lazily RE-CREATES replyCounts[interactionID] (it
@@ -229,6 +234,12 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 		// participant reply counters are discarded (the seam reply_budget.go
 		// reserved for the Layer 4 close path).
 		r.DiscardInteractionReplyBudget(interactionID)
+		// Producer IP8: notify the resolver so the channel's NEXT publish mints
+		// a fresh interaction — the quorum ends one conversation, not the
+		// channel. The closed id parks as the pending retiree; its tombstone
+		// (added above) survives until the deferred discard, suppressing and
+		// self-healing any commit that raced this close.
+		r.markInteractionClosed(msg.ChannelID, interactionID)
 		return true
 	}
 	// Suppress fanout of a redundant in-window duplicate vote. An end-vote is
@@ -321,11 +332,20 @@ func (r *ChannelRouter) recordGovernanceDropEndVote(ctx context.Context, ct Chan
 //     only inline free) — one entry per voting-but-not-closing interaction,
 //     pruned only here.
 //
-// So the `interaction_id` + end-vote producer MUST wire this into the close path
-// before it is enabled on real traffic — otherwise each distinct id (a 128-byte,
-// attacker-influenceable token, see interaction_id.go) leaks an entry for the
-// orchestrator's lifetime. Inert today (no producer), so unbounded growth cannot
-// occur yet; the constraint binds when the producer lands.
+// ORDERING (discharged): the producer wires this seam via the resolver's
+// one-generation-deferred discards (interaction_resolver.go, producer plan
+// IP4/IP7) — a retired id has both maps pruned at its channel's next rotation
+// OR next vote-close, whichever comes first ([ChannelRouter.markInteractionClosed]
+// discharges the previous retiree too). In a channel that never rotates
+// (thread, or an explicit 0 idle window) the next vote-close is the only
+// discharge point, so the most recent closed id's tombstone persists there
+// until one arrives — a deliberate bounded residue of at most one per
+// channel (pinned by TestInteractionResolver_NeverRotatingChannelBoundsTombstones),
+// not unbounded growth. The deferral is the design, not a gap: the close site
+// deliberately cannot prune itself (the tombstone must outlive any commit
+// racing the close), and IP2's claim-override gives "suppress late traffic" a
+// natural endpoint, which is what makes the tombstone prunable at all. Only
+// router-minted uuids key these maps now.
 func (r *ChannelRouter) DiscardInteractionEndVotes(interactionID string) {
 	if interactionID == "" {
 		return

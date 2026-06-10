@@ -13,11 +13,13 @@ package channels
 // cascade_depth and participant_type do — `ChannelMessageEvent` has no
 // metadata map, so a first-class field is required.
 //
-// NOTE: unlike `participantTypeMetadataKey` (written by the REST chat
-// handler), no producer writes this key yet — RFC 0020 interaction tracking
-// is agent-side and there is no orchestrator-side resolver, so `readInteractionID`
-// currently always returns "" (the untracked case). The key + helper are the
-// inert substrate; the producer lands with the layer PRs that consume it.
+// The producer is the router's own resolver (interaction_resolver.go, the
+// interaction-id producer plan IP1/IP2): `publishCommit` stamps the resolved
+// id under this key on every publish, REPLACING any inbound claim — a
+// publisher-supplied value is read only for the override debug log and never
+// keys governance state. `readInteractionID` therefore reads the router's own
+// stamped value downstream of resolution (the end-vote and reply-budget
+// hooks), and the inbound claim upstream of it.
 //
 // [RFC 0030 governance layers]: ../../docs/rfcs/0030-governance-layers-pr-plan.md
 const interactionIDMetadataKey = "interaction_id"
