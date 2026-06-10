@@ -848,17 +848,18 @@ type ChannelMessageEvent struct {
 	// otherwise be dropped at this boundary — and Layers 1/2/4 must attribute
 	// spend (Layer 1 cost ceiling), count replies (Layer 2 reply budget), and
 	// accumulate end-of-interaction votes (Layer 4) per interaction. Contract:
-	// when a publisher supplies `interaction_id` on the publish metadata bag the
-	// orchestrator lifts it here, and the agent maps it onto the
-	// `interaction_id` event-metadata key; the Layer 1 PR will thread that key
-	// toward the `AcquireLease` call (the wallet-side `interaction_budget_tokens`
-	// ceiling lands there too — this field is only the substrate). NOTE: no
-	// publisher populates the key yet (RFC 0020 interaction tracking is
-	// agent-side; there is no orchestrator-side resolver), so in practice the
-	// field is empty on every publish until a later PR adds a producer. Empty
-	// (proto3 implicit presence) is the genuine pre-v0.3.8 / untracked case and
-	// leaves every layer at its uncapped default, so the field is additive. See
-	// `docs/rfcs/0030-governance-layers-pr-plan.md` (PR 1).
+	// the orchestrator's own resolver (`internal/channels/interaction_resolver.go`,
+	// the interaction-id producer plan IP1/IP2) stamps the resolved id onto the
+	// publish metadata — REPLACING any publisher-supplied claim, which never
+	// keys governance state — and it is lifted here; the agent maps it onto the
+	// `interaction_id` event-metadata key. The producer plan's PR 2 threads that
+	// key toward the `AcquireLease` call (the wallet-side
+	// `interaction_budget_tokens` ceiling already landed — this field is the
+	// substrate). The field is therefore non-empty on every routed publish;
+	// empty (proto3 implicit presence) survives as the pre-v0.3.8 / untracked
+	// case and leaves every layer at its uncapped default, so the field stays
+	// additive across a mixed-version deployment. See
+	// `docs/rfcs/0030-interaction-id-producer-pr-plan.md`.
 	//
 	// Field 17, not 13: the Tier B salience PRs (#572–#575) took fields 13–16
 	// (`salience_gated`/`threshold`/`channel_size`/`salience_max_channel_members`)

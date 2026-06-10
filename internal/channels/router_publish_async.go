@@ -205,6 +205,18 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 		msg.Metadata[cascadeDepthMetadataKey] = clampedDepth
 	}
 
+	// RFC 0030 interaction-id producer (IP1/IP2): resolve the channel's open
+	// interaction and stamp it — replacing any inbound claim — BEFORE the
+	// reply-budget reservation and the end-vote hook below, both of which key
+	// on the stamped value. From here on, every tracked publish belongs to a
+	// router-minted interaction; the stamped id persists with the message and
+	// rides the existing fanout lift to `ChannelMessageEvent.interaction_id`.
+	resolvedInteractionID := r.resolveInteractionID(ctx, msg.ChannelID, derivedType, readInteractionID(msg.Metadata))
+	if msg.Metadata == nil {
+		msg.Metadata = map[string]any{}
+	}
+	msg.Metadata[interactionIDMetadataKey] = resolvedInteractionID
+
 	// RFC 0030 Layer 2 (v0.3.8) per-participant reply budget + store commit:
 	// reserve the sender's slot, persist, and release the reservation if the
 	// persist fails — so a throttled (K+1)th publish never enters channel

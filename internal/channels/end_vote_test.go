@@ -17,9 +17,11 @@ import (
 // RFC 0030 Layer 4 (v0.3.8) — end-of-interaction signal. When K distinct
 // participants emit an end-vote within W consecutive turns the interaction
 // closes on its own: fanout of the closing publish is suppressed and the
-// per-interaction governance counters are discarded (§H). The layer is
-// inert in production (no producer writes the vote flag yet); these tests
-// drive the accumulator directly through the publish metadata bag.
+// per-interaction governance counters are discarded (§H). The id side is
+// live (the resolver stamps every publish and overrides caller claims —
+// interaction_resolver.go); the vote flag still has no production producer
+// (the Python action lands in producer plan PR 2), so these tests drive it
+// directly through the publish metadata bag, scoped to the resolver's id.
 
 // endVote drives a single publish carrying the Layer 4 end-vote flag for the
 // given (sender, interaction) pair. A fresh UUID keeps per-message identity unique.
@@ -151,17 +153,24 @@ func TestEndVote_OutOfWindowVotesDoNotAccumulate(t *testing.T) {
 // never accumulated — there is nothing to scope the quorum to, so the layer
 // stays at its inert default (additive). K=1 would close if it were tracked.
 func TestEndVote_UntrackedVoteIgnored(t *testing.T) {
-	router, store, reader := routerWithInteractionClosedMetric(t)
+	// Since the interaction-id producer landed, every Publish is stamped with a
+	// resolver-minted id — untracked traffic can no longer arise on the publish
+	// path. The untracked tolerance is now a defence-in-depth property of the
+	// hook itself (a caller bypassing the resolver), so pin it by direct call.
+	router, store, _ := routerWithInteractionClosedMetric(t)
 	id := mustCreateGroup(t, store, "planning", "alice", "bob")
 	router.SetEndVoteParams(id, 1, 3)
 
-	require.NoError(t, endVote(t, router, id, "alice", ""))
-	require.NoError(t, endVote(t, router, id, "bob", ""))
+	suppressed := router.processEndVote(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: id, SenderID: "alice", Content: "done",
+		Metadata: map[string]any{endVoteMetadataKey: true}, // no interaction_id
+	}, ChannelTypeGroup)
 
-	var rm metricdata.ResourceMetrics
-	require.NoError(t, reader.Collect(context.Background(), &rm))
-	assert.Equal(t, int64(0), interactionClosedCount(t, rm, "group", "end_votes"),
-		"untracked (no interaction_id) votes are never accumulated")
+	assert.False(t, suppressed, "an untracked vote is a no-op, not a suppression")
+	router.endVoteMu.Lock()
+	accumulators := len(router.endVotes)
+	router.endVoteMu.Unlock()
+	assert.Zero(t, accumulators, "untracked (no interaction_id) votes are never accumulated")
 }
 
 // TestEndVote_NoVotesNeverCloses pins the opt-in posture: a tracked interaction
@@ -195,11 +204,14 @@ func TestEndVote_SpamLogged(t *testing.T) {
 	router.SetEndVoteParams(id, 5, 10)
 
 	require.NoError(t, endVote(t, router, id, "alice", "int-1"))
+	resolved := openInteractionID(router, id) // the resolver overrode the "int-1" claim (IP2)
+	require.NotEmpty(t, resolved)
 	require.NoError(t, endVote(t, router, id, "alice", "int-1")) // re-vote → spam
 
 	spam := logs.FilterMessageSnippet("vote").All()
 	require.NotEmpty(t, spam, "a duplicate end-vote must be logged")
-	assert.Equal(t, "int-1", spam[0].ContextMap()["interaction_id"])
+	assert.Equal(t, resolved, spam[0].ContextMap()["interaction_id"],
+		"the spam log carries the resolver-minted id, never the publisher's claim")
 }
 
 // TestEndVote_StaleRevoteNotSpam pins that re-voting AFTER the prior vote has
@@ -327,9 +339,9 @@ func TestEndVote_DiscardClearsAccumulator(t *testing.T) {
 	id := mustCreateGroup(t, store, "planning", "alice", "bob")
 	router.SetEndVoteParams(id, 2, 3)
 
-	require.NoError(t, endVote(t, router, id, "alice", "int-1"))
-	router.DiscardInteractionEndVotes("int-1")
-	require.NoError(t, endVote(t, router, id, "bob", "int-1"))
+	require.NoError(t, endVote(t, router, id, "alice", ""))
+	router.DiscardInteractionEndVotes(openInteractionID(router, id))
+	require.NoError(t, endVote(t, router, id, "bob", ""))
 
 	var rm metricdata.ResourceMetrics
 	require.NoError(t, reader.Collect(context.Background(), &rm))

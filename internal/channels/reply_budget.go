@@ -256,14 +256,15 @@ func (r *ChannelRouter) publishWithReplyBudget(ctx context.Context, msg ChannelM
 // an unknown interaction is a no-op. Bounds `replyCounts` so a long-lived
 // orchestrator does not accumulate a counter map per interaction forever.
 //
-// ORDERING (forward dependency): this is the ONLY seam that prunes a live
-// interaction's entry (a failed-persist release prunes only its own reservation).
-// `replyCounts` therefore grows one map per distinct `interaction_id` until this
-// is called. So the `interaction_id` producer MUST NOT be enabled before PR 4
-// wires this discard into the close path — otherwise every distinct id (a
-// 128-byte, attacker-influenceable token, see interaction_id.go) leaks a counter
-// map for the orchestrator's lifetime. Inert today (no producer), so unbounded
-// growth cannot occur yet; the constraint binds when the producer lands.
+// ORDERING (discharged): this is the ONLY seam that prunes a live
+// interaction's entry (a failed-persist release prunes only its own
+// reservation), so the producer was forbidden from landing before the close
+// paths wired it. Both now do: the Layer 4 quorum close fires it inline
+// (processEndVote), and the resolver's lazy idle rotation fires it
+// one-generation-deferred for every retired id (interaction_resolver.go,
+// producer plan IP4/IP7). The attacker-influenceable-token half of the
+// original hazard is gone outright: the resolver overrides inbound claims
+// (IP2), so only router-minted uuids ever key this map.
 //
 // Also called on the post-close suppression path in [ChannelRouter.processEndVote]:
 // a post-close non-vote reply lazily re-creates this interaction's counter via

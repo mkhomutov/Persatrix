@@ -245,6 +245,15 @@ func initChannels(
 			zap.Error(vErr))
 	}
 
+	// RFC 0030 interaction-id producer (IP3): resolve the per-channel idle
+	// window for every config-declared channel — store-resident channels fall
+	// back to the (fleet or 600s) default at read time, the end-vote posture,
+	// so there is no store enumeration to fail.
+	if iErr := router.ResolveInteractionIdleTimeouts(context.Background(), chanCfg); iErr != nil {
+		logger.Warn("channels: interaction-idle-timeout resolution incomplete; channels fall back to the default window until next restart",
+			zap.Error(iErr))
+	}
+
 	logger.Info("channels: subsystem ready",
 		zap.String("db", dbPath),
 		zap.Int("declared_channels", len(chanCfg.Channels)),

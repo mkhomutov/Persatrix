@@ -44,11 +44,29 @@ type Config struct {
 	// existing channels are unchanged. Resolved per-channel via
 	// [ChannelConfig.ResolveMaxRepliesPerParticipant]. Negative is rejected.
 	DefaultMaxRepliesPerParticipant int `yaml:"default_max_replies_per_participant"`
+	// DefaultInteractionIdleTimeoutSeconds is the fleet-wide interaction idle
+	// window (the RFC 0030 interaction-id producer, IP3) applied to any
+	// channel that omits its own `interaction_idle_timeout_seconds`. Pointer
+	// tri-state (the [MemberConfig.Threshold] precedent): absent inherits
+	// [DefaultInteractionIdleTimeoutSeconds] (600 — the RFC 0020 §B idle
+	// default, matching the agent-side tracker), while an explicit 0 disables
+	// idle rotation fleet-wide. Negative is rejected. Thread channels ignore
+	// the resolved value entirely (the type rule wins — a thread IS its
+	// interaction).
+	DefaultInteractionIdleTimeoutSeconds *int `yaml:"default_interaction_idle_timeout_seconds"`
 	// Governance holds the fleet-wide RFC 0030 governance knobs that are not
 	// per-channel (§OQ-7). Currently just the exempt-principals list that
 	// removes human principals from the Layer 2 reply budget.
 	Governance GovernanceConfig `yaml:"governance"`
 }
+
+// DefaultInteractionIdleTimeoutSeconds is the interaction idle window when
+// neither the fleet nor the channel declares one — 600s, RFC 0020 §B's
+// `idle_timeout` default, deliberately equal to the agent-side
+// `interaction_idle_timeout_sec` (agents/persona_runtime/__init__.py) so the
+// orchestrator's governance boundaries and the agent's memory boundaries
+// roughly coincide out of the box.
+const DefaultInteractionIdleTimeoutSeconds = 600
 
 // GovernanceConfig is the `governance:` block of `config/channels.yaml` —
 // fleet-wide RFC 0030 governance settings (§OQ-7, v0.3.8).
@@ -192,6 +210,15 @@ type ChannelConfig struct {
 	// counts). Zero/absent normalizes to [DefaultEndVoteWindow] (W=3) at load;
 	// negative is rejected.
 	EndVoteWindow int `yaml:"end_vote_window"`
+	// InteractionIdleTimeoutSeconds is this channel's interaction idle window
+	// (the RFC 0030 interaction-id producer, IP3): a publish arriving more than
+	// this many seconds after the channel's last one retires the open
+	// interaction and mints a fresh one. Pointer tri-state, unlike the int
+	// knobs above: an explicit 0 (idle rotation off) is a meaningful value
+	// distinct from absent (inherit the fleet default — itself defaulting to
+	// [DefaultInteractionIdleTimeoutSeconds]). Negative is rejected. Resolved
+	// via [ChannelConfig.ResolveInteractionIdleTimeoutSeconds].
+	InteractionIdleTimeoutSeconds *int `yaml:"interaction_idle_timeout_seconds"`
 }
 
 // ResolveMaxRepliesPerParticipant returns the effective RFC 0030 Layer 2 reply
@@ -219,6 +246,21 @@ func (c ChannelConfig) ResolveInteractionBudgetTokens(fleetDefault int64) int64 
 		return c.InteractionBudgetTokens
 	}
 	return fleetDefault
+}
+
+// ResolveInteractionIdleTimeoutSeconds returns the effective interaction idle
+// window for this channel: the channel's own value when declared (including
+// an explicit 0 = idle rotation off), otherwise the fleet default, otherwise
+// [DefaultInteractionIdleTimeoutSeconds]. The single source of truth for the
+// precedence — the startup resolver stamps the result onto the router.
+func (c ChannelConfig) ResolveInteractionIdleTimeoutSeconds(fleetDefault *int) int {
+	if c.InteractionIdleTimeoutSeconds != nil {
+		return *c.InteractionIdleTimeoutSeconds
+	}
+	if fleetDefault != nil {
+		return *fleetDefault
+	}
+	return DefaultInteractionIdleTimeoutSeconds
 }
 
 // MemberConfig is a `(participant_id, respond_policy)` pair declared in

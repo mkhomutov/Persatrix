@@ -62,6 +62,17 @@ default_max_replies_per_participant: 0
 # existing channels are unchanged. (A `chair` cannot close an interaction — only
 # this vote quorum, the cost ceiling, and the depth cap can.)
 
+# Interaction idle window (the RFC 0030 interaction-id producer, v0.3.8) —
+# how long a channel can sit quiet before its next publish starts a *fresh*
+# interaction (governance counters and end-votes reset; the retirement emits
+# `interaction_closed{trigger=idle}`). Absent means 600s — RFC 0020's idle
+# default, matching the agent-side tracker so governance and memory
+# boundaries roughly coincide. An explicit 0 disables idle rotation (distinct
+# from absent). Override per channel with `interaction_idle_timeout_seconds:`
+# (the per-channel value wins). Thread channels always ignore it — a thread
+# IS its interaction.
+# default_interaction_idle_timeout_seconds: 600
+
 # Governance (RFC 0030, v0.3.8) — fleet-wide knobs that are not per-channel.
 # `exempt_principals: [human]` removes human principals (participant_type
 # "user") from the Layer 2 reply budget, so a human steering the conversation

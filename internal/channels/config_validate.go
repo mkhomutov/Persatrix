@@ -43,6 +43,13 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("%w: default_interaction_budget_tokens=%d (must be >= 0)",
 			ErrInvalidInteractionBudgetTokens, c.DefaultInteractionBudgetTokens)
 	}
+	// Interaction-id producer (IP3): the fleet-wide idle window. Explicit
+	// zero is valid (idle rotation off); negative is a typo the loader
+	// rejects loudly (the schema's `minimum: 0` catches it at `make validate`).
+	if c.DefaultInteractionIdleTimeoutSeconds != nil && *c.DefaultInteractionIdleTimeoutSeconds < 0 {
+		return fmt.Errorf("%w: default_interaction_idle_timeout_seconds=%d (must be >= 0)",
+			ErrInvalidInteractionIdleTimeout, *c.DefaultInteractionIdleTimeoutSeconds)
+	}
 	// RFC 0030 Layer 2: the fleet-wide default reply budget. Zero is the
 	// uncapped opt-in default; negative is a typo the loader rejects loudly
 	// (the schema's `minimum: 0` catches it at `make validate`).
@@ -96,6 +103,15 @@ func (c *Config) Validate() error {
 		if ch.InteractionBudgetTokens < 0 {
 			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 0)",
 				i, ch.Name, ErrInvalidInteractionBudgetTokens, ch.InteractionBudgetTokens)
+		}
+
+		// Reject a negative per-channel interaction idle window (IP3).
+		// Explicit zero is valid (idle rotation off for this channel); only
+		// negative is an error. The schema's `minimum: 0` catches it at
+		// `make validate`; this is the belt-and-suspenders for skippers.
+		if ch.InteractionIdleTimeoutSeconds != nil && *ch.InteractionIdleTimeoutSeconds < 0 {
+			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 0)",
+				i, ch.Name, ErrInvalidInteractionIdleTimeout, *ch.InteractionIdleTimeoutSeconds)
 		}
 
 		// Reject a negative per-channel RFC 0030 Layer 2 reply budget. Zero is

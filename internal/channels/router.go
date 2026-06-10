@@ -182,6 +182,18 @@ type ChannelRouter struct {
 	activityMu      sync.Mutex
 	channelActivity map[string]map[string]time.Time
 	activityNow     func() time.Time
+
+	// interactionMu guards the RFC 0030 interaction-id producer state; methods +
+	// the full field contracts live in interaction_resolver.go.
+	// openInteractions: channel id → the open interaction + its pending retiree.
+	// interactionIdleTimeouts: channel id → resolved idle window (absent falls
+	// back to defaultInteractionIdleTimeout). interactionNow: the resolver
+	// clock, overridable in tests (the activityNow pattern).
+	interactionMu                 sync.Mutex
+	openInteractions              map[string]*openInteraction
+	interactionIdleTimeouts       map[string]time.Duration
+	defaultInteractionIdleTimeout time.Duration
+	interactionNow                func() time.Time
 }
 
 // NewChannelRouter wires a router around a store, dispatcher, logger, and
@@ -196,25 +208,29 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		dispatcher = NoopDispatcher{}
 	}
 	return &ChannelRouter{
-		store:              store,
-		dispatcher:         dispatcher,
-		logger:             logger,
-		metrics:            metrics,
-		waiter:             newReplyWaiter(),
-		floors:             newFloorRegistry(),
-		floorSettings:      make(map[string]channelFloorSettings),
-		floorSpeakers:      make(map[string]map[string]struct{}),
-		salienceMaxMembers: make(map[string]int),
-		replyBudgets:       make(map[string]int),
-		replyCounts:        make(map[string]map[string]int),
-		endVoteThresholds:  make(map[string]int),
-		endVoteWindows:     make(map[string]int),
-		endVotes:           make(map[string]*interactionEndVotes),
-		closedInteractions: make(map[string]struct{}),
-		maxCascadeDepth:    defaults.DefaultMaxCascadeDepth,
-		maxInFlightFanout:  defaultMaxInFlightFanout,
-		channelActivity:    make(map[string]map[string]time.Time),
-		activityNow:        time.Now,
+		store:                         store,
+		dispatcher:                    dispatcher,
+		logger:                        logger,
+		metrics:                       metrics,
+		waiter:                        newReplyWaiter(),
+		floors:                        newFloorRegistry(),
+		floorSettings:                 make(map[string]channelFloorSettings),
+		floorSpeakers:                 make(map[string]map[string]struct{}),
+		salienceMaxMembers:            make(map[string]int),
+		replyBudgets:                  make(map[string]int),
+		replyCounts:                   make(map[string]map[string]int),
+		endVoteThresholds:             make(map[string]int),
+		endVoteWindows:                make(map[string]int),
+		endVotes:                      make(map[string]*interactionEndVotes),
+		closedInteractions:            make(map[string]struct{}),
+		maxCascadeDepth:               defaults.DefaultMaxCascadeDepth,
+		maxInFlightFanout:             defaultMaxInFlightFanout,
+		channelActivity:               make(map[string]map[string]time.Time),
+		activityNow:                   time.Now,
+		openInteractions:              make(map[string]*openInteraction),
+		interactionIdleTimeouts:       make(map[string]time.Duration),
+		defaultInteractionIdleTimeout: time.Duration(DefaultInteractionIdleTimeoutSeconds) * time.Second,
+		interactionNow:                time.Now,
 	}
 }
 

@@ -309,18 +309,22 @@ func TestGovernance_PostCloseSuppressionEmitsGovernanceDrop(t *testing.T) {
 
 	// Two distinct votes close the interaction. The first vote fans out; the
 	// closing vote suppresses its own fanout but is the close, not a drop.
-	require.NoError(t, endVote(t, router, id, "alice", "int-1"))
-	require.NoError(t, endVote(t, router, id, "bob", "int-1"))
+	require.NoError(t, endVote(t, router, id, "alice", ""))
+	closedID := openInteractionID(router, id)
+	require.NoError(t, endVote(t, router, id, "bob", ""))
 	require.Zero(t, governanceDropCount(t, collect(t, reader), "group", governanceLayerEndVote),
 		"reaching quorum is the interaction_closed signal, not a governance_drop")
 	fannedBeforePostClose := len(disp.snapshot())
 
-	// An ordinary (non-vote) reply to the now-closed interaction, carrying a
-	// publish span so the trace-correlation stamp is observable too.
+	// An ordinary (non-vote) reply landing in the now-closed interaction — the
+	// commit-racing-the-close interleaving (since the producer landed, ordinary
+	// post-close traffic mints fresh; the reseed simulates the racer that
+	// resolved the closing id just before quorum — see reseedOpenInteraction).
+	// Carries a publish span so the trace-correlation stamp is observable too.
+	reseedOpenInteraction(router, id, closedID)
 	ctx, span := otel.Tracer("test").Start(context.Background(), "publish")
 	require.NoError(t, router.Publish(ctx, ChannelMessage{
 		ID: uuid.NewString(), ChannelID: id, SenderID: "carol", Content: "late reply",
-		Metadata: map[string]any{interactionIDMetadataKey: "int-1"},
 	}, ""))
 	span.End()
 
@@ -362,25 +366,29 @@ func TestGovernance_PostCloseReplyDoesNotLeakReplyCounter(t *testing.T) {
 	router.SetEndVoteParams(id, 2, 3) // K=2, W=3.
 
 	// alice replies once, so the interaction has a live reply counter.
-	require.NoError(t, publishReply(t, router, id, "alice", "int-1", "agent"))
-	require.True(t, replyCounterTracked(router, "int-1"), "the reply created a counter")
+	require.NoError(t, publishReply(t, router, id, "alice", "", "agent"))
+	closedID := openInteractionID(router, id)
+	require.True(t, replyCounterTracked(router, closedID), "the reply created a counter")
 
 	// Two distinct votes close the interaction; the close discards the counters.
-	require.NoError(t, endVote(t, router, id, "alice", "int-1"))
-	require.NoError(t, endVote(t, router, id, "bob", "int-1"))
+	require.NoError(t, endVote(t, router, id, "alice", ""))
+	require.NoError(t, endVote(t, router, id, "bob", ""))
 	require.Equal(t, int64(1), interactionClosedCount(t, collect(t, reader), "group", endVotesTrigger),
 		"the interaction closed on votes")
-	require.False(t, replyCounterTracked(router, "int-1"), "close discarded the reply counter")
+	require.False(t, replyCounterTracked(router, closedID), "close discarded the reply counter")
 
-	// A post-close non-vote reply from a participant who never replied (so it is
-	// admitted, not budget-rejected) runs enforceReplyBudget and re-creates the
-	// counter map; processEndVote then suppresses its fanout (post-close drop).
-	require.NoError(t, publishReply(t, router, id, "carol", "int-1", "agent"))
+	// A non-vote reply racing the close (the reseed simulates the commit that
+	// resolved the closing id just before quorum — ordinary post-close traffic
+	// mints fresh since the producer landed) from a participant who never
+	// replied (so it is admitted, not budget-rejected): enforceReplyBudget
+	// re-creates the counter map; processEndVote then suppresses its fanout.
+	reseedOpenInteraction(router, id, closedID)
+	require.NoError(t, publishReply(t, router, id, "carol", "", "agent"))
 	require.Equal(t, int64(1), governanceDropCount(t, collect(t, reader), "group", governanceLayerEndVote),
 		"the post-close reply was suppressed by Layer 4 (so it took the re-create path)")
 
 	// The re-created counter must not survive: the post-close path re-discards it.
-	assert.False(t, replyCounterTracked(router, "int-1"),
+	assert.False(t, replyCounterTracked(router, closedID),
 		"post-close reply must not leak a re-created reply counter")
 }
 

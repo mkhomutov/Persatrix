@@ -106,29 +106,38 @@ func TestReplyBudget_PerParticipantAndPerInteraction(t *testing.T) {
 	router, _, store := newRouterTest(t)
 	id := mustCreateGroup(t, store, "planning", "alice", "bob")
 	router.SetReplyBudget(id, 1)
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	router.interactionNow = func() time.Time { return now }
 
-	require.NoError(t, publishReply(t, router, id, "alice", "int-1", "agent"))
-	// alice's 2nd in int-1 is denied.
-	assert.ErrorIs(t, publishReply(t, router, id, "alice", "int-1", "agent"), ErrParticipantBudgetExhausted)
+	require.NoError(t, publishReply(t, router, id, "alice", "", "agent"))
+	// alice's 2nd in the open interaction is denied.
+	assert.ErrorIs(t, publishReply(t, router, id, "alice", "", "agent"), ErrParticipantBudgetExhausted)
 	// bob in the same interaction is unaffected.
-	require.NoError(t, publishReply(t, router, id, "bob", "int-1", "agent"))
-	// alice in a *different* interaction has a fresh allowance.
-	require.NoError(t, publishReply(t, router, id, "alice", "int-2", "agent"))
+	require.NoError(t, publishReply(t, router, id, "bob", "", "agent"))
+	// alice in a *different* interaction — the idle window rotates the channel
+	// onto a fresh one — has a fresh allowance.
+	now = now.Add(601 * time.Second)
+	require.NoError(t, publishReply(t, router, id, "alice", "", "agent"))
 }
 
-// TestReplyBudget_UntrackedInteractionUncapped pins that a publish with no
-// interaction_id is never budget-gated — there is no Interaction to scope the
-// counter to, so the layer stays at its uncapped default (additive).
+// TestReplyBudget_UntrackedInteractionUncapped pins that an untracked message
+// (no interaction_id) is never budget-gated — there is no Interaction to scope
+// the counter to, so the layer stays at its uncapped default (additive). Since
+// the interaction-id producer landed, every Publish is stamped — untracked
+// input can only reach the hook if the resolver is bypassed, so the tolerance
+// is pinned by direct call (the TestEndVote_UntrackedVoteIgnored posture).
 func TestReplyBudget_UntrackedInteractionUncapped(t *testing.T) {
 	router, _, store := newRouterTest(t)
 	id := mustCreateGroup(t, store, "planning", "alice", "bob")
 	router.SetReplyBudget(id, 1)
 
 	for i := 0; i < 5; i++ {
-		require.NoError(t, publishReply(t, router, id, "alice", "", "agent"))
+		release, err := router.enforceReplyBudget(context.Background(), ChannelMessage{
+			ID: uuid.NewString(), ChannelID: id, SenderID: "alice", Content: "hi",
+		}, ChannelTypeGroup)
+		require.NoError(t, err, "untracked (no interaction_id) traffic is never budget-gated")
+		require.Nil(t, release, "no reservation is taken for untracked traffic")
 	}
-	hist, _ := store.GetHistory(context.Background(), id, 100, time.Time{})
-	assert.Len(t, hist, 5, "untracked (no interaction_id) traffic is never budget-gated")
 }
 
 // TestReplyBudget_HumanPrincipalExempt pins GL4 / §OQ-7: a human principal
@@ -173,14 +182,15 @@ func TestReplyBudget_CountersResetOnClose(t *testing.T) {
 	id := mustCreateGroup(t, store, "planning", "alice", "bob")
 	router.SetReplyBudget(id, 1)
 
-	require.NoError(t, publishReply(t, router, id, "alice", "int-1", "agent"))
-	assert.ErrorIs(t, publishReply(t, router, id, "alice", "int-1", "agent"), ErrParticipantBudgetExhausted)
+	require.NoError(t, publishReply(t, router, id, "alice", "", "agent"))
+	assert.ErrorIs(t, publishReply(t, router, id, "alice", "", "agent"), ErrParticipantBudgetExhausted)
 
-	// Close → discard the per-interaction counters.
-	router.DiscardInteractionReplyBudget("int-1")
+	// Close → discard the per-interaction counters (the resolver-minted id is
+	// the live key since the producer landed).
+	router.DiscardInteractionReplyBudget(openInteractionID(router, id))
 
 	// alice gets a fresh allowance after the reset.
-	require.NoError(t, publishReply(t, router, id, "alice", "int-1", "agent"))
+	require.NoError(t, publishReply(t, router, id, "alice", "", "agent"))
 	_ = store
 }
 
