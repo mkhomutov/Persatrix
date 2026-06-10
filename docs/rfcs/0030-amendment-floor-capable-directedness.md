@@ -1,7 +1,7 @@
 # RFC 0030 Amendment — Directedness Requires a Floor-Capable Addressee (Tier A Mention Resolution)
 
 **Type**: amendment to the [relevance-gated-response amendment](0030-amendment-relevance-gated-response.md) §"The graduated response gate" (Tier A — the directed-elsewhere filter), restoring its original definition of directedness against the shipped implementation
-**Status**: 📋 Proposed
+**Status**: ✅ Implemented (v0.3.9 — Go resolution + wire field [#601](https://github.com/mkhomutov/Persatrix/pull/601); the paired gate/candidate-set basis flip + drift pins [#602](https://github.com/mkhomutov/Persatrix/pull/602); manual acceptance [MT-CHANNEL-RELEVANCE-001 §Step 6](../manual-tests/MT-CHANNEL-RELEVANCE-001.md) pending execution)
 **Author**: Maksim Khomutov
 **Date**: 2026-06-10
 **Target**: v0.3.9 (two implementation PRs after this doc: orchestrator-side mention resolution + wire field + presence flag; then agent-side gate consumption + the paired Go candidate-set basis flip + drift pins — the two suppression-basis flips ship atomically, see §C items 1/3)

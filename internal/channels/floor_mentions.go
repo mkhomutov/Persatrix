@@ -36,11 +36,12 @@ package channels
 // same way everywhere, because this subset becomes the cross-language wire
 // suppression basis (`ChannelMessageEvent.floor_mentions`).
 //
-// Called once per publish, by [ChannelRouter.fanout], for the envelope stamp.
-// PR 2/2 adds the [orderResponders] call when the candidate split's
-// directedness basis flips together with the Python gate's (see the deferral
-// note in orderResponders); both calls will see the same (members, mentions)
-// pair, so the two results agree by construction.
+// Called twice per publish — by [orderResponders] for the candidate split
+// (the §C item 3 basis flip, paired with the Python gate's) and by
+// [ChannelRouter.fanout] for the envelope stamp. Both calls see the same
+// (members, mentions) pair, so the two results agree by construction; the
+// duplicate O(N+M) walk over two small lists is cheaper than threading the
+// slice through the [orderResponders] signature and every existing call site.
 func resolveFloorMentions(members []Member, mentions []string, senderID string) []string {
 	if len(mentions) == 0 {
 		return nil

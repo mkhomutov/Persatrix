@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-CHANNEL-RELEVANCE-001`
 **Feature Area**: Channels (conversation governance — RFC 0030 Layer 3, relevance amendment Tier A)
-**Version**: 1.0
+**Version**: 1.1 (Step 6: the v0.3.9 floor-capable-directedness trigger scenario)
 **Created**: 2026-06-06
-**Last Updated**: 2026-06-06
+**Last Updated**: 2026-06-10
 **Status**: Active
 
 ---
@@ -231,6 +231,44 @@ distinct persona senders that replied to each human message.
 
 ---
 
+### Step 6: A mention of the human does not silence the room (v0.3.9 floor-capable directedness)
+
+The [floor-capable-directedness amendment](../rfcs/0030-amendment-floor-capable-directedness.md)
+trigger scenario: a message whose only mention names a **floor-incapable**
+party — the human, joined `respond: never` per the
+[demo-guide convention](../guides/v0.3.0-demo.md) — is **open floor**, not
+directed. Pre-amendment, one polite "@alex, …" suppressed every
+`participant` as `directed_elsewhere` and the room fell silent until the
+next human message.
+
+**Pitfall — the human's membership policy is load-bearing.** Step 2's bare
+`channel join planning --as operator` defaults the disposition to
+`when_mentioned`, which **is** floor-capable: a mention of `operator` is
+(correctly) still directed, and this step would falsely fail. Join a second
+human id with an explicit `--respond never` for this case:
+
+```bash
+./bin/persatrix channel join planning --as alex --respond never
+./bin/persatrix channel send planning \
+  "Thanks @alex for the context. Team, where does that leave the datastore decision?" \
+  --as operator --mention alex
+```
+
+**Expected**:
+- `iron-fox` and `nova-sparrow` treat the message as **open floor**: replies
+  appear (subject to the same Tier B salience caveat as Step 3 — the bid, not
+  the directedness filter, now decides who has something to add).
+- The room is **not** silenced: the pre-amendment outcome (zero persona
+  replies, every `participant` gated as `directed_elsewhere`) must not occur.
+- Orchestrator debug log (optional cross-check): a
+  `channels: mentions name no floor-capable member` line for the publish.
+
+**Verification**:
+- [ ] At least one `participant` replies; no `directed_elsewhere` suppression
+      of unnamed `participant`s appears in the agent logs for this message.
+
+---
+
 ## Expected Results Summary
 
 | Step | Expected Outcome | Pass/Fail |
@@ -240,6 +278,7 @@ distinct persona senders that replied to each human message.
 | 3 | An open-floor prompt admits both `participant`s; `ember-owl` stays silent (Tier B no-pile-on is v0.3.8, not asserted) | ☐ |
 | 4 | An `@everyone` broadcast disables the directed filter — all three reply (D3) | ☐ |
 | 5 | REST history confirms reply counts 1 / 2 / 3 (directed / open-floor / broadcast) | ☐ |
+| 6 | A mention of the `respond: never` human is open floor — the room is not silenced (v0.3.9) | ☐ |
 
 ---
 

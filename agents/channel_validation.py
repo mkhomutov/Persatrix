@@ -142,6 +142,23 @@ def validate_channel_message_event(
             continue  # broadcast sentinel (D3), not a participant id — ISSUE-0094
         if not _CHANNEL_PARTICIPANT_ID_RE.match(m):
             return f"mentions[{i}] is not a valid participant id: {_safe_repr(m)}", None
+    # ``floor_mentions`` (floor-capable-directedness amendment, v0.3.9) is the
+    # orchestrator-resolved subset of ``mentions`` and rides the same
+    # cleartext port — mirror the mentions bounds. No ``@everyone`` carve-out
+    # here: the sentinel is never a member id, so the resolver never emits it;
+    # an inbound sentinel (or any pattern violation) is a malformed or spoofed
+    # producer and is rejected before the gate consumes the list as its
+    # suppression basis.
+    if len(request.floor_mentions) > _CHANNEL_MAX_MENTIONS:
+        return (
+            f"floor_mentions list exceeds {_CHANNEL_MAX_MENTIONS} entries "
+            f"(got {len(request.floor_mentions)})"
+        ), None
+    for i, m in enumerate(request.floor_mentions):
+        if not _CHANNEL_PARTICIPANT_ID_RE.match(m):
+            return (
+                f"floor_mentions[{i}] is not a valid participant id: {_safe_repr(m)}"
+            ), None
 
     # ``sender_id`` carries a stronger trust claim than ``mentions[]`` (it
     # identifies the alleged author) yet rides the same cleartext gRPC
