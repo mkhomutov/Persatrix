@@ -243,7 +243,7 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// ISSUE-0011 (PR #245 review SF-3): per-element validation lives in
-	// the store (`validateParticipantID` per mention), but a count cap
+	// the store (`ValidateParticipantID` per mention), but a count cap
 	// has to live here — the store accepts whatever it gets. Reject
 	// loudly so misconfigured prompts surface with a 400 rather than
 	// silently amplifying the response gate's per-recipient work.

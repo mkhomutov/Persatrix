@@ -11,7 +11,7 @@ import (
 )
 
 // PR #231 deep review SF-3 (RFC 0011 PR 4a-ii-α): every mention id in
-// `ChannelMessage.Mentions` must round-trip through `validateParticipantID`
+// `ChannelMessage.Mentions` must round-trip through `ValidateParticipantID`
 // before INSERT. Without this check, the wire boundary's mentions cap is
 // the only filter and junk values (whitespace, ":", non-ASCII) would
 // reach the response gate in PR 4b. The contract is the same regex used
@@ -130,7 +130,7 @@ func TestSQLiteStore_PublishMessage_RejectsFirstInvalidMention(t *testing.T) {
 // PR #249 deep-review Nice-to-Have #2 (regression pin): the per-mention
 // error must surface the offending value alongside the index so a 422
 // returned to a REST caller pinpoints which input the operator must
-// correct. The value is contributed by `validateParticipantID` itself
+// correct. The value is contributed by `ValidateParticipantID` itself
 // (via “%q“) and bubbles up through the loop's “mentions[%d]: %w“
 // wrap. This test exists so a future refactor of either layer that
 // drops the value (e.g. switching the inner error to a bare sentinel,

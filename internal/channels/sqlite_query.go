@@ -232,7 +232,7 @@ func (s *sqliteStore) SetMemberPolicy(ctx context.Context, channelID, participan
 
 // AddMember implements [ChannelStore.AddMember].
 func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID string, policy RespondPolicy) error {
-	if err := validateParticipantID(participantID); err != nil {
+	if err := ValidateParticipantID(participantID); err != nil {
 		return err
 	}
 	// Resolve the declared disposition into the persisted triple

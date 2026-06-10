@@ -44,15 +44,21 @@ func wireRespondPolicy(respond string) channels.RespondPolicy {
 }
 
 // resolveMemberRequests translates the wire-shape member list into store
-// members, resolving each declared disposition into the persisted triple
-// here at the wire boundary ([channels.ResolveMemberPolicy]). An invalid
-// value surfaces the same [channels.ErrInvalidRespondPolicy] the store
-// would have returned — before the channel row is created instead of
-// mid-transaction, so a malformed body 400s ahead of any state conflict
-// (pinned by TestChannels_CreateChannel_InvalidRespondWinsOverConflict).
+// members, judging each member's full request validity — identity
+// ([channels.ValidateParticipantID]) and declared disposition
+// ([channels.ResolveMemberPolicy]) — here at the wire boundary, in the
+// same id-then-policy order the store's AddMember uses. An invalid value
+// surfaces the same sentinel the store would have returned
+// ([channels.ErrInvalidParticipantID] / [channels.ErrInvalidRespondPolicy])
+// — before the channel row is created instead of mid-transaction, so a
+// malformed body 400s ahead of any state conflict (pinned by the
+// TestChannels_CreateChannel_Invalid*WinsOverConflict pair).
 func resolveMemberRequests(reqs []channelMemberRequest) ([]channels.Member, error) {
 	members := make([]channels.Member, 0, len(reqs))
 	for _, m := range reqs {
+		if err := channels.ValidateParticipantID(m.ID); err != nil {
+			return nil, err
+		}
 		mp, err := channels.ResolveMemberPolicy(wireRespondPolicy(m.Respond))
 		if err != nil {
 			return nil, err

@@ -8,6 +8,13 @@ package channels
 // `ChannelMessageEvent` fields). The named triple exists so the
 // derive-then-normalize pairing travels as one value instead of three
 // loose locals re-assembled per call site.
+//
+// Deliberately NOT embedded in [Member], even though Member carries the
+// same three fields: MemberPolicy.Policy is canonical by construction
+// (only [ResolveMemberPolicy] makes one), while Member.RespondPolicy at
+// the CreateChannelWithMembers boundary legally holds an empty or
+// declared value the store itself defaults and normalizes. Embedding
+// would stamp the "resolved" invariant on a field that isn't.
 type MemberPolicy struct {
 	Policy        RespondPolicy
 	SalienceGated bool

@@ -396,7 +396,7 @@ func (s *sqliteStore) CreateChannelWithMembers(ctx context.Context, ch Channel, 
 
 	now := time.Now().UTC()
 	for _, m := range members {
-		if err := validateParticipantID(m.ParticipantID); err != nil {
+		if err := ValidateParticipantID(m.ParticipantID); err != nil {
 			return err
 		}
 		policy := m.RespondPolicy

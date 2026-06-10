@@ -98,6 +98,34 @@ func TestChannels_CreateChannel_InvalidRespondWinsOverConflict(t *testing.T) {
 		"the winning error must be the respond-policy rejection, not the conflict")
 }
 
+// TestChannels_CreateChannel_InvalidParticipantIDWinsOverConflict pins
+// the participant-ID half of the same precedence rule: member identity
+// is request validity too, so an invalid member `id` in a create body
+// must 400 even when the channel name also conflicts (409). Without
+// handler-side validation the store transaction hits the channel
+// unique violation before the membership loop ever validates the ID,
+// so the conflict would mask the malformed body — the exact asymmetry
+// the PR #598 review flagged against the respond-policy pin above.
+func TestChannels_CreateChannel_InvalidParticipantIDWinsOverConflict(t *testing.T) {
+	srv, _ := channelTestServer(t)
+	createBody, _ := json.Marshal(createChannelRequest{
+		Name:    "planning",
+		Members: []channelMemberRequest{{ID: "alice"}},
+	})
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", createBody).Code)
+
+	conflictAndInvalid, _ := json.Marshal(createChannelRequest{
+		Name:    "planning",                           // already exists → the store would 409
+		Members: []channelMemberRequest{{ID: "Bob!"}}, // fails the §A pattern
+	})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", conflictAndInvalid)
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"malformed member id must win over the state conflict (validate request before state)")
+	assert.Contains(t, rec.Body.String(), "invalid participant id",
+		"the winning error must be the participant-id rejection, not the conflict")
+}
+
 // TestChannels_CreateChannel_AcceptsDispositionVocabulary pins the RFC
 // 0030 relevance-amendment back-compat contract on the REST create path:
 // the disposition vocabulary (`participant`/`addressed`/`observer`) the

@@ -48,7 +48,7 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 	if msg.ChannelID == "" {
 		return errors.New("channels: message channel_id is required")
 	}
-	if err := validateParticipantID(msg.SenderID); err != nil {
+	if err := ValidateParticipantID(msg.SenderID); err != nil {
 		return err
 	}
 	// ISSUE-0050: defense-in-depth byte cap. The agent layer enforces a
@@ -79,7 +79,7 @@ func (s *sqliteStore) PublishMessage(ctx context.Context, msg ChannelMessage) er
 		if mention == MentionEveryone {
 			continue
 		}
-		if err := validateParticipantID(mention); err != nil {
+		if err := ValidateParticipantID(mention); err != nil {
 			return fmt.Errorf("mentions[%d]: %w", i, err)
 		}
 	}
