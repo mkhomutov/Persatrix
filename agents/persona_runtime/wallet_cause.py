@@ -11,7 +11,11 @@ from ..base import TaskInput
 from ..generated import wallet_pb2 as walletpb
 from ..persona_types import AgentEvent, EventType
 
-__all__ = ["cause_for_event", "lease_attribution_for_event"]
+__all__ = [
+    "cause_for_event",
+    "lease_attribution_for_event",
+    "lease_interaction_id_for_event",
+]
 
 
 def cause_for_event(event: AgentEvent) -> walletpb.Cause.ValueType:
@@ -57,8 +61,8 @@ def lease_attribution_for_event(
     event: AgentEvent,
     *,
     agent_id: str,
-) -> tuple[walletpb.Cause.ValueType, str]:
-    """Return ``(cause, lease_agent_id)`` for the action-loop LLM call.
+) -> tuple[walletpb.Cause.ValueType, str, str]:
+    """Return ``(cause, lease_agent_id, interaction_id)`` for the loop's LLM call.
 
     Layers the ISSUE-0064 persona-as-sub-agent override on top of
     :func:`cause_for_event`. When a ``TASK_ASSIGNED`` event carries a
@@ -68,8 +72,13 @@ def lease_attribution_for_event(
     dispatch as a sub-agent invocation. The lease must then be tagged
     ``CAUSE_SUB_AGENT`` and attributed to the parent's ``agent_id`` —
     exact twin of the override RFC 0023 PR 5 added to
-    :meth:`agents.base.BaseAgent._run_llm_loop`. Otherwise the result is
-    ``(cause_for_event(event), agent_id)``.
+    :meth:`agents.base.BaseAgent._run_llm_loop`. Otherwise the cause/agent
+    pair is ``(cause_for_event(event), agent_id)``.
+
+    The third element is :func:`lease_interaction_id_for_event` (RFC 0030
+    producer plan PR 2): the orchestrator-resolved interaction the quality
+    turn bills to, ``""`` when untracked. Bundled here rather than read at
+    the call site so the loop's lease attribution stays one call.
     """
     cause = cause_for_event(event)
     lease_agent_id = agent_id
@@ -84,4 +93,26 @@ def lease_attribution_for_event(
         if isinstance(task, TaskInput) and task.config.sub_agent_parent_id:
             cause = walletpb.CAUSE_SUB_AGENT
             lease_agent_id = task.config.sub_agent_parent_id
-    return cause, lease_agent_id
+    return cause, lease_agent_id, lease_interaction_id_for_event(event)
+
+
+def lease_interaction_id_for_event(event: AgentEvent) -> str:
+    """The RFC 0020 ``interaction_id`` the event's leased LLM calls bill to.
+
+    The interaction-id producer (RFC 0030 producer plan, PR 1) stamps the
+    orchestrator-resolved id onto every routed publish; the gRPC servicer
+    lifts it onto the event metadata (``seed_wire_metadata``), and this
+    helper is the loop-side read — threaded into the Tier C quality-turn
+    lease and the Tier B salience-bid lease so the Layer 1 cost ceiling can
+    attribute spend per interaction (producer plan PR 2). The key literal
+    mirrors Go's ``interactionIDMetadataKey``
+    (internal/channels/interaction_id.go); the cross-language drift pin
+    keeps the two in lockstep.
+
+    Absent (legacy / pre-producer / TICK) and non-string values resolve to
+    the untracked empty string — ``WalletClient.lease`` treats that as "no
+    interaction attribution", every ceiling at its uncapped default. The
+    same tolerance as every other metadata read at this boundary.
+    """
+    value = event.metadata.get("interaction_id", "")
+    return value if isinstance(value, str) else ""

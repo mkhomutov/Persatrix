@@ -43,7 +43,7 @@ from ..salience_bid import (
     evaluate_salience,
     skip_bid_for_channel_size,
 )
-from .wallet_cause import cause_for_event
+from .wallet_cause import cause_for_event, lease_interaction_id_for_event
 
 if TYPE_CHECKING:
     from ..persona_types import AgentEvent
@@ -202,6 +202,9 @@ async def run_salience_gate(
         # cause alone (and keeping ``agent_id`` as the resolving persona) is
         # sufficient and matches the quality turn for every reachable case.
         cause=cause_for_event(event),
+        # RFC 0030 producer plan PR 2: same interaction attribution as the
+        # quality turn — see evaluate_salience's interaction_id contract.
+        interaction_id=lease_interaction_id_for_event(event),
     )
     if not salience.speak:
         # No-pile-on: suppress the turn before paying for memory recall or
