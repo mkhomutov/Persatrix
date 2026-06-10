@@ -12,16 +12,18 @@ independently pinned by same-language tests
 normalization tests in Go), so a one-sided edit keeps that side's suite
 green and the divergence lands silently:
 
-* **Go** — the ``RespondPolicy`` const block and ``Normalize()``
-  disposition→legacy mapping in ``internal/channels/channels.go``, and
-  the ``MentionEveryone`` broadcast sentinel.
+* **Go** — the ``RespondPolicy`` const block, the ``Normalize()``
+  disposition→legacy mapping, and the ``Valid()`` acceptance set in
+  ``internal/channels/channels.go``, plus the ``MentionEveryone``
+  broadcast sentinel.
 * **Python** — the ``POLICY_*`` constants and ``_DISPOSITION_ALIASES``
   defence-in-depth mirror in ``agents/response_gate.py``, the
   ``MENTION_EVERYONE`` sentinel, and the inbound-wire enum
   ``_CHANNEL_RESPOND_POLICIES`` in ``agents/channel_validation.py``.
 * **Schema / DB** — the operator-facing ``respond`` enum in
-  ``schemas/channel.schema.json`` and the legacy-triple CHECK constraint
-  on ``memberships.respond_policy`` in
+  ``schemas/channel.schema.json``, and the legacy-triple CHECK
+  constraint and ``when_mentioned`` column default on
+  ``memberships.respond_policy`` in
   ``internal/channels/sqlite_schema.go``.
 
 The value sets deliberately differ per surface (config accepts both
@@ -87,9 +89,13 @@ _LEGACY_TRIPLE: set[str] = {POLICY_WHEN_MENTIONED, POLICY_ALWAYS, POLICY_NEVER}
 
 # Captures `Respond<Name> RespondPolicy = "<value>"` lines in the
 # `const ( ... )` block of channels.go. A future refactor that renames
-# the constants or moves them out of the typed-const form would force a
-# deliberate update here — that is intended: the parse rule is part of
-# the contract.
+# the constants or moves the whole block out of the typed-const form
+# would force a deliberate update here — that is intended: the parse
+# rule is part of the contract. The zero-match guard in
+# `_go_policy_consts` cannot see a *partial* miss (a single value added
+# in some other form — an untyped const, an inline literal); that case
+# is caught by the `Valid()` pin, which resolves every identifier the
+# acceptance set references back through this block.
 _GO_CONST_PATTERN = re.compile(
     r'^\s*Respond(\w+)\s+RespondPolicy\s*=\s*"([^"]+)"\s*$',
     re.MULTILINE,
@@ -100,6 +106,15 @@ _GO_CONST_PATTERN = re.compile(
 # to a column-0 `}` stops at the function's closing brace.
 _GO_NORMALIZE_PATTERN = re.compile(
     r"func \(p RespondPolicy\) Normalize\(\) RespondPolicy \{\n(.*?)\n\}",
+    re.DOTALL,
+)
+
+# Captures the body of `func (p RespondPolicy) Valid() bool` — the
+# acceptance surface every load/write path gates on
+# (`canonicalRespondPolicy`, the config loader). Same column-0
+# closing-brace bound as _GO_NORMALIZE_PATTERN.
+_GO_VALID_PATTERN = re.compile(
+    r"func \(p RespondPolicy\) Valid\(\) bool \{\n(.*?)\n\}",
     re.DOTALL,
 )
 
@@ -115,6 +130,11 @@ _GO_MENTION_EVERYONE_PATTERN = re.compile(
 _SQLITE_CHECK_PATTERN = re.compile(
     r"respond_policy\s+TEXT.*?CHECK\s*\(respond_policy\s+IN\s*\(([^)]*)\)\)",
     re.DOTALL,
+)
+
+# Captures the memberships-table column default that precedes the CHECK.
+_SQLITE_DEFAULT_PATTERN = re.compile(
+    r"respond_policy\s+TEXT\s+NOT\s+NULL\s+DEFAULT\s+'(\w+)'",
 )
 
 
@@ -141,6 +161,26 @@ def _go_policy_consts() -> dict[str, str]:
     return consts
 
 
+def _resolve_go_const(consts: dict[str, str], identifier: str, where: str) -> str:
+    """Resolve a parsed ``Respond<Name>`` identifier to its wire string,
+    failing actionably (not with a raw ``KeyError``) when no typed const
+    matches. The miss case is load-bearing: a vocabulary value declared
+    in any other form — an untyped const, a const in another file, an
+    inline string literal — is invisible to ``_go_policy_consts``'s
+    zero-match guard, and surfaces here the moment ``Normalize()`` or
+    ``Valid()`` references it.
+    """
+    name = identifier.removeprefix("Respond")
+    if name == identifier or name not in consts:
+        _parse_miss(
+            f'a typed `Respond<Name> RespondPolicy = "<value>"` const '
+            f"matching `{identifier}` (referenced in {where})",
+            _CHANNELS_GO,
+        )
+        raise AssertionError("unreachable")  # _parse_miss always raises
+    return consts[name]
+
+
 def _go_normalize_aliases() -> dict[str, str]:
     """Parse the ``Normalize()`` switch into a disposition→legacy map.
 
@@ -152,7 +192,7 @@ def _go_normalize_aliases() -> dict[str, str]:
     body_match = _GO_NORMALIZE_PATTERN.search(src)
     if body_match is None:
         _parse_miss("`func (p RespondPolicy) Normalize()`", _CHANNELS_GO)
-        raise AssertionError("unreachable")  # _parse_miss always raises
+        raise AssertionError("unreachable")
     consts = _go_policy_consts()
     aliases: dict[str, str] = {}
     # Each `case A, B:` chunk maps its named constants to the chunk's
@@ -160,17 +200,44 @@ def _go_normalize_aliases() -> dict[str, str]:
     # legacy values) never matches the Respond-prefixed pattern.
     for chunk in body_match.group(1).split("case ")[1:]:
         head, _, rest = chunk.partition(":")
-        target_match = re.search(r"return\s+Respond(\w+)", rest)
+        target_match = re.search(r"return\s+(Respond\w+)", rest)
         if target_match is None:
             _parse_miss(
                 f"a `return Respond<Name>` arm for `case {head.strip()}`",
                 _CHANNELS_GO,
             )
             raise AssertionError("unreachable")
-        target = consts[target_match.group(1)]
+        target = _resolve_go_const(consts, target_match.group(1), "`Normalize()`")
         for name in head.split(","):
-            aliases[consts[name.strip().removeprefix("Respond")]] = target
+            aliases[_resolve_go_const(consts, name.strip(), "`Normalize()`")] = target
     return aliases
+
+
+def _go_valid_policies() -> set[str]:
+    """Parse the ``Valid()`` switch into the set of accepted wire strings.
+
+    Every identifier in the ``case`` arms must resolve through the
+    typed-const block (``_resolve_go_const``), so a vocabulary value that
+    ``Valid()`` accepts via any other declaration form fails loudly here
+    instead of slipping past the const-block pin.
+    """
+    src = _CHANNELS_GO.read_text(encoding="utf-8")
+    body_match = _GO_VALID_PATTERN.search(src)
+    if body_match is None:
+        _parse_miss("`func (p RespondPolicy) Valid()`", _CHANNELS_GO)
+        raise AssertionError("unreachable")
+    consts = _go_policy_consts()
+    accepted: set[str] = set()
+    # The case head wraps across lines under gofmt; splitting on "," and
+    # stripping handles the continuation indent.
+    for chunk in body_match.group(1).split("case ")[1:]:
+        head, _, _rest = chunk.partition(":")
+        for name in head.split(","):
+            accepted.add(_resolve_go_const(consts, name.strip(), "`Valid()`"))
+    if not accepted:
+        _parse_miss("`case` arms in `func (p RespondPolicy) Valid()`", _CHANNELS_GO)
+        raise AssertionError("unreachable")
+    return accepted
 
 
 def _go_mention_everyone() -> str:
@@ -195,6 +262,19 @@ def _sqlite_check_policies() -> set[str]:
     return set(re.findall(r"'(\w+)'", match.group(1)))
 
 
+def _sqlite_default_policy() -> str:
+    """Parse the memberships-table ``respond_policy`` column DEFAULT."""
+    src = _SQLITE_SCHEMA_GO.read_text(encoding="utf-8")
+    match = _SQLITE_DEFAULT_PATTERN.search(src)
+    if match is None:
+        _parse_miss(
+            "the `respond_policy TEXT NOT NULL DEFAULT '<value>'` column default",
+            _SQLITE_SCHEMA_GO,
+        )
+        raise AssertionError("unreachable")
+    return match.group(1)
+
+
 def _schema_respond_property() -> dict:
     """Walk ``channel.schema.json`` for the single ``respond`` enum property."""
     schema = json.loads(_CHANNEL_SCHEMA_JSON.read_text(encoding="utf-8"))
@@ -217,6 +297,7 @@ def _schema_respond_property() -> dict:
             f'exactly one `respond` property with an `enum` (found {len(found)})',
             _CHANNEL_SCHEMA_JSON,
         )
+        raise AssertionError("unreachable")
     return found[0]
 
 
@@ -236,6 +317,29 @@ def test_go_consts_and_python_constants_agree() -> None:
         f"Update both — and if the vocabulary is operator-visible, update "
         f"schemas/channel.schema.json (`respond.enum`) and "
         f"docs/guides/channels.md too."
+    )
+
+
+def test_go_valid_accepts_exactly_the_full_vocabulary() -> None:
+    """``RespondPolicy.Valid`` — the acceptance surface every load/write
+    path gates on (``canonicalRespondPolicy``, the config loader) — MUST
+    accept exactly the declared vocabulary.
+
+    This closes the const-block pin's blind spot: its parse-miss guard
+    only fires when *no* typed const matches, so a value added in some
+    other form (an untyped ``RespondX = "x"`` const, an inline
+    ``case "x":`` literal) would land silently. A value only becomes
+    *usable* once ``Valid()`` accepts it, and resolving the ``Valid()``
+    case list through the typed-const block makes any such addition loud
+    — either here (set mismatch) or in ``_resolve_go_const``
+    (unresolvable identifier).
+    """
+    assert _go_valid_policies() == set(_PYTHON_POLICIES.values()), (
+        f"RespondPolicy.Valid ({_CHANNELS_GO}) accepts "
+        f"{sorted(_go_valid_policies())}, but the declared vocabulary is "
+        f"{sorted(_PYTHON_POLICIES.values())}. The loader's acceptance set "
+        f"and the declared vocabulary must move together; update both "
+        f"sides (and the schema `respond.enum`) in lockstep."
     )
 
 
@@ -267,9 +371,19 @@ def test_normalize_targets_are_the_legacy_triple() -> None:
     DB CHECK and the wire contract assume.
     """
     aliases = _go_normalize_aliases()
-    assert set(aliases.values()) <= _LEGACY_TRIPLE
+    assert set(aliases.values()) <= _LEGACY_TRIPLE, (
+        f"Normalize() targets {sorted(set(aliases.values()))} escape the "
+        f"legacy triple {sorted(_LEGACY_TRIPLE)}: a disposition now "
+        f"canonicalizes to a value the DB CHECK and the wire readers do "
+        f"not expect."
+    )
     non_dispositions = set(_go_policy_consts().values()) - set(aliases)
-    assert non_dispositions == _LEGACY_TRIPLE
+    assert non_dispositions == _LEGACY_TRIPLE, (
+        f"non-disposition consts {sorted(non_dispositions)} != the legacy "
+        f"triple {sorted(_LEGACY_TRIPLE)}: either a legacy value gained a "
+        f"Normalize() arm or a new const has none — both change what "
+        f"reaches the store and the wire."
+    )
 
 
 def test_sqlite_check_is_the_legacy_triple() -> None:
@@ -288,9 +402,29 @@ def test_sqlite_check_is_the_legacy_triple() -> None:
     )
 
 
+def test_sqlite_default_is_when_mentioned() -> None:
+    """The ``memberships.respond_policy`` column DEFAULT MUST be exactly
+    ``when_mentioned`` — the no-declared-policy fallback the schema
+    ``default`` (``test_schema_default_normalizes_to_when_mentioned``)
+    and the catch-up replay path
+    (``channel_catchup._resolve_respond_policy``) also resolve to.
+    Asserted as the literal legacy value, not "an alias of": the CHECK on
+    the same column rejects dispositions, so a disposition DEFAULT would
+    make every default-relying insert fail the constraint.
+    """
+    assert _sqlite_default_policy() == POLICY_WHEN_MENTIONED, (
+        f"memberships.respond_policy DEFAULT ({_SQLITE_SCHEMA_GO}) is "
+        f"{_sqlite_default_policy()!r}, expected {POLICY_WHEN_MENTIONED!r} "
+        f"— the conservative fallback shared with the schema default and "
+        f"the catch-up replay path. If the fallback is deliberately "
+        f"changing, update all three together."
+    )
+
+
 def test_schema_enum_is_the_full_vocabulary() -> None:
     """The operator-facing ``respond`` enum MUST offer both vocabularies
-    — exactly the values the Go loader accepts (``RespondPolicy.Valid``).
+    — exactly the values the Go loader accepts (``RespondPolicy.Valid``,
+    itself pinned by ``test_go_valid_accepts_exactly_the_full_vocabulary``).
     A value added to one side only either 400s at the REST boundary
     despite being schema-valid, or is loadable but undocumented.
     """
