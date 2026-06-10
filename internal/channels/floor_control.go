@@ -147,15 +147,26 @@ func orderResponders(members []Member, msg ChannelMessage, threadParentSenderID 
 	}
 
 	// RFC 0030 relevance amendment Tier A (v0.3.7): a message that names
-	// specific recipients (`Mentions` non-empty) and is not an explicit
-	// broadcast (`MentionEveryone` absent) is *directed* — an `always`/
-	// `participant` member who is not named is suppressed by the receiver
-	// gate (directed_elsewhere). Mirror that here so floor control does not
-	// queue such a member into the serialized round only to have it stay
-	// silent and burn the per-turn timeout. This keeps the candidate set a
-	// superset of the gate's respond-true set: it now excludes exactly the
-	// members the gate now excludes, so no member the gate would admit is
-	// dropped (the no-false-negatives invariant above still holds).
+	// specific recipients and is not an explicit broadcast (`MentionEveryone`
+	// absent) is *directed* — an `always`/`participant` member who is not
+	// named is suppressed by the receiver gate (directed_elsewhere). Mirror
+	// that here so floor control does not queue such a member into the
+	// serialized round only to have it stay silent and burn the per-turn
+	// timeout. This keeps the candidate set a superset of the gate's
+	// respond-true set: it now excludes exactly the members the gate now
+	// excludes, so no member the gate would admit is dropped (the
+	// no-false-negatives invariant above still holds).
+	//
+	// Floor-capable-directedness amendment (v0.3.9): the directedness basis
+	// becomes the *floor-capable* mention subset ([resolveFloorMentions]) —
+	// but NOT in this PR. The basis flips in PR 2/2, atomically with the
+	// Python gate's (§C item 1): the live gate still suppresses on raw
+	// mentions, so flipping here first would queue members the gate is
+	// guaranteed to suppress into the serialized round, each burning its
+	// full per-turn timeout (≈45s × N on the blocking publish path) —
+	// violating the parity contract above, the whole point of this mirror.
+	// The raw `mentioned` set keeps serving the admit/ordering checks below
+	// permanently (amendment OQ 3).
 	directed := len(msg.Mentions) > 0 && !mentioned[MentionEveryone]
 
 	// Split into mentioned vs. unmentioned responders so the final
@@ -166,13 +177,21 @@ func orderResponders(members []Member, msg ChannelMessage, threadParentSenderID 
 		if m.ParticipantID == msg.SenderID {
 			continue // never reply to self
 		}
-		if m.RespondPolicy == RespondNever {
+		// Normalize at the read seam, mirroring the Python gate's
+		// `_DISPOSITION_ALIASES` defence for the same row on the wire.
+		// Identity in practice (the membership CHECK constraint admits only
+		// the legacy triple), but a non-canonical spelling that ever does
+		// reach a [Member] must classify identically here, in
+		// [resolveFloorMentions], and in the gate — capable on one basis but
+		// refused candidacy on another is the guaranteed-silence defect.
+		policy := m.RespondPolicy.Normalize()
+		if policy == RespondNever {
 			continue // read-on-demand; no dispatch, off both sets
 		}
 
 		isMentioned := mentioned[m.ParticipantID]
 		isCandidate := false
-		switch m.RespondPolicy {
+		switch policy {
 		case RespondAlways:
 			// Open-floor or broadcast → candidate; directed-elsewhere → not.
 			isCandidate = isMentioned || !directed
@@ -281,11 +300,12 @@ func (r *ChannelRouter) floorRound(
 	responders, nonResponders []Member,
 	turnTimeout time.Duration,
 	channelSize int,
+	floorMentions []string,
 ) {
 	detached := context.WithoutCancel(ctx)
 
 	if len(nonResponders) > 0 {
-		r.dispatchConcurrent(detached, msg, ct, threadParentSenderID, nonResponders, channelSize)
+		r.dispatchConcurrent(detached, msg, ct, threadParentSenderID, nonResponders, channelSize, floorMentions)
 	}
 
 	r.floors.acquire(msg.ChannelID)
@@ -297,7 +317,7 @@ func (r *ChannelRouter) floorRound(
 	// the responders actually impose, not queueing behind a prior round.
 	start := time.Now()
 	for _, speaker := range responders {
-		r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout, channelSize)
+		r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout, channelSize, floorMentions)
 	}
 	r.recordFloorRound(detached, ct, time.Since(start))
 }
@@ -350,6 +370,7 @@ func (r *ChannelRouter) runFloorTurn(
 	speaker Member,
 	turnTimeout time.Duration,
 	channelSize int,
+	floorMentions []string,
 ) {
 	r.recordFloorSpeaker(msg.ChannelID, speaker.ParticipantID)
 
@@ -377,7 +398,7 @@ func (r *ChannelRouter) runFloorTurn(
 		defer cancel()
 	}
 
-	r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker, channelSize)
+	r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker, channelSize, floorMentions)
 
 	timer := time.NewTimer(turnTimeout)
 	defer timer.Stop()

@@ -864,8 +864,42 @@ type ChannelMessageEvent struct {
 	// (`salience_gated`/`threshold`/`channel_size`/`salience_max_channel_members`)
 	// after the governance-layers plan named "field 13"; 17 is the next free tag.
 	InteractionId string `protobuf:"bytes,17,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// RFC 0030 floor-capable-directedness amendment (v0.3.9): the subset of
+	// `mentions = 8` naming *floor-capable* members — current channel members,
+	// **other than the message's sender**, whose normalized respond policy is
+	// not `never`. The sender exclusion is load-bearing, not cosmetic: both
+	// sides already refuse a sender the floor on its own message, so a sole
+	// self-mention must resolve to the empty subset (open floor) — a
+	// policy-only definition would let the sender's own name re-close the
+	// floor (amendment §A). Resolved once per publish by the orchestrator at
+	// fanout (it owns the membership view the receiver gate lacks — the
+	// `thread_parent_sender_id = 10` pre-resolution precedent), deduplicated,
+	// and identical across a fanout's recipients. The receiver-side Tier A
+	// directed-elsewhere decision uses THIS list as its suppression basis: a
+	// message whose mentions name only floor-incapable parties (the human
+	// operator joined `respond: never`, an `observer`, a non-member, the
+	// sender itself) is open floor, not directed — mentioning someone who
+	// cannot take the floor must not close it. The raw `mentions` list keeps
+	// serving the admit paths (named-recipient / `@everyone` broadcast) and
+	// display; the `@everyone` sentinel is never a member id, so it never
+	// appears here.
+	// See `docs/rfcs/0030-amendment-floor-capable-directedness.md`.
+	FloorMentions []string `protobuf:"bytes,18,rep,name=floor_mentions,json=floorMentions,proto3" json:"floor_mentions,omitempty"`
+	// Producer-presence flag for `floor_mentions = 18`. proto3 repeated fields
+	// have no field presence, and "resolved to empty" (a new orchestrator found
+	// no floor-capable mention — exactly the reclassified-to-open-floor case the
+	// amendment exists for) must be distinguishable from "never resolved" (an
+	// old orchestrator that predates the field), or the receiver's legacy
+	// fallback would re-suppress the very messages the fix reclassifies. The
+	// orchestrator sets this true on every dispatch unconditionally; receivers
+	// use `floor_mentions` as the suppression basis iff this is true and fall
+	// back to the raw `mentions` basis (the pre-amendment behaviour, degrading
+	// toward over-suppression, never under-suppression) when false. proto3
+	// implicit presence: false (the zero value) is the genuine old-producer
+	// case, so the field is additive across a mixed-version deployment.
+	FloorMentionsResolved bool `protobuf:"varint,19,opt,name=floor_mentions_resolved,json=floorMentionsResolved,proto3" json:"floor_mentions_resolved,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *ChannelMessageEvent) Reset() {
@@ -1015,6 +1049,20 @@ func (x *ChannelMessageEvent) GetInteractionId() string {
 		return x.InteractionId
 	}
 	return ""
+}
+
+func (x *ChannelMessageEvent) GetFloorMentions() []string {
+	if x != nil {
+		return x.FloorMentions
+	}
+	return nil
+}
+
+func (x *ChannelMessageEvent) GetFloorMentionsResolved() bool {
+	if x != nil {
+		return x.FloorMentionsResolved
+	}
+	return false
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
@@ -1386,7 +1434,7 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xa2\x05\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\x81\x06\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -1407,7 +1455,9 @@ const file_task_proto_rawDesc = "" +
 	"\tthreshold\x18\x0e \x01(\x01H\x00R\tthreshold\x88\x01\x01\x12!\n" +
 	"\fchannel_size\x18\x0f \x01(\x05R\vchannelSize\x12?\n" +
 	"\x1csalience_max_channel_members\x18\x10 \x01(\x05R\x19salienceMaxChannelMembers\x12%\n" +
-	"\x0einteraction_id\x18\x11 \x01(\tR\rinteractionIdB\f\n" +
+	"\x0einteraction_id\x18\x11 \x01(\tR\rinteractionId\x12%\n" +
+	"\x0efloor_mentions\x18\x12 \x03(\tR\rfloorMentions\x126\n" +
+	"\x17floor_mentions_resolved\x18\x13 \x01(\bR\x15floorMentionsResolvedB\f\n" +
 	"\n" +
 	"_threshold\"H\n" +
 	"\aTaskAck\x12\x18\n" +

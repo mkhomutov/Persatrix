@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -71,6 +72,24 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// value (identical across recipients), captured once here.
 	channelSize := len(members)
 
+	// Floor-capable-directedness amendment (v0.3.9): resolve the suppression
+	// basis once per publish and stamp it on every recipient's envelope. The
+	// debug line surfaces the previously-silent resolution — mentions were
+	// present but named no floor-capable member (the human operator, an
+	// observer, a non-member, the sender itself), the case PR 2/2's gate
+	// flip reclassifies to open floor (amendment §D). An explicit
+	// `@everyone` broadcast is excluded: the sentinel always falls out of
+	// the intersection, but a broadcast is open floor by contract (D3), not
+	// a reclassification — logging it would mislabel every broadcast and
+	// bury the signal this line exists to surface.
+	floorMentions := resolveFloorMentions(members, msg.Mentions, msg.SenderID)
+	if len(msg.Mentions) > 0 && len(floorMentions) == 0 && !slices.Contains(msg.Mentions, MentionEveryone) {
+		r.logger.Debug("channels: mentions name no floor-capable member",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("message_id", msg.ID),
+			zap.Int("mentions", len(msg.Mentions)))
+	}
+
 	// Mark the responders as having an in-flight turn for the console presence
 	// signal (RFC 0048 Tier 1) — exactly the members [orderResponders] expects
 	// to reply, not the ingestion-only recipients dispatchConcurrent also
@@ -82,12 +101,12 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 
 	if settings, ok := r.floorSettingsFor(msg.ChannelID); ok && settings.enabled {
 		if len(responders) >= 2 {
-			r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize)
+			r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
 			return
 		}
 	}
 
-	r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize)
+	r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions)
 }
 
 // dispatchConcurrent fans `msg` out to every member of `members` other than
@@ -98,7 +117,7 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 // `ctx` is expected to already be detached from the request lifetime by the
 // caller (so the floor path can reuse it for off-floor non-responder
 // delivery without re-detaching).
-func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, members []Member, channelSize int) {
+func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, members []Member, channelSize int, floorMentions []string) {
 	// Buffered channel as a semaphore: each goroutine acquires a slot
 	// before starting and releases it on exit, so peak in-flight
 	// dispatches never exceed `channelFanoutMaxConcurrency`. The
@@ -112,12 +131,16 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 		if m.ParticipantID == msg.SenderID {
 			continue
 		}
-		if m.RespondPolicy == RespondNever {
+		if m.RespondPolicy.Normalize() == RespondNever {
 			// `respond: never` participants do not receive dispatches in
 			// the v0.3.0 contract — they read history on demand. The
 			// response gate (PR 4b) is the canonical enforcement point;
 			// short-circuiting here keeps the dispatcher free of policy
-			// knowledge and saves a wasted gRPC call.
+			// knowledge and saves a wasted gRPC call. Normalized at the
+			// read seam like [orderResponders]' candidate loop and the
+			// gate's `_DISPOSITION_ALIASES`: identity for store-canonical
+			// rows, but a non-canonical spelling must mean the same thing
+			// at every policy read.
 			continue
 		}
 		// RFC 0030 Tier A note: a directed-elsewhere `always` member (one
@@ -142,7 +165,7 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 			// paths, so a panicking dispatch is not caught by the server's
 			// recoveryMiddleware — recover here or it crashes the process.
 			defer r.recoverFanout("dispatch", msg.ChannelID, msg.ID)
-			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize)
+			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize, floorMentions)
 		}()
 	}
 	wg.Wait()
@@ -152,7 +175,7 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 // timeout and emits the `channel.messages.delivered` counter. Shared by the
 // concurrent path ([dispatchConcurrent]) and the serialized floor turn
 // ([runFloorTurn]) so both honour the same deadline + metric contract.
-func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member, channelSize int) {
+func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member, channelSize int, floorMentions []string) {
 	dispatchCtx, cancel := context.WithTimeout(ctx, channelFanoutPerRecipientTimeout)
 	defer cancel()
 	err := r.dispatcher.Dispatch(dispatchCtx, DispatchEnvelope{
@@ -164,6 +187,9 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		// `m`/`Recipient`; these two are channel-wide.
 		ChannelSize:               channelSize,
 		SalienceMaxChannelMembers: r.salienceMaxFor(msg.ChannelID),
+		// Floor-capable-directedness amendment (v0.3.9): per-publish, like
+		// ChannelSize — resolved once in [ChannelRouter.fanout].
+		FloorMentions: floorMentions,
 	}, msg)
 	status := "ok"
 	if err != nil {
