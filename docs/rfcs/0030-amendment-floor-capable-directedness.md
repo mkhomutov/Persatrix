@@ -25,16 +25,17 @@ The shipped implementation tests something weaker. The Python gate ([`response_g
 | **the human operator** (a `never` member by the [documented join convention](../guides/v0.3.0-demo.md)) | **no** | suppress others | **guaranteed total silence** |
 | **an `observer`/`never` agent** | **no** | suppress others | **guaranteed total silence** |
 | **a non-member** (typo, external name) | **no** | suppress others | **guaranteed total silence** |
+| **the sender itself** (sole mention; "as I, @iron-fox, noted…") | **no** — both sides refuse the sender its own floor ([`orderResponders`](../../internal/channels/floor_control.go) "never reply to self"; the gate's `self_sender` suppress) | suppress others | **guaranteed total silence** |
 
-The last three rows are the defect. Suppression exists to *yield the floor to the addressee*; when the addressee cannot take the floor, yielding produces a floor nobody holds. In the field this presents as the reported symptom: personas answer the human's open-floor prompt (round one), one of them addresses the human by name in its reply, and the channel is structurally dead until the next human message.
+The last four rows are the defect. Suppression exists to *yield the floor to the addressee*; when the addressee cannot take the floor, yielding produces a floor nobody holds. In the field this presents as the reported symptom: personas answer the human's open-floor prompt (round one), one of them addresses the human by name in its reply, and the channel is structurally dead until the next human message.
 
 ## A. The rule — directedness requires a floor-capable addressee
 
 **A mention only directs the floor if the named party could actually take it.**
 
-- **Floor-capable** ≝ a current channel member whose resolved respond policy ([`RespondPolicy.Normalize`](../../internal/channels/channels.go)) is not `never` — i.e. `always` or `when_mentioned` post-normalization. (Equivalently: a member the response gate could ever admit for this message class.)
+- **Floor-capable** (relative to a message) ≝ a current channel member, **other than the message's sender**, whose resolved respond policy ([`RespondPolicy.Normalize`](../../internal/channels/channels.go)) is not `never` — i.e. `always` or `when_mentioned` post-normalization. (Equivalently: a member the response gate could admit *for this message* — the gloss that forces the sender exclusion: both sides already refuse a sender the floor on its own message, so a self-mention is one more name that cannot take it, and a policy-only test would reintroduce the silence defect through the sender's own name.)
 - **Floor-directing mentions** ≝ `mentions ∩ floor-capable members`.
-- Tier A's directed-elsewhere condition changes basis: suppress a non-named `participant` iff the **floor-directing** subset is non-empty (and `@everyone` is absent, unchanged). A message whose mentions name only floor-incapable parties — the human, an `observer`, a non-member — is **open floor** for suppression purposes.
+- Tier A's directed-elsewhere condition changes basis: suppress a non-named `participant` iff the **floor-directing** subset is non-empty (and `@everyone` is absent, unchanged). A message whose mentions name only floor-incapable parties — the human, an `observer`, a non-member, the sender itself — is **open floor** for suppression purposes.
 
 Why the member-*policy* test rather than a participant-*type* (human/agent) test, which the amendment's "different agent" wording might suggest:
 
@@ -48,6 +49,7 @@ Edge semantics, stated explicitly:
 - `@everyone` semantics are unchanged (decision D3 of the relevance amendment): the sentinel always means "do not suppress".
 - The named-member admit paths are unchanged and keep reading **raw** `mentions`: a `when_mentioned` member's `mentioned` admit, an `always` member's individually-named `mentioned` admit (the Tier B TB1 lane), and the thread-reply-to-self trigger are not touched by this amendment. Only the *suppression* decision changes basis.
 - A mention of an `observer` does **not** wake the observer (OQ 2). `observer` means never; the message simply does not close the floor.
+- A **self-mention alongside a floor-capable mention** ("@iron-fox is right, and as I (@ember-owl) said…") is **directed** — iron-fox carries it; the sender's own name contributes nothing either way. Only the *sole*-self-mention message reclassifies to open floor.
 
 ## B. What does NOT change
 
@@ -61,10 +63,10 @@ Edge semantics, stated explicitly:
 
 Primary enforcement belongs orchestrator-side: only the orchestrator owns membership, and it already sits on the trust boundary for exactly this shape of decision (the cascade-depth amendment's posture: primary enforcement in Go fanout, Python as defence-in-depth backstop). The precedent for the wire shape is `thread_parent_sender_id` — "pre-resolved by the router so the gate need not look the parent up itself" ([`response_gate.py`](../../agents/response_gate.py), thread branch; [`task.proto`](../../proto/task.proto) field 10).
 
-1. **Go (PR 1).** At fanout, resolve `floorMentions := msg.Mentions ∩ {m : m.RespondPolicy.Normalize() != never}` once per publish (the member list is already in hand). `orderResponders` computes `directed` from `floorMentions` instead of raw `Mentions`; the off-floor delivery split and mentioned-first ordering keep reading raw mentions (display/admission semantics, not suppression).
-2. **Wire (PR 1).** A new `repeated string floor_mentions` field on `ChannelMessageEvent` ([`task.proto`](../../proto/task.proto)), stamped per-publish (not per-recipient — the subset is recipient-independent). The GRPCMessageDispatcher lifts it into the event payload alongside `mentions`.
-3. **Python (PR 2).** The `POLICY_ALWAYS` suppression branch of [`evaluate_response_gate`](../../agents/response_gate.py) reads `payload["floor_mentions"]` **when present** for the directed-elsewhere decision; the `mentioned`/`broadcast` admit checks keep reading raw `mentions`. When the field is **absent** (an old orchestrator), the gate falls back to today's raw-mentions basis — degrading toward *over*-suppression, never under-suppression, so the failure direction under version skew is the current behaviour, not a new one.
-4. **Drift pins (PR 2).** [`test_cross_language_respond_policy_drift.py`](../../tests/unit/python/test_cross_language_respond_policy_drift.py) gains the field-name + semantics pin (Go resolution and Python consumption agree on "floor-capable = normalized policy ≠ never").
+1. **Go (implementation PR 1).** At fanout, resolve `floorMentions := msg.Mentions ∩ {m : m.RespondPolicy.Normalize() != never && m.ParticipantID != msg.SenderID}` once per publish (the member list is already in hand; the sender exclusion keeps the subset sender-relative but still recipient-independent, so per-publish stamping below is unaffected). `orderResponders` computes `directed` from `floorMentions` instead of raw `Mentions`; the off-floor delivery split and mentioned-first ordering keep reading raw mentions (display/admission semantics, not suppression).
+2. **Wire (implementation PR 1).** A new `repeated string floor_mentions` field on `ChannelMessageEvent` ([`task.proto`](../../proto/task.proto)), stamped per-publish (not per-recipient — the subset is recipient-independent). The GRPCMessageDispatcher lifts it into the event payload alongside `mentions`.
+3. **Python (implementation PR 2).** The `POLICY_ALWAYS` suppression branch of [`evaluate_response_gate`](../../agents/response_gate.py) reads `payload["floor_mentions"]` **when present** for the directed-elsewhere decision; the `mentioned`/`broadcast` admit checks keep reading raw `mentions`. When the field is **absent** (an old orchestrator), the gate falls back to today's raw-mentions basis — degrading toward *over*-suppression, never under-suppression, so the failure direction under version skew is the current behaviour, not a new one.
+4. **Drift pins (implementation PR 2).** [`test_cross_language_respond_policy_drift.py`](../../tests/unit/python/test_cross_language_respond_policy_drift.py) gains the field-name + semantics pin (Go resolution and Python consumption agree on "floor-capable = normalized policy ≠ never, excluding the sender").
 
 The gate cannot independently verify `floor_mentions` (it has no membership view — the same reason it can't compute the subset itself), so this is a deliberate, narrow trust extension to an already-trusted orchestrator-resolved field, identical in kind to `thread_parent_sender_id` and `salience_gated`. A spoofed empty `floor_mentions` on the untrusted gRPC port admits a `participant` to a directed message — the pre-v0.3.7 behaviour, bounded by the same cascade/cost layers that bounded it then.
 
@@ -75,7 +77,7 @@ The gate cannot independently verify `floor_mentions` (it has no membership view
 
 ## E. Test strategy
 
-- **Go**: `orderResponders` unit matrix — mention of a `never` member (the human convention), of a non-member, of an `observer`: candidate set must equal the open-floor set; mention of an `addressed`/`participant` member: unchanged directed behaviour; mixed human+agent mention: directed.
+- **Go**: `orderResponders` unit matrix — mention of a `never` member (the human convention), of a non-member, of an `observer`, of **the sender alone** (self-mention): candidate set must equal the open-floor set; mention of an `addressed`/`participant` member: unchanged directed behaviour; mixed human+agent mention: directed; **`@everyone` alongside a floor-capable mention: not directed** (the sentinel is a non-member and falls out of the intersection, so this row pins that the broadcast guard still reads raw mentions rather than relying on the resolved subset).
 - **Python**: gate unit matrix over `floor_mentions` present/absent × empty/non-empty × named/not-named, pinning the fallback (absent ⇒ legacy basis) and the unchanged admit paths.
 - **Drift pin**: the cross-language definition of floor-capable, per §C item 4.
 - **Manual**: extend [MT-CHANNEL-RELEVANCE-001](../manual-tests/MT-CHANNEL-RELEVANCE-001.md) with the trigger scenario — a persona reply that @-mentions the human must draw further discussion from `participant` members (subject to the Tier B bid), not room-wide silence.
