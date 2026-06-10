@@ -188,7 +188,7 @@ func (s *sqliteStore) SetMemberPolicy(ctx context.Context, channelID, participan
 	// in lock-step with `respond_policy` (e.g. `addressed` →
 	// `participant` turns the bid on and resets the chair threshold) —
 	// otherwise a re-disposition would leave a stale `salience_gated`.
-	mp, err := ResolveMemberPolicy(policy, nil)
+	mp, err := ResolveMemberPolicy(policy)
 	if err != nil {
 		return err
 	}
@@ -241,7 +241,7 @@ func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID st
 	// resolving here is correct: `participant`/`chair` opt into the bid, a
 	// `chair` picks up the low default threshold, and the CHECK constraint
 	// sees only the legacy values.
-	mp, err := ResolveMemberPolicy(policy, nil)
+	mp, err := ResolveMemberPolicy(policy)
 	if err != nil {
 		return err
 	}

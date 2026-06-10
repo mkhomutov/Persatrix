@@ -14,38 +14,39 @@ import (
 // — the ordering constraint every call site previously had to remember —
 // so `participant` resolves gated even though its canonical `always`
 // form, declared bare, would not.
+//
+// The constructor takes no explicit threshold: every boundary that goes
+// through it (the store's AddMember/SetMemberPolicy, the REST create
+// handler) carries only the disposition. The one source of operator
+// thresholds — the config loader — bypasses the constructor by design,
+// and its threshold semantics (`always`+threshold opt-in, chair
+// override, threshold-on-non-gating rejection) are pinned at that
+// boundary in config_salience_test.go / config_threshold_test.go.
 func TestResolveMemberPolicy_Table(t *testing.T) {
-	half := 0.5
 	cases := []struct {
 		name          string
 		declared      RespondPolicy
-		explicit      *float64
 		wantPolicy    RespondPolicy
 		wantGated     bool
 		wantThreshold *float64
 	}{
-		// Legacy triple: identity normalization, no bid by default.
-		{"when_mentioned", RespondWhenMentioned, nil, RespondWhenMentioned, false, nil},
-		{"always bare keeps replying unconditionally", RespondAlways, nil, RespondAlways, false, nil},
-		{"never", RespondNever, nil, RespondNever, false, nil},
-		// `always` + explicit threshold opts into the bid (v0.3.7
-		// back-compat: the only reason to put a salience bar on a member
-		// is to gate it).
-		{"always with explicit threshold bids", RespondAlways, &half, RespondAlways, true, &half},
+		// Legacy triple: identity normalization, no bid (a bare `always`
+		// keeps replying unconditionally — v0.3.7 back-compat).
+		{"when_mentioned", RespondWhenMentioned, RespondWhenMentioned, false, nil},
+		{"always bare keeps replying unconditionally", RespondAlways, RespondAlways, false, nil},
+		{"never", RespondNever, RespondNever, false, nil},
 		// Dispositions: collapse to the legacy triple; the open-floor
 		// pair opts into the bid off the *declared* value.
-		{"participant bids with unset threshold (bias-to-silence)", RespondParticipant, nil, RespondAlways, true, nil},
-		{"participant honours explicit threshold", RespondParticipant, &half, RespondAlways, true, &half},
-		{"addressed", RespondAddressed, nil, RespondWhenMentioned, false, nil},
-		{"observer", RespondObserver, nil, RespondNever, false, nil},
+		{"participant bids with unset threshold (bias-to-silence)", RespondParticipant, RespondAlways, true, nil},
+		{"addressed", RespondAddressed, RespondWhenMentioned, false, nil},
+		{"observer", RespondObserver, RespondNever, false, nil},
 		// `chair` is a participant whose unset threshold picks up the low
 		// facilitator default — its whole wire-visible identity.
-		{"chair defaults to the low threshold", RespondChair, nil, RespondAlways, true, ptrTo(DefaultChairThreshold)},
-		{"chair honours explicit threshold", RespondChair, &half, RespondAlways, true, &half},
+		{"chair defaults to the low threshold", RespondChair, RespondAlways, true, ptrTo(DefaultChairThreshold)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ResolveMemberPolicy(tc.declared, tc.explicit)
+			got, err := ResolveMemberPolicy(tc.declared)
 			if err != nil {
 				t.Fatalf("ResolveMemberPolicy(%q) returned unexpected error: %v", tc.declared, err)
 			}
@@ -74,7 +75,7 @@ func TestResolveMemberPolicy_Table(t *testing.T) {
 // error cannot smuggle a half-resolved triple to the CHECK constraint.
 func TestResolveMemberPolicy_RejectsUnknown(t *testing.T) {
 	for _, declared := range []RespondPolicy{"", "sometimes", "ALWAYS", "Participant"} {
-		got, err := ResolveMemberPolicy(declared, nil)
+		got, err := ResolveMemberPolicy(declared)
 		if !errors.Is(err, ErrInvalidRespondPolicy) {
 			t.Errorf("ResolveMemberPolicy(%q) error = %v, want ErrInvalidRespondPolicy", declared, err)
 		}

@@ -30,22 +30,30 @@ type addMemberRequest struct {
 	Respond string `json:"respond"`
 }
 
+// wireRespondPolicy applies the RFC 0011 §A default to a wire-supplied
+// `respond` string: empty means `when_mentioned`, matching the config
+// loader's bare-ID shorthand. The single defaulting rule for the REST
+// surface (create-channel and add-member translations); the store keeps
+// its own copy inside CreateChannelWithMembers for its non-REST caller,
+// the config reconcile path.
+func wireRespondPolicy(respond string) channels.RespondPolicy {
+	if respond == "" {
+		return channels.RespondWhenMentioned
+	}
+	return channels.RespondPolicy(respond)
+}
+
 // resolveMemberRequests translates the wire-shape member list into store
 // members, resolving each declared disposition into the persisted triple
-// here at the wire boundary ([channels.ResolveMemberPolicy]; the REST
-// shape carries no explicit threshold). An empty `respond` defaults to
-// `when_mentioned` (RFC 0011 §A, matching the config loader's shorthand).
-// An invalid value surfaces the same [channels.ErrInvalidRespondPolicy]
-// the store would have returned, just before the channel row is created
-// instead of mid-transaction.
+// here at the wire boundary ([channels.ResolveMemberPolicy]). An invalid
+// value surfaces the same [channels.ErrInvalidRespondPolicy] the store
+// would have returned — before the channel row is created instead of
+// mid-transaction, so a malformed body 400s ahead of any state conflict
+// (pinned by TestChannels_CreateChannel_InvalidRespondWinsOverConflict).
 func resolveMemberRequests(reqs []channelMemberRequest) ([]channels.Member, error) {
 	members := make([]channels.Member, 0, len(reqs))
 	for _, m := range reqs {
-		policy := channels.RespondWhenMentioned
-		if m.Respond != "" {
-			policy = channels.RespondPolicy(m.Respond)
-		}
-		mp, err := channels.ResolveMemberPolicy(policy, nil)
+		mp, err := channels.ResolveMemberPolicy(wireRespondPolicy(m.Respond))
 		if err != nil {
 			return nil, err
 		}

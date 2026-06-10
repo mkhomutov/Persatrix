@@ -416,11 +416,7 @@ func (s *Server) handleAddChannelMember(w http.ResponseWriter, r *http.Request) 
 		writeError(w, "BAD_REQUEST", "id is required", http.StatusBadRequest)
 		return
 	}
-	policy := channels.RespondWhenMentioned
-	if req.Respond != "" {
-		policy = channels.RespondPolicy(req.Respond)
-	}
-	if err := s.channelStore.AddMember(r.Context(), id, req.ID, policy); err != nil {
+	if err := s.channelStore.AddMember(r.Context(), id, req.ID, wireRespondPolicy(req.Respond)); err != nil {
 		s.writeChannelError(w, err)
 		return
 	}

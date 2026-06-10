@@ -68,6 +68,36 @@ func TestChannels_AddMember_RejectsUnknownRespondPolicy(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+// TestChannels_CreateChannel_InvalidRespondWinsOverConflict pins the PR
+// #598 review disclosure: member respond-policy validation now runs at
+// the handler (resolveMemberRequests), BEFORE the store transaction, so
+// a request that is both malformed (invalid `respond`) and conflicting
+// (channel already exists) returns 400 BAD_REQUEST — request validity
+// is judged before server state. Under the pre-#598 ordering the store
+// hit the unique violation first and the same request surfaced as 409
+// CONFLICT; that precedence was an accident of store-internal statement
+// order, not a contract. The same rule applies to the max_channels cap:
+// a malformed body 400s even when the cap would also have rejected it.
+func TestChannels_CreateChannel_InvalidRespondWinsOverConflict(t *testing.T) {
+	srv, _ := channelTestServer(t)
+	createBody, _ := json.Marshal(createChannelRequest{
+		Name:    "planning",
+		Members: []channelMemberRequest{{ID: "alice"}},
+	})
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", createBody).Code)
+
+	conflictAndInvalid, _ := json.Marshal(createChannelRequest{
+		Name:    "planning", // already exists → the store would 409
+		Members: []channelMemberRequest{{ID: "bob", Respond: "occasionally"}},
+	})
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", conflictAndInvalid)
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"malformed body must win over the state conflict (validate request before state)")
+	assert.Contains(t, rec.Body.String(), "invalid respond_policy",
+		"the winning error must be the respond-policy rejection, not the conflict")
+}
+
 // TestChannels_CreateChannel_AcceptsDispositionVocabulary pins the RFC
 // 0030 relevance-amendment back-compat contract on the REST create path:
 // the disposition vocabulary (`participant`/`addressed`/`observer`) the

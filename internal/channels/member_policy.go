@@ -29,8 +29,17 @@ type MemberPolicy struct {
 // loader ([MemberConfig.UnmarshalYAML]) keeps the non-validating pair
 // because it deliberately defers rejection to [Config.Validate], which
 // reports the channel/member index alongside the bad value.
-func ResolveMemberPolicy(declared RespondPolicy, explicit *float64) (MemberPolicy, error) {
-	salienceGated, threshold := ResolveSalienceSignal(declared, explicit)
+//
+// There is deliberately no explicit-threshold parameter: every boundary
+// that resolves through here carries only the disposition, and the one
+// source of operator thresholds (the config loader) bypasses the
+// constructor. Accepting a threshold without also enforcing the
+// combination rule [Config.Validate] applies (a threshold is only legal
+// on a member that can bid) would let an invalid pair persist silently —
+// if a wire shape ever grows a threshold field, add the parameter and
+// that rule together.
+func ResolveMemberPolicy(declared RespondPolicy) (MemberPolicy, error) {
+	salienceGated, threshold := ResolveSalienceSignal(declared, nil)
 	canonical, err := canonicalRespondPolicy(declared)
 	if err != nil {
 		return MemberPolicy{}, err
