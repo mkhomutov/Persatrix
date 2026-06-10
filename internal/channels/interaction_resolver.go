@@ -172,6 +172,20 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 // history whose deferred discard must still fire). That makes the table's
 // bound real: entries exist only for channels with at least one persisted
 // publish, never for arbitrary caller-supplied channel ids.
+//
+// Orphaned commit: a persisted id that is no longer the entry's open id was
+// stranded by an interleaving — a sibling rejected publish deleted the shared
+// tentative mint and a third publish reminted before this settle ran. The
+// orphan's row is already channel history, so its committed governance state
+// (the reply-budget reservation, a possible vote or tombstone) must still
+// reach a discard seam: park it as the pending retiree when the slot is free,
+// giving it the same next-rotation/next-close discharge as any retiree. An
+// OCCUPIED slot is never clobbered — the occupant's one-generation deferral
+// protects a real commit racing a rotation/close (IP4), and displacing it
+// early would reopen that race. The skip's residue (a settle whose persist
+// spanned an entire rotation cycle leaves one untracked counter map) is
+// accepted: router-minted, requires a publish in flight for a full idle
+// window, and not reachable at attacker-chosen rate.
 func (r *ChannelRouter) settleInteraction(channelID, resolved string, now time.Time, persisted bool) {
 	r.interactionMu.Lock()
 	defer r.interactionMu.Unlock()
@@ -188,6 +202,12 @@ func (r *ChannelRouter) settleInteraction(channelID, resolved string, now time.T
 	}
 	if entry.id == resolved {
 		entry.idCommitted = true
+	} else if entry.retired == "" {
+		// `resolved` was orphaned mid-flight (see doc): park it so the next
+		// rotation/close discharges its governance state. A non-empty slot
+		// already holds either `resolved` itself (the racing-commit case —
+		// nothing to do) or an earlier retiree whose deferral must win.
+		entry.retired = resolved
 	}
 	if now.After(entry.lastActivity) {
 		entry.lastActivity = now
