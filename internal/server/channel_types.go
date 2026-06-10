@@ -1,6 +1,10 @@
 package server
 
-import "time"
+import (
+	"time"
+
+	"github.com/mkhomutov/persatrix/internal/channels"
+)
 
 // createChannelRequest is the JSON body for POST /api/v1/channels (RFC 0011 §C).
 //
@@ -24,6 +28,49 @@ type channelMemberRequest struct {
 type addMemberRequest struct {
 	ID      string `json:"id"`
 	Respond string `json:"respond"`
+}
+
+// wireRespondPolicy applies the RFC 0011 §A default to a wire-supplied
+// `respond` string: empty means `when_mentioned`, matching the config
+// loader's bare-ID shorthand. The single defaulting rule for the REST
+// surface (create-channel and add-member translations); the store keeps
+// its own copy inside CreateChannelWithMembers for its non-REST caller,
+// the config reconcile path.
+func wireRespondPolicy(respond string) channels.RespondPolicy {
+	if respond == "" {
+		return channels.RespondWhenMentioned
+	}
+	return channels.RespondPolicy(respond)
+}
+
+// resolveMemberRequests translates the wire-shape member list into store
+// members, judging each member's full request validity — identity
+// ([channels.ValidateParticipantID]) and declared disposition
+// ([channels.ResolveMemberPolicy]) — here at the wire boundary, in the
+// same id-then-policy order the store's AddMember uses. An invalid value
+// surfaces the same sentinel the store would have returned
+// ([channels.ErrInvalidParticipantID] / [channels.ErrInvalidRespondPolicy])
+// — before the channel row is created instead of mid-transaction, so a
+// malformed body 400s ahead of any state conflict (pinned by the
+// TestChannels_CreateChannel_Invalid*WinsOverConflict pair).
+func resolveMemberRequests(reqs []channelMemberRequest) ([]channels.Member, error) {
+	members := make([]channels.Member, 0, len(reqs))
+	for _, m := range reqs {
+		if err := channels.ValidateParticipantID(m.ID); err != nil {
+			return nil, err
+		}
+		mp, err := channels.ResolveMemberPolicy(wireRespondPolicy(m.Respond))
+		if err != nil {
+			return nil, err
+		}
+		members = append(members, channels.Member{
+			ParticipantID: m.ID,
+			RespondPolicy: mp.Policy,
+			SalienceGated: mp.SalienceGated,
+			Threshold:     mp.Threshold,
+		})
+	}
+	return members, nil
 }
 
 // publishMessageRequest is the JSON body for POST /api/v1/channels/{id}/messages.

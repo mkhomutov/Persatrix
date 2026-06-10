@@ -130,7 +130,7 @@ func TestSQLiteStore_CreateChannelWithMembers_HappyPath(t *testing.T) {
 // (rather than ErrChannelExists for an orphan row).
 //
 // We trigger the failure via an invalid participant id (`""` rejected by
-// validateParticipantID) in the second slot. After the call:
+// ValidateParticipantID) in the second slot. After the call:
 //
 //   - GetChannel must return ErrChannelNotFound (channel was rolled back)
 //   - GetMembers must return empty (no orphan memberships)

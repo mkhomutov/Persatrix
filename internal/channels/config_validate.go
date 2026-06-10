@@ -14,7 +14,7 @@ import (
 
 // Validate enforces the cross-field invariants the JSON Schema cannot
 // express alone:
-//   - participant ids satisfy `validateParticipantID` (no `:`, no whitespace)
+//   - participant ids satisfy `ValidateParticipantID` (no `:`, no whitespace)
 //   - declared `members` entries are unique within a channel
 //   - declared channel names are unique across the file
 //   - the declared channel count does not exceed `MaxChannels`
@@ -126,7 +126,7 @@ func (c *Config) Validate() error {
 		}
 		seenMember := make(map[string]bool, len(ch.Members))
 		for j, m := range ch.Members {
-			if err := validateParticipantID(m.ID); err != nil {
+			if err := ValidateParticipantID(m.ID); err != nil {
 				return fmt.Errorf("channels[%d=%s].members[%d]: %w", i, ch.Name, j, err)
 			}
 			if seenMember[m.ID] {

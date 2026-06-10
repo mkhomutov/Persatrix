@@ -89,7 +89,7 @@ const (
 // presence in a message's `Mentions` list marks the message as addressed
 // to the whole room, disabling the directed-elsewhere suppression so every
 // `always`/`participant` member stays a candidate responder. The value
-// carries an `@`, which [validateParticipantID] forbids, so it can never
+// carries an `@`, which [ValidateParticipantID] forbids, so it can never
 // collide with a real participant id — a safe in-band sentinel reusing the
 // existing `mentions` plumbing with no new wire field. Mirrors the Python
 // gate's `MENTION_EVERYONE` (agents/response_gate.py); the two must stay in
@@ -172,10 +172,11 @@ func canonicalRespondPolicy(p RespondPolicy) (RespondPolicy, error) {
 
 // ResolveSalienceSignal derives the persisted RFC 0030 Tier B per-member signals
 // from a member's *declared* disposition (before [RespondPolicy.Normalize]
-// collapses it to the legacy triple). It is the single derivation choke point
-// the disposition-aware write boundaries share — the config loader
-// ([MemberConfig.UnmarshalYAML]), the REST single-add path ([AddMember]), and
-// the REST policy-update path ([SetMemberPolicy]) — so the participant→bid and
+// collapses it to the legacy triple). It is the derivation half of
+// [ResolveMemberPolicy], which the validating write boundaries (the store's
+// AddMember/SetMemberPolicy, the REST create handler) go through; the config
+// loader ([MemberConfig.UnmarshalYAML]) calls it directly because it defers
+// validation to [Config.Validate]. Either way the participant→bid and
 // chair→low-threshold mappings live in one place rather than being re-derived
 // per call site.
 //
@@ -407,7 +408,7 @@ var (
 // ids across all three RFC 0011 validation surfaces:
 //
 //   - schemas/channel.schema.json (config-time validation via `make validate`)
-//   - LoadConfig→Validate (loader-time, calls validateParticipantID below)
+//   - LoadConfig→Validate (loader-time, calls ValidateParticipantID below)
 //   - the runtime store guards (PublishMessage, CanonicalDMID, AddMember)
 //
 // Keeping the schema, loader, and runtime in lock-step closes the
@@ -430,10 +431,15 @@ var participantIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 // shape used for agent ids in `schemas/agent.schema.json`.
 var channelNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
 
-// validateParticipantID enforces the runtime half of the §A constraint set.
+// ValidateParticipantID enforces the runtime half of the §A constraint set.
 // The other half lives at config-load and registration boundaries; both now
 // share `participantIDPattern` so a value that passes one passes all three.
-func validateParticipantID(id string) error {
+// Exported for the REST wire boundary (the create handler's member
+// translation, resolveMemberRequests), which judges member identity
+// alongside the respond policy before the store transaction opens — so a
+// malformed body 400s ahead of any state conflict. The store write paths
+// keep their own calls for the non-REST callers.
+func ValidateParticipantID(id string) error {
 	if id == "" {
 		return fmt.Errorf("%w: empty", ErrInvalidParticipantID)
 	}
@@ -452,10 +458,10 @@ func validateParticipantID(id string) error {
 // build DM ids by hand — the store's `GetOrCreateDM` is the single source
 // of truth and routes through here.
 func CanonicalDMID(a, b string) (string, error) {
-	if err := validateParticipantID(a); err != nil {
+	if err := ValidateParticipantID(a); err != nil {
 		return "", err
 	}
-	if err := validateParticipantID(b); err != nil {
+	if err := ValidateParticipantID(b); err != nil {
 		return "", err
 	}
 	if a == b {
