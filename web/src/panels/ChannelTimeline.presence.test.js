@@ -281,4 +281,32 @@ describe("Channel timeline — live presence", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(screen.queryByText(/ember owl is thinking/i)).toBeNull();
   });
+
+  it("issues the /activity read concurrently with the head fetch on a poll tick", async () => {
+    // The two reads are independent; serializing them (activity only after the
+    // head response lands) stretches every tick by a full round-trip and
+    // drifts the 3s cadence. Only the INSTALL order matters — set() before
+    // pruneFrom, pinned by the reply-clear case above — not the order the
+    // requests are issued. Pin: the activity read is already in flight while
+    // the head fetch is still pending.
+    vi.useFakeTimers();
+    render(ChannelTimeline, { props: { userId: "local" } });
+    await vi.waitFor(() =>
+      expect(screen.getByRole("option", { name: "General" })).toBeTruthy(),
+    );
+
+    let resolveHead;
+    getChannelHistory.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveHead = resolve;
+        }),
+    );
+    const activityReadsBefore = getChannelActivity.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(3000); // the tick fires; the head fetch hangs
+    expect(getChannelActivity.mock.calls.length).toBe(activityReadsBefore + 1);
+
+    resolveHead(historyOf());
+    await vi.advanceTimersByTimeAsync(0);
+  });
 });

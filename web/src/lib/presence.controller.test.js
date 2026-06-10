@@ -49,6 +49,40 @@ describe("createPresence — idle flash semantics", () => {
     expect(p.thinking).toEqual([]);
     expect(p.idle).toBe(false);
   });
+
+  it("defers a hand-back flash masked by a still-in-grace wrong guess", () => {
+    // The server confirmed agent-a's turn AND the console guessed at a persona
+    // the orchestrator never dispatched. When a's reply empties the server set
+    // the display stays lit by the guess — flashing right then would
+    // contradict the visible "thinking…" line (the bar renders one state at a
+    // time). But the hand-back is real: it must land when the masking guess
+    // fades, not be swallowed because a wrong guess happened to overlap it.
+    vi.useFakeTimers();
+    const p = createPresence({ now: () => Date.now() });
+    p.set(["agent-a"]);
+    p.add(["never-dispatched"], { graceMs: GRACE_MS });
+    p.set([]); // a replied; the wrong guess still masks the display
+    expect(p.thinking).toEqual(["never-dispatched"]);
+    expect(p.idle).toBe(false);
+    vi.advanceTimersByTime(GRACE_MS);
+    expect(p.thinking).toEqual([]);
+    expect(p.idle).toBe(true); // the deferred hand-back flashes with the empty bar
+  });
+
+  it("drops a deferred hand-back once the operator fires a new turn", () => {
+    // Publishing again IS the operator taking their turn — the deferred flash
+    // is moot (the same reason add() cancels a live idle flash), and must not
+    // resurface when the new round eventually fades unanswered.
+    vi.useFakeTimers();
+    const p = createPresence({ now: () => Date.now() });
+    p.set(["agent-a"]);
+    p.add(["never-dispatched"], { graceMs: GRACE_MS });
+    p.set([]); // hand-back deferred behind the masking guess
+    p.add(["also-never-dispatched"], { graceMs: GRACE_MS });
+    vi.advanceTimersByTime(GRACE_MS);
+    expect(p.thinking).toEqual([]);
+    expect(p.idle).toBe(false); // both guesses faded silently
+  });
 });
 
 describe("createPresence — optimistic grace bound", () => {

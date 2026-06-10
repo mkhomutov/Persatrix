@@ -41,6 +41,7 @@ export function createPresence({
   let thinking = $state([]); // the fused, displayed set
   let slow = $state(false); // soften the copy once a turn drags on
   let idle = $state(false); // the brief "Waiting for you" flash
+  let pendingFlash = false; // a real hand-back masked by an in-grace guess (see recompute)
   let serverIds = []; // last authoritative /activity set (plain)
   const grace = new Map(); // optimistic id -> grace-expiry ms (Infinity = sticky)
   let slowTimer = null;
@@ -96,6 +97,16 @@ export function createPresence({
     thinking = ids;
 
     if (ids.length > 0) {
+      // A real hand-back can be MASKED: every confirmed turn handed back
+      // (flashOnEmpty, and the server set is now empty) while a still-in-grace
+      // optimistic guess keeps the bar lit. Flashing now would contradict the
+      // visible "thinking…" line, and dropping it would swallow a reply that
+      // genuinely landed — so defer it to the recompute that finally empties
+      // the display. add() cancels it (the operator taking their turn moots
+      // the hand-back), as do hardClear/reset (degradation/switch).
+      if (flashOnEmpty && serverIds.length === 0) {
+        pendingFlash = true;
+      }
       // Re-arm the dead-poll backstop every recompute so a server-confirmed
       // turn persists. The slow countdown restarts whenever the set GAINS an
       // id: "taking a while…" describes the CURRENT turn, so a new turn
@@ -116,9 +127,10 @@ export function createPresence({
     } else {
       clearActiveTimers();
       slow = false;
-      if (wasActive && flashOnEmpty) {
+      if (wasActive && (flashOnEmpty || pendingFlash)) {
         flashIdle();
       }
+      pendingFlash = false;
     }
   }
 
@@ -131,6 +143,7 @@ export function createPresence({
     clearActiveTimers();
     thinking = [];
     slow = false;
+    pendingFlash = false;
   }
 
   return {
@@ -150,6 +163,8 @@ export function createPresence({
     // server set was empty throughout means a wrong optimistic guess fading —
     // no reply ever landed, so flashing would announce a hand-back that never
     // happened. Silent, like hardClear: degradation, not a turn returning.
+    // (A real hand-back that an in-grace guess masks is deferred, not lost —
+    // see pendingFlash in recompute.)
     set(ids) {
       const hadServer = serverIds.length > 0;
       serverIds = (ids ?? []).filter(Boolean);
@@ -167,6 +182,7 @@ export function createPresence({
       }
       if (!any) return;
       idle = false;
+      pendingFlash = false; // a fresh turn moots a masked hand-back, like the live flash
       clearTimeout(idleTimer);
       recompute();
     },
@@ -212,6 +228,7 @@ export function createPresence({
       thinking = [];
       slow = false;
       idle = false;
+      pendingFlash = false;
     },
 
     // dispose tears the timers down on unmount so a backgrounded tab can't fire

@@ -124,6 +124,14 @@
       return;
     }
     polling = true;
+    // Issue the activity read alongside the head fetch — the two are
+    // independent, and serializing them would stretch every tick by a full
+    // round-trip. Only the INSTALL order matters: set() lands before pruneFrom
+    // (awaited below), so the prune can still trim the just-installed server
+    // set for an agent whose reply this tick surfaced. pollActivity never
+    // rejects (self-guarded), so a head-fetch error can't leak an unhandled
+    // rejection from the un-awaited branch.
+    const activityRead = pollActivity(channel, token);
     try {
       const { messages: head } = await getChannelHistory(channel, {
         limit: HEAD_LIMIT,
@@ -137,9 +145,9 @@
         messages = [...fresh, ...messages];
       }
       // Reconcile the authoritative thinking set, THEN prune locally-seen
-      // replies — pruneFrom trims the server set for an agent whose reply this
-      // tick surfaced, bridging the gap before the next /activity read drops it.
-      await pollActivity(channel, token);
+      // replies — pruneFrom bridges the gap before the next /activity read
+      // drops a freshly-replied agent server-side.
+      await activityRead;
       if (fresh.length > 0) {
         presence.pruneFrom(fresh);
       }
