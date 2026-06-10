@@ -1,6 +1,6 @@
 <script>
-  // The live status line above the composer (RFC 0048 console, Tier 0). Purely
-  // presentational: the owner (ChannelTimeline) tracks who is working and when
+  // The live status line above the composer (RFC 0048 console). Purely
+  // presentational: the owner (ConversationFeed) tracks who is working and when
   // the turn flips back to the operator, and hands this the resolved state. Two
   // mutually-exclusive states, in the same slot for both DMs and group channels:
   //

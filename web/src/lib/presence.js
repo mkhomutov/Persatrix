@@ -8,6 +8,7 @@
 // lib/format.js + lib/agents.js + lib/interactions.js pattern). The thresholds
 // below are exported constants; the controller (lib/presence.svelte.js) drives
 // the transitions off setTimeout, covered by the timer specs in
+// presence.controller.test.js and the wiring specs in
 // ChannelTimeline.presence.test.js.
 //
 // The indicator fuses two sources (Tier 1): the orchestrator's authoritative

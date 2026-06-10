@@ -165,12 +165,27 @@
   // back the whole poll off, so it swallows its own error (and the
   // unknown-in-test case where the mock omits getChannelActivity) — the
   // optimistic overlay holds and the next tick recovers.
+  //
+  // Two guards beyond the channel-switch token:
+  //   • newest-read-wins — the on-open read (loadHistory) is fire-and-forget
+  //     and races the poll ticks under the same token; activitySeq drops any
+  //     resolution that is no longer the latest issued, so a slow straggler
+  //     cannot overwrite a fresher set.
+  //   • the operator's own id is filtered out — the server marks every
+  //     candidate responder (orderResponders), and a human channel member is a
+  //     candidate like any other (e.g. an agent @-mentions the console user),
+  //     so the raw set can contain userId. Mirrors the optimistic path's
+  //     `id !== userId` filter in ChannelTimeline; the bar must never tell the
+  //     operator they are "thinking". Other ids pass through unfiltered —
+  //     shortAgentName's raw-id fallback owns the unknown-agent case.
+  let activitySeq = 0;
   async function pollActivity(channel, token) {
     if (isDM) return;
+    const seq = ++activitySeq;
     try {
       const { thinking } = await getChannelActivity(channel);
-      if (token === loadToken) {
-        presence.set(thinking ?? []);
+      if (token === loadToken && seq === activitySeq) {
+        presence.set((thinking ?? []).filter((id) => id !== userId));
       }
     } catch {
       // keep the last-known / optimistic set; the dead-poll backstop covers a
@@ -328,9 +343,9 @@
   />
 {/if}
 
-<!-- Live status, directly above the composer (presence Tier 0): "… is thinking",
-     softening to "taking a while", then a brief "Waiting for you" when the turn
-     returns. A DM round-trip can be cancelled from here. -->
+<!-- Live status, directly above the composer (RFC 0048 presence): "… is
+     thinking", softening to "taking a while", then a brief "Waiting for you"
+     when the turn returns. A DM round-trip can be cancelled from here. -->
 <PresenceBar
   thinking={presence.thinking}
   {agentsById}

@@ -117,9 +117,9 @@ describe("Channel timeline — live presence", () => {
   it("drops the optimistic indicator when the operator switches conversations", async () => {
     // The optimistic signal belongs to the channel that triggered it. Switching
     // to another conversation must NOT carry a prior channel's "thinking" line
-    // across — there is no turn in flight here, and pruneThinking (which only
-    // clears on the addressed persona posting) would never fire in the new
-    // channel, leaving it stranded until the 60s ceiling.
+    // across — there is no turn in flight here, and neither the new channel's
+    // /activity poll nor a reply would ever clear it, leaving it stranded
+    // until the grace fade.
     listChannels.mockResolvedValue({
       channels: [
         channelWithMembers("local", "ember-owl"),
@@ -166,7 +166,7 @@ describe("Channel timeline — live presence", () => {
     );
 
     // The next poll tick surfaces Ember Owl's reply — the optimistic indicator
-    // clears (pruneThinking), and the brief "Waiting for you" hint flashes.
+    // clears (pruneFrom), and the brief "Waiting for you" hint flashes.
     getChannelHistory.mockResolvedValue(
       historyOf({
         id: "r1",
@@ -229,6 +229,56 @@ describe("Channel timeline — live presence", () => {
 
     getChannelActivity.mockResolvedValue({ thinking: [] });
     await vi.advanceTimersByTimeAsync(3000);
+    expect(screen.queryByText(/ember owl is thinking/i)).toBeNull();
+  });
+
+  it("never shows the operator themselves from the /activity set", async () => {
+    // The server marks every candidate responder (orderResponders), and a
+    // human channel member is a candidate like any other — an agent
+    // @-mentioning the console user puts the USER's id in /activity. The
+    // optimistic path already filters `id !== userId`; the authoritative path
+    // must too, or the bar tells the operator "local is thinking…" about
+    // themselves (and inflates the "N agents" tally).
+    vi.useFakeTimers();
+    getChannelActivity.mockResolvedValue({ thinking: ["ember-owl", "local"] });
+    render(ChannelTimeline, { props: { userId: "local" } });
+    await vi.waitFor(() =>
+      expect(screen.getByRole("option", { name: "General" })).toBeTruthy(),
+    );
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(screen.getByText(/ember owl is thinking/i)).toBeTruthy();
+    expect(screen.queryByText(/local is/i)).toBeNull();
+    expect(screen.queryByText(/2 agents/i)).toBeNull();
+  });
+
+  it("drops a stale /activity read that resolves after a newer one", async () => {
+    // The on-open read (loadHistory) is fire-and-forget and races the first
+    // poll tick's read under the same loadToken. A slow early response must
+    // not overwrite the fresher set a later read already installed — here the
+    // newest truth is "idle", and the late straggler claims a turn in flight.
+    vi.useFakeTimers();
+    let resolveStale;
+    getChannelActivity
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveStale = resolve;
+          }),
+      )
+      .mockResolvedValue({ thinking: [] });
+    render(ChannelTimeline, { props: { userId: "local" } });
+    await vi.waitFor(() =>
+      expect(screen.getByRole("option", { name: "General" })).toBeTruthy(),
+    );
+
+    // First poll tick: the newer read resolves empty (idle).
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(screen.queryByText(/is thinking/i)).toBeNull();
+
+    // The hung on-open read finally resolves with its out-of-date set.
+    resolveStale({ thinking: ["ember-owl"] });
+    await vi.advanceTimersByTimeAsync(0);
     expect(screen.queryByText(/ember owl is thinking/i)).toBeNull();
   });
 });

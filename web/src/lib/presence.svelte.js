@@ -46,12 +46,15 @@ export function createPresence({
   let slowTimer = null;
   let idleTimer = null;
   let staleTimer = null;
+  let graceTimer = null;
 
   function clearActiveTimers() {
     clearTimeout(slowTimer);
     clearTimeout(staleTimer);
+    clearTimeout(graceTimer);
     slowTimer = null;
     staleTimer = null;
+    graceTimer = null;
   }
 
   function flashIdle() {
@@ -63,24 +66,48 @@ export function createPresence({
   }
 
   // recompute folds the two sources into `thinking`, prunes lapsed optimistic
-  // entries, and drives the edge-triggered timers + idle flash off the
-  // empty/non-empty transition. flashOnEmpty distinguishes a real hand-back (a
-  // reply emptied the set) from a mere add.
+  // entries, and drives the timers + idle flash. flashOnEmpty distinguishes a
+  // real hand-back (a reply emptied the set, or the server cleared a turn it
+  // had confirmed) from a mere add — and from a wrong optimistic guess fading,
+  // which is degradation and stays silent (see set()).
   function recompute({ flashOnEmpty = false } = {}) {
     const entries = Array.from(grace, ([id, expiresAt]) => ({ id, expiresAt }));
     const { ids, expired } = mergeThinking(serverIds, entries, now());
     expired.forEach((id) => grace.delete(id));
 
-    const wasActive = thinking.length > 0;
+    // Self-arm the next grace fade. The fade must be timer-driven: the
+    // /activity poll is self-guarded, so a persistent failure means set() never
+    // runs, and without this timer a never-confirmed guess would outlive its
+    // graceMs bound — staying lit (and softening at slowAfterMs) until the
+    // stale backstop. Sticky (Infinity) entries never arm it, so a quiet DM
+    // holds no recurring timer.
+    clearTimeout(graceTimer);
+    graceTimer = null;
+    let nextFade = Infinity;
+    for (const expiresAt of grace.values()) {
+      if (expiresAt < nextFade) nextFade = expiresAt;
+    }
+    if (nextFade !== Infinity) {
+      graceTimer = setTimeout(() => recompute(), Math.max(0, nextFade - now()));
+    }
+
+    const prev = new Set(thinking);
+    const wasActive = prev.size > 0;
     thinking = ids;
 
     if (ids.length > 0) {
-      // Re-arm the dead-poll backstop every tick so a server-confirmed turn
-      // persists; only START the slow countdown on the leading edge so a long
-      // turn softens once, not never.
+      // Re-arm the dead-poll backstop every recompute so a server-confirmed
+      // turn persists. The slow countdown restarts whenever the set GAINS an
+      // id: "taking a while…" describes the CURRENT turn, so a new turn
+      // joining (an optimistic add, or the server rotating to the next floor
+      // speaker without the set ever emptying) resets the softening rather
+      // than inheriting the previous turn's elapsed countdown. A mere
+      // reconfirmation of the same set (every poll tick) must NOT re-arm it,
+      // or a long turn would never soften.
       clearTimeout(staleTimer);
       staleTimer = setTimeout(hardClear, staleAfterMs);
-      if (!wasActive) {
+      if (ids.some((id) => !prev.has(id))) {
+        slow = false;
         clearTimeout(slowTimer);
         slowTimer = setTimeout(() => {
           slow = true;
@@ -117,11 +144,16 @@ export function createPresence({
       return idle;
     },
 
-    // set installs the authoritative server signal (one /activity read). A group
-    // turn handed back to the operator empties this and flashes "Waiting for you".
+    // set installs the authoritative server signal (one /activity read). The
+    // "Waiting for you" hand-back flash is gated on the server having actually
+    // confirmed a turn before this read: a display that empties while the
+    // server set was empty throughout means a wrong optimistic guess fading —
+    // no reply ever landed, so flashing would announce a hand-back that never
+    // happened. Silent, like hardClear: degradation, not a turn returning.
     set(ids) {
+      const hadServer = serverIds.length > 0;
       serverIds = (ids ?? []).filter(Boolean);
-      recompute({ flashOnEmpty: true });
+      recompute({ flashOnEmpty: hadServer });
     },
 
     // add lights the console's own turn instantly. graceMs bounds an unconfirmed

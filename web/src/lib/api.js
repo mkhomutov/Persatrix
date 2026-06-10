@@ -302,7 +302,10 @@ export async function getChannelHistory(channelID, { limit, before } = {}) {
 // is the authoritative signal behind the "… is thinking" indicator: unlike the
 // optimistic client overlay it is accurate for every trigger and survives a
 // reload. `thinking` is always an array (the server marshals an idle channel as
-// []). Encode the id so DM colons stay pinned to the {id}/activity route.
+// []). The id is encoded like every other channel route (canonical ids carry a
+// type-prefix colon, e.g. "group:planning"). The console only calls this for
+// GROUP channels — a DM's presence is fully owned by its synchronous send
+// lifecycle (see lib/presence.svelte.js).
 export async function getChannelActivity(channelID) {
   return getJSON(
     `/api/v1/channels/${encodeURIComponent(channelID)}/activity`,
