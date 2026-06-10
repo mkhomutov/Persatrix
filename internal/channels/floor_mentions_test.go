@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // ---------------------------------------------------------------------------
@@ -88,45 +89,135 @@ func TestResolveFloorMentions_NormalizesDispositions(t *testing.T) {
 		"observer normalizes to never (incapable); participant normalizes to always (capable)")
 }
 
+// TestResolveFloorMentions_DedupesMentions pins that a duplicated mention id
+// appears once in the resolved subset. The publish path caps `mentions` at 10
+// but never dedupes, and `floor_mentions` is a contract-bearing wire field —
+// receivers reason about it as a set (membership/emptiness), so duplicates
+// would be noise at best and a drift hazard for any future consumer that
+// counts entries.
+func TestResolveFloorMentions_DedupesMentions(t *testing.T) {
+	members := []Member{
+		member("iron-fox", RespondAlways),
+	}
+
+	got := resolveFloorMentions(members, []string{"iron-fox", "iron-fox"}, "user")
+
+	assert.Equal(t, []string{"iron-fox"}, got,
+		"a duplicated mention resolves to one subset entry")
+}
+
 // ---------------------------------------------------------------------------
 // orderResponders — the directedness basis change
 // ---------------------------------------------------------------------------
 
-// TestOrderResponders_MentionOfFloorIncapableIsOpenFloor — the trigger defect:
-// a persona reply that politely @-mentions the human ("@alex, here's our
-// recommendation…") must not close the floor. Pre-amendment, the raw
-// `Mentions` non-empty check marked the message directed and dropped every
-// unnamed `always` member to the ingestion-only set; with the floor-capable
-// basis the message is open floor and both participants stay candidates.
-func TestOrderResponders_MentionOfFloorIncapableIsOpenFloor(t *testing.T) {
-	members := []Member{
-		member("alex", RespondNever), // the human
-		member("ember-owl", RespondAlways),
-		member("iron-fox", RespondAlways),
+// TestOrderResponders_RawMentionBasisUntilGateFlip pins the deliberate PR-1/2
+// scope cut: the candidate split STAYS on the raw-mentions directedness basis
+// until the Python gate consumes `floor_mentions` (PR 2/2), at which point
+// both sides flip together. Flipping the orchestrator first would break the
+// candidate-set/gate parity this mirror exists for — a message mentioning
+// only a floor-incapable party (the human, a non-member, the sender itself)
+// would queue every `always` member into the serialized floor round while the
+// live gate still suppresses each of them as directed_elsewhere, burning the
+// full per-turn timeout per member (≈45s × N on the publish path) and
+// stranding "thinking" presence lines. These three rows therefore pin the
+// *pre-amendment* behaviour on purpose; PR 2/2 inverts them to the §E
+// open-floor expectations in the same change that flips the gate.
+func TestOrderResponders_RawMentionBasisUntilGateFlip(t *testing.T) {
+	cases := []struct {
+		name     string
+		members  []Member
+		msg      ChannelMessage
+		wantResp []string
+		wantNon  []string
+	}{
+		{
+			// The trigger defect ("@alex, here's our recommendation…"):
+			// still directed in PR 1/2, matching the live gate.
+			name: "human-only mention still directed",
+			members: []Member{
+				member("alex", RespondNever), // the human
+				member("ember-owl", RespondAlways),
+				member("iron-fox", RespondAlways),
+			},
+			msg:      ChannelMessage{SenderID: "nova-sparrow", Mentions: []string{"alex"}},
+			wantResp: []string{},
+			wantNon:  []string{"ember-owl", "iron-fox"},
+		},
+		{
+			name: "non-member mention still directed",
+			members: []Member{
+				member("ember-owl", RespondAlways),
+				member("iron-fox", RespondAlways),
+			},
+			msg:      ChannelMessage{SenderID: "user", Mentions: []string{"stranger"}},
+			wantResp: []string{},
+			wantNon:  []string{"ember-owl", "iron-fox"},
+		},
+		{
+			name: "sole self-mention still directed",
+			members: []Member{
+				member("ember-owl", RespondAlways),
+				member("iron-fox", RespondAlways),
+			},
+			msg:      ChannelMessage{SenderID: "ember-owl", Mentions: []string{"ember-owl"}},
+			wantResp: []string{},
+			wantNon:  []string{"iron-fox"},
+		},
 	}
-	msg := ChannelMessage{SenderID: "nova-sparrow", Mentions: []string{"alex"}}
-
-	responders, nonResponders := orderResponders(members, msg, "")
-
-	assert.Equal(t, []string{"ember-owl", "iron-fox"}, ids(responders),
-		"a mention of the floor-incapable human leaves the floor open to every participant")
-	assert.Empty(t, nonResponders)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			responders, nonResponders := orderResponders(tc.members, tc.msg, "")
+			assert.Equal(t, tc.wantResp, ids(responders))
+			assert.Equal(t, tc.wantNon, ids(nonResponders))
+		})
+	}
 }
 
-// TestOrderResponders_MentionOfNonMemberIsOpenFloor — a mention that resolves
-// to no membership row (a typo, an external name) is a conversational anchor,
-// not a floor allocation.
-func TestOrderResponders_MentionOfNonMemberIsOpenFloor(t *testing.T) {
+// TestOrderResponders_NormalizesStoredPolicies pins read-seam normalization:
+// the candidate split classifies a member by its *normalized* policy, exactly
+// as the Python gate's `_DISPOSITION_ALIASES` defence-in-depth does for the
+// same row arriving on the wire. Store rows are canonical by construction
+// (the membership CHECK constraint admits only the legacy triple), so this is
+// unreachable through the store today — but a non-canonical spelling that
+// ever does reach a [Member] must classify identically here, in
+// [resolveFloorMentions] (whose Normalize is the wire-basis defence), and in
+// the gate, or the same row directs the floor on one basis and is refused
+// candidacy on another — the guaranteed-silence defect class.
+func TestOrderResponders_NormalizesStoredPolicies(t *testing.T) {
 	members := []Member{
-		member("ember-owl", RespondAlways),
-		member("iron-fox", RespondAlways),
+		member("watcher", RespondObserver),   // → never: off both sets
+		member("helper", RespondParticipant), // → always: candidate
 	}
-	msg := ChannelMessage{SenderID: "user", Mentions: []string{"stranger"}}
+	msg := ChannelMessage{SenderID: "user"}
 
 	responders, nonResponders := orderResponders(members, msg, "")
 
-	assert.Equal(t, []string{"ember-owl", "iron-fox"}, ids(responders))
-	assert.Empty(t, nonResponders)
+	assert.Equal(t, []string{"helper"}, ids(responders),
+		"a participant-spelled member normalizes to always and stays a candidate")
+	assert.Empty(t, nonResponders,
+		"an observer-spelled member normalizes to never: no dispatch, off both sets")
+}
+
+// TestDispatchConcurrent_NormalizesNeverCheck pins the same read-seam
+// normalization on the concurrent path's `never` short-circuit: an
+// observer-spelled member is a `never` member and must not receive a
+// dispatch, exactly as a canonically-spelled one would not.
+func TestDispatchConcurrent_NormalizesNeverCheck(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &envelopeRecorder{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+
+	members := []Member{
+		member("watcher", RespondObserver), // → never: no dispatch
+		member("iron-fox", RespondAlways),
+	}
+	msg := ChannelMessage{ID: uuid.NewString(), ChannelID: "group:planning", SenderID: "user"}
+
+	router.dispatchConcurrent(context.Background(), msg, ChannelTypeGroup, "", members, len(members), nil)
+
+	calls := disp.snapshot()
+	require.Len(t, calls, 1, "only the floor-capable member is dispatched")
+	assert.Equal(t, "iron-fox", calls[0].Recipient.ParticipantID)
 }
 
 // TestOrderResponders_MixedMentionStaysDirected — naming a floor-capable
@@ -148,26 +239,6 @@ func TestOrderResponders_MixedMentionStaysDirected(t *testing.T) {
 		"the floor-capable addressee keeps the message directed")
 	assert.Equal(t, []string{"iron-fox"}, ids(nonResponders),
 		"the unnamed participant stays suppressed — pile-on protection intact")
-}
-
-// TestOrderResponders_SelfMentionAloneIsOpenFloor — §E matrix: a message
-// whose only mention is its own sender is open floor. The sender never
-// replies to itself (it is filtered from both sets), so without the §C
-// sender exclusion the self-mention would mark the message directed and
-// suppress every other participant for an addressee that cannot take the
-// turn.
-func TestOrderResponders_SelfMentionAloneIsOpenFloor(t *testing.T) {
-	members := []Member{
-		member("ember-owl", RespondAlways),
-		member("iron-fox", RespondAlways),
-	}
-	msg := ChannelMessage{SenderID: "ember-owl", Mentions: []string{"ember-owl"}}
-
-	responders, nonResponders := orderResponders(members, msg, "")
-
-	assert.Equal(t, []string{"iron-fox"}, ids(responders),
-		"a self-mention does not direct the floor; the other participant stays a candidate")
-	assert.Empty(t, nonResponders)
 }
 
 // TestOrderResponders_BroadcastWithFloorCapableMentionNotDirected — §E
@@ -227,6 +298,49 @@ func TestFanout_StampsFloorMentionsOnEnvelope(t *testing.T) {
 		assert.Equal(t, []string{"iron-fox"}, c.FloorMentions,
 			"the envelope carries only the floor-capable subset, identical across recipients")
 	}
+}
+
+// TestFanout_ReclassificationDebugLog pins the §D observability contract on
+// both edges: the resolved-empty debug line fires when mentions named no
+// floor-capable member (the previously-silent "addressed a non-responder"
+// case), and does NOT fire for an explicit `@everyone` broadcast — the
+// sentinel always falls out of the intersection, but a broadcast is
+// open-floor by the D3 contract, not a reclassification, so logging it would
+// mislabel every broadcast and drown the signal §D exists to surface.
+func TestFanout_ReclassificationDebugLog(t *testing.T) {
+	run := func(t *testing.T, mentions []string) *observer.ObservedLogs {
+		store := newTestStore(t, SQLiteOptions{})
+		core, logs := observer.New(zap.DebugLevel)
+		router := NewChannelRouter(store, &envelopeRecorder{}, zap.New(core), nil)
+
+		id := mustCreateGroupWithPolicies(t, store, "planning",
+			map[string]RespondPolicy{
+				"alex":      RespondNever, // the human
+				"ember-owl": RespondAlways,
+				"iron-fox":  RespondAlways,
+			}, "alex", "ember-owl", "iron-fox")
+
+		require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+			ID: uuid.NewString(), ChannelID: id, SenderID: "ember-owl",
+			Content:  "hello",
+			Mentions: mentions,
+		}, ""))
+		return logs
+	}
+
+	t.Run("human-only mention logs the resolution", func(t *testing.T) {
+		logs := run(t, []string{"alex"})
+		assert.Equal(t, 1,
+			logs.FilterMessageSnippet("no floor-capable member").Len(),
+			"the resolved-empty case is surfaced while the change beds in (§D)")
+	})
+
+	t.Run("broadcast does not log", func(t *testing.T) {
+		logs := run(t, []string{MentionEveryone})
+		assert.Equal(t, 0,
+			logs.FilterMessageSnippet("no floor-capable member").Len(),
+			"an explicit broadcast is open floor by contract (D3), not a reclassification")
+	})
 }
 
 // TestChannelMessageToProto_PopulatesFloorMentions pins the dispatcher

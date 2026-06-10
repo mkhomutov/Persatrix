@@ -865,18 +865,24 @@ type ChannelMessageEvent struct {
 	// after the governance-layers plan named "field 13"; 17 is the next free tag.
 	InteractionId string `protobuf:"bytes,17,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
 	// RFC 0030 floor-capable-directedness amendment (v0.3.9): the subset of
-	// `mentions = 8` naming *floor-capable* members — current channel members
-	// whose normalized respond policy is not `never`. Resolved once per publish
-	// by the orchestrator at fanout (it owns the membership view the receiver
-	// gate lacks — the `thread_parent_sender_id = 10` pre-resolution precedent)
+	// `mentions = 8` naming *floor-capable* members — current channel members,
+	// **other than the message's sender**, whose normalized respond policy is
+	// not `never`. The sender exclusion is load-bearing, not cosmetic: both
+	// sides already refuse a sender the floor on its own message, so a sole
+	// self-mention must resolve to the empty subset (open floor) — a
+	// policy-only definition would let the sender's own name re-close the
+	// floor (amendment §A). Resolved once per publish by the orchestrator at
+	// fanout (it owns the membership view the receiver gate lacks — the
+	// `thread_parent_sender_id = 10` pre-resolution precedent), deduplicated,
 	// and identical across a fanout's recipients. The receiver-side Tier A
 	// directed-elsewhere decision uses THIS list as its suppression basis: a
 	// message whose mentions name only floor-incapable parties (the human
-	// operator joined `respond: never`, an `observer`, a non-member) is open
-	// floor, not directed — mentioning someone who cannot take the floor must
-	// not close it. The raw `mentions` list keeps serving the admit paths
-	// (named-recipient / `@everyone` broadcast) and display; the `@everyone`
-	// sentinel is never a member id, so it never appears here.
+	// operator joined `respond: never`, an `observer`, a non-member, the
+	// sender itself) is open floor, not directed — mentioning someone who
+	// cannot take the floor must not close it. The raw `mentions` list keeps
+	// serving the admit paths (named-recipient / `@everyone` broadcast) and
+	// display; the `@everyone` sentinel is never a member id, so it never
+	// appears here.
 	// See `docs/rfcs/0030-amendment-floor-capable-directedness.md`.
 	FloorMentions []string `protobuf:"bytes,18,rep,name=floor_mentions,json=floorMentions,proto3" json:"floor_mentions,omitempty"`
 	// Producer-presence flag for `floor_mentions = 18`. proto3 repeated fields

@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -73,12 +74,17 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 
 	// Floor-capable-directedness amendment (v0.3.9): resolve the suppression
 	// basis once per publish and stamp it on every recipient's envelope. The
-	// debug line surfaces the previously-silent reclassification — mentions
-	// were present but named no floor-capable member (the human operator, an
-	// observer, a non-member), so the message is open floor (amendment §D).
+	// debug line surfaces the previously-silent resolution — mentions were
+	// present but named no floor-capable member (the human operator, an
+	// observer, a non-member, the sender itself), the case PR 2/2's gate
+	// flip reclassifies to open floor (amendment §D). An explicit
+	// `@everyone` broadcast is excluded: the sentinel always falls out of
+	// the intersection, but a broadcast is open floor by contract (D3), not
+	// a reclassification — logging it would mislabel every broadcast and
+	// bury the signal this line exists to surface.
 	floorMentions := resolveFloorMentions(members, msg.Mentions, msg.SenderID)
-	if len(msg.Mentions) > 0 && len(floorMentions) == 0 {
-		r.logger.Debug("channels: mentions name no floor-capable member; open floor",
+	if len(msg.Mentions) > 0 && len(floorMentions) == 0 && !slices.Contains(msg.Mentions, MentionEveryone) {
+		r.logger.Debug("channels: mentions name no floor-capable member",
 			zap.String("channel_id", msg.ChannelID),
 			zap.String("message_id", msg.ID),
 			zap.Int("mentions", len(msg.Mentions)))
@@ -125,12 +131,16 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 		if m.ParticipantID == msg.SenderID {
 			continue
 		}
-		if m.RespondPolicy == RespondNever {
+		if m.RespondPolicy.Normalize() == RespondNever {
 			// `respond: never` participants do not receive dispatches in
 			// the v0.3.0 contract — they read history on demand. The
 			// response gate (PR 4b) is the canonical enforcement point;
 			// short-circuiting here keeps the dispatcher free of policy
-			// knowledge and saves a wasted gRPC call.
+			// knowledge and saves a wasted gRPC call. Normalized at the
+			// read seam like [orderResponders]' candidate loop and the
+			// gate's `_DISPOSITION_ALIASES`: identity for store-canonical
+			// rows, but a non-canonical spelling must mean the same thing
+			// at every policy read.
 			continue
 		}
 		// RFC 0030 Tier A note: a directed-elsewhere `always` member (one

@@ -158,15 +158,16 @@ func orderResponders(members []Member, msg ChannelMessage, threadParentSenderID 
 	// no-false-negatives invariant above still holds).
 	//
 	// Floor-capable-directedness amendment (v0.3.9): the directedness basis
-	// is the *floor-capable* mention subset ([resolveFloorMentions]), not the
-	// raw list — a message naming only parties that cannot take the floor
-	// (the human operator, an `observer`, a non-member) is open floor, not
-	// directed. The raw `mentioned` set keeps serving the admit/ordering
-	// checks below: admission-by-name of a `never` member is already
-	// impossible (the policy switch gates it), so the admit paths gain
-	// nothing from the resolved subset (amendment OQ 3).
-	directed := len(resolveFloorMentions(members, msg.Mentions, msg.SenderID)) > 0 &&
-		!mentioned[MentionEveryone]
+	// becomes the *floor-capable* mention subset ([resolveFloorMentions]) —
+	// but NOT in this PR. The basis flips in PR 2/2, atomically with the
+	// Python gate's (§C item 1): the live gate still suppresses on raw
+	// mentions, so flipping here first would queue members the gate is
+	// guaranteed to suppress into the serialized round, each burning its
+	// full per-turn timeout (≈45s × N on the blocking publish path) —
+	// violating the parity contract above, the whole point of this mirror.
+	// The raw `mentioned` set keeps serving the admit/ordering checks below
+	// permanently (amendment OQ 3).
+	directed := len(msg.Mentions) > 0 && !mentioned[MentionEveryone]
 
 	// Split into mentioned vs. unmentioned responders so the final
 	// concatenation is mentioned-first while preserving member order
@@ -176,13 +177,21 @@ func orderResponders(members []Member, msg ChannelMessage, threadParentSenderID 
 		if m.ParticipantID == msg.SenderID {
 			continue // never reply to self
 		}
-		if m.RespondPolicy == RespondNever {
+		// Normalize at the read seam, mirroring the Python gate's
+		// `_DISPOSITION_ALIASES` defence for the same row on the wire.
+		// Identity in practice (the membership CHECK constraint admits only
+		// the legacy triple), but a non-canonical spelling that ever does
+		// reach a [Member] must classify identically here, in
+		// [resolveFloorMentions], and in the gate — capable on one basis but
+		// refused candidacy on another is the guaranteed-silence defect.
+		policy := m.RespondPolicy.Normalize()
+		if policy == RespondNever {
 			continue // read-on-demand; no dispatch, off both sets
 		}
 
 		isMentioned := mentioned[m.ParticipantID]
 		isCandidate := false
-		switch m.RespondPolicy {
+		switch policy {
 		case RespondAlways:
 			// Open-floor or broadcast → candidate; directed-elsewhere → not.
 			isCandidate = isMentioned || !directed

@@ -21,24 +21,26 @@ package channels
 // sender never replies to itself, so counting it would suppress everyone
 // else for an addressee that cannot take the turn; the exclusion keeps the
 // subset sender-relative but still recipient-independent, so per-publish
-// stamping is unaffected). Mention order is preserved; the [MentionEveryone]
-// sentinel is never a member id (`validateParticipantID` forbids `@`) so it
-// never appears in the result — broadcast handling stays on the raw mentions
-// list.
+// stamping is unaffected). Mention order is preserved and duplicates collapse
+// to the first occurrence — the subset is a contract-bearing wire field that
+// receivers reason about as a set, and the publish path caps `mentions` at 10
+// without deduping. The [MentionEveryone] sentinel is never a member id
+// (`validateParticipantID` forbids `@`) so it never appears in the result —
+// broadcast handling stays on the raw mentions list.
 //
-// Normalize is deliberate where the sibling checks in [orderResponders] /
-// [ChannelRouter.dispatchConcurrent] compare the stored policy directly: this
-// subset becomes the cross-language wire suppression basis
-// (`ChannelMessageEvent.floor_mentions`), so a hand-edited membership row
-// carrying an un-normalized disposition spelling must not silently widen or
-// narrow it.
+// Normalize matches every other policy read at this seam — [orderResponders]'
+// candidate loop, [ChannelRouter.dispatchConcurrent]'s `never` short-circuit,
+// and the Python gate's `_DISPOSITION_ALIASES` — identity for store-canonical
+// rows (the membership CHECK constraint admits only the legacy triple), but a
+// non-canonical spelling that ever does reach a [Member] must classify the
+// same way everywhere, because this subset becomes the cross-language wire
+// suppression basis (`ChannelMessageEvent.floor_mentions`).
 //
-// Called twice per publish — once by [orderResponders] for the candidate
-// split and once by [ChannelRouter.fanout] for the envelope stamp. Both calls
-// see the same (members, mentions) pair, so the two results agree by
-// construction; the duplicate O(N+M) walk over two small lists is cheaper
-// than threading the slice through the [orderResponders] signature and every
-// existing call site.
+// Called once per publish, by [ChannelRouter.fanout], for the envelope stamp.
+// PR 2/2 adds the [orderResponders] call when the candidate split's
+// directedness basis flips together with the Python gate's (see the deferral
+// note in orderResponders); both calls will see the same (members, mentions)
+// pair, so the two results agree by construction.
 func resolveFloorMentions(members []Member, mentions []string, senderID string) []string {
 	if len(mentions) == 0 {
 		return nil
@@ -52,6 +54,7 @@ func resolveFloorMentions(members []Member, mentions []string, senderID string) 
 	var out []string
 	for _, id := range mentions {
 		if capable[id] {
+			delete(capable, id) // dedupe: first occurrence wins
 			out = append(out, id)
 		}
 	}
