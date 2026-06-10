@@ -418,5 +418,18 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		//
 		// [RFC 0030 governance layers]: ../../docs/rfcs/0030-governance-layers-pr-plan.md
 		InteractionId: readInteractionID(msg.Metadata),
+		// Floor-capable-directedness amendment (v0.3.9): the per-publish
+		// suppression basis the router resolved at fanout, plus the
+		// unconditional producer-presence flag. The flag is hardcoded true
+		// rather than carried on the envelope because "resolved" is a
+		// property of this orchestrator version, not of the data — an
+		// envelope with a nil FloorMentions is a real "no floor-capable
+		// mention" value (the reclassified-to-open-floor case), never an
+		// unset one. Receivers seeing false (an old producer) fall back to
+		// the raw-mentions basis.
+		//
+		// [Floor-capable-directedness amendment]: ../../docs/rfcs/0030-amendment-floor-capable-directedness.md
+		FloorMentions:         env.FloorMentions,
+		FloorMentionsResolved: true,
 	}
 }

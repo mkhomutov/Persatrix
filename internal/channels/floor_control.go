@@ -147,16 +147,26 @@ func orderResponders(members []Member, msg ChannelMessage, threadParentSenderID 
 	}
 
 	// RFC 0030 relevance amendment Tier A (v0.3.7): a message that names
-	// specific recipients (`Mentions` non-empty) and is not an explicit
-	// broadcast (`MentionEveryone` absent) is *directed* — an `always`/
-	// `participant` member who is not named is suppressed by the receiver
-	// gate (directed_elsewhere). Mirror that here so floor control does not
-	// queue such a member into the serialized round only to have it stay
-	// silent and burn the per-turn timeout. This keeps the candidate set a
-	// superset of the gate's respond-true set: it now excludes exactly the
-	// members the gate now excludes, so no member the gate would admit is
-	// dropped (the no-false-negatives invariant above still holds).
-	directed := len(msg.Mentions) > 0 && !mentioned[MentionEveryone]
+	// specific recipients and is not an explicit broadcast (`MentionEveryone`
+	// absent) is *directed* — an `always`/`participant` member who is not
+	// named is suppressed by the receiver gate (directed_elsewhere). Mirror
+	// that here so floor control does not queue such a member into the
+	// serialized round only to have it stay silent and burn the per-turn
+	// timeout. This keeps the candidate set a superset of the gate's
+	// respond-true set: it now excludes exactly the members the gate now
+	// excludes, so no member the gate would admit is dropped (the
+	// no-false-negatives invariant above still holds).
+	//
+	// Floor-capable-directedness amendment (v0.3.9): the directedness basis
+	// is the *floor-capable* mention subset ([resolveFloorMentions]), not the
+	// raw list — a message naming only parties that cannot take the floor
+	// (the human operator, an `observer`, a non-member) is open floor, not
+	// directed. The raw `mentioned` set keeps serving the admit/ordering
+	// checks below: admission-by-name of a `never` member is already
+	// impossible (the policy switch gates it), so the admit paths gain
+	// nothing from the resolved subset (amendment OQ 3).
+	directed := len(resolveFloorMentions(members, msg.Mentions, msg.SenderID)) > 0 &&
+		!mentioned[MentionEveryone]
 
 	// Split into mentioned vs. unmentioned responders so the final
 	// concatenation is mentioned-first while preserving member order
@@ -281,11 +291,12 @@ func (r *ChannelRouter) floorRound(
 	responders, nonResponders []Member,
 	turnTimeout time.Duration,
 	channelSize int,
+	floorMentions []string,
 ) {
 	detached := context.WithoutCancel(ctx)
 
 	if len(nonResponders) > 0 {
-		r.dispatchConcurrent(detached, msg, ct, threadParentSenderID, nonResponders, channelSize)
+		r.dispatchConcurrent(detached, msg, ct, threadParentSenderID, nonResponders, channelSize, floorMentions)
 	}
 
 	r.floors.acquire(msg.ChannelID)
@@ -297,7 +308,7 @@ func (r *ChannelRouter) floorRound(
 	// the responders actually impose, not queueing behind a prior round.
 	start := time.Now()
 	for _, speaker := range responders {
-		r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout, channelSize)
+		r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout, channelSize, floorMentions)
 	}
 	r.recordFloorRound(detached, ct, time.Since(start))
 }
@@ -350,6 +361,7 @@ func (r *ChannelRouter) runFloorTurn(
 	speaker Member,
 	turnTimeout time.Duration,
 	channelSize int,
+	floorMentions []string,
 ) {
 	r.recordFloorSpeaker(msg.ChannelID, speaker.ParticipantID)
 
@@ -377,7 +389,7 @@ func (r *ChannelRouter) runFloorTurn(
 		defer cancel()
 	}
 
-	r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker, channelSize)
+	r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker, channelSize, floorMentions)
 
 	timer := time.NewTimer(turnTimeout)
 	defer timer.Stop()

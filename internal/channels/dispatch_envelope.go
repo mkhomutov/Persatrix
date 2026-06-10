@@ -45,4 +45,17 @@ type DispatchEnvelope struct {
 	// The router resolves it from config at fanout ([ChannelRouter.salienceMaxFor]);
 	// zero falls back to the agent-side default. Per-publish, like ChannelSize.
 	SalienceMaxChannelMembers int
+
+	// FloorMentions (RFC 0030 floor-capable-directedness amendment) is the
+	// subset of the message's mentions naming floor-capable members —
+	// resolved once per publish by [resolveFloorMentions] in
+	// [ChannelRouter.fanout] and carried on
+	// `ChannelMessageEvent.floor_mentions` as the receiver gate's Tier A
+	// suppression basis. Per-publish (identical across recipients), like
+	// ChannelSize. Nil/empty means "no floor-capable mention" — a real,
+	// load-bearing value (the reclassified-to-open-floor case), which is why
+	// the dispatcher pairs it with the unconditional
+	// `floor_mentions_resolved` wire flag rather than letting receivers
+	// infer producer support from emptiness.
+	FloorMentions []string
 }
