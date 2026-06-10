@@ -157,7 +157,7 @@ func orderResponders(members []Member, msg ChannelMessage, threadParentSenderID 
 	// excludes, so no member the gate would admit is dropped (the
 	// no-false-negatives invariant above still holds).
 	//
-	// Floor-capable-directedness amendment (v0.3.9, §C item 3 — flipped in
+	// Floor-capable-directedness amendment (v0.3.8, §C item 3 — flipped in
 	// the same change as the Python gate, preserving the candidate-set/gate
 	// parity above): the directedness basis is the *floor-capable* mention
 	// subset ([resolveFloorMentions]) — naming only parties that cannot take

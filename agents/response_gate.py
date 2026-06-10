@@ -33,7 +33,7 @@ Policies (RFC 0011 §D table):
   draw a reply from a ``participant`` who is not among them. An open-floor
   message (empty ``mentions``) or a broadcast still admits every
   ``participant``. Since the floor-capable-directedness amendment
-  (v0.3.9), the suppression basis is the orchestrator-resolved
+  (v0.3.8), the suppression basis is the orchestrator-resolved
   ``floor_mentions`` subset when ``floor_mentions_resolved`` is true: a
   message whose mentions name only parties that cannot take the floor
   (the human operator, an ``observer``, a non-member, the sender itself)
@@ -396,7 +396,7 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
                 return GateDecision(
                     respond=True, policy=POLICY_ALWAYS, reason="broadcast",
                 )
-            # Floor-capable-directedness amendment (v0.3.9, §C item 3): the
+            # Floor-capable-directedness amendment (v0.3.8, §C item 3): the
             # suppression basis is the orchestrator-resolved *floor-capable*
             # subset (`floor_mentions` — members whose normalized policy is
             # not `never`, excluding the sender) when, and only when, the
@@ -428,7 +428,7 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
                     reason="directed_elsewhere",
                 )
         # Open floor — the genuinely ambiguous remainder that the v0.3.8
-        # salience bid refines: empty ``mentions``, or (v0.3.9) mentions that
+        # salience bid refines: empty ``mentions``, or (v0.3.8) mentions that
         # resolved to no floor-capable addressee. Both carry the
         # ``policy_always`` reason so :func:`is_open_floor_admit` routes them
         # into Tier B identically.

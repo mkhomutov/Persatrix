@@ -142,7 +142,7 @@ def validate_channel_message_event(
             continue  # broadcast sentinel (D3), not a participant id — ISSUE-0094
         if not _CHANNEL_PARTICIPANT_ID_RE.match(m):
             return f"mentions[{i}] is not a valid participant id: {_safe_repr(m)}", None
-    # ``floor_mentions`` (floor-capable-directedness amendment, v0.3.9) is the
+    # ``floor_mentions`` (floor-capable-directedness amendment, v0.3.8) is the
     # orchestrator-resolved subset of ``mentions`` and rides the same
     # cleartext port — mirror the mentions bounds. No ``@everyone`` carve-out
     # here: the sentinel is never a member id, so the resolver never emits it;

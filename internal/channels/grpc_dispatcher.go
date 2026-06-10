@@ -418,7 +418,7 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		//
 		// [RFC 0030 governance layers]: ../../docs/rfcs/0030-governance-layers-pr-plan.md
 		InteractionId: readInteractionID(msg.Metadata),
-		// Floor-capable-directedness amendment (v0.3.9): the per-publish
+		// Floor-capable-directedness amendment (v0.3.8): the per-publish
 		// suppression basis the router resolved at fanout, plus the
 		// unconditional producer-presence flag. The flag is hardcoded true
 		// rather than carried on the envelope because "resolved" is a

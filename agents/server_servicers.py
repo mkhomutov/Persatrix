@@ -413,7 +413,7 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         # stripped under ``python -O``).
         event = AgentEvent(
             event_type=EventType.CHANNEL_MESSAGE,
-            # Gate + salience-bid + (v0.3.9) floor-mentions decision inputs,
+            # Gate + salience-bid + (v0.3.8) floor-mentions decision inputs,
             # lifted off the wire shape in the carve-out module — see
             # ``channel_wire_metadata.channel_event_payload``.
             payload=channel_event_payload(request),

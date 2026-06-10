@@ -1,4 +1,4 @@
-"""Floor-capable-directedness gate matrix (RFC 0030 amendment, v0.3.9).
+"""Floor-capable-directedness gate matrix (RFC 0030 amendment, v0.3.8).
 
 Pins the §C item 3 contract for the ``POLICY_ALWAYS`` suppression branch
 of :func:`agents.response_gate.evaluate_response_gate` — the Python half
@@ -42,7 +42,7 @@ def _always_event(
     floor_mentions_resolved: object = None,
 ) -> AgentEvent:
     """Build an ``always``-policy CHANNEL_MESSAGE event with the wire shape
-    ``ReceiveChannelMessage`` produces after the v0.3.9 payload lift. The
+    ``ReceiveChannelMessage`` produces after the v0.3.8 payload lift. The
     two floor keys are omitted entirely when ``None`` so the legacy-payload
     case (an old orchestrator: no keys at all) is expressible alongside the
     explicit ``floor_mentions_resolved=False`` case.

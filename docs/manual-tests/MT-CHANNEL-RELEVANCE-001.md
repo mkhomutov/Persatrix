@@ -2,7 +2,7 @@
 
 **Test ID**: `MT-CHANNEL-RELEVANCE-001`
 **Feature Area**: Channels (conversation governance — RFC 0030 Layer 3, relevance amendment Tier A)
-**Version**: 1.1 (Step 6: the v0.3.9 floor-capable-directedness trigger scenario)
+**Version**: 1.1 (Step 6: the v0.3.8 floor-capable-directedness trigger scenario)
 **Created**: 2026-06-06
 **Last Updated**: 2026-06-10
 **Status**: Active
@@ -231,7 +231,7 @@ distinct persona senders that replied to each human message.
 
 ---
 
-### Step 6: A mention of the human does not silence the room (v0.3.9 floor-capable directedness)
+### Step 6: A mention of the human does not silence the room (v0.3.8 floor-capable directedness)
 
 The [floor-capable-directedness amendment](../rfcs/0030-amendment-floor-capable-directedness.md)
 trigger scenario: a message whose only mention names a **floor-incapable**
@@ -278,7 +278,7 @@ human id with an explicit `--respond never` for this case:
 | 3 | An open-floor prompt admits both `participant`s; `ember-owl` stays silent (Tier B no-pile-on is v0.3.8, not asserted) | ☐ |
 | 4 | An `@everyone` broadcast disables the directed filter — all three reply (D3) | ☐ |
 | 5 | REST history confirms reply counts 1 / 2 / 3 (directed / open-floor / broadcast) | ☐ |
-| 6 | A mention of the `respond: never` human is open floor — the room is not silenced (v0.3.9) | ☐ |
+| 6 | A mention of the `respond: never` human is open floor — the room is not silenced (v0.3.8) | ☐ |
 
 ---
 

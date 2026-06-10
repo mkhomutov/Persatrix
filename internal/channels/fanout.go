@@ -72,7 +72,7 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// value (identical across recipients), captured once here.
 	channelSize := len(members)
 
-	// Floor-capable-directedness amendment (v0.3.9): resolve the suppression
+	// Floor-capable-directedness amendment (v0.3.8): resolve the suppression
 	// basis once per publish and stamp it on every recipient's envelope. The
 	// debug line surfaces the previously-silent resolution — mentions were
 	// present but named no floor-capable member (the human operator, an
@@ -187,7 +187,7 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		// `m`/`Recipient`; these two are channel-wide.
 		ChannelSize:               channelSize,
 		SalienceMaxChannelMembers: r.salienceMaxFor(msg.ChannelID),
-		// Floor-capable-directedness amendment (v0.3.9): per-publish, like
+		// Floor-capable-directedness amendment (v0.3.8): per-publish, like
 		// ChannelSize — resolved once in [ChannelRouter.fanout].
 		FloorMentions: floorMentions,
 	}, msg)

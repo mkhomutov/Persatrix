@@ -550,7 +550,7 @@ class ChannelMessageEvent(google.protobuf.message.Message):
 
     @property
     def floor_mentions(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]:
-        """RFC 0030 floor-capable-directedness amendment (v0.3.9): the subset of
+        """RFC 0030 floor-capable-directedness amendment (v0.3.8): the subset of
         `mentions = 8` naming *floor-capable* members — current channel members,
         **other than the message's sender**, whose normalized respond policy is
         not `never`. The sender exclusion is load-bearing, not cosmetic: both

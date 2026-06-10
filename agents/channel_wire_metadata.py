@@ -45,7 +45,7 @@ def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, ob
       inputs (``agents/persona_runtime/salience_gate.py``); ``threshold``
       is ``None`` when absent, a tri-state distinct from an explicit 0.0.
     * ``floor_mentions`` / ``floor_mentions_resolved`` — the
-      floor-capable-directedness amendment (v0.3.9): the
+      floor-capable-directedness amendment (v0.3.8): the
       orchestrator-resolved Tier A suppression basis plus its
       producer-presence flag. The gate keys the basis switch on the flag,
       never on the list's emptiness (proto3 repeated fields have no
