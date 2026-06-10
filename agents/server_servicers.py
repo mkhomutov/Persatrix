@@ -23,7 +23,7 @@ import grpc.aio
 
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 from .channel_validation import validate_channel_message_event
-from .channel_wire_metadata import seed_wire_metadata
+from .channel_wire_metadata import channel_event_payload, seed_wire_metadata
 from .chat_reply import chat_error_response as _chat_error_response
 from .chat_reply import extract_chat_reply as _extract_chat_reply
 from .closed_interactions_read import handle_get_closed_interactions
@@ -413,20 +413,10 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         # stripped under ``python -O``).
         event = AgentEvent(
             event_type=EventType.CHANNEL_MESSAGE,
-            payload={
-                "content": request.content,
-                "channel_type": request.channel_type,
-                "mentions": list(request.mentions),
-                # RFC 0011 PR 4b: gate inputs — see agents/response_gate.py.
-                "respond_policy": request.respond_policy,
-                "thread_parent_sender_id": request.thread_parent_sender_id,
-                # RFC 0030 Tier B (v0.3.8): salience-bid inputs the seam reads
-                # (salience_gate.py); `threshold` None-when-absent ≠ explicit 0.0.
-                "salience_gated": request.salience_gated,
-                "threshold": request.threshold if request.HasField("threshold") else None,
-                "channel_size": request.channel_size,
-                "salience_max_channel_members": request.salience_max_channel_members,
-            },
+            # Gate + salience-bid + (v0.3.8) floor-mentions decision inputs,
+            # lifted off the wire shape in the carve-out module — see
+            # ``channel_wire_metadata.channel_event_payload``.
+            payload=channel_event_payload(request),
             channel_id=request.channel_id,
             sender_id=request.sender_id,
             message_id=request.message_id,

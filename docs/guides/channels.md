@@ -100,9 +100,16 @@ Tier A + Tier B):
 - **`addressed`** *(default)* — replies only when `@`-mentioned or replied to
   in-thread. The quiet advisor role.
 - **`participant`** — joins the **open floor**: replies to un-addressed
-  messages, but a message `@`-mentioning *someone else* (not a broadcast)
-  **draws no reply from it** — the Tier A directedness fix
-  (`reason="directed_elsewhere"` in [`agents/response_gate.py`](../../agents/response_gate.py)).
+  messages, but a message `@`-mentioning *someone else who could take the
+  floor* — another member whose disposition is not `observer` (not a
+  broadcast, not the sender's own name) — **draws no reply from it** — the
+  Tier A directedness fix (`reason="directed_elsewhere"` in
+  [`agents/response_gate.py`](../../agents/response_gate.py)). Since v0.3.8
+  (the [floor-capable-directedness amendment](../rfcs/0030-amendment-floor-capable-directedness.md)),
+  a mention of a party that *cannot* reply — the human operator (joined
+  `respond: never` by the demo convention), an `observer`, a non-member —
+  does **not** close the floor: "@alex, here's our recommendation…" no
+  longer silences the other `participant`s; the message stays open floor.
   On an open-floor message a `participant` then runs the **Tier B salience bid**
   (below) and stays out unless it has something genuinely new to add.
 - **`chair`** *(v0.3.8)* — a `participant` with a **low salience `threshold`**

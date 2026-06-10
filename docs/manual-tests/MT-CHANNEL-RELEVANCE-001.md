@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-CHANNEL-RELEVANCE-001`
 **Feature Area**: Channels (conversation governance — RFC 0030 Layer 3, relevance amendment Tier A)
-**Version**: 1.0
+**Version**: 1.1 (Step 6: the v0.3.8 floor-capable-directedness trigger scenario)
 **Created**: 2026-06-06
-**Last Updated**: 2026-06-06
+**Last Updated**: 2026-06-10
 **Status**: Active
 
 ---
@@ -146,9 +146,10 @@ sender must be a member first — join once, then send):
 
 ### Step 3: An open-floor message admits all `participant`s
 
-Post a question with **no** `@`-mention. With Tier B deferred to v0.3.8, every
-`participant` reaches the turn (no salience suppression yet); the `addressed`
-member stays out because it was not mentioned.
+Post a question with **no** `@`-mention. Tier A admits every `participant`;
+the `addressed` member stays out because it was not mentioned. (On v0.3.7,
+with no salience bid yet, every admitted `participant` reaches the turn
+unconditionally — see the v0.3.8 note under **Expected**.)
 
 **Action**:
 
@@ -163,13 +164,21 @@ member stays out because it was not mentioned.
   floor-controlled ordered round (Layer 2.5), but **both** reach the turn.
 - `ember-owl` (`addressed`) stays **silent** — an un-addressed open-floor
   message does not mention it.
-- **v0.3.8 expectation (NOT asserted here)**: under Tier B, a `participant` with
-  nothing distinctive to add would *choose* to stay out — so this case would
-  eventually draw *fewer* than two replies. In v0.3.7 it correctly draws both;
-  do not treat two replies here as a defect.
+- **On a v0.3.8 stack** (the baseline Step 6 requires) **the Tier B bid is
+  live** for `planning`'s `participant` members — they are declared with the
+  disposition vocabulary and carry no explicit `threshold`, so the bid biases
+  to silence. This step can therefore legitimately draw *fewer* than two
+  replies. The two silences are distinguishable in the agent debug logs: a
+  Tier B silence logs `Tier B salience bid suppressed turn` (and rides
+  `channel.messages.gated{policy=low_salience}`); a directedness failure logs
+  `reason="directed_elsewhere"`. Only the latter fails this step. (On a
+  v0.3.7 stack both `participant`s reply; do not treat two replies as a
+  defect on either version.)
 
 **Verification**:
-- [ ] `iron-fox` and `nova-sparrow` both reply; `ember-owl` does not.
+- [ ] No `directed_elsewhere` suppression for this message; `iron-fox` and
+      `nova-sparrow` each reply **or** show a Tier B salience-bid log line
+      (v0.3.7 stack: both simply reply). `ember-owl` does not reply.
 
 ---
 
@@ -221,13 +230,65 @@ distinct persona senders that replied to each human message.
 
 **Expected**:
 - The directed `@ember-owl` prompt (Step 2) is followed by **one** persona
-  message (`ember-owl`).
+  message (`ember-owl`). The directed `mentioned` admit skips the Tier B bid
+  (TB1), so this count holds on v0.3.8 too.
 - The open-floor prompt (Step 3) is followed by **two** persona messages
-  (`iron-fox`, `nova-sparrow`).
+  (`iron-fox`, `nova-sparrow`) on v0.3.7. On a v0.3.8 stack the live Tier B
+  bid may keep a `participant` out — accept a lower count **only** with a
+  matching salience-bid log line (Step 3's note); a shortfall without one is
+  a failure.
 - The broadcast prompt (Step 4) is followed by **three** persona messages.
+  The `broadcast` admit also skips the bid (the D3 sentinel's "do not
+  suppress" contract), so this count holds on v0.3.8 too.
 
 **Verification**:
-- [ ] Reply counts are 1 / 2 / 3 for the directed / open-floor / broadcast cases.
+- [ ] Reply counts are 1 / 2 / 3 for the directed / open-floor / broadcast
+      cases (v0.3.8: the open-floor count may be lower only with matching
+      Tier B salience log lines).
+
+---
+
+### Step 6: A mention of the human does not silence the room (v0.3.8 floor-capable directedness)
+
+The [floor-capable-directedness amendment](../rfcs/0030-amendment-floor-capable-directedness.md)
+trigger scenario: a message whose only mention names a **floor-incapable**
+party — the human, joined `respond: never` per the
+[demo-guide convention](../guides/v0.3.0-demo.md) — is **open floor**, not
+directed. Pre-amendment, one polite "@alex, …" suppressed every
+`participant` as `directed_elsewhere` and the room fell silent until the
+next human message.
+
+**Pitfall — the human's membership policy is load-bearing.** Step 2's bare
+`channel join planning --as operator` defaults the disposition to
+`when_mentioned`, which **is** floor-capable: a mention of `operator` is
+(correctly) still directed, and this step would falsely fail. Join a second
+human id with an explicit `--respond never` for this case:
+
+```bash
+./bin/persatrix channel join planning --as alex --respond never
+./bin/persatrix channel send planning \
+  "Thanks @alex for the context. Team, where does that leave the datastore decision?" \
+  --as operator --mention alex
+```
+
+**Expected**:
+- `iron-fox` and `nova-sparrow` treat the message as **open floor**: replies
+  appear (subject to the same Tier B salience caveat as Step 3 — the bid, not
+  the directedness filter, now decides who has something to add).
+- The room is **not** silenced: the pre-amendment outcome (zero persona
+  replies, every `participant` gated as `directed_elsewhere`) must not occur.
+- Orchestrator debug log (optional cross-check): a
+  `channels: mentions name no floor-capable member` line for the publish.
+
+**Verification** (two checks — the first is the discriminating one):
+- [ ] No `directed_elsewhere` suppression of an unnamed `participant` appears
+      in the agent logs for this message — the pre-amendment defect signature
+      must be absent **regardless of how many replies appear**.
+- [ ] At least one `participant` replies. Zero replies with the first check
+      passing is a Tier B outcome, not a directedness failure (both bids
+      declined — `Tier B salience bid suppressed turn` in the agent debug
+      logs, `channel.messages.gated{policy=low_salience}` on the counter):
+      re-probe with a more direct open question rather than failing the step.
 
 ---
 
@@ -237,9 +298,10 @@ distinct persona senders that replied to each human message.
 |------|-----------------|-----------|
 | 1 | `group:planning` lists `ember-owl: addressed`, `iron-fox`/`nova-sparrow`: `participant` | ☐ |
 | 2 | A directed `@ember-owl` prompt draws **exactly one** reply (`ember-owl`); the two `participant`s stay silent | ☐ |
-| 3 | An open-floor prompt admits both `participant`s; `ember-owl` stays silent (Tier B no-pile-on is v0.3.8, not asserted) | ☐ |
-| 4 | An `@everyone` broadcast disables the directed filter — all three reply (D3) | ☐ |
-| 5 | REST history confirms reply counts 1 / 2 / 3 (directed / open-floor / broadcast) | ☐ |
+| 3 | An open-floor prompt admits both `participant`s; `ember-owl` stays silent (v0.3.8: a live Tier B bid may keep one out — logs distinguish) | ☐ |
+| 4 | An `@everyone` broadcast disables the directed filter — all three reply (D3; the broadcast admit skips the bid) | ☐ |
+| 5 | REST history confirms reply counts 1 / 2 / 3 (directed / open-floor / broadcast; v0.3.8: open-floor count lower only with Tier B log lines) | ☐ |
+| 6 | A mention of the `respond: never` human is open floor — no `directed_elsewhere` suppression of an unnamed `participant` (v0.3.8) | ☐ |
 
 ---
 

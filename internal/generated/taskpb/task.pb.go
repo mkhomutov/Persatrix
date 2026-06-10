@@ -864,7 +864,7 @@ type ChannelMessageEvent struct {
 	// (`salience_gated`/`threshold`/`channel_size`/`salience_max_channel_members`)
 	// after the governance-layers plan named "field 13"; 17 is the next free tag.
 	InteractionId string `protobuf:"bytes,17,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
-	// RFC 0030 floor-capable-directedness amendment (v0.3.9): the subset of
+	// RFC 0030 floor-capable-directedness amendment (v0.3.8): the subset of
 	// `mentions = 8` naming *floor-capable* members — current channel members,
 	// **other than the message's sender**, whose normalized respond policy is
 	// not `never`. The sender exclusion is load-bearing, not cosmetic: both

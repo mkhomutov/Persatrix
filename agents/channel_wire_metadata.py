@@ -1,13 +1,15 @@
-"""Lift typed ``ChannelMessageEvent`` wire fields onto ``AgentEvent`` metadata.
+"""Lift typed ``ChannelMessageEvent`` wire fields onto the ``AgentEvent``.
 
 Extracted from ``server_servicers.py`` so the servicer stays under the
 500-line review cap (``scripts/checks/file_size.py``). The lifts are a
-cohesive concern: ``ChannelMessageEvent`` carries some cross-cutting context
-as first-class proto fields (because it has no metadata map), and the
-agent-side read paths consume those values off ``AgentEvent.metadata`` keys.
-This module reconciles the two at the single ``ReceiveChannelMessage``
-boundary. The matching precedent is ``session_metadata`` / the Tier B
-``salience_gate`` carve-outs.
+cohesive concern: ``ChannelMessageEvent`` carries the channel context as
+first-class proto fields (because it has no metadata map), and the
+agent-side read paths consume those values off the ``AgentEvent`` payload
+(:func:`channel_event_payload` — the response gate / salience seam inputs)
+and metadata keys (:func:`seed_wire_metadata` — cross-cutting context).
+This module reconciles the wire and event shapes at the single
+``ReceiveChannelMessage`` boundary. The matching precedent is
+``session_metadata`` / the Tier B ``salience_gate`` carve-outs.
 """
 
 from __future__ import annotations
@@ -28,6 +30,42 @@ from .persona_types import AgentEvent
 # points, this bound counts bytes — equal for the ASCII id) and is generous
 # over the 36-byte uuid4.
 _INTERACTION_ID_MAX_BYTES = 128
+
+
+def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, object]:
+    """Build the CHANNEL_MESSAGE ``AgentEvent.payload`` from the wire event.
+
+    The payload carries the receiver-side decision inputs in the shapes
+    their consumers read:
+
+    * ``mentions`` / ``respond_policy`` / ``thread_parent_sender_id`` — the
+      RFC 0011 PR 4b response-gate inputs (``agents/response_gate.py``).
+    * ``salience_gated`` / ``threshold`` / ``channel_size`` /
+      ``salience_max_channel_members`` — the RFC 0030 Tier B salience-bid
+      inputs (``agents/persona_runtime/salience_gate.py``); ``threshold``
+      is ``None`` when absent, a tri-state distinct from an explicit 0.0.
+    * ``floor_mentions`` / ``floor_mentions_resolved`` — the
+      floor-capable-directedness amendment (v0.3.8): the
+      orchestrator-resolved Tier A suppression basis plus its
+      producer-presence flag. The gate keys the basis switch on the flag,
+      never on the list's emptiness (proto3 repeated fields have no
+      presence; a resolved *empty* subset is the motivating human-mention
+      case). An old orchestrator leaves the flag at the proto3-default
+      ``False`` and the gate falls back to the raw ``mentions`` basis.
+    """
+    return {
+        "content": request.content,
+        "channel_type": request.channel_type,
+        "mentions": list(request.mentions),
+        "respond_policy": request.respond_policy,
+        "thread_parent_sender_id": request.thread_parent_sender_id,
+        "salience_gated": request.salience_gated,
+        "threshold": request.threshold if request.HasField("threshold") else None,
+        "channel_size": request.channel_size,
+        "salience_max_channel_members": request.salience_max_channel_members,
+        "floor_mentions": list(request.floor_mentions),
+        "floor_mentions_resolved": request.floor_mentions_resolved,
+    }
 
 
 def seed_wire_metadata(
@@ -76,4 +114,4 @@ def seed_wire_metadata(
         event.metadata["interaction_id"] = interaction_id
 
 
-__all__ = ["seed_wire_metadata"]
+__all__ = ["channel_event_payload", "seed_wire_metadata"]

@@ -32,7 +32,12 @@ Policies (RFC 0011 §D table):
   ``mentions`` — and not an explicit ``@everyone`` broadcast — does not
   draw a reply from a ``participant`` who is not among them. An open-floor
   message (empty ``mentions``) or a broadcast still admits every
-  ``participant``.
+  ``participant``. Since the floor-capable-directedness amendment
+  (v0.3.8), the suppression basis is the orchestrator-resolved
+  ``floor_mentions`` subset when ``floor_mentions_resolved`` is true: a
+  message whose mentions name only parties that cannot take the floor
+  (the human operator, an ``observer``, a non-member, the sender itself)
+  is open floor, not directed.
 * ``never`` — always suppress. The orchestrator filters
   ``RespondNever`` members upstream of dispatch, so this branch should
   not normally fire; if it does, it surfaces a policy-routing
@@ -237,8 +242,11 @@ def is_open_floor_admit(decision: GateDecision) -> bool:
 
     Tier B (the leased salience bid, :mod:`agents.salience_bid`) runs
     **only** on the ambiguous open-floor remainder Tier A leaves: a
-    ``participant`` (``always``) member admitted to an *un-addressed* message
-    (empty ``mentions``) with ``reason="policy_always"``. Every *directed*
+    ``participant`` (``always``) member admitted with
+    ``reason="policy_always"`` to a message that addresses nobody who could
+    take the floor — empty ``mentions``, or (since the v0.3.8
+    floor-capable-directedness amendment) mentions whose orchestrator-resolved
+    ``floor_mentions`` subset is empty. Every *directed*
     admit — a ``@``-mention (``reason="mentioned"``, whether the member's
     disposition is ``when_mentioned`` *or* ``always`` and it was named
     individually), an explicit ``@everyone`` broadcast (``"broadcast"`` — a
@@ -340,19 +348,23 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
         # filter. A ``participant`` (``always``) member no longer answers a
         # message addressed to *other* members — that was the v0.3.6 pile-on
         # defect ("how about you @ember-owl?" drew a reply from everyone).
-        # Suppress iff the message names specific recipients (``mentions``
-        # non-empty), this agent is not among them, and it is not an explicit
-        # broadcast (``MENTION_EVERYONE`` absent, decision D3). A participant
-        # named *individually* is addressed directly and admits with the
-        # ``mentioned`` reason (its lane — RFC 0030 Tier B TB1 keeps it out of
-        # the salience bid); an explicit ``@everyone`` broadcast admits with
-        # the directed ``broadcast`` reason (also TB1 — the sentinel's "do not
-        # suppress" contract is its lane). Only a genuinely un-addressed
-        # message (empty ``mentions``) admits with the open-floor
-        # ``policy_always`` — the ambiguous remainder Tier B (the v0.3.8
-        # salience bid that decides who actually has something to add)
-        # refines. The decision keeps ``policy=always`` in every branch: a
-        # gated-counter fire with ``policy=always`` is, by construction,
+        # Suppress iff the message names recipients the floor could actually
+        # pass to (the suppression *basis* below is non-empty — raw
+        # ``mentions`` pre-amendment, the resolved floor-capable subset since
+        # v0.3.8), this agent is not among the raw mentions, and it is not an
+        # explicit broadcast (``MENTION_EVERYONE`` absent, decision D3). A
+        # participant named *individually* is addressed directly and admits
+        # with the ``mentioned`` reason (its lane — RFC 0030 Tier B TB1 keeps
+        # it out of the salience bid); an explicit ``@everyone`` broadcast
+        # admits with the directed ``broadcast`` reason (also TB1 — the
+        # sentinel's "do not suppress" contract is its lane). Only a message
+        # that addresses nobody who could take the floor — empty ``mentions``,
+        # or (v0.3.8) mentions resolved to an empty floor-capable subset —
+        # admits with the open-floor ``policy_always``, the ambiguous
+        # remainder Tier B (the v0.3.8 salience bid that decides who actually
+        # has something to add) refines. The decision keeps ``policy=always``
+        # in every branch: a gated-counter fire with ``policy=always`` is, by
+        # construction,
         # exactly a directed-elsewhere suppression (a self-sender ``always`` is
         # labelled ``defense_in_depth``), so the RFC 0011 §D
         # ``{channel_id, policy}`` label set surfaces it without a new
@@ -391,13 +403,43 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
                 return GateDecision(
                     respond=True, policy=POLICY_ALWAYS, reason="broadcast",
                 )
-            return GateDecision(
-                respond=False,
-                policy=POLICY_ALWAYS,
-                reason="directed_elsewhere",
-            )
-        # Open floor (empty ``mentions``) — the genuinely ambiguous remainder
-        # (nobody was addressed) that the v0.3.8 salience bid refines.
+            # Floor-capable-directedness amendment (v0.3.8, §C item 3): the
+            # suppression basis is the orchestrator-resolved *floor-capable*
+            # subset (`floor_mentions` — members whose normalized policy is
+            # not `never`, excluding the sender) when, and only when, the
+            # producer declared it resolved. The switch keys on the
+            # `floor_mentions_resolved` flag — never on the list's own
+            # presence or emptiness, which the wire cannot express (proto3
+            # repeated fields have no presence): a flag-true *empty* subset
+            # is the motivating case itself (a sole mention of the human
+            # operator) and reclassifies to the open-floor admit below,
+            # where the Tier B bid still applies (the amendment moves the
+            # message between two existing lanes; no third lane). Flag
+            # false/absent (an old orchestrator, the legacy in-process
+            # path) — and a malformed non-list or absent list under a true
+            # flag — fall back to the raw-mentions basis: today's behaviour,
+            # degrading
+            # toward *over*-suppression, never under-suppression. The
+            # `mentioned`/`broadcast` admits above stay on raw `mentions`
+            # (amendment OQ 3). `is True` is deliberate: the gRPC servicer
+            # lifts a real bool, and a spoofed truthy non-bool on the
+            # cleartext port must not widen admission.
+            basis = mentions
+            if payload.get("floor_mentions_resolved") is True:
+                floor_mentions = payload.get("floor_mentions")
+                if isinstance(floor_mentions, list):
+                    basis = floor_mentions
+            if basis:
+                return GateDecision(
+                    respond=False,
+                    policy=POLICY_ALWAYS,
+                    reason="directed_elsewhere",
+                )
+        # Open floor — the genuinely ambiguous remainder that the v0.3.8
+        # salience bid refines: empty ``mentions``, or (v0.3.8) mentions that
+        # resolved to no floor-capable addressee. Both carry the
+        # ``policy_always`` reason so :func:`is_open_floor_admit` routes them
+        # into Tier B identically.
         return GateDecision(respond=True, policy=POLICY_ALWAYS, reason="policy_always")
 
     if policy == POLICY_WHEN_MENTIONED:
