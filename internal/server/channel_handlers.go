@@ -111,24 +111,13 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 	// transaction. A failure mid-loop left an orphan channel that
 	// poisoned the client's natural retry with 409 CONFLICT. The store's
 	// CreateChannelWithMembers helper makes the bundle atomic so we no
-	// longer need handler-side rollback. Member translation stays here
-	// because the wire shape (channelMemberRequest) is server-local.
-	members := make([]channels.Member, 0, len(req.Members))
-	for _, m := range req.Members {
-		policy := channels.RespondWhenMentioned
-		if m.Respond != "" {
-			policy = channels.RespondPolicy(m.Respond)
-		}
-		// RFC 0030 Tier B (v0.3.8): derive the per-member salience-bid signals
-		// from the declared disposition (the REST shape carries no explicit
-		// threshold) before the store normalizes it.
-		salienceGated, threshold := channels.ResolveSalienceSignal(policy, nil)
-		members = append(members, channels.Member{
-			ParticipantID: m.ID,
-			RespondPolicy: policy,
-			SalienceGated: salienceGated,
-			Threshold:     threshold,
-		})
+	// longer need handler-side rollback. Member translation lives next to
+	// the wire shape (resolveMemberRequests, channel_types.go) because
+	// channelMemberRequest is server-local.
+	members, err := resolveMemberRequests(req.Members)
+	if err != nil {
+		s.writeChannelError(w, err)
+		return
 	}
 	if err := s.channelStore.CreateChannelWithMembers(r.Context(), ch, members); err != nil {
 		s.writeChannelError(w, err)

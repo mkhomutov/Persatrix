@@ -420,9 +420,10 @@ func (s *sqliteStore) CreateChannelWithMembers(ctx context.Context, ch Channel, 
 		// verbatim. Unlike `respond_policy` (normalized here from the
 		// disposition), `SalienceGated`/`Threshold` are resolved by the caller —
 		// the config loader off the declared disposition ([ResolveSalienceSignal]
-		// in [MemberConfig.UnmarshalYAML]) or the REST create handler — because
-		// the config reconcile path passes an already-normalized `always`
-		// policy, so deriving them here would lose a participant's bid-ness.
+		// in [MemberConfig.UnmarshalYAML]) or the REST create handler
+		// ([ResolveMemberPolicy]) — because the config reconcile path passes an
+		// already-normalized `always` policy, so deriving them here would lose
+		// a participant's bid-ness.
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at, threshold, salience_gated)
 			 VALUES (?, ?, ?, ?, ?, ?)

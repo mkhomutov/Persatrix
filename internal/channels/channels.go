@@ -172,10 +172,11 @@ func canonicalRespondPolicy(p RespondPolicy) (RespondPolicy, error) {
 
 // ResolveSalienceSignal derives the persisted RFC 0030 Tier B per-member signals
 // from a member's *declared* disposition (before [RespondPolicy.Normalize]
-// collapses it to the legacy triple). It is the single derivation choke point
-// the disposition-aware write boundaries share — the config loader
-// ([MemberConfig.UnmarshalYAML]), the REST single-add path ([AddMember]), and
-// the REST policy-update path ([SetMemberPolicy]) — so the participant→bid and
+// collapses it to the legacy triple). It is the derivation half of
+// [ResolveMemberPolicy], which the validating write boundaries (the store's
+// AddMember/SetMemberPolicy, the REST create handler) go through; the config
+// loader ([MemberConfig.UnmarshalYAML]) calls it directly because it defers
+// validation to [Config.Validate]. Either way the participant→bid and
 // chair→low-threshold mappings live in one place rather than being re-derived
 // per call site.
 //

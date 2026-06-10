@@ -180,20 +180,15 @@ func (s *sqliteStore) RemoveMember(ctx context.Context, channelID, participantID
 // shape as [RemoveMember] so a concurrent `DeleteChannel` cannot race the
 // existence check between zero-rows-affected and the channel lookup.
 func (s *sqliteStore) SetMemberPolicy(ctx context.Context, channelID, participantID string, policy RespondPolicy) error {
-	// Normalize the RFC 0030 disposition vocabulary to the legacy triple
-	// before validating/persisting: the store is the second back-compat
+	// Resolve the declared disposition into the persisted triple
+	// ([ResolveMemberPolicy]): the store is the second back-compat
 	// boundary (mirroring the config loader) so the REST write path and
-	// the membership-table CHECK constraint see only legacy values. An
-	// unknown value is returned unchanged by Normalize and rejected here
-	// (see [canonicalRespondPolicy]).
-	//
-	// RFC 0030 Tier B (v0.3.8): re-derive the salience-bid signals from the
-	// raw disposition before normalizing, so changing a member's disposition
-	// through this path (e.g. `addressed` → `participant`) turns the bid on or
-	// off and resets the chair threshold in lock-step with `respond_policy` —
+	// the membership-table CHECK constraint see only legacy values, and
+	// re-resolving on every policy change keeps the salience-bid signals
+	// in lock-step with `respond_policy` (e.g. `addressed` →
+	// `participant` turns the bid on and resets the chair threshold) —
 	// otherwise a re-disposition would leave a stale `salience_gated`.
-	salienceGated, threshold := ResolveSalienceSignal(policy, nil)
-	policy, err := canonicalRespondPolicy(policy)
+	mp, err := ResolveMemberPolicy(policy, nil)
 	if err != nil {
 		return err
 	}
@@ -206,7 +201,7 @@ func (s *sqliteStore) SetMemberPolicy(ctx context.Context, channelID, participan
 	res, err := tx.ExecContext(ctx,
 		`UPDATE memberships SET respond_policy = ?, threshold = ?, salience_gated = ?
 		   WHERE channel_id = ? AND participant_id = ?`,
-		string(policy), threshold, boolToInt(salienceGated), channelID, participantID,
+		string(mp.Policy), mp.Threshold, boolToInt(mp.SalienceGated), channelID, participantID,
 	)
 	if err != nil {
 		return fmt.Errorf("channels: set member policy: %w", err)
@@ -240,17 +235,13 @@ func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID st
 	if err := validateParticipantID(participantID); err != nil {
 		return err
 	}
-	// RFC 0030 Tier B (v0.3.8): derive the per-member salience-bid signals from
-	// the *raw* disposition before it is normalized — `participant`/`chair`
-	// opt into the bid, a `chair` picks up the low default threshold. This is
-	// the REST single-add path, which (unlike the config reconcile path) still
-	// carries the disposition, so deriving here is correct; see
-	// [ResolveSalienceSignal].
-	salienceGated, threshold := ResolveSalienceSignal(policy, nil)
-	// Normalize the disposition vocabulary to the legacy triple before
-	// validating/persisting (see [canonicalRespondPolicy]). Keeps the REST
-	// write path and the membership CHECK constraint on the legacy values.
-	policy, err := canonicalRespondPolicy(policy)
+	// Resolve the declared disposition into the persisted triple
+	// ([ResolveMemberPolicy]). This is the REST single-add path, which
+	// (unlike the config reconcile path) still carries the disposition, so
+	// resolving here is correct: `participant`/`chair` opt into the bid, a
+	// `chair` picks up the low default threshold, and the CHECK constraint
+	// sees only the legacy values.
+	mp, err := ResolveMemberPolicy(policy, nil)
 	if err != nil {
 		return err
 	}
@@ -259,7 +250,7 @@ func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID st
 		`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at, threshold, salience_gated)
 		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(channel_id, participant_id) DO NOTHING`,
-		channelID, participantID, string(policy), time.Now().UTC(), threshold, boolToInt(salienceGated),
+		channelID, participantID, string(mp.Policy), time.Now().UTC(), mp.Threshold, boolToInt(mp.SalienceGated),
 	)
 	if err != nil {
 		if isForeignKeyViolation(err) {

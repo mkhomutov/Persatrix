@@ -1,6 +1,10 @@
 package server
 
-import "time"
+import (
+	"time"
+
+	"github.com/mkhomutov/persatrix/internal/channels"
+)
 
 // createChannelRequest is the JSON body for POST /api/v1/channels (RFC 0011 §C).
 //
@@ -24,6 +28,35 @@ type channelMemberRequest struct {
 type addMemberRequest struct {
 	ID      string `json:"id"`
 	Respond string `json:"respond"`
+}
+
+// resolveMemberRequests translates the wire-shape member list into store
+// members, resolving each declared disposition into the persisted triple
+// here at the wire boundary ([channels.ResolveMemberPolicy]; the REST
+// shape carries no explicit threshold). An empty `respond` defaults to
+// `when_mentioned` (RFC 0011 §A, matching the config loader's shorthand).
+// An invalid value surfaces the same [channels.ErrInvalidRespondPolicy]
+// the store would have returned, just before the channel row is created
+// instead of mid-transaction.
+func resolveMemberRequests(reqs []channelMemberRequest) ([]channels.Member, error) {
+	members := make([]channels.Member, 0, len(reqs))
+	for _, m := range reqs {
+		policy := channels.RespondWhenMentioned
+		if m.Respond != "" {
+			policy = channels.RespondPolicy(m.Respond)
+		}
+		mp, err := channels.ResolveMemberPolicy(policy, nil)
+		if err != nil {
+			return nil, err
+		}
+		members = append(members, channels.Member{
+			ParticipantID: m.ID,
+			RespondPolicy: mp.Policy,
+			SalienceGated: mp.SalienceGated,
+			Threshold:     mp.Threshold,
+		})
+	}
+	return members, nil
 }
 
 // publishMessageRequest is the JSON body for POST /api/v1/channels/{id}/messages.

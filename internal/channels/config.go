@@ -287,8 +287,9 @@ func (m *MemberConfig) UnmarshalYAML(value *yaml.Node) error {
 			// Derive the Tier B signals from the *declared* disposition before
 			// it is normalized: `participant`/`chair` opt into the bid, a chair
 			// (or an `always` + explicit threshold) picks up the right bar.
-			// ResolveSalienceSignal is the single choke point the store write
-			// paths share, so the mapping lives in one place (RFC 0030 Tier B).
+			// This is the non-validating half of [ResolveMemberPolicy] (which
+			// the store write paths use): rejection is deferred to Validate so
+			// the error carries the channel/member index (RFC 0030 Tier B).
 			m.SalienceGated, m.Threshold = ResolveSalienceSignal(disposition, raw.Threshold)
 			m.RespondPolicy = disposition.Normalize()
 		}
