@@ -9,6 +9,7 @@ package channels
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,7 +57,9 @@ func openInteractionID(r *ChannelRouter, channelID string) string {
 func reseedOpenInteraction(r *ChannelRouter, channelID, interactionID string) {
 	r.interactionMu.Lock()
 	defer r.interactionMu.Unlock()
-	r.openInteractions[channelID] = &openInteraction{id: interactionID, lastActivity: r.interactionNow()}
+	// idCommitted: the racing commit being simulated PERSISTED under this id,
+	// so the seeded entry must carry the committed posture.
+	r.openInteractions[channelID] = &openInteraction{id: interactionID, idCommitted: true, lastActivity: r.interactionNow()}
 }
 
 // resolverHarness builds a router with a controllable resolver clock and a
@@ -214,7 +217,9 @@ func TestInteractionResolver_OverridesInboundClaim(t *testing.T) {
 // notifies the resolver, so the very next publish mints a fresh interaction
 // instead of stamping the closed id into post-close suppression for the rest
 // of the idle window. The closed id's tombstone survives until its deferred
-// discard (IP4) and is then pruned — no lifetime entry.
+// discard (IP4) and is then pruned — no lifetime entry in a ROTATING channel
+// (a never-rotating channel discharges at its next vote-close instead; see
+// TestInteractionResolver_NeverRotatingChannelBoundsTombstones).
 func TestInteractionResolver_VoteCloseMintsFresh(t *testing.T) {
 	router, store, ch, now := resolverHarness(t)
 	router.SetEndVoteParams(ch, 2, 3)
@@ -238,16 +243,17 @@ func TestInteractionResolver_VoteCloseMintsFresh(t *testing.T) {
 	assert.NotEqual(t, first, next,
 		"the publish after a vote-close mints fresh — quorum ends one conversation, not the channel")
 
-	// The tombstone lives until the closed id's deferred discard: rotate twice.
+	// The tombstone lives until the closed id's deferred discard. The close
+	// itself parked `first` as the pending retiree, so the channel's FIRST
+	// subsequent rotation discharges it — one generation, not two.
 	*now = now.Add(601 * time.Second)
 	publishAndGetInteractionID(t, router, store, ch, "iron-fox", nil)
-	*now = now.Add(601 * time.Second)
-	publishAndGetInteractionID(t, router, store, ch, "ember-owl", nil)
 
 	router.endVoteMu.Lock()
 	_, tombstoned = router.closedInteractions[first]
 	router.endVoteMu.Unlock()
-	assert.False(t, tombstoned, "the vote-closed id's tombstone is eventually pruned — no lifetime entry")
+	assert.False(t, tombstoned,
+		"the vote-closed id's tombstone is pruned at the first rotation after the close — no lifetime entry in a rotating channel")
 }
 
 // TestInteractionResolver_RaceRecreatedCounterSelfHealed — IP4/IP8: a commit
@@ -283,4 +289,153 @@ func TestInteractionResolver_RaceRecreatedCounterSelfHealed(t *testing.T) {
 	_, recreated := router.replyCounts[first]
 	router.replyBudgetMu.Unlock()
 	assert.False(t, recreated, "the recreated counter is self-healed by the post-close re-discard")
+}
+
+// TestInteractionResolver_RejectedPublishLeavesNoState — the resolver
+// reconciles to persistence: a publish the store rejects (unknown channel /
+// non-member — checked inside [ChannelStore.PublishMessage], AFTER the
+// resolver runs) must not grow `openInteractions`. The channel id comes
+// straight from the unauthenticated REST publish path, so without this the
+// table is unbounded attacker-influenceable map growth — the exact hazard
+// class the producer plan claims to retire, moved from the interaction-id
+// key space to the channel-id key space.
+func TestInteractionResolver_RejectedPublishLeavesNoState(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	router := NewChannelRouter(store, &envelopeRecorder{}, zap.NewNop(), nil)
+
+	for i := 0; i < 50; i++ {
+		err := router.Publish(context.Background(), ChannelMessage{
+			ID: uuid.NewString(), ChannelID: "group:" + uuid.NewString(),
+			SenderID: "mallory", Content: "x",
+		}, "")
+		require.Error(t, err, "a publish to a nonexistent channel must be rejected")
+	}
+
+	router.interactionMu.Lock()
+	entries := len(router.openInteractions)
+	router.interactionMu.Unlock()
+	assert.Zero(t, entries,
+		"rejected publishes must not leak resolver entries keyed by caller-supplied channel ids")
+}
+
+// TestInteractionResolver_RejectedAttemptDoesNotExtendIdleWindow — the idle
+// window is measured from channel HISTORY, not attempts (the reply budget's
+// "counter tracks history, not attempts" invariant, applied to the clock).
+// Without this, a budget-throttled participant retrying inside the window
+// keeps its own exhausted interaction alive forever: the idle rotation that
+// would reset the budget never fires, so the 429 is self-sustaining.
+func TestInteractionResolver_RejectedAttemptDoesNotExtendIdleWindow(t *testing.T) {
+	router, store, ch, now := resolverHarness(t)
+	router.SetReplyBudget(ch, 1)
+
+	first := publishAndGetInteractionID(t, router, store, ch, "ember-owl", nil)
+
+	// ember-owl's in-window retry is throttled (K=1, slot already spent)…
+	*now = now.Add(599 * time.Second)
+	err := router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "ember-owl", Content: "retry",
+	}, "")
+	require.ErrorIs(t, err, ErrParticipantBudgetExhausted)
+
+	// …and must not have bumped the idle clock: 800s after the last COMMITTED
+	// publish — though only 201s after the rejected attempt — the channel
+	// rotates and the throttled participant's allowance resets.
+	*now = now.Add(201 * time.Second)
+	second := publishAndGetInteractionID(t, router, store, ch, "ember-owl", nil)
+	require.NotEmpty(t, second)
+	assert.NotEqual(t, first, second,
+		"a rejected attempt is not channel activity — the window counts from the last commit")
+}
+
+// TestInteractionResolver_FailedPersistMintIsAdoptedNotRotated — the two
+// halves of the tentative-mint posture. A store-rejected publish that minted
+// (here: post-close, so the resolver had no open id) leaves the mint parked:
+// (1) the next committed publish ADOPTS it — concurrent commits that resolved
+// the same tentative id must agree with the eventual open id — and (2) a
+// minted-but-never-committed id never idle-rotates, because rotating it would
+// emit `interaction_closed{trigger=idle}` for an interaction containing zero
+// messages.
+func TestInteractionResolver_FailedPersistMintIsAdoptedNotRotated(t *testing.T) {
+	router, store, reader := routerWithInteractionClosedMetric(t)
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	router.interactionNow = func() time.Time { return now }
+	ch := mustCreateGroupWithPolicies(t, store, "planning",
+		map[string]RespondPolicy{"ember-owl": RespondAlways, "iron-fox": RespondAlways},
+		"ember-owl", "iron-fox")
+	router.SetEndVoteParams(ch, 2, 3)
+
+	first := publishAndGetInteractionID(t, router, store, ch, "ember-owl", nil)
+	for _, voter := range []string{"ember-owl", "iron-fox"} {
+		require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+			ID: uuid.NewString(), ChannelID: ch, SenderID: voter, Content: "done",
+			Metadata: map[string]any{endVoteMetadataKey: true},
+		}, ""))
+	}
+
+	// A store-rejected publish (oversized content) arrives after the close:
+	// the resolver mints tentatively, the persist fails.
+	err := router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "ember-owl",
+		Content: strings.Repeat("x", MaxMessageContentBytes+1),
+	}, "")
+	require.ErrorIs(t, err, ErrMessageContentTooLarge)
+	minted := openInteractionID(router, ch)
+	require.NotEmpty(t, minted)
+	require.NotEqual(t, first, minted)
+
+	// A quiet gap past the idle window, then a real publish: it must adopt
+	// the tentative mint, not rotate it away.
+	now = now.Add(700 * time.Second)
+	got := publishAndGetInteractionID(t, router, store, ch, "iron-fox", nil)
+	assert.Equal(t, minted, got,
+		"the next committed publish adopts the tentative mint")
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	assert.Equal(t, int64(0), interactionClosedCount(t, rm, "group", "idle"),
+		"an uncommitted id never idle-rotates — no zero-message interaction_closed")
+}
+
+// TestInteractionResolver_NeverRotatingChannelBoundsTombstones — IP4's
+// deferred discard in a channel that never rotates (explicit 0 window — the
+// documented thread posture). The rotation seam never fires here, so the
+// vote-closed retiree is discharged at the channel's NEXT quorum close
+// ([ChannelRouter.markInteractionClosed]) instead: at most ONE closed id's
+// tombstone persists per never-rotating channel — bounded residue, but a
+// genuine lifetime entry when no further close arrives (the honest version
+// of the "no lifetime entry" claim, which holds only for rotating channels).
+func TestInteractionResolver_NeverRotatingChannelBoundsTombstones(t *testing.T) {
+	router, store, ch, _ := resolverHarness(t)
+	router.SetInteractionIdleTimeout(ch, 0) // rotation off
+	router.SetEndVoteParams(ch, 2, 3)
+
+	closeOpenInteraction := func() {
+		for _, voter := range []string{"ember-owl", "iron-fox"} {
+			require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+				ID: uuid.NewString(), ChannelID: ch, SenderID: voter, Content: "done",
+				Metadata: map[string]any{endVoteMetadataKey: true},
+			}, ""))
+		}
+	}
+
+	first := publishAndGetInteractionID(t, router, store, ch, "ember-owl", nil)
+	closeOpenInteraction()
+
+	second := publishAndGetInteractionID(t, router, store, ch, "ember-owl", nil)
+	require.NotEqual(t, first, second)
+	router.endVoteMu.Lock()
+	_, firstTombstoned := router.closedInteractions[first]
+	router.endVoteMu.Unlock()
+	assert.True(t, firstTombstoned,
+		"with rotation off, the closed id's tombstone persists until the next close — the ≤1-per-channel residue")
+
+	closeOpenInteraction() // closes `second`; discharges `first`'s deferred discard
+	router.endVoteMu.Lock()
+	_, firstTombstoned = router.closedInteractions[first]
+	_, secondTombstoned := router.closedInteractions[second]
+	router.endVoteMu.Unlock()
+	assert.False(t, firstTombstoned,
+		"the next quorum close discharges the previous retiree's tombstone")
+	assert.True(t, secondTombstoned,
+		"the latest closed id keeps its tombstone — at most one per never-rotating channel")
 }

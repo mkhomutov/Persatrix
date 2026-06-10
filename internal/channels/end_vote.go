@@ -139,12 +139,17 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 		// Already closed — keep suppressing fanout for late traffic. That
 		// suppression IS a Layer 4 governance drop (the conversation has
 		// terminated and this publish is barred from cascading), so attribute it
-		// like every other layer's drop. In a converged interaction this is the
-		// BULK of Layer 4's effect — without it, governance_drop{layer=end_vote}
-		// would see only the rare in-window duplicate vote and miss the steady-
-		// state post-close suppression entirely. No Warn here: post-close traffic
-		// is expected, not anomalous (unlike a duplicate vote), so it is metered
-		// and traced but not logged. Fired outside the lock.
+		// like every other layer's drop. Since the producer's IP8 hook landed,
+		// ordinary post-close traffic cannot reach here via Publish — the close
+		// notified the resolver, so the channel's next publish mints fresh — and
+		// this path catches only a commit that resolved the closing id just
+		// before the quorum landed (the racing-commit window the tombstone
+		// exists to cover) or a caller bypassing the resolver. The metric's
+		// steady state is therefore ~zero; a sustained nonzero rate on
+		// governance_drop{layer=end_vote} outside vote-spam is a resolver-bypass
+		// signal, not converged-conversation noise. No Warn here: a racing
+		// commit is expected, not anomalous (unlike a duplicate vote), so it is
+		// metered and traced but not logged. Fired outside the lock.
 		r.recordGovernanceDropEndVote(ctx, ct)
 		// Lifecycle: a post-close NON-vote reply ran enforceReplyBudget BEFORE this
 		// hook in Publish, which lazily RE-CREATES replyCounts[interactionID] (it
@@ -328,13 +333,19 @@ func (r *ChannelRouter) recordGovernanceDropEndVote(ctx context.Context, ct Chan
 //     pruned only here.
 //
 // ORDERING (discharged): the producer wires this seam via the resolver's
-// one-generation-deferred rotation discards (interaction_resolver.go, producer
-// plan IP4/IP7) — every retired id, idle-rotated and vote-closed alike, has
-// both maps pruned at its channel's next rotation. The deferral is the design,
-// not a gap: the close site deliberately cannot prune itself (the tombstone
-// must outlive any commit racing the close), and IP2's claim-override gives
-// "suppress late traffic" a natural endpoint, which is what makes the
-// tombstone prunable at all. Only router-minted uuids key these maps now.
+// one-generation-deferred discards (interaction_resolver.go, producer plan
+// IP4/IP7) — a retired id has both maps pruned at its channel's next rotation
+// OR next vote-close, whichever comes first ([ChannelRouter.markInteractionClosed]
+// discharges the previous retiree too). In a channel that never rotates
+// (thread, or an explicit 0 idle window) the next vote-close is the only
+// discharge point, so the most recent closed id's tombstone persists there
+// until one arrives — a deliberate bounded residue of at most one per
+// channel (pinned by TestInteractionResolver_NeverRotatingChannelBoundsTombstones),
+// not unbounded growth. The deferral is the design, not a gap: the close site
+// deliberately cannot prune itself (the tombstone must outlive any commit
+// racing the close), and IP2's claim-override gives "suppress late traffic" a
+// natural endpoint, which is what makes the tombstone prunable at all. Only
+// router-minted uuids key these maps now.
 func (r *ChannelRouter) DiscardInteractionEndVotes(interactionID string) {
 	if interactionID == "" {
 		return

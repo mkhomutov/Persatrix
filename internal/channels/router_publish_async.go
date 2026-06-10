@@ -211,7 +211,11 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// on the stamped value. From here on, every tracked publish belongs to a
 	// router-minted interaction; the stamped id persists with the message and
 	// rides the existing fanout lift to `ChannelMessageEvent.interaction_id`.
-	resolvedInteractionID := r.resolveInteractionID(ctx, msg.ChannelID, derivedType, readInteractionID(msg.Metadata))
+	// The settle hook reconciles the resolver to the persist outcome below —
+	// the resolver's half of the reply-reservation pattern, so a rejected
+	// publish neither retains a resolver entry nor advances the idle clock
+	// (see [ChannelRouter.settleInteraction]).
+	resolvedInteractionID, settleInteraction := r.resolveInteractionID(ctx, msg.ChannelID, derivedType, readInteractionID(msg.Metadata))
 	if msg.Metadata == nil {
 		msg.Metadata = map[string]any{}
 	}
@@ -223,8 +227,10 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// history (§F) and a store-rejected publish never erodes the allowance.
 	// Additive: a no-op when uncapped, untracked, or an exempt human.
 	if err := r.publishWithReplyBudget(ctx, msg, derivedType); err != nil {
+		settleInteraction(false)
 		return nil, err
 	}
+	settleInteraction(true)
 
 	if r.metrics != nil && r.metrics.MessagesPublished != nil {
 		r.metrics.MessagesPublished.Add(ctx, 1, metric.WithAttributes(attribute.String("channel_type", string(derivedType))))

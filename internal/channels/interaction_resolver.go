@@ -25,11 +25,18 @@ package channels
 // mutexes, so a concurrent commit that resolved the old id just before
 // rotation can bump `replyCounts[old]` after an immediate discard, recreating
 // the lifetime entry the seam exists to prune. Deferring lets every in-flight
-// commit (milliseconds) drain long before the seams fire (≥ one idle window
-// later), and keeps the `closedInteractions` tombstone alive across a Layer 4
-// close so the landed post-close self-heal keeps working in the interim. At
-// most one pending retiree per channel → the table is ≤ 2×`max_channels`
-// ids — bounded state, not a leak.
+// commit (milliseconds) drain long before the seams fire — ≥ one idle window
+// later on the idle path; generational (the channel's next rotation OR next
+// vote-close), not time-bounded, when quorum closes chain — and keeps the
+// `closedInteractions` tombstone alive across a Layer 4 close so the landed
+// post-close self-heal keeps working in the interim. In a channel that never
+// rotates (thread, or explicit 0 window) the next vote-close is the ONLY
+// discharge point, so the most recent closed id's tombstone persists there —
+// at most one per channel, the deliberate bounded residue. At most one
+// pending retiree per channel, and a rejected publish never retains an entry
+// ([ChannelRouter.settleInteraction] deletes a never-committed one), so the
+// table holds ≤ 2 ids per channel WITH PERSISTED HISTORY — bounded by real
+// channels, not by caller-supplied channel ids, and not a leak.
 //
 // The Layer 4 quorum close notifies the resolver via
 // [ChannelRouter.markInteractionClosed] (IP8) so the next publish mints fresh
@@ -63,8 +70,18 @@ const idleTrigger = "idle"
 // next rotation (IP4). A vote-close empties `id` (next resolve mints fresh)
 // while parking the closed id in `retired` so its tombstone outlives any
 // racing commit.
+//
+// `idCommitted` records whether the current `id` has at least one PERSISTED
+// publish, and `lastActivity` is the time of the channel's last persisted
+// publish — both written by [ChannelRouter.settleInteraction], never by the
+// resolve itself, so a rejected publish (non-member, throttled, store error)
+// is invisible to the idle clock. A minted-but-uncommitted id is tentative:
+// it never idle-rotates (rotating it would emit `interaction_closed` for an
+// interaction containing zero messages) and is adopted by the next committed
+// publish instead.
 type openInteraction struct {
 	id           string
+	idCommitted  bool
 	lastActivity time.Time
 	retired      string
 }
@@ -76,7 +93,23 @@ type openInteraction struct {
 // interactionMu — the discard seams take their own leaf mutexes, and holding
 // two governance mutexes at once would mint a lock-ordering edge no other
 // path has.
-func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID string, ct ChannelType, inbound string) string {
+//
+// The returned settle hook is the resolver's half of the reply-reservation
+// pattern ([ChannelRouter.enforceReplyBudget]'s release): the caller invokes
+// it exactly once, with the persist outcome, and only THAT advances the idle
+// clock or retains a fresh entry — see [ChannelRouter.settleInteraction].
+// The split is deliberate: minting and rotation stay visible at resolve time
+// because concurrent publishes must agree on the open id and a rotated id was
+// past its window regardless of this publish's fate (the rotation is lazy
+// either way — only its trigger moves from "next commit" to "next attempt"),
+// while everything that asserts "a publish happened" reconciles to
+// persistence. Without the split, a rejected publish leaks an entry keyed by
+// the caller-supplied channel id (the unauthenticated REST path reaches here
+// before the store's membership check — unbounded attacker-influenceable
+// growth), and a throttled participant's in-window retries hold its own
+// exhausted interaction open forever, so the idle rotation that would reset
+// its budget never fires.
+func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID string, ct ChannelType, inbound string) (string, func(persisted bool)) {
 	now := r.interactionNow()
 
 	r.interactionMu.Lock()
@@ -87,7 +120,10 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 	}
 	window := r.idleWindowLocked(channelID)
 	var rotated, discard string
-	if entry.id != "" && ct != ChannelTypeThread && window > 0 && now.Sub(entry.lastActivity) > window {
+	// Only a committed id can idle out: an uncommitted mint has no messages,
+	// so "rotating" it would close an interaction that never existed on the
+	// record (and its stale lastActivity predates the mint anyway).
+	if entry.id != "" && entry.idCommitted && ct != ChannelTypeThread && window > 0 && now.Sub(entry.lastActivity) > window {
 		rotated = entry.id
 		discard = entry.retired // the previous retiree's deferred seams fire now
 		entry.retired = rotated
@@ -95,8 +131,8 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 	}
 	if entry.id == "" {
 		entry.id = uuid.NewString()
+		entry.idCommitted = false
 	}
-	entry.lastActivity = now
 	resolved := entry.id
 	r.interactionMu.Unlock()
 
@@ -117,7 +153,45 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 			zap.String("claimed", inbound),
 			zap.String("resolved", resolved))
 	}
-	return resolved
+	return resolved, func(persisted bool) { r.settleInteraction(channelID, resolved, now, persisted) }
+}
+
+// settleInteraction reconciles the resolver table to the persist outcome of
+// one publish (the hook [ChannelRouter.resolveInteractionID] returned).
+//
+// Persisted: the resolved id becomes committed and the idle clock advances to
+// the resolve-time `now` — the ONLY writer of `lastActivity`, so the window
+// measures channel history, not attempts (the reply budget's "counter tracks
+// history, not attempts" invariant, applied to the clock). A nil entry here
+// means a concurrent rejected publish that shared this tentative mint settled
+// first and deleted it; recreate it so the persisted row's stamped id stays
+// the channel's open interaction.
+//
+// Rejected: drop the entry iff this publish's tentative state is ALL it holds
+// — same id, never committed, no pending retiree (a retiree implies committed
+// history whose deferred discard must still fire). That makes the table's
+// bound real: entries exist only for channels with at least one persisted
+// publish, never for arbitrary caller-supplied channel ids.
+func (r *ChannelRouter) settleInteraction(channelID, resolved string, now time.Time, persisted bool) {
+	r.interactionMu.Lock()
+	defer r.interactionMu.Unlock()
+	entry := r.openInteractions[channelID]
+	if !persisted {
+		if entry != nil && entry.id == resolved && !entry.idCommitted && entry.retired == "" {
+			delete(r.openInteractions, channelID)
+		}
+		return
+	}
+	if entry == nil {
+		entry = &openInteraction{id: resolved}
+		r.openInteractions[channelID] = entry
+	}
+	if entry.id == resolved {
+		entry.idCommitted = true
+	}
+	if now.After(entry.lastActivity) {
+		entry.lastActivity = now
+	}
 }
 
 // markInteractionClosed is the Layer 4 → resolver close notification (IP8):
