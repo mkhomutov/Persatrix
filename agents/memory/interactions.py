@@ -62,6 +62,7 @@ from .interaction_janitor import (
 )
 from .scopes import (
     SCOPE_TICK,
+    is_thread_scope,
     scope_for_channel_event,
     scope_for_dm,
     scope_for_group,
@@ -168,8 +169,28 @@ class Interaction:
 
     The ``structural_close_reason`` field is the marker that
     :class:`~agents.memory.boundary_detectors.StructuralCloseDetector`
-    consumes — channel-side hooks (PR 5) set it before invoking
-    :meth:`InteractionTracker.idle_check`.
+    consumes — an out-of-band call site that observes a structural
+    event sets it before the next :meth:`InteractionTracker.idle_check`
+    sweep.  The *channel-side* structural closes that landed with the
+    RFC 0030 interaction-id producer (end-of-interaction vote, wire
+    interaction-id rotation — ``persona_runtime/episode_routing.py``)
+    run inline on the event path and call
+    :meth:`InteractionTracker.close` directly instead, so the marker
+    remains the seam for detectors that cannot close synchronously.
+
+    ``wire_interaction_id`` (RFC 0030 interaction-id producer) is the
+    orchestrator-minted channel interaction id this local interaction
+    was opened under, seeded from the first turn's event metadata by
+    episode routing.  In-memory only — never persisted.  The agent's
+    own ``interaction_id`` stays the memory key (producer plan OQ 1
+    defers unification); this field exists solely so the routing path
+    can detect the channel's rotation boundary and close the local
+    scope structurally in step with the wire.  Its sibling
+    ``predecessor_wire_id`` (PR 607 second pass; also in-memory only)
+    is the retired wire id the opening turn attributed
+    (``previous_interaction_id``) — the rotation seam's late-delivery
+    defence, see :func:`~agents.persona_runtime.interaction_boundary
+    .wire_rotation_closes`.
     """
 
     interaction_id: str
@@ -179,6 +200,8 @@ class Interaction:
     closed_at: float | None = None
     close_reason: str = ""
     structural_close_reason: str = ""
+    wire_interaction_id: str = ""
+    predecessor_wire_id: str = ""
     # ISSUE-0081 PR 2: the RFC 0031 session captured when the interaction
     # *opened*, frozen for its lifetime.  Load-bearing for the
     # sibling-mislabel guard: ``idle_check`` can flush conversation B's
@@ -469,6 +492,7 @@ __all__ = [
     "SUMMARY_UNAVAILABLE_TEXT",
     "Turn",
     "cleanup_closing_interactions",
+    "is_thread_scope",
     "scope_for_channel_event",
     "scope_for_dm",
     "scope_for_group",

@@ -32,7 +32,19 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
-from agents.optimization import model_aliases as _load_alias_block
+# Relative import on purpose (was ``from agents.optimization import …``):
+# in the Docker images the package is installed as ``persatrix_agents``
+# while ``/app/agents`` is also importable via the WORKDIR, so an absolute
+# ``agents.…`` import here created a SECOND instance of the optimization
+# module with its own lru_cache and its own ``__file__``-relative config
+# path.  The split made alias resolution and ``summarization_model()``
+# read *different* configs in containers (aliases worked, summarisation
+# saw an empty config and warned ``Summarisation model '' is not
+# resolvable`` on every close).  The relative form keeps the whole
+# runtime on one module instance per namespace; the container config
+# path itself is pinned by ``PERSATRIX_OPTIMIZATION_CONFIG`` in
+# ``Dockerfile.agent``.
+from .optimization import model_aliases as _load_alias_block
 
 logger = logging.getLogger(__name__)
 

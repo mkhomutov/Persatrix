@@ -187,3 +187,44 @@ def test_interaction_id_non_string_rejected():
     """A non-string claim violates ``type: string``."""
     with pytest.raises(jsonschema.ValidationError):
         _validate({"interaction_id": 1234})
+
+
+# RFC 0030 producer plan OQ 5 (v0.3.8, PR 607 second-pass review) — the
+# router-stamped close-cause pair. Same documentary posture as
+# ``interaction_id`` above: the runtime is tolerant (inbound claims are
+# STRIPPED on commit; the dispatcher lift and the agent seed validate the
+# pair and degrade to absent), the schema is the strict expression of the
+# vocabulary. Note JSON Schema cannot express the cross-field "set iff the
+# sibling is set" rule — that pairing is enforced at the runtime
+# boundaries (``readPreviousClose`` / ``seed_wire_metadata``) and
+# documented in each entry's description.
+
+
+def test_previous_close_pair_accepted():
+    _validate({
+        "previous_interaction_id": "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d",
+        "previous_interaction_close_trigger": "idle",
+    })
+    _validate({
+        "previous_interaction_id": "4e2b7c9a-1f3d-4a6b-8c2e-9d0f1a2b3c4d",
+        "previous_interaction_close_trigger": "end_votes",
+    })
+
+
+def test_previous_close_trigger_vocabulary_is_closed():
+    """The trigger is the §L instrument vocabulary — an out-of-vocabulary
+    value is schema-illegal (the runtime drops the whole pair instead)."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate({
+            "previous_interaction_id": "wire-A",
+            "previous_interaction_close_trigger": "cosmic-rays",
+        })
+
+
+def test_previous_interaction_id_over_max_length_rejected():
+    """Same 128 bound as ``interaction_id`` — the pair shares its id space."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate({
+            "previous_interaction_id": "x" * 129,
+            "previous_interaction_close_trigger": "idle",
+        })

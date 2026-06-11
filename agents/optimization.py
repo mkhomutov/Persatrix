@@ -40,6 +40,26 @@ _DEFAULT_CONFIG_PATH: Path = (
     Path(__file__).resolve().parent.parent / "config" / "optimization.yaml"
 )
 
+# Container note.  In the Docker images the agents/ tree is pip-installed
+# as the ``persatrix_agents`` package (Dockerfile.agent), so the
+# package-relative default above resolves to ``<site-packages>/config/…`` —
+# which does not exist; only ``prompts/`` is copied into site-packages.
+# Before v0.3.8 every accessor in this module therefore silently returned
+# its default in containers (e.g. ``summarization_model() == ""`` → the
+# close-path summary degraded to the "[interaction summary unavailable]"
+# sentinel with a per-close WARN), while alias resolution kept working only
+# because ``model_aliases.py`` imported this module by its repo-absolute
+# name (``agents.optimization``) — a second module instance whose
+# ``__file__`` lived under /app.  See the import note in
+# :mod:`agents.model_aliases`.  The container path is pinned at the
+# deployment layer — ``Dockerfile.agent`` sets
+# ``PERSATRIX_OPTIMIZATION_CONFIG=/app/config/optimization.yaml`` (the
+# in-image ``COPY config/`` / compose bind-mount location) — NOT by a
+# CWD-relative fallback here: library resolution must not depend on the
+# process working directory, or any ``config/optimization.yaml`` lying in
+# an unrelated CWD silently takes over model selection (PR 607 review
+# finding 6).
+
 
 @lru_cache(maxsize=1)
 def _load_config() -> dict[str, Any]:
@@ -49,15 +69,37 @@ def _load_config() -> dict[str, Any]:
     an empty dict so accessors fall through to defaults.  The cache is
     process-wide; tests that mutate the file should call
     :func:`reset_cache` before re-reading.
+
+    Resolution order: ``PERSATRIX_OPTIMIZATION_CONFIG`` env var when
+    set to a non-empty value (containers pin it in ``Dockerfile.agent``;
+    an empty value means "unset", not "open the empty path"); else the
+    package-relative default (the repo checkout case); else built-in
+    defaults via the missing-file handler below.
     """
-    config_path = Path(
-        os.environ.get("PERSATRIX_OPTIMIZATION_CONFIG", _DEFAULT_CONFIG_PATH),
-    )
+    env_path = os.environ.get("PERSATRIX_OPTIMIZATION_CONFIG")
+    config_path = Path(env_path) if env_path else _DEFAULT_CONFIG_PATH
     try:
         with config_path.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
     except FileNotFoundError:
-        logger.debug("optimization.yaml not found at %s; using defaults", config_path)
+        if env_path:
+            # An EXPLICITLY pinned path that does not exist is a deployment
+            # bug (a typo'd ENV in a derived image, a dropped COPY config/),
+            # and a silent degrade re-enters the exact pre-v0.3.8 arc the
+            # env pin exists to kill — the per-close "Summarisation model
+            # '' is not resolvable" WARN names the model, never the path
+            # (PR 607 second-pass review).  The package-default miss below
+            # stays DEBUG: absent-by-default is the ordinary non-container
+            # case.
+            logger.warning(
+                "PERSATRIX_OPTIMIZATION_CONFIG points at %s but no file "
+                "exists there; using built-in defaults",
+                config_path,
+            )
+        else:
+            logger.debug(
+                "optimization.yaml not found at %s; using defaults", config_path,
+            )
         return {}
     except (OSError, yaml.YAMLError) as exc:
         logger.warning(

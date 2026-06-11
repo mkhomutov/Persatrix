@@ -31,6 +31,28 @@ from .persona_types import AgentEvent
 # over the 36-byte uuid4.
 _INTERACTION_ID_MAX_BYTES = 128
 
+# The close triggers the orchestrator's resolver actually stamps onto
+# ``previous_interaction_close_trigger`` (producer plan OQ 5) — the §L
+# instrument vocabulary, mirroring Go's ``idleTrigger`` /
+# ``endVotesTrigger`` (``internal/channels/interaction_resolver.go`` /
+# ``end_vote.go``; pinned by the cross-language drift test). Allowlisted at
+# this seed point because the value drives the close *reason* persisted on
+# the local interaction record: an unrecognised string from a non-Go (or
+# compromised) producer must degrade to the legacy label, never ride into
+# ``close_reason`` verbatim.
+#
+# Public (PR 607 second-pass review): this module is the single Python
+# source of the trigger vocabulary — the rotation-close seam
+# (``persona_runtime/interaction_boundary.py``) imports the idle value
+# instead of re-declaring it, so growing the vocabulary (the reserved
+# ``cost`` trigger) is one edit per language, held to Go by one drift pin.
+WIRE_CLOSE_TRIGGER_IDLE = "idle"
+WIRE_CLOSE_TRIGGER_END_VOTES = "end_votes"
+WIRE_CLOSE_TRIGGERS = frozenset({
+    WIRE_CLOSE_TRIGGER_IDLE,
+    WIRE_CLOSE_TRIGGER_END_VOTES,
+})
+
 
 def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, object]:
     """Build the CHANNEL_MESSAGE ``AgentEvent.payload`` from the wire event.
@@ -111,9 +133,94 @@ def seed_wire_metadata(
     # interaction, so fall back to absent rather than truncate. See
     # ``_INTERACTION_ID_MAX_BYTES`` for why the bound must hold at this seed
     # point and not only at publish.
-    interaction_id = request.interaction_id
+    # The OQ 5 pair is seeded by the shared core below; see its notes.
+    _seed_validated_interaction_keys(
+        event.metadata,
+        interaction_id=request.interaction_id,
+        prev_id=request.previous_interaction_id,
+        prev_trigger=request.previous_interaction_close_trigger,
+    )
+
+
+def _seed_validated_interaction_keys(
+    metadata: dict[str, object],
+    *,
+    interaction_id: str,
+    prev_id: str,
+    prev_trigger: str,
+) -> None:
+    """The shared validation core behind both wire-ingress paths (the live
+    gRPC lift above and the catch-up replay's :func:`seed_replay_metadata`).
+
+    ``interaction_id``: only a non-empty value within
+    ``_INTERACTION_ID_MAX_BYTES`` — an over-length claim degrades to
+    untracked rather than truncating (a clipped opaque token would key a
+    *different* interaction).
+
+    Producer plan OQ 5: the retired predecessor's id + close trigger, the
+    close-cause attribution the rotation-close seam
+    (``persona_runtime/interaction_boundary.py``) uses to label the local
+    boundary truthfully (``idle_gap`` vs ``structural``). Seeded only as a
+    validated PAIR — the trigger is meaningless without the id it
+    attributes (the seam applies it only when the id matches the wire id
+    its open record was opened under), and a lone trigger could mislabel a
+    mismatched generation. The id gets the same byte bound as
+    ``interaction_id``; the trigger must be in the resolver's §L
+    vocabulary. Anything else — absent (old orchestrator, fresh channel,
+    post-restart re-mint), oversized, or unrecognised — seeds nothing and
+    the rotation close keeps its pre-OQ5 structural label (the
+    mixed-version contract).
+    """
     if interaction_id and len(interaction_id.encode("utf-8")) <= _INTERACTION_ID_MAX_BYTES:
-        event.metadata["interaction_id"] = interaction_id
+        metadata["interaction_id"] = interaction_id
+    if (
+        prev_id
+        and len(prev_id.encode("utf-8")) <= _INTERACTION_ID_MAX_BYTES
+        and prev_trigger in WIRE_CLOSE_TRIGGERS
+    ):
+        metadata["previous_interaction_id"] = prev_id
+        metadata["previous_interaction_close_trigger"] = prev_trigger
 
 
-__all__ = ["channel_event_payload", "seed_wire_metadata"]
+def seed_replay_metadata(
+    metadata: dict[str, object], row_metadata: object,
+) -> None:
+    """Lift the validated wire interaction keys off a persisted REST
+    history row onto a catch-up replay event's metadata (PR 607
+    second-pass review).
+
+    The history response (``messageToResponse``) returns the
+    router-stamped metadata bag verbatim, so the same three keys the live
+    path receives as typed proto fields arrive here as untyped JSON —
+    re-validated with exactly the live seed point's rules (byte bound,
+    pair-or-nothing, trigger allowlist), with non-string values reading
+    as absent.  Without this lift a replayed span covering a vote-closed
+    conversation and the channel's next topic merges into one local
+    record, and the merged record opens with no wire id so the first
+    LIVE id reads as adoption-not-rotation — the close propagation
+    silently disarmed after every restart.  Rows persisted before
+    v0.3.8 carry none of the keys and replay exactly as before.
+    """
+    if not isinstance(row_metadata, dict):
+        return
+
+    def _str(key: str) -> str:
+        value = row_metadata.get(key, "")
+        return value if isinstance(value, str) else ""
+
+    _seed_validated_interaction_keys(
+        metadata,
+        interaction_id=_str("interaction_id"),
+        prev_id=_str("previous_interaction_id"),
+        prev_trigger=_str("previous_interaction_close_trigger"),
+    )
+
+
+__all__ = [
+    "WIRE_CLOSE_TRIGGER_END_VOTES",
+    "WIRE_CLOSE_TRIGGER_IDLE",
+    "WIRE_CLOSE_TRIGGERS",
+    "channel_event_payload",
+    "seed_replay_metadata",
+    "seed_wire_metadata",
+]

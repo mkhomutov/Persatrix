@@ -10,7 +10,12 @@ pinned the same way in three places — and the posture's other half is a
 lock-step drift guard (``test_channel_validation.py``'s
 ``test_sentinel_agrees_across_modules``). The vote producer (RFC 0030
 producer plan PR 2) added a third ``_DM_CHANNEL_PREFIX`` pin for its DM
-vote gate, which is the copy count where silent divergence stops being
+vote gate.  (The close-propagation follow-up briefly added a fourth in
+``interaction_boundary.py``; the PR 607 second-pass review removed it —
+the vote-close park now gates on the resolved scope KIND via
+``agents.memory.scopes.is_group_scope``, so the agent-local mirror
+classifies DMs through the scope builder instead of a re-declared
+prefix.) Three copies is already where silent divergence stops being
 hypothetical: a one-sided change leaves that side's suite green while a
 DM stops classifying as a DM there — e.g. the vote gate lets a flagged
 vote into a DM and Go's ``processEndVote`` counts it toward a quorum.

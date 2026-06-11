@@ -15,12 +15,18 @@ implementations the RFC's hybrid policy calls for:
   implementation always returns ``False`` so v0.3.0 ships behavioural
   parity with structural + idle-gap only.
 
-PR 1 (this PR) ships the interfaces and registries; PR 3 wires
-:class:`IdleGapDetector` into the runtime, and PR 5 wires structural
-triggers into the channel pipeline.  The detectors are deliberately
-state-free — all interaction state lives on the :class:`Interaction`
-object passed in — so Phase 4's topic-shift implementation can be
-swapped in behind a config flag without touching the tracker.
+PR 1 shipped the interfaces and registries; PR 3 wired
+:class:`IdleGapDetector` into the runtime.  The channel-side structural
+triggers landed with the RFC 0030 interaction-id producer
+(``persona_runtime/episode_routing.py``): the end-of-interaction vote
+and the wire interaction-id rotation both close the scope inline via
+:meth:`InteractionTracker.close` rather than through the
+``structural_close_reason`` marker — the marker remains the seam for
+out-of-band call sites that cannot close synchronously.  The detectors
+are deliberately state-free — all interaction state lives on the
+:class:`Interaction` object passed in — so Phase 4's topic-shift
+implementation can be swapped in behind a config flag without touching
+the tracker.
 """
 
 from __future__ import annotations
@@ -126,13 +132,17 @@ class BoundaryDetector(Protocol):
 class StructuralCloseDetector:
     """Highest-priority detector — deterministic, free.
 
-    PR 1 ships only the marker-evaluation logic: a tracker call site
-    that observes a structural event (thread archive, channel leave,
-    explicit ``END_INTERACTION`` action, process shutdown) sets
+    Marker-evaluation logic only: a tracker call site that observes a
+    structural event (thread archive, channel leave, explicit
+    ``END_INTERACTION`` action, process shutdown) sets
     ``Interaction.structural_close_reason`` to the appropriate
     ``REASON_*`` constant before invoking ``idle_check``.  The
-    channel-side hooks that *write* the marker land in PR 5, jointly
-    with RFC 0011 PR plan PR 5.
+    channel-side structural closes that exist in production (the RFC
+    0030 end-of-interaction vote and the wire interaction-id rotation,
+    ``persona_runtime/episode_routing.py``) run inline on the event
+    path and call :meth:`InteractionTracker.close` directly — they do
+    not route through this marker, which stays available for
+    out-of-band detectors (and is exercised by the tracker unit tests).
     """
 
     def evaluate(

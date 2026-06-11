@@ -215,11 +215,24 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// the resolver's half of the reply-reservation pattern, so a rejected
 	// publish neither retains a resolver entry nor advances the idle clock
 	// (see [ChannelRouter.settleInteraction]).
-	resolvedInteractionID, settleInteraction := r.resolveInteractionID(ctx, msg.ChannelID, derivedType, readInteractionID(msg.Metadata))
+	resolvedInteractionID, prevClose, settleInteraction := r.resolveInteractionID(ctx, msg.ChannelID, derivedType, readInteractionID(msg.Metadata))
 	if msg.Metadata == nil {
 		msg.Metadata = map[string]any{}
 	}
 	msg.Metadata[interactionIDMetadataKey] = resolvedInteractionID
+	// OQ 5 close-cause attribution: stamp the retired predecessor's id +
+	// trigger ("idle"/"end_votes") so the agent-side rotation close can pick
+	// the truthful close reason. Inbound claims are deleted first — like the
+	// interaction id itself, the cause is resolver-authoritative and a
+	// publisher-supplied value must never drive receiver close labels. No
+	// retiree (fresh channel, post-restart re-mint) stamps nothing: absent is
+	// the documented "unknown" the receiver keeps its legacy label for.
+	delete(msg.Metadata, previousInteractionIDMetadataKey)
+	delete(msg.Metadata, previousInteractionTriggerMetadataKey)
+	if prevClose.id != "" {
+		msg.Metadata[previousInteractionIDMetadataKey] = prevClose.id
+		msg.Metadata[previousInteractionTriggerMetadataKey] = prevClose.trigger
+	}
 
 	// RFC 0030 Layer 2 (v0.3.8) per-participant reply budget + store commit:
 	// reserve the sender's slot, persist, and release the reservation if the

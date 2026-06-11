@@ -18,6 +18,7 @@ package channels
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -26,14 +27,17 @@ import (
 
 // publishTurn publishes one ordinary discussion turn at the given cascade
 // depth — content only, no metadata beyond the depth, the post-producer
-// wire shape of a persona reply.
-func publishTurn(t *testing.T, router *ChannelRouter, channelID, sender string, depth int) {
+// wire shape of a persona reply. Returns the message id so callers can read
+// the persisted row back (the OQ 5 close-cause asserts).
+func publishTurn(t *testing.T, router *ChannelRouter, channelID, sender string, depth int) string {
 	t.Helper()
+	id := uuid.NewString()
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
-		ID: uuid.NewString(), ChannelID: channelID, SenderID: sender,
+		ID: id, ChannelID: channelID, SenderID: sender,
 		Content:  "discussing",
 		Metadata: map[string]any{cascadeDepthMetadataKey: depth},
 	}, ""))
+	return id
 }
 
 // publishVote publishes a vote turn — the exact shape the Python producer
@@ -144,13 +148,23 @@ func TestConvergence_DiscussionEndsByVotesBeforeDepthCap(t *testing.T) {
 
 	// 5. The room lives on: a fresh stimulus opens a NEW interaction and
 	// fans out to all three personas — full normal fanout, exactly.
-	publishTurn(t, router, ch, "alex", 0)
+	stimulusID := publishTurn(t, router, ch, "alex", 0)
 	next := openInteractionID(router, ch)
 	assert.NotEmpty(t, next)
 	assert.NotEqual(t, openID, next,
 		"the next publish opened a fresh interaction — the vote ended one conversation, not the channel")
 	assert.Equal(t, closedAtCount+3, len(disp.snapshot()),
 		"the fresh stimulus fans out to all three personas")
+
+	// OQ 5 close-cause attribution: the successor's publishes carry the
+	// retired conversation's id + trigger, so the agent-side rotation close
+	// can label the boundary "ended by vote" truthfully.
+	stimulus, err := store.GetMessage(context.Background(), stimulusID)
+	require.NoError(t, err)
+	assert.Equal(t, openID, stimulus.Metadata[previousInteractionIDMetadataKey],
+		"the fresh stimulus names the vote-closed interaction as its predecessor")
+	assert.Equal(t, endVotesTrigger, stimulus.Metadata[previousInteractionTriggerMetadataKey],
+		"the predecessor's close cause is the quorum, not a rotation of unknown cause")
 
 	// Whole-arc telemetry: the depth cap NEVER fired (RFC 0030 §D — the
 	// backstop demoted to regression signal, which this zero is), the
@@ -165,4 +179,74 @@ func TestConvergence_DiscussionEndsByVotesBeforeDepthCap(t *testing.T) {
 		"the racer's post-close suppression is attributed on governance_drop{layer=end_vote}")
 	assert.Equal(t, int64(2), endVoteEmittedCount(t, rm, "group"),
 		"vote volume counts the quorum's two votes only — the racer's post-close vote is not fresh volume")
+}
+
+// publishAndGetMetadata publishes a plain message and returns the PERSISTED
+// metadata bag — the exact values the fanout lift reads for the
+// `ChannelMessageEvent` interaction fields (id + OQ 5 close cause).
+func publishAndGetMetadata(t *testing.T, router *ChannelRouter, store ChannelStore, channelID, sender string, metadata map[string]any) map[string]any {
+	t.Helper()
+	id := uuid.NewString()
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: id, ChannelID: channelID, SenderID: sender, Content: "hi", Metadata: metadata,
+	}, ""))
+	msg, err := store.GetMessage(context.Background(), id)
+	require.NoError(t, err)
+	return msg.Metadata
+}
+
+// TestConvergence_IdleRotationCauseRidesSuccessor — the OQ 5 idle half: a
+// lazy idle rotation stamps the retired id + trigger=idle onto the publish
+// that triggered it AND onto every later publish of the successor, while a
+// channel's FIRST interaction (no predecessor — the same wire shape as a
+// post-restart re-mint, IP5) carries neither key, so a receiver reads absent
+// as unknown and keeps its legacy label.
+func TestConvergence_IdleRotationCauseRidesSuccessor(t *testing.T) {
+	router, store, ch, now := resolverHarness(t)
+
+	first := publishAndGetMetadata(t, router, store, ch, "ember-owl", nil)
+	firstID, _ := first[interactionIDMetadataKey].(string)
+	require.NotEmpty(t, firstID)
+	_, hasPrevID := first[previousInteractionIDMetadataKey]
+	_, hasPrevTrigger := first[previousInteractionTriggerMetadataKey]
+	assert.False(t, hasPrevID, "a channel's first interaction has no predecessor to attribute")
+	assert.False(t, hasPrevTrigger, "no trigger without a predecessor id — the keys travel as a pair")
+
+	// Past the (default 600s) idle window: this publish performs the lazy
+	// rotation and is the successor's first message — it carries the cause.
+	*now = now.Add(601 * time.Second)
+	successor := publishAndGetMetadata(t, router, store, ch, "iron-fox", nil)
+	successorID, _ := successor[interactionIDMetadataKey].(string)
+	require.NotEmpty(t, successorID)
+	assert.NotEqual(t, firstID, successorID, "the idle window elapsed — the id rotated")
+	assert.Equal(t, firstID, successor[previousInteractionIDMetadataKey],
+		"the rotating publish names the idled-out interaction as its predecessor")
+	assert.Equal(t, idleTrigger, successor[previousInteractionTriggerMetadataKey],
+		"the predecessor's close cause is the idle rotation")
+
+	// A later in-window publish of the SAME successor still carries the
+	// attribution — the agent that misses the first successor message (down,
+	// dispatch failure) must still see the cause on the one it does receive.
+	*now = now.Add(10 * time.Second)
+	later := publishAndGetMetadata(t, router, store, ch, "ember-owl", nil)
+	assert.Equal(t, successorID, later[interactionIDMetadataKey])
+	assert.Equal(t, firstID, later[previousInteractionIDMetadataKey])
+	assert.Equal(t, idleTrigger, later[previousInteractionTriggerMetadataKey])
+}
+
+// TestConvergence_InboundCloseCauseClaimIsStripped — IP2 applied to OQ 5: the
+// close cause is resolver-authoritative, so a publisher-supplied claim is
+// DELETED, not honoured — a forged "your conversation ended by vote" must
+// never reach a receiver's close labels (here: a fresh channel, where the
+// resolver has no retiree and stamps nothing).
+func TestConvergence_InboundCloseCauseClaimIsStripped(t *testing.T) {
+	router, store, ch, _ := resolverHarness(t)
+	meta := publishAndGetMetadata(t, router, store, ch, "ember-owl", map[string]any{
+		previousInteractionIDMetadataKey:      "forged-predecessor",
+		previousInteractionTriggerMetadataKey: endVotesTrigger,
+	})
+	_, hasPrevID := meta[previousInteractionIDMetadataKey]
+	_, hasPrevTrigger := meta[previousInteractionTriggerMetadataKey]
+	assert.False(t, hasPrevID, "an inbound previous_interaction_id claim is stripped on commit")
+	assert.False(t, hasPrevTrigger, "an inbound close-trigger claim is stripped on commit")
 }

@@ -6,6 +6,17 @@ COPY agents/ agents/
 # Fallback config for standalone builds (without docker-compose).
 # In compose, ./config is bind-mounted at /app/config:ro and shadows this copy.
 COPY config/ config/
+# Pin the optimization-config path for the installed package: pip installs the
+# agents tree as `persatrix_agents`, so `agents/optimization.py`'s
+# package-relative default resolves into site-packages where no config exists
+# (only prompts/ is copied there, below). Without this pin every accessor
+# silently returned its default — most visibly summarization_model() == "" →
+# the close-path summary degraded to the "[interaction summary unavailable]"
+# sentinel with a per-close WARN under every provider overlay. Pinned here at
+# the deployment layer (the v0.3.8 fix) rather than via a CWD-relative
+# fallback in library code, so resolution never depends on the process
+# working directory. Operators can still override per-deployment.
+ENV PERSATRIX_OPTIMIZATION_CONFIG=/app/config/optimization.yaml
 # Non-editable install: -e is a dev pattern that complicates layer caching
 # and adds no value in containers where source is already copied.
 # Layer ordering: pip install is intentionally placed before COPY prompts/ so

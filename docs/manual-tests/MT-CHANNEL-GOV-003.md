@@ -139,6 +139,16 @@ from me…").
   decision (relay vs. beacon) — the converged outcome, not a blank or the
   `[interaction summary unavailable]` sentinel. The console's conversation
   view shows the "interaction closed" affordance below the turns.
+- **Timing note** (see the
+  [channels guide §"When the row appears"](../guides/channels.md#the-interaction-summary-surface-rfc-0020--v038)):
+  the row queried here is a *voter's* — a persona closes its local record
+  as soon as its `END_INTERACTION_VOTE` *publish succeeds* (the close is
+  parked at decide time and confirmed by the publish outcome; a vote whose
+  publish fails closes nothing), so it exists by the time the vote is
+  visible in channel history. A non-voting member (`ember-owl`, if it was drawn in)
+  closes its record only on the channel's next publish carrying the
+  rotated interaction id (Step 4) or on its own idle window — querying it
+  at this step may legitimately return nothing yet.
 
 **Verification**:
 - [ ] The summary names the decision the personas converged on.
@@ -202,10 +212,27 @@ traffic.
 
 | Date | Tester | Build | Result | Notes |
 |------|--------|-------|--------|-------|
-|      |        |       |        |       |
+| 2026-06-11 | Claude (for mkhomutov) | `693da8f` (anthropic overlay) | PASS — Steps 1–4 | Re-run after the close-propagation fix; clean epoch (`make reset`), container code verified byte-identical to HEAD. Step 1: one shared `interaction_id` across the whole discussion, no row missing it. Step 2: both participants emitted `end_interaction_vote: true`; close fired on the 2nd distinct vote (`trigger=end_votes`, `votes=2`); room quiet 90s+ after; zero depth drops. Step 3 (prior FAIL) now PASSES: both voters' records close as `structural` (CLI renders "Conversation ended"); nova-sparrow's summary names the converged outcome ("decided to name their new service 'Beacon' … finalized"); iron-fox (first voter) closed at its own vote publish so its summary names the candidates but not the final agreement — consistent with the §Step-3 timing note. Step 4: retro topic drew both personas on a fresh `interaction_id`. Deviations: Tier B salience suppressed the open-floor prompt for iron-fox (one 13-token gate call, silent suppress) — `--mention` nudges used for the follow-ups, same calibration caveat as the prior run; no `not resolvable` WARNs (container config-path fix confirmed). |
+| 2026-06-11 | Claude (for mkhomutov) | `a784cbd` (anthropic overlay) | PARTIAL — Steps 1/2/4 pass, Step 3 fails | Live votes work: iron-fox + nova-sparrow both emitted structured `END_INTERACTION_VOTE`s; close fired on the 2nd distinct vote (`trigger=end_votes`, `votes=2`); zero depth drops; next topic opened a fresh interaction. Step 3 FAIL: the vote close never reaches `agent interactions` — no production writer of `structural_close_reason` (channel-side hook documented in `boundary_detectors.py` but only set in unit tests), and `recordInteractionClosed` (Go) only logs + counts. Calibration notes: Tier B salience (unset threshold → 0.8 bar) suppressed every open-floor prompt incl. a by-name text address — only structured `--mention` drew replies; Edge Case 1 idle rotation observed live (lazy `trigger=idle` on next publish). `Summarisation model '' is not resolvable` WARN observed — diagnosed at the time as an overlay gap, later traced to the container config path instead (the overlay was never at fault; see Notes). |
 
 ## Notes
 
 - The votes are real messages in channel history — they survive as the
   conversation's visible ending, which is the design (an audit trail of who
   judged it done).
+- The 2026-06-11 Step 3 FAIL was a real wire gap, fixed after that run: no
+  agent-side writer closed the local interaction when the channel
+  conversation ended, so the record only ever closed as `idle_gap`. The
+  close now propagates via `agents/persona_runtime/interaction_boundary.py`
+  (a voter closes its scope structurally once its vote publish succeeds —
+  publish-confirmed, so a failed publish closes nothing; everyone else
+  closes on the wire interaction-id rotation), and the run's
+  `Summarisation model '' is not resolvable` WARN was a container
+  config-path bug (the pip-installed package resolved
+  `site-packages/config/optimization.yaml`), not an overlay gap — fixed by
+  pinning `PERSATRIX_OPTIMIZATION_CONFIG=/app/config/optimization.yaml` in
+  `Dockerfile.agent` (a CWD-relative fallback in `agents/optimization.py`
+  was considered and rejected: model selection must not follow the process
+  working directory). The 2026-06-11 re-run at `693da8f` confirmed both
+  fixes live: the voter records now close `structural`, and the WARN is
+  gone.

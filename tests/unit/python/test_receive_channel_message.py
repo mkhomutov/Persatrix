@@ -27,68 +27,30 @@ wire traces can locate the failure class.
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import grpc
 import pytest
 
-from agents.base import BaseAgent, TaskInput, TaskOutput, TaskStatus
-from agents.dispatch import EventDispatcher
 from agents.generated import task_pb2
 from agents.persona_types import AgentEvent, EventType
-from agents.server_servicers import AgentServiceServicer
 
-
-class _StubAgent(BaseAgent):
-    async def handle(self, task: TaskInput) -> TaskOutput:
-        return TaskOutput(status=TaskStatus.COMPLETED, result="ok")
-
-
-def _make_servicer(
-    *,
-    agents: dict[str, BaseAgent] | None = None,
-    enqueue_accepts: bool = True,
-) -> tuple[AgentServiceServicer, MagicMock]:
-    """Build a servicer over a mock dispatcher.
-
-    ``enqueue_inbound`` is a *synchronous* method returning a bool
-    (accepted / dropped); model it with a plain ``MagicMock`` so tests
-    can assert call args and toggle the backpressure outcome.
-    """
-    if agents is None:
-        agents = {"ember-owl": _StubAgent(agent_id="ember-owl", config={"model": "test"})}
-    dispatcher = MagicMock(spec=EventDispatcher)
-    dispatcher.enqueue_inbound = MagicMock(return_value=enqueue_accepts)
-    return AgentServiceServicer(agents, dispatcher), dispatcher
-
-
-def _channel_event(**overrides: Any) -> task_pb2.ChannelMessageEvent:
-    fields: dict[str, Any] = {
-        "message_id": "msg-001",
-        "channel_id": "group:general",
-        "channel_type": "group",
-        "sender_id": "iron-fox",
-        "content": "hello",
-        "timestamp": "2026-05-04T00:00:00Z",
-        "thread_id": "",
-        "mentions": [],
-        # RFC 0011 PR 4b additions: validator now requires
-        # ``respond_policy``. Default to ``always`` so the existing
-        # cases keep passing; gate-specific tests live in
-        # ``test_response_gate.py``.
-        "respond_policy": "always",
-        "thread_parent_sender_id": "",
-    }
-    fields.update(overrides)
-    return task_pb2.ChannelMessageEvent(**fields)
-
-
-def _enqueued_event(dispatcher: MagicMock) -> AgentEvent:
-    """The ``AgentEvent`` the handler passed to ``enqueue_inbound``."""
-    dispatcher.enqueue_inbound.assert_called_once()
-    return dispatcher.enqueue_inbound.call_args.args[1]
-
+# Servicer/event builders shared with the OQ 5 seeding suite
+# (test_receive_channel_message_close_cause.py) — extracted for the
+# 500-line cap; aliased to the historical private names so the existing
+# cases below read unchanged.
+from ._receive_channel_message_helpers import (
+    StubAgent as _StubAgent,
+)
+from ._receive_channel_message_helpers import (
+    channel_event as _channel_event,
+)
+from ._receive_channel_message_helpers import (
+    enqueued_event as _enqueued_event,
+)
+from ._receive_channel_message_helpers import (
+    make_servicer as _make_servicer,
+)
 
 # ─── Happy path ────────────────────────────────────────────
 

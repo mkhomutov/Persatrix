@@ -21,7 +21,7 @@ and binding API.
 from __future__ import annotations
 
 import logging
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -69,6 +69,44 @@ class TestExecutorPublishesVote:
         assert kwargs["cascade_depth"] == 3
         assert kwargs["metadata"] == {"end_interaction_vote": True}
         assert kwargs["content"].strip(), "the vote carries a readable sign-off"
+
+    @pytest.mark.asyncio
+    async def test_park_token_is_echoed_not_published(self):
+        """The decide-time park stamps a correlation token onto the vote
+        action (``VOTE_CLOSE_TOKEN_KEY``); the executor must echo it in
+        the result dict — the outcome callback's correlation handle — and
+        must NOT leak it onto the wire (the publish metadata carries only
+        the vote flag)."""
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        executor = ActionExecutor(channel_publisher=publisher)
+
+        results = await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning",
+                   "vote_close_token": "tok-1"}),
+        ])
+
+        assert results[0]["vote_close_token"] == "tok-1"
+        kwargs = publisher.publish.await_args.kwargs
+        assert kwargs["metadata"] == {"end_interaction_vote": True}
+        assert "tok-1" not in kwargs["content"]
+
+    @pytest.mark.asyncio
+    async def test_park_token_rides_every_channel_carrying_status(self):
+        """Failure statuses correlate too: a failed publish must consume
+        one in-flight slot of the SAME park that stamped it, so every
+        status that carries the channel also carries the token."""
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(side_effect=RuntimeError("boom"))
+        executor = ActionExecutor(channel_publisher=publisher)
+
+        results = await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning",
+                   "vote_close_token": "tok-2"}),
+        ])
+
+        assert results[0]["status"] == "failed"
+        assert results[0]["vote_close_token"] == "tok-2"
 
     @pytest.mark.asyncio
     async def test_vote_content_payload_honoured(self):
@@ -247,3 +285,160 @@ class TestVotePromptVocabulary:
 
         src = Path("agents/persona_runtime/prompt_assembly.py").read_text(encoding="utf-8")
         assert 'load_snippet("end-interaction-vote")' in src
+
+
+class TestVotePublishOutcomeCallback:
+    """PR 607 review finding 5 — the executor reports the vote publish
+    outcome back to the voter (``resolve_end_vote_publish``) so the
+    decide-time PARKED local close is discharged: closed on success,
+    dropped on failure.  Best-effort: a missing dispatcher/agent or a
+    callback error never fails the action."""
+
+    def _executor_with_agent(self, publisher) -> tuple[ActionExecutor, AsyncMock]:
+        agent = AsyncMock()
+        agent.resolve_end_vote_publish = AsyncMock(return_value=None)
+        dispatcher = MagicMock()
+        dispatcher.get_agent = MagicMock(return_value=agent)
+        executor = ActionExecutor(
+            dispatcher=dispatcher, channel_publisher=publisher,
+        )
+        return executor, agent
+
+    @pytest.mark.asyncio
+    async def test_published_outcome_reports_success(self):
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        executor, agent = self._executor_with_agent(publisher)
+
+        await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning",
+                   "vote_close_token": "tok-1"}),
+        ])
+
+        agent.resolve_end_vote_publish.assert_awaited_once_with(
+            "group:planning", published=True, token="tok-1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_unstamped_vote_reports_empty_token(self):
+        """A vote the decide-time park never stamped (a threaded turn, a
+        DM/thread scope the seam exempts) reports ``token=""`` — the
+        discharge treats that as "not my vote" and leaves any parked
+        close alone (the stale-park cross-discharge fix)."""
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        executor, agent = self._executor_with_agent(publisher)
+
+        await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning"}),
+        ])
+
+        agent.resolve_end_vote_publish.assert_awaited_once_with(
+            "group:planning", published=True, token="",
+        )
+
+    @pytest.mark.asyncio
+    async def test_failed_publish_reports_failure(self):
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(side_effect=RuntimeError("boom"))
+        executor, agent = self._executor_with_agent(publisher)
+
+        await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning",
+                   "vote_close_token": "tok-1"}),
+        ])
+
+        agent.resolve_end_vote_publish.assert_awaited_once_with(
+            "group:planning", published=False, token="tok-1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_publisher_reports_failure(self):
+        """The legacy path publishes nothing — the park must be dropped,
+        so the not_implemented result carries the bound channel and the
+        callback reports a non-publish."""
+        executor, agent = self._executor_with_agent(None)
+
+        results = await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning",
+                   "vote_close_token": "tok-1"}),
+        ])
+
+        assert results[0]["status"] == "not_implemented"
+        agent.resolve_end_vote_publish.assert_awaited_once_with(
+            "group:planning", published=False, token="tok-1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_channel_less_drop_skips_callback(self):
+        """``no_channel_id`` has no channel to discharge — nothing was
+        parked for it either (the decide-time gates mirror the executor's)."""
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        executor, agent = self._executor_with_agent(publisher)
+
+        await executor.execute("ember-owl", [_vote({})])
+
+        agent.resolve_end_vote_publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_unknown_agent_is_tolerated(self):
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        dispatcher = MagicMock()
+        dispatcher.get_agent = MagicMock(return_value=None)
+        executor = ActionExecutor(
+            dispatcher=dispatcher, channel_publisher=publisher,
+        )
+
+        results = await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning"}),
+        ])
+
+        assert results[0]["status"] == "published"
+
+    @pytest.mark.asyncio
+    async def test_callback_error_does_not_fail_the_action(self, caplog):
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        executor, agent = self._executor_with_agent(publisher)
+        agent.resolve_end_vote_publish = AsyncMock(
+            side_effect=RuntimeError("tracker exploded"),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="agents.action_executor"):
+            results = await executor.execute("ember-owl", [
+                _vote({"channel_id": "group:planning"}),
+            ])
+
+        assert results[0]["status"] == "published"
+        assert any(
+            "publish-outcome callback failed" in r.message for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_agent_without_the_seam_is_skipped_quietly(self, caplog):
+        """The dispatcher registry is typed for persona agents but not
+        enforced (``EventDispatcher(agents=...)`` accepts any dict); an
+        agent without ``resolve_end_vote_publish`` has no parked closes
+        to discharge — a structural non-event, not a callback failure,
+        so it must skip without the WARNING-with-traceback the except
+        branch reserves for a discharge that actually blew up (PR 607
+        third-pass review)."""
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        dispatcher = MagicMock()
+        # A bare object has no resolve_end_vote_publish attribute —
+        # unlike MagicMock, which would auto-create it.
+        dispatcher.get_agent = MagicMock(return_value=object())
+        executor = ActionExecutor(
+            dispatcher=dispatcher, channel_publisher=publisher,
+        )
+
+        with caplog.at_level(logging.WARNING, logger="agents.action_executor"):
+            results = await executor.execute("ember-owl", [
+                _vote({"channel_id": "group:planning"}),
+            ])
+
+        assert results[0]["status"] == "published"
+        assert not caplog.records

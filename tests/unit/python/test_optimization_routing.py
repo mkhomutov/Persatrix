@@ -174,6 +174,149 @@ class TestShippedYamlRoutingMigration:
         assert model == "summarizer"
 
 
+class TestConfigPathDeterminism:
+    """Container path resolution: the Docker images pip-install the
+    agents tree as ``persatrix_agents``, so the package-relative default
+    (``Path(__file__)…/config/optimization.yaml``) points into
+    site-packages, where no config exists — every accessor silently
+    returned its default (``summarization_model() == ""`` → the
+    close-path summary degraded with a per-close WARN).  The fix lives
+    at the deployment layer: ``Dockerfile.agent`` pins
+    ``PERSATRIX_OPTIMIZATION_CONFIG=/app/config/optimization.yaml`` (the
+    in-image ``COPY config/`` / compose bind-mount location).  Library
+    resolution stays deterministic — env override, else the
+    package-relative default, else built-in defaults.  A CWD-relative
+    fallback was considered and rejected (PR 607 review finding 6): it
+    made model selection depend on whatever ``config/optimization.yaml``
+    happens to exist in the process working directory, for every
+    non-repo install."""
+
+    def test_missing_package_path_yields_defaults_not_cwd_pickup(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("PERSATRIX_OPTIMIZATION_CONFIG", raising=False)
+        monkeypatch.setattr(
+            optimization, "_DEFAULT_CONFIG_PATH",
+            tmp_path / "no-such-dir" / "optimization.yaml",
+        )
+        # A config lurking in the CWD must NOT be picked up.
+        cwd_cfg = tmp_path / "config"
+        cwd_cfg.mkdir()
+        _write_yaml(
+            cwd_cfg / "optimization.yaml",
+            "default:\n"
+            "  context_management:\n"
+            "    summarization:\n"
+            "      model: \"from-cwd\"\n",
+        )
+        monkeypatch.chdir(tmp_path)
+        reset_cache()
+        try:
+            assert summarization_model() == ""
+        finally:
+            reset_cache()
+
+    def test_env_pinned_missing_file_warns_with_the_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """An EXPLICITLY pinned config path that does not exist (a typo'd
+        ENV in a derived image, a dropped ``COPY config/``) must warn and
+        name the path — a DEBUG-only degrade re-enters the exact silent
+        ``summarization_model() == ""`` arc the env pin exists to kill
+        (PR 607 second-pass review).  The package-default path staying
+        DEBUG is deliberate: absent-by-default is the normal repo case."""
+        import logging
+
+        missing = tmp_path / "nope" / "optimization.yaml"
+        monkeypatch.setenv("PERSATRIX_OPTIMIZATION_CONFIG", str(missing))
+        reset_cache()
+        try:
+            with caplog.at_level(logging.WARNING, logger="agents.optimization"):
+                assert summarization_model() == ""
+            assert any(
+                "PERSATRIX_OPTIMIZATION_CONFIG" in r.getMessage()
+                and str(missing) in r.getMessage()
+                for r in caplog.records
+            ), f"no WARN naming the pinned path in {[r.getMessage() for r in caplog.records]!r}"
+        finally:
+            reset_cache()
+
+    def test_package_default_missing_stays_quiet(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """No env pin + no package config is the ordinary non-container
+        default — it must not WARN on every boot."""
+        import logging
+
+        monkeypatch.delenv("PERSATRIX_OPTIMIZATION_CONFIG", raising=False)
+        monkeypatch.setattr(
+            optimization, "_DEFAULT_CONFIG_PATH",
+            tmp_path / "no-such-dir" / "optimization.yaml",
+        )
+        reset_cache()
+        try:
+            with caplog.at_level(logging.WARNING, logger="agents.optimization"):
+                assert summarization_model() == ""
+            assert not caplog.records
+        finally:
+            reset_cache()
+
+    def test_empty_env_override_falls_through_to_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An empty ``PERSATRIX_OPTIMIZATION_CONFIG`` (e.g. ``ENV VAR=``
+        cleared in a derived image) means "unset", not "open the empty
+        path"."""
+        monkeypatch.setenv("PERSATRIX_OPTIMIZATION_CONFIG", "")
+        pkg_cfg = tmp_path / "pkg-config" / "optimization.yaml"
+        pkg_cfg.parent.mkdir()
+        _write_yaml(
+            pkg_cfg,
+            "default:\n"
+            "  context_management:\n"
+            "    summarization:\n"
+            "      model: \"from-package-path\"\n",
+        )
+        monkeypatch.setattr(optimization, "_DEFAULT_CONFIG_PATH", pkg_cfg)
+        reset_cache()
+        try:
+            assert summarization_model() == "from-package-path"
+        finally:
+            reset_cache()
+
+    def test_package_path_wins_when_present(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("PERSATRIX_OPTIMIZATION_CONFIG", raising=False)
+        pkg_cfg = tmp_path / "pkg-config" / "optimization.yaml"
+        pkg_cfg.parent.mkdir()
+        _write_yaml(
+            pkg_cfg,
+            "default:\n"
+            "  context_management:\n"
+            "    summarization:\n"
+            "      model: \"from-package-path\"\n",
+        )
+        monkeypatch.setattr(optimization, "_DEFAULT_CONFIG_PATH", pkg_cfg)
+        cwd_cfg = tmp_path / "config"
+        cwd_cfg.mkdir()
+        _write_yaml(
+            cwd_cfg / "optimization.yaml",
+            "default:\n"
+            "  context_management:\n"
+            "    summarization:\n"
+            "      model: \"from-cwd\"\n",
+        )
+        monkeypatch.chdir(tmp_path)
+        reset_cache()
+        try:
+            assert summarization_model() == "from-package-path"
+        finally:
+            reset_cache()
+
+
 def test_module_exports_routing_accessors() -> None:
     """Pin the new routing accessors on the public surface — the sub-agent
     default-model resolution (RFC 0033 §J.3) imports them."""

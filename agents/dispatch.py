@@ -90,6 +90,16 @@ class EventDispatcher:
         """
         self._executor.set_channel_publisher(publisher)
 
+    def get_agent(self, agent_id: str) -> _LLMPersonaAgent | None:
+        """Public lookup of a registered agent (``None`` when unknown).
+
+        Added for the executor's end-vote publish-outcome callback
+        (PR 607 review finding 5): ``ActionExecutor`` must reach the
+        voting agent to discharge its parked local close without
+        touching the private ``_agents`` map.
+        """
+        return self._agents.get(agent_id)
+
     def register_agent(self, agent_id: str, agent: _LLMPersonaAgent) -> None:
         """Register a persona agent for event dispatch."""
         self._agents[agent_id] = agent

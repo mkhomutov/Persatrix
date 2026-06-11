@@ -455,12 +455,60 @@ unchanged — this is a read surface, not a new synthesis step.
   is **per-agent** (each participating persona persists its own row), so the web
   surface merges across the channel's participants and shows one affordance.
 
+**When the row appears.** The orchestrator's close (quorum / idle rotation) and
+the per-agent row are produced by different processes, and the closing publish's
+fanout is deliberately suppressed — so the channel-side close reaches each
+agent's local interaction record through two seams
+(`agents/persona_runtime/interaction_boundary.py`):
+
+- **A voter closes when its vote lands.** Emitting `END_INTERACTION_VOTE` is
+  the persona's own "my contribution is complete", so its local record of the
+  conversation closes (and summarises) as soon as the vote *publish succeeds*
+  — query a *voter* right after the close and the row is already there,
+  labelled *ended*. This is the persona's judgement, not the quorum: a lone
+  voter's record closes even if the quorum never forms and the room talks on
+  (its next turn simply opens a fresh local interaction). A vote whose
+  publish *fails* (timeout, channels disabled) closes nothing — the vote
+  never reached the orchestrator, so the record stays open for the ordinary
+  closes (PR 607 review finding 5; `agents/persona_runtime/vote_close.py`).
+  Re-votes mirror the orchestrator's dedup: voting *again* on the same
+  still-open conversation closes nothing further (the orchestrator counts a
+  participant once per interaction), so one discussion never fragments into
+  multiple *ended* rows on the voter.
+- **Everyone else closes on the id rotation.** A non-voting member's record
+  closes the moment it receives the channel's next publish carrying the
+  rotated `interaction_id` (the new topic) — or by its own idle window if the
+  room stays quiet. Until one of those happens, its row for the closed
+  discussion does not exist yet; that lag is inherent to the lazy rotation.
+
+Two boundary notes on those seams:
+
+- **Threads are exempt.** A threaded reply rides the *parent* channel's
+  interaction id (the orchestrator resolves per channel), so neither seam
+  applies inside a thread: a floor close never splits a live thread's record,
+  and a vote cast *from* a threaded turn closes nothing at vote time — the
+  voter's floor record closes on the floor's rotation like any non-voter's.
+  Thread records close by their own idle window or an explicit session end,
+  mirroring the resolver's "the thread IS the interaction" rule.
+- **The rotation carries its cause.** Every publish of the successor
+  interaction names the retired id and what closed it
+  (`ChannelMessageEvent.previous_interaction_id` +
+  `previous_interaction_close_trigger`, [producer plan OQ 5](../rfcs/0030-interaction-id-producer-pr-plan.md#open-questions)),
+  so a rotation-closed record is labelled truthfully: *went idle* for a
+  channel idle rotation (even one shorter than the agent's
+  `memory.interaction_idle_timeout_sec`), *ended* for the end-vote quorum.
+  The fields are absent from an old orchestrator and after an orchestrator
+  restart (the resolver re-mints its in-memory ids with no retiree to
+  attribute) — there the record keeps the legacy *ended* label, and the
+  cause is applied only when the retired id matches the one the record was
+  opened under (an agent that missed a whole generation falls back too).
+
 **Close-trigger labels** (the RFC 0020 `close_reason`, rendered identically on
 both surfaces):
 
 | `close_reason` | Label | Meaning |
 |----------------|-------|---------|
-| `idle_gap` | *went idle* | the conversation went quiet past the idle window |
+| `idle_gap` | *went idle* | the conversation went quiet past an idle window — the agent's own, or the channel's (carried on the wire as the rotation cause, producer plan OQ 5) |
 | `structural` | *ended* | an explicit end — the Layer 4 end-vote close routes through the structural close; the row does not distinguish a vote-close from a plain structural close, so "ended" is the honest label |
 | `cost` | *cost limit reached* | the Layer 1 per-interaction cost ceiling tripped |
 

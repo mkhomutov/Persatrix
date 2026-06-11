@@ -17,7 +17,7 @@ from .channel_publisher import (
     ChannelPublisher,
     ChannelsDisabledError,
 )
-from .persona_types import AgentAction
+from .persona_types import VOTE_CLOSE_TOKEN_KEY, AgentAction
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +69,29 @@ async def publish_end_interaction_vote(
     DM vote toward a quorum.
     """
     target_channel = str(action.payload.get("channel_id", "") or "").strip()
+    # The decide-time park's correlation handle (PR 607 second-pass
+    # review): stamped onto the action payload by
+    # ``persona_runtime/vote_close.park_end_vote_close``, echoed verbatim
+    # on every channel-carrying status so the outcome callback discharges
+    # the park that stamped THIS vote — and never published (the wire
+    # message below builds its own metadata).  "" for a vote no park
+    # covers (a threaded turn, an exempted scope).
+    close_token = str(action.payload.get(VOTE_CLOSE_TOKEN_KEY, "") or "")
     if publisher is None:
         logger.info(
             "Agent %s voted to end the interaction but no REST publisher "
             "is configured (legacy in-process path) — vote not published",
             sender_id,
         )
-        return {"action_type": "end_interaction_vote", "status": "not_implemented"}
+        # ``channel_id`` carried (when bound) so the executor's outcome
+        # callback can drop the voter's parked local close — the legacy
+        # path publishes nothing, so nothing must read as "ended".
+        return {
+            "action_type": "end_interaction_vote",
+            "status": "not_implemented",
+            "channel_id": target_channel,
+            "vote_close_token": close_token,
+        }
     if not target_channel:
         logger.warning(
             "Agent %s END_INTERACTION_VOTE has no channel_id (non-channel "
@@ -94,6 +110,7 @@ async def publish_end_interaction_vote(
             "action_type": "end_interaction_vote",
             "status": "dm_channel",
             "channel_id": target_channel,
+            "vote_close_token": close_token,
         }
 
     content = str(action.payload.get("content", "") or "").strip()
@@ -121,6 +138,7 @@ async def publish_end_interaction_vote(
             "action_type": "end_interaction_vote",
             "status": "channels_disabled",
             "channel_id": target_channel,
+            "vote_close_token": close_token,
         }
     except Exception as exc:  # noqa: BLE001 — surfaced via "failed" status
         logger.warning(
@@ -132,9 +150,11 @@ async def publish_end_interaction_vote(
             "action_type": "end_interaction_vote",
             "status": "failed",
             "channel_id": target_channel,
+            "vote_close_token": close_token,
         }
     return {
         "action_type": "end_interaction_vote",
         "status": "published",
         "channel_id": target_channel,
+        "vote_close_token": close_token,
     }
