@@ -381,7 +381,6 @@ class _ActionLoopMixin:
             # conversation role (user/assistant/system).  We use only
             # "content" here; "role" labels are intentionally omitted from
             # the prompt to avoid confusing the LLM with metadata noise.
-            # (PR review should-fix #6: document "role" vs LLM message role.)
             memory_text = "\n\n".join(s["content"] for s in memory_sections)
             system_prompt += "\n\n" + memory_text
 
@@ -411,7 +410,8 @@ class _ActionLoopMixin:
                     max_tokens=max_tokens,
                     temperature=self.config.get("temperature", 0.7),
                     cause=lease_cause,
-                    agent_id=lease_agent_id, interaction_id=lease_interaction_id,
+                    agent_id=lease_agent_id,
+                    interaction_id=lease_interaction_id,
                 )
             except Exception as exc:
                 # Wallet back-pressure / provider failures dispatch to
