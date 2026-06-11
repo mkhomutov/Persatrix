@@ -79,11 +79,35 @@ const idleTrigger = "idle"
 // it never idle-rotates (rotating it would emit `interaction_closed` for an
 // interaction containing zero messages) and is adopted by the next committed
 // publish instead.
+// `prevID`/`prevTrigger` record the channel's most recently CLOSED
+// interaction and the trigger that closed it ([idleTrigger] /
+// [endVotesTrigger]) — the producer plan OQ 5 close-cause attribution
+// [ChannelRouter.publishCommit] stamps onto every publish of the successor
+// interaction. Deliberately separate from `retired`: that slot is the
+// discard-seam ledger and can also park an orphaned commit
+// ([ChannelRouter.settleInteraction]) — an interleaving artefact, not a
+// close — so it cannot double as the close-cause record. The pair persists
+// until the channel's next close overwrites it; in-memory like the rest of
+// the table, so a restart re-mints with no attribution (IP5 — receivers
+// treat absent as unknown).
 type openInteraction struct {
 	id           string
 	idCommitted  bool
 	lastActivity time.Time
 	retired      string
+	prevID       string
+	prevTrigger  string
+}
+
+// previousClose is the resolver's OQ 5 close-cause attribution for one
+// channel, returned by [ChannelRouter.resolveInteractionID] from the same
+// critical section that resolved the open id — reading it later would race a
+// concurrent rotation into stamping a cause from a different generation than
+// the resolved id's. A zero value means no retiree is known (fresh channel
+// or post-restart re-mint).
+type previousClose struct {
+	id      string
+	trigger string
 }
 
 // resolveInteractionID returns the open interaction id for `channelID`,
@@ -93,6 +117,12 @@ type openInteraction struct {
 // interactionMu — the discard seams take their own leaf mutexes, and holding
 // two governance mutexes at once would mint a lock-ordering edge no other
 // path has.
+//
+// The second return is the channel's OQ 5 close-cause attribution (the most
+// recently closed id + its trigger, zero when none) — read under the same
+// lock as the resolve so the stamped cause always belongs to the resolved
+// id's own predecessor, and stamped onto the publish metadata by
+// [ChannelRouter.publishCommit].
 //
 // The returned settle hook is the resolver's half of the reply-reservation
 // pattern ([ChannelRouter.enforceReplyBudget]'s release): the caller invokes
@@ -109,7 +139,7 @@ type openInteraction struct {
 // growth), and a throttled participant's in-window retries hold its own
 // exhausted interaction open forever, so the idle rotation that would reset
 // its budget never fires.
-func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID string, ct ChannelType, inbound string) (string, func(persisted bool)) {
+func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID string, ct ChannelType, inbound string) (string, previousClose, func(persisted bool)) {
 	now := r.interactionNow()
 
 	r.interactionMu.Lock()
@@ -128,12 +158,17 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 		discard = entry.retired // the previous retiree's deferred seams fire now
 		entry.retired = rotated
 		entry.id = ""
+		// OQ 5 close-cause attribution: this resolve IS the idle close, so
+		// the publish that triggered it (the successor's first message)
+		// already carries the cause.
+		entry.prevID, entry.prevTrigger = rotated, idleTrigger
 	}
 	if entry.id == "" {
 		entry.id = uuid.NewString()
 		entry.idCommitted = false
 	}
 	resolved := entry.id
+	prev := previousClose{id: entry.prevID, trigger: entry.prevTrigger}
 	r.interactionMu.Unlock()
 
 	if discard != "" {
@@ -153,7 +188,7 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 			zap.String("claimed", inbound),
 			zap.String("resolved", resolved))
 	}
-	return resolved, func(persisted bool) { r.settleInteraction(channelID, resolved, now, persisted) }
+	return resolved, prev, func(persisted bool) { r.settleInteraction(channelID, resolved, now, persisted) }
 }
 
 // settleInteraction reconciles the resolver table to the persist outcome of
@@ -220,7 +255,10 @@ func (r *ChannelRouter) settleInteraction(channelID, resolved string, now time.T
 // of the idle window. The closed id parks as the pending retiree — its
 // `closedInteractions` tombstone (left by the close) survives until the
 // deferred discard, long enough to suppress and self-heal any commit racing
-// the close. A stale call (the open id moved on already) is a no-op.
+// the close — and is recorded as the channel's OQ 5 close cause
+// (trigger=end_votes) so the successor interaction's publishes carry the
+// truthful "ended by vote" attribution. A stale call (the open id moved on
+// already) is a no-op, including for the cause record.
 func (r *ChannelRouter) markInteractionClosed(channelID, interactionID string) {
 	r.interactionMu.Lock()
 	entry := r.openInteractions[channelID]
@@ -229,6 +267,7 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID string) {
 		discard = entry.retired
 		entry.retired = interactionID
 		entry.id = ""
+		entry.prevID, entry.prevTrigger = interactionID, endVotesTrigger
 	}
 	r.interactionMu.Unlock()
 

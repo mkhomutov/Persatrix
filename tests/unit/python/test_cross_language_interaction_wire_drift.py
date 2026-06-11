@@ -119,3 +119,65 @@ def test_lease_call_sites_thread_the_interaction() -> None:
         src = path.read_text(encoding="utf-8")
         if pin not in src:
             _parse_miss(f"the lease-threading literal `{pin}`", path)
+
+
+# ─── Producer plan OQ 5: the retired-close cause pair ────────────────
+
+_INTERACTION_RESOLVER_GO = Path("internal/channels/interaction_resolver.go")
+_CHANNEL_WIRE_METADATA_PY = Path("agents/channel_wire_metadata.py")
+_INTERACTION_BOUNDARY_PY = Path("agents/persona_runtime/interaction_boundary.py")
+
+
+def _go_grouped_const(path: Path, name: str) -> str:
+    """Parse a NAME = "value" entry inside a grouped ``const (...)`` block
+    (the shape ``previousInteraction*MetadataKey`` use; :func:`_go_const`
+    only matches the single-declaration ``const NAME = ...`` form)."""
+    src = path.read_text(encoding="utf-8")
+    m = re.search(rf'^\s*{name}\s*=\s*"([^"]+)"\s*$', src, re.MULTILINE)
+    if m is None:
+        _parse_miss(f"`{name} = \"<value>\"` (grouped const)", path)
+    return m.group(1)
+
+
+def test_previous_interaction_metadata_keys_agree() -> None:
+    """Go's OQ 5 metadata keys (stamped by publishCommit, lifted by the
+    dispatcher) MUST equal the literals the Python seed point writes
+    (``channel_wire_metadata.seed_wire_metadata``) and the rotation-close
+    seam reads (``interaction_boundary.wire_rotation_close_reason``) — a
+    one-sided rename silently reverts every rotation close to the legacy
+    structural label while both suites stay green."""
+    for go_name in (
+        "previousInteractionIDMetadataKey",
+        "previousInteractionTriggerMetadataKey",
+    ):
+        go_value = _go_grouped_const(_INTERACTION_ID_GO, go_name)
+        for py_path in (_CHANNEL_WIRE_METADATA_PY, _INTERACTION_BOUNDARY_PY):
+            if f'"{go_value}"' not in py_path.read_text(encoding="utf-8"):
+                _parse_miss(
+                    f"the {go_value!r} metadata-key literal (Go {go_name})",
+                    py_path,
+                )
+
+
+def test_close_trigger_values_agree() -> None:
+    """The trigger vocabulary the resolver stamps (Go ``idleTrigger`` /
+    ``endVotesTrigger``) MUST equal the Python seed-point allowlist and the
+    boundary seam's idle literal — a drifted value degrades every close
+    cause to the legacy label without a failing test on either side."""
+    idle = _go_const(_INTERACTION_RESOLVER_GO, "idleTrigger")
+    end_votes = _go_const(_END_VOTE_GO, "endVotesTrigger")
+
+    seed_src = _CHANNEL_WIRE_METADATA_PY.read_text(encoding="utf-8")
+    for name, value in (
+        ("_WIRE_CLOSE_TRIGGER_IDLE", idle),
+        ("_WIRE_CLOSE_TRIGGER_END_VOTES", end_votes),
+    ):
+        pin = f'{name} = "{value}"'
+        if pin not in seed_src:
+            _parse_miss(f"the trigger literal `{pin}`", _CHANNEL_WIRE_METADATA_PY)
+
+    boundary_pin = f'_WIRE_CLOSE_TRIGGER_IDLE = "{idle}"'
+    if boundary_pin not in _INTERACTION_BOUNDARY_PY.read_text(encoding="utf-8"):
+        _parse_miss(
+            f"the trigger literal `{boundary_pin}`", _INTERACTION_BOUNDARY_PY,
+        )

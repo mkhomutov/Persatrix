@@ -42,6 +42,23 @@ const interactionIDMetadataKey = "interaction_id"
 // id riding straight onto that metadata unbounded.
 const interactionIDMaxBytes = 128
 
+// previousInteractionIDMetadataKey / previousInteractionTriggerMetadataKey
+// carry the channel's most recently retired interaction id and the trigger
+// that retired it ("idle" / "end_votes" — the §L instrument vocabulary) onto
+// the publishes of the SUCCESSOR interaction (producer plan OQ 5). The id
+// rotation alone carries no cause, so the agent-side rotation close had to
+// label every observed rotation "structural"; these keys let the receiver
+// pick the truthful close reason (idle_gap vs structural). Producer:
+// [ChannelRouter.publishCommit] stamps the resolver's own retired-close
+// record, REPLACING (deleting, when there is no retiree) any inbound claim —
+// like `interaction_id`, a publisher-supplied value never drives receiver
+// state. Absent is the no-retiree case (old producer / fresh channel /
+// restart re-mint) and receivers keep the pre-OQ5 behaviour.
+const (
+	previousInteractionIDMetadataKey      = "previous_interaction_id"
+	previousInteractionTriggerMetadataKey = "previous_interaction_close_trigger"
+)
+
 // readInteractionID extracts the inbound interaction_id from a publish
 // metadata bag. Returns "" when absent, non-string, or longer than
 // interactionIDMaxBytes — a malformed or oversized claim is treated as the
@@ -51,10 +68,47 @@ const interactionIDMaxBytes = 128
 // clipped opaque token would key a *different* interaction, which is worse
 // than treating the publish as untracked.
 func readInteractionID(metadata map[string]any) string {
+	return readBoundedIDValue(metadata, interactionIDMetadataKey)
+}
+
+// readPreviousInteractionID extracts the retired-interaction id stamped by
+// [ChannelRouter.publishCommit] (producer plan OQ 5) for the dispatch-time
+// lift onto `ChannelMessageEvent.previous_interaction_id`. Same bound and
+// tolerance as [readInteractionID] — the value is router-stamped on every
+// routed publish, but the reader stays defensive for a path that bypassed
+// the resolver.
+func readPreviousInteractionID(metadata map[string]any) string {
+	return readBoundedIDValue(metadata, previousInteractionIDMetadataKey)
+}
+
+// readPreviousInteractionTrigger extracts the retired interaction's close
+// trigger for the dispatch-time lift onto
+// `ChannelMessageEvent.previous_interaction_close_trigger`. Allowlisted to
+// the §L trigger vocabulary the resolver actually stamps ([idleTrigger] /
+// [endVotesTrigger]); anything else reads as absent — the receiver then
+// keeps its legacy label, which is the same degradation an unrecognised
+// value would get agent-side (the seed point re-validates).
+func readPreviousInteractionTrigger(metadata map[string]any) string {
 	if metadata == nil {
 		return ""
 	}
-	if v, ok := metadata[interactionIDMetadataKey].(string); ok {
+	if v, ok := metadata[previousInteractionTriggerMetadataKey].(string); ok {
+		if v == idleTrigger || v == endVotesTrigger {
+			return v
+		}
+	}
+	return ""
+}
+
+// readBoundedIDValue is the shared tolerant reader behind the two
+// interaction-id metadata keys: "" when absent, non-string, or over
+// interactionIDMaxBytes (never truncated — a clipped opaque token would key
+// a different interaction).
+func readBoundedIDValue(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	if v, ok := metadata[key].(string); ok {
 		if len(v) > interactionIDMaxBytes {
 			return ""
 		}

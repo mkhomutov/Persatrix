@@ -20,14 +20,19 @@ from agents.clock import FrozenClock
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
+from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
 from agents.prompt_loader import load_snippet
 
 __all__ = [
+    "GROUP_CHANNEL",
     "TEST_IDLE_TIMEOUT_SEC",
     "all_episodes",
+    "channel_event",
+    "close_reasons",
     "do_nothing_client",
     "make_agent_with_clock",
     "persona_config",
+    "vote_action",
 ]
 
 # Short idle timeout keeps clock-driven tests cheap — production
@@ -129,6 +134,62 @@ async def make_agent_with_clock(
     )
     await agent.initialize_memory()
     return agent
+
+
+# ─── Channel-event builders (the close-propagation suites) ──────────
+
+# The default group channel the close-propagation / close-cause suites
+# publish into; their scope constants derive from it via scope_for_group.
+GROUP_CHANNEL = "group:planning"
+
+
+def channel_event(
+    content: str,
+    *,
+    wire_id: str | None = None,
+    prev_id: str | None = None,
+    prev_trigger: str | None = None,
+    channel: str = GROUP_CHANNEL,
+    channel_type: str = "group",
+    sender: str = "alex",
+    thread_id: str | None = None,
+    event_type: EventType = EventType.CHANNEL_MESSAGE,
+) -> AgentEvent:
+    """A CHANNEL_MESSAGE/MENTION event in the post-fanout metadata shape
+    ``seed_wire_metadata`` delivers: the orchestrator-minted ``wire_id``
+    plus — producer plan OQ 5 — the retired predecessor's id + close
+    trigger pair."""
+    metadata: dict = {}
+    if wire_id is not None:
+        metadata["interaction_id"] = wire_id
+    if prev_id is not None:
+        metadata["previous_interaction_id"] = prev_id
+    if prev_trigger is not None:
+        metadata["previous_interaction_close_trigger"] = prev_trigger
+    return AgentEvent(
+        event_type=event_type,
+        payload={"content": content, "channel_type": channel_type},
+        channel_id=channel,
+        sender_id=sender,
+        thread_id=thread_id,
+        metadata=metadata,
+    )
+
+
+def vote_action(channel_id: str | None = GROUP_CHANNEL) -> AgentAction:
+    """An END_INTERACTION_VOTE action, optionally unbound (no channel)."""
+    payload: dict = {} if channel_id is None else {"channel_id": channel_id}
+    return AgentAction(
+        action_type=ActionType.END_INTERACTION_VOTE, payload=payload,
+    )
+
+
+def close_reasons(episodes: list[dict]) -> list[str]:
+    """The persisted ``close_reason`` of each episode row, in order."""
+    return [
+        json.loads(e["context_json"] or "{}").get("close_reason", "")
+        for e in episodes
+    ]
 
 
 async def all_episodes(agent: _LLMPersonaAgent) -> list[dict]:

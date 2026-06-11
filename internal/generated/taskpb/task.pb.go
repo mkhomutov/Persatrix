@@ -899,8 +899,37 @@ type ChannelMessageEvent struct {
 	// implicit presence: false (the zero value) is the genuine old-producer
 	// case, so the field is additive across a mixed-version deployment.
 	FloorMentionsResolved bool `protobuf:"varint,19,opt,name=floor_mentions_resolved,json=floorMentionsResolved,proto3" json:"floor_mentions_resolved,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// RFC 0030 interaction-id producer plan OQ 5 (v0.3.8) — the channel's most
+	// recently RETIRED interaction id, paired with `= 21` below. The resolver
+	// (`internal/channels/interaction_resolver.go`) rotates `interaction_id = 17`
+	// when a conversation ends, but the rotation alone carries no *cause*, so
+	// the agent-side boundary close (`wire_rotation_closes`) had to label every
+	// observed rotation "structural"/ended — wrong for an idle rotation under a
+	// channel window shorter than the agent's own (PR 607 review finding 3).
+	// `publishCommit` stamps the retired id + its close trigger onto every
+	// publish of the SUCCESSOR interaction; the receiver applies the trigger
+	// only when this id equals the wire id its open local record was opened
+	// under (a mismatch means the agent missed a generation — the cause of ITS
+	// boundary is unknown and the legacy label stands). Empty (proto3 implicit
+	// presence) is the no-retiree case: an old producer, a fresh channel's
+	// first interaction, or an orchestrator-restart re-mint (IP5: the resolver
+	// table is in-memory, so a restart has no retiree to attribute) — receivers
+	// MUST keep the pre-OQ5 behaviour, so the field stays additive across a
+	// mixed-version deployment. Same opaque-token + 128-byte bound contract as
+	// `interaction_id = 17`.
+	PreviousInteractionId string `protobuf:"bytes,20,opt,name=previous_interaction_id,json=previousInteractionId,proto3" json:"previous_interaction_id,omitempty"`
+	// The close trigger that retired `previous_interaction_id = 20`:
+	// "idle" (lazy idle rotation) | "end_votes" (Layer 4 quorum close) — the
+	// same vocabulary as the `channel.conversation.interaction_closed{trigger}`
+	// instrument (§L; `idleTrigger`/`endVotesTrigger` in Go, pinned by the
+	// cross-language drift test). The receiver maps "idle" to its local
+	// `idle_gap` close reason and "end_votes" to `structural`; an empty or
+	// unrecognised value degrades to the pre-OQ5 structural label rather than
+	// failing the dispatch (the tolerant-wire-reader posture of
+	// `readInteractionID`). Set iff `= 20` is set.
+	PreviousInteractionCloseTrigger string `protobuf:"bytes,21,opt,name=previous_interaction_close_trigger,json=previousInteractionCloseTrigger,proto3" json:"previous_interaction_close_trigger,omitempty"`
+	unknownFields                   protoimpl.UnknownFields
+	sizeCache                       protoimpl.SizeCache
 }
 
 func (x *ChannelMessageEvent) Reset() {
@@ -1064,6 +1093,20 @@ func (x *ChannelMessageEvent) GetFloorMentionsResolved() bool {
 		return x.FloorMentionsResolved
 	}
 	return false
+}
+
+func (x *ChannelMessageEvent) GetPreviousInteractionId() string {
+	if x != nil {
+		return x.PreviousInteractionId
+	}
+	return ""
+}
+
+func (x *ChannelMessageEvent) GetPreviousInteractionCloseTrigger() string {
+	if x != nil {
+		return x.PreviousInteractionCloseTrigger
+	}
+	return ""
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
@@ -1435,7 +1478,7 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\x81\x06\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\x86\a\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -1458,7 +1501,9 @@ const file_task_proto_rawDesc = "" +
 	"\x1csalience_max_channel_members\x18\x10 \x01(\x05R\x19salienceMaxChannelMembers\x12%\n" +
 	"\x0einteraction_id\x18\x11 \x01(\tR\rinteractionId\x12%\n" +
 	"\x0efloor_mentions\x18\x12 \x03(\tR\rfloorMentions\x126\n" +
-	"\x17floor_mentions_resolved\x18\x13 \x01(\bR\x15floorMentionsResolvedB\f\n" +
+	"\x17floor_mentions_resolved\x18\x13 \x01(\bR\x15floorMentionsResolved\x126\n" +
+	"\x17previous_interaction_id\x18\x14 \x01(\tR\x15previousInteractionId\x12K\n" +
+	"\"previous_interaction_close_trigger\x18\x15 \x01(\tR\x1fpreviousInteractionCloseTriggerB\f\n" +
 	"\n" +
 	"_threshold\"H\n" +
 	"\aTaskAck\x12\x18\n" +

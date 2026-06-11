@@ -46,9 +46,11 @@ from .close_path import persist_closed_interaction
 from .interaction_boundary import (
     ends_interaction_by_vote,
     is_session_end_event,
+    wire_rotation_close_reason,
     wire_rotation_closes,
 )
 from .summarize_close import drain_pending_summary_tasks
+from .vote_close import PendingVoteClose
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +87,8 @@ class _EpisodeRoutingMixin:
     _memory_ns: MemoryNamespace
     # RFC 0020 PR 4: in-flight background summary tasks (PR #229 Must-Fix #1).
     _pending_summarize_tasks: set[asyncio.Task[None]]
+    # PR 607 finding 5: parked vote closes by channel id (:mod:`.vote_close`).
+    _pending_vote_closes: dict[str, PendingVoteClose]
     # RFC 0031 Phase 1: per-process operator-namespace tag stamped on
     # every ``store_episode`` / ``record_interaction`` call.  Set in
     # ``PersonaAgent.__init__`` (``agents/persona.py``) from
@@ -313,8 +317,9 @@ class _EpisodeRoutingMixin:
         ctx: dict[str, Any],
         actions: list[AgentAction] | None = None,
     ) -> None:
-        """Append a turn to the open interaction; close on session end,
-        end-of-interaction vote, or wire interaction-id rotation.
+        """Append a turn to the open interaction; close on session end or
+        wire interaction-id rotation, and PARK the close for an
+        end-of-interaction vote (publish-confirmed — :mod:`.vote_close`).
 
         The per-turn ``summary`` / ``ctx`` are stashed on the turn
         payload so the PR 4 summariser has the same fields it would
@@ -377,7 +382,8 @@ class _EpisodeRoutingMixin:
         # RFC 0030 interaction-id producer: the channel conversation's
         # wire id rotating means the previous conversation ended (vote
         # quorum or idle) — close the stale local interaction so the new
-        # turn opens a fresh one.  Full rationale on the predicate.
+        # turn opens a fresh one, labelled by the wire-carried close cause
+        # (producer plan OQ 5).  Full rationale on the two predicates.
         #
         # Thread scopes are wire-UNTRACKED (PR 607 review finding 1): a
         # threaded reply publishes to the parent channel, so the resolver
@@ -392,9 +398,10 @@ class _EpisodeRoutingMixin:
             if is_thread_scope(scope)
             else str(event.metadata.get("interaction_id", "") or "")
         )
-        if wire_rotation_closes(self._interaction_tracker.get(scope), wire_id):
+        stale = self._interaction_tracker.get(scope)
+        if wire_rotation_closes(stale, wire_id):
             rotated = self._interaction_tracker.close(
-                scope, reason=REASON_STRUCTURAL,
+                scope, reason=wire_rotation_close_reason(stale, event.metadata),
             )
             if rotated is not None:
                 await self._persist_closed_interaction(rotated)
@@ -418,14 +425,18 @@ class _EpisodeRoutingMixin:
         if not interaction.is_open:
             await self._persist_closed_interaction(interaction)
             return
-        if is_session_end_event(event) or ends_interaction_by_vote(
-            event, actions or [],
-        ):
+        if is_session_end_event(event):
             closed = self._interaction_tracker.close(
                 scope, reason=REASON_STRUCTURAL,
             )
             if closed is not None:
                 await self._persist_closed_interaction(closed)
+        elif ends_interaction_by_vote(event, actions or []):
+            # PR 607 review finding 5: the vote is not PUBLISHED yet, so park
+            # the close for the executor's outcome callback (:mod:`.vote_close`).
+            self._pending_vote_closes[event.channel_id or ""] = PendingVoteClose(
+                scope=scope, interaction_id=interaction.interaction_id,
+            )
 
     async def _persist_closed_interaction(self, interaction: Interaction) -> None:
         """RFC 0020 PR 4 close-path orchestrator — see

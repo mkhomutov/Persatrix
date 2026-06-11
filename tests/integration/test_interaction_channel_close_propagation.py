@@ -9,27 +9,33 @@ interaction-summary surface (``persatrix agent interactions``) never
 showed a converged discussion as "ended".  This suite pins the two
 propagation seams (``agents/persona_runtime/interaction_boundary.py``):
 
-* **Vote-time close** — a turn whose decided actions carry an
-  ``END_INTERACTION_VOTE`` for the event's group channel closes the
-  voter's local scope with ``REASON_STRUCTURAL`` (the channel sibling
-  of RFC 0020 §B's explicit ``END_INTERACTION`` trigger).  DM votes and
-  votes bound to a different channel must not close anything — the
-  executor-side gates (``end_vote_action.py``) mirrored locally.
+* **Publish-confirmed vote close** (PR 607 review finding 5) — a turn
+  whose decided actions carry an ``END_INTERACTION_VOTE`` for the
+  event's group channel PARKS the voter's local close
+  (``agents/persona_runtime/vote_close.py``); the executor's
+  publish-outcome callback (``resolve_end_vote_publish``) closes the
+  scope with ``REASON_STRUCTURAL`` on publish success and drops the
+  park on failure — a vote that never reached the orchestrator leaves
+  no early "ended" record.  DM votes and votes bound to a different
+  channel must not park anything — the executor-side gates
+  (``end_vote_action.py``) mirrored locally.
 
 * **Wire interaction-id rotation** — when the orchestrator-minted
   ``interaction_id`` on an inbound event differs from the one the open
   local interaction was opened under, the previous conversation ended
   (quorum or idle rotation) and the local scope splits at the same
-  boundary.  Untracked traffic (no wire id — old orchestrator,
-  non-channel ingress) keeps the pre-producer idle-only behaviour.
+  boundary, labelled by the wire-carried close cause (producer plan
+  OQ 5: ``previous_interaction_id`` + trigger → ``idle_gap`` for an
+  idle rotation, ``structural`` for the quorum; absent or mismatched →
+  the legacy ``structural``).  Untracked traffic (no wire id — old
+  orchestrator, non-channel ingress) keeps the pre-producer idle-only
+  behaviour.
 
 Shared persona config / mock LLM client / clock-aware agent factory
 live in :mod:`_interaction_multi_turn_helpers`.
 """
 
 from __future__ import annotations
-
-import json
 
 import pytest
 
@@ -40,12 +46,20 @@ from agents.memory.interactions import (
     scope_for_group,
     scope_for_thread,
 )
-from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
+from agents.persona_types import EventType
 from agents.tools.registry import clear_registry
 
 from ._interaction_multi_turn_helpers import (
+    GROUP_CHANNEL,
     all_episodes,
+    channel_event,
     make_agent_with_clock,
+)
+from ._interaction_multi_turn_helpers import (
+    close_reasons as _close_reasons,
+)
+from ._interaction_multi_turn_helpers import (
+    vote_action as vote,
 )
 
 
@@ -56,58 +70,22 @@ def _clean_registry():
     clear_registry()
 
 
-CHANNEL = "group:planning"
+CHANNEL = GROUP_CHANNEL
 SCOPE = scope_for_group(CHANNEL)
 
 
-def channel_event(
-    content: str,
-    *,
-    wire_id: str | None = None,
-    channel: str = CHANNEL,
-    channel_type: str = "group",
-    sender: str = "alex",
-    thread_id: str | None = None,
-    event_type: EventType = EventType.CHANNEL_MESSAGE,
-) -> AgentEvent:
-    metadata: dict = {}
-    if wire_id is not None:
-        metadata["interaction_id"] = wire_id
-    return AgentEvent(
-        event_type=event_type,
-        payload={"content": content, "channel_type": channel_type},
-        channel_id=channel,
-        sender_id=sender,
-        thread_id=thread_id,
-        metadata=metadata,
-    )
-
-
-def vote(channel_id: str | None = CHANNEL) -> AgentAction:
-    payload: dict = {} if channel_id is None else {"channel_id": channel_id}
-    return AgentAction(
-        action_type=ActionType.END_INTERACTION_VOTE, payload=payload,
-    )
-
-
-def _close_reasons(episodes: list[dict]) -> list[str]:
-    return [
-        json.loads(e["context_json"] or "{}").get("close_reason", "")
-        for e in episodes
-    ]
-
-
-# ─── Vote-time close ─────────────────────────────────────────
+# ─── Publish-confirmed vote close ────────────────────────────
 
 
 @pytest.mark.asyncio
 class TestVoteClosesLocalInteraction:
-    """A turn that votes to end the discussion closes the voter's own
-    local interaction structurally — the record MT-CHANNEL-GOV-003
-    Step 3 reads back exists the moment the persona judged "done",
-    not an idle window later."""
+    """A turn that votes to end the discussion PARKS the voter's local
+    close (PR 607 review finding 5); the executor's publish-outcome
+    callback closes it structurally on success — the record
+    MT-CHANNEL-GOV-003 Step 3 reads back exists the moment the vote
+    actually landed on the wire, and never for a publish that failed."""
 
-    async def test_vote_closes_group_scope_structurally(self):
+    async def test_vote_parks_then_publish_success_closes(self):
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         for i in range(2):
             await agent._store_event_episode(
@@ -117,8 +95,16 @@ class TestVoteClosesLocalInteraction:
         await agent._store_event_episode(
             channel_event("wrap it up?", wire_id="wire-A"), [vote()],
         )
-        # Scope popped (RFC 0020 §C never-reopen) and the closed episode
-        # row carries the structural trigger the CLI renders as "ended".
+        # Decide time: parked, NOT closed — the vote has not been
+        # published yet (the episode stores before the executor runs).
+        parked = agent._interaction_tracker.get(SCOPE)
+        assert parked is not None
+        assert parked.is_open
+        assert await all_episodes(agent) == []
+        # Publish outcome: success closes the parked scope (RFC 0020 §C
+        # never-reopen) and the closed episode row carries the structural
+        # trigger the CLI renders as "ended".
+        await agent.resolve_end_vote_publish(CHANNEL, published=True)
         assert agent._interaction_tracker.get(SCOPE) is None
         episodes = await all_episodes(agent)
         assert len(episodes) == 1
@@ -126,15 +112,67 @@ class TestVoteClosesLocalInteraction:
         assert episodes[0]["turn_count"] == 3
         assert _close_reasons(episodes) == [REASON_STRUCTURAL]
 
-    async def test_unbound_vote_counts_for_inbound_channel(self):
+    async def test_failed_publish_leaves_record_open(self):
+        # PR 607 review finding 5 itself: a vote publish that fails
+        # (timeout, channels disabled, no publisher) must not leave an
+        # early "ended" record — the scope stays open for the ordinary
+        # closes (wire rotation once a real quorum forms, or idle).
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await agent._store_event_episode(
+            channel_event("wrap it up?", wire_id="wire-A"), [vote()],
+        )
+        await agent.resolve_end_vote_publish(CHANNEL, published=False)
+        open_interaction = agent._interaction_tracker.get(SCOPE)
+        assert open_interaction is not None
+        assert open_interaction.is_open
+        assert await all_episodes(agent) == []
+        # The park was dropped, not deferred: a later success callback
+        # (a duplicate / stray notification) finds nothing to close.
+        await agent.resolve_end_vote_publish(CHANNEL, published=True)
+        assert agent._interaction_tracker.get(SCOPE) is not None
+        assert await all_episodes(agent) == []
+
+    async def test_stale_park_does_not_close_successor(self):
+        # Between decide and discharge the scope can move on (here: the
+        # wire id rotates and the close-then-reopen replaces the parked
+        # interaction). The discharge must no-op rather than close the
+        # successor on the strength of the predecessor's vote.
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await agent._store_event_episode(
+            channel_event("wrap it up?", wire_id="wire-A"), [vote()],
+        )
+        await agent._store_event_episode(
+            channel_event("new topic", wire_id="wire-B"), [],
+        )
+        episodes = await all_episodes(agent)
+        assert len(episodes) == 1  # the rotation close, not the vote's
+        await agent.resolve_end_vote_publish(CHANNEL, published=True)
+        successor = agent._interaction_tracker.get(SCOPE)
+        assert successor is not None
+        assert successor.is_open
+        assert len(await all_episodes(agent)) == 1
+
+    async def test_callback_without_park_is_noop(self):
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await agent._store_event_episode(
+            channel_event("ongoing", wire_id="wire-A"), [],
+        )
+        await agent.resolve_end_vote_publish(CHANNEL, published=True)
+        open_interaction = agent._interaction_tracker.get(SCOPE)
+        assert open_interaction is not None
+        assert open_interaction.is_open
+        assert await all_episodes(agent) == []
+
+    async def test_unbound_vote_parks_for_inbound_channel(self):
         # ``bind_end_vote_channel`` stamps the inbound channel before
-        # publish; the local close applies the same default so the two
+        # publish; the local park applies the same default so the two
         # halves cannot disagree about which conversation the persona
         # ended.
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         await agent._store_event_episode(
             channel_event("closable question"), [vote(channel_id=None)],
         )
+        await agent.resolve_end_vote_publish(CHANNEL, published=True)
         assert agent._interaction_tracker.get(SCOPE) is None
         episodes = await all_episodes(agent)
         assert _close_reasons(episodes) == [REASON_STRUCTURAL]
@@ -144,6 +182,9 @@ class TestVoteClosesLocalInteraction:
         await agent._store_event_episode(
             channel_event("ongoing"), [vote(channel_id="group:other")],
         )
+        # Nothing parked for either channel: a success callback for the
+        # vote's target closes nothing here.
+        await agent.resolve_end_vote_publish("group:other", published=True)
         open_interaction = agent._interaction_tracker.get(SCOPE)
         assert open_interaction is not None
         assert open_interaction.is_open
@@ -151,7 +192,7 @@ class TestVoteClosesLocalInteraction:
 
     async def test_dm_vote_does_not_close(self):
         # The executor drops DM votes (``status=dm_channel``); the local
-        # close must mirror that gate, not race ahead of it.
+        # park must mirror that gate, not race ahead of it.
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         dm_channel = "dm:alex"
         dm_scope = scope_for_dm(agent.agent_id, "alex")
@@ -161,6 +202,7 @@ class TestVoteClosesLocalInteraction:
             ),
             [vote(channel_id=dm_channel)],
         )
+        await agent.resolve_end_vote_publish(dm_channel, published=True)
         open_interaction = agent._interaction_tracker.get(dm_scope)
         assert open_interaction is not None
         assert open_interaction.is_open
@@ -237,8 +279,9 @@ class TestWireRotationClosesLocalInteraction:
 
     async def test_vote_then_fresh_topic_yields_two_clean_records(self):
         # The MT-CHANNEL-GOV-003 arc in miniature: vote-close the first
-        # discussion, then a new topic on a rotated wire id opens a
-        # fresh local interaction without a spurious second close.
+        # discussion (publish-confirmed), then a new topic on a rotated
+        # wire id opens a fresh local interaction without a spurious
+        # second close.
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         await agent._store_event_episode(
             channel_event("relay or beacon?", wire_id="wire-A"), [],
@@ -246,6 +289,7 @@ class TestWireRotationClosesLocalInteraction:
         await agent._store_event_episode(
             channel_event("agreed: relay", wire_id="wire-A"), [vote()],
         )
+        await agent.resolve_end_vote_publish(CHANNEL, published=True)
         assert agent._interaction_tracker.get(SCOPE) is None
         await agent._store_event_episode(
             channel_event("retro agenda?", wire_id="wire-B"), [],
@@ -257,6 +301,11 @@ class TestWireRotationClosesLocalInteraction:
         fresh = agent._interaction_tracker.get(SCOPE)
         assert fresh is not None
         assert fresh.wire_interaction_id == "wire-B"
+
+
+# The wire-carried close-cause labels (producer plan OQ 5 — idle_gap vs
+# structural by the stamped trigger) are pinned in their own suite:
+# test_interaction_close_cause_labels.py.
 
 
 # ─── Thread scopes are wire-untracked ────────────────────────
@@ -338,10 +387,10 @@ class TestMentionEventVoteGate:
     """``bind_end_vote_channel`` stamps the inbound channel only on
     ``CHANNEL_MESSAGE`` events, so an unbound vote decided on a MENTION
     turn reaches the executor without a ``channel_id`` and is dropped
-    (``status=no_channel_id``) — the local close must not race ahead of
+    (``status=no_channel_id``) — the local park must not race ahead of
     a publish that never happens (PR 607 review finding 4).  A vote that
     explicitly names the channel is published normally and closes the
-    local scope on any multi-turn event type."""
+    local scope on any multi-turn event type once the publish succeeds."""
 
     async def test_unbound_vote_on_mention_event_does_not_close(self):
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
@@ -360,6 +409,7 @@ class TestMentionEventVoteGate:
             channel_event("you were mentioned", event_type=EventType.MENTION),
             [vote()],
         )
+        await agent.resolve_end_vote_publish(CHANNEL, published=True)
         assert agent._interaction_tracker.get(SCOPE) is None
         episodes = await all_episodes(agent)
         assert _close_reasons(episodes) == [REASON_STRUCTURAL]

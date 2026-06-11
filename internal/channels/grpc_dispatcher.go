@@ -420,6 +420,15 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		//
 		// [RFC 0030 governance layers]: ../../docs/rfcs/0030-governance-layers-pr-plan.md
 		InteractionId: readInteractionID(msg.Metadata),
+		// Producer plan OQ 5: the retired predecessor's id + close trigger
+		// ("idle"/"end_votes"), stamped by `publishCommit` from the resolver's
+		// own close record, so the agent-side rotation close can label the
+		// boundary truthfully (idle_gap vs structural) instead of calling
+		// every rotation "ended". Both empty when no retiree is known (fresh
+		// channel / post-restart re-mint) — the receiver keeps its legacy
+		// label, the documented mixed-version posture.
+		PreviousInteractionId:           readPreviousInteractionID(msg.Metadata),
+		PreviousInteractionCloseTrigger: readPreviousInteractionTrigger(msg.Metadata),
 		// Floor-capable-directedness amendment (v0.3.8): the per-publish
 		// suppression basis the router resolved at fanout, plus the
 		// unconditional producer-presence flag. The flag is hardcoded true

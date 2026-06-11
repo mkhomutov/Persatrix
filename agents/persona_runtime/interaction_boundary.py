@@ -29,9 +29,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ..memory.boundary_detectors import REASON_IDLE_GAP, REASON_STRUCTURAL
 from ..persona_types import ActionType, EventType
 
 if TYPE_CHECKING:
+    from ..memory.boundary_detectors import CloseReason
     from ..memory.interactions import Interaction
     from ..persona_types import AgentAction, AgentEvent
 
@@ -118,12 +120,15 @@ def ends_interaction_by_vote(
     surface (``agent interactions``) never shows the converged
     discussion as "ended" (the MT-CHANNEL-GOV-003 Step 3 gap).
 
-    Intent-based by design: this runs before the executor publishes
-    the vote (the action loop stores the episode at step 6 and
-    executes at the dispatcher), so a publish failure leaves a
-    slightly-early local close — the persona's judgement was real
-    either way, and a quorum is never assumed (only the voter's own
-    scope closes; non-voters close on the wire id rotation,
+    Intent-detection only (PR 607 review finding 5): this runs before
+    the executor publishes the vote (the action loop stores the
+    episode at step 6 and executes at the dispatcher), so the caller
+    PARKS the close instead of executing it — the executor's
+    publish-outcome callback (:mod:`.vote_close`) closes the voter's
+    scope on success and drops the park on failure, so a vote that
+    never reached the orchestrator leaves no early "ended" record.
+    A quorum is never assumed (only the voter's own scope closes;
+    non-voters close on the wire id rotation,
     :func:`wire_rotation_closes`).
 
     Mirrors the executor's gates (``end_vote_action.py``): a DM vote
@@ -193,19 +198,15 @@ def wire_rotation_closes(
     §C never-reopen), so a differing id is always a rotation, never a
     revert.
 
-    Label-fidelity caveat (PR 607 review finding 3, accepted
-    limitation): the wire id carries no close *cause*, so the caller
-    closes every observed rotation with ``REASON_STRUCTURAL`` —
-    rendered "ended" by the summary surfaces.  That label is truthful
-    for the end-vote quorum (the propagation this seam exists for) but
-    also claims an idle rotation whose channel window is shorter than
-    the agent's (the step-1 ``idle_check`` only wins the label when
-    the agent-side window expired too), and an orchestrator-restart
-    re-mint (IP5: the resolver table is in-memory, the next publish
-    mints fresh) — both surface as "ended" without any vote.
-    Distinguishing them needs the close trigger carried on the wire
-    (producer plan OQ 5); a local heuristic would just trade one wrong
-    label for another.
+    Label fidelity (PR 607 review finding 3, discharged by producer
+    plan OQ 5): the rotation's close *cause* now rides the wire — the
+    orchestrator stamps the retired id and its trigger
+    (``previous_interaction_id`` / ``previous_interaction_close_trigger``)
+    onto every publish of the successor interaction, and the caller
+    picks the close reason via :func:`wire_rotation_close_reason`
+    instead of hardcoding ``REASON_STRUCTURAL``.  An old orchestrator
+    (or a post-restart re-mint, which has no retiree to attribute)
+    leaves the fields absent and the pre-OQ5 structural label stands.
     """
     return (
         open_interaction is not None
@@ -216,10 +217,66 @@ def wire_rotation_closes(
     )
 
 
+# The resolver's idle-rotation trigger value, as stamped on
+# ``previous_interaction_close_trigger`` (producer plan OQ 5).  Re-declared
+# rather than imported from ``agents.channel_wire_metadata`` for the same
+# layering reason as ``_DM_CHANNEL_PREFIX`` above — the literal is a wire
+# convention, not shared code — and asserted equal to Go's ``idleTrigger``
+# (``internal/channels/interaction_resolver.go``) and the seed-point
+# allowlist by the cross-language drift test.  ``end_votes`` needs no twin
+# here: it maps to the same ``REASON_STRUCTURAL`` the fallback already
+# yields, so only ``idle`` changes the outcome.
+_WIRE_CLOSE_TRIGGER_IDLE = "idle"
+
+
+def wire_rotation_close_reason(
+    open_interaction: Interaction | None,
+    event_metadata: dict[str, object],
+) -> CloseReason:
+    """The close reason for a local interaction being closed by the wire
+    id rotation :func:`wire_rotation_closes` detected (producer plan OQ 5).
+
+    The seed point (``agents/channel_wire_metadata.py``) delivers the
+    retired id + trigger as a validated pair on the event metadata.  The
+    trigger is applied only when the retired id equals the wire id the
+    open local record was opened under — a mismatch means this agent
+    missed a generation (the channel rotated more than once since it
+    last heard anything), so the stamped cause attributes a *different*
+    boundary than the one being closed and is discarded.
+
+    Mapping: ``idle`` → :data:`REASON_IDLE_GAP` (the channel's window
+    elapsed; "went idle" is the truthful label even when the agent's own
+    longer window had not), ``end_votes`` — and any absent, mismatched,
+    or unrecognised value — → :data:`REASON_STRUCTURAL`.  The quorum
+    close IS the explicit end the structural label claims, and the
+    fallback keeps the exact pre-OQ5 behaviour for an old orchestrator
+    or a post-restart re-mint (the mixed-version contract).  A neutral
+    "unknown" reason was considered for the fallback and rejected: the
+    wire cannot distinguish "old producer" from "new producer with no
+    retiree", so a neutral label would relabel every legacy deployment's
+    rotations while still mislabelling nothing-in-particular — see the
+    producer plan OQ 5 notes.
+    """
+    if open_interaction is None:
+        return REASON_STRUCTURAL
+    prev_id = str(event_metadata.get("previous_interaction_id", "") or "")
+    prev_trigger = str(
+        event_metadata.get("previous_interaction_close_trigger", "") or "",
+    )
+    if (
+        prev_id
+        and prev_id == open_interaction.wire_interaction_id
+        and prev_trigger == _WIRE_CLOSE_TRIGGER_IDLE
+    ):
+        return REASON_IDLE_GAP
+    return REASON_STRUCTURAL
+
+
 __all__ = [
     "SESSION_END_METADATA_KEYS",
     "SESSION_END_TRUTHY_STRINGS",
     "ends_interaction_by_vote",
     "is_session_end_event",
+    "wire_rotation_close_reason",
     "wire_rotation_closes",
 ]

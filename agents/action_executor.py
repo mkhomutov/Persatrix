@@ -225,10 +225,15 @@ class ActionExecutor:
             case ActionType.END_INTERACTION_VOTE:
                 # RFC 0030 Layer 4 vote producer (producer plan PR 2, IP6) —
                 # carved into end_vote_action.py for the 500-line cap.
-                return await publish_end_interaction_vote(
+                result = await publish_end_interaction_vote(
                     self._channel_publisher, agent_id, action,
                     cascade_depth=cascade_depth,
                 )
+                # PR 607 review finding 5: tell the voter how its publish
+                # went so the parked local close is discharged — close on
+                # "published", drop on any failure status.
+                await self._notify_end_vote_outcome(agent_id, result)
+                return result
             case _:
                 # Defensive catch-all: Python match is not exhaustive at the
                 # type level. Without this, a new ActionType variant would
@@ -238,6 +243,41 @@ class ActionExecutor:
                     agent_id, action.action_type.value,
                 )
                 return {"action_type": action.action_type.value, "status": "unhandled"}
+
+    async def _notify_end_vote_outcome(
+        self, agent_id: str, result: dict[str, Any],
+    ) -> None:
+        """Discharge the voter's parked local close with the publish outcome
+        (PR 607 review finding 5).
+
+        The decide-time path parks the END_INTERACTION_VOTE's local
+        interaction close instead of executing it (the vote has not been
+        published yet — see ``agents/persona_runtime/vote_close.py``); this
+        callback reports how the publish went so the park is closed
+        (``status == "published"``) or dropped (any failure status, so a
+        vote that never reached the orchestrator leaves no early "ended"
+        record).  Best-effort: no dispatcher / unknown agent / missing
+        ``channel_id`` (the ``no_channel_id`` drop) simply leaves the park
+        to the staleness guards, and a callback error must not fail the
+        action whose publish already succeeded.
+        """
+        if self._dispatcher is None:
+            return
+        agent = self._dispatcher.get_agent(agent_id)
+        if agent is None:
+            return
+        channel_id = str(result.get("channel_id", "") or "")
+        if not channel_id:
+            return
+        try:
+            await agent.resolve_end_vote_publish(
+                channel_id, published=result.get("status") == "published",
+            )
+        except Exception:
+            logger.warning(
+                "End-vote publish-outcome callback failed for agent %s "
+                "(channel %s)", agent_id, channel_id, exc_info=True,
+            )
 
     async def _handle_send_channel_message(
         self,

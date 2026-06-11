@@ -317,6 +317,35 @@ message ChannelMessageEvent {
   // implicit presence: false (the zero value) is the genuine old-producer
   // case, so the field is additive across a mixed-version deployment.
   bool floor_mentions_resolved = 19;
+  // RFC 0030 interaction-id producer plan OQ 5 (v0.3.8) — the channel's most
+  // recently RETIRED interaction id, paired with `= 21` below. The resolver
+  // (`internal/channels/interaction_resolver.go`) rotates `interaction_id = 17`
+  // when a conversation ends, but the rotation alone carries no *cause*, so
+  // the agent-side boundary close (`wire_rotation_closes`) had to label every
+  // observed rotation "structural"/ended — wrong for an idle rotation under a
+  // channel window shorter than the agent's own (PR 607 review finding 3).
+  // `publishCommit` stamps the retired id + its close trigger onto every
+  // publish of the SUCCESSOR interaction; the receiver applies the trigger
+  // only when this id equals the wire id its open local record was opened
+  // under (a mismatch means the agent missed a generation — the cause of ITS
+  // boundary is unknown and the legacy label stands). Empty (proto3 implicit
+  // presence) is the no-retiree case: an old producer, a fresh channel's
+  // first interaction, or an orchestrator-restart re-mint (IP5: the resolver
+  // table is in-memory, so a restart has no retiree to attribute) — receivers
+  // MUST keep the pre-OQ5 behaviour, so the field stays additive across a
+  // mixed-version deployment. Same opaque-token + 128-byte bound contract as
+  // `interaction_id = 17`.
+  string previous_interaction_id = 20;
+  // The close trigger that retired `previous_interaction_id = 20`:
+  // "idle" (lazy idle rotation) | "end_votes" (Layer 4 quorum close) — the
+  // same vocabulary as the `channel.conversation.interaction_closed{trigger}`
+  // instrument (§L; `idleTrigger`/`endVotesTrigger` in Go, pinned by the
+  // cross-language drift test). The receiver maps "idle" to its local
+  // `idle_gap` close reason and "end_votes" to `structural`; an empty or
+  // unrecognised value degrades to the pre-OQ5 structural label rather than
+  // failing the dispatch (the tolerant-wire-reader posture of
+  // `readInteractionID`). Set iff `= 20` is set.
+  string previous_interaction_close_trigger = 21;
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)

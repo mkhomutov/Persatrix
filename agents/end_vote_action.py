@@ -75,7 +75,14 @@ async def publish_end_interaction_vote(
             "is configured (legacy in-process path) — vote not published",
             sender_id,
         )
-        return {"action_type": "end_interaction_vote", "status": "not_implemented"}
+        # ``channel_id`` carried (when bound) so the executor's outcome
+        # callback can drop the voter's parked local close — the legacy
+        # path publishes nothing, so nothing must read as "ended".
+        return {
+            "action_type": "end_interaction_vote",
+            "status": "not_implemented",
+            "channel_id": target_channel,
+        }
     if not target_channel:
         logger.warning(
             "Agent %s END_INTERACTION_VOTE has no channel_id (non-channel "

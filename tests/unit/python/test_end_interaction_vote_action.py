@@ -21,7 +21,7 @@ and binding API.
 from __future__ import annotations
 
 import logging
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -247,3 +247,112 @@ class TestVotePromptVocabulary:
 
         src = Path("agents/persona_runtime/prompt_assembly.py").read_text(encoding="utf-8")
         assert 'load_snippet("end-interaction-vote")' in src
+
+
+class TestVotePublishOutcomeCallback:
+    """PR 607 review finding 5 — the executor reports the vote publish
+    outcome back to the voter (``resolve_end_vote_publish``) so the
+    decide-time PARKED local close is discharged: closed on success,
+    dropped on failure.  Best-effort: a missing dispatcher/agent or a
+    callback error never fails the action."""
+
+    def _executor_with_agent(self, publisher) -> tuple[ActionExecutor, AsyncMock]:
+        agent = AsyncMock()
+        agent.resolve_end_vote_publish = AsyncMock(return_value=None)
+        dispatcher = MagicMock()
+        dispatcher.get_agent = MagicMock(return_value=agent)
+        executor = ActionExecutor(
+            dispatcher=dispatcher, channel_publisher=publisher,
+        )
+        return executor, agent
+
+    @pytest.mark.asyncio
+    async def test_published_outcome_reports_success(self):
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        executor, agent = self._executor_with_agent(publisher)
+
+        await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning"}),
+        ])
+
+        agent.resolve_end_vote_publish.assert_awaited_once_with(
+            "group:planning", published=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_failed_publish_reports_failure(self):
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(side_effect=RuntimeError("boom"))
+        executor, agent = self._executor_with_agent(publisher)
+
+        await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning"}),
+        ])
+
+        agent.resolve_end_vote_publish.assert_awaited_once_with(
+            "group:planning", published=False,
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_publisher_reports_failure(self):
+        """The legacy path publishes nothing — the park must be dropped,
+        so the not_implemented result carries the bound channel and the
+        callback reports a non-publish."""
+        executor, agent = self._executor_with_agent(None)
+
+        results = await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning"}),
+        ])
+
+        assert results[0]["status"] == "not_implemented"
+        agent.resolve_end_vote_publish.assert_awaited_once_with(
+            "group:planning", published=False,
+        )
+
+    @pytest.mark.asyncio
+    async def test_channel_less_drop_skips_callback(self):
+        """``no_channel_id`` has no channel to discharge — nothing was
+        parked for it either (the decide-time gates mirror the executor's)."""
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        executor, agent = self._executor_with_agent(publisher)
+
+        await executor.execute("ember-owl", [_vote({})])
+
+        agent.resolve_end_vote_publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_unknown_agent_is_tolerated(self):
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        dispatcher = MagicMock()
+        dispatcher.get_agent = MagicMock(return_value=None)
+        executor = ActionExecutor(
+            dispatcher=dispatcher, channel_publisher=publisher,
+        )
+
+        results = await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning"}),
+        ])
+
+        assert results[0]["status"] == "published"
+
+    @pytest.mark.asyncio
+    async def test_callback_error_does_not_fail_the_action(self, caplog):
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        executor, agent = self._executor_with_agent(publisher)
+        agent.resolve_end_vote_publish = AsyncMock(
+            side_effect=RuntimeError("tracker exploded"),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="agents.action_executor"):
+            results = await executor.execute("ember-owl", [
+                _vote({"channel_id": "group:planning"}),
+            ])
+
+        assert results[0]["status"] == "published"
+        assert any(
+            "publish-outcome callback failed" in r.message for r in caplog.records
+        )

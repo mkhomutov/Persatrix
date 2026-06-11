@@ -74,6 +74,7 @@ from .memory_context import _MemoryContextMixin, _truncate_with_ellipsis  # noqa
 from .prompt_assembly import _PromptAssemblyMixin
 from .state_persistence import _StatePersistenceMixin
 from .summarize_close import JANITOR_INTERVAL_SEC, maybe_run_janitor
+from .vote_close import PendingVoteClose, discharge_end_vote_publish
 
 logger = logging.getLogger(__name__)
 _tracer = trace.get_tracer(__name__)
@@ -205,6 +206,9 @@ class _LLMPersonaAgent(
         # tasks + janitor cooldown.
         self._pending_summarize_tasks: set[asyncio.Task[None]] = set()
         self._last_janitor_monotonic: float | None = None
+        # PR 607 finding 5: parked vote closes by channel id, discharged on
+        # publish outcome via resolve_end_vote_publish (see vote_close.py).
+        self._pending_vote_closes: dict[str, PendingVoteClose] = {}
         # Pending Span Links to attach to the next on_tick() span (RFC 0019
         # § I).  Populated by ``EventDispatcher.dispatch()`` when an event
         # wakes the tick scheduler so the resulting tick can record
@@ -258,6 +262,17 @@ class _LLMPersonaAgent(
         (PR #55 review: TickScheduler accesses private agent._state.)
         """
         self._state.recover_energy()
+
+    async def resolve_end_vote_publish(
+        self, channel_id: str, *, published: bool,
+    ) -> None:
+        """Discharge the parked vote close for ``channel_id`` (PR 607
+        review finding 5): ``ActionExecutor`` reports the vote publish
+        outcome — success closes the voter's local record, failure drops
+        the park so an unpublished vote leaves no early "ended" record.
+        Acquires the agent lock; full contract in :mod:`.vote_close`.
+        """
+        await discharge_end_vote_publish(self, channel_id, published=published)
 
     def add_pending_tick_link(self, link: Link) -> None:
         """Queue a Span Link for the next ``on_tick()`` to consume.

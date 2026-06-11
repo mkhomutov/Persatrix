@@ -31,6 +31,22 @@ from .persona_types import AgentEvent
 # over the 36-byte uuid4.
 _INTERACTION_ID_MAX_BYTES = 128
 
+# The close triggers the orchestrator's resolver actually stamps onto
+# ``previous_interaction_close_trigger`` (producer plan OQ 5) — the §L
+# instrument vocabulary, mirroring Go's ``idleTrigger`` /
+# ``endVotesTrigger`` (``internal/channels/interaction_resolver.go`` /
+# ``end_vote.go``; pinned by the cross-language drift test). Allowlisted at
+# this seed point because the value drives the close *reason* persisted on
+# the local interaction record: an unrecognised string from a non-Go (or
+# compromised) producer must degrade to the legacy label, never ride into
+# ``close_reason`` verbatim.
+_WIRE_CLOSE_TRIGGER_IDLE = "idle"
+_WIRE_CLOSE_TRIGGER_END_VOTES = "end_votes"
+_WIRE_CLOSE_TRIGGERS = frozenset({
+    _WIRE_CLOSE_TRIGGER_IDLE,
+    _WIRE_CLOSE_TRIGGER_END_VOTES,
+})
+
 
 def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, object]:
     """Build the CHANNEL_MESSAGE ``AgentEvent.payload`` from the wire event.
@@ -114,6 +130,29 @@ def seed_wire_metadata(
     interaction_id = request.interaction_id
     if interaction_id and len(interaction_id.encode("utf-8")) <= _INTERACTION_ID_MAX_BYTES:
         event.metadata["interaction_id"] = interaction_id
+
+    # Producer plan OQ 5: the retired predecessor's id + close trigger, the
+    # close-cause attribution the rotation-close seam
+    # (``persona_runtime/interaction_boundary.py``) uses to label the local
+    # boundary truthfully (``idle_gap`` vs ``structural``). Seeded only as a
+    # validated PAIR — the trigger is meaningless without the id it
+    # attributes (the seam applies it only when the id matches the wire id
+    # its open record was opened under), and a lone trigger could mislabel a
+    # mismatched generation. The id gets the same byte bound as
+    # ``interaction_id`` above; the trigger must be in the resolver's §L
+    # vocabulary. Anything else — absent (old orchestrator, fresh channel,
+    # post-restart re-mint), oversized, or unrecognised — seeds nothing and
+    # the rotation close keeps its pre-OQ5 structural label (the
+    # mixed-version contract).
+    prev_id = request.previous_interaction_id
+    prev_trigger = request.previous_interaction_close_trigger
+    if (
+        prev_id
+        and len(prev_id.encode("utf-8")) <= _INTERACTION_ID_MAX_BYTES
+        and prev_trigger in _WIRE_CLOSE_TRIGGERS
+    ):
+        event.metadata["previous_interaction_id"] = prev_id
+        event.metadata["previous_interaction_close_trigger"] = prev_trigger
 
 
 __all__ = ["channel_event_payload", "seed_wire_metadata"]
