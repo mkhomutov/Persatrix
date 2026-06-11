@@ -87,6 +87,11 @@ def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, ob
         "salience_max_channel_members": request.salience_max_channel_members,
         "floor_mentions": list(request.floor_mentions),
         "floor_mentions_resolved": request.floor_mentions_resolved,
+        # Chair-stall-escalation amendment (§C item 2): the forced-turn
+        # marker. The gate admits a marked event down the directed lane
+        # (strict ``is True``) and the escalation framing renders into the
+        # turn's user message; false is every ordinary dispatch.
+        "chair_escalation": request.chair_escalation,
     }
 
 

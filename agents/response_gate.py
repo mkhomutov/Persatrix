@@ -343,6 +343,22 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
         )
         return GateDecision(respond=False, policy=POLICY_NEVER, reason="policy_never")
 
+    # Chair-stall-escalation amendment (§C item 2): the orchestrator's forced
+    # turn after a stalled floor round admits down the directed lane for
+    # either canonical non-`never` policy (CE2 allows an `addressed` chair,
+    # whose unmarked gate would suppress an unmentioned stimulus). The
+    # dedicated reason keeps it out of :func:`is_open_floor_admit` — which is
+    # what skips the Tier B bid (TB1: re-running it would re-produce the very
+    # silence being escalated). Defence-in-depth mirrors
+    # `floor_mentions_resolved`: strict `is True`, the fail-closed branches
+    # above (DM self-sender / self-sender / `never`) already won, and an
+    # unknown wire policy still falls through to the fail-closed
+    # `unknown_policy` suppress (bounded-label discipline preserved).
+    if payload.get("chair_escalation") is True and policy in (
+        POLICY_ALWAYS, POLICY_WHEN_MENTIONED,
+    ):
+        return GateDecision(respond=True, policy=policy, reason="chair_escalation")
+
     if policy == POLICY_ALWAYS:
         # RFC 0030 relevance amendment Tier A (v0.3.7): the directed-elsewhere
         # filter. A ``participant`` (``always``) member no longer answers a

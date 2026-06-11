@@ -187,3 +187,49 @@ def test_close_trigger_values_agree() -> None:
     assert WIRE_CLOSE_TRIGGERS == {idle, end_votes}
     # The boundary seam consumes the import, not a re-declaration.
     assert interaction_boundary.WIRE_CLOSE_TRIGGER_IDLE is WIRE_CLOSE_TRIGGER_IDLE
+
+
+_GRPC_DISPATCHER_GO = Path("internal/channels/grpc_dispatcher.go")
+_PROMPT_ASSEMBLY_PY = Path("agents/persona_runtime/prompt_assembly.py")
+_RESPONSE_GATE_PY = Path("agents/response_gate.py")
+_TASK_PROTO = Path("proto/task.proto")
+
+
+def test_chair_escalation_marker_agrees() -> None:
+    """The chair-stall-escalation forced-turn marker (amendment §C items
+    1–2) MUST agree across the proto field, the Go dispatcher lift, the
+    Python payload lift, and both strict consumers. A one-sided rename
+    leaves the orchestrator escalating into a marker nobody reads: the
+    chair's gate re-runs the very bid that produced the stall, and the
+    escalation silently degrades to the pre-amendment silence with every
+    suite green.
+    """
+    proto_src = _TASK_PROTO.read_text(encoding="utf-8")
+    if not re.search(r"^\s*bool chair_escalation = 22;", proto_src, re.MULTILINE):
+        _parse_miss("`bool chair_escalation = 22;`", _TASK_PROTO)
+
+    go_src = _GRPC_DISPATCHER_GO.read_text(encoding="utf-8")
+    if "ChairEscalation: env.ChairEscalation" not in go_src:
+        _parse_miss(
+            "the dispatcher lift `ChairEscalation: env.ChairEscalation`",
+            _GRPC_DISPATCHER_GO,
+        )
+
+    lift_src = _CHANNEL_WIRE_METADATA_PY.read_text(encoding="utf-8")
+    if '"chair_escalation": request.chair_escalation' not in lift_src:
+        _parse_miss(
+            'the payload lift `"chair_escalation": request.chair_escalation`',
+            _CHANNEL_WIRE_METADATA_PY,
+        )
+
+    # Both consumers honour the marker ONLY as the strict boolean — the
+    # floor_mentions_resolved posture (a spoofed truthy non-bool on the
+    # cleartext port must not widen admission or rewrite the prompt).
+    for path in (_RESPONSE_GATE_PY, _PROMPT_ASSEMBLY_PY):
+        src = path.read_text(encoding="utf-8")
+        if 'payload.get("chair_escalation") is True' not in src and (
+            'event.payload.get("chair_escalation") is True' not in src
+        ):
+            _parse_miss(
+                'a strict `…get("chair_escalation") is True` read', path,
+            )

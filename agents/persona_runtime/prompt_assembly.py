@@ -152,6 +152,22 @@ def _state_context(
     return {"state": state.to_prompt_section()}
 
 
+def format_chair_escalation(formatted_event: str) -> str:
+    """Wrap a formatted CHANNEL_MESSAGE in the chair-escalation framing.
+
+    The chair-stall-escalation amendment's forced turn (§C item 2): the
+    orchestrator re-delivered a stalled stimulus to this persona — the
+    channel's designated chair — and the framing tells it what the turn is
+    and what its two permissible outcomes are (synthesize + vote, or call on
+    the member best placed). Rendered per-event, ahead of the
+    already-sanitized formatted message; the snippet is the prose half
+    (``prompts/runtime/safety/chair-escalation.md``, the
+    ``end-interaction-vote`` snippet's sibling) and is lru-cached by
+    :func:`load_snippet`, so the per-event call costs one dict lookup.
+    """
+    return f"{load_snippet('chair-escalation')}\n\n{formatted_event}"
+
+
 def _goals_present(persona_cfg: dict[str, Any]) -> bool:
     """Goals section renders when at least one populated key is present.
 
@@ -392,12 +408,23 @@ class _PromptAssemblyMixin:
                     # (PR #120 review F-2: delimiter escape injection.)
                     safe_content = content.replace("<|", "\\<|").replace("|>", "\\|>")
                     safe_sender = sender.replace('"', "")
-                    return (
+                    formatted = (
                         f'<|user_message user_id="{safe_sender}"|>\n'
                         f"{safe_content}\n"
                         f"<|/user_message|>"
                     )
-                return f"Message from {sender}:\n\n{content}"
+                else:
+                    formatted = f"Message from {sender}:\n\n{content}"
+                # Chair-stall-escalation amendment (§C item 2): a marked
+                # forced turn carries the escalation framing ahead of the
+                # stalled stimulus — per-event, the sibling of the
+                # `end-interaction-vote` system-prompt snippet. Strict
+                # `is True`, mirroring the response gate's read; the framing
+                # wraps the already-sanitized formatted message, so it adds
+                # no new injection surface.
+                if event.payload.get("chair_escalation") is True:
+                    return format_chair_escalation(formatted)
+                return formatted
             case EventType.MENTION:
                 sender = event.sender_id or "unknown"
                 content = event.payload.get("content", "")
