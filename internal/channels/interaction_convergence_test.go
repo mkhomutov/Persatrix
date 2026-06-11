@@ -22,7 +22,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 // publishTurn publishes one ordinary discussion turn at the given cascade
@@ -56,15 +55,20 @@ func publishVote(t *testing.T, router *ChannelRouter, channelID, sender string, 
 //  1. A human opens a question (depth 0); two personas discuss (depths 1–2).
 //     Every publish carries the same resolver-minted interaction.
 //  2. Both personas vote (K=2 default quorum) with depth budget remaining.
-//  3. The interaction closes with `interaction_closed{trigger=end_votes}` —
-//     the semantic terminator fired BEFORE the Layer 0 depth cap could, and
-//     `governance_drop{layer=depth}` never incremented.
-//  4. The closing vote and any post-close racer draw no fanout.
+//  3. The interaction closes with `interaction_closed{trigger=end_votes}` and
+//     the Layer 0 depth cap stays untouched — `governance_drop{layer=depth}`
+//     is asserted zero across the WHOLE arc, votes included.
+//  4. The closing vote and a post-close racer draw no fanout — pinned by an
+//     EXACT dispatch count (the first vote's two recipients and nothing
+//     more). The racer's commit tail (settle + end-vote hook, the order
+//     publishCommit runs them) leaves the closed id parked as the retiree,
+//     never reopened, and is attributed as the arc's one
+//     `governance_drop{layer=end_vote}`.
 //  5. The channel is not dead: the next publish opens a FRESH interaction
-//     (IP8) and fans out normally — the quorum ended one conversation, not
-//     the room.
+//     (IP8) and fans out to all three personas — the quorum ended one
+//     conversation, not the room.
 func TestConvergence_DiscussionEndsByVotesBeforeDepthCap(t *testing.T) {
-	router, store, reader := routerWithInteractionClosedMetric(t)
+	router, store, reader := routerWithGovernanceMetrics(t)
 	disp := router.dispatcher.(*recordingDispatcher)
 	ch := mustCreateGroupWithPolicies(t, store, "planning",
 		map[string]RespondPolicy{
@@ -90,27 +94,37 @@ func TestConvergence_DiscussionEndsByVotesBeforeDepthCap(t *testing.T) {
 	publishVote(t, router, ch, "ember-owl", 2)
 	publishVote(t, router, ch, "iron-fox", 2)
 
-	var rm metricdata.ResourceMetrics
-	require.NoError(t, reader.Collect(context.Background(), &rm))
+	rm := collect(t, reader)
 	assert.Equal(t, int64(1), interactionClosedCount(t, rm, "group", "end_votes"),
 		"the discussion closed because the participants said so")
 	assert.Equal(t, int64(0), interactionClosedCount(t, rm, "group", "idle"),
-		"idle rotation had nothing to do — the semantic terminator fired first")
+		"no idle close on this arc — the quorum is the only close recorded")
 
-	// 4. The first vote fans out (others must see the terminal signal); the
-	// closing vote does not.
+	// 4. EXACT fanout accounting. The first vote dispatches to its two
+	// non-sender RespondAlways peers (iron-fox, nova-sparrow; alex is
+	// `respond: never`) — others must see the terminal signal — and the
+	// closing vote dispatches to NO ONE. Greater-than would let a close
+	// that leaked its own fanout pass; the +2 pins the suppression itself.
 	fannedAfterVotes := len(disp.snapshot())
-	assert.Greater(t, fannedAfterVotes, fannedBeforeVotes,
-		"the first vote fanned out as a real message")
+	assert.Equal(t, fannedBeforeVotes+2, fannedAfterVotes,
+		"exactly the first vote fans out (two recipients); the closing vote draws no fanout")
 	closedAtCount := fannedAfterVotes
 
 	// A commit racing the close (the only way the closed id sees more
 	// traffic — ordinary post-close publishes mint fresh) is suppressed. The
-	// racer is simulated at its commit tail (a direct processEndVote call
-	// carrying the closed id): a reseed-then-Publish simulation would
-	// force-install the closed id as the OPEN entry — a state the production
-	// path cannot reach (markInteractionClosed cleared it, and a racer's
-	// settle parks an orphaned id as the retiree, never as open).
+	// racer is simulated at its commit tail — the settle, then the end-vote
+	// hook, the order publishCommit runs them after persist — because a
+	// reseed-then-Publish simulation would force-install the closed id as
+	// the OPEN entry, a state the production path cannot reach: the close
+	// already parked the id as the retiree (markInteractionClosed), so the
+	// racer's settle takes settleInteraction's occupied-slot no-op and must
+	// leave the slot closed rather than reopen or re-park it.
+	racerNow := router.interactionNow()
+	router.settleInteraction(ch, openID, racerNow, true)
+	assert.Empty(t, openInteractionID(router, ch),
+		"the racer's settle must not reopen the closed interaction")
+	assert.Equal(t, openID, retiredInteractionID(router, ch),
+		"the closed id stays parked as the retiree, awaiting its deferred discard")
 	suppressed := router.processEndVote(context.Background(), ChannelMessage{
 		ID: uuid.NewString(), ChannelID: ch, SenderID: "nova-sparrow", Content: "racing",
 		Metadata: map[string]any{interactionIDMetadataKey: openID},
@@ -118,12 +132,21 @@ func TestConvergence_DiscussionEndsByVotesBeforeDepthCap(t *testing.T) {
 	assert.True(t, suppressed, "a racer into the closed interaction draws no fanout")
 
 	// 5. The room lives on: a fresh stimulus opens a NEW interaction and
-	// fans out normally.
+	// fans out to all three personas — full normal fanout, exactly.
 	publishTurn(t, router, ch, "alex", 0)
 	next := openInteractionID(router, ch)
 	assert.NotEmpty(t, next)
 	assert.NotEqual(t, openID, next,
 		"the next publish opened a fresh interaction — the vote ended one conversation, not the channel")
-	assert.Greater(t, len(disp.snapshot()), closedAtCount,
-		"the fresh stimulus fans out normally")
+	assert.Equal(t, closedAtCount+3, len(disp.snapshot()),
+		"the fresh stimulus fans out to all three personas")
+
+	// Whole-arc telemetry: the depth cap NEVER fired (RFC 0030 §D — the
+	// backstop demoted to regression signal, which this zero is), and the
+	// racer's suppression is the arc's one Layer 4 governance drop.
+	rm = collect(t, reader)
+	assert.Zero(t, governanceDropCount(t, rm, "group", governanceLayerDepth),
+		"the depth cap never fired — the semantic terminator closed the arc with budget to spare")
+	assert.Equal(t, int64(1), governanceDropCount(t, rm, "group", governanceLayerEndVote),
+		"the racer's post-close suppression is attributed on governance_drop{layer=end_vote}")
 }

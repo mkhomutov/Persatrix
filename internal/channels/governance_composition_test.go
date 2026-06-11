@@ -19,9 +19,11 @@ import (
 // the channel publish path owns (Layer 0 depth, Layer 2 reply budget, Layer 4
 // end-vote): a lower-layer drop short-circuits the higher layers and is
 // attributed by `governance_drop{layer}`; with every layer at its default the
-// path is behaviourally identical to v0.3.7 (GL1). The layers are inert in
-// production (no `interaction_id` producer); these drive them through the publish
-// metadata bag, like the per-layer suites.
+// path is behaviourally identical to v0.3.7 (GL1). The `interaction_id`
+// producer is live now (#604–#606) — these tests still drive the layers
+// through the publish metadata bag, like the per-layer suites, to pin the
+// composition deterministically; the producer-shaped end-to-end arc is
+// interaction_convergence_test.go.
 
 // routerWithGovernanceMetrics builds a router whose full v0.3.8 governance-layer
 // telemetry surface is collectible through one manual reader, so a composition

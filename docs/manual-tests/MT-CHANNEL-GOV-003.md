@@ -12,8 +12,10 @@
 ## Overview
 
 **Purpose**: Verify the v0.3.8 convergence promise end-to-end with real LLMs —
-the [interaction-id producer plan](../rfcs/0030-interaction-id-producer-pr-plan.md)'s
-Phase 3 acceptance. A multi-persona discussion now has a **semantic
+the live-LLM half of the
+[interaction-id producer plan](../rfcs/0030-interaction-id-producer-pr-plan.md)'s
+acceptance, executed under the [v0.3.8 master plan](../v0.3.8-plan.md)'s
+Phase 3 (release-prep). A multi-persona discussion now has a **semantic
 terminator**: every publish is stamped with an orchestrator-minted
 `interaction_id`, personas carry the end-of-discussion vote vocabulary in
 their system prompt, and when **K=2 distinct** participants emit
@@ -45,7 +47,7 @@ ordering ([MT-CHANNEL-GOV-002](MT-CHANNEL-GOV-002.md)).
 
 ## Related Documentation
 
-- [Interaction-id producer PR plan](../rfcs/0030-interaction-id-producer-pr-plan.md) — IP1–IP8; this MT is its Phase 3 acceptance
+- [Interaction-id producer PR plan](../rfcs/0030-interaction-id-producer-pr-plan.md) — IP1–IP8; this MT is the live-LLM half of its acceptance
 - [RFC 0030 §H](../rfcs/0030-multi-agent-conversation-governance.md#h-layer-4--end-of-interaction-signal) — the end-vote quorum design
 - [channels guide §Conversation governance](../guides/channels.md#conversation-governance-rfc-0030-layers-124--v038) — operator-facing behaviour
 - [`end-interaction-vote.md`](../../prompts/runtime/safety/end-interaction-vote.md) — the prompt half of the social contract
@@ -90,11 +92,19 @@ on; an open-ended ideation prompt postpones the votes indefinitely.
 
 **Expected**:
 - `iron-fox` and `nova-sparrow` reply in an ordered round (floor control).
-- The orchestrator log shows every publish stamped with one shared
-  `interaction_id` (debug) — no `untracked` traffic.
+- Every persisted message carries the same orchestrator-minted
+  `interaction_id` in its metadata. (There is no per-publish stamp log —
+  the resolver only logs when it *overrides* a divergent claim, which this
+  traffic does not produce; the persisted metadata is the ground truth.)
+
+```bash
+./bin/persatrix channel history planning --json \
+  | jq -r '.[] | "\(.sender_id)\t\(.metadata.interaction_id)"'
+```
 
 **Verification**:
-- [ ] Both participants reply; the discussion proceeds on one interaction.
+- [ ] Both participants reply; the history shows one shared
+  `interaction_id` across the whole discussion — no row missing it.
 
 ### Step 2: The discussion converges on votes
 
@@ -123,11 +133,12 @@ from me…").
 ```
 
 **Expected**:
-- The closed interaction appears with a **structural** close trigger and a
-  readable summary that names the decision (relay vs. beacon) — the
-  converged outcome, not a blank or the `[interaction summary unavailable]`
-  sentinel. The console's conversation view shows the "interaction closed"
-  affordance below the turns.
+- The closed interaction appears with the close trigger rendered as
+  **"ended"** (the CLI's label for a `structural` close; add `--json` to
+  see the literal `structural`) and a readable summary that names the
+  decision (relay vs. beacon) — the converged outcome, not a blank or the
+  `[interaction summary unavailable]` sentinel. The console's conversation
+  view shows the "interaction closed" affordance below the turns.
 
 **Verification**:
 - [ ] The summary names the decision the personas converged on.
@@ -142,8 +153,9 @@ from me…").
 
 **Expected**:
 - The personas reply normally — the vote ended one conversation, not the
-  channel. The orchestrator debug log shows a **different** `interaction_id`
-  on the new traffic.
+  channel. The channel history (same `jq` read as Step 1) shows the new
+  traffic stamped with a **different** `interaction_id` than the closed
+  discussion's.
 
 **Verification**:
 - [ ] Replies resume immediately on a fresh interaction.
@@ -167,8 +179,12 @@ from me…").
 
 The prompt-half of Layer 4 is judgement, not mechanism — a persona may keep
 finding things to add. That is not a failure of this MT's machinery: idle
-rotation (`interaction_idle_timeout_seconds`, default 600s) closes the
-interaction with `trigger=idle` once the room goes quiet. If votes *never*
+rotation (`interaction_idle_timeout_seconds`, default 600s) is the net.
+Note the emission is **lazy**: a quiet room emits nothing — the
+`interaction_closed{trigger=idle}` fires on the channel's **next publish**
+after the window has passed, when the resolver rotates to a fresh
+interaction (see the [channels guide](../guides/channels.md)'s idle-rotation
+caveat). If votes *never*
 occur across several closable prompts, treat it as prompt-snippet
 calibration feedback (the vote bar may be set too high), not a wire defect —
 the deterministic close path is pinned by automation either way.
