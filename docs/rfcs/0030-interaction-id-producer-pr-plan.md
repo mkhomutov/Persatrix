@@ -1,7 +1,7 @@
 # RFC 0030 Interaction-ID Producer — PR Implementation Plan (v0.3.8 scope: activate Layers 1/2/4)
 
 **Type**: PR implementation plan — the `interaction_id` producer the [governance-layers plan](0030-governance-layers-pr-plan.md) deliberately scoped out ("wired and tested ahead of the producer, not yet load-bearing")
-**Status**: 📋 Proposed
+**Status**: ✅ Implemented (v0.3.8 — Go resolver + idle rotation [#604](https://github.com/mkhomutov/Persatrix/pull/604); agent-side vote + lease threading [#605](https://github.com/mkhomutov/Persatrix/pull/605); convergence closeout [#606](https://github.com/mkhomutov/Persatrix/pull/606). Deterministic acceptance pinned by [`interaction_convergence_test.go`](../../internal/channels/interaction_convergence_test.go); live-LLM acceptance [MT-CHANNEL-GOV-003](../manual-tests/MT-CHANNEL-GOV-003.md) pending execution)
 **Author**: Maksim Khomutov
 **Date**: 2026-06-10
 **Target**: v0.3.8

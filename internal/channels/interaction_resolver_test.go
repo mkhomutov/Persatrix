@@ -54,6 +54,16 @@ func openInteractionID(r *ChannelRouter, channelID string) string {
 // landed (IP4's deferral exists for exactly this interleaving). Reseeding
 // reproduces that interleaving deterministically: the next Publish resolves
 // the seeded id exactly as the racing commit did.
+//
+// HAZARD — one racing publish only, then stop asserting through Publish.
+// The seeded entry leaves the closed id installed as OPEN (and the racer's
+// settle commits it) — a state the production path cannot reach: the close
+// cleared the slot, and a real racer's settle parks an orphaned id as the
+// RETIREE, never as open (settleInteraction's orphan branch). A test that
+// keeps publishing after the reseed asserts against that phantom state —
+// every later publish resolves the closed id and is silently suppressed
+// (the convergence acceptance arc hit exactly this; it simulates the racer
+// at its commit tail via a direct processEndVote call instead).
 func reseedOpenInteraction(r *ChannelRouter, channelID, interactionID string) {
 	r.interactionMu.Lock()
 	defer r.interactionMu.Unlock()
