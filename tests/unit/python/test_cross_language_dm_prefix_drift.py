@@ -10,14 +10,15 @@ pinned the same way in three places — and the posture's other half is a
 lock-step drift guard (``test_channel_validation.py``'s
 ``test_sentinel_agrees_across_modules``). The vote producer (RFC 0030
 producer plan PR 2) added a third ``_DM_CHANNEL_PREFIX`` pin for its DM
-vote gate, and the close-propagation follow-up (PR 607) a fourth for
-the agent-local vote-close mirror (``interaction_boundary.py`` — a gate
-that must agree with ``end_vote_action.py``'s by construction, or a DM
-vote the executor drops still closes the voter's local record). That is
-the copy count where silent divergence stops being hypothetical: a
-one-sided change leaves that side's suite green while a DM stops
-classifying as a DM there — e.g. the vote gate lets a flagged vote into
-a DM and Go's ``processEndVote`` counts it toward a quorum.
+vote gate.  (The close-propagation follow-up briefly added a fourth in
+``interaction_boundary.py``; the PR 607 second-pass review removed it —
+the vote-close park now gates on the resolved scope KIND via
+``agents.memory.scopes.is_group_scope``, so the agent-local mirror
+classifies DMs through the scope builder instead of a re-declared
+prefix.) Three copies is already where silent divergence stops being
+hypothetical: a one-sided change leaves that side's suite green while a
+DM stops classifying as a DM there — e.g. the vote gate lets a flagged
+vote into a DM and Go's ``processEndVote`` counts it toward a quorum.
 
 Python copies are imported and compared directly (stronger than a text
 pin). The Go side has no named constant — [scopeForDM]'s id *builder*
@@ -66,16 +67,12 @@ def test_dm_prefix_agrees_across_python_modules() -> None:
     from agents.persona_runtime.channel_reply import (
         _DM_CHANNEL_PREFIX as REPLY_FALLBACK_PREFIX,
     )
-    from agents.persona_runtime.interaction_boundary import (
-        _DM_CHANNEL_PREFIX as VOTE_CLOSE_PREFIX,
-    )
     from agents.response_gate import _DM_CHANNEL_PREFIX as GATE_PREFIX
 
     assert (
         GATE_PREFIX
         == REPLY_FALLBACK_PREFIX
         == VOTE_GATE_PREFIX
-        == VOTE_CLOSE_PREFIX
         == _CHANNEL_TYPE_PREFIXES["dm"]
         == SCOPE_PREFIX
         == _DM_PREFIX_CANONICAL

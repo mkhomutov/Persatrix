@@ -69,6 +69,22 @@ def is_thread_scope(scope: str) -> bool:
     return scope.startswith(_THREAD_PREFIX)
 
 
+def is_group_scope(scope: str) -> bool:
+    """True when ``scope`` is group-shaped (RFC 0020 §D ``group:`` prefix).
+
+    Added for the PR 607 second-pass review: the end-of-interaction vote
+    is group-channel governance, so the vote-close park
+    (``persona_runtime/vote_close.park_end_vote_close``) gates on the
+    resolved scope KIND — only group scopes have a vote-closeable
+    conversation.  Gating on the scope puts every exemption (DM, thread
+    scope, thread-prefixed *channel*, the unknown-prefix fallback) on the
+    same basis as the wire seam's :func:`is_thread_scope` guard, instead
+    of re-deriving them per call site from event fields and re-declared
+    channel-id prefixes.  Same predicate-over-prefix contract as above.
+    """
+    return scope.startswith(_GROUP_PREFIX)
+
+
 # ─── Channel-event scope routing (RFC 0020 PR 5) ─────────────
 
 
@@ -179,6 +195,7 @@ def scope_for_channel_event(
 
 __all__ = [
     "SCOPE_TICK",
+    "is_group_scope",
     "is_thread_scope",
     "scope_for_channel_event",
     "scope_for_dm",

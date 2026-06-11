@@ -46,13 +46,15 @@ from agents.memory.interactions import (
     scope_for_group,
     scope_for_thread,
 )
-from agents.persona_types import EventType
+from agents.persona_runtime.channel_reply import bind_end_vote_channel
+from agents.persona_types import VOTE_CLOSE_TOKEN_KEY, EventType
 from agents.tools.registry import clear_registry
 
 from ._interaction_multi_turn_helpers import (
     GROUP_CHANNEL,
     all_episodes,
     channel_event,
+    discharge_vote,
     make_agent_with_clock,
 )
 from ._interaction_multi_turn_helpers import (
@@ -104,7 +106,7 @@ class TestVoteClosesLocalInteraction:
         # Publish outcome: success closes the parked scope (RFC 0020 §C
         # never-reopen) and the closed episode row carries the structural
         # trigger the CLI renders as "ended".
-        await agent.resolve_end_vote_publish(CHANNEL, published=True)
+        await discharge_vote(agent)
         assert agent._interaction_tracker.get(SCOPE) is None
         episodes = await all_episodes(agent)
         assert len(episodes) == 1
@@ -118,17 +120,22 @@ class TestVoteClosesLocalInteraction:
         # early "ended" record — the scope stays open for the ordinary
         # closes (wire rotation once a real quorum forms, or idle).
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        failed_vote = vote()
         await agent._store_event_episode(
-            channel_event("wrap it up?", wire_id="wire-A"), [vote()],
+            channel_event("wrap it up?", wire_id="wire-A"), [failed_vote],
         )
-        await agent.resolve_end_vote_publish(CHANNEL, published=False)
+        stamped_token = failed_vote.payload[VOTE_CLOSE_TOKEN_KEY]
+        await discharge_vote(agent, published=False)
         open_interaction = agent._interaction_tracker.get(SCOPE)
         assert open_interaction is not None
         assert open_interaction.is_open
         assert await all_episodes(agent) == []
         # The park was dropped, not deferred: a later success callback
-        # (a duplicate / stray notification) finds nothing to close.
-        await agent.resolve_end_vote_publish(CHANNEL, published=True)
+        # (a duplicate / stray notification of the same vote) finds
+        # nothing to close.
+        await agent.resolve_end_vote_publish(
+            CHANNEL, published=True, token=stamped_token,
+        )
         assert agent._interaction_tracker.get(SCOPE) is not None
         assert await all_episodes(agent) == []
 
@@ -146,7 +153,7 @@ class TestVoteClosesLocalInteraction:
         )
         episodes = await all_episodes(agent)
         assert len(episodes) == 1  # the rotation close, not the vote's
-        await agent.resolve_end_vote_publish(CHANNEL, published=True)
+        await discharge_vote(agent)
         successor = agent._interaction_tracker.get(SCOPE)
         assert successor is not None
         assert successor.is_open
@@ -157,25 +164,41 @@ class TestVoteClosesLocalInteraction:
         await agent._store_event_episode(
             channel_event("ongoing", wire_id="wire-A"), [],
         )
-        await agent.resolve_end_vote_publish(CHANNEL, published=True)
+        await agent.resolve_end_vote_publish(CHANNEL, published=True, token="")
         open_interaction = agent._interaction_tracker.get(SCOPE)
         assert open_interaction is not None
         assert open_interaction.is_open
         assert await all_episodes(agent) == []
 
-    async def test_unbound_vote_parks_for_inbound_channel(self):
-        # ``bind_end_vote_channel`` stamps the inbound channel before
-        # publish; the local park applies the same default so the two
-        # halves cannot disagree about which conversation the persona
-        # ended.
+    async def test_unbound_vote_parks_once_the_bind_seam_ran(self):
+        # Production order: ``bind_end_vote_channel`` (action-loop step
+        # 4b, inside ``synthesize_channel_reply``) stamps the inbound
+        # channel BEFORE the episode stores (step 6), so the park seam
+        # consumes the already-bound action — the binding rule has
+        # exactly one home (PR 607 second-pass review).
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        event = channel_event("closable question")
+        actions = bind_end_vote_channel(event, [vote(channel_id=None)])
+        assert actions[0].payload["channel_id"] == CHANNEL
+        await agent._store_event_episode(event, actions)
+        await discharge_vote(agent)
+        assert agent._interaction_tracker.get(SCOPE) is None
+        episodes = await all_episodes(agent)
+        assert _close_reasons(episodes) == [REASON_STRUCTURAL]
+
+    async def test_unbound_vote_without_bind_does_not_park(self):
+        # An action that somehow reaches the episode store unbound (the
+        # bind seam only fires on CHANNEL_MESSAGE events with a channel)
+        # matches no conversation — nothing parks, mirroring the
+        # executor's ``no_channel_id`` drop.
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         await agent._store_event_episode(
             channel_event("closable question"), [vote(channel_id=None)],
         )
-        await agent.resolve_end_vote_publish(CHANNEL, published=True)
-        assert agent._interaction_tracker.get(SCOPE) is None
-        episodes = await all_episodes(agent)
-        assert _close_reasons(episodes) == [REASON_STRUCTURAL]
+        assert agent._pending_vote_closes == {}
+        open_interaction = agent._interaction_tracker.get(SCOPE)
+        assert open_interaction is not None
+        assert open_interaction.is_open
 
     async def test_vote_for_other_channel_does_not_close(self):
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
@@ -183,26 +206,34 @@ class TestVoteClosesLocalInteraction:
             channel_event("ongoing"), [vote(channel_id="group:other")],
         )
         # Nothing parked for either channel: a success callback for the
-        # vote's target closes nothing here.
-        await agent.resolve_end_vote_publish("group:other", published=True)
+        # vote's target (whose action was never stamped with a token)
+        # closes nothing here.
+        await agent.resolve_end_vote_publish(
+            "group:other", published=True, token="",
+        )
         open_interaction = agent._interaction_tracker.get(SCOPE)
         assert open_interaction is not None
         assert open_interaction.is_open
         assert await all_episodes(agent) == []
 
     async def test_dm_vote_does_not_close(self):
-        # The executor drops DM votes (``status=dm_channel``); the local
-        # park must mirror that gate, not race ahead of it.
+        # The executor drops DM votes (``status=dm_channel``); locally
+        # the park is gated on the resolved scope KIND (only group
+        # scopes have a vote-closeable conversation), so a DM turn
+        # parks nothing — same basis as the wire seam's thread gate.
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         dm_channel = "dm:alex"
         dm_scope = scope_for_dm(agent.agent_id, "alex")
+        dm_vote = vote(channel_id=dm_channel)
         await agent._store_event_episode(
             channel_event(
                 "wrap up?", channel=dm_channel, channel_type="dm",
             ),
-            [vote(channel_id=dm_channel)],
+            [dm_vote],
         )
-        await agent.resolve_end_vote_publish(dm_channel, published=True)
+        assert agent._pending_vote_closes == {}
+        assert VOTE_CLOSE_TOKEN_KEY not in dm_vote.payload
+        await agent.resolve_end_vote_publish(dm_channel, published=True, token="")
         open_interaction = agent._interaction_tracker.get(dm_scope)
         assert open_interaction is not None
         assert open_interaction.is_open
@@ -289,7 +320,7 @@ class TestWireRotationClosesLocalInteraction:
         await agent._store_event_episode(
             channel_event("agreed: relay", wire_id="wire-A"), [vote()],
         )
-        await agent.resolve_end_vote_publish(CHANNEL, published=True)
+        await discharge_vote(agent)
         assert agent._interaction_tracker.get(SCOPE) is None
         await agent._store_event_episode(
             channel_event("retro agenda?", wire_id="wire-B"), [],
@@ -378,6 +409,34 @@ class TestThreadScopesAreWireUntracked:
         assert open_interaction.is_open
         assert await all_episodes(agent) == []
 
+    async def test_vote_in_thread_channel_does_not_close(self):
+        # A `thread:`-prefixed CHANNEL (the router derives
+        # ChannelTypeThread from the id prefix) delivers events with
+        # channel_type="thread" and NO thread_id.  The vote seam must
+        # exempt them on the same basis as the wire seam — the resolved
+        # scope KIND — or a voter's thread-scoped record would close at
+        # vote time while non-voters (whose wire seam never stamps a
+        # thread scope) keep theirs open: a permanent mirror divergence
+        # (PR 607 second-pass review).
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        thread_channel = "thread:t1"
+        channel_vote = vote(channel_id=thread_channel)
+        await agent._store_event_episode(
+            channel_event(
+                "wrap?", channel=thread_channel, channel_type="thread",
+            ),
+            [channel_vote],
+        )
+        assert agent._pending_vote_closes == {}
+        assert VOTE_CLOSE_TOKEN_KEY not in channel_vote.payload
+        await agent.resolve_end_vote_publish(
+            thread_channel, published=True, token="",
+        )
+        record = agent._interaction_tracker.get(scope_for_thread(thread_channel))
+        assert record is not None
+        assert record.is_open
+        assert await all_episodes(agent) == []
+
 
 # ─── MENTION events and the unbound-vote default ─────────────
 
@@ -409,7 +468,7 @@ class TestMentionEventVoteGate:
             channel_event("you were mentioned", event_type=EventType.MENTION),
             [vote()],
         )
-        await agent.resolve_end_vote_publish(CHANNEL, published=True)
+        await discharge_vote(agent)
         assert agent._interaction_tracker.get(SCOPE) is None
         episodes = await all_episodes(agent)
         assert _close_reasons(episodes) == [REASON_STRUCTURAL]

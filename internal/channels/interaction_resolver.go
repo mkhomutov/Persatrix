@@ -79,12 +79,15 @@ const idleTrigger = "idle"
 // it never idle-rotates (rotating it would emit `interaction_closed` for an
 // interaction containing zero messages) and is adopted by the next committed
 // publish instead.
-// `prevID`/`prevTrigger` record the channel's most recently CLOSED
-// interaction and the trigger that closed it ([idleTrigger] /
-// [endVotesTrigger]) — the producer plan OQ 5 close-cause attribution
-// [ChannelRouter.publishCommit] stamps onto every publish of the successor
-// interaction. Deliberately separate from `retired`: that slot is the
-// discard-seam ledger and can also park an orphaned commit
+// `prev` records the channel's most recently CLOSED interaction and the
+// trigger that closed it ([idleTrigger] / [endVotesTrigger]) — the producer
+// plan OQ 5 close-cause attribution [ChannelRouter.publishCommit] stamps
+// onto every publish of the successor interaction. One [previousClose]
+// field rather than two parallel strings (PR 607 second-pass review): the
+// pair is only ever written and read as a unit, and a future close path
+// setting one half without the other would silently produce a
+// half-attributed cause. Deliberately separate from `retired`: that slot is
+// the discard-seam ledger and can also park an orphaned commit
 // ([ChannelRouter.settleInteraction]) — an interleaving artefact, not a
 // close — so it cannot double as the close-cause record. The pair persists
 // until the channel's next close overwrites it; in-memory like the rest of
@@ -95,8 +98,7 @@ type openInteraction struct {
 	idCommitted  bool
 	lastActivity time.Time
 	retired      string
-	prevID       string
-	prevTrigger  string
+	prev         previousClose
 }
 
 // previousClose is the resolver's OQ 5 close-cause attribution for one
@@ -161,14 +163,14 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 		// OQ 5 close-cause attribution: this resolve IS the idle close, so
 		// the publish that triggered it (the successor's first message)
 		// already carries the cause.
-		entry.prevID, entry.prevTrigger = rotated, idleTrigger
+		entry.prev = previousClose{id: rotated, trigger: idleTrigger}
 	}
 	if entry.id == "" {
 		entry.id = uuid.NewString()
 		entry.idCommitted = false
 	}
 	resolved := entry.id
-	prev := previousClose{id: entry.prevID, trigger: entry.prevTrigger}
+	prev := entry.prev
 	r.interactionMu.Unlock()
 
 	if discard != "" {
@@ -267,7 +269,7 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID string) {
 		discard = entry.retired
 		entry.retired = interactionID
 		entry.id = ""
-		entry.prevID, entry.prevTrigger = interactionID, endVotesTrigger
+		entry.prev = previousClose{id: interactionID, trigger: endVotesTrigger}
 	}
 	r.interactionMu.Unlock()
 

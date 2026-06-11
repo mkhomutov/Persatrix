@@ -29,6 +29,7 @@ __all__ = [
     "all_episodes",
     "channel_event",
     "close_reasons",
+    "discharge_vote",
     "do_nothing_client",
     "make_agent_with_clock",
     "persona_config",
@@ -182,6 +183,26 @@ def vote_action(channel_id: str | None = GROUP_CHANNEL) -> AgentAction:
     return AgentAction(
         action_type=ActionType.END_INTERACTION_VOTE, payload=payload,
     )
+
+
+async def discharge_vote(
+    agent: _LLMPersonaAgent,
+    channel: str = GROUP_CHANNEL,
+    *,
+    published: bool = True,
+) -> None:
+    """Mimic the executor's publish-outcome callback for ``channel``.
+
+    The park stamps a correlation token onto the vote actions it covers
+    (``VOTE_CLOSE_TOKEN_KEY``); ``end_vote_action`` echoes it from the
+    action payload into the result dict and ``ActionExecutor`` hands it to
+    ``resolve_end_vote_publish``.  This helper echoes the parked token the
+    same way — an outcome for a vote the park never stamped carries ``""``
+    and must be passed explicitly by the test exercising that case.
+    """
+    pending = agent._pending_vote_closes.get(channel)
+    token = pending.token if pending is not None else ""
+    await agent.resolve_end_vote_publish(channel, published=published, token=token)
 
 
 def close_reasons(episodes: list[dict]) -> list[str]:

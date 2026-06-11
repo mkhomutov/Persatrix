@@ -209,6 +209,9 @@ class _LLMPersonaAgent(
         # PR 607 finding 5: parked vote closes by channel id, discharged on
         # publish outcome via resolve_end_vote_publish (see vote_close.py).
         self._pending_vote_closes: dict[str, PendingVoteClose] = {}
+        # PR 607 second pass: the wire id each scope last vote-closed — the
+        # local mirror of Go's vote dedup (the re-vote guard, vote_close.py).
+        self._vote_closed_wire_ids: dict[str, str] = {}
         # Pending Span Links to attach to the next on_tick() span (RFC 0019
         # § I).  Populated by ``EventDispatcher.dispatch()`` when an event
         # wakes the tick scheduler so the resulting tick can record
@@ -264,15 +267,17 @@ class _LLMPersonaAgent(
         self._state.recover_energy()
 
     async def resolve_end_vote_publish(
-        self, channel_id: str, *, published: bool,
+        self, channel_id: str, *, published: bool, token: str,
     ) -> None:
         """Discharge the parked vote close for ``channel_id`` (PR 607
-        review finding 5): ``ActionExecutor`` reports the vote publish
-        outcome — success closes the voter's local record, failure drops
-        the park so an unpublished vote leaves no early "ended" record.
+        finding 5): success closes the voter's local record, failure
+        drops the park.  ``token`` is the park's correlation handle
+        echoed off the vote action's payload; a mismatch is a no-op.
         Acquires the agent lock; full contract in :mod:`.vote_close`.
         """
-        await discharge_end_vote_publish(self, channel_id, published=published)
+        await discharge_end_vote_publish(
+            self, channel_id, published=published, token=token,
+        )
 
     def add_pending_tick_link(self, link: Link) -> None:
         """Queue a Span Link for the next ``on_tick()`` to consume.

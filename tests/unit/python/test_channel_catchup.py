@@ -343,5 +343,76 @@ class TestReplayChannelHistory:
         assert agent.events[0].metadata.get("replay_mode") is True
 
 
+class TestReplayWireMetadata:
+    """The startup replay must carry the validated wire interaction keys
+    off the REST history rows (``messageToResponse`` returns the
+    router-stamped metadata verbatim) — without them, a replayed span
+    covering a vote-closed conversation and the channel's next topic
+    merges into ONE local record and the first live wire id becomes
+    adoption-not-rotation, silently disarming the RFC 0030 close
+    propagation after every restart (PR 607 second-pass review)."""
+
+    def test_replay_event_carries_validated_wire_keys(self):
+        from agents.channel_catchup import _build_replay_event
+
+        msg = _msg(
+            msg_id="m1", channel_id="group:planning",
+            sender_id="iron-fox", content="hello",
+        )
+        msg["metadata"] = {
+            "interaction_id": "wire-B",
+            "previous_interaction_id": "wire-A",
+            "previous_interaction_close_trigger": "end_votes",
+            "cascade_depth": 1,
+        }
+        event = _build_replay_event(
+            msg, "group:planning", "when_mentioned",
+            _channel(channel_id="group:planning"),
+        )
+        assert event.metadata["replay_mode"] is True
+        assert event.metadata["interaction_id"] == "wire-B"
+        assert event.metadata["previous_interaction_id"] == "wire-A"
+        assert event.metadata["previous_interaction_close_trigger"] == "end_votes"
+        # Only the validated wire keys ride along — the row's other
+        # metadata (cascade_depth etc.) is not the replay's business.
+        assert "cascade_depth" not in event.metadata
+
+    def test_replay_event_revalidates_like_the_live_seed_point(self):
+        """Same posture as ``seed_wire_metadata``: an oversized id reads
+        as untracked, a half pair / unrecognised trigger seeds nothing,
+        and rows with no metadata (pre-v0.3.8 history) replay exactly
+        as before."""
+        from agents.channel_catchup import _build_replay_event
+
+        base = _msg(
+            msg_id="m1", channel_id="group:planning",
+            sender_id="iron-fox", content="hello",
+        )
+        channel = _channel(channel_id="group:planning")
+
+        oversized = dict(base, metadata={"interaction_id": "x" * 129})
+        event = _build_replay_event(
+            oversized, "group:planning", "when_mentioned", channel,
+        )
+        assert "interaction_id" not in event.metadata
+
+        junk_trigger = dict(base, metadata={
+            "interaction_id": "wire-B",
+            "previous_interaction_id": "wire-A",
+            "previous_interaction_close_trigger": "cosmic-rays",
+        })
+        event = _build_replay_event(
+            junk_trigger, "group:planning", "when_mentioned", channel,
+        )
+        assert event.metadata["interaction_id"] == "wire-B"
+        assert "previous_interaction_id" not in event.metadata
+        assert "previous_interaction_close_trigger" not in event.metadata
+
+        event = _build_replay_event(
+            dict(base), "group:planning", "when_mentioned", channel,
+        )
+        assert event.metadata == {"replay_mode": True}
+
+
 # pytest-asyncio plugin auto-detects ``async def`` tests via
 # ``asyncio_mode = "auto"`` in ``pyproject.toml``; no marker needed.

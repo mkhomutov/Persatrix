@@ -216,6 +216,53 @@ class TestConfigPathDeterminism:
         finally:
             reset_cache()
 
+    def test_env_pinned_missing_file_warns_with_the_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """An EXPLICITLY pinned config path that does not exist (a typo'd
+        ENV in a derived image, a dropped ``COPY config/``) must warn and
+        name the path — a DEBUG-only degrade re-enters the exact silent
+        ``summarization_model() == ""`` arc the env pin exists to kill
+        (PR 607 second-pass review).  The package-default path staying
+        DEBUG is deliberate: absent-by-default is the normal repo case."""
+        import logging
+
+        missing = tmp_path / "nope" / "optimization.yaml"
+        monkeypatch.setenv("PERSATRIX_OPTIMIZATION_CONFIG", str(missing))
+        reset_cache()
+        try:
+            with caplog.at_level(logging.WARNING, logger="agents.optimization"):
+                assert summarization_model() == ""
+            assert any(
+                "PERSATRIX_OPTIMIZATION_CONFIG" in r.getMessage()
+                and str(missing) in r.getMessage()
+                for r in caplog.records
+            ), f"no WARN naming the pinned path in {[r.getMessage() for r in caplog.records]!r}"
+        finally:
+            reset_cache()
+
+    def test_package_default_missing_stays_quiet(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """No env pin + no package config is the ordinary non-container
+        default — it must not WARN on every boot."""
+        import logging
+
+        monkeypatch.delenv("PERSATRIX_OPTIMIZATION_CONFIG", raising=False)
+        monkeypatch.setattr(
+            optimization, "_DEFAULT_CONFIG_PATH",
+            tmp_path / "no-such-dir" / "optimization.yaml",
+        )
+        reset_cache()
+        try:
+            with caplog.at_level(logging.WARNING, logger="agents.optimization"):
+                assert summarization_model() == ""
+            assert not caplog.records
+        finally:
+            reset_cache()
+
     def test_empty_env_override_falls_through_to_default(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:

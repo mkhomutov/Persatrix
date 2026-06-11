@@ -43,8 +43,11 @@ func TestChannelMessageToProto_LiftsPreviousInteractionCloseCause(t *testing.T) 
 	}, DispatchEnvelope{Recipient: Member{ParticipantID: "b", RespondPolicy: RespondAlways}})
 	assert.Equal(t, endVotesTrigger, ev.PreviousInteractionCloseTrigger)
 
-	// Unrecognised trigger → empty on the wire; absent keys → both empty
-	// (the pre-OQ5 / no-retiree shape).
+	// Unrecognised trigger → the whole PAIR lifts as empty. proto field 21
+	// is documented "Set iff `= 20` is set", and the receiver-side seed
+	// point applies the pair only as a validated unit — a half pair (id
+	// without trigger) would put a wire shape on the fanout the producer
+	// contract says cannot exist (PR 607 second-pass review).
 	ev = d.channelMessageToProto(ChannelMessage{
 		ID: "m-3", ChannelID: "group:planning", SenderID: "a",
 		Metadata: map[string]any{
@@ -54,9 +57,24 @@ func TestChannelMessageToProto_LiftsPreviousInteractionCloseCause(t *testing.T) 
 	}, DispatchEnvelope{Recipient: Member{ParticipantID: "b", RespondPolicy: RespondAlways}})
 	assert.Empty(t, ev.PreviousInteractionCloseTrigger,
 		"an out-of-vocabulary trigger lifts as empty (legacy-label degradation)")
+	assert.Empty(t, ev.PreviousInteractionId,
+		"the id must not ride the wire alone — fields 20/21 are a pair")
 
+	// Oversized id → the pair lifts as empty too (the other half-pair
+	// direction): a trigger with no id attributes nothing.
 	ev = d.channelMessageToProto(ChannelMessage{
 		ID: "m-4", ChannelID: "group:planning", SenderID: "a",
+		Metadata: map[string]any{
+			previousInteractionIDMetadataKey:      string(make([]byte, interactionIDMaxBytes+1)),
+			previousInteractionTriggerMetadataKey: idleTrigger,
+		},
+	}, DispatchEnvelope{Recipient: Member{ParticipantID: "b", RespondPolicy: RespondAlways}})
+	assert.Empty(t, ev.PreviousInteractionId)
+	assert.Empty(t, ev.PreviousInteractionCloseTrigger,
+		"a trigger must not ride the wire without the id it attributes")
+
+	ev = d.channelMessageToProto(ChannelMessage{
+		ID: "m-5", ChannelID: "group:planning", SenderID: "a",
 	}, DispatchEnvelope{Recipient: Member{ParticipantID: "b", RespondPolicy: RespondAlways}})
 	assert.Empty(t, ev.PreviousInteractionId)
 	assert.Empty(t, ev.PreviousInteractionCloseTrigger)

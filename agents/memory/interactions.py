@@ -185,7 +185,12 @@ class Interaction:
     own ``interaction_id`` stays the memory key (producer plan OQ 1
     defers unification); this field exists solely so the routing path
     can detect the channel's rotation boundary and close the local
-    scope structurally in step with the wire.
+    scope structurally in step with the wire.  Its sibling
+    ``predecessor_wire_id`` (PR 607 second pass; also in-memory only)
+    is the retired wire id the opening turn attributed
+    (``previous_interaction_id``) — the rotation seam's late-delivery
+    defence, see :func:`~agents.persona_runtime.interaction_boundary
+    .wire_rotation_closes`.
     """
 
     interaction_id: str
@@ -196,6 +201,7 @@ class Interaction:
     close_reason: str = ""
     structural_close_reason: str = ""
     wire_interaction_id: str = ""
+    predecessor_wire_id: str = ""
     # ISSUE-0081 PR 2: the RFC 0031 session captured when the interaction
     # *opened*, frozen for its lifetime.  Load-bearing for the
     # sibling-mislabel guard: ``idle_check`` can flush conversation B's

@@ -471,6 +471,10 @@ agent's local interaction record through two seams
   publish *fails* (timeout, channels disabled) closes nothing — the vote
   never reached the orchestrator, so the record stays open for the ordinary
   closes (PR 607 review finding 5; `agents/persona_runtime/vote_close.py`).
+  Re-votes mirror the orchestrator's dedup: voting *again* on the same
+  still-open conversation closes nothing further (the orchestrator counts a
+  participant once per interaction), so one discussion never fragments into
+  multiple *ended* rows on the voter.
 - **Everyone else closes on the id rotation.** A non-voting member's record
   closes the moment it receives the channel's next publish carrying the
   rotated `interaction_id` (the new topic) — or by its own idle window if the

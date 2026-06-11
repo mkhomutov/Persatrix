@@ -37,6 +37,7 @@ _END_VOTE_ACTION_PY = Path("agents/end_vote_action.py")
 _WALLET_CAUSE_PY = Path("agents/persona_runtime/wallet_cause.py")
 _ACTION_LOOP_PY = Path("agents/persona_runtime/action_loop.py")
 _SALIENCE_GATE_PY = Path("agents/persona_runtime/salience_gate.py")
+_EPISODE_ROUTING_PY = Path("agents/persona_runtime/episode_routing.py")
 
 
 def _parse_miss(what: str, where: Path) -> NoReturn:
@@ -81,16 +82,20 @@ def test_end_vote_metadata_key_agrees() -> None:
 
 
 def test_interaction_id_metadata_key_agrees() -> None:
-    """Go's ``interactionIDMetadataKey`` and the Python lease-threading
-    read MUST be equal."""
+    """Go's ``interactionIDMetadataKey`` and every Python loop-side read
+    MUST be equal — the lease-threading seam (``wallet_cause``) and the
+    rotation-boundary wire-id read (``episode_routing``, PR 607
+    second-pass review: previously unpinned, so a coordinated rename of
+    the other sites would have left it silently dead with green
+    suites)."""
     go_value = _go_const(_INTERACTION_ID_GO, "interactionIDMetadataKey")
-    py_src = _WALLET_CAUSE_PY.read_text(encoding="utf-8")
-    if f'"{go_value}"' not in py_src:
-        _parse_miss(
-            f"a read of the {go_value!r} metadata key "
-            f"(Go interactionIDMetadataKey)",
-            _WALLET_CAUSE_PY,
-        )
+    for py_path in (_WALLET_CAUSE_PY, _EPISODE_ROUTING_PY):
+        if f'"{go_value}"' not in py_path.read_text(encoding="utf-8"):
+            _parse_miss(
+                f"a read of the {go_value!r} metadata key "
+                f"(Go interactionIDMetadataKey)",
+                py_path,
+            )
 
 
 # The exact kwarg-with-value literal each call site must pass. The pin
@@ -161,23 +166,24 @@ def test_previous_interaction_metadata_keys_agree() -> None:
 
 def test_close_trigger_values_agree() -> None:
     """The trigger vocabulary the resolver stamps (Go ``idleTrigger`` /
-    ``endVotesTrigger``) MUST equal the Python seed-point allowlist and the
-    boundary seam's idle literal — a drifted value degrades every close
-    cause to the legacy label without a failing test on either side."""
+    ``endVotesTrigger``) MUST equal the single Python source
+    (``channel_wire_metadata`` — the PR 607 second-pass review collapsed
+    the boundary seam's re-declared copy into an import, so growing the
+    vocabulary is one edit per language).  Imported and compared
+    directly — stronger than a text pin — while the Go side stays
+    text-pinned (no Go toolchain dependency)."""
+    from agents.channel_wire_metadata import (
+        WIRE_CLOSE_TRIGGER_END_VOTES,
+        WIRE_CLOSE_TRIGGER_IDLE,
+        WIRE_CLOSE_TRIGGERS,
+    )
+    from agents.persona_runtime import interaction_boundary
+
     idle = _go_const(_INTERACTION_RESOLVER_GO, "idleTrigger")
     end_votes = _go_const(_END_VOTE_GO, "endVotesTrigger")
 
-    seed_src = _CHANNEL_WIRE_METADATA_PY.read_text(encoding="utf-8")
-    for name, value in (
-        ("_WIRE_CLOSE_TRIGGER_IDLE", idle),
-        ("_WIRE_CLOSE_TRIGGER_END_VOTES", end_votes),
-    ):
-        pin = f'{name} = "{value}"'
-        if pin not in seed_src:
-            _parse_miss(f"the trigger literal `{pin}`", _CHANNEL_WIRE_METADATA_PY)
-
-    boundary_pin = f'_WIRE_CLOSE_TRIGGER_IDLE = "{idle}"'
-    if boundary_pin not in _INTERACTION_BOUNDARY_PY.read_text(encoding="utf-8"):
-        _parse_miss(
-            f"the trigger literal `{boundary_pin}`", _INTERACTION_BOUNDARY_PY,
-        )
+    assert WIRE_CLOSE_TRIGGER_IDLE == idle
+    assert WIRE_CLOSE_TRIGGER_END_VOTES == end_votes
+    assert WIRE_CLOSE_TRIGGERS == {idle, end_votes}
+    # The boundary seam consumes the import, not a re-declaration.
+    assert interaction_boundary.WIRE_CLOSE_TRIGGER_IDLE is WIRE_CLOSE_TRIGGER_IDLE

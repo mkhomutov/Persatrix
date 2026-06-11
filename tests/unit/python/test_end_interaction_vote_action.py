@@ -71,6 +71,44 @@ class TestExecutorPublishesVote:
         assert kwargs["content"].strip(), "the vote carries a readable sign-off"
 
     @pytest.mark.asyncio
+    async def test_park_token_is_echoed_not_published(self):
+        """The decide-time park stamps a correlation token onto the vote
+        action (``VOTE_CLOSE_TOKEN_KEY``); the executor must echo it in
+        the result dict — the outcome callback's correlation handle — and
+        must NOT leak it onto the wire (the publish metadata carries only
+        the vote flag)."""
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        executor = ActionExecutor(channel_publisher=publisher)
+
+        results = await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning",
+                   "vote_close_token": "tok-1"}),
+        ])
+
+        assert results[0]["vote_close_token"] == "tok-1"
+        kwargs = publisher.publish.await_args.kwargs
+        assert kwargs["metadata"] == {"end_interaction_vote": True}
+        assert "tok-1" not in kwargs["content"]
+
+    @pytest.mark.asyncio
+    async def test_park_token_rides_every_channel_carrying_status(self):
+        """Failure statuses correlate too: a failed publish must consume
+        one in-flight slot of the SAME park that stamped it, so every
+        status that carries the channel also carries the token."""
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(side_effect=RuntimeError("boom"))
+        executor = ActionExecutor(channel_publisher=publisher)
+
+        results = await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning",
+                   "vote_close_token": "tok-2"}),
+        ])
+
+        assert results[0]["status"] == "failed"
+        assert results[0]["vote_close_token"] == "tok-2"
+
+    @pytest.mark.asyncio
     async def test_vote_content_payload_honoured(self):
         """A persona-supplied sign-off rides the vote message verbatim."""
         publisher = AsyncMock()
@@ -273,11 +311,30 @@ class TestVotePublishOutcomeCallback:
         executor, agent = self._executor_with_agent(publisher)
 
         await executor.execute("ember-owl", [
+            _vote({"channel_id": "group:planning",
+                   "vote_close_token": "tok-1"}),
+        ])
+
+        agent.resolve_end_vote_publish.assert_awaited_once_with(
+            "group:planning", published=True, token="tok-1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_unstamped_vote_reports_empty_token(self):
+        """A vote the decide-time park never stamped (a threaded turn, a
+        DM/thread scope the seam exempts) reports ``token=""`` — the
+        discharge treats that as "not my vote" and leaves any parked
+        close alone (the stale-park cross-discharge fix)."""
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        executor, agent = self._executor_with_agent(publisher)
+
+        await executor.execute("ember-owl", [
             _vote({"channel_id": "group:planning"}),
         ])
 
         agent.resolve_end_vote_publish.assert_awaited_once_with(
-            "group:planning", published=True,
+            "group:planning", published=True, token="",
         )
 
     @pytest.mark.asyncio
@@ -287,11 +344,12 @@ class TestVotePublishOutcomeCallback:
         executor, agent = self._executor_with_agent(publisher)
 
         await executor.execute("ember-owl", [
-            _vote({"channel_id": "group:planning"}),
+            _vote({"channel_id": "group:planning",
+                   "vote_close_token": "tok-1"}),
         ])
 
         agent.resolve_end_vote_publish.assert_awaited_once_with(
-            "group:planning", published=False,
+            "group:planning", published=False, token="tok-1",
         )
 
     @pytest.mark.asyncio
@@ -302,12 +360,13 @@ class TestVotePublishOutcomeCallback:
         executor, agent = self._executor_with_agent(None)
 
         results = await executor.execute("ember-owl", [
-            _vote({"channel_id": "group:planning"}),
+            _vote({"channel_id": "group:planning",
+                   "vote_close_token": "tok-1"}),
         ])
 
         assert results[0]["status"] == "not_implemented"
         agent.resolve_end_vote_publish.assert_awaited_once_with(
-            "group:planning", published=False,
+            "group:planning", published=False, token="tok-1",
         )
 
     @pytest.mark.asyncio

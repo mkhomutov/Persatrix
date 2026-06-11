@@ -44,13 +44,12 @@ from ..persona_types import EventType
 from ..session_id import current_session_id
 from .close_path import persist_closed_interaction
 from .interaction_boundary import (
-    ends_interaction_by_vote,
     is_session_end_event,
     wire_rotation_close_reason,
     wire_rotation_closes,
 )
 from .summarize_close import drain_pending_summary_tasks
-from .vote_close import PendingVoteClose
+from .vote_close import PendingVoteClose, park_end_vote_close
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +88,9 @@ class _EpisodeRoutingMixin:
     _pending_summarize_tasks: set[asyncio.Task[None]]
     # PR 607 finding 5: parked vote closes by channel id (:mod:`.vote_close`).
     _pending_vote_closes: dict[str, PendingVoteClose]
+    # PR 607 second pass: the wire id each scope last vote-closed — the
+    # local mirror of Go's vote dedup (:mod:`.vote_close`, re-vote guard).
+    _vote_closed_wire_ids: dict[str, str]
     # RFC 0031 Phase 1: per-process operator-namespace tag stamped on
     # every ``store_episode`` / ``record_interaction`` call.  Set in
     # ``PersonaAgent.__init__`` (``agents/persona.py``) from
@@ -315,22 +317,17 @@ class _EpisodeRoutingMixin:
         event: AgentEvent,
         summary: str,
         ctx: dict[str, Any],
-        actions: list[AgentAction] | None = None,
+        actions: list[AgentAction],
     ) -> None:
         """Append a turn to the open interaction; close on session end or
         wire interaction-id rotation, and PARK the close for an
         end-of-interaction vote (publish-confirmed — :mod:`.vote_close`).
 
-        The per-turn ``summary`` / ``ctx`` are stashed on the turn
-        payload so the PR 4 summariser has the same fields it would
-        have written to a legacy single-row episode — PR 4 swaps the
-        placeholder summary for an LLM-generated one without changing
-        this call site.
-
-        ``actions`` (RFC 0030 interaction-id producer follow-up) are the
-        turn's decided actions, consulted for the Layer 4 vote trigger;
-        ``None`` / empty (salience-gate silent paths, legacy callers)
-        means no vote this turn.
+        The per-turn ``summary`` / ``ctx`` ride the turn payload so the
+        PR 4 summariser sees the legacy single-row episode fields.
+        ``actions`` are the turn's decided actions, consulted for the
+        Layer 4 vote trigger; empty (salience-gate silent paths) means
+        no vote this turn.
         """
         scope = self._scope_for_multi_turn_event(event)
         if scope is None:
@@ -386,11 +383,9 @@ class _EpisodeRoutingMixin:
         # (producer plan OQ 5).  Full rationale on the two predicates.
         #
         # Thread scopes are wire-UNTRACKED (PR 607 review finding 1): a
-        # threaded reply publishes to the parent channel, so the resolver
-        # stamps the FLOOR's interaction id on it (``publishCommit`` keys
-        # on ``msg.ChannelID``) — that id rotating says nothing about the
-        # thread, and stamping it would let a floor close split a live
-        # thread.  Mirrors the resolver's IP3 rule ("the thread IS the
+        # threaded reply carries the parent FLOOR's id (the resolver keys
+        # on ``msg.ChannelID``), so that id rotating says nothing about
+        # the thread — the resolver's IP3 rule ("the thread IS the
         # interaction"): thread-scoped locals keep idle / session-end
         # closes only.
         wire_id = (
@@ -399,7 +394,8 @@ class _EpisodeRoutingMixin:
             else str(event.metadata.get("interaction_id", "") or "")
         )
         stale = self._interaction_tracker.get(scope)
-        if wire_rotation_closes(stale, wire_id):
+        # The not-None check narrows ``stale`` for the reason call.
+        if stale is not None and wire_rotation_closes(stale, wire_id):
             rotated = self._interaction_tracker.close(
                 scope, reason=wire_rotation_close_reason(stale, event.metadata),
             )
@@ -410,10 +406,13 @@ class _EpisodeRoutingMixin:
             session_id=self._active_write_session_id,
         )
         # Stamp the wire id the interaction was opened under (first turn
-        # that carries one wins; the resolver never reuses a retired id,
-        # so a later differing id is always a rotation, never a revert).
+        # that carries one wins) plus its known predecessor — the
+        # late-delivery defence ``wire_rotation_closes`` compares against.
         if wire_id and interaction.is_open and not interaction.wire_interaction_id:
             interaction.wire_interaction_id = wire_id
+            interaction.predecessor_wire_id = str(
+                event.metadata.get("previous_interaction_id", "") or "",
+            )
         # PR-3 review #12: ``add_turn`` now closes inline when the
         # MaxTurns cap fires.  The returned interaction is the
         # cap-closed one (with ``close_reason == REASON_MAX_TURNS``);
@@ -431,11 +430,12 @@ class _EpisodeRoutingMixin:
             )
             if closed is not None:
                 await self._persist_closed_interaction(closed)
-        elif ends_interaction_by_vote(event, actions or []):
-            # PR 607 review finding 5: the vote is not PUBLISHED yet, so park
-            # the close for the executor's outcome callback (:mod:`.vote_close`).
-            self._pending_vote_closes[event.channel_id or ""] = PendingVoteClose(
-                scope=scope, interaction_id=interaction.interaction_id,
+        else:
+            # PR 607 finding 5: a vote close is PARKED for the executor's
+            # publish-outcome callback (:mod:`.vote_close` owns the gates).
+            park_end_vote_close(
+                self, event, scope=scope, interaction=interaction,
+                actions=actions,
             )
 
     async def _persist_closed_interaction(self, interaction: Interaction) -> None:

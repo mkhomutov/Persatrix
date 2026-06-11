@@ -71,33 +71,32 @@ func readInteractionID(metadata map[string]any) string {
 	return readBoundedIDValue(metadata, interactionIDMetadataKey)
 }
 
-// readPreviousInteractionID extracts the retired-interaction id stamped by
-// [ChannelRouter.publishCommit] (producer plan OQ 5) for the dispatch-time
-// lift onto `ChannelMessageEvent.previous_interaction_id`. Same bound and
-// tolerance as [readInteractionID] — the value is router-stamped on every
-// routed publish, but the reader stays defensive for a path that bypassed
-// the resolver.
-func readPreviousInteractionID(metadata map[string]any) string {
-	return readBoundedIDValue(metadata, previousInteractionIDMetadataKey)
-}
-
-// readPreviousInteractionTrigger extracts the retired interaction's close
-// trigger for the dispatch-time lift onto
-// `ChannelMessageEvent.previous_interaction_close_trigger`. Allowlisted to
-// the §L trigger vocabulary the resolver actually stamps ([idleTrigger] /
-// [endVotesTrigger]); anything else reads as absent — the receiver then
-// keeps its legacy label, which is the same degradation an unrecognised
-// value would get agent-side (the seed point re-validates).
-func readPreviousInteractionTrigger(metadata map[string]any) string {
-	if metadata == nil {
-		return ""
+// readPreviousClose extracts the retired-interaction close-cause PAIR
+// stamped by [ChannelRouter.publishCommit] (producer plan OQ 5) for the
+// dispatch-time lift onto `ChannelMessageEvent.previous_interaction_id` /
+// `.previous_interaction_close_trigger`. The id gets the same bound and
+// tolerance as [readInteractionID]; the trigger is allowlisted to the §L
+// vocabulary the resolver actually stamps ([idleTrigger] /
+// [endVotesTrigger]). Both-or-neither (PR 607 second-pass review): the
+// proto contract on field 21 is "Set iff `= 20` is set", and the
+// receiver-side seed point applies the pair only as a validated unit — a
+// half pair (an id whose trigger failed the allowlist, a trigger whose id
+// is oversized) lifts as zero so the wire never carries a shape the
+// producer contract says cannot exist. The values are router-stamped on
+// every routed publish, so this reader is defensive depth for a path that
+// bypassed the resolver; degradation matches the agent-side seed point's
+// (the pre-OQ5 legacy label).
+func readPreviousClose(metadata map[string]any) previousClose {
+	id := readBoundedIDValue(metadata, previousInteractionIDMetadataKey)
+	if id == "" {
+		return previousClose{}
 	}
 	if v, ok := metadata[previousInteractionTriggerMetadataKey].(string); ok {
 		if v == idleTrigger || v == endVotesTrigger {
-			return v
+			return previousClose{id: id, trigger: v}
 		}
 	}
-	return ""
+	return previousClose{}
 }
 
 // readBoundedIDValue is the shared tolerant reader behind the two

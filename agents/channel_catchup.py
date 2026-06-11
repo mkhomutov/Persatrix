@@ -69,6 +69,7 @@ from .channel_validation import (
     parse_channel_timestamp,
     validate_channel_message_dict,
 )
+from .channel_wire_metadata import seed_replay_metadata
 from .persona_types import AgentEvent, EventType
 
 if TYPE_CHECKING:
@@ -440,6 +441,19 @@ def _build_replay_event(
     Documented gap, not a defect: the only in-tree consumer (the
     response gate) is bypassed by the replay short-circuit. Future
     threading-aware consumers will need a Go-side schema bump.
+
+    PR 607 second-pass review: the row's wire interaction keys
+    (``interaction_id`` + the OQ 5 close-cause pair) ARE propagated,
+    re-validated by :func:`agents.channel_wire_metadata
+    .seed_replay_metadata` with the live seed point's exact rules.
+    Without them a replayed span covering a vote-closed conversation
+    and the channel's next topic merges into one local record, and the
+    merged record opens with no wire id — the first LIVE id then reads
+    as adoption-not-rotation, silently disarming the RFC 0030 close
+    propagation after every restart.  Replayed rotation closes do run
+    the close-path summariser at boot; those conversations genuinely
+    closed, so the records (and their one-time summary cost) are the
+    feature working, not replay overhead.
     """
     payload: dict[str, Any] = {
         "content": msg.get("content", ""),
@@ -451,6 +465,8 @@ def _build_replay_event(
     parsed_ts = (
         parse_channel_timestamp(raw_ts) if isinstance(raw_ts, str) else None
     )
+    metadata: dict[str, Any] = {"replay_mode": True}
+    seed_replay_metadata(metadata, msg.get("metadata"))
     event_kwargs: dict[str, Any] = {
         "event_type": EventType.CHANNEL_MESSAGE,
         "payload": payload,
@@ -458,7 +474,7 @@ def _build_replay_event(
         "sender_id": msg.get("sender_id"),
         "message_id": msg.get("id"),
         "thread_id": msg.get("thread_id") or None,
-        "metadata": {"replay_mode": True},
+        "metadata": metadata,
     }
     if parsed_ts is not None:
         event_kwargs["timestamp"] = parsed_ts

@@ -114,6 +114,20 @@ class AgentAction:
     payload: dict[str, Any] = field(default_factory=dict)
 
 
+# The END_INTERACTION_VOTE park/discharge correlation handle (PR 607
+# second-pass review).  The decide-time park
+# (``persona_runtime/vote_close.park_end_vote_close``) stamps one fresh
+# token under this payload key onto every vote action it covers;
+# ``end_vote_action`` echoes it from the payload into the publish-outcome
+# result dict (never onto the wire), and the discharge acts only on a
+# matching token — an outcome of a vote the park never stamped (a
+# threaded turn, an earlier turn's stranded park) cannot cross-discharge
+# a park it does not belong to.  Lives here, in the shared action
+# vocabulary, because both the persona-runtime park and the executor-side
+# echo read it and neither package may import the other for one literal.
+VOTE_CLOSE_TOKEN_KEY = "vote_close_token"
+
+
 # ─── Sub-Agent Types ───────────────────────────────────────
 
 

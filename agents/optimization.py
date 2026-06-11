@@ -82,7 +82,24 @@ def _load_config() -> dict[str, Any]:
         with config_path.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
     except FileNotFoundError:
-        logger.debug("optimization.yaml not found at %s; using defaults", config_path)
+        if env_path:
+            # An EXPLICITLY pinned path that does not exist is a deployment
+            # bug (a typo'd ENV in a derived image, a dropped COPY config/),
+            # and a silent degrade re-enters the exact pre-v0.3.8 arc the
+            # env pin exists to kill — the per-close "Summarisation model
+            # '' is not resolvable" WARN names the model, never the path
+            # (PR 607 second-pass review).  The package-default miss below
+            # stays DEBUG: absent-by-default is the ordinary non-container
+            # case.
+            logger.warning(
+                "PERSATRIX_OPTIMIZATION_CONFIG points at %s but no file "
+                "exists there; using built-in defaults",
+                config_path,
+            )
+        else:
+            logger.debug(
+                "optimization.yaml not found at %s; using defaults", config_path,
+            )
         return {}
     except (OSError, yaml.YAMLError) as exc:
         logger.warning(

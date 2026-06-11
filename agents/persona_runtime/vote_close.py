@@ -9,31 +9,60 @@ no REST publisher on the legacy in-process path), and a vote that never
 reached the orchestrator counts toward no quorum — the decide-time close left
 an early "ended" record for a conversation that, on the wire, never ended.
 
-The seam is now two-phase:
+The seam is two-phase:
 
-* **Decide time** (``episode_routing``): when the turn's actions vote to end
-  the event's conversation (:func:`.interaction_boundary.ends_interaction_by_vote`,
-  gates unchanged), the close is PARKED — a :class:`PendingVoteClose` keyed by
-  the vote's channel id — instead of executed.
+* **Decide time** (:func:`park_end_vote_close`, called from
+  ``episode_routing``): when the turn's actions vote to end the event's
+  conversation (:func:`.interaction_boundary.matching_end_votes`) and the
+  resolved scope is a GROUP scope (the only kind with a vote-closeable
+  conversation — DM and thread scopes never park, the same scope-kind
+  basis the wire seam uses), the close is PARKED instead of executed.
 * **Publish outcome** (``agents/action_executor.py``): after
   ``publish_end_interaction_vote`` returns, the executor calls back into the
   voter (``_LLMPersonaAgent.resolve_end_vote_publish`` →
   :func:`discharge_end_vote_publish`).  ``status == "published"`` closes the
   parked scope with ``REASON_STRUCTURAL`` and persists, exactly what the
-  decide-time close did; any failure status drops the park — the record stays
-  open and closes later through the ordinary boundaries (the wire id rotation
-  once a real quorum forms, or the idle gap).
+  decide-time close did; failure statuses drop the park once every
+  in-flight vote has reported — the record stays open and closes later
+  through the ordinary boundaries (the wire id rotation once a real
+  quorum forms, or the idle gap).
+
+Park/discharge identity (PR 607 second-pass review): the park is
+correlated to the votes it covers, not merely to the channel.  The park
+stamps one fresh token (:data:`~agents.persona_types.VOTE_CLOSE_TOKEN_KEY`)
+onto every matching vote action and remembers how many it stamped;
+``end_vote_action`` echoes the token from the action payload into the
+result dict (never onto the wire), and the discharge acts only on a
+matching token.  This kills two confirmed cross-fires of the
+channel-only key: (a) a failed duplicate vote popping the park its
+successful sibling still needs — the failure now consumes one in-flight
+slot, and the park survives until a success closes it or every slot
+fails; (b) a stranded park (the publish coroutine was cancelled before
+the callback ran) being discharged by a LATER vote's outcome — a
+threaded vote the seam exempts carries no token, an overwriting park's
+votes carry a different one.
+
+Re-vote dedup mirror (PR 607 second-pass review): Go's vote gate counts
+a participant once per interaction — an in-window re-vote is suppressed
+but still commits, so its publish reports ``published``.  The discharge
+mirrors that idempotency with a per-scope memory of the wire id it last
+vote-closed: a re-vote on the SAME wire interaction (the scope reopened
+on continued traffic, stamped with the unrotated id) closes nothing —
+the record stays open exactly like Go's interaction — instead of
+minting a second "ended" record per re-vote.  A record with no wire id
+(legacy/untracked traffic) has nothing to compare and keeps the
+pre-memory behaviour.
 
 Staleness guards: the park stores the open interaction's id, and the
-discharge closes only when the scope still holds that same open interaction —
-a max-turns inline close, an idle flush, or a wire rotation between decide
-and discharge wins, and the discharge no-ops.  A park that is never
-discharged (the executor never ran — e.g. a ``dispatch(execute_actions=False)``
-caller) is overwritten by the channel's next vote and is inert meanwhile, by
-the same guard.  At most one park per channel, bounded by channels the agent
-votes in.
+discharge closes only when the scope still holds that same open
+interaction — a max-turns inline close, an idle flush, or a wire
+rotation between decide and discharge wins, and the discharge no-ops.
+A park that is never discharged (the executor never ran) is overwritten
+by the channel's next vote and is inert meanwhile, by the token and
+staleness guards.  At most one park per channel, bounded by channels
+the agent votes in.
 
-Free function over the agent (the ``run_salience_gate`` /
+Free functions over the agent (the ``run_salience_gate`` /
 ``handle_llm_call_exception_with_cost_close`` convention) so
 ``episode_routing`` stays under the 500-line review cap.
 """
@@ -42,42 +71,108 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, NamedTuple
+from uuid import uuid4
 
 from ..memory.boundary_detectors import REASON_STRUCTURAL
+from ..memory.scopes import is_group_scope
+from ..persona_types import VOTE_CLOSE_TOKEN_KEY
+from .interaction_boundary import matching_end_votes
 
 if TYPE_CHECKING:
+    from ..memory.interactions import Interaction
+    from ..persona_types import AgentAction, AgentEvent
     from .episode_routing import _EpisodeRoutingMixin
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PendingVoteClose", "discharge_end_vote_publish"]
+__all__ = [
+    "PendingVoteClose",
+    "discharge_end_vote_publish",
+    "park_end_vote_close",
+]
 
 
 class PendingVoteClose(NamedTuple):
-    """One parked vote close: the scope the voter's record lives under and
-    the open interaction's id at decide time (the staleness guard)."""
+    """One parked vote close: the scope the voter's record lives under,
+    the open interaction's id at decide time (the staleness guard), the
+    correlation token stamped onto the covered vote actions, and how
+    many of them are still in flight (failures decrement; the first
+    success — or the last failure — consumes the park)."""
 
     scope: str
     interaction_id: str
+    token: str
+    in_flight: int
+
+
+def park_end_vote_close(
+    agent: _EpisodeRoutingMixin,
+    event: AgentEvent,
+    *,
+    scope: str,
+    interaction: Interaction,
+    actions: list[AgentAction],
+) -> None:
+    """Park the voter's local close for the executor's publish outcome
+    (module doc).  Runs at decide time, under ``on_event``'s lock.
+
+    Gates on the resolved scope KIND: only group scopes park.  This is
+    the vote seam's twin of the wire seam's ``is_thread_scope`` guard —
+    one basis for every exemption (DM, thread scope, ``thread:``-prefixed
+    channels, the unknown-prefix fallback scope) instead of per-seam
+    re-derivations from event fields and re-declared channel-id
+    prefixes.  The executor's own gates (``end_vote_action.py``) stay
+    authoritative for what actually publishes; an exempted scope's vote
+    still publishes (or is dropped) there — it just never closes a
+    local record here.
+    """
+    if not is_group_scope(scope):
+        return
+    votes = matching_end_votes(event, actions)
+    if not votes:
+        return
+    token = uuid4().hex
+    for action in votes:
+        action.payload[VOTE_CLOSE_TOKEN_KEY] = token
+    agent._pending_vote_closes[event.channel_id or ""] = PendingVoteClose(
+        scope=scope,
+        interaction_id=interaction.interaction_id,
+        token=token,
+        in_flight=len(votes),
+    )
 
 
 async def discharge_end_vote_publish(
-    agent: _EpisodeRoutingMixin, channel_id: str, *, published: bool,
+    agent: _EpisodeRoutingMixin,
+    channel_id: str,
+    *,
+    published: bool,
+    token: str,
 ) -> None:
     """Discharge the parked vote close for ``channel_id`` (module doc).
 
     Runs under the agent's lock: the park/discharge pair brackets the
     executor's publish, which runs *outside* ``on_event``'s lock, so a
     concurrent event for the same scope could otherwise race the close.
-    Idempotent — the park is popped first, so a duplicate callback (or a
-    callback for a channel that never parked: a DM/unbound vote the
-    decide-time gates skipped) is a no-op.
+    Idempotent — a success pops the park first, so a duplicate callback
+    is a no-op; an outcome whose token does not match the park (a vote
+    this park never stamped: a threaded/exempted vote's ``""``, an
+    earlier turn's stranded token under a newer park) leaves the park
+    alone.
     """
     async with agent._lock:
-        pending = agent._pending_vote_closes.pop(channel_id, None)
-        if pending is None:
+        pending = agent._pending_vote_closes.get(channel_id)
+        if pending is None or token != pending.token:
             return
         if not published:
+            if pending.in_flight > 1:
+                # A duplicate vote's failure consumes one in-flight slot;
+                # a sibling publish can still confirm the close.
+                agent._pending_vote_closes[channel_id] = pending._replace(
+                    in_flight=pending.in_flight - 1,
+                )
+                return
+            agent._pending_vote_closes.pop(channel_id, None)
             # The honest outcome of finding 5: no publish → no close. INFO,
             # not WARNING — the publish failure itself already logged at
             # warning in end_vote_action; this line records the memory-side
@@ -88,6 +183,7 @@ async def discharge_end_vote_publish(
                 agent.agent_id, channel_id, pending.scope,
             )
             return
+        agent._pending_vote_closes.pop(channel_id, None)
         open_record = agent._interaction_tracker.get(pending.scope)
         if (
             open_record is None
@@ -98,8 +194,20 @@ async def discharge_end_vote_publish(
             # inline close, idle flush, wire rotation) — that close already
             # told the truth; do not close its successor.
             return
+        wire_id = open_record.wire_interaction_id
+        if wire_id and agent._vote_closed_wire_ids.get(pending.scope) == wire_id:
+            # Re-vote on a wire interaction this voter already vote-closed
+            # (the scope reopened on continued traffic under the SAME id —
+            # no quorum formed).  Go deduped the vote but the suppressed
+            # duplicate still committed (2xx → "published"); mirror the
+            # dedup here so one channel interaction never fragments into
+            # N "ended" local records.  The record stays open, like the
+            # wire's, and closes on the eventual rotation or idle gap.
+            return
         closed = agent._interaction_tracker.close(
             pending.scope, reason=REASON_STRUCTURAL,
         )
         if closed is not None:
+            if wire_id:
+                agent._vote_closed_wire_ids[pending.scope] = wire_id
             await agent._persist_closed_interaction(closed)

@@ -271,7 +271,13 @@ class ActionExecutor:
             return
         try:
             await agent.resolve_end_vote_publish(
-                channel_id, published=result.get("status") == "published",
+                channel_id,
+                published=result.get("status") == "published",
+                # The park's correlation handle (PR 607 second-pass
+                # review), echoed by end_vote_action off the action
+                # payload — "" for a vote the park never stamped, which
+                # the discharge treats as not-mine.
+                token=str(result.get("vote_close_token", "") or ""),
             )
         except Exception:
             logger.warning(
