@@ -192,11 +192,16 @@ class LLMClient:
         directly: that is the un-migrated v0.2.3 path PRs 4–6 wire for the
         chat / autonomous-TICK / sub-agent / channel-message origins.
 
-        *interaction_id* (RFC 0030 producer plan PR 2) attributes the lease
-        to the orchestrator-resolved interaction the triggering event
-        belongs to, activating the Layer 1 per-interaction cost ceiling's
-        attribution. Empty (the default) is the untracked case — every
-        ceiling stays at its uncapped default, the pre-producer behaviour.
+        *interaction_id* (RFC 0030 producer plan PR 2) names the
+        orchestrator-resolved interaction the triggering event belongs to —
+        the Layer 1 attribution substrate. The wallet only tracks (and can
+        only deny) an interaction when a positive
+        ``interaction_budget_tokens`` accompanies the id on the same lease
+        request (``internal/wallet/wallet.go``); until the config-stamping
+        follow-up threads that ceiling, the id rides the wire and the
+        wallet discards it. Empty (the default) is the untracked case —
+        every ceiling stays at its uncapped default, the pre-producer
+        behaviour.
 
         *model_alias* (RFC 0033 §G) is the logical alias the caller resolved
         ``model`` from, when it came in via one. It is emitted as the

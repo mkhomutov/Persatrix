@@ -103,8 +103,10 @@ def lease_interaction_id_for_event(event: AgentEvent) -> str:
     orchestrator-resolved id onto every routed publish; the gRPC servicer
     lifts it onto the event metadata (``seed_wire_metadata``), and this
     helper is the loop-side read — threaded into the Tier C quality-turn
-    lease and the Tier B salience-bid lease so the Layer 1 cost ceiling can
-    attribute spend per interaction (producer plan PR 2). The key literal
+    lease and the Tier B salience-bid lease (producer plan PR 2), the
+    Layer 1 substrate: the wallet acts on the id only once a positive
+    ``interaction_budget_tokens`` accompanies it on the same lease request
+    (the config-stamping follow-up). The key literal
     mirrors Go's ``interactionIDMetadataKey``
     (internal/channels/interaction_id.go); the cross-language drift pin
     keeps the two in lockstep.

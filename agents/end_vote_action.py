@@ -19,13 +19,20 @@ from .channel_publisher import (
 )
 from .persona_types import AgentAction
 
-logger = logging.getLogger("Persatrix.agent.dispatch")
+logger = logging.getLogger(__name__)
 
 # The readable sign-off an END_INTERACTION_VOTE publishes when the persona
 # supplies no content of its own (producer plan PR 2, IP6). The vote is a real
 # message other participants read — an empty publish would look like a glitch
 # rather than a deliberate "nothing further from me".
 _END_VOTE_DEFAULT_CONTENT = "I have nothing further to add."
+
+# DM channels are identified by the ``dm:`` channel-id prefix — the same
+# convention as ``response_gate.py`` / ``channel_reply.py``. Re-declared
+# rather than imported for the same reason ``channel_reply.py`` gives:
+# importing it would couple this executor-side module to the persona-runtime
+# package for one literal.
+_DM_CHANNEL_PREFIX = "dm:"
 
 
 async def publish_end_interaction_vote(
@@ -51,9 +58,17 @@ async def publish_end_interaction_vote(
     ``not_implemented`` status — votes are a channels-governance concept
     and the chat path has no interaction router. A vote with no channel
     (the bind seam never fired — e.g. emitted on a TICK turn) cannot be
-    scoped to an interaction and is dropped with a distinct status.
+    scoped to an interaction and is dropped with a distinct status; the
+    same strip-then-test as the bind seam, so a whitespace-only claim
+    cannot slip past both checks into a junk-channel publish. A vote
+    into a DM is dropped too: the prompt snippet's "never vote in a
+    direct message" is enforced here as a code gate (the repo's DM
+    invariants — must-reply, the ellipsis fallback — all live in code,
+    with the prompt as guidance), because the orchestrator's
+    ``processEndVote`` has no channel-type exemption and would count a
+    DM vote toward a quorum.
     """
-    target_channel = str(action.payload.get("channel_id", "") or "")
+    target_channel = str(action.payload.get("channel_id", "") or "").strip()
     if publisher is None:
         logger.info(
             "Agent %s voted to end the interaction but no REST publisher "
@@ -68,6 +83,18 @@ async def publish_end_interaction_vote(
             sender_id,
         )
         return {"action_type": "end_interaction_vote", "status": "no_channel_id"}
+    if target_channel.startswith(_DM_CHANNEL_PREFIX):
+        logger.warning(
+            "Agent %s END_INTERACTION_VOTE targets DM channel %s; a DM has "
+            "no group discussion to close (see the end-interaction-vote "
+            "prompt snippet) — dropped",
+            sender_id, target_channel,
+        )
+        return {
+            "action_type": "end_interaction_vote",
+            "status": "dm_channel",
+            "channel_id": target_channel,
+        }
 
     content = str(action.payload.get("content", "") or "").strip()
     if not content:

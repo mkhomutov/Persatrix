@@ -376,11 +376,16 @@ async def evaluate_salience(
             temperature=_BID_TEMPERATURE,
             cause=cause,
             agent_id=agent_id,
-            # RFC 0030 producer plan PR 2: the bid bills the same interaction
-            # as the quality turn it gates (TB3 extended to the interaction
-            # dimension), so a Layer 1 ceiling exhausted by quality turns also
-            # denies further bids in that interaction — fail-closed, no bid
-            # ("" = untracked).
+            # RFC 0030 producer plan PR 2: thread the same interaction as the
+            # quality turn this bid gates (TB3 extended to the interaction
+            # dimension; "" = untracked). Attribution substrate, not yet
+            # enforcement: the wallet ignores the id unless a positive
+            # interaction_budget_tokens rides the SAME lease request
+            # (internal/wallet/wallet.go gates both tracking and the ceiling
+            # check on it), and no call site stamps that ceiling yet — for an
+            # exhausted interaction to deny bids fail-closed, the
+            # config-stamping follow-up must thread the budget through here
+            # as well as the quality turn.
             interaction_id=interaction_id,
         )
     except BudgetExceededError:

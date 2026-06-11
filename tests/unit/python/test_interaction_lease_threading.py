@@ -9,9 +9,9 @@ This matrix (TDD-first, written red) pins the three links of the chain:
   ``interaction_id`` into ``WalletClient.lease`` (and omits nothing when
   the caller has none — the default stays the untracked empty string).
 * :func:`agents.salience_bid.evaluate_salience` threads it through to its
-  leased ``fast``-model call, so the Tier B bid bills the same
-  interaction as the quality turn it gates (TB3's attribution contract,
-  extended to the interaction dimension).
+  leased ``fast``-model call, so the Tier B bid carries the same
+  interaction attribution as the quality turn it gates (TB3's attribution
+  contract, extended to the interaction dimension).
 * :func:`agents.persona_runtime.wallet_cause.lease_interaction_id_for_event`
   is the loop-side read: the resolver-stamped id off the inbound event
   metadata, empty for untracked/legacy events and malformed values.
@@ -24,10 +24,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agents.generated import wallet_pb2 as walletpb
 from agents.llm_client import LLMClient, LLMResponse
 from agents.persona_runtime.wallet_cause import lease_interaction_id_for_event
 from agents.persona_types import AgentEvent, EventType
-from agents.generated import wallet_pb2 as walletpb
 
 
 class _RecordingWallet:
@@ -92,8 +92,11 @@ class TestSalienceBidForwardsInteractionID:
     @pytest.mark.asyncio
     async def test_bid_lease_bills_the_same_interaction(self):
         """TB3 extended: the bid's leased call carries the inbound event's
-        interaction, so a Layer 1 ceiling exhausted by quality turns also
-        denies further bids in that interaction (fail-closed, no bid)."""
+        interaction. Substrate, not yet enforcement — the wallet acts on
+        the id only when a positive ``interaction_budget_tokens`` rides the
+        same request, which the config-stamping follow-up adds; this pin
+        guarantees the id half is already in place so that follow-up can
+        deny exhausted-interaction bids fail-closed."""
         from agents.model_aliases import use_alias_map
         from agents.salience_bid import evaluate_salience
 

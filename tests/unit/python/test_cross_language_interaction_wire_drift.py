@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -38,11 +39,16 @@ _ACTION_LOOP_PY = Path("agents/persona_runtime/action_loop.py")
 _SALIENCE_GATE_PY = Path("agents/persona_runtime/salience_gate.py")
 
 
-def _parse_miss(what: str, where: Path) -> None:
+def _parse_miss(what: str, where: Path) -> NoReturn:
     """Fail with an actionable message on a parse miss (vs a silent
     ``None``-vs-value ``AssertionError``): a refactor that hides the
     declaration must land as a deliberate update to this test's parse
     rules — the cross-language drift pin is part of the contract.
+
+    ``NoReturn`` (``pytest.fail`` raises unconditionally) so mypy narrows
+    ``Match | None`` after a guarded call — the committed ``-> None``
+    annotation failed ``mypy tests/`` on ``_go_const``'s ``m.group(1)``,
+    masked in CI because the ruff step failed first.
     """
     pytest.fail(
         f"could not find {what} in {where}. If it was renamed or "
@@ -87,13 +93,29 @@ def test_interaction_id_metadata_key_agrees() -> None:
         )
 
 
+# The exact kwarg-with-value literal each call site must pass. The pin
+# names the kwarg AND the value expression deliberately: a bare
+# ``interaction_id\s*=`` regex is vacuously satisfied in ``action_loop.py``
+# by the attribution tuple unpack alone (``…, lease_interaction_id =
+# lease_attribution_for_event(…)`` — ``interaction_id`` is the tail of
+# ``lease_interaction_id``), so the precise regression this test exists to
+# catch — the kwarg dropped from the leased ``create_message`` call while
+# the unpack stays — would keep the suite green. Pinning the full
+# ``kwarg=value`` literal also guards the value side: passing some *other*
+# id under the kwarg would be an attribution bug the looser regex can't see.
+_LEASE_THREADING_PINS = {
+    _ACTION_LOOP_PY: "interaction_id=lease_interaction_id",
+    _SALIENCE_GATE_PY: "interaction_id=lease_interaction_id_for_event(",
+}
+
+
 def test_lease_call_sites_thread_the_interaction() -> None:
     """The two channel-path leased calls — the Tier C quality turn
     (action_loop) and the Tier B salience bid (salience_gate's
     evaluate_salience call) — MUST pass ``interaction_id`` into their
     ``create_message``/bid invocations, or Layer 1 attribution silently
     degrades to untracked on the path it exists for."""
-    for path in (_ACTION_LOOP_PY, _SALIENCE_GATE_PY):
+    for path, pin in _LEASE_THREADING_PINS.items():
         src = path.read_text(encoding="utf-8")
-        if not re.search(r"interaction_id\s*=", src):
-            _parse_miss("an `interaction_id=` lease-threading argument", path)
+        if pin not in src:
+            _parse_miss(f"the lease-threading literal `{pin}`", path)

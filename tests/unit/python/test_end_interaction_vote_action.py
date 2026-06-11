@@ -20,6 +20,7 @@ and binding API.
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -124,6 +125,73 @@ class TestExecutorPublishesVote:
         ])
 
         assert results[0]["status"] == "failed"
+
+    @pytest.mark.asyncio
+    async def test_dm_vote_is_dropped_not_published(self):
+        """The DM carve-out is a code gate, not prompt prose. The
+        ``end-interaction-vote`` snippet says "never vote in a direct
+        message — a DM has no group discussion to close", and this repo's
+        posture is that DM invariants are enforced in code (the response
+        gate forces DM replies; ``synthesize_channel_reply`` carries a
+        DM-specific fallback) with the prompt as guidance on top. Without
+        this gate an LLM that ignores the snippet publishes a flagged vote
+        into the DM and Go's ``processEndVote`` counts it toward a quorum
+        (it has no channel-type exemption — ``ct`` is metrics-only), so
+        two agents in an agent-agent DM could close the DM's interaction.
+        Dropped with a distinct status so the executor result is honest
+        about why nothing was published."""
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        executor = ActionExecutor(channel_publisher=publisher)
+
+        results = await executor.execute("ember-owl", [
+            _vote({"channel_id": "dm:ember-owl:alice"}),
+        ])
+
+        assert results[0]["status"] == "dm_channel"
+        assert results[0]["channel_id"] == "dm:ember-owl:alice"
+        publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_whitespace_channel_id_is_no_channel(self):
+        """A whitespace-only ``channel_id`` is the no-channel case, not a
+        publish target. The bind seam already strips when deciding whether
+        to stamp the inbound channel (``bind_end_vote_channel``); without
+        the same strip here, a whitespace payload value on a non-channel
+        turn slips past the bind (nothing to stamp) AND past the executor's
+        emptiness check — publishing the vote into a junk channel instead
+        of taking the ``no_channel_id`` drop that exists for exactly this
+        "cannot be scoped to an interaction" case."""
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        executor = ActionExecutor(channel_publisher=publisher)
+
+        results = await executor.execute("ember-owl", [_vote({"channel_id": "  "})])
+
+        assert results[0]["status"] == "no_channel_id"
+        publisher.publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_failure_logs_under_the_module_logger(self, caplog):
+        """The carve-out logs under its own ``__name__``
+        (``agents.end_vote_action``) — the convention of the executor it
+        was carved from and of every sibling module
+        (``action_executor``/``dispatch``/``channel_publisher`` all use
+        ``getLogger(__name__)``). A hand-written name outside the
+        ``agents.*`` hierarchy would silently move the vote's WARN logs
+        out of any handler/filter configured for the executor family."""
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(side_effect=RuntimeError("boom"))
+        executor = ActionExecutor(channel_publisher=publisher)
+
+        with caplog.at_level(logging.WARNING):
+            await executor.execute("ember-owl", [
+                _vote({"channel_id": "group:planning"}),
+            ])
+
+        assert any(
+            record.name == "agents.end_vote_action" for record in caplog.records
+        ), f"vote failure logged under {sorted({r.name for r in caplog.records})!r}"
 
 
 class TestBindEndVoteChannel:
