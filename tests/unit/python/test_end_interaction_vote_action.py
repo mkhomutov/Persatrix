@@ -415,3 +415,30 @@ class TestVotePublishOutcomeCallback:
         assert any(
             "publish-outcome callback failed" in r.message for r in caplog.records
         )
+
+    @pytest.mark.asyncio
+    async def test_agent_without_the_seam_is_skipped_quietly(self, caplog):
+        """The dispatcher registry is typed for persona agents but not
+        enforced (``EventDispatcher(agents=...)`` accepts any dict); an
+        agent without ``resolve_end_vote_publish`` has no parked closes
+        to discharge — a structural non-event, not a callback failure,
+        so it must skip without the WARNING-with-traceback the except
+        branch reserves for a discharge that actually blew up (PR 607
+        third-pass review)."""
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+        dispatcher = MagicMock()
+        # A bare object has no resolve_end_vote_publish attribute —
+        # unlike MagicMock, which would auto-create it.
+        dispatcher.get_agent = MagicMock(return_value=object())
+        executor = ActionExecutor(
+            dispatcher=dispatcher, channel_publisher=publisher,
+        )
+
+        with caplog.at_level(logging.WARNING, logger="agents.action_executor"):
+            results = await executor.execute("ember-owl", [
+                _vote({"channel_id": "group:planning"}),
+            ])
+
+        assert results[0]["status"] == "published"
+        assert not caplog.records

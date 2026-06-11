@@ -51,7 +51,12 @@ on continued traffic, stamped with the unrotated id) closes nothing —
 the record stays open exactly like Go's interaction — instead of
 minting a second "ended" record per re-vote.  A record with no wire id
 (legacy/untracked traffic) has nothing to compare and keeps the
-pre-memory behaviour.
+pre-memory behaviour.  The memory holds one entry per scope and is
+deliberately never pruned (PR 607 third-pass review): a stale entry is
+inert — the resolver never re-uses a retired wire id, so it can never
+equal a later record's id — while a prune at the wrong moment would
+re-enable exactly the fragmentation this map exists to stop; the bound
+is the scopes the agent has ever vote-closed, the park map's own bound.
 
 Staleness guards: the park stores the open interaction's id, and the
 discharge closes only when the scope still holds that same open

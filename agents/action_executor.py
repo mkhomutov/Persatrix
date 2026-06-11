@@ -256,10 +256,11 @@ class ActionExecutor:
         callback reports how the publish went so the park is closed
         (``status == "published"``) or dropped (any failure status, so a
         vote that never reached the orchestrator leaves no early "ended"
-        record).  Best-effort: no dispatcher / unknown agent / missing
-        ``channel_id`` (the ``no_channel_id`` drop) simply leaves the park
-        to the staleness guards, and a callback error must not fail the
-        action whose publish already succeeded.
+        record).  Best-effort: no dispatcher / unknown agent / an agent
+        without the vote-close seam / missing ``channel_id`` (the
+        ``no_channel_id`` drop) simply leaves the park to the staleness
+        guards, and a callback error must not fail the action whose
+        publish already succeeded.
         """
         if self._dispatcher is None:
             return
@@ -269,8 +270,15 @@ class ActionExecutor:
         channel_id = str(result.get("channel_id", "") or "")
         if not channel_id:
             return
+        # The dispatcher registry is typed for persona agents but not
+        # enforced; an agent without the seam has no parked closes to
+        # discharge — skip, keeping the except's WARNING for discharges
+        # that actually fail (PR 607 third-pass review).
+        resolve = getattr(agent, "resolve_end_vote_publish", None)
+        if resolve is None:
+            return
         try:
-            await agent.resolve_end_vote_publish(
+            await resolve(
                 channel_id,
                 published=result.get("status") == "published",
                 # The park's correlation handle (PR 607 second-pass
