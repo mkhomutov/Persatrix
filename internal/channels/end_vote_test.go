@@ -17,11 +17,14 @@ import (
 // RFC 0030 Layer 4 (v0.3.8) — end-of-interaction signal. When K distinct
 // participants emit an end-vote within W consecutive turns the interaction
 // closes on its own: fanout of the closing publish is suppressed and the
-// per-interaction governance counters are discarded (§H). The id side is
-// live (the resolver stamps every publish and overrides caller claims —
-// interaction_resolver.go); the vote flag still has no production producer
-// (the Python action lands in producer plan PR 2), so these tests drive it
-// directly through the publish metadata bag, scoped to the resolver's id.
+// per-interaction governance counters are discarded (§H). Both producers are
+// live: the resolver stamps every publish and overrides caller claims
+// (interaction_resolver.go, producer plan PR 1, #604), and the Python
+// END_INTERACTION_VOTE action publishes the flag (agents/end_vote_action.py,
+// PR 2, #605). These tests still drive the flag directly through the publish
+// metadata bag — the same wire shape the producer emits — to pin the
+// orchestrator hook in isolation; the composed end-to-end arc is
+// interaction_convergence_test.go.
 
 // endVote drives a single publish carrying the Layer 4 end-vote flag for the
 // given (sender, interaction) pair. A fresh UUID keeps per-message identity unique.

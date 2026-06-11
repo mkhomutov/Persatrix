@@ -330,19 +330,31 @@ cannot be silently disabled from config.
 
 The cascade-depth backstop above is **Layer 0** of the [RFC 0030 governance
 model](../rfcs/0030-multi-agent-conversation-governance.md#b-layered-architecture):
-the always-on net that stops runaway loops. v0.3.8 adds three **opt-in,
-default-off** deterministic layers that let a multi-persona brainstorm
-*converge, stay bounded, and terminate* — without a moderator. Each is scoped to
-an **interaction** (the RFC 0020 conversation unit). Layers 1 and 2 **default to
-uncapped** (`0`); Layer 4 carries non-zero `K`/`W` defaults but is **dormant
-until a persona actually emits an `END_INTERACTION_VOTE`** — so a config that
-sets none of these layers behaves exactly as it did in v0.3.7.
+the always-on net that stops runaway loops. v0.3.8 adds three deterministic
+layers that let a multi-persona brainstorm *converge, stay bounded, and
+terminate* — without a moderator. Each is scoped to an **interaction**: the
+orchestrator resolves one open interaction per channel and stamps its id on
+**every publish** (the [interaction-id producer](../rfcs/0030-interaction-id-producer-pr-plan.md)
+— inbound id claims are overridden, so only orchestrator-minted ids ever key
+governance state), rotating to a fresh interaction after the channel sits
+quiet past `interaction_idle_timeout_seconds` (default **600**; explicit `0`
+disables idle rotation; thread channels never rotate — a thread *is* its
+interaction). Layers 1 and 2 **default to uncapped** (`0`); Layer 4 is
+**live by default**: personas carry the vote vocabulary in their system
+prompt (the `end-interaction-vote` snippet) and the default K=`2`/W=`3`
+quorum closes the conversation when two of them say they're done. **A
+conversation now ends because its participants said so** — or because the
+channel went idle — with the depth cap demoted to the regression backstop
+[RFC 0030 §D](../rfcs/0030-multi-agent-conversation-governance.md#d-layer-0--cascade-depth-backstop-shipped)
+intends: a `governance_drop{layer=depth}` on a governed channel is a signal
+something upstream failed, not business as usual.
 
 | Layer | Knob | Default | What it bounds |
 |-------|------|---------|----------------|
 | **1 — cost ceiling** | `interaction_budget_tokens` (per-channel) · `default_interaction_budget_tokens` (fleet) | `0` (uncapped) | Total LLM tokens leased across one interaction. Once the running total would cross the budget, further leases are **denied** (`INTERACTION_BUDGET_EXHAUSTED`) — **fail-closed**: the LLM call does not happen, so the persona produces no reply. Enforced in the wallet on the lease path (RFC 0023), upstream of the channel publish. |
 | **2 — reply budget** | `max_replies_per_participant_per_interaction` (per-channel) · `default_max_replies_per_participant` (fleet) | `0` (uncapped) | How many times one participant may publish in one interaction. The `(K+1)`th publish is rejected **pre-persistence** (HTTP **429**, `ErrParticipantBudgetExhausted`) so an over-budget message never enters channel history and never pollutes future recall. Human principals are exempt — see `governance.exempt_principals` below. |
 | **4 — end-of-interaction vote** | `end_vote_threshold` (K) · `end_vote_window` (W), per-channel | K=`2`, W=`3` | A persona emits an `END_INTERACTION_VOTE` action when it judges its contribution complete. When **K distinct** participants vote within **W consecutive** turns, the interaction **closes** and stops drawing new replies. Votes are deduped per `(participant, interaction)`; an end-vote is exempt from the Layer 2 reply budget so a budget-saturated participant can still cast the terminating signal. |
+| *interaction scope — idle rotation* | `interaction_idle_timeout_seconds` (per-channel) · `default_interaction_idle_timeout_seconds` (fleet) | `600` (seconds) | Not a layer — the lifetime of the **unit the layers count against**. Once the channel sits quiet past the window, the next publish retires the open interaction (`interaction_closed{trigger=idle}`, emitted lazily — see the telemetry note below) and mints a fresh one, resetting every per-interaction count above. Explicit `0` disables idle rotation; thread channels never rotate — a thread *is* its interaction. |
 
 **Composition + failure-down ([RFC 0030 §B](../rfcs/0030-multi-agent-conversation-governance.md#b-layered-architecture)).**
 A publish proceeds only if **every active layer admits it**; a lower-layer drop
@@ -361,6 +373,7 @@ human who explicitly votes that the interaction is done counts toward the quorum
 # config/channels.yaml
 default_interaction_budget_tokens: 0       # fleet default (uncapped)
 default_max_replies_per_participant: 0     # fleet default (uncapped)
+default_interaction_idle_timeout_seconds: 600  # fleet default idle window (seconds)
 governance:
   exempt_principals: [human]               # humans bypass the Layer 2 reply budget
 channels:
@@ -369,6 +382,7 @@ channels:
     max_replies_per_participant_per_interaction: 3   # Layer 2: at most 3 turns each
     end_vote_threshold: 2                  # Layer 4: 2 distinct votes …
     end_vote_window: 3                     # … within 3 consecutive turns closes it
+    interaction_idle_timeout_seconds: 600  # quiet this long → next publish opens a fresh interaction
     members:
       - {id: alex, respond: participant}
       - {id: jordan, respond: participant}
@@ -385,7 +399,9 @@ channels:
   `channel_id` / `interaction_id` / `participant_id`; expected suppression
   (post-close traffic) is metered without a log.
 - `interaction_closed{channel_type, trigger}` — one per closed interaction;
-  `trigger=end_votes` today.
+  `trigger ∈ {end_votes, idle}` (`idle` is emitted lazily, on the publish that
+  rotates past the window — it can lag the semantic close by the gap to the
+  channel's next message). `cost` remains reserved.
 - `end_vote_emitted{channel_type}` — one per vote action (vote volume vs. the
   quorum the close counter measures).
 - `reply_budget_remaining{channel_type}` — histogram of each **replying**

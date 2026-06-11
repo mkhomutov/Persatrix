@@ -47,6 +47,20 @@ func openInteractionID(r *ChannelRouter, channelID string) string {
 	return ""
 }
 
+// retiredInteractionID returns the channel's pending retiree ("" when none) —
+// the one id whose discard seams fire at the channel's next rotation or
+// vote-close (IP4). White-box sibling of [openInteractionID], for tests
+// asserting a close or an orphaned commit parked the right id without
+// displacing the slot.
+func retiredInteractionID(r *ChannelRouter, channelID string) string {
+	r.interactionMu.Lock()
+	defer r.interactionMu.Unlock()
+	if e := r.openInteractions[channelID]; e != nil {
+		return e.retired
+	}
+	return ""
+}
+
 // reseedOpenInteraction force-sets the channel's open interaction — the
 // race simulator. With the resolver authoritative (IP2), traffic carrying a
 // retired/closed id cannot arise through Publish; the one real path is a
@@ -54,6 +68,20 @@ func openInteractionID(r *ChannelRouter, channelID string) string {
 // landed (IP4's deferral exists for exactly this interleaving). Reseeding
 // reproduces that interleaving deterministically: the next Publish resolves
 // the seeded id exactly as the racing commit did.
+//
+// HAZARD — one racing publish only, then stop asserting through Publish.
+// The seeded entry leaves the closed id installed as OPEN (and the racer's
+// settle commits it) — a state the production path cannot reach: the close
+// itself already parked the closed id as the RETIREE when it cleared the
+// open slot (markInteractionClosed), so a real racer's settle finds the
+// slot occupied by its own id and is a no-op (settleInteraction's
+// racing-commit case — the orphan-park branch belongs to a different
+// interleaving, a rejected sibling deleting the shared tentative mint).
+// Either way the closed id never returns to OPEN. A test that keeps
+// publishing after the reseed asserts against that phantom state — every
+// later publish resolves the closed id and is silently suppressed (the
+// convergence acceptance arc hit exactly this; it simulates the racer at
+// its commit tail — settle + processEndVote — instead).
 func reseedOpenInteraction(r *ChannelRouter, channelID, interactionID string) {
 	r.interactionMu.Lock()
 	defer r.interactionMu.Unlock()
