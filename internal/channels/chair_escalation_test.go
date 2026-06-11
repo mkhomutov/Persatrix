@@ -55,9 +55,15 @@ func escalationHarness(t *testing.T) (*ChannelRouter, *envelopeRecorder, Channel
 	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
 	ctr, err := mp.Meter("test").Int64Counter("channel.conversation.chair_escalation")
 	require.NoError(t, err)
+	// The delivered counter rides the same harness so the guard matrix can
+	// pin the forced turn onto the dispatchTo contract (deep-review finding:
+	// a dispatch that bypasses dispatchTo is invisible to delivered/error
+	// dashboards). Nil-safe everywhere, so existing rows are unaffected.
+	delivered, err := mp.Meter("test").Int64Counter("channel.messages.delivered")
+	require.NoError(t, err)
 	store := newTestStore(t, SQLiteOptions{})
 	disp := &envelopeRecorder{}
-	router := NewChannelRouter(store, disp, zap.NewNop(), &RouterMetrics{ChairEscalation: ctr})
+	router := NewChannelRouter(store, disp, zap.NewNop(), &RouterMetrics{ChairEscalation: ctr, MessagesDelivered: delivered})
 	ch := mustCreateGroupWithPolicies(t, store, "planning",
 		map[string]RespondPolicy{
 			"alex":         RespondNever, // the human stimulus author
@@ -210,7 +216,7 @@ func TestChairEscalation_RepliedRoundIsNotAStall(t *testing.T) {
 	router, disp, _, ch, reader := escalationHarness(t)
 
 	msg := ChannelMessage{ID: uuid.NewString(), ChannelID: ch, SenderID: "alex", Content: "hi"}
-	router.maybeEscalateStall(context.Background(), msg, ChannelTypeGroup,
+	router.maybeEscalateStall(context.Background(), msg, ChannelTypeGroup, "",
 		floorRoundOutcome{granted: 2, replied: 1},
 		[]Member{member("nova-sparrow", RespondAlways)}, 4, nil)
 
@@ -227,7 +233,7 @@ func TestChairEscalation_EmptyRoundIsNotAStall(t *testing.T) {
 	router, disp, _, ch, reader := escalationHarness(t)
 
 	msg := ChannelMessage{ID: uuid.NewString(), ChannelID: ch, SenderID: "alex", Content: "hi"}
-	router.maybeEscalateStall(context.Background(), msg, ChannelTypeGroup,
+	router.maybeEscalateStall(context.Background(), msg, ChannelTypeGroup, "",
 		floorRoundOutcome{granted: 0, replied: 0},
 		[]Member{member("nova-sparrow", RespondAlways)}, 4, nil)
 
@@ -244,7 +250,7 @@ func TestChairEscalation_UntrackedChannelIsNotAStall(t *testing.T) {
 	router, disp, _, ch, reader := escalationHarness(t)
 
 	msg := ChannelMessage{ID: uuid.NewString(), ChannelID: ch, SenderID: "alex", Content: "hi"}
-	router.maybeEscalateStall(context.Background(), msg, ChannelTypeGroup,
+	router.maybeEscalateStall(context.Background(), msg, ChannelTypeGroup, "",
 		floorRoundOutcome{granted: 2, replied: 0},
 		[]Member{member("nova-sparrow", RespondAlways)}, 4, nil)
 

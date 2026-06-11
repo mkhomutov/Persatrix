@@ -109,8 +109,8 @@
         },
         "escalation_chair_id": {
           "type": "string",
-          "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
-          "description": "The chair-stall-escalation amendment (RFC 0030 minimal Layer 5 slice, v0.3.8): the member who receives ONE forced turn after a stalled floor round (zero replies across ≥1 granted turns on the channel's open interaction) — prompted to synthesize and cast its end-of-discussion vote, or to call on the member best placed to continue. Must be one of this channel's declared members (the loader rejects a non-member loudly); it need not be declared `chair`. Closing still requires the Layer 4 vote quorum — the chair proposes, the quorum disposes. Absent (the default) disables escalation; deliberately distinct from the v0.4.0 moderator's `moderator_agent_id` (a non-participant trusted closer)."
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+          "description": "The chair-stall-escalation amendment (RFC 0030 minimal Layer 5 slice, v0.3.8): the member who receives ONE forced turn after a stalled floor round (zero replies across ≥1 granted turns on the channel's open interaction) — prompted to synthesize and cast its end-of-discussion vote, or to call on the member best placed to continue. Must be one of this channel's declared members and not an `observer` (the loader rejects both loudly — an observer's gate suppresses every turn, so it could never speak); it need not be declared `chair`. The pattern is the member `id` pattern, verbatim: the knob's domain is this channel's member ids. Closing still requires the Layer 4 vote quorum — the chair proposes, the quorum disposes. Absent (the default) disables escalation; deliberately distinct from the v0.4.0 moderator's `moderator_agent_id` (a non-participant trusted closer)."
         },
         "interaction_idle_timeout_seconds": {
           "type": "integer",

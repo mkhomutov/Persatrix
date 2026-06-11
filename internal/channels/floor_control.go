@@ -406,7 +406,7 @@ func (r *ChannelRouter) runFloorTurn(
 		defer cancel()
 	}
 
-	r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker, channelSize, floorMentions)
+	r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker, channelSize, floorMentions, false)
 
 	timer := time.NewTimer(turnTimeout)
 	defer timer.Stop()

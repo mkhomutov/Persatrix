@@ -109,15 +109,29 @@ func (c *Config) Validate() error {
 		// turn dispatches to a member's envelope, so a non-member chair is a
 		// guaranteed dispatch_error — fail it loudly at load instead.
 		if ch.EscalationChairID != "" {
-			isMember := false
-			for _, m := range ch.Members {
-				if m.ID == ch.EscalationChairID {
-					isMember = true
+			var chair *MemberConfig
+			for j := range ch.Members {
+				if ch.Members[j].ID == ch.EscalationChairID {
+					chair = &ch.Members[j]
 					break
 				}
 			}
-			if !isMember {
+			if chair == nil {
 				return fmt.Errorf("channels[%d=%s]: %w: %q is not a declared member",
+					i, ch.Name, ErrInvalidEscalationChair, ch.EscalationChairID)
+			}
+			// CE2 names a PARTICIPANT member (PR #609 deep review): an
+			// `observer` (legacy `never`) chair is as guaranteed-futile as a
+			// non-member — the receiver gate suppresses an observer before
+			// any LLM, forever — but a membership-only check passed it
+			// silently, burning each interaction's ration as
+			// `outcome=dispatched`. Same loud-at-load rationale. `addressed`
+			// stays legal: the forced-turn marker is the directed admit that
+			// lets it speak (CE3's gate lift), so addressed-ness is not
+			// futility. The loader normalizes dispositions at unmarshal;
+			// Normalize() here is the usual read-seam belt-and-braces.
+			if chair.RespondPolicy.Normalize() == RespondNever {
+				return fmt.Errorf("channels[%d=%s]: %w: %q is an observer (respond: never) and can never take the forced turn",
 					i, ch.Name, ErrInvalidEscalationChair, ch.EscalationChairID)
 			}
 		}

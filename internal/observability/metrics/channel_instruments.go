@@ -112,8 +112,9 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	// Chair-stall-escalation amendment (RFC 0030 minimal Layer 5 slice,
 	// v0.3.8). One increment per DETECTED floor-round stall, labelled by
 	// `channel_type` and `outcome` (dispatched / no_chair / already_escalated
-	// / dispatch_error) — disposition after detection, so operators see the
-	// stalls a chair could be configured for, not only fired escalations.
+	// / dispatch_error / self_stimulus) — disposition after detection, so
+	// operators see the stalls a chair could be configured for, not only
+	// fired escalations.
 	if i.ChannelConversationChairEscalation, err = m.Int64Counter(
 		"channel.conversation.chair_escalation",
 		metric.WithUnit("{stall}"),

@@ -38,6 +38,11 @@ const (
 	chairEscalationNoChair          = "no_chair"
 	chairEscalationAlreadyEscalated = "already_escalated"
 	chairEscalationDispatchError    = "dispatch_error"
+	// chairEscalationSelfStimulus (PR #609 deep review): the chair authored
+	// the stalled stimulus itself, so the forced turn is withheld — see the
+	// guard in [ChannelRouter.maybeEscalateStall] for why dispatching it is
+	// guaranteed-futile and why the ration stays unspent.
+	chairEscalationSelfStimulus = "self_stimulus"
 )
 
 // floorRoundOutcome is what [ChannelRouter.floorRound] now hands back to its
@@ -103,6 +108,7 @@ func (r *ChannelRouter) maybeEscalateStall(
 	ctx context.Context,
 	msg ChannelMessage,
 	ct ChannelType,
+	threadParentSenderID string,
 	outcome floorRoundOutcome,
 	members []Member,
 	channelSize int,
@@ -118,6 +124,22 @@ func (r *ChannelRouter) maybeEscalateStall(
 	if !tracked {
 		return
 	}
+	// Detection, continued (PR #609 deep review): the stall must belong to
+	// the interaction that is still open. publishCommit stamped the resolved
+	// id onto the stimulus metadata, and a serialized round runs up to
+	// N×turnTimeout while rotation/close happen lazily on CONCURRENT
+	// publishes — so the open id read above can be a different generation
+	// than the one this round stalled on. Escalating then would spend the
+	// successor's ration on the predecessor's silence and dispatch a forced
+	// turn whose stamped interaction_id disagrees with the ration's — and
+	// the divergence itself proves new traffic arrived mid-round, so the
+	// channel is not stalled. Fails CE1 ("open tracked interaction") like
+	// the untracked branch: no metric. An absent stamp falls through on
+	// readInteractionID's tolerant-reader posture (the router stamps every
+	// routed publish; only a commit-bypassing direct call lacks it).
+	if stamped := readInteractionID(msg.Metadata); stamped != "" && stamped != interactionID {
+		return
+	}
 
 	// Disposition chain (§C 1) — every branch from here emits the metric.
 	chairID := r.escalationChairFor(msg.ChannelID)
@@ -125,7 +147,25 @@ func (r *ChannelRouter) maybeEscalateStall(
 		r.recordChairEscalation(ctx, ct, chairEscalationNoChair)
 		return
 	}
-	if escalated || !r.markChairEscalated(msg.ChannelID, interactionID) {
+	if escalated {
+		r.recordChairEscalation(ctx, ct, chairEscalationAlreadyEscalated)
+		return
+	}
+	if chairID == msg.SenderID {
+		// The chair authored the stalled stimulus (PR #609 deep review).
+		// Every dispatch path filters the sender ([orderResponders]'
+		// never-reply-to-self, [dispatchConcurrent]'s sender skip), and the
+		// receiver gate's self_sender defence (agents/response_gate.py)
+		// suppresses a self-delivery before any LLM regardless — a forced
+		// turn here is guaranteed-suppressed, and dispatching it would burn
+		// the interaction's one ration while recording `dispatched`.
+		// Withhold WITHOUT spending the ration: unlike the membership-drift
+		// branch below this is per-stimulus, not persistent, so a later
+		// stall on another member's stimulus still deserves the escalation.
+		r.recordChairEscalation(ctx, ct, chairEscalationSelfStimulus)
+		return
+	}
+	if !r.markChairEscalated(msg.ChannelID, interactionID) {
 		// The CAS re-check covers a concurrent stalled round racing this one
 		// to the same ration; both observing `escalated == false` is fine —
 		// exactly one mark wins.
@@ -156,18 +196,20 @@ func (r *ChannelRouter) maybeEscalateStall(
 	// (the agent-side conversation window dedups by message id, so the
 	// original id would be silently dropped), same content and metadata
 	// (the stamped interaction_id rides along for lease attribution, CE6).
+	//
+	// Delivered via [ChannelRouter.dispatchTo] (PR #609 deep review), the
+	// single deadline + `channel.messages.delivered` contract point every
+	// other recipient dispatch uses — a bypass made forced turns invisible
+	// to delivered/error dashboards. The chair is re-stamped as thinking
+	// first: it is an expected-reply dispatch and its round-start mark has
+	// typically aged out across the silent round (the same TTL decay
+	// [runFloorTurn]'s re-mark exists for). Pre-lift agents never reply (the
+	// §D skew posture); the TTL prune clears the mark, the same degraded
+	// path as any gate-suppressed candidate.
 	forced := msg
 	forced.ID = uuid.NewString()
-	dispatchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), channelFanoutPerRecipientTimeout)
-	defer cancel()
-	err := r.dispatcher.Dispatch(dispatchCtx, DispatchEnvelope{
-		Recipient:                 *chair,
-		ChannelSize:               channelSize,
-		SalienceMaxChannelMembers: r.salienceMaxFor(msg.ChannelID),
-		FloorMentions:             floorMentions,
-		ChairEscalation:           true,
-	}, forced)
-	if err != nil {
+	r.markActivity(msg.ChannelID, []string{chairID})
+	if err := r.dispatchTo(ctx, forced, ct, threadParentSenderID, *chair, channelSize, floorMentions, true); err != nil {
 		r.logger.Warn("channels: chair escalation dispatch failed; stall stands",
 			zap.String("channel_id", msg.ChannelID),
 			zap.String("escalation_chair_id", chairID),
