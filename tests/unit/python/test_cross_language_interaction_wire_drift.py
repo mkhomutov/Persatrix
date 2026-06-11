@@ -225,11 +225,14 @@ def test_chair_escalation_marker_agrees() -> None:
     # Both consumers honour the marker ONLY as the strict boolean — the
     # floor_mentions_resolved posture (a spoofed truthy non-bool on the
     # cleartext port must not widen admission or rewrite the prompt).
+    # One substring covers both shapes: the gate reads a local
+    # `payload.get(...)`, prompt_assembly reads `event.payload.get(...)`,
+    # and the latter contains the former — the PR 610 second-pass review
+    # dropped a second `event.`-prefixed clause that could therefore
+    # never be the deciding one.
     for path in (_RESPONSE_GATE_PY, _PROMPT_ASSEMBLY_PY):
         src = path.read_text(encoding="utf-8")
-        if 'payload.get("chair_escalation") is True' not in src and (
-            'event.payload.get("chair_escalation") is True' not in src
-        ):
+        if 'payload.get("chair_escalation") is True' not in src:
             _parse_miss(
                 'a strict `…get("chair_escalation") is True` read', path,
             )

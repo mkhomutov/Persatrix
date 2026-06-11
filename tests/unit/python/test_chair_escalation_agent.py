@@ -20,7 +20,16 @@ the §C item 2 contract
   self-sender stay suppressed even when marked.
 * The escalation framing is rendered into the forced turn's user message
   (the per-event sibling of the ``end-interaction-vote`` system-prompt
-  snippet): synthesize + vote, or call on the member best placed.
+  snippet): synthesize + vote, or call on the member best placed. The
+  synthesis MUST be steered into the vote action's ``content`` payload
+  (PR 610 review, the headline finding):
+  :func:`agents.persona_runtime.action_parser.parse_actions` keeps only
+  the fenced JSON block — prose beside it never becomes a
+  ``COMPLETE_TASK``, so ``synthesize_channel_reply`` has nothing to
+  promote and a synthesis written as prose next to the vote block is
+  silently dropped. A snippet that lets the chair pick that output shape
+  degrades the escalation to a close-vote with no synthesis on the
+  record — the pre-amendment outcome with a `dispatched` metric.
 """
 
 from __future__ import annotations
@@ -102,20 +111,27 @@ class TestGateAdmitsForcedTurn:
     def test_marker_does_not_override_never(self) -> None:
         """Fail-closed order: a `never` policy wins over a (spoofed) marker —
         the orchestrator validates the chair is not an observer at load, so a
-        marked `never` event is a forged or misrouted dispatch."""
+        marked `never` event is a forged or misrouted dispatch. The reason is
+        pinned too (PR 610 review): suppressing down a *different* branch —
+        say the unknown-policy fall-through — would mean the `never` check
+        moved behind the marker, exactly the ordering this test exists to
+        hold."""
         decision = evaluate_response_gate(
             _escalation_event(respond_policy="never"), agent_id="nova-sparrow",
         )
         assert decision.respond is False
+        assert decision.reason == "policy_never"
 
     def test_marker_does_not_override_self_sender(self) -> None:
         """The self-sender re-check stays ahead of the marker: an agent never
-        replies to its own message, escalated or not."""
+        replies to its own message, escalated or not. Reason pinned for the
+        same ordering argument as the `never` pin above."""
         decision = evaluate_response_gate(
             _escalation_event(respond_policy="always", sender_id="nova-sparrow"),
             agent_id="nova-sparrow",
         )
         assert decision.respond is False
+        assert decision.reason == "self_sender"
 
 
 class TestWireLift:
@@ -147,6 +163,32 @@ class TestEscalationFraming:
         assert "chair" in framed.lower()
         assert "vote" in framed.lower()
 
+    def test_format_event_frames_only_the_strictly_marked_turn(self) -> None:
+        """Behavioural pins through ``_format_event`` itself (PR 610 review —
+        the drift test pins the strict read as source text; this pins what
+        the rendered prompt actually does). An ordinary dispatch (proto3
+        default ``False``) and a spoofed truthy string both format plain —
+        the framing never leaks onto unmarked traffic (which includes every
+        replayed conversation-window turn: ``_format_peer_turn``'s synthetic
+        payloads carry no marker). Called unbound with ``self=None`` through
+        the same cast ``conversation_window._format_peer_message`` uses —
+        the branch's self-independence is that seam's pinned contract."""
+        from collections.abc import Callable
+        from typing import cast
+
+        from agents.persona_runtime.prompt_assembly import _PromptAssemblyMixin
+
+        fmt = cast(
+            "Callable[[object, AgentEvent], str]",
+            _PromptAssemblyMixin._format_event,
+        )
+        plain = "Message from alex:\n\nthoughts, team?"
+        assert fmt(None, _escalation_event(chair_escalation=False)) == plain
+        assert fmt(None, _escalation_event(chair_escalation="true")) == plain
+        framed = fmt(None, _escalation_event(chair_escalation=True))
+        assert framed.startswith("[Chair escalation")
+        assert framed.endswith(plain)
+
     def test_snippet_exists_and_names_the_two_outcomes(self) -> None:
         from agents.prompt_loader import load_snippet
 
@@ -155,4 +197,30 @@ class TestEscalationFraming:
         assert "vote" in snippet.lower(), "outcome (a): cast the end-of-discussion vote"
         assert "call on" in snippet.lower() or "name the member" in snippet.lower(), (
             "outcome (b): hand the floor to the member best placed"
+        )
+
+    def test_snippet_routes_the_synthesis_through_the_vote_content(self) -> None:
+        """PR 610 review, the headline finding. Outcome (a) MUST tell the
+        chair to carry the synthesis *inside* the vote's ``content`` payload,
+        and MUST warn against writing it as prose beside the action block:
+        ``parse_actions`` keeps only the fenced JSON block (prose around it
+        never becomes a ``COMPLETE_TASK``), so ``synthesize_channel_reply``
+        finds no reply text to promote and the prose is silently dropped.
+        The room would then see a close-vote carrying only a brief sign-off
+        — or the bare ``end_vote_action`` default — with no synthesis on the
+        record: the exact stall outcome the escalation exists to prevent,
+        now hidden behind a ``dispatched`` metric and a green suite. The
+        vote publish *is* a real channel message whose body is the payload's
+        ``content``, so synthesis-in-``content`` is the one output shape
+        where the synthesis and the vote genuinely travel together."""
+        from agents.prompt_loader import load_snippet
+
+        snippet = load_snippet("chair-escalation")
+        assert "`content`" in snippet, (
+            "outcome (a) must name the vote's `content` field as where the "
+            "synthesis goes"
+        )
+        assert "action block" in snippet, (
+            "the snippet must warn that prose beside the action block is "
+            "not published"
         )
