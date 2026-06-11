@@ -134,6 +134,20 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("channels[%d=%s]: %w: %q is an observer (respond: never) and can never take the forced turn",
 					i, ch.Name, ErrInvalidEscalationChair, ch.EscalationChairID)
 			}
+			// Stall detection runs ONLY at the floor round's tail
+			// ([ChannelRouter.maybeEscalateStall], called from fanout's
+			// serialized-round branch), so the knob on a channel with an
+			// explicit `floor_control: false` can never act (PR #609 review
+			// follow-up) — and unlike the runtime dispositions it is also
+			// invisible: no round means no detection and no metric, so the
+			// operator reads "no stalls" where the truth is "knob inert".
+			// Same loud-at-load rationale as the two rejections above. The
+			// <2-responder no-op stays runtime-only — responder sets are
+			// per-message, not statically checkable here.
+			if !ch.FloorControlEnabled() {
+				return fmt.Errorf("channels[%d=%s]: %w: %q requires floor control, but floor_control is explicitly false (stall detection runs only at the floor round's tail)",
+					i, ch.Name, ErrInvalidEscalationChair, ch.EscalationChairID)
+			}
 		}
 
 		// Reject a negative per-channel interaction idle window (IP3).

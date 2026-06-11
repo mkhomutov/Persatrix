@@ -22,6 +22,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // commitOpenInteraction mints + commits an open interaction for `ch`, exactly
@@ -258,4 +260,119 @@ channels:
 	cfg, err := LoadConfig(writeYAML(t, body))
 	require.NoError(t, err)
 	assert.Equal(t, "advisor", cfg.Channels[0].EscalationChairID)
+}
+
+// ─── PR #609 review follow-up: the four remaining findings ──────────────
+
+// TestChairEscalation_RoundOutlivedInteraction_LogsDivergence — the stale-
+// round guard is the one silently-dropped branch in an otherwise every-
+// branch-counted design (deliberately: per the RFC it fails CE1 *detection*,
+// so counting it would pollute the stall counter with non-stalls). A debug
+// line keeps the mid-round-rotation race observable for whoever eventually
+// chases a "stall that didn't escalate".
+func TestChairEscalation_RoundOutlivedInteraction_LogsDivergence(t *testing.T) {
+	router, _, _, ch, _ := escalationHarness(t)
+	core, logs := observer.New(zap.DebugLevel)
+	router.logger = zap.New(core)
+	open := commitOpenInteraction(t, router, ch)
+
+	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", uuid.NewString()),
+		ChannelTypeGroup, "", floorRoundOutcome{granted: 2},
+		[]Member{member("nova-sparrow", RespondAlways)}, 4, nil)
+
+	entries := logs.FilterMessage("channels: stalled round outlived its interaction; not escalating").All()
+	require.Len(t, entries, 1, "the stale-round guard must leave a debug trace")
+	fields := entries[0].ContextMap()
+	assert.Equal(t, ch, fields["channel_id"])
+	assert.Equal(t, open, fields["open_interaction_id"])
+	assert.NotEqual(t, open, fields["stamped_interaction_id"],
+		"the divergence itself is the evidence the line exists to carry")
+}
+
+// TestChairEscalation_DispatcherFailure_ClearsThinkingMark — the chair is
+// re-stamped as thinking BEFORE the dispatch (the runFloorTurn ordering: mark
+// first, or a fast reply could race the mark and strand it the other way
+// round). When the dispatch itself fails, no reply can ever clear that mark —
+// clear it on the error branch instead of leaving a "thinking" line dangling
+// until the TTL prune.
+func TestChairEscalation_DispatcherFailure_ClearsThinkingMark(t *testing.T) {
+	router, _, _, ch, _ := escalationHarness(t)
+	router.dispatcher = &chairEscalationFailingDispatcher{}
+	open := commitOpenInteraction(t, router, ch)
+
+	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", open),
+		ChannelTypeGroup, "", floorRoundOutcome{granted: 2},
+		[]Member{member("nova-sparrow", RespondAlways)}, 4, nil)
+
+	assert.NotContains(t, router.ChannelActivity(ch), "nova-sparrow",
+		"a failed forced-turn dispatch must not strand the chair's thinking mark")
+}
+
+// TestChairEscalation_ForcedTurnMetadataDetached — `forced := msg` copies the
+// struct but aliases the Metadata map. Nothing downstream mutates it today,
+// but the forced turn outlives the stimulus's round and crosses the
+// dispatcher seam; pin the clone so a future metadata write on either side
+// cannot silently corrupt the other.
+func TestChairEscalation_ForcedTurnMetadataDetached(t *testing.T) {
+	router, _, _, ch, _ := escalationHarness(t)
+	rec := &messageRecordingDispatcher{}
+	router.dispatcher = rec
+	open := commitOpenInteraction(t, router, ch)
+
+	stimulus := stalledMsg(ch, "alex", open)
+	router.maybeEscalateStall(context.Background(), stimulus, ChannelTypeGroup, "",
+		floorRoundOutcome{granted: 2}, []Member{member("nova-sparrow", RespondAlways)}, 4, nil)
+
+	var forced []ChannelMessage
+	for i, env := range rec.envelopes {
+		if env.ChairEscalation {
+			forced = append(forced, rec.messages[i])
+		}
+	}
+	require.Len(t, forced, 1)
+	assert.Equal(t, open, forced[0].Metadata[interactionIDMetadataKey],
+		"the stamped interaction_id still rides the forced turn (CE6 lease attribution)")
+	forced[0].Metadata["probe"] = true
+	assert.NotContains(t, stimulus.Metadata, "probe",
+		"the forced turn's metadata must be a detached copy, not an alias of the stimulus's map")
+}
+
+// TestLoadConfig_EscalationChair_RequiresFloorControl — stall detection runs
+// ONLY at the floor round's tail, so `escalation_chair_id` on a channel with
+// an explicit `floor_control: false` is a knob that can never act — and
+// unlike the runtime dispositions it is also invisible: no round, no
+// detection, no metric, so the operator reads "no stalls" where the truth is
+// "knob inert". Same loud-at-load rationale as the non-member and observer
+// rejections.
+func TestLoadConfig_EscalationChair_RequiresFloorControl(t *testing.T) {
+	body := `
+channels:
+  - name: design
+    floor_control: false
+    escalation_chair_id: ada
+    members: [ada, iron-fox]
+`
+	_, err := LoadConfig(writeYAML(t, body))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidEscalationChair,
+		"an escalation chair on a floor-control-disabled channel can never act and must fail at load")
+}
+
+// TestLoadConfig_EscalationChair_FloorControlBoundary — explicit true and
+// absent (the group default is ON) both stay legal: only the explicit
+// opt-out contradicts the knob.
+func TestLoadConfig_EscalationChair_FloorControlBoundary(t *testing.T) {
+	for name, line := range map[string]string{"explicit_true": "    floor_control: true\n", "absent_default_on": ""} {
+		t.Run(name, func(t *testing.T) {
+			body := `
+channels:
+  - name: design
+` + line + `    escalation_chair_id: ada
+    members: [ada, iron-fox]
+`
+			cfg, err := LoadConfig(writeYAML(t, body))
+			require.NoError(t, err)
+			assert.Equal(t, "ada", cfg.Channels[0].EscalationChairID)
+		})
+	}
 }

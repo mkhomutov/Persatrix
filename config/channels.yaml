@@ -143,10 +143,12 @@ channels:
     # participant honestly passed on an unresolved question — this member gets
     # ONE forced turn: synthesize and cast its end-of-discussion vote, or call
     # on whoever should speak next. Closing still needs the vote quorum above
-    # (the chair proposes, the quorum disposes). Must be a member and not an
-    # observer (an observer could never take the turn); omit to disable
-    # escalation. nova-sparrow pairs naturally with a `chair` disposition,
-    # but any non-observer participant may be the designated synthesizer.
+    # (the chair proposes, the quorum disposes). Must be a member, not an
+    # observer (an observer could never take the turn), and the channel must
+    # keep floor control on — stall detection runs at the floor round's tail,
+    # so `floor_control: false` alongside this knob is rejected at load. Omit
+    # to disable escalation. nova-sparrow pairs naturally with a `chair`
+    # disposition, but any non-observer participant may be the synthesizer.
     escalation_chair_id: nova-sparrow
     members:
       - id: ember-owl

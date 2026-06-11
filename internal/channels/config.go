@@ -213,9 +213,12 @@ type ChannelConfig struct {
 	// EscalationChairID (the chair-stall-escalation amendment, CE2) names the
 	// member who receives the one forced turn after a stalled floor round
 	// (zero replies across ≥1 granted turns on an open tracked interaction).
-	// Must be one of this channel's declared members and not an `observer`
+	// Must be one of this channel's declared members, not an `observer`
 	// ([Config.Validate] — an observer's gate suppresses every turn, so it
-	// could never speak); it need not be declared `chair` (chair-ness does
+	// could never speak), and the channel must not opt out of floor control
+	// (stall detection runs only at the floor round's tail, so an explicit
+	// `floor_control: false` would leave the knob silently inert — also
+	// rejected at load); it need not be declared `chair` (chair-ness does
 	// not survive persistence — the canonicalization amendment's encoding
 	// rule — which is why this is a knob, not an inference). Empty/absent
 	// (the default) disables escalation

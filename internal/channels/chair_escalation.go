@@ -22,6 +22,7 @@ package channels
 
 import (
 	"context"
+	"maps"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
@@ -134,10 +135,17 @@ func (r *ChannelRouter) maybeEscalateStall(
 	// turn whose stamped interaction_id disagrees with the ration's — and
 	// the divergence itself proves new traffic arrived mid-round, so the
 	// channel is not stalled. Fails CE1 ("open tracked interaction") like
-	// the untracked branch: no metric. An absent stamp falls through on
-	// readInteractionID's tolerant-reader posture (the router stamps every
-	// routed publish; only a commit-bypassing direct call lacks it).
+	// the untracked branch: no metric (a non-stall on the counter would
+	// pollute it) — but it IS the chain's one silently-dropped branch, so
+	// the divergence goes on debug record for whoever chases a "stall that
+	// didn't escalate". An absent stamp falls through on readInteractionID's
+	// tolerant-reader posture (the router stamps every routed publish; only
+	// a commit-bypassing direct call lacks it).
 	if stamped := readInteractionID(msg.Metadata); stamped != "" && stamped != interactionID {
+		r.logger.Debug("channels: stalled round outlived its interaction; not escalating",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("stamped_interaction_id", stamped),
+			zap.String("open_interaction_id", interactionID))
 		return
 	}
 
@@ -195,7 +203,10 @@ func (r *ChannelRouter) maybeEscalateStall(
 	// CE3 — the forced turn: the stalled stimulus under a FRESH event id
 	// (the agent-side conversation window dedups by message id, so the
 	// original id would be silently dropped), same content and metadata
-	// (the stamped interaction_id rides along for lease attribution, CE6).
+	// (the stamped interaction_id rides along for lease attribution, CE6;
+	// the bag is CLONED — the forced turn outlives the stimulus's round and
+	// crosses the dispatcher seam, so aliasing the map would let a future
+	// metadata write on either side silently corrupt the other).
 	//
 	// Delivered via [ChannelRouter.dispatchTo] (PR #609 deep review), the
 	// single deadline + `channel.messages.delivered` contract point every
@@ -203,13 +214,19 @@ func (r *ChannelRouter) maybeEscalateStall(
 	// to delivered/error dashboards. The chair is re-stamped as thinking
 	// first: it is an expected-reply dispatch and its round-start mark has
 	// typically aged out across the silent round (the same TTL decay
-	// [runFloorTurn]'s re-mark exists for). Pre-lift agents never reply (the
-	// §D skew posture); the TTL prune clears the mark, the same degraded
-	// path as any gate-suppressed candidate.
+	// [runFloorTurn]'s re-mark exists for; marking after the send instead
+	// would let a fast reply's publishCommit clear-then-lose to the mark).
+	// Pre-lift agents never reply (the §D skew posture); the TTL prune
+	// clears the mark, the same degraded path as any gate-suppressed
+	// candidate. A FAILED send is different: no reply can ever clear it, so
+	// the error branch unmarks rather than stranding a "thinking" line on
+	// the console until the TTL prune.
 	forced := msg
 	forced.ID = uuid.NewString()
+	forced.Metadata = maps.Clone(msg.Metadata)
 	r.markActivity(msg.ChannelID, []string{chairID})
 	if err := r.dispatchTo(ctx, forced, ct, threadParentSenderID, *chair, channelSize, floorMentions, true); err != nil {
+		r.clearActivity(msg.ChannelID, chairID)
 		r.logger.Warn("channels: chair escalation dispatch failed; stall stands",
 			zap.String("channel_id", msg.ChannelID),
 			zap.String("escalation_chair_id", chairID),

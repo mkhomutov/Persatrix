@@ -383,13 +383,17 @@ var (
 	ErrInvalidInteractionIdleTimeout = errors.New("channels: invalid interaction_idle_timeout_seconds")
 	// ErrInvalidEscalationChair — a declared channel's `escalation_chair_id`
 	// (the chair-stall-escalation amendment, CE2) names someone who is not
-	// one of the channel's declared members, or names an `observer` (legacy
-	// `never`) member. The forced turn dispatches to a member's envelope; a
-	// non-member chair could never receive it, and an observer's gate
-	// suppresses every turn before any LLM, so it could never speak — both
-	// misconfigurations fail loudly at load rather than as permanent
-	// per-stall futility (`dispatch_error`, or `dispatched` with no turn
-	// ever possible).
+	// one of the channel's declared members, names an `observer` (legacy
+	// `never`) member, or rides a channel with an explicit
+	// `floor_control: false` (PR #609 review follow-up). The forced turn
+	// dispatches to a member's envelope; a non-member chair could never
+	// receive it; an observer's gate suppresses every turn before any LLM,
+	// so it could never speak; and stall detection runs only at the floor
+	// round's tail, so without floor control no stall is ever detected —
+	// all three misconfigurations fail loudly at load rather than as
+	// permanent per-stall futility (`dispatch_error`, `dispatched` with no
+	// turn ever possible, or — worst — a knob silently inert with no metric
+	// at all).
 	ErrInvalidEscalationChair = errors.New("channels: invalid escalation_chair_id")
 	// ErrInvalidMaxRepliesPerParticipant — a declared channel (or the
 	// top-level `default_max_replies_per_participant`) carried a negative
