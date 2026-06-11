@@ -105,6 +105,51 @@ func (c *Config) Validate() error {
 				i, ch.Name, ErrInvalidInteractionBudgetTokens, ch.InteractionBudgetTokens)
 		}
 
+		// The escalation chair must be a declared member (CE2): the forced
+		// turn dispatches to a member's envelope, so a non-member chair is a
+		// guaranteed dispatch_error — fail it loudly at load instead.
+		if ch.EscalationChairID != "" {
+			var chair *MemberConfig
+			for j := range ch.Members {
+				if ch.Members[j].ID == ch.EscalationChairID {
+					chair = &ch.Members[j]
+					break
+				}
+			}
+			if chair == nil {
+				return fmt.Errorf("channels[%d=%s]: %w: %q is not a declared member",
+					i, ch.Name, ErrInvalidEscalationChair, ch.EscalationChairID)
+			}
+			// CE2 names a PARTICIPANT member (PR #609 deep review): an
+			// `observer` (legacy `never`) chair is as guaranteed-futile as a
+			// non-member — the receiver gate suppresses an observer before
+			// any LLM, forever — but a membership-only check passed it
+			// silently, burning each interaction's ration as
+			// `outcome=dispatched`. Same loud-at-load rationale. `addressed`
+			// stays legal: the forced-turn marker is the directed admit that
+			// lets it speak (CE3's gate lift), so addressed-ness is not
+			// futility. The loader normalizes dispositions at unmarshal;
+			// Normalize() here is the usual read-seam belt-and-braces.
+			if chair.RespondPolicy.Normalize() == RespondNever {
+				return fmt.Errorf("channels[%d=%s]: %w: %q is an observer (respond: never) and can never take the forced turn",
+					i, ch.Name, ErrInvalidEscalationChair, ch.EscalationChairID)
+			}
+			// Stall detection runs ONLY at the floor round's tail
+			// ([ChannelRouter.maybeEscalateStall], called from fanout's
+			// serialized-round branch), so the knob on a channel with an
+			// explicit `floor_control: false` can never act (PR #609 review
+			// follow-up) — and unlike the runtime dispositions it is also
+			// invisible: no round means no detection and no metric, so the
+			// operator reads "no stalls" where the truth is "knob inert".
+			// Same loud-at-load rationale as the two rejections above. The
+			// <2-responder no-op stays runtime-only — responder sets are
+			// per-message, not statically checkable here.
+			if !ch.FloorControlEnabled() {
+				return fmt.Errorf("channels[%d=%s]: %w: %q requires floor control, but floor_control is explicitly false (stall detection runs only at the floor round's tail)",
+					i, ch.Name, ErrInvalidEscalationChair, ch.EscalationChairID)
+			}
+		}
+
 		// Reject a negative per-channel interaction idle window (IP3).
 		// Explicit zero is valid (idle rotation off for this channel); only
 		// negative is an error. The schema's `minimum: 0` catches it at

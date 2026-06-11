@@ -210,6 +210,23 @@ type ChannelConfig struct {
 	// counts). Zero/absent normalizes to [DefaultEndVoteWindow] (W=3) at load;
 	// negative is rejected.
 	EndVoteWindow int `yaml:"end_vote_window"`
+	// EscalationChairID (the chair-stall-escalation amendment, CE2) names the
+	// member who receives the one forced turn after a stalled floor round
+	// (zero replies across ≥1 granted turns on an open tracked interaction).
+	// Must be one of this channel's declared members, not an `observer`
+	// ([Config.Validate] — an observer's gate suppresses every turn, so it
+	// could never speak), and the channel must not opt out of floor control
+	// (stall detection runs only at the floor round's tail, so an explicit
+	// `floor_control: false` would leave the knob silently inert — also
+	// rejected at load); it need not be declared `chair` (chair-ness does
+	// not survive persistence — the canonicalization amendment's encoding
+	// rule — which is why this is a knob, not an inference). Empty/absent
+	// (the default) disables escalation
+	// — opt-in like every governance knob. Deliberately NOT §I's
+	// `moderator_agent_id` (a non-participant trusted closer, reserved for
+	// the v0.4.0 moderator): this member proposes, the Layer 4 quorum
+	// disposes (CE4).
+	EscalationChairID string `yaml:"escalation_chair_id"`
 	// InteractionIdleTimeoutSeconds is this channel's interaction idle window
 	// (the RFC 0030 interaction-id producer, IP3): a publish arriving more than
 	// this many seconds after the channel's last one retires the open

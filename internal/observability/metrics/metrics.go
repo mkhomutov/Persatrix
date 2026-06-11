@@ -144,6 +144,7 @@ type Instruments struct {
 	ChannelConversationInteractionClosed    metric.Int64Counter
 	ChannelConversationEndVoteEmitted       metric.Int64Counter
 	ChannelConversationReplyBudgetRemaining metric.Float64Histogram
+	ChannelConversationChairEscalation      metric.Int64Counter
 	// SessionsWrites — RFC 0031 Phase 1; see channel_instruments.go.
 	SessionsWrites metric.Int64Counter
 }

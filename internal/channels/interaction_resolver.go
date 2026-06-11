@@ -99,6 +99,13 @@ type openInteraction struct {
 	lastActivity time.Time
 	retired      string
 	prev         previousClose
+	// chairEscalated is the chair-stall-escalation amendment's CE5 ration:
+	// true once this interaction's one forced turn has been dispatched. It
+	// rides the entry deliberately — rotation/close replaces the entry's id
+	// (and a fresh mint starts unmarked), so the mark dies with the
+	// interaction and needs no lifetime map. Guarded by interactionMu;
+	// written via [ChannelRouter.markChairEscalated].
+	chairEscalated bool
 }
 
 // previousClose is the resolver's OQ 5 close-cause attribution for one
@@ -168,6 +175,10 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 	if entry.id == "" {
 		entry.id = uuid.NewString()
 		entry.idCommitted = false
+		// A fresh interaction carries a fresh escalation ration (CE5): the
+		// mark belongs to the id it was spent on, and the entry is reused
+		// across generations.
+		entry.chairEscalated = false
 	}
 	resolved := entry.id
 	prev := entry.prev
@@ -349,4 +360,36 @@ func (r *ChannelRouter) ResolveInteractionIdleTimeouts(_ context.Context, cfg *C
 			decl.ResolveInteractionIdleTimeoutSeconds(cfg.DefaultInteractionIdleTimeoutSeconds))
 	}
 	return nil
+}
+
+// openInteractionEscalationState is the chair-stall-escalation amendment's
+// read half (CE1's "open tracked interaction" detection input): the channel's
+// open interaction id, whether its CE5 ration is spent, and whether a
+// tracked, committed interaction exists at all. Only a COMMITTED id counts —
+// an uncommitted mint has no persisted messages, so there is no discussion to
+// have stalled.
+func (r *ChannelRouter) openInteractionEscalationState(channelID string) (interactionID string, escalated, tracked bool) {
+	r.interactionMu.Lock()
+	defer r.interactionMu.Unlock()
+	entry := r.openInteractions[channelID]
+	if entry == nil || entry.id == "" || !entry.idCommitted {
+		return "", false, false
+	}
+	return entry.id, entry.chairEscalated, true
+}
+
+// markChairEscalated spends the interaction's CE5 ration — compare-and-set
+// under interactionMu so two concurrently-stalled rounds racing the same
+// ration resolve to exactly one dispatched escalation. Returns false when the
+// open id moved on (rotation/close between read and mark) or the ration is
+// already spent.
+func (r *ChannelRouter) markChairEscalated(channelID, interactionID string) bool {
+	r.interactionMu.Lock()
+	defer r.interactionMu.Unlock()
+	entry := r.openInteractions[channelID]
+	if entry == nil || entry.id != interactionID || entry.chairEscalated {
+		return false
+	}
+	entry.chairEscalated = true
+	return true
 }

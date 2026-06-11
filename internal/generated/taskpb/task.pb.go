@@ -928,8 +928,21 @@ type ChannelMessageEvent struct {
 	// failing the dispatch (the tolerant-wire-reader posture of
 	// `readInteractionID`). Set iff `= 20` is set.
 	PreviousInteractionCloseTrigger string `protobuf:"bytes,21,opt,name=previous_interaction_close_trigger,json=previousInteractionCloseTrigger,proto3" json:"previous_interaction_close_trigger,omitempty"`
-	unknownFields                   protoimpl.UnknownFields
-	sizeCache                       protoimpl.SizeCache
+	// Chair-stall-escalation amendment (RFC 0030 minimal Layer 5 slice,
+	// v0.3.8): true iff this dispatch is the orchestrator's forced turn to the
+	// channel's `escalation_chair_id` after a stalled floor round (zero
+	// replies, >=1 granted turn, open tracked interaction - CE1). The receiver
+	// routes a marked event down the directed lane: the response gate admits
+	// it and the Tier B salience bid is skipped (re-running the bid would
+	// re-produce the very silence being escalated - CE3). Orchestrator-
+	// authored, the same trust class as `floor_mentions`; never set by
+	// ordinary fanout. proto3 implicit presence: false (the zero value) is
+	// every non-escalation dispatch, so the field is additive - an old
+	// producer never sets it and an old consumer ignoring it sees an ordinary
+	// open-floor message (degraded to the pre-amendment stall, CE7/SD).
+	ChairEscalation bool `protobuf:"varint,22,opt,name=chair_escalation,json=chairEscalation,proto3" json:"chair_escalation,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ChannelMessageEvent) Reset() {
@@ -1107,6 +1120,13 @@ func (x *ChannelMessageEvent) GetPreviousInteractionCloseTrigger() string {
 		return x.PreviousInteractionCloseTrigger
 	}
 	return ""
+}
+
+func (x *ChannelMessageEvent) GetChairEscalation() bool {
+	if x != nil {
+		return x.ChairEscalation
+	}
+	return false
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
@@ -1478,7 +1498,7 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\x86\a\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xb1\a\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -1503,7 +1523,8 @@ const file_task_proto_rawDesc = "" +
 	"\x0efloor_mentions\x18\x12 \x03(\tR\rfloorMentions\x126\n" +
 	"\x17floor_mentions_resolved\x18\x13 \x01(\bR\x15floorMentionsResolved\x126\n" +
 	"\x17previous_interaction_id\x18\x14 \x01(\tR\x15previousInteractionId\x12K\n" +
-	"\"previous_interaction_close_trigger\x18\x15 \x01(\tR\x1fpreviousInteractionCloseTriggerB\f\n" +
+	"\"previous_interaction_close_trigger\x18\x15 \x01(\tR\x1fpreviousInteractionCloseTrigger\x12)\n" +
+	"\x10chair_escalation\x18\x16 \x01(\bR\x0fchairEscalationB\f\n" +
 	"\n" +
 	"_threshold\"H\n" +
 	"\aTaskAck\x12\x18\n" +

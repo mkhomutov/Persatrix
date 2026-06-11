@@ -101,7 +101,13 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 
 	if settings, ok := r.floorSettingsFor(msg.ChannelID); ok && settings.enabled {
 		if len(responders) >= 2 {
-			r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
+			outcome := r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
+			// Chair-stall-escalation amendment §C 1: the stall tail runs in
+			// the round's CALLER, after the floor is released and the round's
+			// floor-speaker set is cleared — the chair's reply must re-fanout
+			// as a fresh open-floor stimulus, which a floor turn would
+			// suppress. A send, never an await (CE7).
+			r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
 			return
 		}
 	}
@@ -165,7 +171,7 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 			// paths, so a panicking dispatch is not caught by the server's
 			// recoveryMiddleware — recover here or it crashes the process.
 			defer r.recoverFanout("dispatch", msg.ChannelID, msg.ID)
-			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize, floorMentions)
+			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize, floorMentions, false)
 		}()
 	}
 	wg.Wait()
@@ -173,9 +179,18 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 
 // dispatchTo delivers `msg` to a single recipient with the per-recipient
 // timeout and emits the `channel.messages.delivered` counter. Shared by the
-// concurrent path ([dispatchConcurrent]) and the serialized floor turn
-// ([runFloorTurn]) so both honour the same deadline + metric contract.
-func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member, channelSize int, floorMentions []string) {
+// concurrent path ([dispatchConcurrent]), the serialized floor turn
+// ([runFloorTurn]), and the chair-escalation forced turn
+// ([ChannelRouter.maybeEscalateStall]) so all three honour the same
+// deadline + metric contract.
+//
+// `chairEscalation` stamps the CE3 forced-turn marker on the envelope —
+// true only from the escalation tail, false on every ordinary dispatch.
+// The dispatch error is returned so that tail can label its
+// `chair_escalation{outcome}`; the fanout and floor-turn callers are
+// fire-and-forget by contract and ignore it (the warn + the delivered
+// counter's status=error emitted here are their entire failure surface).
+func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member, channelSize int, floorMentions []string, chairEscalation bool) error {
 	dispatchCtx, cancel := context.WithTimeout(ctx, channelFanoutPerRecipientTimeout)
 	defer cancel()
 	err := r.dispatcher.Dispatch(dispatchCtx, DispatchEnvelope{
@@ -189,7 +204,8 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		SalienceMaxChannelMembers: r.salienceMaxFor(msg.ChannelID),
 		// Floor-capable-directedness amendment (v0.3.8): per-publish, like
 		// ChannelSize — resolved once in [ChannelRouter.fanout].
-		FloorMentions: floorMentions,
+		FloorMentions:   floorMentions,
+		ChairEscalation: chairEscalation,
 	}, msg)
 	status := "ok"
 	if err != nil {
@@ -205,4 +221,5 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 			attribute.String("status", status),
 		))
 	}
+	return err
 }

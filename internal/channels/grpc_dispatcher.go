@@ -446,5 +446,9 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		// [Floor-capable-directedness amendment]: ../../docs/rfcs/0030-amendment-floor-capable-directedness.md
 		FloorMentions:         env.FloorMentions,
 		FloorMentionsResolved: true,
+		// Chair-stall-escalation amendment (CE3): the forced-turn marker,
+		// set only by [ChannelRouter.maybeEscalateStall]'s dispatch — false
+		// (the proto3 default) on every ordinary fanout.
+		ChairEscalation: env.ChairEscalation,
 	}
 }

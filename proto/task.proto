@@ -346,6 +346,19 @@ message ChannelMessageEvent {
   // failing the dispatch (the tolerant-wire-reader posture of
   // `readInteractionID`). Set iff `= 20` is set.
   string previous_interaction_close_trigger = 21;
+  // Chair-stall-escalation amendment (RFC 0030 minimal Layer 5 slice,
+  // v0.3.8): true iff this dispatch is the orchestrator's forced turn to the
+  // channel's `escalation_chair_id` after a stalled floor round (zero
+  // replies, >=1 granted turn, open tracked interaction - CE1). The receiver
+  // routes a marked event down the directed lane: the response gate admits
+  // it and the Tier B salience bid is skipped (re-running the bid would
+  // re-produce the very silence being escalated - CE3). Orchestrator-
+  // authored, the same trust class as `floor_mentions`; never set by
+  // ordinary fanout. proto3 implicit presence: false (the zero value) is
+  // every non-escalation dispatch, so the field is additive - an old
+  // producer never sets it and an old consumer ignoring it sees an ordinary
+  // open-floor message (degraded to the pre-amendment stall, CE7/SD).
+  bool chair_escalation = 22;
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)

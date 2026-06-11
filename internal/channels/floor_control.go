@@ -301,7 +301,7 @@ func (r *ChannelRouter) floorRound(
 	turnTimeout time.Duration,
 	channelSize int,
 	floorMentions []string,
-) {
+) floorRoundOutcome {
 	detached := context.WithoutCancel(ctx)
 
 	if len(nonResponders) > 0 {
@@ -316,10 +316,18 @@ func (r *ChannelRouter) floorRound(
 	// the inter-round wait) so the histogram measures the serialization cost
 	// the responders actually impose, not queueing behind a prior round.
 	start := time.Now()
+	// Aggregate the per-turn outcomes into the round outcome the caller's
+	// stall-detection tail reads (chair-stall-escalation amendment CE1) —
+	// the same tallies the `floor_turn{outcome}` counter already records.
+	var outcome floorRoundOutcome
 	for _, speaker := range responders {
-		r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout, channelSize, floorMentions)
+		outcome.granted++
+		if r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout, channelSize, floorMentions) {
+			outcome.replied++
+		}
 	}
 	r.recordFloorRound(detached, ct, time.Since(start))
+	return outcome
 }
 
 // recordFloorTurn / recordFloorRound emit the RFC 0030 Layer 2.5 floor-control
@@ -371,7 +379,7 @@ func (r *ChannelRouter) runFloorTurn(
 	turnTimeout time.Duration,
 	channelSize int,
 	floorMentions []string,
-) {
+) bool {
 	r.recordFloorSpeaker(msg.ChannelID, speaker.ParticipantID)
 
 	// Presence Tier 1 (RFC 0048): re-stamp the speaker as thinking at the moment
@@ -398,7 +406,7 @@ func (r *ChannelRouter) runFloorTurn(
 		defer cancel()
 	}
 
-	r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker, channelSize, floorMentions)
+	r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker, channelSize, floorMentions, false)
 
 	timer := time.NewTimer(turnTimeout)
 	defer timer.Stop()
@@ -407,6 +415,7 @@ func (r *ChannelRouter) runFloorTurn(
 		// Speaker's reply landed and was persisted; the next speaker will
 		// read it from history. Advance.
 		r.recordFloorTurn(ctx, ct, floorOutcomeReplied)
+		return true
 	case <-timer.C:
 		// Speaker stayed silent past its turn budget; advance rather than
 		// stall the round (D2). A candidate the response gate ultimately
@@ -415,6 +424,7 @@ func (r *ChannelRouter) runFloorTurn(
 		// here: the loop never saw this speaker's reply, so it is a timeout
 		// for telemetry purposes.
 		r.recordFloorTurn(ctx, ct, floorOutcomeTimeout)
+		return false
 	}
 }
 
@@ -461,40 +471,6 @@ func (r *ChannelRouter) ResolveFloorControl(ctx context.Context, cfg *Config) er
 		// channel that survived a restart. Default ON (SetFloorControl
 		// normalizes the zero timeout to the 45s default).
 		r.SetFloorControl(ch.ID, true, 0)
-	}
-	return nil
-}
-
-// ResolveSalienceCaps applies the RFC 0030 Tier B (v0.3.8) channel-size cap to
-// every group channel known at startup, the per-channel sibling of
-// [ChannelRouter.ResolveFloorControl]. Each config-declared channel uses its
-// resolved `salience_max_channel_members` (already normalized to
-// [DefaultSalienceMaxChannelMembers] at load when omitted); every other group
-// channel present in the store — e.g. a runtime-created channel that survived
-// a restart — picks up the default. The resolved cap is what the dispatcher
-// stamps on the `ChannelMessageEvent.salience_max_channel_members` wire field.
-//
-// DM and thread channels are skipped: the salience bid runs only on open-floor
-// group traffic. Call once after [ChannelRouter.ReconcileConfig]; idempotent.
-func (r *ChannelRouter) ResolveSalienceCaps(ctx context.Context, cfg *Config) error {
-	configured := make(map[string]bool)
-	if cfg != nil {
-		for _, decl := range cfg.Channels {
-			id := decl.CanonicalID()
-			configured[id] = true
-			r.SetSalienceMaxChannelMembers(id, decl.SalienceMaxChannelMembers)
-		}
-	}
-	all, err := r.store.ListChannels(ctx, 0, "")
-	if err != nil {
-		return fmt.Errorf("channels: resolve salience caps: list channels: %w", err)
-	}
-	for _, ch := range all {
-		if ch.Type != ChannelTypeGroup || configured[ch.ID] {
-			continue
-		}
-		// SetSalienceMaxChannelMembers normalizes the zero to the default.
-		r.SetSalienceMaxChannelMembers(ch.ID, 0)
 	}
 	return nil
 }
