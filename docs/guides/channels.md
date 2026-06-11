@@ -354,6 +354,7 @@ something upstream failed, not business as usual.
 | **1 — cost ceiling** | `interaction_budget_tokens` (per-channel) · `default_interaction_budget_tokens` (fleet) | `0` (uncapped) | Total LLM tokens leased across one interaction. Once the running total would cross the budget, further leases are **denied** (`INTERACTION_BUDGET_EXHAUSTED`) — **fail-closed**: the LLM call does not happen, so the persona produces no reply. Enforced in the wallet on the lease path (RFC 0023), upstream of the channel publish. |
 | **2 — reply budget** | `max_replies_per_participant_per_interaction` (per-channel) · `default_max_replies_per_participant` (fleet) | `0` (uncapped) | How many times one participant may publish in one interaction. The `(K+1)`th publish is rejected **pre-persistence** (HTTP **429**, `ErrParticipantBudgetExhausted`) so an over-budget message never enters channel history and never pollutes future recall. Human principals are exempt — see `governance.exempt_principals` below. |
 | **4 — end-of-interaction vote** | `end_vote_threshold` (K) · `end_vote_window` (W), per-channel | K=`2`, W=`3` | A persona emits an `END_INTERACTION_VOTE` action when it judges its contribution complete. When **K distinct** participants vote within **W consecutive** turns, the interaction **closes** and stops drawing new replies. Votes are deduped per `(participant, interaction)`; an end-vote is exempt from the Layer 2 reply budget so a budget-saturated participant can still cast the terminating signal. |
+| *interaction scope — idle rotation* | `interaction_idle_timeout_seconds` (per-channel) · `default_interaction_idle_timeout_seconds` (fleet) | `600` (seconds) | Not a layer — the lifetime of the **unit the layers count against**. Once the channel sits quiet past the window, the next publish retires the open interaction (`interaction_closed{trigger=idle}`, emitted lazily — see the telemetry note below) and mints a fresh one, resetting every per-interaction count above. Explicit `0` disables idle rotation; thread channels never rotate — a thread *is* its interaction. |
 
 **Composition + failure-down ([RFC 0030 §B](../rfcs/0030-multi-agent-conversation-governance.md#b-layered-architecture)).**
 A publish proceeds only if **every active layer admits it**; a lower-layer drop
@@ -372,6 +373,7 @@ human who explicitly votes that the interaction is done counts toward the quorum
 # config/channels.yaml
 default_interaction_budget_tokens: 0       # fleet default (uncapped)
 default_max_replies_per_participant: 0     # fleet default (uncapped)
+default_interaction_idle_timeout_seconds: 600  # fleet default idle window (seconds)
 governance:
   exempt_principals: [human]               # humans bypass the Layer 2 reply budget
 channels:

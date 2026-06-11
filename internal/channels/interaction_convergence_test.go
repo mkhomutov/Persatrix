@@ -60,10 +60,13 @@ func publishVote(t *testing.T, router *ChannelRouter, channelID, sender string, 
 //     is asserted zero across the WHOLE arc, votes included.
 //  4. The closing vote and a post-close racer draw no fanout — pinned by an
 //     EXACT dispatch count (the first vote's two recipients and nothing
-//     more). The racer's commit tail (settle + end-vote hook, the order
-//     publishCommit runs them) leaves the closed id parked as the retiree,
-//     never reopened, and is attributed as the arc's one
-//     `governance_drop{layer=end_vote}`.
+//     more). The racer is itself a VOTE (the §H interleaving — a third
+//     participant judged "done" concurrently with the quorum): its commit
+//     tail (settle + end-vote hook, the order publishCommit runs them)
+//     leaves the closed id parked as the retiree, never reopened, and is
+//     attributed as the arc's one `governance_drop{layer=end_vote}` — while
+//     `end_vote_emitted` stays at the quorum's two, pinning that a
+//     post-close vote is suppressed, not counted as vote volume.
 //  5. The channel is not dead: the next publish opens a FRESH interaction
 //     (IP8) and fans out to all three personas — the quorum ended one
 //     conversation, not the room.
@@ -118,7 +121,11 @@ func TestConvergence_DiscussionEndsByVotesBeforeDepthCap(t *testing.T) {
 	// the OPEN entry, a state the production path cannot reach: the close
 	// already parked the id as the retiree (markInteractionClosed), so the
 	// racer's settle takes settleInteraction's occupied-slot no-op and must
-	// leave the slot closed rather than reopen or re-park it.
+	// leave the slot closed rather than reopen or re-park it. The racer
+	// carries the vote flag — the strictest variant of the race (a third
+	// "done" judgement landing just after quorum), and the one that pins
+	// processEndVote's deliberate non-count: a post-close vote is a
+	// governance drop, never fresh vote volume.
 	racerNow := router.interactionNow()
 	router.settleInteraction(ch, openID, racerNow, true)
 	assert.Empty(t, openInteractionID(router, ch),
@@ -126,8 +133,12 @@ func TestConvergence_DiscussionEndsByVotesBeforeDepthCap(t *testing.T) {
 	assert.Equal(t, openID, retiredInteractionID(router, ch),
 		"the closed id stays parked as the retiree, awaiting its deferred discard")
 	suppressed := router.processEndVote(context.Background(), ChannelMessage{
-		ID: uuid.NewString(), ChannelID: ch, SenderID: "nova-sparrow", Content: "racing",
-		Metadata: map[string]any{interactionIDMetadataKey: openID},
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "nova-sparrow",
+		Content: "Agreed — nothing further from me either.",
+		Metadata: map[string]any{
+			interactionIDMetadataKey: openID,
+			endVoteMetadataKey:       true,
+		},
 	}, ChannelTypeGroup)
 	assert.True(t, suppressed, "a racer into the closed interaction draws no fanout")
 
@@ -142,11 +153,16 @@ func TestConvergence_DiscussionEndsByVotesBeforeDepthCap(t *testing.T) {
 		"the fresh stimulus fans out to all three personas")
 
 	// Whole-arc telemetry: the depth cap NEVER fired (RFC 0030 §D — the
-	// backstop demoted to regression signal, which this zero is), and the
-	// racer's suppression is the arc's one Layer 4 governance drop.
+	// backstop demoted to regression signal, which this zero is), the
+	// racer's suppression is the arc's one Layer 4 governance drop, and the
+	// vote-volume counter holds the quorum's two — the racing post-close
+	// vote landed on the drop counter instead, keeping the §L
+	// end_vote_emitted / interaction_closed dashboard pair honest.
 	rm = collect(t, reader)
 	assert.Zero(t, governanceDropCount(t, rm, "group", governanceLayerDepth),
 		"the depth cap never fired — the semantic terminator closed the arc with budget to spare")
 	assert.Equal(t, int64(1), governanceDropCount(t, rm, "group", governanceLayerEndVote),
 		"the racer's post-close suppression is attributed on governance_drop{layer=end_vote}")
+	assert.Equal(t, int64(2), endVoteEmittedCount(t, rm, "group"),
+		"vote volume counts the quorum's two votes only — the racer's post-close vote is not fresh volume")
 }
