@@ -474,6 +474,23 @@ agent's local interaction record through two seams
   room stays quiet. Until one of those happens, its row for the closed
   discussion does not exist yet; that lag is inherent to the lazy rotation.
 
+Two boundary notes on those seams:
+
+- **Threads are exempt.** A threaded reply rides the *parent* channel's
+  interaction id (the orchestrator resolves per channel), so neither seam
+  applies inside a thread: a floor close never splits a live thread's record,
+  and a vote cast *from* a threaded turn closes nothing at vote time — the
+  voter's floor record closes on the floor's rotation like any non-voter's.
+  Thread records close by their own idle window or an explicit session end,
+  mirroring the resolver's "the thread IS the interaction" rule.
+- **The rotation carries no cause.** A record closed by the id rotation is
+  labelled *ended* even when the rotation was not a vote: a channel idle
+  window set shorter than the agent's `memory.interaction_idle_timeout_sec`,
+  or an orchestrator restart (the resolver re-mints its in-memory ids), also
+  rotate. With matching idle windows (both default 600s) the agent's own idle
+  close wins the label first; carrying the close trigger on the wire is
+  tracked as [producer plan OQ 5](../rfcs/0030-interaction-id-producer-pr-plan.md#open-questions).
+
 **Close-trigger labels** (the RFC 0020 `close_reason`, rendered identically on
 both surfaces):
 

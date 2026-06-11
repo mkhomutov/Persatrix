@@ -62,6 +62,7 @@ from .interaction_janitor import (
 )
 from .scopes import (
     SCOPE_TICK,
+    is_thread_scope,
     scope_for_channel_event,
     scope_for_dm,
     scope_for_group,
@@ -485,6 +486,7 @@ __all__ = [
     "SUMMARY_UNAVAILABLE_TEXT",
     "Turn",
     "cleanup_closing_interactions",
+    "is_thread_scope",
     "scope_for_channel_event",
     "scope_for_dm",
     "scope_for_group",

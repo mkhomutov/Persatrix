@@ -40,20 +40,25 @@ _DEFAULT_CONFIG_PATH: Path = (
     Path(__file__).resolve().parent.parent / "config" / "optimization.yaml"
 )
 
-# Container fallback.  In the Docker images the agents/ tree is pip-installed
+# Container note.  In the Docker images the agents/ tree is pip-installed
 # as the ``persatrix_agents`` package (Dockerfile.agent), so the
 # package-relative default above resolves to ``<site-packages>/config/…`` —
-# which does not exist; only ``prompts/`` is copied into site-packages.  The
-# images run with WORKDIR /app where compose bind-mounts ./config, so the
-# CWD-relative path is the real config there.  Without this fallback every
-# accessor in this module silently returned its default in containers (e.g.
-# ``summarization_model() == ""`` → the close-path summary degraded to the
-# "[interaction summary unavailable]" sentinel with a per-close WARN), while
-# alias resolution kept working only because ``model_aliases.py`` imported
-# this module by its repo-absolute name (``agents.optimization``) — a second
-# module instance whose ``__file__`` lived under /app.  See the import note
-# in :mod:`agents.model_aliases`.
-_CWD_CONFIG_PATH: Path = Path("config") / "optimization.yaml"
+# which does not exist; only ``prompts/`` is copied into site-packages.
+# Before v0.3.8 every accessor in this module therefore silently returned
+# its default in containers (e.g. ``summarization_model() == ""`` → the
+# close-path summary degraded to the "[interaction summary unavailable]"
+# sentinel with a per-close WARN), while alias resolution kept working only
+# because ``model_aliases.py`` imported this module by its repo-absolute
+# name (``agents.optimization``) — a second module instance whose
+# ``__file__`` lived under /app.  See the import note in
+# :mod:`agents.model_aliases`.  The container path is pinned at the
+# deployment layer — ``Dockerfile.agent`` sets
+# ``PERSATRIX_OPTIMIZATION_CONFIG=/app/config/optimization.yaml`` (the
+# in-image ``COPY config/`` / compose bind-mount location) — NOT by a
+# CWD-relative fallback here: library resolution must not depend on the
+# process working directory, or any ``config/optimization.yaml`` lying in
+# an unrelated CWD silently takes over model selection (PR 607 review
+# finding 6).
 
 
 @lru_cache(maxsize=1)
@@ -66,18 +71,13 @@ def _load_config() -> dict[str, Any]:
     :func:`reset_cache` before re-reading.
 
     Resolution order: ``PERSATRIX_OPTIMIZATION_CONFIG`` env var when
-    set; else the package-relative default (the repo checkout case);
-    else — when that file does not exist — the CWD-relative
-    ``config/optimization.yaml`` (the container case, see
-    :data:`_CWD_CONFIG_PATH`).
+    set to a non-empty value (containers pin it in ``Dockerfile.agent``;
+    an empty value means "unset", not "open the empty path"); else the
+    package-relative default (the repo checkout case); else built-in
+    defaults via the missing-file handler below.
     """
     env_path = os.environ.get("PERSATRIX_OPTIMIZATION_CONFIG")
-    if env_path:
-        config_path = Path(env_path)
-    elif _DEFAULT_CONFIG_PATH.exists():
-        config_path = _DEFAULT_CONFIG_PATH
-    else:
-        config_path = _CWD_CONFIG_PATH
+    config_path = Path(env_path) if env_path else _DEFAULT_CONFIG_PATH
     try:
         with config_path.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}

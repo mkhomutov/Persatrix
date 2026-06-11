@@ -37,6 +37,7 @@ from ..memory.interactions import (
     Interaction,
     InteractionTracker,
     cleanup_closing_interactions,
+    is_thread_scope,
     scope_for_channel_event,
 )
 from ..persona_types import EventType
@@ -136,9 +137,11 @@ class _EpisodeRoutingMixin:
 
         Routes single-turn paths through :class:`InteractionTracker`
         and accumulates multi-turn paths into the open interaction;
-        closure is driven by ``chat_end`` metadata, idle gap, or the
-        PR-4 janitor.  See PR-215 review for scope-labelling
-        rationale (single-turn rows carry the event-type value, not
+        closure is driven by the :mod:`.interaction_boundary` triggers
+        (session-end metadata, the RFC 0030 end-of-interaction vote,
+        the wire interaction-id rotation), the idle gap, or the PR-4
+        janitor.  See PR-215 review for scope-labelling rationale
+        (single-turn rows carry the event-type value, not
         :data:`SCOPE_TICK`).
         """
         summary = (
@@ -375,7 +378,20 @@ class _EpisodeRoutingMixin:
         # wire id rotating means the previous conversation ended (vote
         # quorum or idle) — close the stale local interaction so the new
         # turn opens a fresh one.  Full rationale on the predicate.
-        wire_id = str(event.metadata.get("interaction_id", "") or "")
+        #
+        # Thread scopes are wire-UNTRACKED (PR 607 review finding 1): a
+        # threaded reply publishes to the parent channel, so the resolver
+        # stamps the FLOOR's interaction id on it (``publishCommit`` keys
+        # on ``msg.ChannelID``) — that id rotating says nothing about the
+        # thread, and stamping it would let a floor close split a live
+        # thread.  Mirrors the resolver's IP3 rule ("the thread IS the
+        # interaction"): thread-scoped locals keep idle / session-end
+        # closes only.
+        wire_id = (
+            ""
+            if is_thread_scope(scope)
+            else str(event.metadata.get("interaction_id", "") or "")
+        )
         if wire_rotation_closes(self._interaction_tracker.get(scope), wire_id):
             rotated = self._interaction_tracker.close(
                 scope, reason=REASON_STRUCTURAL,

@@ -42,7 +42,8 @@ from urllib.parse import urlparse
 # saw an empty config and warned ``Summarisation model '' is not
 # resolvable`` on every close).  The relative form keeps the whole
 # runtime on one module instance per namespace; the container config
-# path itself is handled by the CWD fallback in ``optimization.py``.
+# path itself is pinned by ``PERSATRIX_OPTIMIZATION_CONFIG`` in
+# ``Dockerfile.agent``.
 from .optimization import model_aliases as _load_alias_block
 
 logger = logging.getLogger(__name__)

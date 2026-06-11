@@ -54,6 +54,21 @@ def scope_for_group(channel_id_or_name: str) -> str:
     return f"{_GROUP_PREFIX}{channel_id_or_name}"
 
 
+def is_thread_scope(scope: str) -> bool:
+    """True when ``scope`` is thread-shaped (RFC 0020 §D ``thread:`` prefix).
+
+    Added for the RFC 0030 interaction-id producer follow-up: thread
+    conversations are exempt from the wire interaction-id lifecycle (the
+    resolver's IP3 rule — "the thread IS the interaction"), and a
+    threaded reply's wire id is the *parent floor's* (the orchestrator
+    resolves per ``channel_id``), so episode routing must classify the
+    resolved scope before stamping or comparing wire ids.  A public
+    predicate rather than an exported prefix so call sites cannot drift
+    into ad-hoc string surgery — the module-docstring contract.
+    """
+    return scope.startswith(_THREAD_PREFIX)
+
+
 # ─── Channel-event scope routing (RFC 0020 PR 5) ─────────────
 
 
@@ -164,6 +179,7 @@ def scope_for_channel_event(
 
 __all__ = [
     "SCOPE_TICK",
+    "is_thread_scope",
     "scope_for_channel_event",
     "scope_for_dm",
     "scope_for_group",

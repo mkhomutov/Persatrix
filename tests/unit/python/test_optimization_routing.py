@@ -174,18 +174,24 @@ class TestShippedYamlRoutingMigration:
         assert model == "summarizer"
 
 
-class TestCwdConfigFallback:
+class TestConfigPathDeterminism:
     """Container path resolution: the Docker images pip-install the
     agents tree as ``persatrix_agents``, so the package-relative default
     (``Path(__file__)…/config/optimization.yaml``) points into
     site-packages, where no config exists — every accessor silently
     returned its default (``summarization_model() == ""`` → the
-    close-path summary degraded with a per-close WARN).  The loader now
-    falls back to the CWD-relative ``config/optimization.yaml`` (the
-    compose bind-mount at WORKDIR /app) when the package-relative file
-    is absent and no env override is set."""
+    close-path summary degraded with a per-close WARN).  The fix lives
+    at the deployment layer: ``Dockerfile.agent`` pins
+    ``PERSATRIX_OPTIMIZATION_CONFIG=/app/config/optimization.yaml`` (the
+    in-image ``COPY config/`` / compose bind-mount location).  Library
+    resolution stays deterministic — env override, else the
+    package-relative default, else built-in defaults.  A CWD-relative
+    fallback was considered and rejected (PR 607 review finding 6): it
+    made model selection depend on whatever ``config/optimization.yaml``
+    happens to exist in the process working directory, for every
+    non-repo install."""
 
-    def test_falls_back_to_cwd_when_package_path_missing(
+    def test_missing_package_path_yields_defaults_not_cwd_pickup(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.delenv("PERSATRIX_OPTIMIZATION_CONFIG", raising=False)
@@ -193,6 +199,7 @@ class TestCwdConfigFallback:
             optimization, "_DEFAULT_CONFIG_PATH",
             tmp_path / "no-such-dir" / "optimization.yaml",
         )
+        # A config lurking in the CWD must NOT be picked up.
         cwd_cfg = tmp_path / "config"
         cwd_cfg.mkdir()
         _write_yaml(
@@ -200,12 +207,35 @@ class TestCwdConfigFallback:
             "default:\n"
             "  context_management:\n"
             "    summarization:\n"
-            "      model: \"summarizer\"\n",
+            "      model: \"from-cwd\"\n",
         )
         monkeypatch.chdir(tmp_path)
         reset_cache()
         try:
-            assert summarization_model() == "summarizer"
+            assert summarization_model() == ""
+        finally:
+            reset_cache()
+
+    def test_empty_env_override_falls_through_to_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An empty ``PERSATRIX_OPTIMIZATION_CONFIG`` (e.g. ``ENV VAR=``
+        cleared in a derived image) means "unset", not "open the empty
+        path"."""
+        monkeypatch.setenv("PERSATRIX_OPTIMIZATION_CONFIG", "")
+        pkg_cfg = tmp_path / "pkg-config" / "optimization.yaml"
+        pkg_cfg.parent.mkdir()
+        _write_yaml(
+            pkg_cfg,
+            "default:\n"
+            "  context_management:\n"
+            "    summarization:\n"
+            "      model: \"from-package-path\"\n",
+        )
+        monkeypatch.setattr(optimization, "_DEFAULT_CONFIG_PATH", pkg_cfg)
+        reset_cache()
+        try:
+            assert summarization_model() == "from-package-path"
         finally:
             reset_cache()
 

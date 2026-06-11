@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..persona_types import ActionType
+from ..persona_types import ActionType, EventType
 
 if TYPE_CHECKING:
     from ..memory.interactions import Interaction
@@ -39,7 +39,11 @@ if TYPE_CHECKING:
 # convention as ``channel_reply.py`` / ``end_vote_action.py``.  Re-declared
 # rather than imported from ``agents.memory.scopes`` for the same reason
 # those modules give: the prefix is private there, and importing a module
-# for one literal couples layers that only share a wire convention.
+# for one literal couples layers that only share a wire convention.  The
+# posture's other half is the lock-step drift guard — this pin is asserted
+# equal to every sibling copy (and to Go's DM id builder) by
+# ``test_cross_language_dm_prefix_drift.py``; a divergence here would let
+# a DM vote the executor drops still close the voter's local record.
 _DM_CHANNEL_PREFIX = "dm:"
 
 # Metadata keys that signal an explicit session end on a multi-turn
@@ -125,9 +129,25 @@ def ends_interaction_by_vote(
     Mirrors the executor's gates (``end_vote_action.py``): a DM vote
     never closes anything, and a vote bound to a *different* channel
     is not about this conversation.  An unbound vote (no
-    ``channel_id``) counts for the inbound channel — the same binding
-    ``bind_end_vote_channel`` applies before publish.
+    ``channel_id``) counts for the inbound channel ONLY on a
+    ``CHANNEL_MESSAGE`` event — the exact condition under which
+    ``bind_end_vote_channel`` stamps the inbound channel before
+    publish.  On any other multi-turn event type (``MENTION``) an
+    unbound vote reaches the executor channel-less and is dropped
+    there (``status=no_channel_id``), so closing locally would record
+    the conversation as ended on the strength of a vote that never
+    happened (PR 607 review finding 4).
+
+    A vote decided on a *threaded* turn (``event.thread_id`` set)
+    closes nothing here (PR 607 review finding 2): the binding above
+    stamps the PARENT channel, so the conversation the vote ends is
+    the floor's — a different local scope from the thread scope the
+    caller would close.  The voter's floor-scope record closes on the
+    floor's wire-id rotation like any non-voter's, and the thread it
+    was replying in keeps living.
     """
+    if event.thread_id:
+        return False
     channel_id = event.channel_id or ""
     if not channel_id or channel_id.startswith(_DM_CHANNEL_PREFIX):
         return False
@@ -135,7 +155,11 @@ def ends_interaction_by_vote(
         if action.action_type is not ActionType.END_INTERACTION_VOTE:
             continue
         target = str(action.payload.get("channel_id", "") or "").strip()
-        if not target or target == channel_id:
+        if not target:
+            if event.event_type is EventType.CHANNEL_MESSAGE:
+                return True
+            continue
+        if target == channel_id:
             return True
     return False
 
@@ -161,10 +185,27 @@ def wire_rotation_closes(
     rule.
 
     Both ids must be non-empty: untracked traffic (old orchestrator,
-    non-channel events, over-length claims dropped at the seed point)
-    keeps the v0.3.7 idle-only behaviour.  The resolver never reuses a
-    retired id (IP2 overrides inbound claims; §C never-reopen), so a
-    differing id is always a rotation, never a revert.
+    non-channel events, *thread-scoped* events — episode routing never
+    stamps a thread scope, see the wire-id guard in
+    ``_handle_multi_turn_event`` — and over-length claims dropped at
+    the seed point) keeps the v0.3.7 idle-only behaviour.  The
+    resolver never reuses a retired id (IP2 overrides inbound claims;
+    §C never-reopen), so a differing id is always a rotation, never a
+    revert.
+
+    Label-fidelity caveat (PR 607 review finding 3, accepted
+    limitation): the wire id carries no close *cause*, so the caller
+    closes every observed rotation with ``REASON_STRUCTURAL`` —
+    rendered "ended" by the summary surfaces.  That label is truthful
+    for the end-vote quorum (the propagation this seam exists for) but
+    also claims an idle rotation whose channel window is shorter than
+    the agent's (the step-1 ``idle_check`` only wins the label when
+    the agent-side window expired too), and an orchestrator-restart
+    re-mint (IP5: the resolver table is in-memory, the next publish
+    mints fresh) — both surface as "ended" without any vote.
+    Distinguishing them needs the close trigger carried on the wire
+    (producer plan OQ 5); a local heuristic would just trade one wrong
+    label for another.
     """
     return (
         open_interaction is not None

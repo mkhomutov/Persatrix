@@ -38,6 +38,7 @@ from agents.memory.interactions import (
     REASON_STRUCTURAL,
     scope_for_dm,
     scope_for_group,
+    scope_for_thread,
 )
 from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
 from agents.tools.registry import clear_registry
@@ -66,15 +67,18 @@ def channel_event(
     channel: str = CHANNEL,
     channel_type: str = "group",
     sender: str = "alex",
+    thread_id: str | None = None,
+    event_type: EventType = EventType.CHANNEL_MESSAGE,
 ) -> AgentEvent:
     metadata: dict = {}
     if wire_id is not None:
         metadata["interaction_id"] = wire_id
     return AgentEvent(
-        event_type=EventType.CHANNEL_MESSAGE,
+        event_type=event_type,
         payload={"content": content, "channel_type": channel_type},
         channel_id=channel,
         sender_id=sender,
+        thread_id=thread_id,
         metadata=metadata,
     )
 
@@ -253,3 +257,109 @@ class TestWireRotationClosesLocalInteraction:
         fresh = agent._interaction_tracker.get(SCOPE)
         assert fresh is not None
         assert fresh.wire_interaction_id == "wire-B"
+
+
+# ─── Thread scopes are wire-untracked ────────────────────────
+
+
+THREAD_ID = "t-veto"
+THREAD_SCOPE = scope_for_thread(THREAD_ID)
+
+
+@pytest.mark.asyncio
+class TestThreadScopesAreWireUntracked:
+    """Resolver rule IP3: thread conversations never rotate — "the thread
+    IS the interaction".  A threaded reply publishes to the *parent*
+    channel, so ``publishCommit`` resolves the FLOOR's interaction id for
+    it and the fanout delivers ``thread_id`` and that floor id on the
+    same event.  The floor id rotating (vote quorum, idle rotation, or an
+    orchestrator-restart re-mint) therefore says nothing about the thread
+    conversation: a thread-scoped local interaction must neither stamp
+    nor compare wire ids — it keeps the idle / session-end closes only
+    (PR 607 review finding 1)."""
+
+    async def test_floor_rotation_does_not_close_thread_scope(self):
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        for i in range(2):
+            await agent._store_event_episode(
+                channel_event(
+                    f"thread-turn-{i}", wire_id="wire-A", thread_id=THREAD_ID,
+                ),
+                [],
+            )
+        # The floor conversation closes (quorum or idle) and the resolver
+        # rotates; the next threaded reply carries the rotated floor id.
+        await agent._store_event_episode(
+            channel_event(
+                "thread keeps going", wire_id="wire-B", thread_id=THREAD_ID,
+            ),
+            [],
+        )
+        open_interaction = agent._interaction_tracker.get(THREAD_SCOPE)
+        assert open_interaction is not None
+        assert open_interaction.is_open
+        assert open_interaction.turn_count == 3
+        assert await all_episodes(agent) == []
+
+    async def test_thread_interaction_never_stamps_wire_id(self):
+        # Not stamping is the load-bearing half: a stamped floor id is
+        # exactly what would arm the rotation close above.
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await agent._store_event_episode(
+            channel_event("threaded", wire_id="wire-A", thread_id=THREAD_ID),
+            [],
+        )
+        opened = agent._interaction_tracker.get(THREAD_SCOPE)
+        assert opened is not None
+        assert opened.wire_interaction_id == ""
+
+    async def test_vote_on_threaded_turn_does_not_close_thread_scope(self):
+        # ``bind_end_vote_channel`` stamps the PARENT channel onto the
+        # vote and the quorum closes the FLOOR conversation — the thread
+        # the voter happened to be replying in does not end (PR 607
+        # review finding 2).  The voter's floor-scope record closes on
+        # the floor's id rotation like any non-voter's.
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await agent._store_event_episode(
+            channel_event("wrap the floor up?", thread_id=THREAD_ID),
+            [vote()],
+        )
+        open_interaction = agent._interaction_tracker.get(THREAD_SCOPE)
+        assert open_interaction is not None
+        assert open_interaction.is_open
+        assert await all_episodes(agent) == []
+
+
+# ─── MENTION events and the unbound-vote default ─────────────
+
+
+@pytest.mark.asyncio
+class TestMentionEventVoteGate:
+    """``bind_end_vote_channel`` stamps the inbound channel only on
+    ``CHANNEL_MESSAGE`` events, so an unbound vote decided on a MENTION
+    turn reaches the executor without a ``channel_id`` and is dropped
+    (``status=no_channel_id``) — the local close must not race ahead of
+    a publish that never happens (PR 607 review finding 4).  A vote that
+    explicitly names the channel is published normally and closes the
+    local scope on any multi-turn event type."""
+
+    async def test_unbound_vote_on_mention_event_does_not_close(self):
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await agent._store_event_episode(
+            channel_event("you were mentioned", event_type=EventType.MENTION),
+            [vote(channel_id=None)],
+        )
+        open_interaction = agent._interaction_tracker.get(SCOPE)
+        assert open_interaction is not None
+        assert open_interaction.is_open
+        assert await all_episodes(agent) == []
+
+    async def test_bound_vote_on_mention_event_closes(self):
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        await agent._store_event_episode(
+            channel_event("you were mentioned", event_type=EventType.MENTION),
+            [vote()],
+        )
+        assert agent._interaction_tracker.get(SCOPE) is None
+        episodes = await all_episodes(agent)
+        assert _close_reasons(episodes) == [REASON_STRUCTURAL]
