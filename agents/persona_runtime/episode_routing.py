@@ -42,6 +42,11 @@ from ..memory.interactions import (
 from ..persona_types import EventType
 from ..session_id import current_session_id
 from .close_path import persist_closed_interaction
+from .interaction_boundary import (
+    ends_interaction_by_vote,
+    is_session_end_event,
+    wire_rotation_closes,
+)
 from .summarize_close import drain_pending_summary_tasks
 
 logger = logging.getLogger(__name__)
@@ -170,7 +175,7 @@ class _EpisodeRoutingMixin:
                 )
         try:
             if event.event_type in self._MULTI_TURN_EVENT_TYPES:
-                await self._handle_multi_turn_event(event, summary, ctx)
+                await self._handle_multi_turn_event(event, summary, ctx, actions)
                 return
             if event.event_type not in self._SINGLE_TURN_EVENT_TYPES:
                 # Defensive fallback: a new EventType was introduced
@@ -277,26 +282,10 @@ class _EpisodeRoutingMixin:
 
     # ─── Multi-turn aggregation (RFC 0020 PR 3) ───────────────
 
-    # Metadata keys that signal an explicit session end on a multi-turn
-    # event.  Either spelling is accepted so RFC 0016 ("chat_end") and
-    # RFC 0011 ("session_end") emit a structural close without a
-    # second adapter layer.
-    _SESSION_END_METADATA_KEYS: frozenset[str] = frozenset({
-        "chat_end",
-        "session_end",
-    })
-
-    # Strings accepted as ``True`` for session-end metadata flags.
-    # PR-216 review (High #3): a bare ``bool(meta.get(k))`` truthiness
-    # check would close on any non-empty string, including ``"false"``
-    # / ``"0"`` / ``"no"`` — a footgun for any channel adapter that
-    # JSON-stringifies booleans (a common interop pattern).  Restrict
-    # the accepted truthy strings to a small canonical allowlist so
-    # ``metadata={"chat_end": "false"}`` no longer closes the
-    # interaction.
-    _SESSION_END_TRUTHY_STRINGS: frozenset[str] = frozenset({
-        "true", "1", "yes", "y", "on",
-    })
+    # The close-trigger predicates (session-end metadata, the RFC 0030
+    # end-of-interaction vote, the wire interaction-id rotation) live in
+    # :mod:`agents.persona_runtime.interaction_boundary` — extracted to
+    # keep this module under the 500-line cap.
 
     def _scope_for_multi_turn_event(self, event: AgentEvent) -> str | None:
         """RFC 0020 §G scope routing — see :func:`scope_for_channel_event`."""
@@ -314,54 +303,26 @@ class _EpisodeRoutingMixin:
             ),
         )
 
-    def _is_session_end_event(self, event: AgentEvent) -> bool:
-        """Strict-truthy check for session-end metadata flags.
-
-        PR-216 review (High #3): ``bool("false")`` is ``True``, so the
-        prior ``bool(meta.get(k))`` accepted any non-empty string — a
-        channel adapter that stringifies booleans would have closed
-        every multi-turn interaction unexpectedly.  Accept only:
-
-        * the ``bool`` value ``True`` (and only ``True`` — not any
-          truthy non-bool such as a list/object),
-        * a non-zero numeric value,
-        * a string whose lowercase form is in
-          :attr:`_SESSION_END_TRUTHY_STRINGS`.
-
-        Anything else (``False``, ``0``, ``None``, ``"false"``,
-        ``"0"``, empty string, missing key) is treated as not-end.
-        """
-        meta = event.metadata or {}
-        for key in self._SESSION_END_METADATA_KEYS:
-            if key not in meta:
-                continue
-            val = meta[key]
-            if val is True:
-                return True
-            if isinstance(val, str):
-                if val.strip().lower() in self._SESSION_END_TRUTHY_STRINGS:
-                    return True
-                continue
-            # ``bool`` is a subclass of ``int``; ``True`` is handled
-            # above and ``False`` falls through to the int branch as
-            # ``0`` (correctly evaluating not-end).
-            if isinstance(val, (int, float)) and val != 0:
-                return True
-        return False
-
     async def _handle_multi_turn_event(
         self,
         event: AgentEvent,
         summary: str,
         ctx: dict[str, Any],
+        actions: list[AgentAction] | None = None,
     ) -> None:
-        """Append a turn to the open interaction; close on session end.
+        """Append a turn to the open interaction; close on session end,
+        end-of-interaction vote, or wire interaction-id rotation.
 
         The per-turn ``summary`` / ``ctx`` are stashed on the turn
         payload so the PR 4 summariser has the same fields it would
         have written to a legacy single-row episode — PR 4 swaps the
         placeholder summary for an LLM-generated one without changing
         this call site.
+
+        ``actions`` (RFC 0030 interaction-id producer follow-up) are the
+        turn's decided actions, consulted for the Layer 4 vote trigger;
+        ``None`` / empty (salience-gate silent paths, legacy callers)
+        means no vote this turn.
         """
         scope = self._scope_for_multi_turn_event(event)
         if scope is None:
@@ -410,10 +371,26 @@ class _EpisodeRoutingMixin:
         message_text = (event.payload or {}).get("content")
         if isinstance(message_text, str) and message_text.strip():
             payload["text"] = message_text
+        # RFC 0030 interaction-id producer: the channel conversation's
+        # wire id rotating means the previous conversation ended (vote
+        # quorum or idle) — close the stale local interaction so the new
+        # turn opens a fresh one.  Full rationale on the predicate.
+        wire_id = str(event.metadata.get("interaction_id", "") or "")
+        if wire_rotation_closes(self._interaction_tracker.get(scope), wire_id):
+            rotated = self._interaction_tracker.close(
+                scope, reason=REASON_STRUCTURAL,
+            )
+            if rotated is not None:
+                await self._persist_closed_interaction(rotated)
         interaction = self._interaction_tracker.add_turn(
             scope, payload=payload,
             session_id=self._active_write_session_id,
         )
+        # Stamp the wire id the interaction was opened under (first turn
+        # that carries one wins; the resolver never reuses a retired id,
+        # so a later differing id is always a rotation, never a revert).
+        if wire_id and interaction.is_open and not interaction.wire_interaction_id:
+            interaction.wire_interaction_id = wire_id
         # PR-3 review #12: ``add_turn`` now closes inline when the
         # MaxTurns cap fires.  The returned interaction is the
         # cap-closed one (with ``close_reason == REASON_MAX_TURNS``);
@@ -425,7 +402,9 @@ class _EpisodeRoutingMixin:
         if not interaction.is_open:
             await self._persist_closed_interaction(interaction)
             return
-        if self._is_session_end_event(event):
+        if is_session_end_event(event) or ends_interaction_by_vote(
+            event, actions or [],
+        ):
             closed = self._interaction_tracker.close(
                 scope, reason=REASON_STRUCTURAL,
             )

@@ -139,6 +139,14 @@ from me…").
   decision (relay vs. beacon) — the converged outcome, not a blank or the
   `[interaction summary unavailable]` sentinel. The console's conversation
   view shows the "interaction closed" affordance below the turns.
+- **Timing note** (see the
+  [channels guide §"When the row appears"](../guides/channels.md#the-interaction-summary-surface-rfc-0020--v038)):
+  the row queried here is a *voter's* — a persona closes its local record
+  the moment it emits `END_INTERACTION_VOTE`, so it exists immediately
+  after Step 2. A non-voting member (`ember-owl`, if it was drawn in)
+  closes its record only on the channel's next publish carrying the
+  rotated interaction id (Step 4) or on its own idle window — querying it
+  at this step may legitimately return nothing yet.
 
 **Verification**:
 - [ ] The summary names the decision the personas converged on.
@@ -202,10 +210,21 @@ traffic.
 
 | Date | Tester | Build | Result | Notes |
 |------|--------|-------|--------|-------|
-|      |        |       |        |       |
+| 2026-06-11 | Claude (for mkhomutov) | `a784cbd` (anthropic overlay) | PARTIAL — Steps 1/2/4 pass, Step 3 fails | Live votes work: iron-fox + nova-sparrow both emitted structured `END_INTERACTION_VOTE`s; close fired on the 2nd distinct vote (`trigger=end_votes`, `votes=2`); zero depth drops; next topic opened a fresh interaction. Step 3 FAIL: the vote close never reaches `agent interactions` — no production writer of `structural_close_reason` (channel-side hook documented in `boundary_detectors.py` but only set in unit tests), and `recordInteractionClosed` (Go) only logs + counts. Calibration notes: Tier B salience (unset threshold → 0.8 bar) suppressed every open-floor prompt incl. a by-name text address — only structured `--mention` drew replies; Edge Case 1 idle rotation observed live (lazy `trigger=idle` on next publish). Anthropic overlay leaves the summarisation alias empty (`Summarisation model '' is not resolvable` WARN, falls back). |
 
 ## Notes
 
 - The votes are real messages in channel history — they survive as the
   conversation's visible ending, which is the design (an audit trail of who
   judged it done).
+- The 2026-06-11 Step 3 FAIL was a real wire gap, fixed after that run: no
+  agent-side writer closed the local interaction when the channel
+  conversation ended, so the record only ever closed as `idle_gap`. The
+  close now propagates via `agents/persona_runtime/interaction_boundary.py`
+  (a voter closes its scope structurally at vote time; everyone else closes
+  on the wire interaction-id rotation), and the run's
+  `Summarisation model '' is not resolvable` WARN was a container
+  config-path bug (the pip-installed package resolved
+  `site-packages/config/optimization.yaml`), not an overlay gap — fixed by
+  the CWD fallback in `agents/optimization.py`. Step 3 needs a re-run to
+  flip the result row.

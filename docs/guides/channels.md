@@ -455,6 +455,25 @@ unchanged — this is a read surface, not a new synthesis step.
   is **per-agent** (each participating persona persists its own row), so the web
   surface merges across the channel's participants and shows one affordance.
 
+**When the row appears.** The orchestrator's close (quorum / idle rotation) and
+the per-agent row are produced by different processes, and the closing publish's
+fanout is deliberately suppressed — so the channel-side close reaches each
+agent's local interaction record through two seams
+(`agents/persona_runtime/interaction_boundary.py`):
+
+- **A voter closes at vote time.** Emitting `END_INTERACTION_VOTE` is the
+  persona's own "my contribution is complete", so its local record of the
+  conversation closes (and summarises) immediately — query a *voter* right
+  after the close and the row is already there, labelled *ended*. This is the
+  persona's judgement, not the quorum: a lone voter's record closes even if the
+  quorum never forms and the room talks on (its next turn simply opens a fresh
+  local interaction).
+- **Everyone else closes on the id rotation.** A non-voting member's record
+  closes the moment it receives the channel's next publish carrying the
+  rotated `interaction_id` (the new topic) — or by its own idle window if the
+  room stays quiet. Until one of those happens, its row for the closed
+  discussion does not exist yet; that lag is inherent to the lazy rotation.
+
 **Close-trigger labels** (the RFC 0020 `close_reason`, rendered identically on
 both surfaces):
 

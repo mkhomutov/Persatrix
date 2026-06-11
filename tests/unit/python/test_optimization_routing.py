@@ -174,6 +174,72 @@ class TestShippedYamlRoutingMigration:
         assert model == "summarizer"
 
 
+class TestCwdConfigFallback:
+    """Container path resolution: the Docker images pip-install the
+    agents tree as ``persatrix_agents``, so the package-relative default
+    (``Path(__file__)…/config/optimization.yaml``) points into
+    site-packages, where no config exists — every accessor silently
+    returned its default (``summarization_model() == ""`` → the
+    close-path summary degraded with a per-close WARN).  The loader now
+    falls back to the CWD-relative ``config/optimization.yaml`` (the
+    compose bind-mount at WORKDIR /app) when the package-relative file
+    is absent and no env override is set."""
+
+    def test_falls_back_to_cwd_when_package_path_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("PERSATRIX_OPTIMIZATION_CONFIG", raising=False)
+        monkeypatch.setattr(
+            optimization, "_DEFAULT_CONFIG_PATH",
+            tmp_path / "no-such-dir" / "optimization.yaml",
+        )
+        cwd_cfg = tmp_path / "config"
+        cwd_cfg.mkdir()
+        _write_yaml(
+            cwd_cfg / "optimization.yaml",
+            "default:\n"
+            "  context_management:\n"
+            "    summarization:\n"
+            "      model: \"summarizer\"\n",
+        )
+        monkeypatch.chdir(tmp_path)
+        reset_cache()
+        try:
+            assert summarization_model() == "summarizer"
+        finally:
+            reset_cache()
+
+    def test_package_path_wins_when_present(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("PERSATRIX_OPTIMIZATION_CONFIG", raising=False)
+        pkg_cfg = tmp_path / "pkg-config" / "optimization.yaml"
+        pkg_cfg.parent.mkdir()
+        _write_yaml(
+            pkg_cfg,
+            "default:\n"
+            "  context_management:\n"
+            "    summarization:\n"
+            "      model: \"from-package-path\"\n",
+        )
+        monkeypatch.setattr(optimization, "_DEFAULT_CONFIG_PATH", pkg_cfg)
+        cwd_cfg = tmp_path / "config"
+        cwd_cfg.mkdir()
+        _write_yaml(
+            cwd_cfg / "optimization.yaml",
+            "default:\n"
+            "  context_management:\n"
+            "    summarization:\n"
+            "      model: \"from-cwd\"\n",
+        )
+        monkeypatch.chdir(tmp_path)
+        reset_cache()
+        try:
+            assert summarization_model() == "from-package-path"
+        finally:
+            reset_cache()
+
+
 def test_module_exports_routing_accessors() -> None:
     """Pin the new routing accessors on the public surface — the sub-agent
     default-model resolution (RFC 0033 §J.3) imports them."""
