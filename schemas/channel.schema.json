@@ -107,6 +107,11 @@
           "default": 3,
           "description": "RFC 0030 Layer 4 (v0.3.8) end-of-interaction recency window (W) for this channel: an end-vote counts toward the `end_vote_threshold` quorum only while it is within W consecutive turns of the current turn, so a stale vote from much earlier no longer counts ('votes must be recent'). A 'turn' is any tracked publish in the interaction (every message, not only votes), so in a busy channel the K distinct votes must land within W publishes of each other — tune W up if intervening chatter is starving the quorum. Absent uses the W=3 default (wide enough to survive an intervening one-off comment); the Go loader treats a zero/absent value as 'use the default' and rejects negatives at load time."
         },
+        "escalation_chair_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+          "description": "The chair-stall-escalation amendment (RFC 0030 minimal Layer 5 slice, v0.3.8): the member who receives ONE forced turn after a stalled floor round (zero replies across ≥1 granted turns on the channel's open interaction) — prompted to synthesize and cast its end-of-discussion vote, or to call on the member best placed to continue. Must be one of this channel's declared members (the loader rejects a non-member loudly); it need not be declared `chair`. Closing still requires the Layer 4 vote quorum — the chair proposes, the quorum disposes. Absent (the default) disables escalation; deliberately distinct from the v0.4.0 moderator's `moderator_agent_id` (a non-participant trusted closer)."
+        },
         "interaction_idle_timeout_seconds": {
           "type": "integer",
           "minimum": 0,

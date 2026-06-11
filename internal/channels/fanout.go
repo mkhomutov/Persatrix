@@ -101,7 +101,13 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 
 	if settings, ok := r.floorSettingsFor(msg.ChannelID); ok && settings.enabled {
 		if len(responders) >= 2 {
-			r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
+			outcome := r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
+			// Chair-stall-escalation amendment §C 1: the stall tail runs in
+			// the round's CALLER, after the floor is released and the round's
+			// floor-speaker set is cleared — the chair's reply must re-fanout
+			// as a fresh open-floor stimulus, which a floor turn would
+			// suppress. A send, never an await (CE7).
+			r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, outcome, members, channelSize, floorMentions)
 			return
 		}
 	}

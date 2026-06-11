@@ -56,6 +56,13 @@ type RouterMetrics struct {
 	// wired). The per-close attribution (channel, interaction, the vote count) is
 	// on the structured log line.
 	InteractionClosed metric.Int64Counter
+	// ChairEscalation counts each DETECTED floor-round stall (the
+	// chair-stall-escalation amendment §C 1), labelled by `channel_type` and
+	// `outcome ∈ {dispatched, no_chair, already_escalated, dispatch_error}` —
+	// the disposition chain runs after detection, so an operator sees the
+	// stalls a chair could be configured for, not only the escalations that
+	// fired.
+	ChairEscalation metric.Int64Counter
 	// EndVoteEmitted counts each RFC 0030 Layer 4 end-of-interaction vote action,
 	// labelled by `channel_type` (§L). Pairs with InteractionClosed to make
 	// "votes cast vs. interactions that actually converged" observable on the

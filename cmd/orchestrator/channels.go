@@ -143,6 +143,8 @@ func initChannels(
 			// Layer 4 vote volume + Layer 2 reply-budget headroom at close.
 			EndVoteEmitted:       orchMetrics.ChannelConversationEndVoteEmitted,
 			ReplyBudgetRemaining: orchMetrics.ChannelConversationReplyBudgetRemaining,
+			// Chair-stall-escalation amendment (minimal Layer 5 slice).
+			ChairEscalation: orchMetrics.ChannelConversationChairEscalation,
 		}
 	}
 	// ISSUE-0082 PR 2: build the per-request session resolver over the
@@ -252,6 +254,15 @@ func initChannels(
 	if iErr := router.ResolveInteractionIdleTimeouts(context.Background(), chanCfg); iErr != nil {
 		logger.Warn("channels: interaction-idle-timeout resolution incomplete; channels fall back to the default window until next restart",
 			zap.Error(iErr))
+	}
+
+	// Chair-stall-escalation amendment (CE2): resolve each declared channel's
+	// escalation chair. Absent knob = no escalation (opt-in); store-resident
+	// channels not in config are never escalated, so nothing can fail here
+	// beyond a nil config (a no-op).
+	if eErr := router.ResolveEscalationChairs(context.Background(), chanCfg); eErr != nil {
+		logger.Warn("channels: escalation-chair resolution incomplete; affected channels stay un-escalated until next restart",
+			zap.Error(eErr))
 	}
 
 	logger.Info("channels: subsystem ready",

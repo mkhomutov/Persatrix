@@ -381,6 +381,13 @@ var (
 	// producer's idle window, IP3). Zero is NOT an error — it is the explicit
 	// "idle rotation off" value, distinct from absent (inherit the default).
 	ErrInvalidInteractionIdleTimeout = errors.New("channels: invalid interaction_idle_timeout_seconds")
+	// ErrInvalidEscalationChair — a declared channel's `escalation_chair_id`
+	// (the chair-stall-escalation amendment, CE2) names someone who is not
+	// one of the channel's declared members. The forced turn dispatches to a
+	// member's envelope; a non-member chair could never receive it, so the
+	// misconfiguration fails loudly at load rather than as a permanent
+	// `chair_escalation{outcome=dispatch_error}` at the first stall.
+	ErrInvalidEscalationChair = errors.New("channels: invalid escalation_chair_id")
 	// ErrInvalidMaxRepliesPerParticipant — a declared channel (or the
 	// top-level `default_max_replies_per_participant`) carried a negative
 	// `max_replies_per_participant_per_interaction:` (RFC 0030 Layer 2 reply

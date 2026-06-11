@@ -138,6 +138,15 @@ channels:
     # END_INTERACTION_VOTE within W consecutive turns close the interaction.
     end_vote_threshold: 2
     end_vote_window: 3
+    # escalation_chair_id (the chair-stall-escalation amendment, v0.3.8): when
+    # a floor round ends with zero replies on the open interaction — every
+    # participant honestly passed on an unresolved question — this member gets
+    # ONE forced turn: synthesize and cast its end-of-discussion vote, or call
+    # on whoever should speak next. Closing still needs the vote quorum above
+    # (the chair proposes, the quorum disposes). Must be a member; omit to
+    # disable escalation. nova-sparrow pairs naturally with a `chair`
+    # disposition, but any participant may be the designated synthesizer.
+    escalation_chair_id: nova-sparrow
     members:
       - id: ember-owl
         respond: addressed

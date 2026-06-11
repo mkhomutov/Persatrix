@@ -46,6 +46,14 @@ type DispatchEnvelope struct {
 	// zero falls back to the agent-side default. Per-publish, like ChannelSize.
 	SalienceMaxChannelMembers int
 
+	// ChairEscalation (the chair-stall-escalation amendment, CE3) marks this
+	// dispatch as the orchestrator's forced turn to the channel's configured
+	// escalation chair after a stalled floor round. Carried on
+	// `ChannelMessageEvent.chair_escalation`; the receiver routes a marked
+	// event down the directed lane (gate admit + Tier B bypass). Never set on
+	// ordinary fanout — the zero value is every non-escalation dispatch.
+	ChairEscalation bool
+
 	// FloorMentions (RFC 0030 floor-capable-directedness amendment) is the
 	// subset of the message's mentions naming floor-capable members —
 	// resolved once per publish by [resolveFloorMentions] in

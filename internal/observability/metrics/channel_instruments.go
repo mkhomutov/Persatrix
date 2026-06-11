@@ -109,6 +109,20 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	); err != nil {
 		return fmt.Errorf("create channel.conversation.interaction_closed: %w", err)
 	}
+	// Chair-stall-escalation amendment (RFC 0030 minimal Layer 5 slice,
+	// v0.3.8). One increment per DETECTED floor-round stall, labelled by
+	// `channel_type` and `outcome` (dispatched / no_chair / already_escalated
+	// / dispatch_error) — disposition after detection, so operators see the
+	// stalls a chair could be configured for, not only fired escalations.
+	if i.ChannelConversationChairEscalation, err = m.Int64Counter(
+		"channel.conversation.chair_escalation",
+		metric.WithUnit("{stall}"),
+		metric.WithDescription(
+			"Detected floor-round stalls, labelled by channel_type and escalation outcome.",
+		),
+	); err != nil {
+		return fmt.Errorf("create channel.conversation.chair_escalation: %w", err)
+	}
 	// RFC 0030 Layer 4 (v0.3.8) vote-volume counter. One increment per
 	// end-of-interaction vote action, labelled by `channel_type`. Paired with
 	// interaction_closed it shows how many votes were cast versus how many

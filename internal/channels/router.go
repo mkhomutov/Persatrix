@@ -194,6 +194,12 @@ type ChannelRouter struct {
 	interactionIdleTimeouts       map[string]time.Duration
 	defaultInteractionIdleTimeout time.Duration
 	interactionNow                func() time.Time
+
+	// escalationMu guards escalationChairs — the per-channel
+	// `escalation_chair_id` knob (the chair-stall-escalation amendment, CE2);
+	// methods + the full contract live in chair_escalation.go.
+	escalationMu     sync.Mutex
+	escalationChairs map[string]string
 }
 
 // NewChannelRouter wires a router around a store, dispatcher, logger, and
@@ -231,6 +237,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		interactionIdleTimeouts:       make(map[string]time.Duration),
 		defaultInteractionIdleTimeout: time.Duration(DefaultInteractionIdleTimeoutSeconds) * time.Second,
 		interactionNow:                time.Now,
+		escalationChairs:              make(map[string]string),
 	}
 }
 

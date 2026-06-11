@@ -105,6 +105,23 @@ func (c *Config) Validate() error {
 				i, ch.Name, ErrInvalidInteractionBudgetTokens, ch.InteractionBudgetTokens)
 		}
 
+		// The escalation chair must be a declared member (CE2): the forced
+		// turn dispatches to a member's envelope, so a non-member chair is a
+		// guaranteed dispatch_error — fail it loudly at load instead.
+		if ch.EscalationChairID != "" {
+			isMember := false
+			for _, m := range ch.Members {
+				if m.ID == ch.EscalationChairID {
+					isMember = true
+					break
+				}
+			}
+			if !isMember {
+				return fmt.Errorf("channels[%d=%s]: %w: %q is not a declared member",
+					i, ch.Name, ErrInvalidEscalationChair, ch.EscalationChairID)
+			}
+		}
+
 		// Reject a negative per-channel interaction idle window (IP3).
 		// Explicit zero is valid (idle rotation off for this channel); only
 		// negative is an error. The schema's `minimum: 0` catches it at
