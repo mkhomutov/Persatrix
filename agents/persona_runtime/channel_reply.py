@@ -52,7 +52,7 @@ from __future__ import annotations
 
 from ..persona_types import ActionType, AgentAction, AgentEvent, EventType
 
-__all__ = ["synthesize_channel_reply"]
+__all__ = ["bind_end_vote_channel", "synthesize_channel_reply"]
 
 
 # DM channels enforce a "must reply" invariant (RFC 0011 §D,
@@ -101,6 +101,12 @@ def synthesize_channel_reply(
     if not channel_id:
         return actions
 
+    # RFC 0030 producer plan PR 2 (IP6): reconcile any END_INTERACTION_VOTE
+    # with the inbound channel before the promotion logic below — the two
+    # concerns share this seam because both bind parsed actions to the
+    # channel the turn arrived on.
+    actions = bind_end_vote_channel(event, actions)
+
     for action in actions:
         if action.action_type is not ActionType.SEND_CHANNEL_MESSAGE:
             continue
@@ -140,3 +146,43 @@ def synthesize_channel_reply(
         },
     )
     return [synthesized, *actions]
+
+
+def bind_end_vote_channel(
+    event: AgentEvent,
+    actions: list[AgentAction],
+) -> list[AgentAction]:
+    """Bind a channel-less ``END_INTERACTION_VOTE`` to the inbound channel.
+
+    The RFC 0030 Layer 4 vote (producer plan PR 2, IP6) is a real channel
+    publish, so the executor needs a ``channel_id`` — but a persona votes on
+    *the conversation it is in*, and requiring it to echo routing details
+    back through the action payload invites transcription mistakes (a typo'd
+    channel casts the vote into the wrong room, or nowhere). This seam
+    stamps the inbound channel onto any vote that omits ``channel_id``,
+    exactly the :func:`synthesize_channel_reply` posture for conversational
+    replies. An explicit payload value is preserved; non-channel events
+    (e.g. a TICK-emitted vote) are left untouched — the executor's
+    ``no_channel_id`` status is the backstop there.
+
+    Pure: returns a new list when a binding fires; actions themselves are
+    re-created, never mutated.
+    """
+    if event.event_type is not EventType.CHANNEL_MESSAGE or not event.channel_id:
+        return actions
+
+    bound: list[AgentAction] = []
+    changed = False
+    for action in actions:
+        if (
+            action.action_type is ActionType.END_INTERACTION_VOTE
+            and not str(action.payload.get("channel_id", "") or "").strip()
+        ):
+            bound.append(AgentAction(
+                action_type=ActionType.END_INTERACTION_VOTE,
+                payload={**action.payload, "channel_id": event.channel_id},
+            ))
+            changed = True
+        else:
+            bound.append(action)
+    return bound if changed else actions

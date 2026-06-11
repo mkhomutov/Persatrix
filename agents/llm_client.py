@@ -175,6 +175,7 @@ class LLMClient:
         cause: walletpb.Cause.ValueType = walletpb.CAUSE_UNSPECIFIED,
         workflow_id: str = "",
         agent_id: str = "",
+        interaction_id: str = "",
         model_alias: str | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
@@ -190,6 +191,17 @@ class LLMClient:
         Without a wallet, or with no *cause*, the provider is invoked
         directly: that is the un-migrated v0.2.3 path PRs 4–6 wire for the
         chat / autonomous-TICK / sub-agent / channel-message origins.
+
+        *interaction_id* (RFC 0030 producer plan PR 2) names the
+        orchestrator-resolved interaction the triggering event belongs to —
+        the Layer 1 attribution substrate. The wallet only tracks (and can
+        only deny) an interaction when a positive
+        ``interaction_budget_tokens`` accompanies the id on the same lease
+        request (``internal/wallet/wallet.go``); until the config-stamping
+        follow-up threads that ceiling, the id rides the wire and the
+        wallet discards it. Empty (the default) is the untracked case —
+        every ceiling stays at its uncapped default, the pre-producer
+        behaviour.
 
         *model_alias* (RFC 0033 §G) is the logical alias the caller resolved
         ``model`` from, when it came in via one. It is emitted as the
@@ -207,6 +219,7 @@ class LLMClient:
             cause=cause,
             workflow_id=workflow_id,
             trace_id=_current_trace_id(),
+            interaction_id=interaction_id,
         ) as lease:
             response = await self._invoke_provider(
                 kwargs, lease=lease, model_alias=model_alias,

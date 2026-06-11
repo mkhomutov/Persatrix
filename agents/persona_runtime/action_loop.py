@@ -381,7 +381,6 @@ class _ActionLoopMixin:
             # conversation role (user/assistant/system).  We use only
             # "content" here; "role" labels are intentionally omitted from
             # the prompt to avoid confusing the LLM with metadata noise.
-            # (PR review should-fix #6: document "role" vs LLM message role.)
             memory_text = "\n\n".join(s["content"] for s in memory_sections)
             system_prompt += "\n\n" + memory_text
 
@@ -395,8 +394,8 @@ class _ActionLoopMixin:
 
         max_llm_calls = self.config.get("max_llm_calls", _PERSONA_DEFAULT_MAX_LLM_CALLS)
         max_tokens = self.config.get("max_tokens", _PERSONA_DEFAULT_MAX_TOKENS)
-        # RFC 0023 PR 4 base + ISSUE-0064 persona-as-sub-agent override.
-        lease_cause, lease_agent_id = lease_attribution_for_event(
+        # RFC 0023 cause + ISSUE-0064 override + RFC 0030 interaction attribution.
+        lease_cause, lease_agent_id, lease_interaction_id = lease_attribution_for_event(
             event, agent_id=self.agent_id,
         )
         response: LLMResponse | None = None
@@ -412,6 +411,7 @@ class _ActionLoopMixin:
                     temperature=self.config.get("temperature", 0.7),
                     cause=lease_cause,
                     agent_id=lease_agent_id,
+                    interaction_id=lease_interaction_id,
                 )
             except Exception as exc:
                 # Wallet back-pressure / provider failures dispatch to

@@ -61,7 +61,7 @@ TDD anchor (red first): a publish to a governed channel carries a non-empty `int
 
 ### PR 3: `feature/v038-rfc0030-convergence-closeout` — activation closeout
 
-- **Convergence MT** (the governance master-plan's Phase 3 acceptance): N personas, an open question, discussion proceeds, two emit votes, the interaction closes with `trigger=end_votes`, fanout stops *before* the depth cap, and the interaction-summary surface hands back a readable outcome.
+- **Convergence MT** (the governance master-plan's Phase 3 acceptance): N personas, an open question, discussion proceeds, two emit votes, the interaction closes with `trigger=end_votes`, fanout stops *before* the depth cap, and the interaction-summary surface hands back a readable outcome. The MT must use the realistic publish shape, not bare back-to-back votes: a persona that votes typically also publishes a final reply (`synthesize_channel_reply` promotes the prose, then the vote follows — two publishes per voter), and `processEndVote` advances the interaction's turn counter on *every* tracked publish, so replies and interjections age the first vote toward the W=3 window edge. Cover at least one interleaving with a reply between the two votes (quorum still forms) and one where intervening publishes push the first vote out of window (quorum correctly does not form) — this pins the window arithmetic on the traffic shape the vote producer actually emits.
 - Docs: channels guide §governance (how a conversation ends now), CHANGELOG, ROADMAP RFC 0030 row, this plan's status, the governance-layers plan's "inert until the producer" notes annotated as discharged.
 - Telemetry sanity: `interaction_closed{trigger}` now emits on real traffic; `governance_drop{layer=depth}` becoming rare is the success signal.
 

@@ -77,9 +77,10 @@ def seed_wire_metadata(
     fields here are conditional — only a non-empty value is seeded, and
     ``interaction_id`` additionally only within ``_INTERACTION_ID_MAX_BYTES``
     (an over-length claim degrades to untracked). Whether a field actually
-    carries a value depends on its producer: ``participant_type`` has one (the
-    REST chat handler), ``interaction_id`` does not yet (see the per-field note
-    below), so today only the former is ever seeded.
+    carries a value depends on its producer: ``participant_type``'s is the
+    REST chat handler; ``interaction_id``'s is the orchestrator's interaction
+    resolver, live since the interaction-id producer plan PR 1 (see the
+    per-field note below), so both are seeded on routed traffic today.
     """
     # ISSUE-0068: lift the sender's peer type off the typed proto field onto
     # the metadata key the episode-routing close path reads
@@ -95,13 +96,14 @@ def seed_wire_metadata(
     # RFC 0030 deterministic governance layers (v0.3.8), PR 1: lift the RFC
     # 0020 ``interaction_id`` (an opaque uuid4 token, not a ULID despite RFC
     # 0020 §D's wording — see ``agents/memory/interactions.py``) off the typed
-    # proto field onto the event-metadata key the governance layers will read:
-    # the Layer 1 PR will thread it toward the ``AcquireLease`` cost ceiling,
-    # Layers 2/4 will key reply budgets and end-votes on it. Inert this PR:
-    # nothing reads the key, and nothing populates the wire field either (no
-    # orchestrator-side producer exists yet — interaction tracking is
-    # agent-side), so ``request.interaction_id`` is empty on every publish
-    # today and the branch below never fires. Only seed a non-empty value — an
+    # proto field onto the event-metadata key the governance layers read.
+    # Both ends are live now: the orchestrator's resolver stamps the id onto
+    # every routed publish and the dispatcher lifts it onto the wire field
+    # (interaction-id producer plan PR 1), and the loop-side read —
+    # ``wallet_cause.lease_interaction_id_for_event`` (producer plan PR 2) —
+    # threads the seeded key into the channel-path leases, while Layers 2/4
+    # key reply budgets and end-votes on the same id orchestrator-side. So
+    # this branch fires on every routed publish. Only seed a non-empty value — an
     # empty field is the untracked / pre-v0.3.8 publish, which leaves every
     # layer at its uncapped default (the additive opt-in contract). Drop an
     # over-length claim to untracked (mirrors the Go publish boundary's

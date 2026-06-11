@@ -323,6 +323,16 @@ class _PromptAssemblyMixin:
         # a code gate.
         rendered.append(load_snippet("peer-conversation-voice"))
 
+        # End-of-discussion vote vocabulary (RFC 0030 Layer 4, the producer
+        # plan PR 2). The orchestrator's quorum machinery is live; this
+        # snippet is the prompt half of the social contract — it teaches the
+        # one structured action a persona can emit (the exact JSON form the
+        # action parser recognises) and when voting is appropriate.
+        # Unconditional like its siblings: the assembler has no per-turn
+        # channel context, so the prose carries the group-channel framing and
+        # the DM carve-out inline.
+        rendered.append(load_snippet("end-interaction-vote"))
+
         # Memory-tool usage nudge — without this the LLM often responds
         # conversationally ("Got it, I'll remember that") instead of
         # actually calling the store_note / recall_notes tools.

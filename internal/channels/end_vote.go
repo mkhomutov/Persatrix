@@ -19,15 +19,18 @@ import (
 // file stays under the 500-line review cap, mirroring reply_budget.go; the
 // `endVoteMu` mutex + its maps are declared on [ChannelRouter] in router.go.
 //
-// PRODUCER STATUS: the `interaction_id` producer is live — the router's
-// resolver (interaction_resolver.go) stamps every publish, so this layer is
-// load-bearing on the id side: every tracked publish advances the open
-// interaction, and a quorum close both fires the discard seams and notifies
-// the resolver via [ChannelRouter.markInteractionClosed] (IP8) so the next
-// publish mints fresh. The VOTE producer is still pending — the Python
-// `END_INTERACTION_VOTE` action is recognised but not yet wired to publish
-// the `end_interaction_vote` flag (producer plan PR 2) — so no quorum forms
-// on real traffic yet; interactions close by idle rotation until it lands.
+// PRODUCER STATUS: both producers are live. The `interaction_id` producer
+// (producer plan PR 1) — the router's resolver (interaction_resolver.go)
+// stamps every publish, so this layer is load-bearing on the id side: every
+// tracked publish advances the open interaction, and a quorum close both
+// fires the discard seams and notifies the resolver via
+// [ChannelRouter.markInteractionClosed] (IP8) so the next publish mints
+// fresh. The VOTE producer (producer plan PR 2) — the Python
+// `END_INTERACTION_VOTE` action publishes a real channel message with the
+// `end_interaction_vote` flag (agents/end_vote_action.py; the key literal is
+// pinned by the cross-language drift test), so quorums form on real traffic
+// and the semantic terminator is the normal close, with idle rotation and
+// the depth cap as the backstops.
 
 // endVoteMetadataKey is the wire-level publish-metadata flag a producer sets to
 // mark a publish as an RFC 0030 Layer 4 end-of-interaction vote. Centralised so

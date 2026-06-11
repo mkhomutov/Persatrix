@@ -1,0 +1,140 @@
+"""The RFC 0030 Layer 4 vote producer — END_INTERACTION_VOTE publishing.
+
+Carved out of :mod:`agents.action_executor` so that file stays under the
+500-line review cap (the ``channel_reply`` / ``wallet_cause`` split
+convention). One free function: the executor's
+``ActionType.END_INTERACTION_VOTE`` arm delegates here.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+from .channel_publisher import (
+    DEFAULT_PUBLISH_TIMEOUT_SECONDS,
+    ChannelPublisher,
+    ChannelsDisabledError,
+)
+from .persona_types import AgentAction
+
+logger = logging.getLogger(__name__)
+
+# The readable sign-off an END_INTERACTION_VOTE publishes when the persona
+# supplies no content of its own (producer plan PR 2, IP6). The vote is a real
+# message other participants read — an empty publish would look like a glitch
+# rather than a deliberate "nothing further from me".
+_END_VOTE_DEFAULT_CONTENT = "I have nothing further to add."
+
+# DM channels are identified by the ``dm:`` channel-id prefix — the same
+# convention as ``response_gate.py`` / ``channel_reply.py``. Re-declared
+# rather than imported for the same reason ``channel_reply.py`` gives:
+# importing it would couple this executor-side module to the persona-runtime
+# package for one literal.
+_DM_CHANNEL_PREFIX = "dm:"
+
+
+async def publish_end_interaction_vote(
+    publisher: ChannelPublisher | None,
+    sender_id: str,
+    action: AgentAction,
+    *,
+    cascade_depth: int,
+) -> dict[str, Any]:
+    """Publish an RFC 0030 Layer 4 end-of-interaction vote (producer plan
+    PR 2, IP6).
+
+    The vote is a REAL channel message — the orchestrator's
+    ``processEndVote`` runs post-persistence, scoping the vote to its own
+    resolved interaction (IP2), never to anything this side claims — with
+    the ``end_interaction_vote: true`` flag merged into the publish
+    metadata (the literal mirrors Go's ``endVoteMetadataKey``; pinned by
+    the cross-language drift test). Mentions stay empty: a vote addresses
+    the room's process, not a member, and must not direct the floor.
+    ``cascade_depth`` rides verbatim, the send-branch posture.
+
+    The legacy in-process dispatcher path keeps the pre-producer
+    ``not_implemented`` status — votes are a channels-governance concept
+    and the chat path has no interaction router. A vote with no channel
+    (the bind seam never fired — e.g. emitted on a TICK turn) cannot be
+    scoped to an interaction and is dropped with a distinct status; the
+    same strip-then-test as the bind seam, so a whitespace-only claim
+    cannot slip past both checks into a junk-channel publish. A vote
+    into a DM is dropped too: the prompt snippet's "never vote in a
+    direct message" is enforced here as a code gate (the repo's DM
+    invariants — must-reply, the ellipsis fallback — all live in code,
+    with the prompt as guidance), because the orchestrator's
+    ``processEndVote`` has no channel-type exemption and would count a
+    DM vote toward a quorum.
+    """
+    target_channel = str(action.payload.get("channel_id", "") or "").strip()
+    if publisher is None:
+        logger.info(
+            "Agent %s voted to end the interaction but no REST publisher "
+            "is configured (legacy in-process path) — vote not published",
+            sender_id,
+        )
+        return {"action_type": "end_interaction_vote", "status": "not_implemented"}
+    if not target_channel:
+        logger.warning(
+            "Agent %s END_INTERACTION_VOTE has no channel_id (non-channel "
+            "turn?); a vote cannot be scoped to an interaction — dropped",
+            sender_id,
+        )
+        return {"action_type": "end_interaction_vote", "status": "no_channel_id"}
+    if target_channel.startswith(_DM_CHANNEL_PREFIX):
+        logger.warning(
+            "Agent %s END_INTERACTION_VOTE targets DM channel %s; a DM has "
+            "no group discussion to close (see the end-interaction-vote "
+            "prompt snippet) — dropped",
+            sender_id, target_channel,
+        )
+        return {
+            "action_type": "end_interaction_vote",
+            "status": "dm_channel",
+            "channel_id": target_channel,
+        }
+
+    content = str(action.payload.get("content", "") or "").strip()
+    if not content:
+        content = _END_VOTE_DEFAULT_CONTENT
+    try:
+        await asyncio.wait_for(
+            publisher.publish(
+                channel_id=target_channel,
+                sender_id=sender_id,
+                content=content,
+                mentions=[],
+                cascade_depth=cascade_depth,
+                metadata={"end_interaction_vote": True},
+            ),
+            timeout=DEFAULT_PUBLISH_TIMEOUT_SECONDS,
+        )
+    except ChannelsDisabledError:
+        logger.debug(
+            "END_INTERACTION_VOTE short-circuited (channels disabled at "
+            "orchestrator): agent=%s channel=%s",
+            sender_id, target_channel,
+        )
+        return {
+            "action_type": "end_interaction_vote",
+            "status": "channels_disabled",
+            "channel_id": target_channel,
+        }
+    except Exception as exc:  # noqa: BLE001 — surfaced via "failed" status
+        logger.warning(
+            "End-interaction vote from %s to %s failed: %s",
+            sender_id, target_channel, exc,
+            exc_info=not isinstance(exc, TimeoutError),
+        )
+        return {
+            "action_type": "end_interaction_vote",
+            "status": "failed",
+            "channel_id": target_channel,
+        }
+    return {
+        "action_type": "end_interaction_vote",
+        "status": "published",
+        "channel_id": target_channel,
+    }

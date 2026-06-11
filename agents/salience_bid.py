@@ -326,6 +326,7 @@ async def evaluate_salience(
     persona_role: str,
     threshold: float | None,
     cause: walletpb.Cause.ValueType = walletpb.CAUSE_CHANNEL_MESSAGE,
+    interaction_id: str = "",
 ) -> SalienceDecision:
     """Run the Tier B salience bid for one open-floor admit.
 
@@ -375,6 +376,17 @@ async def evaluate_salience(
             temperature=_BID_TEMPERATURE,
             cause=cause,
             agent_id=agent_id,
+            # RFC 0030 producer plan PR 2: thread the same interaction as the
+            # quality turn this bid gates (TB3 extended to the interaction
+            # dimension; "" = untracked). Attribution substrate, not yet
+            # enforcement: the wallet ignores the id unless a positive
+            # interaction_budget_tokens rides the SAME lease request
+            # (internal/wallet/wallet.go gates both tracking and the ceiling
+            # check on it), and no call site stamps that ceiling yet — for an
+            # exhausted interaction to deny bids fail-closed, the
+            # config-stamping follow-up must thread the budget through here
+            # as well as the quality turn.
+            interaction_id=interaction_id,
         )
     except BudgetExceededError:
         # TB3 / RFC 0023 §F: a denied (or unreachable) lease fails closed.
