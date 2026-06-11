@@ -268,6 +268,8 @@ The gate is necessary but not sufficient — it admits every event for `always` 
 
 ### I. Layer 5 — Moderator role
 
+> **Brought-forward slice (chair stall escalation, 2026-06-11).** One narrow, deterministic fragment of this layer ships ahead of the full moderator via the [chair-stall-escalation amendment](0030-amendment-chair-stall-escalation.md): a floor round that ends with **zero replies** on an open, tracked interaction (every Tier B bid honestly passed — the stall the convergence review identified as the remaining silent-death mode) dispatches **one forced turn** to a per-channel `escalation_chair_id`, whose prompt is "synthesize and cast your end-vote, or call on whoever should speak next." Termination still flows through Layer 4's quorum alone (the chair proposes, the quorum disposes — TB5 intact); the transcript-level CONTINUE/WRAP_UP/TERMINATE judgement below, the trusted non-participant closer, and `moderator_agent_id` all remain v0.4.0 and subsume the slice when they land.
+
 **Why.** Sub-problem (d) — "is the discussion productive?" — requires reading the transcript. Only an LLM can do that. A moderator is the right abstraction because the question is genuinely transcript-level, not per-message; it's a different judgement from "should I reply?"
 
 **Mechanism.** A new logical role: a **moderator agent** registered against a channel via `channels.yaml: moderator_agent_id`. The moderator is not a participant — it doesn't send messages into the channel — but it does subscribe to events. Every N turns within an open Interaction (default `moderator_interval_turns=5`), the orchestrator wakes the moderator with a `MODERATE_INTERACTION` event containing the interaction transcript and asks for a decision:
