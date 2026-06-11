@@ -152,6 +152,35 @@ func TestEndVote_OutOfWindowVotesDoNotAccumulate(t *testing.T) {
 		"alice's vote is outside the W=3 window of bob's, so no quorum")
 }
 
+// TestEndVote_PendingVoteSurvivesSilenceAndEscalationTurn pins the window
+// mechanics the chair-stall-escalation amendment (OQ 1) leans on: W counts
+// turns — publishes carrying the interaction_id — not wall-clock, so a
+// zero-replied round advances zero turns and a lone pending vote cannot go
+// stale during the very silence that triggers the escalation (only idle
+// rotation kills it, by closing the whole interaction). The arc is the
+// quorum-pending stall: a lone vote (turn 1), the stall itself (no publishes —
+// deliberately nothing to drive here, which is the point), one escalation
+// synthesis turn (turn 2), then a concurrence at turn 3 that still sees the
+// first vote live (3-1 = 2 < W=3). Distance W-1 with an intervening publish is
+// the window boundary no other test exercises (KDistinct… is distance 1,
+// OutOfWindow… is distance W).
+func TestEndVote_PendingVoteSurvivesSilenceAndEscalationTurn(t *testing.T) {
+	router, store, reader := routerWithInteractionClosedMetric(t)
+	id := mustCreateGroup(t, store, "planning", "alice", "bob", "carol")
+	router.SetEndVoteParams(id, 2, 3)
+
+	require.NoError(t, endVote(t, router, id, "alice", "int-1")) // turn 1 — the lone pending vote
+	// The zero-replied round: no publishes, so the per-interaction turn
+	// counter does not move and alice's vote stays live.
+	require.NoError(t, plainTurn(t, router, id, "carol", "int-1")) // turn 2 — the chair's synthesis
+	require.NoError(t, endVote(t, router, id, "bob", "int-1"))     // turn 3 — concurrence; alice is at distance 2 < W
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	assert.Equal(t, int64(1), interactionClosedCount(t, rm, "group", "end_votes"),
+		"a pre-stall vote at distance W-1 is still live — the escalation arc completes the quorum")
+}
+
 // TestEndVote_UntrackedVoteIgnored pins that a vote with no interaction_id is
 // never accumulated — there is nothing to scope the quorum to, so the layer
 // stays at its inert default (additive). K=1 would close if it were tracked.
