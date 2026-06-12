@@ -251,6 +251,10 @@ class TestLLMPersonaAgent:
             ),
         )
         actions = agent._parse_actions(response)
+        # Schema preamble beside a non-vote block stays dropped (PR 610
+        # review: the prose seam is scoped to END_INTERACTION_VOTE blocks —
+        # the synthesis-rescue case — so boilerplate narration never reaches
+        # the channel-reply promotion seam).
         assert len(actions) == 1
         assert actions[0].action_type == ActionType.DO_NOTHING
 
