@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import time
 
-from agents.memory.boundary_detectors import REASON_STRUCTURAL
+from agents.memory.boundary_detectors import REASON_IDLE_GAP, REASON_STRUCTURAL
 from agents.memory.interactions import Interaction
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
@@ -106,6 +106,44 @@ class TestCloseNotificationActionLoopWiring:
             "the closing vote is the closed record's final turn, "
             "after the opening turn it arrived behind"
         )
+
+    async def test_already_idle_scope_invents_no_record(self):
+        """PR #614 review finding 3, through the real loop: a
+        notification landing AFTER the scope already idled out (restart,
+        janitor flush, slow delivery) is a true no-op — the orchestrator's
+        "ended" record stands; the agent fabricates nothing. The pre-fix
+        composition ingested first, which ``add_turn``-opened a fresh
+        interaction holding only the re-delivered closing vote, then
+        closed it structurally — a spurious 1-turn "ended" record plus a
+        summariser LLM call, duplicating the record that already closed."""
+        agent, persisted = await _make_agent_with_persist_spy()
+        assert agent._interaction_tracker.get(_SCOPE) is None
+
+        actions = await agent.on_event(_notification_event())
+
+        assert len(actions) == 1
+        assert actions[0].action_type is ActionType.DO_NOTHING
+        assert persisted == [], "no record invented for an already-closed scope"
+        assert agent._interaction_tracker.get(_SCOPE) is None, (
+            "the notification must not re-open the scope"
+        )
+        agent._llm_client._provider.create_message.assert_not_called()  # type: ignore[attr-defined]
+
+    async def test_expired_scope_flushes_idle_with_no_structural_successor(self):
+        """The stale-open half of the same finding: an interaction whose
+        idle window expired before the notification arrived closes by the
+        agent's own idle rule (the staleness pass every ingest runs), and
+        the notification then finds nothing open — one idle record, no
+        fabricated structural successor riding behind it."""
+        agent, persisted = await _make_agent_with_persist_spy()
+        agent._interaction_tracker.add_turn(_SCOPE, now=time.time() - 100_000)
+
+        await agent.on_event(_notification_event())
+
+        assert [i.close_reason for i in persisted] == [REASON_IDLE_GAP], (
+            "exactly the idle flush — no structural record fabricated after it"
+        )
+        assert agent._interaction_tracker.get(_SCOPE) is None
 
     async def test_impostor_marker_takes_the_ordinary_path(self):
         """A truthy non-bool marker is no notification (strict-bool on

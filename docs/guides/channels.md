@@ -543,7 +543,11 @@ Two boundary notes on those seams:
   (found live by [MT-CHANNEL-GOV-004](../manual-tests/MT-CHANNEL-GOV-004.md)).
   Fail-open: a dropped notification degrades to exactly that pre-amendment
   idle-out, observable per recipient on
-  `channel.conversation.close_notification{outcome}`.
+  `channel.conversation.close_notification{outcome}`. A notification that
+  arrives only *after* the member's own idle window already closed the
+  record degrades the same way — the agent's boundary rules outrank the
+  late signal, and no local record is invented to mirror the
+  orchestrator's (which stands regardless).
 - **The rotation carries its cause.** Every publish of the successor
   interaction names the retired id and what closed it
   (`ChannelMessageEvent.previous_interaction_id` +
