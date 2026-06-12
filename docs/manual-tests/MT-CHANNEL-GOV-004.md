@@ -173,7 +173,7 @@ here is signal that steering needs another pass).
 
 | Date | Tester | Build | Result | Notes |
 |------|--------|-------|--------|-------|
-|      |        |       |        |       |
+| 2026-06-12 | Claude (operator: mkhomutov) | main @ 113c728 | PARTIAL PASS | Steps 1–2 fully verified (run with interaction `ebc02462`: stall → `outcome=dispatched` → chair synthesis-in-vote with `end_interaction_vote: true` on the wire → close on 2nd distinct vote, `trigger=end_votes`, 9 s after escalation; CE5 one-ration guard observed three times). Step 3 partial: summaries carry the synthesis and vote-closed interactions render "ended", but the closing vote's fanout suppression means no member's agent-local tracker hears the close — with no follow-up traffic inside the agent-side 600 s idle window every member's surface renders the escalated interaction "went idle". Edge Case 1 (chair hand-off) observed on first run, incl. display-name @-mentions resolving to no floor-capable member. Side findings: one unreproduced idle-rotation no-fire (700 s gap, window 600 s, 03:14:50→03:26:30Z; later gaps of 680 s did rotate); personas pass-prone enough that un-mentioned prompts often stall on the *opening* round; split prose+vote replies burn a W=3 turn. Wall-clock cost was ~2 h — dominated by 600 s governance timers and re-runs; this MT needs a test-profile idle window (e.g. 60 s) to be practical. |
 
 ## Notes
 

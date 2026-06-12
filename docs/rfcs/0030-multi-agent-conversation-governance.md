@@ -252,6 +252,8 @@ The gate is necessary but not sufficient — it admits every event for `always` 
 
 ### H. Layer 4 — End-of-interaction signal
 
+> **Amendment (end-vote close propagation, 2026-06-12).** The quorum close suppresses the closing vote's fanout — correctly, so the room stops — but that starves every member's agent-local tracker of the close itself: with no follow-up traffic, each member buries the converged discussion as *went idle* up to a full idle window later, and the chair never learns its synthesis closed the room (found live by [MT-CHANNEL-GOV-004](../manual-tests/MT-CHANNEL-GOV-004.md)). The [end-vote-close-propagation amendment](0030-amendment-end-vote-close-propagation.md) adds a marked, ingestion-grade close-notification dispatch to every dispatch-served non-sender member — control, never stimulus: no turn, no bid, no LLM — so an `end_votes` close renders *ended* with the synthesis, promptly, on every member's summary surface. Suppression, the quorum mechanics, and the lazy-idle successor-stamp path are unchanged.
+
 **Why.** The simplest way to terminate a productive discussion is to let participants signal "I'm done." Two consecutive distinct participants saying "I have nothing more to add" is strong enough evidence to close. This pattern is standard in human meetings — "any other business?" → silence → meeting adjourned.
 
 **Mechanism.** Two compatible options; this RFC recommends Option A and reserves the decision per [§OQ-4](#open-questions):
