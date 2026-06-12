@@ -36,6 +36,7 @@ from .salience_gate import run_salience_gate
 from .wallet_cause import lease_attribution_for_event
 
 if TYPE_CHECKING:
+    from ..memory.interactions import Interaction, InteractionTracker
     from .memory_context import MemoryInjectionResult
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,18 @@ class _ActionLoopMixin:
 
     # Stub declarations for methods provided by sibling mixins / concrete class.
     if TYPE_CHECKING:
+        # The episode-routing surface the gate-suppress path's
+        # ``_GateSuppressAgent`` protocol requires (CP3): ``self`` must
+        # satisfy it structurally at the ``suppressed_event_actions``
+        # call site, exactly like the existing ``_store_event_episode``
+        # stub below.
+        _interaction_tracker: InteractionTracker
+        _MULTI_TURN_EVENT_TYPES: frozenset[EventType]
+
+        def _scope_for_multi_turn_event(self, event: AgentEvent) -> str | None: ...
+        async def _persist_closed_interaction(
+            self, interaction: Interaction,
+        ) -> None: ...
         def _format_event(self, event: AgentEvent) -> str: ...
         async def _build_seed_messages(
             self, event: AgentEvent, current_user_message: str,
