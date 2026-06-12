@@ -450,5 +450,9 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		// set only by [ChannelRouter.maybeEscalateStall]'s dispatch — false
 		// (the proto3 default) on every ordinary fanout.
 		ChairEscalation: env.ChairEscalation,
+		// End-vote-close-propagation amendment (CP2): the close-notification
+		// marker, set only by [ChannelRouter.notifyInteractionClose]'s
+		// dispatch — false (the proto3 default) on every ordinary fanout.
+		InteractionCloseNotification: env.InteractionCloseNotification,
 	}
 }

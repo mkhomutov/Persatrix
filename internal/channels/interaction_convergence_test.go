@@ -112,11 +112,15 @@ func TestConvergence_DiscussionEndsByVotesBeforeDepthCap(t *testing.T) {
 	// 4. EXACT fanout accounting. The first vote dispatches to its two
 	// non-sender RespondAlways peers (iron-fox, nova-sparrow; alex is
 	// `respond: never`) — others must see the terminal signal — and the
-	// closing vote dispatches to NO ONE. Greater-than would let a close
-	// that leaked its own fanout pass; the +2 pins the suppression itself.
+	// closing vote draws NO fanout: its two dispatches are the CP1 close
+	// notifications (ember-owl, nova-sparrow; the end-vote-close-propagation
+	// amendment — fire-and-forget, so the drain point makes the count
+	// deterministic). Greater-than would let a close that leaked real
+	// fanout pass; the exact +4 pins suppression and notification together.
+	router.WaitForPendingFanout()
 	fannedAfterVotes := len(disp.snapshot())
-	assert.Equal(t, fannedBeforeVotes+2, fannedAfterVotes,
-		"exactly the first vote fans out (two recipients); the closing vote draws no fanout")
+	assert.Equal(t, fannedBeforeVotes+4, fannedAfterVotes,
+		"the first vote fans out (two recipients); the closing vote delivers exactly the two close notifications")
 	closedAtCount := fannedAfterVotes
 
 	// A commit racing the close (the only way the closed id sees more

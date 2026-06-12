@@ -61,8 +61,6 @@ func (d *closeDispatchRecorder) snapshot() []closeDispatchCall {
 }
 
 func TestEndVoteClose_NotifiesEveryMemberOfTheClose(t *testing.T) {
-	t.Skip("CP acceptance (0030-amendment-end-vote-close-propagation §E) — unskip in PR 2, the close-notification dispatch")
-
 	store := newTestStore(t, SQLiteOptions{})
 	disp := &closeDispatchRecorder{}
 	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
@@ -120,6 +118,10 @@ func TestEndVoteClose_NotifiesEveryMemberOfTheClose(t *testing.T) {
 	seenIDs := map[string]bool{}
 	for _, call := range disp.snapshot()[beforeClose:] {
 		notified[call.env.Recipient.ParticipantID]++
+		assert.True(t, call.env.InteractionCloseNotification,
+			"CP2: the dispatch carries the typed close-notification marker")
+		assert.False(t, call.env.ChairEscalation,
+			"the notification is not a forced turn — the markers never alias")
 		assert.Equal(t, closingContent, call.msg.Content,
 			"the notification carries the closing vote verbatim")
 		assert.Equal(t, "iron-fox", call.msg.SenderID,

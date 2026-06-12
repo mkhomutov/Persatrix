@@ -93,7 +93,9 @@ func interactionClosedCount(t *testing.T, rm metricdata.ResourceMetrics, channel
 // TestEndVote_KDistinctVotesWithinWindowCloses pins the core Layer 4 contract
 // (§H): K=2 distinct participants voting within W=3 consecutive turns closes
 // the interaction with interaction_closed{trigger=end_votes}, and the closing
-// publish's fanout is suppressed (no new replies are dispatched).
+// publish's fanout is suppressed — its only dispatches are the marked CP1
+// close notifications (the end-vote-close-propagation amendment), never
+// ordinary fanout that could draw new replies.
 func TestEndVote_KDistinctVotesWithinWindowCloses(t *testing.T) {
 	router, store, reader := routerWithInteractionClosedMetric(t)
 	disp := router.dispatcher.(*recordingDispatcher)
@@ -112,8 +114,20 @@ func TestEndVote_KDistinctVotesWithinWindowCloses(t *testing.T) {
 	assert.Equal(t, int64(1), interactionClosedCount(t, rm, "group", "end_votes"),
 		"K distinct votes within W closes the interaction exactly once")
 
-	assert.Equal(t, before, len(disp.snapshot()),
-		"the closing vote's fanout is suppressed — no new replies dispatched")
+	// The closing vote's only dispatches are the close notifications to the
+	// non-sender members (alice, carol) — marked, so a receiver treats them
+	// as control; an UNMARKED post-close dispatch here would be leaked
+	// fanout, exactly what suppression exists to stop.
+	router.WaitForPendingFanout()
+	postClose := disp.snapshot()[before:]
+	notified := map[string]bool{}
+	for _, call := range postClose {
+		assert.True(t, call.closeNotification,
+			"every post-close dispatch is a marked close notification, never fanout")
+		notified[call.participantID] = true
+	}
+	assert.Equal(t, map[string]bool{"alice": true, "carol": true}, notified,
+		"the close is announced to exactly the non-sender members")
 }
 
 // TestEndVote_DoubleVoteDedupes pins the per-(participant, interaction) dedupe

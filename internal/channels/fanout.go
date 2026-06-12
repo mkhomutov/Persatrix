@@ -171,7 +171,7 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 			// paths, so a panicking dispatch is not caught by the server's
 			// recoveryMiddleware — recover here or it crashes the process.
 			defer r.recoverFanout("dispatch", msg.ChannelID, msg.ID)
-			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize, floorMentions, false)
+			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize, floorMentions, false, false)
 		}()
 	}
 	wg.Wait()
@@ -190,7 +190,7 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 // `chair_escalation{outcome}`; the fanout and floor-turn callers are
 // fire-and-forget by contract and ignore it (the warn + the delivered
 // counter's status=error emitted here are their entire failure surface).
-func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member, channelSize int, floorMentions []string, chairEscalation bool) error {
+func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member, channelSize int, floorMentions []string, chairEscalation, closeNotification bool) error {
 	dispatchCtx, cancel := context.WithTimeout(ctx, channelFanoutPerRecipientTimeout)
 	defer cancel()
 	err := r.dispatcher.Dispatch(dispatchCtx, DispatchEnvelope{
@@ -204,8 +204,9 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		SalienceMaxChannelMembers: r.salienceMaxFor(msg.ChannelID),
 		// Floor-capable-directedness amendment (v0.3.8): per-publish, like
 		// ChannelSize — resolved once in [ChannelRouter.fanout].
-		FloorMentions:   floorMentions,
-		ChairEscalation: chairEscalation,
+		FloorMentions:                floorMentions,
+		ChairEscalation:              chairEscalation,
+		InteractionCloseNotification: closeNotification,
 	}, msg)
 	status := "ok"
 	if err != nil {

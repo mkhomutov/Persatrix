@@ -54,6 +54,18 @@ type DispatchEnvelope struct {
 	// ordinary fanout — the zero value is every non-escalation dispatch.
 	ChairEscalation bool
 
+	// InteractionCloseNotification (the end-vote-close-propagation
+	// amendment, CP2) marks this dispatch as the orchestrator's close
+	// notification: the closing quorum vote re-dispatched to a
+	// dispatch-served non-sender member after an `end_votes` close, whose
+	// ordinary fanout is suppressed. Carried on
+	// `ChannelMessageEvent.interaction_close_notification`; the receiver
+	// treats a marked event as control, never stimulus (gate refusal
+	// pre-LLM + immediate local-tracker close, CP3). Set only by
+	// [ChannelRouter.notifyInteractionClose] — the zero value is every
+	// ordinary dispatch.
+	InteractionCloseNotification bool
+
 	// FloorMentions (RFC 0030 floor-capable-directedness amendment) is the
 	// subset of the message's mentions naming floor-capable members —
 	// resolved once per publish by [resolveFloorMentions] in

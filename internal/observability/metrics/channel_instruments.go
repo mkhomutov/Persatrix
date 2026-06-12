@@ -124,6 +124,20 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	); err != nil {
 		return fmt.Errorf("create channel.conversation.chair_escalation: %w", err)
 	}
+	// End-vote-close-propagation amendment (RFC 0030 SH follow-up, v0.3.8).
+	// One increment per per-recipient close-notification dispatch, labelled
+	// by `channel_type` and `outcome` (dispatched / dispatch_error) — CP5's
+	// entire observable surface for the fire-and-forget delivery of an
+	// `end_votes` close to the room.
+	if i.ChannelConversationCloseNotification, err = m.Int64Counter(
+		"channel.conversation.close_notification",
+		metric.WithUnit("{dispatch}"),
+		metric.WithDescription(
+			"Per-recipient end-vote close-notification dispatches, labelled by channel_type and outcome.",
+		),
+	); err != nil {
+		return fmt.Errorf("create channel.conversation.close_notification: %w", err)
+	}
 	// RFC 0030 Layer 4 (v0.3.8) vote-volume counter. One increment per
 	// end-of-interaction vote action, labelled by `channel_type`. Paired with
 	// interaction_closed it shows how many votes were cast versus how many

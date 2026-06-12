@@ -243,6 +243,15 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 		// (added above) survives until the deferred discard, suppressing and
 		// self-healing any commit that raced this close.
 		r.markInteractionClosed(msg.ChannelID, interactionID)
+		// End-vote-close-propagation amendment (CP1/CP5): the closing vote's
+		// fanout is suppressed (the caller's early return this `true` buys),
+		// so the close must be DELIVERED, not inferred — fan the closing
+		// message to every dispatch-served non-sender member as the marked
+		// close notification, fire-and-forget, so each agent-local tracker
+		// closes the scope now with the truthful `end_votes` cause instead
+		// of burying the converged discussion as "went idle" an idle window
+		// later.
+		r.notifyInteractionClose(ctx, msg, ct)
 		return true
 	}
 	// Suppress fanout of a redundant in-window duplicate vote. An end-vote is

@@ -310,12 +310,16 @@ func TestGovernance_PostCloseSuppressionEmitsGovernanceDrop(t *testing.T) {
 	router.SetEndVoteParams(id, 2, 3) // K=2, W=3
 
 	// Two distinct votes close the interaction. The first vote fans out; the
-	// closing vote suppresses its own fanout but is the close, not a drop.
+	// closing vote suppresses its own fanout but is the close, not a drop —
+	// it delivers the CP1 close notifications instead (alice and carol; the
+	// end-vote-close-propagation amendment), drained below so the count is
+	// deterministic before the post-close suppression is measured.
 	require.NoError(t, endVote(t, router, id, "alice", ""))
 	closedID := openInteractionID(router, id)
 	require.NoError(t, endVote(t, router, id, "bob", ""))
 	require.Zero(t, governanceDropCount(t, collect(t, reader), "group", governanceLayerEndVote),
 		"reaching quorum is the interaction_closed signal, not a governance_drop")
+	router.WaitForPendingFanout()
 	fannedBeforePostClose := len(disp.snapshot())
 
 	// An ordinary (non-vote) reply landing in the now-closed interaction — the

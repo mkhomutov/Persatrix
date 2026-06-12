@@ -145,6 +145,8 @@ func initChannels(
 			ReplyBudgetRemaining: orchMetrics.ChannelConversationReplyBudgetRemaining,
 			// Chair-stall-escalation amendment (minimal Layer 5 slice).
 			ChairEscalation: orchMetrics.ChannelConversationChairEscalation,
+			// End-vote-close-propagation amendment (CP5).
+			CloseNotification: orchMetrics.ChannelConversationCloseNotification,
 		}
 	}
 	// ISSUE-0082 PR 2: build the per-request session resolver over the
