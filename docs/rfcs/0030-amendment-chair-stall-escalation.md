@@ -1,7 +1,7 @@
 # RFC 0030 Amendment — Chair Stall Escalation (a Minimal Layer 5 Slice, Brought Forward)
 
 **Type**: amendment to [RFC 0030 §I](0030-multi-agent-conversation-governance.md#i-layer-5--moderator-role) (Layer 5 — moderator role), bringing one narrow slice forward from Phase 2 (v0.4.0) — the floor-control precedent (Layer 2.5, brought forward to v0.3.6 as a usability blocker)
-**Status**: 📋 Proposed
+**Status**: ✅ Implemented (v0.3.8 — orchestrator detection + dispatch [#609](https://github.com/mkhomutov/Persatrix/pull/609); agent-side forced turn [#610](https://github.com/mkhomutov/Persatrix/pull/610); acceptance arc + closeout [#611](https://github.com/mkhomutov/Persatrix/pull/611). Deterministic acceptance pinned by [`TestConvergence_StallEscalatesAndClosesByVotes`](../../internal/channels/interaction_convergence_test.go); live acceptance [MT-CHANNEL-GOV-004](../manual-tests/MT-CHANNEL-GOV-004.md) pending execution)
 **Author**: Maksim Khomutov
 **Date**: 2026-06-11
 **Target**: v0.3.8 (three implementation PRs after this doc: orchestrator stall detection + escalation dispatch; agent-side forced turn; MT + closeout)
