@@ -124,7 +124,7 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	); err != nil {
 		return fmt.Errorf("create channel.conversation.chair_escalation: %w", err)
 	}
-	// End-vote-close-propagation amendment (RFC 0030 SH follow-up, v0.3.8).
+	// End-vote-close-propagation amendment (RFC 0030 §H follow-up, v0.3.8).
 	// One increment per per-recipient close-notification dispatch, labelled
 	// by `channel_type` and `outcome` (dispatched / dispatch_error) — CP5's
 	// entire observable surface for the fire-and-forget delivery of an

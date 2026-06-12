@@ -14,12 +14,13 @@ package channels
 
 import (
 	"context"
+	"maps"
+	"slices"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
-	"maps"
 )
 
 // Close-notification dispatch outcomes (CP5): every per-recipient dispatch
@@ -49,64 +50,98 @@ const (
 // Posture (CP5): fire-and-forget, off the publish path — called from
 // [ChannelRouter.processEndVote]'s close branch, never awaited, every
 // degraded branch nets to the status quo (the member's tracker idles out
-// with the legacy label). "Never awaited" is not "untracked": each
-// per-recipient goroutine registers on the router's fanout drain
-// WaitGroup, so graceful shutdown's drain bounds them instead of leaking
-// them past process exit, and [ChannelRouter.WaitForPendingFanout] stays
-// the deterministic assert point the committed acceptance relies on —
-// this is the one dispatch the suppressed publish path never joins.
+// with the legacy label). The WHOLE fan is off-path (PR #613 review):
+// the member lookup and the spawning loop run on a detached, tracked
+// wrapper goroutine, so the closing publish pays one goroutine spawn,
+// never a store read — and the per-recipient loop applies the same
+// ISSUE-0014 semaphore bound as [ChannelRouter.dispatchConcurrent], with
+// the acquire on the wrapper's loop so the backpressure stalls the
+// wrapper, never the publisher. Every goroutine here recovers via
+// [ChannelRouter.recoverFanout]: detached workers have no
+// recoveryMiddleware umbrella, and an unrecovered panic in any goroutine
+// terminates the whole orchestrator.
 //
-// The context is detached (`context.WithoutCancel`): the notification
-// outlives the closing publish's HTTP response by construction, and a
-// client disconnect must not silently drop the room's close signal —
-// the same posture as [ChannelRouter.fanout].
+// "Never awaited" is not "untracked": the wrapper and each per-recipient
+// worker register on the router's fanout drain WaitGroup — the workers
+// Add while the wrapper's own registration holds the count positive, so
+// the drain never races an Add-from-zero — graceful shutdown's drain
+// bounds them instead of leaking them past process exit, and
+// [ChannelRouter.WaitForPendingFanout] stays the deterministic assert
+// point the committed acceptance relies on — this is the one dispatch
+// the suppressed publish path never joins.
 //
-// Each recipient gets a FRESH event id with a CLONED metadata bag (CE3's
-// lesson, both halves: the agent-side conversation window dedups by
-// message id, so redelivering the persisted vote under its own id would
-// be silently dropped by any member that ingested it pre-close; and the
-// per-recipient goroutines outlive this call, so aliasing the map would
-// let a future metadata write corrupt a sibling's dispatch).
+// The context is detached (`context.WithoutCancel`) BEFORE any work,
+// member lookup included: the close is a one-shot signal (the
+// interaction is already closed; nothing retries it) that outlives the
+// closing publish's HTTP response by construction, and a client
+// disconnect must not silently drop it — a lookup still descended from
+// the request context would die with the request and drop the entire
+// fan (PR #613 review; pinned by the disconnect acceptance). The same
+// posture as [ChannelRouter.fanout]'s callers, which detach before any
+// fan work runs.
+//
+// Each recipient gets a FRESH event id with CLONED reference fields —
+// the metadata bag and the mentions slice (CE3's lesson, both halves:
+// the agent-side conversation window dedups by message id, so
+// redelivering the persisted vote under its own id would be silently
+// dropped by any member that ingested it pre-close; and the
+// per-recipient goroutines outlive this call, so an aliased map or
+// backing array would let a future write corrupt a sibling's dispatch).
 //
 // Thread channels ride the same seam (CP4 — a thread IS its
 // interaction). `threadParentSenderID` is deliberately empty: it exists
 // to serve receiver-side directedness decisions, and a marked event
 // never reaches them — the gate refuses it pre-LLM (CP3).
 func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType) {
-	members, err := r.store.GetMembers(ctx, msg.ChannelID)
-	if err != nil {
-		// CP5: fail-open. No members means no one to notify; the trackers
-		// idle out exactly as they would have pre-amendment.
-		r.logger.Warn("channels: close-notification member lookup failed; close stands unannounced",
-			zap.String("channel_id", msg.ChannelID),
-			zap.Error(err))
-		return
-	}
-	channelSize := len(members)
 	notifyCtx := context.WithoutCancel(ctx)
-	for _, m := range members {
-		if m.ParticipantID == msg.SenderID || m.RespondPolicy == RespondNever {
-			continue
+	r.fanoutWG.Add(1)
+	go func() {
+		defer r.fanoutWG.Done()
+		defer r.recoverFanout("close_notification", msg.ChannelID, msg.ID)
+		members, err := r.store.GetMembers(notifyCtx, msg.ChannelID)
+		if err != nil {
+			// CP5: fail-open. No members means no one to notify; the trackers
+			// idle out exactly as they would have pre-amendment.
+			r.logger.Warn("channels: close-notification member lookup failed; close stands unannounced",
+				zap.String("channel_id", msg.ChannelID),
+				zap.Error(err))
+			return
 		}
-		notification := msg
-		notification.ID = uuid.NewString()
-		notification.Metadata = maps.Clone(msg.Metadata)
-		recipient := m
-		r.fanoutWG.Add(1)
-		go func() {
-			defer r.fanoutWG.Done()
-			outcome := closeNotificationDispatched
-			if err := r.dispatchTo(notifyCtx, notification, ct, "", recipient, channelSize, nil, false, true); err != nil {
-				// dispatchTo already warned with the recipient + error; the
-				// outcome label is this path's own failure surface (CP5).
-				outcome = closeNotificationDispatchError
+		channelSize := len(members)
+		sem := make(chan struct{}, channelFanoutMaxConcurrency)
+		for _, m := range members {
+			// Normalized at the read seam like every other policy read
+			// ([dispatchConcurrent], [orderResponders], the Python gate's
+			// `_DISPOSITION_ALIASES`): identity for store-canonical rows,
+			// but CP1 defines the recipient set as the set fanout serves,
+			// so the two predicates must not diverge (PR #613 review).
+			if m.ParticipantID == msg.SenderID || m.RespondPolicy.Normalize() == RespondNever {
+				continue
 			}
-			if r.metrics != nil && r.metrics.CloseNotification != nil {
-				r.metrics.CloseNotification.Add(notifyCtx, 1, metric.WithAttributes(
-					attribute.String("channel_type", string(ct)),
-					attribute.String("outcome", outcome),
-				))
-			}
-		}()
-	}
+			notification := msg
+			notification.ID = uuid.NewString()
+			notification.Metadata = maps.Clone(msg.Metadata)
+			notification.Mentions = slices.Clone(msg.Mentions)
+			recipient := m
+			sem <- struct{}{}
+			r.fanoutWG.Add(1)
+			go func() {
+				defer r.fanoutWG.Done()
+				defer func() { <-sem }()
+				defer r.recoverFanout("close_notification", msg.ChannelID, notification.ID)
+				outcome := closeNotificationDispatched
+				if err := r.dispatchTo(notifyCtx, notification, ct, "", recipient, channelSize, nil, markerCloseNotification); err != nil {
+					// dispatchTo already warned with the recipient + error; the
+					// outcome label is this path's own failure surface (CP5).
+					outcome = closeNotificationDispatchError
+				}
+				if r.metrics != nil && r.metrics.CloseNotification != nil {
+					r.metrics.CloseNotification.Add(notifyCtx, 1, metric.WithAttributes(
+						attribute.String("channel_type", string(ct)),
+						attribute.String("outcome", outcome),
+					))
+				}
+			}()
+		}
+	}()
 }

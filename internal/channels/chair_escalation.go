@@ -225,7 +225,7 @@ func (r *ChannelRouter) maybeEscalateStall(
 	forced.ID = uuid.NewString()
 	forced.Metadata = maps.Clone(msg.Metadata)
 	r.markActivity(msg.ChannelID, []string{chairID})
-	if err := r.dispatchTo(ctx, forced, ct, threadParentSenderID, *chair, channelSize, floorMentions, true, false); err != nil {
+	if err := r.dispatchTo(ctx, forced, ct, threadParentSenderID, *chair, channelSize, floorMentions, markerChairEscalation); err != nil {
 		r.clearActivity(msg.ChannelID, chairID)
 		r.logger.Warn("channels: chair escalation dispatch failed; stall stands",
 			zap.String("channel_id", msg.ChannelID),

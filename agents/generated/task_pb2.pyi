@@ -589,7 +589,7 @@ class ChannelMessageEvent(google.protobuf.message.Message):
     open-floor message (degraded to the pre-amendment stall, CE7/SD).
     """
     interaction_close_notification: builtins.bool
-    """End-vote-close-propagation amendment (RFC 0030 SH, v0.3.8): true iff
+    """End-vote-close-propagation amendment (RFC 0030 §H, v0.3.8): true iff
     this dispatch is the orchestrator's close NOTIFICATION - the closing
     quorum vote re-dispatched to every dispatch-served non-sender member
     after an `end_votes` close, whose ordinary fanout is suppressed

@@ -120,14 +120,18 @@ func TestEndVote_KDistinctVotesWithinWindowCloses(t *testing.T) {
 	// fanout, exactly what suppression exists to stop.
 	router.WaitForPendingFanout()
 	postClose := disp.snapshot()[before:]
-	notified := map[string]bool{}
+	// Count per recipient, never a set: a boolean set would dedupe a double
+	// notification to the same member and pass on it (PR #613 review) — the
+	// exactly-once shape is half the pin, like the CP1 acceptance
+	// (TestEndVoteClose_NotifiesEveryMemberOfTheClose).
+	notified := map[string]int{}
 	for _, call := range postClose {
 		assert.True(t, call.closeNotification,
 			"every post-close dispatch is a marked close notification, never fanout")
-		notified[call.participantID] = true
+		notified[call.participantID]++
 	}
-	assert.Equal(t, map[string]bool{"alice": true, "carol": true}, notified,
-		"the close is announced to exactly the non-sender members")
+	assert.Equal(t, map[string]int{"alice": 1, "carol": 1}, notified,
+		"the close is announced to exactly the non-sender members, exactly once each")
 }
 
 // TestEndVote_DoubleVoteDedupes pins the per-(participant, interaction) dedupe

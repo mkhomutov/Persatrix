@@ -941,7 +941,7 @@ type ChannelMessageEvent struct {
 	// producer never sets it and an old consumer ignoring it sees an ordinary
 	// open-floor message (degraded to the pre-amendment stall, CE7/SD).
 	ChairEscalation bool `protobuf:"varint,22,opt,name=chair_escalation,json=chairEscalation,proto3" json:"chair_escalation,omitempty"`
-	// End-vote-close-propagation amendment (RFC 0030 SH, v0.3.8): true iff
+	// End-vote-close-propagation amendment (RFC 0030 §H, v0.3.8): true iff
 	// this dispatch is the orchestrator's close NOTIFICATION - the closing
 	// quorum vote re-dispatched to every dispatch-served non-sender member
 	// after an `end_votes` close, whose ordinary fanout is suppressed

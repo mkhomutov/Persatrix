@@ -359,7 +359,7 @@ message ChannelMessageEvent {
   // producer never sets it and an old consumer ignoring it sees an ordinary
   // open-floor message (degraded to the pre-amendment stall, CE7/SD).
   bool chair_escalation = 22;
-  // End-vote-close-propagation amendment (RFC 0030 SH, v0.3.8): true iff
+  // End-vote-close-propagation amendment (RFC 0030 §H, v0.3.8): true iff
   // this dispatch is the orchestrator's close NOTIFICATION - the closing
   // quorum vote re-dispatched to every dispatch-served non-sender member
   // after an `end_votes` close, whose ordinary fanout is suppressed
