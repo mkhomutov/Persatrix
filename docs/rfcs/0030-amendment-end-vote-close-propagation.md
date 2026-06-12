@@ -1,7 +1,7 @@
 # RFC 0030 Amendment — End-Vote Close Propagation (the Close Must Reach the Room)
 
 **Type**: amendment to [RFC 0030 §H](0030-multi-agent-conversation-governance.md#h-layer-4--end-of-interaction-signal) (Layer 4 — end-of-interaction signal), closing the gap between the orchestrator's close and the agents' knowledge of it
-**Status**: 📋 Proposed (this doc is PR 1 of 3; acceptance tests land here skip-guarded — orchestrator dispatch is PR 2, agent-side consumption is PR 3)
+**Status**: ✅ Implemented (v0.3.8 — amendment + skip-guarded acceptance [#612](https://github.com/mkhomutov/Persatrix/pull/612); orchestrator close-notification dispatch [#613](https://github.com/mkhomutov/Persatrix/pull/613); agent-side consumption PR 3/3, which unskipped the committed acceptance. Live re-validation — §C item 3, MT-CHANNEL-GOV-004 step 3 rendering *ended* with no follow-up traffic — pending the next MT run)
 **Author**: Maksim Khomutov
 **Date**: 2026-06-12
 **Target**: v0.3.8

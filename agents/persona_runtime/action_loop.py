@@ -16,7 +16,7 @@ from ..llm_client import LLMClient, LLMResponse, LLMToolResult, StopReason, Tool
 from ..memory.episodic import EpisodicMemory
 from ..memory.working import WorkingMemory
 from ..observability._metrics_persona_tick import tick_idle_attrs
-from ..observability.metrics import gate_attrs, replay_attrs, try_get_instruments
+from ..observability.metrics import replay_attrs, try_get_instruments
 from ..persona_types import (
     ActionType,
     AgentAction,
@@ -24,17 +24,19 @@ from ..persona_types import (
     EventType,
     PersonaState,
 )
-from ..response_gate import POLICY_DEFENSE_IN_DEPTH, evaluate_response_gate
+from ..response_gate import evaluate_response_gate
 from ..security import maybe_wrap_tool_content
 from ..tools.registry import ToolDefinition, get_tool, list_tools
 from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
 from .channel_reply import synthesize_channel_reply
+from .gate_suppress import suppressed_event_actions
 from .llm_call_errors import handle_llm_call_exception_with_cost_close
 from .salience_gate import run_salience_gate
 from .wallet_cause import lease_attribution_for_event
 
 if TYPE_CHECKING:
+    from ..memory.interactions import Interaction, InteractionTracker
     from .memory_context import MemoryInjectionResult
 
 logger = logging.getLogger(__name__)
@@ -77,6 +79,18 @@ class _ActionLoopMixin:
 
     # Stub declarations for methods provided by sibling mixins / concrete class.
     if TYPE_CHECKING:
+        # The episode-routing surface the gate-suppress path's
+        # ``_GateSuppressAgent`` protocol requires (CP3): ``self`` must
+        # satisfy it structurally at the ``suppressed_event_actions``
+        # call site, exactly like the existing ``_store_event_episode``
+        # stub below.
+        _interaction_tracker: InteractionTracker
+        _MULTI_TURN_EVENT_TYPES: frozenset[EventType]
+
+        def _scope_for_multi_turn_event(self, event: AgentEvent) -> str | None: ...
+        async def _persist_closed_interaction(
+            self, interaction: Interaction,
+        ) -> None: ...
         def _format_event(self, event: AgentEvent) -> str: ...
         async def _build_seed_messages(
             self, event: AgentEvent, current_user_message: str,
@@ -252,31 +266,10 @@ class _ActionLoopMixin:
         # "why is this agent quiet?" — see Q-1 in the PR #252 review.
         decision = evaluate_response_gate(event, agent_id=self.agent_id)
         if not decision.respond:
-            inst = try_get_instruments()
-            if inst is not None:
-                # RFC 0011 §D label set: ``{channel_id, policy}``. The
-                # legacy SendChatMessage path (deferred for cleanup in
-                # ISSUE-0035) builds CHANNEL_MESSAGE events with no
-                # channel_id; the gate exits early before this branch
-                # runs for those, so an empty channel_id should not
-                # reach this site in practice.
-                inst.channel_messages_gated.add(1, attributes=gate_attrs(
-                    channel_id=event.channel_id or "",
-                    policy=decision.policy or "unknown",
-                ))
-            # RFC 0011 PR 5: suppressed events still ingest memory so a
-            # ``when_mentioned`` listener does not lose context between
-            # mentions. The gate decides *whether to respond*, not
-            # *whether to remember*.  Exception (PR-263 review M-1):
-            # ``policy=defense_in_depth`` fires only when ``sender_id ==
-            # agent_id`` — the agent's own outbound message echoed back
-            # through the cleartext gRPC port. Ingesting that row would
-            # inflate ``turn_count`` and (for DMs) write a turn whose
-            # ``payload.sender == agent_id`` for a peer-keyed scope; we
-            # do not echo our own outbound message into episodic memory.
-            if decision.policy != POLICY_DEFENSE_IN_DEPTH:
-                await self._store_event_episode(event, [])
-            return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
+            # Gated counter + ingest-on-suppress + the CP3 close hook —
+            # extracted verbatim to gate_suppress.py (the cost_close
+            # extraction idiom) to stay under the file-size review cap.
+            return await suppressed_event_actions(self, event, decision)
 
         # RFC 0030 Tier B (v0.3.8): the leased ``fast``-model salience-bid
         # (no-pile-on) seam. Runs only on the open-floor admit of a

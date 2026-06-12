@@ -75,7 +75,7 @@ def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, ob
       case). An old orchestrator leaves the flag at the proto3-default
       ``False`` and the gate falls back to the raw ``mentions`` basis.
     """
-    return {
+    payload: dict[str, object] = {
         "content": request.content,
         "channel_type": request.channel_type,
         "mentions": list(request.mentions),
@@ -93,6 +93,18 @@ def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, ob
         # turn's user message; false is every ordinary dispatch.
         "chair_escalation": request.chair_escalation,
     }
+    # End-vote-close-propagation amendment (CP3): the close-notification
+    # marker — seeded ONLY when the typed field is set, unlike
+    # ``chair_escalation``'s unconditional lift, because the committed
+    # acceptance pins key-ABSENCE on ordinary traffic (the typed-field-only
+    # negative: an over-broad copy that grew the key on every event would
+    # erase the marked/unmarked distinction the strict consumers key on).
+    # The gate refuses a marked event pre-LLM (reason
+    # ``close_notification``) and the suppress path's close dispatch
+    # closes the local tracker with the structural ("ended") cause.
+    if request.interaction_close_notification:
+        payload["interaction_close_notification"] = True
+    return payload
 
 
 def seed_wire_metadata(

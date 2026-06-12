@@ -43,7 +43,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import grpc
-import pytest
 
 from agents.memory.boundary_detectors import REASON_STRUCTURAL
 from agents.memory.interactions import Interaction, InteractionTracker
@@ -54,11 +53,6 @@ from ._receive_channel_message_helpers import (
     channel_event,
     enqueued_event,
     make_servicer,
-)
-
-SKIP_REASON = (
-    "CP acceptance (0030-amendment-end-vote-close-propagation §E) — "
-    "unskip in PR 3, the agent-side close-notification consumption"
 )
 
 
@@ -108,7 +102,6 @@ class TestCloseNotificationWireLift:
     """The servicer lift: payload carries the marker from the typed proto
     field only (the ``chair_escalation`` lift posture)."""
 
-    @pytest.mark.skip(reason=SKIP_REASON)
     async def test_marked_field_lifts_into_event_payload(self):
         """The typed field rides into the enqueued event's payload —
         the port the response gate reads."""
@@ -138,7 +131,6 @@ class TestCloseNotificationWireLift:
         assert "interaction_close_notification" not in event.metadata
 
 
-@pytest.mark.skip(reason=SKIP_REASON)
 class TestCloseNotificationProducesNoTurn:
     """CP3, the stimulus half, pinned behaviorally at the canonical
     enforcement point: the response gate refuses a marked event pre-LLM
@@ -172,7 +164,6 @@ class TestCloseNotificationProducesNoTurn:
         assert decision.reason != "close_notification"
 
 
-@pytest.mark.skip(reason=SKIP_REASON)
 class TestCloseNotificationClosesTracker:
     """CP3, the control half: the close dispatch (the planned
     ``agents.persona_runtime.close_notification``, the ``cost_close`` /
