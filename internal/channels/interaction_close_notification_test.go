@@ -101,6 +101,15 @@ func TestEndVoteClose_NotifiesEveryMemberOfTheClose(t *testing.T) {
 		},
 	}, ""))
 
+	// CP5 makes the notification dispatch fire-and-forget, so nothing on
+	// the publish path joins it — ordinary fanout (whose workers the sync
+	// path DOES join) is suppressed for this very message. The router's
+	// drain WaitGroup is the documented deterministic assert point
+	// ([ChannelRouter.WaitForPendingFanout]); CP5 pins PR 2's dispatch
+	// goroutines onto it, and the call is a no-op today, so the
+	// red-without-skip posture is unchanged.
+	router.WaitForPendingFanout()
+
 	// CP1: every dispatch-served non-sender member heard about the close —
 	// exactly once each — and what they were handed IS the closing vote
 	// (the synthesis/concurrence is real history, not a digest), under a
