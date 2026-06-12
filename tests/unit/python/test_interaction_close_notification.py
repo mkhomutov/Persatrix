@@ -183,7 +183,7 @@ class TestCloseNotificationClosesTracker:
         """Closed immediately with the established ``end_votes`` mapping
         — :data:`REASON_STRUCTURAL`, rendering "ended" — not an
         idle-window later, not "went idle"."""
-        from agents.persona_runtime.close_notification import (
+        from agents.persona_runtime.close_notification import (  # type: ignore[import-not-found]
             close_interaction_on_notification,
         )
 
@@ -203,7 +203,7 @@ class TestCloseNotificationClosesTracker:
         """Defence-in-depth (CP3): a truthy non-bool marker must not
         fabricate a close — burying an active discussion is exactly the
         failure mode the strict-bool rule exists to block."""
-        from agents.persona_runtime.close_notification import (
+        from agents.persona_runtime.close_notification import (  # type: ignore[import-not-found]
             close_interaction_on_notification,
         )
 
@@ -224,7 +224,7 @@ class TestCloseNotificationClosesTracker:
         """A notification for an already-idle scope degrades quietly —
         the ``InteractionTracker.close`` unknown-scope contract, the
         ``cost_close`` no-op posture."""
-        from agents.persona_runtime.close_notification import (
+        from agents.persona_runtime.close_notification import (  # type: ignore[import-not-found]
             close_interaction_on_notification,
         )
 
