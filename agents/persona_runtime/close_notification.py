@@ -39,7 +39,14 @@ invent. Sequence:
    identity: if the ingest itself closed or rotated the interaction
    (max-turns cap, wire-id rotation), that close's own cause stands
    and no second close is layered on a different interaction than the
-   one the notification found open.
+   one the notification found open. A rotation's fresh successor —
+   opened by the ingest, holding only the notification — is
+   deliberately left open for its own boundaries (idle, the next
+   rotation): closing it structurally would mint exactly the 1-turn
+   "ended" record step 3 refuses to invent. By CP2 construction the
+   notification carries the retired record's own wire id, so the
+   rotation corner should not fire in practice; the guard pins the
+   contract against a producer change.
 
 Conservative choice, deliberately: an interaction whose idle window
 expired BEFORE the notification landed closes by the idle rule (step
@@ -145,7 +152,10 @@ async def close_interaction_on_notification(
         # The ingest itself closed or replaced the interaction (the
         # max-turns inline close, a wire-id rotation): that close's own
         # cause stands; never layer a structural close on a different
-        # interaction than the one the notification found open.
+        # interaction than the one the notification found open. A
+        # rotation's 1-turn successor stays open for its own boundaries
+        # — closing it here would be the fabrication the no-open branch
+        # above refuses (module docstring, step 4).
         return
     closed = agent._interaction_tracker.close(scope, reason=REASON_STRUCTURAL)
     if closed is not None:

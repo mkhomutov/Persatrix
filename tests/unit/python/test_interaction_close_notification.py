@@ -45,7 +45,11 @@ from unittest.mock import MagicMock
 
 import grpc
 
-from agents.memory.boundary_detectors import REASON_IDLE_GAP, REASON_STRUCTURAL
+from agents.memory.boundary_detectors import (
+    REASON_IDLE_GAP,
+    REASON_MAX_TURNS,
+    REASON_STRUCTURAL,
+)
 from agents.memory.interactions import Interaction, InteractionTracker
 from agents.persona_types import AgentAction, AgentEvent, EventType
 from agents.response_gate import (
@@ -209,6 +213,22 @@ class TestCloseNotificationGateOrdering:
         assert decision.respond is False
         assert decision.reason == "close_notification"
         assert decision.policy == POLICY_ALWAYS
+
+    def test_dm_impostor_marker_keeps_the_dm_admit(self):
+        """Strict ``is True`` on the DM branch too — the group branch's
+        ``test_marker_is_strictly_boolean`` twin: a truthy non-bool
+        marker is no notification, so the event keeps the ordinary DM
+        always-admit. Pinned per site: the strict-bool rule is checked
+        inline at each consumer (the ``chair_escalation`` convention —
+        no shared helper to drift in lockstep)."""
+        decision = evaluate_response_gate(
+            _notification_event(marker="true",
+                                channel_id="dm:ember-owl:iron-fox",
+                                channel_type="dm"),
+            agent_id="ember-owl",
+        )
+        assert decision.respond is True
+        assert decision.reason == "dm"
 
     def test_marked_event_for_never_policy_takes_the_dedicated_reason(self):
         """Refused for EVERY policy means `never` too: the orchestrator
@@ -398,3 +418,82 @@ class TestCloseNotificationClosesTracker:
         await close_interaction_on_notification(agent, event)
 
         assert agent.persisted == []
+
+    async def test_ingest_max_turns_close_stands_alone(self):
+        """Identity-guard pin, the cap half: when the notification's own
+        ingest pushes the interaction over the max-turns cap, ``add_turn``
+        closes it inline with :data:`REASON_MAX_TURNS` and the ingest
+        persists it in the same step (the ``episode_routing`` contract).
+        That close's own cause stands — exactly one persisted record,
+        labelled by the cap, with nothing layered after it."""
+        from agents.persona_runtime.close_notification import (
+            close_interaction_on_notification,
+        )
+
+        class _CappingIngestAgent(_CloseNotificationAgent):
+            async def _store_event_episode(
+                self, event: AgentEvent, actions: list[AgentAction],
+            ) -> None:
+                self.ingested.append(event)
+                self._interaction_tracker.add_turn("group:planning")
+                capped = self._interaction_tracker.close(
+                    "group:planning", reason=REASON_MAX_TURNS,
+                )
+                assert capped is not None
+                await self._persist_closed_interaction(capped)
+
+        tracker = InteractionTracker()
+        tracker.add_turn("group:planning", now=time.time())
+        agent = _CappingIngestAgent(tracker)
+
+        await close_interaction_on_notification(agent, _notification_event())
+
+        assert [i.close_reason for i in agent.persisted] == [REASON_MAX_TURNS], (
+            "exactly the cap's own close — no structural close layered on"
+        )
+        assert agent.persisted[0].turn_count == 2
+        assert tracker.get("group:planning") is None
+
+    async def test_ingest_rotation_leaves_the_successor_to_its_boundaries(self):
+        """Identity-guard pin, the rotation half: a notification whose
+        wire id no longer matches the open record rotates it during the
+        ingest — the retired record closes with the wire-carried cause
+        and a fresh successor opens holding only the notification. The
+        rotation's own close stands, and the 1-turn successor is
+        deliberately left OPEN for its own boundaries: closing it
+        structurally would mint exactly the fabricated 1-turn "ended"
+        record the no-open branch refuses to invent (module docstring,
+        step 4). By CP2 construction the notification carries the
+        retired record's own id, so this corner should not fire in
+        practice — pinned so a producer change surfaces here."""
+        from agents.persona_runtime.close_notification import (
+            close_interaction_on_notification,
+        )
+
+        class _RotatingIngestAgent(_CloseNotificationAgent):
+            async def _store_event_episode(
+                self, event: AgentEvent, actions: list[AgentAction],
+            ) -> None:
+                self.ingested.append(event)
+                rotated = self._interaction_tracker.close(
+                    "group:planning", reason=REASON_STRUCTURAL,
+                )
+                assert rotated is not None
+                await self._persist_closed_interaction(rotated)
+                self._interaction_tracker.add_turn("group:planning")
+
+        tracker = InteractionTracker()
+        tracker.add_turn("group:planning", now=time.time())
+        agent = _RotatingIngestAgent(tracker)
+
+        await close_interaction_on_notification(agent, _notification_event())
+
+        assert len(agent.persisted) == 1, (
+            "only the rotation's own close — the successor must not be "
+            "closed (and persisted) structurally behind it"
+        )
+        successor = tracker.get("group:planning")
+        assert successor is not None and successor.is_open, (
+            "the 1-turn successor stays open for its own boundaries"
+        )
+        assert successor.turn_count == 1
