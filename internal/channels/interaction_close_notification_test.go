@@ -21,6 +21,7 @@ package channels
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -29,6 +30,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.uber.org/zap"
 )
 
@@ -93,14 +96,15 @@ func TestEndVoteClose_NotifiesEveryMemberOfTheClose(t *testing.T) {
 	closingID := uuid.NewString()
 	const closingContent = "Agreed — relay. Nothing further."
 	closingMentions := []string{"nova-sparrow"}
+	closingMetadata := map[string]any{
+		cascadeDepthMetadataKey: 2,
+		endVoteMetadataKey:      true,
+	}
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
 		ID: closingID, ChannelID: ch, SenderID: "iron-fox",
 		Content:  closingContent,
 		Mentions: closingMentions,
-		Metadata: map[string]any{
-			cascadeDepthMetadataKey: 2,
-			endVoteMetadataKey:      true,
-		},
+		Metadata: closingMetadata,
 	}, ""))
 
 	// CP5 makes the notification dispatch fire-and-forget, so nothing on
@@ -146,6 +150,15 @@ func TestEndVoteClose_NotifiesEveryMemberOfTheClose(t *testing.T) {
 			assert.NotSame(t, &closingMentions[0], &call.msg.Mentions[0],
 				"the mentions slice is cloned per recipient, never aliased")
 		}
+		// The metadata bag rides VERBATIM, vote keys included, deliberately
+		// (PR #613 review): the wire event's typed fields (`interaction_id`,
+		// `cascade_depth`) are extractions FROM this bag in
+		// channelMessageToProto, so "cleaning up" the now-inert end-vote key
+		// would also strip fields the agent-side close (PR 3) consumes.
+		assert.Equal(t, true, call.msg.Metadata[endVoteMetadataKey],
+			"the notification's metadata is the closing vote's, verbatim — the vote key is inert post-close, not stripped")
+		assert.Equal(t, 2, asInt(call.msg.Metadata[cascadeDepthMetadataKey]),
+			"the closing vote's cascade depth rides the notification unchanged")
 	}
 	// The exactly-once shape carries CP2's suppression half as well:
 	// ordinary fanout of the closing vote stays suppressed (a count of 2
@@ -156,6 +169,17 @@ func TestEndVoteClose_NotifiesEveryMemberOfTheClose(t *testing.T) {
 		"nova-sparrow": 1,
 	}, notified,
 		"the end_votes close reached every dispatch-served non-sender member exactly once")
+
+	// Metadata non-aliasing, the mutation way (maps have no NotSame): the
+	// drain is past, so corrupting the published bag is race-free — a
+	// recorded notification still reading the original depth proves each
+	// got maps.Clone storage, not a shared reference a future in-place
+	// write could corrupt (CE3's aliasing half, PR #613 review).
+	closingMetadata[cascadeDepthMetadataKey] = 99
+	postClose := disp.snapshot()[beforeClose:]
+	require.NotEmpty(t, postClose)
+	assert.Equal(t, 2, asInt(postClose[0].msg.Metadata[cascadeDepthMetadataKey]),
+		"the metadata map is cloned per recipient, never aliased to the published bag")
 }
 
 // panickingCloseDispatcher panics on the marked close-notification dispatch
@@ -212,6 +236,15 @@ func TestEndVoteClose_NotificationDispatchPanicIsRecovered(t *testing.T) {
 // disconnect) and then behaves like any context-honouring driver — if the
 // context it was handed descends from the now-dead request, the lookup
 // aborts with the context's error. A lookup on a detached context proceeds.
+//
+// COUPLING (PR #613 review): "the next GetMembers call" assumes the closing
+// publish path itself performs none between arming and the notification —
+// true today (the closing vote's fanout is suppressed before fanout's own
+// member lookup, and processEndVote reads no membership). If Publish ever
+// grows a pre-close GetMembers, the armed cancel fires THERE instead and
+// the disconnect test fails confusingly at its require.NoError(Publish)
+// line — the fix is to re-arm after that new call, not to read the failure
+// as a context-detachment regression.
 type closeTimedDisconnectStore struct {
 	ChannelStore
 	mu     sync.Mutex
@@ -322,4 +355,105 @@ func TestEndVoteClose_NotificationFanoutRespectsConcurrencyBound(t *testing.T) {
 	// would peak at 1, which would also "respect the bound" trivially.
 	assert.Greater(t, peak, 1,
 		"the notification fan must actually run concurrently (peak in-flight > 1)")
+}
+
+// closeNotificationCount returns the
+// `channel.conversation.close_notification` counter value for the given
+// channel_type + outcome pair, 0 when absent. Mirrors chairEscalationCount —
+// the two control-dispatch metrics share the {channel_type, outcome} shape.
+func closeNotificationCount(t *testing.T, rm metricdata.ResourceMetrics, channelType, outcome string) int64 {
+	t.Helper()
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "channel.conversation.close_notification" {
+				continue
+			}
+			sum, ok := m.Data.(metricdata.Sum[int64])
+			require.Truef(t, ok, "close_notification: expected Sum[int64], got %T", m.Data)
+			for _, dp := range sum.DataPoints {
+				ct, _ := dp.Attributes.Value("channel_type")
+				oc, _ := dp.Attributes.Value("outcome")
+				if ct.AsString() == channelType && oc.AsString() == outcome {
+					return dp.Value
+				}
+			}
+		}
+	}
+	return 0
+}
+
+// closeTelemetryHarness builds the metric-instrumented close-flow stage the
+// two CP5 telemetry tests share: a three-member group with K=2/W=3 and a
+// router wired with the delivered + close_notification counters.
+func closeTelemetryHarness(t *testing.T, disp MessageDispatcher) (*ChannelRouter, string, *sdkmetric.ManualReader) {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+	delivered, err := mp.Meter("test").Int64Counter("channel.messages.delivered")
+	require.NoError(t, err)
+	closeNotif, err := mp.Meter("test").Int64Counter("channel.conversation.close_notification")
+	require.NoError(t, err)
+	store := newTestStore(t, SQLiteOptions{})
+	router := NewChannelRouter(store, disp, zap.NewNop(), &RouterMetrics{
+		MessagesDelivered: delivered,
+		CloseNotification: closeNotif,
+	})
+	id := mustCreateGroup(t, store, "planning", "alice", "bob", "carol")
+	router.SetEndVoteParams(id, 2, 3)
+	return router, id, reader
+}
+
+// TestEndVoteClose_NotificationHonoursDispatchContract pins the telemetry
+// half of CP5 the same way TestChairEscalation_ForcedTurnHonoursDispatchContract
+// pins the forced turn's: the notification rides [ChannelRouter.dispatchTo],
+// the single deadline + telemetry contract point, so each per-recipient
+// dispatch counts once on `close_notification{outcome=dispatched}` AND once
+// on `channel.messages.delivered` — the delivered stream deliberately
+// includes orchestrator-authored control dispatches alongside stimulus
+// fanout. Both pins were missing (PR #613 review): the CP5 counter — "CP5's
+// entire observable surface" — had no coverage at all, and the
+// delivered-inclusion precedent was test-enforced for the chair's forced
+// turn but only implicit here.
+func TestEndVoteClose_NotificationHonoursDispatchContract(t *testing.T) {
+	router, id, reader := closeTelemetryHarness(t, &recordingDispatcher{})
+
+	require.NoError(t, endVote(t, router, id, "alice", "int-telemetry"))
+	require.NoError(t, endVote(t, router, id, "bob", "int-telemetry"))
+	router.WaitForPendingFanout()
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	assert.Equal(t, int64(2), closeNotificationCount(t, rm, "group", "dispatched"),
+		"one dispatched outcome per notified member (alice, carol; bob voted, never notified)")
+	assert.Zero(t, closeNotificationCount(t, rm, "group", "dispatch_error"),
+		"a clean fan emits no dispatch_error points")
+	// Exactly 4 ok deliveries: the first vote's ordinary fanout (bob,
+	// carol) plus the two close notifications — pinned equal, so a close
+	// fan silently exempted from the delivered stream fails here instead
+	// of silently skewing the delivered/published dashboards.
+	assert.Equal(t, int64(4), deliveredCount(t, rm, "ok"),
+		"close notifications count on channel.messages.delivered like every dispatch")
+}
+
+// TestEndVoteClose_NotificationDispatchErrorOutcome pins CP5's only other
+// outcome, previously uncovered (PR #613 review): a failing dispatch labels
+// `dispatch_error` — and because each recipient rides its own goroutine,
+// the exact count of 2 proves one member's failure never costs a sibling
+// its notification attempt (every degraded branch nets to the status quo
+// for that member alone, not for the room).
+func TestEndVoteClose_NotificationDispatchErrorOutcome(t *testing.T) {
+	router, id, reader := closeTelemetryHarness(t,
+		&recordingDispatcher{err: errors.New("agent unreachable")})
+
+	require.NoError(t, endVote(t, router, id, "alice", "int-telemetry-err"))
+	require.NoError(t, endVote(t, router, id, "bob", "int-telemetry-err"))
+	router.WaitForPendingFanout()
+
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	assert.Equal(t, int64(2), closeNotificationCount(t, rm, "group", "dispatch_error"),
+		"every recipient's failed notification labels dispatch_error — one failure does not abort the fan")
+	assert.Zero(t, closeNotificationCount(t, rm, "group", "dispatched"),
+		"a failed dispatch is never double-counted as dispatched")
 }

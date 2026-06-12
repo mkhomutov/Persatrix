@@ -120,6 +120,15 @@ func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelM
 			}
 			notification := msg
 			notification.ID = uuid.NewString()
+			// The bag is cloned VERBATIM, vote keys included, deliberately
+			// (PR #613 review): the wire event's `interaction_id` and
+			// `cascade_depth` are typed extractions FROM it in
+			// [GRPCMessageDispatcher.channelMessageToProto], so stripping
+			// the "stale" end-vote key would invite stripping fields the
+			// agent-side close (PR 3) consumes. The retained key is inert:
+			// the bag itself is never serialized onto the wire event, and a
+			// dispatch never re-enters [ChannelRouter.Publish], so nothing
+			// downstream can re-read it as a live vote.
 			notification.Metadata = maps.Clone(msg.Metadata)
 			notification.Mentions = slices.Clone(msg.Mentions)
 			recipient := m
