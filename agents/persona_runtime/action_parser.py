@@ -29,13 +29,19 @@ def parse_actions(response: LLMResponse) -> list[AgentAction]:
     a single ``COMPLETE_TASK`` with the raw text if parsing fails. Parsed
     actions are validated per action type before returning.
 
-    Non-empty prose surrounding a fenced ```json block is preserved as a
-    trailing ``COMPLETE_TASK`` carrying it in ``payload["result"]``, so
+    Non-empty prose surrounding a fenced ```json block whose actions
+    include an ``END_INTERACTION_VOTE`` is preserved as a trailing
+    ``COMPLETE_TASK`` carrying it in ``payload["result"]``, so
     ``channel_reply.synthesize_channel_reply`` can promote it into a
-    channel publish. Notably for the RFC 0030 chair-stall escalation: a
-    chair that writes its synthesis as prose beside the vote block (against
-    the ``chair-escalation`` snippet guidance) must not lose the synthesis
-    from the channel record.
+    channel publish — the RFC 0030 chair-stall escalation rescue: a chair
+    that writes its synthesis as prose beside the vote block (against the
+    ``chair-escalation`` snippet guidance) must not lose the synthesis
+    from the channel record. The vote is the *only* shape that preserves
+    prose (PR 610 review): beside any other block, prose is overwhelmingly
+    schema narration ("Here are my actions:") or a narrated decision to
+    stay silent, and a preserved ``COMPLETE_TASK`` would let the promotion
+    seam publish boilerplate — or stamp a post over a deliberate
+    ``do_nothing`` silence, defeating the ``reply-discretion`` affordance.
     """
     text = response.text or ""
     surrounding_prose = ""
@@ -88,7 +94,9 @@ def parse_actions(response: LLMResponse) -> list[AgentAction]:
                 action_type=ActionType.COMPLETE_TASK,
                 payload={"result": text},
             )]
-        if surrounding_prose:
+        if surrounding_prose and any(
+            a.action_type is ActionType.END_INTERACTION_VOTE for a in actions
+        ):
             actions.append(AgentAction(
                 action_type=ActionType.COMPLETE_TASK,
                 payload={"result": surrounding_prose},

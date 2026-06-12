@@ -22,14 +22,18 @@ the §C item 2 contract
   (the per-event sibling of the ``end-interaction-vote`` system-prompt
   snippet): synthesize + vote, or call on the member best placed. The
   synthesis MUST be steered into the vote action's ``content`` payload
-  (PR 610 review, the headline finding):
-  :func:`agents.persona_runtime.action_parser.parse_actions` keeps only
-  the fenced JSON block — prose beside it never becomes a
-  ``COMPLETE_TASK``, so ``synthesize_channel_reply`` has nothing to
-  promote and a synthesis written as prose next to the vote block is
-  silently dropped. A snippet that lets the chair pick that output shape
-  degrades the escalation to a close-vote with no synthesis on the
-  record — the pre-amendment outcome with a `dispatched` metric.
+  (PR 610 review, the headline finding): only there do the synthesis and
+  the vote travel as one publish.
+  :func:`agents.persona_runtime.action_parser.parse_actions` has a
+  vote-scoped rescue seam for a chair that disobeys (prose beside an
+  ``END_INTERACTION_VOTE`` block is preserved as a ``COMPLETE_TASK`` and
+  promoted by ``synthesize_channel_reply``), but the rescued prose
+  arrives as a *separate* message — and prose beside any other block
+  shape is still dropped — so a snippet that let the chair pick a prose
+  output shape would degrade the escalation whenever the rescue can't
+  fire (e.g. a narrated ``do_nothing``): a close-vote, or silence, with
+  no synthesis on the record — the pre-amendment outcome with a
+  `dispatched` metric.
 """
 
 from __future__ import annotations
@@ -202,17 +206,18 @@ class TestEscalationFraming:
     def test_snippet_routes_the_synthesis_through_the_vote_content(self) -> None:
         """PR 610 review, the headline finding. Outcome (a) MUST tell the
         chair to carry the synthesis *inside* the vote's ``content`` payload,
-        and MUST warn against writing it as prose beside the action block:
-        ``parse_actions`` keeps only the fenced JSON block (prose around it
-        never becomes a ``COMPLETE_TASK``), so ``synthesize_channel_reply``
-        finds no reply text to promote and the prose is silently dropped.
-        The room would then see a close-vote carrying only a brief sign-off
-        — or the bare ``end_vote_action`` default — with no synthesis on the
-        record: the exact stall outcome the escalation exists to prevent,
-        now hidden behind a ``dispatched`` metric and a green suite. The
-        vote publish *is* a real channel message whose body is the payload's
-        ``content``, so synthesis-in-``content`` is the one output shape
-        where the synthesis and the vote genuinely travel together."""
+        and MUST warn against writing it as prose beside the action block.
+        The vote publish *is* a real channel message whose body is the
+        payload's ``content``, so synthesis-in-``content`` is the one output
+        shape where the synthesis and the vote genuinely travel together:
+        ``parse_actions`` has a vote-scoped rescue for disobedient prose
+        (it is preserved and promoted to a publish), but it arrives as a
+        separate message detached from the vote — and a chair that narrates
+        a ``do_nothing`` instead gets no rescue at all. Without the steer,
+        the degraded outcomes range from a split synthesis to a close-vote
+        carrying only a brief sign-off — or silence — with no synthesis on
+        the record: the stall outcome the escalation exists to prevent,
+        hidden behind a ``dispatched`` metric and a green suite."""
         from agents.prompt_loader import load_snippet
 
         snippet = load_snippet("chair-escalation")
@@ -221,6 +226,6 @@ class TestEscalationFraming:
             "synthesis goes"
         )
         assert "action block" in snippet, (
-            "the snippet must warn that prose beside the action block is "
-            "not published"
+            "the snippet must warn against writing the synthesis as prose "
+            "beside the action block"
         )

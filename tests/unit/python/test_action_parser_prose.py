@@ -1,4 +1,4 @@
-"""Prose surrounding a fenced ```json action block must be preserved.
+"""Prose beside a fenced ```json vote block must be preserved — only there.
 
 ``parse_actions`` extracts only the fenced JSON block from an LLM
 response — historically any prose the model wrote around it was silently
@@ -9,12 +9,18 @@ action's ``content`` payload precisely because prose-beside-block was
 dropped, but an LLM that disobeys lost the synthesis with no trace — the
 room saw a close-vote with no synthesis on the record.
 
-These tests pin the recovery seam: non-empty prose around the block is
-appended as a ``COMPLETE_TASK`` carrying ``payload["result"]``, which
+These tests pin the recovery seam AND its scope (PR 610 review): prose
+around a block containing an ``END_INTERACTION_VOTE`` is appended as a
+``COMPLETE_TASK`` carrying ``payload["result"]``, which
 :func:`agents.persona_runtime.channel_reply.synthesize_channel_reply`
-promotes into a channel publish on CHANNEL_MESSAGE turns. The promotion
-is a no-op when the block already contains a ``SEND_CHANNEL_MESSAGE``
-for the inbound channel, so explicit-publish turns never double-post.
+promotes into a channel publish on CHANNEL_MESSAGE turns. The vote is
+the one action whose *substance* models habitually externalize as
+prose; beside any other block shape the prose is overwhelmingly schema
+narration ("Here are my actions:") or a narrated decision to stay
+silent, and preserving it would let the promotion seam publish
+boilerplate — or stamp a post over a deliberate ``do_nothing`` silence,
+defeating the ``reply-discretion`` affordance. Non-vote prose therefore
+stays dropped, exactly the pre-seam behavior.
 """
 
 from __future__ import annotations
@@ -54,7 +60,10 @@ class TestParseActionsSurroundingProse:
         response = LLMResponse(
             text=(
                 "Summary of the discussion.\n"
-                + _fenced('[{"action_type": "do_nothing", "payload": {}}]')
+                + _fenced(
+                    '[{"action_type": "end_interaction_vote",'
+                    ' "payload": {"content": "closing"}}]'
+                )
                 + "\nThanks everyone."
             ),
         )
@@ -66,6 +75,48 @@ class TestParseActionsSurroundingProse:
         assert actions[1].payload["result"] == (
             "Summary of the discussion.\n\nThanks everyone."
         )
+
+    def test_prose_beside_non_vote_block_is_dropped(self):
+        """The seam's scope (PR 610 review finding 1): prose beside a block
+        with no ``END_INTERACTION_VOTE`` stays dropped. A narrated
+        ``do_nothing`` ("I don't have anything to add here.") is a
+        deliberate silence — preserving the narration would hand
+        ``synthesize_channel_reply`` a non-empty ``COMPLETE_TASK`` to
+        promote, stamping a publish over the silence the
+        ``reply-discretion`` snippet promises the persona it may choose."""
+        response = LLMResponse(
+            text=(
+                "I don't have anything to add here.\n"
+                + _fenced('[{"action_type": "do_nothing", "payload": {}}]')
+                + "\nStaying out of this one."
+            ),
+        )
+
+        actions = parse_actions(response)
+
+        assert len(actions) == 1
+        assert actions[0].action_type is ActionType.DO_NOTHING
+
+    def test_schema_preamble_beside_send_is_dropped(self):
+        """The other common non-vote shape: pure schema-following preamble
+        beside an explicit send. Preserved, it would ride along as a
+        ``COMPLETE_TASK`` and — on any turn whose send targets a *different*
+        channel — get promoted into a boilerplate post on the inbound one."""
+        response = LLMResponse(
+            text=(
+                "Here are my actions:\n"
+                + _fenced(
+                    '[{"action_type": "send_channel_message",'
+                    ' "payload": {"channel_id": "group:other",'
+                    ' "content": "cross-post", "mentions": []}}]'
+                )
+            ),
+        )
+
+        actions = parse_actions(response)
+
+        assert len(actions) == 1
+        assert actions[0].action_type is ActionType.SEND_CHANNEL_MESSAGE
 
     def test_whitespace_only_remainder_stays_dropped(self):
         """A block wrapped in nothing but newlines/spaces must not grow a
@@ -153,9 +204,10 @@ class TestProseSynthesisIntegration:
         )
 
     def test_explicit_send_plus_narration_does_not_double_publish(self):
-        """An explicit ``SEND_CHANNEL_MESSAGE`` for the inbound channel
-        suppresses promotion — the narration ``COMPLETE_TASK`` rides along
-        unpublished rather than turning into a second post."""
+        """An explicit ``SEND_CHANNEL_MESSAGE`` with narration beside it:
+        the narration is dropped at parse (non-vote block — the seam's
+        scope), so nothing reaches the promotion seam and the turn posts
+        exactly the explicit reply."""
         response = LLMResponse(
             text=(
                 "Posting my reply now.\n"
@@ -177,10 +229,28 @@ class TestProseSynthesisIntegration:
         ]
         assert len(sends) == 1
         assert sends[0].payload["content"] == "explicit reply"
-        # The narration is still carried (legacy chat priority-3 surface),
-        # just never promoted to a publish on this turn.
         completes = [
             a for a in actions if a.action_type is ActionType.COMPLETE_TASK
         ]
-        assert len(completes) == 1
-        assert completes[0].payload["result"] == "Posting my reply now."
+        assert completes == []
+
+    def test_narrated_do_nothing_stays_silent_on_group_channel(self):
+        """End-to-end pin for PR 610 review finding 1: narration beside a
+        ``do_nothing`` block on a group channel must produce NO publish.
+        Before the scoping fix the narration became a ``COMPLETE_TASK``
+        and ``synthesize_channel_reply`` promoted it — posting "I don't
+        have anything to add here." to the room over a deliberate
+        silence."""
+        response = LLMResponse(
+            text=(
+                "I don't have anything to add here.\n"
+                + _fenced('[{"action_type": "do_nothing", "payload": {}}]')
+            ),
+        )
+        event = _channel_event()
+
+        actions = synthesize_channel_reply(
+            event, parse_actions(response), agent_id="ember-owl",
+        )
+
+        assert [a.action_type for a in actions] == [ActionType.DO_NOTHING]
