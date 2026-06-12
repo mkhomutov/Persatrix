@@ -365,8 +365,8 @@ disposes; no new close path, no new trust grant. The knob must name a
 non-`observer` member and the channel must not disable floor control
 (detection lives at the round's tail) — both validated loudly at load.
 Every detected stall emits `chair_escalation{outcome}` (`dispatched` /
-`no_chair` / `already_escalated` / `dispatch_error`), so stalls are visible
-even on channels with no chair configured. Acceptance:
+`no_chair` / `already_escalated` / `self_stimulus` / `dispatch_error`), so
+stalls are visible even on channels with no chair configured. Acceptance:
 [MT-CHANNEL-GOV-004](../manual-tests/MT-CHANNEL-GOV-004.md).
 
 | Layer | Knob | Default | What it bounds |
@@ -425,6 +425,13 @@ channels:
   channel's next message). `cost` remains reserved.
 - `end_vote_emitted{channel_type}` — one per vote action (vote volume vs. the
   quorum the close counter measures).
+- `chair_escalation{channel_type, outcome}` — one per **detected stall** (a
+  fully-silent floor round on the open interaction; the chair-stall-escalation
+  amendment above), labelled with its disposition: `dispatched`, `no_chair`
+  (knob unset), `already_escalated` (the interaction's one ration is spent),
+  `self_stimulus` (the chair authored the stalled message itself, so the
+  forced turn is withheld — the ration stays **unspent**, unlike the spent-ration
+  `dispatch_error` branch), or `dispatch_error`.
 - `reply_budget_remaining{channel_type}` — histogram of each **replying**
   participant's leftover allowance at interaction close (one sample per
   participant who consumed reply budget; members who stayed silent or only cast

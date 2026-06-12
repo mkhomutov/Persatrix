@@ -281,10 +281,12 @@ func TestConvergence_StallEscalatesAndClosesByVotes(t *testing.T) {
 	require.NoError(t, err)
 	escalated, err := mp.Meter("test").Int64Counter("channel.conversation.chair_escalation")
 	require.NoError(t, err)
+	drop, err := mp.Meter("test").Int64Counter("channel.conversation.governance_drop")
+	require.NoError(t, err)
 	store := newTestStore(t, SQLiteOptions{})
 	disp := &envelopeRecorder{}
 	router := NewChannelRouter(store, disp, zap.NewNop(), &RouterMetrics{
-		InteractionClosed: closed, ChairEscalation: escalated,
+		InteractionClosed: closed, ChairEscalation: escalated, GovernanceDrop: drop,
 	})
 	ch := mustCreateGroupWithPolicies(t, store, "planning",
 		map[string]RespondPolicy{
@@ -327,12 +329,14 @@ func TestConvergence_StallEscalatesAndClosesByVotes(t *testing.T) {
 	assert.Equal(t, int64(1), chairEscalationCount(t, rm, "group", "already_escalated"),
 		"the synthesis round's stall observes CE5's loop guard, not a second escalation")
 
-	// 3. A second member concurs → quorum → close, depth budget unspent.
+	// 3. A second member concurs → quorum → close, depth budget unspent. The
+	// concurrence replies to the chair's depth-1 synthesis, so it lands at
+	// depth 2 — the dispatcher's +1, same as the sibling arc's votes.
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
 		ID: uuid.NewString(), ChannelID: ch, SenderID: "iron-fox",
 		Content: "Agreed — relay. Nothing further.",
 		Metadata: map[string]any{
-			cascadeDepthMetadataKey: 1,
+			cascadeDepthMetadataKey: 2,
 			endVoteMetadataKey:      true,
 		},
 	}, ""))
@@ -347,8 +351,11 @@ func TestConvergence_StallEscalatesAndClosesByVotes(t *testing.T) {
 		ID: uuid.NewString(), ChannelID: ch, SenderID: "alex", Content: "new topic",
 	}, ""))
 	next := openInteractionID(router, ch)
+	assert.NotEmpty(t, next, "the next publish opened a fresh interaction")
 	assert.NotEqual(t, stalledID, next, "the close ended one conversation, not the channel")
 	rm = collect(t, reader)
 	assert.Equal(t, int64(2), chairEscalationCount(t, rm, "group", "dispatched"),
 		"the fresh interaction's stall escalates again — the ration was per-interaction")
+	assert.Zero(t, governanceDropCount(t, rm, "group", governanceLayerDepth),
+		"the depth cap never fired across the arc — the chair proposed, the quorum disposed (CE4)")
 }
