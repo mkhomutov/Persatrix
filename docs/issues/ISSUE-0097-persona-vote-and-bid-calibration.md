@@ -25,7 +25,7 @@ live run (Claude provider, demo personas):
    nothing-new.
 2. **Split prose+vote concurrence.** Asked to confirm and vote, a
    persona published agreement prose and the `end_interaction_vote` as
-   two separate messages seconds apart. W counts turns: with
+   two separate messages milliseconds apart. W counts turns: with
    `end_vote_window: 3`, the split pushed the concurring vote to
    distance 3 from the chair's vote and the quorum missed — the
    escalated interaction then idled out instead of closing on votes. A
