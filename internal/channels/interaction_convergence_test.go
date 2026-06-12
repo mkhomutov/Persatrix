@@ -356,6 +356,16 @@ func TestConvergence_StallEscalatesAndClosesByVotes(t *testing.T) {
 	rm = collect(t, reader)
 	assert.Equal(t, int64(2), chairEscalationCount(t, rm, "group", "dispatched"),
 		"the fresh interaction's stall escalates again — the ration was per-interaction")
+	assert.Len(t, escalationEnvelopes(disp), 2,
+		"the second escalation's forced turn reached the dispatcher seam, not just the counter")
+	// The round after the closing vote stalled too — on an interaction the
+	// quorum had already closed (markInteractionClosed blanked the open id
+	// before the round's tail ran). That stall fails CE1's
+	// open-tracked-interaction test and is dropped without ANY outcome:
+	// already_escalated holding at step 2's count pins that the post-close
+	// stall neither reported against nor spent on the dead interaction.
+	assert.Equal(t, int64(1), chairEscalationCount(t, rm, "group", "already_escalated"),
+		"a stall on a closed interaction is a non-stall — no outcome, not a second already_escalated")
 	assert.Zero(t, governanceDropCount(t, rm, "group", governanceLayerDepth),
 		"the depth cap never fired across the arc — the chair proposed, the quorum disposed (CE4)")
 }
