@@ -23,6 +23,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.uber.org/zap"
 )
 
 // publishTurn publishes one ordinary discussion turn at the given cascade
@@ -249,4 +251,121 @@ func TestConvergence_InboundCloseCauseClaimIsStripped(t *testing.T) {
 	_, hasPrevTrigger := meta[previousInteractionTriggerMetadataKey]
 	assert.False(t, hasPrevID, "an inbound previous_interaction_id claim is stripped on commit")
 	assert.False(t, hasPrevTrigger, "an inbound close-trigger claim is stripped on commit")
+}
+
+// TestConvergence_StallEscalatesAndClosesByVotes — the chair-stall-escalation
+// amendment's deterministic acceptance arc (§C item 3), the sibling of the
+// vote-convergence arc above. The stall the convergence review identified as
+// the remaining silent-death mode now ends in a recorded decision:
+//
+//  1. A human stimulus draws a fully-silent floor round (every turn times
+//     out) — the stall. The orchestrator escalates: ONE forced turn to the
+//     configured chair, marked on the envelope.
+//  2. The chair answers as the agent half now produces it: an
+//     END_INTERACTION_VOTE publish whose content IS the synthesis (PR #610's
+//     review steered the synthesis into the vote's content). The synthesis
+//     round itself stalls — every bid passes on it — which spends nothing:
+//     the interaction's escalation ration is already used
+//     (already_escalated, CE5's loop guard observed in the arc).
+//  3. A second member concurs with its own vote → the Layer 4 quorum closes
+//     the SAME interaction that was escalated (trigger=end_votes), with
+//     cascade-depth budget unspent — the chair proposed, the quorum
+//     disposed (CE4).
+//  4. The room lives on: the next publish opens a fresh interaction with a
+//     fresh escalation ration.
+func TestConvergence_StallEscalatesAndClosesByVotes(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+	closed, err := mp.Meter("test").Int64Counter("channel.conversation.interaction_closed")
+	require.NoError(t, err)
+	escalated, err := mp.Meter("test").Int64Counter("channel.conversation.chair_escalation")
+	require.NoError(t, err)
+	drop, err := mp.Meter("test").Int64Counter("channel.conversation.governance_drop")
+	require.NoError(t, err)
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &envelopeRecorder{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), &RouterMetrics{
+		InteractionClosed: closed, ChairEscalation: escalated, GovernanceDrop: drop,
+	})
+	ch := mustCreateGroupWithPolicies(t, store, "planning",
+		map[string]RespondPolicy{
+			"alex":         RespondNever, // the human
+			"ember-owl":    RespondAlways,
+			"iron-fox":     RespondAlways,
+			"nova-sparrow": RespondAlways, // the designated chair
+		}, "alex", "ember-owl", "iron-fox", "nova-sparrow")
+	router.SetFloorControl(ch, true, time.Millisecond)
+	router.SetEscalationChair(ch, "nova-sparrow")
+
+	// 1. The stall: a human stimulus, every floor turn silent.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "alex",
+		Content: "relay or beacon — final call?",
+	}, ""))
+	stalledID := openInteractionID(router, ch)
+	require.NotEmpty(t, stalledID)
+
+	forced := escalationEnvelopes(disp)
+	require.Len(t, forced, 1, "the stall escalated exactly once")
+	assert.Equal(t, "nova-sparrow", forced[0].Recipient.ParticipantID)
+
+	// 2. The chair's forced turn lands: synthesis IN the vote's content, at
+	// the depth the agent-side dispatcher would stamp (stimulus + 1).
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "nova-sparrow",
+		Content: "Synthesis: the room supports 'relay' — shorter and unambiguous. Voting to close.",
+		Metadata: map[string]any{
+			cascadeDepthMetadataKey: 1,
+			endVoteMetadataKey:      true,
+		},
+	}, ""))
+	assert.Equal(t, stalledID, openInteractionID(router, ch),
+		"the chair's vote belongs to the escalated interaction")
+
+	// The synthesis round stalls too — the ration is spent, not re-spent.
+	rm := collect(t, reader)
+	assert.Equal(t, int64(1), chairEscalationCount(t, rm, "group", "dispatched"))
+	assert.Equal(t, int64(1), chairEscalationCount(t, rm, "group", "already_escalated"),
+		"the synthesis round's stall observes CE5's loop guard, not a second escalation")
+
+	// 3. A second member concurs → quorum → close, depth budget unspent. The
+	// concurrence replies to the chair's depth-1 synthesis, so it lands at
+	// depth 2 — the dispatcher's +1, same as the sibling arc's votes.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "iron-fox",
+		Content: "Agreed — relay. Nothing further.",
+		Metadata: map[string]any{
+			cascadeDepthMetadataKey: 2,
+			endVoteMetadataKey:      true,
+		},
+	}, ""))
+	rm = collect(t, reader)
+	assert.Equal(t, int64(1), interactionClosedCount(t, rm, "group", "end_votes"),
+		"the escalated discussion closed because its participants said so")
+	assert.Equal(t, int64(0), interactionClosedCount(t, rm, "group", "idle"),
+		"idle rotation never had to bury it")
+
+	// 4. The room lives on, with a fresh ration.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "alex", Content: "new topic",
+	}, ""))
+	next := openInteractionID(router, ch)
+	assert.NotEmpty(t, next, "the next publish opened a fresh interaction")
+	assert.NotEqual(t, stalledID, next, "the close ended one conversation, not the channel")
+	rm = collect(t, reader)
+	assert.Equal(t, int64(2), chairEscalationCount(t, rm, "group", "dispatched"),
+		"the fresh interaction's stall escalates again — the ration was per-interaction")
+	assert.Len(t, escalationEnvelopes(disp), 2,
+		"the second escalation's forced turn reached the dispatcher seam, not just the counter")
+	// The round after the closing vote stalled too — on an interaction the
+	// quorum had already closed (markInteractionClosed blanked the open id
+	// before the round's tail ran). That stall fails CE1's
+	// open-tracked-interaction test and is dropped without ANY outcome:
+	// already_escalated holding at step 2's count pins that the post-close
+	// stall neither reported against nor spent on the dead interaction.
+	assert.Equal(t, int64(1), chairEscalationCount(t, rm, "group", "already_escalated"),
+		"a stall on a closed interaction is a non-stall — no outcome, not a second already_escalated")
+	assert.Zero(t, governanceDropCount(t, rm, "group", governanceLayerDepth),
+		"the depth cap never fired across the arc — the chair proposed, the quorum disposed (CE4)")
 }

@@ -349,6 +349,26 @@ channel went idle — with the depth cap demoted to the regression backstop
 intends: a `governance_drop{layer=depth}` on a governed channel is a signal
 something upstream failed, not business as usual.
 
+**Stalls escalate to the chair** (the
+[chair-stall-escalation amendment](../rfcs/0030-amendment-chair-stall-escalation.md),
+a minimal Layer 5 slice). A floor round that ends with **zero replies** on
+the open interaction — every participant honestly bid "nothing new to add"
+with the question unresolved — would previously just stand until idle
+rotation buried it, outcome unrecorded. With `escalation_chair_id` set, the
+orchestrator dispatches **one forced turn per interaction** to that member:
+its prompt forbids silence for the turn and steers it to either cast its
+end-of-discussion vote with the **synthesis in the vote's content** (one
+more concurring vote then closes with the synthesis on the record) or to
+@-mention the member best placed to resolve what remains. Closing still
+flows through the Layer 4 quorum alone — the chair proposes, the quorum
+disposes; no new close path, no new trust grant. The knob must name a
+non-`observer` member and the channel must not disable floor control
+(detection lives at the round's tail) — both validated loudly at load.
+Every detected stall emits `chair_escalation{outcome}` (`dispatched` /
+`no_chair` / `already_escalated` / `self_stimulus` / `dispatch_error`), so
+stalls are visible even on channels with no chair configured. Acceptance:
+[MT-CHANNEL-GOV-004](../manual-tests/MT-CHANNEL-GOV-004.md).
+
 | Layer | Knob | Default | What it bounds |
 |-------|------|---------|----------------|
 | **1 — cost ceiling** | `interaction_budget_tokens` (per-channel) · `default_interaction_budget_tokens` (fleet) | `0` (uncapped) | Total LLM tokens leased across one interaction. Once the running total would cross the budget, further leases are **denied** (`INTERACTION_BUDGET_EXHAUSTED`) — **fail-closed**: the LLM call does not happen, so the persona produces no reply. Enforced in the wallet on the lease path (RFC 0023), upstream of the channel publish. |
@@ -383,6 +403,7 @@ channels:
     end_vote_threshold: 2                  # Layer 4: 2 distinct votes …
     end_vote_window: 3                     # … within 3 consecutive turns closes it
     interaction_idle_timeout_seconds: 600  # quiet this long → next publish opens a fresh interaction
+    escalation_chair_id: jordan            # a stalled round forces one turn from this member
     members:
       - {id: alex, respond: participant}
       - {id: jordan, respond: participant}
@@ -404,6 +425,13 @@ channels:
   channel's next message). `cost` remains reserved.
 - `end_vote_emitted{channel_type}` — one per vote action (vote volume vs. the
   quorum the close counter measures).
+- `chair_escalation{channel_type, outcome}` — one per **detected stall** (a
+  fully-silent floor round on the open interaction; the chair-stall-escalation
+  amendment above), labelled with its disposition: `dispatched`, `no_chair`
+  (knob unset), `already_escalated` (the interaction's one ration is spent),
+  `self_stimulus` (the chair authored the stalled message itself, so the
+  forced turn is withheld — the ration stays **unspent**, unlike the spent-ration
+  `dispatch_error` branch), or `dispatch_error`.
 - `reply_budget_remaining{channel_type}` — histogram of each **replying**
   participant's leftover allowance at interaction close (one sample per
   participant who consumed reply budget; members who stayed silent or only cast
