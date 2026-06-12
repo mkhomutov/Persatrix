@@ -251,8 +251,13 @@ class TestLLMPersonaAgent:
             ),
         )
         actions = agent._parse_actions(response)
-        assert len(actions) == 1
+        # Prose around the fence is preserved as a trailing COMPLETE_TASK
+        # (RFC 0030 chair escalation: synthesis written beside the vote
+        # block must not be silently dropped).
+        assert len(actions) == 2
         assert actions[0].action_type == ActionType.DO_NOTHING
+        assert actions[1].action_type == ActionType.COMPLETE_TASK
+        assert actions[1].payload["result"] == "Here are my actions:"
 
     async def test_parse_actions_plain_text_fallback(self):
         agent = await self._make_agent()

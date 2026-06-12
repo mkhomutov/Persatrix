@@ -28,8 +28,17 @@ def parse_actions(response: LLMResponse) -> list[AgentAction]:
     The LLM is expected to return a JSON array of actions. Falls back to
     a single ``COMPLETE_TASK`` with the raw text if parsing fails. Parsed
     actions are validated per action type before returning.
+
+    Non-empty prose surrounding a fenced ```json block is preserved as a
+    trailing ``COMPLETE_TASK`` carrying it in ``payload["result"]``, so
+    ``channel_reply.synthesize_channel_reply`` can promote it into a
+    channel publish. Notably for the RFC 0030 chair-stall escalation: a
+    chair that writes its synthesis as prose beside the vote block (against
+    the ``chair-escalation`` snippet guidance) must not lose the synthesis
+    from the channel record.
     """
     text = response.text or ""
+    surrounding_prose = ""
     try:
         stripped = text.strip()
         if stripped.startswith("["):
@@ -46,6 +55,10 @@ def parse_actions(response: LLMResponse) -> list[AgentAction]:
                     payload={"result": text},
                 )]
             raw_actions = json.loads(m.group(1))
+            prose_parts = (stripped[: m.start()], stripped[m.end():])
+            surrounding_prose = "\n\n".join(
+                part.strip() for part in prose_parts if part.strip()
+            )
         else:
             return [AgentAction(
                 action_type=ActionType.COMPLETE_TASK,
@@ -67,10 +80,20 @@ def parse_actions(response: LLMResponse) -> list[AgentAction]:
                 payload=raw.get("payload", {}),
             ))
             actions.append(validated)
-        return actions if actions else [AgentAction(
-            action_type=ActionType.COMPLETE_TASK,
-            payload={"result": text},
-        )]
+        if not actions:
+            # Full-raw-text fallback wins over the prose seam below: with
+            # every parsed action dropped, the prose alone would be a lossy
+            # echo of the turn (the fence content vanishes from the record).
+            return [AgentAction(
+                action_type=ActionType.COMPLETE_TASK,
+                payload={"result": text},
+            )]
+        if surrounding_prose:
+            actions.append(AgentAction(
+                action_type=ActionType.COMPLETE_TASK,
+                payload={"result": surrounding_prose},
+            ))
+        return actions
 
     except (json.JSONDecodeError, ValueError):
         return [AgentAction(
