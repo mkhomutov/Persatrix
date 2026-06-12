@@ -67,5 +67,8 @@ itself renders speakers to the model.
 > more: both chair forced turns handed off to "@Ember Owl" / "Ember" by
 > display name and died into silence, deadlocking both escalated
 > interactions to idle. The full cycle (this issue + the chair's
-> completeness-fixation) is written up in [ISSUE-0098]; the spent-ration
-> half is [ISSUE-0099]. This resolver fix is the highest-leverage link.
+> completeness-fixation) is written up in
+> [ISSUE-0098](ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md);
+> the spent-ration half is
+> [ISSUE-0099](ISSUE-0099-ce5-ration-spent-on-provably-failed-handoff.md).
+> This resolver fix is the highest-leverage link.
