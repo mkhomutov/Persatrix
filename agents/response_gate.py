@@ -232,6 +232,21 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
                 policy=POLICY_DEFENSE_IN_DEPTH,
                 reason="dm_self_sender",
             )
+        # End-vote-close-propagation amendment (CP3), PR #614 review
+        # finding 2: control outranks the DM always-override. The
+        # override exists because "a DM with no reply is broken by
+        # definition" — but a close NOTIFICATION is not a message
+        # awaiting a reply; admitting it would fire a full LLM turn on
+        # control traffic and skip the tracker close. DMs are
+        # interaction-tracked orchestrator-side (the resolver rotates
+        # `group`/`dm` alike) and `processEndVote` keys on the
+        # interaction id, not the channel type, so the lane is reachable
+        # by any publisher the agent-side DM-vote drop does not bind.
+        # Labelled with the POLICY_ALWAYS the override applies (bounded).
+        if payload.get("interaction_close_notification") is True:
+            return GateDecision(
+                respond=False, policy=POLICY_ALWAYS, reason="close_notification",
+            )
         return GateDecision(respond=True, policy=POLICY_ALWAYS, reason="dm")
 
     # Sender-side filter (defence in depth). The router already drops
@@ -246,6 +261,41 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
             reason="self_sender",
         )
 
+    # End-vote-close-propagation amendment (CP3): the orchestrator's close
+    # NOTIFICATION — the closing quorum vote re-dispatched after an
+    # `end_votes` close so the local tracker can close with the truthful
+    # cause. Control, never stimulus: refused for EVERY policy (`never`
+    # included — the orchestrator excludes RespondNever members from the
+    # fan by contract, but if one arrives anyway the dedicated reason
+    # beats the routing-regression warn: the suppress path's close
+    # dispatch keys on it, and closing a stale record truthfully is
+    # strictly better than warning and letting it idle out), before any
+    # admitting lane (a notification may well @-mention the room — it is
+    # still not an invitation to speak), so no turn, no Tier B bid, no
+    # LLM call ever runs on it. Only the self-sender defence-in-depth
+    # refusals above outrank it: Go never fans the notification to the
+    # voter (its own vote_close owns its record), so a marked self-echo
+    # is spoofed or a contract break and refuses like any other
+    # self-echo. Strict `is True` — the `floor_mentions_resolved`
+    # posture: a spoofed truthy non-bool on the cleartext port must not
+    # fabricate a close signal (it falls through to the ordinary policy
+    # branches below). PR #614 review finding 1: the decision's `policy`
+    # is clamped to the canonical triple, else POLICY_UNKNOWN — it
+    # becomes the `channel.messages.gated` label, and the bounded-label
+    # discipline (see POLICY_UNKNOWN; the chair-escalation branch's
+    # explicit policy guard) forbids echoing a raw wire string there.
+    if payload.get("interaction_close_notification") is True:
+        if policy not in (POLICY_ALWAYS, POLICY_WHEN_MENTIONED, POLICY_NEVER):
+            logger.warning(
+                "Agent %s: close notification carries unknown "
+                "respond_policy %r on channel %s; labelling unknown",
+                agent_id, raw_policy, channel_id,
+            )
+            policy = POLICY_UNKNOWN
+        return GateDecision(
+            respond=False, policy=policy, reason="close_notification",
+        )
+
     if policy == POLICY_NEVER:
         # Fail-closed. The orchestrator filters ``RespondNever`` members
         # upstream of dispatch, so a ``never`` reaching the gate is a
@@ -258,23 +308,6 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
             agent_id, channel_id,
         )
         return GateDecision(respond=False, policy=POLICY_NEVER, reason="policy_never")
-
-    # End-vote-close-propagation amendment (CP3): the orchestrator's close
-    # NOTIFICATION — the closing quorum vote re-dispatched after an
-    # `end_votes` close so the local tracker can close with the truthful
-    # cause. Control, never stimulus: refused for EVERY policy, before any
-    # admitting lane (a notification may well @-mention the room — it is
-    # still not an invitation to speak), so no turn, no Tier B bid, no LLM
-    # call ever runs on it; the action loop's ingest-on-suppress keeps the
-    # closing message in the window, and its suppress path runs the
-    # tracker-close dispatch off this dedicated reason. Strict `is True` —
-    # the `floor_mentions_resolved` posture: a spoofed truthy non-bool on
-    # the cleartext port must not fabricate a close signal (it falls
-    # through to the ordinary policy branches below).
-    if payload.get("interaction_close_notification") is True:
-        return GateDecision(
-            respond=False, policy=policy, reason="close_notification",
-        )
 
     # Chair-stall-escalation amendment (§C item 2): the orchestrator's forced
     # turn after a stalled floor round admits down the directed lane for

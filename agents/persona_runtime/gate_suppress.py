@@ -1,10 +1,12 @@
 """The action loop's gate-suppress path (RFC 0011 PR 4b / PR 5 + CP3).
 
 What happens to a CHANNEL_MESSAGE the response gate refused: the gated
-counter fires, the event still ingests memory (suppression decides
-*whether to respond*, not *whether to remember*), and — since the
-end-vote-close-propagation amendment — the dedicated
-``close_notification`` refusal runs the agent-local tracker close.
+counter fires, then the dedicated ``close_notification`` refusal hands
+the event to the close dispatch (which owns the conditional final-turn
+ingest *and* the agent-local tracker close — see
+:mod:`.close_notification`), while every other refusal still ingests
+memory (suppression decides *whether to respond*, not *whether to
+remember*).
 
 Extracted as a free function taking the composed persona agent — the
 :mod:`.cost_close` / :mod:`.close_notification` extraction idiom — so
@@ -67,6 +69,21 @@ async def suppressed_event_actions(
             channel_id=event.channel_id or "",
             policy=decision.policy or "unknown",
         ))
+    # End-vote-close-propagation amendment (CP3): the dedicated refusal
+    # is the close signal, and the close dispatch owns the WHOLE arc —
+    # staleness flush, open-scope check, the conditional final-turn
+    # ingest, then the structural ("ended") close. The ingest cannot be
+    # unconditional here (PR #614 review finding 3): for a scope that
+    # already idled out, ``_store_event_episode`` would open a fresh
+    # interaction holding only the re-delivered closing vote and the
+    # close would persist that fabricated 1-turn "ended" record. Whether
+    # to ingest depends on whether there is an open window to land the
+    # final turn in — only the dispatch knows, so it decides (the
+    # documented cost: a notification arriving after the scope closed is
+    # not remembered; the orchestrator persists the message regardless).
+    if decision.reason == "close_notification":
+        await close_interaction_on_notification(agent, event)
+        return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
     # RFC 0011 PR 5: suppressed events still ingest memory so a
     # ``when_mentioned`` listener does not lose context between
     # mentions. The gate decides *whether to respond*, not
@@ -79,13 +96,4 @@ async def suppressed_event_actions(
     # do not echo our own outbound message into episodic memory.
     if decision.policy != POLICY_DEFENSE_IN_DEPTH:
         await agent._store_event_episode(event, [])
-    # End-vote-close-propagation amendment (CP3): the dedicated
-    # refusal doubles as the close signal — the ingest above kept
-    # the closing vote as the interaction's final turn; close the
-    # scope NOW with the structural ("ended") cause instead of
-    # letting it idle out a window later. After the ingest on
-    # purpose: closing first would strand the closing message in
-    # the successor interaction.
-    if decision.reason == "close_notification":
-        await close_interaction_on_notification(agent, event)
     return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
