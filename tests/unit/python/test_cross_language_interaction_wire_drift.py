@@ -236,3 +236,53 @@ def test_chair_escalation_marker_agrees() -> None:
             _parse_miss(
                 'a strict `…get("chair_escalation") is True` read', path,
             )
+
+
+_CLOSE_NOTIFICATION_PY = Path("agents/persona_runtime/close_notification.py")
+
+
+def test_close_notification_marker_agrees() -> None:
+    """The end-vote close-notification marker (the close-propagation
+    amendment, CP2/CP3) MUST agree across the proto field, the Go
+    dispatcher lift, the Python payload lift, and both strict consumers.
+    A one-sided rename leaves the orchestrator announcing closes into a
+    marker nobody reads: every member's gate runs an ordinary bid on the
+    closing vote, no local tracker closes, and the converged discussion
+    silently degrades to the pre-amendment "went idle" burial with every
+    suite green.
+    """
+    proto_src = _TASK_PROTO.read_text(encoding="utf-8")
+    if not re.search(
+        r"^\s*bool interaction_close_notification = 23;", proto_src, re.MULTILINE,
+    ):
+        _parse_miss("`bool interaction_close_notification = 23;`", _TASK_PROTO)
+
+    go_src = _GRPC_DISPATCHER_GO.read_text(encoding="utf-8")
+    if "InteractionCloseNotification: env.InteractionCloseNotification" not in go_src:
+        _parse_miss(
+            "the dispatcher lift `InteractionCloseNotification: "
+            "env.InteractionCloseNotification`",
+            _GRPC_DISPATCHER_GO,
+        )
+
+    # The lift is CONDITIONAL, unlike chair_escalation's: the committed
+    # acceptance pins key-ABSENCE on unmarked events (typed-field-only).
+    lift_src = _CHANNEL_WIRE_METADATA_PY.read_text(encoding="utf-8")
+    if 'payload["interaction_close_notification"] = True' not in lift_src:
+        _parse_miss(
+            'the conditional payload lift '
+            '`payload["interaction_close_notification"] = True`',
+            _CHANNEL_WIRE_METADATA_PY,
+        )
+
+    # Both consumers honour the marker ONLY as the strict boolean — the
+    # gate's refusal branch and the close dispatch's defence-in-depth
+    # re-check (a spoofed truthy non-bool must neither suppress a turn
+    # into oblivion nor fabricate a close).
+    for path in (_RESPONSE_GATE_PY, _CLOSE_NOTIFICATION_PY):
+        src = path.read_text(encoding="utf-8")
+        if 'payload.get("interaction_close_notification") is True' not in src:
+            _parse_miss(
+                'a strict `…get("interaction_close_notification") is True` read',
+                path,
+            )

@@ -529,6 +529,21 @@ Two boundary notes on those seams:
   voter's floor record closes on the floor's rotation like any non-voter's.
   Thread records close by their own idle window or an explicit session end,
   mirroring the resolver's "the thread IS the interaction" rule.
+- **A vote close is announced, not inferred** (the
+  [end-vote-close-propagation amendment](../rfcs/0030-amendment-end-vote-close-propagation.md),
+  v0.3.8). The closing quorum vote's ordinary fanout is suppressed (the room
+  must stop), so the orchestrator re-dispatches it to every dispatch-served
+  member as a marked close notification
+  (`ChannelMessageEvent.interaction_close_notification`): the receiver's gate
+  refuses it pre-LLM — no turn, no salience bid, no spend — the closing
+  message still lands in the window as the record's final turn, and the
+  member's record closes **immediately** as *ended*. Before the amendment a
+  converged-then-quiet room buried its own decision: every member idled out
+  up to a full `memory.interaction_idle_timeout_sec` later as *went idle*
+  (found live by [MT-CHANNEL-GOV-004](../manual-tests/MT-CHANNEL-GOV-004.md)).
+  Fail-open: a dropped notification degrades to exactly that pre-amendment
+  idle-out, observable per recipient on
+  `channel.conversation.close_notification{outcome}`.
 - **The rotation carries its cause.** Every publish of the successor
   interaction names the retired id and what closed it
   (`ChannelMessageEvent.previous_interaction_id` +
