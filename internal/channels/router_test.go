@@ -33,6 +33,10 @@ type dispatchCall struct {
 	// per-recipient dispatch event carries the depth verbatim (the +1
 	// lives agent-side on outbound; the orchestrator never increments).
 	cascadeDepth int
+	// closeNotification mirrors the envelope's CP2 marker so Layer 4
+	// tests can tell an end-vote close NOTIFICATION from ordinary fanout
+	// (the end-vote-close-propagation amendment).
+	closeNotification bool
 }
 
 func (d *recordingDispatcher) Dispatch(_ context.Context, env DispatchEnvelope, msg ChannelMessage) error {
@@ -45,6 +49,7 @@ func (d *recordingDispatcher) Dispatch(_ context.Context, env DispatchEnvelope, 
 		respondPolicy:        env.Recipient.RespondPolicy,
 		threadParentSenderID: env.ThreadParentSenderID,
 		cascadeDepth:         asInt(msg.Metadata["cascade_depth"]),
+		closeNotification:    env.InteractionCloseNotification,
 	})
 	return d.err
 }

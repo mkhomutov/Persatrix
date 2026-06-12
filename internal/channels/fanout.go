@@ -171,26 +171,51 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 			// paths, so a panicking dispatch is not caught by the server's
 			// recoveryMiddleware — recover here or it crashes the process.
 			defer r.recoverFanout("dispatch", msg.ChannelID, msg.ID)
-			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize, floorMentions, false)
+			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize, floorMentions, markerNone)
 		}()
 	}
 	wg.Wait()
 }
 
+// dispatchMarker selects which orchestrator-authored control marker, if
+// any, a dispatch stamps on its envelope. The markers' never-alias
+// invariant ([DispatchEnvelope.ChairEscalation] vs
+// [DispatchEnvelope.InteractionCloseNotification]) was previously held by
+// call-site discipline over two adjacent positional bools — `..., true,
+// false)` against `..., false, true)`, which a silent transposition
+// defeats with no compile error (PR #613 review). One enum value cannot
+// set two envelope bools, so the aliased state is unrepresentable at this
+// seam, and the next amendment adds a constant instead of widening every
+// call site.
+type dispatchMarker uint8
+
+const (
+	// markerNone is every ordinary dispatch: fanout, floor turns.
+	markerNone dispatchMarker = iota
+	// markerChairEscalation is the CE3 forced turn, stamped only by
+	// [ChannelRouter.maybeEscalateStall]'s dispatch.
+	markerChairEscalation
+	// markerCloseNotification is the CP2 end-vote close notification,
+	// stamped only by [ChannelRouter.notifyInteractionClose]'s dispatches.
+	markerCloseNotification
+)
+
 // dispatchTo delivers `msg` to a single recipient with the per-recipient
 // timeout and emits the `channel.messages.delivered` counter. Shared by the
 // concurrent path ([dispatchConcurrent]), the serialized floor turn
-// ([runFloorTurn]), and the chair-escalation forced turn
-// ([ChannelRouter.maybeEscalateStall]) so all three honour the same
+// ([runFloorTurn]), the chair-escalation forced turn
+// ([ChannelRouter.maybeEscalateStall]), and the close-notification fan
+// ([ChannelRouter.notifyInteractionClose]) so all four honour the same
 // deadline + metric contract.
 //
-// `chairEscalation` stamps the CE3 forced-turn marker on the envelope —
-// true only from the escalation tail, false on every ordinary dispatch.
-// The dispatch error is returned so that tail can label its
-// `chair_escalation{outcome}`; the fanout and floor-turn callers are
+// `marker` stamps at most one orchestrator-authored control marker on the
+// envelope (see [dispatchMarker]) — [markerNone] on every ordinary
+// dispatch. The dispatch error is returned so the escalation tail can
+// label its `chair_escalation{outcome}` and the close fan its
+// `close_notification{outcome}`; the fanout and floor-turn callers are
 // fire-and-forget by contract and ignore it (the warn + the delivered
 // counter's status=error emitted here are their entire failure surface).
-func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member, channelSize int, floorMentions []string, chairEscalation bool) error {
+func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member, channelSize int, floorMentions []string, marker dispatchMarker) error {
 	dispatchCtx, cancel := context.WithTimeout(ctx, channelFanoutPerRecipientTimeout)
 	defer cancel()
 	err := r.dispatcher.Dispatch(dispatchCtx, DispatchEnvelope{
@@ -204,8 +229,9 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		SalienceMaxChannelMembers: r.salienceMaxFor(msg.ChannelID),
 		// Floor-capable-directedness amendment (v0.3.8): per-publish, like
 		// ChannelSize — resolved once in [ChannelRouter.fanout].
-		FloorMentions:   floorMentions,
-		ChairEscalation: chairEscalation,
+		FloorMentions:                floorMentions,
+		ChairEscalation:              marker == markerChairEscalation,
+		InteractionCloseNotification: marker == markerCloseNotification,
 	}, msg)
 	status := "ok"
 	if err != nil {

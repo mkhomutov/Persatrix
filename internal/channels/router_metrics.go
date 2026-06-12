@@ -64,6 +64,13 @@ type RouterMetrics struct {
 	// escalations that fired. `self_stimulus` (PR #609 deep review) is the
 	// withheld forced turn whose stalled stimulus the chair itself authored.
 	ChairEscalation metric.Int64Counter
+	// CloseNotification counts each per-recipient close-notification dispatch
+	// (the end-vote-close-propagation amendment, CP5), labelled by
+	// `channel_type` and `outcome ∈ {dispatched, dispatch_error}`. A member
+	// excluded by contract (the closing sender, a `RespondNever` row) is not
+	// a recipient and does not count; a missing entry where a close happened
+	// therefore reads "nobody to notify", not "notification lost".
+	CloseNotification metric.Int64Counter
 	// EndVoteEmitted counts each RFC 0030 Layer 4 end-of-interaction vote action,
 	// labelled by `channel_type` (§L). Pairs with InteractionClosed to make
 	// "votes cast vs. interactions that actually converged" observable on the

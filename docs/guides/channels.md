@@ -432,6 +432,17 @@ channels:
   `self_stimulus` (the chair authored the stalled message itself, so the
   forced turn is withheld — the ration stays **unspent**, unlike the spent-ration
   `dispatch_error` branch), or `dispatch_error`.
+- `close_notification{channel_type, outcome}` — one per **notified member** of
+  an `end_votes` close (the
+  [end-vote-close-propagation amendment](../rfcs/0030-amendment-end-vote-close-propagation.md)):
+  the closing vote re-dispatched as a marked control event so each agent-local
+  tracker closes at close time instead of idling out. `outcome ∈ {dispatched,
+  dispatch_error}`. The closing sender and `respond: never` members are not
+  recipients by contract, so no data points after a close reads "nobody to
+  notify", never "notification lost". Note for delivery dashboards: like the
+  chair's forced turn, every notification also counts on
+  `channel.messages.delivered` — that stream includes orchestrator-authored
+  control dispatches, not only stimulus fanout.
 - `reply_budget_remaining{channel_type}` — histogram of each **replying**
   participant's leftover allowance at interaction close (one sample per
   participant who consumed reply budget; members who stayed silent or only cast

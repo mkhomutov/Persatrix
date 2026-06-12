@@ -941,8 +941,26 @@ type ChannelMessageEvent struct {
 	// producer never sets it and an old consumer ignoring it sees an ordinary
 	// open-floor message (degraded to the pre-amendment stall, CE7/SD).
 	ChairEscalation bool `protobuf:"varint,22,opt,name=chair_escalation,json=chairEscalation,proto3" json:"chair_escalation,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// End-vote-close-propagation amendment (RFC 0030 §H, v0.3.8): true iff
+	// this dispatch is the orchestrator's close NOTIFICATION - the closing
+	// quorum vote re-dispatched to every dispatch-served non-sender member
+	// after an `end_votes` close, whose ordinary fanout is suppressed
+	// (CP1/CP2). Control, never stimulus: the receiver's response gate
+	// refuses a marked event pre-LLM (no turn, no Tier B bid, no LLM call),
+	// the window keeps the closing message via ingest-on-suppress, and the
+	// agent-local tracker closes the channel scope immediately with the
+	// `end_votes` cause - the "ended" render, instead of idling out a window
+	// later (CP3). Orchestrator-authored, the same trust class as
+	// `chair_escalation = 22`; never set by ordinary fanout, honoured only
+	// from this typed field and strictly boolean receiver-side. proto3
+	// implicit presence: false (the zero value) is every ordinary dispatch,
+	// so the field is additive - an old producer never sets it and an old
+	// consumer ignoring it sees a single-recipient delivery of the closing
+	// vote (one Tier B bid, any reply dropped by the post-close guard -
+	// degraded but bounded, amendment SD).
+	InteractionCloseNotification bool `protobuf:"varint,23,opt,name=interaction_close_notification,json=interactionCloseNotification,proto3" json:"interaction_close_notification,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *ChannelMessageEvent) Reset() {
@@ -1125,6 +1143,13 @@ func (x *ChannelMessageEvent) GetPreviousInteractionCloseTrigger() string {
 func (x *ChannelMessageEvent) GetChairEscalation() bool {
 	if x != nil {
 		return x.ChairEscalation
+	}
+	return false
+}
+
+func (x *ChannelMessageEvent) GetInteractionCloseNotification() bool {
+	if x != nil {
+		return x.InteractionCloseNotification
 	}
 	return false
 }
@@ -1498,7 +1523,7 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xb1\a\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xf7\a\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -1524,7 +1549,8 @@ const file_task_proto_rawDesc = "" +
 	"\x17floor_mentions_resolved\x18\x13 \x01(\bR\x15floorMentionsResolved\x126\n" +
 	"\x17previous_interaction_id\x18\x14 \x01(\tR\x15previousInteractionId\x12K\n" +
 	"\"previous_interaction_close_trigger\x18\x15 \x01(\tR\x1fpreviousInteractionCloseTrigger\x12)\n" +
-	"\x10chair_escalation\x18\x16 \x01(\bR\x0fchairEscalationB\f\n" +
+	"\x10chair_escalation\x18\x16 \x01(\bR\x0fchairEscalation\x12D\n" +
+	"\x1einteraction_close_notification\x18\x17 \x01(\bR\x1cinteractionCloseNotificationB\f\n" +
 	"\n" +
 	"_threshold\"H\n" +
 	"\aTaskAck\x12\x18\n" +

@@ -359,6 +359,24 @@ message ChannelMessageEvent {
   // producer never sets it and an old consumer ignoring it sees an ordinary
   // open-floor message (degraded to the pre-amendment stall, CE7/SD).
   bool chair_escalation = 22;
+  // End-vote-close-propagation amendment (RFC 0030 §H, v0.3.8): true iff
+  // this dispatch is the orchestrator's close NOTIFICATION - the closing
+  // quorum vote re-dispatched to every dispatch-served non-sender member
+  // after an `end_votes` close, whose ordinary fanout is suppressed
+  // (CP1/CP2). Control, never stimulus: the receiver's response gate
+  // refuses a marked event pre-LLM (no turn, no Tier B bid, no LLM call),
+  // the window keeps the closing message via ingest-on-suppress, and the
+  // agent-local tracker closes the channel scope immediately with the
+  // `end_votes` cause - the "ended" render, instead of idling out a window
+  // later (CP3). Orchestrator-authored, the same trust class as
+  // `chair_escalation = 22`; never set by ordinary fanout, honoured only
+  // from this typed field and strictly boolean receiver-side. proto3
+  // implicit presence: false (the zero value) is every ordinary dispatch,
+  // so the field is additive - an old producer never sets it and an old
+  // consumer ignoring it sees a single-recipient delivery of the closing
+  // vote (one Tier B bid, any reply dropped by the post-close guard -
+  // degraded but bounded, amendment SD).
+  bool interaction_close_notification = 23;
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
