@@ -286,3 +286,67 @@ def test_close_notification_marker_agrees() -> None:
                 'a strict `…get("interaction_close_notification") is True` read',
                 path,
             )
+
+
+def test_chair_escalation_resynthesize_marker_agrees() -> None:
+    """The chair-escalation RESYNTHESIZE refinement (ISSUE-0099) MUST agree
+    across the proto field, the Python payload lift, and its sole strict
+    consumer — the same one-sided-rename guard the ``chair_escalation`` and
+    ``interaction_close_notification`` markers carry, extended to their
+    sibling so the second-forced-turn framing cannot silently stop firing
+    with every suite green (the exact degradation this file exists to catch).
+
+    Scope note — this is the AGENT half (PR 1, lands dormant). The producer
+    (Go ``maybeEscalateStall`` setting the new field on the second forced
+    turn) is PR 2, so there is deliberately NO Go-dispatcher lift to pin yet;
+    the cross-language half (``ChairEscalationResynthesize: env.…``) joins
+    this pin when PR 2 adds the producer. Two things the agent half DOES pin:
+
+    * The lift is CONDITIONAL — the ``interaction_close_notification``
+      posture, NOT ``chair_escalation``'s unconditional copy — so ordinary
+      traffic keeps key-ABSENCE and the strict ``is True`` selector never
+      fires on unmarked events.
+    * The strict read lives ONLY in prompt_assembly, NOT the response gate:
+      the refinement swaps FRAMING, while admission and the Tier-B-bid skip
+      still key on ``chair_escalation = 22`` (covered by
+      ``test_chair_escalation_marker_agrees`` above). Pinning the gate here
+      would wrongly assert the gate reads the new field — it does not.
+    """
+    proto_src = _TASK_PROTO.read_text(encoding="utf-8")
+    if not re.search(
+        r"^\s*bool chair_escalation_resynthesize = 24;", proto_src, re.MULTILINE,
+    ):
+        _parse_miss("`bool chair_escalation_resynthesize = 24;`", _TASK_PROTO)
+    # The refinement is paired with `chair_escalation = 22`, never a new
+    # number standing alone: the lift rides field 22 and this field only
+    # swaps framing, so the two field numbers must stay adjacent siblings.
+    if not re.search(r"^\s*bool chair_escalation = 22;", proto_src, re.MULTILINE):
+        _parse_miss("`bool chair_escalation = 22;` (the field 24 lifts on)", _TASK_PROTO)
+
+    # The lift is CONDITIONAL, like interaction_close_notification's.
+    lift_src = _CHANNEL_WIRE_METADATA_PY.read_text(encoding="utf-8")
+    if 'payload["chair_escalation_resynthesize"] = True' not in lift_src:
+        _parse_miss(
+            'the conditional payload lift '
+            '`payload["chair_escalation_resynthesize"] = True`',
+            _CHANNEL_WIRE_METADATA_PY,
+        )
+
+    # The sole strict consumer honours the marker only as the strict boolean
+    # (a spoofed truthy non-bool on the cleartext port must not swap the
+    # framing) — and it is the framing seam, not the gate.
+    prompt_src = _PROMPT_ASSEMBLY_PY.read_text(encoding="utf-8")
+    if 'payload.get("chair_escalation_resynthesize") is True' not in prompt_src:
+        _parse_miss(
+            'a strict `…get("chair_escalation_resynthesize") is True` read',
+            _PROMPT_ASSEMBLY_PY,
+        )
+    if 'payload.get("chair_escalation_resynthesize")' in _RESPONSE_GATE_PY.read_text(
+        encoding="utf-8",
+    ):
+        pytest.fail(
+            "the response gate must NOT read chair_escalation_resynthesize: the "
+            "refinement swaps framing only; admission still keys on "
+            "chair_escalation = 22. A gate read here means the lift posture "
+            "drifted — update the contract deliberately.",
+        )
