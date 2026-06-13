@@ -20,18 +20,29 @@ import "strings"
 // Kept in its own file (sibling of floor_mentions.go) so floor_control.go and
 // the publish handler stay under the 500-line review cap.
 
-// mentionCandidate is one channel member as the lift sees it: its canonical
+// MentionCandidate is one channel member as the lift sees it: its canonical
 // participant id and its registry display name (empty when the member has no
-// registry row — the human's `respond: never` seat, ML3/OQ 3). PR 3 builds the
-// slice by joining the channel's members with the agent registry directory
-// (`AgentInfo.Name`); this file never touches the registry itself, keeping the
-// resolver pure and unit-testable.
-type mentionCandidate struct {
+// registry row — the human's `respond: never` seat, ML3/OQ 3). The publish
+// handler ([Server.liftContentMentions]) builds the slice by joining the
+// channel's members with the agent registry directory (`AgentInfo.Name`); this
+// file never touches the registry itself, keeping the resolver pure and
+// unit-testable.
+type MentionCandidate struct {
 	ID          string
 	DisplayName string
 }
 
-// liftDisplayNameMentions resolves the in-text `@`-mentions in `content` to
+// LiftedMentions is the resolver's result: the canonical ids it lifted, plus
+// the display names it *skipped* because the roster maps them to more than one
+// member (ML5 — the call site logs these at WARN as a config smell; reporting
+// them content-triggered keeps a standing collision from spamming the publish
+// path on every message). Both slices are content-ordered and de-duplicated.
+type LiftedMentions struct {
+	IDs            []string
+	AmbiguousNames []string
+}
+
+// LiftDisplayNameMentions resolves the in-text `@`-mentions in `content` to
 // canonical member ids, returning them in first-seen content order, deduped to
 // the first occurrence, with the sender excluded (a self-mention cannot direct
 // the floor — the [resolveFloorMentions] posture). Resolution is
@@ -54,9 +65,9 @@ type mentionCandidate struct {
 // broadcast sentinel stays on the raw-mentions path. The fold is ASCII-case;
 // participant display names are ASCII by construction (kebab ids, latinate
 // persona names).
-func liftDisplayNameMentions(content string, candidates []mentionCandidate, senderID string) []string {
+func LiftDisplayNameMentions(content string, candidates []MentionCandidate, senderID string) LiftedMentions {
 	if content == "" || len(candidates) == 0 {
-		return nil
+		return LiftedMentions{}
 	}
 
 	// Index the non-sender candidates once: the exact-id set, and the folded
@@ -87,8 +98,9 @@ func liftDisplayNameMentions(content string, candidates []mentionCandidate, send
 		}
 	}
 
-	var out []string
+	var result LiftedMentions
 	emitted := make(map[string]struct{})
+	ambiguousSeen := make(map[string]struct{})
 	n := len(content)
 	for i := 0; i < n; {
 		if content[i] != '@' || (i > 0 && !isMentionSpace(content[i-1])) {
@@ -115,16 +127,20 @@ func liftDisplayNameMentions(content string, candidates []mentionCandidate, send
 		// string), so `> bestEnd` alone is order-independent and deterministic.
 		if resolved == "" {
 			bestEnd := -1
+			bestName := ""
 			var bestIDs []string
 			for name, nameIDs := range folded {
 				if e := matchDisplayNameAt(content, start, name); e > bestEnd {
-					bestEnd, bestIDs = e, nameIDs
+					bestEnd, bestName, bestIDs = e, name, nameIDs
 				}
 			}
 			if bestEnd >= 0 {
 				end = bestEnd
 				if len(bestIDs) == 1 { // unambiguous; a collision lifts nobody
 					resolved = bestIDs[0]
+				} else if _, dup := ambiguousSeen[bestName]; !dup {
+					ambiguousSeen[bestName] = struct{}{}
+					result.AmbiguousNames = append(result.AmbiguousNames, bestName)
 				}
 			}
 		}
@@ -132,7 +148,7 @@ func liftDisplayNameMentions(content string, candidates []mentionCandidate, send
 		if resolved != "" {
 			if _, dup := emitted[resolved]; !dup {
 				emitted[resolved] = struct{}{}
-				out = append(out, resolved)
+				result.IDs = append(result.IDs, resolved)
 			}
 		}
 		if end > i {
@@ -141,7 +157,7 @@ func liftDisplayNameMentions(content string, candidates []mentionCandidate, send
 			i++
 		}
 	}
-	return out
+	return result
 }
 
 // matchDisplayNameAt attempts to match the already-folded `name` against
