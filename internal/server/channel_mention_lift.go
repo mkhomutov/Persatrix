@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -29,13 +30,22 @@ import (
 // at [channelMaxMentionsPerPublish] with any overflow dropped and logged (ML5).
 //
 // Fail-open throughout (the amendment's degraded branch is exactly today's
-// behaviour — ISSUE-0096 open): a missing router/store member lookup or a
-// registry miss skips the lift and returns `structured` untouched, so a
-// resolution hiccup can never block a publish. The registry supplies display
-// names only — even with no registry an in-text *id* ("@iron-fox") still lifts,
-// since candidate ids come from the membership rows.
+// behaviour — ISSUE-0096 open), so a resolution hiccup can never block a
+// publish. The two misses degrade differently, by design:
+//   - A store/member-lookup miss (no store, lookup error, empty membership)
+//     leaves no candidate set at all, so the lift is skipped and `structured`
+//     is returned untouched.
+//   - A registry miss (no registry, List error) only costs the display *names*:
+//     candidates are still built from the membership rows with empty names, so
+//     an in-text *id* ("@iron-fox") still lifts — only display-name mentions
+//     ("@Iron Fox") quietly fall back to today's no-lift behaviour.
 func (s *Server) liftContentMentions(ctx context.Context, channelID, senderID, content string, structured []string) []string {
-	if s.channelStore == nil || content == "" {
+	// Short-circuit before any I/O: content with no `@` cannot name anyone, so
+	// there is nothing to lift and no reason to pay the member query plus the
+	// full registry scan below. This is the dominant case on a chat publish path
+	// (most prose carries no mention), and the lookups are pure waste for it —
+	// the resolver's own empty return would arrive only after the I/O is spent.
+	if s.channelStore == nil || strings.IndexByte(content, '@') < 0 {
 		return structured
 	}
 	members, err := s.channelStore.GetMembers(ctx, channelID)
