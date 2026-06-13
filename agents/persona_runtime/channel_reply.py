@@ -52,7 +52,11 @@ from __future__ import annotations
 
 from ..persona_types import ActionType, AgentAction, AgentEvent, EventType
 
-__all__ = ["bind_end_vote_channel", "synthesize_channel_reply"]
+__all__ = [
+    "bind_end_vote_channel",
+    "fold_prose_into_end_vote",
+    "synthesize_channel_reply",
+]
 
 
 # DM channels enforce a "must reply" invariant (RFC 0011 §D,
@@ -73,6 +77,13 @@ _DM_EMPTY_REPLY_FALLBACK: str = "…"
 # Keeping the prefix literal here rather than importing avoids a
 # circular dependency between this module and the gate.
 _DM_CHANNEL_PREFIX: str = "dm:"
+
+# Group channels carry the ``group:`` prefix (RFC 0020 §D scope vocabulary,
+# mirrored on the channel id). Re-declared locally for the same reason
+# ``_DM_CHANNEL_PREFIX`` is — ``fold_prose_into_end_vote`` gates on it so the
+# fold fires only where the vote both publishes (the executor drops DM votes,
+# see ``end_vote_action.py``) and participates in the RFC 0030 Layer 4 quorum.
+_GROUP_CHANNEL_PREFIX: str = "group:"
 
 
 def synthesize_channel_reply(
@@ -106,6 +117,13 @@ def synthesize_channel_reply(
     # concerns share this seam because both bind parsed actions to the
     # channel the turn arrived on.
     actions = bind_end_vote_channel(event, actions)
+
+    # ISSUE-0097 defect 2: fold the turn's free-text into a group-channel vote
+    # so it travels as ONE publish. Runs AFTER the bind (so the vote carries
+    # its channel and same-channel prose can be matched) and BEFORE the
+    # promotion below (so the consumed prose is never promoted into a separate
+    # SEND_CHANNEL_MESSAGE).
+    actions = fold_prose_into_end_vote(event, actions)
 
     for action in actions:
         if action.action_type is not ActionType.SEND_CHANNEL_MESSAGE:
@@ -186,3 +204,118 @@ def bind_end_vote_channel(
         else:
             bound.append(action)
     return bound if changed else actions
+
+
+def fold_prose_into_end_vote(
+    event: AgentEvent,
+    actions: list[AgentAction],
+) -> list[AgentAction]:
+    """Fold a turn's free-text into its END_INTERACTION_VOTE ``content``
+    (ISSUE-0097 defect 2) so the vote travels as a single channel publish.
+
+    A single LLM turn that emits an agreement/closing block *plus* a vote is
+    parsed into two actions — the prose (an explicit ``SEND_CHANNEL_MESSAGE``
+    for the channel, or a ``COMPLETE_TASK`` the ISSUE-0048 synthesis would
+    promote into its own publish) and the vote. The executor publishes each
+    separately, and the RFC 0030 Layer 4 quorum counts published messages as
+    turns (``end_vote.go``: ``state.turn++`` per publish, window check
+    ``state.turn - voteTurn < w``). The extra prose turn pushes a concurring
+    vote one position further from the chair's vote, dropping it out of
+    ``end_vote_window`` — the structural cause the PR-2 prompt steer could not
+    reach. Folding the prose INTO the vote ``content`` and dropping the prose
+    action makes the vote one publish, the single-message shape the chair path
+    already produces.
+
+    Gated to **group** channels: that is the only place the vote both
+    publishes (``end_vote_action.py`` drops DM votes and never reaches the
+    quorum) and counts toward a quorum. On a DM the prose must keep its own
+    publish — folding it into a vote that is then dropped would lose the reply
+    and 504 the DM-must-reply round-trip (ISSUE-0048). Thread floors do not run
+    the end-vote arc, so they are left to the ordinary promotion path too.
+
+    Only the prose ``content`` is folded; an explicit ``SEND_CHANNEL_MESSAGE``'s
+    structured ``mentions`` are intentionally NOT carried onto the vote. A vote
+    addresses the room's process, not a member — ``end_vote_action.py`` publishes
+    every vote with empty mentions, and a turn that has voted to close must not
+    draw a mentioned member back in (the folded vote already fans out to all
+    members as the terminal signal). The persona's literal "@name" survives
+    inside the folded text; only the routing-level mention is dropped, which is
+    the vote invariant holding rather than a loss.
+
+    Pure: returns a new list only when a fold fires; actions are re-created,
+    never mutated. A no-op when there is no group-channel vote, when the vote
+    has no sibling free-text (the clean chair path), or off CHANNEL_MESSAGE
+    events.
+    """
+    if event.event_type is not EventType.CHANNEL_MESSAGE or not event.channel_id:
+        return actions
+
+    vote_idx = next(
+        (
+            i for i, a in enumerate(actions)
+            if a.action_type is ActionType.END_INTERACTION_VOTE
+            and str(a.payload.get("channel_id", "") or "").strip().startswith(
+                _GROUP_CHANNEL_PREFIX,
+            )
+        ),
+        None,
+    )
+    if vote_idx is None:
+        return actions
+    vote = actions[vote_idx]
+    vote_channel = str(vote.payload.get("channel_id", "") or "").strip()
+
+    # Collect the turn's free-text siblings: a SEND_CHANNEL_MESSAGE aimed at
+    # the vote's own channel (an explicit publish), and any COMPLETE_TASK
+    # result (the parser folds conversational prose — and the chair-stall
+    # rescue's surrounding prose — into one). A cross-posted SEND to another
+    # channel is not this vote's free-text and is left untouched.
+    prose_parts: list[str] = []
+    consumed: set[int] = set()
+    for i, action in enumerate(actions):
+        if i == vote_idx:
+            continue
+        if (
+            action.action_type is ActionType.SEND_CHANNEL_MESSAGE
+            and str(action.payload.get("channel_id", "") or "").strip() == vote_channel
+        ):
+            text = action.payload.get("content", "")
+        elif action.action_type is ActionType.COMPLETE_TASK:
+            text = action.payload.get("result", "")
+        else:
+            continue
+        if isinstance(text, str) and text.strip():
+            prose_parts.append(text.strip())
+            consumed.add(i)
+
+    if not prose_parts:
+        return actions
+
+    # Join the prose siblings ahead of any content the vote already carried
+    # (prose leads, the vote's own statement trails), de-duplicating exact
+    # repeats: an LLM that emits the same sentence in BOTH its free-text block
+    # and the vote ``content`` would otherwise publish it twice inside one
+    # message. Exact (stripped) match only — every part is already stripped, so
+    # this drops a verbatim duplicate and leaves distinct-but-similar text
+    # untouched, preserving first-occurrence order.
+    existing = str(vote.payload.get("content", "") or "").strip()
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for part in [*prose_parts, *([existing] if existing else [])]:
+        if part not in seen:
+            seen.add(part)
+            ordered.append(part)
+    folded = "\n\n".join(ordered)
+
+    folded_actions: list[AgentAction] = []
+    for i, action in enumerate(actions):
+        if i in consumed:
+            continue
+        if i == vote_idx:
+            folded_actions.append(AgentAction(
+                action_type=ActionType.END_INTERACTION_VOTE,
+                payload={**action.payload, "content": folded},
+            ))
+        else:
+            folded_actions.append(action)
+    return folded_actions
