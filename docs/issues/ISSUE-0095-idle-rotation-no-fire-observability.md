@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0095
-summary: "One live idle-rotation no-fire (700 s gap vs 600 s window, unreproduced); rotation decisions are unobservable"
+summary: "One live idle-rotation no-fire (700 s gap vs 600 s window, unreproduced); decision + startup-window-map instrumentation landed, awaiting next occurrence for root-cause"
 status: open
 severity: medium
 area: channels
@@ -70,3 +70,19 @@ issue.
 > 2026-06-12 — initial capture during the MT-CHANNEL-GOV-004 live run
 > (build main @ 113c728). Full timestamp trail in the MT's Test Results
 > row.
+
+> 2026-06-13 — observability steps 1 & 2 landed (the bug stayed
+> unreproduced across the 2026-06-13 MT-CHANNEL-GOV-004 re-runs, so the
+> instrument-first plan stands).
+> [`interaction_resolver.go`](../../internal/channels/interaction_resolver.go)
+> now emits a `channels: interaction idle-rotation decision` debug line on
+> every committed publish that *could* idle out (channel, window, now,
+> last_activity, gap, rotated) — a `gap > window` line reading
+> `rotated=false` IS the no-fire signature, no longer traceless — and
+> `ResolveInteractionIdleTimeouts` logs the resolved per-channel window map
+> once at startup (`channels: interaction idle windows resolved`) so a
+> wrong resolved window is visible without a repro. Step 3 (the
+> `rotation_skipped` counter) deliberately skipped: the decision line
+> already carries the gap+window context a bare counter would lack. Kept
+> open: the next live no-fire should now be self-diagnosing; root-cause is
+> the follow-up.
