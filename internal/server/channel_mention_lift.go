@@ -45,6 +45,8 @@ func (s *Server) liftContentMentions(ctx context.Context, channelID, senderID, c
 	// full registry scan below. This is the dominant case on a chat publish path
 	// (most prose carries no mention), and the lookups are pure waste for it —
 	// the resolver's own empty return would arrive only after the I/O is spent.
+	// The nil-store leg is defensive for direct-construction callers (unit
+	// tests); the handler itself 503s on a nil store before reaching here.
 	if s.channelStore == nil || strings.IndexByte(content, '@') < 0 {
 		return structured
 	}
@@ -59,6 +61,12 @@ func (s *Server) liftContentMentions(ctx context.Context, channelID, senderID, c
 	// id → display name, from the registry directory (the same source the
 	// persona roster join reads). A registry miss leaves the name empty, which
 	// the resolver treats as "id-only" for that member.
+	//
+	// Cost note: this snapshots the *whole* directory per `@`-bearing publish
+	// even though only the channel's members are consulted. Fine while
+	// registries are small (the dominant deployment); if one grows hot, scope
+	// the lookup to membership (per-member Get, or a cached directory). Tracked
+	// as ISSUE-0096 follow-up, deliberately out of this PR.
 	names := map[string]string{}
 	if s.registry != nil {
 		if agents, lErr := s.registry.List(ctx); lErr == nil {
