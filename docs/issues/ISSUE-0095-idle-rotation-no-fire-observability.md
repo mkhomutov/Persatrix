@@ -76,13 +76,28 @@ issue.
 > instrument-first plan stands).
 > [`interaction_resolver.go`](../../internal/channels/interaction_resolver.go)
 > now emits a `channels: interaction idle-rotation decision` debug line on
-> every committed publish that *could* idle out (channel, window, now,
-> last_activity, gap, rotated) — a `gap > window` line reading
-> `rotated=false` IS the no-fire signature, no longer traceless — and
+> every eligible resolve — committed, non-thread, window>0 — that *could*
+> idle out (channel, window, now, last_activity, gap, rotated), and
 > `ResolveInteractionIdleTimeouts` logs the resolved per-channel window map
 > once at startup (`channels: interaction idle windows resolved`) so a
 > wrong resolved window is visible without a repro. Step 3 (the
 > `rotation_skipped` counter) deliberately skipped: the decision line
-> already carries the gap+window context a bare counter would lack. Kept
-> open: the next live no-fire should now be self-diagnosing; root-cause is
-> the follow-up.
+> already carries the gap+window context a bare counter would lack.
+>
+> **Reading the decision line (corrected).** An earlier draft of this note
+> claimed a `gap > window` line that reads `rotated=false` is the no-fire
+> signature. That pairing is *unreachable*: the resolver sets `rotated`
+> exactly when `gap > window`, so the boolean is fully derivable from the
+> `gap`/`window` on the same line and never contradicts them. A real
+> no-fire — wall-clock idle past the *intended* window, yet no rotation —
+> shows up as a **wrong field**, not a contradiction: `window` larger than
+> the configured value (a mis-resolved window — cross-check against the
+> startup window map), or `gap`/`last_activity` out of step with wall clock
+> (a phantom publish advanced `last_activity`, or `now` is skewed). Two
+> known blind spots remain: (a) a no-fire whose cause is *ineligibility*
+> (an entry left uncommitted when it should hold history) takes the mint
+> path and logs no decision line at all; (b) the decision line is Debug, so
+> it is invisible at the staging/production InfoLevel — the live MT stack
+> runs `--env development`, where it shows. Kept open: the next live no-fire
+> should now be self-diagnosing *for the in-window-resolution failure mode*;
+> root-cause is the follow-up.

@@ -21,10 +21,12 @@ import (
 const rotationDecisionMsg = "channels: interaction idle-rotation decision"
 
 // TestInteractionResolver_LogsRotationDecision_NoFire is the ISSUE-0095 core:
-// a committed publish that stays WITHIN the window leaves a decision trace with
-// rotated=false and the computed gap, so a future no-fire is diagnosable from
-// logs alone. The opening mint is NOT a decision (the entry has no committed id
-// yet to rotate), so the second publish is the first and only decision logged.
+// a committed publish that stays WITHIN the window leaves a decision trace
+// carrying the resolved window and computed gap — the fields a future no-fire
+// is read from (a mis-resolved window, or a gap out of step with wall clock),
+// not the rotated boolean, which only mirrors gap>window. The opening mint is
+// NOT a decision (the entry has no committed id yet to rotate), so the second
+// publish is the first and only decision logged.
 func TestInteractionResolver_LogsRotationDecision_NoFire(t *testing.T) {
 	router, store, ch, now := resolverHarness(t)
 	core, logs := observer.New(zap.DebugLevel)
@@ -105,4 +107,33 @@ func TestResolveInteractionIdleTimeouts_LogsWindowMap(t *testing.T) {
 	require.True(t, ok, "the per-channel windows ride as a map")
 	assert.Equal(t, (0 * time.Second).String(), windows["group:design"], "an explicit 0 is rotation-off")
 	assert.Equal(t, (90 * time.Second).String(), windows["group:planning"], "an absent knob inherits the fleet default")
+}
+
+// TestResolveInteractionIdleTimeouts_WindowMapReflectsResolvedNotRawSeconds —
+// the map's whole purpose is to show the window the RESOLVER will actually use,
+// so it must be read back from the router ([ChannelRouter.idleWindowLocked]),
+// not re-derived from the raw seconds. The two diverge at
+// [ChannelRouter.SetInteractionIdleTimeout]'s `seconds < 0` delete sentinel: a
+// negative override drops the entry, so the channel resolves to the fleet
+// default — but a raw stringify would log "-1s", a window no publish ever sees.
+// A diagnostic that misreports the resolved window defeats ISSUE-0095. (A
+// validated config never carries a negative, but this applier does not
+// validate, so the map must not depend on that upstream guarantee.)
+func TestResolveInteractionIdleTimeouts_WindowMapReflectsResolvedNotRawSeconds(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	core, logs := observer.New(zap.InfoLevel)
+	router := NewChannelRouter(store, NoopDispatcher{}, zap.New(core), nil)
+	ninety, negative := 90, -1
+	cfg := &Config{
+		DefaultInteractionIdleTimeoutSeconds: &ninety,
+		Channels: []ChannelConfig{
+			{Name: "design", InteractionIdleTimeoutSeconds: &negative},
+		},
+	}
+	require.NoError(t, router.ResolveInteractionIdleTimeouts(t.Context(), cfg))
+
+	f := logs.FilterMessage("channels: interaction idle windows resolved").All()[0].ContextMap()
+	windows := f["windows"].(map[string]string)
+	assert.Equal(t, (90 * time.Second).String(), windows["group:design"],
+		"a negative override is the delete sentinel, so the resolved window is the fleet default, not -1s")
 }

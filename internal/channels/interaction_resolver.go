@@ -195,10 +195,22 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 	r.interactionMu.Unlock()
 
 	if eligible {
-		// ISSUE-0095: one debug line per committed publish that COULD rotate,
-		// fired or not. The not-fired case is the one with no other trace — a
-		// gap>window here that reads rotated=false is the bug signal. Cheap:
-		// debug level, one line per publish on a tracked channel.
+		// ISSUE-0095: one line per eligible resolve (committed, non-thread,
+		// window>0), fired or not — the within-window case was otherwise
+		// traceless. Read the fields, not the boolean: `rotated` is set exactly
+		// when `gap > window` (same lock, same values), so it is fully derivable
+		// from the `gap`/`window` already on the line and a `gap > window` line
+		// that reads `rotated=false` is unreachable. A genuine no-fire — wall
+		// clock idle past the INTENDED window yet no rotation — surfaces instead
+		// as a wrong field: `window` larger than expected (mis-resolved window),
+		// or `gap`/`last_activity` out of step with wall clock (a phantom
+		// publish advanced the clock, or a skewed `now`). Those are the tells.
+		// Limitation: a no-fire whose cause is ineligibility (an entry left
+		// uncommitted when it should hold history) takes the mint path and logs
+		// nothing here. Debug keeps it cheap (one line per eligible publish);
+		// note the orchestrator suppresses Debug at staging/production
+		// InfoLevel — diagnosing a fleet no-fire needs --env development or a
+		// raised level, same as the live MT stack runs.
 		r.logger.Debug("channels: interaction idle-rotation decision",
 			zap.String("channel_id", channelID),
 			zap.Duration("window", window),
@@ -379,19 +391,27 @@ func (r *ChannelRouter) ResolveInteractionIdleTimeouts(_ context.Context, cfg *C
 		r.defaultInteractionIdleTimeout = time.Duration(*cfg.DefaultInteractionIdleTimeoutSeconds) * time.Second
 		r.interactionMu.Unlock()
 	}
-	windows := make(map[string]string, len(cfg.Channels))
 	for _, decl := range cfg.Channels {
 		secs := decl.ResolveInteractionIdleTimeoutSeconds(cfg.DefaultInteractionIdleTimeoutSeconds)
 		r.SetInteractionIdleTimeout(decl.CanonicalID(), secs)
-		windows[decl.CanonicalID()] = (time.Duration(secs) * time.Second).String()
 	}
 	// ISSUE-0095: surface the resolved window map once at startup so a wrong
 	// resolved window (a 0/rotation-off where one wasn't intended, or the
 	// fleet default landing where a per-channel override was expected) is
 	// visible without a repro. Store-resident channels not declared here fall
 	// back to default_window at read time ([ChannelRouter.idleWindowLocked]).
+	//
+	// The map is read BACK from the router, not re-derived from `secs`: a
+	// re-derivation would drift from [ChannelRouter.SetInteractionIdleTimeout]'s
+	// semantics — notably its `seconds < 0` delete sentinel, which resolves the
+	// channel to default_window while a raw stringify would misreport "-1s".
+	// The diagnostic must show the window the resolver will actually use.
 	r.interactionMu.Lock()
 	def := r.defaultInteractionIdleTimeout
+	windows := make(map[string]string, len(cfg.Channels))
+	for _, decl := range cfg.Channels {
+		windows[decl.CanonicalID()] = r.idleWindowLocked(decl.CanonicalID()).String()
+	}
 	r.interactionMu.Unlock()
 	r.logger.Info("channels: interaction idle windows resolved",
 		zap.Duration("default_window", def),
