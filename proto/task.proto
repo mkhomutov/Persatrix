@@ -377,6 +377,23 @@ message ChannelMessageEvent {
   // vote (one Tier B bid, any reply dropped by the post-close guard -
   // degraded but bounded, amendment SD).
   bool interaction_close_notification = 23;
+  // Chair-stall-escalation resynthesize variant (ISSUE-0099, v0.3.8): a
+  // REFINEMENT of `chair_escalation = 22`, never set alone. The orchestrator
+  // sets both on the SECOND forced turn — the one it dispatches after the
+  // chair's first forced-turn reply provably reached nobody (its mentions
+  // named only parties that cannot take the floor, so `resolveFloorMentions`
+  // came up empty). The lift is unchanged: the receiver keys admission and
+  // the Tier-B-bid skip on `chair_escalation = 22` exactly as before, so this
+  // field touches only the FRAMING — the persona renders the synthesize-only
+  // variant (`prompts/runtime/safety/chair-escalation-resynthesize.md`)
+  // instead of the two-outcome default, because handing off again is the move
+  // that just failed. Orchestrator-authored, the same trust class as
+  // `chair_escalation = 22`. proto3 implicit presence: false (the zero value)
+  // is every dispatch that is not this second forced turn, so the field is
+  // additive — an old producer never sets it, and an old consumer ignoring it
+  // still gets the lift from field 22 and renders the two-outcome framing
+  // (degraded but functional: synthesis is outcome (a) there too).
+  bool chair_escalation_resynthesize = 24;
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)

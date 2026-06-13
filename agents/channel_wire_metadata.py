@@ -104,6 +104,16 @@ def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, ob
     # closes the local tracker with the structural ("ended") cause.
     if request.interaction_close_notification:
         payload["interaction_close_notification"] = True
+    # Chair-stall-escalation resynthesize variant (ISSUE-0099): a REFINEMENT
+    # of ``chair_escalation`` — the orchestrator sets both on the second
+    # forced turn, after the chair's first hand-off provably reached nobody.
+    # Seeded typed-field-only (like ``interaction_close_notification`` above,
+    # not ``chair_escalation``'s unconditional copy) so ordinary traffic keeps
+    # key-ABSENCE: the framing selector reads strict ``is True``, and the lift
+    # itself still rides ``chair_escalation``, so this key only ever flips the
+    # persona to the synthesize-only snippet.
+    if request.chair_escalation_resynthesize:
+        payload["chair_escalation_resynthesize"] = True
     return payload
 
 
