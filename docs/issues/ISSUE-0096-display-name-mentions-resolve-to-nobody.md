@@ -28,8 +28,11 @@ and the discussion died, defeating the escalation's outcome (b) entirely.
 ## Context
 
 Observed live on 2026-06-12 (build main @ 113c728): the chair's forced
-turn named members exactly as the conversation window renders them
-(`**Iron Fox:**` headers), the orchestrator logged
+turn named members by display name (`@Iron Fox`) — the spelling the
+channel roster section surfaces to the persona
+([`channel_roster.py`](../../agents/persona_runtime/channel_roster.py)),
+not the participant id the message stream renders each speaker by
+(`Message from iron-fox:`). The orchestrator logged
 `channels: mentions name no floor-capable member`, and iron-fox's
 open-floor bid passed on a message that explicitly asked it to speak.
 The directedness amendment's debug line surfaced the failure precisely

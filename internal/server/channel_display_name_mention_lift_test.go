@@ -150,8 +150,11 @@ func TestPublishMessage_LiftsDisplayNameMentionsFromContent(t *testing.T) {
 	// milliseconds.
 	router.SetFloorControl("group:planning", false, 0)
 
-	// The chair's hand-off, spelled the way the conversation window renders
-	// speakers (`**Iron Fox:**` headers) — NOT as participant ids.
+	// The chair's hand-off, spelled the way the channel roster surfaces
+	// co-members (display names — `Ember Owl`, `Iron Fox`), which is NOT how
+	// the message stream itself renders speakers (that uses the participant
+	// id: `Message from iron-fox:`). The roster spelling is the one the
+	// model reaches for, so the prose carries display names the wire cannot.
 	pubBody, _ := json.Marshal(map[string]any{
 		"sender_id": "nova-sparrow",
 		"content":   "@Ember Owl @Iron Fox — alex needs one risk each from all of us on the relay plan.",
