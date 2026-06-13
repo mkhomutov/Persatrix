@@ -74,6 +74,33 @@ needed; neither alone closes the cycle (a working hand-off to a member
 with nothing to add still stalls, and a synthesis-biased chair that
 does hand off still reaches nobody).
 
+## Fix (prompt calibration landed — live verification pending)
+
+The two-outcome steer in
+[`chair-escalation.md`](../../prompts/runtime/safety/chair-escalation.md)
+was recalibrated along the investigation path above:
+
+- **Outcome (a)** now explicitly licenses a *partial* synthesis: when a
+  voice is still outstanding, close with what the room has and name the
+  gap inside the vote's `content` ("Ember's risk is still open — closing
+  with the two we have"). "A partial synthesis on the record beats a
+  complete one that never arrives."
+- **Outcome (b)** is narrowed to a member who has **not yet been asked**
+  on the question — not merely one who has been silent. If the member the
+  chair would name already had the floor and stayed quiet, the steer
+  routes back to (a). Hand-off survives for its legitimate use: bringing
+  in a genuinely-uninvited voice (e.g. an `addressed` member never
+  mentioned), which now actually reaches them because ISSUE-0096 is
+  resolved.
+
+The calibration is pinned by
+`test_snippet_gates_handoff_on_an_unasked_voice` in
+[`test_chair_escalation_agent.py`](../../tests/unit/python/test_chair_escalation_agent.py).
+This is a prompt steer against an LLM disposition, so it cannot be proven
+by the suite — the issue stays **open** until a clean live MT-CHANNEL-GOV-004
+run exercises outcome (a) (synthesis-in-vote → close → recorded summary,
+§C item 3).
+
 ## Notes
 
 - Three-for-three on outcome (b) is also a topic artifact: the demo

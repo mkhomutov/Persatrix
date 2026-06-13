@@ -203,6 +203,28 @@ class TestEscalationFraming:
             "outcome (b): hand the floor to the member best placed"
         )
 
+    def test_snippet_gates_handoff_on_an_unasked_voice(self) -> None:
+        """ISSUE-0098. Completeness-fixation made outcome (b) the chair's
+        every choice: a stall *means* a member is silent, so "the question
+        cannot be synthesized yet" always read true and the chair handed off
+        instead of synthesizing — leaving outcome (a) structurally
+        unreachable. The calibration narrows (b) to a voice that has **not
+        yet been asked** and licenses (a) to close on a partial set with the
+        gap named inside the synthesis. Pin both halves so the steer cannot
+        silently regress to the every-time-hand-off behaviour."""
+        from agents.prompt_loader import load_snippet
+
+        snippet = load_snippet("chair-escalation").lower()
+        assert "not yet been asked" in snippet, (
+            "outcome (b) must be gated on a member who has not yet been "
+            "asked — not merely one who has been silent"
+        )
+        assert "partial synthesis" in snippet, (
+            "outcome (a) must license a partial synthesis when a voice is "
+            "still outstanding (a partial synthesis on the record beats a "
+            "complete one that never arrives)"
+        )
+
     def test_snippet_routes_the_synthesis_through_the_vote_content(self) -> None:
         """PR 610 review, the headline finding. Outcome (a) MUST tell the
         chair to carry the synthesis *inside* the vote's ``content`` payload,
