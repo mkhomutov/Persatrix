@@ -2,9 +2,9 @@
 
 **Test ID**: `MT-CHANNEL-GOV-004`
 **Feature Area**: Channels (conversation governance — the RFC 0030 chair-stall-escalation amendment, a minimal Layer 5 slice)
-**Version**: 1.0
+**Version**: 1.1
 **Created**: 2026-06-11
-**Last Updated**: 2026-06-11
+**Last Updated**: 2026-06-12
 **Status**: Active
 
 ---
@@ -67,8 +67,14 @@ Same as [MT-CHANNEL-GOV-003 § Preconditions](MT-CHANNEL-GOV-003.md#precondition
 
 ```bash
 make reset
-ENABLE_UI=1 docker compose up --build
+ENABLE_UI=1 docker compose -f docker-compose.yaml -f docker-compose.anthropic.yaml up --build
 ```
+
+The provider overlay is required: the base config ships UNCONFIGURED by
+design (RFC 0033 — no default provider), so a bare
+`docker compose up --build` crash-loops every agent on the missing
+`quality` model alias. Any provider lane works (`make demo-anthropic`
+is the one-step equivalent of the above).
 
 ---
 
@@ -85,12 +91,30 @@ honestly passes).
 ./bin/persatrix channel join planning --as alex --respond never
 ./bin/persatrix channel send planning \
   "Name exactly one risk each for shipping v1 next Friday. One sentence per person, no repeats." \
-  --as alex
+  --as alex --mention iron-fox --mention nova-sparrow --mention ember-owl
 # …after the round lands:
 ./bin/persatrix channel send planning \
   "Anything else on this?" \
   --as alex
 ```
+
+Two send-side facts the 2026-06-12 session tripped on:
+
+- **Mentions only travel via `--mention`.** The CLI does not parse
+  in-text `@id` (or `@Display Name`) from the message body — the
+  mention list is a structured field on the publish request. An opener
+  whose only addressing is prose lands on the open floor.
+- **Mention every member in the opener.** Open-floor opening questions
+  reliably draw unanimous Tier B passes
+  ([ISSUE-0097](../issues/ISSUE-0097-persona-vote-and-bid-calibration.md)) —
+  the stall fires on round one, before any discussion exists, burning
+  the interaction's CE5 ration on an empty synthesis. Mentioning every
+  member (including the `addressed` one) also completes the
+  enumeration, which matters for the chair's disposition: a visibly
+  missing voice steers the forced turn to hand-off (outcome b) instead
+  of synthesis
+  ([ISSUE-0098](../issues/ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md)).
+  The *nudge* stays un-mentioned — that is the honest stall under test.
 
 **Expected**:
 - The first prompt draws the round; the follow-up draws **silence** (every
@@ -115,9 +139,12 @@ honestly passes).
   re-judge it ("do I agree?"); a second persona concurs with its own vote
   within the W=3 window.
 - `interaction_closed{trigger=end_votes}` fires; the room then stays quiet.
-- If the synthesis round *also* stalls, the orchestrator emits
+- If the synthesis round *also* stalls, the orchestrator increments
   `chair_escalation{outcome=already_escalated}` and nothing else — CE5's
   one-ration guard; nudge once more from `alex` to draw the concurrence.
+  Note this disposition is **metric-only**: the CE5 branch emits no log
+  line, so check Prometheus (`channel.conversation.chair_escalation`),
+  not the orchestrator logs — a log-grep for it never fires.
 
 **Verification**:
 - [ ] The chair's turn carries a synthesis, not a hollow sign-off.
@@ -158,6 +185,18 @@ the specific open point instead of synthesizing. The named member's reply
 restarts the discussion — no close yet, and that is correct behaviour, not a
 failure. Re-run with a more exhausted topic to exercise outcome (a).
 
+Live calibration so far runs three-for-three on outcome (b), always
+triggered by a member who never spoke
+([ISSUE-0098](../issues/ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md)) —
+and the hand-off itself names members by display name, which resolves to
+nobody ([ISSUE-0096](../issues/ISSUE-0096-display-name-mentions-resolve-to-nobody.md)),
+so instead of restarting the discussion it deadlocks the interaction: CE5
+blocks re-escalation
+([ISSUE-0099](../issues/ISSUE-0099-ce5-ration-spent-on-provably-failed-handoff.md))
+and only idle rotation ends it. Until those land, the practical guard is
+the step-1 posture: mention every member in the opener so no voice is
+visibly missing when the stall hits.
+
 ### Edge Case 2: The chair narrates instead of voting
 
 If the chair's turn produces prose with no vote action, the parser's
@@ -173,6 +212,7 @@ here is signal that steering needs another pass).
 
 | Date | Tester | Build | Result | Notes |
 |------|--------|-------|--------|-------|
+| 2026-06-12 | Claude (operator: mkhomutov) | main @ d47385d | FAIL (blocked) | Re-run targeting step 3 after the end-vote close-propagation fix (#613–#615). Two interactions, neither reached a vote-close: both stalls escalated correctly (`outcome=dispatched`), but both chair forced turns chose hand-off (outcome b) on the silent `addressed` member, named it by display name (ISSUE-0096 ×2), reached nobody, and the interactions deadlocked to idle — CE5 ration spent, concurrence nudges drew honest passes with no synthesis on the table (ISSUE-0098/ISSUE-0099 filed from this run). Steps 2–3 not exercised; close-propagation fix still unverified live. Also confirmed: bare-compose preconditions crash-loop agents (provider overlay required); `already_escalated` is metric-only (log-greps never fire); CLI in-text @-names are prose (structured `--mention` required); interaction rotation does not reset persona windows — re-asked questions get deflected as duplicates, so re-runs need a fresh topic. |
 | 2026-06-12 | Claude (operator: mkhomutov) | main @ 113c728 | PARTIAL PASS | Steps 1–2 fully verified (run with interaction `ebc02462`: stall → `outcome=dispatched` → chair synthesis-in-vote with `end_interaction_vote: true` on the wire → close on 2nd distinct vote, `trigger=end_votes`, 9 s after escalation; CE5 one-ration guard observed three times). Step 3 partial: summaries carry the synthesis and vote-closed interactions render "ended", but the closing vote's fanout suppression means no member's agent-local tracker hears the close — with no follow-up traffic inside the agent-side 600 s idle window every member's surface renders the escalated interaction "went idle". Edge Case 1 (chair hand-off) observed on first run, incl. display-name @-mentions resolving to no floor-capable member. Side findings: one unreproduced idle-rotation no-fire (700 s gap, window 600 s, 03:14:50→03:26:30Z; later gaps of 680 s did rotate); personas pass-prone enough that un-mentioned prompts often stall on the *opening* round; split prose+vote replies burn a W=3 turn. Wall-clock cost was ~2 h — dominated by 600 s governance timers and re-runs; this MT needs a test-profile idle window (e.g. 60 s) to be practical. |
 
 ## Notes
