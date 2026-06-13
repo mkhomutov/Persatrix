@@ -89,3 +89,12 @@ itself renders speakers to the model.
 > lifting at the REST publish seam, unioned into `mentions` as canonical
 > ids before persist and fanout; the resolver and both gates stay
 > untouched and start seeing the ids the prose always meant.
+
+> 2026-06-13 — fix landed (PR 3/3): the publish handler now lifts
+> in-text `@`-mentions (`Server.liftContentMentions` →
+> `channels.LiftDisplayNameMentions`) and unions the canonical ids into
+> `mentions` before persist and fanout; the skip-guarded acceptance is
+> unskipped and green. Status stays `in_progress` until the live
+> MT-CHANNEL-GOV-004 Edge Case 1 re-run confirms a display-name hand-off
+> actually restarts the discussion (the amendment's §C item 3
+> acceptance) — that re-run closes this issue.

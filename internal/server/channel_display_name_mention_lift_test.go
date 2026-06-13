@@ -115,8 +115,6 @@ func liftTestServer(t *testing.T, disp channels.MessageDispatcher, displayNames 
 // so the persisted row names the addressees and every recipient's envelope
 // carries the floor-capable basis — the hand-off is directed, not open floor.
 func TestPublishMessage_LiftsDisplayNameMentionsFromContent(t *testing.T) {
-	t.Skip("ML acceptance (0011-amendment-display-name-mention-lifting §E) — unskip in PR 3, the publish-handler wiring")
-
 	disp := &liftEnvelopeRecorder{}
 	srv, router := liftTestServer(t, disp, map[string]string{
 		"nova-sparrow": "Nova Sparrow",
@@ -205,8 +203,6 @@ func TestPublishMessage_LiftsDisplayNameMentionsFromContent(t *testing.T) {
 // is a config smell that logs WARN) — while unambiguous tokens in the same
 // publish still lift.
 func TestPublishMessage_AmbiguousDisplayNameLiftsNobody(t *testing.T) {
-	t.Skip("ML acceptance (0011-amendment-display-name-mention-lifting §E) — unskip in PR 3, the publish-handler wiring")
-
 	disp := &liftEnvelopeRecorder{}
 	srv, router := liftTestServer(t, disp, map[string]string{
 		"nova-sparrow": "Nova Sparrow",
@@ -267,8 +263,6 @@ func TestPublishMessage_AmbiguousDisplayNameLiftsNobody(t *testing.T) {
 // than in PR 2's pure-function matrix; locking it now guards against a future
 // "quotes shouldn't mention" regression silently narrowing the contract.
 func TestPublishMessage_QuotedMentionStillDirects(t *testing.T) {
-	t.Skip("ML acceptance (0011-amendment-display-name-mention-lifting §E) — unskip in PR 3, the publish-handler wiring")
-
 	disp := &liftEnvelopeRecorder{}
 	srv, router := liftTestServer(t, disp, map[string]string{
 		"nova-sparrow": "Nova Sparrow",

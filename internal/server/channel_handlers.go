@@ -285,6 +285,15 @@ func (s *Server) handlePublishMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RFC 0011 display-name-mention-lifting amendment (ML1): resolve the prose
+	// `@`-mentions personas actually write ("@Iron Fox") to canonical ids and
+	// union them into the structured array BEFORE persist and fanout, so the
+	// floor resolution and both gates see the addressees the prose always
+	// meant. Runs after the structured >cap 400 (above) and is fail-open — a
+	// resolution miss returns the producer's array untouched.
+	// See [Server.liftContentMentions].
+	req.Mentions = s.liftContentMentions(ctx, id, req.SenderID, req.Content, req.Mentions)
+
 	msg := channels.ChannelMessage{
 		ID:        uuid.NewString(),
 		ChannelID: id,
