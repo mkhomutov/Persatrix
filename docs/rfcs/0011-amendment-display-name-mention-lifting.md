@@ -38,7 +38,7 @@ Prompt-side steering ("always mention by id") is rejected: it fights the roster 
 
 ## C. Mechanism (implementation sketch — PRs 2 and 3)
 
-1. **PR 2 — the substrate, no call site.** `internal/channels/mention_lift.go` (sibling of `floor_mentions.go`, same review-cap rationale): a pure function over `(content, candidates, senderID)` where a candidate is `{ID, DisplayName}`, returning lifted ids in first-seen content order. Unit matrix: multi-word longest-match, case folding, id-vs-name precedence, ambiguity → nobody, boundary anchoring (emails, mid-word `@`), sender exclusion, dedupe, cap interplay.
+1. **PR 2 — the substrate, no call site.** `internal/channels/mention_lift.go` (sibling of `floor_mentions.go`, same review-cap rationale): a pure function over `(content, candidates, senderID)` where a candidate is `{ID, DisplayName}`, returning lifted ids in first-seen content order. Unit matrix: multi-word longest-match, case folding, id-vs-name precedence, ambiguity → nobody, boundary anchoring (emails, mid-word `@`), sender exclusion, dedupe, cap interplay (including the ML5 drop-logging boundary — entries past the union cap are logged, never silently dropped).
 2. **PR 3 — the wiring.** `handlePublishMessage` joins the channel's members against the registry's names, calls the lift, unions into `req.Mentions` before the `ChannelMessage` is built; debug/WARN logging per ML5. Unskips the committed acceptance.
 3. **Acceptance.** Re-run MT-CHANNEL-GOV-004 Edge Case 1: a chair hand-off naming members by display name must reach the named member (Tier A directed, no gate flip) and restart the discussion — the escalation arc's outcome (b) working live for the first time.
 
@@ -52,6 +52,7 @@ Committed with this document in [`internal/server/channel_display_name_mention_l
 
 - `TestPublishMessage_LiftsDisplayNameMentionsFromContent` — the MT scenario verbatim: a publish whose content reads `@Ember Owl @Iron Fox — alex needs one risk each…` with structured `mentions: ["alex"]` (the synthesized inbound-sender entry) persists `mentions == [alex, ember-owl, iron-fox]` (union order), and every recipient's envelope carries `FloorMentions == [ember-owl, iron-fox]` — the hand-off is directed, not open floor.
 - `TestPublishMessage_AmbiguousDisplayNameLiftsNobody` — two members sharing a folded display name: the colliding token lifts neither (no misdirection), unambiguous tokens in the same publish still lift.
+- `TestPublishMessage_QuotedMentionStillDirects` — ML4: a mention inside reported speech (`@Iron Fox said earlier…`) is lifted like any other and directs the floor. The semantic is only observable here (the lifted id on the row, the `FloorMentions` stamp), so it lands as acceptance rather than in PR 2's matrix; it pins the deliberate "quoting directs" choice against silent narrowing.
 
 ## Open questions
 

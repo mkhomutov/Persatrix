@@ -255,3 +255,65 @@ func TestPublishMessage_AmbiguousDisplayNameLiftsNobody(t *testing.T) {
 	}
 	require.NotEmpty(t, disp.snapshot(), "sanity: fanout dispatched the publish")
 }
+
+// TestPublishMessage_QuotedMentionStillDirects pins ML4: any `@`-anchored
+// resolvable token in content directs the floor — including quoted or reported
+// speech (`@Iron Fox said earlier…`). The lift matches member tokens and does
+// not model quoting, so this is a deliberate (and slightly surprising) product
+// choice the amendment accepts: Tier A's floor-capable basis bounds the cost of
+// an unwanted direct to a single suppressed round. The consequence is only
+// observable at the publish/fanout seam — the lifted id on the persisted row
+// and the FloorMentions stamp — which is why it lives here as acceptance rather
+// than in PR 2's pure-function matrix; locking it now guards against a future
+// "quotes shouldn't mention" regression silently narrowing the contract.
+func TestPublishMessage_QuotedMentionStillDirects(t *testing.T) {
+	t.Skip("ML acceptance (0011-amendment-display-name-mention-lifting §E) — unskip in PR 3, the publish-handler wiring")
+
+	disp := &liftEnvelopeRecorder{}
+	srv, router := liftTestServer(t, disp, map[string]string{
+		"nova-sparrow": "Nova Sparrow",
+		"iron-fox":     "Iron Fox",
+	})
+	handler := srv.Handler()
+
+	createBody, _ := json.Marshal(createChannelRequest{
+		Name: "retro",
+		Members: []channelMemberRequest{
+			{ID: "nova-sparrow", Respond: "always"},
+			{ID: "iron-fox", Respond: "when_mentioned"},
+		},
+	})
+	require.Equal(t, http.StatusCreated,
+		doRequest(handler, http.MethodPost, "/api/v1/channels", createBody).Code)
+
+	// Off the serialized floor round, as the siblings above — the lift sits
+	// upstream of the floor/concurrent branch, so the concurrent path asserts
+	// the same contract without burning silent-turn timeouts.
+	router.SetFloorControl("group:retro", false, 0)
+
+	// The mention rides inside reported speech, not a fresh address. ML4 lifts
+	// it anyway: a `when_mentioned` member quoted in prose is still directed.
+	pubBody, _ := json.Marshal(map[string]any{
+		"sender_id": "nova-sparrow",
+		"content":   "Earlier @Iron Fox said the relay plan still needs a rollback step — can we settle that?",
+	})
+	rec := doRequest(handler, http.MethodPost, "/api/v1/channels/group:retro/messages", pubBody)
+	require.Equal(t, http.StatusCreated, rec.Code, "body=%s", rec.Body.String())
+
+	var resp channelMessageResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, []string{"iron-fox"}, resp.Mentions,
+		"a quoted @-mention is lifted like any other — ML4 does not special-case reported speech")
+
+	router.WaitForPendingFanout()
+
+	// iron-fox is when_mentioned and the quoted token lifts it into mentions, so
+	// it is admitted and directed; the floor basis carries it — the quote
+	// directs the floor exactly as a fresh address would.
+	for _, call := range disp.snapshot() {
+		assert.Equal(t, []string{"iron-fox"}, call.env.FloorMentions,
+			"the quoted mention directs the floor — ML4 accepted, Tier A bounds the cost to one round")
+	}
+	require.NotEmpty(t, disp.snapshot(),
+		"sanity: the quoted-and-lifted member was dispatched — the quote reached its addressee")
+}
