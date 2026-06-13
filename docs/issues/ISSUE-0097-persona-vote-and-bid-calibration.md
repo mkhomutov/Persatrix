@@ -70,3 +70,17 @@ if snippet steering proves insufficient; prefer the prompt fix first
 
 > 2026-06-12 — initial capture during the MT-CHANNEL-GOV-004 live run
 > (build main @ 113c728).
+
+> 2026-06-13 — **PR 1 (defect 1, opening-round bid).** Calibrated the Tier B
+> bid prompt in [`agents/salience_bid.py`](../../agents/salience_bid.py)
+> `_build_bid_messages`: an *unanswered direct question put to the room* is
+> named as salient on its own — answering it IS the new content, score it
+> high — while the redundant case (someone has already answered) still routes
+> to silence, so the bias-to-silence posture (TB2) is preserved. Prompt-side,
+> no mechanism change. Pinned with `TestOpeningQuestionCalibration` in
+> `tests/unit/python/test_salience_bid.py`. Issue stays **open**: the unit
+> test pins the steer, but defect 1's close needs a live MT-CHANNEL-GOV-004
+> run showing an un-mentioned opening round draw replies without `--mention`
+> nudges. Defect 2 (split prose+vote → single-message vote in
+> [`end-interaction-vote.md`](../../prompts/runtime/safety/end-interaction-vote.md))
+> is **PR 2**, not yet started.
