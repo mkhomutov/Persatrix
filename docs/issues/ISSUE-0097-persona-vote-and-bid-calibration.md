@@ -94,20 +94,34 @@ if snippet steering proves insufficient; prefer the prompt fix first
 
 > 2026-06-13 — **PR 2 (defect 2, split prose+vote).** Added the single-message
 > steer to [`end-interaction-vote.md`](../../prompts/runtime/safety/end-interaction-vote.md):
-> when agreeing and voting, the agreement travels *inside* the vote's
-> `content` as one message — never agreement prose first, vote second — because
-> the split arrives as two turns and a concurring vote that trails its own
-> prose can land outside the `end_vote_window` that closes the discussion (the
-> 04:04:01Z miss this issue captured: prose at .593, vote at .600, distance 3
-> at `end_vote_window: 3`). This ports to the base vote snippet the line the
+> whatever travels alongside the vote — agreement, a closing remark, a caveat —
+> goes *inside* the vote's `content` as that one message, never as prose first
+> and the vote second, because the split arrives as two turns and a concurring
+> vote that trails its own prose can land outside the `end_vote_window` that
+> closes the discussion (the 04:04:01Z miss this issue captured: prose at .593,
+> vote at .600, distance 3 at `end_vote_window: 3` — `state.turn - voteTurn < w`
+> fails `3 < 3`, so the chair's vote is out of window). The steer is **not**
+> narrowed to agreement: the miss is caused by any extra turn between the two
+> votes, not by concurrence specifically. It ports the precise clause the
 > [`chair-escalation.md`](../../prompts/runtime/safety/chair-escalation.md)
-> snippet already gives the chair (ISSUE-0098). Prompt-side, no mechanism
-> change. TDD: `test_snippet_steers_agreement_into_the_vote_not_a_separate_message`
-> in `tests/unit/python/test_end_interaction_vote_action.py` (written red
-> first), plus the
+> snippet already gives the chair (ISSUE-0098) — *prose beside the action block
+> does not travel inside your vote, it reaches the room as a separate,
+> disconnected message* — rather than the ambiguous "one message together"
+> summary the first cut used, which could be misread as "prose + action block
+> in one turn" (the very split the chair clause warns against). The snippet's
+> own opening line was reconciled at the same time: *instead of (or **folded
+> into**) a final reply*, no longer *(or after)*, which had blessed the exact
+> reply-then-separate-vote split this paragraph forbids. Prompt-side, no
+> mechanism change. TDD:
+> `test_snippet_steers_what_you_say_into_the_vote_not_a_separate_message` in
+> `tests/unit/python/test_end_interaction_vote_action.py` (rewritten red first
+> to pin co-location, the ported clause, the polarity-explicit *one message,
+> not two*, and the generalised scope — the prior version asserted a tautology
+> (`content` is named several times anyway) and bare tokens an inverted steer
+> would still satisfy), plus the
 > `tests/unit/python/test_persona_section_composer.py` byte-identity golden
-> updated for the new paragraph. Issue stays **open**: defect 2's close needs a
-> live MT-CHANNEL-GOV-004 run where a concurring persona casts a
-> single-message vote and the quorum lands (`trigger=end_votes`), without the
-> "reply with just your vote, no preamble" operator nudge the original run
-> needed.
+> updated for the rewritten paragraph and the reconciled opening line. Issue
+> stays **open**: defect 2's close needs a live MT-CHANNEL-GOV-004 run where a
+> concurring persona casts a single-message vote and the quorum lands
+> (`trigger=end_votes`), without the "reply with just your vote, no preamble"
+> operator nudge the original run needed.

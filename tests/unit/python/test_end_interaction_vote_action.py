@@ -286,36 +286,58 @@ class TestVotePromptVocabulary:
         src = Path("agents/persona_runtime/prompt_assembly.py").read_text(encoding="utf-8")
         assert 'load_snippet("end-interaction-vote")' in src
 
-    def test_snippet_steers_agreement_into_the_vote_not_a_separate_message(self):
+    def test_snippet_steers_what_you_say_into_the_vote_not_a_separate_message(self):
         """ISSUE-0097 defect 2. A persona asked to confirm and vote published
-        agreement prose and the ``end_interaction_vote`` as two separate
+        its remark as prose and the ``end_interaction_vote`` as two separate
         messages milliseconds apart; W counts turns, so with
         ``end_vote_window: 3`` the split pushed the concurring vote to
         distance 3 from the chair's vote and the quorum missed — the
         escalated interaction then idled out instead of closing on votes.
 
         The base vote snippet must carry the same single-message steer the
-        chair-escalation snippet already gives the chair: agreement travels
-        INSIDE the vote's ``content``, one message — never prose first, vote
-        second. Pin both halves (put it inside / do not split) so the steer
-        cannot silently regress."""
+        chair-escalation snippet already gives the chair. The earlier version
+        of this test was too loose to defend the steer: it asserted ``"inside"
+        and "content"`` (``content`` names a field the snippet already mentions
+        several times, so that half was a tautology) and bare ``"one message"``
+        / ``"separate message"`` tokens that an *inverted* steer ("one message,
+        then a separate vote") would still satisfy. Pin the steer so neither a
+        polarity inversion nor a silent narrowing can pass green."""
+        import re
+
         from agents.prompt_loader import load_snippet
 
         snippet = load_snippet("end-interaction-vote").lower()
-        # Half 1 — agreement rides inside the vote's content as one message.
-        assert "inside" in snippet and "content" in snippet, (
-            "the snippet must tell the persona to put its agreement inside "
-            "the vote's content"
+
+        # (a) Co-location, not the tautology: what the persona says rides
+        # INSIDE the vote's content *in the same breath* — "inside" and
+        # "content" within one sentence, not merely both present somewhere.
+        assert re.search(r"inside[^.]*content", snippet), (
+            "the snippet must tell the persona to put what it says inside the "
+            "vote's content, in the same breath — not just mention both words"
         )
-        assert "one message" in snippet, (
-            "the steer must name the single-message shape that lands in the "
-            "quorum window"
+
+        # (b) Port the chair-escalation clause in substance: prose set beside
+        # the action block does NOT travel inside the vote (this is the
+        # precise mechanism the closing summary line used to leave ambiguous).
+        assert "does not travel inside" in snippet, (
+            "the snippet must carry the chair snippet's warning that prose "
+            "beside the action block does not travel inside the vote"
         )
-        # Half 2 — explicitly warn against the prose-then-vote split that
-        # cost the W-window miss.
-        assert "separate message" in snippet, (
-            "the snippet must warn against publishing agreement prose and the "
-            "vote as two separate messages"
+
+        # (c) Polarity-explicit single-message shape. An inverted steer cannot
+        # contain this phrase, unlike a bare "one message" token.
+        assert "one message, not two" in snippet, (
+            "the steer must name the single-message shape unambiguously, so a "
+            "reworded/inverted steer cannot regress past it"
+        )
+
+        # (d) Not narrowed to agreement: ANY extra turn between two votes
+        # triggers the miss, so the steer must cover whatever travels with the
+        # vote, not only concurrence.
+        assert "alongside your vote" in snippet, (
+            "the steer must generalise beyond agreement to anything sent "
+            "alongside the vote, since the W-window miss is not "
+            "agreement-specific"
         )
 
 
