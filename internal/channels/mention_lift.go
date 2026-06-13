@@ -9,9 +9,13 @@ import "strings"
 // ("iron-fox"). PR 2 lands the substrate with NO call site; PR 3 wires it into
 // the REST publish handler ([Server.handlePublishMessage]), unioning the
 // result into the structured `mentions` array before persist and fanout
-// (ML1) — at which point [resolveFloorMentions], both response gates, history,
-// and web highlighting start seeing the ids the prose always meant, with no
-// proto/wire/schema change.
+// (ML1) — at which point [resolveFloorMentions], both response gates, and
+// history start seeing the ids the prose always meant, with no proto/wire/
+// schema change. Web mention *highlighting* is NOT in that set: the renderer's
+// `segmentMentions` (web/src/lib/mentions.js) highlights only literal `@<id>`
+// tokens present in the text, so a display-name mention ("@Iron Fox") drives
+// the gate but still renders as plain prose until the renderer learns to span
+// display names — deliberately out of scope for this wire-only resolver.
 //
 // Kept in its own file (sibling of floor_mentions.go) so floor_control.go and
 // the publish handler stay under the 500-line review cap.
@@ -182,7 +186,10 @@ func isMentionIDChar(b byte) bool {
 
 // isMentionSpace reports whether b is ASCII whitespace — the `\s` half of the
 // composer's `(^|\s)@` boundary anchor and the inter-word gap in a display
-// name.
+// name. ASCII-only by design: unlike the composer's JS `\s`, a Unicode space
+// (e.g. NBSP, U+00A0) is not treated as a boundary — content is scanned
+// byte-wise and display names are ASCII by construction, so for canonical
+// rosters the divergence is unreachable.
 func isMentionSpace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f' || b == '\v'
 }

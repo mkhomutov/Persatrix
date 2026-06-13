@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// cand is the three-member roster the live MT-CHANNEL-GOV-004 hand-off ran
-// against — ids are kebab-case, display names are the `**Iron Fox:**` window
-// spellings the chair actually typed.
+// liftRoster is the three-member roster the live MT-CHANNEL-GOV-004 hand-off
+// ran against — ids are kebab-case, display names are the `**Iron Fox:**`
+// window spellings the chair actually typed.
 func liftRoster() []mentionCandidate {
 	return []mentionCandidate{
 		{ID: "nova-sparrow", DisplayName: "Nova Sparrow"},
@@ -80,6 +80,24 @@ func TestLiftDisplayNameMentions_IdMatchAndPrecedence(t *testing.T) {
 	assert.Equal(t, []string{"iron-fox"},
 		liftDisplayNameMentions("@iron-fox and @Iron Fox", liftRoster(), "x"),
 		"the id form and the display-name form of one member collapse to a single id")
+}
+
+// TestLiftDisplayNameMentions_IdMatchShadowsLongerName pins the documented
+// "exact id first" precedence at its sharp edge: when a short valid id is also
+// the first word of a *longer* display name, the id wins and the trailing
+// words are left as prose — the resolver never falls through to the longer
+// display-name match once an id has matched. This locks the spec choice (id
+// before longest-name), so a future "prefer the longest overall span" refactor
+// trips here first instead of silently changing who the floor is directed at.
+func TestLiftDisplayNameMentions_IdMatchShadowsLongerName(t *testing.T) {
+	roster := []mentionCandidate{
+		{ID: "ok", DisplayName: "Ok"},
+		{ID: "team-lead", DisplayName: "Ok Then"},
+	}
+
+	assert.Equal(t, []string{"ok"},
+		liftDisplayNameMentions("@ok then, ship it", roster, "x"),
+		"an exact id match wins over a longer display-name match — id-first precedence, trailing words stay prose")
 }
 
 // TestLiftDisplayNameMentions_AmbiguousLiftsNobody pins ML3's collision rule:
