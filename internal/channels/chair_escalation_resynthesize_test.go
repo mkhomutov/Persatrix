@@ -101,6 +101,47 @@ func TestChairResynthesize_EndToEnd_PublishWiring(t *testing.T) {
 	assert.Equal(t, int64(1), chairEscalationCount(t, rm, "group", "resynthesized"))
 }
 
+// TestChairResynthesize_EndToEnd_VoteReplyDisarmsNoReForce — the false positive
+// ISSUE-0099's live MT surfaced: the chair's forced-turn reply is a synthesis-
+// in-VOTE that @-mentions the still-outstanding voice — here the operator, a
+// `respond: never` member — exactly what the framing invites ("@-mention the
+// missing voice inside your vote's `content`"). Its floor-mention subset is
+// empty, identical to a misfired hand-off at the seam, but a vote is outcome
+// (a), not a hand-off: it must DISARM the trigger (consume the stash) WITHOUT
+// re-forcing, or the chair gets a second synthesize-only turn after it already
+// synthesized and voted. Exercised through the real publish seam, where the
+// `end_interaction_vote` guard on `misfired` lives.
+func TestChairResynthesize_EndToEnd_VoteReplyDisarmsNoReForce(t *testing.T) {
+	router, disp, _, ch, reader := escalationHarness(t)
+
+	stallStimulus(t, router, ch, "alex") // forced turn 1 → chair, stash alex's stimulus
+	require.Len(t, escalationEnvelopes(disp), 1)
+
+	// The chair's forced-turn reply: a synthesis cast as a vote that @-mentions
+	// the operator (non-floor-capable). A vote, not a hand-off — no re-force.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "nova-sparrow",
+		Content:  "Closing: three risks on the record. @alex owns the budget call.",
+		Mentions: []string{"alex"},
+		Metadata: map[string]any{endVoteMetadataKey: true},
+	}, ""))
+
+	assert.Empty(t, resynthesizeEnvelopes(disp),
+		"a synthesis-in-vote is outcome (a), not a misfired hand-off — no re-force")
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	assert.Zero(t, chairEscalationCount(t, rm, "group", "resynthesized"))
+
+	// The vote still consumed the arm: a later BARE misfire from the chair is a
+	// stale message, not the forced-turn reply, so it does not re-inject either.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "nova-sparrow",
+		Content: "@alex thanks all", Mentions: []string{"alex"},
+	}, ""))
+	assert.Empty(t, resynthesizeEnvelopes(disp),
+		"the vote reply already disarmed the trigger — a later bare misfire re-forces nothing")
+}
+
 // TestChairResynthesize_CarriesOriginalNonChairSender — the headline of the
 // design: the re-dispatch must carry the ORIGINAL stimulus's non-chair sender,
 // not the chair's misfired reply. Re-sending the chair's own reply to the chair

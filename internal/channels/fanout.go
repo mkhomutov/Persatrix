@@ -83,18 +83,29 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// a reclassification — logging it would mislabel every broadcast and
 	// bury the signal this line exists to surface.
 	floorMentions := resolveFloorMentions(members, msg.Mentions, msg.SenderID)
-	// ISSUE-0099: `misfired` is the one publish-time-PROVABLE escalation
-	// failure — the publish named mentions but no floor-capable member, so a
-	// hand-off (the escalation chair's forced-turn reply pointing at a
-	// `respond: never` observer, the operator, or itself) reached nobody. An
-	// explicit `@everyone` is open floor by contract (D3), not a misfire.
-	misfired := len(msg.Mentions) > 0 && len(floorMentions) == 0 && !slices.Contains(msg.Mentions, MentionEveryone)
-	if misfired {
+	// The previously-silent resolution: mentions were present but named no
+	// floor-capable member (the operator, an observer, a non-member, the sender
+	// itself), the case the gate flip reclassifies to open floor. An explicit
+	// `@everyone` is open floor by contract (D3), not a reclassification.
+	namedNoFloorCapable := len(msg.Mentions) > 0 && len(floorMentions) == 0 && !slices.Contains(msg.Mentions, MentionEveryone)
+	if namedNoFloorCapable {
 		r.logger.Debug("channels: mentions name no floor-capable member",
 			zap.String("channel_id", msg.ChannelID),
 			zap.String("message_id", msg.ID),
 			zap.Int("mentions", len(msg.Mentions)))
 	}
+	// ISSUE-0099: `misfired` is the one publish-time-PROVABLE escalation
+	// failure — the chair's forced-turn reply handed off to a target that
+	// reached nobody. A misfired hand-off is a BARE message (outcome b); a
+	// publish carrying an `end_interaction_vote` is the chair's synthesis
+	// (outcome a), NOT a hand-off, even when it @-mentions the still-outstanding
+	// voice — the framing invites "@-mention the missing voice inside your
+	// vote's `content`", and that voice is routinely non-floor-capable (the
+	// operator, or the observer the residue targets). Re-forcing on a vote would
+	// inject a second synthesize-only turn after the chair already voted, so the
+	// vote disarms the trigger (it still consumes the stash below) without
+	// re-forcing.
+	misfired := namedNoFloorCapable && !readEndInteractionVote(msg.Metadata)
 	// Run for EVERY chair publish in an escalated interaction, not only the
 	// misfiring ones: the chair's first reply after the forced turn disarms the
 	// trigger whether it misfired (re-force one synthesize-only turn) or handed
