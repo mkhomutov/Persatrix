@@ -66,7 +66,7 @@ func (s *Server) liftContentMentions(ctx context.Context, channelID, senderID, c
 	// even though only the channel's members are consulted. Fine while
 	// registries are small (the dominant deployment); if one grows hot, scope
 	// the lookup to membership (per-member Get, or a cached directory). Tracked
-	// as ISSUE-0096 follow-up, deliberately out of this PR.
+	// as ISSUE-0100, deliberately out of the wiring PR.
 	names := map[string]string{}
 	if s.registry != nil {
 		if agents, lErr := s.registry.List(ctx); lErr == nil {
