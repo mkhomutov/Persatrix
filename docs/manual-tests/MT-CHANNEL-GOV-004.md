@@ -115,6 +115,14 @@ Two send-side facts the 2026-06-12 session tripped on:
   of synthesis
   ([ISSUE-0098](../issues/ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md)).
   The *nudge* stays un-mentioned — that is the honest stall under test.
+- **To exercise outcome (a), run with an all-`participant` roster.** On
+  the default roster `ember-owl` is `respond: addressed` — a
+  genuinely-unasked standing voice, which the calibrated outcome (b) still
+  legitimately lets the chair hand off to (ISSUE-0098 Resolution). The
+  2026-06-13 PR 622 PASS overrode `ember-owl: participant` in
+  `config/channels.yaml` (reverted after the run) so no `addressed`-only
+  voice stood open when the stall hit; that is what steered the chair to
+  synthesize rather than hand off.
 
 **Expected**:
 - The first prompt draws the round; the follow-up draws **silence** (every
@@ -147,8 +155,8 @@ Two send-side facts the 2026-06-12 session tripped on:
   not the orchestrator logs — a log-grep for it never fires.
 
 **Verification**:
-- [ ] The chair's turn carries a synthesis, not a hollow sign-off.
-- [ ] The close lands on the second distinct vote.
+- [x] The chair's turn carries a synthesis, not a hollow sign-off. *(2026-06-13, PR 622 — `end_interaction_vote=true` with a real three-risk synthesis in `content`.)*
+- [x] The close lands on the second distinct vote. *(2026-06-13 — `trigger=end_votes votes=2`.)*
 
 ### Step 3: The synthesis is the recorded outcome
 
@@ -162,7 +170,7 @@ Two send-side facts the 2026-06-12 session tripped on:
   trigger renders as **"ended"** (structural), not *went idle*.
 
 **Verification**:
-- [ ] The summary carries the chair's synthesis; the trigger is "ended".
+- [x] The summary carries the chair's synthesis; the trigger is "ended". *(2026-06-13, PR 622 — summary records the resolution around Nova's synthesis; `close_reason=structural`.)*
 
 ---
 
@@ -170,9 +178,9 @@ Two send-side facts the 2026-06-12 session tripped on:
 
 | Step | Expected Outcome | Pass/Fail |
 |------|-----------------|-----------|
-| 1 | An honest stall (silent round) escalates: one forced turn to the chair, `outcome=dispatched` | ☐ |
-| 2 | The chair publishes synthesis-in-vote; a second vote closes (`trigger=end_votes`); CE5 caps re-escalation | ☐ |
-| 3 | The interaction summary records the synthesis with a structural ("ended") close | ☐ |
+| 1 | An honest stall (silent round) escalates: one forced turn to the chair, `outcome=dispatched` | ✅ (2026-06-13, PR 622) |
+| 2 | The chair publishes synthesis-in-vote; a second vote closes (`trigger=end_votes`); CE5 caps re-escalation | ✅ (2026-06-13, PR 622) |
+| 3 | The interaction summary records the synthesis with a structural ("ended") close | ✅ (2026-06-13, PR 622) |
 
 ---
 
@@ -183,11 +191,14 @@ Two send-side facts the 2026-06-12 session tripped on:
 A legitimate alternative: the chair @-mentions the member best placed with
 the specific open point instead of synthesizing. The named member's reply
 restarts the discussion — no close yet, and that is correct behaviour, not a
-failure. Re-run with a more exhausted topic to exercise outcome (a).
+failure. To exercise outcome (a) instead, remove the `addressed`-only
+standing voice (all-`participant` roster, per the step-1 override note).
 
-Live calibration so far runs three-for-three on outcome (b), always
+Pre-PR-622 calibration ran three-for-three on outcome (b), always
 triggered by a member who never spoke
-([ISSUE-0098](../issues/ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md)) —
+([ISSUE-0098](../issues/ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md),
+now **resolved** — the calibrated snippet plus an all-`participant` roster
+exercised outcome (a) live on 2026-06-13, see Test Results) —
 and the hand-off itself names members by display name, which used to resolve
 to nobody ([ISSUE-0096](../issues/ISSUE-0096-display-name-mentions-resolve-to-nobody.md)
 — **fixed** 2026-06-13 by the
@@ -216,6 +227,7 @@ here is signal that steering needs another pass).
 
 | Date | Tester | Build | Result | Notes |
 |------|--------|-------|--------|-------|
+| 2026-06-13 | Claude (operator: mkhomutov) | main @ 3cde982 (PR 622) | PASS (full arc, steps 1–3) | First live exercise of **outcome (a)** — the synthesis-in-vote ISSUE-0098 had made unreachable (prior runs went 3-for-3 on hand-off). Run on the **all-`participant`** planning roster (temporary `ember-owl: participant` override, reverted after — the lever the PR 622 review identified: no `addressed`-only standing voice). Arc: opener (`--mention` all three) drew one risk each → un-mentioned nudge "Anything else on this?" drew silence → `channels: stalled round escalated to chair` (`escalation_chair_id=nova-sparrow`, interaction `4b332af1`, 05:34:27Z). **Step 2:** nova-sparrow's forced turn was a genuine synthesis ("Three distinct risks on the record … Recommend these three go into the v0.3.0 launch checklist as explicit go/no-go gates") carried **inside the vote** — persisted `metadata.end_interaction_vote=true`, not prose beside the block. **Close:** iron-fox + ember-owl each concurred (prose "Agreed" + `end_interaction_vote=true`); `channels: interaction closed by end-of-interaction votes` `trigger=end_votes votes=2` (05:51:05Z). **Step 3:** summary records the resolution ("… confirmation … on Nova's summary of three risks … agreed to proceed with closure"), `close_reason=structural` ("ended"). Two caveats, both pre-existing and orthogonal to ISSUE-0098: (a) concurrence had to be *drawn* — personas bid-passed on open-floor nudges, so a `--mention`-targeted nudge was needed to pull the two votes (ISSUE-0097 pass-proneness); (b) the agent `/interactions/closed` summary listed ids (`0d2ca73d`, `3eb8c3e5`) diverging from the message-stamped/end-vote-closed id (`4b332af1`) — interaction-id segmentation in the summary view, worth a separate look. |
 | 2026-06-13 | Claude (operator: mkhomutov) | main @ def19ca | PASS (ISSUE-0096 mechanism) | Targeted live verification of the display-name-mention-lifting fix (#617–#619), **not** the full stall→escalation arc. Lever: `ember-owl` is `respond: addressed` (when_mentioned), so it wakes *only* on a real mention. Joined as `alex --respond never` and sent `@Ember Owl — gut check…` with **no `--mention`** (prose only — the exact form the prior FAIL row proved reached nobody). Three-way proof the lift now works end-to-end through the real stack: (1) orchestrator DEBUG `channels: lifted display-name mentions from content` `lifted=["ember-owl"]` (`channel_mention_lift.go:124`); (2) the persisted row (`deeb6367`) carries `mentions=["ember-owl"]` despite the empty structured array — the canonical id was unioned in before persist/fanout; (3) `ember-owl` **replied** (impossible pre-fix for a when_mentioned member on prose). Bonus: a follow-up `nova-sparrow` turn's prose `@alex` also lifted (`mentions=["ember-owl","alex"]`), and `ember-owl`'s reply-to-human (`mentions=["alex"]`, `respond:never`) correctly logged `mentions name no floor-capable member` — the floor-capable basis is unchanged, it just finally sees the addressees. This closes the ISSUE-0096 resolver bug. The native **Edge Case 1** observation (a *chair forced-turn* hand-off by display name restarting a stalled discussion) is the same mechanism inside the governance arc and is still gated on ISSUE-0098's chair completeness-fixation; left for an opportunistic full-arc run. |
 | 2026-06-12 | Claude (operator: mkhomutov) | main @ d47385d | FAIL (blocked) | Re-run targeting step 3 after the end-vote close-propagation fix (#613–#615). Two interactions, neither reached a vote-close: both stalls escalated correctly (`outcome=dispatched`), but both chair forced turns chose hand-off (outcome b) on the silent `addressed` member, named it by display name (ISSUE-0096 ×2), reached nobody, and the interactions deadlocked to idle — CE5 ration spent, concurrence nudges drew honest passes with no synthesis on the table (ISSUE-0098/ISSUE-0099 filed from this run). Steps 2–3 not exercised; close-propagation fix still unverified live. Also confirmed: bare-compose preconditions crash-loop agents (provider overlay required); `already_escalated` is metric-only (log-greps never fire); CLI in-text @-names are prose (structured `--mention` required); interaction rotation does not reset persona windows — re-asked questions get deflected as duplicates, so re-runs need a fresh topic. |
 | 2026-06-12 | Claude (operator: mkhomutov) | main @ 113c728 | PARTIAL PASS | Steps 1–2 fully verified (run with interaction `ebc02462`: stall → `outcome=dispatched` → chair synthesis-in-vote with `end_interaction_vote: true` on the wire → close on 2nd distinct vote, `trigger=end_votes`, 9 s after escalation; CE5 one-ration guard observed three times). Step 3 partial: summaries carry the synthesis and vote-closed interactions render "ended", but the closing vote's fanout suppression means no member's agent-local tracker hears the close — with no follow-up traffic inside the agent-side 600 s idle window every member's surface renders the escalated interaction "went idle". Edge Case 1 (chair hand-off) observed on first run, incl. display-name @-mentions resolving to no floor-capable member. Side findings: one unreproduced idle-rotation no-fire (700 s gap, window 600 s, 03:14:50→03:26:30Z; later gaps of 680 s did rotate); personas pass-prone enough that un-mentioned prompts often stall on the *opening* round; split prose+vote replies burn a W=3 turn. Wall-clock cost was ~2 h — dominated by 600 s governance timers and re-runs; this MT needs a test-profile idle window (e.g. 60 s) to be practical. |
