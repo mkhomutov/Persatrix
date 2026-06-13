@@ -59,9 +59,10 @@ func TestChairResynthesize_MisfiredReply_ReForcesSynthesizeOnly(t *testing.T) {
 	require.Len(t, escalationEnvelopes(disp), 1)
 
 	// The chair's reply misfires: it @-mentions the operator, who cannot take
-	// the floor → the resynthesize re-dispatch fires.
+	// the floor → the resynthesize re-dispatch fires (misfired = true, the
+	// value the fanout seam computes from the empty floor-mention subset).
 	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open),
-		ChannelTypeGroup, "", members, 4)
+		ChannelTypeGroup, members, 4, true)
 
 	re := resynthesizeEnvelopes(disp)
 	require.Len(t, re, 1, "a provable misfire re-forces exactly one synthesize-only turn")
@@ -116,7 +117,7 @@ func TestChairResynthesize_CarriesOriginalNonChairSender(t *testing.T) {
 	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", open), ChannelTypeGroup, "",
 		floorRoundOutcome{granted: 2}, members, 4, nil)
 	reply := chairMisfireReply(ch, open)
-	router.maybeResynthesizeMisfire(context.Background(), reply, ChannelTypeGroup, "", members, 4)
+	router.maybeResynthesizeMisfire(context.Background(), reply, ChannelTypeGroup, members, 4, true)
 
 	var forced []ChannelMessage
 	for i, env := range rec.envelopes {
@@ -142,8 +143,8 @@ func TestChairResynthesize_BoundOncePerInteraction(t *testing.T) {
 
 	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", open), ChannelTypeGroup, "",
 		floorRoundOutcome{granted: 2}, members, 4, nil)
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, "", members, 4)
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, "", members, 4)
+	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, members, 4, true)
+	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, members, 4, true)
 
 	assert.Len(t, resynthesizeEnvelopes(disp), 1, "the resynthesize re-dispatch is bounded to once")
 	var rm metricdata.ResourceMetrics
@@ -166,7 +167,7 @@ func TestChairResynthesize_OnlyTheChairsOwnReply(t *testing.T) {
 	// ember-owl (not the chair) names the operator — not a hand-off misfire.
 	notChair := stalledMsg(ch, "ember-owl", open)
 	notChair.Mentions = []string{"alex"}
-	router.maybeResynthesizeMisfire(context.Background(), notChair, ChannelTypeGroup, "", members, 4)
+	router.maybeResynthesizeMisfire(context.Background(), notChair, ChannelTypeGroup, members, 4, true)
 
 	assert.Empty(t, resynthesizeEnvelopes(disp), "only the chair's own reply misfires a hand-off")
 	var rm metricdata.ResourceMetrics
@@ -183,7 +184,7 @@ func TestChairResynthesize_NotEscalated_NoReForce(t *testing.T) {
 	open := commitOpenInteraction(t, router, ch)
 	members := []Member{member("nova-sparrow", RespondAlways), member("ember-owl", RespondAlways)}
 
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, "", members, 4)
+	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, members, 4, true)
 
 	assert.Empty(t, resynthesizeEnvelopes(disp))
 	var rm metricdata.ResourceMetrics
@@ -204,7 +205,7 @@ func TestChairResynthesize_RoundOutlivedInteraction_NotReForced(t *testing.T) {
 		floorRoundOutcome{granted: 2}, members, 4, nil)
 
 	stale := chairMisfireReply(ch, uuid.NewString()) // a retired generation's id
-	router.maybeResynthesizeMisfire(context.Background(), stale, ChannelTypeGroup, "", members, 4)
+	router.maybeResynthesizeMisfire(context.Background(), stale, ChannelTypeGroup, members, 4, true)
 
 	assert.Empty(t, resynthesizeEnvelopes(disp), "a reply that outlived its interaction does not re-force")
 	var rm metricdata.ResourceMetrics
@@ -212,11 +213,12 @@ func TestChairResynthesize_RoundOutlivedInteraction_NotReForced(t *testing.T) {
 	assert.Zero(t, chairEscalationCount(t, rm, "group", "resynthesized"))
 }
 
-// TestChairResynthesize_ChairGone_DispatchError — runtime drift: the chair
-// left after the first escalation. claimResynthesize spends the bound (like the
+// TestChairResynthesize_ChairGone_ResynthesizeError — runtime drift: the chair
+// left after the first escalation. claimChairReply consumes the arm (like the
 // stall tail's drift branch spends the ration — no refund), so the failure is
-// dispatch_error and a later misfire does not retry.
-func TestChairResynthesize_ChairGone_DispatchError(t *testing.T) {
+// the publish-seam `resynthesize_error` (NOT the round-tail `dispatch_error`),
+// and a later misfire does not retry.
+func TestChairResynthesize_ChairGone_ResynthesizeError(t *testing.T) {
 	router, disp, _, ch, reader := escalationHarness(t)
 	open := commitOpenInteraction(t, router, ch)
 	full := []Member{member("nova-sparrow", RespondAlways), member("ember-owl", RespondAlways)}
@@ -225,15 +227,17 @@ func TestChairResynthesize_ChairGone_DispatchError(t *testing.T) {
 		floorRoundOutcome{granted: 2}, full, 4, nil)
 
 	withoutChair := []Member{member("ember-owl", RespondAlways)}
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, "", withoutChair, 4)
-	// The bound is spent on the drift error — a second misfire re-forces nothing.
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, "", full, 4)
+	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, withoutChair, 4, true)
+	// The arm is consumed on the drift error — a second misfire re-forces nothing.
+	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, full, 4, true)
 
 	assert.Empty(t, resynthesizeEnvelopes(disp))
 	var rm metricdata.ResourceMetrics
 	require.NoError(t, reader.Collect(context.Background(), &rm))
-	assert.Equal(t, int64(1), chairEscalationCount(t, rm, "group", "dispatch_error"),
-		"a drift dispatch_error spends the resynthesize bound — no retry")
+	assert.Equal(t, int64(1), chairEscalationCount(t, rm, "group", "resynthesize_error"),
+		"a drift failure consumes the arm and labels resynthesize_error — no retry")
+	assert.Zero(t, chairEscalationCount(t, rm, "group", "dispatch_error"),
+		"the publish-seam failure must NOT pollute the round-tail dispatch_error stall count")
 	assert.Zero(t, chairEscalationCount(t, rm, "group", "resynthesized"))
 }
 
@@ -249,7 +253,7 @@ func TestChairResynthesize_FreshInteractionClearsState(t *testing.T) {
 	first := commitOpenInteraction(t, router, ch)
 	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", first), ChannelTypeGroup, "",
 		floorRoundOutcome{granted: 2}, members, 4, nil)
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, first), ChannelTypeGroup, "", members, 4)
+	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, first), ChannelTypeGroup, members, 4, true)
 	require.Len(t, resynthesizeEnvelopes(disp), 1)
 
 	// Idle past the window: the next commit rotates to a fresh interaction. The
@@ -260,7 +264,91 @@ func TestChairResynthesize_FreshInteractionClearsState(t *testing.T) {
 	require.NotEqual(t, first, second)
 	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", second), ChannelTypeGroup, "",
 		floorRoundOutcome{granted: 2}, members, 4, nil)
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, second), ChannelTypeGroup, "", members, 4)
+	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, second), ChannelTypeGroup, members, 4, true)
 
 	assert.Len(t, resynthesizeEnvelopes(disp), 2, "a fresh interaction re-forces again")
+}
+
+// TestChairResynthesize_CleanReplyDisarms_NoLaterMisfire — the deep-review
+// finding the trigger MUST close: the re-synthesis is the chair's FORCED-TURN
+// reply's misfire, not "the first chair publish in the interaction that names
+// no floor-capable member". When the forced-turn reply takes the floor cleanly
+// (`misfired == false`), consuming the stash disarms the trigger, so a LATER
+// innocuous chair message ("@alex, thanks") can no longer be mistaken for the
+// reply's misfire and re-inject the now-stale stimulus.
+func TestChairResynthesize_CleanReplyDisarms_NoLaterMisfire(t *testing.T) {
+	router, disp, _, ch, reader := escalationHarness(t)
+	open := commitOpenInteraction(t, router, ch)
+	members := []Member{member("nova-sparrow", RespondAlways), member("ember-owl", RespondAlways)}
+
+	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", open), ChannelTypeGroup, "",
+		floorRoundOutcome{granted: 2}, members, 4, nil)
+
+	// The chair's forced-turn reply hands the floor cleanly (misfired = false):
+	// it consumes the arm without re-forcing.
+	cleanReply := stalledMsg(ch, "nova-sparrow", open)
+	router.maybeResynthesizeMisfire(context.Background(), cleanReply, ChannelTypeGroup, members, 4, false)
+	require.Empty(t, resynthesizeEnvelopes(disp), "a clean forced-turn reply does not re-force")
+
+	// A later chair message names only the operator — a provable empty floor
+	// mention. The arm is already consumed, so this stands; pre-fix it would
+	// have spuriously re-forced from the stale stimulus.
+	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, members, 4, true)
+
+	assert.Empty(t, resynthesizeEnvelopes(disp),
+		"a clean hand-off disarms the trigger; a later innocuous chair message is not a misfire")
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	assert.Zero(t, chairEscalationCount(t, rm, "group", "resynthesized"))
+}
+
+// TestChairResynthesize_EndToEnd_CleanReplyDisarms — the same defence through
+// the real fanout seam: the seam must run the trigger for the chair's clean
+// hand-off too (not only empty-floor-mention publishes), or the arm never
+// clears and the false-positive returns. A refactor that re-gates the seam call
+// behind the misfire condition would fail here.
+func TestChairResynthesize_EndToEnd_CleanReplyDisarms(t *testing.T) {
+	router, disp, _, ch, _ := escalationHarness(t)
+
+	stallStimulus(t, router, ch, "alex") // forced turn 1 → chair, arm the stash
+	require.Len(t, escalationEnvelopes(disp), 1)
+
+	// The chair hands off to a floor-capable member — a clean reply, not a
+	// misfire. The seam must still consume the arm.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "nova-sparrow",
+		Content: "ember-owl, your take?", Mentions: []string{"ember-owl"},
+	}, ""))
+	require.Empty(t, resynthesizeEnvelopes(disp), "a clean hand-off does not re-force")
+
+	// A later chair message names only the operator — disarmed, so it stands.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "nova-sparrow",
+		Content: "alex, thanks", Mentions: []string{"alex"},
+	}, ""))
+	assert.Empty(t, resynthesizeEnvelopes(disp),
+		"the seam disarmed on the clean reply; the later empty-floor-mention message is not a misfire")
+}
+
+// TestChairResynthesize_CarriesOriginalThreadParent — the re-dispatch
+// reproduces the ORIGINAL stimulus's thread parent (stashed at escalation), not
+// the misfired reply's: the reply is a different node in the thread tree, and
+// the re-forced turn re-delivers the stimulus, so it must carry the stimulus's
+// thread context.
+func TestChairResynthesize_CarriesOriginalThreadParent(t *testing.T) {
+	router, disp, _, ch, _ := escalationHarness(t)
+	open := commitOpenInteraction(t, router, ch)
+	members := []Member{member("nova-sparrow", RespondAlways), member("ember-owl", RespondAlways)}
+
+	// Forced turn 1 carries the original stimulus's thread parent.
+	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", open), ChannelTypeGroup,
+		"thread-root-author", floorRoundOutcome{granted: 2}, members, 4, nil)
+
+	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open),
+		ChannelTypeGroup, members, 4, true)
+
+	re := resynthesizeEnvelopes(disp)
+	require.Len(t, re, 1)
+	assert.Equal(t, "thread-root-author", re[0].ThreadParentSenderID,
+		"the re-dispatch reproduces the stimulus's thread parent, stashed at escalation — not the reply's")
 }

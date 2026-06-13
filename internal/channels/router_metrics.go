@@ -57,17 +57,19 @@ type RouterMetrics struct {
 	// on the structured log line.
 	InteractionClosed metric.Int64Counter
 	// ChairEscalation counts chair-escalation lifecycle events, labelled by
-	// `channel_type` and `outcome`. Most outcomes — `{dispatched, no_chair,
-	// already_escalated, dispatch_error, self_stimulus}` — are stall
-	// dispositions: one per DETECTED floor-round stall (the
-	// chair-stall-escalation amendment §C 1), emitted after the disposition
-	// chain so an operator sees the stalls a chair could be configured for,
-	// not only the escalations that fired. `self_stimulus` (PR #609 deep
-	// review) is the withheld forced turn whose stalled stimulus the chair
-	// itself authored. `resynthesized` (ISSUE-0099) is the exception: it fires
-	// at the chair-reply publish seam, not the round tail, when a hand-off
-	// provably reached nobody and one synthesize-only turn is re-forced — a
-	// distinct lifecycle label, so summing the counter is not a stall count.
+	// `channel_type` and `outcome`. The stall dispositions — `{dispatched,
+	// no_chair, already_escalated, dispatch_error, self_stimulus}` — are one
+	// per DETECTED floor-round stall (the chair-stall-escalation amendment
+	// §C 1), emitted after the disposition chain so an operator sees the stalls
+	// a chair could be configured for, not only the escalations that fired.
+	// `self_stimulus` (PR #609 deep review) is the withheld forced turn whose
+	// stalled stimulus the chair itself authored. The remaining two outcomes —
+	// `{resynthesized, resynthesize_error}` (ISSUE-0099) — fire at the
+	// chair-reply publish seam, NOT the round tail, when the chair's forced-turn
+	// reply provably reached nobody and one synthesize-only turn is re-forced
+	// (or its re-dispatch failed). They are distinct lifecycle labels, kept off
+	// dispatch_error precisely so summing the stall dispositions stays a stall
+	// count.
 	ChairEscalation metric.Int64Counter
 	// CloseNotification counts each per-recipient close-notification dispatch
 	// (the end-vote-close-propagation amendment, CP5), labelled by

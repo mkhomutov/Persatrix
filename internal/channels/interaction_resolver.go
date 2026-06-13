@@ -114,12 +114,21 @@ type openInteraction struct {
 	// `self_sender` defence that makes a plain refund inert), whereas this
 	// carries the ORIGINAL non-chair sender. nil until escalated; rides the
 	// entry and dies with the interaction like chairEscalated.
+	//
+	// It doubles as the ISSUE-0099 "armed" bit and the loop guard:
+	// [ChannelRouter.claimChairReply] consumes it (back to nil) on the chair's
+	// FIRST publish after the forced turn — the forced-turn reply — whether or
+	// not that reply misfired. So a clean hand-off disarms the trigger, and a
+	// later innocuous chair message naming no floor-capable member can no
+	// longer be mistaken for the reply's misfire; a second misfire likewise
+	// finds nothing to claim and stands.
 	escalatedStimulus *ChannelMessage
-	// escalationResynthesized is the ISSUE-0099 bound: true once the one
-	// synthesize-only re-dispatch has fired, so a second provable misfire on
-	// the same interaction stands (the loop guard, preserved). CAS via
-	// [ChannelRouter.claimResynthesize].
-	escalationResynthesized bool
+	// escalatedThreadParent is the thread-parent attribution the first forced
+	// turn carried (ISSUE-0099), stashed beside escalatedStimulus so the
+	// re-dispatch reproduces the ORIGINAL stimulus's thread context rather than
+	// the misfired reply's — the reply is a different message in the tree.
+	// Meaningless ("") off threads, like the value it mirrors.
+	escalatedThreadParent string
 }
 
 // previousClose is the resolver's OQ 5 close-cause attribution for one
@@ -206,7 +215,7 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 		// inherits a spent re-dispatch nor a stale stimulus pointer.
 		entry.chairEscalated = false
 		entry.escalatedStimulus = nil
-		entry.escalationResynthesized = false
+		entry.escalatedThreadParent = ""
 	}
 	resolved := entry.id
 	prev := entry.prev

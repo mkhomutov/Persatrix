@@ -83,20 +83,25 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// a reclassification — logging it would mislabel every broadcast and
 	// bury the signal this line exists to surface.
 	floorMentions := resolveFloorMentions(members, msg.Mentions, msg.SenderID)
-	if len(msg.Mentions) > 0 && len(floorMentions) == 0 && !slices.Contains(msg.Mentions, MentionEveryone) {
+	// ISSUE-0099: `misfired` is the one publish-time-PROVABLE escalation
+	// failure — the publish named mentions but no floor-capable member, so a
+	// hand-off (the escalation chair's forced-turn reply pointing at a
+	// `respond: never` observer, the operator, or itself) reached nobody. An
+	// explicit `@everyone` is open floor by contract (D3), not a misfire.
+	misfired := len(msg.Mentions) > 0 && len(floorMentions) == 0 && !slices.Contains(msg.Mentions, MentionEveryone)
+	if misfired {
 		r.logger.Debug("channels: mentions name no floor-capable member",
 			zap.String("channel_id", msg.ChannelID),
 			zap.String("message_id", msg.ID),
 			zap.Int("mentions", len(msg.Mentions)))
-		// ISSUE-0099: this is the one publish-time-PROVABLE escalation failure
-		// — the escalation chair's own forced-turn reply named a hand-off
-		// target that lifts to a real id but cannot take the floor (a
-		// `respond: never` observer, the operator, or itself), so the hand-off
-		// reached nobody. Re-force ONE synthesize-only turn. Detached and
-		// fire-and-forget like the stall tail; a no-op for every publish that
-		// is not the chair's misfired reply.
-		r.maybeResynthesizeMisfire(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize)
 	}
+	// Run for EVERY chair publish in an escalated interaction, not only the
+	// misfiring ones: the chair's first reply after the forced turn disarms the
+	// trigger whether it misfired (re-force one synthesize-only turn) or handed
+	// the floor cleanly (consume the arm and stop), so a later innocuous chair
+	// message cannot be mistaken for the reply's misfire. Detached and
+	// fire-and-forget like the stall tail; a no-op for every non-chair publish.
+	r.maybeResynthesizeMisfire(context.WithoutCancel(ctx), msg, ct, members, channelSize, misfired)
 
 	// Mark the responders as having an in-flight turn for the console presence
 	// signal (RFC 0048 Tier 1) — exactly the members [orderResponders] expects
