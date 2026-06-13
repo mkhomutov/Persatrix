@@ -5,6 +5,8 @@ status: resolved
 severity: medium
 area: persona
 created: 2026-06-12
+closed: 2026-06-13
+closed_pr: 628
 refs:
   - docs/rfcs/0030-amendment-relevance-gated-response.md
   - docs/manual-tests/MT-CHANNEL-GOV-004.md
