@@ -91,3 +91,23 @@ if snippet steering proves insufficient; prefer the prompt fix first
 > prose+vote → single-message vote in
 > [`end-interaction-vote.md`](../../prompts/runtime/safety/end-interaction-vote.md))
 > is **PR 2**, not yet started.
+
+> 2026-06-13 — **PR 2 (defect 2, split prose+vote).** Added the single-message
+> steer to [`end-interaction-vote.md`](../../prompts/runtime/safety/end-interaction-vote.md):
+> when agreeing and voting, the agreement travels *inside* the vote's
+> `content` as one message — never agreement prose first, vote second — because
+> the split arrives as two turns and a concurring vote that trails its own
+> prose can land outside the `end_vote_window` that closes the discussion (the
+> 04:04:01Z miss this issue captured: prose at .593, vote at .600, distance 3
+> at `end_vote_window: 3`). This ports to the base vote snippet the line the
+> [`chair-escalation.md`](../../prompts/runtime/safety/chair-escalation.md)
+> snippet already gives the chair (ISSUE-0098). Prompt-side, no mechanism
+> change. TDD: `test_snippet_steers_agreement_into_the_vote_not_a_separate_message`
+> in `tests/unit/python/test_end_interaction_vote_action.py` (written red
+> first), plus the
+> `tests/unit/python/test_persona_section_composer.py` byte-identity golden
+> updated for the new paragraph. Issue stays **open**: defect 2's close needs a
+> live MT-CHANNEL-GOV-004 run where a concurring persona casts a
+> single-message vote and the quorum lands (`trigger=end_votes`), without the
+> "reply with just your vote, no preamble" operator nudge the original run
+> needed.

@@ -286,6 +286,38 @@ class TestVotePromptVocabulary:
         src = Path("agents/persona_runtime/prompt_assembly.py").read_text(encoding="utf-8")
         assert 'load_snippet("end-interaction-vote")' in src
 
+    def test_snippet_steers_agreement_into_the_vote_not_a_separate_message(self):
+        """ISSUE-0097 defect 2. A persona asked to confirm and vote published
+        agreement prose and the ``end_interaction_vote`` as two separate
+        messages milliseconds apart; W counts turns, so with
+        ``end_vote_window: 3`` the split pushed the concurring vote to
+        distance 3 from the chair's vote and the quorum missed — the
+        escalated interaction then idled out instead of closing on votes.
+
+        The base vote snippet must carry the same single-message steer the
+        chair-escalation snippet already gives the chair: agreement travels
+        INSIDE the vote's ``content``, one message — never prose first, vote
+        second. Pin both halves (put it inside / do not split) so the steer
+        cannot silently regress."""
+        from agents.prompt_loader import load_snippet
+
+        snippet = load_snippet("end-interaction-vote").lower()
+        # Half 1 — agreement rides inside the vote's content as one message.
+        assert "inside" in snippet and "content" in snippet, (
+            "the snippet must tell the persona to put its agreement inside "
+            "the vote's content"
+        )
+        assert "one message" in snippet, (
+            "the steer must name the single-message shape that lands in the "
+            "quorum window"
+        )
+        # Half 2 — explicitly warn against the prose-then-vote split that
+        # cost the W-window miss.
+        assert "separate message" in snippet, (
+            "the snippet must warn against publishing agreement prose and the "
+            "vote as two separate messages"
+        )
+
 
 class TestVotePublishOutcomeCallback:
     """PR 607 review finding 5 — the executor reports the vote publish
