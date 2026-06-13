@@ -44,6 +44,14 @@ const (
 	// guard in [ChannelRouter.maybeEscalateStall] for why dispatching it is
 	// guaranteed-futile and why the ration stays unspent.
 	chairEscalationSelfStimulus = "self_stimulus"
+	// chairEscalationResynthesized (ISSUE-0099) is the one synthesize-only
+	// re-dispatch [ChannelRouter.maybeResynthesizeMisfire] sends after the
+	// chair's first forced-turn reply provably reached no floor-capable
+	// member. Unlike the outcomes above it is NOT a stall disposition — it
+	// fires at the chair-reply publish seam, not the round tail — so it shares
+	// the instrument as a distinct lifecycle label, not as a stall count. A
+	// failed re-dispatch reuses chairEscalationDispatchError.
+	chairEscalationResynthesized = "resynthesized"
 )
 
 // floorRoundOutcome is what [ChannelRouter.floorRound] now hands back to its
@@ -234,11 +242,115 @@ func (r *ChannelRouter) maybeEscalateStall(
 		r.recordChairEscalation(ctx, ct, chairEscalationDispatchError)
 		return
 	}
+	// ISSUE-0099: stash the stalled stimulus now that the forced turn is on
+	// the wire, so a provable misfire of the chair's reply can re-force one
+	// synthesize-only turn from the ORIGINAL (non-chair) sender. Stored on the
+	// success path only — a withheld or failed escalation has no reply to
+	// misfire. CAS-scoped to the escalated id inside the helper.
+	r.storeEscalatedStimulus(msg.ChannelID, interactionID, msg)
 	r.logger.Info("channels: stalled round escalated to chair",
 		zap.String("channel_id", msg.ChannelID),
 		zap.String("interaction_id", interactionID),
 		zap.String("escalation_chair_id", chairID))
 	r.recordChairEscalation(ctx, ct, chairEscalationDispatched)
+}
+
+// maybeResynthesizeMisfire is the ISSUE-0099 trigger, run at the fanout
+// misfire seam (a publish whose mentions named no floor-capable member). It
+// closes the one escalation failure the orchestrator can PROVE at publish
+// time: the escalation chair's own forced-turn reply handed the floor to a
+// target that lifts to a real id but cannot take it (a `respond: never`
+// observer, the operator, or itself), so the hand-off reached nobody. The
+// fix is option 2 (re-dispatch one synthesize-only forced turn) rather than
+// option 1 (refund the ration): a refund is inert here because the misfired
+// reply is itself chair-authored, so the refunded re-escalation would trip
+// [ChannelRouter.maybeEscalateStall]'s self_stimulus guard and never fire.
+//
+// The re-dispatch reuses the STASHED original stimulus, not this reply — the
+// stash carries a non-chair sender, so the gate admits it (re-sending the
+// chair's own reply to the chair self-suppresses). Bounded to once per
+// interaction by [ChannelRouter.claimResynthesize]; a send, never an await,
+// like the stall tail.
+func (r *ChannelRouter) maybeResynthesizeMisfire(
+	ctx context.Context,
+	msg ChannelMessage,
+	ct ChannelType,
+	threadParentSenderID string,
+	members []Member,
+	channelSize int,
+) {
+	// Only the escalation chair's OWN reply can misfire a hand-off. Every
+	// other empty-floor-mention publish (an ordinary message naming only the
+	// operator, say) is not an escalation failure and must not re-force.
+	chairID := r.escalationChairFor(msg.ChannelID)
+	if chairID == "" || msg.SenderID != chairID {
+		return
+	}
+	interactionID, escalated, tracked := r.openInteractionEscalationState(msg.ChannelID)
+	if !tracked || !escalated {
+		return
+	}
+	// Same divergence guard as the stall tail: a reply that outlived its
+	// interaction (a concurrent rotation/close moved the open id on) must not
+	// re-force the successor's ration. Absent stamp falls through on the
+	// tolerant-reader posture.
+	if stamped := readInteractionID(msg.Metadata); stamped != "" && stamped != interactionID {
+		r.logger.Debug("channels: misfired reply outlived its interaction; not resynthesizing",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("stamped_interaction_id", stamped),
+			zap.String("open_interaction_id", interactionID))
+		return
+	}
+	stimulus, ok := r.claimResynthesize(msg.ChannelID, interactionID)
+	if !ok {
+		// No stash, a rotation between read and claim, or the one re-dispatch
+		// already fired (the bound — a second misfire stands). No metric: this
+		// is not a fresh disposition, just the guard holding.
+		return
+	}
+
+	var chair *Member
+	for i := range members {
+		if members[i].ParticipantID == chairID {
+			chair = &members[i]
+			break
+		}
+	}
+	if chair == nil {
+		// Runtime drift (the chair left after the first escalation). The
+		// re-dispatch is spent — like the stall tail's chair-gone branch, the
+		// bound does not refund — and the stall stands.
+		r.logger.Warn("channels: resynthesize chair is not a member; misfire stands",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("escalation_chair_id", chairID))
+		r.recordChairEscalation(ctx, ct, chairEscalationDispatchError)
+		return
+	}
+
+	// The second forced turn: the STASHED original stimulus under a fresh
+	// event id and cloned metadata (the stamped interaction_id rides along for
+	// lease attribution), stamped resynthesize so the chair renders the
+	// synthesize-only framing. No floor mentions — the chair is admitted by
+	// the escalation lift, not by directedness. Marked thinking before the
+	// send; a failed send unmarks (no reply will ever clear it), mirroring the
+	// stall tail.
+	forced := stimulus
+	forced.ID = uuid.NewString()
+	r.markActivity(msg.ChannelID, []string{chairID})
+	if err := r.dispatchTo(ctx, forced, ct, threadParentSenderID, *chair, channelSize, nil, markerChairEscalationResynthesize); err != nil {
+		r.clearActivity(msg.ChannelID, chairID)
+		r.logger.Warn("channels: chair resynthesize dispatch failed; misfire stands",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("escalation_chair_id", chairID),
+			zap.Error(err))
+		r.recordChairEscalation(ctx, ct, chairEscalationDispatchError)
+		return
+	}
+	r.logger.Info("channels: chair hand-off misfired; re-forced a synthesize-only turn",
+		zap.String("channel_id", msg.ChannelID),
+		zap.String("interaction_id", interactionID),
+		zap.String("escalation_chair_id", chairID))
+	r.recordChairEscalation(ctx, ct, chairEscalationResynthesized)
 }
 
 // recordChairEscalation emits `channel.conversation.chair_escalation

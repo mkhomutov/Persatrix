@@ -88,6 +88,14 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 			zap.String("channel_id", msg.ChannelID),
 			zap.String("message_id", msg.ID),
 			zap.Int("mentions", len(msg.Mentions)))
+		// ISSUE-0099: this is the one publish-time-PROVABLE escalation failure
+		// — the escalation chair's own forced-turn reply named a hand-off
+		// target that lifts to a real id but cannot take the floor (a
+		// `respond: never` observer, the operator, or itself), so the hand-off
+		// reached nobody. Re-force ONE synthesize-only turn. Detached and
+		// fire-and-forget like the stall tail; a no-op for every publish that
+		// is not the chair's misfired reply.
+		r.maybeResynthesizeMisfire(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize)
 	}
 
 	// Mark the responders as having an in-flight turn for the console presence
@@ -198,6 +206,15 @@ const (
 	// markerCloseNotification is the CP2 end-vote close notification,
 	// stamped only by [ChannelRouter.notifyInteractionClose]'s dispatches.
 	markerCloseNotification
+	// markerChairEscalationResynthesize is the ISSUE-0099 second forced turn,
+	// stamped only by [ChannelRouter.maybeResynthesizeMisfire]'s dispatch. It
+	// is a REFINEMENT of markerChairEscalation, not a peer: dispatchTo stamps
+	// BOTH `ChairEscalation` and `ChairEscalationResynthesize` for it, so the
+	// admission lift (which keys on ChairEscalation) is unchanged and only the
+	// framing flips. The never-alias invariant the enum protects is between
+	// {ChairEscalation, CloseNotification}; a resynthesize marker still never
+	// sets CloseNotification, so that invariant holds.
+	markerChairEscalationResynthesize
 )
 
 // dispatchTo delivers `msg` to a single recipient with the per-recipient
@@ -230,7 +247,8 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		// Floor-capable-directedness amendment (v0.3.8): per-publish, like
 		// ChannelSize — resolved once in [ChannelRouter.fanout].
 		FloorMentions:                floorMentions,
-		ChairEscalation:              marker == markerChairEscalation,
+		ChairEscalation:              marker == markerChairEscalation || marker == markerChairEscalationResynthesize,
+		ChairEscalationResynthesize:  marker == markerChairEscalationResynthesize,
 		InteractionCloseNotification: marker == markerCloseNotification,
 	}, msg)
 	status := "ok"

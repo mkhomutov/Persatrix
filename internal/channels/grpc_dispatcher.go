@@ -450,6 +450,12 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		// set only by [ChannelRouter.maybeEscalateStall]'s dispatch — false
 		// (the proto3 default) on every ordinary fanout.
 		ChairEscalation: env.ChairEscalation,
+		// Chair-escalation resynthesize refinement (ISSUE-0099): the
+		// synthesize-only framing selector, set with ChairEscalation only by
+		// [ChannelRouter.maybeResynthesizeMisfire] — false on every other
+		// dispatch. Additive: the lift rides ChairEscalation, so this touches
+		// only the framing.
+		ChairEscalationResynthesize: env.ChairEscalationResynthesize,
 		// End-vote-close-propagation amendment (CP2): the close-notification
 		// marker, set only by [ChannelRouter.notifyInteractionClose]'s
 		// dispatch — false (the proto3 default) on every ordinary fanout.

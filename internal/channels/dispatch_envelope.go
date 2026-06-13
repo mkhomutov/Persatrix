@@ -54,6 +54,17 @@ type DispatchEnvelope struct {
 	// ordinary fanout — the zero value is every non-escalation dispatch.
 	ChairEscalation bool
 
+	// ChairEscalationResynthesize (ISSUE-0099) refines ChairEscalation: set
+	// together with it on the SECOND forced turn — the one the orchestrator
+	// re-dispatches after the chair's first forced-turn reply provably reached
+	// no floor-capable member. Carried on
+	// `ChannelMessageEvent.chair_escalation_resynthesize`; the receiver's
+	// admission is unchanged (it keys on ChairEscalation), so this flips only
+	// the persona framing to the synthesize-only variant. Never set without
+	// ChairEscalation, and never on ordinary fanout. Set only by
+	// [ChannelRouter.maybeResynthesizeMisfire].
+	ChairEscalationResynthesize bool
+
 	// InteractionCloseNotification (the end-vote-close-propagation
 	// amendment, CP2) marks this dispatch as the orchestrator's close
 	// notification: the closing quorum vote re-dispatched to a
