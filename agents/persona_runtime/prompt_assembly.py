@@ -152,7 +152,9 @@ def _state_context(
     return {"state": state.to_prompt_section()}
 
 
-def format_chair_escalation(formatted_event: str) -> str:
+def format_chair_escalation(
+    formatted_event: str, *, resynthesize: bool = False
+) -> str:
     """Wrap a formatted CHANNEL_MESSAGE in the chair-escalation framing.
 
     The chair-stall-escalation amendment's forced turn (§C item 2): the
@@ -164,8 +166,18 @@ def format_chair_escalation(formatted_event: str) -> str:
     (``prompts/runtime/safety/chair-escalation.md``, the
     ``end-interaction-vote`` snippet's sibling) and is lru-cached by
     :func:`load_snippet`, so the per-event call costs one dict lookup.
+
+    ``resynthesize`` (ISSUE-0099) selects the synthesize-only variant
+    (``chair-escalation-resynthesize.md``): the SECOND forced turn, sent after
+    the chair's first hand-off provably reached no floor-capable member. The
+    two-outcome default is wrong there — handing off again is the move that
+    just failed — so the variant drops outcome (b) and forces the end-vote.
+    The wire flag is ``chair_escalation_resynthesize``, a refinement of
+    ``chair_escalation``; the gate lift is unchanged (it still keys on
+    ``chair_escalation``), so this only swaps the framing.
     """
-    return f"{load_snippet('chair-escalation')}\n\n{formatted_event}"
+    snippet = "chair-escalation-resynthesize" if resynthesize else "chair-escalation"
+    return f"{load_snippet(snippet)}\n\n{formatted_event}"
 
 
 def _goals_present(persona_cfg: dict[str, Any]) -> bool:
@@ -423,7 +435,14 @@ class _PromptAssemblyMixin:
                 # wraps the already-sanitized formatted message, so it adds
                 # no new injection surface.
                 if event.payload.get("chair_escalation") is True:
-                    return format_chair_escalation(formatted)
+                    # ISSUE-0099: the resynthesize refinement swaps in the
+                    # synthesize-only framing for the second forced turn; the
+                    # admission lift above is unchanged (it keys on
+                    # `chair_escalation`). Strict `is True`, same as the gate.
+                    resynth = (
+                        event.payload.get("chair_escalation_resynthesize") is True
+                    )
+                    return format_chair_escalation(formatted, resynthesize=resynth)
                 return formatted
             case EventType.MENTION:
                 sender = event.sender_id or "unknown"
