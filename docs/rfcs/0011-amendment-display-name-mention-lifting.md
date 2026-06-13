@@ -1,0 +1,67 @@
+# RFC 0011 Amendment — Display-Name Mention Lifting (Prose Addressing Becomes Structurally Real)
+
+**Type**: amendment to [RFC 0011 §C/§D](0011-channels-bridges.md#c-message-routing-and-delivery) (the `mentions` contract — "participant IDs explicitly @-mentioned", "agents … set `mentions` explicitly"), supplying the resolution step between how personas *write* addresses and what the wire *carries*
+**Status**: 🚧 In progress (PR 1/3 — this document + skip-guarded acceptance; PR 2/3 — the lift substrate, a pure resolver in `internal/channels`; PR 3/3 — publish-handler wiring + unskip)
+**Author**: Maksim Khomutov
+**Date**: 2026-06-13
+**Target**: v0.3.8
+**Trigger**: [ISSUE-0096](../issues/ISSUE-0096-display-name-mentions-resolve-to-nobody.md) — observed live three times across both [MT-CHANNEL-GOV-004](../manual-tests/MT-CHANNEL-GOV-004.md) runs (2026-06-12, builds 113c728 and d47385d). Every chair-stall hand-off (escalation outcome (b)) opened with display-name prose — `@Ember Owl @Iron Fox — alex needs one risk each from all of us…` — reached nobody, and the escalated interaction deadlocked to idle: with [ISSUE-0098](../issues/ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md)'s completeness-fixation making outcome (a) unreachable and [ISSUE-0099](../issues/ISSUE-0099-ce5-ration-spent-on-provably-failed-handoff.md)'s spent ration blocking re-escalation, this resolver gap is the highest-leverage link in the deadlock cycle.
+**Supersedes**: §D's "agents … set `mentions` explicitly" as the *only* mention channel for persona publishes. The structured array stays first-class and unchanged; this amendment makes the prose form — the one personas actually produce — resolve to the same canonical ids.
+
+---
+
+## Context — three links, only the visible one was suspected
+
+The live failure is not (only) a matching bug in the floor resolver; the trace has three links:
+
+1. **The hand-off is prose by design.** The [chair-escalation snippet](../../prompts/runtime/safety/chair-escalation.md) instructs outcome (b) as "@-mention them … as a plain message with no action block" — so there is no model-emitted `mentions` payload at all for exactly the message whose directedness matters most.
+2. **The synthesized mentions name the wrong party.** A prose reply gets `mentions=[event.sender_id]` ([`channel_reply.py`](../../agents/persona_runtime/channel_reply.py)), and the forced turn re-dispatches the stalled stimulus verbatim (`forced := msg`, [`chair_escalation.go`](../../internal/channels/chair_escalation.go)) — so the chair's hand-off structurally mentions the *stalling sender* (live: the human, `respond: never`). [`resolveFloorMentions`](../../internal/channels/floor_mentions.go) correctly finds no floor-capable addressee and the [directedness amendment](0030-amendment-floor-capable-directedness.md)'s gate flip reclassifies the hand-off to open floor — Tier B bids, conservative calibration, silence.
+3. **Display names cannot ride the wire even when emitted.** Member ids are `ember-owl` / `iron-fox`; the conversation window renders speakers as `**Iron Fox:**`, so personas address each other the way their own context spells names. A multi-word display name fails [`ValidateParticipantID`](../../internal/channels/channels.go) per-mention at the store ([`sqlite_messages.go`](../../internal/channels/sqlite_messages.go)) — the whole publish would 400.
+
+Prompt-side steering ("always mention by id") is rejected: it fights the window's own rendering every turn, and the MT already showed the chair names members "exactly as the conversation window renders them". The web composer solved this class for operators ([`web/src/lib/mentions.js`](../../web/src/lib/mentions.js): member-scoped `@`-token lifting at the composer); personas and the CLI's in-text names (an MT side-finding) have no equivalent — the lift belongs where every producer's publish converges.
+
+## A. Decisions
+
+- **ML1 — in-text `@`-mentions are lifted at the orchestrator publish seam.** The REST publish handler ([`channel_handlers.go`](../../internal/server/channel_handlers.go)) — the single ingress every producer's publish converges on (persona [`channel_publisher.py`](../../agents/channel_publisher.py), CLI, web) — resolves `@`-anchored tokens in `content` against the channel's member set and **unions** the resolved canonical ids into `mentions` before validation, persist, and fanout. The structured array keeps working unchanged; prose addressing becomes structurally real for every producer at once. Router-internal control dispatches (the forced turn, the close notification) re-dispatch already-persisted messages and are not re-lifted.
+- **ML2 — canonical ids only, past the seam.** Lifted entries are member participant ids; display names never ride the wire or the store. `ValidateParticipantID`, the `floor_mentions` resolution and its cross-language suppression basis, the Tier A gate's `agent_id in mentions` admit, web highlighting, and history all work unchanged — one seam fixes every consumer.
+- **ML3 — membership-scoped, deterministic matching.** A token is lifted iff it resolves within the channel's current member set: **exact id match first** (the web composer's semantics — the id namespace is canonical), then **case-insensitive whole-display-name match** with greedy longest-match across the multi-word name (`@Iron Fox` → member `iron-fox` whose registry name is "Iron Fox"; boundary-anchored on both sides, so emails and mid-word `@` never match — the `TOKEN_RE` posture). Display names come from the agent registry (`AgentInfo.Name` — the same id→name directory the roster join reads); a member with no registry row simply has no display-name form. The sender's own names are excluded (the composer's `exclude`; a self-mention cannot direct the floor). **Ambiguity lifts nobody**: two members whose folded display names collide make the name unresolvable — misdirecting the floor is worse than today's silence — and the collision logs WARN as a config smell. `@everyone` stays a raw-array sentinel, untouched.
+- **ML4 — quoting directs, accepted.** Any `@`-anchored resolvable token in content directs the floor, including quoted or reported speech ("@Iron Fox said earlier…"). This is the standard chat-product semantics, it is what outcome (b) requires, and Tier A's floor-capable basis already bounds the damage of an unwanted direct to one suppressed round.
+- **ML5 — observable, never load-bearing silently.** Each publish that lifts logs the lifted ids at debug; an ambiguous-name skip logs WARN; the union is capped at the existing 10 (structured entries first — the producer's explicit intent outranks prose — lifted ids in content order after), and anything dropped by the cap is logged rather than silently vanishing. The fanout gate-flip debug line ([`fanout.go`](../../internal/channels/fanout.go) "mentions name no floor-capable member") stays as the residual signal and should become rare.
+
+## B. What does NOT change
+
+- **No proto, wire, or schema change at all.** No new field, no regen, no migration — the amendment changes what the existing `mentions` array *contains*, produced one seam earlier.
+- **Mention validation and caps.** `ValidateParticipantID` per entry, the structured-array 400 above 10, the store's shape checks: untouched. Lifted entries are by construction valid member ids.
+- **Floor resolution and both gates.** [`resolveFloorMentions`](../../internal/channels/floor_mentions.go), the Tier A directed-elsewhere basis, Tier B bids, the named-member admit paths: untouched — they just start seeing the ids the prose always meant.
+- **The web composer and CLI.** The composer's client-side lift becomes redundant-but-harmless (same ids, deduped by the union); `--mention` keeps working. Bare names *without* `@` ("over to Ember Owl") remain Tier B's soft NL-addressing signal ([`salience_addressing.py`](../../agents/salience_addressing.py)) — this amendment moves only the explicit `@` form across the deterministic line.
+- **`channel_reply.py`'s synthesized `mentions=[event.sender_id]`.** Stays — once the lift adds the real addressees, the inbound-sender entry is at worst floor-inert (the resolver already excludes non-capable parties).
+
+## C. Mechanism (implementation sketch — PRs 2 and 3)
+
+1. **PR 2 — the substrate, no call site.** `internal/channels/mention_lift.go` (sibling of `floor_mentions.go`, same review-cap rationale): a pure function over `(content, candidates, senderID)` where a candidate is `{ID, DisplayName}`, returning lifted ids in first-seen content order. Unit matrix: multi-word longest-match, case folding, id-vs-name precedence, ambiguity → nobody, boundary anchoring (emails, mid-word `@`), sender exclusion, dedupe, cap interplay.
+2. **PR 3 — the wiring.** `handlePublishMessage` joins the channel's members against the registry's names, calls the lift, unions into `req.Mentions` before the `ChannelMessage` is built; debug/WARN logging per ML5. Unskips the committed acceptance.
+3. **Acceptance.** Re-run MT-CHANNEL-GOV-004 Edge Case 1: a chair hand-off naming members by display name must reach the named member (Tier A directed, no gate flip) and restart the discussion — the escalation arc's outcome (b) working live for the first time.
+
+## D. Mixed-version analysis
+
+No wire change makes this trivial. **New orchestrator + old anything**: producers keep sending what they send; prose starts resolving. The web composer's lift double-resolves to the same ids (union dedupes). **Old orchestrator + new agents**: today's behaviour exactly — the degraded state is the status quo, ISSUE-0096 open. No coordination required between sides.
+
+## E. Acceptance tests land in PR 1, red and skip-guarded (TDD)
+
+Committed with this document in [`internal/server/channel_display_name_mention_lift_test.go`](../../internal/server/channel_display_name_mention_lift_test.go), written entirely against seams that exist today (the registry's `AgentInfo.Name`, the REST publish boundary, the dispatch envelope's `FloorMentions` stamp — whose proto projection `floor_mentions` / `floor_mentions_resolved` the dispatcher suites already pin) — the [end-vote-close-propagation amendment](0030-amendment-end-vote-close-propagation.md) §E posture. PR 3 unskips; implementation PRs grow fixtures at most and never edit the committed assertions:
+
+- `TestPublishMessage_LiftsDisplayNameMentionsFromContent` — the MT scenario verbatim: a publish whose content reads `@Ember Owl @Iron Fox — alex needs one risk each…` with structured `mentions: ["alex"]` (the synthesized inbound-sender entry) persists `mentions == [alex, ember-owl, iron-fox]` (union order), and every recipient's envelope carries `FloorMentions == [ember-owl, iron-fox]` — the hand-off is directed, not open floor.
+- `TestPublishMessage_AmbiguousDisplayNameLiftsNobody` — two members sharing a folded display name: the colliding token lifts neither (no misdirection), unambiguous tokens in the same publish still lift.
+
+## Open questions
+
+1. **First-name / unique-prefix matching.** The second live session saw a hand-off to bare "Ember". Whole-name matching does not cover it; prefix matching trades determinism for recall. Deferred — measure the residual gate-flip rate after this lands before adding fuzziness.
+2. **Textual `@everyone`.** [`response_policies.py`](../../agents/response_policies.py) already anticipates expanding a typed `@everyone`/`@here`; that expansion is its own decision (broadcast is a cost event, not an addressing nicety) and stays out of scope.
+3. **Registry-absent members.** A config-declared member that never registers an agent has no display-name form (id lifting still works). Acceptable — display names *are* registry data; inventing a second name source would create drift.
+
+## Related documentation
+
+- [Floor-capable-directedness amendment](0030-amendment-floor-capable-directedness.md) — the gate flip whose debug line surfaced the failure; its resolution basis is this amendment's downstream consumer
+- [Chair-stall-escalation amendment](0030-amendment-chair-stall-escalation.md) — outcome (b), the hand-off this amendment makes deliverable
+- [MT-CHANNEL-GOV-004](../manual-tests/MT-CHANNEL-GOV-004.md) — the live executions (2026-06-12 Test Results rows)
+- [ISSUE-0096](../issues/ISSUE-0096-display-name-mentions-resolve-to-nobody.md) / [ISSUE-0098](../issues/ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md) / [ISSUE-0099](../issues/ISSUE-0099-ce5-ration-spent-on-provably-failed-handoff.md) — the deadlock cycle this is the highest-leverage link of
