@@ -1,8 +1,8 @@
 ---
 id: ISSUE-0099
-summary: "CE5 spends the escalation ration on a hand-off the orchestrator can prove reached nobody — no refund or synthesize-instead fallback, so the interaction can only die idle"
+summary: "CE5 spends the escalation ration on a provably-empty chair hand-off (mentions resolve to no floor-capable member — a respond:never observer or the chair itself) with no refund/synthesize fallback, so that interaction can only die idle. Re-scoped to low 2026-06-13: post-ISSUE-0096/0098 the common case (chair hands off the whole arc) is gone — the chair now synthesizes — leaving only this narrow empty-target residue"
 status: open
-severity: medium
+severity: low
 area: channels
 created: 2026-06-12
 refs:
@@ -10,6 +10,7 @@ refs:
   - docs/rfcs/0030-amendment-floor-capable-directedness.md
   - docs/issues/ISSUE-0096-display-name-mentions-resolve-to-nobody.md
   - docs/issues/ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md
+  - docs/manual-tests/MT-CHANNEL-GOV-004.md
 ---
 
 ## Summary
@@ -38,11 +39,20 @@ round.
 
 ## Impact
 
-The escalation arc has no recovery path from its most common live
-failure (three-for-three chair turns chose hand-off; see ISSUE-0098).
-The amendment's contract — a stall ends in a recorded decision — fails
-exactly when the chair's hand-off misfires, and the orchestrator
+When it fires, the amendment's contract — a stall ends in a recorded
+decision — fails: the chair's hand-off misfires and the orchestrator
 watches it happen with enough information to know.
+
+**Re-scoped 2026-06-13** (MT-CHANNEL-GOV-004 clean re-run, main @
+7b2de85): this is no longer the *common* failure. The original evidence
+was a three-for-three hand-off run (ISSUE-0098), but post-0098 prompt
+calibration (#622) + post-0096 mention-lifting (#619) the chair now
+reliably takes outcome (a) — synthesis-in-vote — even on the default
+roster with a standing `respond: addressed` voice present (the
+historical hand-off trigger). Two live arcs on that exact roster both
+synthesized and closed on `end_votes`; the failed-hand-off path was
+never entered. What remains is the narrow residue in Notes below — hence
+the drop to `low`.
 
 ## Proposed fix / investigation path
 
@@ -65,9 +75,30 @@ Either keeps CE5's intent (no unbounded escalation loops) while closing
 the watched-it-die gap. Option 2 pairs naturally with the ISSUE-0098
 prompt calibration; option 1 is smaller and provider-agnostic.
 
+**Recommendation (2026-06-13, post-re-scope):** prefer **option 1
+(refund)**. With the common hand-off case closed, the provable signal
+now fires only for the rare observer/self empty-target residue, which
+does not justify option 2's extra LLM call, new dispatch marker, and
+two-state ration. Refund clears the escalated flag on the provable empty
+hand-off (bounded to once per interaction, preserving the loop guard) so
+the next stalled round may re-escalate. Option 2 was the stronger choice
+only while the hand-off path was the *default* behaviour, which the
+re-run shows it no longer is.
+
 ## Notes
 
-- Out of scope until ISSUE-0096 lands: display-name resolution will
-  make most current hand-offs succeed, shrinking this to the genuinely
-  empty-target case (e.g. chair names a departed member). It stays a
-  real gap — the guard exists precisely for the residue.
+- ISSUE-0096 (#619) and ISSUE-0098 (#622) both landed 2026-06-13:
+  display-name resolution now makes a hand-off to a current floor-capable
+  member succeed, and the calibrated chair prompt steers to synthesis by
+  default. Both reconfirmed live in the MT-CHANNEL-GOV-004 re-run.
+- Precision on the provable surface (corrects this issue's original
+  draft): a *departed or hallucinated* name does **not** lift — lifting
+  is membership-scoped — so it yields empty `mentions`, indistinguishable
+  at the publish seam from a no-mention synthesis attempt, and the
+  `mentions name no floor-capable member` line never fires. So the
+  departed-member example is *not* provable. The genuinely-provable
+  residue is narrower: the chair @-mentions someone who lifts to a real
+  id but is **not** floor-capable — a `respond: never` observer, or the
+  chair itself. That is the only case where `resolveFloorMentions` comes
+  up empty with non-empty `mentions`. The guard exists precisely for this
+  residue; option 1 (refund) is the proportionate close.
