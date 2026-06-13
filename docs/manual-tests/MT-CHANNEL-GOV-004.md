@@ -189,7 +189,9 @@ Live calibration so far runs three-for-three on outcome (b), always
 triggered by a member who never spoke
 ([ISSUE-0098](../issues/ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md)) —
 and the hand-off itself names members by display name, which resolves to
-nobody ([ISSUE-0096](../issues/ISSUE-0096-display-name-mentions-resolve-to-nobody.md)),
+nobody ([ISSUE-0096](../issues/ISSUE-0096-display-name-mentions-resolve-to-nobody.md)
+— fix in progress: the
+[display-name-mention-lifting amendment](../rfcs/0011-amendment-display-name-mention-lifting.md)),
 so instead of restarting the discussion it deadlocks the interaction: CE5
 blocks re-escalation
 ([ISSUE-0099](../issues/ISSUE-0099-ce5-ration-spent-on-provably-failed-handoff.md))

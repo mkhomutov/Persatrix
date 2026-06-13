@@ -426,7 +426,7 @@ Additional invariants:
 - An agent never receives its own `CHANNEL_MESSAGE` event — the orchestrator filters by `sender_id != subscriber_id` during fanout. This is enforced regardless of policy.
 - The `when_mentioned` thread-reply branch fires only when *another participant* replies to a message the agent authored. An agent's own thread continuation does not retrigger itself.
 - The autonomous tick loop is unaffected: agents may initiate channel messages on their own schedule. The gate only governs *reactive* replies to incoming events.
-- Agents that publish via `SEND_CHANNEL_MESSAGE` set `mentions` explicitly. The Rust CLI offers a `--mention <id>` repeatable flag and a `--mention-all` shorthand that expands to every channel member, addressing the human-in-the-loop case where a human wants every agent in a channel to react.
+- Agents that publish via `SEND_CHANNEL_MESSAGE` set `mentions` explicitly. The Rust CLI offers a `--mention <id>` repeatable flag and a `--mention-all` shorthand that expands to every channel member, addressing the human-in-the-loop case where a human wants every agent to react. [Amended 2026-06-13.](0011-amendment-display-name-mention-lifting.md)
 
 ### E. Memory Integration
 

@@ -1,11 +1,12 @@
 ---
 id: ISSUE-0096
 summary: "Persona-authored display-name @-mentions (\"@Iron Fox\") resolve to no member; chair hand-offs silently restart nothing"
-status: open
+status: in_progress
 severity: medium
 area: channels
 created: 2026-06-12
 refs:
+  - docs/rfcs/0011-amendment-display-name-mention-lifting.md
   - docs/rfcs/0030-amendment-chair-stall-escalation.md
   - docs/rfcs/0030-amendment-floor-capable-directedness.md
   - docs/manual-tests/MT-CHANNEL-GOV-004.md
@@ -27,8 +28,11 @@ and the discussion died, defeating the escalation's outcome (b) entirely.
 ## Context
 
 Observed live on 2026-06-12 (build main @ 113c728): the chair's forced
-turn named members exactly as the conversation window renders them
-(`**Iron Fox:**` headers), the orchestrator logged
+turn named members by display name (`@Iron Fox`) — the spelling the
+channel roster section surfaces to the persona
+([`channel_roster.py`](../../agents/persona_runtime/channel_roster.py)),
+not the participant id the message stream renders each speaker by
+(`Message from iron-fox:`). The orchestrator logged
 `channels: mentions name no floor-capable member`, and iron-fox's
 open-floor bid passed on a message that explicitly asked it to speak.
 The directedness amendment's debug line surfaced the failure precisely
@@ -72,3 +76,16 @@ itself renders speakers to the model.
 > the spent-ration half is
 > [ISSUE-0099](ISSUE-0099-ce5-ration-spent-on-provably-failed-handoff.md).
 > This resolver fix is the highest-leverage link.
+
+> 2026-06-13 — fix workstream opened: the
+> [display-name-mention-lifting amendment](../rfcs/0011-amendment-display-name-mention-lifting.md)
+> (PR 1/3, amendment + skip-guarded acceptance). The full trace moved the
+> seam from this issue's original proposal: `resolveFloorMentions` alone
+> cannot fix it — multi-word display names are rejected per-mention at the
+> store before ever reaching the resolver, and in all three live
+> reproductions the names existed only in *content* (the chair's hand-off
+> is a prose reply, so its structured mentions are the synthesized inbound
+> sender — the `respond: never` human). The fix is membership-scoped
+> lifting at the REST publish seam, unioned into `mentions` as canonical
+> ids before persist and fanout; the resolver and both gates stay
+> untouched and start seeing the ids the prose always meant.
