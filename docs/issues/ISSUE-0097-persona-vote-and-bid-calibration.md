@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0097
-summary: "Tier B bids pass on direct opening questions; split prose+vote replies burn a W-window turn — live calibration findings"
+summary: "Opening-round bid pass FIXED & live-verified (PR 1); concurrence still splits prose+vote into two messages — defect 2 re-opened (structural, not prompt)"
 status: open
 severity: medium
 area: persona
@@ -125,3 +125,55 @@ if snippet steering proves insufficient; prefer the prompt fix first
 > concurring persona casts a single-message vote and the quorum lands
 > (`trigger=end_votes`), without the "reply with just your vote, no preamble"
 > operator nudge the original run needed.
+
+> 2026-06-13 — **Live verification (MT-CHANNEL-GOV-004, build main @ d51f3b4 —
+> PR 1 + PR 2 both landed).** Ran the full arc on the Anthropic provider.
+>
+> **Defect 1 — RESOLVED.** An un-mentioned opener ("Name exactly one risk
+> each…") drew open-floor replies with *no* `--mention`: `iron-fox` and
+> `nova-sparrow` each posted a distinct risk (`ember-owl` is `addressed`, silent
+> by design). Pre-fix this exact round drew unanimous Tier B passes and stalled
+> on round one. PR 1's bid calibration is confirmed working live; defect 1
+> stands closed.
+>
+> **Defect 2 — NOT resolved.** On an all-`participant` roster the stall
+> escalated to the chair (`nova-sparrow`, interaction `ac4063c4`): Nova
+> published a correct **single-message** synthesis-in-vote
+> (`end_interaction_vote=true`, the synthesis inside `content`) — the *chair*
+> path ([`chair-escalation.md`](../../prompts/runtime/safety/chair-escalation.md))
+> is clean. But the *concurrence* path PR 2 targeted still splits. Both drawn
+> concurrers — each a *single* `claude-sonnet-4-6` turn — emitted agreement
+> prose and the vote as **two separate messages 4–5ms apart**:
+>
+> - `ember-owl` `9dae857c` (prose, `vote=∅`) @ 10:42:59.786 → `b58d4ecd`
+>   (`vote=true`) @ .791
+> - `iron-fox` `e2a04ad8` (prose, `vote=∅`) @ 10:43:04.745 → `4084bb9f`
+>   (`vote=true`) @ .749
+>
+> The 4–5ms gap (and one wallet lease per agent) shows this is **one LLM turn
+> emitting a free-text block plus the action block**, which the runtime
+> persists as two channel messages — not two turns. The PR-2 steer is confirmed
+> baked into the running agent image
+> ([`end-interaction-vote.md`](../../prompts/runtime/safety/end-interaction-vote.md)
+> line 9, *"one message, not two"*) yet did **not** change behaviour. The close
+> *did* land (`trigger=end_votes votes=2`, `participant_id=iron-fox`) — but
+> **incidentally**: two members were drawn together and their two `vote=true`
+> messages fell within W=3 of *each other* (Nova's vote was already out of
+> window). With a *single* concurring member, the chair-vote → split-concurrence
+> -vote gap reproduces the original out-of-window miss exactly. The defect is
+> live.
+>
+> **Root-cause re-read:** prompt steering is the wrong lever — the split is
+> **structural**, a turn's free-text block and its `end_interaction_vote`
+> action block persist as two separate channel messages regardless of what the
+> snippet says. Defect 2 needs a runtime/serialization change: when a turn
+> carries an `end_interaction_vote` action, the sibling free-text message
+> should be suppressed (or folded into the vote `content`) so the vote travels
+> as one publish. Re-opening defect 2 on that basis. Threshold/window tuning is
+> a separate mitigation but does not fix the split.
+>
+> **Secondary (pre-existing, unchanged):** the chair's synthesis did not draw
+> *spontaneous* open-floor concurrence — both members bid-passed on it; the two
+> votes had to be `--mention`-drawn. PR 1 calibrated the bid for *unanswered
+> direct questions*, not for concurring on a chair synthesis, so this open-floor
+> pass-proneness on the convergence turn remains.
