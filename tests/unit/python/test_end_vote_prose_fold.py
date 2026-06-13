@@ -191,6 +191,73 @@ class TestFoldProseIntoEndVote:
 
         assert result == actions
 
+    def test_explicit_send_mentions_are_not_carried_into_vote(self):
+        """Folding an explicit SEND contributes only its ``content``; its
+        structured ``mentions`` are intentionally dropped, not preserved.
+
+        A vote addresses the room's process, not a member: ``end_vote_action.py``
+        publishes every vote with empty mentions, and a turn that has voted to
+        close must not draw a mentioned member back in (the folded vote already
+        fans out to everyone as the terminal signal). The persona's literal
+        "@name" survives inside the folded text — only the routing-level mention
+        is dropped, which is the vote invariant holding, not a loss. Pinned so a
+        future change cannot silently start riding mentions onto a vote.
+        """
+        event = _group_event()
+        send = AgentAction(
+            action_type=ActionType.SEND_CHANNEL_MESSAGE,
+            payload={
+                "channel_id": "group:planning",
+                "content": "@dr-chen I defer to your call — closing.",
+                "mentions": ["dr-chen"],
+            },
+        )
+        actions = [send, _vote()]
+
+        result = fold_prose_into_end_vote(event, actions)
+
+        assert len(result) == 1
+        vote = result[0]
+        assert vote.action_type is ActionType.END_INTERACTION_VOTE
+        assert vote.payload["content"] == "@dr-chen I defer to your call — closing."
+        # The structured mention does not ride onto the vote.
+        assert vote.payload.get("mentions", []) == []
+
+    def test_explicit_send_with_vote_content_joins_prose_first(self):
+        """The explicit-SEND + pre-existing-vote-content combination — the
+        COMPLETE_TASK variant was pinned, this one was the coverage gap: the
+        send's text leads, the vote's own content trails, one block.
+        """
+        event = _group_event()
+        actions = [
+            _send("group:planning", "Wrapping up from my side."),
+            _vote(content="I vote to close."),
+        ]
+
+        result = fold_prose_into_end_vote(event, actions)
+
+        assert len(result) == 1
+        assert result[0].payload["content"] == (
+            "Wrapping up from my side.\n\nI vote to close."
+        )
+
+    def test_duplicate_prose_and_vote_content_is_deduped(self):
+        """An LLM that emits the SAME sentence in both its free-text block and
+        the vote ``content`` must not publish it twice inside one message. Exact
+        (stripped) repeats collapse to a single occurrence; distinct-but-similar
+        text is left alone (only an exact match is dropped).
+        """
+        event = _group_event()
+        actions = [
+            _vote(content="Agreed, let's close."),
+            _complete("Agreed, let's close."),
+        ]
+
+        result = fold_prose_into_end_vote(event, actions)
+
+        assert len(result) == 1
+        assert result[0].payload["content"] == "Agreed, let's close."
+
 
 # ─── Integration: synthesize_channel_reply runs the fold ───
 

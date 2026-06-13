@@ -233,6 +233,15 @@ def fold_prose_into_end_vote(
     and 504 the DM-must-reply round-trip (ISSUE-0048). Thread floors do not run
     the end-vote arc, so they are left to the ordinary promotion path too.
 
+    Only the prose ``content`` is folded; an explicit ``SEND_CHANNEL_MESSAGE``'s
+    structured ``mentions`` are intentionally NOT carried onto the vote. A vote
+    addresses the room's process, not a member — ``end_vote_action.py`` publishes
+    every vote with empty mentions, and a turn that has voted to close must not
+    draw a mentioned member back in (the folded vote already fans out to all
+    members as the terminal signal). The persona's literal "@name" survives
+    inside the folded text; only the routing-level mention is dropped, which is
+    the vote invariant holding rather than a loss.
+
     Pure: returns a new list only when a fold fires; actions are re-created,
     never mutated. A no-op when there is no group-channel vote, when the vote
     has no sibling free-text (the clean chair path), or off CHANNEL_MESSAGE
@@ -282,8 +291,21 @@ def fold_prose_into_end_vote(
     if not prose_parts:
         return actions
 
+    # Join the prose siblings ahead of any content the vote already carried
+    # (prose leads, the vote's own statement trails), de-duplicating exact
+    # repeats: an LLM that emits the same sentence in BOTH its free-text block
+    # and the vote ``content`` would otherwise publish it twice inside one
+    # message. Exact (stripped) match only — every part is already stripped, so
+    # this drops a verbatim duplicate and leaves distinct-but-similar text
+    # untouched, preserving first-occurrence order.
     existing = str(vote.payload.get("content", "") or "").strip()
-    folded = "\n\n".join([*prose_parts, *([existing] if existing else [])])
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for part in [*prose_parts, *([existing] if existing else [])]:
+        if part not in seen:
+            seen.add(part)
+            ordered.append(part)
+    folded = "\n\n".join(ordered)
 
     folded_actions: list[AgentAction] = []
     for i, action in enumerate(actions):
