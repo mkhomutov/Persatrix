@@ -1,7 +1,10 @@
 ---
 id: ISSUE-0096
 summary: "Persona-authored display-name @-mentions (\"@Iron Fox\") resolve to no member; chair hand-offs silently restart nothing"
-status: in_progress
+status: resolved
+resolution: "Closed by the display-name-mention-lifting amendment (#617 amendment+acceptance, #618 resolver, #619 publish-seam wiring): the REST publish handler now lifts in-text `@`-mentions (membership-scoped, registry display names via `Server.liftContentMentions` → `channels.LiftDisplayNameMentions`) and unions the canonical ids into `mentions` before persist and fanout. Verified live 2026-06-13 (main @ def19ca): a prose `@Ember Owl` with no `--mention` woke `ember-owl` (a when_mentioned member that stayed silent pre-fix), persisted `mentions=[\"ember-owl\"]`, and logged `lifted=[\"ember-owl\"]` — see the MT-CHANNEL-GOV-004 Test Results row."
+closed: 2026-06-13
+closed_pr: 619
 severity: medium
 area: channels
 created: 2026-06-12

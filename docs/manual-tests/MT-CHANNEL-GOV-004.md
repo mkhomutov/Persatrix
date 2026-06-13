@@ -188,11 +188,13 @@ failure. Re-run with a more exhausted topic to exercise outcome (a).
 Live calibration so far runs three-for-three on outcome (b), always
 triggered by a member who never spoke
 ([ISSUE-0098](../issues/ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md)) —
-and the hand-off itself names members by display name, which resolves to
-nobody ([ISSUE-0096](../issues/ISSUE-0096-display-name-mentions-resolve-to-nobody.md)
-— fix in progress: the
-[display-name-mention-lifting amendment](../rfcs/0011-amendment-display-name-mention-lifting.md)),
-so instead of restarting the discussion it deadlocks the interaction: CE5
+and the hand-off itself names members by display name, which used to resolve
+to nobody ([ISSUE-0096](../issues/ISSUE-0096-display-name-mentions-resolve-to-nobody.md)
+— **fixed** 2026-06-13 by the
+[display-name-mention-lifting amendment](../rfcs/0011-amendment-display-name-mention-lifting.md),
+verified live: the publish seam now lifts `@Display Name` to the member id, so
+a display-name hand-off reaches the named member). Before that fix, instead of
+restarting the discussion it deadlocked the interaction: CE5
 blocks re-escalation
 ([ISSUE-0099](../issues/ISSUE-0099-ce5-ration-spent-on-provably-failed-handoff.md))
 and only idle rotation ends it. Until those land, the practical guard is
@@ -214,6 +216,7 @@ here is signal that steering needs another pass).
 
 | Date | Tester | Build | Result | Notes |
 |------|--------|-------|--------|-------|
+| 2026-06-13 | Claude (operator: mkhomutov) | main @ def19ca | PASS (ISSUE-0096 mechanism) | Targeted live verification of the display-name-mention-lifting fix (#617–#619), **not** the full stall→escalation arc. Lever: `ember-owl` is `respond: addressed` (when_mentioned), so it wakes *only* on a real mention. Joined as `alex --respond never` and sent `@Ember Owl — gut check…` with **no `--mention`** (prose only — the exact form the prior FAIL row proved reached nobody). Three-way proof the lift now works end-to-end through the real stack: (1) orchestrator DEBUG `channels: lifted display-name mentions from content` `lifted=["ember-owl"]` (`channel_mention_lift.go:124`); (2) the persisted row (`deeb6367`) carries `mentions=["ember-owl"]` despite the empty structured array — the canonical id was unioned in before persist/fanout; (3) `ember-owl` **replied** (impossible pre-fix for a when_mentioned member on prose). Bonus: a follow-up `nova-sparrow` turn's prose `@alex` also lifted (`mentions=["ember-owl","alex"]`), and `ember-owl`'s reply-to-human (`mentions=["alex"]`, `respond:never`) correctly logged `mentions name no floor-capable member` — the floor-capable basis is unchanged, it just finally sees the addressees. This closes the ISSUE-0096 resolver bug. The native **Edge Case 1** observation (a *chair forced-turn* hand-off by display name restarting a stalled discussion) is the same mechanism inside the governance arc and is still gated on ISSUE-0098's chair completeness-fixation; left for an opportunistic full-arc run. |
 | 2026-06-12 | Claude (operator: mkhomutov) | main @ d47385d | FAIL (blocked) | Re-run targeting step 3 after the end-vote close-propagation fix (#613–#615). Two interactions, neither reached a vote-close: both stalls escalated correctly (`outcome=dispatched`), but both chair forced turns chose hand-off (outcome b) on the silent `addressed` member, named it by display name (ISSUE-0096 ×2), reached nobody, and the interactions deadlocked to idle — CE5 ration spent, concurrence nudges drew honest passes with no synthesis on the table (ISSUE-0098/ISSUE-0099 filed from this run). Steps 2–3 not exercised; close-propagation fix still unverified live. Also confirmed: bare-compose preconditions crash-loop agents (provider overlay required); `already_escalated` is metric-only (log-greps never fire); CLI in-text @-names are prose (structured `--mention` required); interaction rotation does not reset persona windows — re-asked questions get deflected as duplicates, so re-runs need a fresh topic. |
 | 2026-06-12 | Claude (operator: mkhomutov) | main @ 113c728 | PARTIAL PASS | Steps 1–2 fully verified (run with interaction `ebc02462`: stall → `outcome=dispatched` → chair synthesis-in-vote with `end_interaction_vote: true` on the wire → close on 2nd distinct vote, `trigger=end_votes`, 9 s after escalation; CE5 one-ration guard observed three times). Step 3 partial: summaries carry the synthesis and vote-closed interactions render "ended", but the closing vote's fanout suppression means no member's agent-local tracker hears the close — with no follow-up traffic inside the agent-side 600 s idle window every member's surface renders the escalated interaction "went idle". Edge Case 1 (chair hand-off) observed on first run, incl. display-name @-mentions resolving to no floor-capable member. Side findings: one unreproduced idle-rotation no-fire (700 s gap, window 600 s, 03:14:50→03:26:30Z; later gaps of 680 s did rotate); personas pass-prone enough that un-mentioned prompts often stall on the *opening* round; split prose+vote replies burn a W=3 turn. Wall-clock cost was ~2 h — dominated by 600 s governance timers and re-runs; this MT needs a test-profile idle window (e.g. 60 s) to be practical. |
 

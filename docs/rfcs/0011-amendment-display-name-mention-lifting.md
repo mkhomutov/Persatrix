@@ -1,7 +1,7 @@
 # RFC 0011 Amendment — Display-Name Mention Lifting (Prose Addressing Becomes Structurally Real)
 
 **Type**: amendment to [RFC 0011 §C/§D](0011-channels-bridges.md#c-message-routing-and-delivery) (the `mentions` contract — "participant IDs explicitly @-mentioned", "agents … set `mentions` explicitly"), supplying the resolution step between how personas *write* addresses and what the wire *carries*
-**Status**: ✅ Implemented (v0.3.8 — amendment + skip-guarded acceptance [#617](https://github.com/mkhomutov/Persatrix/pull/617); the pure lift resolver in `internal/channels` [#618](https://github.com/mkhomutov/Persatrix/pull/618); publish-handler wiring + ML5 logging PR 3/3, which unskipped the committed acceptance. Live re-validation — §C item 3, MT-CHANNEL-GOV-004 Edge Case 1 restarting the discussion — pending the next MT run)
+**Status**: ✅ Implemented (v0.3.8 — amendment + skip-guarded acceptance [#617](https://github.com/mkhomutov/Persatrix/pull/617); the pure lift resolver in `internal/channels` [#618](https://github.com/mkhomutov/Persatrix/pull/618); publish-handler wiring + ML5 logging PR 3/3, which unskipped the committed acceptance. Live-verified 2026-06-13 (main @ def19ca): a prose `@Ember Owl` with no `--mention` lifted to `ember-owl` end-to-end and woke that when_mentioned member — [MT-CHANNEL-GOV-004 Test Results](../manual-tests/MT-CHANNEL-GOV-004.md#test-results). The native §C-3 Edge Case 1 — a *chair forced-turn* hand-off restarting a stalled discussion — is the same mechanism in the governance arc, still gated on [ISSUE-0098](../issues/ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md))
 **Author**: Maksim Khomutov
 **Date**: 2026-06-13
 **Target**: v0.3.8
