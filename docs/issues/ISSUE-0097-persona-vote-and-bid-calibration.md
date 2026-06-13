@@ -1,7 +1,7 @@
 ---
 id: ISSUE-0097
-summary: "Opening-round bid pass FIXED & live-verified (PR 1); split prose+vote fixed structurally (PR 3, fold-into-vote) — awaiting live MT-CHANNEL-GOV-004 re-verify"
-status: open
+summary: "Both defects RESOLVED & live-verified: opening-round bid pass (PR 1); split prose+vote folded into one in-window publish (PR 3) — single-concurrer close confirmed live on MT-CHANNEL-GOV-004 (main @ cf02a53)"
+status: resolved
 severity: medium
 area: persona
 created: 2026-06-12
@@ -212,3 +212,28 @@ if snippet steering proves insufficient; prefer the prompt fix first
 > quorum still lands (`trigger=end_votes`), confirming the fold collapses it to
 > one in-window publish. The **secondary** open-floor pass-proneness on the
 > convergence turn (above) is unchanged by this PR.
+
+> 2026-06-13 — **Defect 2 RESOLVED — live-verified (MT-CHANNEL-GOV-004, build
+> main @ cf02a53 — PR 3 landed).** Ran the full arc on the Anthropic provider,
+> default `planning` roster, machine-paced (no idle waits mid-arc). Interaction
+> `bfe2386e`: opener (`--mention` all three) drew one risk each → un-mentioned
+> nudge "Anything else on this?" drew a silent round → `channels: stalled round
+> escalated to chair` (`escalation_chair_id=nova-sparrow`, 12:09:23Z) → chair's
+> forced turn was a single-message synthesis-in-vote (`cc833960`,
+> `end_interaction_vote=true`, three-risk synthesis in `content`). Then drew a
+> **single** concurrer — `--mention iron-fox` only — precisely the case the
+> 2026-06-13 d51f3b4 FAIL row predicted would "reproduce the original
+> out-of-window miss." It no longer misses: iron-fox emitted exactly **one**
+> published message (`vote=true`, the agreement prose *"Agreed — Nova's summary
+> is accurate…"* folded **into** the vote `content`) — not the two-messages-
+> 4–5ms-apart split the pre-fix run captured. The `fold_prose_into_end_vote`
+> helper collapsed the turn to one publish, so the concurrer's vote stayed
+> within `end_vote_window: 3` of the chair vote and the quorum closed:
+> `channels: interaction closed by end-of-interaction votes` `trigger=end_votes
+> votes=2 participant_id=iron-fox` (12:09:33Z). **Step 3:** the closed
+> interaction's summary renders structural ("Conversation ended") with the
+> synthesis on record (Nova's three-risk summary, mid-week go/no-go gate).
+> Defect 2 stands **closed**; with defect 1 already closed, **the issue is
+> resolved**. The **secondary** open-floor pass-proneness on the convergence
+> turn remains (the concurrence still had to be `--mention`-drawn) — out of
+> scope for this issue; that bid-calibration item lives on independently.
