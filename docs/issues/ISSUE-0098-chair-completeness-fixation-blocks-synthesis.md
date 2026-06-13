@@ -66,7 +66,7 @@ window) and stayed silent, the chair should synthesize what it has —
 arrives." Concretely: make outcome (b) conditional on the chair naming
 a member who has NOT yet been asked, and steer everything else to
 outcome (a) with the gap noted inside the synthesis ("Ember's risk is
-outstanding — closing with the two we have").
+still open — closing with the two we have").
 
 Fixing ISSUE-0096 (display-name mention resolution) is the other half:
 it makes outcome (b) functional when the chair does choose it. Both are
@@ -92,14 +92,36 @@ was recalibrated along the investigation path above:
   in a genuinely-uninvited voice (e.g. an `addressed` member never
   mentioned), which now actually reaches them because ISSUE-0096 is
   resolved.
+- **The one-shot cost is named (PR 622 review).** CE5 grants the
+  interaction exactly one escalation, so a hand-off that itself draws
+  silence ends the discussion with nothing on the record — the very
+  unrecorded-outcome death this issue is about — with no second
+  escalation to recover it. The steer now spells this out and tells the
+  chair to hand off only when it has real reason to expect the named voice
+  will answer; otherwise prefer (a) (still @-mentioning the missing voice
+  inside the vote's `content` if useful). Pinned by
+  `test_snippet_warns_handoff_spends_the_only_escalation`.
+
+**The narrowing alone does not redirect the observed failure.** The three
+live hand-offs all named `ember-owl` — an `addressed` member never
+mentioned, i.e. a *genuinely-unasked* voice — so the narrowed (b) still
+*licenses* exactly that hand-off; what made it the wrong move was the
+one-shot cost above (and, before #617–#619, the dead mention), not that
+Ember had "already been asked." So on the **current** demo roster a clean
+re-run may still legitimately land on (b). Exercising outcome (a)
+end-to-end live therefore also needs the all-`participant` MT variant from
+the Notes below (mention every member in the opener, leave no
+`addressed`-only voice as the standing gap) — not the prompt edit on its
+own.
 
 The calibration is pinned by
-`test_snippet_gates_handoff_on_an_unasked_voice` in
+`test_snippet_gates_handoff_on_an_unasked_voice` and
+`test_snippet_warns_handoff_spends_the_only_escalation` in
 [`test_chair_escalation_agent.py`](../../tests/unit/python/test_chair_escalation_agent.py).
 This is a prompt steer against an LLM disposition, so it cannot be proven
 by the suite — the issue stays **open** until a clean live MT-CHANNEL-GOV-004
-run exercises outcome (a) (synthesis-in-vote → close → recorded summary,
-§C item 3).
+run (on the all-`participant` roster) exercises outcome (a)
+(synthesis-in-vote → close → recorded summary, §C item 3).
 
 ## Notes
 

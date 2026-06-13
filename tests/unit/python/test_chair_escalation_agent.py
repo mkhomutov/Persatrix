@@ -224,6 +224,33 @@ class TestEscalationFraming:
             "still outstanding (a partial synthesis on the record beats a "
             "complete one that never arrives)"
         )
+        assert "close with what the room" in snippet, (
+            "outcome (a) must carry the partial-synthesis *instruction* — "
+            "close on what the room has and name the gap — not only the "
+            "slogan; deleting the instruction while keeping the slogan must "
+            "not leave this pin green"
+        )
+
+    def test_snippet_warns_handoff_spends_the_only_escalation(self) -> None:
+        """ISSUE-0098 follow-up (PR 622 review). Narrowing (b) to an *unasked*
+        voice does not, by itself, redirect the observed failure: the demo's
+        one outstanding voice (`ember-owl`, disposition `addressed`, never
+        mentioned) is a genuinely-unasked voice, so the narrowed (b) still
+        licenses the very hand-off that went 3-for-3 live. And CE5 grants the
+        interaction exactly ONE escalation — so a hand-off that itself draws
+        silence ends the discussion with nothing on the record (the
+        unrecorded-outcome death the amendment exists to prevent), with no
+        second escalation to recover it. The steer must name that one-shot
+        cost, so the chair has a concrete reason to prefer (a) even when the
+        outstanding voice is genuinely uninvited."""
+        from agents.prompt_loader import load_snippet
+
+        snippet = load_snippet("chair-escalation").lower()
+        assert "only escalation turn" in snippet, (
+            "outcome (b) must warn that a hand-off spends the chair's only "
+            "escalation turn (CE5): if the named voice also stays silent, the "
+            "discussion ends with nothing recorded and idle rotation buries it"
+        )
 
     def test_snippet_routes_the_synthesis_through_the_vote_content(self) -> None:
         """PR 610 review, the headline finding. Outcome (a) MUST tell the
