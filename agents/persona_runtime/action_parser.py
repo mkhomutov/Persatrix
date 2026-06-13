@@ -31,12 +31,14 @@ def parse_actions(response: LLMResponse) -> list[AgentAction]:
 
     Non-empty prose surrounding a fenced ```json block whose actions
     include an ``END_INTERACTION_VOTE`` is preserved as a trailing
-    ``COMPLETE_TASK`` carrying it in ``payload["result"]``, so
-    ``channel_reply.synthesize_channel_reply`` can promote it into a
-    channel publish — the RFC 0030 chair-stall escalation rescue: a chair
-    that writes its synthesis as prose beside the vote block (against the
-    ``chair-escalation`` snippet guidance) must not lose the synthesis
-    from the channel record. The vote is the *only* shape that preserves
+    ``COMPLETE_TASK`` carrying it in ``payload["result"]``, which
+    ``channel_reply.fold_prose_into_end_vote`` then folds INTO the vote's
+    ``content`` (ISSUE-0097 defect 2) — the RFC 0030 chair-stall escalation
+    rescue: a chair (or a concurrer) that writes its synthesis/agreement as
+    prose beside the vote block (against the ``chair-escalation`` snippet
+    guidance) must not lose the text from the channel record, and it travels
+    inside the single vote publish rather than as a separate message. The
+    vote is the *only* shape that preserves
     prose (PR 610 review): beside any other block, prose is overwhelmingly
     schema narration ("Here are my actions:") or a narrated decision to
     stay silent, and a preserved ``COMPLETE_TASK`` would let the promotion

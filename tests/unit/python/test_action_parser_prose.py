@@ -167,12 +167,15 @@ def _channel_event(channel_id: str = "group:planning") -> AgentEvent:
 
 
 class TestProseSynthesisIntegration:
-    """The RFC 0030 failure mode this seam exists for: a chair that
-    disobeys the ``chair-escalation`` snippet and writes its synthesis
-    as prose beside the vote block must still get the synthesis onto
-    the channel record, alongside the vote."""
+    """The RFC 0030 failure mode this seam exists for: a chair (or a
+    concurrer) that writes its synthesis/agreement as prose beside the vote
+    block must still get that text onto the channel record. ISSUE-0097
+    defect 2 changed *where* it lands: ``fold_prose_into_end_vote`` now folds
+    the prose INSIDE the vote ``content`` so the turn is a single publish,
+    rather than publishing the prose as a separate message beside the vote
+    (the split that dropped a concurring vote out of ``end_vote_window``)."""
 
-    def test_prose_beside_vote_block_publishes_prose_and_keeps_vote(self):
+    def test_prose_beside_vote_block_folds_into_single_vote(self):
         response = LLMResponse(
             text=(
                 "Synthesis: we agreed on option B with rollout next week.\n"
@@ -197,10 +200,13 @@ class TestProseSynthesisIntegration:
         assert len(votes) == 1
         # bind_end_vote_channel stamps the inbound channel onto the vote.
         assert votes[0].payload["channel_id"] == "group:planning"
-        assert len(sends) == 1
-        assert sends[0].payload["channel_id"] == "group:planning"
-        assert sends[0].payload["content"] == (
+        # The synthesis prose now travels INSIDE the vote (prose leads, the
+        # vote's own content trails) — ISSUE-0097 defect 2. No separate
+        # publish, so the vote is a single turn for the W-window quorum.
+        assert sends == []
+        assert votes[0].payload["content"] == (
             "Synthesis: we agreed on option B with rollout next week."
+            "\n\nclosing — synthesis above"
         )
 
     def test_explicit_send_plus_narration_does_not_double_publish(self):

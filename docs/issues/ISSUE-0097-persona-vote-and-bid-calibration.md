@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0097
-summary: "Opening-round bid pass FIXED & live-verified (PR 1); concurrence still splits prose+vote into two messages — defect 2 re-opened (structural, not prompt)"
+summary: "Opening-round bid pass FIXED & live-verified (PR 1); split prose+vote fixed structurally (PR 3, fold-into-vote) — awaiting live MT-CHANNEL-GOV-004 re-verify"
 status: open
 severity: medium
 area: persona
@@ -177,3 +177,38 @@ if snippet steering proves insufficient; prefer the prompt fix first
 > votes had to be `--mention`-drawn. PR 1 calibrated the bid for *unanswered
 > direct questions*, not for concurring on a chair synthesis, so this open-floor
 > pass-proneness on the convergence turn remains.
+
+> 2026-06-13 — **PR 3 (defect 2, structural fold).** Addressed the split at its
+> structural cause — not the prompt. A single turn's free-text block and its
+> `end_interaction_vote` action block were parsed into two actions and the
+> executor published each as a separate channel message; the W-window quorum
+> counts published messages as turns (`end_vote.go` `state.turn++` per publish,
+> window check `state.turn - voteTurn < w`), so the extra prose turn pushed a
+> concurring vote out of `end_vote_window`. New pure helper
+> `fold_prose_into_end_vote` in
+> [`channel_reply.py`](../../agents/persona_runtime/channel_reply.py), run inside
+> `synthesize_channel_reply` *after* `bind_end_vote_channel` (so the vote carries
+> its channel) and *before* the ISSUE-0048 promotion (so the consumed prose is
+> never promoted into its own publish): when a turn carries a **group-channel**
+> vote, the sibling free-text (an explicit same-channel `SEND_CHANNEL_MESSAGE`,
+> or the `COMPLETE_TASK` the parser folds conversational/chair-stall-rescue prose
+> into) is folded INTO the vote `content` (prose leads, any pre-existing vote
+> content trails) and the prose action is dropped — the vote travels as one
+> publish, the single-message shape the chair path already produces. Gated to
+> group channels because that is the only place the vote both publishes (the
+> executor drops DM votes) and counts toward a quorum; on a DM the prose keeps
+> its own publish (the DM-must-reply invariant, ISSUE-0048). The folded vote is a
+> re-created `AgentAction` carrying the same `channel_id`, so the downstream
+> `park_end_vote_close` → `matching_end_votes` stamp still finds it. TDD:
+> `tests/unit/python/test_end_vote_prose_fold.py` (red first — the helper did not
+> exist) pins the pure helper and the `synthesize_channel_reply` integration;
+> `test_action_parser_prose.py`'s chair-stall-rescue integration test was
+> rewritten from "publishes prose as a separate message beside the vote" to
+> "folds into a single vote" — the behaviour this PR supersedes. Prompt-side
+> snippet ([`end-interaction-vote.md`](../../prompts/runtime/safety/end-interaction-vote.md))
+> is left as-is — still correct guidance, now backed by a structural guarantee.
+> Issue stays **open**: defect 2's close needs a live MT-CHANNEL-GOV-004 run
+> where a *single* concurring persona casts a split prose+vote turn and the
+> quorum still lands (`trigger=end_votes`), confirming the fold collapses it to
+> one in-window publish. The **secondary** open-floor pass-proneness on the
+> convergence turn (above) is unchanged by this PR.
