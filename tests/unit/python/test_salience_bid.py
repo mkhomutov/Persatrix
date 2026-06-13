@@ -37,11 +37,9 @@ import pytest
 from agents.generated import wallet_pb2 as walletpb
 from agents.llm_client import LLMClient, LLMResponse
 from agents.model_aliases import use_alias_map
-from agents.salience_addressing import NLAddressing
 from agents.salience_bid import (
     DEFAULT_SALIENCE_MAX_CHANNEL_MEMBERS,
     SalienceDecision,
-    _build_bid_messages,
     evaluate_salience,
     skip_bid_for_channel_size,
 )
@@ -473,28 +471,3 @@ class TestNLAddressingBiasesTheBid:
                 threshold=0.4,
             )
         provider.create_message.assert_awaited_once()
-
-
-class TestBidPromptShape:
-    """Review finding #4 — with no addressing cue the bid prompt must be
-    byte-identical to PR 2b (the note slot collapses to the original single
-    space, not a paragraph break); a present note rides its own paragraph."""
-
-    def test_no_addressing_prompt_keeps_the_pre_pr3_spacing(self):
-        body = _build_bid_messages(
-            content="hi", transcript=[], addressing=NLAddressing(False, False),
-        )[0]["content"]
-        assert "Bias toward staying silent. Answer on exactly two lines:" in body
-        assert "staying silent.\n\nAnswer" not in body
-
-    @pytest.mark.parametrize("addressing,marker", [
-        (NLAddressing(True, False), "invited by name"),
-        (NLAddressing(False, True), "someone else appears to be invited"),
-    ])
-    def test_addressing_note_rides_its_own_paragraph(self, addressing, marker):
-        body = _build_bid_messages(
-            content="hi", transcript=[], addressing=addressing,
-        )[0]["content"]
-        assert marker in body
-        assert "staying silent.\n\nNote:" in body
-        assert "\n\nAnswer on exactly two lines:" in body

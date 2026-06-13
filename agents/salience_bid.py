@@ -56,6 +56,7 @@ import grpc.aio
 
 from .generated import wallet_pb2 as walletpb
 from .model_aliases import resolve as resolve_model
+from .prompt_loader import load_snippet
 from .salience_addressing import NLAddressing, detect_nl_addressing
 from .wallet_client import BudgetExceededError
 
@@ -198,17 +199,16 @@ def _addressing_note(addressing: NLAddressing) -> str:
     The note is advisory only — it never instructs the model to stay silent
     outright (that would re-introduce a hard NL filter); it leans the
     judgement, and the deterministic bar shift in :func:`evaluate_salience`
-    carries the load that does not depend on the model honouring prose."""
+    carries the load that does not depend on the model honouring prose.
+
+    The note *text* is externalised to
+    ``prompts/runtime/safety/salience-bid-addressing-{self,other}.md`` like
+    every other runtime prompt; the leading ``\n\n`` that floats it onto its
+    own paragraph stays here (layout, not prose)."""
     if addressing.self_named:
-        return (
-            "\n\nNote: you appear to be invited by name to weigh in — if you "
-            "have anything useful, lean toward speaking."
-        )
+        return "\n\n" + load_snippet("salience-bid-addressing-self")
     if addressing.other_named:
-        return (
-            "\n\nNote: someone else appears to be invited by name — defer "
-            "unless you have something genuinely new they would miss."
-        )
+        return "\n\n" + load_snippet("salience-bid-addressing-other")
     return ""
 
 
@@ -231,21 +231,33 @@ def _build_bid_messages(
         speaker = "Me" if role == "assistant" else "Thread"
         lines.append(f"{speaker}: {text}")
     transcript_block = "\n".join(lines) if lines else "(no prior turns this round)"
-    # With no addressing cue the note slot collapses to the original single
-    # space, so a non-addressing bid prompt is byte-identical to PR 2b (review
-    # finding #4); a present note rides on its own paragraph instead.
+    # With no addressing cue the note slot collapses to a single space, so it
+    # never forces a paragraph break between the instruction and the answer
+    # form (review finding #4); a present note rides on its own paragraph.
     note = _addressing_note(addressing)
     note_tail = f"{note}\n\n" if note else " "
+    # The instruction prose + answer-format scaffold is externalised to
+    # ``prompts/runtime/safety/salience-bid-user.md`` (loaded like every other
+    # runtime prompt). It carries the ISSUE-0097 opening-round calibration:
+    # an *unanswered direct question put to the room* is itself salient —
+    # answering it IS the new content, score it high — which the bare
+    # "something genuinely new" framing scored as nothing-new on the opening
+    # round (empty transcript → no novel argument → every member passes →
+    # the discussion stalls before it exists), while the redundant case
+    # (already answered) still routes to silence (bias-to-silence intact).
+    #
+    # Only the controlled ``{note_tail}`` placeholder is ``.format``-
+    # substituted; the untrusted inbound ``content`` and the reconstructed
+    # ``transcript_block`` are *concatenated*, never formatted in, so a ``{``
+    # in a user message cannot break rendering — the same data-framing
+    # discipline ``summarize_close`` uses around ``interaction-summarizer``.
+    # The file must therefore keep ``{note_tail}`` as its only brace pair.
+    instruction = load_snippet("salience-bid-user").format(note_tail=note_tail)
     user = (
         "Conversation so far this round:\n"
         f"{transcript_block}\n\n"
         f"New message:\n{content}\n\n"
-        "Decide whether you have something genuinely new and relevant to add "
-        "that has not already been said. Bias toward staying silent."
-        f"{note_tail}"
-        "Answer on exactly two lines:\n"
-        "speak: yes|no\n"
-        "score: <a number from 0.0 to 1.0 for how much you have to add>"
+        f"{instruction}"
     )
     return [{"role": "user", "content": user}]
 
@@ -282,11 +294,13 @@ def _bar_for(threshold: float | None, addressing: NLAddressing) -> float:
 
 
 def _bid_system_prompt(*, persona_name: str, persona_role: str) -> str:
-    return (
-        f"You are {persona_name} ({persona_role}) in a group chat. You are "
-        "deciding ONLY whether to speak — not what to say. Prefer silence "
-        "unless you would add something the thread does not already have. "
-        "Reply with the two-line speak/score form and nothing else."
+    # Externalised to ``prompts/runtime/safety/salience-bid-system.md``. The two
+    # ``{persona_name}`` / ``{persona_role}`` placeholders are the file's only
+    # brace pairs (cf. the ``workspace-root-instructions`` precedent for the
+    # ``.format`` caveat); both are trusted persona-config values, not inbound
+    # user text, so formatting them in is safe.
+    return load_snippet("salience-bid-system").format(
+        persona_name=persona_name, persona_role=persona_role,
     )
 
 
