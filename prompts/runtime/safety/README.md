@@ -19,8 +19,8 @@ Short prompt fragments loaded by the agent runtime via
 | `episode-summarizer.md`       | [`agents/memory/episodic_retention.py`](../../../agents/memory/episodic_retention.py) | System prompt for the episodic-summary compression LLM call.           |
 | `salience-bid-system.md`      | [`agents/salience_bid.py`](../../../agents/salience_bid.py)      | System prompt for the RFC 0030 Tier B `fast`-model salience bid — "decide ONLY whether to speak". Templated: `{persona_name}` / `{persona_role}` (the only braces). |
 | `salience-bid-user.md`        | [`agents/salience_bid.py`](../../../agents/salience_bid.py)      | User message for the Tier B salience bid — the speak/score instruction + the ISSUE-0097 opening-round calibration (an unanswered direct question to the room is itself salient). Templated: `{note_tail}` only (the inbound message + transcript are concatenated, never formatted in). |
-| `salience-bid-addressing-self.md`  | [`agents/salience_bid.py`](../../../agents/salience_bid.py) | Tier B bid NL-addressing nudge (PR 3) — the persona is invited by name; lean toward speaking. |
-| `salience-bid-addressing-other.md` | [`agents/salience_bid.py`](../../../agents/salience_bid.py) | Tier B bid NL-addressing nudge (PR 3) — someone else is invited by name; defer unless genuinely novel. |
+| `salience-bid-addressing-self.md`  | [`agents/salience_bid.py`](../../../agents/salience_bid.py) | Tier B bid NL-addressing nudge (RFC 0030 Tier B PR 3, v0.3.8) — the persona is invited by name; lean toward speaking. |
+| `salience-bid-addressing-other.md` | [`agents/salience_bid.py`](../../../agents/salience_bid.py) | Tier B bid NL-addressing nudge (RFC 0030 Tier B PR 3, v0.3.8) — someone else is invited by name; defer unless genuinely novel. |
 
 ## Contract
 
