@@ -63,7 +63,10 @@ func TestSQLiteStore_SchemaV7_Migration_Idempotent(t *testing.T) {
 		require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
 		assert.Equal(t, channelStoreSchemaVersion, version,
 			"user_version stamped to the latest schema version; reopen is a no-op")
-		assert.Equal(t, 7, channelStoreSchemaVersion, "RFC 0030 Tier B PR 2b bumps the channel store to v7")
+		// The literal-version pin moved to the newest migration's test
+		// (TestSQLiteStore_SchemaV8_Migration_Idempotent) per the convention the
+		// v5/v6 test headers document; this test now only asserts that a reopen
+		// is a no-op at whatever the latest version is.
 	})
 }
 
@@ -108,7 +111,11 @@ func TestSQLiteStore_Migration_V6ToV7_PreservesRows(t *testing.T) {
 	withDB(t, path, func(db *sql.DB) {
 		var version int
 		require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
-		assert.Equal(t, 7, version, "v6→v7 ran")
+		// NewSQLiteStore migrates all the way to the latest version, so a
+		// hand-built v6 DB lands at channelStoreSchemaVersion (≥8 since the RFC
+		// 0050 config columns migration). What this test pins is the v6→v7 Tier B
+		// backfill below, which the migration chain still applies en route.
+		assert.GreaterOrEqual(t, version, 7, "the v6→v7 migration ran (chain continues to latest)")
 
 		var threshold sql.NullFloat64
 		var salienceGated int

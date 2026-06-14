@@ -60,7 +60,17 @@ import (
 //	    inputs the agent-side relevance bid reads. A pure addition: every
 //	    pre-v7 row reads back as an un-gated legacy `always` member, so a
 //	    v0.3.7 database behaves byte-identically.
-const channelStoreSchemaVersion = 7
+//	v8 — RFC 0050 Phase 1 PR 1 (operator-editable channel config): adds three
+//	    additive columns to `channels` — `config_overrides_json TEXT` (the
+//	    sparse per-channel governance override blob; NULL = inherit-all),
+//	    `config_revision INTEGER NOT NULL DEFAULT 0` (the store-owned monotonic
+//	    revision the optimistic-concurrency apply path bumps; 0 = seed-only
+//	    floor under the revision gate) and `config_change_lineage TEXT`
+//	    (RESERVED / dormant — the mutation's governance interaction id, RFC
+//	    Open Q2). A pure addition: every pre-v8 row reads back with no override
+//	    at revision 0, so a v0.3.8 database behaves byte-identically until the
+//	    PR-2 apply path is wired.
+const channelStoreSchemaVersion = 8
 
 // schemaV1SQL is the original schema shipped in PR #231. Applied verbatim
 // when opening a fresh database; the v1→v2 migration below uses
