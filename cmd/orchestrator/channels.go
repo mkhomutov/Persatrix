@@ -267,6 +267,21 @@ func initChannels(
 			zap.Error(eErr))
 	}
 
+	// RFC 0050 Phase 1 PR 2: overlay the store-canonical per-channel overrides
+	// on top of the YAML-seeded router maps above. MUST run last — after every
+	// per-knob resolver — so the inherit-paths it relies on read the captured
+	// fleet defaults (reply budget, idle window) and so the store wins over YAML
+	// for an edited channel. A channel the store has never had edited
+	// (config_revision 0) is skipped, leaving its YAML/default seeding intact, so
+	// a fleet that has never used the live-edit path boots byte-identically.
+	// Same non-fatal posture as the resolvers: an enumeration failure leaves the
+	// YAML-seeded maps in place and edited channels reflect their overrides at
+	// next restart.
+	if sErr := router.ResolveFromStore(context.Background()); sErr != nil {
+		logger.Warn("channels: store-config resolution incomplete; edited channels may not reflect persisted overrides until next restart",
+			zap.Error(sErr))
+	}
+
 	logger.Info("channels: subsystem ready",
 		zap.String("db", dbPath),
 		zap.Int("declared_channels", len(chanCfg.Channels)),
