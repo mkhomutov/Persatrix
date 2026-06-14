@@ -188,6 +188,26 @@ fn parse_channels_doc_rejects_missing_or_empty_channels() {
         .contains("yaml"));
 }
 
+#[test]
+fn parse_channels_doc_rejects_duplicate_channel() {
+    // The same channel declared twice — here once bare, once fully-qualified, both
+    // canonicalizing to `group:planning` — is a hand-edit mistake, not a merge:
+    // `import` would PATCH it twice and `diff` would silently compare only the
+    // first block. A channel carries exactly one override set, so this must fail
+    // loudly (and name the offending id) rather than pick one block arbitrarily.
+    let doc = "channels:\n  - name: planning\n    floor_control: false\n  \
+               - name: group:planning\n    end_vote_window: 5\n";
+    let err = parse_channels_doc(doc).unwrap_err();
+    assert!(
+        err.contains("group:planning"),
+        "names the duplicate id: {err}"
+    );
+    assert!(
+        err.contains("more than once"),
+        "explains the failure: {err}"
+    );
+}
+
 // ─── render_export_doc ─────────────────────────────────────────────────────
 
 #[test]

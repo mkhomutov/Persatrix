@@ -533,6 +533,16 @@ persatrix channel config diff planning
   an undeclared live override would be cleared on boot — that is real drift the
   file does not capture.
 
+- **`import` is sparse-additive, not a reconcile.** It applies only the knobs each
+  block *declares* and never clears a store override the file omits — so it is
+  **not** equivalent to the boot reconcile, which rewrites the whole override blob.
+  This means `import` does not resolve `DRIFT (store-only)`: a live override the
+  file omits stays in the store after `import` and is only cleared by committing
+  the file and rebooting, or by an explicit `unset`. `import` is also best-effort,
+  not atomic — there is no cross-channel transaction, so a 409 or wire error on a
+  later block leaves the earlier blocks applied; the error names the channels that
+  already landed so the remainder can be re-run after re-reading.
+
 > **Scope.** `get`/`set`/`unset` ride purely on the REST endpoints;
 > `export`/`import`/`diff` additionally read or write the declared
 > `config/channels.yaml`. As with the other verbs, the authoritative flag grammar

@@ -131,7 +131,23 @@ pub(crate) fn parse_channels_doc(text: &str) -> Result<Vec<ParsedChannel>, Strin
     if channels.is_empty() {
         return Err("`channels:` is empty — nothing to apply".to_string());
     }
-    channels.iter().map(parse_channel_block).collect()
+    let parsed: Vec<ParsedChannel> = channels
+        .iter()
+        .map(parse_channel_block)
+        .collect::<Result<_, _>>()?;
+    // Reject a doc that declares the same channel twice (after canonicalization, so
+    // a bare `planning` and a qualified `group:planning` collide). A channel holds
+    // exactly one override set: `import` would otherwise PATCH it twice and `diff`
+    // would silently compare only the first block, so a duplicate `name:` is a
+    // hand-edit mistake to fail loudly on, before any write, rather than resolve
+    // arbitrarily.
+    let mut seen = std::collections::HashSet::with_capacity(parsed.len());
+    for ch in &parsed {
+        if !seen.insert(ch.id.as_str()) {
+            return Err(format!("channel '{}' is declared more than once", ch.id));
+        }
+    }
+    Ok(parsed)
 }
 
 /// Validate every parsed channel's id before `import` writes anything, so a
@@ -358,6 +374,11 @@ pub(crate) async fn cmd_config_import(
     // `name:` in a later block cannot leave earlier blocks half-applied.
     validate_channel_ids(&channels)?;
     let mut raws: Vec<String> = Vec::new();
+    // Track the channels already PATCHed so a mid-run failure can tell the operator
+    // exactly which writes landed. `import` is sparse and per-channel — there is no
+    // cross-channel transaction over REST — so it is best-effort, not atomic: a 409
+    // or wire error on a later block leaves the earlier blocks applied.
+    let mut applied: Vec<String> = Vec::new();
     for ch in &channels {
         if ch.patch.is_empty() {
             if !json_out {
@@ -371,12 +392,24 @@ pub(crate) async fn cmd_config_import(
         }
         // Read the current revision for the If-Match guard, then apply. A 409
         // (a concurrent edit moved the revision) aborts the import with the
-        // already-applied channels left in place — the channel id is named so the
-        // operator can re-run after re-reading.
+        // already-applied channels left in place — the channel id is named, and the
+        // already-applied set is surfaced, so the operator can re-run the remainder
+        // after re-reading rather than guessing what landed.
         let current = fetch_config(client, server, &ch.id).await?;
         let resp = apply_config_patch(client, server, &ch.id, &ch.patch, current.view.revision)
             .await
-            .map_err(|e| format!("{}: {e}", ch.id))?;
+            .map_err(|e| {
+                let mut msg = format!("{}: {e}", ch.id);
+                if !applied.is_empty() {
+                    msg.push_str(&format!(
+                        "\n  note: {} channel(s) already applied and NOT rolled back: {}",
+                        applied.len(),
+                        applied.join(", ")
+                    ));
+                }
+                msg
+            })?;
+        applied.push(ch.id.clone());
         if json_out {
             raws.push(resp.raw.trim_end().to_string());
         } else {
