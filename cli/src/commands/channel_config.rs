@@ -20,7 +20,7 @@
 
 use colored::Colorize;
 use reqwest::StatusCode;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::commands::channel::canonicalize_channel_id;
@@ -38,7 +38,7 @@ use crate::types::{api_error_message, validate_path_param};
 /// `interaction_budget_tokens` when inherited — is reported `null` (its live
 /// resolution is deferred, RFC 0050 Phase 1 Open item 4). A single dynamic cell
 /// renders every knob uniformly without a per-knob struct.
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize)]
 pub(crate) struct ConfigField {
     pub(crate) value: Value,
     pub(crate) source: String,
@@ -47,10 +47,11 @@ pub(crate) struct ConfigField {
 /// JSON shape returned by `GET` and `PATCH /api/v1/channels/{id}/config`,
 /// mirroring the Go `channelConfigResponse`: the channel's optimistic-concurrency
 /// `revision` plus each governed knob's effective value + provenance. Field names
-/// match the Go JSON tags exactly so the same value renders identically under
-/// `--json`; the `revision` is what a follow-up `set`/`unset` echoes back in the
-/// `If-Match` header.
-#[derive(Deserialize, Serialize)]
+/// match the Go JSON tags exactly so each knob deserializes into the right cell
+/// for the human render; the `revision` is what a follow-up `set`/`unset` echoes
+/// back in the `If-Match` header. (`--json` does not serialize this struct — it
+/// passes the server body through verbatim, see [`passthrough_json`].)
+#[derive(Deserialize)]
 pub(crate) struct ChannelConfigView {
     pub(crate) revision: i64,
     pub(crate) floor_control: ConfigField,
@@ -118,8 +119,14 @@ fn knob_vocabulary() -> String {
 /// here with a message that names the knob — the server's closed-knob-set and
 /// strict-type checks mirrored client-side so a typo fails before the round-trip.
 ///
-/// To clear a knob back to inherit, use `channel config unset` — an empty value
-/// (`escalation_chair_id=`) is a typo, not the unset path, and is rejected.
+/// An empty value is rejected for the numeric/boolean knobs (there is no empty
+/// int or bool, so `end_vote_window=` is a typo — steered to `channel config
+/// unset`). For the string knob it is KEPT: `escalation_chair_id=` is the
+/// explicit empty-string override, which the server treats as "escalation
+/// disabled" — a state DISTINCT from `unset` (clear back to inherit, which may
+/// resolve to a non-empty inherited chair). See `ChannelConfigOverrides`
+/// (internal/channels/channel_config_store.go): "An explicit empty string
+/// disables escalation; nil inherits."
 pub(crate) fn parse_set_assignment(spec: &str) -> Result<(String, Value), String> {
     let (key, raw) = spec.split_once('=').ok_or_else(|| {
         format!("invalid assignment '{spec}'; expected key=value (e.g. floor_control=true)")
@@ -132,7 +139,10 @@ pub(crate) fn parse_set_assignment(spec: &str) -> Result<(String, Value), String
             knob_vocabulary()
         )
     })?;
-    if raw.is_empty() {
+    // A string knob's empty value is a legitimate override (the explicit
+    // empty-string "disable" sentinel — see the doc above), so only the
+    // numeric/boolean knobs reject empty and steer to `unset`.
+    if raw.is_empty() && ty != KnobType::Str {
         return Err(format!(
             "knob '{key}' has an empty value; supply a {} value, or use \
              `channel config unset {key}` to clear it back to inherit",
@@ -254,9 +264,24 @@ fn render_value(value: &Value) -> String {
     }
 }
 
+/// A trailing advisory note for a knob's rendered row, or `None`.
+///
+/// Only `interaction_budget_tokens` carries one, and only when it is overridden:
+/// it is persisted like the other knobs but its live application is deferred
+/// (RFC 0050 Phase 1 Open item 4 — it is not router-held), so a `[channel]` tag
+/// alone would let an operator read the value they set as "enforced". The note
+/// says otherwise. An inherited budget renders as `—` and needs no note (there
+/// is no override to mis-read).
+fn knob_note(key: &str, field: &ConfigField) -> Option<&'static str> {
+    if key == "interaction_budget_tokens" && !field.value.is_null() {
+        return Some("not yet enforced (RFC 0050 Open item 4)");
+    }
+    None
+}
+
 /// Render the effective-config block: a header carrying the channel id and
-/// current revision, then one aligned row per knob with its value and a
-/// `[channel]` / `[default]` provenance tag.
+/// current revision, then one aligned row per knob with its value, a
+/// `[channel]` / `[default]` provenance tag, and an optional deferral note.
 fn render_config_view(id: &str, view: &ChannelConfigView) {
     println!(
         "{}  {}",
@@ -266,8 +291,12 @@ fn render_config_view(id: &str, view: &ChannelConfigView) {
     let rows = config_rows(view);
     let width = rows.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
     for (key, field) in rows {
+        let note = match knob_note(key, field) {
+            Some(n) => format!("  {}", format!("⚠ {n}").yellow()),
+            None => String::new(),
+        };
         println!(
-            "  {key:<width$}  {}  {}",
+            "  {key:<width$}  {}  {}{note}",
             render_value(&field.value),
             format!("[{}]", field.source).dimmed(),
         );
@@ -276,14 +305,32 @@ fn render_config_view(id: &str, view: &ChannelConfigView) {
 
 // ─── HTTP helpers ───────────────────────────────────────────────────────
 
-/// `GET /api/v1/channels/{id}/config` → typed [`ChannelConfigView`]. The caller
-/// is responsible for validating `id` first. A non-2xx (403 toggle-off, 404
-/// unknown channel, 503 unwired) surfaces via [`api_error_message`].
+/// A `…/config` response: the typed [`ChannelConfigView`] (for the human render
+/// and the `revision` the next write needs) plus the server's raw response body,
+/// kept verbatim for the `--json` passthrough (see [`passthrough_json`]) so the
+/// CLI does not lose a field the server reports but the typed view does not model.
+pub(crate) struct ConfigResponse {
+    pub(crate) view: ChannelConfigView,
+    pub(crate) raw: String,
+}
+
+/// Decode a successful `…/config` body into a [`ConfigResponse`], keeping the
+/// raw bytes alongside the parsed view. (We read the body as text and parse it
+/// ourselves rather than `resp.json()` so the same bytes back the `--json`
+/// passthrough.)
+fn decode_config_response(raw: String) -> Result<ConfigResponse, String> {
+    let view = serde_json::from_str(&raw).map_err(|e| format!("invalid response: {e}"))?;
+    Ok(ConfigResponse { view, raw })
+}
+
+/// `GET /api/v1/channels/{id}/config` → [`ConfigResponse`]. The caller is
+/// responsible for validating `id` first. A non-2xx (403 toggle-off, 404 unknown
+/// channel, 503 unwired) surfaces via [`api_error_message`].
 async fn fetch_config(
     client: &reqwest::Client,
     server: &str,
     id: &str,
-) -> Result<ChannelConfigView, String> {
+) -> Result<ConfigResponse, String> {
     let resp = client
         .get(format!("{server}/api/v1/channels/{id}/config"))
         .send()
@@ -292,9 +339,11 @@ async fn fetch_config(
     if !resp.status().is_success() {
         return Err(api_error_message(resp).await);
     }
-    resp.json()
+    let raw = resp
+        .text()
         .await
-        .map_err(|e| format!("invalid response: {e}"))
+        .map_err(|e| format!("invalid response: {e}"))?;
+    decode_config_response(raw)
 }
 
 /// `PATCH /api/v1/channels/{id}/config` with the sparse `patch` body under an
@@ -307,7 +356,7 @@ async fn apply_config_patch(
     id: &str,
     patch: &serde_json::Map<String, Value>,
     revision: i64,
-) -> Result<ChannelConfigView, String> {
+) -> Result<ConfigResponse, String> {
     let resp = client
         .patch(format!("{server}/api/v1/channels/{id}/config"))
         .header("If-Match", revision.to_string())
@@ -328,17 +377,29 @@ async fn apply_config_patch(
         }
         return Err(msg);
     }
-    resp.json()
+    let raw = resp
+        .text()
         .await
-        .map_err(|e| format!("invalid response: {e}"))
+        .map_err(|e| format!("invalid response: {e}"))?;
+    decode_config_response(raw)
 }
 
-/// Emit a view as either the raw server JSON (`--json`) or the human block.
-fn emit_view(id: &str, view: &ChannelConfigView, json_out: bool) {
+/// The `--json` output line: the server's response body verbatim, with trailing
+/// whitespace trimmed (the server's JSON encoder appends a newline). This is a
+/// PASSTHROUGH, not a re-serialization of the typed [`ChannelConfigView`] — so a
+/// field the server reports that the CLI does not yet model still reaches a
+/// `--json` consumer instead of being silently dropped by a typed round-trip.
+fn passthrough_json(raw: &str) -> String {
+    raw.trim_end().to_string()
+}
+
+/// Emit a response as either the server's JSON body verbatim (`--json`, via
+/// [`passthrough_json`]) or the human block (rendered from the typed view).
+fn emit_view(id: &str, resp: &ConfigResponse, json_out: bool) {
     if json_out {
-        println!("{}", serde_json::to_string(view).unwrap());
+        println!("{}", passthrough_json(&resp.raw));
     } else {
-        render_config_view(id, view);
+        render_config_view(id, &resp.view);
     }
 }
 
@@ -353,8 +414,8 @@ pub(crate) async fn cmd_config_get(
 ) -> Result<(), String> {
     let id = canonicalize_channel_id(name);
     validate_path_param(&id, "channel id")?;
-    let view = fetch_config(client, server, &id).await?;
-    emit_view(&id, &view, json_out);
+    let resp = fetch_config(client, server, &id).await?;
+    emit_view(&id, &resp, json_out);
     Ok(())
 }
 
@@ -400,8 +461,8 @@ async fn apply_validated_patch(
     // Read the current revision for the If-Match guard. This GET also surfaces a
     // toggle-off 403 / unknown-channel 404 before the write is attempted.
     let current = fetch_config(client, server, &id).await?;
-    let view = apply_config_patch(client, server, &id, patch, current.revision).await?;
-    emit_view(&id, &view, json_out);
+    let resp = apply_config_patch(client, server, &id, patch, current.view.revision).await?;
+    emit_view(&id, &resp, json_out);
     Ok(())
 }
 

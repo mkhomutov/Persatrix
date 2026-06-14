@@ -115,10 +115,37 @@ fn parse_set_assignment_accepts_negative_and_large_ints() {
 }
 
 #[test]
-fn parse_set_assignment_rejects_empty_value_pointing_at_unset() {
-    // `escalation_chair_id=` is a typo, not the clear path — steer to unset.
-    let err = parse_set_assignment("escalation_chair_id=").unwrap_err();
+fn parse_set_assignment_keeps_empty_string_for_string_knob() {
+    // `escalation_chair_id=` is NOT a typo: the empty string is the server's
+    // explicit "disable escalation" override, distinct from `unset` (inherit).
+    // The CLI must be able to express it, so the string knob keeps an empty value
+    // rather than rejecting it. (ChannelConfigOverrides.EscalationChairID:
+    // "An explicit empty string disables escalation; nil inherits.")
+    assert_eq!(
+        parse_set_assignment("escalation_chair_id=").unwrap(),
+        (
+            "escalation_chair_id".to_string(),
+            Value::String(String::new())
+        )
+    );
+    // Trimmed-to-empty is the same: whitespace-only is still the disable sentinel.
+    assert_eq!(
+        parse_set_assignment("escalation_chair_id=   ").unwrap(),
+        (
+            "escalation_chair_id".to_string(),
+            Value::String(String::new())
+        )
+    );
+}
+
+#[test]
+fn parse_set_assignment_rejects_empty_value_for_numeric_knob_pointing_at_unset() {
+    // There is no empty int/bool, so an empty value for a numeric/boolean knob is
+    // a typo — rejected with a steer to `unset` (the clear-to-inherit path).
+    let err = parse_set_assignment("end_vote_window=").unwrap_err();
     assert!(err.contains("unset"), "points at the unset verb: {err}");
+    let b = parse_set_assignment("floor_control=").unwrap_err();
+    assert!(b.contains("unset"), "bool knob too: {b}");
 }
 
 // ─── build_set_patch ───────────────────────────────────────────────
@@ -186,6 +213,51 @@ fn render_value_dashes_null_and_unquotes_string() {
     assert_eq!(render_value(&Value::String("ada".into())), "ada");
     assert_eq!(render_value(&serde_json::json!(600)), "600");
     assert_eq!(render_value(&Value::Bool(true)), "true");
+}
+
+// ─── passthrough_json (--json fidelity) ────────────────────────────
+
+#[test]
+fn passthrough_json_preserves_unmodeled_server_fields() {
+    // `--json` echoes the server body verbatim rather than re-serializing the
+    // typed view, so a field the server reports that the CLI does not model
+    // survives into `--json` (a typed round-trip would silently drop it). The
+    // server's encoder appends a newline; that one is trimmed.
+    let raw = "{\"revision\":1,\"future_knob\":{\"value\":7,\"source\":\"channel\"}}\n";
+    let out = passthrough_json(raw);
+    assert!(
+        out.contains("future_knob"),
+        "unmodeled field survives: {out}"
+    );
+    assert_eq!(out, raw.trim_end(), "verbatim minus trailing newline");
+}
+
+// ─── knob_note (deferred-budget marker) ────────────────────────────
+
+#[test]
+fn knob_note_flags_overridden_budget_as_deferred() {
+    // An overridden interaction_budget_tokens is persisted but not live-enforced
+    // (RFC 0050 Open item 4), so its row carries a note — an operator must not
+    // read `[channel]` as "enforced".
+    let set = ConfigField {
+        value: serde_json::json!(5000),
+        source: "channel".into(),
+    };
+    assert!(knob_note("interaction_budget_tokens", &set).is_some());
+
+    // Inherited (null) budget renders as `—`; no override to mis-read, no note.
+    let inherited = ConfigField {
+        value: Value::Null,
+        source: "default".into(),
+    };
+    assert!(knob_note("interaction_budget_tokens", &inherited).is_none());
+
+    // No other knob is deferred, even when overridden.
+    let other = ConfigField {
+        value: Value::Bool(true),
+        source: "channel".into(),
+    };
+    assert!(knob_note("floor_control", &other).is_none());
 }
 
 // ─── config_rows ───────────────────────────────────────────────────
@@ -265,5 +337,76 @@ fn cli_knob_set_matches_server_merge_switch() {
              missing from CLI = {:?}, extra in CLI = {:?}",
         server.difference(&client).collect::<Vec<_>>(),
         client.difference(&server).collect::<Vec<_>>(),
+    );
+}
+
+// The sibling guard above is name-only: it stays green if the server *retypes* a
+// knob (e.g. an int knob becomes a string) while keeping its name. But the CLI's
+// reason to exist is mirroring the server's wire TYPE so a wrong-typed value
+// fails before the round-trip — a guarantee that silently rots under a name-only
+// check. So we also pin each knob's CLI [`KnobType`] against the Go type the
+// server's `decodeKnob[T]` instantiates for that case. Go `int`/`int64` both map
+// to the CLI's single integer type.
+#[test]
+fn cli_knob_types_match_server_decode_types() {
+    use std::collections::BTreeMap;
+
+    let go_src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../internal/server/channel_config_handlers.go"
+    ))
+    .expect(
+        "channel_config_handlers.go must be readable for the knob-type lockstep \
+             guard; update the path if it moved",
+    );
+
+    // Walk mergeConfigPatch: a `case "<knob>":` opens a knob arm; the first
+    // `decodeKnob[<goType>]` that follows is that knob's wire type (the null-unset
+    // branch returns before the decode, so first-after-case is unambiguous). The
+    // `func decodeKnob[T any]` definition also contains `decodeKnob[` but is
+    // reached with no open case, so it is skipped.
+    let mut server: BTreeMap<String, &str> = BTreeMap::new();
+    let mut current: Option<String> = None;
+    for line in go_src.lines().map(str::trim_start) {
+        if let Some(rest) = line.strip_prefix("case \"") {
+            if let Some(end) = rest.find('"') {
+                current = Some(rest[..end].to_string());
+            }
+        } else if let Some(open) = line.find("decodeKnob[") {
+            if let Some(knob) = current.take() {
+                let ty = &line[open + "decodeKnob[".len()..];
+                let ty = &ty[..ty.find(']').expect("decodeKnob[ must close with ]")];
+                let class = match ty {
+                    "bool" => "bool",
+                    "string" => "string",
+                    "int" | "int64" => "int",
+                    other => panic!("unmapped server knob type {other:?}; extend the map"),
+                };
+                server.insert(knob, class);
+            }
+        }
+    }
+
+    assert!(
+        !server.is_empty(),
+        "parsed no knob decode types from channel_config_handlers.go — the \
+             case/decodeKnob format changed; update this guard's parser",
+    );
+
+    let client: BTreeMap<String, &str> = CONFIG_KNOBS
+        .iter()
+        .map(|(k, t)| {
+            let class = match t {
+                KnobType::Bool => "bool",
+                KnobType::Int => "int",
+                KnobType::Str => "string",
+            };
+            (k.to_string(), class)
+        })
+        .collect();
+
+    assert_eq!(
+        client, server,
+        "CLI knob wire-types drifted from server decodeKnob types (knob → type)",
     );
 }
