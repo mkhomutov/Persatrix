@@ -100,6 +100,12 @@ class Episode:
     started_at: float | None = None
     closed_at: float | None = None
     turn_count: int | None = None
+    # ISSUE-0102 PR 2 (migration v15): the RFC 0030 governance interaction id
+    # this episode was opened under — a different namespace from the agent-side
+    # ``interaction_id`` above.  Nullable so legacy / DM / thread / non-channel
+    # rows round-trip cleanly; the closed-interaction read filter matches it
+    # alongside ``interaction_id`` so the channel-side id is look-up-able.
+    governance_interaction_id: str | None = None
 
 
 # Column list for SELECT queries — keeps row_to_episode() positional
@@ -111,6 +117,8 @@ _EPISODE_COLS = (
     "scope",
     # RFC 0020 §D + RFC 0021 PR 2: interaction columns surfaced to recall.
     "interaction_id", "started_at", "closed_at", "turn_count",
+    # ISSUE-0102 PR 2: governance interaction id surfaced to the read filter.
+    "governance_interaction_id",
 )
 EPISODE_SELECT = ", ".join(_EPISODE_COLS)
 _EPISODE_SELECT_ALIASED = ", ".join(f"e.{c}" for c in _EPISODE_COLS)
@@ -150,6 +158,8 @@ def row_to_episode(row: aiosqlite.Row) -> Episode:
         started_at=row[14],
         closed_at=row[15],
         turn_count=row[16],
+        # ISSUE-0102 PR 2 (migration v15): NULL on legacy / non-channel rows.
+        governance_interaction_id=row[17],
     )
 
 
@@ -395,6 +405,7 @@ async def insert_episode(
     turn_count: int | None,
     session_id: str,
     scope: str | None,
+    governance_interaction_id: str | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
     epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> str:
@@ -419,10 +430,10 @@ async def insert_episode(
              importance, access_count, last_accessed_at,
              tags_json, created_at, compressed_at, compression_level,
              interaction_id, started_at, closed_at, turn_count, scope,
-             session_id, principal_id, epoch_id)
+             session_id, principal_id, epoch_id, governance_interaction_id)
         VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0,
                 ?, ?, ?, ?, ?,
-                ?, ?, ?)
+                ?, ?, ?, ?)
         """,
         (
             episode_id,
@@ -441,6 +452,7 @@ async def insert_episode(
             session_id,
             principal_id,
             epoch_id,
+            governance_interaction_id,
         ),
     )
     await db.commit()

@@ -42,13 +42,12 @@ async def _store_closed(
     turn_count: int = 3,
     governance_interaction_id: str | None = None,
 ) -> None:
-    context: dict = {"scope": scope, "close_reason": close_reason}
-    if governance_interaction_id is not None:
-        context["governance_interaction_id"] = governance_interaction_id
+    # PR 2: the governance id is now a queryable column, not a context key.
     await mem.store_episode(
         summary=summary,
-        context=context,
+        context={"scope": scope, "close_reason": close_reason},
         interaction_id=interaction_id,
+        governance_interaction_id=governance_interaction_id,
         started_at=started_at,
         closed_at=closed_at,
         turn_count=turn_count,
@@ -103,6 +102,56 @@ async def test_recall_filters_by_scope_and_interaction_id(memory):
 
     by_id = await closed_interactions(memory, limit=10, interaction_id="i-1")
     assert [ep.interaction_id for ep in by_id] == ["i-1"]
+
+
+async def test_interaction_id_filter_matches_governance_id(memory):
+    # ISSUE-0102 PR 2: the natural diagnostic move — paste the end-vote-closed
+    # governance id into --interaction-id — must return the episode, even
+    # though that id never equals the agent-side episode id.
+    await _store_closed(
+        memory, interaction_id="ep-1", scope="group:a", summary="converged",
+        close_reason="structural", started_at=1.0, closed_at=2.0,
+        governance_interaction_id="gov-4b332af1",
+    )
+    by_gov = await closed_interactions(
+        memory, limit=10, interaction_id="gov-4b332af1",
+    )
+    assert [ep.interaction_id for ep in by_gov] == ["ep-1"]
+
+
+async def test_governance_id_filter_returns_every_episode_of_one_arc(memory):
+    # One governance interaction maps to several agent-side episodes (an idle
+    # split inside the arc); filtering by the governance id returns them all,
+    # newest-first — the cardinality the single-column design rests on.
+    await _store_closed(
+        memory, interaction_id="ep-early", scope="group:a", summary="part 1",
+        close_reason="idle_gap", started_at=1.0, closed_at=2.0,
+        governance_interaction_id="gov-X",
+    )
+    await _store_closed(
+        memory, interaction_id="ep-late", scope="group:a", summary="part 2",
+        close_reason="structural", started_at=3.0, closed_at=4.0,
+        governance_interaction_id="gov-X",
+    )
+    by_gov = await closed_interactions(memory, limit=10, interaction_id="gov-X")
+    assert [ep.interaction_id for ep in by_gov] == ["ep-late", "ep-early"]
+
+
+async def test_agent_side_id_still_matches_when_governance_present(memory):
+    # The OR must not break the original agent-side lookup: filtering by the
+    # episode id returns exactly that episode, not its whole arc.
+    await _store_closed(
+        memory, interaction_id="ep-1", scope="group:a", summary="a",
+        close_reason="structural", started_at=1.0, closed_at=2.0,
+        governance_interaction_id="gov-X",
+    )
+    await _store_closed(
+        memory, interaction_id="ep-2", scope="group:a", summary="b",
+        close_reason="structural", started_at=3.0, closed_at=4.0,
+        governance_interaction_id="gov-X",
+    )
+    by_ep = await closed_interactions(memory, limit=10, interaction_id="ep-1")
+    assert [ep.interaction_id for ep in by_ep] == ["ep-1"]
 
 
 async def test_recall_excludes_unfinalised_pending_rows(memory):
@@ -223,8 +272,8 @@ async def test_handler_projects_summary_and_trigger(memory):
     assert len(resp.interactions) == 1
     it = resp.interactions[0]
     assert it.interaction_id == "i-1"
-    # ISSUE-0102: the RFC 0030 governance id rides in the same context blob and
-    # is surfaced as a distinct field from the agent-side interaction_id.
+    # ISSUE-0102 PR 2: the RFC 0030 governance id is read from its queryable
+    # column and surfaced as a distinct field from the agent-side interaction_id.
     assert it.governance_interaction_id == "gov-4b332af1"
     assert it.scope == "group:room-7"
     assert it.summary == "converged"
@@ -267,6 +316,29 @@ async def test_handler_governance_id_empty_for_real_dm_close(memory):
         agents, task_pb2.ClosedInteractionsRequest(agent_id="agent-x"), MagicMock(),
     )
     assert resp.interactions[0].governance_interaction_id == ""
+
+
+async def test_handler_falls_back_to_context_when_column_null(memory):
+    """ISSUE-0102 PR 2 mixed-version safety: a row whose governance-id
+    *column* is NULL but whose context blob still carries the id (a PR-1-shaped
+    row written by an older agent process after the v15 schema landed, before
+    the backfill or a fresh write populated the column) still surfaces the id
+    via the context fallback — the column is preferred, context is the safety
+    net."""
+    await memory.store_episode(
+        summary="converged", interaction_id="i-ctx", scope="group:room-7",
+        started_at=1.0, closed_at=2.0, turn_count=3,
+        # Column left NULL (param omitted); id only in the context blob.
+        context={
+            "scope": "group:room-7", "close_reason": "structural",
+            "governance_interaction_id": "gov-ctx-only",
+        },
+    )
+    agents = {"agent-x": _fake_agent(memory)}
+    resp = await handle_get_closed_interactions(
+        agents, task_pb2.ClosedInteractionsRequest(agent_id="agent-x"), MagicMock(),
+    )
+    assert resp.interactions[0].governance_interaction_id == "gov-ctx-only"
 
 
 async def test_handler_projects_participants_from_multi_turn_context(memory):

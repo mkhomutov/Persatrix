@@ -221,7 +221,7 @@ async def all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
     async with db.execute(
         """
         SELECT summary, interaction_id, started_at, closed_at,
-               turn_count, scope, context_json
+               turn_count, scope, context_json, governance_interaction_id
         FROM episodes
         WHERE agent_id = ?
         ORDER BY created_at
@@ -238,6 +238,8 @@ async def all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
             "turn_count": r[4],
             "scope": r[5],
             "context_json": r[6],
+            # ISSUE-0102 PR 2: the queryable governance-id column (v15).
+            "governance_interaction_id": r[7],
         }
         for r in rows
     ]

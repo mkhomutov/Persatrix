@@ -46,6 +46,7 @@ import aiosqlite
 # work without churn.
 from ._migration_epoch import _apply_migration_12
 from ._migration_facts import _apply_migration_8
+from ._migration_governance_id import _apply_migration_15
 from ._migration_identity import _apply_migration_13
 from ._migration_identity_backfill import _apply_migration_14
 from ._migration_interactions_session import _apply_migration_10
@@ -471,4 +472,5 @@ _MIGRATION_HANDLERS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]
     12: _apply_migration_12,
     13: _apply_migration_13,
     14: _apply_migration_14,
+    15: _apply_migration_15,
 }

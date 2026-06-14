@@ -38,6 +38,7 @@ from ._migration_handlers import (
     _apply_migration_12,
     _apply_migration_13,
     _apply_migration_14,
+    _apply_migration_15,
 )
 
 __all__ = [
@@ -58,6 +59,7 @@ __all__ = [
     "_apply_migration_12",
     "_apply_migration_13",
     "_apply_migration_14",
+    "_apply_migration_15",
     "_apply_migrations",
     "_fts5_available",
 ]
@@ -341,6 +343,23 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         "RFC 0031 amendment: backfill contact notes to relationship identity "
         "(F-7 Option D)",
         "",  # handled by _apply_migration_14()
+    ),
+    # Migration 15 (ISSUE-0102 PR 2) promotes the RFC 0030 governance
+    # interaction id from the episode ``context_json`` blob (where PR 1 stamped
+    # it for display) to a queryable ``governance_interaction_id`` column on
+    # ``episodes``, then backfills the column from each row's context so a
+    # PR-1-shaped row becomes look-up-able.  This lets the closed-interaction
+    # read filter match the channel-side id (``interaction_id = ? OR
+    # governance_interaction_id = ?``).  Additive nullable column — no
+    # primary-key rebuild (like v5/v13) — plus a one-time data backfill, so it
+    # uses the callable path with the same ``sqlite_master`` + ``PRAGMA
+    # table_info`` guards.  Lives in
+    # :mod:`agents.memory._migration_governance_id`.  See
+    # docs/issues/ISSUE-0102-closed-summary-episode-id-diverges-from-governance-interaction-id.md.
+    (
+        15,
+        "ISSUE-0102: governance_interaction_id column on episodes + backfill",
+        "",  # handled by _apply_migration_15()
     ),
 ]
 

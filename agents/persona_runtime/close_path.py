@@ -68,7 +68,10 @@ async def persist_closed_interaction(
         # carrying it here makes the channel-side id — the one the end-vote
         # close logs carry — cross-referenceable. Empty for a DM / thread /
         # non-channel interaction that never carried a governance id; omitted
-        # from the surface in that case.
+        # from the surface in that case. PR 2 also writes it to the queryable
+        # ``governance_interaction_id`` column below (the read filter matches
+        # that); this context copy stays as the read-side fallback that covers
+        # a column-NULL row written by an older agent process.
         "governance_interaction_id": interaction.wire_interaction_id,
         # ISSUE-0054 / RFC 0020 §D — strip the inbound message ``text`` the
         # multi-turn path stashes for the RFC 0026 extractor: Phase 2 reads it
@@ -84,6 +87,9 @@ async def persist_closed_interaction(
         await episodic.store_episode(
             summary=SUMMARY_PENDING_TEXT, context=ctx,
             interaction_id=interaction.interaction_id,
+            # ISSUE-0102 PR 2: the queryable governance-id column (v15). Empty
+            # ``wire_interaction_id`` (DM / thread / non-channel) → NULL.
+            governance_interaction_id=interaction.wire_interaction_id or None,
             started_at=interaction.started_at,
             closed_at=interaction.closed_at,
             turn_count=interaction.turn_count, scope=interaction.scope,

@@ -70,6 +70,26 @@ def _participants_from_context(ctx: object) -> list[str]:
     return out
 
 
+def _governance_id(ep: object) -> str:
+    """The RFC 0030 governance interaction id for a closed-interaction row.
+
+    ISSUE-0102: PR 2 promoted this to the ``governance_interaction_id`` column
+    (migration v15); read it from there, falling back to the PR-1 context-blob
+    key only when the column is empty (a row written by an older agent process
+    after the v15 schema landed, not yet rewritten/backfilled). Returns ""
+    when neither carries one — never ``None`` (the proto field is a string).
+    """
+    column = getattr(ep, "governance_interaction_id", None)
+    if isinstance(column, str) and column:
+        return column
+    ctx = getattr(ep, "context", None)
+    if isinstance(ctx, dict):
+        value = ctx.get("governance_interaction_id")
+        if isinstance(value, str):
+            return value
+    return ""
+
+
 async def handle_get_closed_interactions(
     agents: dict[str, BaseAgent],
     request: task_pb2.ClosedInteractionsRequest,
@@ -127,15 +147,14 @@ async def handle_get_closed_interactions(
                 ),
                 summary=ep.summary,
                 participants=_participants_from_context(ep.context),
-                # ISSUE-0102: the RFC 0030 governance interaction id rides in
-                # the same persisted context blob as ``close_reason`` (no
-                # dedicated column); empty for a pre-ISSUE-0102 row or an
-                # interaction that carried no governance id.
-                governance_interaction_id=(
-                    str(ep.context.get("governance_interaction_id", ""))
-                    if isinstance(ep.context, dict)
-                    else ""
-                ),
+                # ISSUE-0102: surface the RFC 0030 governance interaction id.
+                # PR 2 promoted it to the queryable ``governance_interaction_id``
+                # column (migration v15) — read it from there. Falls back to the
+                # PR-1 context-blob key for mixed-version safety: a row written by
+                # an older agent process after the v15 schema landed (column NULL,
+                # id only in context) still surfaces. Empty when neither carries
+                # one (DM / thread / non-channel / legacy row).
+                governance_interaction_id=_governance_id(ep),
             )
             for ep in episodes
         ],

@@ -223,7 +223,8 @@ enum AgentCommands {
         /// Restrict to one conversation scope (e.g. `group:planning`, a DM id)
         #[arg(long)]
         scope: Option<String>,
-        /// Show a single interaction by id
+        /// Filter by id — the agent-side episode id, or the channel governance
+        /// interaction id (e.g. from an end-vote close log; may match several)
         #[arg(long = "interaction-id")]
         interaction_id: Option<String>,
         /// Max interactions to fetch (default: 20; newest-first)

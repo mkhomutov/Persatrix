@@ -44,8 +44,11 @@ async def recall_closed_interactions(
     """Return closed-interaction episode rows newest-first (by ``closed_at``).
 
     Filters: ``scope`` restricts to one RFC 0020 scope (``None`` spans all
-    scopes for the agent); ``interaction_id`` fetches exactly one
-    interaction (``None`` lists); ``min_turns`` drops rows below the given
+    scopes for the agent); ``interaction_id`` matches either the agent-side
+    RFC 0020 episode id (exactly one) or the RFC 0030 governance interaction
+    id (ISSUE-0102 PR 2 — one governance interaction can map to several
+    episodes, so a governance-id match may return more than one row; ``None``
+    lists); ``min_turns`` drops rows below the given
     ``turn_count`` (clamped to ``>= 1``; the default of 1 returns every
     closed interaction, including the degenerate single-turn rows the plan
     keeps retrievable — pass 2 to exclude the per-event tick/task
@@ -72,7 +75,15 @@ async def recall_closed_interactions(
         filters += " AND scope = ?"
         params.append(scope)
     if interaction_id is not None:
-        filters += " AND interaction_id = ?"
+        # ISSUE-0102 PR 2: match EITHER the agent-side RFC 0020 episode id OR
+        # the RFC 0030 governance interaction id (migration v15 column), so the
+        # natural diagnostic move — paste the end-vote-closed governance id from
+        # the logs into ``--interaction-id`` — returns the episode(s). One
+        # governance interaction maps to several episodes, so a governance-id
+        # match can return more than one row (all newest-first); an agent-side
+        # episode-id match still returns exactly that one.
+        filters += " AND (interaction_id = ? OR governance_interaction_id = ?)"
+        params.append(interaction_id)
         params.append(interaction_id)
     params.append(clamped)
     async with db.execute(

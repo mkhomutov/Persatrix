@@ -1254,7 +1254,10 @@ type ClosedInteractionsRequest struct {
 	// Optional: restrict to a single RFC 0020 scope (e.g. "group:room-7").
 	// Empty → the agent's most-recent closed interactions across scopes.
 	Scope string `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`
-	// Optional: fetch exactly one interaction by id. Empty → list mode.
+	// Optional: filter by id. Matches EITHER the agent-side RFC 0020 episode
+	// id (returns that one interaction) OR the RFC 0030 governance interaction
+	// id (ISSUE-0102 PR 2 — one governance interaction maps to several
+	// episodes, so this may return more than one row). Empty → list mode.
 	InteractionId string `protobuf:"bytes,3,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
 	// Max rows returned (recency order by closed_at). 0 → server default;
 	// the server caps the value regardless.
