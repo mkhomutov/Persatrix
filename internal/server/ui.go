@@ -27,10 +27,14 @@ func WithUI(uiFS fs.FS) ServerOption {
 
 // WithUIConfig injects the parsed config/ui.yaml feature toggles (RFC 0048 §C)
 // that /api/v1/ui/config reports to the SPA. Separate from WithUI so the asset
-// tree and the toggle config stay independently injectable (a test can supply
-// toggles without an FS, or an FS without toggles). When absent — including
-// whenever --enable-ui is off — handleUIConfig falls back to the Slice-1
-// defaults (see [DefaultUIConfig]).
+// tree and the toggle config stay independently injectable: the orchestrator
+// wires the toggles UNCONDITIONALLY (even with --enable-ui off) because they
+// gate non-web surfaces too — notably the RFC 0050 config_edit toggle read by
+// [Server.configEditEnabled] for the channel-config endpoints — while the asset
+// tree stays console-gated (see cmd/orchestrator initUI). When this option is
+// absent entirely (e.g. a bare test server), handleUIConfig and
+// configEditEnabled fall back to the Slice-1 defaults (see [DefaultUIConfig],
+// where config_edit ships OFF).
 func WithUIConfig(cfg *UIConfig) ServerOption {
 	return func(s *Server) {
 		s.uiConfig = cfg

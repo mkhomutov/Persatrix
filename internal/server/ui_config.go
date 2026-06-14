@@ -36,6 +36,14 @@ type PanelToggle struct {
 	// channel_timeline — see [Server.panelCreate]; on any other panel an authored
 	// create_enabled is inert.
 	CreateEnabled bool `yaml:"create_enabled"`
+	// ConfigEditEnabled gates the per-channel governance-config edit surface
+	// (RFC 0050 Phase 1 — the apply path exposed over PATCH/GET
+	// /api/v1/channels/{id}/config). Like CreateEnabled it is defined on the
+	// shared toggle but honoured only for channel_timeline — see
+	// [Server.panelConfigEdit] and [Server.configEditEnabled]; inert elsewhere.
+	// Ships OFF by default (the surface lands dark, like memory_strip): the
+	// endpoints 403 until an operator flips it on, gating CLI and web uniformly.
+	ConfigEditEnabled bool `yaml:"config_edit_enabled"`
 }
 
 // DefaultUIConfig is the Slice-1 default applied when config/ui.yaml is absent:

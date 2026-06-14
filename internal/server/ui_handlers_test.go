@@ -156,6 +156,13 @@ type uiConfigResponseBody struct {
 			Enabled   bool `json:"enabled"`
 			Available bool `json:"available"`
 		} `json:"create"`
+		// ConfigEdit is the nested governance-config edit capability (RFC 0050
+		// Phase 1). Like Create it is a pointer so the test can tell an absent key
+		// from present-but-false, and only channel_timeline carries it.
+		ConfigEdit *struct {
+			Enabled   bool `json:"enabled"`
+			Available bool `json:"available"`
+		} `json:"config_edit"`
 	} `json:"panels"`
 	Build struct {
 		Version string `json:"version"`
@@ -278,6 +285,57 @@ func TestUIConfig_CreateEnabledEchoesToggle(t *testing.T) {
 	require.NotNil(t, ct.Create)
 	assert.True(t, ct.Create.Enabled, "create_enabled:true must surface as create.enabled:true")
 	assert.True(t, ct.Create.Available, "channels wired → create.available true")
+}
+
+// TestUIConfig_ConfigEditCapabilityShape pins the RFC 0050 Phase 1 contract: the
+// channel_timeline entry carries a nested `config_edit {enabled, available}`
+// object; config_edit.enabled echoes the (default-OFF) toggle, config_edit.
+// available is runtime-derived from the channel ROUTER being wired (editing a
+// live knob needs the apply path, not just the store). No other panel carries it.
+func TestUIConfig_ConfigEditCapabilityShape(t *testing.T) {
+	store := uiChannelStore(t)
+	router := channels.NewChannelRouter(store, channels.NoopDispatcher{}, zap.NewNop(), nil)
+	srv := uiTestServer(t, WithUI(uiAssetFS()), WithChannels(store, router))
+
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/ui/config", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var body uiConfigResponseBody
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+
+	ct := body.Panels["channel_timeline"]
+	require.NotNil(t, ct.ConfigEdit, "channel_timeline must carry a nested config_edit capability")
+	assert.False(t, ct.ConfigEdit.Enabled, "config_edit ships OFF by default (the surface lands dark)")
+	assert.True(t, ct.ConfigEdit.Available, "router wired → config_edit.available is true")
+
+	assert.Nil(t, body.Panels["memory_strip"].ConfigEdit,
+		"only channel_timeline exposes a config-edit affordance")
+}
+
+// TestUIConfig_ConfigEditAvailabilityTracksRouter: config_edit.available is the
+// router-wired half of the toggle contract. With the store wired but no router,
+// the affordance is unavailable even when an operator flips the toggle on — the
+// same forward-compat posture as create.available, here keyed on the router
+// because the edit needs the apply path.
+func TestUIConfig_ConfigEditAvailabilityTracksRouter(t *testing.T) {
+	cfg := DefaultUIConfig()
+	cfg.Panels["channel_timeline"] = PanelToggle{Enabled: true, CreateEnabled: true, ConfigEditEnabled: true}
+	srv := uiTestServer(t,
+		WithUI(uiAssetFS()),
+		WithChannels(uiChannelStore(t), nil), // store wired, router nil
+		WithUIConfig(cfg),
+	)
+
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/ui/config", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var body uiConfigResponseBody
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+
+	ct := body.Panels["channel_timeline"]
+	require.NotNil(t, ct.ConfigEdit, "the config_edit object is reported regardless of availability")
+	assert.True(t, ct.ConfigEdit.Enabled, "config_edit_enabled:true surfaces as enabled even when unavailable")
+	assert.False(t, ct.ConfigEdit.Available, "router absent → config_edit.available must be false")
 }
 
 // TestUIContext_Local pins the RFC 0048 §F identity contract for today's

@@ -368,6 +368,23 @@ func (r *ChannelRouter) SetInteractionIdleTimeout(channelID string, seconds int)
 	r.interactionIdleTimeouts[channelID] = time.Duration(seconds) * time.Second
 }
 
+// InteractionIdleTimeoutFor reports the channel's resolved idle window in whole
+// seconds and whether an explicit per-channel entry exists (`set` false → the
+// fleet default applies). Exposed for ops introspection and the RFC 0050
+// `GET …/config` effective-value read, mirroring [ChannelRouter.FloorControlFor];
+// the hot path reads [ChannelRouter.idleWindowLocked]. An explicit per-channel 0
+// (idle rotation off) reads back as seconds 0 / set true — distinct from an
+// absent entry that resolves to the same 0 only if the fleet default is 0.
+func (r *ChannelRouter) InteractionIdleTimeoutFor(channelID string) (seconds int, set bool) {
+	r.interactionMu.Lock()
+	defer r.interactionMu.Unlock()
+	w, ok := r.interactionIdleTimeouts[channelID]
+	if !ok {
+		return int(r.defaultInteractionIdleTimeout / time.Second), false
+	}
+	return int(w / time.Second), true
+}
+
 // idleWindowLocked returns the channel's resolved idle window. Caller holds
 // interactionMu. An absent entry falls back to the router's fleet default —
 // store-resident channels not declared in config need no startup enumeration
