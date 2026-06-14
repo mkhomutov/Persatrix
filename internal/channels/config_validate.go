@@ -78,6 +78,17 @@ func (c *Config) Validate() error {
 		}
 		seenName[ch.Name] = true
 
+		// Reject a negative RFC 0050 per-channel config revision. Zero/absent is
+		// the legal seed-only sentinel (the revision-gated loader treats it as
+		// "apply only to a channel the store has never had edited"); a rollback
+		// is a NEW higher revision, never a decrement — so a negative value is
+		// always a typo. The schema's `minimum: 0` catches it at `make validate`;
+		// this is the belt-and-suspenders for operators who skipped that step.
+		if ch.Revision < 0 {
+			return fmt.Errorf("channels[%d=%s]: %w: %d (must be >= 0)",
+				i, ch.Name, ErrInvalidConfigRevision, ch.Revision)
+		}
+
 		// Reject a negative floor-turn timeout (the schema's `minimum: 1`
 		// catches it at `make validate`; this is the belt-and-suspenders
 		// for operators who skipped that step). Zero never reaches here —

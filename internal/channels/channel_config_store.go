@@ -221,3 +221,50 @@ func (s *sqliteStore) PutChannelConfig(ctx context.Context, id string, overrides
 		zap.Int64("config_revision", current+1))
 	return nil
 }
+
+// ReconcileChannelConfig implements [ChannelStore.ReconcileChannelConfig] — the
+// RFC 0050 PR 3 boot-loader write that SETS the revision to the YAML-declared
+// value (vs PutChannelConfig's +1 bump). No CAS and no enclosing transaction:
+// the single UPDATE is atomic, but the absence of a compare-and-set is only safe
+// because the caller has already gated on the revision ordering AND is the sole
+// boot-time writer (the REST/CLI surface is not yet serving). See the interface
+// doc's CONTRACT note — this must not be reused on a request-time path without
+// growing its own CAS first.
+func (s *sqliteStore) ReconcileChannelConfig(ctx context.Context, id string, overrides ChannelConfigOverrides, revision int64) error {
+	// An all-unset override persists as NULL (inherit-all), not a literal `{}`,
+	// so it reads back identically to a never-edited channel — same encoding
+	// contract as PutChannelConfig.
+	var blobArg any
+	if !overrides.IsEmpty() {
+		data, err := json.Marshal(overrides)
+		if err != nil {
+			return fmt.Errorf("channels: encode config overrides for %s: %w", id, err)
+		}
+		blobArg = string(data)
+	}
+	// The YAML reconcile carries no governance lineage (RFC 0050 Open Q2 is
+	// dormant), so the column is cleared to NULL — consistent with a no-id
+	// PutChannelConfig write.
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE channels
+		    SET config_overrides_json = ?,
+		        config_revision       = ?,
+		        config_change_lineage = NULL
+		  WHERE id = ?`,
+		blobArg, revision, id,
+	)
+	if err != nil {
+		return fmt.Errorf("channels: reconcile config %s: %w", id, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("channels: reconcile config %s: rows affected: %w", id, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("%w: %s", ErrChannelNotFound, id)
+	}
+	s.logger.Info("channels: channel config reconciled from yaml",
+		zap.String("channel_id", id),
+		zap.Int64("config_revision", revision))
+	return nil
+}

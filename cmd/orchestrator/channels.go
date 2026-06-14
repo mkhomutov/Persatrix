@@ -267,6 +267,25 @@ func initChannels(
 			zap.Error(eErr))
 	}
 
+	// RFC 0050 Phase 1 PR 3: revision-gated YAML reconciliation. Walk every
+	// declared channel and, for any block whose `revision:` is strictly greater
+	// than the store's, adopt the resolved YAML governance set into the canonical
+	// store at that revision (the GitOps push); equal-revision content
+	// divergence is logged as drift (the store stays authoritative) and an older
+	// revision is ignored. Absent revision is seed-only — the store row is left
+	// untouched, so existing configs are not rewritten. MUST run AFTER
+	// ReconcileConfig (so the store rows it writes already exist) and BEFORE
+	// ResolveFromStore (so adopted writes are overlaid onto the router by the step
+	// below). It carries NO dependency on the per-knob resolvers above — the
+	// snapshot is computed from the loaded `chanCfg`, not from router state — so
+	// sitting after them is only for keeping the RFC 0050 steps grouped, not an
+	// ordering requirement. Same non-fatal posture: a store error leaves the
+	// YAML-seeded maps in place and reconciliation retries at next restart.
+	if rErr := router.ReconcileFromYAML(context.Background(), chanCfg); rErr != nil {
+		logger.Warn("channels: yaml reconciliation incomplete; committed config-as-code edits may not reach the store until next restart",
+			zap.Error(rErr))
+	}
+
 	// RFC 0050 Phase 1 PR 2: overlay the store-canonical per-channel overrides
 	// on top of the YAML-seeded router maps above. MUST run last — after every
 	// per-knob resolver — so the inherit-paths it relies on read the captured

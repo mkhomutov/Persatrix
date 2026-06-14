@@ -66,6 +66,12 @@
           "description": "Group-channel name. Canonical address is `group:<name>`."
         },
         "description": { "type": "string" },
+        "revision": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "RFC 0050 Phase 1 per-channel config revision (the revision-gated loader). The monotonic, store-owned version this YAML block was exported at. At boot the loader writes the block into the canonical channel store ONLY if its revision is strictly greater than the store's current revision for that channel; equal revision with differing content is surfaced as drift (the store stays authoritative — `channel config diff` inspects it) and an older revision is ignored, so the higher revision always wins. Absent or 0 is seed-only: it never overrides a store edit (a channel the store has had edited sits at revision > 0), so existing hand-authored configs are left untouched. `channel config export` stamps `store + 1` automatically; to roll back, write the old config as a NEW higher revision — never decrement. Negative is rejected at load time."
+        },
         "floor_control": {
           "type": "boolean",
           "default": true,

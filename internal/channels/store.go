@@ -158,6 +158,29 @@ type ChannelStore interface {
 	// Returns [ErrChannelNotFound] for an unknown id. RFC 0050 Phase 1.
 	PutChannelConfig(ctx context.Context, id string, overrides ChannelConfigOverrides, expectedRevision int64, lineage string) error
 
+	// ReconcileChannelConfig is the RFC 0050 Phase 1 PR 3 boot-loader write
+	// path: it persists `overrides` for `id` and SETS the store-owned config
+	// revision to `revision` (the YAML-declared value) rather than bumping it by
+	// one. This is what lets a revision-gated YAML block adopt its committed
+	// revision in a single boot and stay idempotent thereafter — unlike
+	// [ChannelStore.PutChannelConfig], whose +1 optimistic-concurrency semantics
+	// belong to the operator-facing CLI/web writers. It carries no
+	// expected-revision check: the caller ([ChannelRouter.ReconcileFromYAML]) is
+	// a trusted single writer that has already gated on the revision ordering.
+	//
+	// CONTRACT — boot-time, single-writer only. Unlike [PutChannelConfig], this
+	// does an unconditional `SET config_revision = ?` with NO compare-and-set and
+	// NO read-then-write transaction (the single UPDATE is atomic on its own, but
+	// nothing guards against a concurrent writer). It is safe only because the
+	// orchestrator runs it at boot, before the REST/CLI surface is serving. Do NOT
+	// wire it to a request-time path: run concurrently with [PutChannelConfig] it
+	// would clobber a live edit's revision bump with no conflict signal. A
+	// request-time "force reconcile" must grow its own CAS/transaction first.
+	//
+	// An all-unset `overrides` persists as inherit-all (a NULL blob). Returns
+	// [ErrChannelNotFound] for an unknown id. RFC 0050 Phase 1.
+	ReconcileChannelConfig(ctx context.Context, id string, overrides ChannelConfigOverrides, revision int64) error
+
 	// Close releases any resources held by the store.
 	Close() error
 }
