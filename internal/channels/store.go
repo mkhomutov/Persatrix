@@ -150,7 +150,10 @@ type ChannelStore interface {
 	// channel's current revision it writes nothing and returns a
 	// [ConfigRevisionConflictError] (matching [ErrConfigRevisionConflict] via
 	// [errors.Is]). An all-unset `overrides` persists as inherit-all (a NULL
-	// blob). `lineage` (the mutation's governance interaction id) is written
+	// blob); on a never-edited channel (revision 0) an all-unset apply is a
+	// no-op — it does NOT bump the revision, so the channel stays seedable from
+	// `config/channels.yaml` under RFC 0050's revision gate. `lineage` (the
+	// mutation's governance interaction id) is written
 	// through but ships dormant — pass "" until RFC 0050 Open Q2 is activated.
 	// Returns [ErrChannelNotFound] for an unknown id. RFC 0050 Phase 1.
 	PutChannelConfig(ctx context.Context, id string, overrides ChannelConfigOverrides, expectedRevision int64, lineage string) error

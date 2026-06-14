@@ -139,12 +139,12 @@ func TestSQLiteStore_PutChannelConfig_RoundTrips(t *testing.T) {
 	mustCreateGroup(t, store, "planning")
 
 	fc := false
-	cap := 12
+	maxMembers := 12
 	budget := int64(50_000)
 	idle := 0 // explicit "idle rotation off" — distinct from absent
 	want := ChannelConfigOverrides{
 		FloorControl:                  &fc,
-		SalienceMaxChannelMembers:     &cap,
+		SalienceMaxChannelMembers:     &maxMembers,
 		InteractionBudgetTokens:       &budget,
 		InteractionIdleTimeoutSeconds: &idle,
 	}
@@ -189,9 +189,9 @@ func TestSQLiteStore_PutChannelConfig_StaleRevisionConflict(t *testing.T) {
 	store, ctx, _ := newConfigStore(t)
 	mustCreateGroup(t, store, "planning")
 
-	cap := 9
+	maxMembers := 9
 	require.NoError(t, store.PutChannelConfig(ctx, "group:planning",
-		ChannelConfigOverrides{SalienceMaxChannelMembers: &cap}, 0, ""))
+		ChannelConfigOverrides{SalienceMaxChannelMembers: &maxMembers}, 0, ""))
 	// Store is now at revision 1. A writer that still believes it is 0 loses.
 	other := 99
 	err := store.PutChannelConfig(ctx, "group:planning",
@@ -219,9 +219,9 @@ func TestSQLiteStore_PutChannelConfig_EmptyOverridesAreInheritAll(t *testing.T) 
 	store, ctx, path := newConfigStore(t)
 	mustCreateGroup(t, store, "planning")
 
-	cap := 7
+	maxMembers := 7
 	require.NoError(t, store.PutChannelConfig(ctx, "group:planning",
-		ChannelConfigOverrides{SalienceMaxChannelMembers: &cap}, 0, ""))
+		ChannelConfigOverrides{SalienceMaxChannelMembers: &maxMembers}, 0, ""))
 	// Now unset everything.
 	require.NoError(t, store.PutChannelConfig(ctx, "group:planning",
 		ChannelConfigOverrides{}, 1, ""))
@@ -241,15 +241,44 @@ func TestSQLiteStore_PutChannelConfig_EmptyOverridesAreInheritAll(t *testing.T) 
 	})
 }
 
+// TestSQLiteStore_PutChannelConfig_EmptyOnPristineChannelIsNoOp asserts that a
+// no-content apply against a never-edited channel (revision 0) does NOT bump the
+// revision. There is nothing to clear, and a gratuitous bump would shadow the
+// channel's config/channels.yaml block under RFC 0050's revision gate (which
+// seeds a YAML block — revision absent = 0 — only while the store is at revision
+// 0). The clear-everything-after-editing case (revision > 0) still bumps — see
+// TestSQLiteStore_PutChannelConfig_EmptyOverridesAreInheritAll.
+func TestSQLiteStore_PutChannelConfig_EmptyOnPristineChannelIsNoOp(t *testing.T) {
+	store, ctx, path := newConfigStore(t)
+	mustCreateGroup(t, store, "planning")
+
+	// Apply inherit-all to a channel that already inherits everything.
+	require.NoError(t, store.PutChannelConfig(ctx, "group:planning",
+		ChannelConfigOverrides{}, 0, ""))
+
+	_, revision, err := store.GetChannelConfig(ctx, "group:planning")
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), revision,
+		"an empty apply on a pristine channel is a no-op — revision stays 0 so YAML still seeds")
+
+	// The row is untouched: still a NULL blob, identical to a never-written channel.
+	withDB(t, path, func(db *sql.DB) {
+		var blob sql.NullString
+		require.NoError(t, db.QueryRow(
+			`SELECT config_overrides_json FROM channels WHERE id = 'group:planning'`).Scan(&blob))
+		assert.False(t, blob.Valid, "pristine channel stays NULL (inherit-all), unbumped")
+	})
+}
+
 // TestSQLiteStore_PutChannelConfig_PersistsLineage asserts the (otherwise
 // dormant) lineage argument is written through when supplied.
 func TestSQLiteStore_PutChannelConfig_PersistsLineage(t *testing.T) {
 	store, ctx, path := newConfigStore(t)
 	mustCreateGroup(t, store, "planning")
 
-	cap := 5
+	maxMembers := 5
 	require.NoError(t, store.PutChannelConfig(ctx, "group:planning",
-		ChannelConfigOverrides{SalienceMaxChannelMembers: &cap}, 0, "interaction:abc123"))
+		ChannelConfigOverrides{SalienceMaxChannelMembers: &maxMembers}, 0, "interaction:abc123"))
 
 	withDB(t, path, func(db *sql.DB) {
 		var lineage sql.NullString
@@ -268,9 +297,9 @@ func TestSQLiteStore_ChannelConfig_MissingChannel(t *testing.T) {
 	_, _, err := store.GetChannelConfig(ctx, "group:ghost")
 	assert.ErrorIs(t, err, ErrChannelNotFound)
 
-	cap := 4
+	maxMembers := 4
 	err = store.PutChannelConfig(ctx, "group:ghost",
-		ChannelConfigOverrides{SalienceMaxChannelMembers: &cap}, 0, "")
+		ChannelConfigOverrides{SalienceMaxChannelMembers: &maxMembers}, 0, "")
 	assert.ErrorIs(t, err, ErrChannelNotFound)
 }
 

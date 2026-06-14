@@ -19,8 +19,10 @@ import (
 // Every field is a pointer on purpose — the tri-state the whole design turns
 // on:
 //
-//   - nil   → the knob is unset → the channel INHERITS the fleet default
-//     (resolved by the existing `ChannelConfig.Resolve*` methods).
+//   - nil   → the knob is unset → the channel INHERITS the resolved default
+//     (the `ChannelConfig.Resolve*` method for the knobs that have one — reply
+//     budget, interaction budget, idle timeout — and the load-time
+//     normalization to the package default for the rest).
 //   - &v    → an explicit per-channel override that wins over the fleet default,
 //     including the values a plain int cannot express distinctly: an explicit
 //     `floor_control:false` (opt a group back out of the ON default) and an
@@ -32,6 +34,17 @@ import (
 // knob needs no migration (it is one more optional field on this struct and one
 // more key in the same blob). This is the seam the schema-driven generic config
 // (RFC 0050 Phase 3) grows into.
+//
+// HAZARD — reconcile seam (RFC 0050 Phase 3): "inherit the resolved default"
+// is NOT "inherit the channel's `config/channels.yaml` value". Because the
+// revision gate makes the store canonical for any channel at revision > 0 (a
+// YAML block, revision absent = 0, seeds only at store revision 0), the first
+// store edit of ANY single knob shadows the channel's ENTIRE YAML block — so
+// its un-edited knobs fall back to the package/fleet default, not the value an
+// operator wrote in channels.yaml. For RFC 0050's "config-as-code and live
+// edits coexist" promise to hold, PR 3's reconcile MUST seed this blob from the
+// channel's resolved YAML on first edit (so a sparse override layers over the
+// YAML baseline rather than replacing it). Tracked as a Phase 1 design seam.
 //
 // PR 1 persists and reads these back but does NOT consult them at runtime — the
 // router is still seeded from `config/channels.yaml`. PR 2 introduces the apply
@@ -150,6 +163,23 @@ func (s *sqliteStore) PutChannelConfig(ctx context.Context, id string, overrides
 		return &ConfigRevisionConflictError{ChannelID: id, Expected: expectedRevision, Actual: current}
 	}
 
+	// A no-content apply against a never-edited channel (revision 0, NULL blob)
+	// is a no-op: there is nothing to clear, and bumping the revision would
+	// gratuitously shadow the channel's `config/channels.yaml` block under RFC
+	// 0050's revision gate — which seeds a YAML block (revision absent = 0) only
+	// while the store is still at revision 0. Skipping the bump preserves the
+	// "the store has never had this edited" invariant the gate relies on, so an
+	// accidental empty PATCH on a pristine channel does not silently detach it
+	// from config-as-code. The deferred Rollback closes the read-only tx.
+	//
+	// Clearing every knob on an ALREADY-edited channel (revision > 0) still
+	// bumps — that is the meaningful reset-to-inherit-all operation, distinct
+	// from "untouched". (current == expectedRevision here, so current == 0
+	// implies the caller also passed expectedRevision 0.)
+	if current == 0 && overrides.IsEmpty() {
+		return nil
+	}
+
 	// An all-unset override persists as NULL (inherit-all), not a literal `{}`,
 	// so it reads back identically to a never-edited channel.
 	var blobArg any
@@ -161,7 +191,13 @@ func (s *sqliteStore) PutChannelConfig(ctx context.Context, id string, overrides
 		blobArg = string(data)
 	}
 	// Lineage ships dormant (RFC 0050 Open Q2): no production caller populates
-	// it yet, so an empty string persists as NULL rather than "".
+	// it yet, so an empty string persists as NULL rather than "". Each apply
+	// OVERWRITES the column with this change's lineage — it records the last
+	// mutation, not an append-only trail — so a write that carries no governance
+	// id (the PR-1 norm) clears any value a prior write recorded, and there is no
+	// read accessor yet ([GetChannelConfig] returns overrides + revision only).
+	// Whether a no-id write should instead preserve the prior lineage is itself
+	// Open Q2; the column stays write-through until that is resolved.
 	var lineageArg any
 	if lineage != "" {
 		lineageArg = lineage
