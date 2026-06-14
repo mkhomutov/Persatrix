@@ -144,6 +144,20 @@ type ChannelConfig struct {
 	Name        string         `yaml:"name"`
 	Description string         `yaml:"description"`
 	Members     []MemberConfig `yaml:"members"`
+	// Revision is the RFC 0050 Phase 1 per-channel config revision this YAML
+	// block was exported at (the revision-gated loader). At boot the loader
+	// applies a block to the canonical store ONLY if its revision is strictly
+	// greater than the store's current revision for that channel; equal revision
+	// with differing content surfaces as drift, and an older revision is ignored
+	// (higher revision wins — [ChannelRouter.ReconcileFromYAML]). Absent — the
+	// hand-authored norm and every pre-RFC-0050 block — reads as 0 / seed-only:
+	// it never overrides a store edit (a channel the store has had edited sits at
+	// revision > 0), so existing configs are left untouched. The store owns the
+	// counter and `channel config export` (PR 5) stamps `store + 1`; never
+	// decrement to roll back — write the old config as a new, higher revision
+	// (RFC 0050 mechanic 2). Zero/absent is seed-only; negative is rejected at
+	// load ([Config.Validate]).
+	Revision int64 `yaml:"revision"`
 	// FloorControl opts this channel into RFC 0030 Layer 2.5 speaker
 	// serialization: candidate responders take the floor one at a time,
 	// each reading the prior speaker's reply, instead of replying
