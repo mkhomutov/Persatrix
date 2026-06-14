@@ -527,7 +527,11 @@ persatrix channel config diff planning
   (that field is what the boot loader consumes once the file is committed to
   `config/channels.yaml`). `diff` reports `interaction_budget_tokens` as
   `deferred` rather than drift, since its effective value is not yet resolvable
-  (Open item 4).
+  (Open item 4). A knob the file omits but the store overrides
+  (`source == "channel"`) reads as `DRIFT (store-only)`, **not** `inherited`:
+  the boot reconcile replaces the whole override blob with the declared set, so
+  an undeclared live override would be cleared on boot — that is real drift the
+  file does not capture.
 
 > **Scope.** `get`/`set`/`unset` ride purely on the REST endpoints;
 > `export`/`import`/`diff` additionally read or write the declared

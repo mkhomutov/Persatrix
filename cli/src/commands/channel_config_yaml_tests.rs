@@ -283,3 +283,51 @@ fn diff_rows_no_drift_when_all_in_sync_or_inherited() {
     assert_eq!(row(&rows, "end_vote_window").status, DiffStatus::InSync);
     assert!(!has_drift(&rows));
 }
+
+#[test]
+fn diff_rows_flags_undeclared_store_override_as_drift() {
+    // The store carries an explicit `floor_control` override (`source ==
+    // "channel"`, e.g. a live `config set`), but the YAML declares nothing for
+    // it. The boot reconcile REPLACES the whole override blob with the declared
+    // set (ReconcileChannelConfig is a full-blob write), so this override would
+    // be cleared on boot — real drift, NOT a benign "inherited". A knob with no
+    // store override stays Inherited.
+    let v = view(5, &[("floor_control", serde_json::json!(false))]);
+    let declared = Map::new(); // YAML omits every knob
+    let rows = diff_rows(&declared, &v);
+    assert_eq!(row(&rows, "floor_control").status, DiffStatus::Undeclared);
+    assert_eq!(row(&rows, "end_vote_window").status, DiffStatus::Inherited);
+    assert!(has_drift(&rows));
+}
+
+#[test]
+fn diff_status_machine_tags_are_stable() {
+    // `--json` serializes these tags, so they are a wire contract decoupled from
+    // the Rust variant names — a variant rename must not silently change them.
+    assert_eq!(DiffStatus::InSync.tag(), "in_sync");
+    assert_eq!(DiffStatus::Drift.tag(), "drift");
+    assert_eq!(DiffStatus::Inherited.tag(), "inherited");
+    assert_eq!(DiffStatus::Indeterminate.tag(), "deferred");
+    assert_eq!(DiffStatus::Undeclared.tag(), "undeclared");
+}
+
+// ─── validate_channel_ids ──────────────────────────────────────────────────
+
+#[test]
+fn validate_channel_ids_rejects_malformed_id_before_any_write() {
+    // `import` must validate every channel id up front: a malformed `name:` in a
+    // later block has to abort before the first PATCH, not after earlier blocks
+    // were already written.
+    let good =
+        parse_channels_doc("channels:\n  - name: planning\n    floor_control: true\n").unwrap();
+    assert!(validate_channel_ids(&good).is_ok());
+
+    let bad = parse_channels_doc(
+        "channels:\n  - name: planning\n    floor_control: true\n  - name: bad/name\n    \
+         floor_control: true\n",
+    )
+    .unwrap();
+    assert!(validate_channel_ids(&bad)
+        .unwrap_err()
+        .contains("channel id"));
+}

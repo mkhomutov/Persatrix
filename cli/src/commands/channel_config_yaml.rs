@@ -134,6 +134,18 @@ pub(crate) fn parse_channels_doc(text: &str) -> Result<Vec<ParsedChannel>, Strin
     channels.iter().map(parse_channel_block).collect()
 }
 
+/// Validate every parsed channel's id before `import` writes anything, so a
+/// malformed `name:` in a later block aborts the whole run up front rather than
+/// after the earlier blocks were already PATCHed. Pairs with the parse-time knob
+/// coercion to make the "validated before the first write" contract hold for the
+/// channel id too, not just the knob values.
+pub(crate) fn validate_channel_ids(channels: &[ParsedChannel]) -> Result<(), String> {
+    for ch in channels {
+        validate_path_param(&ch.id, "channel id")?;
+    }
+    Ok(())
+}
+
 /// Regenerate a channel's YAML block from its effective config view, emitting
 /// only the explicitly-overridden knobs (`source == "channel"`) under a
 /// `channels:` list so the output is both a standalone `import` file and a
@@ -163,7 +175,7 @@ pub(crate) fn render_export_doc(name: &str, view: &ChannelConfigView) -> Result<
 
 /// Per-knob outcome of a `diff`: how the declared YAML value relates to the
 /// effective store value.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DiffStatus {
     /// Declared and matches the effective value.
     InSync,
@@ -175,6 +187,28 @@ pub(crate) enum DiffStatus {
     /// `interaction_budget_tokens`, RFC Open item 4) so the two cannot be
     /// compared: neither a confirmed match nor confirmed drift.
     Indeterminate,
+    /// Not declared in the YAML, yet the store carries an explicit per-channel
+    /// override (`source == "channel"`). This IS drift: the boot reconcile
+    /// (`ReconcileChannelConfig`) replaces the whole override blob with the
+    /// declared set, so an override the file omits would be cleared on boot. A
+    /// plain `Inherited` here would falsely reassure the operator that a live
+    /// override is captured in config-as-code when committing the file reverts it.
+    Undeclared,
+}
+
+impl DiffStatus {
+    /// Stable machine tag for the `--json` `status` field. Decoupled from the
+    /// Rust variant names so a rename cannot silently change the wire contract
+    /// (`{:?}` would have). Pinned by `diff_status_machine_tags_are_stable`.
+    fn tag(self) -> &'static str {
+        match self {
+            DiffStatus::InSync => "in_sync",
+            DiffStatus::Drift => "drift",
+            DiffStatus::Inherited => "inherited",
+            DiffStatus::Indeterminate => "deferred",
+            DiffStatus::Undeclared => "undeclared",
+        }
+    }
 }
 
 /// One row of a channel `diff`: the knob, its declared YAML value (if any), the
@@ -190,15 +224,19 @@ pub(crate) struct DiffRow {
 /// Compare a declared override patch against an effective config view, one row
 /// per knob in registry order. A knob the YAML declares is `InSync` when its
 /// value equals the effective value and `Drift` when it differs; a knob the YAML
-/// omits is `Inherited`. The one exception is a declared knob whose effective
-/// value is null (deferred-resolution budget) → `Indeterminate`, so a stale
-/// "drift" is never reported for a value the server cannot resolve yet.
+/// omits is `Inherited` only when the store has no override for it — if the store
+/// carries an explicit `channel`-source override the file omits, that is
+/// `Undeclared` drift (the boot reconcile would clear it), not `Inherited`. The
+/// one exception is a declared knob whose effective value is null
+/// (deferred-resolution budget) → `Indeterminate`, so a stale "drift" is never
+/// reported for a value the server cannot resolve yet.
 pub(crate) fn diff_rows(declared: &Map<String, Value>, view: &ChannelConfigView) -> Vec<DiffRow> {
     config_rows(view)
         .into_iter()
         .map(|(knob, field)| {
             let declared_val = declared.get(knob).cloned();
             let status = match &declared_val {
+                None if field.source == "channel" => DiffStatus::Undeclared,
                 None => DiffStatus::Inherited,
                 Some(_) if field.value.is_null() => DiffStatus::Indeterminate,
                 Some(d) if *d == field.value => DiffStatus::InSync,
@@ -214,10 +252,13 @@ pub(crate) fn diff_rows(declared: &Map<String, Value>, view: &ChannelConfigView)
         .collect()
 }
 
-/// Whether any row in a diff is `Drift` — the signal that drives the non-zero
-/// "config-as-code diverges from the store" render and a future exit-code hook.
+/// Whether any row in a diff is drift — a declared knob whose value diverges
+/// (`Drift`) or a store override the file omits (`Undeclared`, which the boot
+/// reconcile would clear). Drives the non-zero "config-as-code diverges from the
+/// store" render and a future exit-code hook.
 pub(crate) fn has_drift(rows: &[DiffRow]) -> bool {
-    rows.iter().any(|r| r.status == DiffStatus::Drift)
+    rows.iter()
+        .any(|r| matches!(r.status, DiffStatus::Drift | DiffStatus::Undeclared))
 }
 
 // ─── Rendering ─────────────────────────────────────────────────────────────
@@ -251,13 +292,13 @@ fn render_diff(id: &str, declared_rev: Option<i64>, view: &ChannelConfigView, ro
     );
     let width = rows.iter().map(|r| r.knob.len()).max().unwrap_or(0);
     for row in rows {
-        let (tag, painted) = match row.status {
-            DiffStatus::InSync => ("in sync", "in sync".green()),
-            DiffStatus::Drift => ("DRIFT", "DRIFT".red().bold()),
-            DiffStatus::Inherited => ("inherited", "inherited".dimmed()),
-            DiffStatus::Indeterminate => ("deferred", "deferred".yellow()),
+        let painted = match row.status {
+            DiffStatus::InSync => "in sync".green(),
+            DiffStatus::Drift => "DRIFT".red().bold(),
+            DiffStatus::Inherited => "inherited".dimmed(),
+            DiffStatus::Indeterminate => "deferred".yellow(),
+            DiffStatus::Undeclared => "DRIFT (store-only)".red().bold(),
         };
-        let _ = tag;
         println!(
             "  {knob:<width$}  declared {:<14} effective {:<14} {}",
             cell(row.declared.as_ref()),
@@ -312,9 +353,12 @@ pub(crate) async fn cmd_config_import(
 ) -> Result<(), String> {
     let text = std::fs::read_to_string(file).map_err(|e| format!("cannot read {file}: {e}"))?;
     let channels = parse_channels_doc(&text)?;
+    // Validate every channel id before the first write — the same before-any-write
+    // discipline the knob coercion already gets at parse time, so a malformed
+    // `name:` in a later block cannot leave earlier blocks half-applied.
+    validate_channel_ids(&channels)?;
     let mut raws: Vec<String> = Vec::new();
     for ch in &channels {
-        validate_path_param(&ch.id, "channel id")?;
         if ch.patch.is_empty() {
             if !json_out {
                 println!(
@@ -382,7 +426,7 @@ pub(crate) async fn cmd_config_diff(
                     "knob": r.knob,
                     "declared": r.declared,
                     "effective": r.effective,
-                    "status": format!("{:?}", r.status),
+                    "status": r.status.tag(),
                 })
             })
             .collect();
