@@ -22,7 +22,7 @@
 
 use colored::Colorize;
 use serde_json::{Map, Value};
-use serde_yml::Value as Yaml;
+use serde_yaml_ng::Value as Yaml;
 
 use crate::commands::channel::canonicalize_channel_id;
 use crate::commands::channel_config::{
@@ -63,7 +63,7 @@ pub(crate) fn yaml_to_knob_json(key: &str, ty: KnobType, y: &Yaml) -> Result<Val
             .as_i64()
             .map(|n| Value::Number(n.into()))
             .ok_or_else(|| format!("knob '{key}' expects an integer")),
-        // serde_yml parses an unquoted YAML scalar as Bool/Number where it can,
+        // serde_yaml_ng parses an unquoted YAML scalar as Bool/Number where it can,
         // so `escalation_chair_id: true` arrives as Bool, not String. Accept only
         // a genuine string — a non-string here is a typo, not a chair id.
         KnobType::Str => y
@@ -122,7 +122,7 @@ pub(crate) fn parse_channel_block(block: &Yaml) -> Result<ParsedChannel, String>
 /// An absent / non-sequence / empty `channels:` is a usage error — there is
 /// nothing to import or diff.
 pub(crate) fn parse_channels_doc(text: &str) -> Result<Vec<ParsedChannel>, String> {
-    let doc: Yaml = serde_yml::from_str(text).map_err(|e| format!("invalid YAML: {e}"))?;
+    let doc: Yaml = serde_yaml_ng::from_str(text).map_err(|e| format!("invalid YAML: {e}"))?;
     let channels = doc
         .as_mapping()
         .and_then(|m| m.get("channels"))
@@ -171,22 +171,22 @@ pub(crate) fn validate_channel_ids(channels: &[ParsedChannel]) -> Result<(), Str
 /// without the operator remembering to bump it. Knob order follows
 /// [`config_rows`] (the registry order), keeping exports stable and reviewable.
 pub(crate) fn render_export_doc(name: &str, view: &ChannelConfigView) -> Result<String, String> {
-    let mut block = serde_yml::Mapping::new();
+    let mut block = serde_yaml_ng::Mapping::new();
     block.insert(Yaml::from("name"), Yaml::from(name));
     block.insert(Yaml::from("revision"), Yaml::from(view.revision + 1));
     for (knob, field) in config_rows(view) {
         if field.source == "channel" {
-            let y = serde_yml::to_value(&field.value)
+            let y = serde_yaml_ng::to_value(&field.value)
                 .map_err(|e| format!("knob '{knob}': cannot encode value as YAML: {e}"))?;
             block.insert(Yaml::from(knob), y);
         }
     }
-    let mut doc = serde_yml::Mapping::new();
+    let mut doc = serde_yaml_ng::Mapping::new();
     doc.insert(
         Yaml::from("channels"),
         Yaml::Sequence(vec![Yaml::Mapping(block)]),
     );
-    serde_yml::to_string(&Yaml::Mapping(doc)).map_err(|e| format!("cannot serialize YAML: {e}"))
+    serde_yaml_ng::to_string(&Yaml::Mapping(doc)).map_err(|e| format!("cannot serialize YAML: {e}"))
 }
 
 /// Per-knob outcome of a `diff`: how the declared YAML value relates to the
