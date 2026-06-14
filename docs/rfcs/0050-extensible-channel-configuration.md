@@ -3,7 +3,7 @@ id: RFC-0050
 title: "Extensible Channel Configuration (Operator-Editable, Single Source of Truth)"
 summary: "Make per-channel governance config operator-editable from CLI and web console without restart, with the channel store as the single source of truth and a revision-gated YAML loader so config-as-code and live edits coexist (higher per-channel revision wins)"
 type: architecture
-status: proposed
+status: accepted
 author: Maksim Khomutov
 created: 2026-06-14
 target: "v0.3.x (unscheduled)"
@@ -15,13 +15,28 @@ depends_on:
 # RFC 0050 — Extensible Channel Configuration (Operator-Editable, Single Source of Truth)
 
 **Type**: architecture  
-**Status**: 📋 Proposed  
+**Status**: ✅ Accepted — **Phase 1 delivered** (see [Phased Implementation Plan](#phased-implementation-plan))  
 **Author**: Maksim Khomutov  
 **Date**: 2026-06-14  
 **Target**: v0.3.x (unscheduled)  
 **Depends on**: RFC 0030 (multi-agent conversation governance), RFC 0048 (operator/tester web console)
 
 ---
+
+## Progress
+
+- **Phase 1 — code-complete** (2026-06-14). All 5 PRs of the
+  [Phase 1 PR plan](0050-phase1-pr-plan.md) merged: storage + migration v7→v8
+  (#640), apply path + boot repoint (#641), revision-gated YAML reconciliation +
+  drift detection (#642), REST `PATCH/GET …/config` + `config_edit_enabled`
+  toggle (#643), CLI `channel config get/set/unset` (#645) and
+  `export/import/diff` (#646). Six of the seven governance knobs are
+  runtime-editable; **interaction budget is store-persisted but not yet
+  router-wired** (Open item 4 — live application deferred). Live G1 acceptance:
+  [MT-CHANNEL-CONFIG-001](../manual-tests/MT-CHANNEL-CONFIG-001.md) *(pending
+  first run)*.
+- **Phase 2 (web settings panel)** — not started.
+- **Phase 3 (schema-driven generic config / profiles)** — future RFC.
 
 ## Table of Contents
 
@@ -263,10 +278,16 @@ stamps them). No flag-day, no rewrite of the committed config required.
 
 ## Phased Implementation Plan
 
-### Phase 1: Single apply path + per-channel revision + CLI get/set
+### Phase 1: Single apply path + per-channel revision + CLI get/set — ✅ delivered
 
 **Summary.** Establish the canonical apply path and make existing knobs
-editable from the CLI. No web work yet.
+editable from the CLI. No web work yet. **Delivered** across the 5 PRs of the
+[Phase 1 PR plan](0050-phase1-pr-plan.md) (#640–#646); see
+[Progress](#progress). One refinement the plan added during implementation: the
+per-channel `revision` column alone was insufficient because the governance
+knobs were not persisted in the store at all — so Phase 1 also persists the
+sparse overrides themselves (a single `config_overrides_json` column), changing
+the boot flow from *YAML → router* to *YAML →(revision-gated)→ store → router*.
 
 Deliverables:
 1. Per-channel `revision` column in the channel store; bumped on every apply.
@@ -320,18 +341,25 @@ both.
   equal-revision content mismatch.
 - **E2E / smoke**: CLI `config set` changes live channel behavior (e.g. flip
   `floor_control`, observe dispatch change) without restart.
-- **Manual tests**: an `MT-CHANNEL-CONFIG-*` arc — live-edit a governance knob
-  mid-interaction and confirm the running channel honors it.
+- **Manual tests**:
+  [MT-CHANNEL-CONFIG-001](../manual-tests/MT-CHANNEL-CONFIG-001.md) — live-edit a
+  router-held governance knob (`interaction_idle_timeout_seconds`) from the CLI,
+  confirm the running channel honors it without restart, and confirm it survives
+  one (G1). *(Authored 2026-06-14; pending first live run.)*
 
 ## Open Questions
 
-1. **Authorization.** Who may call `PATCH …/config`? Reuse
-   `governance.exempt_principals`, a dedicated operator role, or leave
-   unguarded behind the existing console auth (RFC 0039 / 0048)?
-2. **Config-change lineage.** Should each mutation mint or reference a
-   governance interaction id (ISSUE-0102 pattern) for a first-class audit trail
-   and `config rollback`, or is the revision counter + `config diff` enough for
-   v1?
+1. **Authorization.** ✅ **Resolved for Phase 1** — gate the config-edit surface
+   behind a feature toggle (`config_edit_enabled` on `channel_timeline` in
+   `config/ui.yaml`, default off), mirroring the web-console `create_enabled`
+   mechanism; it gates CLI and web uniformly. No dedicated operator role in
+   Phase 1. (A non-UI toggle home, and a per-principal gate, remain revisitable —
+   PR plan Open item 1.)
+2. **Config-change lineage.** ✅ **Reserved (dormant) in Phase 1** — the nullable
+   `config_change_lineage` column ships in the v7→v8 migration but is not
+   populated; activating it (minting/referencing a governance interaction id per
+   the ISSUE-0102 pattern) is a later additive change needing no migration. The
+   revision counter + `config diff` carry v1.
 3. **Profiles (G6).** Deferred — separate RFC. Does the Phase 1 store schema
    need a `profile_ref` seam reserved now to avoid a later migration?
 4. **Schema-driven generic config (G2).** When (and whether) to collapse the
