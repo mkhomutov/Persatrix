@@ -1334,9 +1334,15 @@ func (x *ClosedInteractionsRequest) GetMinTurns() int32 {
 }
 
 type ClosedInteraction struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	InteractionId string                 `protobuf:"bytes,1,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
-	Scope         string                 `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The persona's own RFC 0020 memory-episode id (minted agent-side on the
+	// persona's idle clock) — NOT the orchestrator's RFC 0030 governance
+	// interaction id stamped on channel messages and the end-vote close logs.
+	// The two segment on independent clocks, so one governance interaction can
+	// map to several of these episode ids; use `governance_interaction_id`
+	// below to cross-reference the channel-side id (ISSUE-0102).
+	InteractionId string `protobuf:"bytes,1,opt,name=interaction_id,json=interactionId,proto3" json:"interaction_id,omitempty"`
+	Scope         string `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`
 	// Unix epoch seconds (REAL in the episodes table). For a closed
 	// interaction `closed_at` is always populated.
 	StartedAt float64 `protobuf:"fixed64,3,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
@@ -1356,9 +1362,19 @@ type ClosedInteraction struct {
 	// context (multi-turn: each turn's `sender`; single-turn: the event
 	// `sender`); empty for a legacy row that predates turn capture. The
 	// owning agent is not included — these are the *other* parties.
-	Participants  []string `protobuf:"bytes,8,rep,name=participants,proto3" json:"participants,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Participants []string `protobuf:"bytes,8,rep,name=participants,proto3" json:"participants,omitempty"`
+	// The orchestrator-minted RFC 0030 governance interaction id this episode
+	// was opened under (the channel conversation's wire id, carried inbound on
+	// ChannelMessageEvent.interaction_id and stamped onto the local interaction
+	// by episode routing). This is the id the end-vote close logs and channel
+	// messages carry — exposing it alongside the agent-side `interaction_id`
+	// makes the channel-side id directly cross-referenceable (ISSUE-0102).
+	// Empty when the interaction carried no governance id (DM / thread / non-
+	// channel scope, an old orchestrator, or a legacy row persisted before this
+	// field existed).
+	GovernanceInteractionId string `protobuf:"bytes,9,opt,name=governance_interaction_id,json=governanceInteractionId,proto3" json:"governance_interaction_id,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *ClosedInteraction) Reset() {
@@ -1445,6 +1461,13 @@ func (x *ClosedInteraction) GetParticipants() []string {
 		return x.Participants
 	}
 	return nil
+}
+
+func (x *ClosedInteraction) GetGovernanceInteractionId() string {
+	if x != nil {
+		return x.GovernanceInteractionId
+	}
+	return ""
 }
 
 type ClosedInteractionsResponse struct {
@@ -1586,7 +1609,7 @@ const file_task_proto_rawDesc = "" +
 	"\x05scope\x18\x02 \x01(\tR\x05scope\x12%\n" +
 	"\x0einteraction_id\x18\x03 \x01(\tR\rinteractionId\x12\x14\n" +
 	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x1b\n" +
-	"\tmin_turns\x18\x05 \x01(\x05R\bminTurns\"\x8c\x02\n" +
+	"\tmin_turns\x18\x05 \x01(\x05R\bminTurns\"\xc8\x02\n" +
 	"\x11ClosedInteraction\x12%\n" +
 	"\x0einteraction_id\x18\x01 \x01(\tR\rinteractionId\x12\x14\n" +
 	"\x05scope\x18\x02 \x01(\tR\x05scope\x12\x1d\n" +
@@ -1597,7 +1620,8 @@ const file_task_proto_rawDesc = "" +
 	"turn_count\x18\x05 \x01(\x05R\tturnCount\x12!\n" +
 	"\fclose_reason\x18\x06 \x01(\tR\vcloseReason\x12\x18\n" +
 	"\asummary\x18\a \x01(\tR\asummary\x12\"\n" +
-	"\fparticipants\x18\b \x03(\tR\fparticipants\"a\n" +
+	"\fparticipants\x18\b \x03(\tR\fparticipants\x12:\n" +
+	"\x19governance_interaction_id\x18\t \x01(\tR\x17governanceInteractionId\"a\n" +
 	"\x1aClosedInteractionsResponse\x12C\n" +
 	"\finteractions\x18\x01 \x03(\v2\x1f.persatrix.v1.ClosedInteractionR\finteractions*^\n" +
 	"\n" +

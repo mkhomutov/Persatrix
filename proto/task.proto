@@ -437,6 +437,12 @@ message ClosedInteractionsRequest {
 }
 
 message ClosedInteraction {
+  // The persona's own RFC 0020 memory-episode id (minted agent-side on the
+  // persona's idle clock) — NOT the orchestrator's RFC 0030 governance
+  // interaction id stamped on channel messages and the end-vote close logs.
+  // The two segment on independent clocks, so one governance interaction can
+  // map to several of these episode ids; use `governance_interaction_id`
+  // below to cross-reference the channel-side id (ISSUE-0102).
   string interaction_id = 1;
   string scope = 2;
   // Unix epoch seconds (REAL in the episodes table). For a closed
@@ -459,6 +465,16 @@ message ClosedInteraction {
   // `sender`); empty for a legacy row that predates turn capture. The
   // owning agent is not included — these are the *other* parties.
   repeated string participants = 8;
+  // The orchestrator-minted RFC 0030 governance interaction id this episode
+  // was opened under (the channel conversation's wire id, carried inbound on
+  // ChannelMessageEvent.interaction_id and stamped onto the local interaction
+  // by episode routing). This is the id the end-vote close logs and channel
+  // messages carry — exposing it alongside the agent-side `interaction_id`
+  // makes the channel-side id directly cross-referenceable (ISSUE-0102).
+  // Empty when the interaction carried no governance id (DM / thread / non-
+  // channel scope, an old orchestrator, or a legacy row persisted before this
+  // field existed).
+  string governance_interaction_id = 9;
 }
 
 message ClosedInteractionsResponse {

@@ -37,6 +37,8 @@ live in :mod:`_interaction_multi_turn_helpers`.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from agents.clock import FrozenClock
@@ -269,6 +271,28 @@ class TestWireRotationClosesLocalInteraction:
         assert fresh.is_open
         assert fresh.turn_count == 1
         assert fresh.wire_interaction_id == "wire-B"
+
+    async def test_governance_id_persisted_into_closed_episode(self):
+        # ISSUE-0102: the governance wire id the interaction was opened under
+        # round-trips into the persisted episode context (otherwise in-memory
+        # only), so the read surface can expose it alongside the agent-side
+        # interaction_id. The rotation that closes wire-A's interaction must
+        # leave a row tagged with wire-A — the channel-side id the end-vote
+        # close logs carry — not the successor wire-B.
+        agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
+        for i in range(2):
+            await agent._store_event_episode(
+                channel_event(f"topic-{i}", wire_id="wire-A"), [],
+            )
+        await agent._store_event_episode(
+            channel_event("new topic", wire_id="wire-B"), [],
+        )
+        episodes = await all_episodes(agent)
+        assert len(episodes) == 1
+        ctx = json.loads(episodes[0]["context_json"] or "{}")
+        assert ctx.get("governance_interaction_id") == "wire-A"
+        # (the empty-governance-id case for untracked / non-channel closes is
+        # pinned at the read-handler level in test_closed_interactions_read.py)
 
     async def test_first_wire_id_is_stamped_on_open(self):
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))

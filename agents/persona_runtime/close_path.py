@@ -60,6 +60,16 @@ async def persist_closed_interaction(
         "scope": interaction.scope,
         "close_reason": interaction.close_reason,
         "turn_count": interaction.turn_count,
+        # ISSUE-0102: persist the RFC 0030 governance interaction id this
+        # episode was opened under (``wire_interaction_id``, otherwise
+        # in-memory-only) so the read surface can expose it alongside the
+        # agent-side ``interaction_id``. The two segment on independent clocks,
+        # so a single governance interaction can map to several episode ids;
+        # carrying it here makes the channel-side id — the one the end-vote
+        # close logs carry — cross-referenceable. Empty for a DM / thread /
+        # non-channel interaction that never carried a governance id; omitted
+        # from the surface in that case.
+        "governance_interaction_id": interaction.wire_interaction_id,
         # ISSUE-0054 / RFC 0020 §D — strip the inbound message ``text`` the
         # multi-turn path stashes for the RFC 0026 extractor: Phase 2 reads it
         # off the in-memory interaction, so the persisted ``context_json``

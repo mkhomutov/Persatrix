@@ -40,10 +40,14 @@ async def _store_closed(
     started_at: float,
     closed_at: float,
     turn_count: int = 3,
+    governance_interaction_id: str | None = None,
 ) -> None:
+    context: dict = {"scope": scope, "close_reason": close_reason}
+    if governance_interaction_id is not None:
+        context["governance_interaction_id"] = governance_interaction_id
     await mem.store_episode(
         summary=summary,
-        context={"scope": scope, "close_reason": close_reason},
+        context=context,
         interaction_id=interaction_id,
         started_at=started_at,
         closed_at=closed_at,
@@ -208,6 +212,7 @@ async def test_handler_projects_summary_and_trigger(memory):
     await _store_closed(
         memory, interaction_id="i-1", scope="group:room-7", summary="converged",
         close_reason="cost", started_at=10.0, closed_at=20.0, turn_count=5,
+        governance_interaction_id="gov-4b332af1",
     )
     agents = {"agent-x": _fake_agent(memory)}
     ctx = MagicMock()
@@ -218,12 +223,30 @@ async def test_handler_projects_summary_and_trigger(memory):
     assert len(resp.interactions) == 1
     it = resp.interactions[0]
     assert it.interaction_id == "i-1"
+    # ISSUE-0102: the RFC 0030 governance id rides in the same context blob and
+    # is surfaced as a distinct field from the agent-side interaction_id.
+    assert it.governance_interaction_id == "gov-4b332af1"
     assert it.scope == "group:room-7"
     assert it.summary == "converged"
     assert it.close_reason == "cost"
     assert it.turn_count == 5
     assert it.started_at == 10.0
     assert it.closed_at == 20.0
+
+
+async def test_handler_governance_id_empty_for_legacy_or_non_channel_row(memory):
+    """ISSUE-0102: a row with no persisted governance id (pre-fix, or a DM /
+    thread / non-channel interaction) surfaces an empty string, not an error."""
+    await _store_closed(
+        memory, interaction_id="i-dm", scope="dm:agent-x:peer", summary="wrap-up",
+        close_reason="structural", started_at=1.0, closed_at=2.0,
+        # governance_interaction_id omitted → key absent from context.
+    )
+    agents = {"agent-x": _fake_agent(memory)}
+    resp = await handle_get_closed_interactions(
+        agents, task_pb2.ClosedInteractionsRequest(agent_id="agent-x"), MagicMock(),
+    )
+    assert resp.interactions[0].governance_interaction_id == ""
 
 
 async def test_handler_projects_participants_from_multi_turn_context(memory):

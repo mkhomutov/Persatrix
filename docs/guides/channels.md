@@ -494,6 +494,23 @@ unchanged — this is a read surface, not a new synthesis step.
   is **per-agent** (each participating persona persists its own row), so the web
   surface merges across the channel's participants and shows one affordance.
 
+> **Two interaction-id namespaces (ISSUE-0102).** The `interaction_id` on a
+> closed-interaction row is the persona's **agent-side** RFC 0020 memory-episode
+> id, minted on the persona's own idle clock. It is **not** the orchestrator's
+> RFC 0030 **governance** interaction id — the one stamped on channel messages,
+> printed in the escalation/close logs, and used for the end-vote quorum. The two
+> producers segment on independent clocks, so a single governance interaction can
+> map to **several** agent-side episode ids (e.g. an agent-side idle boundary
+> splitting one governance arc into two episodes). To keep the channel-side id
+> cross-referenceable, each row also carries `governance_interaction_id` (shown
+> on the CLI's dimmed `governance:` line when present); it is empty for a DM /
+> thread / non-channel interaction that never carried a governance id. Note the
+> `--interaction-id` filter currently matches the **agent-side** id only — so
+> taking the end-vote-closed id straight from the logs and passing it to
+> `--interaction-id` can return nothing even though the summary exists; read the
+> `governance_interaction_id` field off an unfiltered list (or `--json`) to
+> correlate until the filter accepts both id spaces.
+
 **When the row appears.** The orchestrator's close (quorum / idle rotation) and
 the per-agent row are produced by different processes, and the closing publish's
 fanout is deliberately suppressed — so the channel-side close reaches each

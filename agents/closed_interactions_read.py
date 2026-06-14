@@ -127,6 +127,15 @@ async def handle_get_closed_interactions(
                 ),
                 summary=ep.summary,
                 participants=_participants_from_context(ep.context),
+                # ISSUE-0102: the RFC 0030 governance interaction id rides in
+                # the same persisted context blob as ``close_reason`` (no
+                # dedicated column); empty for a pre-ISSUE-0102 row or an
+                # interaction that carried no governance id.
+                governance_interaction_id=(
+                    str(ep.context.get("governance_interaction_id", ""))
+                    if isinstance(ep.context, dict)
+                    else ""
+                ),
             )
             for ep in episodes
         ],

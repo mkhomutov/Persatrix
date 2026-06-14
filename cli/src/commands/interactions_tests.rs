@@ -9,6 +9,7 @@ use super::*;
 fn interaction(reason: &str, summary: &str) -> ClosedInteraction {
     ClosedInteraction {
         interaction_id: "int-100".to_string(),
+        governance_interaction_id: "gov-4b332af1".to_string(),
         scope: "group:planning".to_string(),
         started_at: 1000.0,
         closed_at: 1200.0,
@@ -100,6 +101,28 @@ fn format_renders_summary_trigger_and_participants() {
     assert!(out.contains("Shipped the plan."));
     assert!(out.contains("iron-fox, stone-owl"));
     assert!(out.contains("group:planning"));
+}
+
+#[test]
+fn format_surfaces_governance_id_distinctly() {
+    // ISSUE-0102: the agent-side episode id (header) and the RFC 0030
+    // governance id are different namespaces; the surface shows both, the
+    // governance id on its own labelled line, so the channel-side id is
+    // cross-referenceable.
+    let out = format_interaction(&interaction("structural", "Shipped the plan."));
+    assert!(out.contains("int-100")); // header: agent-side episode id
+    assert!(out.contains("governance:"));
+    assert!(out.contains("gov-4b332af1"));
+}
+
+#[test]
+fn format_omits_governance_line_when_absent() {
+    // A DM / thread / non-channel interaction (or an older server) carries no
+    // governance id — omit the line rather than print an empty "governance:".
+    let mut it = interaction("structural", "DM wrap-up.");
+    it.governance_interaction_id = String::new();
+    let out = format_interaction(&it);
+    assert!(!out.contains("governance:"));
 }
 
 #[test]
@@ -216,6 +239,8 @@ fn deserializes_envelope_and_tolerates_missing_fields() {
     assert_eq!(it.turn_count, 2);
     assert!(it.participants.is_empty());
     assert_eq!(it.scope, "");
+    // An older server omits governance_interaction_id → serde default "".
+    assert_eq!(it.governance_interaction_id, "");
 }
 
 #[test]

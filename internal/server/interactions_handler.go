@@ -28,14 +28,20 @@ func WithInteractionReader(ir executor.InteractionReader) ServerOption {
 }
 
 type closedInteractionDTO struct {
-	InteractionID string   `json:"interaction_id"`
-	Scope         string   `json:"scope"`
-	StartedAt     float64  `json:"started_at"`
-	ClosedAt      float64  `json:"closed_at"`
-	TurnCount     int32    `json:"turn_count"`
-	CloseReason   string   `json:"close_reason"`
-	Summary       string   `json:"summary"`
-	Participants  []string `json:"participants"`
+	InteractionID string `json:"interaction_id"`
+	// GovernanceInteractionID is the RFC 0030 governance interaction id the
+	// episode was opened under — a different namespace from InteractionID
+	// (the persona's agent-side RFC 0020 episode id). Exposed so the channel-
+	// side id carried in the end-vote close logs is cross-referenceable
+	// (ISSUE-0102); empty when the interaction carried no governance id.
+	GovernanceInteractionID string   `json:"governance_interaction_id"`
+	Scope                   string   `json:"scope"`
+	StartedAt               float64  `json:"started_at"`
+	ClosedAt                float64  `json:"closed_at"`
+	TurnCount               int32    `json:"turn_count"`
+	CloseReason             string   `json:"close_reason"`
+	Summary                 string   `json:"summary"`
+	Participants            []string `json:"participants"`
 }
 
 type closedInteractionsResponse struct {
@@ -136,14 +142,15 @@ func (s *Server) handleGetClosedInteractions(w http.ResponseWriter, r *http.Requ
 			participants = []string{}
 		}
 		out.Interactions = append(out.Interactions, closedInteractionDTO{
-			InteractionID: it.GetInteractionId(),
-			Scope:         it.GetScope(),
-			StartedAt:     it.GetStartedAt(),
-			ClosedAt:      it.GetClosedAt(),
-			TurnCount:     it.GetTurnCount(),
-			CloseReason:   it.GetCloseReason(),
-			Summary:       it.GetSummary(),
-			Participants:  participants,
+			InteractionID:           it.GetInteractionId(),
+			GovernanceInteractionID: it.GetGovernanceInteractionId(),
+			Scope:                   it.GetScope(),
+			StartedAt:               it.GetStartedAt(),
+			ClosedAt:                it.GetClosedAt(),
+			TurnCount:               it.GetTurnCount(),
+			CloseReason:             it.GetCloseReason(),
+			Summary:                 it.GetSummary(),
+			Participants:            participants,
 		})
 	}
 	writeJSON(w, out, http.StatusOK)

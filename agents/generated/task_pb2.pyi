@@ -786,7 +786,15 @@ class ClosedInteraction(google.protobuf.message.Message):
     CLOSE_REASON_FIELD_NUMBER: builtins.int
     SUMMARY_FIELD_NUMBER: builtins.int
     PARTICIPANTS_FIELD_NUMBER: builtins.int
+    GOVERNANCE_INTERACTION_ID_FIELD_NUMBER: builtins.int
     interaction_id: builtins.str
+    """The persona's own RFC 0020 memory-episode id (minted agent-side on the
+    persona's idle clock) — NOT the orchestrator's RFC 0030 governance
+    interaction id stamped on channel messages and the end-vote close logs.
+    The two segment on independent clocks, so one governance interaction can
+    map to several of these episode ids; use `governance_interaction_id`
+    below to cross-reference the channel-side id (ISSUE-0102).
+    """
     scope: builtins.str
     started_at: builtins.float
     """Unix epoch seconds (REAL in the episodes table). For a closed
@@ -804,6 +812,17 @@ class ClosedInteraction(google.protobuf.message.Message):
     """The persisted per-interaction summary. The
     "[interaction summary unavailable]" sentinel is surfaced verbatim so
     a failed summary is shown honestly (never blanked or fabricated).
+    """
+    governance_interaction_id: builtins.str
+    """The orchestrator-minted RFC 0030 governance interaction id this episode
+    was opened under (the channel conversation's wire id, carried inbound on
+    ChannelMessageEvent.interaction_id and stamped onto the local interaction
+    by episode routing). This is the id the end-vote close logs and channel
+    messages carry — exposing it alongside the agent-side `interaction_id`
+    makes the channel-side id directly cross-referenceable (ISSUE-0102).
+    Empty when the interaction carried no governance id (DM / thread / non-
+    channel scope, an old orchestrator, or a legacy row persisted before this
+    field existed).
     """
     @property
     def participants(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]:
@@ -825,8 +844,9 @@ class ClosedInteraction(google.protobuf.message.Message):
         close_reason: builtins.str = ...,
         summary: builtins.str = ...,
         participants: collections.abc.Iterable[builtins.str] | None = ...,
+        governance_interaction_id: builtins.str = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["close_reason", b"close_reason", "closed_at", b"closed_at", "interaction_id", b"interaction_id", "participants", b"participants", "scope", b"scope", "started_at", b"started_at", "summary", b"summary", "turn_count", b"turn_count"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["close_reason", b"close_reason", "closed_at", b"closed_at", "governance_interaction_id", b"governance_interaction_id", "interaction_id", b"interaction_id", "participants", b"participants", "scope", b"scope", "started_at", b"started_at", "summary", b"summary", "turn_count", b"turn_count"]) -> None: ...
 
 global___ClosedInteraction = ClosedInteraction
 
