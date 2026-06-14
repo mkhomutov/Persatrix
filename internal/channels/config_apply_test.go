@@ -246,6 +246,73 @@ func TestApplyChannelConfig_EscalationChairRequiresFloorControl(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidEscalationChair)
 }
 
+// TestApplyChannelConfig_LoneFloorControlFalseDoesNotSeeYAMLSeededChair pins the
+// limit of the cross-field rule above, and is the ground-truth reference for
+// MT-CHANNEL-CONFIG-001's Edge Case 2: the "chair requires floor control" check
+// validates the MERGED override set (store overrides + the sparse patch), NOT
+// the router's effective state. A chair seeded only from YAML — router-held via
+// ResolveEscalationChairs, never written to the store, which is the default
+// `planning` channel's situation at revision 0 — is therefore invisible to it.
+// So a lone `floor_control:false` patch (no chair in the override blob) is NOT
+// rejected on such a channel; it commits, and the store-canonical re-stamp then
+// DROPS the YAML-seeded chair (the same "absent knob → inherit" mechanic as
+// TestApplyChannelConfig_AbsentKnobsResolveToDefaults). The rejection fires only
+// when the chair rides the SAME patch (the test above). MT-CHANNEL-CONFIG-001
+// therefore must not claim floor_control:false on `planning` is rejected at
+// apply.
+func TestApplyChannelConfig_LoneFloorControlFalseDoesNotSeeYAMLSeededChair(t *testing.T) {
+	router, store, ctx := newApplyRouter(t)
+	mustCreateGroup(t, store, "planning", "nova-sparrow", "iron-fox")
+
+	// Seed the chair the way the YAML boot path does (ResolveEscalationChairs →
+	// SetEscalationChair): router-held only, never persisted as a store override.
+	router.SetEscalationChair("group:planning", "nova-sparrow")
+	require.Equal(t, "nova-sparrow", router.escalationChairFor("group:planning"),
+		"precondition: the chair is live on the router but absent from the store")
+
+	// A lone floor_control:false patch — the override blob carries no chair, so
+	// the merged set the cross-field rule validates has nothing to conflict with.
+	off := false
+	err := router.ApplyChannelConfig(ctx, "group:planning",
+		ChannelConfigOverrides{FloorControl: &off}, 0, "")
+	require.NoError(t, err,
+		"lone floor_control:false is accepted: the cross-field rule never sees the YAML-seeded chair")
+
+	// The edit committed (revision bumped) AND the store-canonical re-stamp
+	// silently detached the chair — the footgun the MT must document, not the
+	// rejection it originally claimed.
+	_, revision, err := store.GetChannelConfig(ctx, "group:planning")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), revision, "the edit committed — no rejection occurred")
+	assert.Equal(t, "", router.escalationChairFor("group:planning"),
+		"first edit detaches the YAML-seeded chair (absent knob → inherit), with no validation warning")
+}
+
+// TestApplyChannelConfig_FirstEditDetachesYAMLSeededChair generalises the above
+// to the knob MT-CHANNEL-CONFIG-001's *happy path* edits: it is not specific to
+// floor_control. ANY first edit re-stamps all six router-held knobs from the
+// merged override set, so editing only `interaction_idle_timeout_seconds` on a
+// channel whose chair was YAML-seeded silently detaches that chair too. The MT's
+// Step 2 must therefore note that the `set …=60` edit also drops `planning`'s
+// `nova-sparrow` chair — not just that the idle timeout changes.
+func TestApplyChannelConfig_FirstEditDetachesYAMLSeededChair(t *testing.T) {
+	router, store, ctx := newApplyRouter(t)
+	mustCreateGroup(t, store, "planning", "nova-sparrow")
+	router.SetEscalationChair("group:planning", "nova-sparrow")
+
+	idle := 60
+	require.NoError(t, router.ApplyChannelConfig(ctx, "group:planning",
+		ChannelConfigOverrides{InteractionIdleTimeoutSeconds: &idle}, 0, ""))
+
+	assert.Equal(t, 60*time.Second, idleWindowFor(router, "group:planning"),
+		"the edited knob took effect")
+	assert.Equal(t, "", router.escalationChairFor("group:planning"),
+		"the un-edited, YAML-only chair was detached by the same first edit")
+	_, revision, err := store.GetChannelConfig(ctx, "group:planning")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), revision)
+}
+
 // TestResolveFromStore_RestartPreservesApply is RFC 0050 goal G1: an apply
 // survives a process restart. A second router built over the same store, seeded
 // via ResolveFromStore at boot, reflects the prior apply.

@@ -40,14 +40,28 @@ deliberately:
   demonstrates the operator ergonomics win, not just the contract.
 
 **Why not `floor_control`** (the knob the RFC/PR plan name in their E2E
-sketch): on the default `planning` channel `floor_control: false` is **rejected
-at apply** by the cross-field rule — `escalation_chair_id: nova-sparrow` ships
-on `planning` and requires floor control on
-([`config/channels.yaml`](../../config/channels.yaml) line ~149,
-[`config_apply.go`](../../internal/channels/config_apply.go) validation). A
-live `floor_control` flip therefore needs a chair-less channel — covered as
-[Edge Case 2](#edge-case-2-flip-floor_control-on-a-chair-less-channel) rather
+sketch): it is the wrong knob for a single-channel happy path on `planning`, for
+a subtler reason than the RFC sketch assumes. `planning` carries
+`escalation_chair_id: nova-sparrow`
+([`config/channels.yaml`](../../config/channels.yaml) ~line 152), and a chair
+requires floor control on. But that cross-field rule is enforced against the
+**merged override set** (the channel's *stored* overrides + the patch), **not**
+the running channel's effective state — and on a freshly seeded `planning` the
+chair is **YAML-seeded / router-held, never a store override** (revision 0 ⇒ the
+reconcile leaves the store to config-as-code). So a lone
+`channel config set planning floor_control=false` is **not** rejected: the rule
+sees no chair in the merged blob, the apply commits, and — because the override
+blob omits the chair — the store-canonical re-stamp **silently detaches** the
+YAML chair (absent knob → inherit; see
+[`config_apply.go`](../../internal/channels/config_apply.go) `applyOverridesToRouter`,
+pinned by `TestApplyChannelConfig_LoneFloorControlFalseDoesNotSeeYAMLSeededChair`).
+That makes `floor_control` both undemonstrative (no clean rejection to show) and
+quietly destructive on `planning`. A *legitimate* cross-field rejection needs the
+chair to ride the same patch — covered as
+[Edge Case 2](#edge-case-2-flip-floor_control-and-the-yaml-chair-limit) rather
 than the main arc, so the happy path stays single-channel and dependency-free.
+(Idle timeout sidesteps all of this — but note it triggers the *same* chair
+detachment on its first edit; see [Step 2](#step-2-live-edit-the-knob--no-yaml-no-restart).)
 
 **Scope**: the default `planning` group channel; the toggle-gated
 `channel config get`/`set` CLI verbs against a running orchestrator; the
@@ -73,7 +87,7 @@ router-wired, so it must **not** be the live-flip knob); the web settings panel
 
 **Related Automated Tests**:
 - [`channel_config_store_test.go`](../../internal/channels/channel_config_store_test.go) — round-trip persistence, revision monotonicity, stale-revision conflict (PR 1)
-- [`config_apply_test.go`](../../internal/channels/config_apply_test.go) — apply persists + reflected by router getters; invalid patch rejected pre-write; restart simulation (PR 2)
+- [`config_apply_test.go`](../../internal/channels/config_apply_test.go) — apply persists + reflected by router getters; invalid patch rejected pre-write; restart simulation; the cross-field chair/floor-control rule and **its limit** (`TestApplyChannelConfig_LoneFloorControlFalseDoesNotSeeYAMLSeededChair`, `TestApplyChannelConfig_FirstEditDetachesYAMLSeededChair` — a YAML-seeded chair is not in the merged blob, so a lone `floor_control`/idle edit is accepted and detaches it) (PR 2)
 - [`config_reconcile_test.go`](../../internal/channels/config_reconcile_test.go) — revision-gating decision table + drift detection (PR 3)
 - [`channel_config_handlers_test.go`](../../internal/server/channel_config_handlers_test.go) — `PATCH/GET …/config` happy path, stale-revision 409, toggle-off 403 (PR 4)
 - [`channel_config_tests.rs`](../../cli/src/commands/channel_config_tests.rs) — CLI set→get round-trip, conflict surfacing (PR 5)
@@ -152,9 +166,21 @@ post-apply state from the response (no second round-trip).
   (the value came back from the store round-trip, not just the writer's local
   echo).
 
+> **⚠️ Side effect — this first edit also detaches `planning`'s escalation
+> chair.** The apply re-stamps **all six** router-held knobs from the merged
+> override blob, and that blob carries only the knob you set. `planning`'s
+> `escalation_chair_id: nova-sparrow` is YAML-seeded (never a store override), so
+> it is *not* in the blob and the re-stamp drops it back to "inherit" (no chair).
+> The second `get` will show `escalation_chair_id` unset where Step 1 showed
+> `nova-sparrow`. This is the store-canonical model working as designed (RFC 0050
+> — a channel goes store-canonical on its first edit); it is **not** specific to
+> idle timeout. Pinned by `TestApplyChannelConfig_FirstEditDetachesYAMLSeededChair`.
+> `make reset` restores the seed after the run.
+
 **Verification**:
 - [ ] `set` returns the bumped revision (1) with `interaction_idle_timeout_seconds=60`, source `channel`.
 - [ ] An independent `get` reflects the same value — the change is persisted, not in-memory-only.
+- [ ] The same `get` shows `escalation_chair_id` now unset (the documented first-edit side effect), confirming the store-canonical re-stamp.
 
 ### Step 3: The running channel honors the new value — drive a stall and time the rotation
 
@@ -203,11 +229,15 @@ ENABLE_UI=1 docker compose -f docker-compose.yaml -f docker-compose.anthropic.ya
 
 **Expected**:
 - `interaction_idle_timeout_seconds` is still **60**, source **`channel`**,
-  `revision` still **1**. The boot reconcile (`ResolveFromStore` →
-  revision-gated YAML reconcile) seeds the router from the **store** override;
-  the YAML block carries an absent revision (= 0), which is **not** strictly
-  greater than the store's 1, so the 600 s seed does **not** overwrite the live
-  edit. G1 holds: the change survived restart.
+  `revision` still **1**. Two boot mechanisms combine: (1) the per-knob YAML
+  `Resolve*` calls seed the router with the 600 s default, then `ResolveFromStore`
+  **overlays** `planning` (now at revision > 0, so store-canonical) and re-stamps
+  it to 60; and (2) the revision-gated `ReconcileFromYAML` leaves the store
+  untouched because the YAML block's absent revision (= 0) is **not** strictly
+  greater than the store's 1 (higher revision wins) — so the 600 s seed never
+  overwrites the live edit in either direction. G1 holds: the change survived
+  restart. (The first-edit chair detachment from Step 2 also persists — `get`
+  still shows `escalation_chair_id` unset.)
 
 **Verification**:
 - [ ] After restart `get` still shows 60 / `channel` / revision 1 — the store won over the YAML seed under the revision gate.
@@ -258,23 +288,48 @@ value/revision). This is the uniform gate that covers CLI and web identically
 (PR 4 / PR plan Open item 1). Pinned deterministically by
 `channel_config_handlers_test.go` (toggle-off → 403).
 
-### Edge Case 2: Flip `floor_control` on a chair-less channel
+### Edge Case 2: Flip `floor_control` and the YAML-chair limit
 
 `floor_control` is the most visceral behavioral knob (turn-by-turn dispatch vs
-open floor) but cannot be set `false` on `planning` (its `escalation_chair_id`
-requires floor control — the cross-field rule rejects it at apply, surfacing a
-clean validation error, **not** a silent no-op). To exercise a live
-`floor_control` flip, create a chair-less group channel first:
+open floor). The cross-field rule "a chair requires floor control on" guards the
+**merged override set**, not the channel's effective state — so its behavior
+depends on whether the chair is in the patch/store, not on whether the channel
+*appears* to have a chair. Three cases confirm where it does and does not fire:
 
-```bash
-./bin/persatrix channel create scratch --type group   # no escalation_chair_id
-./bin/persatrix channel config set scratch floor_control=false
-```
+1. **Open-floor flip on a chair-less channel succeeds.** Create one and flip it:
 
-**Expected**: the apply succeeds (no chair to conflict), the router's dispatch
-for `scratch` switches to open-floor on the next round, and a `floor_control=false`
-attempt on `planning` instead returns a validation error naming the
-chair/floor-control conflict.
+   ```bash
+   ./bin/persatrix channel create scratch --type group   # no escalation_chair_id
+   ./bin/persatrix channel config set scratch floor_control=false
+   ```
+
+   The apply succeeds (no chair to conflict) and `scratch`'s dispatch switches to
+   open-floor on the next round.
+
+2. **A chair set *alongside* `floor_control=false` is rejected.** The chair is in
+   the merged blob, so the rule fires:
+
+   ```bash
+   ./bin/persatrix channel config set scratch escalation_chair_id=nova-sparrow floor_control=false
+   ```
+
+   returns a clean validation error naming the chair/floor-control conflict, and
+   nothing persists. Pinned deterministically by `config_apply_test.go`
+   (`TestApplyChannelConfig_EscalationChairRequiresFloorControl`).
+
+3. **⚠️ A lone `floor_control=false` on `planning` is *accepted* — and silently
+   detaches the chair.** This is the gotcha the RFC's E2E sketch missed:
+
+   ```bash
+   ./bin/persatrix channel config set planning floor_control=false
+   ```
+
+   does **not** error. `planning`'s `nova-sparrow` chair lives in YAML, not the
+   store, so it is invisible to the cross-field rule (which sees only the merged
+   store overrides). The edit commits and the store-canonical re-stamp drops the
+   chair — **no validation warning**. Pinned by
+   `TestApplyChannelConfig_LoneFloorControlFalseDoesNotSeeYAMLSeededChair`. Run
+   `make reset` afterward to restore the YAML-seeded chair.
 
 ### Edge Case 3: Stale-revision conflict (409)
 

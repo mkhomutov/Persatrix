@@ -26,11 +26,12 @@ depends_on:
 ## Progress
 
 - **Phase 1 — code-complete** (2026-06-14). All 5 PRs of the
-  [Phase 1 PR plan](0050-phase1-pr-plan.md) merged: storage + migration v7→v8
-  (#640), apply path + boot repoint (#641), revision-gated YAML reconciliation +
-  drift detection (#642), REST `PATCH/GET …/config` + `config_edit_enabled`
-  toggle (#643), CLI `channel config get/set/unset` (#645) and
-  `export/import/diff` (#646). Six of the seven governance knobs are
+  [Phase 1 PR plan](0050-phase1-pr-plan.md) merged across 6 GitHub PRs (plan PR 5
+  landed as two — the core verbs then the YAML follow-up): storage + migration
+  v7→v8 (#640), apply path + boot repoint (#641), revision-gated YAML
+  reconciliation + drift detection (#642), REST `PATCH/GET …/config` +
+  `config_edit_enabled` toggle (#643), CLI `channel config get/set/unset` (#645)
+  and `export/import/diff` (#646). Six of the seven governance knobs are
   runtime-editable; **interaction budget is store-persisted but not yet
   router-wired** (Open item 4 — live application deferred). Live G1 acceptance:
   [MT-CHANNEL-CONFIG-001](../manual-tests/MT-CHANNEL-CONFIG-001.md) *(pending
