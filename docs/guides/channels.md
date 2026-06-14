@@ -504,12 +504,14 @@ unchanged — this is a read surface, not a new synthesis step.
 > splitting one governance arc into two episodes). To keep the channel-side id
 > cross-referenceable, each row also carries `governance_interaction_id` (shown
 > on the CLI's dimmed `governance:` line when present); it is empty for a DM /
-> thread / non-channel interaction that never carried a governance id. Note the
-> `--interaction-id` filter currently matches the **agent-side** id only — so
-> taking the end-vote-closed id straight from the logs and passing it to
-> `--interaction-id` can return nothing even though the summary exists; read the
-> `governance_interaction_id` field off an unfiltered list (or `--json`) to
-> correlate until the filter accepts both id spaces.
+> thread / non-channel interaction that never carried a governance id. The
+> `--interaction-id` filter matches **either** id space: pass an agent-side
+> episode id to get that one interaction, or paste the end-vote-closed
+> **governance** id straight from the logs to get every episode of that arc
+> (one governance interaction can return several rows, newest-first). So the
+> natural diagnostic — take the closed id from the escalation/close log and run
+> `agent interactions <agent> --interaction-id <that-id>` — just works,
+> whichever namespace the id came from.
 
 **When the row appears.** The orchestrator's close (quorum / idle rotation) and
 the per-agent row are produced by different processes, and the closing publish's

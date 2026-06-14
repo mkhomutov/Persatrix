@@ -274,11 +274,11 @@ class TestWireRotationClosesLocalInteraction:
 
     async def test_governance_id_persisted_into_closed_episode(self):
         # ISSUE-0102: the governance wire id the interaction was opened under
-        # round-trips into the persisted episode context (otherwise in-memory
-        # only), so the read surface can expose it alongside the agent-side
-        # interaction_id. The rotation that closes wire-A's interaction must
-        # leave a row tagged with wire-A — the channel-side id the end-vote
-        # close logs carry — not the successor wire-B.
+        # round-trips into the persisted episode — PR 2 to the queryable
+        # ``governance_interaction_id`` column (the read filter matches that),
+        # PR 1's context copy kept as the read-side fallback. The rotation that
+        # closes wire-A's interaction must leave a row tagged with wire-A — the
+        # channel-side id the end-vote close logs carry — not successor wire-B.
         agent = await make_agent_with_clock(FrozenClock(at=1_000.0))
         for i in range(2):
             await agent._store_event_episode(
@@ -289,8 +289,9 @@ class TestWireRotationClosesLocalInteraction:
         )
         episodes = await all_episodes(agent)
         assert len(episodes) == 1
+        assert episodes[0]["governance_interaction_id"] == "wire-A"  # column
         ctx = json.loads(episodes[0]["context_json"] or "{}")
-        assert ctx.get("governance_interaction_id") == "wire-A"
+        assert ctx.get("governance_interaction_id") == "wire-A"  # fallback copy
         # (the empty-governance-id case for untracked / non-channel closes is
         # pinned at the read-handler level in test_closed_interactions_read.py)
 

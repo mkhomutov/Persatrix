@@ -213,21 +213,22 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         closed_at: float | None = None,
         turn_count: int | None = None,
         scope: str | None = None,
+        governance_interaction_id: str | None = None,
         session_id: str = "legacy",
         surface: str = "episode",
     ) -> str:
         """Store a new episode. Returns the generated episode ID.
 
         The keyword-only ``interaction_id`` / ``started_at`` / ``closed_at`` /
-        ``turn_count`` / ``scope`` fields populate the RFC 0020 §D columns
-        added in migration v5.  Pre-RFC callers omit them and the row keeps
-        ``NULL`` in those columns — recall code treats the NULLs as legacy
-        single-turn episodes per RFC 0020 §I.
+        ``turn_count`` / ``scope`` populate the RFC 0020 §D columns (v5), and
+        ``governance_interaction_id`` the RFC 0030 governance id the episode
+        opened under (ISSUE-0102 PR 2 — v15).  Pre-RFC callers omit them and the
+        row keeps ``NULL`` — recall treats those as legacy single-turn episodes
+        per RFC 0020 §I.
 
-        ``session_id`` (RFC 0031 Phase 1 — migration v7) tags the row with
-        the operator-namespace active at write time; default ``"legacy"``
-        matches ``channels.DefaultSessionID`` so pre-RFC callers produce
-        queryable rows.  Phase 1 ships no recall-side filtering.
+        ``session_id`` (RFC 0031 Phase 1 — migration v7) tags the row with the
+        operator-namespace active at write time; default ``"legacy"`` matches
+        ``channels.DefaultSessionID``.  Phase 1 ships no recall-side filtering.
 
         ``surface`` (PR 4 F2) tags ``sessions.writes`` only — not persisted.
         """
@@ -263,6 +264,7 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                     interaction_id=interaction_id, started_at=started_at,
                     closed_at=closed_at, turn_count=turn_count,
                     session_id=session_id, scope=scope,
+                    governance_interaction_id=governance_interaction_id,
                     principal_id=principal_id, epoch_id=epoch_id,
                 )
             except Exception as exc:

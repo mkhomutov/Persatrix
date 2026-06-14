@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0102
 summary: "The agent closed-interaction summary surfaces the persona's RFC 0020 episode id, which can diverge from the orchestrator's RFC 0030 governance interaction id (one governance interaction → several agent-side episode ids); the surface gives no signal the two are different namespaces, so cross-referencing an end-vote-closed id against `agent interactions` finds nothing"
-status: in_progress
+status: resolved
 severity: low
 area: agents/persona_runtime
 created: 2026-06-14
+closed: 2026-06-14
 refs:
   - docs/rfcs/0020-interaction-lifecycle.md
   - docs/rfcs/0030-interaction-id-producer-pr-plan.md
@@ -116,12 +117,20 @@ namespaces:
 - `docs/guides/channels.md` documents the two id spaces and that
   `--interaction-id <governance-id>` can currently miss.
 
-**PR 2 (remaining) — the queryable join.** Promote `wire_interaction_id` from
-the context blob to a real `episodes` column and extend the read filter to
-`AND (interaction_id = ? OR wire_interaction_id = ?)`, so the natural diagnostic
-move — paste the end-vote-closed governance id into `agent interactions
---interaction-id` — returns the episodes directly. Until then, the governance id
-is visible (PR 1) but not filterable. Closing this issue is gated on PR 2.
+**PR 2 (landed) — the queryable join.** Migration **v15** promotes the
+governance id from the PR-1 context blob to a real
+`episodes.governance_interaction_id` column (additive nullable, no PK rebuild —
+the v5/v13 skeleton) and **backfills** it from each row's `context_json`, so
+PR-1-era rows become look-up-able without a rewrite. The read filter now matches
+either namespace —
+`AND (interaction_id = ? OR governance_interaction_id = ?)` in
+[`episodic_closed.py`](../../agents/memory/episodic_closed.py) — so the natural
+diagnostic move (paste the end-vote-closed governance id into `agent
+interactions --interaction-id`) returns every episode of that arc, newest-first.
+The read handler reads the column (PR-1 context key kept as a mixed-version
+fallback); `close_path.py` writes both. The proto / DTO need no field change —
+the filter lives agent-side. **Resolved**: the governance id is now both visible
+(PR 1) and filterable (PR 2).
 
 ## Notes
 

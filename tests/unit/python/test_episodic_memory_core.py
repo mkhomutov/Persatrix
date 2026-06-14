@@ -75,8 +75,9 @@ class TestMigrations:
         # description-substring) assertion here.  The count bumped from
         # 13 → 14 alongside migration v14 (RFC 0031 amendment — F-7
         # Option D, ISSUE-0093, PR D4: backfill contact notes onto
-        # relationship identity).
-        assert len(rows) == 14
+        # relationship identity).  14 → 15 alongside migration v15
+        # (ISSUE-0102 PR 2: governance_interaction_id column on episodes).
+        assert len(rows) == 15
         assert rows[0][0] == 1
         assert "Initial schema" in rows[0][1]
         assert rows[1][0] == 2
@@ -123,6 +124,11 @@ class TestMigrations:
         # carries it).
         assert rows[13][0] == 14
         assert "backfill" in rows[13][1].lower()
+        # v15 promotes the RFC 0030 governance interaction id to a queryable
+        # episodes column — disambiguated by the ``governance`` token (no
+        # other migration carries it).
+        assert rows[14][0] == 15
+        assert "governance" in rows[14][1].lower()
 
     async def test_migrations_are_idempotent(self, memory: EpisodicMemory):
         """Re-running migrations does not error or duplicate rows."""
@@ -133,9 +139,10 @@ class TestMigrations:
         assert row is not None
         # Bumped from 13 → 14 alongside migration v14 (RFC 0031 amendment —
         # F-7 Option D, ISSUE-0093, PR D4: backfill contact notes onto
-        # relationship identity).
+        # relationship identity).  14 → 15 alongside migration v15 (ISSUE-0102
+        # PR 2: governance_interaction_id column on episodes).
         # Same row-count discipline as ``test_migration_version_recorded``.
-        assert row[0] == 14
+        assert row[0] == 15
 
     async def test_wal_mode_enabled(self):
         """WAL mode is set on file-based databases (not :memory:)."""
