@@ -26,10 +26,15 @@ dirs = "5"
 # Already pulled in transitively by reqwest; declared here so cli/src code can
 # `use futures_util::StreamExt` without depending on a transitive surface.
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# YAML for the RFC 0050 `channel config export/import/diff` verbs
+# (cli/src/commands/channel_config_yaml.rs) — read the declared
+# `config/channels.yaml` per-channel block and regenerate it from the store.
+# serde_yaml is unmaintained; serde_yml is the maintained fork.
+serde_yml = "0.0.12"
 
 # Removed in PR review: tonic (gRPC — not used, CLI uses REST via reqwest),
-# serde_yml (no YAML parsing yet), indicatif (no progress bars yet).
-# Re-add each when the corresponding feature is implemented.
+# indicatif (no progress bars yet). Re-add each when the corresponding feature
+# is implemented.
 # SSE parsing is implemented inline in cli/src/commands/logs.rs against the
 # server's narrow contract (`data: <json>\n\n` + `: heartbeat\n\n`); a full
 # eventsource crate would be overkill for the two frame shapes in use.

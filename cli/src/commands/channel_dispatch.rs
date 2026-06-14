@@ -12,7 +12,12 @@ use crate::commands::channel::{
     validate_message_id, DEFAULT_HISTORY_LIMIT, DEFAULT_WATCH_INTERVAL_SECS,
 };
 use crate::commands::channel_config::{cmd_config_get, cmd_config_set, cmd_config_unset};
+use crate::commands::channel_config_yaml::{cmd_config_diff, cmd_config_export, cmd_config_import};
 use crate::commands::channel_manage::{cmd_channel_create, cmd_channel_info};
+
+/// Default declared-config path the `diff` verb reads when `--file` is omitted —
+/// the repo's canonical channel config-as-code (RFC 0011 / RFC 0050).
+const DEFAULT_CHANNELS_YAML: &str = "config/channels.yaml";
 
 /// `--respond` value-parser. clap renders each variant in its `snake_case`
 /// form (via `rename_all`), so `--respond` is validated against that set
@@ -227,6 +232,38 @@ pub(crate) enum ConfigAction {
         #[arg(long)]
         json: bool,
     },
+    /// Regenerate a channel's YAML override block from the store, stamped
+    /// `revision: store + 1` (the export-first foot-gun mitigation, RFC 0050).
+    /// Emits only the explicitly-overridden knobs — inherited knobs are not
+    /// frozen. Writes to `--out` if given, else stdout.
+    Export {
+        /// Channel name (`planning`) or fully-qualified id (`group:planning`)
+        name: String,
+        /// Write the YAML to this file instead of stdout
+        #[arg(long)]
+        out: Option<String>,
+    },
+    /// Apply each declared channel block in a YAML file through the
+    /// optimistic-concurrency PATCH path (the live CLI writer — If-Match
+    /// guarded, not the revision-gated boot loader). Validates the whole file
+    /// before the first write.
+    Import {
+        /// Path to a YAML file (the `config/channels.yaml` shape)
+        file: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Compare a channel's declared YAML block against its effective store
+    /// config and surface per-knob drift plus a revision comparison.
+    Diff {
+        /// Channel name (`planning`) or fully-qualified id (`group:planning`)
+        name: String,
+        /// Declared-config file to compare against (default: config/channels.yaml)
+        #[arg(long)]
+        file: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 pub(crate) async fn dispatch(
@@ -339,6 +376,16 @@ pub(crate) async fn dispatch(
             } => cmd_config_set(client, server, &name, &assignments, json).await,
             ConfigAction::Unset { name, keys, json } => {
                 cmd_config_unset(client, server, &name, &keys, json).await
+            }
+            ConfigAction::Export { name, out } => {
+                cmd_config_export(client, server, &name, out.as_deref()).await
+            }
+            ConfigAction::Import { file, json } => {
+                cmd_config_import(client, server, &file, json).await
+            }
+            ConfigAction::Diff { name, file, json } => {
+                let file = file.as_deref().unwrap_or(DEFAULT_CHANNELS_YAML);
+                cmd_config_diff(client, server, &name, file, json).await
             }
         },
     }

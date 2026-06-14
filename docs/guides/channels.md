@@ -483,6 +483,23 @@ persatrix channel config set planning floor_control=true end_vote_window=4
 
 # Clear one or more knobs back to inherit.
 persatrix channel config unset planning floor_control
+
+# Regenerate a channel's YAML override block from the store, stamped
+# `revision: store + 1` — emits ONLY the explicitly-overridden knobs (inherited
+# knobs are not frozen). To stdout, or to a file with `--out`.
+persatrix channel config export planning
+persatrix channel config export planning --out planning.patch.yaml
+
+# Apply each declared channel block in a YAML file (the config/channels.yaml
+# shape) through the same optimistic-concurrency PATCH path. The whole file is
+# parsed and validated before the first write, so a typo aborts before any
+# channel is touched.
+persatrix channel config import planning.patch.yaml
+
+# Compare a channel's declared YAML block against its effective store config and
+# surface per-knob drift plus a revision comparison (default file:
+# config/channels.yaml; override with `--file`).
+persatrix channel config diff planning
 ```
 
 - **Dark by default.** The whole surface — read and write — is gated behind the
@@ -501,12 +518,39 @@ persatrix channel config unset planning floor_control
   (Open item 4) — an overridden value carries a deferral note in the `get` view,
   and an inherited one reads as `—`.
 
-> **Scope.** This is the dependency-free core (`get`/`set`/`unset`), riding purely
-> on the REST endpoints. The YAML-backed verbs (`export`/`import`/`diff`, which
-> read the declared `config/channels.yaml`) are a follow-up. As with the other
-> verbs, the authoritative flag grammar lives in the CLI source
-> ([`cli/src/commands/channel_config.rs`](../../cli/src/commands/channel_config.rs)),
-> not this guide.
+- **Export-first, revision-stamped.** `export` regenerates the YAML from the
+  store stamped `revision: store + 1`, so the hand-edit loop (export → edit →
+  commit/`import`) carries a fresh, higher revision without the operator
+  remembering to bump it (the RFC 0050 foot-gun mitigation). `import` is the
+  **live CLI writer** — it is `If-Match` guarded like `set`/`unset`, *not* the
+  revision-gated boot loader, so it does not gate on the file's `revision:`
+  (that field is what the boot loader consumes once the file is committed to
+  `config/channels.yaml`). `diff` reports `interaction_budget_tokens` as
+  `deferred` rather than drift, since its effective value is not yet resolvable
+  (Open item 4). A knob the file omits but the store overrides
+  (`source == "channel"`) reads as `DRIFT (store-only)`, **not** `inherited`:
+  the boot reconcile replaces the whole override blob with the declared set, so
+  an undeclared live override would be cleared on boot — that is real drift the
+  file does not capture.
+
+- **`import` is sparse-additive, not a reconcile.** It applies only the knobs each
+  block *declares* and never clears a store override the file omits — so it is
+  **not** equivalent to the boot reconcile, which rewrites the whole override blob.
+  This means `import` does not resolve `DRIFT (store-only)`: a live override the
+  file omits stays in the store after `import` and is only cleared by committing
+  the file and rebooting, or by an explicit `unset`. `import` is also best-effort,
+  not atomic — there is no cross-channel transaction, so a 409 or wire error on a
+  later block leaves the earlier blocks applied; the error names the channels that
+  already landed so the remainder can be re-run after re-reading.
+
+> **Scope.** `get`/`set`/`unset` ride purely on the REST endpoints;
+> `export`/`import`/`diff` additionally read or write the declared
+> `config/channels.yaml`. As with the other verbs, the authoritative flag grammar
+> lives in the CLI source — the REST-only core in
+> [`cli/src/commands/channel_config.rs`](../../cli/src/commands/channel_config.rs)
+> and the YAML verbs in
+> [`cli/src/commands/channel_config_yaml.rs`](../../cli/src/commands/channel_config_yaml.rs)
+> — not this guide.
 
 ### The interaction-summary surface (RFC 0020) — v0.3.8
 
