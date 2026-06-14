@@ -8,6 +8,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | ID | Status | Type | Target | Created | Title |
 |----|--------|------|--------|---------|-------|
 | [RFC-0030](0030-multi-agent-conversation-governance.md) | 🚧 Implementing | architecture | v0.3.6 (Layer 2.5 — shipped); v0.3.7–v0.3.9 (Phase 1 — relevance gate + deterministic layers); v0.4.0 (Phase 2 — moderator); v0.5.0+ (Phase 3) | 2026-05-11 | Multi-Agent Conversation Governance |
+| [RFC-0050](0050-extensible-channel-configuration.md) | 👍 Accepted | architecture | v0.3.x (unscheduled) | 2026-06-14 | Extensible Channel Configuration (Operator-Editable, Single Source of Truth) |
 | [RFC-0007](0007-conditional-looped-workflow-control-flow.md) | 📋 Proposed | feature | v0.4.0 | 2026-04-15 | Conditional and Looped Workflow Control Flow |
 | [RFC-0012](0012-protocols-organizations.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3 — organizations & authority); v0.5.0 (Phases 4–5 — meeting/negotiation protocols, inter-org federation) | 2026-05-16 | Protocols & Organizations |
 | [RFC-0013](0013-legal-ethical-compliance.md) | 📋 Proposed | architecture | v0.5.0 | 2026-04-16 | Legal, Ethical & Regulatory Compliance Framework |
@@ -24,7 +25,6 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0046](0046-budget-lease-extraction.md) | 📋 Proposed | architecture | v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate) | 2026-05-25 | Budget-Lease Library Extraction (persatrix-budget) |
 | [RFC-0047](0047-low-coupling-batch-extraction.md) | 📋 Proposed | architecture | v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate) | 2026-05-25 | Low-Coupling Batch Library Extraction (prompt kit, mock LLM, schemas) |
 | [RFC-0049](0049-memory-consolidation-gradient.md) | 📋 Proposed | architecture | v0.4.0 (design lands v0.3.7) | 2026-06-06 | Memory Consolidation Gradient & Scope Reconciliation |
-| [RFC-0050](0050-extensible-channel-configuration.md) | 📋 Proposed | architecture | v0.3.x (unscheduled) | 2026-06-14 | Extensible Channel Configuration (Operator-Editable, Single Source of Truth) |
 | [RFC-0032](0032-channel-interaction-layer.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-12 | Wire-Level Channel Interaction Layer and Chat-Façade Unification |
 | [RFC-0040](0040-agent-orchestrator-transport-unification.md) | 🔨 Draft | protocol | v0.3.x (Phase 1) + v0.4.0 (Phases 2–4) | 2026-05-17 | Agent–Orchestrator Transport Unification |
 | [RFC-0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-20 | Typed Event Taxonomy and Lifecycle Callbacks |
