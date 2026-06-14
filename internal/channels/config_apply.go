@@ -44,12 +44,18 @@ import (
 // the same mirror-with-a-comment discipline config_validate.go keeps against
 // `schemas/channel.schema.json`.
 func (o ChannelConfigOverrides) Validate() error {
-	// Tier B channel-size cap (RFC 0030): negative is a typo; an explicit value
-	// is honoured as-is (the router's SetSalienceMaxChannelMembers normalizes a
-	// non-positive value to the default, but the operator should not be able to
-	// persist a negative).
-	if o.SalienceMaxChannelMembers != nil && *o.SalienceMaxChannelMembers < 0 {
-		return fmt.Errorf("%w: %d (must be >= 0)",
+	// Tier B channel-size cap (RFC 0030): reject anything below 1, mirroring the
+	// loader's schema `minimum: 1` (config_validate.go). Unlike the reply/idle
+	// budgets, zero is NOT a meaningful value here: SetSalienceMaxChannelMembers
+	// coerces any non-positive cap to [DefaultSalienceMaxChannelMembers], so a
+	// persisted explicit 0 reads back as a non-nil knob that nonetheless applies
+	// the default — behaviourally indistinguishable from nil (inherit) and a
+	// value the operator did not intend. The loader never sees a YAML 0 (LoadConfig
+	// normalizes it before Validate); the override path has no such pre-pass, so
+	// the rejection has to happen here or the apply path would persist a value it
+	// silently swallows.
+	if o.SalienceMaxChannelMembers != nil && *o.SalienceMaxChannelMembers < 1 {
+		return fmt.Errorf("%w: %d (must be >= 1)",
 			ErrInvalidSalienceMaxChannelMembers, *o.SalienceMaxChannelMembers)
 	}
 	// Layer 1 per-interaction cost ceiling: zero is meaningful (uncapped);
@@ -116,6 +122,17 @@ func (r *ChannelRouter) ApplyChannelConfig(ctx context.Context, channelID string
 		return err
 	}
 
+	// Serialize the persist → re-read → stamp sequence so it is atomic as a
+	// whole. The store CAS in PutChannelConfig already serializes the write, but
+	// the re-read-and-stamp below is in-memory and would otherwise race: two
+	// concurrent applies could interleave such that a slow apply stamps its
+	// now-stale snapshot AFTER a newer apply committed and stamped, leaving the
+	// live router on a superseded override that disagrees with the canonical
+	// store until restart. Holding applyMu across all three steps makes the last
+	// committed override also the last stamped. (See the field's doc in router.go.)
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
+
 	if err := r.store.PutChannelConfig(ctx, channelID, patch, expectedRevision, lineage); err != nil {
 		return err
 	}
@@ -144,20 +161,19 @@ func (r *ChannelRouter) ApplyChannelConfig(ctx context.Context, channelID string
 // because the patch replaces the whole override blob, a patch that omits
 // floor_control resolves to the group default (ON).
 //
+// The checks run in the SAME order as [Config.Validate] — membership → observer
+// → floor-control — so the two enforcement points surface the same diagnosis for
+// a patch that fails more than one rule (e.g. a non-member chair set alongside
+// floor_control:false is reported as the more fundamental "not a declared
+// member", not "requires floor control"). The doc claims to mirror the loader;
+// the order is part of that mirror.
+//
 // A nil or empty chair clears the knob (no escalation) and needs no membership.
 func (r *ChannelRouter) validateEscalationChair(ctx context.Context, channelID string, patch ChannelConfigOverrides) error {
 	if patch.EscalationChairID == nil || *patch.EscalationChairID == "" {
 		return nil
 	}
 	chairID := *patch.EscalationChairID
-
-	// Floor control must be on in the resulting state. An absent floor_control
-	// knob inherits the group default (ON); an explicit false opts out and makes
-	// the chair inert.
-	if patch.FloorControl != nil && !*patch.FloorControl {
-		return fmt.Errorf("channels: apply config %s: %w: %q requires floor control, but the patch sets floor_control:false (stall detection runs only at the floor round's tail)",
-			channelID, ErrInvalidEscalationChair, chairID)
-	}
 
 	members, err := r.store.GetMembers(ctx, channelID)
 	if err != nil {
@@ -179,6 +195,13 @@ func (r *ChannelRouter) validateEscalationChair(ctx context.Context, channelID s
 	// mirroring [Config.Validate].
 	if chair.RespondPolicy.Normalize() == RespondNever {
 		return fmt.Errorf("channels: apply config %s: %w: %q is an observer (respond: never) and can never take the forced turn",
+			channelID, ErrInvalidEscalationChair, chairID)
+	}
+	// Floor control must be on in the resulting state. An absent floor_control
+	// knob inherits the group default (ON); an explicit false opts out and makes
+	// the chair inert.
+	if patch.FloorControl != nil && !*patch.FloorControl {
+		return fmt.Errorf("channels: apply config %s: %w: %q requires floor control, but the patch sets floor_control:false (stall detection runs only at the floor round's tail)",
 			channelID, ErrInvalidEscalationChair, chairID)
 	}
 	return nil

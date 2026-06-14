@@ -200,6 +200,20 @@ type ChannelRouter struct {
 	// methods + the full contract live in chair_escalation.go.
 	escalationMu     sync.Mutex
 	escalationChairs map[string]string
+
+	// applyMu serializes the RFC 0050 Phase 1 PR 2 store-config apply path
+	// ([ChannelRouter.ApplyChannelConfig]). It is NOT a per-knob lock — each knob
+	// already has its own setter mutex above. It exists to make the persist →
+	// re-read → stamp sequence atomic as a whole: PR 1's optimistic-concurrency
+	// CAS serializes the STORE write, but without this lock two concurrent applies
+	// could each re-read and stamp in an order that leaves the live router on a
+	// SUPERSEDED override (a slow apply stamping its now-stale snapshot after a
+	// newer one committed), so the router would silently diverge from the
+	// canonical store until the next restart. Taken only on the (infrequent) apply
+	// path, never on the publish hot path. The boot repoint
+	// ([ChannelRouter.ResolveFromStore]) runs single-threaded before traffic and
+	// does not take it.
+	applyMu sync.Mutex
 }
 
 // NewChannelRouter wires a router around a store, dispatcher, logger, and

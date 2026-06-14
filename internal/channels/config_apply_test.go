@@ -14,6 +14,8 @@ package channels
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -241,4 +243,88 @@ func TestResolveFromStore_UneditedChannelLeavesSeedingIntact(t *testing.T) {
 	maxOut, _ := router.SalienceMaxChannelMembersFor("group:design")
 	assert.Equal(t, 7, maxOut,
 		"an un-edited channel (revision 0) is skipped — its prior seeding is untouched")
+}
+
+// TestValidate_RejectsZeroSalienceCap pins that an explicit
+// salience_max_channel_members:0 is rejected, not silently accepted. Zero cannot
+// be faithfully honoured — SetSalienceMaxChannelMembers coerces any non-positive
+// value to DefaultSalienceMaxChannelMembers — so a persisted 0 is behaviourally
+// identical to nil (inherit), making it a dead value the operator did not intend.
+// The loader's mirror (config_validate.go) rejects it via the schema's
+// `minimum: 1`; Validate must match so the apply path cannot persist a value it
+// will swallow.
+func TestValidate_RejectsZeroSalienceCap(t *testing.T) {
+	zero := 0
+	err := ChannelConfigOverrides{SalienceMaxChannelMembers: &zero}.Validate()
+	require.Error(t, err, "salience cap 0 cannot be honoured (router coerces it to the default), so it must be rejected")
+	assert.ErrorIs(t, err, ErrInvalidSalienceMaxChannelMembers)
+
+	// The smallest meaningful cap (1) is still accepted.
+	one := 1
+	assert.NoError(t, ChannelConfigOverrides{SalienceMaxChannelMembers: &one}.Validate())
+}
+
+// TestApplyChannelConfig_NonMemberChairReportsMembershipFirst pins that the
+// cross-field chair validation mirrors [Config.Validate]'s check ORDER: a chair
+// that is both a non-member AND set alongside floor_control:false is reported as
+// the more fundamental "not a declared member", not "requires floor control".
+// config_validate.go checks membership → observer → floor-control; the apply
+// path must agree so the two enforcement points surface the same diagnosis.
+func TestApplyChannelConfig_NonMemberChairReportsMembershipFirst(t *testing.T) {
+	router, store, ctx := newApplyRouter(t)
+	mustCreateGroup(t, store, "planning", "ada")
+
+	ghost := "ghost"
+	off := false
+	err := router.ApplyChannelConfig(ctx, "group:planning",
+		ChannelConfigOverrides{EscalationChairID: &ghost, FloorControl: &off}, 0, "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidEscalationChair)
+	assert.Contains(t, err.Error(), "is not a declared member",
+		"membership is the more fundamental failure and is checked first, mirroring Config.Validate")
+}
+
+// TestApplyChannelConfig_ConcurrentAppliesRouterMatchesStore guards the
+// store-canonical invariant under concurrency: after a flurry of competing
+// applies on one channel, the LIVE router must equal the canonical store — never
+// a superseded apply's value left behind by a stamp that raced past a newer
+// write. The apply critical section (persist → re-read → stamp) is serialized,
+// so the last committed override is also the last stamped. Runs under -race to
+// also catch any data race in the locking. Each writer retries on the PR-1
+// optimistic-concurrency conflict, so every goroutine eventually lands a write.
+func TestApplyChannelConfig_ConcurrentAppliesRouterMatchesStore(t *testing.T) {
+	router, store, ctx := newApplyRouter(t)
+	mustCreateGroup(t, store, "planning", "ada")
+
+	const writers = 16
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(v int) {
+			defer wg.Done()
+			capVal := v + 1 // >= 1 so Validate accepts it
+			for {
+				_, rev, err := store.GetChannelConfig(ctx, "group:planning")
+				if !assert.NoError(t, err) {
+					return
+				}
+				err = router.ApplyChannelConfig(ctx, "group:planning",
+					ChannelConfigOverrides{SalienceMaxChannelMembers: &capVal}, rev, "")
+				if errors.Is(err, ErrConfigRevisionConflict) {
+					continue // lost the race — re-read the revision and retry.
+				}
+				assert.NoError(t, err)
+				return
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	got, _, err := store.GetChannelConfig(ctx, "group:planning")
+	require.NoError(t, err)
+	require.NotNil(t, got.SalienceMaxChannelMembers)
+	maxOut, set := router.SalienceMaxChannelMembersFor("group:planning")
+	require.True(t, set)
+	assert.Equal(t, *got.SalienceMaxChannelMembers, maxOut,
+		"the live router must reflect the canonical store, not a superseded concurrent apply")
 }
