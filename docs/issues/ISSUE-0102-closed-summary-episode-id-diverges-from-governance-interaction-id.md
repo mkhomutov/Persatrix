@@ -6,7 +6,7 @@ severity: low
 area: agents/persona_runtime
 created: 2026-06-14
 refs:
-  - docs/rfcs/0020-interaction-memory.md
+  - docs/rfcs/0020-interaction-lifecycle.md
   - docs/rfcs/0030-interaction-id-producer-pr-plan.md
   - docs/manual-tests/MT-CHANNEL-GOV-004.md
   - docs/issues/ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md
