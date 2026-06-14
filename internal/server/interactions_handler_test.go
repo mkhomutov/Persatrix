@@ -55,14 +55,15 @@ func interactionTestServer(t *testing.T, reader executor.InteractionReader) *Ser
 func TestHandleGetClosedInteractions_ProjectsResponse(t *testing.T) {
 	reader := &fakeInteractionReader{resp: &taskpb.ClosedInteractionsResponse{
 		Interactions: []*taskpb.ClosedInteraction{{
-			InteractionId: "i-1",
-			Scope:         "group:room-7",
-			StartedAt:     10.0,
-			ClosedAt:      20.0,
-			TurnCount:     5,
-			CloseReason:   "cost",
-			Summary:       "converged on Thursday",
-			Participants:  []string{"alice", "bob"},
+			InteractionId:           "i-1",
+			GovernanceInteractionId: "gov-1",
+			Scope:                   "group:room-7",
+			StartedAt:               10.0,
+			ClosedAt:                20.0,
+			TurnCount:               5,
+			CloseReason:             "cost",
+			Summary:                 "converged on Thursday",
+			Participants:            []string{"alice", "bob"},
 		}},
 	}}
 	srv := interactionTestServer(t, reader)
@@ -77,6 +78,7 @@ func TestHandleGetClosedInteractions_ProjectsResponse(t *testing.T) {
 	require.Len(t, body.Interactions, 1)
 	it := body.Interactions[0]
 	assert.Equal(t, "i-1", it.InteractionID)
+	assert.Equal(t, "gov-1", it.GovernanceInteractionID)
 	assert.Equal(t, "group:room-7", it.Scope)
 	assert.Equal(t, "cost", it.CloseReason)
 	assert.Equal(t, "converged on Thursday", it.Summary)

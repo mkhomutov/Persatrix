@@ -181,13 +181,13 @@ class Interaction:
     ``wire_interaction_id`` (RFC 0030 interaction-id producer) is the
     orchestrator-minted channel interaction id this local interaction
     was opened under, seeded from the first turn's event metadata by
-    episode routing.  In-memory only — never persisted.  The agent's
-    own ``interaction_id`` stays the memory key (producer plan OQ 1
-    defers unification); this field exists solely so the routing path
-    can detect the channel's rotation boundary and close the local
-    scope structurally in step with the wire.  Its sibling
-    ``predecessor_wire_id`` (PR 607 second pass; also in-memory only)
-    is the retired wire id the opening turn attributed
+    episode routing.  In-memory on the live interaction; at close it is
+    copied into the persisted episode context as
+    ``governance_interaction_id`` (ISSUE-0102 — ``close_path.py``).  The
+    agent's own ``interaction_id`` stays the memory key (OQ 1 defers
+    unification); the live field also drives rotation-boundary detection.
+    Its sibling ``predecessor_wire_id`` (PR 607 second pass; in-memory
+    only, not persisted) is the retired wire id the opening turn attributed
     (``previous_interaction_id``) — the rotation seam's late-delivery
     defence, see :func:`~agents.persona_runtime.interaction_boundary
     .wire_rotation_closes`.

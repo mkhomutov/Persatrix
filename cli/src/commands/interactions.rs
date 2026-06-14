@@ -44,6 +44,13 @@ pub(crate) const SUMMARY_UNAVAILABLE_TEXT: &str = "[interaction summary unavaila
 pub(crate) struct ClosedInteraction {
     #[serde(default)]
     pub(crate) interaction_id: String,
+    /// The RFC 0030 governance interaction id the episode was opened under — a
+    /// different namespace from `interaction_id` (the persona's agent-side RFC
+    /// 0020 episode id). Surfaced so the channel-side id carried in the
+    /// end-vote close logs is cross-referenceable (ISSUE-0102); empty when the
+    /// interaction carried no governance id or the server predates the field.
+    #[serde(default)]
+    pub(crate) governance_interaction_id: String,
     #[serde(default)]
     pub(crate) scope: String,
     #[serde(default)]
@@ -163,6 +170,19 @@ pub(crate) fn format_interaction(it: &ClosedInteraction) -> String {
     ));
     if !it.scope.is_empty() {
         lines.push(format!("  {} {}", "scope:".dimmed(), it.scope));
+    }
+    // ISSUE-0102: the header id is the persona's agent-side RFC 0020 episode
+    // id; surface the RFC 0030 governance interaction id this episode was
+    // opened under (the one the end-vote close logs carry) on its own labelled
+    // line so the two namespaces are visibly distinct and the channel-side id
+    // is cross-referenceable. Omitted when empty (DM / thread / non-channel
+    // interaction, or a server that predates the field).
+    if !it.governance_interaction_id.is_empty() {
+        lines.push(format!(
+            "  {} {}",
+            "governance:".dimmed(),
+            it.governance_interaction_id
+        ));
     }
     if !it.participants.is_empty() {
         lines.push(format!(

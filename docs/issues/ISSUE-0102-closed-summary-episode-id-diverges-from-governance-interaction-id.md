@@ -1,7 +1,7 @@
 ---
 id: ISSUE-0102
 summary: "The agent closed-interaction summary surfaces the persona's RFC 0020 episode id, which can diverge from the orchestrator's RFC 0030 governance interaction id (one governance interaction → several agent-side episode ids); the surface gives no signal the two are different namespaces, so cross-referencing an end-vote-closed id against `agent interactions` finds nothing"
-status: open
+status: in_progress
 severity: low
 area: agents/persona_runtime
 created: 2026-06-14
@@ -10,6 +10,7 @@ refs:
   - docs/rfcs/0030-interaction-id-producer-pr-plan.md
   - docs/manual-tests/MT-CHANNEL-GOV-004.md
   - docs/issues/ISSUE-0098-chair-completeness-fixation-blocks-synthesis.md
+  - docs/guides/channels.md
 ---
 
 ## Summary
@@ -80,6 +81,47 @@ agent-side tracker to adopt the governance id is a much larger RFC 0020 ↔
    can miss.
 
 Option 2 is the operator-complete fix; option 1 is the cheap honesty fix.
+
+## Progress
+
+**Cardinality invariant confirmed (settled from code, no live re-run needed).**
+The single-column design rests on "one governance interaction → N agent-side
+episodes that all carry that *one* id, and no episode spans two governance ids".
+This holds by construction: `wire_rotation_closes`
+([`interaction_boundary.py`](../../agents/persona_runtime/interaction_boundary.py))
+force-closes the open episode whenever the inbound wire id differs from the one
+it was opened under (excepting a known-predecessor straggler), and the wire id
+is stamped exactly once, first-wins
+([`episode_routing.py`](../../agents/persona_runtime/episode_routing.py) — `not
+interaction.wire_interaction_id`). So `wire_interaction_id` is single-valued per
+episode; an idle/structural split inside one governance arc stamps both episodes
+the *same* id (the observed `4b332af1 → 0d2ca73d + 3eb8c3e5`). Governance closes
+occur only on group scopes (DM/thread never vote-close; thread scopes are
+deliberately wire-untracked), exactly where the id is reliably present. The one
+accepted residual — a late-delivered predecessor straggler absorbed into the
+successor episode — predates this work and does not affect the end-vote-close
+lookup (the closed id labels its own episodes).
+
+**PR 1 (this change) — option 2 display half + option 1 honesty + option 3 docs.**
+The governance id is now *persisted* and *surfaced*, disambiguating the
+namespaces:
+
+- `close_path.py` persists `interaction.wire_interaction_id` into the episode
+  context (previously in-memory only) as `governance_interaction_id`.
+- `ClosedInteraction` proto gains `governance_interaction_id` (field 9), plumbed
+  through `closed_interactions_read.py` → the Go DTO → the CLI render (a dimmed
+  `governance:` line, shown only when present). The agent-side `interaction_id`
+  is documented in the proto / DTO / CLI as the persona-memory episode id (the
+  option-1 honesty fix), without a breaking JSON-key rename.
+- `docs/guides/channels.md` documents the two id spaces and that
+  `--interaction-id <governance-id>` can currently miss.
+
+**PR 2 (remaining) — the queryable join.** Promote `wire_interaction_id` from
+the context blob to a real `episodes` column and extend the read filter to
+`AND (interaction_id = ? OR wire_interaction_id = ?)`, so the natural diagnostic
+move — paste the end-vote-closed governance id into `agent interactions
+--interaction-id` — returns the episodes directly. Until then, the governance id
+is visible (PR 1) but not filterable. Closing this issue is gated on PR 2.
 
 ## Notes
 
