@@ -52,17 +52,29 @@ def parse_actions(response: LLMResponse) -> list[AgentAction]:
         if stripped.startswith("["):
             raw_actions = json.loads(stripped)
         elif "```json" in stripped:
-            # Use regex to extract the first JSON code block — more robust
-            # than str.index() against nested fences (review finding P-1).
-            # Newline anchors (not \s*) to avoid polynomial backtracking on
-            # pathological input with many backtick sequences (PR #54 review).
-            m = re.search(r"```json\n(.*?)\n```", stripped, re.DOTALL)
+            # Extract the first JSON code block — more robust than
+            # str.index() against nested fences (review finding P-1).
+            # The fence markers and the JSON may share a single line
+            # (```json [..] ```) or sit on their own lines (```json\n..\n```),
+            # and the inner edges may carry stray spaces/tabs or CRLF: the
+            # chair's forced-turn end_interaction_vote was published RAW as a
+            # one-line ```json [..] ``` because the prior newline-only anchor
+            # (```json\n..\n```) could not match it, so the structured vote was
+            # lost and the room saw a double-synthesis (ISSUE-0101 /
+            # MT-CHANNEL-GOV-004 Edge Case 2). Possessive whitespace
+            # quantifiers ([ \t]*+) keep the match linear on pathological
+            # many-backtick input — the polynomial-backtracking guard the
+            # newline anchor originally bought (PR #54 review), now without the
+            # one-line false negative.
+            m = re.search(
+                r"```json[ \t]*+\r?\n?(.*?)\r?\n?[ \t]*+```", stripped, re.DOTALL,
+            )
             if m is None:
                 return [AgentAction(
                     action_type=ActionType.COMPLETE_TASK,
                     payload={"result": text},
                 )]
-            raw_actions = json.loads(m.group(1))
+            raw_actions = json.loads(m.group(1).strip())
             prose_parts = (stripped[: m.start()], stripped[m.end():])
             surrounding_prose = "\n\n".join(
                 part.strip() for part in prose_parts if part.strip()

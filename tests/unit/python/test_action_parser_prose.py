@@ -56,6 +56,47 @@ class TestParseActionsSurroundingProse:
         assert actions[1].action_type is ActionType.COMPLETE_TASK
         assert actions[1].payload["result"] == "We've converged; closing it out."
 
+    def test_one_line_fenced_vote_parses_into_structured_vote(self):
+        """Regression for ISSUE-0101 / MT-CHANNEL-GOV-004 Edge Case 2: the
+        chair (nova-sparrow) emitted its forced-turn vote as a SINGLE-LINE
+        fence — ``` ```json [..] ``` ``` with spaces, not newlines, around the
+        body. The prior ``` ```json\\n..\\n``` ``` anchor could not match it,
+        so the turn published the literal JSON as channel text with no vote
+        metadata; the orchestrator read the missing vote as an ISSUE-0099
+        hand-off misfire and re-forced a turn — a visible double-synthesis.
+        A one-line fence must parse into a structured END_INTERACTION_VOTE."""
+        response = LLMResponse(
+            text=(
+                '```json [{"action_type": "end_interaction_vote",'
+                ' "payload": {"content": "Synthesizing the three risks"}}] ```'
+            ),
+        )
+
+        actions = parse_actions(response)
+
+        assert len(actions) == 1
+        assert actions[0].action_type is ActionType.END_INTERACTION_VOTE
+        assert actions[0].payload["content"] == "Synthesizing the three risks"
+
+    def test_one_line_fenced_vote_preserves_surrounding_prose(self):
+        """The one-line fence must keep the prose seam too: synthesis prose
+        beside a single-line vote fence is still folded back as the trailing
+        COMPLETE_TASK, exactly as for the block fence."""
+        response = LLMResponse(
+            text=(
+                "We've converged. "
+                '```json [{"action_type": "end_interaction_vote",'
+                ' "payload": {"content": "closing"}}] ```'
+            ),
+        )
+
+        actions = parse_actions(response)
+
+        assert len(actions) == 2
+        assert actions[0].action_type is ActionType.END_INTERACTION_VOTE
+        assert actions[1].action_type is ActionType.COMPLETE_TASK
+        assert actions[1].payload["result"] == "We've converged."
+
     def test_prose_on_both_sides_is_joined(self):
         response = LLMResponse(
             text=(

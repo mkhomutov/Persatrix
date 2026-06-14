@@ -56,13 +56,20 @@ type RouterMetrics struct {
 	// wired). The per-close attribution (channel, interaction, the vote count) is
 	// on the structured log line.
 	InteractionClosed metric.Int64Counter
-	// ChairEscalation counts each DETECTED floor-round stall (the
-	// chair-stall-escalation amendment §C 1), labelled by `channel_type` and
-	// `outcome ∈ {dispatched, no_chair, already_escalated, dispatch_error,
-	// self_stimulus}` — the disposition chain runs after detection, so an
-	// operator sees the stalls a chair could be configured for, not only the
-	// escalations that fired. `self_stimulus` (PR #609 deep review) is the
-	// withheld forced turn whose stalled stimulus the chair itself authored.
+	// ChairEscalation counts chair-escalation lifecycle events, labelled by
+	// `channel_type` and `outcome`. The stall dispositions — `{dispatched,
+	// no_chair, already_escalated, dispatch_error, self_stimulus}` — are one
+	// per DETECTED floor-round stall (the chair-stall-escalation amendment
+	// §C 1), emitted after the disposition chain so an operator sees the stalls
+	// a chair could be configured for, not only the escalations that fired.
+	// `self_stimulus` (PR #609 deep review) is the withheld forced turn whose
+	// stalled stimulus the chair itself authored. The remaining two outcomes —
+	// `{resynthesized, resynthesize_error}` (ISSUE-0099) — fire at the
+	// chair-reply publish seam, NOT the round tail, when the chair's forced-turn
+	// reply provably reached nobody and one synthesize-only turn is re-forced
+	// (or its re-dispatch failed). They are distinct lifecycle labels, kept off
+	// dispatch_error precisely so summing the stall dispositions stays a stall
+	// count.
 	ChairEscalation metric.Int64Counter
 	// CloseNotification counts each per-recipient close-notification dispatch
 	// (the end-vote-close-propagation amendment, CP5), labelled by

@@ -187,6 +187,12 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # release (v0.3.1 ×2, v0.3.5 ×2), so it sits at the 3 000-word prose cap
     # as a permanent release-cycle accumulator. Trim only if a row is dropped.
     "docs/manual-tests/MT-MEMORY-005-dementia-test.md",
+    # docs/manual-tests/MT-CHANNEL-GOV-004.md — the live chair-stall-escalation
+    # acceptance gate (RFC 0030 §C). Like MT-MEMORY-005 above it is a permanent
+    # Test Results accumulator: each governance build (ISSUE-0096/0097/0098/0099
+    # verification) folds in a detailed evidence row, so it sits at the 3 000-word
+    # prose cap. The ISSUE-0099 PR-2 row tipped it over. Trim only if a row is dropped.
+    "docs/manual-tests/MT-CHANNEL-GOV-004.md",
     # docs/manual-tests/v0.3.2-execution-report.md is the v0.3.2 sibling of
     # the v0.3.0 / v0.3.1 reports above — identical per-release accumulator
     # pattern. The release-prep PR 1 sweep (32 tests + wallet acquire+settle

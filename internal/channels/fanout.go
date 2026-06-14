@@ -83,12 +83,36 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// a reclassification — logging it would mislabel every broadcast and
 	// bury the signal this line exists to surface.
 	floorMentions := resolveFloorMentions(members, msg.Mentions, msg.SenderID)
-	if len(msg.Mentions) > 0 && len(floorMentions) == 0 && !slices.Contains(msg.Mentions, MentionEveryone) {
+	// The previously-silent resolution: mentions were present but named no
+	// floor-capable member (the operator, an observer, a non-member, the sender
+	// itself), the case the gate flip reclassifies to open floor. An explicit
+	// `@everyone` is open floor by contract (D3), not a reclassification.
+	namedNoFloorCapable := len(msg.Mentions) > 0 && len(floorMentions) == 0 && !slices.Contains(msg.Mentions, MentionEveryone)
+	if namedNoFloorCapable {
 		r.logger.Debug("channels: mentions name no floor-capable member",
 			zap.String("channel_id", msg.ChannelID),
 			zap.String("message_id", msg.ID),
 			zap.Int("mentions", len(msg.Mentions)))
 	}
+	// ISSUE-0099: `misfired` is the one publish-time-PROVABLE escalation
+	// failure — the chair's forced-turn reply handed off to a target that
+	// reached nobody. A misfired hand-off is a BARE message (outcome b); a
+	// publish carrying an `end_interaction_vote` is the chair's synthesis
+	// (outcome a), NOT a hand-off, even when it @-mentions the still-outstanding
+	// voice — the framing invites "@-mention the missing voice inside your
+	// vote's `content`", and that voice is routinely non-floor-capable (the
+	// operator, or the observer the residue targets). Re-forcing on a vote would
+	// inject a second synthesize-only turn after the chair already voted, so the
+	// vote disarms the trigger (it still consumes the stash below) without
+	// re-forcing.
+	misfired := namedNoFloorCapable && !readEndInteractionVote(msg.Metadata)
+	// Run for EVERY chair publish in an escalated interaction, not only the
+	// misfiring ones: the chair's first reply after the forced turn disarms the
+	// trigger whether it misfired (re-force one synthesize-only turn) or handed
+	// the floor cleanly (consume the arm and stop), so a later innocuous chair
+	// message cannot be mistaken for the reply's misfire. Detached and
+	// fire-and-forget like the stall tail; a no-op for every non-chair publish.
+	r.maybeResynthesizeMisfire(context.WithoutCancel(ctx), msg, ct, members, channelSize, misfired)
 
 	// Mark the responders as having an in-flight turn for the console presence
 	// signal (RFC 0048 Tier 1) — exactly the members [orderResponders] expects
@@ -198,6 +222,15 @@ const (
 	// markerCloseNotification is the CP2 end-vote close notification,
 	// stamped only by [ChannelRouter.notifyInteractionClose]'s dispatches.
 	markerCloseNotification
+	// markerChairEscalationResynthesize is the ISSUE-0099 second forced turn,
+	// stamped only by [ChannelRouter.maybeResynthesizeMisfire]'s dispatch. It
+	// is a REFINEMENT of markerChairEscalation, not a peer: dispatchTo stamps
+	// BOTH `ChairEscalation` and `ChairEscalationResynthesize` for it, so the
+	// admission lift (which keys on ChairEscalation) is unchanged and only the
+	// framing flips. The never-alias invariant the enum protects is between
+	// {ChairEscalation, CloseNotification}; a resynthesize marker still never
+	// sets CloseNotification, so that invariant holds.
+	markerChairEscalationResynthesize
 )
 
 // dispatchTo delivers `msg` to a single recipient with the per-recipient
@@ -230,7 +263,8 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		// Floor-capable-directedness amendment (v0.3.8): per-publish, like
 		// ChannelSize — resolved once in [ChannelRouter.fanout].
 		FloorMentions:                floorMentions,
-		ChairEscalation:              marker == markerChairEscalation,
+		ChairEscalation:              marker == markerChairEscalation || marker == markerChairEscalationResynthesize,
+		ChairEscalationResynthesize:  marker == markerChairEscalationResynthesize,
 		InteractionCloseNotification: marker == markerCloseNotification,
 	}, msg)
 	status := "ok"

@@ -106,6 +106,29 @@ type openInteraction struct {
 	// interaction and needs no lifetime map. Guarded by interactionMu;
 	// written via [ChannelRouter.markChairEscalated].
 	chairEscalated bool
+	// escalatedStimulus is the stalled stimulus the first forced turn was
+	// built from (ISSUE-0099), cloned and stashed when that turn dispatches
+	// ([ChannelRouter.storeEscalatedStimulus]). The resynthesize re-dispatch
+	// reuses it rather than the chair's misfired reply: re-sending the chair's
+	// own reply to the chair would self-suppress at the gate (the same
+	// `self_sender` defence that makes a plain refund inert), whereas this
+	// carries the ORIGINAL non-chair sender. nil until escalated; rides the
+	// entry and dies with the interaction like chairEscalated.
+	//
+	// It doubles as the ISSUE-0099 "armed" bit and the loop guard:
+	// [ChannelRouter.claimChairReply] consumes it (back to nil) on the chair's
+	// FIRST publish after the forced turn — the forced-turn reply — whether or
+	// not that reply misfired. So a clean hand-off disarms the trigger, and a
+	// later innocuous chair message naming no floor-capable member can no
+	// longer be mistaken for the reply's misfire; a second misfire likewise
+	// finds nothing to claim and stands.
+	escalatedStimulus *ChannelMessage
+	// escalatedThreadParent is the thread-parent attribution the first forced
+	// turn carried (ISSUE-0099), stashed beside escalatedStimulus so the
+	// re-dispatch reproduces the ORIGINAL stimulus's thread context rather than
+	// the misfired reply's — the reply is a different message in the tree.
+	// Meaningless ("") off threads, like the value it mirrors.
+	escalatedThreadParent string
 }
 
 // previousClose is the resolver's OQ 5 close-cause attribution for one
@@ -187,8 +210,12 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 		entry.idCommitted = false
 		// A fresh interaction carries a fresh escalation ration (CE5): the
 		// mark belongs to the id it was spent on, and the entry is reused
-		// across generations.
+		// across generations. The ISSUE-0099 resynthesize state belongs to the
+		// same generation — clear it in lockstep so a new interaction neither
+		// inherits a spent re-dispatch nor a stale stimulus pointer.
 		entry.chairEscalated = false
+		entry.escalatedStimulus = nil
+		entry.escalatedThreadParent = ""
 	}
 	resolved := entry.id
 	prev := entry.prev
@@ -418,36 +445,4 @@ func (r *ChannelRouter) ResolveInteractionIdleTimeouts(_ context.Context, cfg *C
 		zap.Any("windows", windows),
 	)
 	return nil
-}
-
-// openInteractionEscalationState is the chair-stall-escalation amendment's
-// read half (CE1's "open tracked interaction" detection input): the channel's
-// open interaction id, whether its CE5 ration is spent, and whether a
-// tracked, committed interaction exists at all. Only a COMMITTED id counts —
-// an uncommitted mint has no persisted messages, so there is no discussion to
-// have stalled.
-func (r *ChannelRouter) openInteractionEscalationState(channelID string) (interactionID string, escalated, tracked bool) {
-	r.interactionMu.Lock()
-	defer r.interactionMu.Unlock()
-	entry := r.openInteractions[channelID]
-	if entry == nil || entry.id == "" || !entry.idCommitted {
-		return "", false, false
-	}
-	return entry.id, entry.chairEscalated, true
-}
-
-// markChairEscalated spends the interaction's CE5 ration — compare-and-set
-// under interactionMu so two concurrently-stalled rounds racing the same
-// ration resolve to exactly one dispatched escalation. Returns false when the
-// open id moved on (rotation/close between read and mark) or the ration is
-// already spent.
-func (r *ChannelRouter) markChairEscalated(channelID, interactionID string) bool {
-	r.interactionMu.Lock()
-	defer r.interactionMu.Unlock()
-	entry := r.openInteractions[channelID]
-	if entry == nil || entry.id != interactionID || entry.chairEscalated {
-		return false
-	}
-	entry.chairEscalated = true
-	return true
 }
