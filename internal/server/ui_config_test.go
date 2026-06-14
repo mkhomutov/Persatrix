@@ -79,6 +79,33 @@ func TestLoadUIConfig_ParsesCreateEnabled(t *testing.T) {
 		"the panel's own enabled toggle is independent of create_enabled")
 }
 
+// TestDefaultUIConfig_ConfigEditOffByDefault pins the RFC 0050 Phase 1 default:
+// the per-channel governance-config edit surface ships OFF (dark), so the
+// endpoints 403 until an operator opts in — unlike create_enabled, which ships
+// on.
+func TestDefaultUIConfig_ConfigEditOffByDefault(t *testing.T) {
+	cfg := DefaultUIConfig()
+	require.NotNil(t, cfg)
+
+	assert.False(t, cfg.Panels["channel_timeline"].ConfigEditEnabled,
+		"config editing ships disabled by default — RFC 0050 Phase 1 (surface lands dark)")
+}
+
+// TestLoadUIConfig_ParsesConfigEditEnabled: an operator opting into runtime
+// config editing authors config_edit_enabled:true under channel_timeline, and the
+// loader carries it through (KnownFields accepts the documented key).
+func TestLoadUIConfig_ParsesConfigEditEnabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ui.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(
+		"panels:\n  channel_timeline:\n    enabled: true\n    config_edit_enabled: true\n"), 0o600))
+
+	cfg, err := LoadUIConfig(path)
+	require.NoError(t, err)
+
+	assert.True(t, cfg.Panels["channel_timeline"].ConfigEditEnabled,
+		"an explicit config_edit_enabled:true must turn the edit surface on")
+}
+
 // TestLoadUIConfig_Malformed: a syntactically broken ui.yaml is an operator bug
 // we surface loudly (the caller logs + soft-degrades), mirroring channels.yaml's
 // parse-error posture — distinct from the absent-file default path.

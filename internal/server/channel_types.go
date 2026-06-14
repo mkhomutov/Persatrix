@@ -160,6 +160,40 @@ type historyResponse struct {
 	Messages []channelMessageResponse `json:"messages"`
 }
 
+// configFieldResponse is one governance knob's resolved view in the RFC 0050
+// `GET/PATCH …/config` payload: the effective `value` plus its `source`
+// provenance. `source` is "channel" when an explicit per-channel override is
+// persisted for the knob, or "default" when the channel inherits the resolved
+// fleet/group default. (The governance knobs in this set are all channel-scoped,
+// so there is no third "member" level here — member-scoped settings, e.g. a
+// member's salience threshold, ride the member surface, not this one.) `value`
+// is the typed effective value (bool / int / string); it is `null` only for an
+// inherited interaction_budget_tokens, whose effective resolution is deferred
+// with its live application (RFC 0050 Phase 1 Open item 4 — it is not
+// router-held, so this endpoint cannot resolve the fleet default for it yet).
+type configFieldResponse struct {
+	Value  any    `json:"value"`
+	Source string `json:"source"`
+}
+
+// channelConfigResponse is the JSON shape returned by GET and PATCH
+// /api/v1/channels/{id}/config (RFC 0050 Phase 1 PR 4): the channel's current
+// optimistic-concurrency `revision` plus each governed knob's effective value +
+// provenance. The revision is the value a follow-up PATCH echoes back in the
+// `If-Match` header; a knob's `source` lets an operator see at a glance which
+// values are inherited vs explicitly set.
+type channelConfigResponse struct {
+	Revision                               int64               `json:"revision"`
+	FloorControl                           configFieldResponse `json:"floor_control"`
+	SalienceMaxChannelMembers              configFieldResponse `json:"salience_max_channel_members"`
+	MaxRepliesPerParticipantPerInteraction configFieldResponse `json:"max_replies_per_participant_per_interaction"`
+	EndVoteThreshold                       configFieldResponse `json:"end_vote_threshold"`
+	EndVoteWindow                          configFieldResponse `json:"end_vote_window"`
+	EscalationChairID                      configFieldResponse `json:"escalation_chair_id"`
+	InteractionIdleTimeoutSeconds          configFieldResponse `json:"interaction_idle_timeout_seconds"`
+	InteractionBudgetTokens                configFieldResponse `json:"interaction_budget_tokens"`
+}
+
 // channelActivityResponse is the envelope for GET /api/v1/channels/{id}/activity
 // (RFC 0048 console presence Tier 1). `Thinking` is the set of participant ids
 // the orchestrator has an in-flight turn for — those it dispatched to and is

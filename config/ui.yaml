@@ -29,10 +29,19 @@
 # render where channels are unconfigured. (Console exposure is still gated by
 # --enable-ui + the localhost bind; see the security note in the web-console
 # guide before exposing the console beyond localhost.)
+#
+# `config_edit_enabled` (channel_timeline, RFC 0050 Phase 1) opts CLI and web
+# into editing per-channel governance config at runtime — the PATCH/GET
+# /api/v1/channels/{id}/config surface over the store-canonical apply path. It
+# ships OFF (false) so the surface lands dark: the endpoints return 403 until an
+# operator flips it on, and the server enforces this one toggle for both the CLI
+# and the browser. Its companion `config_edit.available` is runtime-derived (the
+# channel router must be wired) and never authored here.
 panels:
   channel_timeline:
     enabled: true
     create_enabled: true
+    config_edit_enabled: false
   memory_strip:
     enabled: false
   cost:
