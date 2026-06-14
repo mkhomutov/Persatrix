@@ -109,7 +109,9 @@ class TestEmptyEpisodesGuard:
             cursor = await db.execute(
                 "SELECT COUNT(*) FROM schema_version WHERE version = 15",
             )
-            assert (await cursor.fetchone())[0] == 0
+            row = await cursor.fetchone()
+            assert row is not None
+            assert row[0] == 0
         finally:
             await db.close()
 
@@ -212,6 +214,7 @@ class TestStoreEpisodeGovernanceField:
             (ep_id,),
         ) as cursor:
             row = await cursor.fetchone()
+        assert row is not None
         assert row[0] is None
 
     async def test_governance_id_round_trips(self, memory: EpisodicMemory):
