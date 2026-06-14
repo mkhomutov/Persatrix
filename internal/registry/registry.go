@@ -56,6 +56,13 @@ type Registry interface {
 	Unregister(ctx context.Context, agentID string) error
 	Get(ctx context.Context, agentID string) (*AgentInfo, error)
 	List(ctx context.Context) ([]AgentInfo, error)
+	// NamesFor returns id→display-name for just the requested ids, omitting any
+	// id with no registered row. It is the membership-scoped read the channel
+	// mention lift needs (ISSUE-0100): one pass over a known id set instead of a
+	// whole-directory List+sort when only a handful of names are wanted. Backings
+	// can satisfy it in one scoped query (in-memory: N map reads under one lock;
+	// a remote store: one `id IN (…)`), so it stays O(ids), never O(directory).
+	NamesFor(ctx context.Context, ids []string) (map[string]string, error)
 	UpdateStatus(ctx context.Context, agentID string, status AgentStatus) error
 	FindByCapability(ctx context.Context, capability string) ([]AgentInfo, error)
 }
@@ -162,6 +169,25 @@ func (r *InMemoryRegistry) List(_ context.Context) ([]AgentInfo, error) {
 		return result[i].ID < result[j].ID
 	})
 	return result, nil
+}
+
+// NamesFor returns id→display-name for the requested ids, reading each under a
+// single read lock. Ids with no registered row are omitted (not an error), so
+// the caller treats a missing name as "id-only". Only the name string is copied
+// — no AgentInfo deep-copy or directory sort, the cost the whole-directory List
+// pays — keeping the call O(len(ids)) instead of O(registry). The returned map
+// is always non-nil (empty for empty input), matching List/FindByCapability.
+func (r *InMemoryRegistry) NamesFor(_ context.Context, ids []string) (map[string]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	names := make(map[string]string, len(ids))
+	for _, id := range ids {
+		if agent, exists := r.agents[id]; exists {
+			names[id] = agent.Name
+		}
+	}
+	return names, nil
 }
 
 // UpdateStatus updates the status of a registered agent.

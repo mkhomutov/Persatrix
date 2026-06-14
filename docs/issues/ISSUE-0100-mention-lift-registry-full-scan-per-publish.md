@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0100
-summary: "Display-name mention lift snapshots the whole agent registry per @-bearing publish; scope the lookup to channel membership before registries grow hot"
-status: open
+summary: "RESOLVED 2026-06-14 — display-name mention lift no longer snapshots the whole agent registry per @-bearing publish; the name lookup is scoped to channel membership via a new Registry.NamesFor(ids) batch read (Option 3). Microbench on a 5000-agent directory / 6-member channel: 1.72 ms → 261 ns, 1.33 MB → 336 B, 5021 → 2 allocs."
+status: resolved
 severity: low
 area: internal/server
 created: 2026-06-13
+closed: 2026-06-14
 refs:
   - docs/rfcs/0011-amendment-display-name-mention-lifting.md
 ---
@@ -59,3 +60,55 @@ directory. Options, cheapest-first:
 Pick per the registry backing that actually lands; the lift's call site is
 the only consumer, so the change is local. Pair with a microbenchmark on a
 synthetic large directory to confirm the chosen path before enforcing.
+
+## Resolution
+
+**2026-06-14 — fixed via Option 3 (membership-join batch on the registry).**
+
+Options 1 and 2 were rejected:
+
+- **Per-member `Get` (Option 1)** optimizes the wrong axis for the very
+  scenario the issue hedges against: on a remote backing, N `Get`s are N
+  round-trips, which can be *worse* than one `List`. In-memory it also
+  deep-copies each agent it touches.
+- **Cached snapshot (Option 2)** still reads the whole directory (just less
+  often) and adds TTL/invalidation plus rename staleness — a speculative
+  mitigation of a publish pattern that does not exist yet, and the one option
+  with a correctness cost. Deliberately not built.
+
+Option 3 is the only choice that is a strict improvement across *both*
+backings — single scoped read, membership-bounded by construction — and it
+is a real win even on today's in-memory registry, where `List` deep-copies
+*and sorts* the entire directory (including every agent's `Capabilities`
+slice) just to read a handful of `Name` strings. The issue's "cheap map
+copy" framing understated that cost.
+
+Change (one PR, local to the call site as predicted):
+
+- Added `Registry.NamesFor(ctx, ids) (map[string]string, error)` to the
+  interface and `InMemoryRegistry` — one `RLock`, N map reads, copies only
+  the name strings (no `AgentInfo` deep-copy, no sort). Missing ids are
+  omitted, preserving the lift's existing "id-only on a registry miss"
+  fail-open.
+- [`Server.liftContentMentions`](../../internal/server/channel_mention_lift.go)
+  now builds `memberIDs` from the channel membership and calls
+  `NamesFor(memberIDs)` instead of `List()`.
+
+TDD: registry-layer `TestNamesFor` (scoping, missing-id omission, non-nil
+empty) written red-first; the lift's `countingRegistry` spy was flipped from
+counting `List` to counting `NamesFor` + asserting it receives *exactly* the
+member ids and that `List` is never called; a new
+`TestLiftContentMentions_NamesForErrorDegradesToIDOnly` pins the fail-open
+leg (in-text id still lifts, display name no-lifts on a `NamesFor` error).
+
+Microbenchmark (`registry_names_for_bench_test.go`, 5000-agent directory,
+6-member channel) confirms before enforcing:
+
+| path | ns/op | B/op | allocs/op |
+|------|-------|------|-----------|
+| whole-directory `List` + extract | 1,721,813 | 1,332,035 | 5021 |
+| scoped `NamesFor` | 261 | 336 | 2 |
+
+~6,600× faster, ~4,000× less allocated — and `List`'s figure *understates*
+its real cost (the bench stops at name extraction; `List` additionally
+deep-copies every `Capabilities` slice).
