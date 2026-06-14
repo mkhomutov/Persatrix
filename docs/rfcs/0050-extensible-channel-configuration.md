@@ -34,8 +34,8 @@ depends_on:
   and `export/import/diff` (#646). Six of the seven governance knobs are
   runtime-editable; **interaction budget is store-persisted but not yet
   router-wired** (Open item 4 — live application deferred). Live G1 acceptance:
-  [MT-CHANNEL-CONFIG-001](../manual-tests/MT-CHANNEL-CONFIG-001.md) *(pending
-  first run)*.
+  [MT-CHANNEL-CONFIG-001](../manual-tests/MT-CHANNEL-CONFIG-001.md) — **first
+  live run passed 2026-06-14** (all steps + edge cases green).
 - **Phase 2 (web settings panel)** — not started.
 - **Phase 3 (schema-driven generic config / profiles)** — future RFC.
 
@@ -346,7 +346,10 @@ both.
   [MT-CHANNEL-CONFIG-001](../manual-tests/MT-CHANNEL-CONFIG-001.md) — live-edit a
   router-held governance knob (`interaction_idle_timeout_seconds`) from the CLI,
   confirm the running channel honors it without restart, and confirm it survives
-  one (G1). *(Authored 2026-06-14; pending first live run.)*
+  one (G1). *(Authored + first live run passed 2026-06-14 — all steps + edge
+  cases green; the run also hardened three MT-procedure details: the
+  join/restart membership-divergence hazard, the toggle-off GET gate, and the
+  `channel create` syntax.)*
 
 ## Open Questions
 

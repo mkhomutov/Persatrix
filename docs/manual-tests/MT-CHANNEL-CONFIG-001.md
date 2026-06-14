@@ -217,6 +217,19 @@ than the 600 s default:
 
 ### Step 4: Restart — the live edit survives, the YAML seed does not clobber it
 
+> **⚠️ Sequencing hazard — undo the Step 3 `join` before restarting.** The boot
+> path runs a **strict** config-vs-store membership reconcile (`ReconcileConfig`,
+> v0.3.0 §B): if a config-declared channel's stored member set diverges from
+> `config/channels.yaml`, the orchestrator **FATAL-exits and crash-loops**
+> (`channels: config-vs-store membership divergence: channel=group:planning
+> divergent_participants=[+alex]`). Step 3 joined `alex` (undeclared in YAML), so
+> a restart now will **not boot**. Before restarting, remove the runtime-joined
+> driver — `DELETE /api/v1/channels/group:planning` membership for `alex`, or
+> `make reset` and re-run Steps 1–2 *without* the Step 3 join if you only need to
+> verify config survival. (This hazard is orthogonal to RFC 0050 — it is the
+> pre-existing membership gate — but it bites this arc, so it is called out here.
+> Pinned by `router_reconcile` tests.)
+
 Restart the orchestrator **without** touching `config/channels.yaml` (it still
 declares no `interaction_idle_timeout_seconds` on `planning`, and no
 `revision:`):
@@ -282,11 +295,14 @@ With `config_edit_enabled: false` (the shipped default), restart and retry:
 ./bin/persatrix channel config set planning interaction_idle_timeout_seconds=60
 ```
 
-**Expected**: the `PATCH` is gated server-side and returns **403**; the CLI
-surfaces it cleanly (no partial write — `config get` still shows the prior
-value/revision). This is the uniform gate that covers CLI and web identically
-(PR 4 / PR plan Open item 1). Pinned deterministically by
-`channel_config_handlers_test.go` (toggle-off → 403).
+**Expected**: the `PATCH` is gated server-side and returns **403** with a clean
+message (`channel config editing is disabled (set
+panels.channel_timeline.config_edit_enabled: true …)`), no partial write. The
+gate covers the **whole `/config` endpoint, not just writes**: with the toggle
+off, `channel config get` **also returns 403** — you cannot read the config
+surface while it is dark, so there is no "read-only fallback" view. This is the
+uniform gate that covers CLI and web identically (PR 4 / PR plan Open item 1).
+Pinned deterministically by `channel_config_handlers_test.go` (toggle-off → 403).
 
 ### Edge Case 2: Flip `floor_control` and the YAML-chair limit
 
@@ -299,7 +315,9 @@ depends on whether the chair is in the patch/store, not on whether the channel
 1. **Open-floor flip on a chair-less channel succeeds.** Create one and flip it:
 
    ```bash
-   ./bin/persatrix channel create scratch --type group   # no escalation_chair_id
+   # `channel create` takes a bare NAME and requires ≥1 --member; it is always a
+   # group channel (no --type flag) and declares no escalation_chair_id:
+   ./bin/persatrix channel create scratch --member alex --member nova-sparrow
    ./bin/persatrix channel config set scratch floor_control=false
    ```
 
@@ -347,7 +365,7 @@ surfaces it without clobbering. Pinned deterministically by
 
 | Date | Tester | Build | Result | Notes |
 |------|--------|-------|--------|-------|
-| _pending_ | | | | First live exercise of the RFC 0050 Phase 1 G1 arc. |
+| 2026-06-14 | Maksim Khomutov | `3402f0e` (Anthropic overlay; orchestrator built via host-asset workaround — see note) | **PASS (with 3 procedure fixes)** | First live exercise. Steps 1, 2, 3, 5 ✅; Step 4 ✅ via clean re-run (see ⚠️ below); Edge Cases 1, 2, 3 ✅. **Step 1**: rev 0, idle 600 `[default]`, chair `nova-sparrow` `[default]` (inherited, *not* a store override — confirms the chair is YAML-seeded). **Step 2**: live set → idle 60 `[channel]`, rev 1, **and `escalation_chair_id` flipped `nova-sparrow → (none)`** — the first-edit chair detachment, confirmed live exactly as documented. **Step 3**: stalled round (last turn 15:02:09Z) closed by idle rotation at 15:03:48Z (~99 s) — only possible under the 60 s window, *not* the 600 s default; recorded lazily on the next event (the capture-timing note). **Step 4**: the original Step 3 `join alex` then crash-looped the restart on membership divergence (now documented as a hazard); re-ran clean (set→restart, no join) → 60 `[channel]` rev 1 survived. **Step 5**: unset → 600 `[default]` rev 2. **EC1**: toggle off → 403 on both PATCH *and* GET. **EC2**: lone `floor_control=false` accepted; chair+`floor_control=false` in one patch rejected with the cross-field error. **EC3**: stale `If-Match` → 409. Fixed during this run: Step 4 join/restart hazard, EC1 GET-also-gated, EC2 `channel create` syntax (`--member`, no `--type`). Build caveat: the canonical arm64 Docker UI build is broken (npm rollup optional-dep, npm/cli#4828 — likely #644 fallout); ran the orchestrator from an image baked with host-built `internal/ui/assets`. |
 
 ## Notes
 
