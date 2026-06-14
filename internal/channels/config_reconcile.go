@@ -73,6 +73,23 @@ var ErrInvalidConfigRevision = errors.New("channels: invalid revision")
 // escalation — the opt-in default), distinct from an explicit empty string, so
 // an un-configured channel does not hash differently from one that explicitly
 // cleared the chair.
+//
+// FREEZE CONSEQUENCE (RFC 0050 follow-up). Because this captures the FULLY
+// RESOLVED set — every INHERITED fleet default snapshotted as an explicit value
+// — adopting a channel's revision detaches that channel from fleet-default
+// tracking. After adoption [ChannelRouter.ResolveFromStore] overlays the frozen
+// snapshot (the channel sits at revision > 0), so a later change to a fleet
+// default (e.g. `default_interaction_idle_timeout_seconds`) on an UN-bumped
+// channel is NOT inherited AND reads as drift in the equal-revision branch (the
+// re-resolved YAML differs from the frozen store row). Recovery is a revision
+// bump, which re-snapshots. This is the deliberate cost of representational,
+// byte-exact drift detection (the full snapshot is what makes YAML-vs-YAML
+// comparison exact — see [channelConfigContentHash]) and cannot be made sparse
+// without pointerizing the load-normalized int knobs, which lose the
+// explicit-vs-inherited distinction at [LoadConfig] time. A sparse snapshot that
+// layers over the YAML baseline is the tracked Phase-1 seam (see the HAZARD note
+// on [ChannelConfigOverrides]); until then the freeze is a documented property,
+// not a regression.
 func (c ChannelConfig) toConfigOverrides(cfg *Config) ChannelConfigOverrides {
 	floor := c.FloorControlEnabled()
 	salience := c.SalienceMaxChannelMembers
@@ -134,14 +151,36 @@ func channelConfigContentHash(o ChannelConfigOverrides) (string, error) {
 // Call once at startup AFTER [ChannelRouter.ReconcileConfig] (so the store rows
 // exist) and BEFORE [ChannelRouter.ResolveFromStore] (so adopted writes are
 // visible to the overlay). Idempotent: a second run at equal revision is a
-// no-op (or a drift warning, if the YAML diverged). Non-fatal posture is the
-// caller's — a per-channel store error is returned so the orchestrator can
-// log-and-continue with the YAML-seeded maps in place.
+// no-op (or a drift warning, if the YAML diverged).
+//
+// Resilient per channel: a store fault on one channel is logged and the pass
+// continues to the channels declared after it (one bad channel must not starve
+// the rest). The first such fault is still returned so the caller can log the
+// incident; the orchestrator's non-fatal posture leaves the YAML-seeded maps in
+// place and the failed channels retry at the next restart.
 func (r *ChannelRouter) ReconcileFromYAML(ctx context.Context, cfg *Config) error {
 	if cfg == nil {
 		return nil
 	}
-	adopted, drift := 0, 0
+	adopted, drift, failed := 0, 0, 0
+	// firstErr surfaces a per-channel fault to the caller WITHOUT aborting the
+	// pass. The loop must be resilient per channel: a transient store fault on one
+	// channel must not starve the channels declared after it (an early return
+	// would silently defer every later channel's adoption to the next restart,
+	// which contradicts the "log-and-continue, per-channel" posture this method
+	// and the boot wiring promise). Each fault is logged where it happens (so none
+	// hides behind another) and the first is returned at the end so the
+	// orchestrator still logs the incident.
+	var firstErr error
+	recordErr := func(channelID string, err error) {
+		r.logger.Warn("channels: yaml reconcile skipped a channel after a store error; later channels still processed",
+			zap.String("channel_id", channelID),
+			zap.Error(err))
+		if firstErr == nil {
+			firstErr = err
+		}
+		failed++
+	}
 	for _, decl := range cfg.Channels {
 		// Absent / zero revision is seed-only: the store row stays owned by
 		// config-as-code (the per-knob resolvers already seeded the router), so
@@ -155,13 +194,15 @@ func (r *ChannelRouter) ReconcileFromYAML(ctx context.Context, cfg *Config) erro
 		stored, storeRev, err := r.store.GetChannelConfig(ctx, channelID)
 		if errors.Is(err, ErrChannelNotFound) {
 			// Declared in YAML but absent from the store (a reconcile bypass or
-			// partial create). Skip rather than fail the whole boot pass.
+			// partial create). Skip rather than fail the whole boot pass. This is
+			// expected, not a fault — no error is recorded.
 			r.logger.Warn("channels: yaml reconcile skipped a channel missing from the store",
 				zap.String("channel_id", channelID))
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("channels: reconcile from yaml: get config %s: %w", channelID, err)
+			recordErr(channelID, fmt.Errorf("get config %s: %w", channelID, err))
+			continue
 		}
 
 		switch {
@@ -170,7 +211,8 @@ func (r *ChannelRouter) ReconcileFromYAML(ctx context.Context, cfg *Config) erro
 			// resolved YAML governance set in at the declared revision.
 			snapshot := decl.toConfigOverrides(cfg)
 			if err := r.store.ReconcileChannelConfig(ctx, channelID, snapshot, decl.Revision); err != nil {
-				return fmt.Errorf("channels: reconcile from yaml: adopt %s: %w", channelID, err)
+				recordErr(channelID, fmt.Errorf("adopt %s: %w", channelID, err))
+				continue
 			}
 			adopted++
 
@@ -179,11 +221,13 @@ func (r *ChannelRouter) ReconcileFromYAML(ctx context.Context, cfg *Config) erro
 			// without a revision bump). Compare content hashes to tell them apart.
 			yamlHash, err := channelConfigContentHash(decl.toConfigOverrides(cfg))
 			if err != nil {
-				return fmt.Errorf("channels: reconcile from yaml: hash yaml %s: %w", channelID, err)
+				recordErr(channelID, fmt.Errorf("hash yaml %s: %w", channelID, err))
+				continue
 			}
 			storeHash, err := channelConfigContentHash(stored)
 			if err != nil {
-				return fmt.Errorf("channels: reconcile from yaml: hash store %s: %w", channelID, err)
+				recordErr(channelID, fmt.Errorf("hash store %s: %w", channelID, err))
+				continue
 			}
 			if yamlHash != storeHash {
 				// DRIFT (mechanic 4): warn loudly, store stays authoritative.
@@ -201,11 +245,16 @@ func (r *ChannelRouter) ReconcileFromYAML(ctx context.Context, cfg *Config) erro
 			// Not drift (the revisions disagree on purpose).
 		}
 	}
-	if adopted > 0 || drift > 0 {
+	if adopted > 0 || drift > 0 || failed > 0 {
 		r.logger.Info("channels: yaml config reconciled into store",
 			zap.Int("adopted_channels", adopted),
 			zap.Int("drifted_channels", drift),
+			zap.Int("failed_channels", failed),
 			zap.Int("declared_channels", len(cfg.Channels)))
+	}
+	if firstErr != nil {
+		return fmt.Errorf("channels: reconcile from yaml: %d of %d declared channels failed (first: %w)",
+			failed, len(cfg.Channels), firstErr)
 	}
 	return nil
 }

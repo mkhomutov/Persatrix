@@ -13,6 +13,7 @@ package channels
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -319,4 +320,55 @@ func TestReconcileFromYAML_ChannelNotInStore_Skipped(t *testing.T) {
 func TestReconcileFromYAML_NilConfig(t *testing.T) {
 	router, _, _, ctx := newReconcileRouter(t)
 	assert.NoError(t, router.ReconcileFromYAML(ctx, nil))
+}
+
+// failingGetStore wraps a ChannelStore and injects a HARD (non-ErrChannelNotFound)
+// error from GetChannelConfig for one channel id — the transient-store-fault case
+// the per-channel resilience guard exists for. Every other method delegates to the
+// embedded store.
+type failingGetStore struct {
+	ChannelStore
+	failID string
+}
+
+func (f *failingGetStore) GetChannelConfig(ctx context.Context, id string) (ChannelConfigOverrides, int64, error) {
+	if id == f.failID {
+		return ChannelConfigOverrides{}, 0, errors.New("channels: injected store fault")
+	}
+	return f.ChannelStore.GetChannelConfig(ctx, id)
+}
+
+// A hard store error on ONE channel must not abort the whole reconcile pass: the
+// channels declared after the failing one must still be adopted. Otherwise a
+// transient fault on an early channel silently defers every later channel's
+// adoption to the next restart — exactly the "log-and-continue, per-channel"
+// posture the method's doc and the boot wiring promise. The fault is still
+// surfaced to the caller (a non-nil return) so the orchestrator logs the incident.
+func TestReconcileFromYAML_PerChannelErrorDoesNotAbortPass(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	core, logs := observer.New(zap.WarnLevel)
+	mustCreateGroup(t, store, "planning", "ada", "iron-fox")
+	mustCreateGroup(t, store, "design", "ada", "iron-fox")
+
+	// planning is declared first and is wired to fault; design is declared after.
+	wrapped := &failingGetStore{ChannelStore: store, failID: "group:planning"}
+	router := NewChannelRouter(wrapped, NoopDispatcher{}, zap.New(core), nil)
+	ctx := context.Background()
+
+	body := "channels:\n" +
+		"  - name: planning\n    revision: 1\n    members:\n      - ada\n      - iron-fox\n" +
+		"  - name: design\n    revision: 1\n    members:\n      - ada\n      - iron-fox\n"
+	cfg, err := LoadConfig(writeYAML(t, body))
+	require.NoError(t, err)
+
+	rErr := router.ReconcileFromYAML(ctx, cfg)
+	require.Error(t, rErr, "a per-channel fault is surfaced to the caller (orchestrator logs it)")
+
+	// The channel declared AFTER the failing one is still adopted — the pass did
+	// not abort at the first fault.
+	_, rev, err := store.GetChannelConfig(ctx, "group:design")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), rev, "a later channel is adopted despite an earlier channel's fault")
+
+	assert.NotZero(t, logs.Len(), "the per-channel fault is logged, not swallowed")
 }

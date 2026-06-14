@@ -157,6 +157,14 @@ type ChannelConfig struct {
 	// decrement to roll back — write the old config as a new, higher revision
 	// (RFC 0050 mechanic 2). Zero/absent is seed-only; negative is rejected at
 	// load ([Config.Validate]).
+	//
+	// OPERATOR CAVEAT — adopting a revision freezes inherited fleet defaults.
+	// Setting `revision:` on a block snapshots its FULLY RESOLVED config into the
+	// store, including knobs the block inherits from the fleet `default_*` values.
+	// After adoption that channel no longer tracks the fleet defaults: a later
+	// change to a `default_*` knob does not reach the channel (and surfaces as a
+	// drift warning) until you bump THIS channel's revision to re-snapshot. Adopt
+	// deliberately, per channel; see [ChannelConfig.toConfigOverrides].
 	Revision int64 `yaml:"revision"`
 	// FloorControl opts this channel into RFC 0030 Layer 2.5 speaker
 	// serialization: candidate responders take the floor one at a time,

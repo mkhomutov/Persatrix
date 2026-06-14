@@ -224,8 +224,12 @@ func (s *sqliteStore) PutChannelConfig(ctx context.Context, id string, overrides
 
 // ReconcileChannelConfig implements [ChannelStore.ReconcileChannelConfig] — the
 // RFC 0050 PR 3 boot-loader write that SETS the revision to the YAML-declared
-// value (vs PutChannelConfig's +1 bump). No CAS: the caller has already gated on
-// the revision ordering and is the sole boot-time writer.
+// value (vs PutChannelConfig's +1 bump). No CAS and no enclosing transaction:
+// the single UPDATE is atomic, but the absence of a compare-and-set is only safe
+// because the caller has already gated on the revision ordering AND is the sole
+// boot-time writer (the REST/CLI surface is not yet serving). See the interface
+// doc's CONTRACT note — this must not be reused on a request-time path without
+// growing its own CAS first.
 func (s *sqliteStore) ReconcileChannelConfig(ctx context.Context, id string, overrides ChannelConfigOverrides, revision int64) error {
 	// An all-unset override persists as NULL (inherit-all), not a literal `{}`,
 	// so it reads back identically to a never-edited channel — same encoding
