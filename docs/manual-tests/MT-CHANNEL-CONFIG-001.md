@@ -381,5 +381,3 @@ surfaces it without clobbering. Pinned deterministically by
   an edit to it takes effect only on the *next restart*, not mid-run. The
   live-honor step (Step 3) must use a router-held knob; this MT uses
   `interaction_idle_timeout_seconds`.
-</content>
-</invoke>
