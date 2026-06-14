@@ -35,7 +35,7 @@ import (
 //   - A store/member-lookup miss (no store, lookup error, empty membership)
 //     leaves no candidate set at all, so the lift is skipped and `structured`
 //     is returned untouched.
-//   - A registry miss (no registry, List error) only costs the display *names*:
+//   - A registry miss (no registry, NamesFor error) only costs the display *names*:
 //     candidates are still built from the membership rows with empty names, so
 //     an in-text *id* ("@iron-fox") still lifts — only display-name mentions
 //     ("@Iron Fox") quietly fall back to today's no-lift behaviour.

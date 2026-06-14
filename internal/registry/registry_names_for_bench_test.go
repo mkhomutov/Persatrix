@@ -13,11 +13,14 @@ import (
 // case the issue is forward-looking about — to confirm the scoped NamesFor is a
 // strict improvement (not just a wash) before the lift relies on it.
 //
-// Run: go test ./internal/registry/ -run x -bench NamesFor -benchmem
+// Run: go test ./internal/registry/ -run x -bench NameLookup -benchmem
+// (the filter must match BOTH benchmarks below — "NamesFor" alone would skip the
+// whole-directory baseline and report only half the comparison.)
 //
-// The List path here even *understates* its real cost: it stops at name
-// extraction, whereas List additionally deep-copies every agent's Capabilities
-// slice — work NamesFor skips entirely.
+// The List path measures the real thing: it calls the production List, so its
+// numbers already include deep-copying every agent's Capabilities slice — the
+// dominant cost (the ~5000 allocs/op are those per-agent slice copies), exactly
+// the work NamesFor skips. No estimation; the deep copy is in the figure.
 
 const benchDirectorySize = 5000 // a large multi-tenant-ish directory
 const benchChannelMembers = 6   // a typical small channel

@@ -109,6 +109,7 @@ Microbenchmark (`registry_names_for_bench_test.go`, 5000-agent directory,
 | whole-directory `List` + extract | 1,721,813 | 1,332,035 | 5021 |
 | scoped `NamesFor` | 261 | 336 | 2 |
 
-~6,600× faster, ~4,000× less allocated — and `List`'s figure *understates*
-its real cost (the bench stops at name extraction; `List` additionally
-deep-copies every `Capabilities` slice).
+~6,600× faster, ~4,000× less allocated. `List`'s figure is its real cost,
+not an estimate: the baseline calls the production `List`, so its ~5000
+allocs/op *are* the per-agent `Capabilities` deep-copies — exactly the work
+`NamesFor` skips.
