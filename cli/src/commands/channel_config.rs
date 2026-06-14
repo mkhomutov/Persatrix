@@ -256,9 +256,18 @@ fn config_rows(view: &ChannelConfigView) -> Vec<(&'static str, &ConfigField)> {
 /// `interaction_budget_tokens` when inherited — its live resolution is deferred,
 /// RFC 0050 Phase 1 Open item 4) reads as `—` so it is not mistaken for the
 /// literal string "null"; a JSON string drops its quotes.
+///
+/// An empty string renders as `(none)` rather than a blank cell. The one string
+/// knob is `escalation_chair_id`, whose empty value means "no chair" — either an
+/// explicit `[channel]` disable (the empty-string sentinel) or an inherited
+/// `[default]` with no chair configured. A blank cell would read as a render
+/// glitch / missing field; `(none)` names the state, and the provenance tag still
+/// distinguishes the two cases. Kept distinct from `—` (deferred/null) so the two
+/// are not conflated.
 fn render_value(value: &Value) -> String {
     match value {
         Value::Null => "\u{2014}".to_string(),
+        Value::String(s) if s.is_empty() => "(none)".to_string(),
         Value::String(s) => s.clone(),
         other => other.to_string(),
     }
@@ -346,6 +355,18 @@ async fn fetch_config(
     decode_config_response(raw)
 }
 
+/// Augment a 409-conflict API message with the operator's recovery step. Pulled
+/// out of [`apply_config_patch`] so this user-facing copy has a regression guard
+/// (the HTTP path itself is only live-verified) — a refactor that drops the
+/// re-read steer fails [`conflict_hint_points_at_reread`] rather than silently
+/// shipping a dead-end error.
+fn conflict_hint(msg: &str) -> String {
+    format!(
+        "{msg}\nthe config changed since you last read it; re-run \
+         `channel config get` and retry"
+    )
+}
+
 /// `PATCH /api/v1/channels/{id}/config` with the sparse `patch` body under an
 /// `If-Match: revision` optimistic-concurrency guard. Returns the post-apply
 /// view (bumped revision + new effective config). A stale revision surfaces as a
@@ -370,10 +391,7 @@ async fn apply_config_patch(
         if status == StatusCode::CONFLICT {
             // The revision we read moved under us (a concurrent edit). Re-read
             // and retry — never decrement; the higher revision always wins.
-            return Err(format!(
-                "{msg}\nthe config changed since you last read it; re-run \
-                 `channel config get` and retry"
-            ));
+            return Err(conflict_hint(&msg));
         }
         return Err(msg);
     }

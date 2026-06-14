@@ -215,6 +215,33 @@ fn render_value_dashes_null_and_unquotes_string() {
     assert_eq!(render_value(&Value::Bool(true)), "true");
 }
 
+#[test]
+fn render_value_names_empty_string_rather_than_blanking() {
+    // The one string knob (escalation_chair_id) renders empty as `(none)`, not a
+    // blank cell that reads as a missing field — the empty value is a real state
+    // (no chair / escalation disabled). Kept distinct from `—` (null/deferred);
+    // the row's [channel]/[default] tag separates an explicit disable from an
+    // inherited no-chair.
+    assert_eq!(render_value(&Value::String(String::new())), "(none)");
+    assert_ne!(render_value(&Value::String(String::new())), "\u{2014}");
+}
+
+// ─── conflict_hint (409 recovery copy) ─────────────────────────────
+
+#[test]
+fn conflict_hint_points_at_reread() {
+    // A stale-revision 409 must steer the operator to re-read and retry, and must
+    // preserve the server's own message. This is the only automated guard on the
+    // hint copy — the HTTP path that emits it is live-verified only.
+    let hint = conflict_hint("409 Conflict: revision mismatch");
+    assert!(hint.contains("409 Conflict: revision mismatch"), "{hint}");
+    assert!(
+        hint.contains("channel config get"),
+        "names the re-read verb: {hint}"
+    );
+    assert!(hint.contains("retry"), "{hint}");
+}
+
 // ─── passthrough_json (--json fidelity) ────────────────────────────
 
 #[test]

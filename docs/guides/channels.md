@@ -461,6 +461,53 @@ channels:
 > wraps up / terminates) is **v0.4.0** — v0.3.8 convergence is deliberately
 > deterministic (Layers 1/2/4), so it needs no moderator.
 
+### Editing governance config at runtime — `channel config` (RFC 0050 Phase 1)
+
+The governance knobs above are declared in `config/channels.yaml` and resolved at
+startup. RFC 0050 Phase 1 adds an **operator surface to read and edit a channel's
+governed knobs at runtime**, without a redeploy — over
+`GET`/`PATCH /api/v1/channels/{id}/config` and the `persatrix channel config`
+verb group:
+
+```bash
+# Show effective values, provenance ([channel] override vs [default] inherited),
+# and the channel's config revision.
+persatrix channel config get planning
+persatrix channel config get planning --json
+
+# Override one or more knobs (space-separated key=value). Knob names match the
+# YAML fields above (floor_control, end_vote_threshold, end_vote_window,
+# escalation_chair_id, interaction_idle_timeout_seconds, interaction_budget_tokens,
+# max_replies_per_participant_per_interaction, salience_max_channel_members).
+persatrix channel config set planning floor_control=true end_vote_window=4
+
+# Clear one or more knobs back to inherit.
+persatrix channel config unset planning floor_control
+```
+
+- **Dark by default.** The whole surface — read and write — is gated behind the
+  operator-authored `panels.channel_timeline.config_edit_enabled` toggle in
+  [`config/ui.yaml`](../../config/ui.yaml). A `403` means it is off.
+- **Optimistic concurrency.** `set`/`unset` read the current revision and carry it
+  back as an `If-Match` guard; a concurrent edit surfaces as a conflict with a
+  re-read steer (re-run `config get` and retry). A successful write echoes the
+  bumped revision and new effective config, so no second round-trip is needed.
+- **Closed knob set, client-validated.** A typo'd knob or wrong-typed value
+  (`floor_control=maybe`) fails fast with the vocabulary listed, before any
+  round-trip; the server owns value *ranges*. `escalation_chair_id=` (empty
+  string) is the explicit "disable escalation" override — distinct from
+  `unset escalation_chair_id` (clear back to inherit).
+- **`interaction_budget_tokens`** is persisted but **not yet live-enforced**
+  (Open item 4) — an overridden value carries a deferral note in the `get` view,
+  and an inherited one reads as `—`.
+
+> **Scope.** This is the dependency-free core (`get`/`set`/`unset`), riding purely
+> on the REST endpoints. The YAML-backed verbs (`export`/`import`/`diff`, which
+> read the declared `config/channels.yaml`) are a follow-up. As with the other
+> verbs, the authoritative flag grammar lives in the CLI source
+> ([`cli/src/commands/channel_config.rs`](../../cli/src/commands/channel_config.rs)),
+> not this guide.
+
 ### The interaction-summary surface (RFC 0020) — v0.3.8
 
 Governance makes a brainstorm *converge and terminate*; the **summary surface**
