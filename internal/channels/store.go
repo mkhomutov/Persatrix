@@ -137,6 +137,24 @@ type ChannelStore interface {
 	// when the participant is not a member of the channel.
 	RemoveMember(ctx context.Context, channelID, participantID string) error
 
+	// GetChannelConfig returns the sparse per-channel governance overrides and
+	// the current store-owned config revision for `id`, or [ErrChannelNotFound]
+	// when the channel does not exist. A channel that has never been edited
+	// reads back an empty (inherit-all) [ChannelConfigOverrides] at revision 0.
+	// RFC 0050 Phase 1.
+	GetChannelConfig(ctx context.Context, id string) (ChannelConfigOverrides, int64, error)
+
+	// PutChannelConfig persists `overrides` for `id` and bumps the store-owned
+	// config revision by one, in a single transaction. It is the optimistic-
+	// concurrency primitive: when `expectedRevision` does not equal the
+	// channel's current revision it writes nothing and returns a
+	// [ConfigRevisionConflictError] (matching [ErrConfigRevisionConflict] via
+	// [errors.Is]). An all-unset `overrides` persists as inherit-all (a NULL
+	// blob). `lineage` (the mutation's governance interaction id) is written
+	// through but ships dormant — pass "" until RFC 0050 Open Q2 is activated.
+	// Returns [ErrChannelNotFound] for an unknown id. RFC 0050 Phase 1.
+	PutChannelConfig(ctx context.Context, id string, overrides ChannelConfigOverrides, expectedRevision int64, lineage string) error
+
 	// Close releases any resources held by the store.
 	Close() error
 }

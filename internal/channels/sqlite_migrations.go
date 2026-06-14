@@ -44,9 +44,57 @@ func applyMigration(db *sql.DB, target int) error {
 		return migrateV5ToV6(db)
 	case 7:
 		return migrateV6ToV7(db)
+	case 8:
+		return migrateV7ToV8(db)
 	default:
 		return fmt.Errorf("no migration registered for v%d", target)
 	}
+}
+
+// migrateV7ToV8 lands the RFC 0050 Phase 1 operator-editable channel config
+// columns on `channels`. Forward-only and a pure addition — three additive,
+// nullable-or-defaulted columns, no index or table rebuild, every existing
+// index left intact:
+//
+//   - `config_overrides_json TEXT` (nullable, no DEFAULT) holds the sparse
+//     per-channel governance override set ([ChannelConfigOverrides]) as JSON.
+//     NULL = no override = inherit every knob, so a pre-v8 row reads back
+//     byte-identically to today. A single sparse blob — not one column per
+//     knob — preserves tri-state inherit semantics (absent key = inherit) and
+//     lets future knobs land with no further migration (RFC 0050 §refinement).
+//   - `config_revision INTEGER NOT NULL DEFAULT 0` is the store-owned,
+//     monotonic per-channel revision the optimistic-concurrency apply path
+//     bumps. The 0 backfill is the revision gate's seed-only floor: a channel
+//     the store has never had edited sits at 0 (RFC 0050 *Migration*).
+//   - `config_change_lineage TEXT` (nullable) is RESERVED / dormant — the
+//     governance interaction id of the mutation (RFC Open Q2). Phase 1 plumbs
+//     it through [PutChannelConfig] but no production caller populates it yet.
+//
+// SQLite ≥3.20 supports `ADD COLUMN ... DEFAULT <constant>` without a backfill
+// UPDATE, so each column lands in one statement. The whole migration runs in
+// one transaction and stamps `user_version` inside it (PR #335 review L3) so
+// the schema change and its version bookkeeping commit atomically.
+func migrateV7ToV8(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []string{
+		`ALTER TABLE channels ADD COLUMN config_overrides_json TEXT`,
+		`ALTER TABLE channels ADD COLUMN config_revision INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE channels ADD COLUMN config_change_lineage TEXT`,
+	}
+	for _, q := range stmts {
+		if _, err := tx.Exec(q); err != nil {
+			return fmt.Errorf("exec %q: %w", firstLine(q), err)
+		}
+	}
+	if err := stampUserVersionTx(tx, 8); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // migrateV6ToV7 adds the RFC 0030 Tier B (v0.3.8) per-member salience-bid
