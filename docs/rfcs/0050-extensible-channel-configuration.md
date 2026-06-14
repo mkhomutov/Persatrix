@@ -1,7 +1,7 @@
 ---
 id: RFC-0050
 title: "Extensible Channel Configuration (Operator-Editable, Single Source of Truth)"
-summary: "Make per-channel governance config operator-editable from CLI and web console without restart, with the channel store as the single source of truth and a revision-gated YAML loader so config-as-code and live edits coexist (last-writer-wins by per-channel revision)"
+summary: "Make per-channel governance config operator-editable from CLI and web console without restart, with the channel store as the single source of truth and a revision-gated YAML loader so config-as-code and live edits coexist (higher per-channel revision wins)"
 type: architecture
 status: proposed
 author: Maksim Khomutov
@@ -19,7 +19,7 @@ depends_on:
 **Author**: Maksim Khomutov  
 **Date**: 2026-06-14  
 **Target**: v0.3.x (unscheduled)  
-**Depends on**: RFC 0030 (channel interaction governance), RFC 0048 (operator/tester web console)
+**Depends on**: RFC 0030 (multi-agent conversation governance), RFC 0048 (operator/tester web console)
 
 ---
 
@@ -72,9 +72,11 @@ Two concrete pains, established while scoping this work:
    YAML → restart orchestrator → wait for `ReconcileConfig` / `Resolve*`. There
    is no way for an operator to nudge `end_vote_window` or disable
    `floor_control` on a running channel. The router already exposes setters
-   (`SetFloorControl`, salience caps, reply budgets, end-vote params, escalation
-   chairs — `internal/channels/router.go`); nothing wires them to a runtime
-   request.
+   (`SetFloorControl` in `internal/channels/router.go`;
+   `SetSalienceMaxChannelMembers`, `SetReplyBudget`, `SetEndVoteParams`,
+   `SetEscalationChair` in the sibling `internal/channels/router_salience.go`,
+   `reply_budget.go`, `end_vote.go`, `chair_escalation.go`); nothing wires them
+   to a runtime request.
 
 2. **Per-knob extension cost (developer pain).** Adding one governance knob
    today touches ~6 layers: YAML field → `ChannelConfig` struct
@@ -115,6 +117,15 @@ Supporting (served as a consequence, not separately optimized here):
    knob *with provenance* (fleet default → channel → member), so "one source of
    truth" is visible, not merely asserted.
 
+Deferred (named here so the [Non-Goals](#non-goals) references resolve; these
+belong to the same goal family but are explicitly out of scope for this RFC):
+
+- **G2 — Cheap to extend.** Adding a knob today touches ~6 layers; a
+  schema-driven generic config would collapse the per-knob plumbing. Deferred
+  (see Non-Goals).
+- **G6 — Organized.** Reusable named profiles / presets with
+  fleet→channel→member inheritance. Deferred (see Non-Goals).
+
 ## Non-Goals
 
 - **Schema-driven generic config (G2 / cheap-to-extend).** Replacing the typed
@@ -123,8 +134,9 @@ Supporting (served as a consequence, not separately optimized here):
   *not* re-architect the per-knob plumbing. Knobs stay typed for now.
 - **Profiles / named presets (G6).** Inheritance beyond fleet→channel→member
   (e.g. reusable `debate-room` presets) is deferred to a follow-up RFC.
-- **Unifying the RFC-0020 (agent memory episode) and RFC-0030 (governance
-  interaction) id producers.** Out of scope, as in [ISSUE-0102].
+- **Unifying the RFC-0020 (interaction lifecycle / episode granularity) and
+  RFC-0030 (governance interaction) id producers.** Out of scope, as in
+  [ISSUE-0102](../issues/ISSUE-0102-closed-summary-episode-id-diverges-from-governance-interaction-id.md).
 - **Free-form key/value config.** Config remains schema-validated and typed;
   "extensible" here means *editable and single-sourced*, not *untyped*.
 - **A new governance layer.** No new knob is introduced; this is about how
@@ -156,7 +168,9 @@ flowchart LR
 All three writers funnel through **one apply path**:
 `validate (schema) → apply (router setters) → persist (store) → bump revision`.
 With one store, "who wins" stops being philosophical and becomes mechanical:
-**last writer wins, ordered by revision.** G4 holds (one store); G1 holds (live
+**the higher revision wins** (a revision-ordered last-writer-wins register).
+Equal revisions are *not* a silent overwrite either way — they are treated as a
+conflict and surfaced as drift (mechanic 4). G4 holds (one store); G1 holds (live
 edits persist and survive restart, because they are written to the canonical
 store, not just the in-memory maps).
 
@@ -171,7 +185,8 @@ bumped on every apply (from any writer). A YAML channel block carries the
 YAML block **only if its `revision` is strictly greater than the store's
 current revision** for that channel. GitOps pushes a change by exporting (which
 stamps `store + 1`); live edits also bump the revision. Both paths coexist under
-last-writer-wins, and `config export` regenerates YAML from the store so the
+revision ordering (higher revision wins; equal-revision collisions surface as
+drift, mechanic 4), and `config export` regenerates YAML from the store so the
 committed file never silently lies.
 
 ### The four mechanics
@@ -191,7 +206,12 @@ committed file never silently lies.
    hand-authored today, so humans *will* forget to bump `revision:`. The normal
    loop is therefore **export → edit → apply**, where `channel config export`
    stamps `revision: store + 1` automatically. Hand-editing still works but is
-   the advanced path.
+   the advanced path. **Caveat:** `export` *reads* the counter and does not
+   reserve it, so if another writer bumps the store between export and the next
+   boot, the committed `store + 1` is no longer strictly greater — it ties (→
+   drift, mechanic 4) or loses (→ ignored). Export-first narrows the window but
+   does not guarantee a committed GitOps change applies; see
+   [Open Question 6](#open-questions).
 
 4. **Drift detection → warn loudly, store stays authoritative.** If a YAML
    block's `revision` equals the store's but the *content hash* differs (someone
@@ -259,8 +279,9 @@ Deliverables:
 4. CLI: `channel config get <id>` (effective values + provenance),
    `channel config set <id> <key>=<value>…`, `channel config unset`,
    `channel config export <id>` / `import`, `channel config diff <id>`.
-5. Drift detection in the boot loader (mechanic 4) + revision-gating (mechanic 2)
-   + absent-revision-as-seed migration (mechanic).
+5. Drift detection in the boot loader (mechanic 4) + revision-gating (per the
+   [Revision-gated YAML loader](#revision-gated-yaml-loader)) +
+   absent-revision-as-seed migration (per [Migration](#migration)).
 
 Dependencies: none beyond current RFC-0030 plumbing.
 
@@ -319,6 +340,13 @@ both.
 5. **Reload trigger.** Is YAML re-evaluated only at process start, or also on a
    SIGHUP / `reconcile` command? Revision-gating works for both; this only
    decides *when* the loader runs.
+6. **Export/apply revision collision.** Because `export` stamps `store + 1`
+   without reserving it (mechanic 3), a writer that bumps the store between
+   export and the next boot makes the committed GitOps revision tie or lose, so
+   it does not apply — only a drift warning fires. Is the drift warning + manual
+   re-export an acceptable v1 resolution, or does GitOps need a reserve-on-export
+   (allocate the revision at export time) or a content-hash fast-forward (apply
+   an equal-revision YAML block when its hash supersedes the store's)?
 
 ## Decision / Next Steps
 
@@ -326,7 +354,8 @@ both.
 
 - Primary goals: **G1 (operator self-service)** and **G4 (one source of truth)**.
 - Truth model: **store-canonical; one validated apply path; three writers (YAML
-  loader, CLI, web); last-writer-wins ordered by per-channel revision.**
+  loader, CLI, web); higher per-channel revision wins (revision-ordered
+  last-writer-wins), equal revisions surface as drift.**
 - Boot rule: **revision-gated YAML loader.**
 - The four mechanics (per-channel granularity; store-owned counter with
   export-stamped YAML revision; export-first to avoid the hand-bump foot-gun;
