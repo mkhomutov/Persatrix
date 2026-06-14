@@ -29,8 +29,9 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # YAML for the RFC 0050 `channel config export/import/diff` verbs
 # (cli/src/commands/channel_config_yaml.rs) — read the declared
 # `config/channels.yaml` per-channel block and regenerate it from the store.
-# serde_yaml is unmaintained; serde_yml is the maintained fork.
-serde_yml = "0.0.12"
+# serde_yaml is deprecated and serde_yml is now unmaintained/unsound
+# (RUSTSEC, via libyml). serde_yaml_ng is the maintained drop-in fork.
+serde_yaml_ng = "0.10"
 
 # Removed in PR review: tonic (gRPC — not used, CLI uses REST via reqwest),
 # indicatif (no progress bars yet). Re-add each when the corresponding feature

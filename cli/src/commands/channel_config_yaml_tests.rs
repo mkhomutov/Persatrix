@@ -77,7 +77,7 @@ fn yaml_to_knob_json_rejects_wrong_type_naming_the_knob() {
 // ─── parse_channel_block ───────────────────────────────────────────────────
 
 fn yaml_block(text: &str) -> Yaml {
-    serde_yml::from_str(text).expect("test YAML parses")
+    serde_yaml_ng::from_str(text).expect("test YAML parses")
 }
 
 #[test]
