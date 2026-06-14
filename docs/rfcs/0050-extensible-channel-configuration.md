@@ -36,7 +36,12 @@ depends_on:
   router-wired** (Open item 4 — live application deferred). Live G1 acceptance:
   [MT-CHANNEL-CONFIG-001](../manual-tests/MT-CHANNEL-CONFIG-001.md) — **first
   live run passed 2026-06-14** (all steps + edge cases green).
-- **Phase 2 (web settings panel)** — not started.
+- **Phase 2 (web settings panel)** — not started. **Prerequisite:**
+  [ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md)
+  (first-edit detachment of YAML-seeded knobs) should be resolved first — it is
+  bounded today (feature ships dark; only `planning` carries a non-default
+  chair) but becomes a routine silent-data-loss footgun once a UI invites
+  operators to edit YAML-configured channels.
 - **Phase 3 (schema-driven generic config / profiles)** — future RFC.
 
 ## Table of Contents
