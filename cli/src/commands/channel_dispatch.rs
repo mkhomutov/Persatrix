@@ -11,6 +11,7 @@ use crate::commands::channel::{
     cmd_channel_history, cmd_channel_join, cmd_channel_list, cmd_channel_send, cmd_channel_watch,
     validate_message_id, DEFAULT_HISTORY_LIMIT, DEFAULT_WATCH_INTERVAL_SECS,
 };
+use crate::commands::channel_config::{cmd_config_get, cmd_config_set, cmd_config_unset};
 use crate::commands::channel_manage::{cmd_channel_create, cmd_channel_info};
 
 /// `--respond` value-parser. clap renders each variant in its `snake_case`
@@ -180,6 +181,52 @@ pub(crate) enum ChannelCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Read or edit a channel's governance config (RFC 0050 Phase 1).
+    ///
+    /// Gated server-side behind the `config_edit_enabled` operator toggle
+    /// (config/ui.yaml) — a `403` means the surface is off. Writes are
+    /// optimistic-concurrency guarded: `set`/`unset` read the current revision
+    /// and a concurrent edit surfaces as a conflict.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+/// `persatrix channel config <action>` — the operator surface over PR 4's
+/// `GET`/`PATCH /api/v1/channels/{id}/config`. A new variant compile-errors in
+/// `dispatch` until its arm is added, keeping the parser and dispatch in lockstep.
+#[derive(clap::Subcommand)]
+pub(crate) enum ConfigAction {
+    /// Show a channel's effective governance values, provenance, and revision
+    Get {
+        /// Channel name (`planning`) or fully-qualified id (`group:planning`)
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set one or more knobs (`key=value`, space-separated, e.g.
+    /// `floor_control=true end_vote_window=5`). Knobs ∈ floor_control,
+    /// salience_max_channel_members, max_replies_per_participant_per_interaction,
+    /// end_vote_threshold, end_vote_window, escalation_chair_id,
+    /// interaction_idle_timeout_seconds, interaction_budget_tokens.
+    Set {
+        name: String,
+        /// One or more `key=value` assignments (at least one required)
+        #[arg(required = true)]
+        assignments: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Clear one or more knobs back to inherit (space-separated knob names)
+    Unset {
+        name: String,
+        /// One or more knob names to unset (at least one required)
+        #[arg(required = true)]
+        keys: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 pub(crate) async fn dispatch(
@@ -283,6 +330,17 @@ pub(crate) async fn dispatch(
             limit,
             json,
         } => cmd_channel_watch(client, server, &name, interval, limit, json).await,
+        ChannelCommands::Config { action } => match action {
+            ConfigAction::Get { name, json } => cmd_config_get(client, server, &name, json).await,
+            ConfigAction::Set {
+                name,
+                assignments,
+                json,
+            } => cmd_config_set(client, server, &name, &assignments, json).await,
+            ConfigAction::Unset { name, keys, json } => {
+                cmd_config_unset(client, server, &name, &keys, json).await
+            }
+        },
     }
 }
 
