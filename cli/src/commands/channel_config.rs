@@ -95,7 +95,9 @@ pub(crate) const CONFIG_KNOBS: &[(&str, KnobType)] = &[
 ];
 
 /// The wire type for a knob, or `None` if `key` is not an editable knob.
-fn knob_type(key: &str) -> Option<KnobType> {
+/// `pub(crate)` so the YAML follow-up verbs (`channel_config_yaml.rs`) coerce a
+/// declared `config/channels.yaml` value against the same closed knob set.
+pub(crate) fn knob_type(key: &str) -> Option<KnobType> {
     CONFIG_KNOBS
         .iter()
         .find(|(k, _)| *k == key)
@@ -228,7 +230,9 @@ pub(crate) fn build_unset_patch(keys: &[String]) -> Result<serde_json::Map<Strin
 /// its resolved field. Driven off [`CONFIG_KNOBS`] so the render order and the
 /// editable-knob set stay in lockstep (a knob added to the registry shows up in
 /// `get` automatically), matching against the typed view's fields by name.
-fn config_rows(view: &ChannelConfigView) -> Vec<(&'static str, &ConfigField)> {
+/// `pub(crate)` so the YAML follow-up verbs walk the same knob→(value, source)
+/// cells (`export` emits the `"channel"` subset; `diff` compares each cell).
+pub(crate) fn config_rows(view: &ChannelConfigView) -> Vec<(&'static str, &ConfigField)> {
     CONFIG_KNOBS
         .iter()
         .map(|(key, _)| {
@@ -334,8 +338,9 @@ fn decode_config_response(raw: String) -> Result<ConfigResponse, String> {
 
 /// `GET /api/v1/channels/{id}/config` → [`ConfigResponse`]. The caller is
 /// responsible for validating `id` first. A non-2xx (403 toggle-off, 404 unknown
-/// channel, 503 unwired) surfaces via [`api_error_message`].
-async fn fetch_config(
+/// channel, 503 unwired) surfaces via [`api_error_message`]. `pub(crate)` so the
+/// YAML follow-up verbs read effective config + revision through the same path.
+pub(crate) async fn fetch_config(
     client: &reqwest::Client,
     server: &str,
     id: &str,
@@ -371,7 +376,10 @@ fn conflict_hint(msg: &str) -> String {
 /// `If-Match: revision` optimistic-concurrency guard. Returns the post-apply
 /// view (bumped revision + new effective config). A stale revision surfaces as a
 /// 409 with a hint to re-read; other non-2xx pass through [`api_error_message`].
-async fn apply_config_patch(
+///
+/// `pub(crate)` so the YAML follow-up's `import` applies each declared channel
+/// block through the same optimistic-concurrency apply path.
+pub(crate) async fn apply_config_patch(
     client: &reqwest::Client,
     server: &str,
     id: &str,
