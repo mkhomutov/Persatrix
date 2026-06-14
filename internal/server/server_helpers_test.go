@@ -192,6 +192,13 @@ func (f *failingRegistry) Unregister(ctx context.Context, agentID string) error 
 	return f.Registry.Unregister(ctx, agentID)
 }
 
+func (f *failingRegistry) NamesFor(ctx context.Context, ids []string) (map[string]string, error) {
+	if f.failOn == "NamesFor" {
+		return nil, errors.New("simulated db error")
+	}
+	return f.Registry.NamesFor(ctx, ids)
+}
+
 // testServerWithRegistry creates a Server using the provided registry instead of
 // the default InMemoryRegistry. Used by failingRegistry tests.
 func testServerWithRegistry(t *testing.T, reg registry.Registry) *Server {

@@ -35,14 +35,14 @@ import (
 //   - A store/member-lookup miss (no store, lookup error, empty membership)
 //     leaves no candidate set at all, so the lift is skipped and `structured`
 //     is returned untouched.
-//   - A registry miss (no registry, List error) only costs the display *names*:
+//   - A registry miss (no registry, NamesFor error) only costs the display *names*:
 //     candidates are still built from the membership rows with empty names, so
 //     an in-text *id* ("@iron-fox") still lifts — only display-name mentions
 //     ("@Iron Fox") quietly fall back to today's no-lift behaviour.
 func (s *Server) liftContentMentions(ctx context.Context, channelID, senderID, content string, structured []string) []string {
 	// Short-circuit before any I/O: content with no `@` cannot name anyone, so
 	// there is nothing to lift and no reason to pay the member query plus the
-	// full registry scan below. This is the dominant case on a chat publish path
+	// scoped name lookup below. This is the dominant case on a chat publish path
 	// (most prose carries no mention), and the lookups are pure waste for it —
 	// the resolver's own empty return would arrive only after the I/O is spent.
 	// The nil-store leg is defensive for direct-construction callers (unit
@@ -58,28 +58,27 @@ func (s *Server) liftContentMentions(ctx context.Context, channelID, senderID, c
 		return structured
 	}
 
-	// id → display name, from the registry directory (the same source the
-	// persona roster join reads). A registry miss leaves the name empty, which
-	// the resolver treats as "id-only" for that member.
-	//
-	// Cost note: this snapshots the *whole* directory per `@`-bearing publish
-	// even though only the channel's members are consulted. Fine while
-	// registries are small (the dominant deployment); if one grows hot, scope
-	// the lookup to membership (per-member Get, or a cached directory). Tracked
-	// as ISSUE-0100, deliberately out of the wiring PR.
-	names := map[string]string{}
+	// id → display name for *only* this channel's members (the same Name source
+	// the persona roster join reads), via the membership-scoped NamesFor rather
+	// than a whole-directory List+sort that discards every non-member (ISSUE-0100).
+	// A registry miss (no registry, lookup error) leaves names empty, which the
+	// resolver treats as "id-only" for that member — an in-text *id* still lifts,
+	// only display *names* fall back to today's no-lift behaviour.
+	memberIDs := make([]string, len(members))
+	for i, m := range members {
+		memberIDs[i] = m.ParticipantID
+	}
+	var names map[string]string
 	if s.registry != nil {
-		if agents, lErr := s.registry.List(ctx); lErr == nil {
-			for _, a := range agents {
-				names[a.ID] = a.Name
-			}
+		if got, nErr := s.registry.NamesFor(ctx, memberIDs); nErr == nil {
+			names = got
 		}
 	}
 	candidates := make([]channels.MentionCandidate, len(members))
 	for i, m := range members {
 		candidates[i] = channels.MentionCandidate{
 			ID:          m.ParticipantID,
-			DisplayName: names[m.ParticipantID],
+			DisplayName: names[m.ParticipantID], // nil-map read is "" → id-only
 		}
 	}
 
