@@ -19,13 +19,89 @@ import (
 	"github.com/mkhomutov/persatrix/internal/state"
 )
 
-// TestInitUI_DisabledByDefault is the Red assertion for the off-by-default
-// posture (RFC 0048 §Security): --enable-ui=false yields no server option, so
-// the /ui/ route is never registered.
-func TestInitUI_DisabledByDefault(t *testing.T) {
+// TestInitUI_DisabledLoadsTogglesButNotConsole pins the post-decoupling
+// contract: --enable-ui=false still wires the feature toggles (one option,
+// server.WithUIConfig) so non-web surfaces can read config/ui.yaml, but it does
+// NOT serve the embedded console — the /ui/ assets and the /api/v1/ui/* boot
+// endpoints stay a clean 404 (RFC 0048 §Security off-by-default).
+func TestInitUI_DisabledLoadsTogglesButNotConsole(t *testing.T) {
 	opts := initUI(false, t.TempDir(), zap.NewNop())
-	assert.Empty(t, opts,
-		"--enable-ui=false (default) must wire no UI option so /ui/ is never registered")
+	require.Len(t, opts, 1,
+		"--enable-ui=false must still wire the config/ui.yaml toggles (WithUIConfig) so the RFC 0050 config-edit gate is reachable")
+
+	srv := buildUITestServer(t, opts...)
+	hs := httptest.NewServer(srv.Handler())
+	t.Cleanup(hs.Close)
+
+	for _, path := range []string{"/ui/", "/api/v1/ui/config"} {
+		resp, err := http.Get(hs.URL + path)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode,
+			"%s must 404 with the console disabled (assets are console-gated, not toggle-gated)", path)
+	}
+}
+
+// TestInitUI_DisabledHonorsConfigEditToggle is the regression guard for the
+// PR-643 finding: the RFC 0050 config-edit surface must be reachable WITHOUT
+// --enable-ui. An operator opts into runtime config editing
+// (config_edit_enabled: true in config/ui.yaml) but runs the orchestrator with
+// the console off; the PATCH/GET /api/v1/channels/{id}/config endpoints — mounted
+// unconditionally by registerChannelRoutes — must honor that toggle.
+//
+// The decisive signal is the status on a MISSING channel: a 404 proves the
+// config_edit gate was passed (the toggle reached the server); the pre-fix
+// behaviour was a 403, because initUI dropped server.WithUIConfig whenever the
+// console was off, leaving server.uiConfig nil → the default-OFF fallback.
+func TestInitUI_DisabledHonorsConfigEditToggle(t *testing.T) {
+	cfgDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "ui.yaml"), []byte(
+		"panels:\n  channel_timeline:\n    enabled: true\n    config_edit_enabled: true\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "channels.yaml"),
+		[]byte("max_channels: 50\n"), 0o644))
+
+	status := configEndpointStatus(t, cfgDir, false /* enableUI */)
+	assert.Equal(t, http.StatusNotFound, status,
+		"config_edit_enabled:true must be honored with --enable-ui off (404 = gate passed, channel missing); a 403 is the regression")
+}
+
+// TestInitUI_DisabledConfigEditDefaultStillForbidden is the negative control:
+// with the toggle at its default (OFF, no ui.yaml authored), the same disabled
+// orchestrator still 403s the config endpoint — the gate works; the fix only
+// stops initUI from silently dropping an operator's explicit opt-in.
+func TestInitUI_DisabledConfigEditDefaultStillForbidden(t *testing.T) {
+	cfgDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "channels.yaml"),
+		[]byte("max_channels: 50\n"), 0o644))
+
+	status := configEndpointStatus(t, cfgDir, false /* enableUI */)
+	assert.Equal(t, http.StatusForbidden, status,
+		"default-off config_edit must still 403 even with channels wired (no 503), with the console off")
+}
+
+// configEndpointStatus wires a real channel store/router (via initChannels) plus
+// the UI options (via initUI) onto a test server and returns the status of a GET
+// against a missing channel's config endpoint. The channels wiring guarantees
+// the endpoint is not a 503, so the result isolates the config_edit gate: 403
+// (toggle off) vs 404 (toggle on, channel absent).
+func configEndpointStatus(t *testing.T, cfgDir string, enableUI bool) int {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "channels.db")
+	logger := zap.NewNop()
+	chanOpts, cleanup, err := initChannels(cfgDir, dbPath, "", "", nil, nil, logger)
+	t.Cleanup(cleanup)
+	require.NoError(t, err)
+	require.NotEmpty(t, chanOpts, "channels must wire so the config endpoint is not a 503")
+
+	opts := append(chanOpts, initUI(enableUI, cfgDir, logger)...)
+	srv := buildUITestServer(t, opts...)
+	hs := httptest.NewServer(srv.Handler())
+	t.Cleanup(hs.Close)
+
+	resp, err := http.Get(hs.URL + "/api/v1/channels/group:ghost/config")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp.StatusCode
 }
 
 // TestInitUI_DisabledEmitsNoWarn guards that the disabled (default) path is

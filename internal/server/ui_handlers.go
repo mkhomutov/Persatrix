@@ -144,19 +144,25 @@ func (s *Server) panelCreate(name string, toggle PanelToggle) *uiCreateStatus {
 // channel_timeline carries one — the PATCH/GET /api/v1/channels/{id}/config
 // surface over the store-canonical apply path. `enabled` echoes the operator's
 // config_edit_enabled toggle (ships OFF — the surface lands dark); `available`
-// is runtime-derived and true only when the router is wired, because editing a
-// live knob needs the apply path ([ChannelRouter.ApplyChannelConfig]), not just
-// the store. So the affordance renders only when an operator opted in AND the
-// channels subsystem can actually serve the edit — and the server-side gate
-// ([Server.configEditEnabled]) enforces the same toggle on the endpoints, so a
-// client that ignores this hint still cannot reach a dark surface.
+// is runtime-derived and mirrors EXACTLY the endpoints' own availability check
+// (both the store and the router must be wired — the handlers 503 otherwise),
+// because editing a live knob reads the store provenance AND drives the router
+// apply path ([ChannelRouter.ApplyChannelConfig]). Keeping the hint identical to
+// the handler's 503 condition means a client that trusts `available` never hits
+// an avoidable 503. (In practice the router is constructed from the store, so a
+// router-without-store is unreachable; the store conjunct is for faithfulness to
+// the handler, not a distinct case.) So the affordance renders only when an
+// operator opted in AND the channels subsystem can actually serve the edit — and
+// the server-side gate ([Server.configEditEnabled]) enforces the same toggle on
+// the endpoints, so a client that ignores this hint still cannot reach a dark
+// surface.
 func (s *Server) panelConfigEdit(name string, toggle PanelToggle) *uiCreateStatus {
 	if name != "channel_timeline" {
 		return nil
 	}
 	return &uiCreateStatus{
 		Enabled:   toggle.ConfigEditEnabled,
-		Available: s.channelRouter != nil,
+		Available: s.channelStore != nil && s.channelRouter != nil,
 	}
 }
 

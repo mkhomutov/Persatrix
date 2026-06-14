@@ -176,9 +176,14 @@ func parseIfMatch(w http.ResponseWriter, r *http.Request) (int64, bool) {
 // current overrides and returns the COMPLETE desired override set for the apply
 // path. Per knob: a JSON null clears the override (unset→inherit), any other
 // value sets it, and a key absent from the patch leaves the current value
-// untouched. An unrecognised key or a value of the wrong JSON type is rejected
-// (additionalProperties:false at the wire boundary) so a typo'd knob 400s rather
-// than silently doing nothing.
+// untouched. An unrecognised key (default case) or a value of the wrong JSON
+// type ([decodeKnob]) is rejected here so a typo'd knob 400s rather than
+// silently doing nothing — this is where the closed-knob-set (the wire analogue
+// of additionalProperties:false) is enforced. Note the decode into
+// `map[string]json.RawMessage` upstream cannot do it: DisallowUnknownFields is a
+// no-op on a map, so the gate is this loop, which runs AFTER the channel load
+// and If-Match check (so a typo'd knob on a missing channel surfaces the 404
+// first).
 func mergeConfigPatch(current channels.ChannelConfigOverrides, patch map[string]json.RawMessage) (channels.ChannelConfigOverrides, error) {
 	out := current // value copy; pointer fields are shared but only reassigned below
 	for key, rawVal := range patch {
