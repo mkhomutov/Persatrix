@@ -40,11 +40,21 @@ The RFC's Phase 1 bullet said "per-channel `revision` column." Exploration
 showed that is necessary **but not sufficient**: the governance knobs
 (`floor_control`, end-vote `K`/`W`, reply budget, salience cap, escalation
 chair, idle timeout, interaction budget) are **not persisted in the channel
-store today** — they live only in `config/channels.yaml` and are seeded into the
-router's in-memory maps at startup by the `Resolve*` methods
-([`cmd/orchestrator/channels.go`](../../cmd/orchestrator/channels.go)). The
-store (`internal/channels/sqlite_schema.go`, `PRAGMA user_version` v7) persists
-only `channels` (id/name/type/description/created_at) and `memberships`.
+store today** — they live only in `config/channels.yaml`. Most are seeded into
+the router's in-memory maps at startup by per-knob `Resolve*` methods on
+`*ChannelRouter` (defined across `internal/channels/{floor_control,
+router_salience,reply_budget,end_vote,interaction_resolver,chair_escalation}.go`),
+invoked at boot — after `ChannelRouter.ReconcileConfig` has created the store
+rows — from [`cmd/orchestrator/channels.go`](../../cmd/orchestrator/channels.go).
+**Interaction budget is the exception**: it is *not* router-held — there is no
+`Resolve*` boot call and no router setter/map for it; it is resolved on demand
+by the value method [`ChannelConfig.ResolveInteractionBudgetTokens`](../../internal/channels/config.go)
+and enforced on the wallet path (`internal/wallet/`). This asymmetry shapes the
+apply path below (see PR 2). The store
+(`internal/channels/sqlite_schema.go`, `PRAGMA user_version` v7) persists, on
+`channels`, only `id`/`name`/`channel_type`/`description`/`created_at` plus the
+isolation axes `session_id` (v3) and `epoch_id` (v6) — and `memberships`. No
+governance knob lives there.
 
 For G1 ("the change … survives restart"), **Phase 1 must persist the per-channel
 overrides in the store**, not merely a revision number. Decision:
@@ -104,9 +114,19 @@ Deliverables:
 1. `ApplyChannelConfig(ctx, id, patch, expectedRevision, lineage)` —
    validate (single-channel rules extracted from
    [`config_validate.go`](../../internal/channels/config_validate.go)) →
-   `PutChannelConfig` (persist + bump) → call the existing router setters
-   (`SetFloorControl`, `SetSalienceMaxChannelMembers`, `SetReplyBudget`,
-   `SetEndVoteParams`, `SetEscalationChair`).
+   `PutChannelConfig` (persist + bump) → call the existing router setters for
+   the six **router-held** knobs: `SetFloorControl`,
+   `SetSalienceMaxChannelMembers`, `SetReplyBudget`, `SetEndVoteParams`,
+   `SetEscalationChair`, `SetInteractionIdleTimeout`.
+   **Interaction budget is excluded from this PR's apply path**: it is not
+   router-held (see the refinement note above), so there is no existing setter to
+   call and no in-memory map to update. Its override is still *persisted* by
+   `PutChannelConfig` in PR 1's uniform `config_overrides_json` (storage is knob-
+   agnostic), but applying it live requires new plumbing — a router-side budget
+   map + setter, or repointing the wallet enforcement path to read the stored
+   override — which is deferred (see *Open items*). So PR 2 makes six of the
+   seven knobs runtime-editable; interaction budget is store-persisted but its
+   live application lands later.
 2. Boot repoint: a `ResolveFromStore` step after `ReconcileConfig` that loads
    each channel's persisted overrides into the router (so the in-memory maps are
    seeded from the canonical store). Empty overrides → identical to today.
@@ -209,3 +229,14 @@ Dependencies: PR 4.
    override vs member) is available from the resolvers.
 3. **Lineage activation.** The `config_change_lineage` column ships dormant;
    populating it (RFC Open Q2) is a later, additive change with no migration.
+4. **Interaction-budget live application.** Unlike the other six knobs,
+   interaction budget is not router-held (no `Resolve*` boot call, no setter — it
+   is read on demand by `ChannelConfig.ResolveInteractionBudgetTokens` on the
+   wallet path). PR 1 persists its override uniformly, but PR 2's apply path does
+   not wire it live. Closing this needs an explicit follow-up: either add a
+   router-side per-channel budget map + `SetInteractionBudgetTokens` (mirroring
+   the other setters) and seed it at boot, or repoint the wallet enforcement read
+   at the stored override. Until then, an interaction-budget edit persists and
+   takes effect on the next restart but not mid-run — so the `MT-CHANNEL-CONFIG-*`
+   live-edit arc should exercise a router-held knob (e.g. `floor_control`), not
+   interaction budget.
