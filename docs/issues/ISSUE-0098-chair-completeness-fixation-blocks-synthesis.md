@@ -158,7 +158,10 @@ regression of this fix.
 `/agents/{id}/interactions/closed` summary listed interaction ids
 (`0d2ca73d`, `3eb8c3e5`) that diverge from the message-stamped /
 end-vote-closed id (`4b332af1`) — interaction-id segmentation in the
-summary view worth a separate look.
+summary view. Filed for its own look as
+[ISSUE-0102](ISSUE-0102-closed-summary-episode-id-diverges-from-governance-interaction-id.md)
+(the surface reports the persona's RFC 0020 memory-episode id, a
+different namespace from the RFC 0030 governance interaction id).
 
 ## Notes
 
