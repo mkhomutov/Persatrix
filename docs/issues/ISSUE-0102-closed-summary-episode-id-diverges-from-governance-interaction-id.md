@@ -102,7 +102,7 @@ accepted residual — a late-delivered predecessor straggler absorbed into the
 successor episode — predates this work and does not affect the end-vote-close
 lookup (the closed id labels its own episodes).
 
-**PR 1 (landed) — option 2 display half + option 1 honesty + option 3 docs.**
+**PR 1 (this change) — option 2 display half + option 1 honesty + option 3 docs.**
 The governance id is now *persisted* and *surfaced*, disambiguating the
 namespaces:
 

@@ -234,13 +234,33 @@ async def test_handler_projects_summary_and_trigger(memory):
     assert it.closed_at == 20.0
 
 
-async def test_handler_governance_id_empty_for_legacy_or_non_channel_row(memory):
-    """ISSUE-0102: a row with no persisted governance id (pre-fix, or a DM /
-    thread / non-channel interaction) surfaces an empty string, not an error."""
+async def test_handler_governance_id_empty_for_legacy_row(memory):
+    """ISSUE-0102: a pre-fix row persisted before the field existed has the
+    key *absent* from the context blob — the handler's ``.get`` default
+    surfaces an empty string, not an error or a missing-key crash."""
+    await _store_closed(
+        memory, interaction_id="i-legacy", scope="group:room-7", summary="wrap-up",
+        close_reason="structural", started_at=1.0, closed_at=2.0,
+        # governance_interaction_id omitted → key absent from context (a row
+        # written before close_path.py started stamping the field).
+    )
+    agents = {"agent-x": _fake_agent(memory)}
+    resp = await handle_get_closed_interactions(
+        agents, task_pb2.ClosedInteractionsRequest(agent_id="agent-x"), MagicMock(),
+    )
+    assert resp.interactions[0].governance_interaction_id == ""
+
+
+async def test_handler_governance_id_empty_for_real_dm_close(memory):
+    """ISSUE-0102: a DM / thread / non-channel close is the production shape
+    the legacy test missed — ``close_path.py`` *always* writes the key, but
+    ``wire_interaction_id`` is "" for a scope that carried no governance id, so
+    the persisted context holds the key *present with an empty value*. That
+    distinct shape (present-but-empty, not absent) must also surface ""."""
     await _store_closed(
         memory, interaction_id="i-dm", scope="dm:agent-x:peer", summary="wrap-up",
         close_reason="structural", started_at=1.0, closed_at=2.0,
-        # governance_interaction_id omitted → key absent from context.
+        governance_interaction_id="",  # key present, value "" — the real DM close.
     )
     agents = {"agent-x": _fake_agent(memory)}
     resp = await handle_get_closed_interactions(
