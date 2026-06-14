@@ -326,17 +326,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/agents/{id}/chat/history", s.handleGetChatHistory)
 	s.mux.HandleFunc("GET /api/v1/agents/{id}/interactions/closed", s.handleGetClosedInteractions)
 
-	// Channels endpoints (RFC 0011 §C); /activity = RFC 0048 console presence Tier 1.
-	s.mux.HandleFunc("POST /api/v1/channels", s.handleCreateChannel)
-	s.mux.HandleFunc("GET /api/v1/channels", s.handleListChannels)
-	s.mux.HandleFunc("GET /api/v1/channels/{id}", s.handleGetChannel)
-	s.mux.HandleFunc("DELETE /api/v1/channels/{id}", s.handleDeleteChannel)
-	s.mux.HandleFunc("POST /api/v1/channels/{id}/messages", s.handlePublishMessage)
-	s.mux.HandleFunc("GET /api/v1/channels/{id}/messages", s.handleGetChannelHistory)
-	s.mux.HandleFunc("GET /api/v1/channels/{id}/activity", s.handleChannelActivity)
-	s.mux.HandleFunc("GET /api/v1/channels/{id}/messages/{msg_id}/thread", s.handleGetThread)
-	s.mux.HandleFunc("POST /api/v1/channels/{id}/members", s.handleAddChannelMember)
-	s.mux.HandleFunc("DELETE /api/v1/channels/{id}/members/{participant_id}", s.handleDeleteChannelMember)
+	// Channels endpoints (RFC 0011 §C / RFC 0048 / RFC 0050) — see registerChannelRoutes.
+	s.registerChannelRoutes()
 
 	// Session registry endpoints (RFC 0031 Phase 3 §E operator surface).
 	// Enabler for the `persatrix session …` CLI verbs (PR 2); return 503

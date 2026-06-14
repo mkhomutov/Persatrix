@@ -24,14 +24,17 @@ type uiConfigResponse struct {
 // so an older client that does not know the key simply shows no create
 // affordance — the §C graceful-degradation contract, unchanged.
 type uiPanelStatus struct {
-	Enabled   bool            `json:"enabled"`
-	Available bool            `json:"available"`
-	Create    *uiCreateStatus `json:"create,omitempty"`
+	Enabled    bool            `json:"enabled"`
+	Available  bool            `json:"available"`
+	Create     *uiCreateStatus `json:"create,omitempty"`
+	ConfigEdit *uiCreateStatus `json:"config_edit,omitempty"`
 }
 
 // uiCreateStatus mirrors the panel `{enabled, available}` shape one level down
-// for the create affordance (RFC 0048 channel-creation amendment §A). `Enabled`
-// echoes the operator's create_enabled toggle; `Available` is runtime-derived
+// for a per-panel capability affordance. It backs both the create affordance
+// (RFC 0048 channel-creation amendment §A) and the RFC 0050 config-edit
+// affordance: in each case `Enabled` echoes the operator's toggle
+// (create_enabled / config_edit_enabled) and `Available` is runtime-derived
 // (the console renders the affordance only when both are true), never authored.
 type uiCreateStatus struct {
 	Enabled   bool `json:"enabled"`
@@ -66,9 +69,10 @@ func (s *Server) handleUIConfig(w http.ResponseWriter, _ *http.Request) {
 	panels := make(map[string]uiPanelStatus, len(cfg.Panels))
 	for name, toggle := range cfg.Panels {
 		panels[name] = uiPanelStatus{
-			Enabled:   toggle.Enabled,
-			Available: s.panelAvailable(name),
-			Create:    s.panelCreate(name, toggle),
+			Enabled:    toggle.Enabled,
+			Available:  s.panelAvailable(name),
+			Create:     s.panelCreate(name, toggle),
+			ConfigEdit: s.panelConfigEdit(name, toggle),
 		}
 	}
 
@@ -132,6 +136,27 @@ func (s *Server) panelCreate(name string, toggle PanelToggle) *uiCreateStatus {
 	return &uiCreateStatus{
 		Enabled:   toggle.CreateEnabled,
 		Available: s.channelStore != nil,
+	}
+}
+
+// panelConfigEdit reports a panel's governance-config edit capability (RFC 0050
+// Phase 1), or nil for panels that expose none. Like [Server.panelCreate], only
+// channel_timeline carries one — the PATCH/GET /api/v1/channels/{id}/config
+// surface over the store-canonical apply path. `enabled` echoes the operator's
+// config_edit_enabled toggle (ships OFF — the surface lands dark); `available`
+// is runtime-derived and true only when the router is wired, because editing a
+// live knob needs the apply path ([ChannelRouter.ApplyChannelConfig]), not just
+// the store. So the affordance renders only when an operator opted in AND the
+// channels subsystem can actually serve the edit — and the server-side gate
+// ([Server.configEditEnabled]) enforces the same toggle on the endpoints, so a
+// client that ignores this hint still cannot reach a dark surface.
+func (s *Server) panelConfigEdit(name string, toggle PanelToggle) *uiCreateStatus {
+	if name != "channel_timeline" {
+		return nil
+	}
+	return &uiCreateStatus{
+		Enabled:   toggle.ConfigEditEnabled,
+		Available: s.channelRouter != nil,
 	}
 }
 

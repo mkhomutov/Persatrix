@@ -96,6 +96,21 @@ func (r *ChannelRouter) escalationChairFor(channelID string) string {
 	return r.escalationChairs[channelID]
 }
 
+// EscalationChairFor reports the channel's resolved escalation chair ("" when
+// no chair is set) and whether an explicit entry exists. Exposed for ops
+// introspection and the RFC 0050 `GET …/config` effective-value read, mirroring
+// [ChannelRouter.FloorControlFor]; the hot path reads the unexported
+// [ChannelRouter.escalationChairFor]. `set` is redundant with a non-empty chair
+// today (the unset state is the empty map entry), but is returned for symmetry
+// with the other `*For` getters so the config read can label provenance without
+// special-casing this knob.
+func (r *ChannelRouter) EscalationChairFor(channelID string) (chair string, set bool) {
+	r.escalationMu.Lock()
+	defer r.escalationMu.Unlock()
+	chair, set = r.escalationChairs[channelID]
+	return chair, set
+}
+
 // ResolveEscalationChairs applies the per-channel escalation chairs for
 // every config-declared channel at startup, the sibling of
 // [ChannelRouter.ResolveEndVotes]. Absent knob = unset = no escalation;

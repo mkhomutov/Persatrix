@@ -22,6 +22,16 @@ func (s *Server) writeChannelError(w http.ResponseWriter, err error) {
 		writeError(w, "CONFLICT", "channel already exists", http.StatusConflict)
 	case errors.Is(err, channels.ErrChannelCapExceeded):
 		writeError(w, "CONFLICT", "max_channels cap exceeded", http.StatusConflict)
+	case errors.Is(err, channels.ErrConfigRevisionConflict): // RFC 0050 PR 4 optimistic concurrency
+		writeError(w, "CONFLICT", err.Error(), http.StatusConflict)
+	case errors.Is(err, channels.ErrInvalidSalienceMaxChannelMembers), // RFC 0050 PR 4 config validation
+		errors.Is(err, channels.ErrInvalidInteractionBudgetTokens),
+		errors.Is(err, channels.ErrInvalidMaxRepliesPerParticipant),
+		errors.Is(err, channels.ErrInvalidEndVoteThreshold),
+		errors.Is(err, channels.ErrInvalidEndVoteWindow),
+		errors.Is(err, channels.ErrInvalidInteractionIdleTimeout),
+		errors.Is(err, channels.ErrInvalidEscalationChair):
+		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
 	case errors.Is(err, channels.ErrNotMember):
 		writeError(w, "FORBIDDEN", "sender is not a member of the channel", http.StatusForbidden)
 	case errors.Is(err, channels.ErrInvalidChannelType),
