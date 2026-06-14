@@ -300,6 +300,18 @@ func (r *ChannelRouter) applyOverridesToRouter(channelID string, o ChannelConfig
 // shadow-the-whole-block semantics the revision gate turns on (and that PR 3's
 // reconcile layers a sparse override over the YAML baseline to soften).
 //
+// Boot replay TRUSTS the last-validated state: it re-stamps the persisted
+// overrides as-is and does NOT re-run the cross-field invariants
+// [ChannelRouter.ApplyChannelConfig] enforced at write time (escalation-chair
+// membership, floor-control-on). Those rules need the channel's live membership,
+// which can have drifted since the apply (e.g. a chair who has since left).
+// Re-validating here is unnecessary: post-apply drift is already absorbed at the
+// only seam that consumes the knob — [ChannelRouter.maybeEscalateStall] skips a
+// non-member chair at dispatch time (logging "escalation chair is not a member;
+// stall stands") — and surfacing/reconciling such drift at boot is PR 3's job,
+// not this overlay's. Re-validating would only mask the drift PR 3 means to
+// detect.
+//
 // Call once at startup after [ChannelRouter.ReconcileConfig] and the per-knob
 // resolvers (so the captured fleet defaults the inherit-paths rely on are in
 // place). Idempotent. Non-fatal posture is the caller's: a store-enumeration
