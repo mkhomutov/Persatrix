@@ -283,10 +283,11 @@ func isJSONNull(raw json.RawMessage) bool {
 }
 
 // decodeKnob strictly unmarshals a single knob's raw JSON into its Go type,
-// turning a wrong-typed value (e.g. a string where an int is expected) into a
-// 400-worthy error that names the knob. DisallowUnknownFields is irrelevant for
-// scalars but Decode surfaces the type mismatch the plain Unmarshal would too;
-// the wrapper exists to attach the knob name to the diagnosis.
+// turning a wrong-typed value (e.g. a string where an int is expected, or a
+// fractional number for an integer knob) into a 400-worthy error that names the
+// knob. encoding/json already enforces this — json.Unmarshal refuses to coerce a
+// fractional literal like 1.5 into an int — so the wrapper adds no strictness of
+// its own; it exists only to attach the knob name to the diagnosis.
 func decodeKnob[T any](key string, raw json.RawMessage) (T, error) {
 	var v T
 	if err := json.Unmarshal(raw, &v); err != nil {

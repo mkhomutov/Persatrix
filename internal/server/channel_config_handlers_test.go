@@ -218,6 +218,26 @@ func TestChannelConfig_UnknownKeyRejected(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
 }
 
+// TestChannelConfig_FractionalIntRejected pins the decode strictness on integer
+// knobs: a fractional JSON number for an int-typed knob — here end_vote_threshold,
+// whose integer form 2 would pass validation — is a 400 at the decode boundary
+// ([decodeKnob]), never reaching the apply path, so the revision stays 0. The
+// value 2.5 isolates the decode rejection from range validation (2 is in range),
+// guarding against a future switch to a lax number type (json.Number / any) that
+// would silently truncate.
+func TestChannelConfig_FractionalIntRejected(t *testing.T) {
+	srv, id := channelConfigTestServer(t, true)
+	body := []byte(`{"end_vote_threshold": 2.5}`)
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+
+	// No write happened — the bad decode preceded the apply.
+	rec = doRequest(srv.Handler(), http.MethodGet, "/api/v1/channels/"+id+"/config", nil)
+	revision, _ := decodeConfig(t, rec.Body.Bytes())
+	assert.Equal(t, int64(0), revision)
+}
+
 // TestChannelConfig_MissingIfMatch: an absent If-Match header is a 428 — the
 // optimistic-concurrency contract requires the caller to state what it saw.
 func TestChannelConfig_MissingIfMatch(t *testing.T) {
