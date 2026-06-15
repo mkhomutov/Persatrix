@@ -50,18 +50,19 @@ the running channel's effective state — and on a freshly seeded `planning` the
 chair is **YAML-seeded / router-held, never a store override** (revision 0 ⇒ the
 reconcile leaves the store to config-as-code). So a lone
 `channel config set planning floor_control=false` is **not** rejected: the rule
-sees no chair in the merged blob, the apply commits, and — because the override
-blob omits the chair — the store-canonical re-stamp **silently detaches** the
-YAML chair (absent knob → inherit; see
-[`config_apply.go`](../../internal/channels/config_apply.go) `applyOverridesToRouter`,
-pinned by `TestApplyChannelConfig_LoneFloorControlFalseDoesNotSeeYAMLSeededChair`).
-That makes `floor_control` both undemonstrative (no clean rejection to show) and
-quietly destructive on `planning`. A *legitimate* cross-field rejection needs the
-chair to ride the same patch — covered as
+sees no chair in the merged blob and the apply commits. (Historically — before
+ISSUE-0103 was fixed — that commit *also* silently detached the YAML chair,
+because the first edit seeded the apply from the empty revision-0 store. Since
+the 2026-06-15 fix the REST handler seeds the merge base from the channel's
+resolved governance, so the chair survives; see
+[ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md).)
+`floor_control` is still the wrong happy-path knob: it is undemonstrative (no
+clean rejection to show on a single channel), so a *legitimate* cross-field
+rejection needs the chair to ride the same patch — covered as
 [Edge Case 2](#edge-case-2-flip-floor_control-and-the-yaml-chair-limit) rather
 than the main arc, so the happy path stays single-channel and dependency-free.
-(Idle timeout sidesteps all of this — but note it triggers the *same* chair
-detachment on its first edit; see [Step 2](#step-2-live-edit-the-knob--no-yaml-no-restart).)
+(Idle timeout is a clean choice — a clear before/after value with no cross-field
+entanglement.)
 
 **Scope**: the default `planning` group channel; the toggle-gated
 `channel config get`/`set` CLI verbs against a running orchestrator; the
@@ -87,7 +88,8 @@ router-wired, so it must **not** be the live-flip knob); the web settings panel
 
 **Related Automated Tests**:
 - [`channel_config_store_test.go`](../../internal/channels/channel_config_store_test.go) — round-trip persistence, revision monotonicity, stale-revision conflict (PR 1)
-- [`config_apply_test.go`](../../internal/channels/config_apply_test.go) — apply persists + reflected by router getters; invalid patch rejected pre-write; restart simulation; the cross-field chair/floor-control rule and **its limit** (`TestApplyChannelConfig_LoneFloorControlFalseDoesNotSeeYAMLSeededChair`, `TestApplyChannelConfig_FirstEditDetachesYAMLSeededChair` — a YAML-seeded chair is not in the merged blob, so a lone `floor_control`/idle edit is accepted and detaches it) (PR 2)
+- [`config_apply_test.go`](../../internal/channels/config_apply_test.go) — apply persists + reflected by router getters; invalid patch rejected pre-write; restart simulation; the cross-field chair/floor-control rule and **its limit** (`TestApplyChannelConfig_LoneFloorControlFalseDoesNotSeeYAMLSeededChair`, `TestApplyChannelConfig_FirstEditDetachesYAMLSeededChair` — these pin the apply path's wholesale-replace *contract* in isolation; the ISSUE-0103 end-to-end fix lives one layer up, see below) (PR 2)
+- [`channel_config_handlers_test.go`](../../internal/server/channel_config_handlers_test.go) — the REST merge/apply surface, including the ISSUE-0103 regression: `TestChannelConfig_FirstEditPreservesYAMLSeededChair` (a sparse first edit on a YAML-seeded channel keeps the chair) and `TestChannelConfig_FirstEditFreezesDefaultsAsChannel` (the first edit flips un-edited knobs to `[channel]` provenance — the intended freeze)
 - [`config_reconcile_test.go`](../../internal/channels/config_reconcile_test.go) — revision-gating decision table + drift detection (PR 3)
 - [`channel_config_handlers_test.go`](../../internal/server/channel_config_handlers_test.go) — `PATCH/GET …/config` happy path, stale-revision 409, toggle-off 403 (PR 4)
 - [`channel_config_tests.rs`](../../cli/src/commands/channel_config_tests.rs) — CLI set→get round-trip, conflict surfacing (PR 5)
@@ -166,23 +168,31 @@ post-apply state from the response (no second round-trip).
   (the value came back from the store round-trip, not just the writer's local
   echo).
 
-> **⚠️ Side effect — this first edit also detaches `planning`'s escalation
-> chair.** The apply re-stamps **all six** router-held knobs from the merged
-> override blob, and that blob carries only the knob you set. `planning`'s
-> `escalation_chair_id: nova-sparrow` is YAML-seeded (never a store override), so
-> it is *not* in the blob and the re-stamp drops it back to "inherit" (no chair).
-> The second `get` will show `escalation_chair_id` unset where Step 1 showed
-> `nova-sparrow`. This is the store-canonical model working as designed (RFC 0050
-> — a channel goes store-canonical on its first edit); it is **not** specific to
-> idle timeout. Pinned by `TestApplyChannelConfig_FirstEditDetachesYAMLSeededChair`;
-> the underlying fix is tracked in
+> **✅ The chair survives the first edit (ISSUE-0103 fixed 2026-06-15).** The
+> second `get` will still show `escalation_chair_id = nova-sparrow`. Historically
+> (before the fix, e.g. the 2026-06-14 run at `3402f0e` recorded below) this first
+> edit *detached* the chair: the apply re-stamps all six router-held knobs from
+> the merged override blob, and a sparse blob built off the empty revision-0 store
+> carried only the knob you set, dropping the YAML-seeded chair back to "inherit".
+> The REST PATCH handler now seeds the merge base from the channel's resolved
+> governance on the first edit, so the sparse patch layers over the full baseline
+> and only the idle timeout changes.
+>
+> Note the channel *does* go store-canonical on this first edit (RFC 0050), so the
+> previously-inherited knobs' provenance flips from `default` to `channel` — a
+> `get` after the edit shows them as `[channel]`. That is the intended freeze, not
+> data loss. Pinned end-to-end by
+> `TestChannelConfig_FirstEditPreservesYAMLSeededChair` (the chair survives) and
+> `TestChannelConfig_FirstEditFreezesDefaultsAsChannel` (the provenance flip);
+> `TestApplyChannelConfig_FirstEditDetachesYAMLSeededChair` still pins the apply
+> path's underlying wholesale-replace contract. See
 > [ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md).
 > `make reset` restores the seed after the run.
 
 **Verification**:
 - [ ] `set` returns the bumped revision (1) with `interaction_idle_timeout_seconds=60`, source `channel`.
 - [ ] An independent `get` reflects the same value — the change is persisted, not in-memory-only.
-- [ ] The same `get` shows `escalation_chair_id` now unset (the documented first-edit side effect), confirming the store-canonical re-stamp.
+- [ ] The same `get` still shows `escalation_chair_id = nova-sparrow` (ISSUE-0103 fixed — the first edit no longer detaches the YAML-seeded chair), now sourced `[channel]` (the channel went store-canonical).
 
 ### Step 3: The running channel honors the new value — drive a stall and time the rotation
 
@@ -251,8 +261,10 @@ ENABLE_UI=1 docker compose -f docker-compose.yaml -f docker-compose.anthropic.ya
   untouched because the YAML block's absent revision (= 0) is **not** strictly
   greater than the store's 1 (higher revision wins) — so the 600 s seed never
   overwrites the live edit in either direction. G1 holds: the change survived
-  restart. (The first-edit chair detachment from Step 2 also persists — `get`
-  still shows `escalation_chair_id` unset.)
+  restart. (Post-ISSUE-0103, the chair preserved in Step 2 also survives restart —
+  `get` still shows `escalation_chair_id = nova-sparrow`, now sourced `[channel]`
+  since `planning` is store-canonical; `ResolveFromStore` re-stamps it from the
+  seeded baseline.)
 
 **Verification**:
 - [ ] After restart `get` still shows 60 / `channel` / revision 1 — the store won over the YAML seed under the revision gate.
@@ -337,19 +349,25 @@ depends on whether the chair is in the patch/store, not on whether the channel
    nothing persists. Pinned deterministically by `config_apply_test.go`
    (`TestApplyChannelConfig_EscalationChairRequiresFloorControl`).
 
-3. **⚠️ A lone `floor_control=false` on `planning` is *accepted* — and silently
-   detaches the chair.** This is the gotcha the RFC's E2E sketch missed:
+3. **A lone `floor_control=false` on `planning` is now *rejected* (post-ISSUE-0103).**
 
    ```bash
    ./bin/persatrix channel config set planning floor_control=false
    ```
 
-   does **not** error. `planning`'s `nova-sparrow` chair lives in YAML, not the
-   store, so it is invisible to the cross-field rule (which sees only the merged
-   store overrides). The edit commits and the store-canonical re-stamp drops the
-   chair — **no validation warning**. Pinned by
-   `TestApplyChannelConfig_LoneFloorControlFalseDoesNotSeeYAMLSeededChair`. Run
-   `make reset` afterward to restore the YAML-seeded chair.
+   returns a `400` naming the chair/floor-control conflict, and nothing persists.
+   This is a behavior **change** from the pre-fix run (where the same command was
+   silently accepted and detached the chair — the gotcha the RFC's E2E sketch
+   missed). The ISSUE-0103 fix seeds the first edit's merge base from the
+   channel's resolved governance, so `nova-sparrow` is now *in* the merged set the
+   cross-field rule validates — and "a chair requires floor control on" fires
+   exactly as it does for case 2's same-patch edit. The first-edit baseline thus
+   delivers the issue's "make the validator consult effective state" guard for
+   free: a YAML-seeded chair is no longer invisible to the floor-control rule.
+   Pinned by `TestChannelConfig_FirstEditFloorOffWithYAMLChairRejected` (REST) and
+   the apply path's replace contract by
+   `TestApplyChannelConfig_LoneFloorControlFalseDoesNotSeeYAMLSeededChair`. No
+   `make reset` needed — nothing was written.
 
 ### Edge Case 3: Stale-revision conflict (409)
 

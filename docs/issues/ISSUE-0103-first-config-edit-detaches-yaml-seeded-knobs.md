@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0103
 summary: "The first live config edit on a YAML-seeded channel silently resets every OTHER non-default per-channel knob to the fleet default — most visibly it detaches the escalation chair. ApplyChannelConfig is store-canonical: it merges the sparse patch onto the channel's STORE overrides (empty at revision 0, because YAML config-as-code is never persisted there) and re-stamps all six router-held knobs from that merged set, so any knob the patch omits reverts to default rather than its YAML value. The cross-field escalation-chair/floor-control validator cannot warn because the merged set carries no chair."
-status: open
+status: resolved
 severity: medium
 area: internal/channels
 created: 2026-06-14
+closed: 2026-06-15
+closed_pr:
 refs:
   - docs/rfcs/0050-extensible-channel-configuration.md
   - docs/manual-tests/MT-CHANNEL-CONFIG-001.md
@@ -97,8 +99,45 @@ This is an RFC 0050 design call; options, roughly in order of principle:
 
 Recommend (1) as the real fix and (2)/(3) as cheap interim guards.
 
+## Resolution
+
+Fixed via option (3 of the proposed list, refined): **seed the merge base from
+the channel's resolved governance on the first edit** — the lazy, on-first-edit
+form of option 1, not the eager seed-at-boot form (which would push every
+YAML channel off revision 0, break the byte-identical-boot property, and trigger
+the FREEZE CONSEQUENCE / false drift for channels nobody ever edited).
+
+`handlePatchChannelConfig`
+([`channel_config_handlers.go`](../../internal/server/channel_config_handlers.go))
+now chooses the merge base: for a channel already at revision > 0 the store is
+canonical (base = stored overrides, unchanged); for a revision-0 channel with a
+non-empty patch the base is `Server.resolvedConfigBaseline(id)` — a complete
+snapshot of the channel's six router-held knobs read from the same getters
+`buildChannelConfigResponse` uses. The sparse patch then layers over that
+baseline, so the apply path receives the channel's full resolved set plus the
+edit; nothing un-edited is dropped, the chair survives, and the channel becomes
+store-canonical with a faithful snapshot — the same transition the YAML *adopt*
+path makes via `ChannelConfig.toConfigOverrides`.
+
+Deliberate, documented consequence (the FREEZE CONSEQUENCE, already accepted on
+the adopt path): a first edit flips the previously-inherited knobs' provenance
+from `default` to `channel` and detaches them from fleet-default tracking. This
+is strictly better than the old reset-to-package-default data loss and is
+consistent with how adoption already works. True sparse-layering over the live
+YAML baseline (keeping inherited knobs tracking the fleet default) remains RFC
+0050 Phase 3.
+
+`ApplyChannelConfig`'s wholesale-replace contract is unchanged — the fix is one
+layer up, at the REST merge. The two characterization tests still pin that
+contract; the end-to-end regression is
+`TestChannelConfig_FirstEditPreservesYAMLSeededChair` (+
+`TestChannelConfig_FirstEditFreezesDefaultsAsChannel`) in
+[`channel_config_handlers_test.go`](../../internal/server/channel_config_handlers_test.go).
+This unblocks flipping `config_edit_enabled` on (RFC 0050 Phase 2 prerequisite).
+
 ## Notes
 
+> 2026-06-15 — resolved (this PR). See Resolution above.
 > 2026-06-14 — captured during the MT-CHANNEL-CONFIG-001 first live run; the MT
 > documents the behavior (Step 2 side-effect + Edge Case 2) and the two
 > characterization tests pin it. This issue tracks the underlying fix, which is

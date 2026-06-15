@@ -177,6 +177,89 @@ func TestChannelConfig_PatchMergePreservesOtherKnobs(t *testing.T) {
 	assert.EqualValues(t, 2, fields["max_replies_per_participant_per_interaction"].Value)
 }
 
+// TestChannelConfig_FirstEditPreservesYAMLSeededChair is the ISSUE-0103
+// regression: on a YAML-seeded channel (a router-held escalation chair that was
+// never written to the store — revision 0), the FIRST sparse edit of an
+// unrelated knob must NOT silently detach the chair. The REST layer seeds the
+// merge base from the channel's resolved governance before layering the patch,
+// so editing only the idle timeout leaves the chair (and every other resolved
+// knob) intact while flipping the channel to store-canonical.
+func TestChannelConfig_FirstEditPreservesYAMLSeededChair(t *testing.T) {
+	srv, id := channelConfigTestServer(t, true)
+
+	// Seed a chair the way the YAML boot path does (ResolveEscalationChairs →
+	// SetEscalationChair): router-held only, absent from the store. "alice" is a
+	// declared member of the seeded channel, so the cross-field rule accepts it.
+	srv.channelRouter.SetEscalationChair(id, "alice")
+	chair, _ := srv.channelRouter.EscalationChairFor(id)
+	require.Equal(t, "alice", chair, "precondition: chair is live on the router but unstored")
+
+	// First edit: an unrelated knob, the exact shape of the issue's repro.
+	body, _ := json.Marshal(map[string]any{"interaction_idle_timeout_seconds": 60})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	revision, fields := decodeConfig(t, rec.Body.Bytes())
+	assert.Equal(t, int64(1), revision, "the edit committed")
+	assert.EqualValues(t, 60, fields["interaction_idle_timeout_seconds"].Value, "the edited knob took effect")
+	// The footgun the issue describes: this assertion FAILS before the fix.
+	assert.Equal(t, "alice", fields["escalation_chair_id"].Value,
+		"the un-edited YAML-seeded chair must survive the first edit")
+	chairAfter, _ := srv.channelRouter.EscalationChairFor(id)
+	assert.Equal(t, "alice", chairAfter, "the router must still hold the chair after the apply")
+}
+
+// TestChannelConfig_FirstEditFreezesDefaultsAsChannel documents the deliberate
+// consequence of the ISSUE-0103 fix: a first edit makes the channel
+// store-canonical, so its previously-inherited knobs are snapshotted as explicit
+// overrides and their provenance flips from "default" to "channel" — the same
+// freeze the YAML adopt path makes. This is the accepted interim cost (true
+// sparse-layering over the YAML baseline is RFC 0050 Phase 3); pin it so the flip
+// is an intended, tested property rather than a surprise.
+func TestChannelConfig_FirstEditFreezesDefaultsAsChannel(t *testing.T) {
+	srv, id := channelConfigTestServer(t, true)
+
+	body, _ := json.Marshal(map[string]any{"interaction_idle_timeout_seconds": 60})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	_, fields := decodeConfig(t, rec.Body.Bytes())
+	assert.Equal(t, "channel", fields["floor_control"].Source,
+		"an un-edited knob is frozen as an explicit override once the channel is canonical")
+	assert.Equal(t, "channel", fields["end_vote_threshold"].Source)
+	// Interaction budget is NOT router-held (Open item 4), so it is not part of
+	// the seeded baseline and keeps inheriting.
+	assert.Equal(t, "default", fields["interaction_budget_tokens"].Source,
+		"interaction budget is not snapshotted — it stays inherited")
+}
+
+// TestChannelConfig_FirstEditFloorOffWithYAMLChairRejected is the beneficial
+// flip-side of the ISSUE-0103 fix: because a first edit now seeds the merge base
+// from the channel's resolved governance, a YAML-seeded escalation chair is part
+// of the set the cross-field validator sees. So a lone `floor_control:false` on a
+// chaired channel — silently accepted (and chair-detaching) before the fix — is
+// now rejected with the chair/floor-control conflict, and nothing persists. This
+// is the issue's "make the validator consult effective state" guard, delivered
+// for free by the baseline seeding.
+func TestChannelConfig_FirstEditFloorOffWithYAMLChairRejected(t *testing.T) {
+	srv, id := channelConfigTestServer(t, true)
+	srv.channelRouter.SetEscalationChair(id, "alice") // YAML-seeded, unstored
+
+	body, _ := json.Marshal(map[string]any{"floor_control": false})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"lone floor_control:false on a chaired channel must be rejected, body=%s", rec.Body.String())
+
+	// Nothing was written: the channel is still at revision 0 and the chair stands.
+	rec = doRequest(srv.Handler(), http.MethodGet, "/api/v1/channels/"+id+"/config", nil)
+	revision, fields := decodeConfig(t, rec.Body.Bytes())
+	assert.Equal(t, int64(0), revision, "a rejected apply must not bump the revision")
+	assert.Equal(t, "alice", fields["escalation_chair_id"].Value, "the chair survives a rejected edit")
+}
+
 // TestChannelConfig_StaleRevisionConflict: an If-Match that no longer matches
 // the stored revision yields 409 and does not write.
 func TestChannelConfig_StaleRevisionConflict(t *testing.T) {

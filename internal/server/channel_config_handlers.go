@@ -115,12 +115,31 @@ func (s *Server) handlePatchChannelConfig(w http.ResponseWriter, r *http.Request
 	// path replaces the override blob wholesale, so the REST layer is responsible
 	// for turning a sparse edit into the complete desired set. A 404 here (channel
 	// gone) precedes any write.
-	current, _, err := s.channelStore.GetChannelConfig(r.Context(), id)
+	current, revision, err := s.channelStore.GetChannelConfig(r.Context(), id)
 	if err != nil {
 		s.writeChannelError(w, err)
 		return
 	}
-	merged, err := mergeConfigPatch(current, raw)
+
+	// ISSUE-0103: pick the merge BASE. For an already-edited channel (revision
+	// > 0) the store is canonical, so the base is its stored overrides. But a
+	// YAML-seeded channel sits at revision 0 with an EMPTY store blob — its
+	// governance lives only on the router (seeded from config/channels.yaml at
+	// boot). Merging a sparse first edit onto that empty blob would hand the
+	// wholesale-replace apply path a set carrying only the edited knob, so every
+	// OTHER non-default knob — most visibly the escalation chair — silently
+	// reverts to the package default. So on the FIRST edit we seed the base from
+	// the channel's resolved governance, making the channel store-canonical with a
+	// faithful snapshot (the same transition the YAML adopt path makes via
+	// ChannelConfig.toConfigOverrides). The sparse patch then layers over that
+	// baseline and nothing un-edited is dropped. Skipped for an empty patch so a
+	// no-op PATCH stays a no-op rather than freezing the channel.
+	base := current
+	if revision == 0 && len(raw) > 0 {
+		base = s.resolvedConfigBaseline(id)
+	}
+
+	merged, err := mergeConfigPatch(base, raw)
 	if err != nil {
 		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
 		return
@@ -172,9 +191,11 @@ func parseIfMatch(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return rev, true
 }
 
-// mergeConfigPatch folds a sparse `{knob: rawJSON}` patch onto the channel's
-// current overrides and returns the COMPLETE desired override set for the apply
-// path. Per knob: a JSON null clears the override (unset→inherit), any other
+// mergeConfigPatch folds a sparse `{knob: rawJSON}` patch onto a base override
+// set (the caller's choice — the channel's stored overrides normally, or its
+// resolved governance baseline on a revision-0 first edit; see ISSUE-0103 in
+// [Server.handlePatchChannelConfig]) and returns the COMPLETE desired override
+// set for the apply path. Per knob: a JSON null clears the override (unset→inherit), any other
 // value sets it, and a key absent from the patch leaves the current value
 // untouched. An unrecognised key (default case) or a value of the wrong JSON
 // type ([decodeKnob]) is rejected here so a typo'd knob 400s rather than
@@ -339,6 +360,43 @@ func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (cha
 		resp.InteractionBudgetTokens = configFieldResponse{Value: nil, Source: configSourceDefault}
 	}
 	return resp, nil
+}
+
+// resolvedConfigBaseline snapshots the channel's currently-resolved governance
+// into a COMPLETE override set — the merge base ISSUE-0103 layers a first edit
+// over so a sparse PATCH on a revision-0 (YAML-seeded) channel does not reset its
+// un-edited knobs to the package default. It reads the same six router-held
+// getters as [Server.buildChannelConfigResponse], so the snapshot is exactly the
+// channel's effective governance at the moment it becomes store-canonical.
+//
+// The escalation chair is the one knob captured conditionally: an empty chair
+// stays nil (no escalation — the opt-in default), mirroring
+// [channels.ChannelConfig.toConfigOverrides] so a chair-less channel is not
+// frozen with an explicit empty string that would read back as "explicitly
+// cleared". Interaction budget is intentionally absent: it is not router-held
+// (RFC 0050 Open item 4), is not behaviourally affected by the store edit (it is
+// resolved on demand from YAML on the wallet path), and continues to inherit
+// until it is wired — so omitting it from the snapshot loses nothing live.
+func (s *Server) resolvedConfigBaseline(id string) channels.ChannelConfigOverrides {
+	floorEnabled, _, _ := s.channelRouter.FloorControlFor(id)
+	salienceMax, _ := s.channelRouter.SalienceMaxChannelMembersFor(id)
+	replyBudget := s.channelRouter.ReplyBudgetFor(id)
+	k, wWindow := s.channelRouter.EndVoteParamsFor(id)
+	chair, _ := s.channelRouter.EscalationChairFor(id)
+	idleSeconds, _ := s.channelRouter.InteractionIdleTimeoutFor(id)
+
+	base := channels.ChannelConfigOverrides{
+		FloorControl:                           &floorEnabled,
+		SalienceMaxChannelMembers:              &salienceMax,
+		MaxRepliesPerParticipantPerInteraction: &replyBudget,
+		EndVoteThreshold:                       &k,
+		EndVoteWindow:                          &wWindow,
+		InteractionIdleTimeoutSeconds:          &idleSeconds,
+	}
+	if chair != "" {
+		base.EscalationChairID = &chair
+	}
+	return base
 }
 
 // configField builds a knob's response cell: the effective value plus its

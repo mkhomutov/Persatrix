@@ -15,7 +15,7 @@ depends_on:
 # RFC 0050 — Extensible Channel Configuration (Operator-Editable, Single Source of Truth)
 
 **Type**: architecture  
-**Status**: ✅ Accepted — **Phase 1 + Phase 2 (web settings panel) delivered**; RFC stays open (ISSUE-0103, the member-threshold slice, and Open item 4 — see [Progress](#progress) / [Phased Implementation Plan](#phased-implementation-plan))  
+**Status**: ✅ Accepted — **Phase 1 + Phase 2 (web settings panel) delivered**; ISSUE-0103 (first-edit detachment) **resolved**, so the non-dark prerequisite is cleared; RFC stays open (the member-threshold slice and Open item 4 — see [Progress](#progress) / [Phased Implementation Plan](#phased-implementation-plan))  
 **Author**: Maksim Khomutov  
 **Date**: 2026-06-14  
 **Target**: v0.3.x (unscheduled)  
@@ -46,15 +46,17 @@ depends_on:
   acceptance: [MT-CHANNEL-CONFIG-002](../manual-tests/MT-CHANNEL-CONFIG-002.md) —
   edit a knob in the browser, the running channel honors it, and the CLI
   `channel config get` reads back the same value.
-- **The RFC stays open past Phase 2.** Three items keep it from closing, none of
-  them web-rendering work (RFC 0050 Phase 2 PR plan
+- **The RFC stays open past Phase 2.** Two items keep it from closing, neither
+  web-rendering work (RFC 0050 Phase 2 PR plan
   [Prerequisite + cross-phase dependencies](0050-phase2-pr-plan.md#prerequisite--cross-phase-dependencies-reconciling-with-the-rfc)):
-  1. **Prerequisite —**
+  1. ~~**Prerequisite —**
      [ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md)
-     (first-edit detachment of YAML-seeded knobs). Bounded today (the surface
-     ships dark; only `planning` carries a non-default chair) but a silent-data-loss
-     footgun once a UI invites operators to edit YAML-configured channels — **must
-     be fixed before `config_edit_enabled` is flipped on in any real deployment.**
+     (first-edit detachment of YAML-seeded knobs)~~ — **RESOLVED 2026-06-15.** The
+     REST PATCH handler now seeds the merge base from the channel's resolved
+     governance on a first edit, so a sparse edit on a revision-0 YAML-seeded
+     channel layers over the full baseline instead of resetting the un-edited
+     knobs (the chair survives). This was the one blocker to flipping
+     `config_edit_enabled` on; it is cleared.
   2. **Editable member threshold** — the RFC's Phase 2 summary lists it, but it
      needs a member-config mutation endpoint that does not exist, so it was
      **deferred** out of the web-only workstream (a backend+web "Phase 2.5" slice).
@@ -344,8 +346,9 @@ default-off `config_edit_enabled` toggle, so the panel lands dark.
 thresholds** were **deferred** — no member-config mutation endpoint exists, so
 making thresholds editable is a backend+web slice ("Phase 2.5"), not a
 render-over-landed-endpoints change. Closing RFC 0050 still requires that slice
-(or an RFC amendment moving member-threshold editing out of Phase 2), plus
-ISSUE-0103 and Open item 4 — see [Progress](#progress).
+(or an RFC amendment moving member-threshold editing out of Phase 2), plus Open
+item 4 — see [Progress](#progress). (ISSUE-0103, the first-edit detachment
+prerequisite, is resolved as of 2026-06-15.)
 
 Dependencies: Phase 1.
 

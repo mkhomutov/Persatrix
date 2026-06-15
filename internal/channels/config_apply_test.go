@@ -256,10 +256,16 @@ func TestApplyChannelConfig_EscalationChairRequiresFloorControl(t *testing.T) {
 // So a lone `floor_control:false` patch (no chair in the override blob) is NOT
 // rejected on such a channel; it commits, and the store-canonical re-stamp then
 // DROPS the YAML-seeded chair (the same "absent knob → inherit" mechanic as
-// TestApplyChannelConfig_AbsentKnobsResolveToDefaults). The rejection fires only
-// when the chair rides the SAME patch (the test above). MT-CHANNEL-CONFIG-001
-// therefore must not claim floor_control:false on `planning` is rejected at
-// apply.
+// TestApplyChannelConfig_AbsentKnobsResolveToDefaults).
+//
+// This is ApplyChannelConfig's wholesale-replace contract working as designed —
+// `patch` IS the complete desired set, so an omitted chair means "no chair". The
+// ISSUE-0103 footgun was that the REST layer FED this method a set built from an
+// empty revision-0 store blob, dropping the YAML chair end-to-end. That is fixed
+// one layer up, where the REST handler now seeds the merge base from the
+// channel's resolved governance on a first edit (TestChannelConfig_FirstEdit-
+// PreservesYAMLSeededChair in internal/server). This test keeps pinning the
+// underlying replace contract, which is correct and unchanged.
 func TestApplyChannelConfig_LoneFloorControlFalseDoesNotSeeYAMLSeededChair(t *testing.T) {
 	router, store, ctx := newApplyRouter(t)
 	mustCreateGroup(t, store, "planning", "nova-sparrow", "iron-fox")
@@ -290,11 +296,12 @@ func TestApplyChannelConfig_LoneFloorControlFalseDoesNotSeeYAMLSeededChair(t *te
 
 // TestApplyChannelConfig_FirstEditDetachesYAMLSeededChair generalises the above
 // to the knob MT-CHANNEL-CONFIG-001's *happy path* edits: it is not specific to
-// floor_control. ANY first edit re-stamps all six router-held knobs from the
-// merged override set, so editing only `interaction_idle_timeout_seconds` on a
-// channel whose chair was YAML-seeded silently detaches that chair too. The MT's
-// Step 2 must therefore note that the `set …=60` edit also drops `planning`'s
-// `nova-sparrow` chair — not just that the idle timeout changes.
+// floor_control. ANY override set the apply path receives re-stamps all six
+// router-held knobs, so a set carrying only `interaction_idle_timeout_seconds`
+// re-seeds the chair to its default (unset). This pins the method's replace
+// contract in isolation; the ISSUE-0103 fix that stops a sparse REST first edit
+// from PRODUCING such a chair-less set lives in the REST layer (see the note on
+// TestApplyChannelConfig_LoneFloorControlFalseDoesNotSeeYAMLSeededChair).
 func TestApplyChannelConfig_FirstEditDetachesYAMLSeededChair(t *testing.T) {
 	router, store, ctx := newApplyRouter(t)
 	mustCreateGroup(t, store, "planning", "nova-sparrow")
