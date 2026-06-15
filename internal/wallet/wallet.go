@@ -60,6 +60,13 @@ type WalletService struct {
 	// total, keyed by the RFC 0020 interaction_id. Read/written under mu by
 	// the helpers in interaction_budget.go. A zero/absent entry is uncapped.
 	interactionTokens map[string]int64
+
+	// interactionBudgetResolver resolves the per-interaction cost ceiling
+	// server-side from the channel router's snapshot (RFC 0050 amendment). When
+	// wired it is authoritative; nil falls back to the request field. Set once at
+	// startup (SetInteractionBudgetResolver, interaction_budget.go) before serving,
+	// so the lock-free read in AcquireLease is safe. See resolveInteractionBudget.
+	interactionBudgetResolver func(interactionID string) (int64, bool)
 }
 
 // lease is an in-flight (or recently-closed) lease tracked for settlement
@@ -172,6 +179,11 @@ func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseReque
 		return nil, err
 	}
 
+	// RFC 0050 amendment: resolve the per-interaction ceiling server-side BEFORE
+	// taking w.mu, so the injected resolver (which locks the router) never nests
+	// under the wallet mutex. See resolveInteractionBudget (interaction_budget.go).
+	interactionBudget := w.resolveInteractionBudget(req)
+
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -193,8 +205,9 @@ func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseReque
 	// RFC 0030 Layer 1 interaction ceiling and the RFC 0023 dollar-budget check.
 	estimatedTokens := req.GetEstimatedInputTokens() + req.GetEstimatedMaxOutputTokens()
 
-	// RFC 0030 Layer 1 — per-interaction cost ceiling (§E), fail-closed.
-	if denied := w.interactionCeilingDenialLocked(req, estimatedTokens); denied != nil {
+	// RFC 0030 Layer 1 — per-interaction cost ceiling (§E), fail-closed. The
+	// ceiling is the server-resolved budget, not the request field (RFC 0050).
+	if denied := w.interactionCeilingDenialLocked(req, estimatedTokens, interactionBudget); denied != nil {
 		return denied, nil
 	}
 
@@ -252,7 +265,7 @@ func (w *WalletService) AcquireLease(_ context.Context, req *walletpb.LeaseReque
 	// the gated id on the lease keeps acquire's fold and finalize's reconcile
 	// symmetric — both key off the same (possibly empty) tracked id.
 	trackedInteractionID := ""
-	if req.GetInteractionBudgetTokens() > 0 {
+	if interactionBudget > 0 {
 		trackedInteractionID = req.GetInteractionId()
 	}
 	w.active[leaseID] = &lease{

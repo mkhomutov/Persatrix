@@ -88,7 +88,7 @@ func configEndpointStatus(t *testing.T, cfgDir string, enableUI bool) int {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "channels.db")
 	logger := zap.NewNop()
-	chanOpts, cleanup, err := initChannels(cfgDir, dbPath, "", "", nil, nil, logger)
+	chanOpts, cleanup, err := initChannels(cfgDir, dbPath, "", "", nil, nil, nil, logger)
 	t.Cleanup(cleanup)
 	require.NoError(t, err)
 	require.NotEmpty(t, chanOpts, "channels must wire so the config endpoint is not a 503")

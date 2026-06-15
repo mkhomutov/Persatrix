@@ -116,3 +116,72 @@ func (r *ChannelRouter) ResolveInteractionBudgets(ctx context.Context, cfg *Conf
 	}
 	return nil
 }
+
+// snapshotInteractionBudget records the channel's effective interaction budget
+// against `interactionID` the moment that interaction first commits (RFC 0050
+// amendment — server-side resolution, "snapshot at interaction open"). The
+// snapshot is what the wallet's resolver reads, so the ceiling is fixed for the
+// interaction's life: an operator editing the channel budget mid-interaction
+// re-bases only the NEXT interaction, not an in-flight one. Called from
+// [ChannelRouter.settleInteraction] on the first commit, after interactionMu is
+// released (so the only lock here is budgetMu — no nesting).
+//
+// Only a CAPPED channel (budget > 0) gets an entry: an uncapped interaction needs
+// no snapshot (the resolver's miss already means "uncapped"), so an uncapped
+// fleet leaves interactionBudgetSnapshots empty — the latent-until-configured
+// property the wallet's running-total map also has. A re-snapshot of an already-
+// recorded id is harmless (same channel → same value) but the caller gates on the
+// first commit so it does not happen.
+//
+// Boundary (snapshot-at-FIRST-COMMIT, not at lease): the lease that produces an
+// interaction's opening message is acquired before that message is published, so
+// it resolves before this snapshot exists and is therefore UNGOVERNED by the
+// interaction's own ceiling — every lease after the opening commit is governed.
+// In the dominant flow this is a non-issue: the opening message is an inbound
+// (human / external) publish carrying no lease, so the snapshot is already in
+// place before any agent reply leases. Only a fully agent-initiated opening turn
+// (a TICK-driven first post to a channel with no open interaction) escapes the
+// ceiling for that one turn, and the Layer 0 depth cap plus the RFC 0023 dollar
+// budget still bound it.
+func (r *ChannelRouter) snapshotInteractionBudget(interactionID, channelID string) {
+	if interactionID == "" {
+		return
+	}
+	r.budgetMu.Lock()
+	defer r.budgetMu.Unlock()
+	if b := r.channelBudgets[channelID]; b > 0 {
+		r.interactionBudgetSnapshots[interactionID] = b
+	}
+}
+
+// DiscardInteractionBudget evicts a closed interaction's budget snapshot — the
+// Layer 1 sibling of [ChannelRouter.DiscardInteractionEndVotes], fired from the
+// same deferred resolver seams (rotation / Layer 4 close) so the snapshot lives
+// exactly as long as the end-vote tombstone: through the post-close suppression
+// window, covering any lease racing the close, then gone. Idempotent — discarding
+// an unknown or uncapped (never-snapshotted) interaction is a no-op, so it bounds
+// the map the same way the end-vote accumulator is bounded.
+func (r *ChannelRouter) DiscardInteractionBudget(interactionID string) {
+	if interactionID == "" {
+		return
+	}
+	r.budgetMu.Lock()
+	delete(r.interactionBudgetSnapshots, interactionID)
+	r.budgetMu.Unlock()
+}
+
+// ResolveInteractionBudgetForInteraction returns the snapshotted cost ceiling for
+// `interactionID` and whether one exists. It is the server-side resolver the
+// wallet calls at lease time (wired via [wallet.WalletService.SetInteractionBudgetResolver]):
+// `ok` is true only for a capped interaction that has already committed its first
+// message, so a miss (uncapped channel, non-channel/TICK lease, an interaction
+// already fully retired, or one still in its opening turn — see
+// [ChannelRouter.snapshotInteractionBudget] for why the first lease predates the
+// snapshot) reads as "no ceiling". This is the seam that makes the store — not the
+// agent-supplied request field — authoritative over the Layer 1 budget.
+func (r *ChannelRouter) ResolveInteractionBudgetForInteraction(interactionID string) (int64, bool) {
+	r.budgetMu.Lock()
+	defer r.budgetMu.Unlock()
+	v, ok := r.interactionBudgetSnapshots[interactionID]
+	return v, ok
+}

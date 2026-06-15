@@ -20,15 +20,15 @@ import (
 // denies (the uncapped pre-v0.3.8 default); a denial means the LLM call does
 // not happen (GL5), and the depth cap (Layer 0) remains the always-on net.
 //
-// The ceiling is read from the request, not stored: every lease of one
-// interaction is expected to carry the same resolved channel budget (PR 5
-// stamps it from config), so enforcement is last-writer-wins if the budget
-// were ever to differ across leases of one interaction — an operator changing
-// a channel's interaction_budget_tokens mid-conversation re-bases the cap for
-// subsequent leases. The running total it is compared against is server-held.
-func (w *WalletService) interactionCeilingDenialLocked(req *walletpb.LeaseRequest, estimatedTokens int64) *walletpb.LeaseResponse {
+// The `budget` is resolved by the caller (RFC 0050 amendment — server-side
+// resolution via WalletService.resolveInteractionBudget), not read from the
+// request: the channel store owns the ceiling, so an agent cannot widen it by
+// under-reporting on the lease. Because the snapshot is fixed at interaction open
+// (router-side), every lease of one interaction sees the same number; an operator
+// editing the channel budget re-bases only the next interaction. The running
+// total it is compared against is server-held.
+func (w *WalletService) interactionCeilingDenialLocked(req *walletpb.LeaseRequest, estimatedTokens, budget int64) *walletpb.LeaseResponse {
 	interactionID := req.GetInteractionId()
-	budget := req.GetInteractionBudgetTokens()
 	if interactionID == "" || budget <= 0 {
 		return nil
 	}
@@ -54,6 +54,42 @@ func (w *WalletService) interactionCeilingDenialLocked(req *walletpb.LeaseReques
 			},
 		},
 	}
+}
+
+// SetInteractionBudgetResolver wires the server-side per-interaction cost-ceiling
+// resolver (RFC 0050 amendment). The orchestrator calls it once at startup, after
+// both the wallet and the channel router exist — the wallet is constructed first
+// (no channels dependency), so this is a post-construction setter, not a
+// NewWalletService option. A nil fn leaves the legacy request-field behaviour in
+// place. Not concurrency-guarded by design: it runs in single-threaded startup
+// wiring before the gRPC server accepts the first lease, so the lock-free read in
+// AcquireLease is safe.
+func (w *WalletService) SetInteractionBudgetResolver(fn func(interactionID string) (int64, bool)) {
+	w.interactionBudgetResolver = fn
+}
+
+// resolveInteractionBudget returns the effective per-interaction cost ceiling for
+// a lease (RFC 0050 amendment — server-side resolution). When the resolver is
+// wired (the orchestrator injects one reading the channel router's snapshot) it
+// is AUTHORITATIVE: a hit returns the snapshotted channel ceiling; a miss
+// (uncapped channel, non-channel / TICK lease, an interaction already retired,
+// or one whose first message has not yet committed — the snapshot is taken at
+// first commit, router-side, so the lease that PRODUCES an interaction's opening
+// message predates its snapshot and resolves uncapped) returns 0 = uncapped,
+// deliberately IGNORING any agent-supplied request value —
+// the store, not the agent, owns the ceiling. Only with no resolver wired (tests,
+// or a wallet built without channels) does it fall back to the request field, the
+// legacy pre-amendment behaviour. Lock-free: the resolver field is set once at
+// startup before any lease (see SetInteractionBudgetResolver), and the router
+// read it performs takes the router's own lock, not w.mu.
+func (w *WalletService) resolveInteractionBudget(req *walletpb.LeaseRequest) int64 {
+	if w.interactionBudgetResolver == nil {
+		return req.GetInteractionBudgetTokens()
+	}
+	if budget, ok := w.interactionBudgetResolver(req.GetInteractionId()); ok {
+		return budget
+	}
+	return 0
 }
 
 // recordInteractionGrantLocked folds a granted lease's worst-case estimate

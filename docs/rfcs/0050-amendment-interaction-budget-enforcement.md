@@ -115,13 +115,18 @@ Three pieces, no wire/agent changes.
   reads the new getter and returns the effective fleet-default value, instead of the
   `value: null` it emits today only when no per-channel override is present).
 
-**2. Snapshot the budget onto the interaction at stamp time.** Where the router
-stamps the resolved `interaction_id` onto a channel publish
-(`internal/channels/interaction_resolver.go`), both the channel id and the fresh
-interaction id are in hand. Record `interactionBudgets[interactionID] =
-InteractionBudgetTokensFor(channelID)` there; evict on interaction close (piggyback
-the existing end-vote / reply-budget close cleanup keyed by `interaction_id`).
-See [Semantics](#semantics-snapshot-at-interaction-open).
+**2. Snapshot the budget onto the interaction at first commit.** When an
+interaction first *commits* — its first persisted publish, in
+`settleInteraction` (`internal/channels/interaction_resolver.go`), after
+`interactionMu` is released so `budgetMu` never nests — both the channel id and
+the resolved interaction id are in hand. Record
+`interactionBudgetSnapshots[interactionID] = InteractionBudgetTokensFor(channelID)`
+there, only for a capped channel (`> 0`). First-commit, not bare stamp-at-resolve,
+mirrors how `idCommitted` / `lastActivity` already reconcile to persistence — a
+rejected or never-committed publish leaves no snapshot. Evict one generation after
+close via the same deferred discard seams as the end-vote tombstone
+(`DiscardInteractionBudget` beside `DiscardInteractionEndVotes`), so a lease racing
+the close still resolves. See [Semantics](#semantics-snapshot-at-interaction-open).
 
 **3. Inject a resolver into the wallet; enforce server-side.** Give `WalletService` a
 `SetInteractionBudgetResolver(func(interactionID string) (int64, bool))` injector
@@ -158,8 +163,8 @@ owns. The proto field it would add is exactly what Option A makes unnecessary.
 
 ## Semantics: snapshot at interaction open
 
-The budget is snapshotted **when the interaction opens** (first stamp of its
-`interaction_id`) and is **stable for the life of that interaction**. A live edit
+The budget is snapshotted **when the interaction opens** (its first *committed*
+publish) and is **stable for the life of that interaction**. A live edit
 therefore applies to interactions opened *after* the edit, not retroactively to an
 in-flight one. This is the chosen, defensible semantic: a per-interaction cost
 ceiling that shifts mid-interaction is harder to reason about than one fixed at
@@ -167,6 +172,23 @@ open, and it matches how `interaction_id`-keyed Layer-1 tracking already
 accumulates. (Resolving live per-lease is possible — read `channelBudgets` through
 an `interaction_id → channel` association every acquire — but adds a second map and
 a moving ceiling for no clear benefit; recorded as an [open question](#open-questions).)
+
+**Boundary — the opening turn is ungoverned.** Because the snapshot is taken at
+first *commit* and a lease is acquired *before* its message is published, the lease
+that produces an interaction's opening message resolves before the snapshot exists
+and is therefore not governed by that interaction's own ceiling; every lease after
+the opening commit is. In the dominant flow this is a non-issue — the opening
+message is an inbound (human / external) publish carrying no lease, so the snapshot
+is in place before any agent reply leases. Only a fully agent-initiated opening
+turn (a TICK-driven first post to a channel with no open interaction) escapes the
+ceiling for that one turn — and because that lease resolves uncapped (budget 0) it
+is not interaction-tracked either, so its tokens never accrue to the running total
+the *next* lease is checked against. The effective ceiling for such an interaction
+is therefore the configured budget plus the opening turn's (uncounted) spend; both
+remain bounded by the always-on Layer 0 depth cap and the RFC 0023 dollar budget.
+Closing it would require resolving the channel ceiling for
+an interaction-less lease (the live-per-lease variant above), which this amendment
+deliberately does not adopt.
 
 ## Implementation plan (PR sequence)
 
@@ -222,8 +244,13 @@ No `proto/`, no `agents/`, no stub regen.
 Tightens the trust boundary: the cost ceiling is no longer asserted by the agent
 (which the wallet otherwise trusted), but resolved from store-canonical governance
 at the enforcement point. An agent can no longer widen its own interaction budget
-by under-reporting it. The resolver is a read-only function over in-memory router
-state — no new external surface.
+by under-reporting it — for every lease after the interaction's opening commit. The
+opening turn itself is ungoverned by the per-interaction ceiling (see the
+[Boundary](#semantics-snapshot-at-interaction-open) note); in the dominant
+inbound-driven flow no agent lease falls in that turn, and where one can (a fully
+agent-initiated opening post) the Layer 0 depth cap and the RFC 0023 dollar budget
+still bound it. The resolver is a read-only function over in-memory router state —
+no new external surface.
 
 ## Open questions
 

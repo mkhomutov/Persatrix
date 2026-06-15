@@ -15,6 +15,7 @@ import (
 	obsmetrics "github.com/mkhomutov/persatrix/internal/observability/metrics"
 	"github.com/mkhomutov/persatrix/internal/registry"
 	"github.com/mkhomutov/persatrix/internal/server"
+	"github.com/mkhomutov/persatrix/internal/wallet"
 )
 
 // channelsDB is the SQLite path backing the RFC 0011 channels subsystem.
@@ -63,6 +64,7 @@ func initChannels(
 	cfgDir, dbPath, sessionID, epochID string,
 	orchMetrics *obsmetrics.Instruments,
 	reg registry.Registry,
+	walletSvc *wallet.WalletService,
 	logger *zap.Logger,
 ) (opts []server.ServerOption, cleanup func(), err error) {
 	noop := func() {}
@@ -162,6 +164,16 @@ func initChannels(
 	}
 	dispatcher := selectChannelDispatcher(reg, sessionResolver, epochID, logger)
 	router := channels.NewChannelRouter(chanStore, dispatcher, logger, routerMetrics)
+	// RFC 0050 amendment (interaction-budget enforcement): make the channel
+	// router the authority for the wallet's per-interaction cost ceiling. The
+	// wallet was constructed before this point (it has no channels dependency),
+	// so the resolver is injected here, where the router is born. Nil-safe: a
+	// deployment without cost config has no wallet, so the budget stays its
+	// pre-amendment self (the wallet falls back to the request field, which no
+	// producer stamps — i.e. uncapped).
+	if walletSvc != nil {
+		walletSvc.SetInteractionBudgetResolver(router.ResolveInteractionBudgetForInteraction)
+	}
 	// Drain in-flight detached fanout (RFC 0048 console publish-latency fix:
 	// the REST handler returns at the persistence boundary and runs fanout on a
 	// tracked goroutine) before closing the store, so a shutdown mid-round
