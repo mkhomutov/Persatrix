@@ -23,6 +23,7 @@
   import DmComposer from "./DmComposer.svelte";
   import CreateChannelForm from "./CreateChannelForm.svelte";
   import ChannelMembers from "./ChannelMembers.svelte";
+  import ChannelSettings from "./ChannelSettings.svelte";
   import ChannelPicker from "./ChannelPicker.svelte";
   import ConversationFeed from "./ConversationFeed.svelte";
   import PersonaPicker from "./PersonaPicker.svelte";
@@ -424,26 +425,19 @@
     />
 
     {#if canCreate && showCreateForm}
-      <CreateChannelForm
-        {agents}
-        {userId}
-        onCreated={onChannelCreated}
-        onCancel={() => (showCreateForm = false)}
-      />
+      <CreateChannelForm {agents} {userId} onCreated={onChannelCreated} onCancel={() => (showCreateForm = false)} />
     {/if}
 
     {#if canCreate && selectedChannel && !isDM}
-      <!-- Manage the watched group channel's roster (add/remove members,
-           set dispositions). Same management capability as create; hidden for
-           DMs (a DM's two members are fixed). -->
-      <ChannelMembers
-        channelId={selectedChannel}
-        members={selectedChannelMembers}
-        {agents}
-        {agentsById}
-        {userId}
-        onChanged={loadChannels}
-      />
+      <!-- Manage the watched group channel's roster (add/remove members, set
+           dispositions). Same capability as create; hidden for DMs. -->
+      <ChannelMembers channelId={selectedChannel} members={selectedChannelMembers} {agents} {agentsById} {userId} onChanged={loadChannels} />
+    {/if}
+
+    {#if canConfigEdit && selectedChannel && !isDM}
+      <!-- Governance settings for the watched group channel (RFC 0050 P2);
+           config-edit capability only (independent of create), hidden for DMs. -->
+      <ChannelSettings channelId={selectedChannel} members={selectedChannelMembers} {agentsById} onChanged={loadChannels} />
     {/if}
 
     {#if isDM}
