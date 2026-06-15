@@ -124,6 +124,139 @@ describe("ChannelMembers", () => {
     expect(JSON.parse(init.body)).toEqual({ id: "iron-fox", respond: "chair" });
   });
 
+  it("edits a member's disposition + threshold and re-lists via onChanged", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(noContent()));
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn(() => Promise.resolve());
+    renderMembers({ onChanged });
+
+    // Open the inline editor for Ada (the editor defaults to her current config).
+    await fireEvent.click(screen.getByLabelText("Edit Ada"));
+    const threshold = screen.getByLabelText("Salience threshold for Ada");
+    expect(threshold.value).toBe("0.3");
+
+    await fireEvent.change(screen.getByLabelText("Disposition for Ada"), {
+      target: { value: "participant" },
+    });
+    // A number input binds on `input` (not `change`) in Svelte.
+    await fireEvent.input(threshold, { target: { value: "0.7" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await vi.waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/channels/group%3Aplanning/members/ada");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body)).toEqual({
+      respond: "participant",
+      threshold: 0.7,
+    });
+  });
+
+  it("re-declares the open-floor disposition for a salience-gated member (no silent un-gating on a no-op save)", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(noContent()));
+    vi.stubGlobal("fetch", fetchMock);
+    renderMembers();
+
+    // Ada reads back respond:"always" + salience_gated — the store normalizes a
+    // participant/chair to the legacy "always" wire value, so her *declared*
+    // open-floor disposition is unrecoverable from persisted state. The editor
+    // must seed an open-floor disposition (not the literal "always"), because the
+    // server re-derives salience_gated from the disposition we send: a no-op save
+    // that echoed "always" with no explicit threshold would resolve to
+    // salience_gated=false and silently demote her to an unconditional responder.
+    await fireEvent.click(screen.getByLabelText("Edit Ada"));
+    expect(screen.getByLabelText("Disposition for Ada").value).toBe(
+      "participant",
+    );
+
+    // Save without touching the disposition — the bid must survive the round-trip.
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.respond).toBe("participant");
+    expect(body.threshold).toBe(0.3);
+  });
+
+  it("sends an explicit null threshold when the field is cleared (unset the bar, keeping the bid)", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(noContent()));
+    vi.stubGlobal("fetch", fetchMock);
+    renderMembers();
+
+    await fireEvent.click(screen.getByLabelText("Edit Ada"));
+    await fireEvent.input(screen.getByLabelText("Salience threshold for Ada"), {
+      target: { value: "" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.threshold).toBeNull();
+    // respond is always sent (the server requires it), and for a salience-gated
+    // member it must be the open-floor disposition, NOT the normalized "always".
+    // Unsetting the bar is "bias-to-silence" — the bid stays on (salience_gated
+    // true, no threshold). Echoing "always"+null would instead un-gate her, the
+    // opposite of the intended effect.
+    expect(body.respond).toBe("participant");
+  });
+
+  it("offers no Edit button for the acting user (a human principal, not a governed persona)", () => {
+    renderMembers();
+    expect(screen.getByLabelText("Edit Ada")).toBeTruthy();
+    expect(screen.queryByLabelText("Edit local")).toBeNull();
+  });
+
+  it("surfaces the server error and does not re-list when an edit fails", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 400,
+        json: () =>
+          Promise.resolve({ error: "channels: invalid member threshold" }),
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn(() => Promise.resolve());
+    renderMembers({ onChanged });
+
+    await fireEvent.click(screen.getByLabelText("Edit Ada"));
+    await fireEvent.input(screen.getByLabelText("Salience threshold for Ada"), {
+      target: { value: "5" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByRole("alert");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "invalid member threshold",
+    );
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it("disables the editor inputs while a save is in flight (no mid-flight drift from the submitted values)", async () => {
+    // Hold the PATCH open so the save stays in flight; the disposition select
+    // and threshold input must lock while busy. Otherwise a mid-flight change
+    // would diverge from the values already captured into the request — and on a
+    // failed save the reopened editor would show the drifted value, not the one
+    // actually attempted.
+    let release;
+    const fetchMock = vi.fn(
+      () => new Promise((resolve) => (release = () => resolve(noContent()))),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderMembers();
+
+    await fireEvent.click(screen.getByLabelText("Edit Ada"));
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText("Disposition for Ada").disabled).toBe(true);
+      expect(screen.getByLabelText("Salience threshold for Ada").disabled).toBe(
+        true,
+      );
+    });
+
+    release();
+  });
+
   it("surfaces the server error and does not re-list when an add fails", async () => {
     // A plausible real failure: the watched channel was deleted between the
     // list and the add, so the server reports 404 (the add is idempotent, so

@@ -30,18 +30,24 @@
 # --enable-ui + the localhost bind; see the security note in the web-console
 # guide before exposing the console beyond localhost.)
 #
-# `config_edit_enabled` (channel_timeline, RFC 0050 Phase 1) opts CLI and web
-# into editing per-channel governance config at runtime — the PATCH/GET
-# /api/v1/channels/{id}/config surface over the store-canonical apply path. It
-# ships OFF (false) so the surface lands dark: the endpoints return 403 until an
-# operator flips it on, and the server enforces this one toggle for both the CLI
-# and the browser. Its companion `config_edit.available` is runtime-derived (the
+# `config_edit_enabled` (channel_timeline, RFC 0050) opts CLI and web into editing
+# per-channel governance config at runtime — the PATCH/GET
+# /api/v1/channels/{id}/config surface over the store-canonical apply path, and
+# the member-config PATCH. The server enforces this one toggle for both the CLI
+# and the browser. It ships ON (true) now that RFC 0050 is complete — all seven
+# governance knobs are live end-to-end (the interaction-budget amendment closed
+# the last one), the ISSUE-0103 first-edit detachment is fixed, and the web
+# settings + member-threshold editors have landed — so the go-live blockers that
+# kept it dark are cleared. Like `create_enabled` it is a structural write still
+# gated by --enable-ui + the localhost bind (see the web-console security note
+# before exposing the console beyond localhost); set it back to `false` to hide
+# config editing. Its companion `config_edit.available` is runtime-derived (the
 # channel router must be wired) and never authored here.
 panels:
   channel_timeline:
     enabled: true
     create_enabled: true
-    config_edit_enabled: false
+    config_edit_enabled: true
   memory_strip:
     enabled: false
   cost:
