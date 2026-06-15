@@ -351,7 +351,7 @@ func main() {
 	epochID := resolveEpochID(logger)
 
 	// RFC 0011 PR 2 — channels subsystem (see channels.go).
-	chanOpts, chanCleanup, chanErr := initChannels(*configDir, *channelsDB, sessionID, epochID, orchMetrics, reg, logger)
+	chanOpts, chanCleanup, chanErr := initChannels(*configDir, *channelsDB, sessionID, epochID, orchMetrics, reg, walletSvc, logger)
 	if chanErr != nil {
 		logger.Fatal("channels: config-vs-store reconcile failed", zap.Error(chanErr))
 	}

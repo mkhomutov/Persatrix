@@ -146,10 +146,17 @@ type ChannelRouter struct {
 	// channelBudgets: channel id → resolved interaction_budget_tokens (0 =
 	// uncapped). defaultInteractionBudget: fleet default_interaction_budget_tokens,
 	// captured for runtime inheritance (zero is a meaningful "uncapped" value, like
-	// the reply budget, so it cannot ride a Set(_, 0) sentinel). Guarded by budgetMu.
-	budgetMu                 sync.Mutex
-	channelBudgets           map[string]int64
-	defaultInteractionBudget int64
+	// the reply budget, so it cannot ride a Set(_, 0) sentinel).
+	// interactionBudgetSnapshots: interaction id → the channel budget snapshotted
+	// when that interaction first committed (RFC 0050 amendment — the snapshot the
+	// wallet's server-side resolver reads; stable for the interaction's life,
+	// evicted on close alongside the end-vote tombstone). Only capped (>0)
+	// interactions get an entry, so an uncapped fleet leaves it empty. All guarded
+	// by budgetMu.
+	budgetMu                   sync.Mutex
+	channelBudgets             map[string]int64
+	defaultInteractionBudget   int64
+	interactionBudgetSnapshots map[string]int64
 
 	// endVoteMu guards the RFC 0030 Layer 4 (v0.3.8) end-of-interaction vote
 	// state; methods + the full field contracts live in end_vote.go.
@@ -250,6 +257,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		replyBudgets:                  make(map[string]int),
 		replyCounts:                   make(map[string]map[string]int),
 		channelBudgets:                make(map[string]int64),
+		interactionBudgetSnapshots:    make(map[string]int64),
 		endVoteThresholds:             make(map[string]int),
 		endVoteWindows:                make(map[string]int),
 		endVotes:                      make(map[string]*interactionEndVotes),

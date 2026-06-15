@@ -250,6 +250,7 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 	if discard != "" {
 		r.DiscardInteractionReplyBudget(discard)
 		r.DiscardInteractionEndVotes(discard)
+		r.DiscardInteractionBudget(discard)
 	}
 	if rotated != "" {
 		r.recordInteractionClosedIdle(ctx, channelID, ct, rotated)
@@ -299,19 +300,25 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 // window, and not reachable at attacker-chosen rate.
 func (r *ChannelRouter) settleInteraction(channelID, resolved string, now time.Time, persisted bool) {
 	r.interactionMu.Lock()
-	defer r.interactionMu.Unlock()
 	entry := r.openInteractions[channelID]
 	if !persisted {
 		if entry != nil && entry.id == resolved && !entry.idCommitted && entry.retired == "" {
 			delete(r.openInteractions, channelID)
 		}
+		r.interactionMu.Unlock()
 		return
 	}
 	if entry == nil {
 		entry = &openInteraction{id: resolved}
 		r.openInteractions[channelID] = entry
 	}
+	// firstCommit is the open seam for the RFC 0050 Layer 1 budget snapshot: the
+	// transition into committed is exactly "this interaction now exists on the
+	// record", the snapshot-at-open moment. Recorded after the lock is released
+	// so budgetMu never nests under interactionMu.
+	firstCommit := false
 	if entry.id == resolved {
+		firstCommit = !entry.idCommitted
 		entry.idCommitted = true
 	} else if entry.retired == "" {
 		// `resolved` was orphaned mid-flight (see doc): park it so the next
@@ -322,6 +329,11 @@ func (r *ChannelRouter) settleInteraction(channelID, resolved string, now time.T
 	}
 	if now.After(entry.lastActivity) {
 		entry.lastActivity = now
+	}
+	r.interactionMu.Unlock()
+
+	if firstCommit {
+		r.snapshotInteractionBudget(resolved, channelID)
 	}
 }
 
@@ -350,6 +362,7 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID string) {
 	if discard != "" {
 		r.DiscardInteractionReplyBudget(discard)
 		r.DiscardInteractionEndVotes(discard)
+		r.DiscardInteractionBudget(discard)
 	}
 }
 
