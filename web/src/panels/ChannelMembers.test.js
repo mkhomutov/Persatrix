@@ -231,6 +231,32 @@ describe("ChannelMembers", () => {
     expect(onChanged).not.toHaveBeenCalled();
   });
 
+  it("disables the editor inputs while a save is in flight (no mid-flight drift from the submitted values)", async () => {
+    // Hold the PATCH open so the save stays in flight; the disposition select
+    // and threshold input must lock while busy. Otherwise a mid-flight change
+    // would diverge from the values already captured into the request — and on a
+    // failed save the reopened editor would show the drifted value, not the one
+    // actually attempted.
+    let release;
+    const fetchMock = vi.fn(
+      () => new Promise((resolve) => (release = () => resolve(noContent()))),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderMembers();
+
+    await fireEvent.click(screen.getByLabelText("Edit Ada"));
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await vi.waitFor(() => {
+      expect(screen.getByLabelText("Disposition for Ada").disabled).toBe(true);
+      expect(screen.getByLabelText("Salience threshold for Ada").disabled).toBe(
+        true,
+      );
+    });
+
+    release();
+  });
+
   it("surfaces the server error and does not re-list when an add fails", async () => {
     // A plausible real failure: the watched channel was deleted between the
     // list and the add, so the server reports 404 (the add is idempotent, so

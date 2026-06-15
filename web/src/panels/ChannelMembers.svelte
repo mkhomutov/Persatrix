@@ -189,6 +189,7 @@
             <!-- Inline member-config editor: replace disposition + threshold. -->
             <select
               bind:value={editRespond}
+              disabled={busy}
               aria-label={`Disposition for ${displayName(member.id)}`}
             >
               <option value="when_mentioned">When mentioned</option>
@@ -205,6 +206,7 @@
               max="1"
               step="0.05"
               placeholder="unset"
+              disabled={busy}
               bind:value={editThreshold}
               aria-label={`Salience threshold for ${displayName(member.id)}`}
             />
