@@ -115,22 +115,18 @@ func TestApplyChannelConfig_AbsentKnobsResolveToDefaults(t *testing.T) {
 		"an absent knob falls back to the package default, not the prior value")
 }
 
-// TestApplyChannelConfig_InteractionBudgetPersistedButNotRouterHeld pins the
-// RFC 0050 PR-2 deferral contract for interaction budget (RFC 0030 Layer 1):
-// PR 1 persists the override uniformly with the other six knobs, but PR 2
-// intentionally does NOT stamp it onto the router — it is not router-held (no
-// setter, no Resolve* boot call; it is read on demand by
-// [ChannelConfig.ResolveInteractionBudgetTokens] on the wallet path), so wiring
-// it live is deferred to a follow-up (PR-2 plan, Open item 4).
+// TestApplyChannelConfig_InteractionBudgetPersistedAndRouterHeld pins the RFC
+// 0050 amendment contract for interaction budget (RFC 0030 Layer 1): a patch
+// carrying ONLY interaction budget both persists to the canonical store AND
+// stamps the live router, exactly like the other router-held knobs. (Before the
+// amendment the budget was persisted but NOT router-held — wiring it live was
+// deferred; this test guarded that deferral and now guards its removal.)
 //
-// This test is the guard for that deferral: a patch carrying ONLY interaction
-// budget still persists and round-trips through the canonical store (so the
-// operator edit is not silently dropped), while the six router-held knobs the
-// apply re-seeds all resolve to their inherited defaults — the budget bleeds
-// into none of them. The day interaction budget IS wired live it gains a router
-// accessor and this test must be updated deliberately, rather than the deferral
-// lapsing unnoticed.
-func TestApplyChannelConfig_InteractionBudgetPersistedButNotRouterHeld(t *testing.T) {
+// The apply must (a) round-trip the override through the store and bump the
+// revision, (b) stamp the budget onto the router so InteractionBudgetTokensFor
+// reads it back, and (c) leave the OTHER knobs at their inherited defaults — the
+// budget bleeds into none of them.
+func TestApplyChannelConfig_InteractionBudgetPersistedAndRouterHeld(t *testing.T) {
 	router, store, ctx := newApplyRouter(t)
 	mustCreateGroup(t, store, "planning", "ada")
 
@@ -138,19 +134,21 @@ func TestApplyChannelConfig_InteractionBudgetPersistedButNotRouterHeld(t *testin
 	require.NoError(t, router.ApplyChannelConfig(ctx, "group:planning",
 		ChannelConfigOverrides{InteractionBudgetTokens: &budget}, 0, ""))
 
-	// Persisted (PR-1 uniformity): the budget round-trips through the store and
-	// the apply bumped the revision — the override is canonical even though it
-	// has no live router effect yet.
+	// Persisted: the budget round-trips through the store and the apply bumped
+	// the revision — the override is canonical.
 	got, revision, err := store.GetChannelConfig(ctx, "group:planning")
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), revision, "an interaction-budget-only apply still bumps the revision")
 	require.NotNil(t, got.InteractionBudgetTokens, "interaction budget is persisted by the apply path")
 	assert.Equal(t, int64(50_000), *got.InteractionBudgetTokens)
 
-	// Not router-held: the six knobs the apply re-seeds all resolve to their
-	// inherited defaults — the budget is stamped onto none of them. (There is no
-	// router accessor for interaction budget to assert against; its absence here
-	// IS the deferral.)
+	// Router-held: the apply stamps the budget onto the live router (the RFC 0050
+	// amendment behaviour this test now guards).
+	assert.EqualValues(t, 50_000, router.InteractionBudgetTokensFor("group:planning"),
+		"the apply stamps the interaction budget onto the router")
+
+	// The other knobs the apply re-seeds all resolve to their inherited defaults —
+	// the budget is stamped onto none of them.
 	enabled, _, fcSet := router.FloorControlFor("group:planning")
 	assert.True(t, fcSet)
 	assert.True(t, enabled, "floor control inherits the group default (ON)")

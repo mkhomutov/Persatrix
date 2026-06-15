@@ -58,8 +58,10 @@ type ChannelConfigOverrides struct {
 	SalienceMaxChannelMembers *int `json:"salience_max_channel_members,omitempty"`
 	// InteractionBudgetTokens overrides the RFC 0030 Layer 1 per-interaction
 	// cost ceiling ([ChannelConfig.InteractionBudgetTokens]). Persisted here
-	// uniformly with the other knobs; its *live* application is deferred (it is
-	// not router-held — see the RFC 0050 PR-2 plan's interaction-budget note).
+	// uniformly with the other knobs; router-held as of the RFC 0050 amendment
+	// (interaction-budget enforcement), so an override becomes live router state
+	// — though wallet-side enforcement of the resolved ceiling is the amendment's
+	// PR 2.
 	InteractionBudgetTokens *int64 `json:"interaction_budget_tokens,omitempty"`
 	// MaxRepliesPerParticipantPerInteraction overrides the RFC 0030 Layer 2
 	// reply budget ([ChannelConfig.MaxRepliesPerParticipantPerInteraction]).

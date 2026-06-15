@@ -20,17 +20,16 @@ import (
 // router together, and at boot the router is overlaid from the store for any
 // channel an operator has edited.
 //
-// Six of the seven governance knobs are router-held and made live here:
-// floor control, the Tier B salience cap, the Layer 2 reply budget, the Layer 4
-// end-vote K/W, the escalation chair, and the interaction idle window. The
-// seventh — interaction budget (RFC 0030 Layer 1) — is NOT router-held (there is
-// no `Resolve*` boot call and no setter; [ChannelConfig.ResolveInteractionBudgetTokens]
-// is read only when snapshotting the YAML image into the store
-// (config_reconcile.go), never on a live wallet path — the resolved ceiling
-// reaches no enforcement today). PR 1
-// persists its override uniformly in `config_overrides_json`, but applying it
-// live needs new plumbing and is deferred (RFC 0050 PR-2 plan, Open item 4); so
-// the apply path here makes six of the seven knobs runtime-editable.
+// All seven governance knobs are router-held and made live here: floor control,
+// the Tier B salience cap, the Layer 1 interaction budget, the Layer 2 reply
+// budget, the Layer 4 end-vote K/W, the escalation chair, and the interaction
+// idle window. The interaction budget (RFC 0030 Layer 1) became router-held in
+// the RFC 0050 amendment (interaction-budget enforcement): it now has a
+// [ChannelRouter.ResolveInteractionBudgets] boot call and a
+// [ChannelRouter.SetInteractionBudgetTokens] setter, so the apply path here
+// stamps it like the others. Note enforcement of the resolved ceiling is still
+// the amendment's PR 2 (wallet-side resolution); this PR resolves and surfaces
+// the value but does not yet act on it.
 
 // Validate enforces the per-channel field-range invariants on a sparse override
 // patch — the single-channel subset of [Config.Validate], applied to the knobs
