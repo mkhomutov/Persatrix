@@ -50,6 +50,19 @@ type MemberPolicy struct {
 // on a member that can bid) would let an invalid pair persist silently —
 // if a wire shape ever grows a threshold field, add the parameter and
 // that rule together.
+func ResolveMemberPolicy(declared RespondPolicy) (MemberPolicy, error) {
+	salienceGated, threshold := ResolveSalienceSignal(declared, nil)
+	canonical, err := canonicalRespondPolicy(declared)
+	if err != nil {
+		return MemberPolicy{}, err
+	}
+	return MemberPolicy{
+		Policy:        canonical,
+		SalienceGated: salienceGated,
+		Threshold:     threshold,
+	}, nil
+}
+
 // ResolveMemberPolicyWithThreshold is [ResolveMemberPolicy] for a write boundary
 // that DOES carry an operator threshold — the RFC 0050 member-config edit
 // (`PATCH /api/v1/channels/{id}/members/{participant_id}`). It derives the Tier B
@@ -79,17 +92,4 @@ func ResolveMemberPolicyWithThreshold(declared RespondPolicy, explicit *float64)
 		}
 	}
 	return MemberPolicy{Policy: canonical, SalienceGated: salienceGated, Threshold: threshold}, nil
-}
-
-func ResolveMemberPolicy(declared RespondPolicy) (MemberPolicy, error) {
-	salienceGated, threshold := ResolveSalienceSignal(declared, nil)
-	canonical, err := canonicalRespondPolicy(declared)
-	if err != nil {
-		return MemberPolicy{}, err
-	}
-	return MemberPolicy{
-		Policy:        canonical,
-		SalienceGated: salienceGated,
-		Threshold:     threshold,
-	}, nil
 }
