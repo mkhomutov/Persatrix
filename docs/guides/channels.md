@@ -552,6 +552,15 @@ persatrix channel config diff planning
 > [`cli/src/commands/channel_config_yaml.rs`](../../cli/src/commands/channel_config_yaml.rs)
 > — not this guide.
 
+**From the web console (RFC 0050 Phase 2).** The same `get`/`set`/`unset` surface
+is available in the browser as a **Channel settings** panel nested in the
+Channels tab — each governed knob with its effective value, an
+overridden-vs-inherited provenance badge, and an inherit/override control. It is
+gated behind the **same** `config_edit_enabled` toggle (so it ships dark too) and
+rides the same `If-Match` revision, so a value set in the browser is the value the
+CLI `channel config get` reads back. See the
+[web-console guide § Channel settings](web-console.md#channel-settings--edit-governance-from-the-browser).
+
 ### The interaction-summary surface (RFC 0020) — v0.3.8
 
 Governance makes a brainstorm *converge and terminate*; the **summary surface**

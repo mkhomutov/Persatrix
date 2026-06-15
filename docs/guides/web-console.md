@@ -28,6 +28,7 @@ behind the `--enable-ui` flag (**default off**).
   - [Direct-message a persona](#direct-message-a-persona)
   - [Watch a group channel](#watch-a-group-channel)
 - [Creating a channel](#creating-a-channel)
+- [Channel settings — edit governance from the browser](#channel-settings--edit-governance-from-the-browser)
 - [The feature-toggle model (`config/ui.yaml`)](#the-feature-toggle-model-configuiyaml)
 - [Security — do not expose beyond localhost](#security--do-not-expose-beyond-localhost)
 - [What is not in Slice 1](#what-is-not-in-slice-1)
@@ -249,6 +250,78 @@ follows.
 
 ---
 
+## Channel settings — edit governance from the browser
+
+A selected **group channel** can have its governance knobs read and edited from
+the console — the browser counterpart to the CLI
+[`channel config`](channels.md#editing-governance-config-at-runtime--channel-config-rfc-0050-phase-1)
+verb group (RFC 0050 Phase 2). Both surfaces ride the **same**
+`GET`/`PATCH /api/v1/channels/{id}/config` endpoint and the **same** per-channel
+revision, so a value set in one is what the other reads back — one source of
+truth, the store. It is a **Channel settings** disclosure nested in the
+**Channels** tab beside the member roster, shown only for a watched **group**
+channel (not DMs).
+
+**It ships dark.** Unlike channel creation (on by default), the panel is **off by
+default** — turn it on per deployment with `config_edit_enabled: true` under the
+`channel_timeline` panel in [`config/ui.yaml`](../../config/ui.yaml):
+
+```yaml
+panels:
+  channel_timeline:
+    enabled: true
+    config_edit_enabled: true   # default false — gates BOTH the web panel and CLI uniformly
+```
+
+This is the **same toggle** that gates the CLI `channel config` verbs, covering
+the whole `/config` endpoint (read *and* write): on exposes both the panel and
+the CLI verbs; off (the default) returns `403` to both. The panel renders only
+when **both** `config_edit.enabled` and `config_edit.available` are true — the
+usual `enabled && available` rule. `available` is **runtime-derived** (true only
+when the channel store and router are both wired, mirroring the endpoint's `503`)
+and never authored — an `available:` key in the YAML is a `make validate` error.
+Verify with:
+
+```bash
+curl -s http://localhost:8080/api/v1/ui/config | jq '.panels.channel_timeline.config_edit'
+# want: { "enabled": true, "available": true }
+```
+
+**Using it.** Each knob shows its effective value and a provenance badge —
+**Overridden on this channel** or **Inherited default**. To change one, untick
+**Inherit fleet default** and set the value; to revert, re-tick it. **Save
+settings** sends only the knobs you touched (a sparse patch), carrying the loaded
+revision as an `If-Match` guard:
+
+- A reverted knob sends an explicit "unset → inherit"; an override left blank is
+  skipped, not sent as `0` (a no-op save sends nothing).
+- The **escalation chair** picker offers only members that can hold the floor (an
+  observer cannot chair). A chair still requires `floor_control` on; setting one
+  alongside `floor_control: off` round-trips to a `400` the panel surfaces — the
+  picker cannot prevent that cross-field conflict.
+- `interaction_budget_tokens` is store-persisted but **not yet router-wired**
+  (Phase 1 Open item 4), so an inherited value reads back empty ("inherited"),
+  not `0`.
+- On a concurrent edit, the save returns `409`; the panel **reloads the latest
+  config and replays your pending edits on top** rather than blind-overwriting,
+  and asks you to review and save again.
+
+> **⚠️ First-edit caveat (before you flip this on for real).** The store-canonical
+> apply path resets every *other* non-default knob to the fleet default on the
+> **first** edit of a YAML-seeded channel — most visibly the YAML-declared
+> escalation chair — with no warning
+> ([ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md)).
+> Bounded today (ships dark; only `planning` carries a non-default chair) but a
+> silent-data-loss footgun once a UI invites editing YAML-configured channels. **Resolve ISSUE-0103 before turning `config_edit_enabled` on in any
+> deployment that relies on YAML-seeded knobs.** This is also a governance write
+> **before auth** — read [Security](#security--do-not-expose-beyond-localhost)
+> before exposing the console beyond localhost.
+
+For the live cross-surface acceptance walkthrough, see
+[MT-CHANNEL-CONFIG-002](../manual-tests/MT-CHANNEL-CONFIG-002.md).
+
+---
+
 ## The feature-toggle model (`config/ui.yaml`)
 
 Panels ship "dark" in [`config/ui.yaml`](../../config/ui.yaml) and are flipped
@@ -259,7 +332,8 @@ later slices ship off so they land additively:
 panels:
   channel_timeline:
     enabled: true
-    create_enabled: true    # default true — group-channel creation; see "Creating a channel"
+    create_enabled: true       # default true  — group-channel creation; see "Creating a channel"
+    config_edit_enabled: false # default false — governance settings panel; see "Channel settings"
   memory_strip:        # Slice 2 (v0.4.0+) — ships off
     enabled: false
   cost:                # Slice 4 (v0.4.0+) — ships off
@@ -268,9 +342,11 @@ panels:
 
 Two rules make this real:
 
-- **`enabled` is the operator knob** (and `create_enabled` is a per-panel
-  capability knob alongside it). They decide whether the console *offers* a panel
-  or affordance.
+- **`enabled` is the operator knob** (and `create_enabled` /
+  `config_edit_enabled` are per-panel capability knobs alongside it). They decide
+  whether the console *offers* a panel or affordance. `config_edit_enabled` ships
+  **false** so the governance settings panel lands additively, dark, while
+  `create_enabled` ships **true**.
 - **`available` is runtime-derived and never authored.** The server computes,
   per request, whether each panel's backing subsystem is wired (e.g.
   `channel_timeline.available` is true exactly when channels are configured,

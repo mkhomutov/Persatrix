@@ -15,7 +15,7 @@ depends_on:
 # RFC 0050 — Extensible Channel Configuration (Operator-Editable, Single Source of Truth)
 
 **Type**: architecture  
-**Status**: ✅ Accepted — **Phase 1 delivered** (see [Phased Implementation Plan](#phased-implementation-plan))  
+**Status**: ✅ Accepted — **Phase 1 + Phase 2 (web settings panel) delivered**; RFC stays open (ISSUE-0103, the member-threshold slice, and Open item 4 — see [Progress](#progress) / [Phased Implementation Plan](#phased-implementation-plan))  
 **Author**: Maksim Khomutov  
 **Date**: 2026-06-14  
 **Target**: v0.3.x (unscheduled)  
@@ -36,12 +36,31 @@ depends_on:
   router-wired** (Open item 4 — live application deferred). Live G1 acceptance:
   [MT-CHANNEL-CONFIG-001](../manual-tests/MT-CHANNEL-CONFIG-001.md) — **first
   live run passed 2026-06-14** (all steps + edge cases green).
-- **Phase 2 (web settings panel)** — not started. **Prerequisite:**
-  [ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md)
-  (first-edit detachment of YAML-seeded knobs) should be resolved first — it is
-  bounded today (feature ships dark; only `planning` carries a non-default
-  chair) but becomes a routine silent-data-loss footgun once a UI invites
-  operators to edit YAML-configured channels.
+- **Phase 2 (web settings panel) — delivered** (2026-06-15). All 3 PRs of the
+  [Phase 2 PR plan](0050-phase2-pr-plan.md) merged: capability threading +
+  channel-config API client (#652), the `ChannelSettings.svelte` panel nested in
+  `ChannelTimeline` (#653), and docs + the live web manual test + this status bump
+  (PR 3). The slice is **web-only — zero Go changes**: it renders over the Phase 1
+  `GET`/`PATCH …/config` endpoint behind the same `config_edit_enabled` toggle,
+  which ships **off** so the panel lands dark. Live G4 (single-source-of-truth)
+  acceptance: [MT-CHANNEL-CONFIG-002](../manual-tests/MT-CHANNEL-CONFIG-002.md) —
+  edit a knob in the browser, the running channel honors it, and the CLI
+  `channel config get` reads back the same value.
+- **The RFC stays open past Phase 2.** Three items keep it from closing, none of
+  them web-rendering work (RFC 0050 Phase 2 PR plan
+  [Prerequisite + cross-phase dependencies](0050-phase2-pr-plan.md#prerequisite--cross-phase-dependencies-reconciling-with-the-rfc)):
+  1. **Prerequisite —**
+     [ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md)
+     (first-edit detachment of YAML-seeded knobs). Bounded today (the surface
+     ships dark; only `planning` carries a non-default chair) but a silent-data-loss
+     footgun once a UI invites operators to edit YAML-configured channels — **must
+     be fixed before `config_edit_enabled` is flipped on in any real deployment.**
+  2. **Editable member threshold** — the RFC's Phase 2 summary lists it, but it
+     needs a member-config mutation endpoint that does not exist, so it was
+     **deferred** out of the web-only workstream (a backend+web "Phase 2.5" slice).
+  3. **Open item 4** — `interaction_budget_tokens` is store-persisted but not
+     router-wired, so its inherited value reads back `null`; the panel renders it
+     correctly but the knob is not yet live end-to-end.
 - **Phase 3 (schema-driven generic config / profiles)** — future RFC.
 
 ## Table of Contents
@@ -312,11 +331,21 @@ Deliverables:
 
 Dependencies: none beyond current RFC-0030 plumbing.
 
-### Phase 2: Web console settings panel
+### Phase 2: Web console settings panel — ✅ delivered (web slice)
 
 **Summary.** A settings panel alongside `ChannelMembers.svelte`, reading and
-writing the Phase 1 endpoint; editable member thresholds; inherit/override
-toggles per knob.
+writing the Phase 1 endpoint; inherit/override toggles per knob. **Delivered**
+across the 3 web-only PRs of the [Phase 2 PR plan](0050-phase2-pr-plan.md)
+(#652, #653, + docs/closeout PR 3); see [Progress](#progress). The slice ships
+**zero Go changes** — it renders over the landed Phase 1 endpoint behind the
+default-off `config_edit_enabled` toggle, so the panel lands dark.
+
+**Narrowed from the RFC's original Phase 2 scope:** **editable member
+thresholds** were **deferred** — no member-config mutation endpoint exists, so
+making thresholds editable is a backend+web slice ("Phase 2.5"), not a
+render-over-landed-endpoints change. Closing RFC 0050 still requires that slice
+(or an RFC amendment moving member-threshold editing out of Phase 2), plus
+ISSUE-0103 and Open item 4 — see [Progress](#progress).
 
 Dependencies: Phase 1.
 
