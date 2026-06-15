@@ -250,6 +250,7 @@ func TestChannelConfig_FirstEditFreezesDefaultsAsChannel(t *testing.T) {
 	for _, knob := range []string{
 		"floor_control",
 		"salience_max_channel_members",
+		"interaction_budget_tokens",
 		"max_replies_per_participant_per_interaction",
 		"end_vote_threshold",
 		"end_vote_window",
@@ -262,10 +263,6 @@ func TestChannelConfig_FirstEditFreezesDefaultsAsChannel(t *testing.T) {
 	// none is seeded here, so it stays inherited rather than freezing.
 	assert.Equal(t, "default", fields["escalation_chair_id"].Source,
 		"no chair was seeded, so the conditional capture leaves it inherited")
-	// Interaction budget is NOT router-held (Open item 4), so it is not part of
-	// the seeded baseline and keeps inheriting.
-	assert.Equal(t, "default", fields["interaction_budget_tokens"].Source,
-		"interaction budget is not snapshotted — it stays inherited")
 }
 
 // TestChannelConfig_FirstEditFloorOffWithYAMLChairRejected is the beneficial
@@ -442,16 +439,17 @@ func TestChannelConfig_UnknownChannel(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code, "body=%s", rec.Body.String())
 }
 
-// TestChannelConfig_InteractionBudgetDeferredEffective: interaction budget is
-// persisted by a PATCH (source flips to channel) but its inherited effective
-// value is reported null while live application is deferred (RFC 0050 Open
-// item 4) — so an unset budget reads {value:null, source:default}.
-func TestChannelConfig_InteractionBudgetDeferredEffective(t *testing.T) {
+// TestChannelConfig_InteractionBudgetEffectiveResolved: interaction budget is now
+// router-held (RFC 0050 amendment — interaction-budget enforcement), so its
+// inherited effective value resolves through the router getter (no longer null).
+// An unset budget reads {value:0, source:default} (0 = the uncapped fleet
+// default), and a PATCH flips the source to channel and echoes the set value.
+func TestChannelConfig_InteractionBudgetEffectiveResolved(t *testing.T) {
 	srv, id := channelConfigTestServer(t, true)
 
 	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/channels/"+id+"/config", nil)
 	_, fields := decodeConfig(t, rec.Body.Bytes())
-	assert.Nil(t, fields["interaction_budget_tokens"].Value, "inherited budget effective value is deferred → null")
+	assert.EqualValues(t, 0, fields["interaction_budget_tokens"].Value, "inherited budget resolves to the fleet default (0 = uncapped), not null")
 	assert.Equal(t, "default", fields["interaction_budget_tokens"].Source)
 
 	body, _ := json.Marshal(map[string]any{"interaction_budget_tokens": 50000})

@@ -240,6 +240,20 @@ func initChannels(
 			zap.Error(bErr))
 	}
 
+	// RFC 0030 Layer 1 (v0.3.8) / RFC 0050 amendment: resolve the per-channel
+	// interaction cost ceiling the same way — config channels use their declared
+	// (or fleet-default) `interaction_budget_tokens`, store-resident channels pick
+	// up the fleet default (the store enumeration is required because budget zero
+	// is meaningful, like the reply budget). Same non-fatal posture: an
+	// enumeration failure leaves the config channels resolved and any un-resolved
+	// channel uncapped until next restart. Surfacing makes the override live in the
+	// router and resolves the GET /config value; wallet-side enforcement of it is
+	// the amendment's PR 2.
+	if ibErr := router.ResolveInteractionBudgets(context.Background(), chanCfg); ibErr != nil {
+		logger.Warn("channels: interaction-budget resolution incomplete; config channels resolved, store-resident channels stay uncapped until next create/restart",
+			zap.Error(ibErr))
+	}
+
 	// RFC 0030 Layer 4 (v0.3.8): resolve the per-channel end-of-interaction vote
 	// quorum (K) and recency window (W) for every config-declared channel —
 	// store-resident channels fall back to the K=2 / W=3 defaults at read time,

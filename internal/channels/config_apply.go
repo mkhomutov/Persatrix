@@ -209,7 +209,7 @@ func (r *ChannelRouter) validateEscalationChair(ctx context.Context, channelID s
 	return nil
 }
 
-// applyOverridesToRouter stamps the six router-held knobs for `channelID` onto
+// applyOverridesToRouter stamps the seven router-held knobs for `channelID` onto
 // the live router from a (canonical) override set: present → the override value,
 // absent → the inherited default. It is the shared seam used by both the runtime
 // apply path ([ChannelRouter.ApplyChannelConfig]) and the boot repoint
@@ -232,9 +232,9 @@ func (r *ChannelRouter) validateEscalationChair(ctx context.Context, channelID s
 //     escalation — the opt-in default).
 //   - idle window: absent → SetInteractionIdleTimeout(_, -1), whose negative
 //     sentinel deletes the entry so the channel falls back to the fleet default.
-//
-// Interaction budget is intentionally absent: it is not router-held (RFC 0050
-// PR-2 plan, Open item 4), so there is no setter to call here.
+//   - interaction budget: absent → ApplyDefaultInteractionBudget, which stamps
+//     the captured fleet default (zero is a meaningful "uncapped" value, like the
+//     reply budget, so it cannot inherit via Set(_, 0)).
 func (r *ChannelRouter) applyOverridesToRouter(channelID string, o ChannelConfigOverrides) {
 	// Floor control. Preserve the channel's resolved per-turn timeout (it rides
 	// a separate YAML knob, not the override set); a non-positive value falls
@@ -284,6 +284,15 @@ func (r *ChannelRouter) applyOverridesToRouter(channelID string, o ChannelConfig
 		r.SetInteractionIdleTimeout(channelID, *o.InteractionIdleTimeoutSeconds)
 	} else {
 		r.SetInteractionIdleTimeout(channelID, -1)
+	}
+
+	// Layer 1 interaction budget. Like the reply budget, zero is a meaningful
+	// "uncapped" value, so an absent knob inherits the captured fleet default via
+	// ApplyDefaultInteractionBudget rather than a Set(_, 0) sentinel.
+	if o.InteractionBudgetTokens != nil {
+		r.SetInteractionBudgetTokens(channelID, *o.InteractionBudgetTokens)
+	} else {
+		r.ApplyDefaultInteractionBudget(channelID)
 	}
 }
 

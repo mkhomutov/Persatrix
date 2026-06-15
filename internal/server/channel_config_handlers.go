@@ -326,10 +326,10 @@ func decodeKnob[T any](key string, raw json.RawMessage) (T, error) {
 // missing channel surfaces [channels.ErrChannelNotFound] for the caller to map
 // to 404.
 //
-// Interaction budget is the one knob whose inherited effective value is NOT
-// resolved here: it is not router-held (RFC 0050 Phase 1 Open item 4), so when
-// it is inherited the response reports value null. When it IS overridden the
-// stored value is echoed, so an operator still sees what they set.
+// All eight knobs — interaction budget included, as of the RFC 0050 amendment
+// (interaction-budget enforcement) — are now router-held, so every inherited
+// effective value resolves through a getter (no knob reports a null effective
+// value).
 //
 // Keep the router-held getters below in sync with [Server.resolvedConfigBaseline]:
 // the two are a matched pair (this method REPORTS each knob's provenance; the
@@ -349,24 +349,18 @@ func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (cha
 	k, wWindow := s.channelRouter.EndVoteParamsFor(id)
 	chair, _ := s.channelRouter.EscalationChairFor(id)
 	idleSeconds, _ := s.channelRouter.InteractionIdleTimeoutFor(id)
+	budget := s.channelRouter.InteractionBudgetTokensFor(id)
 
 	resp := channelConfigResponse{
 		Revision:                               revision,
 		FloorControl:                           configField(floorEnabled, overrides.FloorControl != nil),
 		SalienceMaxChannelMembers:              configField(salienceMax, overrides.SalienceMaxChannelMembers != nil),
+		InteractionBudgetTokens:                configField(budget, overrides.InteractionBudgetTokens != nil),
 		MaxRepliesPerParticipantPerInteraction: configField(replyBudget, overrides.MaxRepliesPerParticipantPerInteraction != nil),
 		EndVoteThreshold:                       configField(k, overrides.EndVoteThreshold != nil),
 		EndVoteWindow:                          configField(wWindow, overrides.EndVoteWindow != nil),
 		EscalationChairID:                      configField(chair, overrides.EscalationChairID != nil),
 		InteractionIdleTimeoutSeconds:          configField(idleSeconds, overrides.InteractionIdleTimeoutSeconds != nil),
-	}
-
-	// Interaction budget: echo the override when set, otherwise leave the effective
-	// value null (deferred resolution — see the method doc).
-	if overrides.InteractionBudgetTokens != nil {
-		resp.InteractionBudgetTokens = configField(*overrides.InteractionBudgetTokens, true)
-	} else {
-		resp.InteractionBudgetTokens = configFieldResponse{Value: nil, Source: configSourceDefault}
 	}
 	return resp, nil
 }
@@ -393,10 +387,11 @@ func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (cha
 // edited channel — the same outcome dispatch already produces), while a valid
 // chair still survives the first edit (ISSUE-0103).
 //
-// Interaction budget is intentionally absent: it is not router-held (RFC 0050
-// Open item 4), is not behaviourally affected by the store edit (it is resolved
-// on demand from YAML on the wallet path), and continues to inherit until it is
-// wired — so omitting it from the snapshot loses nothing live.
+// Interaction budget is now router-held (RFC 0050 amendment — interaction-budget
+// enforcement) and is therefore part of the baseline, exactly like the other
+// unconditionally-seeded knobs: a first edit freezes its resolved effective value
+// so a sparse PATCH does not reset it to the package default (the same ISSUE-0103
+// invariant the matched pair pins).
 func (s *Server) resolvedConfigBaseline(ctx context.Context, id string) channels.ChannelConfigOverrides {
 	floorEnabled, _, _ := s.channelRouter.FloorControlFor(id)
 	salienceMax, _ := s.channelRouter.SalienceMaxChannelMembersFor(id)
@@ -404,10 +399,12 @@ func (s *Server) resolvedConfigBaseline(ctx context.Context, id string) channels
 	k, wWindow := s.channelRouter.EndVoteParamsFor(id)
 	chair, _ := s.channelRouter.EscalationChairFor(id)
 	idleSeconds, _ := s.channelRouter.InteractionIdleTimeoutFor(id)
+	budget := s.channelRouter.InteractionBudgetTokensFor(id)
 
 	base := channels.ChannelConfigOverrides{
 		FloorControl:                           &floorEnabled,
 		SalienceMaxChannelMembers:              &salienceMax,
+		InteractionBudgetTokens:                &budget,
 		MaxRepliesPerParticipantPerInteraction: &replyBudget,
 		EndVoteThreshold:                       &k,
 		EndVoteWindow:                          &wWindow,
