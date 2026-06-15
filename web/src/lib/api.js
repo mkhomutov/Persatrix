@@ -132,6 +132,40 @@ async function postJSON(path, body, { signal } = {}) {
   }
 }
 
+// patchJSON sends `body` as a JSON PATCH to `path` with an optional set of extra
+// headers (RFC 0050 Phase 2 wires the `If-Match` optimistic-concurrency header
+// through here). It mirrors postJSON's contract — the server's `{error, code}`
+// envelope on a non-2xx (status survives onto ApiError; the config panel
+// branches on 409), a status-0 ApiError on a transport failure — and parses the
+// 2xx body (the apply path returns the new effective config + bumped revision).
+async function patchJSON(path, body, extraHeaders) {
+  let response;
+  try {
+    response = await fetch(path, {
+      method: "PATCH",
+      headers: consoleHeaders({
+        "Content-Type": "application/json",
+        ...extraHeaders,
+      }),
+      body: JSON.stringify(body),
+    });
+  } catch (cause) {
+    throw new ApiError(`network error patching ${path}`, 0, { cause });
+  }
+  if (!response.ok) {
+    throw await errorFromResponse(path, response);
+  }
+  try {
+    return await response.json();
+  } catch (cause) {
+    throw new ApiError(
+      `${path} returned a malformed JSON body`,
+      response.status,
+      { cause },
+    );
+  }
+}
+
 // sendNoBody issues a write whose success answer is `204 No Content` (the
 // member add/remove handlers return no body). It mirrors postJSON's error
 // contract — the server's `{error, code}` envelope on a non-2xx, a status-0
@@ -418,5 +452,49 @@ export async function publishMessage(
   return postJSON(
     `/api/v1/channels/${encodeURIComponent(channelID)}/messages`,
     body,
+  );
+}
+
+// getChannelConfig reads a channel's effective governance config
+// (GET /api/v1/channels/{id}/config), returning the `channelConfigResponse`
+// ({revision, <eight knobs>}) where each knob is a {value, source} pair —
+// `source` ("channel" | "default") is the provenance the panel renders
+// (overridden-here vs inherited default). One knob, `interaction_budget_tokens`,
+// reads back `value: null` when inherited (not router-held — RFC 0050 Phase 1
+// Open item 4); the panel must treat that as "inherited, unset," not coerce to
+// 0. The surface is gated behind `config_edit_enabled`, so a 403 (off) / 503
+// (store/router unwired) surfaces as an ApiError carrying the server's wording.
+export async function getChannelConfig(channelID) {
+  // Encode the id (canonical ids carry a type-prefix colon, e.g.
+  // "group:planning") so the request stays pinned to the {id}/config route.
+  return getJSON(`/api/v1/channels/${encodeURIComponent(channelID)}/config`);
+}
+
+// patchChannelConfig applies a sparse governance-config edit
+// (PATCH /api/v1/channels/{id}/config) under an optimistic-concurrency guard,
+// returning the new `channelConfigResponse` (with the bumped revision) for reuse
+// as the next If-Match without a re-read. `patch` is the sparse `{knob: value}`
+// body: explicit `null` means unset→inherit, an absent key means leave-unchanged.
+// JSON.stringify keeps an explicit null but DROPS `undefined`, so a revert must
+// pass `null`, never `undefined`. `revision` (last read) rides the REQUIRED
+// `If-Match` header as a bare integer (an absent header is a 428, not a
+// lost-update write). The full status set — 403 (toggle off), 409 (conflict),
+// 428 (If-Match missing), 400 (bad knob / unparseable If-Match), 404 (no
+// channel), 503 (store/router unwired) — survives onto ApiError with status
+// intact, so the panel can branch on 409 to reload-not-overwrite (RFC 0050 P2).
+export async function patchChannelConfig(channelID, patch, revision) {
+  // Guard the required `revision` at the call site so a missing/garbage value
+  // fails here rather than serialising to "undefined"/"NaN" in If-Match (a
+  // guaranteed 400). Number.isInteger admits 0 (first revision) but rejects
+  // undefined/null/NaN/fractional/string.
+  if (!Number.isInteger(revision)) {
+    throw new Error(
+      "patchChannelConfig requires an integer revision (the value last read)",
+    );
+  }
+  return patchJSON(
+    `/api/v1/channels/${encodeURIComponent(channelID)}/config`,
+    patch,
+    { "If-Match": String(revision) },
   );
 }

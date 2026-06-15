@@ -28,9 +28,10 @@
   import PersonaPicker from "./PersonaPicker.svelte";
   import PersonaHeader from "./PersonaHeader.svelte";
 
-  // canCreate is the create capability, already reduced to enabled && available
-  // by the shell (channel-creation amendment §A).
-  let { userId, canCreate = false } = $props();
+  // canCreate / canConfigEdit: the create (amendment §A) + RFC 0050 config-edit
+  // capabilities, each reduced to enabled && available by the shell. config-edit
+  // is threaded here in PR 1 (plumbing); nested ChannelSettings consumes it in PR 2.
+  let { userId, canCreate = false, canConfigEdit = false } = $props();
 
   // Mirrors the server's rune limit (chat_handler.go) for immediate feedback;
   // counts code points, not UTF-16 units. The server still enforces it.

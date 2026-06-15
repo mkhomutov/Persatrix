@@ -135,6 +135,54 @@ describe("selectPanels", () => {
     const [panel] = selectPanels(config);
     expect(panel.create).toBeUndefined();
   });
+
+  it("carries the per-panel config_edit capability through to the descriptor", () => {
+    // RFC 0050 Phase 2 adds a nested config_edit {enabled, available} to the
+    // channel_timeline payload entry (the exact shape of `create`); the shell
+    // threads it to the panel so the settings affordance renders only when
+    // config_edit.enabled && config_edit.available.
+    const config = {
+      panels: {
+        channel_timeline: {
+          enabled: true,
+          available: true,
+          config_edit: { enabled: true, available: true },
+        },
+      },
+    };
+    const [panel] = selectPanels(config);
+    expect(panel.name).toBe("channel_timeline");
+    expect(panel.config_edit).toEqual({ enabled: true, available: true });
+  });
+
+  it("leaves config_edit undefined for a panel the server reports no config_edit capability for", () => {
+    // A panel with no config_edit object must not have one fabricated — same
+    // server-driven rule as `create`.
+    const config = {
+      panels: { memory_strip: { enabled: true, available: true } },
+    };
+    const [panel] = selectPanels(config);
+    expect(panel.config_edit).toBeUndefined();
+  });
+
+  it("threads create and config_edit independently on the same panel", () => {
+    // The two capabilities are orthogonal: a panel can carry both, and each is
+    // spread onto the descriptor under its own snake_case key matching the
+    // server JSON.
+    const config = {
+      panels: {
+        channel_timeline: {
+          enabled: true,
+          available: true,
+          create: { enabled: true, available: false },
+          config_edit: { enabled: false, available: true },
+        },
+      },
+    };
+    const [panel] = selectPanels(config);
+    expect(panel.create).toEqual({ enabled: true, available: false });
+    expect(panel.config_edit).toEqual({ enabled: false, available: true });
+  });
 });
 
 describe("KNOWN_PANELS", () => {
