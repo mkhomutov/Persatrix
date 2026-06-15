@@ -62,9 +62,10 @@
   let original = {}; // non-reactive snapshot of the loaded state, for diffing
   let loading = $state(false);
   let saving = $state(false);
-  let error = $state("");
-  let notice = $state("");
-  let loadToken = 0; // invalidates an in-flight load when the channel switches
+  let error = $state(""); // a hard failure (load/save error wording)
+  let warning = $state(""); // a recovered condition (a 409 that reloaded cleanly)
+  let notice = $state(""); // a success confirmation
+  let loadToken = 0; // invalidates an in-flight load/save when the channel switches
 
   // Chair candidates: members that can hold the floor (observers — respond
   // "never" — are rejected by the server, so omit them). If the current override
@@ -153,6 +154,7 @@
     }
     loading = true;
     error = "";
+    warning = "";
     notice = "";
     // Drop the previous channel's config up front so its form never renders over
     // the new channel's load — otherwise an operator could edit/save against the
@@ -183,38 +185,56 @@
   // the retried save dirty against the fresh revision. An edit that now matches
   // the updated server value falls out of `dirty` on its own; a genuine conflict
   // stays visible and saveable.
-  async function reloadAfterConflict() {
+  // `id`/`token` pin this reload to the channel generation the conflicting save
+  // belonged to: if the operator switched channels while the conflict was being
+  // resolved, load() has bumped loadToken, so we drop the adopt and the notice
+  // rather than stamping this channel's state/warning onto another channel.
+  async function reloadAfterConflict(id, token) {
     const pending = {};
     for (const k of KNOBS) {
       if (changed(k)) pending[k.key] = { ...drafts[k.key] };
     }
     try {
-      const resp = await getChannelConfig(channelId);
+      const resp = await getChannelConfig(id);
+      if (token !== loadToken) return; // a newer channel won the race
       adopt(resp);
       for (const key of Object.keys(pending)) drafts[key] = pending[key];
     } catch {
       // The reload itself failed; the operator's edits stay put and the conflict
       // notice below is still the right signal — they must not assume success.
     }
-    error =
+    if (token !== loadToken) return; // moved on; don't warn against another channel
+    // A recovered condition, not a hard error: the save didn't land but the panel
+    // re-synced cleanly. Render it as a warning, not in the red error styling.
+    warning =
       "This channel's settings changed elsewhere — reloaded with the latest. Review your edits and save again.";
   }
 
   async function save(event) {
     event?.preventDefault?.();
     if (!dirty || saving || !config) return;
+    // Pin this save to the channel generation it started in. load() bumps
+    // loadToken on every channel switch, so if the operator navigates away while
+    // the request is in flight we leave the new channel's state untouched rather
+    // than rendering this channel's response (or a stale failure) under it.
+    const token = loadToken;
+    const id = channelId;
     const body = patch;
+    const revision = config.revision;
     saving = true;
     error = "";
+    warning = "";
     notice = "";
     try {
-      const resp = await patchChannelConfig(channelId, body, config.revision);
+      const resp = await patchChannelConfig(id, body, revision);
+      if (token !== loadToken) return; // a newer channel won the race
       adopt(resp); // picks up the bumped revision for the next save
       notice = "Settings saved.";
       await onChanged?.();
     } catch (err) {
+      if (token !== loadToken) return; // stale outcome for a channel we've left
       if (err instanceof ApiError && err.status === 409) {
-        await reloadAfterConflict();
+        await reloadAfterConflict(id, token);
       } else {
         error =
           err instanceof ApiError
@@ -238,6 +258,9 @@
 
   {#if error}
     <p class="boot error" role="alert">{error}</p>
+  {/if}
+  {#if warning}
+    <p class="warning" role="alert">{warning}</p>
   {/if}
   {#if notice}
     <p class="notice" role="status">{notice}</p>
@@ -361,6 +384,9 @@
     align-items: center;
     gap: 0.3rem;
     font-size: 0.8rem;
+  }
+  .warning {
+    color: var(--warn, #b26a00);
   }
   .notice {
     color: var(--ok, green);

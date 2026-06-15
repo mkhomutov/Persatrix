@@ -295,4 +295,38 @@ describe("ChannelSettings", () => {
 
     resolveSecond(okJSON(configBody())); // let the pending load settle
   });
+
+  it("does not adopt a save response after the channel switched mid-request", async () => {
+    let resolvePatch;
+    const fetchMock = vi.fn((path, init) => {
+      if (init?.method === "PATCH") {
+        return new Promise((res) => (resolvePatch = res)); // hold the save open
+      }
+      return Promise.resolve(okJSON(configBody()));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn(() => Promise.resolve());
+    const { rerender } = renderSettings({ onChanged });
+
+    const floor = await screen.findByLabelText("Floor control");
+    await fireEvent.click(floor); // edit the old channel
+    await fireEvent.click(screen.getByRole("button", { name: /save settings/i }));
+
+    // Operator navigates to another channel before the save resolves; the new
+    // channel loads its own (fresh) config while the old save is still in flight.
+    await rerender({ channelId: "group:other" });
+    await screen.findByLabelText("Floor control");
+
+    // The stale save now resolves with a bumped revision. It must NOT be adopted
+    // onto the channel we've since moved to: no success notice, and onChanged
+    // (which would refresh siblings) is not called for a channel left behind.
+    resolvePatch(okJSON(configBody({ revision: 99 })));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /save settings/i }),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByText("Settings saved.")).toBeNull();
+    expect(onChanged).not.toHaveBeenCalled();
+  });
 });

@@ -72,7 +72,10 @@ describe("ChannelSettings mount gating", () => {
     render(ChannelTimeline, { props: { userId: "local", canConfigEdit: false } });
     await screen.findByRole("option", { name: "General" });
 
-    expect(screen.queryByRole("group", { name: /channel settings/i })).toBeNull();
+    // Assert on the text the panel would actually render (its summary), not
+    // role="group" — a <details> carries no such role, so that query would pass
+    // whether the panel were mounted or not. The fetch guard below corroborates.
+    expect(screen.queryByText(/channel settings/i)).toBeNull();
     expect(getChannelConfig).not.toHaveBeenCalled();
   });
 
