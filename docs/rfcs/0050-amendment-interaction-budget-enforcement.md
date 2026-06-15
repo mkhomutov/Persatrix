@@ -30,8 +30,8 @@
 ## Context
 
 RFC 0050 makes per-channel governance operator-editable, store-canonical, live.
-Six of the seven router-held knobs are enforced **entirely orchestrator-side** in
-the router hot-path (`enforceReplyBudget`, `processEndVote`, floor control, …), so
+Six of the seven governance knobs are router-held and enforced **entirely
+orchestrator-side** in the router hot-path (`enforceReplyBudget`, `processEndVote`, floor control, …), so
 the Phase 1 apply path wires a store override to them with a single setter call
 (`applyOverridesToRouter`, `internal/channels/config_apply.go`). The seventh —
 `interaction_budget_tokens`, the RFC 0030 Layer 1 per-interaction cost ceiling —
@@ -43,8 +43,10 @@ written.
 Interaction-budget enforcement lives **agent-side**, and the enforcing number
 **never leaves the orchestrator**. Traced end to end:
 
-1. **Enforcement** is in the wallet: `WalletService.AcquireLease`
-   (`internal/wallet/wallet.go:255`) tracks/denies only when
+1. **Enforcement** is in the wallet: `WalletService.AcquireLease` denies an
+   over-budget interaction (`internal/wallet/wallet.go:197` →
+   `interactionCeilingDenialLocked`, `internal/wallet/interaction_budget.go`) and
+   folds the running total (`wallet.go:255`) only when
    `req.GetInteractionBudgetTokens() > 0`. The ceiling and its tracking key
    (`interaction_id`) both arrive **on the `LeaseRequest`**, supplied by the
    **agent**.
@@ -54,10 +56,14 @@ Interaction-budget enforcement lives **agent-side**, and the enforcing number
    has no channel to reach the agent through.
 3. **No call site stamps a ceiling.** The only code passing the field to a lease is
    `wallet_client.py:259` forwarding its own default-`0` parameter; **no caller
-   passes a positive value** (`agents/salience_bid.py`, `agents/llm_client.py`,
-   `agents/persona_runtime/wallet_cause.py` all say so in-line: *"no call site
+   passes a positive value**. The three lease call sites each note this in-line in
+   their own words — `agents/salience_bid.py` is the explicit one: *"no call site
    stamps that ceiling yet … the config-stamping follow-up must thread the budget
-   through here"*).
+   through here"*; `agents/llm_client.py` (*"until the config-stamping follow-up
+   threads that ceiling, the id rides the wire and the wallet discards it"*) and
+   `agents/persona_runtime/wallet_cause.py` (*"the wallet acts on the id only once a
+   positive `interaction_budget_tokens` accompanies it … (the config-stamping
+   follow-up)"*) corroborate.
 
 **Consequence:** per-channel `interaction_budget_tokens` is enforced **nowhere
 today** — not from the store, not from YAML. The wallet check, the
@@ -105,8 +111,9 @@ Three pieces, no wire/agent changes.
   `SetInteractionBudgetTokens` (override present) or applies the captured fleet
   default (absent → inherit). `ResolveFromStore` re-overlays it on boot like the
   rest. **This alone makes the override live in the router and closes the
-  GET `/config` `null` gap** (`buildChannelConfigResponse` reads the new getter
-  instead of returning `value: null`).
+  GET `/config` `null` gap for an inherited budget** (`buildChannelConfigResponse`
+  reads the new getter and returns the effective fleet-default value, instead of the
+  `value: null` it emits today only when no per-channel override is present).
 
 **2. Snapshot the budget onto the interaction at stamp time.** Where the router
 stamps the resolved `interaction_id` onto a channel publish
@@ -116,14 +123,18 @@ InteractionBudgetTokensFor(channelID)` there; evict on interaction close (piggyb
 the existing end-vote / reply-budget close cleanup keyed by `interaction_id`).
 See [Semantics](#semantics-snapshot-at-interaction-open).
 
-**3. Inject a resolver into the wallet; enforce server-side.** Add a
-`WithInteractionBudgetResolver(func(interactionID string) (int64, bool))`
-construction option to `WalletService` (closing over the router — the wallet gains
-a thin function dependency, not the whole router). At `AcquireLease`, resolve the
-ceiling from `req.GetInteractionId()` via the resolver; the resolved value is
-authoritative. The agent-supplied `req.InteractionBudgetTokens` is ignored when a
-resolver is wired (kept on the proto for back-compat / a no-resolver fallback so
-the change is additive).
+**3. Inject a resolver into the wallet; enforce server-side.** Give `WalletService` a
+`SetInteractionBudgetResolver(func(interactionID string) (int64, bool))` injector
+(closing over the router — the wallet gains a thin function dependency, not the whole
+router). It is a **post-construction setter, not a `New…` option**: in
+`cmd/orchestrator/main.go` the wallet is built (`NewWalletService`, ~L276) *before*
+the channel router exists (`initChannels` → `NewChannelRouter`, ~L354), so there is
+no router to close over at construction time. The resolver is wired in the window
+after the router is built and before the gRPC server that serves `AcquireLease` is
+registered (`newAgentGRPCServer`, ~L388). At `AcquireLease`, resolve the ceiling from
+`req.GetInteractionId()` via the resolver; the resolved value is authoritative. The
+agent-supplied `req.InteractionBudgetTokens` is ignored when a resolver is wired (kept
+on the proto for back-compat / a no-resolver fallback so the change is additive).
 
 ```
 operator edit ─▶ store (canonical) ─▶ router.channelBudgets[ch]
@@ -176,9 +187,10 @@ restart overlay; GET returns effective (override + inherited fleet default).
 
 Wire enforcement (design pieces 2–3). Deliverables: `interactionBudgets`
 snapshot at the `interaction_resolver` stamp site + close-time eviction;
-`WithInteractionBudgetResolver` on `WalletService` + server-side resolution at
+`SetInteractionBudgetResolver` on `WalletService` + server-side resolution at
 `AcquireLease`; orchestrator wiring of the resolver in `cmd/orchestrator/main.go`
-(thread the router/resolver into the wallet constructor). Tests: an over-budget
+(set the router-backed resolver on the wallet after `initChannels`, before the gRPC
+server is registered). Tests: an over-budget
 interaction denies fail-closed via the *resolved* ceiling with no agent-supplied
 value; a live edit applies to the next interaction; eviction on close; mixed-mode
 (no resolver → legacy request-field behavior unchanged).
@@ -188,7 +200,7 @@ value; a live edit applies to the next interaction; eviction on close; mixed-mod
 | PR | Component | Files |
 |----|-----------|-------|
 | 1 | Go orchestrator | new `internal/channels/interaction_budget.go` (map+setter+getter+resolve), `config_apply.go` (apply branch + ResolveFromStore), `cmd/orchestrator/channels.go` (boot call), `internal/server/channel_config_handlers.go` (GET gap) |
-| 2 | Go orchestrator + wallet | `internal/channels/interaction_resolver.go` (snapshot+evict), `internal/wallet/wallet.go` (resolver option + AcquireLease), `cmd/orchestrator/main.go` (wire resolver) |
+| 2 | Go orchestrator + wallet | `internal/channels/interaction_resolver.go` (snapshot+evict), `internal/wallet/wallet.go` (resolver setter + AcquireLease), `cmd/orchestrator/main.go` (wire resolver post-`initChannels`) |
 
 No `proto/`, no `agents/`, no stub regen.
 
