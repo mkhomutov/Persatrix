@@ -330,6 +330,13 @@ func decodeKnob[T any](key string, raw json.RawMessage) (T, error) {
 // resolved here: it is not router-held (RFC 0050 Phase 1 Open item 4), so when
 // it is inherited the response reports value null. When it IS overridden the
 // stored value is echoed, so an operator still sees what they set.
+//
+// Keep the router-held getters below in sync with [Server.resolvedConfigBaseline]:
+// the two are a matched pair (this method REPORTS each knob's provenance; the
+// baseline FREEZES the same set on a first edit). A getter added here but not
+// there would resolve effectively yet silently drop out of the first-edit
+// baseline — the ISSUE-0103 footgun. TestChannelConfig_FirstEditFreezesDefaultsAsChannel
+// pins the invariant.
 func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (channelConfigResponse, error) {
 	overrides, revision, err := s.channelStore.GetChannelConfig(ctx, id)
 	if err != nil {

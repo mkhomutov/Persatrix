@@ -228,6 +228,14 @@ func TestChannelConfig_FirstEditPreservesYAMLSeededChair(t *testing.T) {
 // freeze the YAML adopt path makes. This is the accepted interim cost (true
 // sparse-layering over the YAML baseline is RFC 0050 Phase 3); pin it so the flip
 // is an intended, tested property rather than a surprise.
+//
+// It also pins the matched-pair invariant between [Server.resolvedConfigBaseline]
+// (which builds the freeze set) and [Server.buildChannelConfigResponse] (which
+// reports provenance): EVERY router-held knob the response surfaces must be in
+// the seeded baseline, so all of them flip to "channel" on a first edit. If a
+// future change adds a router-held knob to one method but not the other, the new
+// knob stays "default" after a first edit and an assertion below goes red — the
+// drift the two methods' cross-references warn against, caught in CI.
 func TestChannelConfig_FirstEditFreezesDefaultsAsChannel(t *testing.T) {
 	srv, id := channelConfigTestServer(t, true)
 
@@ -237,9 +245,23 @@ func TestChannelConfig_FirstEditFreezesDefaultsAsChannel(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 
 	_, fields := decodeConfig(t, rec.Body.Bytes())
-	assert.Equal(t, "channel", fields["floor_control"].Source,
-		"an un-edited knob is frozen as an explicit override once the channel is canonical")
-	assert.Equal(t, "channel", fields["end_vote_threshold"].Source)
+	// Every UNCONDITIONALLY-seeded router-held knob freezes to "channel" — the
+	// edited one (interaction_idle_timeout_seconds) and every un-edited one alike.
+	for _, knob := range []string{
+		"floor_control",
+		"salience_max_channel_members",
+		"max_replies_per_participant_per_interaction",
+		"end_vote_threshold",
+		"end_vote_window",
+		"interaction_idle_timeout_seconds",
+	} {
+		assert.Equalf(t, "channel", fields[knob].Source,
+			"%s must freeze to an explicit override once the channel is canonical", knob)
+	}
+	// The escalation chair is seeded CONDITIONALLY (only when set + enforceable);
+	// none is seeded here, so it stays inherited rather than freezing.
+	assert.Equal(t, "default", fields["escalation_chair_id"].Source,
+		"no chair was seeded, so the conditional capture leaves it inherited")
 	// Interaction budget is NOT router-held (Open item 4), so it is not part of
 	// the seeded baseline and keeps inheriting.
 	assert.Equal(t, "default", fields["interaction_budget_tokens"].Source,
