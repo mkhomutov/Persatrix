@@ -6,7 +6,7 @@ severity: medium
 area: internal/channels
 created: 2026-06-14
 closed: 2026-06-15
-closed_pr:
+closed_pr: "https://github.com/mkhomutov/Persatrix/pull/655"
 refs:
   - docs/rfcs/0050-extensible-channel-configuration.md
   - docs/manual-tests/MT-CHANNEL-CONFIG-001.md
