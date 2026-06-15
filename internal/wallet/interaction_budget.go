@@ -72,8 +72,11 @@ func (w *WalletService) SetInteractionBudgetResolver(fn func(interactionID strin
 // a lease (RFC 0050 amendment — server-side resolution). When the resolver is
 // wired (the orchestrator injects one reading the channel router's snapshot) it
 // is AUTHORITATIVE: a hit returns the snapshotted channel ceiling; a miss
-// (uncapped channel, non-channel / TICK lease, or an interaction already retired)
-// returns 0 = uncapped, deliberately IGNORING any agent-supplied request value —
+// (uncapped channel, non-channel / TICK lease, an interaction already retired,
+// or one whose first message has not yet committed — the snapshot is taken at
+// first commit, router-side, so the lease that PRODUCES an interaction's opening
+// message predates its snapshot and resolves uncapped) returns 0 = uncapped,
+// deliberately IGNORING any agent-supplied request value —
 // the store, not the agent, owns the ceiling. Only with no resolver wired (tests,
 // or a wallet built without channels) does it fall back to the request field, the
 // legacy pre-amendment behaviour. Lock-free: the resolver field is set once at

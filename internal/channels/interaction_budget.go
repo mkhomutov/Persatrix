@@ -132,6 +132,17 @@ func (r *ChannelRouter) ResolveInteractionBudgets(ctx context.Context, cfg *Conf
 // property the wallet's running-total map also has. A re-snapshot of an already-
 // recorded id is harmless (same channel → same value) but the caller gates on the
 // first commit so it does not happen.
+//
+// Boundary (snapshot-at-FIRST-COMMIT, not at lease): the lease that produces an
+// interaction's opening message is acquired before that message is published, so
+// it resolves before this snapshot exists and is therefore UNGOVERNED by the
+// interaction's own ceiling — every lease after the opening commit is governed.
+// In the dominant flow this is a non-issue: the opening message is an inbound
+// (human / external) publish carrying no lease, so the snapshot is already in
+// place before any agent reply leases. Only a fully agent-initiated opening turn
+// (a TICK-driven first post to a channel with no open interaction) escapes the
+// ceiling for that one turn, and the Layer 0 depth cap plus the RFC 0023 dollar
+// budget still bound it.
 func (r *ChannelRouter) snapshotInteractionBudget(interactionID, channelID string) {
 	if interactionID == "" {
 		return
@@ -162,10 +173,12 @@ func (r *ChannelRouter) DiscardInteractionBudget(interactionID string) {
 // ResolveInteractionBudgetForInteraction returns the snapshotted cost ceiling for
 // `interactionID` and whether one exists. It is the server-side resolver the
 // wallet calls at lease time (wired via [wallet.WalletService.SetInteractionBudgetResolver]):
-// `ok` is true only for a capped, still-open interaction, so a miss (uncapped
-// channel, non-channel/TICK lease, or an interaction already fully retired) reads
-// as "no ceiling". This is the seam that makes the store — not the agent-supplied
-// request field — authoritative over the Layer 1 budget.
+// `ok` is true only for a capped interaction that has already committed its first
+// message, so a miss (uncapped channel, non-channel/TICK lease, an interaction
+// already fully retired, or one still in its opening turn — see
+// [ChannelRouter.snapshotInteractionBudget] for why the first lease predates the
+// snapshot) reads as "no ceiling". This is the seam that makes the store — not the
+// agent-supplied request field — authoritative over the Layer 1 budget.
 func (r *ChannelRouter) ResolveInteractionBudgetForInteraction(interactionID string) (int64, bool) {
 	r.budgetMu.Lock()
 	defer r.budgetMu.Unlock()
