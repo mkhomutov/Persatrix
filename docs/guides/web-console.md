@@ -306,16 +306,17 @@ revision as an `If-Match` guard:
   config and replays your pending edits on top** rather than blind-overwriting,
   and asks you to review and save again.
 
-> **⚠️ First-edit caveat (before you flip this on for real).** The store-canonical
-> apply path resets every *other* non-default knob to the fleet default on the
-> **first** edit of a YAML-seeded channel — most visibly the YAML-declared
-> escalation chair — with no warning
+> **First-edit behavior (✅ ISSUE-0103 resolved 2026-06-15).** Editing one knob on
+> a YAML-seeded channel **preserves** its other knobs (including the YAML chair):
+> the first edit seeds its merge base from the channel's resolved governance
 > ([ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md)).
-> Bounded today (ships dark; only `planning` carries a non-default chair) but a
-> silent-data-loss footgun once a UI invites editing YAML-configured channels. **Resolve ISSUE-0103 before turning `config_edit_enabled` on in any
-> deployment that relies on YAML-seeded knobs.** This is also a governance write
-> **before auth** — read [Security](#security--do-not-expose-beyond-localhost)
-> before exposing the console beyond localhost.
+> Expect two things: the first edit makes the channel **store-canonical**, so
+> previously-inherited knobs now show source `channel` and stop tracking fleet
+> defaults; and a lone `floor_control: false` on a chaired channel is now
+> **rejected** — clear the chair in the same save to turn floor control off. Still
+> a governance write **before auth** — see
+> [Security](#security--do-not-expose-beyond-localhost) before exposing the
+> console beyond localhost.
 
 For the live cross-surface acceptance walkthrough, see
 [MT-CHANNEL-CONFIG-002](../manual-tests/MT-CHANNEL-CONFIG-002.md).
