@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0104
-summary: "The orchestrator Docker image fails to build on linux/arm64 (Apple Silicon): Dockerfile.orchestrator's Stage-1 ui-builder runs `npm ci && npm run build`, which dies with `Cannot find module @rollup/rollup-linux-arm64-musl` (npm optional-dependencies bug, npm/cli#4828). This breaks `docker compose up --build`, `make demo-anthropic`, and any live manual-test arc that needs a fresh image on arm64; likely fallout of the #644 vite/esbuild bump's lockfile."
-status: open
+summary: "The orchestrator Docker image failed to build on linux/arm64 (Apple Silicon) with `Cannot find module @rollup/rollup-linux-arm64-musl`. ROOT CAUSE (not the npm optional-deps bug, and not the lockfile): `.dockerignore` listed a root-anchored `node_modules/`, which does NOT match the nested `web/node_modules`, so `COPY web/ ./` in Dockerfile.orchestrator leaked the host's macOS `web/node_modules` into the image and clobbered the clean in-image `npm ci`. The leaked host tree carried rollup with only the darwin binding, so `vite build` died on the missing linux-arm64-musl one. FIX: `.dockerignore` `node_modules/` -> `**/node_modules/`. The lockfile was already correct (vite 8 -> rolldown, full bindings; a clean `npm ci` builds fine)."
+status: resolved
 severity: medium
 area: build/docker
 created: 2026-06-14
+closed: 2026-06-15
+closed_pr: 650
 refs:
   - docs/manual-tests/MT-CHANNEL-CONFIG-001.md
 ---
@@ -57,22 +59,55 @@ output (the emitted JS/CSS is platform-agnostic).
 - CI is presumably x86_64 and unaffected, so the break is invisible to the
   pipeline and only bites local arm64 operators.
 
-## Proposed fix / investigation path
+## Root cause (corrected 2026-06-15)
 
-Several known-good options, cheapest first:
+The original diagnosis above (npm optional-deps bug / truncated lockfile from
+the #644 vite bump) was **wrong**. Verified ground truth:
 
-1. **Make the install resilient in the Dockerfile** — e.g.
-   `RUN npm ci || (rm -rf node_modules package-lock.json && npm install)`, or
-   explicitly `npm install @rollup/rollup-linux-arm64-musl --no-save` after
-   `npm ci`. Quick, unblocks arm64, but the fallback can drift from the lockfile.
-2. **Repair `web/package-lock.json`** so it carries the full set of rollup
-   optional dependencies for all target platforms (regenerate on a clean
-   `npm install` and commit) — the proper fix if #644 truncated it.
-3. **Pin/upgrade npm** in the `node:22-alpine` stage to a version past the
-   optional-deps bug, if one resolves it cleanly.
+- #644 bumped `vite` to `^8.0.16`, and **vite 8 bundles with rolldown, not
+  rollup**. The committed `web/package-lock.json` carries **zero** rollup entries
+  and the full rolldown binding set, including `@rolldown/binding-linux-arm64-musl@1.0.3`.
+- A clean `npm ci && npm run build` in a `node:22-alpine` **arm64** container
+  **succeeds** (~378 ms, emits the hashed bundle). The lockfile is fine.
+- The real culprit is `Dockerfile.orchestrator` Stage 1:
+  ```dockerfile
+  RUN npm ci          # clean, correct, rolldown-based install
+  COPY web/ ./        # ← re-copies the host's web/ INCLUDING web/node_modules
+  RUN npm run build   # now loads the leaked host node_modules and dies
+  ```
+  `.dockerignore` listed a **root-anchored** `node_modules/`, which does **not**
+  match the nested `web/node_modules`. So `COPY web/ ./` overwrote the clean
+  in-image install with the operator's macOS `web/node_modules` — a stale tree
+  (often left by the `cd web && npm run build` host workaround) that still
+  carries **rollup** with only the *darwin* native binding. `vite build` then
+  loaded that rollup and failed on the missing `@rollup/rollup-linux-arm64-musl`.
+- Proven with a real `docker build` honouring the repo `.dockerignore`:
+  `web/node_modules` reached the image (`/w/node_modules/rollup/dist/native.js`
+  present). This is why it bit local arm64 operators and was invisible to
+  clean-x86 CI — CI has no host `web/node_modules` to leak.
 
-Verify the chosen fix with a clean `docker compose -f docker-compose.yaml -f
-docker-compose.anthropic.yaml build orchestrator` on arm64.
+## Resolution
+
+`.dockerignore`: `node_modules/` → `**/node_modules/` (the `**/` is required to
+match nested dirs). This stops the host tree from leaking, restoring the
+Dockerfile's stated design goal of a host-state-independent, self-contained
+image. No lockfile change, no `npm ci` fallback, no npm pin — those would have
+papered over a build-context-hygiene bug.
+
+Verified on darwin/arm64:
+
+- Leak probe with the fix → `clean: no node_modules in context`.
+- `docker build --no-cache -f Dockerfile.orchestrator` → full image builds; the
+  embedded bundle hash (`index-HARX7q1C.js`) matches the clean rolldown build,
+  confirming the real console is baked in (not the placeholder).
+
+Regression guard: the `dockerignore-hygiene` CI job (`make dockerignore-check`,
+`scripts/checks/dockerignore_context.py`) seeds a sentinel under
+`web/node_modules` and runs a real `docker build` to assert the nested tree does
+NOT reach the build context. It seeds the sentinel because a clean checkout has
+none to leak — the exact reason this break was invisible to CI — and uses real
+Docker because Docker anchors `node_modules/` to the context root (a string or
+gitignore check would wrongly call the buggy pattern safe).
 
 ## Notes
 
@@ -82,4 +117,4 @@ docker-compose.anthropic.yaml build orchestrator` on arm64.
 > Dockerfile that skips the ui-builder stage and bakes the host-built
 > `internal/ui/assets` from the build context, tagged
 > `persatrix-orchestrator:latest`, and `docker compose up -d` WITHOUT `--build`.
-> This is a stopgap, not a fix.
+> This was a stopgap; the `.dockerignore` fix removes the need for it.
