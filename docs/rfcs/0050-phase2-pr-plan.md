@@ -36,6 +36,40 @@ RFC Phase-2 bullets that *do* need backend work — editable member threshold an
 the effective-policy preview — are explicitly **deferred** (see
 [Deferred](#deferred-requires-backend-work)), keeping this workstream pure-web.
 
+### Prerequisite + cross-phase dependencies (reconciling with the RFC)
+
+"Web-only" describes the *rendering* work, **not** the full set of conditions for
+RFC 0050 to close. Two items in the RFC sit outside these three web PRs and must
+be tracked so the plan does not read as "Phase 2 ships → RFC done":
+
+1. **Blocking prerequisite —
+   [ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md)
+   (Go, `internal/channels`).** The store-canonical apply path resets every
+   *other* non-default knob to fleet default on the **first** edit of a
+   YAML-seeded channel (most visibly detaching the escalation chair), with no
+   validation warning. It is bounded today — the surface ships dark and only
+   `planning` carries a non-default chair — but the RFC
+   ([Progress](0050-extensible-channel-configuration.md#progress)) flags it as a
+   "routine silent-data-loss footgun once a UI invites operators to edit
+   YAML-configured channels," i.e. exactly what PR 2 does. **This must be fixed
+   before the panel ships non-dark** (toggle flipped on in any real deployment),
+   even though it is not itself web work. It is the one Go change Phase 2 cannot
+   pretend away.
+2. **Scope reconciliation — editable member threshold.** The RFC's Phase 2
+   summary lists editable member thresholds *inside* Phase 2; this plan defers
+   them ([Deferred](#deferred-requires-backend-work) item 1) because no
+   member-config mutation endpoint exists. That is a deliberate **narrowing** of
+   the RFC's Phase 2, not a silent drop — closing RFC 0050 still requires either
+   building that backend+web slice or amending the RFC to move member-threshold
+   editing out of Phase 2.
+
+Also note Open item 4 from Phase 1 (`interaction_budget_tokens` is store-persisted
+but **not router-wired**, so its inherited value reads back `null` — see the
+[surface notes](#the-surface-phase-2-renders-over-landed-in-phase-1)) remains
+open; the panel renders it correctly but the knob is not yet live end-to-end.
+None of this changes that the three PRs below are web-only — it scopes what
+"Phase 2 delivered" does and does not let the RFC claim.
+
 ## The surface Phase 2 renders over (landed in Phase 1)
 
 Verified against `internal/server/channel_config_handlers.go`,
@@ -167,6 +201,10 @@ Deliverables:
    confirm the running channel honors it and that the CLI `channel config get`
    shows the same value (cross-surface single-source-of-truth check, G4).
 3. RFC-0050 *Phased Implementation Plan*: mark Phase 2 delivered; link this plan.
+   Mark Phase **2**, not the RFC as a whole — ISSUE-0103, the member-threshold
+   slice, and Open item 4 (see [Prerequisite + cross-phase
+   dependencies](#prerequisite--cross-phase-dependencies-reconciling-with-the-rfc))
+   keep RFC 0050 open past this workstream.
 
 Dependencies: PR 2.
 
