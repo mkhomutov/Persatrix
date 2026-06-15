@@ -6,6 +6,7 @@ severity: medium
 area: build/docker
 created: 2026-06-14
 closed: 2026-06-15
+closed_pr: 650
 refs:
   - docs/manual-tests/MT-CHANNEL-CONFIG-001.md
 ---
