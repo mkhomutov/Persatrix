@@ -46,8 +46,9 @@ depends_on:
   acceptance: [MT-CHANNEL-CONFIG-002](../manual-tests/MT-CHANNEL-CONFIG-002.md) —
   edit a knob in the browser, the running channel honors it, and the CLI
   `channel config get` reads back the same value.
-- **The RFC stays open past Phase 2.** Two items keep it from closing, neither
-  web-rendering work (RFC 0050 Phase 2 PR plan
+- **The RFC stays open past Phase 2.** Two items keep it from closing (item 1
+  below is struck through — resolved 2026-06-15 — and kept only for history),
+  neither web-rendering work (RFC 0050 Phase 2 PR plan
   [Prerequisite + cross-phase dependencies](0050-phase2-pr-plan.md#prerequisite--cross-phase-dependencies-reconciling-with-the-rfc)):
   1. ~~**Prerequisite —**
      [ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md)

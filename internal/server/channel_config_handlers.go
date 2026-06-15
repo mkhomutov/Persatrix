@@ -130,13 +130,15 @@ func (s *Server) handlePatchChannelConfig(w http.ResponseWriter, r *http.Request
 	// OTHER non-default knob — most visibly the escalation chair — silently
 	// reverts to the package default. So on the FIRST edit we seed the base from
 	// the channel's resolved governance, making the channel store-canonical with a
-	// faithful snapshot (the same transition the YAML adopt path makes via
-	// ChannelConfig.toConfigOverrides). The sparse patch then layers over that
-	// baseline and nothing un-edited is dropped. Skipped for an empty patch so a
-	// no-op PATCH stays a no-op rather than freezing the channel.
+	// faithful snapshot — the same kind of freeze the YAML adopt path makes via
+	// ChannelConfig.toConfigOverrides (minus the not-yet-live interaction_budget
+	// knob, which resolvedConfigBaseline deliberately omits — see its doc). The
+	// sparse patch then layers over that baseline and nothing un-edited is dropped.
+	// Skipped for an empty patch so a no-op PATCH stays a no-op rather than
+	// freezing the channel.
 	base := current
 	if revision == 0 && len(raw) > 0 {
-		base = s.resolvedConfigBaseline(id)
+		base = s.resolvedConfigBaseline(r.Context(), id)
 	}
 
 	merged, err := mergeConfigPatch(base, raw)
@@ -373,11 +375,22 @@ func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (cha
 // stays nil (no escalation — the opt-in default), mirroring
 // [channels.ChannelConfig.toConfigOverrides] so a chair-less channel is not
 // frozen with an explicit empty string that would read back as "explicitly
-// cleared". Interaction budget is intentionally absent: it is not router-held
-// (RFC 0050 Open item 4), is not behaviourally affected by the store edit (it is
-// resolved on demand from YAML on the wallet path), and continues to inherit
-// until it is wired — so omitting it from the snapshot loses nothing live.
-func (s *Server) resolvedConfigBaseline(id string) channels.ChannelConfigOverrides {
+// cleared". It is ALSO dropped when it is no longer enforceable — see
+// [Server.chairIsEnforceableMember]: a router-held chair that has drifted out of
+// the channel's membership (or become an observer) is inert at dispatch, and
+// seeding it back into the baseline would make [ChannelRouter.ApplyChannelConfig]
+// re-run the cross-field chair-membership rule and REJECT an otherwise-unrelated
+// first edit with a 400 about a chair the operator never touched. Boot replay
+// and dispatch both deliberately tolerate that drift; the baseline must not
+// resurrect it as a hard error. So a drifted chair is omitted (left unset on the
+// edited channel — the same outcome dispatch already produces), while a valid
+// chair still survives the first edit (ISSUE-0103).
+//
+// Interaction budget is intentionally absent: it is not router-held (RFC 0050
+// Open item 4), is not behaviourally affected by the store edit (it is resolved
+// on demand from YAML on the wallet path), and continues to inherit until it is
+// wired — so omitting it from the snapshot loses nothing live.
+func (s *Server) resolvedConfigBaseline(ctx context.Context, id string) channels.ChannelConfigOverrides {
 	floorEnabled, _, _ := s.channelRouter.FloorControlFor(id)
 	salienceMax, _ := s.channelRouter.SalienceMaxChannelMembersFor(id)
 	replyBudget := s.channelRouter.ReplyBudgetFor(id)
@@ -393,10 +406,34 @@ func (s *Server) resolvedConfigBaseline(id string) channels.ChannelConfigOverrid
 		EndVoteWindow:                          &wWindow,
 		InteractionIdleTimeoutSeconds:          &idleSeconds,
 	}
-	if chair != "" {
+	if chair != "" && s.chairIsEnforceableMember(ctx, id, chair) {
 		base.EscalationChairID = &chair
 	}
 	return base
+}
+
+// chairIsEnforceableMember reports whether `chairID` would survive
+// [ChannelRouter.validateEscalationChair]'s membership rules — it is a declared
+// member of the channel and is not an observer (respond: never). It mirrors the
+// member/observer checks there (the floor-control check is excluded: the
+// baseline sets floor control to its own resolved value, so a revision-0 chaired
+// channel is floor-on by construction). Used only to decide whether a
+// router-held chair should be FROZEN into the first-edit baseline; an
+// unenforceable chair is dropped so a drifted chair cannot block an unrelated
+// edit. A store error reading members is treated as "not enforceable" — better
+// to drop the chair and let the edit proceed than to block it on a transient
+// fault (the apply path that follows would surface a real outage anyway).
+func (s *Server) chairIsEnforceableMember(ctx context.Context, id, chairID string) bool {
+	members, err := s.channelStore.GetMembers(ctx, id)
+	if err != nil {
+		return false
+	}
+	for i := range members {
+		if members[i].ParticipantID == chairID {
+			return members[i].RespondPolicy.Normalize() != channels.RespondNever
+		}
+	}
+	return false
 }
 
 // configField builds a knob's response cell: the effective value plus its

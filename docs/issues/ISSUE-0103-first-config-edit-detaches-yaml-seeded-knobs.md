@@ -111,13 +111,28 @@ the FREEZE CONSEQUENCE / false drift for channels nobody ever edited).
 ([`channel_config_handlers.go`](../../internal/server/channel_config_handlers.go))
 now chooses the merge base: for a channel already at revision > 0 the store is
 canonical (base = stored overrides, unchanged); for a revision-0 channel with a
-non-empty patch the base is `Server.resolvedConfigBaseline(id)` — a complete
+non-empty patch the base is `Server.resolvedConfigBaseline(ctx, id)` — a complete
 snapshot of the channel's six router-held knobs read from the same getters
 `buildChannelConfigResponse` uses. The sparse patch then layers over that
 baseline, so the apply path receives the channel's full resolved set plus the
 edit; nothing un-edited is dropped, the chair survives, and the channel becomes
-store-canonical with a faithful snapshot — the same transition the YAML *adopt*
-path makes via `ChannelConfig.toConfigOverrides`.
+store-canonical with a faithful snapshot — the same *kind* of freeze the YAML
+*adopt* path makes via `ChannelConfig.toConfigOverrides` (not byte-identical: the
+baseline omits the not-yet-live `interaction_budget_tokens` knob, which is not
+router-held and keeps resolving from YAML — RFC 0050 Open item 4).
+
+Drifted-chair guard (deep-review follow-up). Seeding the baseline promotes the
+router-held escalation chair *into* the patch `ApplyChannelConfig` validates, so
+the cross-field chair-membership rule re-runs on the first edit. If that chair
+has drifted out of the channel's membership (a member who left after the
+YAML/boot seeding) or become an observer, naively freezing it would make an
+*unrelated* first edit fail with a 400 about a chair the operator never touched —
+even though boot replay (`ResolveFromStore`) and dispatch (`maybeEscalateStall`)
+both deliberately *tolerate* that drift. So `resolvedConfigBaseline` seeds the
+chair only when it is still enforceable (`Server.chairIsEnforceableMember`:
+declared member, not an observer); a drifted chair is dropped (left unset on the
+edited channel — the same inert outcome dispatch already produces) rather than
+resurrected as a hard error. A valid chair still survives the first edit.
 
 Deliberate, documented consequence (the FREEZE CONSEQUENCE, already accepted on
 the adopt path): a first edit flips the previously-inherited knobs' provenance
@@ -129,9 +144,11 @@ YAML baseline (keeping inherited knobs tracking the fleet default) remains RFC
 
 `ApplyChannelConfig`'s wholesale-replace contract is unchanged — the fix is one
 layer up, at the REST merge. The two characterization tests still pin that
-contract; the end-to-end regression is
+contract; the end-to-end regressions are
 `TestChannelConfig_FirstEditPreservesYAMLSeededChair` (+
-`TestChannelConfig_FirstEditFreezesDefaultsAsChannel`) in
+`TestChannelConfig_FirstEditFreezesDefaultsAsChannel`, and
+`TestChannelConfig_FirstEditWith{Drifted,Observer}ChairDoesNotBlockUnrelatedEdit`
+for the drifted-chair guard) in
 [`channel_config_handlers_test.go`](../../internal/server/channel_config_handlers_test.go).
 This unblocks flipping `config_edit_enabled` on (RFC 0050 Phase 2 prerequisite).
 

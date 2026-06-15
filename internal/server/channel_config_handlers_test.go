@@ -18,9 +18,20 @@ import (
 
 // channelConfigTestServer wires a real SQLite channel store + router onto a
 // test Server with the RFC 0050 `config_edit_enabled` toggle ON (and a seeded
-// group channel `group:planning`). Pass enabled=false to exercise the
-// toggle-off gate. Returns the server and the canonical channel id.
+// group channel `group:planning` with members alice + bob). Pass enabled=false
+// to exercise the toggle-off gate. Returns the server and the canonical channel
+// id.
 func channelConfigTestServer(t *testing.T, enabled bool) (*Server, string) {
+	t.Helper()
+	return channelConfigTestServerWithMembers(t, enabled,
+		[]channels.Member{{ParticipantID: "alice"}, {ParticipantID: "bob"}})
+}
+
+// channelConfigTestServerWithMembers is channelConfigTestServer with the seeded
+// channel's membership roster injected by the caller — used by tests that need a
+// specific member shape (e.g. an observer chair) the default alice/bob roster
+// cannot express.
+func channelConfigTestServerWithMembers(t *testing.T, enabled bool, members []channels.Member) (*Server, string) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "channels.db")
 	store, err := channels.NewSQLiteStore(dbPath, channels.SQLiteOptions{
@@ -47,7 +58,7 @@ func channelConfigTestServer(t *testing.T, enabled bool) (*Server, string) {
 	const id = "group:planning"
 	require.NoError(t, store.CreateChannelWithMembers(t.Context(),
 		channels.Channel{ID: id, Name: "planning", Type: channels.ChannelTypeGroup},
-		[]channels.Member{{ParticipantID: "alice"}, {ParticipantID: "bob"}},
+		members,
 	))
 	// Match the runtime-create governance seeding so the router has live entries
 	// for the channel (floor on, default salience + reply budget).
@@ -258,6 +269,63 @@ func TestChannelConfig_FirstEditFloorOffWithYAMLChairRejected(t *testing.T) {
 	revision, fields := decodeConfig(t, rec.Body.Bytes())
 	assert.Equal(t, int64(0), revision, "a rejected apply must not bump the revision")
 	assert.Equal(t, "alice", fields["escalation_chair_id"].Value, "the chair survives a rejected edit")
+}
+
+// TestChannelConfig_FirstEditWithDriftedChairDoesNotBlockUnrelatedEdit is the
+// regression for the ISSUE-0103 fix's OWN footgun. Seeding the merge base from
+// resolved governance promotes the router-held escalation chair INTO the patch
+// the apply path validates. If that chair has drifted out of the channel's
+// membership (a member who left after the YAML/boot seeding — drift the boot
+// replay [ChannelRouter.ResolveFromStore] and dispatch-time escalation
+// [ChannelRouter.maybeEscalateStall] both deliberately TOLERATE), re-running the
+// cross-field chair-membership rule would reject an UNRELATED first edit with a
+// 400 naming a chair the operator never touched. The baseline must instead drop
+// a non-enforceable chair: the edit succeeds and the already-inert chair is left
+// unset — the same outcome dispatch already produces for it — instead of being
+// frozen into the store (which would persist an invalid chair AND keep blocking).
+func TestChannelConfig_FirstEditWithDriftedChairDoesNotBlockUnrelatedEdit(t *testing.T) {
+	srv, id := channelConfigTestServer(t, true)
+	// A chair the boot path seated on the router but who is NOT a declared member
+	// of {alice, bob}: membership drift the rest of the system absorbs silently.
+	srv.channelRouter.SetEscalationChair(id, "ghost-who-left")
+
+	body, _ := json.Marshal(map[string]any{"interaction_idle_timeout_seconds": 60})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code,
+		"an unrelated first edit must NOT be blocked by a drifted (non-member) chair, body=%s", rec.Body.String())
+
+	revision, fields := decodeConfig(t, rec.Body.Bytes())
+	assert.Equal(t, int64(1), revision, "the edit committed")
+	assert.EqualValues(t, 60, fields["interaction_idle_timeout_seconds"].Value, "the edited knob took effect")
+	// The drifted chair was never enforceable, so it is dropped rather than frozen.
+	assert.Equal(t, "", fields["escalation_chair_id"].Value,
+		"a non-member chair is not seeded into the first-edit baseline")
+}
+
+// TestChannelConfig_FirstEditWithObserverChairDoesNotBlockUnrelatedEdit is the
+// sibling of the drift case: a chair who IS a declared member but is an observer
+// (respond: never) is just as guaranteed-inert as a non-member (the receiver
+// gate suppresses it before any LLM), and [ChannelRouter.validateEscalationChair]
+// rejects it for exactly that reason. So the first-edit baseline must drop an
+// observer chair too, or an unrelated edit would 400 on a chair the operator
+// never set.
+func TestChannelConfig_FirstEditWithObserverChairDoesNotBlockUnrelatedEdit(t *testing.T) {
+	srv, id := channelConfigTestServerWithMembers(t, true, []channels.Member{
+		{ParticipantID: "alice"},
+		{ParticipantID: "cleo", RespondPolicy: channels.RespondNever},
+	})
+	srv.channelRouter.SetEscalationChair(id, "cleo") // member, but an observer
+
+	body, _ := json.Marshal(map[string]any{"interaction_idle_timeout_seconds": 60})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code,
+		"an unrelated first edit must NOT be blocked by an observer chair, body=%s", rec.Body.String())
+
+	_, fields := decodeConfig(t, rec.Body.Bytes())
+	assert.Equal(t, "", fields["escalation_chair_id"].Value,
+		"an observer chair is not seeded into the first-edit baseline")
 }
 
 // TestChannelConfig_StaleRevisionConflict: an If-Match that no longer matches
