@@ -126,7 +126,10 @@ Deliverables:
    map + setter, or repointing the wallet enforcement path to read the stored
    override — which is deferred (see *Open items*). So PR 2 makes six of the
    seven knobs runtime-editable; interaction budget is store-persisted but its
-   live application lands later.
+   live application lands later. **(Resolved 2026-06-15** by the
+   [interaction-budget amendment](0050-amendment-interaction-budget-enforcement.md),
+   #657/#658: the budget is now router-held and the wallet enforces it server-side —
+   the "router-side budget map + setter" path. All seven knobs are now live.**)**
 2. Boot repoint: a `ResolveFromStore` step after `ReconcileConfig` that loads
    each channel's persisted overrides into the router (so the in-memory maps are
    seeded from the canonical store). Empty overrides → identical to today.

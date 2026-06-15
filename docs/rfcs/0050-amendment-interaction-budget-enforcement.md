@@ -1,7 +1,7 @@
 # RFC 0050 Amendment — Interaction-Budget Enforcement (server-side resolution)
 
 **Type**: amendment to [RFC 0050](0050-extensible-channel-configuration.md) — corrects the *"Open item 4"* framing and the [Phase 1 plan](0050-phase1-pr-plan.md)'s interaction-budget note
-**Status**: 📋 Proposed
+**Status**: ✅ Implemented — router-held budget + GET resolution (#657) and snapshot-at-open + wallet server-side enforcement (#658)
 **Author**: Maksim Khomutov
 **Date**: 2026-06-15
 **Decision**: architecture resolved 2026-06-15 — **Option A (server-side resolution)**; see [Decision](#decision)

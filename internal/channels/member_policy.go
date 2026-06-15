@@ -1,5 +1,10 @@
 package channels
 
+import (
+	"fmt"
+	"math"
+)
+
 // MemberPolicy is the resolved per-member respond-policy triple — the
 // canonical legacy `Policy` plus the RFC 0030 Tier B salience signals
 // derived from the member's *declared* disposition. It is what a write
@@ -56,4 +61,35 @@ func ResolveMemberPolicy(declared RespondPolicy) (MemberPolicy, error) {
 		SalienceGated: salienceGated,
 		Threshold:     threshold,
 	}, nil
+}
+
+// ResolveMemberPolicyWithThreshold is [ResolveMemberPolicy] for a write boundary
+// that DOES carry an operator threshold — the RFC 0050 member-config edit
+// (`PATCH /api/v1/channels/{id}/members/{participant_id}`). It derives the Tier B
+// signals from the declared disposition AND the explicit threshold
+// ([ResolveSalienceSignal]), normalizes the disposition, and — discharging the
+// contract [ResolveMemberPolicy] flagged ("if a wire shape ever grows a threshold
+// field, add the parameter and that rule together") — enforces the same two rules
+// [Config.Validate] applies to a config-declared threshold: it must be a finite
+// value in [0, 1] ([ErrInvalidThreshold]), and it is only meaningful on an
+// open-floor disposition (participant/chair/legacy always — [ErrThresholdNotApplicable]).
+// The validated `threshold` is the resolved one, so a `chair` with no explicit
+// value carries its [DefaultChairThreshold] and still passes.
+func ResolveMemberPolicyWithThreshold(declared RespondPolicy, explicit *float64) (MemberPolicy, error) {
+	salienceGated, threshold := ResolveSalienceSignal(declared, explicit)
+	canonical, err := canonicalRespondPolicy(declared)
+	if err != nil {
+		return MemberPolicy{}, err
+	}
+	if threshold != nil {
+		if math.IsNaN(*threshold) || *threshold < 0.0 || *threshold > 1.0 {
+			return MemberPolicy{}, fmt.Errorf("%w: %v (must be a finite value in [0, 1])",
+				ErrInvalidThreshold, *threshold)
+		}
+		if canonical != RespondAlways {
+			return MemberPolicy{}, fmt.Errorf("%w: %q carries threshold %v but only an open-floor disposition (participant/chair/always) runs the salience bid",
+				ErrThresholdNotApplicable, canonical, *threshold)
+		}
+	}
+	return MemberPolicy{Policy: canonical, SalienceGated: salienceGated, Threshold: threshold}, nil
 }

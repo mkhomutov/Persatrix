@@ -63,12 +63,15 @@ be tracked so the plan does not read as "Phase 2 ships → RFC done":
    building that backend+web slice or amending the RFC to move member-threshold
    editing out of Phase 2.
 
-Also note Open item 4 from Phase 1 (`interaction_budget_tokens` is store-persisted
-but **not router-wired**, so its inherited value reads back `null` — see the
-[surface notes](#the-surface-phase-2-renders-over-landed-in-phase-1)) remains
-open; the panel renders it correctly but the knob is not yet live end-to-end.
-None of this changes that the three PRs below are web-only — it scopes what
-"Phase 2 delivered" does and does not let the RFC claim.
+Also note Open item 4 from Phase 1 (`interaction_budget_tokens` was store-persisted
+but not router-wired, so its inherited value read back `null` — see the
+[surface notes](#the-surface-phase-2-renders-over-landed-in-phase-1)) — **resolved
+2026-06-15** by the [interaction-budget amendment](0050-amendment-interaction-budget-enforcement.md)
+(#657/#658): the budget is now router-held, the server resolves the effective
+value (no longer `null`), and the wallet enforces it. The null-handling the panel
+shipped (below) is now a harmless no-op for a live server; updating the mocked
+panel test that still feeds `null` is a minor follow-up. None of this changes that
+the three PRs below were web-only.
 
 ## The surface Phase 2 renders over (landed in Phase 1)
 
