@@ -98,6 +98,12 @@ describe("ChannelSettings", () => {
     // and renders its effective value, marked inherited.
     const budget = await screen.findByLabelText("Interaction budget (tokens)");
     expect(budget.value).toBe("0");
+    // ...and the source:"default" read-back is reflected as inherited, so the
+    // honest "0" isn't mistaken for a channel override (the comment's claim).
+    expect(
+      screen.getByLabelText("Inherit fleet default for Interaction budget (tokens)")
+        .checked,
+    ).toBe(true);
   });
 
   it("renders a genuinely null knob value as empty (never coerced to 0)", async () => {

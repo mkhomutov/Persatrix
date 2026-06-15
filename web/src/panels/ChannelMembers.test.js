@@ -152,7 +152,32 @@ describe("ChannelMembers", () => {
     });
   });
 
-  it("sends an explicit null threshold when the field is cleared (unset the bar)", async () => {
+  it("re-declares the open-floor disposition for a salience-gated member (no silent un-gating on a no-op save)", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(noContent()));
+    vi.stubGlobal("fetch", fetchMock);
+    renderMembers();
+
+    // Ada reads back respond:"always" + salience_gated — the store normalizes a
+    // participant/chair to the legacy "always" wire value, so her *declared*
+    // open-floor disposition is unrecoverable from persisted state. The editor
+    // must seed an open-floor disposition (not the literal "always"), because the
+    // server re-derives salience_gated from the disposition we send: a no-op save
+    // that echoed "always" with no explicit threshold would resolve to
+    // salience_gated=false and silently demote her to an unconditional responder.
+    await fireEvent.click(screen.getByLabelText("Edit Ada"));
+    expect(screen.getByLabelText("Disposition for Ada").value).toBe(
+      "participant",
+    );
+
+    // Save without touching the disposition — the bid must survive the round-trip.
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.respond).toBe("participant");
+    expect(body.threshold).toBe(0.3);
+  });
+
+  it("sends an explicit null threshold when the field is cleared (unset the bar, keeping the bid)", async () => {
     const fetchMock = vi.fn(() => Promise.resolve(noContent()));
     vi.stubGlobal("fetch", fetchMock);
     renderMembers();
@@ -166,9 +191,12 @@ describe("ChannelMembers", () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.threshold).toBeNull();
-    // respond is always sent — the server requires it (salience_gated is derived
-    // from the disposition and is unrecoverable from persisted state).
-    expect(body.respond).toBe("always");
+    // respond is always sent (the server requires it), and for a salience-gated
+    // member it must be the open-floor disposition, NOT the normalized "always".
+    // Unsetting the bar is "bias-to-silence" — the bid stays on (salience_gated
+    // true, no threshold). Echoing "always"+null would instead un-gate her, the
+    // opposite of the intended effect.
+    expect(body.respond).toBe("participant");
   });
 
   it("offers no Edit button for the acting user (a human principal, not a governed persona)", () => {

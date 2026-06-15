@@ -99,7 +99,20 @@
     }
     error = "";
     editingMember = member.id;
-    editRespond = member.respond;
+    // The persisted `respond` reads back as the normalized legacy triple: the
+    // store collapses an open-floor participant/chair to "always", so the
+    // declared disposition is unrecoverable from persisted state. Seeding the
+    // editor with a literal "always" would be a silent demotion trap — the
+    // server re-derives `salience_gated` from the disposition we send back, and
+    // "always" with no explicit threshold resolves to salience_gated=false. So
+    // for a member the store still reports as salience-gated we re-declare an
+    // open-floor disposition (participant; chair is indistinguishable here and
+    // resolves to the same RespondAlways canonical + bid). This keeps a no-op
+    // save and an unset-the-bar edit bias-to-silence instead of un-gating.
+    editRespond =
+      member.salience_gated && member.respond === "always"
+        ? "participant"
+        : member.respond;
     editThreshold = member.threshold ?? null;
   }
 
