@@ -141,6 +141,16 @@ type ChannelRouter struct {
 	exemptParticipantTypes map[string]struct{}
 	defaultReplyBudget     int
 
+	// budgetMu guards the RFC 0030 Layer 1 (v0.3.8) per-channel interaction cost
+	// ceiling; methods + the full field contracts live in interaction_budget.go.
+	// channelBudgets: channel id → resolved interaction_budget_tokens (0 =
+	// uncapped). defaultInteractionBudget: fleet default_interaction_budget_tokens,
+	// captured for runtime inheritance (zero is a meaningful "uncapped" value, like
+	// the reply budget, so it cannot ride a Set(_, 0) sentinel). Guarded by budgetMu.
+	budgetMu                 sync.Mutex
+	channelBudgets           map[string]int64
+	defaultInteractionBudget int64
+
 	// endVoteMu guards the RFC 0030 Layer 4 (v0.3.8) end-of-interaction vote
 	// state; methods + the full field contracts live in end_vote.go.
 	// endVoteThresholds/endVoteWindows: channel id → resolved K / W (absent
@@ -239,6 +249,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		salienceMaxMembers:            make(map[string]int),
 		replyBudgets:                  make(map[string]int),
 		replyCounts:                   make(map[string]map[string]int),
+		channelBudgets:                make(map[string]int64),
 		endVoteThresholds:             make(map[string]int),
 		endVoteWindows:                make(map[string]int),
 		endVotes:                      make(map[string]*interactionEndVotes),

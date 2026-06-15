@@ -20,17 +20,16 @@ import (
 // router together, and at boot the router is overlaid from the store for any
 // channel an operator has edited.
 //
-// Six of the seven governance knobs are router-held and made live here:
-// floor control, the Tier B salience cap, the Layer 2 reply budget, the Layer 4
-// end-vote K/W, the escalation chair, and the interaction idle window. The
-// seventh — interaction budget (RFC 0030 Layer 1) — is NOT router-held (there is
-// no `Resolve*` boot call and no setter; [ChannelConfig.ResolveInteractionBudgetTokens]
-// is read only when snapshotting the YAML image into the store
-// (config_reconcile.go), never on a live wallet path — the resolved ceiling
-// reaches no enforcement today). PR 1
-// persists its override uniformly in `config_overrides_json`, but applying it
-// live needs new plumbing and is deferred (RFC 0050 PR-2 plan, Open item 4); so
-// the apply path here makes six of the seven knobs runtime-editable.
+// All seven governance knobs are router-held and made live here: floor control,
+// the Tier B salience cap, the Layer 1 interaction budget, the Layer 2 reply
+// budget, the Layer 4 end-vote K/W, the escalation chair, and the interaction
+// idle window. The interaction budget (RFC 0030 Layer 1) became router-held in
+// the RFC 0050 amendment (interaction-budget enforcement): it now has a
+// [ChannelRouter.ResolveInteractionBudgets] boot call and a
+// [ChannelRouter.SetInteractionBudgetTokens] setter, so the apply path here
+// stamps it like the others. Note enforcement of the resolved ceiling is still
+// the amendment's PR 2 (wallet-side resolution); this PR resolves and surfaces
+// the value but does not yet act on it.
 
 // Validate enforces the per-channel field-range invariants on a sparse override
 // patch — the single-channel subset of [Config.Validate], applied to the knobs
@@ -209,7 +208,7 @@ func (r *ChannelRouter) validateEscalationChair(ctx context.Context, channelID s
 	return nil
 }
 
-// applyOverridesToRouter stamps the six router-held knobs for `channelID` onto
+// applyOverridesToRouter stamps the seven router-held knobs for `channelID` onto
 // the live router from a (canonical) override set: present → the override value,
 // absent → the inherited default. It is the shared seam used by both the runtime
 // apply path ([ChannelRouter.ApplyChannelConfig]) and the boot repoint
@@ -232,9 +231,9 @@ func (r *ChannelRouter) validateEscalationChair(ctx context.Context, channelID s
 //     escalation — the opt-in default).
 //   - idle window: absent → SetInteractionIdleTimeout(_, -1), whose negative
 //     sentinel deletes the entry so the channel falls back to the fleet default.
-//
-// Interaction budget is intentionally absent: it is not router-held (RFC 0050
-// PR-2 plan, Open item 4), so there is no setter to call here.
+//   - interaction budget: absent → ApplyDefaultInteractionBudget, which stamps
+//     the captured fleet default (zero is a meaningful "uncapped" value, like the
+//     reply budget, so it cannot inherit via Set(_, 0)).
 func (r *ChannelRouter) applyOverridesToRouter(channelID string, o ChannelConfigOverrides) {
 	// Floor control. Preserve the channel's resolved per-turn timeout (it rides
 	// a separate YAML knob, not the override set); a non-positive value falls
@@ -284,6 +283,15 @@ func (r *ChannelRouter) applyOverridesToRouter(channelID string, o ChannelConfig
 		r.SetInteractionIdleTimeout(channelID, *o.InteractionIdleTimeoutSeconds)
 	} else {
 		r.SetInteractionIdleTimeout(channelID, -1)
+	}
+
+	// Layer 1 interaction budget. Like the reply budget, zero is a meaningful
+	// "uncapped" value, so an absent knob inherits the captured fleet default via
+	// ApplyDefaultInteractionBudget rather than a Set(_, 0) sentinel.
+	if o.InteractionBudgetTokens != nil {
+		r.SetInteractionBudgetTokens(channelID, *o.InteractionBudgetTokens)
+	} else {
+		r.ApplyDefaultInteractionBudget(channelID)
 	}
 }
 

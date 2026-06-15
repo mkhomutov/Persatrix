@@ -167,10 +167,10 @@ type historyResponse struct {
 // fleet/group default. (The governance knobs in this set are all channel-scoped,
 // so there is no third "member" level here — member-scoped settings, e.g. a
 // member's salience threshold, ride the member surface, not this one.) `value`
-// is the typed effective value (bool / int / string); it is `null` only for an
-// inherited interaction_budget_tokens, whose effective resolution is deferred
-// with its live application (RFC 0050 Phase 1 Open item 4 — it is not
-// router-held, so this endpoint cannot resolve the fleet default for it yet).
+// is the typed effective value (bool / int / string). Every knob — including
+// interaction_budget_tokens, made router-held in the RFC 0050 amendment
+// (interaction-budget enforcement) — resolves its inherited effective value
+// through a router getter, so `value` is never `null` for an inherited knob.
 type configFieldResponse struct {
 	Value  any    `json:"value"`
 	Source string `json:"source"`

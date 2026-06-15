@@ -104,6 +104,29 @@ func TestChannels_ReplyBudget_RuntimeChannelInheritsFleetDefault(t *testing.T) {
 		"a runtime-created channel must inherit default_max_replies_per_participant")
 }
 
+// TestChannels_InteractionBudget_RuntimeChannelInheritsFleetDefault pins that a
+// channel created at runtime via POST /api/v1/channels inherits the fleet-wide
+// `default_interaction_budget_tokens`, the Layer 1 sibling of the reply-budget
+// inheritance above. Regression guard for the RFC 0050 amendment: once the
+// interaction budget became router-held with the same meaningful-zero semantics
+// as the reply budget, the create seam (applyRuntimeGroupGovernance) had to seed
+// it too — otherwise a runtime channel reads 0 (uncapped) instead of a non-zero
+// fleet default until the next restart re-runs ResolveInteractionBudgets, which
+// both mis-reports the GET /config effective value and lets a first sparse PATCH
+// freeze the baseline at the wrong value (the ISSUE-0103 footgun).
+func TestChannels_InteractionBudget_RuntimeChannelInheritsFleetDefault(t *testing.T) {
+	srv, router := replyBudgetTestServer(t)
+	// Resolve a non-zero fleet default (empty store, no config channels) so the
+	// gap between "seeded" and "unseeded zero" is observable.
+	require.NoError(t, router.ResolveInteractionBudgets(context.Background(), &channels.Config{
+		DefaultInteractionBudgetTokens: 4000,
+	}))
+
+	mustCreateChannelHTTP(t, srv, "planning", "alice", "bob")
+	assert.EqualValues(t, 4000, router.InteractionBudgetTokensFor("group:planning"),
+		"a runtime-created channel must inherit default_interaction_budget_tokens")
+}
+
 // TestChannels_ReplyBudget_DefaultUncapped pins the opt-in default: with no
 // budget set, a participant publishes past any cap with 201s (v0.3.0 behaviour).
 func TestChannels_ReplyBudget_DefaultUncapped(t *testing.T) {
