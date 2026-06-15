@@ -15,7 +15,7 @@ depends_on:
 # RFC 0050 — Extensible Channel Configuration (Operator-Editable, Single Source of Truth)
 
 **Type**: architecture  
-**Status**: ✅ Accepted — **Phase 1 + Phase 2 (web settings panel) delivered**; ISSUE-0103 (first-edit detachment) **resolved**, so the non-dark prerequisite is cleared; RFC stays open (the member-threshold slice and Open item 4 — see [Progress](#progress) / [Phased Implementation Plan](#phased-implementation-plan))  
+**Status**: ✅ Accepted — **Phase 1 + Phase 2 (web settings panel) delivered**; ISSUE-0103 (first-edit detachment) **resolved**; Open item 4 (interaction-budget enforcement) **resolved** by its [amendment](0050-amendment-interaction-budget-enforcement.md) (#657, #658). RFC stays open only on the member-threshold slice — its backend endpoint now landed, web editing pending (see [Progress](#progress) / [Phased Implementation Plan](#phased-implementation-plan))  
 **Author**: Maksim Khomutov  
 **Date**: 2026-06-14  
 **Target**: v0.3.x (unscheduled)  
@@ -32,8 +32,9 @@ depends_on:
   reconciliation + drift detection (#642), REST `PATCH/GET …/config` +
   `config_edit_enabled` toggle (#643), CLI `channel config get/set/unset` (#645)
   and `export/import/diff` (#646). Six of the seven governance knobs are
-  runtime-editable; **interaction budget is store-persisted but not yet
-  router-wired** (Open item 4 — live application deferred). Live G1 acceptance:
+  runtime-editable; the seventh — **interaction budget — became router-held and
+  server-side enforced** via the [interaction-budget amendment](0050-amendment-interaction-budget-enforcement.md)
+  (#657, #658), closing Open item 4, so all seven are now live end-to-end. Live G1 acceptance:
   [MT-CHANNEL-CONFIG-001](../manual-tests/MT-CHANNEL-CONFIG-001.md) — **first
   live run passed 2026-06-14** (all steps + edge cases green).
 - **Phase 2 (web settings panel) — delivered** (2026-06-15). Both code PRs of the
@@ -46,10 +47,9 @@ depends_on:
   acceptance: [MT-CHANNEL-CONFIG-002](../manual-tests/MT-CHANNEL-CONFIG-002.md) —
   edit a knob in the browser, the running channel honors it, and the CLI
   `channel config get` reads back the same value.
-- **The RFC stays open past Phase 2.** Two items keep it from closing (item 1
-  below is struck through — resolved 2026-06-15 — and kept only for history),
-  neither web-rendering work (RFC 0050 Phase 2 PR plan
-  [Prerequisite + cross-phase dependencies](0050-phase2-pr-plan.md#prerequisite--cross-phase-dependencies-reconciling-with-the-rfc)):
+- **The RFC stays open past Phase 2.** Of the three items that kept it open, two
+  are now resolved (struck through, kept for history); only item 2's **web** half
+  remains:
   1. ~~**Prerequisite —**
      [ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md)
      (first-edit detachment of YAML-seeded knobs)~~ — **RESOLVED 2026-06-15.** The
@@ -58,12 +58,17 @@ depends_on:
      channel layers over the full baseline instead of resetting the un-edited
      knobs (the chair survives). This was the one blocker to flipping
      `config_edit_enabled` on; it is cleared.
-  2. **Editable member threshold** — the RFC's Phase 2 summary lists it, but it
-     needs a member-config mutation endpoint that does not exist, so it was
-     **deferred** out of the web-only workstream (a backend+web "Phase 2.5" slice).
-  3. **Open item 4** — `interaction_budget_tokens` is store-persisted but not
-     router-wired, so its inherited value reads back `null`; the panel renders it
-     correctly but the knob is not yet live end-to-end.
+  2. **Editable member threshold** — the RFC's Phase 2 summary lists it. The
+     **backend** now exists (a `PATCH /api/v1/channels/{id}/members/{participant_id}`
+     member-config endpoint that re-resolves the Tier B signals and enforces the
+     same threshold rules as config load); the **web** editing UI (making the
+     read-only threshold in `ChannelMembers.svelte` editable) is the remaining
+     follow-up.
+  3. ~~**Open item 4** — `interaction_budget_tokens` not router-wired~~ —
+     **RESOLVED 2026-06-15** by the [interaction-budget amendment](0050-amendment-interaction-budget-enforcement.md)
+     (#657, #658): the budget is now router-held, the `GET …/config` inherited
+     value resolves (no longer `null`), and the wallet enforces the channel
+     ceiling server-side. All seven knobs are live end-to-end.
 - **Phase 3 (schema-driven generic config / profiles)** — future RFC.
 
 ## Table of Contents

@@ -30,6 +30,17 @@ type addMemberRequest struct {
 	Respond string `json:"respond"`
 }
 
+// updateMemberRequest is the JSON body for
+// PATCH /api/v1/channels/{id}/members/{participant_id} (RFC 0050 member-config
+// edit). It is a REPLACE of the member's editable config: `respond` is the new
+// disposition (empty → when_mentioned, the add-member default) and `threshold`
+// the new salience bar — a tri-state pointer where absent/null unsets it
+// (bias-to-silence). The participant id is the path segment, not a body field.
+type updateMemberRequest struct {
+	Respond   string   `json:"respond"`
+	Threshold *float64 `json:"threshold,omitempty"`
+}
+
 // wireRespondPolicy applies the RFC 0011 §A default to a wire-supplied
 // `respond` string: empty means `when_mentioned`, matching the config
 // loader's bare-ID shorthand. The single defaulting rule for the REST

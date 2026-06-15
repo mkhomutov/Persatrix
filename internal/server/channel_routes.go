@@ -21,6 +21,7 @@ func (s *Server) registerChannelRoutes() {
 	s.mux.HandleFunc("GET /api/v1/channels/{id}/activity", s.handleChannelActivity)
 	s.mux.HandleFunc("GET /api/v1/channels/{id}/messages/{msg_id}/thread", s.handleGetThread)
 	s.mux.HandleFunc("POST /api/v1/channels/{id}/members", s.handleAddChannelMember)
+	s.mux.HandleFunc("PATCH /api/v1/channels/{id}/members/{participant_id}", s.handleUpdateChannelMember) // RFC 0050 member-config edit
 	s.mux.HandleFunc("DELETE /api/v1/channels/{id}/members/{participant_id}", s.handleDeleteChannelMember)
 	// RFC 0050 Phase 1 PR 4 — per-channel governance config over the store-canonical
 	// apply path, gated server-side on the config_edit_enabled toggle (config/ui.yaml).

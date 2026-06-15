@@ -74,6 +74,17 @@ type ChannelStore interface {
 	// "dispatch target not registered" WARN at chat QPS (ISSUE-0034).
 	SetMemberPolicy(ctx context.Context, channelID, participantID string, policy RespondPolicy) error
 
+	// UpdateMemberConfig replaces an existing member's disposition AND salience
+	// threshold (the RFC 0050 member-config edit). It re-resolves the Tier B
+	// signals from the declared disposition + explicit threshold, enforcing the
+	// same rules as config load ([ResolveMemberPolicyWithThreshold]): a finite
+	// threshold in [0, 1] ([ErrInvalidThreshold]) only on an open-floor
+	// disposition ([ErrThresholdNotApplicable]). A nil threshold unsets it
+	// (bias-to-silence). Returns [ErrChannelNotFound] when the channel is absent
+	// and [ErrMemberNotFound] when the participant is not a member (404, distinct
+	// from the publish-time [ErrNotMember]'s 403).
+	UpdateMemberConfig(ctx context.Context, channelID, participantID string, policy RespondPolicy, threshold *float64) error
+
 	// GetMembers returns all members of `channelID` ordered by `joined_at`.
 	GetMembers(ctx context.Context, channelID string) ([]Member, error)
 

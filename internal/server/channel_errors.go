@@ -34,9 +34,13 @@ func (s *Server) writeChannelError(w http.ResponseWriter, err error) {
 		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
 	case errors.Is(err, channels.ErrNotMember):
 		writeError(w, "FORBIDDEN", "sender is not a member of the channel", http.StatusForbidden)
+	case errors.Is(err, channels.ErrMemberNotFound): // RFC 0050 member-config PATCH target missing
+		writeError(w, "NOT_FOUND", "member not found", http.StatusNotFound)
 	case errors.Is(err, channels.ErrInvalidChannelType),
 		errors.Is(err, channels.ErrInvalidParticipantID),
-		errors.Is(err, channels.ErrInvalidRespondPolicy):
+		errors.Is(err, channels.ErrInvalidRespondPolicy),
+		errors.Is(err, channels.ErrInvalidThreshold), // RFC 0050 member-config threshold validation
+		errors.Is(err, channels.ErrThresholdNotApplicable):
 		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
 	case errors.Is(err, channels.ErrMessageContentTooLarge): // ISSUE-0050
 		writeError(w, "PAYLOAD_TOO_LARGE", err.Error(), http.StatusRequestEntityTooLarge)

@@ -310,6 +310,11 @@ var (
 	// ErrNotMember — publish from a non-member of the target channel (the
 	// store-side guard; REST layer surfaces this as 403).
 	ErrNotMember = errors.New("channels: sender is not a member of the channel")
+	// ErrMemberNotFound — a member-config update (RFC 0050 member-config PATCH)
+	// named a participant who is not a member of the channel. Distinct from
+	// ErrNotMember (a publish-time sender-authorization guard surfaced as 403):
+	// this is a missing PATCH target, surfaced as 404.
+	ErrMemberNotFound = errors.New("channels: member not found")
 	// ErrInvalidParticipantID — participant id violated the registration-time
 	// constraints (no `:`, no whitespace, ASCII only) per RFC 0011 §A.
 	ErrInvalidParticipantID = errors.New("channels: invalid participant id")

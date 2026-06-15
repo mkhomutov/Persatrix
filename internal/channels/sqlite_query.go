@@ -230,6 +230,55 @@ func (s *sqliteStore) SetMemberPolicy(ctx context.Context, channelID, participan
 	return nil
 }
 
+// UpdateMemberConfig implements [ChannelStore.UpdateMemberConfig].
+func (s *sqliteStore) UpdateMemberConfig(ctx context.Context, channelID, participantID string, policy RespondPolicy, threshold *float64) error {
+	// Resolve the declared disposition + explicit threshold into the persisted
+	// triple, enforcing the same threshold rules config load applies
+	// ([ResolveMemberPolicyWithThreshold]) so the REST member-config PATCH cannot
+	// persist a pair the YAML path would reject. Re-resolving keeps the
+	// salience-bid signals in lock-step with respond_policy, exactly like
+	// SetMemberPolicy.
+	mp, err := ResolveMemberPolicyWithThreshold(policy, threshold)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("channels: update member config begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE memberships SET respond_policy = ?, threshold = ?, salience_gated = ?
+		   WHERE channel_id = ? AND participant_id = ?`,
+		string(mp.Policy), mp.Threshold, boolToInt(mp.SalienceGated), channelID, participantID,
+	)
+	if err != nil {
+		return fmt.Errorf("channels: update member config: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("channels: update member config rowsaffected: %w", err)
+	}
+	if n == 0 {
+		// Disambiguate channel-missing (404 channel) from member-missing (404
+		// member) for operator triage, mirroring SetMemberPolicy.
+		var present int
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM channels WHERE id = ?`, channelID).Scan(&present)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %s", ErrChannelNotFound, channelID)
+		}
+		if err != nil {
+			return fmt.Errorf("channels: update member config existence check: %w", err)
+		}
+		return fmt.Errorf("%w: channel=%s participant=%s", ErrMemberNotFound, channelID, participantID)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("channels: update member config commit: %w", err)
+	}
+	return nil
+}
+
 // AddMember implements [ChannelStore.AddMember].
 func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID string, policy RespondPolicy) error {
 	if err := ValidateParticipantID(participantID); err != nil {
