@@ -37,13 +37,24 @@ export function selectPanels(config) {
     const status = panels[panel.name];
     return Boolean(status?.enabled && status?.available);
   }).map((panel) => {
-    // Thread the server-reported per-panel `create` capability (RFC 0048
-    // channel-creation amendment §A) onto the descriptor so the shell can pass
-    // it to the panel, which renders the affordance only when both
-    // create.enabled && create.available. A panel the server reports no create
-    // object for leaves `create` undefined — the descriptor never fabricates one.
-    const create = panels[panel.name]?.create;
-    return create ? { ...panel, create } : panel;
+    // Thread the server-reported per-panel capabilities onto the descriptor so
+    // the shell can pass them to the panel, which renders each affordance only
+    // when both <cap>.enabled && <cap>.available. Two capabilities ride here:
+    //   - `create` (RFC 0048 channel-creation amendment §A)
+    //   - `config_edit` (RFC 0050 Phase 2 — the channel settings panel)
+    // Each is spread under its own snake_case key, matching the server JSON and
+    // App.svelte's `activePanel?.<cap>` access. A panel the server reports no
+    // object for leaves that key undefined — the descriptor never fabricates a
+    // capability the server didn't report.
+    const entry = panels[panel.name];
+    let descriptor = panel;
+    if (entry?.create) {
+      descriptor = { ...descriptor, create: entry.create };
+    }
+    if (entry?.config_edit) {
+      descriptor = { ...descriptor, config_edit: entry.config_edit };
+    }
+    return descriptor;
   });
 }
 

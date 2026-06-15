@@ -132,6 +132,41 @@ async function postJSON(path, body, { signal } = {}) {
   }
 }
 
+// patchJSON sends `body` as a JSON PATCH to `path` with an optional set of
+// extra headers (RFC 0050 Phase 2 wires the `If-Match` optimistic-concurrency
+// header through here). It mirrors postJSON's contract — the server's
+// `{error, code}` envelope on a non-2xx (so the status survives onto ApiError;
+// the config panel branches on 409), a status-0 ApiError on a transport
+// failure — and parses the 2xx body (the config apply path returns the new
+// effective config, so the caller gets the bumped revision back).
+async function patchJSON(path, body, extraHeaders) {
+  let response;
+  try {
+    response = await fetch(path, {
+      method: "PATCH",
+      headers: consoleHeaders({
+        "Content-Type": "application/json",
+        ...extraHeaders,
+      }),
+      body: JSON.stringify(body),
+    });
+  } catch (cause) {
+    throw new ApiError(`network error patching ${path}`, 0, { cause });
+  }
+  if (!response.ok) {
+    throw await errorFromResponse(path, response);
+  }
+  try {
+    return await response.json();
+  } catch (cause) {
+    throw new ApiError(
+      `${path} returned a malformed JSON body`,
+      response.status,
+      { cause },
+    );
+  }
+}
+
 // sendNoBody issues a write whose success answer is `204 No Content` (the
 // member add/remove handlers return no body). It mirrors postJSON's error
 // contract — the server's `{error, code}` envelope on a non-2xx, a status-0
@@ -418,5 +453,45 @@ export async function publishMessage(
   return postJSON(
     `/api/v1/channels/${encodeURIComponent(channelID)}/messages`,
     body,
+  );
+}
+
+// getChannelConfig reads a channel's effective governance config
+// (GET /api/v1/channels/{id}/config), returning the `channelConfigResponse`
+// ({revision, <eight knobs>}) where each knob is a {value, source} pair —
+// `source` ("channel" | "default") is the provenance the settings panel
+// renders (overridden-here vs inherited fleet default). One knob,
+// `interaction_budget_tokens`, reads back `value: null` when inherited (it is
+// not router-held — RFC 0050 Phase 1 Open item 4); the panel must treat that as
+// "inherited, unset," not coerce it to 0. The whole surface is gated behind the
+// `config_edit_enabled` toggle, so a 403 (toggle off) or 503 (store/router
+// unwired) surfaces as an ApiError carrying the server's wording (RFC 0050
+// Phase 2 PR 1).
+export async function getChannelConfig(channelID) {
+  // Encode the id (canonical ids carry a type-prefix colon, e.g.
+  // "group:planning") so the request stays pinned to the {id}/config route.
+  return getJSON(`/api/v1/channels/${encodeURIComponent(channelID)}/config`);
+}
+
+// patchChannelConfig applies a sparse governance-config edit
+// (PATCH /api/v1/channels/{id}/config) under an optimistic-concurrency guard,
+// returning the new `channelConfigResponse` (with the bumped revision) so the
+// caller can use it as the next If-Match without a re-read. `patch` is the
+// sparse `{knob: value}` body where an explicit `null` means unset→inherit and
+// an absent key means leave-unchanged — JSON.stringify preserves an explicit
+// null, so the revert path round-trips the key. `revision` is the value last
+// read, sent as the bare integer in the REQUIRED `If-Match` header (the server
+// 428s an absent header rather than doing a lost-update unconditional write);
+// it is stringified explicitly so a legitimate revision 0 is still sent as "0"
+// rather than dropped by a falsy guard. The full status set the surface
+// declares — 403 (toggle off), 409 (revision conflict), 428 (If-Match missing),
+// 400 (unknown knob / wrong type / unparseable If-Match), 404 (no channel),
+// 503 (store/router unwired) — survives onto ApiError with its status intact,
+// so the panel can branch on 409 to reload-not-overwrite (RFC 0050 Phase 2 PR 1).
+export async function patchChannelConfig(channelID, patch, revision) {
+  return patchJSON(
+    `/api/v1/channels/${encodeURIComponent(channelID)}/config`,
+    patch,
+    { "If-Match": String(revision) },
   );
 }

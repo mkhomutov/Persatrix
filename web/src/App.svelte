@@ -90,6 +90,16 @@
   const canCreate = $derived(
     Boolean(activePanel?.create?.enabled && activePanel?.create?.available),
   );
+  // The channel settings affordance renders only when the server reports the
+  // active panel's config_edit capability both enabled (operator opt-in, the
+  // default-off config_edit_enabled toggle) and available (store + router wired)
+  // — the same enabled && available gate as `create` (RFC 0050 Phase 2). Panels
+  // without a config_edit capability get false and ignore the prop.
+  const canConfigEdit = $derived(
+    Boolean(
+      activePanel?.config_edit?.enabled && activePanel?.config_edit?.available,
+    ),
+  );
 
   $effect(() => {
     let cancelled = false;
@@ -292,7 +302,7 @@
       tabindex="0"
     >
       {#if ActiveComponent}
-        <ActiveComponent {userId} {canCreate} />
+        <ActiveComponent {userId} {canCreate} {canConfigEdit} />
       {:else}
         <p class="boot">This panel isn’t available in this build.</p>
       {/if}
