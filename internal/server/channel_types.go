@@ -32,13 +32,21 @@ type addMemberRequest struct {
 
 // updateMemberRequest is the JSON body for
 // PATCH /api/v1/channels/{id}/members/{participant_id} (RFC 0050 member-config
-// edit). It is a REPLACE of the member's editable config: `respond` is the new
-// disposition (empty → when_mentioned, the add-member default) and `threshold`
-// the new salience bar — a tri-state pointer where absent/null unsets it
-// (bias-to-silence). The participant id is the path segment, not a body field.
+// edit). It is a full REPLACE of the member's editable config:
+//   - `respond` is the new disposition and is REQUIRED — unlike add-member's
+//     bare-id shorthand it is NOT defaulted, because the disposition is what
+//     re-derives the salience bid and is unrecoverable from stored state (the
+//     handler rejects an empty value with 400). See [Server.handleUpdateChannelMember].
+//   - `threshold` is the new salience bar. Absent/null carries no explicit value,
+//     which resolves the same way config load does: a `chair` picks up
+//     [channels.DefaultChairThreshold], any other open-floor disposition is left
+//     unset (bias-to-silence). A number outside [0, 1], or any threshold on a
+//     non-open-floor disposition, is a 400.
+//
+// The participant id is the path segment, not a body field.
 type updateMemberRequest struct {
 	Respond   string   `json:"respond"`
-	Threshold *float64 `json:"threshold,omitempty"`
+	Threshold *float64 `json:"threshold"`
 }
 
 // wireRespondPolicy applies the RFC 0011 §A default to a wire-supplied
