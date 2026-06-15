@@ -23,8 +23,9 @@ afterEach(() => {
 
 // A representative config body: revision + the eight {value, source} knobs.
 // floor_control and escalation_chair_id are overridden on the channel; the rest
-// inherit the fleet default. interaction_budget_tokens is the inherited-null
-// case (RFC 0050 Phase 1 Open item 4 — not router-held, reads back value:null).
+// inherit the fleet default. interaction_budget_tokens reads back its effective
+// value like every other knob (the RFC 0050 interaction-budget amendment made it
+// router-held; an inherited uncapped budget is 0, not the old Open-item-4 null).
 function configBody(overrides = {}) {
   return {
     revision: 3,
@@ -35,7 +36,7 @@ function configBody(overrides = {}) {
     end_vote_window: { value: 600, source: "default" },
     escalation_chair_id: { value: "ada", source: "channel" },
     interaction_idle_timeout_seconds: { value: 900, source: "default" },
-    interaction_budget_tokens: { value: null, source: "default" },
+    interaction_budget_tokens: { value: 0, source: "default" },
     ...overrides,
   };
 }
@@ -87,14 +88,34 @@ describe("ChannelSettings", () => {
     );
   });
 
-  it("renders an inherited interaction_budget_tokens as empty, never 0", async () => {
+  it("renders an inherited interaction_budget_tokens with its effective value (router-held since the amendment)", async () => {
     const fetchMock = vi.fn(() => Promise.resolve(okJSON(configBody())));
     vi.stubGlobal("fetch", fetchMock);
     renderSettings();
 
+    // Post-amendment the budget is router-held and resolves like any other knob:
+    // an inherited uncapped budget reads back 0 (not the old Open-item-4 null),
+    // and renders its effective value, marked inherited.
     const budget = await screen.findByLabelText("Interaction budget (tokens)");
-    // value:null inherited must render blank — coercing to "0" would lie about
-    // the inherited state and would re-emit 0 on the next save.
+    expect(budget.value).toBe("0");
+  });
+
+  it("renders a genuinely null knob value as empty (never coerced to 0)", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        okJSON(
+          configBody({
+            interaction_budget_tokens: { value: null, source: "default" },
+          }),
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    // The generic null→empty guard still holds for any knob that ever reports a
+    // null effective value — it must render blank, not a lying "0".
+    const budget = await screen.findByLabelText("Interaction budget (tokens)");
     expect(budget.value).toBe("");
   });
 

@@ -124,6 +124,85 @@ describe("ChannelMembers", () => {
     expect(JSON.parse(init.body)).toEqual({ id: "iron-fox", respond: "chair" });
   });
 
+  it("edits a member's disposition + threshold and re-lists via onChanged", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(noContent()));
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn(() => Promise.resolve());
+    renderMembers({ onChanged });
+
+    // Open the inline editor for Ada (the editor defaults to her current config).
+    await fireEvent.click(screen.getByLabelText("Edit Ada"));
+    const threshold = screen.getByLabelText("Salience threshold for Ada");
+    expect(threshold.value).toBe("0.3");
+
+    await fireEvent.change(screen.getByLabelText("Disposition for Ada"), {
+      target: { value: "participant" },
+    });
+    // A number input binds on `input` (not `change`) in Svelte.
+    await fireEvent.input(threshold, { target: { value: "0.7" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await vi.waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/channels/group%3Aplanning/members/ada");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body)).toEqual({
+      respond: "participant",
+      threshold: 0.7,
+    });
+  });
+
+  it("sends an explicit null threshold when the field is cleared (unset the bar)", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(noContent()));
+    vi.stubGlobal("fetch", fetchMock);
+    renderMembers();
+
+    await fireEvent.click(screen.getByLabelText("Edit Ada"));
+    await fireEvent.input(screen.getByLabelText("Salience threshold for Ada"), {
+      target: { value: "" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.threshold).toBeNull();
+    // respond is always sent — the server requires it (salience_gated is derived
+    // from the disposition and is unrecoverable from persisted state).
+    expect(body.respond).toBe("always");
+  });
+
+  it("offers no Edit button for the acting user (a human principal, not a governed persona)", () => {
+    renderMembers();
+    expect(screen.getByLabelText("Edit Ada")).toBeTruthy();
+    expect(screen.queryByLabelText("Edit local")).toBeNull();
+  });
+
+  it("surfaces the server error and does not re-list when an edit fails", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 400,
+        json: () =>
+          Promise.resolve({ error: "channels: invalid member threshold" }),
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn(() => Promise.resolve());
+    renderMembers({ onChanged });
+
+    await fireEvent.click(screen.getByLabelText("Edit Ada"));
+    await fireEvent.input(screen.getByLabelText("Salience threshold for Ada"), {
+      target: { value: "5" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByRole("alert");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "invalid member threshold",
+    );
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
   it("surfaces the server error and does not re-list when an add fails", async () => {
     // A plausible real failure: the watched channel was deleted between the
     // list and the add, so the server reports 404 (the add is idempotent, so

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { publishMessage, removeChannelMember } from "./api.js";
+import { publishMessage } from "./api.js";
+import { removeChannelMember } from "./api.members.js";
 
 // The console attaches its X-Agent-ID on every request so the orchestrator
 // buckets the UI's rate limit under `web-console` rather than the shared

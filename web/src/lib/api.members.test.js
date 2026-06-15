@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { addChannelMember, removeChannelMember, ApiError } from "./api.js";
+import { ApiError } from "./api.js";
+import {
+  addChannelMember,
+  removeChannelMember,
+  updateChannelMember,
+} from "./api.members.js";
 
 // Member add/remove wire-contract tests (RFC 0011 §C). Split from api.test.js
 // to keep each spec under the review-size cap. Both endpoints answer 204 No
@@ -91,5 +96,73 @@ describe("removeChannelMember", () => {
     const err = await removeChannelMember("group:x", "ada").catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(404);
+  });
+});
+
+// updateChannelMember is the RFC 0050 member-config edit
+// (PATCH /api/v1/channels/{id}/members/{participant_id} → 204). Like add/remove
+// it parses no success body. `respond` is REQUIRED by the server (a threshold-only
+// edit is a 400) because salience_gated is derived from the declared disposition
+// and is unrecoverable from persisted state — so the client always sends it.
+describe("updateChannelMember", () => {
+  it("PATCHes {respond, threshold} to the encoded participant route and resolves with no value", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(noContent()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await updateChannelMember("group:planning", "ada", {
+      respond: "participant",
+      threshold: 0.6,
+    });
+
+    expect(result).toBeUndefined();
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/v1/channels/group%3Aplanning/members/ada");
+    expect(init.method).toBe("PATCH");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body)).toEqual({
+      respond: "participant",
+      threshold: 0.6,
+    });
+  });
+
+  it("sends an explicit null threshold to unset the salience bar", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(noContent()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateChannelMember("group:planning", "ada", {
+      respond: "participant",
+      threshold: null,
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toEqual({ respond: "participant", threshold: null });
+  });
+
+  it("surfaces the server error on a 400 (bad threshold) and a 404 (member absent)", async () => {
+    const bad = vi.fn(() =>
+      Promise.resolve(
+        errorResponse(
+          { error: "channels: invalid member threshold", code: "BAD_REQUEST" },
+          400,
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", bad);
+    const e400 = await updateChannelMember("group:planning", "ada", {
+      respond: "participant",
+      threshold: 5,
+    }).catch((e) => e);
+    expect(e400).toBeInstanceOf(ApiError);
+    expect(e400.status).toBe(400);
+
+    const missing = vi.fn(() =>
+      Promise.resolve(errorResponse({ error: "member not found" }, 404)),
+    );
+    vi.stubGlobal("fetch", missing);
+    const e404 = await updateChannelMember("group:planning", "ghost", {
+      respond: "participant",
+    }).catch((e) => e);
+    expect(e404).toBeInstanceOf(ApiError);
+    expect(e404.status).toBe(404);
   });
 });

@@ -91,9 +91,10 @@
     for (const k of KNOBS) {
       const field = resp[k.key] ?? { value: null, source: "default" };
       const inherit = field.source !== "channel";
-      // An inherited interaction_budget_tokens reads back value:null (not
-      // router-held — Phase 1 Open item 4). Render it as empty, never coerced to
-      // 0, so the inherited state is honest and a no-op save emits nothing.
+      // A null/absent effective value renders as empty, never coerced to 0, so a
+      // no-op save emits nothing. (Generic guard: since the RFC 0050
+      // interaction-budget amendment every knob is router-held and resolves a
+      // real value, but a defensive null still renders honestly.)
       d[k.key] = { inherit, value: field.value == null ? "" : field.value };
       o[k.key] = { inherit, value: field.value };
     }
