@@ -199,6 +199,31 @@ describe("patchChannelConfig", () => {
     expect(err.status).toBe(503);
   });
 
+  it("surfaces a 404 (no such channel) as an ApiError with status 404 intact", async () => {
+    // The merge precedes the write, so a PATCH against a missing channel 404s on
+    // the current-overrides load (channel_config_handlers.go). The status must
+    // survive so the panel can distinguish "channel gone" from a config error.
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse(
+          { error: "channel not found", code: "NOT_FOUND" },
+          false,
+          404,
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const err = await patchChannelConfig(
+      "group:missing",
+      { floor_control: true },
+      3,
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(404);
+    expect(err.code).toBe("NOT_FOUND");
+  });
+
   it("accepts a revision of 0 and still sends the If-Match header", async () => {
     // A freshly-seeded channel can read back revision 0; the If-Match must be
     // sent as the literal "0", not omitted by a falsy-revision guard.
@@ -208,5 +233,22 @@ describe("patchChannelConfig", () => {
     await patchChannelConfig("group:planning", { floor_control: true }, 0);
 
     expect(fetchMock.mock.calls[0][1].headers["If-Match"]).toBe("0");
+  });
+
+  it("rejects a non-integer revision before issuing any request", async () => {
+    // `revision` is REQUIRED and must be the integer last read. A missing or
+    // garbage value would otherwise stringify to "undefined"/"NaN" in the
+    // If-Match header and burn a round-trip on a guaranteed 400 — guard at the
+    // call site instead, mirroring getChatHistory's missing-userId guard. (0 is
+    // a legitimate revision and is covered above, so the guard must admit it.)
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const bad of [undefined, null, NaN, 1.5, "3"]) {
+      await expect(
+        patchChannelConfig("group:planning", { floor_control: true }, bad),
+      ).rejects.toThrow(/revision/);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
