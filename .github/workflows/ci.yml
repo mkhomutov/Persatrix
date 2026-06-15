@@ -6,7 +6,8 @@
 # to main.
 #
 # Scope: Go build+test, Go proto staleness check, Python lint+test,
-# Rust build+clippy, config validation. Docker builds are excluded.
+# Rust build+clippy, config validation, and a lightweight Docker build-context
+# hygiene probe (ISSUE-0104). Full Docker product-image builds are excluded.
 
 name: CI
 
@@ -84,6 +85,32 @@ jobs:
 
       - name: Build orchestrator with the real bundle embedded
         run: go build ./cmd/orchestrator
+
+  dockerignore-hygiene:
+    # ISSUE-0104 regression guard. Dockerfile.orchestrator runs a clean in-image
+    # `npm ci` and then `COPY web/ ./`; if `.dockerignore` fails to exclude the
+    # nested `web/node_modules`, a host tree leaks into the context and clobbers
+    # the clean install (on arm64 this shipped a darwin-only rollup that broke
+    # `vite build`). The fix was `node_modules/` -> `**/node_modules/`.
+    #
+    # This guard is invisible to the other lanes for two reasons the probe
+    # handles directly: (1) Docker anchors `node_modules/` to the context root,
+    # so only a real `docker build` reflects the actual matcher (a string check
+    # would call the buggy pattern safe); (2) a clean checkout has no
+    # web/node_modules to leak, so the probe seeds a sentinel first — which is
+    # exactly why the original break never tripped CI. ubuntu-latest ships
+    # Docker preinstalled, so this is a few-second probe, not a product build.
+    name: Dockerignore context hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Assert .dockerignore excludes nested node_modules
+        run: make dockerignore-check
 
   proto-staleness:
     name: Proto staleness check

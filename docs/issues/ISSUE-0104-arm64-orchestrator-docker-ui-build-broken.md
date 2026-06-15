@@ -101,6 +101,14 @@ Verified on darwin/arm64:
   embedded bundle hash (`index-HARX7q1C.js`) matches the clean rolldown build,
   confirming the real console is baked in (not the placeholder).
 
+Regression guard: the `dockerignore-hygiene` CI job (`make dockerignore-check`,
+`scripts/checks/dockerignore_context.py`) seeds a sentinel under
+`web/node_modules` and runs a real `docker build` to assert the nested tree does
+NOT reach the build context. It seeds the sentinel because a clean checkout has
+none to leak — the exact reason this break was invisible to CI — and uses real
+Docker because Docker anchors `node_modules/` to the context root (a string or
+gitignore check would wrongly call the buggy pattern safe).
+
 ## Notes
 
 > 2026-06-14 — captured during the MT-CHANNEL-CONFIG-001 first live run.

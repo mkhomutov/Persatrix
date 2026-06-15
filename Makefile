@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate help demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -256,6 +256,9 @@ validate: ## Validate all YAML configs against JSON schemas
 # UI iteration use `make run-ui` (or `make build-orchestrator-ui`) instead.
 docker-build: ## Build Docker images
 	docker compose build
+
+dockerignore-check: ## Fail if .dockerignore lets nested web/node_modules leak into the build context (ISSUE-0104, CI)
+	$(PYTHON) scripts/checks/dockerignore_context.py --strict
 
 docker-up: ## Start all services
 	docker compose up -d
