@@ -181,8 +181,12 @@ the opening commit is. In the dominant flow this is a non-issue — the opening
 message is an inbound (human / external) publish carrying no lease, so the snapshot
 is in place before any agent reply leases. Only a fully agent-initiated opening
 turn (a TICK-driven first post to a channel with no open interaction) escapes the
-ceiling for that one turn, bounded by the always-on Layer 0 depth cap and the
-RFC 0023 dollar budget. Closing it would require resolving the channel ceiling for
+ceiling for that one turn — and because that lease resolves uncapped (budget 0) it
+is not interaction-tracked either, so its tokens never accrue to the running total
+the *next* lease is checked against. The effective ceiling for such an interaction
+is therefore the configured budget plus the opening turn's (uncounted) spend; both
+remain bounded by the always-on Layer 0 depth cap and the RFC 0023 dollar budget.
+Closing it would require resolving the channel ceiling for
 an interaction-less lease (the live-per-lease variant above), which this amendment
 deliberately does not adopt.
 
