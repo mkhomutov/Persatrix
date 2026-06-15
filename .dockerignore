@@ -11,8 +11,12 @@ bin/
 cli/target/
 
 # Dependencies / caches
+# NOTE: `**/` is required to also match *nested* dirs (e.g. web/node_modules).
+# A bare `node_modules/` is anchored to the context root and would let the
+# host's web/node_modules leak through `COPY web/ ./` in Dockerfile.orchestrator,
+# clobbering the clean in-image `npm ci` with a host-platform tree (ISSUE-0104).
 vendor/
-node_modules/
+**/node_modules/
 __pycache__/
 *.pyc
 *.egg-info/
