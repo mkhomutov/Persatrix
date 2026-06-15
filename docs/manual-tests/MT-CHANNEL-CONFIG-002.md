@@ -56,7 +56,7 @@ store-vs-YAML revision gate is identical to and covered by
 since the web panel writes through the *same* store path — this MT does not
 re-verify it); editable member thresholds and the effective-policy preview (both
 **deferred** — require backend work, RFC 0050 Phase 2 PR plan
-[Deferred](../rfcs/0050-phase2-pr-plan.md#deferred-requires-backend-work)).
+[Deferred](../rfcs/0050-phase2-pr-plan.md#deferred-requires-backend-work--out-of-phase-2-scope)).
 
 ---
 
@@ -341,5 +341,3 @@ client-side `min="0"` int bounds are advisory only.
   restart. The panel renders its inherited value as empty ("inherited"), never
   `0` — verify that rendering separately, but use `interaction_idle_timeout_seconds`
   for Step 4.
-</content>
-</invoke>

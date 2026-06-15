@@ -36,11 +36,11 @@ depends_on:
   router-wired** (Open item 4 — live application deferred). Live G1 acceptance:
   [MT-CHANNEL-CONFIG-001](../manual-tests/MT-CHANNEL-CONFIG-001.md) — **first
   live run passed 2026-06-14** (all steps + edge cases green).
-- **Phase 2 (web settings panel) — delivered** (2026-06-15). All 3 PRs of the
-  [Phase 2 PR plan](0050-phase2-pr-plan.md) merged: capability threading +
-  channel-config API client (#652), the `ChannelSettings.svelte` panel nested in
-  `ChannelTimeline` (#653), and docs + the live web manual test + this status bump
-  (PR 3). The slice is **web-only — zero Go changes**: it renders over the Phase 1
+- **Phase 2 (web settings panel) — delivered** (2026-06-15). Both code PRs of the
+  [Phase 2 PR plan](0050-phase2-pr-plan.md) are merged — capability threading +
+  channel-config API client (#652) and the `ChannelSettings.svelte` panel nested in
+  `ChannelTimeline` (#653) — and PR 3 (this one) lands the docs, the live web manual
+  test, and this status bump. The slice is **web-only — zero Go changes**: it renders over the Phase 1
   `GET`/`PATCH …/config` endpoint behind the same `config_edit_enabled` toggle,
   which ships **off** so the panel lands dark. Live G4 (single-source-of-truth)
   acceptance: [MT-CHANNEL-CONFIG-002](../manual-tests/MT-CHANNEL-CONFIG-002.md) —

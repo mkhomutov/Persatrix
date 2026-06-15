@@ -105,6 +105,7 @@ _CHECKS: list[tuple[str, list[str]]] = [
     ("ruff check", ["{python}", "-m", "ruff", "check", "agents/"]),
     ("cargo fmt", ["cargo", "fmt", "--manifest-path", "cli/Cargo.toml", "--", "--check"]),
     ("doc links", ["{python}", "scripts/checks/doc_links.py"]),
+    ("doc markup", ["{python}", "scripts/checks/doc_leaked_markup.py"]),
     ("doc status", ["{python}", "scripts/checks/doc_status_markers.py"]),
     ("file size", ["{python}", "scripts/checks/file_size.py", "--strict"]),
 ]
