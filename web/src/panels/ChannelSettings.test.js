@@ -190,4 +190,109 @@ describe("ChannelSettings", () => {
     // No knob controls rendered when the config never loaded.
     expect(screen.queryByLabelText("Floor control")).toBeNull();
   });
+
+  it("on a 409 it preserves the operator's edit and re-saves against the refreshed revision", async () => {
+    let gets = 0;
+    let patches = 0;
+    const fetchMock = vi.fn((path, init) => {
+      if (init?.method === "PATCH") {
+        patches += 1;
+        // First save loses the race (409); the retry — now carrying the
+        // refreshed revision — succeeds.
+        if (patches === 1) {
+          return Promise.resolve(
+            errJSON(409, { error: "config revision conflict", code: "CONFLICT" }),
+          );
+        }
+        return Promise.resolve(okJSON(configBody({ revision: 8 })));
+      }
+      gets += 1;
+      // initial load -> revision 3; post-conflict reload -> revision 7
+      return Promise.resolve(okJSON(configBody({ revision: gets === 1 ? 3 : 7 })));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn(() => Promise.resolve());
+    renderSettings({ onChanged });
+
+    const floor = await screen.findByLabelText("Floor control");
+    await fireEvent.click(floor); // true -> false
+    await fireEvent.click(screen.getByRole("button", { name: /save settings/i }));
+
+    // Let the conflict fully settle: the notice appears once the reload finishes
+    // and the in-flight save resolves (button back to its idle "Save settings"
+    // label, not "Saving…").
+    await screen.findByRole("alert");
+    await waitFor(() => expect(gets).toBe(2));
+
+    // After the conflict reload the edit must SURVIVE — discarding it would make
+    // the "review your edits and save again" notice a lie and force a re-type.
+    expect(screen.getByLabelText("Floor control").checked).toBe(false);
+    const saveBtn = await screen.findByRole("button", { name: /save settings/i });
+    expect(saveBtn.disabled).toBe(false); // still dirty, saveable again
+
+    // The retry rides the REFRESHED revision (7), not the stale 3, and replays
+    // the preserved edit verbatim.
+    await fireEvent.click(saveBtn);
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    const patchCalls = fetchMock.mock.calls.filter((c) => c[1]?.method === "PATCH");
+    expect(patchCalls[1][1].headers["If-Match"]).toBe("7");
+    expect(JSON.parse(patchCalls[1][1].body)).toEqual({ floor_control: false });
+  });
+
+  it("overriding an inherited chair without picking a member emits no empty id", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        okJSON(
+          configBody({ escalation_chair_id: { value: null, source: "default" } }),
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    const inherit = await screen.findByLabelText(
+      "Inherit fleet default for Escalation chair",
+    );
+    expect(inherit.checked).toBe(true);
+    await fireEvent.click(inherit); // flip to override, but pick nobody
+
+    // A blank chair override has nothing concrete to send: the panel must not
+    // emit escalation_chair_id:"" (a guaranteed 400), the same way a blank int
+    // override is skipped. With nothing to save, the button stays disabled.
+    expect(screen.getByRole("button", { name: /save/i }).disabled).toBe(true);
+  });
+
+  it("renders each knob label once — the control is labelled, not duplicated", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(okJSON(configBody())));
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    await screen.findByLabelText("Floor control");
+    // The label shows once as the row heading; the control carries it as an
+    // accessible name (aria-label), not a second visible copy of the text.
+    expect(screen.getAllByText("Floor control").length).toBe(1);
+  });
+
+  it("clears the previous channel's form while the next channel's config loads", async () => {
+    let resolveSecond;
+    let calls = 0;
+    const fetchMock = vi.fn(() => {
+      calls += 1;
+      if (calls === 1) return Promise.resolve(okJSON(configBody()));
+      return new Promise((res) => (resolveSecond = res)); // second channel: pending
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = renderSettings();
+    await screen.findByLabelText("Floor control");
+
+    await rerender({ channelId: "group:other" });
+    // While the new channel loads, the prior channel's form must not linger —
+    // otherwise an operator could edit/save against the wrong channel's state.
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Floor control")).toBeNull(),
+    );
+    expect(screen.getByText(/loading settings/i)).toBeTruthy();
+
+    resolveSecond(okJSON(configBody())); // let the pending load settle
+  });
 });

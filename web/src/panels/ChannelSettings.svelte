@@ -131,7 +131,14 @@
       else if (k.type === "int") {
         if (v === "" || v == null) continue;
         body[k.key] = Number(v);
-      } else body[k.key] = String(v);
+      } else {
+        // chair: an override with no member picked has nothing concrete to send.
+        // Skip it rather than emit escalation_chair_id:"" (a guaranteed 400) —
+        // the same way a blank int override is skipped above.
+        const s = String(v ?? "");
+        if (s === "") continue;
+        body[k.key] = s;
+      }
     }
     return body;
   });
@@ -147,6 +154,11 @@
     loading = true;
     error = "";
     notice = "";
+    // Drop the previous channel's config up front so its form never renders over
+    // the new channel's load — otherwise an operator could edit/save against the
+    // wrong channel's state during the fetch window. The `{#if loading && !config}`
+    // branch then shows the loading indicator instead of stale rows.
+    config = null;
     try {
       const resp = await getChannelConfig(id);
       if (token !== loadToken) return; // a newer channel won the race
@@ -164,14 +176,25 @@
   }
 
   // Re-read after a 409 without clobbering the conflict notice, so the operator
-  // sees the latest values AND why their save didn't land.
+  // sees the latest values AND why their save didn't land. Crucially, do NOT
+  // discard their in-flight edits: snapshot the touched knobs first, refresh the
+  // baseline (new revision + whatever changed elsewhere), then replay the edits
+  // on top. That keeps the "review your edits and save again" notice honest and
+  // the retried save dirty against the fresh revision. An edit that now matches
+  // the updated server value falls out of `dirty` on its own; a genuine conflict
+  // stays visible and saveable.
   async function reloadAfterConflict() {
+    const pending = {};
+    for (const k of KNOBS) {
+      if (changed(k)) pending[k.key] = { ...drafts[k.key] };
+    }
     try {
       const resp = await getChannelConfig(channelId);
       adopt(resp);
+      for (const key of Object.keys(pending)) drafts[key] = pending[key];
     } catch {
-      // The reload itself failed; the conflict notice below is still the right
-      // signal — they must not assume the save succeeded.
+      // The reload itself failed; the operator's edits stay put and the conflict
+      // notice below is still the right signal — they must not assume success.
     }
     error =
       "This channel's settings changed elsewhere — reloaded with the latest. Review your edits and save again.";
@@ -240,39 +263,39 @@
             </div>
 
             <div class="knob-control">
+              <!-- The label is shown once in .knob-head above; the control
+                   carries it as an accessible name (aria-label), not a second
+                   visible copy of the text. -->
               {#if knob.type === "bool"}
-                <label class="value">
-                  {knob.label}
-                  <input
-                    type="checkbox"
-                    bind:checked={drafts[knob.key].value}
-                    disabled={drafts[knob.key].inherit}
-                  />
-                </label>
+                <input
+                  class="value"
+                  type="checkbox"
+                  aria-label={knob.label}
+                  bind:checked={drafts[knob.key].value}
+                  disabled={drafts[knob.key].inherit}
+                />
               {:else if knob.type === "int"}
-                <label class="value">
-                  {knob.label}
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    bind:value={drafts[knob.key].value}
-                    disabled={drafts[knob.key].inherit}
-                  />
-                </label>
+                <input
+                  class="value"
+                  type="number"
+                  aria-label={knob.label}
+                  min="0"
+                  step="1"
+                  bind:value={drafts[knob.key].value}
+                  disabled={drafts[knob.key].inherit}
+                />
               {:else}
-                <label class="value">
-                  {knob.label}
-                  <select
-                    bind:value={drafts[knob.key].value}
-                    disabled={drafts[knob.key].inherit}
-                  >
-                    <option value="" disabled>Select a chair…</option>
-                    {#each chairCandidates as cand (cand.id)}
-                      <option value={cand.id}>{cand.name}</option>
-                    {/each}
-                  </select>
-                </label>
+                <select
+                  class="value"
+                  aria-label={knob.label}
+                  bind:value={drafts[knob.key].value}
+                  disabled={drafts[knob.key].inherit}
+                >
+                  <option value="" disabled>Select a chair…</option>
+                  {#each chairCandidates as cand (cand.id)}
+                    <option value={cand.id}>{cand.name}</option>
+                  {/each}
+                </select>
               {/if}
 
               <label class="inherit">
@@ -332,11 +355,6 @@
     justify-content: space-between;
     gap: 0.75rem;
     flex-wrap: wrap;
-  }
-  .knob-control .value {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
   }
   .knob-control .inherit {
     display: flex;
