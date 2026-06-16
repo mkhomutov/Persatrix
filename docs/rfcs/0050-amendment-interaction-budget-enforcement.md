@@ -242,8 +242,9 @@ No `proto/`, no `agents/`, no stub regen.
   ceiling denied both mentioned personas' leases server-side (estimated ~5926 >
   500, `spent=0`, fail-closed); raising to 1,000,000 admitted the next
   interaction's leases (real reply landed). Note: a stale CLI warning
-  (`channel_config.rs` "not yet enforced") was filed as a cosmetic follow-up — the
-  Go enforcement is correct and verified.
+  (`channel_config.rs` "not yet enforced") was filed as a cosmetic follow-up
+  ([ISSUE-0105](../issues/ISSUE-0105-stale-cli-interaction-budget-not-enforced-warning.md))
+  — the Go enforcement is correct and verified.
 
 ## Security considerations
 

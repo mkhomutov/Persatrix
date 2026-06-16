@@ -77,7 +77,9 @@ depends_on:
   (interaction-budget server-side enforcement: a 500-token ceiling denied agent
   leases `INTERACTION_BUDGET_EXHAUSTED`, raising it relieved the next interaction),
   004 (member-threshold web editor, gating preserved). One **cosmetic follow-up**
-  surfaced and is filed: the Rust CLI still prints `interaction_budget_tokens … ⚠
+  surfaced and is filed
+  ([ISSUE-0105](../issues/ISSUE-0105-stale-cli-interaction-budget-not-enforced-warning.md)):
+  the Rust CLI still prints `interaction_budget_tokens … ⚠
   not yet enforced (RFC 0050 Open item 4)` ([`channel_config.rs`](../../cli/src/commands/channel_config.rs))
   — stale post-amendment text; the Go enforcement is correct and verified.
 - **Phase 3 (schema-driven generic config / profiles)** — future RFC.
