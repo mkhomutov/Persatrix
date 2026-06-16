@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-06-16 (v0.3.8 released-status flip — final pre-tag verification (PR 4) green on the post-bump tip; Version Map → ✅ Released. Only the mechanical `v0.3.8` tag + GitHub Release remain.)
+> **Last updated**: 2026-06-16 (v0.3.8 post-release follow-up — `v0.3.8` tagged + [GitHub Release](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.8) published; next phase v0.3.9 *conversations you can mine*.)
 > **Current phase**: v0.3.8 (Conversations that converge — RFC 0030 relevance Tier B + governance Layers 1/2/4 + RFC 0020 interaction-summary surface + RFC 0050 channel config) — ✅ Released
 > **Current milestone**: v0.3.8 *Conversations that converge* — ✅ Released. The headline user-facing story: **give a group of personas a problem and watch the brainstorm converge, terminate, and produce a readable synthesized outcome** — no pile-on ([RFC 0030 relevance Tier B](docs/rfcs/0030-amendment-relevance-gated-response.md) leased salience bid + the `chair` disposition + natural-language addressing), bounded cost and finite turns ([RFC 0030 Layers 1/2/4](docs/rfcs/0030-multi-agent-conversation-governance.md) cost ceiling + reply budget + end-of-interaction vote, all opt-in), a real result (the [RFC 0020](docs/rfcs/0020-interaction-lifecycle.md) interaction summary surfaced at close), and per-channel governance knobs editable live from the CLI and web console ([RFC 0050](docs/rfcs/0050-extensible-channel-configuration.md)). The `chair` ships as a low-threshold facilitator only — its moderator half (Layer 5) and declarative conversation types (Layer 6) remain v0.4.0 / v0.5.0+. The next phase is **v0.3.9** (conversations you can mine — verbatim recall).
 
@@ -1184,6 +1184,104 @@ v0.5.0 complete
 | [#566](https://github.com/mkhomutov/Persatrix/pull/566) | chore(v037): release-prep PR 3 — version bump 0.3.6 → 0.3.7 + changelog `[0.3.7]` | v0.3.7 release prep | 2026-06-06 |
 | [#567](https://github.com/mkhomutov/Persatrix/pull/567) | docs(v037): release-prep PR 4 — final pre-tag verification & release notes | v0.3.7 release prep | 2026-06-06 |
 | [#568](https://github.com/mkhomutov/Persatrix/pull/568) | docs(release): post-release follow-up for v0.3.7 (this PR) | v0.3.7 post-release | 2026-06-06 |
+| [#569](https://github.com/mkhomutov/Persatrix/pull/569) | docs(v038): open v0.3.8 planning — Conversations that converge (master plan + scope lock) | v0.3.8 plan | 2026-06-07 |
+| [#570](https://github.com/mkhomutov/Persatrix/pull/570) | docs(v038): Phase 1 PR plans — Tier B salience + governance Layers 1/2/4 + interaction-summary surface | v0.3.8 plan | 2026-06-07 |
+| [#571](https://github.com/mkhomutov/Persatrix/pull/571) | feat(v038): Tier B PR 1 — activate per-disposition `threshold` + `chair` disposition (inert) | 0030 Tier B (1) | 2026-06-07 |
+| [#572](https://github.com/mkhomutov/Persatrix/pull/572) | feat(v038): Tier B PR 2a — leased fast-model salience bid core (Python; dormant) | 0030 Tier B (2a) | 2026-06-07 |
+| [#573](https://github.com/mkhomutov/Persatrix/pull/573) | feat(v038): Tier B PR 2b — carry threshold + tier_b_active across the store/wire boundary (Go + proto) | 0030 Tier B (2b) | 2026-06-07 |
+| [#574](https://github.com/mkhomutov/Persatrix/pull/574) | chore(v038): rename Tier B code identifiers to salience (no behavior change) | 0030 Tier B (chore) | 2026-06-07 |
+| [#575](https://github.com/mkhomutov/Persatrix/pull/575) | feat(v038): Tier B PR 3 — natural-language addressing as a salience signal (Python) | 0030 Tier B (3) | 2026-06-08 |
+| [#576](https://github.com/mkhomutov/Persatrix/pull/576) | feat(v038): governance Layers PR 1 — interaction_id wire propagation (substrate, inert) | 0030 Layers (1) | 2026-06-08 |
+| [#577](https://github.com/mkhomutov/Persatrix/pull/577) | feat(v038): governance Layers PR 2 — Layer 1 per-interaction cost ceiling (wallet enforcement) | 0030 Layers (2) | 2026-06-08 |
+| [#579](https://github.com/mkhomutov/Persatrix/pull/579) | feat(v038): governance Layers PR 3 — Layer 2 per-participant reply budget | 0030 Layers (3) | 2026-06-08 |
+| [#580](https://github.com/mkhomutov/Persatrix/pull/580) | feat(v038): governance Layers PR 4 — Layer 4 end-of-interaction signal (END_INTERACTION_VOTE) | 0030 Layers (4) | 2026-06-08 |
+| [#581](https://github.com/mkhomutov/Persatrix/pull/581) | feat(v038): governance Layers PR 5 — composition + failure-down + telemetry closeout (Layers 1/2/4) | 0030 Layers (5/close) | 2026-06-08 |
+| [#582](https://github.com/mkhomutov/Persatrix/pull/582) | feat(v038): Tier B PR 4 — `chair` facilitator closeout + inert Layer-5 seam | 0030 Tier B (4/close) | 2026-06-08 |
+| [#583](https://github.com/mkhomutov/Persatrix/pull/583) | feat(v038): interaction-summary surface PR 1 — every close trigger summarises + read path | 0020 summary (1) | 2026-06-09 |
+| [#584](https://github.com/mkhomutov/Persatrix/pull/584) | feat(v038): interaction-summary surface PR 2 — web console conversation-view summary | 0020 summary (2) | 2026-06-09 |
+| [#585](https://github.com/mkhomutov/Persatrix/pull/585) | feat(v038): interaction-summary surface PR 3 — CLI closed-interaction surface | 0020 summary (3) | 2026-06-09 |
+| [#586](https://github.com/mkhomutov/Persatrix/pull/586) | docs(v038): interaction-summary surface PR 4 — MT + docs + status closeout | 0020 summary (4/close) | 2026-06-09 |
+| [#587](https://github.com/mkhomutov/Persatrix/pull/587) | fix(clients): expose v0.3.8 disposition vocabulary + fix CLI agent `type` serde | 0030 follow-up | 2026-06-09 |
+| [#588](https://github.com/mkhomutov/Persatrix/pull/588) | feat(cli): add `channel create` and `channel info` verbs | channels CLI | 2026-06-09 |
+| [#589](https://github.com/mkhomutov/Persatrix/pull/589) | feat(web): channel member-management surface (add/remove members + dispositions) | web (channels) | 2026-06-09 |
+| [#590](https://github.com/mkhomutov/Persatrix/pull/590) | feat(web): surface interaction-summary participants | 0020 summary (web) | 2026-06-09 |
+| [#591](https://github.com/mkhomutov/Persatrix/pull/591) | fix(channels): respond-policy comment sync + bounded unknown-policy metric label | channels follow-up | 2026-06-09 |
+| [#592](https://github.com/mkhomutov/Persatrix/pull/592) | fix(web): give the console an X-Agent-ID + bound the interaction-summary fan-out | web (fix) | 2026-06-09 |
+| [#593](https://github.com/mkhomutov/Persatrix/pull/593) | fix(channels): return REST publish at persistence, fan out asynchronously | channels (fix) | 2026-06-09 |
+| [#594](https://github.com/mkhomutov/Persatrix/pull/594) | feat(web): live presence indicators in the conversation panel | web presence | 2026-06-09 |
+| [#595](https://github.com/mkhomutov/Persatrix/pull/595) | feat(channels): per-channel /activity signal for the console presence indicator (Tier 1) | channels presence | 2026-06-10 |
+| [#596](https://github.com/mkhomutov/Persatrix/pull/596) | feat(web): consume the /activity signal in the presence indicator (Tier 1 frontend) | web presence | 2026-06-10 |
+| [#597](https://github.com/mkhomutov/Persatrix/pull/597) | test(channels): cross-language drift pins for the respond_policy vocabulary | channels (test) | 2026-06-10 |
+| [#598](https://github.com/mkhomutov/Persatrix/pull/598) | refactor(channels): centralize the member-policy triple behind ResolveMemberPolicy | channels refactor | 2026-06-10 |
+| [#599](https://github.com/mkhomutov/Persatrix/pull/599) | docs(rfcs): amendment proposing disposition-vocabulary canonicalization | 0030 amendment (RFC) | 2026-06-10 |
+| [#600](https://github.com/mkhomutov/Persatrix/pull/600) | docs(rfcs): amendment proposing floor-capable directedness for the Tier A filter | 0030 amendment (RFC) | 2026-06-10 |
+| [#601](https://github.com/mkhomutov/Persatrix/pull/601) | feat(channels): floor-capable directedness — Go resolution + wire field (RFC 0030 amendment, PR 1/2) | 0030 floor-capable (1) | 2026-06-10 |
+| [#602](https://github.com/mkhomutov/Persatrix/pull/602) | feat(channels): floor-capable directedness — the paired gate/candidate-set basis flip (RFC 0030 amendment, PR 2/2) | 0030 floor-capable (2) | 2026-06-10 |
+| [#603](https://github.com/mkhomutov/Persatrix/pull/603) | docs(rfcs): PR plan for the RFC 0030 interaction-id producer (activate Layers 1/2/4) | 0030 producer (plan) | 2026-06-10 |
+| [#604](https://github.com/mkhomutov/Persatrix/pull/604) | feat(channels): the interaction-id producer — orchestrator resolver + idle rotation (RFC 0030, PR 1/3) | 0030 producer (1) | 2026-06-10 |
+| [#605](https://github.com/mkhomutov/Persatrix/pull/605) | feat(agents): the end-interaction vote producer + Layer 1 lease threading (RFC 0030, PR 2/3) | 0030 producer (2) | 2026-06-11 |
+| [#606](https://github.com/mkhomutov/Persatrix/pull/606) | feat(channels): convergence closeout — acceptance arc + docs (RFC 0030, PR 3/3) | 0030 producer (3/close) | 2026-06-11 |
+| [#607](https://github.com/mkhomutov/Persatrix/pull/607) | fix(agents): propagate the channel interaction close to the agent-local tracker (RFC 0030 follow-up) | 0030 follow-up | 2026-06-11 |
+| [#608](https://github.com/mkhomutov/Persatrix/pull/608) | docs(rfcs): amendment proposing chair stall escalation (minimal Layer 5 slice, brought forward) | 0030 amendment (RFC) | 2026-06-11 |
+| [#609](https://github.com/mkhomutov/Persatrix/pull/609) | feat(channels): chair stall escalation — detection + forced-turn dispatch (RFC 0030 amendment, PR 2/4) | 0030 chair-stall (2) | 2026-06-11 |
+| [#610](https://github.com/mkhomutov/Persatrix/pull/610) | feat(agents): chair stall escalation — the forced turn goes live agent-side (RFC 0030 amendment, PR 3/4) | 0030 chair-stall (3) | 2026-06-12 |
+| [#611](https://github.com/mkhomutov/Persatrix/pull/611) | feat(channels): chair stall escalation — acceptance arc + closeout (RFC 0030 amendment, PR 4/4) | 0030 chair-stall (4/close) | 2026-06-12 |
+| [#612](https://github.com/mkhomutov/Persatrix/pull/612) | docs(rfcs): amendment proposing end-vote close propagation + MT-CHANNEL-GOV-004 findings (PR 1/3) | 0030 amendment (RFC) | 2026-06-12 |
+| [#613](https://github.com/mkhomutov/Persatrix/pull/613) | feat(channels): end-vote close propagation — the close-notification dispatch (RFC 0030 amendment, PR 2/3) | 0030 close-prop (2) | 2026-06-12 |
+| [#614](https://github.com/mkhomutov/Persatrix/pull/614) | feat(agents): end-vote close propagation — agent-side consumption + closeout (RFC 0030 amendment, PR 3/3) | 0030 close-prop (3) | 2026-06-12 |
+| [#615](https://github.com/mkhomutov/Persatrix/pull/615) | fix(agents): close-notification gate ordering, bounded label, no fabricated record (RFC 0030 amendment follow-up) | 0030 follow-up | 2026-06-12 |
+| [#616](https://github.com/mkhomutov/Persatrix/pull/616) | docs(issues): escalation-arc deadlock findings from the MT-CHANNEL-GOV-004 re-run (ISSUE-0098, ISSUE-0099) | ISSUE-0098/0099 | 2026-06-13 |
+| [#617](https://github.com/mkhomutov/Persatrix/pull/617) | docs(rfcs): amendment proposing display-name mention lifting + skip-guarded acceptance (PR 1/3) | 0011 amendment (RFC) | 2026-06-13 |
+| [#618](https://github.com/mkhomutov/Persatrix/pull/618) | feat(channels): pure display-name mention-lift resolver (RFC 0011 amendment, PR 2/3) | 0011 mention-lift (2) | 2026-06-13 |
+| [#619](https://github.com/mkhomutov/Persatrix/pull/619) | feat(channels): lift display-name @-mentions at the publish seam + unskip acceptance (RFC 0011 amendment, PR 3/3) | 0011 mention-lift (3) | 2026-06-13 |
+| [#620](https://github.com/mkhomutov/Persatrix/pull/620) | docs(issues): close ISSUE-0096 — display-name mention lifting verified live (MT-CHANNEL-GOV-004) | ISSUE-0096 | 2026-06-13 |
+| [#621](https://github.com/mkhomutov/Persatrix/pull/621) | docs(issues): track the mention-lift registry full-scan as ISSUE-0100 | ISSUE-0100 | 2026-06-13 |
+| [#622](https://github.com/mkhomutov/Persatrix/pull/622) | fix(persona): calibrate chair escalation to synthesize on a partial set (ISSUE-0098) | ISSUE-0098 | 2026-06-13 |
+| [#623](https://github.com/mkhomutov/Persatrix/pull/623) | docs(issues): re-scope ISSUE-0099 to low after MT-CHANNEL-GOV-004 clean re-run | ISSUE-0099 | 2026-06-13 |
+| [#624](https://github.com/mkhomutov/Persatrix/pull/624) | fix(persona): calibrate the Tier B bid for unanswered opening questions + externalize the bid prompts (ISSUE-0097 PR 1) | ISSUE-0097 (1) | 2026-06-13 |
+| [#625](https://github.com/mkhomutov/Persatrix/pull/625) | fix(persona): steer concurrence into a single-message vote (ISSUE-0097 PR 2) | ISSUE-0097 (2) | 2026-06-13 |
+| [#626](https://github.com/mkhomutov/Persatrix/pull/626) | docs(issues): ISSUE-0097 defect 1 verified-resolved, defect 2 re-opened (MT-CHANNEL-GOV-004 live run) | ISSUE-0097 | 2026-06-13 |
+| [#627](https://github.com/mkhomutov/Persatrix/pull/627) | fix(persona): fold a turn's free-text into its end-vote so it publishes as one message (ISSUE-0097 PR 3) | ISSUE-0097 (3) | 2026-06-13 |
+| [#628](https://github.com/mkhomutov/Persatrix/pull/628) | docs(issues): ISSUE-0097 resolved — defect 2 fold live-verified on MT-CHANNEL-GOV-004 | ISSUE-0097 | 2026-06-13 |
+| [#629](https://github.com/mkhomutov/Persatrix/pull/629) | feat(channels): make idle-rotation decisions observable (ISSUE-0095) | ISSUE-0095 | 2026-06-13 |
+| [#630](https://github.com/mkhomutov/Persatrix/pull/630) | feat(persona): add chair-escalation resynthesize framing (ISSUE-0099 PR 1) | ISSUE-0099 (1) | 2026-06-13 |
+| [#631](https://github.com/mkhomutov/Persatrix/pull/631) | feat(channels): re-force a synthesize-only turn on a provable hand-off misfire (ISSUE-0099 PR 2) | ISSUE-0099 (2) | 2026-06-14 |
+| [#632](https://github.com/mkhomutov/Persatrix/pull/632) | docs(issues): ISSUE-0099 resolved — synthesize re-dispatch live-proven, option 1 was inert (#631) | ISSUE-0099 | 2026-06-14 |
+| [#633](https://github.com/mkhomutov/Persatrix/pull/633) | perf(channels): scope mention-lift name lookup to channel membership (ISSUE-0100) | ISSUE-0100 | 2026-06-14 |
+| [#634](https://github.com/mkhomutov/Persatrix/pull/634) | docs(issues): file ISSUE-0102 — closed-summary episode id diverges from governance interaction id | ISSUE-0102 | 2026-06-14 |
+| [#635](https://github.com/mkhomutov/Persatrix/pull/635) | feat(interactions): surface governance interaction id on closed-interaction summary (ISSUE-0102 PR 1) | ISSUE-0102 (1) | 2026-06-14 |
+| [#636](https://github.com/mkhomutov/Persatrix/pull/636) | feat(interactions): make closed-interaction summary look-up-able by the governance id (ISSUE-0102 PR 2) | ISSUE-0102 (2) | 2026-06-14 |
+| [#637](https://github.com/mkhomutov/Persatrix/pull/637) | docs(manual-tests): log MT-CHANNEL-GOV-004 full-arc PASS on main@4607258 | manual-test | 2026-06-14 |
+| [#638](https://github.com/mkhomutov/Persatrix/pull/638) | docs(rfcs): RFC-0050 — extensible channel configuration (operator-editable, single source of truth) | 0050 (RFC) | 2026-06-14 |
+| [#639](https://github.com/mkhomutov/Persatrix/pull/639) | docs(rfcs): RFC-0050 Phase 1 PR plan — operator-editable channel config | 0050 (plan) | 2026-06-14 |
+| [#640](https://github.com/mkhomutov/Persatrix/pull/640) | feat(channels): persist per-channel config overrides (RFC 0050 Phase 1 PR 1) | 0050 P1 (1) | 2026-06-14 |
+| [#641](https://github.com/mkhomutov/Persatrix/pull/641) | feat(channels): apply path + boot repoint for persisted channel config (RFC 0050 Phase 1 PR 2) | 0050 P1 (2) | 2026-06-14 |
+| [#642](https://github.com/mkhomutov/Persatrix/pull/642) | feat(channels): revision-gated YAML reconciliation + drift detection (RFC 0050 Phase 1 PR 3) | 0050 P1 (3) | 2026-06-14 |
+| [#643](https://github.com/mkhomutov/Persatrix/pull/643) | feat(channels): REST PATCH/GET per-channel config + config_edit toggle (RFC 0050 Phase 1 PR 4) | 0050 P1 (4) | 2026-06-14 |
+| [#644](https://github.com/mkhomutov/Persatrix/pull/644) | chore(deps): bump esbuild, @sveltejs/vite-plugin-svelte and vite in /web | deps | 2026-06-14 |
+| [#645](https://github.com/mkhomutov/Persatrix/pull/645) | feat(channels): CLI `channel config` get/set/unset (RFC 0050 Phase 1 PR 5) | 0050 P1 (5) | 2026-06-14 |
+| [#646](https://github.com/mkhomutov/Persatrix/pull/646) | feat(channels): CLI `channel config` export/import/diff (RFC 0050 Phase 1 PR 5 YAML follow-up) | 0050 P1 (5) | 2026-06-14 |
+| [#647](https://github.com/mkhomutov/Persatrix/pull/647) | docs(rfcs): RFC-0050 Phase 1 progress + MT-CHANNEL-CONFIG-001 live-edit arc | 0050 P1 (docs) | 2026-06-14 |
+| [#648](https://github.com/mkhomutov/Persatrix/pull/648) | fix(deps): migrate serde_yml -> serde_yaml_ng (RUSTSEC, clears 2 Dependabot alerts) | deps (RUSTSEC) | 2026-06-14 |
+| [#649](https://github.com/mkhomutov/Persatrix/pull/649) | docs(rfcs): RFC-0050 Phase 2 PR plan — web-console channel settings panel | 0050 (plan) | 2026-06-15 |
+| [#650](https://github.com/mkhomutov/Persatrix/pull/650) | fix(docker): exclude nested node_modules from build context (ISSUE-0104) | ISSUE-0104 | 2026-06-15 |
+| [#651](https://github.com/mkhomutov/Persatrix/pull/651) | fix(deps): ignore RUSTSEC-2026-0173 (proc-macro-error2 unmaintained) (#578) | deps (RUSTSEC) | 2026-06-15 |
+| [#652](https://github.com/mkhomutov/Persatrix/pull/652) | feat(web): RFC-0050 Phase 2 PR 1 — config_edit capability threading + channel-config API client | 0050 P2 (1) | 2026-06-15 |
+| [#653](https://github.com/mkhomutov/Persatrix/pull/653) | feat(web): RFC-0050 Phase 2 PR 2 — channel settings panel | 0050 P2 (2) | 2026-06-15 |
+| [#654](https://github.com/mkhomutov/Persatrix/pull/654) | docs(web): RFC-0050 Phase 2 PR 3 — settings panel docs, web manual test, RFC closeout | 0050 P2 (3/close) | 2026-06-15 |
+| [#655](https://github.com/mkhomutov/Persatrix/pull/655) | fix(channels): first config edit no longer detaches YAML-seeded knobs (ISSUE-0103) | ISSUE-0103 | 2026-06-15 |
+| [#656](https://github.com/mkhomutov/Persatrix/pull/656) | docs(rfcs): RFC-0050 amendment — interaction-budget enforcement (server-side resolution) | 0050 amendment (RFC) | 2026-06-15 |
+| [#657](https://github.com/mkhomutov/Persatrix/pull/657) | feat(channels): make interaction_budget_tokens router-held (RFC 0050 amendment PR 1) | 0050 amendment (1) | 2026-06-15 |
+| [#658](https://github.com/mkhomutov/Persatrix/pull/658) | feat(channels,wallet): server-side interaction-budget enforcement (RFC 0050 amendment PR 2) | 0050 amendment (2) | 2026-06-15 |
+| [#659](https://github.com/mkhomutov/Persatrix/pull/659) | feat(channels): member-config edit endpoint + RFC-0050 doc closeout | 0050 (close) | 2026-06-15 |
+| [#660](https://github.com/mkhomutov/Persatrix/pull/660) | feat(web): member-threshold editor + budget-mock fix + flip config_edit on (RFC 0050 close-out) | 0050 (close) | 2026-06-15 |
+| [#661](https://github.com/mkhomutov/Persatrix/pull/661) | docs(rfcs): close RFC-0050 — run all four channel-config MTs live | 0050 (close) | 2026-06-16 |
+| [#662](https://github.com/mkhomutov/Persatrix/pull/662) | docs(v038): Phase 2 — v0.3.8 release-prep plan | v0.3.8 release prep | 2026-06-16 |
+| [#663](https://github.com/mkhomutov/Persatrix/pull/663) | docs(v038): PR 1 — v0.3.8 manual-test execution report (convergence surface, live) | v0.3.8 release prep | 2026-06-16 |
+| [#664](https://github.com/mkhomutov/Persatrix/pull/664) | docs(v038): PR 2 — README + ROADMAP + guide verification + release checklist | v0.3.8 release prep | 2026-06-16 |
+| [#665](https://github.com/mkhomutov/Persatrix/pull/665) | chore(v038): PR 3 — version bump 0.3.7 → 0.3.8 + changelog [0.3.8] curation | v0.3.8 release prep | 2026-06-16 |
+| [#666](https://github.com/mkhomutov/Persatrix/pull/666) | docs(v038): release-prep PR 4 — final pre-tag verification & release notes | v0.3.8 release prep | 2026-06-16 |
+| [#667](https://github.com/mkhomutov/Persatrix/pull/667) | docs(release): post-release follow-up for v0.3.8 (this PR) | v0.3.8 post-release | 2026-06-16 |
 
 ---
 
