@@ -50,7 +50,7 @@ depends_on:
 ## Summary
 
 The channel store records membership as **current state only**. The
-`memberships` table ([`internal/channels/sqlite_schema.go:47-54`](../../internal/channels/sqlite_schema.go#L47-L54))
+`memberships` table ([`internal/channels/sqlite_schema.go:87-94`](../../internal/channels/sqlite_schema.go#L87-L94))
 has one row per `(channel_id, participant_id)` pair with a single
 `joined_at` timestamp; `RemoveMember` **hard-deletes** that row
 ([`sqlite_query.go:130-175`](../../internal/channels/sqlite_query.go#L130-L175)).
@@ -82,7 +82,7 @@ own.
 `memberships` is a projection of *who is in a channel right now*. That
 is the correct shape for the operations it was built for — the
 publish-time membership probe
-([`sqlite_messages.go:102-104`](../../internal/channels/sqlite_messages.go#L102-L104)),
+([`sqlite_messages.go:113`](../../internal/channels/sqlite_messages.go#L113)),
 the response gate, `GetMembers`. It is the **wrong** shape for any
 question about the past:
 
@@ -95,7 +95,7 @@ question about the past:
 
 The rejoin case is actively wrong, not merely absent. `AddMember` is
 `INSERT … ON CONFLICT(channel_id, participant_id) DO NOTHING`
-([`sqlite_query.go:233-238`](../../internal/channels/sqlite_query.go#L233-L238)).
+([`sqlite_query.go:301`](../../internal/channels/sqlite_query.go#L301)).
 After a remove the row is gone, so a re-add inserts a fresh row with a
 **new** `joined_at` — good. But while the participant is *still*
 present, a redundant `AddMember` no-ops and keeps the original
@@ -175,6 +175,15 @@ right substrate to build once.
   presence (join/leave) is.
 - **Operator-facing membership-history UI.** A read-only inspection
   endpoint is scoped as an optional Phase 2 deliverable, not a goal.
+- **Session / epoch scoping.** The ledger is keyed at channel grain
+  (`channel_id, participant_id`); a channel already belongs to a single
+  `epoch_id` (migration v6) and membership is presence on that channel,
+  so the ledger carries no `session_id` / `epoch_id` columns. How
+  verbatim recall composes with those run/test-isolation axes — added
+  to `messages`/`channels` *after* this RFC was first drafted — is a
+  query-time concern owned by [RFC 0036 §C and Open Question #6](0036-persona-message-recall.md),
+  which filters `messages.epoch_id` directly. The ledger needs no
+  change for it.
 
 ## Design / Implementation
 
@@ -203,13 +212,18 @@ interval (§C).
 
 ### B. Schema — `membership_intervals`
 
-Channel-store schema migration **v4** (the store is at v3 today —
-`channelStoreSchemaVersion = 3`,
-[`sqlite_schema.go:33`](../../internal/channels/sqlite_schema.go#L33)).
-A new `case 4:` arm in `applyMigration` and a `migrateV3ToV4` function,
-following the existing one-step-per-PR migration pattern; the const is
-bumped to 4 and `user_version` is stamped inside the migration's
-transaction (the L3 atomicity rule the file header documents).
+Channel-store schema migration **v9** (the store is at v8 today —
+`channelStoreSchemaVersion = 8`,
+[`sqlite_schema.go:73`](../../internal/channels/sqlite_schema.go#L73);
+v9 is the next free slot as of 2026-06-17). A new `case 9:` arm in
+`applyMigration` and a `migrateV8ToV9` function — both in
+[`internal/channels/sqlite_migrations.go`](../../internal/channels/sqlite_migrations.go),
+the dedicated migration runner the channel store extracted out of
+`sqlite_schema.go` after this RFC was first drafted — following the
+existing one-step-per-PR migration pattern; the const (in
+`sqlite_schema.go`) is bumped to 9 and `user_version` is stamped inside
+the migration's transaction (the L3 atomicity rule the file header
+documents).
 
 ```sql
 CREATE TABLE membership_intervals (
@@ -257,7 +271,7 @@ Notes:
 Three call sites mutate `memberships` today; each gets a matching
 interval write **in the same transaction**.
 
-**`AddMember`** ([`sqlite_query.go:225`](../../internal/channels/sqlite_query.go#L225))
+**`AddMember`** ([`sqlite_query.go:283`](../../internal/channels/sqlite_query.go#L283))
 — currently a single `INSERT … ON CONFLICT DO NOTHING` with no
 transaction. It must now (a) run in a transaction and (b) open an
 interval **only when it actually inserted a `memberships` row**:
@@ -302,7 +316,7 @@ rejects a spurious double-open by failing the INSERT. The `n == 0`
 branch (member not present) closes nothing — that is the expected
 no-op, not the invariant violation.
 
-**`GetOrCreateDM`** ([`sqlite_query.go:307`](../../internal/channels/sqlite_query.go#L307))
+**`GetOrCreateDM`** ([`sqlite_query.go:406`](../../internal/channels/sqlite_query.go#L406))
 — inserts the two DM participants' `memberships` rows directly inside
 its own transaction, bypassing `AddMember`. It must open an interval
 for each of the two participants in that same transaction, with
@@ -315,7 +329,7 @@ either both the projection and the ledger move, or neither does.
 
 ### D. Backfill
 
-`migrateV3ToV4` seeds the ledger from the current `memberships` state
+`migrateV8ToV9` seeds the ledger from the current `memberships` state
 so the table is correct the instant it exists:
 
 ```sql
@@ -450,11 +464,13 @@ table of join/leave/rejoin fixtures.
 
 The load-bearing phase — everything RFC 0036 depends on.
 
-1. Channel-store schema migration **v4**: `migrateV3ToV4` creates
+1. Channel-store schema migration **v9**: `migrateV8ToV9` creates
    `membership_intervals`, `idx_membership_intervals_lookup`, and
    `ux_membership_intervals_open`; runs the §D backfill; stamps
-   `user_version = 4` inside its transaction. Bump
-   `channelStoreSchemaVersion` to 4 and add the `case 4:` arm.
+   `user_version = 9` inside its transaction. Bump
+   `channelStoreSchemaVersion` to 9 and add the `case 9:` arm (the
+   migration body lands in `sqlite_migrations.go`, the const bump in
+   `sqlite_schema.go`).
 2. `MembershipInterval` struct in `channels.go`; `GetMembershipIntervals`
    read method; `InScope` predicate helper.
 3. Write hooks (§C): `AddMember` becomes transactional and opens an
@@ -480,7 +496,8 @@ Question #2.
 
 | Component | Files | Change |
 |-----------|-------|--------|
-| Go orchestrator | `internal/channels/sqlite_schema.go` | v4 migration: table, indexes, backfill; bump `channelStoreSchemaVersion` |
+| Go orchestrator | `internal/channels/sqlite_migrations.go` | `migrateV8ToV9` + `case 9:` arm: `membership_intervals` table, indexes, §D backfill |
+| Go orchestrator | `internal/channels/sqlite_schema.go` | Bump `channelStoreSchemaVersion` to 9; migration-history header comment |
 | Go orchestrator | `internal/channels/sqlite_query.go` | `AddMember` (transactional, opens interval), `RemoveMember` (closes interval), `GetOrCreateDM` (opens DM intervals), new `GetMembershipIntervals` |
 | Go orchestrator | `internal/channels/channels.go` | `MembershipInterval` type, `InScope` helper, `ChannelStore` interface method |
 | Go orchestrator | `internal/server/channel_handlers.go`, `channel_types.go` | Phase 2 only — inspection endpoint |
@@ -506,11 +523,11 @@ Question #2.
   - `GetOrCreateDM` opens one interval per DM participant.
   - `DeleteChannel` cascades intervals away.
 - **Migration tests**:
-  - v3 → v4 backfill: every `memberships` row produces exactly one
+  - v8 → v9 backfill: every `memberships` row produces exactly one
     open interval; `user_version` is stamped inside the migration
     transaction (extend the existing
     `Test…_StampsUserVersionInTransaction` pattern).
-  - v4 migration is idempotent on reopen — no duplicate intervals, no
+  - v9 migration is idempotent on reopen — no duplicate intervals, no
     resurrected indexes.
 - **Integration tests**:
   - Via the channel store API: add, remove, re-add a participant; assert
