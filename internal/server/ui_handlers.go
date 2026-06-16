@@ -143,7 +143,8 @@ func (s *Server) panelCreate(name string, toggle PanelToggle) *uiCreateStatus {
 // Phase 1), or nil for panels that expose none. Like [Server.panelCreate], only
 // channel_timeline carries one — the PATCH/GET /api/v1/channels/{id}/config
 // surface over the store-canonical apply path. `enabled` echoes the operator's
-// config_edit_enabled toggle (ships OFF — the surface lands dark); `available`
+// config_edit_enabled toggle (ships ON as of v0.3.8 now RFC 0050 is complete;
+// set config_edit_enabled:false to land the surface dark); `available`
 // is runtime-derived and mirrors EXACTLY the endpoints' own availability check
 // (both the store and the router must be wired — the handlers 503 otherwise),
 // because editing a live knob reads the store provenance AND drives the router
