@@ -199,9 +199,9 @@ pub(crate) enum DiffStatus {
     Drift,
     /// Not declared in the YAML — the channel inherits this knob.
     Inherited,
-    /// Declared, but the effective value is null (the deferred-resolution
-    /// `interaction_budget_tokens`, RFC Open item 4) so the two cannot be
-    /// compared: neither a confirmed match nor confirmed drift.
+    /// Declared in the YAML, but the effective value the store reports is null,
+    /// so the two cannot be compared: neither a confirmed match nor confirmed
+    /// drift.
     Indeterminate,
     /// Not declared in the YAML, yet the store carries an explicit per-channel
     /// override (`source == "channel"`). This IS drift: the boot reconcile
@@ -243,9 +243,9 @@ pub(crate) struct DiffRow {
 /// omits is `Inherited` only when the store has no override for it — if the store
 /// carries an explicit `channel`-source override the file omits, that is
 /// `Undeclared` drift (the boot reconcile would clear it), not `Inherited`. The
-/// one exception is a declared knob whose effective value is null
-/// (deferred-resolution budget) → `Indeterminate`, so a stale "drift" is never
-/// reported for a value the server cannot resolve yet.
+/// one exception is a declared knob whose effective value is null →
+/// `Indeterminate`, so a stale "drift" is never reported for a value the server
+/// reports as unresolved.
 pub(crate) fn diff_rows(declared: &Map<String, Value>, view: &ChannelConfigView) -> Vec<DiffRow> {
     config_rows(view)
         .into_iter()
@@ -279,8 +279,8 @@ pub(crate) fn has_drift(rows: &[DiffRow]) -> bool {
 
 // ─── Rendering ─────────────────────────────────────────────────────────────
 
-/// Render a JSON value for a diff cell: a JSON `null` (the deferred budget) reads
-/// as `—`, a string drops its quotes, an absent declared value reads as `·`.
+/// Render a JSON value for a diff cell: a JSON `null` reads as `—`, a string
+/// drops its quotes, an absent declared value reads as `·`.
 fn cell(v: Option<&Value>) -> String {
     match v {
         None => "·".to_string(),

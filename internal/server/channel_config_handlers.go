@@ -131,9 +131,10 @@ func (s *Server) handlePatchChannelConfig(w http.ResponseWriter, r *http.Request
 	// reverts to the package default. So on the FIRST edit we seed the base from
 	// the channel's resolved governance, making the channel store-canonical with a
 	// faithful snapshot — the same kind of freeze the YAML adopt path makes via
-	// ChannelConfig.toConfigOverrides (minus the not-yet-live interaction_budget
-	// knob, which resolvedConfigBaseline deliberately omits — see its doc). The
-	// sparse patch then layers over that baseline and nothing un-edited is dropped.
+	// ChannelConfig.toConfigOverrides (interaction_budget included: it is
+	// router-held since the RFC 0050 enforcement amendment, so resolvedConfigBaseline
+	// seeds it like every other router-held knob — see its doc). The sparse patch
+	// then layers over that baseline and nothing un-edited is dropped.
 	// Skipped for an empty patch so a no-op PATCH stays a no-op rather than
 	// freezing the channel.
 	base := current
@@ -368,9 +369,10 @@ func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (cha
 // resolvedConfigBaseline snapshots the channel's currently-resolved governance
 // into a COMPLETE override set — the merge base ISSUE-0103 layers a first edit
 // over so a sparse PATCH on a revision-0 (YAML-seeded) channel does not reset its
-// un-edited knobs to the package default. It reads the same six router-held
-// getters as [Server.buildChannelConfigResponse], so the snapshot is exactly the
-// channel's effective governance at the moment it becomes store-canonical.
+// un-edited knobs to the package default. It reads the same router-held getters
+// as [Server.buildChannelConfigResponse] (interaction budget among them since the
+// RFC 0050 enforcement amendment), so the snapshot is exactly the channel's
+// effective governance at the moment it becomes store-canonical.
 //
 // The escalation chair is the one knob captured conditionally: an empty chair
 // stays nil (no escalation — the opt-in default), mirroring

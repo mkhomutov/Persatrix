@@ -263,7 +263,7 @@ fn row<'a>(rows: &'a [DiffRow], knob: &str) -> &'a DiffRow {
 #[test]
 fn diff_rows_classifies_each_knob() {
     // Effective: floor_control overridden false, end_vote_window overridden 5,
-    // everything else inherited (incl. the null deferred budget).
+    // everything else inherited (incl. a budget the view reports as null).
     let v = view(
         4,
         &[

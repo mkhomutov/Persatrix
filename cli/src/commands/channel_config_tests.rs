@@ -29,8 +29,8 @@ fn channel_config_view_deserializes_full_payload() {
     assert_eq!(view.floor_control.value, serde_json::json!(true));
     assert_eq!(view.floor_control.source, "channel");
     assert_eq!(view.escalation_chair_id.value, serde_json::json!("ada"));
-    // The deferred-resolution knob: inherited interaction_budget reports a JSON
-    // null value (not an absent field) — Value::Null preserves that.
+    // A JSON null value (not an absent field) deserializes to Value::Null rather
+    // than being dropped — the dynamic cell tolerates a null knob defensively.
     assert!(view.interaction_budget_tokens.value.is_null());
     assert_eq!(view.interaction_budget_tokens.source, "default");
 }
@@ -219,7 +219,7 @@ fn render_value_dashes_null_and_unquotes_string() {
 fn render_value_names_empty_string_rather_than_blanking() {
     // The one string knob (escalation_chair_id) renders empty as `(none)`, not a
     // blank cell that reads as a missing field — the empty value is a real state
-    // (no chair / escalation disabled). Kept distinct from `—` (null/deferred);
+    // (no chair / escalation disabled). Kept distinct from `—` (a JSON null);
     // the row's [channel]/[default] tag separates an explicit disable from an
     // inherited no-chair.
     assert_eq!(render_value(&Value::String(String::new())), "(none)");
@@ -257,34 +257,6 @@ fn passthrough_json_preserves_unmodeled_server_fields() {
         "unmodeled field survives: {out}"
     );
     assert_eq!(out, raw.trim_end(), "verbatim minus trailing newline");
-}
-
-// ─── knob_note (deferred-budget marker) ────────────────────────────
-
-#[test]
-fn knob_note_flags_overridden_budget_as_deferred() {
-    // An overridden interaction_budget_tokens is persisted but not live-enforced
-    // (RFC 0050 Open item 4), so its row carries a note — an operator must not
-    // read `[channel]` as "enforced".
-    let set = ConfigField {
-        value: serde_json::json!(5000),
-        source: "channel".into(),
-    };
-    assert!(knob_note("interaction_budget_tokens", &set).is_some());
-
-    // Inherited (null) budget renders as `—`; no override to mis-read, no note.
-    let inherited = ConfigField {
-        value: Value::Null,
-        source: "default".into(),
-    };
-    assert!(knob_note("interaction_budget_tokens", &inherited).is_none());
-
-    // No other knob is deferred, even when overridden.
-    let other = ConfigField {
-        value: Value::Bool(true),
-        source: "channel".into(),
-    };
-    assert!(knob_note("floor_control", &other).is_none());
 }
 
 // ─── config_rows ───────────────────────────────────────────────────
