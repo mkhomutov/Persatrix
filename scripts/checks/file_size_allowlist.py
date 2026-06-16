@@ -291,6 +291,12 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # extra §Schema/migration-state contract for the F-7 Option D persona-memory
     # migration (v12→v14) this release adds. Archive once v0.3.7 ships.
     "docs/v0.3.7-release-prep-plan.md",
+    # docs/v0.3.8-release-prep-plan.md — v0.3.8 release-prep sequencer; same
+    # accumulator pattern as the v0.3.4/v0.3.6/v0.3.7 plans above, and carries an
+    # extra workstream (the RFC 0050 channel-config fold-in) plus the §Schema/
+    # migration-state contract for the two migrations this release adds (channel
+    # store v6→v8, persona-memory v14→v15). Archive once v0.3.8 ships.
+    "docs/v0.3.8-release-prep-plan.md",
     # docs/guides/persona-agents.md was at 2 867 words on the v0.3.0
     # release-candidate tip; release-prep PR 2 added three §2 callouts
     # (interactions-not-messages per RFC 0020, now-anchor per RFC 0021,
