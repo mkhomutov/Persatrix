@@ -160,7 +160,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | v0.3.5 | [v0.3.5-execution-report.md](v0.3.5-execution-report.md) | ✅ Complete |
 | v0.3.6 | [v0.3.6-execution-report.md](v0.3.6-execution-report.md) | ✅ Complete |
 | v0.3.7 | [v0.3.7-execution-report.md](v0.3.7-execution-report.md) | ✅ Complete — clean pass on tip `92a5a00` (the first-run blocker [ISSUE-0094](../issues/ISSUE-0094-everyone-broadcast-rejected-by-agent-inbound-validation.md) / MT-CHANNEL-RELEVANCE-001 Step 4 fixed in [#562](https://github.com/mkhomutov/Persatrix/pull/562)/[#563](https://github.com/mkhomutov/Persatrix/pull/563), re-verified live) |
-| v0.3.8 | [v0.3.8-execution-report.md](v0.3.8-execution-report.md) | ✅ Complete — clean pass on tip `8897727` (Tier B no-pile-on + end-vote convergence + chair stall + interaction-summary surface + RFC 0050 channel config + the combined convergence walkthrough, all live; one non-blocking finding F-1) |
+| v0.3.8 | [v0.3.8-execution-report.md](v0.3.8-execution-report.md) | ✅ Complete — clean pass on tip `8897727` (Tier B no-pile-on + end-vote convergence + chair stall + interaction-summary surface + RFC 0050 channel config + the combined convergence walkthrough, all live; MT-INTERACTION-SUMMARY-001 Part A DM `idle_gap` accepted-with-known-gap, structurally pinned; one non-blocking finding F-1) |
 
 ---
 

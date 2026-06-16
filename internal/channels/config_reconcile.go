@@ -60,13 +60,14 @@ var ErrInvalidConfigRevision = errors.New("channels: invalid revision")
 // governance set into a [ChannelConfigOverrides] — the image the YAML reconcile
 // persists into the store and hashes for drift detection.
 //
-// Every router-held knob plus the (persisted-but-not-yet-live) interaction
-// budget is captured as an explicit value, resolved against the fleet defaults
-// in `cfg`: the int knobs are already normalized by [LoadConfig] (salience cap,
-// end-vote K/W) and the opt-in knobs (reply budget, interaction budget, idle
-// window) are resolved through their `Resolve*` precedence so the store row is a
-// faithful, self-contained image of the YAML rather than a sparse delta. A full
-// snapshot is also what makes the drift hash stable: both sides of an
+// Every router-held knob — the interaction budget among them, router-held since
+// the RFC 0050 enforcement amendment — is captured as an explicit value, resolved
+// against the fleet defaults in `cfg`: the int knobs are already normalized by
+// [LoadConfig] (salience cap, end-vote K/W) and the opt-in knobs (reply budget,
+// interaction budget, idle window) are resolved through their `Resolve*`
+// precedence so the store row is a faithful, self-contained image of the YAML
+// rather than a sparse delta. A full snapshot is also what makes the drift hash
+// stable: both sides of an
 // equal-revision comparison are computed the same canonical way.
 //
 // The one exception is the escalation chair: an absent chair stays nil (no

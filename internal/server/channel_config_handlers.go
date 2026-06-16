@@ -131,9 +131,10 @@ func (s *Server) handlePatchChannelConfig(w http.ResponseWriter, r *http.Request
 	// reverts to the package default. So on the FIRST edit we seed the base from
 	// the channel's resolved governance, making the channel store-canonical with a
 	// faithful snapshot — the same kind of freeze the YAML adopt path makes via
-	// ChannelConfig.toConfigOverrides (minus the not-yet-live interaction_budget
-	// knob, which resolvedConfigBaseline deliberately omits — see its doc). The
-	// sparse patch then layers over that baseline and nothing un-edited is dropped.
+	// ChannelConfig.toConfigOverrides (interaction_budget included: it is
+	// router-held since the RFC 0050 enforcement amendment, so resolvedConfigBaseline
+	// seeds it like every other router-held knob — see its doc). The sparse patch
+	// then layers over that baseline and nothing un-edited is dropped.
 	// Skipped for an empty patch so a no-op PATCH stays a no-op rather than
 	// freezing the channel.
 	base := current
