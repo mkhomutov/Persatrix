@@ -34,10 +34,9 @@ use crate::types::{api_error_message, validate_path_param};
 /// `"default"` = inherited fleet/group default).
 ///
 /// `value` is `serde_json::Value` rather than a typed field because the knob set
-/// is heterogeneous (bool / int / string) and one knob —
-/// `interaction_budget_tokens` when inherited — is reported `null` (its live
-/// resolution is deferred, RFC 0050 Phase 1 Open item 4). A single dynamic cell
-/// renders every knob uniformly without a per-knob struct.
+/// is heterogeneous (bool / int / string), and keeping it dynamic also lets the
+/// CLI tolerate a JSON `null` defensively — a single dynamic cell renders every
+/// knob uniformly without a per-knob struct.
 #[derive(Deserialize)]
 pub(crate) struct ConfigField {
     pub(crate) value: Value,
@@ -256,17 +255,16 @@ pub(crate) fn config_rows(view: &ChannelConfigView) -> Vec<(&'static str, &Confi
         .collect()
 }
 
-/// Render one knob's effective value for the human view. A JSON `null` (only
-/// `interaction_budget_tokens` when inherited — its live resolution is deferred,
-/// RFC 0050 Phase 1 Open item 4) reads as `—` so it is not mistaken for the
-/// literal string "null"; a JSON string drops its quotes.
+/// Render one knob's effective value for the human view. A JSON `null` reads as
+/// `—` so it is not mistaken for the literal string "null"; a JSON string drops
+/// its quotes.
 ///
 /// An empty string renders as `(none)` rather than a blank cell. The one string
 /// knob is `escalation_chair_id`, whose empty value means "no chair" — either an
 /// explicit `[channel]` disable (the empty-string sentinel) or an inherited
 /// `[default]` with no chair configured. A blank cell would read as a render
 /// glitch / missing field; `(none)` names the state, and the provenance tag still
-/// distinguishes the two cases. Kept distinct from `—` (deferred/null) so the two
+/// distinguishes the two cases. Kept distinct from `—` (a JSON null) so the two
 /// are not conflated.
 fn render_value(value: &Value) -> String {
     match value {
@@ -277,24 +275,9 @@ fn render_value(value: &Value) -> String {
     }
 }
 
-/// A trailing advisory note for a knob's rendered row, or `None`.
-///
-/// Only `interaction_budget_tokens` carries one, and only when it is overridden:
-/// it is persisted like the other knobs but its live application is deferred
-/// (RFC 0050 Phase 1 Open item 4 — it is not router-held), so a `[channel]` tag
-/// alone would let an operator read the value they set as "enforced". The note
-/// says otherwise. An inherited budget renders as `—` and needs no note (there
-/// is no override to mis-read).
-fn knob_note(key: &str, field: &ConfigField) -> Option<&'static str> {
-    if key == "interaction_budget_tokens" && !field.value.is_null() {
-        return Some("not yet enforced (RFC 0050 Open item 4)");
-    }
-    None
-}
-
 /// Render the effective-config block: a header carrying the channel id and
-/// current revision, then one aligned row per knob with its value, a
-/// `[channel]` / `[default]` provenance tag, and an optional deferral note.
+/// current revision, then one aligned row per knob with its value and a
+/// `[channel]` / `[default]` provenance tag.
 fn render_config_view(id: &str, view: &ChannelConfigView) {
     println!(
         "{}  {}",
@@ -304,12 +287,8 @@ fn render_config_view(id: &str, view: &ChannelConfigView) {
     let rows = config_rows(view);
     let width = rows.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
     for (key, field) in rows {
-        let note = match knob_note(key, field) {
-            Some(n) => format!("  {}", format!("⚠ {n}").yellow()),
-            None => String::new(),
-        };
         println!(
-            "  {key:<width$}  {}  {}{note}",
+            "  {key:<width$}  {}  {}",
             render_value(&field.value),
             format!("[{}]", field.source).dimmed(),
         );
