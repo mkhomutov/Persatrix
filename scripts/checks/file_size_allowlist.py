@@ -238,6 +238,15 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # tables), and it carries the live root-cause analysis of the @everyone
     # broadcast defect (ISSUE-0094) past the cap. Archive once the tag ships.
     "docs/manual-tests/v0.3.7-execution-report.md",
+    # v0.3.8 sibling — same per-release accumulator pattern (the convergence
+    # surface: MT-CHANNEL-RELEVANCE-002 + MT-CHANNEL-GOV-003/-004 +
+    # MT-INTERACTION-SUMMARY-001 + MT-CHANNEL-CONFIG-001…004 + the combined
+    # convergence walkthrough + the structural-gate tables). The PR 4 final
+    # pre-tag verification appended its live gate table + the two-store
+    # migration upgrade-on-open verification + the Docker-smoke carry-forward,
+    # tipping the report past the 3 000-word cap (~4 280 words). Archive once
+    # the tag ships.
+    "docs/manual-tests/v0.3.8-execution-report.md",
     # docs/v0.3.3-release-checklist.md crossed the 3 000-word prose cap as a
     # release-cycle record: the §3.1 Upgrade Notes table (8 rows — event-driven
     # loop, fire-and-forget channel dispatch, autonomy.timers, scheduled_wakes
