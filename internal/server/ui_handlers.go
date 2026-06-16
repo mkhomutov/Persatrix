@@ -174,7 +174,7 @@ func (s *Server) panelConfigEdit(name string, toggle PanelToggle) *uiCreateStatu
 // with the observability stack's service.version. Like that constant it is not
 // a build input, so a stale value never fails `make all` — scripts/bump_version.py
 // bumps it each release (VERSION_FILES) or it silently drifts.
-const defaultServiceVersion = "0.3.7"
+const defaultServiceVersion = "0.3.8"
 
 // uiBuildVersion resolves the version string surfaced in /api/v1/ui/config. It
 // prefers the PERSATRIX_SERVICE_VERSION env var (the same source the
