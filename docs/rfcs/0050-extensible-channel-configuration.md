@@ -3,7 +3,7 @@ id: RFC-0050
 title: "Extensible Channel Configuration (Operator-Editable, Single Source of Truth)"
 summary: "Make per-channel governance config operator-editable from CLI and web console without restart, with the channel store as the single source of truth and a revision-gated YAML loader so config-as-code and live edits coexist (higher per-channel revision wins)"
 type: architecture
-status: accepted
+status: implemented
 author: Maksim Khomutov
 created: 2026-06-14
 target: "v0.3.x (unscheduled)"
@@ -15,7 +15,7 @@ depends_on:
 # RFC 0050 — Extensible Channel Configuration (Operator-Editable, Single Source of Truth)
 
 **Type**: architecture  
-**Status**: ✅ Accepted — **Phase 1 + Phase 2 (web settings panel) delivered**; ISSUE-0103 (first-edit detachment) **resolved**; Open item 4 (interaction-budget enforcement) **resolved** by its [amendment](0050-amendment-interaction-budget-enforcement.md) (#657, #658). RFC stays open only on the member-threshold slice — its backend endpoint now landed, web editing pending (see [Progress](#progress) / [Phased Implementation Plan](#phased-implementation-plan))  
+**Status**: ✅ **Implemented** — closed 2026-06-16. Phase 1 + Phase 2 fully delivered; ISSUE-0103 (first-edit detachment) **resolved**; Open item 4 (interaction-budget enforcement) **resolved** by its [amendment](0050-amendment-interaction-budget-enforcement.md) (#657, #658); the last open slice — **member-threshold web editing** — landed in #660 (which also flipped `config_edit_enabled` on). All four live acceptance arcs pass: [MT-CHANNEL-CONFIG-001](../manual-tests/MT-CHANNEL-CONFIG-001.md) (CLI live-edit, G1), [MT-CHANNEL-CONFIG-002](../manual-tests/MT-CHANNEL-CONFIG-002.md) (web edit + cross-surface read-back, G4), [MT-CHANNEL-CONFIG-003](../manual-tests/MT-CHANNEL-CONFIG-003.md) (interaction-budget server-side enforcement), [MT-CHANNEL-CONFIG-004](../manual-tests/MT-CHANNEL-CONFIG-004.md) (member-threshold web editor). Phase 3 (schema-driven generic config / profiles) is a future RFC (see [Progress](#progress) / [Phased Implementation Plan](#phased-implementation-plan)).  
 **Author**: Maksim Khomutov  
 **Date**: 2026-06-14  
 **Target**: v0.3.x (unscheduled)  
@@ -47,9 +47,8 @@ depends_on:
   acceptance: [MT-CHANNEL-CONFIG-002](../manual-tests/MT-CHANNEL-CONFIG-002.md) —
   edit a knob in the browser, the running channel honors it, and the CLI
   `channel config get` reads back the same value.
-- **The RFC stays open past Phase 2.** Of the three items that kept it open, two
-  are now resolved (struck through, kept for history); only item 2's **web** half
-  remains:
+- **The RFC is now closed (2026-06-16).** All three items that kept it open past
+  Phase 2 are resolved (struck through, kept for history):
   1. ~~**Prerequisite —**
      [ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md)
      (first-edit detachment of YAML-seeded knobs)~~ — **RESOLVED 2026-06-15.** The
@@ -57,18 +56,32 @@ depends_on:
      governance on a first edit, so a sparse edit on a revision-0 YAML-seeded
      channel layers over the full baseline instead of resetting the un-edited
      knobs (the chair survives). This was the one blocker to flipping
-     `config_edit_enabled` on; it is cleared.
-  2. **Editable member threshold** — the RFC's Phase 2 summary lists it. The
-     **backend** now exists (a `PATCH /api/v1/channels/{id}/members/{participant_id}`
-     member-config endpoint that re-resolves the Tier B signals and enforces the
-     same threshold rules as config load); the **web** editing UI (making the
-     read-only threshold in `ChannelMembers.svelte` editable) is the remaining
-     follow-up.
+     `config_edit_enabled` on; it is cleared. (Confirmed live in MT-CHANNEL-CONFIG-002:
+     the first browser edit left `nova-sparrow` as chair.)
+  2. ~~**Editable member threshold**~~ — **RESOLVED 2026-06-16 (#660).** The
+     backend (`PATCH /api/v1/channels/{id}/members/{participant_id}`, #659) plus the
+     `ChannelMembers.svelte` per-row inline disposition + salience-threshold editor
+     (#660) make the threshold editable from the browser; #660 also reconstructs the
+     open-floor disposition on edit so a threshold change does not silently un-gate a
+     participant. Accepted live by
+     [MT-CHANNEL-CONFIG-004](../manual-tests/MT-CHANNEL-CONFIG-004.md).
   3. ~~**Open item 4** — `interaction_budget_tokens` not router-wired~~ —
      **RESOLVED 2026-06-15** by the [interaction-budget amendment](0050-amendment-interaction-budget-enforcement.md)
      (#657, #658): the budget is now router-held, the `GET …/config` inherited
      value resolves (no longer `null`), and the wallet enforces the channel
-     ceiling server-side. All seven knobs are live end-to-end.
+     ceiling server-side. All seven knobs are live end-to-end. Accepted live by
+     [MT-CHANNEL-CONFIG-003](../manual-tests/MT-CHANNEL-CONFIG-003.md).
+- **Live acceptance (2026-06-16).** All four `MT-CHANNEL-CONFIG-*` arcs pass on
+  build `015149a` (Anthropic overlay): 001 (CLI live-edit / restart survival, G1),
+  002 (browser edit → store → router + cross-surface read-back, G4), 003
+  (interaction-budget server-side enforcement: a 500-token ceiling denied agent
+  leases `INTERACTION_BUDGET_EXHAUSTED`, raising it relieved the next interaction),
+  004 (member-threshold web editor, gating preserved). One **cosmetic follow-up**
+  surfaced and is filed
+  ([ISSUE-0105](../issues/ISSUE-0105-stale-cli-interaction-budget-not-enforced-warning.md)):
+  the Rust CLI still prints `interaction_budget_tokens … ⚠
+  not yet enforced (RFC 0050 Open item 4)` ([`channel_config.rs`](../../cli/src/commands/channel_config.rs))
+  — stale post-amendment text; the Go enforcement is correct and verified.
 - **Phase 3 (schema-driven generic config / profiles)** — future RFC.
 
 ## Table of Contents
@@ -348,13 +361,14 @@ across the 3 web-only PRs of the [Phase 2 PR plan](0050-phase2-pr-plan.md)
 **zero Go changes** — it renders over the landed Phase 1 endpoint behind the
 default-off `config_edit_enabled` toggle, so the panel lands dark.
 
-**Narrowed from the RFC's original Phase 2 scope:** **editable member
-thresholds** were **deferred** — no member-config mutation endpoint exists, so
-making thresholds editable is a backend+web slice ("Phase 2.5"), not a
-render-over-landed-endpoints change. Closing RFC 0050 still requires that slice
-(or an RFC amendment moving member-threshold editing out of Phase 2), plus Open
-item 4 — see [Progress](#progress). (ISSUE-0103, the first-edit detachment
-prerequisite, is resolved as of 2026-06-15.)
+**Narrowed from the RFC's original Phase 2 scope (now resolved):** **editable
+member thresholds** were initially **deferred** — no member-config mutation
+endpoint existed, so making thresholds editable was a backend+web slice
+("Phase 2.5"), not a render-over-landed-endpoints change. That slice landed: the
+backend endpoint in #659 and the `ChannelMembers.svelte` web editor in #660,
+which also flipped `config_edit_enabled` on. With it (and Open item 4 via the
+interaction-budget amendment, and ISSUE-0103's 2026-06-15 fix) every Phase 2 item
+is delivered and **RFC 0050 is closed** — see [Progress](#progress).
 
 Dependencies: Phase 1.
 
@@ -385,14 +399,22 @@ both.
   equal-revision content mismatch.
 - **E2E / smoke**: CLI `config set` changes live channel behavior (e.g. flip
   `floor_control`, observe dispatch change) without restart.
-- **Manual tests**:
-  [MT-CHANNEL-CONFIG-001](../manual-tests/MT-CHANNEL-CONFIG-001.md) — live-edit a
-  router-held governance knob (`interaction_idle_timeout_seconds`) from the CLI,
-  confirm the running channel honors it without restart, and confirm it survives
-  one (G1). *(Authored + first live run passed 2026-06-14 — all steps + edge
-  cases green; the run also hardened three MT-procedure details: the
-  join/restart membership-divergence hazard, the toggle-off GET gate, and the
-  `channel create` syntax.)*
+- **Manual tests** (all passed live on build `015149a`, 2026-06-16 unless noted):
+  - [MT-CHANNEL-CONFIG-001](../manual-tests/MT-CHANNEL-CONFIG-001.md) — CLI
+    live-edit of a router-held knob (`interaction_idle_timeout_seconds`), honored
+    without restart and surviving one (G1). *(First live run passed 2026-06-14.)*
+  - [MT-CHANNEL-CONFIG-002](../manual-tests/MT-CHANNEL-CONFIG-002.md) — the web
+    settings panel: a browser edit → store → router, with the CLI reading back the
+    same value (G4). Live idle-rotation honored the browser-set 60 s; the chair
+    survived the first edit (ISSUE-0103 fix).
+  - [MT-CHANNEL-CONFIG-003](../manual-tests/MT-CHANNEL-CONFIG-003.md) — the
+    interaction-budget amendment: a 500-token ceiling denied agent leases
+    server-side (`INTERACTION_BUDGET_EXHAUSTED`, fail-closed); raising it relieved
+    the next interaction (snapshot-at-open).
+  - [MT-CHANNEL-CONFIG-004](../manual-tests/MT-CHANNEL-CONFIG-004.md) — the
+    member-threshold web editor (#660): a browser threshold edit read back over
+    REST with gating preserved (no silent un-gating); range / disposition
+    validation rejected server-side.
 
 ## Open Questions
 
