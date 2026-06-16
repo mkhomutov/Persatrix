@@ -235,9 +235,15 @@ No `proto/`, no `agents/`, no stub regen.
 - **Integration**: operator edits budget via the Phase 1 `PATCH /config` →
   next interaction in that channel is enforced at the new ceiling; GET `/config`
   no longer returns `null` for an inherited budget.
-- **Manual**: an `MT-CHANNEL-CONFIG-003` arc — set a tight budget on a channel,
-  drive an interaction past it, confirm `interaction_budget_exhausted` denial,
-  then raise it and confirm relief on the next interaction.
+- **Manual**: [MT-CHANNEL-CONFIG-003](../manual-tests/MT-CHANNEL-CONFIG-003.md) —
+  set a tight budget on a channel, drive an interaction past it, confirm the
+  `INTERACTION_BUDGET_EXHAUSTED` denial, then raise it and confirm relief on the
+  next interaction. **Passed live 2026-06-16** (build `015149a`): a 500-token
+  ceiling denied both mentioned personas' leases server-side (estimated ~5926 >
+  500, `spent=0`, fail-closed); raising to 1,000,000 admitted the next
+  interaction's leases (real reply landed). Note: a stale CLI warning
+  (`channel_config.rs` "not yet enforced") was filed as a cosmetic follow-up — the
+  Go enforcement is correct and verified.
 
 ## Security considerations
 
