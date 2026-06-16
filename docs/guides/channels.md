@@ -514,9 +514,10 @@ persatrix channel config diff planning
   round-trip; the server owns value *ranges*. `escalation_chair_id=` (empty
   string) is the explicit "disable escalation" override — distinct from
   `unset escalation_chair_id` (clear back to inherit).
-- **`interaction_budget_tokens`** is persisted but **not yet live-enforced**
-  (Open item 4) — an overridden value carries a deferral note in the `get` view,
-  and an inherited one reads as `—`.
+- **`interaction_budget_tokens`** is router-held and **live-enforced** in the
+  wallet on the lease path (RFC 0050 interaction-budget-enforcement amendment) —
+  the `get` view resolves a concrete effective value for both the overridden and
+  the inherited case, so it no longer carries a deferral note or reads as `—`.
 
 - **Export-first, revision-stamped.** `export` regenerates the YAML from the
   store stamped `revision: store + 1`, so the hand-edit loop (export → edit →
@@ -525,9 +526,10 @@ persatrix channel config diff planning
   **live CLI writer** — it is `If-Match` guarded like `set`/`unset`, *not* the
   revision-gated boot loader, so it does not gate on the file's `revision:`
   (that field is what the boot loader consumes once the file is committed to
-  `config/channels.yaml`). `diff` reports `interaction_budget_tokens` as
-  `deferred` rather than drift, since its effective value is not yet resolvable
-  (Open item 4). A knob the file omits but the store overrides
+  `config/channels.yaml`). `diff` resolves `interaction_budget_tokens` like any
+  other knob (its effective value is now router-resolvable), so it reports
+  `InSync` / `Drift` / `Inherited` rather than a budget-specific carve-out. A
+  knob the file omits but the store overrides
   (`source == "channel"`) reads as `DRIFT (store-only)`, **not** `inherited`:
   the boot reconcile replaces the whole override blob with the declared set, so
   an undeclared live override would be cleared on boot — that is real drift the
@@ -556,8 +558,9 @@ persatrix channel config diff planning
 is available in the browser as a **Channel settings** panel nested in the
 Channels tab — each governed knob with its effective value, an
 overridden-vs-inherited provenance badge, and an inherit/override control. It is
-gated behind the **same** `config_edit_enabled` toggle (so it ships dark too) and
-rides the same `If-Match` revision, so a value set in the browser is the value the
+gated behind the **same** `config_edit_enabled` toggle (which the shipped
+`config/ui.yaml` now sets on) and rides the same `If-Match` revision, so a value
+set in the browser is the value the
 CLI `channel config get` reads back. See the
 [web-console guide § Channel settings](web-console.md#channel-settings--edit-governance-from-the-browser).
 

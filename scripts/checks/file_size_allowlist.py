@@ -271,6 +271,14 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # and the v12→v14 person-identity migration) + §6 Known Gaps. Archive once
     # the tag ships.
     "docs/v0.3.7-release-checklist.md",
+    # docs/v0.3.8-release-checklist.md — v0.3.8 sibling of the v0.3.3–v0.3.7
+    # checklists above; same release-cycle-record pattern. Crossed the cap on
+    # creation (release-prep PR 2) carrying the convergence-cluster surface
+    # (Tier B + governance Layers 1/2/4 + interaction-summary + RFC 0050), the
+    # §3.1 Upgrade Notes for *both* schema migrations (channel store v6→v8,
+    # persona-memory v14→v15) + the behaviour-active-by-default caveat, and §6
+    # Known Gaps. Archive once the tag ships.
+    "docs/v0.3.8-release-checklist.md",
     # docs/v0.3.4-release-prep-plan.md is the v0.3.4 release-prep sequencer —
     # same release-cycle-accumulator pattern as the v0.3.0 / v0.3.1 plans and
     # the v0.3.3 checklist above. It crossed the 3 000-word prose cap when PR 1
