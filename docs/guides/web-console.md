@@ -262,20 +262,20 @@ truth, the store. It is a **Channel settings** disclosure nested in the
 **Channels** tab beside the member roster, shown only for a watched **group**
 channel (not DMs).
 
-**It ships dark.** Unlike channel creation (on by default), the panel is **off by
-default** — turn it on per deployment with `config_edit_enabled: true` under the
-`channel_timeline` panel in [`config/ui.yaml`](../../config/ui.yaml):
+**It ships on.** The schema default is `false`, but the delivered
+[`config/ui.yaml`](../../config/ui.yaml) sets `config_edit_enabled: true` (RFC
+0050) — set it back to `false` under the `channel_timeline` panel to disable it:
 
 ```yaml
 panels:
   channel_timeline:
     enabled: true
-    config_edit_enabled: true   # default false — gates BOTH the web panel and CLI uniformly
+    config_edit_enabled: true   # shipped on (schema default false) — gates BOTH the web panel and CLI uniformly
 ```
 
 This is the **same toggle** that gates the CLI `channel config` verbs, covering
 the whole `/config` endpoint (read *and* write): on exposes both the panel and
-the CLI verbs; off (the default) returns `403` to both. The panel renders only
+the CLI verbs; off returns `403` to both. The panel renders only
 when **both** `config_edit.enabled` and `config_edit.available` are true — the
 usual `enabled && available` rule. `available` is **runtime-derived** (true only
 when the channel store and router are both wired, mirroring the endpoint's `503`)
@@ -299,9 +299,9 @@ revision as an `If-Match` guard:
   observer cannot chair). A chair still requires `floor_control` on; setting one
   alongside `floor_control: off` round-trips to a `400` the panel surfaces — the
   picker cannot prevent that cross-field conflict.
-- `interaction_budget_tokens` is store-persisted but **not yet router-wired**
-  (Phase 1 Open item 4), so an inherited value reads back empty ("inherited"),
-  not `0`.
+- `interaction_budget_tokens` is now **router-wired and live-enforced** (RFC 0050
+  interaction-budget-enforcement amendment), so an inherited value resolves to its
+  concrete effective number, not empty.
 - On a concurrent edit, the save returns `409`; the panel **reloads the latest
   config and replays your pending edits on top** rather than blind-overwriting,
   and asks you to review and save again.
@@ -334,7 +334,7 @@ panels:
   channel_timeline:
     enabled: true
     create_enabled: true       # default true  — group-channel creation; see "Creating a channel"
-    config_edit_enabled: false # default false — governance settings panel; see "Channel settings"
+    config_edit_enabled: true  # schema default false, shipped on — governance settings panel; see "Channel settings"
   memory_strip:        # Slice 2 (v0.4.0+) — ships off
     enabled: false
   cost:                # Slice 4 (v0.4.0+) — ships off
@@ -345,9 +345,9 @@ Two rules make this real:
 
 - **`enabled` is the operator knob** (and `create_enabled` /
   `config_edit_enabled` are per-panel capability knobs alongside it). They decide
-  whether the console *offers* a panel or affordance. `config_edit_enabled` ships
-  **false** so the governance settings panel lands additively, dark, while
-  `create_enabled` ships **true**.
+  whether the console *offers* a panel or affordance. `config_edit_enabled` has a
+  **schema default of `false`** but ships **`true`** in `config/ui.yaml` (RFC
+  0050); `create_enabled` ships **true** too.
 - **`available` is runtime-derived and never authored.** The server computes,
   per request, whether each panel's backing subsystem is wired (e.g.
   `channel_timeline.available` is true exactly when channels are configured,
