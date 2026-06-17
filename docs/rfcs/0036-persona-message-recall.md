@@ -334,10 +334,13 @@ SELECT m.id, m.channel_id, m.sender_id, m.content, m.timestamp
 - **`LIKE` fallback** — when FTS5 is unavailable (§B) the same query
   runs with `m.content LIKE '%' || ? || '%'` in place of the FTS join,
   scope and narrowing clauses unchanged.
-- **Run/test-isolation axes** — `messages` gained `session_id`
-  (migration v3) and `epoch_id` (migration v6) *after* this RFC was
-  first drafted; the query above predates them. `epoch_id` is the
-  strict isolation axis ([`DefaultEpochID`](../../internal/channels/sqlite_schema.go),
+- **Run/test-isolation axes** — `messages` carries two scoping columns
+  the §C query above omits, for two different reasons. `session_id`
+  (migration v3, landed 2026-05-13) **already existed** when this RFC
+  was drafted (2026-05-16 — the store was at v3): the query simply never
+  accounted for it. `epoch_id` (migration v6) was added *after* the
+  draft, so the query genuinely predates that axis. `epoch_id` is the
+  strict isolation axis ([`DefaultEpochID`](../../internal/channels/sqlite.go#L42),
   no carry-over), so recall MUST add `AND m.epoch_id = ?` bound to the
   caller's epoch or it would surface messages from a different run /
   post-`reset` epoch — an isolation breach, not just noise. Whether
@@ -707,10 +710,14 @@ and separately reviewable.
    "you already summarised this")? Out of scope for this RFC; noted as
    a possible follow-up once both surfaces are in use.
 
-6. **Epoch / session scoping of recall.** `messages` gained
-   `session_id` (channel-store migration v3, RFC 0031) and `epoch_id`
-   (migration v6, ISSUE-0085) *after* this RFC was first drafted, so
-   the §C query predates both axes. Two sub-questions:
+6. **Epoch / session scoping of recall.** The §C query addresses
+   neither of the two scoping columns now on `messages`, but they
+   arrived on opposite sides of this RFC's draft. `session_id`
+   (channel-store migration v3, RFC 0031) **already existed** at draft
+   (the store was at v3 on 2026-05-16) — the query just never accounted
+   for it. `epoch_id` (migration v6, ISSUE-0085) was added *after* the
+   draft, so for it the query genuinely predates the axis. Two
+   sub-questions:
    - **Epoch (proposed resolution: scope, non-optional).** `epoch_id`
      is the strict run/test-isolation axis with no carry-over. Recall
      MUST add `AND m.epoch_id = ?` bound to the caller's epoch;

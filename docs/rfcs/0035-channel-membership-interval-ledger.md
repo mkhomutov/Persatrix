@@ -177,11 +177,13 @@ right substrate to build once.
   endpoint is scoped as an optional Phase 2 deliverable, not a goal.
 - **Session / epoch scoping.** The ledger is keyed at channel grain
   (`channel_id, participant_id`); a channel already belongs to a single
-  `epoch_id` (migration v6) and membership is presence on that channel,
-  so the ledger carries no `session_id` / `epoch_id` columns. How
-  verbatim recall composes with those run/test-isolation axes — added
-  to `messages`/`channels` *after* this RFC was first drafted — is a
-  query-time concern owned by [RFC 0036 §C and Open Question #6](0036-persona-message-recall.md),
+  `session_id` (migration v3) and a single `epoch_id` (migration v6),
+  and membership is presence on that channel, so the ledger carries no
+  `session_id` / `epoch_id` columns. How verbatim recall composes with
+  those run/test-isolation axes — `epoch_id` added to
+  `messages`/`channels` *after* this RFC was first drafted, `session_id`
+  already present at draft but unaddressed by the original §C query — is
+  a query-time concern owned by [RFC 0036 §C and Open Question #6](0036-persona-message-recall.md),
   which filters `messages.epoch_id` directly. The ledger needs no
   change for it.
 
