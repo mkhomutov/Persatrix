@@ -55,10 +55,10 @@ depends_on:
 
 A persona can ask its episodic memory *what it concluded* about a past
 interaction — the episodic tier stores LLM-generated **summaries**
-([`agents/memory/migrations.py:86-99`](../../agents/memory/migrations.py#L86-L99)).
+([`agents/memory/migrations.py:104-117`](../../agents/memory/migrations.py#L104-L117)).
 It cannot ask *what was literally said*. The verbatim text of every
 message lives in the channel store's `messages` table
-([`internal/channels/sqlite_schema.go:56-65`](../../internal/channels/sqlite_schema.go#L56-L65),
+([`internal/channels/sqlite_schema.go:96-105`](../../internal/channels/sqlite_schema.go#L96-L105),
 `content TEXT NOT NULL`), but the only way to read it is timestamp-
 ordered pagination via `GetHistory` — there is no search, and nothing
 exposes it to the persona as a tool.
@@ -160,7 +160,7 @@ server-side.
 
 - **A durable recall store.** Recall reads the live `messages` table.
   Messages removed by the channel cap-prune
-  ([`sqlite_messages.go:188-220`](../../internal/channels/sqlite_messages.go#L188-L220))
+  ([`sqlite_messages.go:198-230`](../../internal/channels/sqlite_messages.go#L198-L230))
   or by user deletion are simply gone from recall (§H). Copying
   messages into a separate retention-immune index was considered and
   **rejected** for this RFC — it re-opens the retention/privacy
@@ -212,13 +212,19 @@ persona tool is a thin caller.
 
 ### B. FTS5 index over `messages`
 
-Channel-store schema migration **v5** (RFC 0035 lands v4; this RFC is
-the next step — a `case 5:` arm in `applyMigration`, a `migrateV4ToV5`
-function, `channelStoreSchemaVersion` bumped to 5, `user_version`
-stamped inside the migration transaction).
+Channel-store schema migration **v10** (RFC 0035 lands v9; this RFC is
+the next step — a `case 10:` arm in `applyMigration`, a `migrateV9ToV10`
+function, `channelStoreSchemaVersion` bumped to 10, `user_version`
+stamped inside the migration transaction). Both the `case` arm and the
+migrate function live in
+[`internal/channels/sqlite_migrations.go`](../../internal/channels/sqlite_migrations.go)
+— the dedicated migration runner the channel store extracted out of
+`sqlite_schema.go` after this RFC was first drafted (the store sits at
+v8 today; v9 / v10 are the next two free slots as of 2026-06-17, RFC
+0035 then RFC 0036).
 
 The index mirrors the episodic tier's external-content FTS5 pattern
-([`agents/memory/migrations.py:232-254`](../../agents/memory/migrations.py#L232-L254),
+([`agents/memory/migrations.py:369-389`](../../agents/memory/migrations.py#L369-L389),
 `episodes_fts`). `messages` is a normal rowid table, so `content_rowid`
 can alias its implicit `rowid`:
 
@@ -236,6 +242,14 @@ CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
     INSERT INTO messages_fts(messages_fts, rowid, content)
         VALUES ('delete', old.rowid, old.content);
 END;
+
+-- Defensive-symmetric with the episodic pattern; expected never to fire
+-- (messages is insert-and-cap-prune only — see below).
+CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, content)
+        VALUES ('delete', old.rowid, old.content);
+    INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+END;
 ```
 
 The migration then backfills the index from every existing message —
@@ -247,9 +261,9 @@ INSERT INTO messages_fts(messages_fts) VALUES ('rebuild');
 ```
 
 `messages` has no `UPDATE` path today (it is insert-and-cap-prune
-only), so an `_au` update trigger is added defensively-symmetric with
-the episodic pattern but is expected never to fire; a reviewer note
-in the migration records this.
+only), so the `messages_au` update trigger shown above is added
+defensively-symmetric with the episodic pattern but is expected never
+to fire; a reviewer note in the migration records this.
 
 **Rowid stability.** `messages` is keyed `id TEXT PRIMARY KEY`, *not*
 `INTEGER PRIMARY KEY`, so its `rowid` is **not** preserved across an
@@ -265,7 +279,7 @@ maintenance/compaction `VACUUM` later would corrupt `messages_fts` and
 
 **FTS5 availability.** The migration probes FTS5 the way the memory
 tier does (`_fts5_available` —
-[`migrations.py:331-340`](../../agents/memory/migrations.py#L331-L340)):
+[`migrations.py:467-476`](../../agents/memory/migrations.py#L467-L476)):
 attempt a throwaway virtual table, and if FTS5 is not compiled into the
 SQLite build, skip `messages_fts` and record a flag. The search query
 (§C) then falls back to a `LIKE`-based scan — slower, correct, and the
@@ -309,7 +323,7 @@ SELECT m.id, m.channel_id, m.sender_id, m.content, m.timestamp
   falls inside one of the persona's membership stints for its channel.
 - **Ranking** — FTS5 `rank` (BM25) normalised into `[0,1]` the way the
   episodic tier does
-  ([`episodic_queries.py` `_normalize_bm25`](../../agents/memory/episodic_queries.py)),
+  ([`episodic_queries.py:169` `_normalize_bm25`](../../agents/memory/episodic_queries.py#L169)),
   blended with a recency factor so a strong old hit and a weak fresh
   hit order sensibly. Exact blend weights are an Open Question (#3) —
   tuned when recall-usage data exists, not guessed in this RFC.
@@ -320,6 +334,20 @@ SELECT m.id, m.channel_id, m.sender_id, m.content, m.timestamp
 - **`LIKE` fallback** — when FTS5 is unavailable (§B) the same query
   runs with `m.content LIKE '%' || ? || '%'` in place of the FTS join,
   scope and narrowing clauses unchanged.
+- **Run/test-isolation axes** — `messages` carries two scoping columns
+  the §C query above omits, for two different reasons. `session_id`
+  (migration v3, landed 2026-05-13) **already existed** when this RFC
+  was drafted (2026-05-16 — the store was at v3): the query simply never
+  accounted for it. `epoch_id` (migration v6) was added *after* the
+  draft, so the query genuinely predates that axis. `epoch_id` is the
+  strict isolation axis ([`DefaultEpochID`](../../internal/channels/sqlite.go#L42),
+  no carry-over), so recall MUST add `AND m.epoch_id = ?` bound to the
+  caller's epoch or it would surface messages from a different run /
+  post-`reset` epoch — an isolation breach, not just noise. Whether
+  recall is *also* session-scoped (like RFC 0031 Phase 2 made
+  persona-memory recall) is a deliberate choice, not an oversight.
+  Both are settled in **Open Question #6**; the predicate is shown
+  unqualified here only because the answer to #6 fixes its exact form.
 
 `limit` is clamped server-side to a hard maximum regardless of what the
 caller requests.
@@ -353,7 +381,7 @@ lands.
 ### E. The `recall_channel_messages` persona tool
 
 A new tool, registered the way `create_memory_tools` registers the
-note tools ([`agents/tools/builtin.py:330-448`](../../agents/tools/builtin.py#L330-L448)):
+note tools ([`agents/tools/builtin.py:333-481`](../../agents/tools/builtin.py#L333-L481)):
 a closure-bound factory `create_recall_tool(http_client, gate, *,
 agent_id)`.
 
@@ -409,14 +437,14 @@ gets the exact treatment RFC 0034 §D defined for replayed turns:
 every recalled `content` string is passed through the
 `_format_event` `CHANNEL_MESSAGE` branch so the
 `"<|" → "\\<|"` / `"|>" → "\\|>"` delimiter escape
-([`prompt_assembly.py:355-362`](../../agents/persona_runtime/prompt_assembly.py#L355-L362))
+([`prompt_assembly.py:421-426`](../../agents/persona_runtime/prompt_assembly.py#L421-L426))
 is applied before the text reaches the model.
 
 The recall tool result returns to the LLM as a `tool_result` block,
 not as a `messages` user turn — so the escape is applied **per
 recalled row's `content`** as the tool assembles its `data` payload.
 This reuses `conversation_window._format_peer_turn`
-([`conversation_window.py:347-366`](../../agents/persona_runtime/conversation_window.py#L347-L366))
+([`conversation_window.py:405-438`](../../agents/persona_runtime/conversation_window.py#L405-L438))
 — the same RFC 0034 reuse pattern, not a re-implementation. Each
 recalled row is also tagged with its origin `channel_id` and `sender`
 so the model is explicitly aware it is quoting cross-context material
@@ -426,7 +454,7 @@ so the model is explicitly aware it is quoting cross-context material
 
 RFC 0034's conversation window fetches "the last N messages of
 `event.channel_id`" with **no membership filter**
-([`conversation_window.py:185-196`](../../agents/persona_runtime/conversation_window.py#L185-L196)).
+([`conversation_window.py:263-302`](../../agents/persona_runtime/conversation_window.py#L263-L302)).
 A persona re-added to a channel therefore sees, *live in its prompt*,
 messages from the gap when it was not a member — yet under this RFC it
 could not *recall* those same messages later. That is incoherent. This
@@ -459,7 +487,7 @@ accepted property, not a defect:
 
 - **Cap-pruning.** `pruneExcess` hard-deletes the oldest messages once
   a channel exceeds `maxMessagesPerChannel`
-  ([`sqlite_messages.go:188-220`](../../internal/channels/sqlite_messages.go#L188-L220)).
+  ([`sqlite_messages.go:198-230`](../../internal/channels/sqlite_messages.go#L198-L230)).
   A pruned message is gone from `messages` and — via the `messages_ad`
   delete trigger (§B) — from `messages_fts`. Recall cannot surface it.
   Recall therefore reaches back only as far as the channel cap allows.
@@ -545,9 +573,11 @@ scenario.
 Server-side only; testable end-to-end via REST with no persona
 involvement.
 
-1. Channel-store schema migration **v5**: `messages_fts` virtual table
-   + insert/delete triggers, FTS5-availability probe with `LIKE`
-   fallback flag; bump `channelStoreSchemaVersion`.
+1. Channel-store schema migration **v10** (`migrateV9ToV10` + `case 10:`
+   arm in `sqlite_migrations.go`): `messages_fts` virtual table +
+   insert/update/delete triggers, FTS5-availability probe with `LIKE`
+   fallback flag; bump `channelStoreSchemaVersion` to 10 in
+   `sqlite_schema.go`.
 2. `internal/channels/sqlite_search.go`: the scoped search query (§C),
    including the `membership_intervals` `EXISTS` clause, ranking, query
    escaping, and the `LIKE` fallback path.
@@ -591,8 +621,9 @@ and separately reviewable.
 
 | Component | Files | Change |
 |-----------|-------|--------|
-| Go orchestrator | `internal/channels/sqlite_schema.go` | v5 migration: `messages_fts` + triggers, FTS5 probe; bump `channelStoreSchemaVersion` |
-| Go orchestrator | `internal/channels/sqlite_search.go` (new) | Scoped search query + `LIKE` fallback |
+| Go orchestrator | `internal/channels/sqlite_migrations.go` | `migrateV9ToV10` + `case 10:` arm: `messages_fts` + triggers, FTS5 probe, backfill |
+| Go orchestrator | `internal/channels/sqlite_schema.go` | Bump `channelStoreSchemaVersion` to 10; migration-history header comment |
+| Go orchestrator | `internal/channels/sqlite_search.go` (new) | Scoped search query + `LIKE` fallback; epoch (and possibly session) predicate per OQ #6 |
 | Go orchestrator | `internal/server/channel_handlers.go` | Recall endpoint (incl. server-side RFC 0009 audit emission); `as_participant` on the history handler |
 | Go orchestrator | `internal/server/channel_types.go` | Recall request/response types |
 | Go orchestrator | `internal/security/audit_event.go` | New recall audit-event constant |
@@ -624,7 +655,7 @@ and separately reviewable.
     overridden by a tool argument; a `channels:recall` permission
     denial returns a failed `ToolResult`; recalled `content` is
     delimiter-escaped (`<|user_message|>` literal round-trips inert).
-- **Migration tests**: v4 → v5 builds `messages_fts` and backfills it
+- **Migration tests**: v9 → v10 builds `messages_fts` and backfills it
   from existing `messages`; the delete trigger keeps the index
   consistent; `user_version` is stamped inside the migration
   transaction; the migration is idempotent on reopen.
@@ -678,6 +709,33 @@ and separately reviewable.
    be cross-referenced against episodic episodes (dedupe, or annotate
    "you already summarised this")? Out of scope for this RFC; noted as
    a possible follow-up once both surfaces are in use.
+
+6. **Epoch / session scoping of recall.** The §C query addresses
+   neither of the two scoping columns now on `messages`, but they
+   arrived on opposite sides of this RFC's draft. `session_id`
+   (channel-store migration v3, RFC 0031) **already existed** at draft
+   (the store was at v3 on 2026-05-16) — the query just never accounted
+   for it. `epoch_id` (migration v6, ISSUE-0085) was added *after* the
+   draft, so for it the query genuinely predates the axis. Two
+   sub-questions:
+   - **Epoch (proposed resolution: scope, non-optional).** `epoch_id`
+     is the strict run/test-isolation axis with no carry-over. Recall
+     MUST add `AND m.epoch_id = ?` bound to the caller's epoch;
+     omitting it lets a persona recall a *different* run's or a
+     post-`reset` epoch's messages — an isolation breach. This is the
+     load-bearing half and should be treated as a correctness
+     requirement, not an option.
+   - **Session (open).** `session_id` is the room-continuity axis;
+     RFC 0031 Phase 2 made persona *episodic-memory* recall
+     session-scoped. Whether verbatim recall should match that
+     (search only the caller's session) or span sessions within an
+     epoch (a persona's whole history in a channel, the membership
+     ledger already bounding access) is a genuine product choice. Lean:
+     span sessions within the epoch — verbatim recall's value is
+     cross-conversation, and the membership interval is the intended
+     access boundary — but flagged for an explicit decision in the
+     v0.3.9 plan, where it changes the §C predicate and the
+     `as_participant` history clause (§G) together.
 
 ## Decision / Next Steps
 
