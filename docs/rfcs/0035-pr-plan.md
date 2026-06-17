@@ -141,9 +141,9 @@ SELECT channel_id, participant_id, joined_at, NULL FROM memberships;
 
 | File | Change |
 |------|--------|
-| `internal/channels/membership_intervals.go` (new) | The `MembershipInterval` struct (`ChannelID`, `ParticipantID`, `JoinedAt time.Time`, `LeftAt time.Time` — zero ⇒ open) and the `InScope(intervals []MembershipInterval, t time.Time) bool` helper expressing the half-open `[joined_at, left_at)` predicate (§F). A **new file** rather than `channels.go`, which sits at 499 lines — one line under the [`file_size.py --strict`](../../.github/copilot-instructions.md) 500 cap — so the type + helper cannot land there without evicting an unrelated line. |
+| `internal/channels/membership_intervals.go` (new) | The `MembershipInterval` struct (`ChannelID`, `ParticipantID`, `JoinedAt time.Time`, `LeftAt time.Time` — zero ⇒ open) and the `InScope(intervals []MembershipInterval, t time.Time) bool` helper expressing the half-open `[joined_at, left_at)` predicate (§F). A **new file** rather than `channels.go`, which sits at 499 lines — one line under the [`file_size.py --strict`](../../scripts/checks/file_size.py) 500-line code cap — so the type + helper cannot land there without evicting an unrelated line. |
 | `internal/channels/sqlite_membership_intervals.go` (new) | The `(*sqliteStore).GetMembershipIntervals(ctx, channelID, participantID) ([]MembershipInterval, error)` read method — `SELECT … ORDER BY joined_at ASC`, scanning `left_at` through a `sql.NullTime` into the zero-`Time`-when-open convention. A **new file** rather than `sqlite_query.go` (465 lines) to stay clear of the cap and to co-locate the ledger read with PR 3's ledger writes. |
-| [`internal/channels/channels.go`](../../internal/channels/channels.go) | `ChannelStore` interface gains `GetMembershipIntervals(ctx context.Context, channelID, participantID string) ([]MembershipInterval, error)`. One line — fits under the cap. |
+| [`internal/channels/store.go`](../../internal/channels/store.go) | `ChannelStore` interface gains `GetMembershipIntervals(ctx context.Context, channelID, participantID string) ([]MembershipInterval, error)` — the interface is defined here, **not** in `channels.go`. One line; `store.go` is 197 lines, so no cap concern. |
 | `internal/channels/membership_intervals_test.go` (new) | Read-method + `InScope` unit tests (see below). |
 
 #### Key implementation details
@@ -158,15 +158,15 @@ SELECT channel_id, participant_id, joined_at, NULL FROM memberships;
 - `GetMembershipIntervals` on the backfilled store returns one open interval per current member, ordered by `joined_at` ascending; an unknown `(channel, participant)` returns an empty slice, not an error.
 - `InScope` against a hand-built join → leave → rejoin fixture (`[t0,t1)`, `[t2,NULL)`): a `t < t0` (pre-join), a `t1 ≤ t < t2` (gap), and a `t ≥ t2` (post-re-add) classify correctly; the boundary instants `t == t0`, `t == t1`, `t == t2` follow the half-open rule (`t0` in, `t1` out, `t2` in).
 - `InScope` with an empty interval slice is `false` for any `t`.
-- The interface is satisfied — a compile-time `var _ ChannelStore = (*sqliteStore)(nil)` assertion already exists; confirm it still builds with the new method.
+- The interface is satisfied — `*sqliteStore` is handed back as `ChannelStore` by [`NewSQLiteStore`](../../internal/channels/sqlite.go#L95), so the package fails to compile if the new interface method is left unimplemented; confirm the build is green. (There is **no** standalone `var _ ChannelStore = (*sqliteStore)(nil)` assertion in the package — conformance rides the constructor's return type.)
 
 #### PR checklist
 
 - [ ] `go test ./internal/channels/ -run 'MembershipInterval|InScope' -count=1` passes.
 - [ ] `make test` (Go lane) green; `go vet` clean.
-- [ ] `channels.go` still ≤ 500 lines; the type/helper/read-method live in the new files.
+- [ ] Type/helper/read-method live in the new files; the interface method lands in `store.go` (197 → 198 lines, far under cap). `channels.go` is untouched (stays 499).
 - [ ] No write-path edits (`AddMember` / `RemoveMember` / `GetOrCreateDM` untouched — PR 3).
-- [ ] Interface assertion compiles; any in-repo `ChannelStore` fakes/mocks gain the new method (grep for `ChannelStore` implementers).
+- [ ] Package builds (interface conformance is enforced by `NewSQLiteStore`'s `ChannelStore` return type — there is no separate assertion to update); any in-repo `ChannelStore` fakes/mocks gain the new method (grep for `ChannelStore` implementers).
 
 ---
 
@@ -225,7 +225,7 @@ Per [RFC §Test Strategy](0035-channel-membership-interval-ledger.md#test-strate
 
 | File | Change |
 |------|--------|
-| `internal/channels/sqlite_membership_intervals.go` | Add `GetAccessibleChannels(ctx, participantID) ([]string, error)` — distinct `channel_id`s the participant has ever held an interval in (`SELECT DISTINCT channel_id … ORDER BY channel_id`). Add to the `ChannelStore` interface in `channels.go` (one line). |
+| `internal/channels/sqlite_membership_intervals.go` | Add `GetAccessibleChannels(ctx, participantID) ([]string, error)` — distinct `channel_id`s the participant has ever held an interval in (`SELECT DISTINCT channel_id … ORDER BY channel_id`). Add to the `ChannelStore` interface in `store.go` (one line). |
 | `internal/server/channel_membership_handlers.go` (new) | The read-only `GET` handler returning a participant's intervals as JSON. A **new file** rather than [`channel_handlers.go`](../../internal/server/channel_handlers.go) (494 lines — five under the cap). Proposed route: `GET /api/v1/channels/{channel_id}/members/{participant_id}/history` → `{ "intervals": [ { "joined_at", "left_at" }, … ] }` (`left_at` omitted/null while open). The exact path is a review decision; it must read naturally alongside the existing channel-member routes. |
 | `internal/server/channel_types.go` | Response type for the interval-history payload. |
 | `internal/server/channel_membership_handlers_test.go` (new) | Handler tests (see below). |
@@ -285,7 +285,7 @@ Doc-only unless a review finding requires a code change.
 | `main` carries a **backfilled-but-not-maintained** ledger between PR 1 and PR 3. | Coherent additive state: the table reflects the current snapshot, has no consumer (RFC 0036 has not landed), regresses no existing behaviour, and the invariant index guards it from creation. PR 3 makes it track changes; RFC 0036 Phase 1 is gated on PR 3, not PR 1. |
 | `AddMember` going transactional **regresses the add path** (error semantics, idempotency, FK-violation mapping). | PR 3 preserves the `ON CONFLICT DO NOTHING` + `RowsAffected`-gated open, so a redundant add still no-ops on both tables; the `ErrChannelNotFound` FK mapping moves inside the tx unchanged; existing `AddMember` tests run green, plus the new no-second-interval test. |
 | **Pre-ship history is unrecoverable** — a persona removed before v9 has no backfillable stint. | Accepted and documented ([RFC §D](0035-channel-membership-interval-ledger.md#d-backfill), OQ #1): the backfill seeds one open interval per *currently present* member; the ledger is exact from v9 forward. Surfaced as a known recall limitation in RFC 0036's CHANGELOG Upgrade Notes, not a bug. |
-| **File-size cap** (`channels.go` 499, `sqlite_query.go` 465, `channel_handlers.go` 494) is breached by the additions. | New code is routed into new files (`membership_intervals.go`, `sqlite_membership_intervals.go`, `channel_membership_handlers.go`); only one-line interface additions touch the near-cap files. Each PR checklist re-verifies the cap. |
+| **File-size cap** (`channels.go` 499, `sqlite_query.go` 465, `channel_handlers.go` 494) is breached by the additions. | New code is routed into new files (`membership_intervals.go`, `sqlite_membership_intervals.go`, `channel_membership_handlers.go`); the one-line interface additions land in `store.go` (197 lines, far under the cap), not the near-cap files. Each PR checklist re-verifies the cap. |
 | **Phase 2 (PR 4) reads as scope creep** in an infra-only RFC. | It is explicitly cut-tolerant and **not** a recall dependency — RFC 0036 joins the ledger server-side. If the v0.3.9 cut tightens, PR 4 is the first drop, leaving the recall headline intact ([v0.3.9-plan §Candidate fold-ins](../v0.3.9-plan.md#candidate-fold-ins-maintainer-decision)). |
 
 ---
