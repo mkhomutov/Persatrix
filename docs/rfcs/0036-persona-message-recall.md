@@ -224,7 +224,7 @@ v8 today; v9 / v10 are the next two free slots as of 2026-06-17, RFC
 0035 then RFC 0036).
 
 The index mirrors the episodic tier's external-content FTS5 pattern
-([`agents/memory/migrations.py:369-390`](../../agents/memory/migrations.py#L369-L390),
+([`agents/memory/migrations.py:369-389`](../../agents/memory/migrations.py#L369-L389),
 `episodes_fts`). `messages` is a normal rowid table, so `content_rowid`
 can alias its implicit `rowid`:
 
@@ -279,7 +279,7 @@ maintenance/compaction `VACUUM` later would corrupt `messages_fts` and
 
 **FTS5 availability.** The migration probes FTS5 the way the memory
 tier does (`_fts5_available` —
-[`migrations.py:467-477`](../../agents/memory/migrations.py#L467-L477)):
+[`migrations.py:467-476`](../../agents/memory/migrations.py#L467-L476)):
 attempt a throwaway virtual table, and if FTS5 is not compiled into the
 SQLite build, skip `messages_fts` and record a flag. The search query
 (§C) then falls back to a `LIKE`-based scan — slower, correct, and the
@@ -381,7 +381,7 @@ lands.
 ### E. The `recall_channel_messages` persona tool
 
 A new tool, registered the way `create_memory_tools` registers the
-note tools ([`agents/tools/builtin.py:333-460`](../../agents/tools/builtin.py#L333-L460)):
+note tools ([`agents/tools/builtin.py:333-481`](../../agents/tools/builtin.py#L333-L481)):
 a closure-bound factory `create_recall_tool(http_client, gate, *,
 agent_id)`.
 
@@ -454,7 +454,7 @@ so the model is explicitly aware it is quoting cross-context material
 
 RFC 0034's conversation window fetches "the last N messages of
 `event.channel_id`" with **no membership filter**
-([`conversation_window.py:263-303`](../../agents/persona_runtime/conversation_window.py#L263-L303)).
+([`conversation_window.py:263-302`](../../agents/persona_runtime/conversation_window.py#L263-L302)).
 A persona re-added to a channel therefore sees, *live in its prompt*,
 messages from the gap when it was not a member — yet under this RFC it
 could not *recall* those same messages later. That is incoherent. This
