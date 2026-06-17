@@ -3,7 +3,7 @@ id: RFC-0035
 title: Channel Membership Interval Ledger
 summary: Add an append-only join/leave ledger to the channel store so the system can answer "was participant X a member of channel Y at time T" — the membership history a current-state-only `memberships` table cannot reconstruct after a remove or a rejoin.
 type: architecture
-status: proposed
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-16
 target: v0.3.9
@@ -14,7 +14,7 @@ depends_on:
 # RFC 0035 — Channel Membership Interval Ledger
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: 🚧 Implementing
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
 **Target**: v0.3.9
