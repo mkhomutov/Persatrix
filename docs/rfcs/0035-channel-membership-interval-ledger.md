@@ -218,10 +218,14 @@ Channel-store schema migration **v9** (the store is at v8 today —
 `channelStoreSchemaVersion = 8`,
 [`sqlite_schema.go:73`](../../internal/channels/sqlite_schema.go#L73);
 v9 is the next free slot as of 2026-06-17). A new `case 9:` arm in
-`applyMigration` and a `migrateV8ToV9` function — both in
+`applyMigration` — in
 [`internal/channels/sqlite_migrations.go`](../../internal/channels/sqlite_migrations.go),
 the dedicated migration runner the channel store extracted out of
-`sqlite_schema.go` after this RFC was first drafted — following the
+`sqlite_schema.go` after this RFC was first drafted — dispatches to a
+`migrateV8ToV9` function carried in its own sibling file
+[`internal/channels/sqlite_membership_intervals_migration.go`](../../internal/channels/sqlite_membership_intervals_migration.go),
+a split that keeps `sqlite_migrations.go` under the repo's 500-line
+file cap, following the
 existing one-step-per-PR migration pattern; the const (in
 `sqlite_schema.go`) is bumped to 9 and `user_version` is stamped inside
 the migration's transaction (the L3 atomicity rule the file header
@@ -303,8 +307,8 @@ UPDATE membership_intervals
  WHERE channel_id = ? AND participant_id = ? AND left_at IS NULL;
 ```
 
-The backfill (§D) guarantees every participant present at v4 has an
-open interval, and the `AddMember` hook guarantees every post-v4 join
+The backfill (§D) guarantees every participant present at v9 has an
+open interval, and the `AddMember` hook guarantees every post-v9 join
 opens one, so this `UPDATE` finds exactly one row to close on the
 success path. If it instead closes **zero** rows — a `memberships` row
 existed with no matching open interval — the open-interval invariant
@@ -346,7 +350,7 @@ interval starting at their recorded `joined_at`. This satisfies
 the in-scope predicate (§F) is immediately correct for all present
 members.
 
-**The accepted gap.** A participant removed *before* v4 ships left no
+**The accepted gap.** A participant removed *before* v9 ships left no
 `memberships` row, so the backfill cannot see them — that stint is
 unrecoverable. Likewise, for a participant whose `joined_at` predates
 their *actual* first interaction (none exist today, but defensively:
@@ -355,7 +359,7 @@ at the recorded join. Consequence for RFC 0036: a persona that joined
 a channel, was removed, and is re-added all *before* this RFC ships
 can recall only from its current (re-added) stint forward. This is
 documented as a known limitation of recall, not a correctness bug —
-the ledger is exact for every membership change from v4 onward.
+the ledger is exact for every membership change from v9 onward.
 
 ### E. Query surface
 
@@ -498,7 +502,7 @@ Question #2.
 
 | Component | Files | Change |
 |-----------|-------|--------|
-| Go orchestrator | `internal/channels/sqlite_migrations.go` | `migrateV8ToV9` + `case 9:` arm: `membership_intervals` table, indexes, §D backfill |
+| Go orchestrator | `internal/channels/sqlite_membership_intervals_migration.go` (new) + `case 9:` arm in `internal/channels/sqlite_migrations.go` | `migrateV8ToV9`: `membership_intervals` table, indexes, §D backfill — the function lives in the sibling file so `sqlite_migrations.go` stays under the 500-line cap |
 | Go orchestrator | `internal/channels/sqlite_schema.go` | Bump `channelStoreSchemaVersion` to 9; migration-history header comment |
 | Go orchestrator | `internal/channels/sqlite_query.go` | `AddMember` (transactional, opens interval), `RemoveMember` (closes interval), `GetOrCreateDM` (opens DM intervals), new `GetMembershipIntervals` |
 | Go orchestrator | `internal/channels/channels.go` | `MembershipInterval` type, `InScope` helper, `ChannelStore` interface method |
@@ -541,7 +545,7 @@ Question #2.
 
 1. **Backfill `joined_at` fidelity.** The backfill trusts
    `memberships.joined_at` as the open interval's start. For a
-   participant re-added before v4 (where `joined_at` is the *latest*
+   participant re-added before v9 (where `joined_at` is the *latest*
    re-add, the earlier stint already lost), this is the best available
    value and the open interval is correct from that point forward.
    No action proposed — the §D "accepted gap" framing covers it. Listed
