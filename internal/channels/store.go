@@ -103,6 +103,15 @@ type ChannelStore interface {
 	// endpoint; RFC 0036 recall joins the ledger directly in SQL instead.
 	GetMembershipIntervals(ctx context.Context, channelID, participantID string) ([]MembershipInterval, error)
 
+	// GetAccessibleChannels returns the distinct set of channel ids
+	// `participantID` has ever held a membership interval in — across both open
+	// and closed stints — ordered by channel id ascending. An unknown
+	// participant returns an empty slice, not an error. RFC 0035 Phase 2: the
+	// "what channels was X ever in" convenience for the operator inspection
+	// surface and audit reconstruction; RFC 0036 recall joins the ledger
+	// directly in SQL and does not need it.
+	GetAccessibleChannels(ctx context.Context, participantID string) ([]string, error)
+
 	// PublishMessage stores `msg` after enforcing the membership rule and the
 	// per-channel cap.
 	//

@@ -106,3 +106,42 @@ func (s *sqliteStore) GetMembershipIntervals(
 	}
 	return out, rows.Err()
 }
+
+// GetAccessibleChannels returns the distinct set of channel ids `participantID`
+// has EVER held a membership interval in — across both open and closed stints —
+// ordered by channel id ascending. An unknown participant returns an empty
+// slice, not an error.
+//
+// This is the RFC 0035 Phase 2 operator-inspection convenience ("what channels
+// was X ever in", for audit reconstruction). It is deliberately "ever a member"
+// rather than "currently a member" (which `memberships` already answers via
+// GetMembers): a closed-only stint still grants a recall scope over that
+// channel's messages for the stint's window, so an audit view must surface it.
+// RFC 0036 recall does NOT route through this method — its default-all-channels
+// search joins `membership_intervals` directly in SQL (RFC 0035 §E).
+//
+// NOTE: it has no in-tree caller yet — the Phase 2 history endpoint serves
+// per-channel intervals from GetMembershipIntervals, and recall bypasses this
+// read. It ships as the RFC 0035 Phase-2 optional convenience (the RFC marks it
+// cut-tolerant); revisit at the RFC 0035 closeout (PR 5) if still unconsumed.
+func (s *sqliteStore) GetAccessibleChannels(ctx context.Context, participantID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT channel_id
+		   FROM membership_intervals
+		  WHERE participant_id = ?
+		  ORDER BY channel_id ASC`, participantID)
+	if err != nil {
+		return nil, fmt.Errorf("channels: get accessible channels: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]string, 0)
+	for rows.Next() {
+		var channelID string
+		if err := rows.Scan(&channelID); err != nil {
+			return nil, fmt.Errorf("channels: scan accessible channel: %w", err)
+		}
+		out = append(out, channelID)
+	}
+	return out, rows.Err()
+}

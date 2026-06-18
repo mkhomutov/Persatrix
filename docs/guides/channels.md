@@ -219,10 +219,15 @@ GET    /api/v1/channels                                  # list
 GET    /api/v1/channels/{id}                             # one channel + members
 POST   /api/v1/channels/{id}/members                     # add member
 DELETE /api/v1/channels/{id}                             # delete + cascade
+PATCH  /api/v1/channels/{id}/members/{participant_id}    # update member config (RFC 0050)
 DELETE /api/v1/channels/{id}/members/{participant_id}    # remove one member
+GET    /api/v1/channels/{id}/members/{participant_id}/history # membership stints, oldest-first (RFC 0035)
 POST   /api/v1/channels/{id}/messages                    # publish
 GET    /api/v1/channels/{id}/messages                    # history (newest-first)
+GET    /api/v1/channels/{id}/activity                    # console presence (RFC 0048)
 GET    /api/v1/channels/{id}/messages/{message_id}/thread # thread under a parent
+GET    /api/v1/channels/{id}/config                      # read governance config (RFC 0050)
+PATCH  /api/v1/channels/{id}/config                      # update governance config (RFC 0050)
 ```
 
 Endpoint shapes match the [RFC §C endpoint table](../rfcs/0011-channels-bridges.md#c-message-routing-and-delivery).

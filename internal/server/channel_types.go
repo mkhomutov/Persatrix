@@ -179,6 +179,25 @@ type historyResponse struct {
 	Messages []channelMessageResponse `json:"messages"`
 }
 
+// membershipIntervalResponse is one stint in the RFC 0035 Phase 2 membership-
+// history payload: the join instant and, for a closed stint, the leave instant.
+// `left_at` is omitted while the stint is open, so an operator reads an absent
+// `left_at` as "still a member". The interval is half-open `[joined_at, left_at)`
+// (RFC 0035 §F): a closed stint's `left_at` is the instant membership ended.
+type membershipIntervalResponse struct {
+	JoinedAt time.Time  `json:"joined_at"`
+	LeftAt   *time.Time `json:"left_at,omitempty"`
+}
+
+// membershipHistoryResponse is the envelope for
+// GET /api/v1/channels/{id}/members/{participant_id}/history (RFC 0035 Phase 2).
+// `intervals` is ordered oldest stint first and is always an array (never null),
+// so a participant with no history in the channel reads back `{"intervals": []}`
+// at 200 — distinct from the 404 a non-existent channel returns.
+type membershipHistoryResponse struct {
+	Intervals []membershipIntervalResponse `json:"intervals"`
+}
+
 // configFieldResponse is one governance knob's resolved view in the RFC 0050
 // `GET/PATCH …/config` payload: the effective `value` plus its `source`
 // provenance. `source` is "channel" when an explicit per-channel override is

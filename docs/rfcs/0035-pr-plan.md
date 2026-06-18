@@ -151,7 +151,7 @@ SELECT channel_id, participant_id, joined_at, NULL FROM memberships;
 - **`InScope` is the single source of the predicate.** RFC 0036's SQL `EXISTS` clause is the *same* predicate as a join; both are tested against the same join/leave/rejoin fixture table ([RFC §F](0035-channel-membership-interval-ledger.md#f-the-in-scope-predicate)). Half-open means a message at the exact join instant is in scope, one at the exact leave instant is not — so back-to-back leave-then-rejoin is unambiguous.
 - **`LeftAt` zero-value = open.** The struct uses `time.Time` (not `*time.Time` or `sql.NullTime`) for ergonomics; `GetMembershipIntervals` maps a NULL `left_at` to the zero `Time`, and `InScope` treats `LeftAt.IsZero()` as "still open". Documented on the struct.
 - **`GetMembershipIntervals` is for callers that need the list as data** — the `InScope` helper, tests, and PR 4's inspection endpoint. RFC 0036's recall query does **not** route through it; it joins `membership_intervals` directly in SQL ([RFC §E](0035-channel-membership-interval-ledger.md#e-query-surface)). Noted so a reviewer does not expect the recall path to call this method.
-- **`GetAccessibleChannels` is deferred to PR 4** — it is a Phase 2 convenience, not load-bearing (RFC 0036's tool defaults to "all accessible channels" via the SQL join), so it lands with the endpoint that needs it.
+- **`GetAccessibleChannels` is deferred to PR 4** — it is a Phase 2 convenience, not load-bearing (RFC 0036's tool defaults to "all accessible channels" via the SQL join), so it lands in PR 4 with the optional Phase-2 inspection surface — ahead of its eventual operator-inspection consumer, since the history endpoint reads per-channel intervals via `GetMembershipIntervals`, not this method.
 
 #### Tests
 
@@ -229,15 +229,15 @@ Per [RFC §Test Strategy](0035-channel-membership-interval-ledger.md#test-strate
 | File | Change |
 |------|--------|
 | `internal/channels/sqlite_membership_intervals.go` | Add `GetAccessibleChannels(ctx, participantID) ([]string, error)` — distinct `channel_id`s the participant has ever held an interval in (`SELECT DISTINCT channel_id … ORDER BY channel_id`). Add to the `ChannelStore` interface in `store.go` (one line). |
-| `internal/server/channel_membership_handlers.go` (new) | The read-only `GET` handler returning a participant's intervals as JSON. A **new file** rather than [`channel_handlers.go`](../../internal/server/channel_handlers.go) (494 lines — five under the cap). Proposed route: `GET /api/v1/channels/{channel_id}/members/{participant_id}/history` → `{ "intervals": [ { "joined_at", "left_at" }, … ] }` (`left_at` omitted/null while open). The exact path is a review decision; it must read naturally alongside the existing channel-member routes. |
+| `internal/server/channel_member_handlers.go` (existing) | The read-only `GET` handler returning a participant's intervals as JSON. Appended to the existing member-handlers file rather than [`channel_handlers.go`](../../internal/server/channel_handlers.go) (494 lines — five under the cap). Route: `GET /api/v1/channels/{id}/members/{participant_id}/history` → `{ "intervals": [ { "joined_at", "left_at" }, … ] }` (`left_at` omitted/null while open). It reads naturally alongside the existing channel-member routes in the same file. |
 | `internal/server/channel_types.go` | Response type for the interval-history payload. |
-| `internal/server/channel_membership_handlers_test.go` (new) | Handler tests (see below). |
+| `internal/server/channel_member_history_test.go` (new) | Handler tests (see below). |
 
 #### Key implementation details
 
-- **Auth inherits the channel-surface trust level (OQ #2).** The endpoint adds no new auth model; it matches the existing unauthenticated channel REST surface at the current single-tenant trust level and picks up RFC 0009's model when that lands. The handler MUST NOT ship more permissively than its neighbours. Exposing who-was-where-when is no more sensitive than `GetMembers` already is.
+- **Auth inherits the channel-surface trust level (OQ #2).** The endpoint adds no new auth model; it matches the existing unauthenticated channel REST surface at the current single-tenant trust level and picks up RFC 0009's model when that lands. The handler MUST NOT ship more permissively than its neighbours. Note it reveals MORE than `GetMembers` (which lists only current members): departed members and every past stint's window, so it must gain access control no later than its neighbours.
 - **Read-only.** `GET` only — no mutation surface on the ledger from REST. The append-only invariant stays owned by the four Go write hooks (PR 3).
-- **`GetAccessibleChannels` lands here, not PR 2**, because this endpoint is its only Phase-2 consumer; RFC 0036 does not need it.
+- **`GetAccessibleChannels` lands here, not PR 2**, because PR 4 builds the optional Phase-2 surface it belongs to. It ships ahead of its consumer: the history endpoint reads per-channel intervals via `GetMembershipIntervals` (not this method), and RFC 0036 does not need it either.
 
 #### Tests
 
@@ -247,10 +247,10 @@ Per [RFC §Test Strategy](0035-channel-membership-interval-ledger.md#test-strate
 
 #### PR checklist
 
-- [ ] `go test ./internal/channels/ ./internal/server/ -run 'AccessibleChannels|MembershipHistory|Inspection' -count=1` passes.
-- [ ] `make test` green; `channel_handlers.go` untouched / still ≤ 500 lines.
-- [ ] Endpoint registered in the channel-router wiring next to the existing member routes; route documented in the handler header comment.
-- [ ] Auth posture documented inline as inheriting the channel-surface trust level (OQ #2); no bespoke auth added.
+- [x] `go test ./internal/channels/ ./internal/server/ -run 'AccessibleChannels|MembershipHistory|Inspection' -count=1` passes.
+- [x] `make test-go` green — 18 packages, no failures; `channel_handlers.go` untouched / still 494 lines. (Go-only diff — full `make test` also runs the `test-python` / `test-integration` lanes, which exercise no code this PR touches; those lanes were not run.)
+- [x] Endpoint registered in the channel-router wiring next to the existing member routes; route documented in the handler header comment.
+- [x] Auth posture documented inline as inheriting the channel-surface trust level (OQ #2); no bespoke auth added.
 - [ ] If the cut tightens, this PR is the drop candidate — confirm with the maintainer before deferring.
 
 ---
@@ -288,7 +288,7 @@ Doc-only unless a review finding requires a code change.
 | `main` carries a **backfilled-but-not-maintained** ledger between PR 1 and PR 3. | Coherent additive state: the table reflects the current snapshot, has no consumer (RFC 0036 has not landed), regresses no existing behaviour, and the invariant index guards it from creation. PR 3 makes it track changes; RFC 0036 Phase 1 is gated on PR 3, not PR 1. |
 | `AddMember` going transactional **regresses the add path** (error semantics, idempotency, FK-violation mapping). | PR 3 preserves the `ON CONFLICT DO NOTHING` + `RowsAffected`-gated open, so a redundant add still no-ops on both tables; the `ErrChannelNotFound` FK mapping moves inside the tx unchanged; existing `AddMember` tests run green, plus the new no-second-interval test. |
 | **Pre-ship history is unrecoverable** — a persona removed before v9 has no backfillable stint. | Accepted and documented ([RFC §D](0035-channel-membership-interval-ledger.md#d-backfill), OQ #1): the backfill seeds one open interval per *currently present* member; the ledger is exact from v9 forward. Surfaced as a known recall limitation in RFC 0036's CHANGELOG Upgrade Notes, not a bug. |
-| **File-size cap** (`channels.go` 499, `sqlite_query.go` 465, `channel_handlers.go` 494) is breached by the additions. | New code is routed into new files (`membership_intervals.go`, `sqlite_membership_intervals.go`, `channel_membership_handlers.go`); the one-line interface additions land in `store.go` (197 lines, far under the cap), not the near-cap files. Each PR checklist re-verifies the cap. |
+| **File-size cap** (`channels.go` 499, `sqlite_query.go` 465, `channel_handlers.go` 494) is breached by the additions. | New code is routed into new files (`membership_intervals.go`, `sqlite_membership_intervals.go`) and the existing `channel_member_handlers.go`; the one-line interface additions land in `store.go` (197 lines, far under the cap), not the near-cap files. Each PR checklist re-verifies the cap. |
 | **Phase 2 (PR 4) reads as scope creep** in an infra-only RFC. | It is explicitly cut-tolerant and **not** a recall dependency — RFC 0036 joins the ledger server-side. If the v0.3.9 cut tightens, PR 4 is the first drop, leaving the recall headline intact ([v0.3.9-plan §Candidate fold-ins](../v0.3.9-plan.md#candidate-fold-ins-maintainer-decision)). |
 
 ---
@@ -310,8 +310,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 |---|-------|--------|--------|-----------|--------|
 | 1 | Migration v9 — `membership_intervals` table + indexes + backfill | `feature/v039-rfc0035-migration` | ✅ Merged | [#671](https://github.com/mkhomutov/Persatrix/pull/671) | 2026-06-18 |
 | 2 | Read surface — struct, `GetMembershipIntervals`, `InScope`, interface | `feature/v039-rfc0035-read-surface` | ✅ Merged | [#672](https://github.com/mkhomutov/Persatrix/pull/672) | 2026-06-18 |
-| 3 | Write hooks — transactional interval open/close (load-bearing) + `CreateChannelWithMembers` (fourth hook) | `feature/v039-rfc0035-write-hooks` | 🔀 PR open | [#673](https://github.com/mkhomutov/Persatrix/pull/673) | — |
-| 4 | Phase 2 — inspection endpoint + `GetAccessibleChannels` (cut-tolerant) | `feature/v039-rfc0035-inspection-endpoint` | ⬜ Not started | — | — |
+| 3 | Write hooks — transactional interval open/close (load-bearing) + `CreateChannelWithMembers` (fourth hook) | `feature/v039-rfc0035-write-hooks` | ✅ Merged | [#673](https://github.com/mkhomutov/Persatrix/pull/673) | 2026-06-18 |
+| 4 | Phase 2 — inspection endpoint + `GetAccessibleChannels` (cut-tolerant) | `feature/v039-rfc0035-inspection-endpoint` | 🔀 PR open | [#674](https://github.com/mkhomutov/Persatrix/pull/674) | — |
 | 5 | Review follow-ups + closeout | `feature/v039-rfc0035-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
