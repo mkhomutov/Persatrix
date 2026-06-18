@@ -95,6 +95,14 @@ type ChannelStore interface {
 	// IsMember is a fast existence check used by the publish path.
 	IsMember(ctx context.Context, channelID, participantID string) (bool, error)
 
+	// GetMembershipIntervals returns every membership stint for `(channelID,
+	// participantID)` from the RFC 0035 `membership_intervals` ledger, ordered
+	// by `joined_at` ascending. An open stint carries a zero [MembershipInterval.LeftAt].
+	// An unknown pair returns an empty slice, not an error. This is the data
+	// form of the ledger for the [InScope] predicate and the Phase 2 inspection
+	// endpoint; RFC 0036 recall joins the ledger directly in SQL instead.
+	GetMembershipIntervals(ctx context.Context, channelID, participantID string) ([]MembershipInterval, error)
+
 	// PublishMessage stores `msg` after enforcing the membership rule and the
 	// per-channel cap.
 	//
