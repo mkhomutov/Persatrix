@@ -177,6 +177,15 @@ func (s *sqliteStore) RemoveMember(ctx context.Context, channelID, participantID
 		return err
 	}
 	if closed == 0 {
+		// Log at the store, not only at the REST boundary's default-case
+		// handler: internal callers (config reconcile, future non-REST callers)
+		// never pass through writeChannelError, and a silent never-closing
+		// interval is an RFC 0036 data-exposure bug — the breach must leave an
+		// operator breadcrumb regardless of who called RemoveMember.
+		s.logger.Error("channels: membership ledger divergence",
+			zap.String("channel_id", channelID),
+			zap.String("participant_id", participantID),
+		)
 		return fmt.Errorf("%w: channel=%s participant=%s",
 			errMembershipLedgerDivergence, channelID, participantID)
 	}

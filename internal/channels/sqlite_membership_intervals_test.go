@@ -1,8 +1,9 @@
 // RFC 0035 PR 3 — the transactional write hooks that keep the
 // `membership_intervals` ledger live and exact. PR 1 landed the table dormant,
 // PR 2 the read surface ([GetMembershipIntervals] / [InScope]); these tests pin
-// the four `memberships`-mutating call sites that must each maintain the ledger
-// in the same transaction:
+// the four `memberships` lifecycle call sites — each inserts a row (a join) or
+// deletes one (a leave) — that must maintain the ledger in the same transaction
+// (policy-only UPDATEs move no boundary and open/close no interval):
 //
 //   - AddMember               — opens one interval on a genuine insert, none on
 //     a redundant re-add (RowsAffected==0).
@@ -36,6 +37,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // TestAddMember_OpensOneOpenInterval pins Goal 2: a genuine AddMember opens
@@ -200,6 +203,36 @@ func TestCreateChannelWithMembers_ThenRemoveMember_ClosesInterval(t *testing.T) 
 	assert.False(t, ivs[0].LeftAt.IsZero(), "the initial member's interval is closed on removal")
 }
 
+// TestCreateChannelWithMembers_RollsBackIntervals proves the fourth hook's
+// interval-open rides the SAME create transaction as the channel + member
+// inserts — so a mid-slice failure rolls back ALL of it, intervals included.
+// TestSQLiteStore_CreateChannelWithMembers_AtomicOnPartialFailure already pins
+// that the channel and memberships roll back; this adds the ledger half, whose
+// rollback scope (the channel row + every already-opened member interval) is
+// wider than the single-row AddMember atomicity case. The seam is the same: an
+// invalid participant id in the second slot fails ValidateParticipantID after
+// alice's row + interval are already open in the tx, forcing the rollback.
+func TestCreateChannelWithMembers_RollsBackIntervals(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	ctx := context.Background()
+
+	err := store.CreateChannelWithMembers(ctx, Channel{
+		ID: "group:planning", Name: "planning", Type: ChannelTypeGroup,
+	}, []Member{
+		{ParticipantID: "alice", RespondPolicy: RespondAlways}, // inserted + interval opened
+		{ParticipantID: "", RespondPolicy: RespondAlways},      // invalid → triggers rollback
+	})
+	require.Error(t, err, "the invalid member must surface an error")
+
+	// alice's interval-open was committed to the tx before the failure; the
+	// rollback must undo it too. GetMembershipIntervals on the rolled-back
+	// channel reads back empty (a lookup, not a membership assertion).
+	ivs, err := store.GetMembershipIntervals(ctx, "group:planning", "alice")
+	require.NoError(t, err)
+	assert.Empty(t, ivs,
+		"alice's interval rolled back with the channel + memberships (atomic)")
+}
+
 // TestAddMember_OpensInterval_Atomically proves the interval open rides the
 // memberships insert's transaction. We pre-seed a dangling OPEN interval (no
 // memberships row) so the AddMember interval-open collides with
@@ -269,6 +302,44 @@ func TestRemoveMember_LedgerDivergence_RollsBack(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, isMember,
 		"RemoveMember rolled back; the memberships row survives the divergence guard")
+}
+
+// TestRemoveMember_LedgerDivergence_LogsError pins that the divergence breach is
+// observable at the STORE layer, not only at the REST boundary. The REST handler
+// logs unrecognised store errors via writeChannelError's default case, but
+// internal callers (config reconcile prunes members; future non-REST callers)
+// never pass through it — so RemoveMember itself emits an Error-level log naming
+// the channel and participant before returning the sentinel. A silent
+// never-closing interval is an RFC 0036 data-exposure bug; it must leave an
+// operator breadcrumb no matter who called RemoveMember.
+func TestRemoveMember_LedgerDivergence_LogsError(t *testing.T) {
+	core, logs := observer.New(zap.ErrorLevel) // success-path Info is below the floor — not captured
+	path := filepath.Join(t.TempDir(), "channels.db")
+	store, err := NewSQLiteStore(path, SQLiteOptions{Logger: zap.New(core)})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	require.NoError(t, store.CreateChannel(ctx, Channel{
+		ID: "group:planning", Name: "planning", Type: ChannelTypeGroup,
+	}))
+
+	// Synthesize divergence: a memberships row with NO open interval.
+	withDB(t, path, func(db *sql.DB) {
+		_, err := db.Exec(
+			`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at)
+			   VALUES ('group:planning', 'ghost', 'always', '2026-01-01T00:00:00Z')`)
+		require.NoError(t, err)
+	})
+
+	err = store.RemoveMember(ctx, "group:planning", "ghost")
+	require.ErrorIs(t, err, errMembershipLedgerDivergence)
+
+	entries := logs.FilterMessage("channels: membership ledger divergence").All()
+	require.Len(t, entries, 1, "the invariant breach is logged exactly once at the store")
+	assert.Equal(t, zap.ErrorLevel, entries[0].Level, "divergence logs at Error level")
+	fields := entries[0].ContextMap()
+	assert.Equal(t, "group:planning", fields["channel_id"], "log names the channel")
+	assert.Equal(t, "ghost", fields["participant_id"], "log names the participant")
 }
 
 // TestRemoveMember_NotPresent_IsNotDivergence guards the boundary: removing a

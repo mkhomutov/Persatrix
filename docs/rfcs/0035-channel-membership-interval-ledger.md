@@ -277,8 +277,12 @@ Notes:
 
 ### C. Write path — opening and closing intervals
 
-Four call sites mutate `memberships` today; each gets a matching
-interval write **in the same transaction**. (An earlier draft of this
+Four call sites change `memberships` **membership** today — they
+**insert** a row (a join) or **delete** one (a leave) — and each gets a
+matching interval write **in the same transaction**. Policy-only writes
+(`SetMemberPolicy` / `UpdateMemberConfig`) `UPDATE` a row in place
+without moving its join/leave boundary, so they open or close no
+interval and are deliberately not hooked. (An earlier draft of this
 section counted three — `AddMember` / `RemoveMember` / `GetOrCreateDM` —
 and missed `CreateChannelWithMembers`, the atomic create-with-members
 path the REST create handler and config reconcile use. It is the

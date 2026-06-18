@@ -173,7 +173,7 @@ SELECT channel_id, participant_id, joined_at, NULL FROM memberships;
 ### PR 3: `feature/v039-rfc0035-write-hooks` — Transactional Interval Open/Close (load-bearing)
 
 **Depends on**: PR 2 merged.
-**Purpose**: Wire the four `memberships`-mutating call sites to open/close intervals **in the same transaction**, so the ledger is live and exact. This is the hard dependency for [RFC 0036](0036-persona-message-recall.md) Phase 1 — it cannot begin until this merges.
+**Purpose**: Wire the four `memberships` lifecycle call sites — the ones that **insert** a row (a join) or **delete** one (a leave); policy-only `UPDATE`s (`SetMemberPolicy` / `UpdateMemberConfig`) move no join/leave boundary and open/close no interval — to open/close intervals **in the same transaction**, so the ledger is live and exact. This is the hard dependency for [RFC 0036](0036-persona-message-recall.md) Phase 1 — it cannot begin until this merges.
 
 #### Scope
 
