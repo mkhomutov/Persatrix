@@ -202,3 +202,46 @@ func TestGetMembershipIntervals_TwoStintHistory(t *testing.T) {
 	assert.True(t, InScope(got, mustRFC3339(t, "2026-01-05T00:00:00Z")), "stint-1 timestamp is in scope")
 	assert.False(t, InScope(got, mustRFC3339(t, "2026-01-15T00:00:00Z")), "removal-gap timestamp is out of scope")
 }
+
+// --- RFC 0035 PR 4 (Phase 2) — GetAccessibleChannels --------------------------
+
+// TestGetAccessibleChannels_DistinctAcrossStintsOrdered pins the Phase 2
+// convenience query: the distinct set of channel ids a participant has EVER held
+// an interval in, ordered by channel id. A channel with two stints (a closed and
+// an open interval) appears exactly once (deduped), and a closed-only channel
+// (joined then left, never rejoined) appears alongside an open-only one — the set
+// is "ever a member", not "currently a member".
+func TestGetAccessibleChannels_DistinctAcrossStintsOrdered(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	ctx := context.Background()
+
+	// planning: join → leave → rejoin ⇒ one closed + one open interval for alice.
+	planning := mustCreateGroup(t, store, "planning", "alice")
+	require.NoError(t, store.RemoveMember(ctx, planning, "alice"))
+	require.NoError(t, store.AddMember(ctx, planning, "alice", RespondWhenMentioned))
+
+	// design: a single open stint.
+	mustCreateGroup(t, store, "design", "alice")
+
+	// archive: a single closed stint — joined then left, never rejoined.
+	archive := mustCreateGroup(t, store, "archive", "alice")
+	require.NoError(t, store.RemoveMember(ctx, archive, "alice"))
+
+	got, err := store.GetAccessibleChannels(ctx, "alice")
+	require.NoError(t, err)
+	// Deduped (planning's two intervals collapse to one id) and ordered by
+	// channel id ascending; the closed-only and open-only channels both appear.
+	assert.Equal(t, []string{"group:archive", "group:design", "group:planning"}, got)
+}
+
+// TestGetAccessibleChannels_UnknownParticipant reads back an empty slice (not an
+// error) for a participant that has never held an interval anywhere — a clean
+// lookup, mirroring GetMembershipIntervals on an unknown pair.
+func TestGetAccessibleChannels_UnknownParticipant(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	mustCreateGroup(t, store, "planning", "alice")
+
+	got, err := store.GetAccessibleChannels(context.Background(), "nobody")
+	require.NoError(t, err)
+	assert.Empty(t, got, "a participant with no intervals reads back empty, not an error")
+}
