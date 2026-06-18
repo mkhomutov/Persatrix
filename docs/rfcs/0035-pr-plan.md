@@ -310,7 +310,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 |---|-------|--------|--------|-----------|--------|
 | 1 | Migration v9 — `membership_intervals` table + indexes + backfill | `feature/v039-rfc0035-migration` | ✅ Merged | [#671](https://github.com/mkhomutov/Persatrix/pull/671) | 2026-06-18 |
 | 2 | Read surface — struct, `GetMembershipIntervals`, `InScope`, interface | `feature/v039-rfc0035-read-surface` | ✅ Merged | [#672](https://github.com/mkhomutov/Persatrix/pull/672) | 2026-06-18 |
-| 3 | Write hooks — transactional interval open/close (load-bearing) + `CreateChannelWithMembers` (fourth hook) | `feature/v039-rfc0035-write-hooks` | 🔀 PR open | _TBD_ | — |
+| 3 | Write hooks — transactional interval open/close (load-bearing) + `CreateChannelWithMembers` (fourth hook) | `feature/v039-rfc0035-write-hooks` | 🔀 PR open | [#673](https://github.com/mkhomutov/Persatrix/pull/673) | — |
 | 4 | Phase 2 — inspection endpoint + `GetAccessibleChannels` (cut-tolerant) | `feature/v039-rfc0035-inspection-endpoint` | ⬜ Not started | — | — |
 | 5 | Review follow-ups + closeout | `feature/v039-rfc0035-close` | ⬜ Not started | — | — |
 
