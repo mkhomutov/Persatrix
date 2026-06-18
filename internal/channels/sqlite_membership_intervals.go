@@ -119,6 +119,11 @@ func (s *sqliteStore) GetMembershipIntervals(
 // channel's messages for the stint's window, so an audit view must surface it.
 // RFC 0036 recall does NOT route through this method — its default-all-channels
 // search joins `membership_intervals` directly in SQL (RFC 0035 §E).
+//
+// NOTE: it has no in-tree caller yet — the Phase 2 history endpoint serves
+// per-channel intervals from GetMembershipIntervals, and recall bypasses this
+// read. It ships as the RFC 0035 Phase-2 optional convenience (the RFC marks it
+// cut-tolerant); revisit at the RFC 0035 closeout (PR 5) if still unconsumed.
 func (s *sqliteStore) GetAccessibleChannels(ctx context.Context, participantID string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT channel_id

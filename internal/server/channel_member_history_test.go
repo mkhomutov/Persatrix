@@ -34,15 +34,25 @@ func TestChannels_MembershipHistory_TwoStints(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Len(t, resp.Intervals, 2)
 
-	// [0] is the earlier, closed stint — left_at present and after the join.
+	// Oldest-first ordering is proven structurally, not by strict wall-clock
+	// inequality: the store orders by (joined_at, id), and the id tiebreaker
+	// exists precisely because two stints can share a joined_at — so "[0] closed,
+	// [1] open" IS the ordering proof and needs no timestamp comparison. The time
+	// assertions below are logical invariants (`!Before`, i.e. >=) that hold even
+	// if two of the three add/remove/add calls land in the same clock tick; a
+	// strict `.After` here would be a self-inflicted flake the store layer guards
+	// against on our behalf.
+
+	// [0] is the earlier, closed stint — left_at present, not before its join.
 	require.NotNil(t, resp.Intervals[0].LeftAt, "the first stint is closed")
 	assert.False(t, resp.Intervals[0].JoinedAt.IsZero())
-	assert.True(t, resp.Intervals[0].LeftAt.After(resp.Intervals[0].JoinedAt))
+	assert.False(t, resp.Intervals[0].LeftAt.Before(resp.Intervals[0].JoinedAt),
+		"a stint cannot end before it began")
 
 	// [1] is the later, open stint — left_at omitted (nil after unmarshal).
 	assert.Nil(t, resp.Intervals[1].LeftAt, "the second stint is open")
-	assert.True(t, resp.Intervals[1].JoinedAt.After(*resp.Intervals[0].LeftAt),
-		"the re-add join is after the first leave")
+	assert.False(t, resp.Intervals[1].JoinedAt.Before(*resp.Intervals[0].LeftAt),
+		"the re-add join cannot predate the first leave")
 }
 
 // TestChannels_MembershipHistory_NoIntervalsIsEmpty200 pins that a KNOWN channel

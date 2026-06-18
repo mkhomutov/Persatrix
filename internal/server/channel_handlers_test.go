@@ -486,6 +486,7 @@ func TestChannels_Endpoints_503WhenStoreUnset(t *testing.T) {
 		"/api/v1/channels",
 		"/api/v1/channels/group:x",
 		"/api/v1/channels/group:x/messages",
+		"/api/v1/channels/group:x/members/alice/history", // RFC 0035 Phase 2 membership-history inspection
 	} {
 		rec := doRequest(srv.Handler(), http.MethodGet, path, nil)
 		assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "path=%s", path)
