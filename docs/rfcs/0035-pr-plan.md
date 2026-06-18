@@ -23,7 +23,7 @@ The work splits into **5 PRs**:
 - **PR 4** is RFC 0035 **Phase 2** (optional, cut-tolerant): the read-only operator inspection endpoint + `GetAccessibleChannels`.
 - **PR 5** is review follow-ups + closeout (status flips, progress-overview fill).
 
-**Prerequisites**: the channel store at **v8** (✅ — `channelStoreSchemaVersion = 8`, [`sqlite_schema.go:73`](../../internal/channels/sqlite_schema.go#L73)); the [v0.3.9 master plan Phase 0](../v0.3.9-plan.md#phase-0--this-pr) merged so the RFC 0035 Master-Index row exists (✅ — [#669](https://github.com/mkhomutov/Persatrix/pull/669)). No dependency beyond the existing RFC 0011 channel store.
+**Prerequisites**: the channel store at **v8** before PR 1 (✅ — `channelStoreSchemaVersion` [`sqlite_schema.go:86`](../../internal/channels/sqlite_schema.go#L86), which PR 1 bumps 8 → 9); the [v0.3.9 master plan Phase 0](../v0.3.9-plan.md#phase-0--this-pr) merged so the RFC 0035 Master-Index row exists (✅ — [#669](https://github.com/mkhomutov/Persatrix/pull/669)). No dependency beyond the existing RFC 0011 channel store.
 
 ### Open-question resolutions locked at plan-authoring time
 
@@ -79,8 +79,8 @@ PR 1 is pure additive schema; no Go behaviour change. PR 3 is the hard dependenc
 
 | File | Change |
 |------|--------|
-| [`internal/channels/sqlite_migrations.go`](../../internal/channels/sqlite_migrations.go) | Add `migrateV8ToV9` and a `case 9:` arm in `applyMigration`. The migration runs in one transaction: `CREATE TABLE membership_intervals`, `CREATE INDEX idx_membership_intervals_lookup`, `CREATE UNIQUE INDEX ux_membership_intervals_open … WHERE left_at IS NULL`, the §D backfill `INSERT … SELECT … FROM memberships`, then `stampUserVersionTx(tx, 9)` as the final statement before `tx.Commit()` (the L3 atomicity rule the file header documents). A header comment block mirrors `migrateV6ToV7` / `migrateV7ToV8` style, naming the table as RFC 0035's substrate and the partial unique index as the open-interval invariant guard. |
-| [`internal/channels/sqlite_schema.go`](../../internal/channels/sqlite_schema.go#L73) | Bump `channelStoreSchemaVersion` 8 → 9; extend the migration-history header comment with the v9 line. |
+| [`internal/channels/sqlite_migrations.go`](../../internal/channels/sqlite_migrations.go) | Add a `case 9:` arm in `applyMigration` dispatching to `migrateV8ToV9` — which lives in the sibling file `sqlite_membership_intervals_migration.go` to keep this file under the 500-line cap. That function runs in one transaction: `CREATE TABLE membership_intervals`, `CREATE INDEX idx_membership_intervals_lookup`, `CREATE UNIQUE INDEX ux_membership_intervals_open … WHERE left_at IS NULL`, the §D backfill `INSERT … SELECT … FROM memberships`, then `stampUserVersionTx(tx, 9)` as the final statement before `tx.Commit()` (the L3 atomicity rule the file header documents). A header comment block mirrors `migrateV6ToV7` / `migrateV7ToV8` style, naming the table as RFC 0035's substrate and the partial unique index as the open-interval invariant guard. |
+| [`internal/channels/sqlite_schema.go`](../../internal/channels/sqlite_schema.go#L86) | Bump `channelStoreSchemaVersion` 8 → 9; extend the migration-history header comment with the v9 line. |
 | `internal/channels/sqlite_membership_intervals_migration_test.go` (new) | Migration tests (see below), modelled on [`sqlite_epoch_migration_test.go`](../../internal/channels/sqlite_epoch_migration_test.go) / [`sqlite_schema_user_version_test.go`](../../internal/channels/sqlite_schema_user_version_test.go). |
 
 #### Schema (per [RFC §B](0035-channel-membership-interval-ledger.md#b-schema--membership_intervals))
@@ -305,7 +305,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
-| 1 | Migration v9 — `membership_intervals` table + indexes + backfill | `feature/v039-rfc0035-migration` | ⬜ Not started | — | — |
+| 1 | Migration v9 — `membership_intervals` table + indexes + backfill | `feature/v039-rfc0035-migration` | 🔀 PR open | [#671](https://github.com/mkhomutov/Persatrix/pull/671) | — |
 | 2 | Read surface — struct, `GetMembershipIntervals`, `InScope`, interface | `feature/v039-rfc0035-read-surface` | ⬜ Not started | — | — |
 | 3 | Write hooks — transactional interval open/close (load-bearing) | `feature/v039-rfc0035-write-hooks` | ⬜ Not started | — | — |
 | 4 | Phase 2 — inspection endpoint + `GetAccessibleChannels` (cut-tolerant) | `feature/v039-rfc0035-inspection-endpoint` | ⬜ Not started | — | — |

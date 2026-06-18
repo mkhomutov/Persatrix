@@ -70,7 +70,20 @@ import (
 //	    Open Q2). A pure addition: every pre-v8 row reads back with no override
 //	    at revision 0, so a v0.3.8 database behaves byte-identically until the
 //	    PR-2 apply path is wired.
-const channelStoreSchemaVersion = 8
+//	v9 — RFC 0035 PR 1 (membership-interval ledger): introduces the
+//	    append-only `membership_intervals` table — one row per membership
+//	    stint `(channel_id, participant_id, joined_at, left_at)` — with a
+//	    `(channel_id, participant_id, joined_at)` lookup index and the
+//	    partial unique index `ux_membership_intervals_open` (WHERE left_at
+//	    IS NULL) that makes a double-open a hard INSERT failure. The §D
+//	    backfill seeds one OPEN interval per current `memberships` row, so
+//	    the ledger reflects the present snapshot from v9 forward; pre-ship
+//	    removed stints are permanently absent (accepted gap). A pure
+//	    addition: no existing table, row, or index is touched, so a v0.3.8
+//	    database reads back byte-identically. The ledger is the load-bearing
+//	    substrate for RFC 0036 verbatim recall (its scoped search joins this
+//	    table); the write hooks that keep it live land in RFC 0035 PR 3.
+const channelStoreSchemaVersion = 9
 
 // schemaV1SQL is the original schema shipped in PR #231. Applied verbatim
 // when opening a fresh database; the v1→v2 migration below uses

@@ -58,7 +58,7 @@ interaction — the episodic tier stores LLM-generated **summaries**
 ([`agents/memory/migrations.py:104-117`](../../agents/memory/migrations.py#L104-L117)).
 It cannot ask *what was literally said*. The verbatim text of every
 message lives in the channel store's `messages` table
-([`internal/channels/sqlite_schema.go:96-105`](../../internal/channels/sqlite_schema.go#L96-L105),
+([`internal/channels/sqlite_schema.go:109-118`](../../internal/channels/sqlite_schema.go#L109-L118),
 `content TEXT NOT NULL`), but the only way to read it is timestamp-
 ordered pagination via `GetHistory` — there is no search, and nothing
 exposes it to the persona as a tool.
@@ -219,9 +219,9 @@ stamped inside the migration transaction). Both the `case` arm and the
 migrate function live in
 [`internal/channels/sqlite_migrations.go`](../../internal/channels/sqlite_migrations.go)
 — the dedicated migration runner the channel store extracted out of
-`sqlite_schema.go` after this RFC was first drafted (the store sits at
-v8 today; v9 / v10 are the next two free slots as of 2026-06-17, RFC
-0035 then RFC 0036).
+`sqlite_schema.go` after this RFC was first drafted (RFC 0035 PR 1 has
+since taken v9, so v10 is the next free slot as of 2026-06-17 — this
+RFC's).
 
 The index mirrors the episodic tier's external-content FTS5 pattern
 ([`agents/memory/migrations.py:369-389`](../../agents/memory/migrations.py#L369-L389),

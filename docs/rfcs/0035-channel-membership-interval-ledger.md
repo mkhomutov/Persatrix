@@ -3,7 +3,7 @@ id: RFC-0035
 title: Channel Membership Interval Ledger
 summary: Add an append-only join/leave ledger to the channel store so the system can answer "was participant X a member of channel Y at time T" — the membership history a current-state-only `memberships` table cannot reconstruct after a remove or a rejoin.
 type: architecture
-status: proposed
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-16
 target: v0.3.9
@@ -14,7 +14,7 @@ depends_on:
 # RFC 0035 — Channel Membership Interval Ledger
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: 🚧 Implementing
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
 **Target**: v0.3.9
@@ -50,7 +50,7 @@ depends_on:
 ## Summary
 
 The channel store records membership as **current state only**. The
-`memberships` table ([`internal/channels/sqlite_schema.go:87-94`](../../internal/channels/sqlite_schema.go#L87-L94))
+`memberships` table ([`internal/channels/sqlite_schema.go:100-107`](../../internal/channels/sqlite_schema.go#L100-L107))
 has one row per `(channel_id, participant_id)` pair with a single
 `joined_at` timestamp; `RemoveMember` **hard-deletes** that row
 ([`sqlite_query.go:130-175`](../../internal/channels/sqlite_query.go#L130-L175)).
@@ -214,14 +214,18 @@ interval (§C).
 
 ### B. Schema — `membership_intervals`
 
-Channel-store schema migration **v9** (the store is at v8 today —
-`channelStoreSchemaVersion = 8`,
-[`sqlite_schema.go:73`](../../internal/channels/sqlite_schema.go#L73);
-v9 is the next free slot as of 2026-06-17). A new `case 9:` arm in
-`applyMigration` and a `migrateV8ToV9` function — both in
+Channel-store schema migration **v9** (this RFC bumps the store from v8
+to v9 — `channelStoreSchemaVersion = 9`,
+[`sqlite_schema.go:86`](../../internal/channels/sqlite_schema.go#L86);
+v9 was the next free slot as of 2026-06-17). A new `case 9:` arm in
+`applyMigration` — in
 [`internal/channels/sqlite_migrations.go`](../../internal/channels/sqlite_migrations.go),
 the dedicated migration runner the channel store extracted out of
-`sqlite_schema.go` after this RFC was first drafted — following the
+`sqlite_schema.go` after this RFC was first drafted — dispatches to a
+`migrateV8ToV9` function carried in its own sibling file
+[`internal/channels/sqlite_membership_intervals_migration.go`](../../internal/channels/sqlite_membership_intervals_migration.go),
+a split that keeps `sqlite_migrations.go` under the repo's 500-line
+file cap, following the
 existing one-step-per-PR migration pattern; the const (in
 `sqlite_schema.go`) is bumped to 9 and `user_version` is stamped inside
 the migration's transaction (the L3 atomicity rule the file header
@@ -248,8 +252,11 @@ CREATE UNIQUE INDEX ux_membership_intervals_open
 
 Notes:
 
-- `id INTEGER PRIMARY KEY` is the rowid alias — monotonic, no
-  `AUTOINCREMENT` needed for an append-only table.
+- `id INTEGER PRIMARY KEY` is the rowid alias — a compact surrogate
+  key. No `AUTOINCREMENT` is needed: nothing depends on id ordering or
+  non-reuse (the ledger is scanned by `joined_at` / `left_at`, never by
+  id), and a plain rowid can be reclaimed after an `ON DELETE CASCADE`,
+  which is harmless for a time-keyed table.
 - `joined_at` / `left_at` are `DATETIME`, matching `memberships.joined_at`
   and `messages.timestamp`. RFC 0036's join compares
   `membership_intervals.joined_at` against `messages.timestamp`
@@ -303,8 +310,8 @@ UPDATE membership_intervals
  WHERE channel_id = ? AND participant_id = ? AND left_at IS NULL;
 ```
 
-The backfill (§D) guarantees every participant present at v4 has an
-open interval, and the `AddMember` hook guarantees every post-v4 join
+The backfill (§D) guarantees every participant present at v9 has an
+open interval, and the `AddMember` hook guarantees every post-v9 join
 opens one, so this `UPDATE` finds exactly one row to close on the
 success path. If it instead closes **zero** rows — a `memberships` row
 existed with no matching open interval — the open-interval invariant
@@ -346,7 +353,7 @@ interval starting at their recorded `joined_at`. This satisfies
 the in-scope predicate (§F) is immediately correct for all present
 members.
 
-**The accepted gap.** A participant removed *before* v4 ships left no
+**The accepted gap.** A participant removed *before* v9 ships left no
 `memberships` row, so the backfill cannot see them — that stint is
 unrecoverable. Likewise, for a participant whose `joined_at` predates
 their *actual* first interaction (none exist today, but defensively:
@@ -355,7 +362,7 @@ at the recorded join. Consequence for RFC 0036: a persona that joined
 a channel, was removed, and is re-added all *before* this RFC ships
 can recall only from its current (re-added) stint forward. This is
 documented as a known limitation of recall, not a correctness bug —
-the ledger is exact for every membership change from v4 onward.
+the ledger is exact for every membership change from v9 onward.
 
 ### E. Query surface
 
@@ -498,7 +505,7 @@ Question #2.
 
 | Component | Files | Change |
 |-----------|-------|--------|
-| Go orchestrator | `internal/channels/sqlite_migrations.go` | `migrateV8ToV9` + `case 9:` arm: `membership_intervals` table, indexes, §D backfill |
+| Go orchestrator | `internal/channels/sqlite_membership_intervals_migration.go` (new) + `case 9:` arm in `internal/channels/sqlite_migrations.go` | `migrateV8ToV9`: `membership_intervals` table, indexes, §D backfill — the function lives in the sibling file so `sqlite_migrations.go` stays under the 500-line cap |
 | Go orchestrator | `internal/channels/sqlite_schema.go` | Bump `channelStoreSchemaVersion` to 9; migration-history header comment |
 | Go orchestrator | `internal/channels/sqlite_query.go` | `AddMember` (transactional, opens interval), `RemoveMember` (closes interval), `GetOrCreateDM` (opens DM intervals), new `GetMembershipIntervals` |
 | Go orchestrator | `internal/channels/channels.go` | `MembershipInterval` type, `InScope` helper, `ChannelStore` interface method |
@@ -541,7 +548,7 @@ Question #2.
 
 1. **Backfill `joined_at` fidelity.** The backfill trusts
    `memberships.joined_at` as the open interval's start. For a
-   participant re-added before v4 (where `joined_at` is the *latest*
+   participant re-added before v9 (where `joined_at` is the *latest*
    re-add, the earlier stint already lost), this is the best available
    value and the open interval is correct from that point forward.
    No action proposed — the §D "accepted gap" framing covers it. Listed

@@ -186,6 +186,84 @@ func TestMigrateV5ToV6_StampsUserVersionInTransaction(t *testing.T) {
 		"migrateV5ToV6 must stamp user_version=6 inside its own tx")
 }
 
+// TestMigrateV6ToV7_StampsUserVersionInTransaction asserts the same
+// atomicity property for the v6→v7 step (RFC 0030 Tier B — the per-member
+// salience columns). The migration is additive (ADD COLUMN); a re-run would
+// fail with "duplicate column name" rather than corrupt data, so pinning the
+// stamp inside the tx keeps the next boot from attempting that re-run at all,
+// consistent with the v1→v2 … v5→v6 discipline.
+func TestMigrateV6ToV7_StampsUserVersionInTransaction(t *testing.T) {
+	db, _ := rawSchemaDB(t)
+
+	_, err := db.Exec(schemaV1SQL)
+	require.NoError(t, err, "apply v1 baseline")
+	require.NoError(t, migrateV1ToV2(db), "advance to v2")
+	require.NoError(t, migrateV2ToV3(db), "advance to v3")
+	require.NoError(t, migrateV3ToV4(db), "advance to v4")
+	require.NoError(t, migrateV4ToV5(db), "advance to v5")
+	require.NoError(t, migrateV5ToV6(db), "advance to v6")
+	require.Equal(t, 6, readUserVersion(t, db),
+		"precondition: at v6 with user_version=6 before exercising v6→v7")
+
+	require.NoError(t, migrateV6ToV7(db))
+
+	assert.Equal(t, 7, readUserVersion(t, db),
+		"migrateV6ToV7 must stamp user_version=7 inside its own tx")
+}
+
+// TestMigrateV7ToV8_StampsUserVersionInTransaction asserts the same
+// atomicity property for the v7→v8 step (RFC 0050 Phase 1 — the operator
+// config columns). Additive (ADD COLUMN), same re-run hazard as v6→v7.
+func TestMigrateV7ToV8_StampsUserVersionInTransaction(t *testing.T) {
+	db, _ := rawSchemaDB(t)
+
+	_, err := db.Exec(schemaV1SQL)
+	require.NoError(t, err, "apply v1 baseline")
+	require.NoError(t, migrateV1ToV2(db), "advance to v2")
+	require.NoError(t, migrateV2ToV3(db), "advance to v3")
+	require.NoError(t, migrateV3ToV4(db), "advance to v4")
+	require.NoError(t, migrateV4ToV5(db), "advance to v5")
+	require.NoError(t, migrateV5ToV6(db), "advance to v6")
+	require.NoError(t, migrateV6ToV7(db), "advance to v7")
+	require.Equal(t, 7, readUserVersion(t, db),
+		"precondition: at v7 with user_version=7 before exercising v7→v8")
+
+	require.NoError(t, migrateV7ToV8(db))
+
+	assert.Equal(t, 8, readUserVersion(t, db),
+		"migrateV7ToV8 must stamp user_version=8 inside its own tx")
+}
+
+// TestMigrateV8ToV9_StampsUserVersionInTransaction asserts the same
+// atomicity property for the v8→v9 step (RFC 0035 PR 1 — the
+// `membership_intervals` ledger). The migration is a CREATE TABLE + two
+// CREATE INDEX + a backfill INSERT…SELECT; a re-run would fail with "table
+// already exists" rather than corrupt data, so pinning the stamp inside the
+// tx keeps the next boot from attempting that re-run at all, consistent with
+// the v1→v2 … v7→v8 discipline. Because the ledger is RFC 0036's
+// access-control record, an un-stamped half-applied migration is the entry
+// point to a divergent ledger — the property is most acute here.
+func TestMigrateV8ToV9_StampsUserVersionInTransaction(t *testing.T) {
+	db, _ := rawSchemaDB(t)
+
+	_, err := db.Exec(schemaV1SQL)
+	require.NoError(t, err, "apply v1 baseline")
+	require.NoError(t, migrateV1ToV2(db), "advance to v2")
+	require.NoError(t, migrateV2ToV3(db), "advance to v3")
+	require.NoError(t, migrateV3ToV4(db), "advance to v4")
+	require.NoError(t, migrateV4ToV5(db), "advance to v5")
+	require.NoError(t, migrateV5ToV6(db), "advance to v6")
+	require.NoError(t, migrateV6ToV7(db), "advance to v7")
+	require.NoError(t, migrateV7ToV8(db), "advance to v8")
+	require.Equal(t, 8, readUserVersion(t, db),
+		"precondition: at v8 with user_version=8 before exercising v8→v9")
+
+	require.NoError(t, migrateV8ToV9(db))
+
+	assert.Equal(t, 9, readUserVersion(t, db),
+		"migrateV8ToV9 must stamp user_version=9 inside its own tx")
+}
+
 // TestApplySchema_FreshDB_StampsLatestVersion is the integration-shaped
 // counterpart to the two single-step tests above. It is intentionally
 // duplicative with `TestSQLiteStore_SchemaV3_Migration_Idempotent` (which
