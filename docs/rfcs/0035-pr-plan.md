@@ -247,10 +247,10 @@ Per [RFC §Test Strategy](0035-channel-membership-interval-ledger.md#test-strate
 
 #### PR checklist
 
-- [ ] `go test ./internal/channels/ ./internal/server/ -run 'AccessibleChannels|MembershipHistory|Inspection' -count=1` passes.
-- [ ] `make test` green; `channel_handlers.go` untouched / still ≤ 500 lines.
-- [ ] Endpoint registered in the channel-router wiring next to the existing member routes; route documented in the handler header comment.
-- [ ] Auth posture documented inline as inheriting the channel-surface trust level (OQ #2); no bespoke auth added.
+- [x] `go test ./internal/channels/ ./internal/server/ -run 'AccessibleChannels|MembershipHistory|Inspection' -count=1` passes.
+- [x] `make test` (Go lane, `make test-go`) green — 18 packages, no failures; `channel_handlers.go` untouched / still 494 lines.
+- [x] Endpoint registered in the channel-router wiring next to the existing member routes; route documented in the handler header comment.
+- [x] Auth posture documented inline as inheriting the channel-surface trust level (OQ #2); no bespoke auth added.
 - [ ] If the cut tightens, this PR is the drop candidate — confirm with the maintainer before deferring.
 
 ---
@@ -310,8 +310,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 |---|-------|--------|--------|-----------|--------|
 | 1 | Migration v9 — `membership_intervals` table + indexes + backfill | `feature/v039-rfc0035-migration` | ✅ Merged | [#671](https://github.com/mkhomutov/Persatrix/pull/671) | 2026-06-18 |
 | 2 | Read surface — struct, `GetMembershipIntervals`, `InScope`, interface | `feature/v039-rfc0035-read-surface` | ✅ Merged | [#672](https://github.com/mkhomutov/Persatrix/pull/672) | 2026-06-18 |
-| 3 | Write hooks — transactional interval open/close (load-bearing) + `CreateChannelWithMembers` (fourth hook) | `feature/v039-rfc0035-write-hooks` | 🔀 PR open | [#673](https://github.com/mkhomutov/Persatrix/pull/673) | — |
-| 4 | Phase 2 — inspection endpoint + `GetAccessibleChannels` (cut-tolerant) | `feature/v039-rfc0035-inspection-endpoint` | ⬜ Not started | — | — |
+| 3 | Write hooks — transactional interval open/close (load-bearing) + `CreateChannelWithMembers` (fourth hook) | `feature/v039-rfc0035-write-hooks` | ✅ Merged | [#673](https://github.com/mkhomutov/Persatrix/pull/673) | 2026-06-18 |
+| 4 | Phase 2 — inspection endpoint + `GetAccessibleChannels` (cut-tolerant) | `feature/v039-rfc0035-inspection-endpoint` | 🔀 PR open | [#674](https://github.com/mkhomutov/Persatrix/pull/674) | — |
 | 5 | Review follow-ups + closeout | `feature/v039-rfc0035-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
