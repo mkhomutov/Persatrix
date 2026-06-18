@@ -50,7 +50,7 @@ depends_on:
 ## Summary
 
 The channel store records membership as **current state only**. The
-`memberships` table ([`internal/channels/sqlite_schema.go:87-94`](../../internal/channels/sqlite_schema.go#L87-L94))
+`memberships` table ([`internal/channels/sqlite_schema.go:100-107`](../../internal/channels/sqlite_schema.go#L100-L107))
 has one row per `(channel_id, participant_id)` pair with a single
 `joined_at` timestamp; `RemoveMember` **hard-deletes** that row
 ([`sqlite_query.go:130-175`](../../internal/channels/sqlite_query.go#L130-L175)).
@@ -214,10 +214,10 @@ interval (§C).
 
 ### B. Schema — `membership_intervals`
 
-Channel-store schema migration **v9** (the store is at v8 today —
-`channelStoreSchemaVersion = 8`,
-[`sqlite_schema.go:73`](../../internal/channels/sqlite_schema.go#L73);
-v9 is the next free slot as of 2026-06-17). A new `case 9:` arm in
+Channel-store schema migration **v9** (this RFC bumps the store from v8
+to v9 — `channelStoreSchemaVersion = 9`,
+[`sqlite_schema.go:86`](../../internal/channels/sqlite_schema.go#L86);
+v9 was the next free slot as of 2026-06-17). A new `case 9:` arm in
 `applyMigration` — in
 [`internal/channels/sqlite_migrations.go`](../../internal/channels/sqlite_migrations.go),
 the dedicated migration runner the channel store extracted out of
@@ -252,8 +252,11 @@ CREATE UNIQUE INDEX ux_membership_intervals_open
 
 Notes:
 
-- `id INTEGER PRIMARY KEY` is the rowid alias — monotonic, no
-  `AUTOINCREMENT` needed for an append-only table.
+- `id INTEGER PRIMARY KEY` is the rowid alias — a compact surrogate
+  key. No `AUTOINCREMENT` is needed: nothing depends on id ordering or
+  non-reuse (the ledger is scanned by `joined_at` / `left_at`, never by
+  id), and a plain rowid can be reclaimed after an `ON DELETE CASCADE`,
+  which is harmless for a time-keyed table.
 - `joined_at` / `left_at` are `DATETIME`, matching `memberships.joined_at`
   and `messages.timestamp`. RFC 0036's join compares
   `membership_intervals.joined_at` against `messages.timestamp`
