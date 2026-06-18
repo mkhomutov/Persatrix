@@ -53,7 +53,7 @@ The channel store records membership as **current state only**. The
 `memberships` table ([`internal/channels/sqlite_schema.go:100-107`](../../internal/channels/sqlite_schema.go#L100-L107))
 has one row per `(channel_id, participant_id)` pair with a single
 `joined_at` timestamp; `RemoveMember` **hard-deletes** that row
-([`sqlite_query.go:130-175`](../../internal/channels/sqlite_query.go#L130-L175)).
+([`sqlite_query.go:130-192`](../../internal/channels/sqlite_query.go#L130-L192)).
 There is no `left_at`, no event log, and no second row for a second
 membership stint. A join → leave → rejoin cycle therefore leaves the
 store unable to answer the only question that matters for
@@ -95,7 +95,7 @@ question about the past:
 
 The rejoin case is actively wrong, not merely absent. `AddMember` is
 `INSERT … ON CONFLICT(channel_id, participant_id) DO NOTHING`
-([`sqlite_query.go:301`](../../internal/channels/sqlite_query.go#L301)).
+([`sqlite_query.go:334`](../../internal/channels/sqlite_query.go#L334)).
 After a remove the row is gone, so a re-add inserts a fresh row with a
 **new** `joined_at` — good. But while the participant is *still*
 present, a redundant `AddMember` no-ops and keeps the original
@@ -277,10 +277,23 @@ Notes:
 
 ### C. Write path — opening and closing intervals
 
-Three call sites mutate `memberships` today; each gets a matching
-interval write **in the same transaction**.
+Four call sites change `memberships` **membership** today — they
+**insert** a row (a join) or **delete** one (a leave) — and each gets a
+matching interval write **in the same transaction**. Policy-only writes
+(`SetMemberPolicy` / `UpdateMemberConfig`) `UPDATE` a row in place
+without moving its join/leave boundary, so they open or close no
+interval and are deliberately not hooked. (An earlier draft of this
+section counted three — `AddMember` / `RemoveMember` / `GetOrCreateDM` —
+and missed `CreateChannelWithMembers`, the atomic create-with-members
+path the REST create handler and config reconcile use. It is the
+*primary* way config-declared channels and their members enter the
+store, so omitting its interval-open would leave every config persona
+with no interval — silently breaking RFC 0036 recall for them — and make
+a later `RemoveMember` trip the divergence guard below, a reachable REST
+500. The fourth hook closes that gap; it is implemented and tested with
+the other three.)
 
-**`AddMember`** ([`sqlite_query.go:283`](../../internal/channels/sqlite_query.go#L283))
+**`AddMember`** ([`sqlite_query.go:309`](../../internal/channels/sqlite_query.go#L309))
 — currently a single `INSERT … ON CONFLICT DO NOTHING` with no
 transaction. It must now (a) run in a transaction and (b) open an
 interval **only when it actually inserted a `memberships` row**:
@@ -325,7 +338,7 @@ rejects a spurious double-open by failing the INSERT. The `n == 0`
 branch (member not present) closes nothing — that is the expected
 no-op, not the invariant violation.
 
-**`GetOrCreateDM`** ([`sqlite_query.go:406`](../../internal/channels/sqlite_query.go#L406))
+**`GetOrCreateDM`** ([`sqlite_dm.go:31`](../../internal/channels/sqlite_dm.go#L31))
 — inserts the two DM participants' `memberships` rows directly inside
 its own transaction, bypassing `AddMember`. It must open an interval
 for each of the two participants in that same transaction, with
@@ -333,7 +346,17 @@ for each of the two participants in that same transaction, with
 removed in normal operation, so these intervals stay open for the
 life of the channel.
 
-All three writes are transactional with their `memberships` mutation:
+**`CreateChannelWithMembers`** ([`sqlite.go:328`](../../internal/channels/sqlite.go#L328))
+— the atomic create-with-members path (REST create handler + config
+reconcile). Already transactional. After each member's
+`INSERT … ON CONFLICT DO NOTHING`, it opens an interval **only when it
+actually inserted a row** (`RowsAffected() == 1`), exactly like
+`AddMember`, with `joined_at` equal to the member's `memberships.joined_at`.
+The `RowsAffected` gate makes a participant repeated in the input slice a
+clean no-op on both tables. This is the hook that keeps the ledger
+complete for config-declared channels — the common case at boot.
+
+All four writes are transactional with their `memberships` mutation:
 either both the projection and the ledger move, or neither does.
 
 ### D. Backfill
@@ -440,7 +463,7 @@ table of join/leave/rejoin fixtures.
   written by existing membership operations. The attack surface is
   unchanged from RFC 0011's channel store.
 - **Append-only integrity.** Interval rows are only ever written by
-  the three transactional hooks in §C and mutated only by the single
+  the four transactional hooks in §C and mutated only by the single
   `left_at` close-out. The partial unique index
   `ux_membership_intervals_open` makes a double-open a hard failure.
   There is no code path that deletes an interval except channel-level
@@ -450,7 +473,7 @@ table of join/leave/rejoin fixtures.
   rolls back both — the ledger cannot diverge from the current-state
   projection. The
   `TestAddMember_OpensInterval_Atomically` /
-  `TestRemoveMember_ClosesInterval_Atomically` tests pin this.
+  `TestRemoveMember_LedgerDivergence_RollsBack` tests pin this.
 - **The ledger underpins an access-control decision.** RFC 0036 uses
   this table to decide which messages a persona may recall. An
   incorrect interval (a missed close, a spurious open) becomes a
