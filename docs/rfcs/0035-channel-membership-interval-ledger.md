@@ -277,8 +277,17 @@ Notes:
 
 ### C. Write path — opening and closing intervals
 
-Three call sites mutate `memberships` today; each gets a matching
-interval write **in the same transaction**.
+Four call sites mutate `memberships` today; each gets a matching
+interval write **in the same transaction**. (An earlier draft of this
+section counted three — `AddMember` / `RemoveMember` / `GetOrCreateDM` —
+and missed `CreateChannelWithMembers`, the atomic create-with-members
+path the REST create handler and config reconcile use. It is the
+*primary* way config-declared channels and their members enter the
+store, so omitting its interval-open would leave every config persona
+with no interval — silently breaking RFC 0036 recall for them — and make
+a later `RemoveMember` trip the divergence guard below, a reachable REST
+500. The fourth hook closes that gap; it is implemented and tested with
+the other three.)
 
 **`AddMember`** ([`sqlite_query.go:283`](../../internal/channels/sqlite_query.go#L283))
 — currently a single `INSERT … ON CONFLICT DO NOTHING` with no
@@ -333,7 +342,17 @@ for each of the two participants in that same transaction, with
 removed in normal operation, so these intervals stay open for the
 life of the channel.
 
-All three writes are transactional with their `memberships` mutation:
+**`CreateChannelWithMembers`** ([`sqlite.go:328`](../../internal/channels/sqlite.go#L328))
+— the atomic create-with-members path (REST create handler + config
+reconcile). Already transactional. After each member's
+`INSERT … ON CONFLICT DO NOTHING`, it opens an interval **only when it
+actually inserted a row** (`RowsAffected() == 1`), exactly like
+`AddMember`, with `joined_at` equal to the member's `memberships.joined_at`.
+The `RowsAffected` gate makes a participant repeated in the input slice a
+clean no-op on both tables. This is the hook that keeps the ledger
+complete for config-declared channels — the common case at boot.
+
+All four writes are transactional with their `memberships` mutation:
 either both the projection and the ledger move, or neither does.
 
 ### D. Backfill

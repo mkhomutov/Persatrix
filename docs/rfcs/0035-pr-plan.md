@@ -180,9 +180,11 @@ SELECT channel_id, participant_id, joined_at, NULL FROM memberships;
 | File | Change |
 |------|--------|
 | [`internal/channels/sqlite_query.go`](../../internal/channels/sqlite_query.go#L283) — `AddMember` | Currently a **single non-transactional** `INSERT … ON CONFLICT DO NOTHING` ([L301](../../internal/channels/sqlite_query.go#L301)). Wrap it in a `BeginTx`; check `RowsAffected()`. `== 1` (genuine new join or post-removal re-add) → INSERT an open interval `(channel_id, participant_id, joined_at = now, left_at = NULL)` in the same tx, where `now` is the **same** `time.Now().UTC()` written to `memberships.joined_at` so projection and ledger agree. `== 0` (already present) → open no interval (the existing stint's open interval is still correct; the `ux_…_open` index would reject a second anyway). Idempotency preserved on both tables. |
-| `internal/channels/sqlite_membership_intervals.go` | The interval-write helpers (`openInterval(tx, …)`, `closeOpenInterval(tx, …) (int64, error)`) called by the three hooks, co-located with PR 2's read method. Keeps the write SQL in one ledger file rather than scattering it across `sqlite_query.go`. |
+| `internal/channels/sqlite_membership_intervals.go` | The interval-write helpers (`openMembershipInterval(ctx, tx, …)`, `closeOpenMembershipInterval(ctx, tx, …) (int64, error)`) called by the **four** hooks, plus the unexported `errMembershipLedgerDivergence` sentinel; co-located with PR 2's read method. (Named `…MembershipInterval` rather than the plan's `openInterval` to avoid colliding with the `openInterval`/`closedInterval` test fixtures already in `membership_intervals_test.go`.) Keeps the write SQL in one ledger file rather than scattering it across `sqlite_query.go`. |
 | [`internal/channels/sqlite_query.go`](../../internal/channels/sqlite_query.go#L130) — `RemoveMember` | Already transactional (act-first-then-disambiguate). On the `RowsAffected() == 1` success path, before `tx.Commit()`, run `UPDATE membership_intervals SET left_at = ? WHERE channel_id = ? AND participant_id = ? AND left_at IS NULL` with `now`. If it closes **zero** rows on this path, the open-interval invariant (Goal 6) is violated (a `memberships` row with no matching open interval) → **roll back and return a hard error**, never commit silently (a never-closing interval is a data-*exposure* bug for RFC 0036). The existing `n == 0` member-not-present branch closes nothing — that is the expected no-op, not the violation. |
-| [`internal/channels/sqlite_query.go`](../../internal/channels/sqlite_query.go#L406) — `GetOrCreateDM` | Already transactional. After the two `memberships` inserts, open one interval per DM participant in the same tx with `joined_at = now` (the DM's creation time). DM membership is never removed in normal operation, so these stay open for the channel's life. |
+| `internal/channels/sqlite_query.go` — `GetOrCreateDM` | Already transactional. After the two `memberships` inserts, open one interval per DM participant in the same tx with `joined_at = now` (the DM's creation time). DM membership is never removed in normal operation, so these stay open for the channel's life. (Extracted with `LookupDM` into the new `internal/channels/sqlite_dm.go` — see the file-split note below.) |
+| [`internal/channels/sqlite.go`](../../internal/channels/sqlite.go#L328) — `CreateChannelWithMembers` (**fourth hook — not in the original plan**) | Already transactional. The atomic create-with-members path used by the REST create handler and config reconcile — the *primary* way config-declared channels enter the store. Per member, capture `RowsAffected()` on the `INSERT … ON CONFLICT DO NOTHING` and open an interval on `== 1` (gating a participant repeated in the input slice), `joined_at` = the member's `memberships.joined_at`. **Omitting this hook would leave every config persona with no interval (RFC 0036 recall silently empty for them) and make a later `RemoveMember` trip the divergence guard — a reachable REST 500.** The RFC §C "three call sites" count is corrected to four. |
+| `internal/channels/sqlite_dm.go` (new) | **File split** to honour the ≤ 500-line cap: the `AddMember`/`RemoveMember` interval hooks pushed `sqlite_query.go` to 520 lines, so `LookupDM` + `GetOrCreateDM` (a cohesive DM unit, one of them a ledger hook) move here. `sqlite_query.go` returns to 439 lines. |
 | `internal/channels/sqlite_membership_intervals_test.go` (new) | Write-hook unit tests + lifecycle (see below). |
 | `internal/channels/membership_intervals_integration_test.go` (new) | Integration test through the store API (add → remove → re-add). |
 
@@ -204,15 +206,16 @@ Per [RFC §Test Strategy](0035-channel-membership-interval-ledger.md#test-strate
 - **Atomicity** (`TestAddMember_OpensInterval_Atomically` / `TestRemoveMember_ClosesInterval_Atomically`): a forced failure after the `memberships` write rolls back the interval write too — neither table moves.
 - **Invariant-violation rollback**: synthesize a `memberships` row with no open interval (direct SQL), then `RemoveMember` → assert the sentinel error and that the transaction rolled back (the `memberships` row is still present).
 - **`GetOrCreateDM`** opens exactly one interval per DM participant, both open, `joined_at == DM creation time`.
+- **`CreateChannelWithMembers`** (fourth hook) opens exactly one open interval per initial member, `joined_at == memberships.joined_at`; and **create-with-members → `RemoveMember`** closes cleanly (does **not** trip the divergence guard — the regression that proves the hook is load-bearing).
 - **Integration (store API)**: add, remove, re-add a participant; `GetMembershipIntervals` returns the two-stint history in order.
 
 #### PR checklist
 
-- [ ] `go test ./internal/channels/ -run 'MembershipInterval|AddMember|RemoveMember|GetOrCreateDM|Atomic' -count=1` passes.
-- [ ] `make test` (Go lane) green; `go vet` clean; race detector clean on the channels package (`go test -race ./internal/channels/`).
-- [ ] `sqlite_query.go` re-verified ≤ 500 lines (write SQL lives in `sqlite_membership_intervals.go`); if over, split further.
-- [ ] No publish-path query change — `sqlite_messages.go` membership probe untouched ([RFC Goal 4](0035-channel-membership-interval-ledger.md#goals)); a publish regression test still green.
-- [ ] **RFC 0036 Phase 1 is now unblocked** — note this in the PR description and in [v0.3.9-plan row 1a](../v0.3.9-plan.md#master-progress-overview).
+- [x] `go test ./internal/channels/ -run 'MembershipInterval|AddMember|RemoveMember|GetOrCreateDM|CreateChannelWithMembers|MembershipLedger|Atomic' -count=1` passes.
+- [x] `make test` (Go lane) green; `go vet` clean; race detector clean on the channels package (`go test -race ./internal/channels/`).
+- [x] `sqlite_query.go` re-verified ≤ 500 lines — exceeded at 520, so `LookupDM`/`GetOrCreateDM` were split into `sqlite_dm.go` (now 439). All touched files pass `file_size.py --strict`.
+- [x] No publish-path query change — `sqlite_messages.go` membership probe untouched ([RFC Goal 4](0035-channel-membership-interval-ledger.md#goals)); the full channels + server suites stay green.
+- [x] **RFC 0036 Phase 1 is now unblocked** — noted in the PR description and in [v0.3.9-plan row 1a](../v0.3.9-plan.md#master-progress-overview).
 
 ---
 
@@ -306,8 +309,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | # | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|--------|--------|-----------|--------|
 | 1 | Migration v9 — `membership_intervals` table + indexes + backfill | `feature/v039-rfc0035-migration` | ✅ Merged | [#671](https://github.com/mkhomutov/Persatrix/pull/671) | 2026-06-18 |
-| 2 | Read surface — struct, `GetMembershipIntervals`, `InScope`, interface | `feature/v039-rfc0035-read-surface` | 🔀 PR open | [#672](https://github.com/mkhomutov/Persatrix/pull/672) | — |
-| 3 | Write hooks — transactional interval open/close (load-bearing) | `feature/v039-rfc0035-write-hooks` | ⬜ Not started | — | — |
+| 2 | Read surface — struct, `GetMembershipIntervals`, `InScope`, interface | `feature/v039-rfc0035-read-surface` | ✅ Merged | [#672](https://github.com/mkhomutov/Persatrix/pull/672) | 2026-06-18 |
+| 3 | Write hooks — transactional interval open/close (load-bearing) + `CreateChannelWithMembers` (fourth hook) | `feature/v039-rfc0035-write-hooks` | 🔀 PR open | _TBD_ | — |
 | 4 | Phase 2 — inspection endpoint + `GetAccessibleChannels` (cut-tolerant) | `feature/v039-rfc0035-inspection-endpoint` | ⬜ Not started | — | — |
 | 5 | Review follow-ups + closeout | `feature/v039-rfc0035-close` | ⬜ Not started | — | — |
 

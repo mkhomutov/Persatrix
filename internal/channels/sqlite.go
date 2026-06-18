@@ -424,12 +424,13 @@ func (s *sqliteStore) CreateChannelWithMembers(ctx context.Context, ch Channel, 
 		// ([ResolveMemberPolicy]) — because the config reconcile path passes an
 		// already-normalized `always` policy, so deriving them here would lose
 		// a participant's bid-ness.
-		if _, err := tx.ExecContext(ctx,
+		res, err := tx.ExecContext(ctx,
 			`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at, threshold, salience_gated)
 			 VALUES (?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(channel_id, participant_id) DO NOTHING`,
 			ch.ID, m.ParticipantID, string(policy), joinedAt, m.Threshold, boolToInt(m.SalienceGated),
-		); err != nil {
+		)
+		if err != nil {
 			// FK violations are unexpected here \u2014 we just inserted the
 			// parent row in the same transaction \u2014 but classify them the
 			// same way [AddMember] does for symmetry.
@@ -437,6 +438,21 @@ func (s *sqliteStore) CreateChannelWithMembers(ctx context.Context, ch Channel, 
 				return fmt.Errorf("%w: %s", ErrChannelNotFound, ch.ID)
 			}
 			return fmt.Errorf("channels: add member %s: %w", m.ParticipantID, err)
+		}
+		// RFC 0035 §C (fourth hook): seed an OPEN interval for each genuinely
+		// inserted member in the same tx, so a channel created with initial
+		// members — the REST atomic-create and config-reconcile path — feeds the
+		// ledger exactly like AddMember would. joinedAt is the SAME instant
+		// written to memberships.joined_at. RowsAffected gates a participant
+		// repeated in the input slice (the ON CONFLICT no-op), mirroring AddMember.
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("channels: add member %s rowsaffected: %w", m.ParticipantID, err)
+		}
+		if n == 1 {
+			if err := openMembershipInterval(ctx, tx, ch.ID, m.ParticipantID, joinedAt); err != nil {
+				return fmt.Errorf("channels: open interval %s: %w", m.ParticipantID, err)
+			}
 		}
 	}
 

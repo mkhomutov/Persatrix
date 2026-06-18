@@ -8,8 +8,63 @@ package channels
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"time"
 )
+
+// errMembershipLedgerDivergence is returned by [sqliteStore.RemoveMember] when
+// closing a removed participant's open interval affects zero rows — a
+// `memberships` row existed with no matching OPEN interval, so the current-state
+// projection and the append-only ledger have diverged (RFC 0035 Goal 6 breach).
+// It is deliberately loud: a silent commit would leave a removed participant
+// with an interval that never closes, a data-*exposure* bug for RFC 0036
+// verbatim recall (whose `EXISTS` join *is* the access decision). It surfaces as
+// a 500 to REST — an invariant breach, not a client error — and is unexported
+// because it is an internal correctness signal, not part of the store's error
+// contract.
+var errMembershipLedgerDivergence = errors.New(
+	"channels: membership ledger divergence: no open interval to close")
+
+// openMembershipInterval inserts a new OPEN interval (NULL left_at) for the pair
+// inside tx — the ledger half of a membership admit (RFC 0035 §C). `now` is the
+// SAME instant the caller writes to `memberships.joined_at`, so the projection
+// and the ledger agree on the join boundary the half-open §F predicate compares
+// against. The partial unique index `ux_membership_intervals_open` rejects a
+// second open interval for the pair, so a caller that opens without first
+// gating on a genuine insert will fail loudly rather than corrupt history.
+func openMembershipInterval(ctx context.Context, tx *sql.Tx, channelID, participantID string, now time.Time) error {
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO membership_intervals (channel_id, participant_id, joined_at, left_at)
+		 VALUES (?, ?, ?, NULL)`,
+		channelID, participantID, now,
+	); err != nil {
+		return fmt.Errorf("channels: open membership interval: %w", err)
+	}
+	return nil
+}
+
+// closeOpenMembershipInterval stamps `left_at = now` on the pair's OPEN interval
+// inside tx and returns the number of rows closed. On a [sqliteStore.RemoveMember]
+// success path the caller REQUIRES exactly one (Goal 6: every present member has
+// one open interval); a zero-row close means the projection and the ledger
+// diverged, and the caller MUST roll back with [errMembershipLedgerDivergence]
+// rather than commit a never-closing interval.
+func closeOpenMembershipInterval(ctx context.Context, tx *sql.Tx, channelID, participantID string, now time.Time) (int64, error) {
+	res, err := tx.ExecContext(ctx,
+		`UPDATE membership_intervals SET left_at = ?
+		  WHERE channel_id = ? AND participant_id = ? AND left_at IS NULL`,
+		now, channelID, participantID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("channels: close membership interval: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("channels: close membership interval rowsaffected: %w", err)
+	}
+	return n, nil
+}
 
 // GetMembershipIntervals returns every interval for `(channelID, participantID)`
 // ordered by `joined_at` ascending — the data form of the ledger for the

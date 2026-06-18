@@ -164,6 +164,23 @@ func (s *sqliteStore) RemoveMember(ctx context.Context, channelID, participantID
 			ErrNotMember, channelID, participantID)
 	}
 
+	// RFC 0035 §C: the `memberships` row was deleted (success path), so close
+	// the participant's OPEN interval in the same tx. The §D backfill and the
+	// AddMember / GetOrCreateDM / CreateChannelWithMembers open hooks guarantee a
+	// present member has exactly one open interval, so this closes exactly one
+	// row. A ZERO-row close means a `memberships` row existed with no matching
+	// open interval — the projection and the ledger diverged (Goal 6). Roll back
+	// loudly rather than commit a never-closing interval (an RFC 0036 exposure
+	// bug); the deferred Rollback fires on the early return.
+	closed, err := closeOpenMembershipInterval(ctx, tx, channelID, participantID, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if closed == 0 {
+		return fmt.Errorf("%w: channel=%s participant=%s",
+			errMembershipLedgerDivergence, channelID, participantID)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("channels: remove member commit: %w", err)
 	}
@@ -280,6 +297,15 @@ func (s *sqliteStore) UpdateMemberConfig(ctx context.Context, channelID, partici
 }
 
 // AddMember implements [ChannelStore.AddMember].
+//
+// RFC 0035 §C: AddMember is now transactional. It opens a membership interval
+// in the same tx as the `memberships` insert, but ONLY when it actually
+// inserted a row (RowsAffected == 1 — a genuine new join or a post-removal
+// re-add). A redundant add on a present member fires the `ON CONFLICT` no-op
+// (RowsAffected == 0) and opens no second interval: the existing stint's open
+// interval is still correct, and `ux_membership_intervals_open` would reject a
+// duplicate anyway. Idempotency is preserved on both tables, and the
+// foreign-key → [ErrChannelNotFound] mapping is unchanged, now inside the tx.
 func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID string, policy RespondPolicy) error {
 	if err := ValidateParticipantID(participantID); err != nil {
 		return err
@@ -294,18 +320,39 @@ func (s *sqliteStore) AddMember(ctx context.Context, channelID, participantID st
 	if err != nil {
 		return err
 	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("channels: add member begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// One `now` for both the projection and the ledger so they agree (§C).
+	now := time.Now().UTC()
 	// Idempotent re-add: keep the existing joined_at and respond_policy.
-	_, err = s.db.ExecContext(ctx,
+	res, err := tx.ExecContext(ctx,
 		`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at, threshold, salience_gated)
 		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(channel_id, participant_id) DO NOTHING`,
-		channelID, participantID, string(mp.Policy), time.Now().UTC(), mp.Threshold, boolToInt(mp.SalienceGated),
+		channelID, participantID, string(mp.Policy), now, mp.Threshold, boolToInt(mp.SalienceGated),
 	)
 	if err != nil {
 		if isForeignKeyViolation(err) {
 			return fmt.Errorf("%w: %s", ErrChannelNotFound, channelID)
 		}
 		return fmt.Errorf("channels: add member: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("channels: add member rowsaffected: %w", err)
+	}
+	if n == 1 {
+		if err := openMembershipInterval(ctx, tx, channelID, participantID, now); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("channels: add member commit: %w", err)
 	}
 	return nil
 }
@@ -388,78 +435,5 @@ func (s *sqliteStore) IsMember(ctx context.Context, channelID, participantID str
 	return true, nil
 }
 
-// LookupDM implements [ChannelStore.LookupDM]: a read-only resolve of the
-// canonical DM between `a` and `b`. It derives the canonical id (which validates
-// the pair and is the same access boundary GetOrCreateDM uses) and returns the
-// existing channel, or [ErrChannelNotFound] when the DM has never been created.
-// No mutation, no membership insert — the fresh-start case is a clean not-found,
-// not a side-effecting create.
-func (s *sqliteStore) LookupDM(ctx context.Context, a, b string) (Channel, error) {
-	id, err := CanonicalDMID(a, b)
-	if err != nil {
-		return Channel{}, err
-	}
-	return s.GetChannel(ctx, id)
-}
-
-// GetOrCreateDM implements [ChannelStore.GetOrCreateDM].
-func (s *sqliteStore) GetOrCreateDM(ctx context.Context, a, b string) (Channel, error) {
-	id, err := CanonicalDMID(a, b)
-	if err != nil {
-		return Channel{}, err
-	}
-
-	s.dmMu.Lock()
-	defer s.dmMu.Unlock()
-
-	ch, err := s.GetChannel(ctx, id)
-	if err == nil {
-		return ch, nil
-	}
-	if !errors.Is(err, ErrChannelNotFound) {
-		return Channel{}, err
-	}
-
-	// Lexicographically sort once to mirror CanonicalDMID's ordering for the
-	// membership inserts.
-	pa, pb := a, b
-	if pa > pb {
-		pa, pb = pb, pa
-	}
-
-	now := time.Now().UTC()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Channel{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// RFC 0031 Phase 1: DM rows created implicitly carry the legacy
-	// carve-out. Operators can promote a DM into a named session via
-	// Phase 3 CLI's `persatrix session use <id>` after the fact.
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO channels (id, name, channel_type, description, created_at, session_id)
-		 VALUES (?, NULL, ?, '', ?, ?)`,
-		id, string(ChannelTypeDM), now, DefaultSessionID); err != nil {
-		return Channel{}, fmt.Errorf("channels: create dm: %w", err)
-	}
-	for _, p := range []string{pa, pb} {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO memberships (channel_id, participant_id, respond_policy, joined_at)
-			 VALUES (?, ?, 'always', ?)`,
-			id, p, now); err != nil {
-			return Channel{}, fmt.Errorf("channels: add dm member %s: %w", p, err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return Channel{}, err
-	}
-	s.recordSessionWrite(ctx, DefaultSessionID)
-
-	return Channel{
-		ID:        id,
-		Type:      ChannelTypeDM,
-		CreatedAt: now,
-		SessionID: DefaultSessionID,
-	}, nil
-}
+// DM resolution (LookupDM, GetOrCreateDM) lives in sqlite_dm.go to keep this
+// file under the 500-line cap.
