@@ -10,8 +10,10 @@
 // The half-open `[joined_at, left_at)` predicate (§F) is the correctness core —
 // a message at the exact join instant is in scope, one at the exact leave
 // instant is not — so a back-to-back leave-then-rejoin is unambiguous. The
-// [InScope] table tests pin every boundary; RFC 0036's SQL `EXISTS` clause is
-// the same predicate expressed as a join and is tested against the same shapes.
+// [InScope] table tests pin every boundary. RFC 0036's SQL `EXISTS` clause will
+// express the same predicate as a join and should be tested against these same
+// shapes — that encoding does not exist yet (see the TODO in
+// membership_intervals.go), so only the Go side is covered here.
 package channels
 
 import (
@@ -66,10 +68,12 @@ func TestInScope_HalfOpenPredicate(t *testing.T) {
 		// Empty ledger — never in scope.
 		{"empty slice is never in scope", nil, t0, false},
 
-		// Single open interval [t0, NULL): closed below, open above.
-		{"before an open interval's join", []MembershipInterval{openInterval(t1)}, t0, false},
-		{"at an open interval's join instant (inclusive)", []MembershipInterval{openInterval(t1)}, t1, true},
-		{"after an open interval's join", []MembershipInterval{openInterval(t1)}, t2, true},
+		// Single open interval [t0, NULL): out strictly below the join, in at
+		// the join instant and everywhere after. (Joins at t0 — a join instant —
+		// not t1, which names stint-1's leave below.)
+		{"before an open interval's join", []MembershipInterval{openInterval(t0)}, mustRFC3339(t, "2025-12-31T23:59:59Z"), false},
+		{"at an open interval's join instant (inclusive)", []MembershipInterval{openInterval(t0)}, t0, true},
+		{"after an open interval's join", []MembershipInterval{openInterval(t0)}, t2, true},
 
 		// Single closed interval [t0,t1): half-open both ends.
 		{"before a closed interval", []MembershipInterval{closedInterval(t0, t1)}, mustRFC3339(t, "2025-12-31T23:59:59Z"), false},

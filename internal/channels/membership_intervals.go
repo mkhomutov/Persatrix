@@ -36,9 +36,14 @@ type MembershipInterval struct {
 //
 // This Go helper pins the predicate in one place for the [GetMembershipIntervals]
 // callers, the tests, and the Phase 2 inspection endpoint. RFC 0036's recall
-// query expresses the *same* predicate as a SQL `EXISTS` join and does not call
-// this helper; both are tested against the same join/leave/rejoin fixtures so
-// the two encodings cannot drift.
+// query will express the *same* predicate as a SQL `EXISTS` join rather than
+// calling this helper; the two encodings must then be tested against a shared
+// table of join/leave/rejoin fixtures so they cannot drift.
+//
+// TODO(RFC 0036): that SQL `EXISTS` encoding does not exist yet, so no
+// cross-encoding test guards drift today — only the Go side here is covered.
+// When RFC 0036 lands the recall query, add the shared-fixture test that
+// exercises both encodings before relying on the no-drift property above.
 func InScope(intervals []MembershipInterval, t time.Time) bool {
 	for _, iv := range intervals {
 		// JoinedAt <= t, i.e. t is not strictly before the join.
