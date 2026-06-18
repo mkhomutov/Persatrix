@@ -67,8 +67,10 @@ func closeOpenMembershipInterval(ctx context.Context, tx *sql.Tx, channelID, par
 }
 
 // GetMembershipIntervals returns every interval for `(channelID, participantID)`
-// ordered by `joined_at` ascending — the data form of the ledger for the
-// [InScope] predicate, the tests, and the Phase 2 inspection endpoint. An
+// ordered by `joined_at` then `id` ascending — the data form of the ledger for
+// the [InScope] predicate, the tests, and the Phase 2 inspection endpoint. The
+// `id` tiebreaker keeps the order deterministic when two stints share a
+// `joined_at` (so a closed stint always sorts before a later open one). An
 // unknown pair reads back as an empty slice, not an error: this is a lookup,
 // not a membership assertion.
 //
@@ -84,7 +86,7 @@ func (s *sqliteStore) GetMembershipIntervals(
 		`SELECT channel_id, participant_id, joined_at, left_at
 		   FROM membership_intervals
 		  WHERE channel_id = ? AND participant_id = ?
-		  ORDER BY joined_at ASC`, channelID, participantID)
+		  ORDER BY joined_at ASC, id ASC`, channelID, participantID)
 	if err != nil {
 		return nil, fmt.Errorf("channels: get membership intervals: %w", err)
 	}

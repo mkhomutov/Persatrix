@@ -19,7 +19,7 @@ The work splits into **5 PRs**:
 
 - **PR 1** lands the dormant schema: migration v9 (table, indexes, backfill) + migration tests. No Go read/write surface yet.
 - **PR 2** adds the read surface: the `MembershipInterval` type, `GetMembershipIntervals`, the `InScope` predicate helper, and the `ChannelStore` interface method — queryable against the backfilled snapshot.
-- **PR 3** is the **load-bearing correctness PR**: the three transactional write hooks that keep the ledger live and exact, plus the add/remove/re-add lifecycle tests. Everything RFC 0036 depends on exists after PR 3 merges.
+- **PR 3** is the **load-bearing correctness PR**: the four transactional write hooks that keep the ledger live and exact, plus the add/remove/re-add lifecycle tests. Everything RFC 0036 depends on exists after PR 3 merges.
 - **PR 4** is RFC 0035 **Phase 2** (optional, cut-tolerant): the read-only operator inspection endpoint + `GetAccessibleChannels`.
 - **PR 5** is review follow-ups + closeout (status flips, progress-overview fill).
 
@@ -39,7 +39,7 @@ The three RFC 0035 open questions and the two [v0.3.9-plan](../v0.3.9-plan.md#op
 
 **Recommended merge order**: **PR 1 → PR 2 → PR 3 → PR 4 → PR 5.**
 
-PR 1 lands the table as additive, dormant schema (the channel store's [migration runner](../../internal/channels/sqlite_migrations.go) header documents the one-`migrateV(N-1)ToVN`-per-PR pattern). PR 2 makes it queryable; its tests assert reads of the backfilled snapshot (all intervals open). PR 3 wires the three write hooks so the ledger goes *live and correct* — its tests need `GetMembershipIntervals` from PR 2 to assert the two-stint history, which is why read lands before write. PR 4 (Phase 2) is independent of nothing but PR 1–3 and is separately reviewable; it may be deferred or dropped. PR 5 closes out.
+PR 1 lands the table as additive, dormant schema (the channel store's [migration runner](../../internal/channels/sqlite_migrations.go) header documents the one-`migrateV(N-1)ToVN`-per-PR pattern). PR 2 makes it queryable; its tests assert reads of the backfilled snapshot (all intervals open). PR 3 wires the four write hooks so the ledger goes *live and correct* — its tests need `GetMembershipIntervals` from PR 2 to assert the two-stint history, which is why read lands before write. PR 4 (Phase 2) is independent of nothing but PR 1–3 and is separately reviewable; it may be deferred or dropped. PR 5 closes out.
 
 Between PR 1 and PR 3 merging, `main` carries a backfilled-but-not-yet-maintained ledger. That is a coherent additive state: the table reflects the current membership snapshot, has no consumer (RFC 0036 has not landed), and regresses no existing behaviour. The write hooks (PR 3) make it track changes going forward; the partial unique index (PR 1) guards the invariant from the moment the table exists.
 
@@ -173,16 +173,16 @@ SELECT channel_id, participant_id, joined_at, NULL FROM memberships;
 ### PR 3: `feature/v039-rfc0035-write-hooks` — Transactional Interval Open/Close (load-bearing)
 
 **Depends on**: PR 2 merged.
-**Purpose**: Wire the three `memberships`-mutating call sites to open/close intervals **in the same transaction**, so the ledger is live and exact. This is the hard dependency for [RFC 0036](0036-persona-message-recall.md) Phase 1 — it cannot begin until this merges.
+**Purpose**: Wire the four `memberships`-mutating call sites to open/close intervals **in the same transaction**, so the ledger is live and exact. This is the hard dependency for [RFC 0036](0036-persona-message-recall.md) Phase 1 — it cannot begin until this merges.
 
 #### Scope
 
 | File | Change |
 |------|--------|
-| [`internal/channels/sqlite_query.go`](../../internal/channels/sqlite_query.go#L283) — `AddMember` | Currently a **single non-transactional** `INSERT … ON CONFLICT DO NOTHING` ([L301](../../internal/channels/sqlite_query.go#L301)). Wrap it in a `BeginTx`; check `RowsAffected()`. `== 1` (genuine new join or post-removal re-add) → INSERT an open interval `(channel_id, participant_id, joined_at = now, left_at = NULL)` in the same tx, where `now` is the **same** `time.Now().UTC()` written to `memberships.joined_at` so projection and ledger agree. `== 0` (already present) → open no interval (the existing stint's open interval is still correct; the `ux_…_open` index would reject a second anyway). Idempotency preserved on both tables. |
+| [`internal/channels/sqlite_query.go`](../../internal/channels/sqlite_query.go#L309) — `AddMember` | Currently a **single non-transactional** `INSERT … ON CONFLICT DO NOTHING` ([L334](../../internal/channels/sqlite_query.go#L334)). Wrap it in a `BeginTx`; check `RowsAffected()`. `== 1` (genuine new join or post-removal re-add) → INSERT an open interval `(channel_id, participant_id, joined_at = now, left_at = NULL)` in the same tx, where `now` is the **same** `time.Now().UTC()` written to `memberships.joined_at` so projection and ledger agree. `== 0` (already present) → open no interval (the existing stint's open interval is still correct; the `ux_…_open` index would reject a second anyway). Idempotency preserved on both tables. |
 | `internal/channels/sqlite_membership_intervals.go` | The interval-write helpers (`openMembershipInterval(ctx, tx, …)`, `closeOpenMembershipInterval(ctx, tx, …) (int64, error)`) called by the **four** hooks, plus the unexported `errMembershipLedgerDivergence` sentinel; co-located with PR 2's read method. (Named `…MembershipInterval` rather than the plan's `openInterval` to avoid colliding with the `openInterval`/`closedInterval` test fixtures already in `membership_intervals_test.go`.) Keeps the write SQL in one ledger file rather than scattering it across `sqlite_query.go`. |
 | [`internal/channels/sqlite_query.go`](../../internal/channels/sqlite_query.go#L130) — `RemoveMember` | Already transactional (act-first-then-disambiguate). On the `RowsAffected() == 1` success path, before `tx.Commit()`, run `UPDATE membership_intervals SET left_at = ? WHERE channel_id = ? AND participant_id = ? AND left_at IS NULL` with `now`. If it closes **zero** rows on this path, the open-interval invariant (Goal 6) is violated (a `memberships` row with no matching open interval) → **roll back and return a hard error**, never commit silently (a never-closing interval is a data-*exposure* bug for RFC 0036). The existing `n == 0` member-not-present branch closes nothing — that is the expected no-op, not the violation. |
-| `internal/channels/sqlite_query.go` — `GetOrCreateDM` | Already transactional. After the two `memberships` inserts, open one interval per DM participant in the same tx with `joined_at = now` (the DM's creation time). DM membership is never removed in normal operation, so these stay open for the channel's life. (Extracted with `LookupDM` into the new `internal/channels/sqlite_dm.go` — see the file-split note below.) |
+| [`internal/channels/sqlite_dm.go`](../../internal/channels/sqlite_dm.go#L31) — `GetOrCreateDM` | Already transactional. After the two `memberships` inserts, open one interval per DM participant in the same tx with `joined_at = now` (the DM's creation time). DM membership is never removed in normal operation, so these stay open for the channel's life. (Extracted with `LookupDM` into the new `internal/channels/sqlite_dm.go` — see the file-split note below.) |
 | [`internal/channels/sqlite.go`](../../internal/channels/sqlite.go#L328) — `CreateChannelWithMembers` (**fourth hook — not in the original plan**) | Already transactional. The atomic create-with-members path used by the REST create handler and config reconcile — the *primary* way config-declared channels enter the store. Per member, capture `RowsAffected()` on the `INSERT … ON CONFLICT DO NOTHING` and open an interval on `== 1` (gating a participant repeated in the input slice), `joined_at` = the member's `memberships.joined_at`. **Omitting this hook would leave every config persona with no interval (RFC 0036 recall silently empty for them) and make a later `RemoveMember` trip the divergence guard — a reachable REST 500.** The RFC §C "three call sites" count is corrected to four. |
 | `internal/channels/sqlite_dm.go` (new) | **File split** to honour the ≤ 500-line cap: the `AddMember`/`RemoveMember` interval hooks pushed `sqlite_query.go` to 520 lines, so `LookupDM` + `GetOrCreateDM` (a cohesive DM unit, one of them a ledger hook) move here. `sqlite_query.go` returns to 439 lines. |
 | `internal/channels/sqlite_membership_intervals_test.go` (new) | Write-hook unit tests + lifecycle (see below). |
@@ -203,7 +203,7 @@ Per [RFC §Test Strategy](0035-channel-membership-interval-ledger.md#test-strate
 - **Redundant `AddMember` on a present participant** opens **no** second interval (the `RowsAffected == 0` path) — assert still exactly one open interval.
 - **`RemoveMember`** sets `left_at` on the open interval, leaves the rest of the row unchanged, and `GetMembershipIntervals` shows the interval closed.
 - **Join → leave → rejoin** yields two non-overlapping intervals: one closed `[t0, t1)`, one open `[t2, NULL)`.
-- **Atomicity** (`TestAddMember_OpensInterval_Atomically` / `TestRemoveMember_ClosesInterval_Atomically`): a forced failure after the `memberships` write rolls back the interval write too — neither table moves.
+- **Atomicity** (`TestAddMember_OpensInterval_Atomically` / `TestRemoveMember_LedgerDivergence_RollsBack`): a forced failure after the `memberships` write rolls back the interval write too — neither table moves.
 - **Invariant-violation rollback**: synthesize a `memberships` row with no open interval (direct SQL), then `RemoveMember` → assert the sentinel error and that the transaction rolled back (the `memberships` row is still present).
 - **`GetOrCreateDM`** opens exactly one interval per DM participant, both open, `joined_at == DM creation time`.
 - **`CreateChannelWithMembers`** (fourth hook) opens exactly one open interval per initial member, `joined_at == memberships.joined_at`; and **create-with-members → `RemoveMember`** closes cleanly (does **not** trip the divergence guard — the regression that proves the hook is load-bearing).
@@ -236,7 +236,7 @@ Per [RFC §Test Strategy](0035-channel-membership-interval-ledger.md#test-strate
 #### Key implementation details
 
 - **Auth inherits the channel-surface trust level (OQ #2).** The endpoint adds no new auth model; it matches the existing unauthenticated channel REST surface at the current single-tenant trust level and picks up RFC 0009's model when that lands. The handler MUST NOT ship more permissively than its neighbours. Exposing who-was-where-when is no more sensitive than `GetMembers` already is.
-- **Read-only.** `GET` only — no mutation surface on the ledger from REST. The append-only invariant stays owned by the three Go write hooks (PR 3).
+- **Read-only.** `GET` only — no mutation surface on the ledger from REST. The append-only invariant stays owned by the four Go write hooks (PR 3).
 - **`GetAccessibleChannels` lands here, not PR 2**, because this endpoint is its only Phase-2 consumer; RFC 0036 does not need it.
 
 #### Tests

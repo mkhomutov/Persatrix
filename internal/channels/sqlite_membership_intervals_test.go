@@ -285,3 +285,44 @@ func TestRemoveMember_NotPresent_IsNotDivergence(t *testing.T) {
 	assert.NotErrorIs(t, err, errMembershipLedgerDivergence,
 		"member-not-present is the expected no-op, not the invariant breach")
 }
+
+// TestGetMembershipIntervals_OrdersTiesDeterministically pins the read order when
+// two stints for a pair share an identical joined_at. The live hooks always
+// advance the wall clock between stints, so this is a degenerate case — but a
+// backfill or repair that copies a coarse joined_at can produce it, and the
+// two-stint assertions elsewhere lean on "[0] is the earlier/closed stint, [1]
+// the open one". `GetMembershipIntervals` breaks the joined_at tie by `id` ASC
+// (insertion order), so the earlier-inserted closed stint sorts first. The pair
+// is inserted via direct SQL because the live path cannot force the tie.
+func TestGetMembershipIntervals_OrdersTiesDeterministically(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	store, err := NewSQLiteStore(path, SQLiteOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	require.NoError(t, store.CreateChannel(ctx, Channel{
+		ID: "group:planning", Name: "planning", Type: ChannelTypeGroup,
+	}))
+
+	// Same joined_at for both rows: a closed stint inserted first (lower id), then
+	// the open stint. ORDER BY joined_at alone is a tie; the id tiebreaker decides.
+	// Only one row is open, so the ux_membership_intervals_open index is satisfied.
+	withDB(t, path, func(db *sql.DB) {
+		_, err := db.Exec(
+			`INSERT INTO membership_intervals (channel_id, participant_id, joined_at, left_at)
+			   VALUES ('group:planning', 'alice', '2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z')`)
+		require.NoError(t, err)
+		_, err = db.Exec(
+			`INSERT INTO membership_intervals (channel_id, participant_id, joined_at, left_at)
+			   VALUES ('group:planning', 'alice', '2026-01-01T00:00:00Z', NULL)`)
+		require.NoError(t, err)
+	})
+
+	ivs, err := store.GetMembershipIntervals(ctx, "group:planning", "alice")
+	require.NoError(t, err)
+	require.Len(t, ivs, 2)
+	assert.False(t, ivs[0].LeftAt.IsZero(),
+		"on a joined_at tie the lower-id (earlier, closed) stint sorts first")
+	assert.True(t, ivs[1].LeftAt.IsZero(),
+		"the higher-id (open) stint sorts second")
+}
