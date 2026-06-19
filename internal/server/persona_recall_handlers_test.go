@@ -216,7 +216,7 @@ func TestRecallEndpoint_EmitsAuditEvent_CountNotContent(t *testing.T) {
 	assert.EqualValues(t, 2, ev.Detail["result_count"], "the result COUNT is recorded")
 	assert.Equal(t, ch, ev.Detail["channel_id"], "narrowing channel_id recorded")
 	assert.Equal(t, "bob", ev.Detail["sender"], "narrowing sender recorded")
-	assert.EqualValues(t, 25, ev.Detail["limit"], "requested limit recorded")
+	assert.EqualValues(t, 25, ev.Detail["limit"], "effective limit recorded (25 is within bounds, so equals the request)")
 	assert.Equal(t, "live", ev.Detail["epoch_id"], "resolved epoch recorded")
 
 	// The recalled content must never be written anywhere in the audit trail.

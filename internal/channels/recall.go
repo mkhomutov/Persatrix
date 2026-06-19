@@ -68,10 +68,15 @@ type RecallParams struct {
 	Limit int
 }
 
-// effectiveLimit resolves [RecallParams.Limit] against the default floor and the
-// hard ceiling. Centralised here (not in the SQL site) so the bound is a single
-// line of truth a future non-SQLite store reuses.
-func (p RecallParams) effectiveLimit() int {
+// EffectiveLimit resolves [RecallParams.Limit] against the default floor and the
+// hard ceiling — the exact cap the store applies to the result set. Centralised
+// here (not at the SQL site) so the bound is a single line of truth: the store
+// uses it to LIMIT the query, and the RFC 0036 PR 3 recall handler reuses it to
+// audit the *effective* cap (so an auditor reading result_count == limit knows
+// the set was truncated), keeping the audited value and the applied value
+// provably in lockstep. Exported for that cross-package audit reuse; a future
+// non-SQLite store reuses it as well.
+func (p RecallParams) EffectiveLimit() int {
 	if p.Limit <= 0 {
 		return DefaultRecallLimit
 	}

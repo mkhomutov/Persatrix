@@ -106,6 +106,15 @@ func (s *Server) handleRecallMessages(w http.ResponseWriter, r *http.Request) {
 	// result count, never the content (RFC 0036 §Security — Audit). Emitted here
 	// rather than in the Phase 2 tool so a bypassed or misbehaving tool client
 	// cannot suppress the trail.
+	//
+	// Executed reads only (PR #677 review finding #1): a request that fails before
+	// this point — 400 (malformed body / wire-illegal epoch), 503 (store unset), or
+	// 500 (store error, already logged at Error just above) — emits NO event. A
+	// deliberate boundary, distinct from the empty-Outcome rationale in
+	// [Server.emitRecallAudit]: a failed call read nothing, and auditing
+	// attacker-controlled malformed input would let an unauthenticated caller
+	// inflate the trail at will. Revisit once RFC 0009 gives an attempt an
+	// attributable identity. Pinned by TestRecallEndpoint_FailedAttemptNotAudited.
 	s.emitRecallAudit(ctx, participantID, params, len(msgs))
 
 	writeJSON(w, recallMessagesToResponse(msgs), http.StatusOK)
@@ -113,10 +122,18 @@ func (s *Server) handleRecallMessages(w http.ResponseWriter, r *http.Request) {
 
 // emitRecallAudit emits the RFC 0009 `channel.recall` event for one executed
 // recall. It records the calling persona, the query, the resolved epoch, the
-// supplied narrowing parameters, and the result COUNT — and deliberately never
-// the recalled content: the trail proves a sensitive read happened without
-// itself copying the sensitive text into the audit log. Telemetry-class, so the
-// high-volume persona-tool path batches rather than fsyncing per call.
+// effective limit, the supplied narrowing parameters, and the result COUNT — and
+// deliberately never the recalled content: the trail proves a sensitive read
+// happened without itself copying the sensitive text into the audit log.
+// Telemetry-class, so the high-volume persona-tool path batches rather than
+// fsyncing per call.
+//
+// The `query` IS recorded verbatim — a conscious choice (PR #677 review finding
+// #3). It is caller-supplied free text that could itself carry a sensitive
+// phrase, but it is exactly what an auditor needs to read how the search was
+// scoped, and it is the verbatim sibling of `memory.read`, which logs its query
+// the same way. Only the recalled CONTENT — the rows the query returned — is
+// withheld.
 //
 // AgentID == Resource == the persona: recall acts on behalf of, and is scoped
 // to, the calling participant, so the participant is both the actor and the
@@ -135,6 +152,13 @@ func (s *Server) emitRecallAudit(ctx context.Context, participantID string, p ch
 		"query":        p.Query,
 		"epoch_id":     epoch,
 		"result_count": resultCount,
+		// limit is ALWAYS applied (every recall has an effective cap), so unlike the
+		// optional narrowers below it is always recorded — and as the EFFECTIVE value
+		// the store applied, via the same [channels.RecallParams.EffectiveLimit] the
+		// store LIMITs on. So an auditor reading result_count == limit knows the set
+		// was truncated; recording the raw request would mis-read a clamped result as
+		// un-truncated (PR #677 review finding #2).
+		"limit": p.EffectiveLimit(),
 	}
 	// Record only the narrowing parameters that were actually supplied, so the
 	// event stays compact and an auditor can read at a glance how the search was
@@ -145,9 +169,6 @@ func (s *Server) emitRecallAudit(ctx context.Context, participantID string, p ch
 	if p.Sender != "" {
 		detail["sender"] = p.Sender
 	}
-	if p.Limit > 0 {
-		detail["limit"] = p.Limit
-	}
 	// Time bounds as RFC3339 strings, not raw time.Time — clean, human-readable
 	// audit JSON and no struct for the redactor's reflective walk to descend into.
 	if !p.After.IsZero() {
@@ -157,8 +178,9 @@ func (s *Server) emitRecallAudit(ctx context.Context, participantID string, p ch
 		detail["before"] = p.Before.UTC().Format(time.RFC3339)
 	}
 	// Outcome is left empty, matching the existing server emit sites (none populate
-	// it): an executed recall is uniformly a success — failures 500 before the
-	// audit — so the field would carry no discriminating signal here.
+	// it): an executed recall is uniformly a success — every failure path returns
+	// before this emit (see the call site) — so the field would carry no
+	// discriminating signal here.
 	s.emitAudit(ctx, security.AuditEvent{
 		EventType: security.AuditChannelRecall,
 		AgentID:   participantID,
