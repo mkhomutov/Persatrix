@@ -136,6 +136,26 @@ type ChannelStore interface {
 	// ordered by `timestamp` ascending. Capped at `limit`; pass 0 for no cap.
 	GetThread(ctx context.Context, threadID string, limit int) ([]ChannelMessage, error)
 
+	// RecallMessages searches the verbatim text of stored messages, scoped to
+	// the channels and time windows `params.ParticipantID` was a member for
+	// (RFC 0036 §C). The `membership_intervals` `EXISTS` join *is* the
+	// access-control decision: a message is returned only if its timestamp falls
+	// inside one of the participant's half-open `[joined_at, left_at)` stints —
+	// so a join → leave → rejoin recalls both stints and neither the pre-join
+	// period nor the removal gap. Results are additionally hard-filtered to
+	// `params.EpochID` (defaulting to [DefaultEpochID]) with strict equality and
+	// no carve-out (§OQ-6), so one run never recalls another's (or a post-`reset`
+	// epoch's) messages; `session_id` is deliberately NOT filtered — recall spans
+	// a participant's whole history in a channel within the epoch.
+	//
+	// The optional `ChannelID` / `Sender` / `After` / `Before` narrow the result;
+	// `Limit` is clamped server-side to [MaxRecallLimit]. The search runs over the
+	// `messages_fts` FTS5 index when present and falls back to a `LIKE` substring
+	// scan when FTS5 is unavailable, applying the identical scope on both paths.
+	// `params.ParticipantID` must be non-empty. Recall issues no LLM call and
+	// takes no wallet lease — it is pure SQL in the store.
+	RecallMessages(ctx context.Context, params RecallParams) ([]ChannelMessage, error)
+
 	// GetOrCreateDM returns the canonical DM channel between `a` and `b`,
 	// creating it (and both memberships) if it does not yet exist. The
 	// returned [Channel.ID] is always lexicographically sorted; callers
