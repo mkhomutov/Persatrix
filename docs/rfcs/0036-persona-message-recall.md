@@ -650,7 +650,9 @@ and separately reviewable.
   - `channel_id` / `sender` / time-range narrowing each filter as
     expected and compose.
   - FTS5 `MATCH` ranking returns the more relevant hit first; the
-    `LIKE` fallback returns the same row set when FTS5 is disabled.
+    `LIKE` fallback applies the same scope when FTS5 is disabled,
+    though its substring text match diverges from FTS5's whole-token
+    match (a single term hits a superstring token under `LIKE` only).
   - A query containing FTS5 operator syntax is escaped and does not
     error or escape its scope.
   - `limit` is clamped to the server-side maximum.

@@ -136,7 +136,9 @@ Per [RFC §Test Strategy](0036-persona-message-recall.md#test-strategy) + the §
 - **Epoch (load-bearing)**: a message in a *different* epoch / a post-`reset` epoch is **never** returned, even when it matches the query and the membership window.
 - **Session-span**: two messages in the same channel + epoch but different `session_id` are **both** returned (subject to membership) — recall is not session-scoped.
 - **Narrowing**: `channel_id` / `sender` / `after` / `before` each filter as expected and compose.
-- **Ranking**: the more relevant FTS hit ranks first; the `LIKE` fallback returns the **same row set** as FTS when FTS5 is disabled.
+- **Ranking**: the more relevant FTS hit ranks first.
+- **FTS / `LIKE` fallback**: when FTS5 is disabled the `LIKE` fallback applies the **identical scope** but a substring (not whole-token) text match — a single term matches a superstring token (`budget`→`budgets`) under `LIKE` yet not under FTS5, so the two row sets diverge while access can never widen.
+- **Unicode**: a non-Latin (Cyrillic) term filters rather than sanitizing to a match-all dump (`\p{L}\p{N}` sanitizer preserves non-ASCII terms).
 - **`MATCH` safety**: a query containing FTS5 operator syntax is escaped — it neither errors the statement nor escapes scope.
 - **`limit`** is clamped to the server-side maximum regardless of the requested value.
 - **Retention**: a cap-pruned / deleted message is absent from results (gone from `messages_fts` via the delete trigger).
@@ -325,7 +327,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | # | Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|-------|--------|--------|-----------|--------|
 | 1 | 1 | Migration v10 — `messages_fts` + triggers + backfill | `feature/v039-rfc0036-fts-migration` | 🔀 PR open | [#675](https://github.com/mkhomutov/Persatrix/pull/675) | — |
-| 2 | 1 | Scoped search query (membership EXISTS + epoch filter) | `feature/v039-rfc0036-scoped-search` | ⬜ Not started | — | — |
+| 2 | 1 | Scoped search query (membership EXISTS + epoch filter) | `feature/v039-rfc0036-scoped-search` | 🔀 PR open | [#676](https://github.com/mkhomutov/Persatrix/pull/676) | — |
 | 3 | 1 | `POST …/recall` endpoint + server-side audit | `feature/v039-rfc0036-recall-endpoint` | ⬜ Not started | — | — |
 | 4 | 2 | Persona tool + `channels:recall` + §F sanitization | `feature/v039-rfc0036-tool-and-permission` | ⬜ Not started | — | — |
 | 5 | 3 | Conversation-window membership filter (independent) | `feature/v039-rfc0036-window-filter` | ⬜ Not started | — | — |
