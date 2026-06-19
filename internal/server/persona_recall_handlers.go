@@ -43,9 +43,12 @@ import (
 // (currently unauthenticated, single-tenant) channel REST surface and inherits
 // RFC 0009's identity/auth model when that lands; it MUST NOT ship more
 // permissively than its neighbours. Until then every executed call is audited
-// (see [Server.emitRecallAudit]), so misuse on the shared surface is at least
-// observable. Verbatim cross-channel recall is a sensitive read; it leaves a
-// trail.
+// (see [Server.emitRecallAudit]) — but note the audited actor is the
+// self-asserted PATH participant, not an authenticated identity: with no auth a
+// caller can recall as any participant, and the trail then attributes the read to
+// the claimed id, not the true caller. So the audit makes a recall observable as
+// an EVENT, but cannot yet ATTRIBUTE it; real attribution arrives with RFC 0009.
+// Verbatim cross-channel recall is a sensitive read; it leaves a trail.
 func (s *Server) handleRecallMessages(w http.ResponseWriter, r *http.Request) {
 	if s.channelStore == nil {
 		writeError(w, "UNAVAILABLE", "channel store not configured", http.StatusServiceUnavailable)
@@ -60,12 +63,20 @@ func (s *Server) handleRecallMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ISSUE-0085 PR 5 epoch resolution, byte-identical to the publish handler: an
+	// ISSUE-0085 PR 5 epoch resolution, sharing the publish handler's plumbing: an
 	// explicit body `epoch_id` rides the request context via resolveEpochOverride,
 	// then EpochOverrideFromContext reads it back to bind RecallParams.EpochID. A
 	// blank value leaves EpochID "" so the store resolves it to DefaultEpochID
-	// ("live") — recall and publish agree on the run-isolation axis (§OQ-6). A
-	// wire-illegal epoch is a 400, the same fail-loud posture publish takes.
+	// ("live"). A wire-illegal epoch is a 400, the same fail-loud posture publish
+	// takes.
+	//
+	// NB: recall and publish share this RESOLUTION but not its EFFECT. Publish's
+	// resolved epoch rides the gRPC dispatch rail and is deliberately NOT persisted
+	// (channel_epoch_override.go) — every stored message keeps the "live" column
+	// default — whereas recall's resolved epoch binds the store's `messages.epoch_id`
+	// filter. So an explicit non-"live" epoch matches nothing the real publish path
+	// ever wrote; the §OQ-6 filter is a forward-looking guard, not a live isolation
+	// boundary today. Pinned by TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable.
 	ctx, err := s.resolveEpochOverride(r.Context(), req.EpochID)
 	if err != nil {
 		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)

@@ -243,20 +243,30 @@ type channelConfigResponse struct {
 //     not required here.
 //   - `channel_id` / `sender` narrow to one channel / one author.
 //   - `after` (inclusive) / `before` (exclusive) bound the time window; an absent
-//     value decodes to the zero [time.Time], which the store reads as "unset". A
-//     non-RFC3339 string is a decode error → 400, like any malformed body.
+//     value decodes to the zero [time.Time], which the store reads as "unset".
+//     The zero value — not tag omission — is the "unset" signal: a `time.Time` is
+//     a struct, so `omitempty` cannot omit it, and the tag is left off the two
+//     time fields rather than carried as a no-op that reads as a wire contract it
+//     is not. A non-RFC3339 string is a decode error → 400, like any malformed body.
 //   - `limit` is forwarded unmodified; the store clamps it to
 //     [channels.MaxRecallLimit], so the bound holds even for a caller that
 //     bypasses the persona tool.
-//   - `epoch_id` is the optional ISSUE-0085 run-isolation override, resolved
-//     through the same [Server.resolveEpochOverride] the publish handler uses;
-//     absent ⇒ the boot/default epoch ("live").
+//   - `epoch_id` is the optional ISSUE-0085 run-isolation override (§OQ-6 lock),
+//     resolved through the same [Server.resolveEpochOverride] plumbing the publish
+//     handler uses; absent ⇒ "" ⇒ the store's [channels.DefaultEpochID] ("live").
+//     CAVEAT: the channel store is not epoch-partitioned today. The publish path
+//     never stamps a non-"live" epoch on a persisted message — the override rides
+//     the gRPC dispatch rail, not the row (channel_epoch_override.go) — so
+//     `messages.epoch_id` is universally "live" in production. An explicit
+//     non-"live" epoch therefore matches nothing published through the real path;
+//     the filter is a forward-looking defensive guard, not a live isolation axis.
+//     Pinned by TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable.
 type recallRequest struct {
 	Query     string    `json:"query"`
 	ChannelID string    `json:"channel_id,omitempty"`
 	Sender    string    `json:"sender,omitempty"`
-	After     time.Time `json:"after,omitempty"`
-	Before    time.Time `json:"before,omitempty"`
+	After     time.Time `json:"after"`
+	Before    time.Time `json:"before"`
 	Limit     int       `json:"limit,omitempty"`
 	EpochID   string    `json:"epoch_id,omitempty"`
 }
