@@ -324,7 +324,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|-------|--------|--------|-----------|--------|
-| 1 | 1 | Migration v10 — `messages_fts` + triggers + backfill | `feature/v039-rfc0036-fts-migration` | 🔀 PR open | — | — |
+| 1 | 1 | Migration v10 — `messages_fts` + triggers + backfill | `feature/v039-rfc0036-fts-migration` | 🔀 PR open | [#675](https://github.com/mkhomutov/Persatrix/pull/675) | — |
 | 2 | 1 | Scoped search query (membership EXISTS + epoch filter) | `feature/v039-rfc0036-scoped-search` | ⬜ Not started | — | — |
 | 3 | 1 | `POST …/recall` endpoint + server-side audit | `feature/v039-rfc0036-recall-endpoint` | ⬜ Not started | — | — |
 | 4 | 2 | Persona tool + `channels:recall` + §F sanitization | `feature/v039-rfc0036-tool-and-permission` | ⬜ Not started | — | — |
