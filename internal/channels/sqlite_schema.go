@@ -92,9 +92,11 @@ import (
 //	    leaves the index); `messages_au` is defensive-symmetric (`messages` is
 //	    insert-and-cap-prune only, so it should never fire). A pure addition:
 //	    no existing table, row, or index is touched, so a v0.3.8/v9 database
-//	    reads back byte-identically. The index ships dormant — no query reads
-//	    it until RFC 0036 PR 2's scoped search, which joins it against the v9
-//	    `membership_intervals` ledger. On an FTS5-less build the migration
+//	    reads back byte-identically. The index ships read-dormant — no query
+//	    reads it until RFC 0036 PR 2's scoped search, which joins it against the
+//	    v9 `membership_intervals` ledger — but its sync triggers are live from
+//	    v10: every publish/prune maintains the index (one extra index write per
+//	    insert, on the publish transaction). On an FTS5-less build the migration
 //	    advances to v10 without the virtual table and PR 2 falls back to LIKE.
 //	    NOTE: `content_rowid=rowid` aliases `messages`' implicit rowid, which is
 //	    NOT preserved across an explicit `VACUUM`; no code runs `VACUUM` today,

@@ -22,9 +22,11 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -156,6 +158,82 @@ func TestSQLiteStore_SchemaV10_Triggers_KeepIndexInSync(t *testing.T) {
 		require.NoError(t, db.QueryRow(
 			`SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'roadmap'`).Scan(&n))
 		assert.Equal(t, 0, n, "messages_ad trigger removes the deleted message from the index")
+	})
+}
+
+// TestSQLiteStore_SchemaV10_CapPruneCascade_LeavesIndex pins the RFC 0036 §H
+// retention property through the REAL prune path. pruneExcess hard-deletes the
+// oldest message(s) on a publish that exceeds the cap, and a pruned thread root
+// cascade-deletes its replies (thread_id ON DELETE CASCADE). Every such removal
+// must fire messages_ad so the row also leaves messages_fts — otherwise RFC 0036
+// PR 2 recall could surface a message that no longer exists, and (because SQLite
+// reuses rowids) a stale index entry could later resolve to a different
+// message's content.
+//
+// TestSQLiteStore_ThreadFKCascade (sqlite_test.go) pins that the rows leave
+// `messages`; this is its FTS sibling. The trigger test above only exercises a
+// single *direct* DELETE, so the cap-prune + cascade path the §H story actually
+// depends on was otherwise uncovered.
+func TestSQLiteStore_SchemaV10_CapPruneCascade_LeavesIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	store, err := NewSQLiteStore(path, SQLiteOptions{MaxMessagesPerChannel: 5})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	ctx := context.Background()
+	id := "group:planning"
+	require.NoError(t, store.CreateChannel(ctx, Channel{ID: id, Name: "planning", Type: ChannelTypeGroup}))
+	require.NoError(t, store.AddMember(ctx, id, "alice", RespondWhenMentioned))
+
+	// Distinctive single-token contents so MATCH is unambiguous. The root and
+	// its two replies are the oldest rows; they prune (root) and cascade
+	// (replies) once the channel is pushed over the cap of 5.
+	rootID := uuid.NewString()
+	rootTS := time.Now().UTC()
+	require.NoError(t, store.PublishMessage(ctx, ChannelMessage{
+		ID: rootID, ChannelID: id, SenderID: "alice", Content: "zorproot", Timestamp: rootTS,
+	}))
+	for i := 0; i < 2; i++ {
+		require.NoError(t, store.PublishMessage(ctx, ChannelMessage{
+			ID: uuid.NewString(), ChannelID: id, SenderID: "alice",
+			Content: "quxreply", ThreadID: rootID,
+			Timestamp: rootTS.Add(time.Duration(i+1) * time.Millisecond),
+		}))
+	}
+	// Six fresh messages (a shared survivor token) over a cap of 5 evict the
+	// three oldest (root + cascaded replies) and then the first fresh message,
+	// leaving exactly the five most recent. Mirrors ThreadFKCascade's arithmetic.
+	for i := 0; i < 6; i++ {
+		require.NoError(t, store.PublishMessage(ctx, ChannelMessage{
+			ID: uuid.NewString(), ChannelID: id, SenderID: "alice",
+			Content:   "survivortoken",
+			Timestamp: rootTS.Add(time.Hour + time.Duration(i)*time.Millisecond),
+		}))
+	}
+
+	withDB(t, path, func(db *sql.DB) {
+		matchCount := func(term string) int {
+			var n int
+			require.NoError(t, db.QueryRow(
+				`SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH ?`, term).Scan(&n))
+			return n
+		}
+		assert.Equal(t, 0, matchCount("zorproot"),
+			"cap-pruned thread root must leave messages_fts")
+		assert.Equal(t, 0, matchCount("quxreply"),
+			"cascade-deleted replies must leave messages_fts")
+		assert.Equal(t, 5, matchCount("survivortoken"),
+			"the five surviving messages stay indexed (positive control)")
+
+		// No orphaned index entries: the FTS doc set tracks `messages` exactly,
+		// and FTS5's own structural integrity check passes.
+		var ftsN, msgN int
+		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM messages_fts`).Scan(&ftsN))
+		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&msgN))
+		assert.Equal(t, 5, msgN, "cap holds at 5 after prune + cascade")
+		assert.Equal(t, msgN, ftsN, "messages_fts row count tracks messages (no orphans)")
+		_, err := db.Exec(`INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')`)
+		assert.NoError(t, err, "FTS5 integrity-check passes after prune + cascade")
 	})
 }
 

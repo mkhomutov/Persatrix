@@ -14,6 +14,10 @@ import (
 // FTS5 DDL for the verbatim-recall index. External-content table over
 // `messages.content` (mirroring the episodic tier's `episodes_fts`), kept in
 // sync by three triggers. RFC 0036 PR 2's scoped search MATCHes against it.
+// These statements omit `IF NOT EXISTS`: unlike the episodic tier's DDL (re-run
+// on every open) the v9→v10 step is version-gated and atomic, so it runs
+// exactly once — idempotency comes from that gate, not from the DDL. See
+// [applyMessagesFTSMigration].
 const (
 	// `content=messages, content_rowid=rowid` makes this an EXTERNAL-CONTENT
 	// table: it stores only the inverted index, reading column values back from
@@ -66,7 +70,11 @@ const (
 // FTS5 availability is probed once here and the decision delegated to
 // [applyMessagesFTSMigration]; when FTS5 is absent the migration still advances
 // to v10 (no virtual table), and PR 2's query detects the missing table to take
-// its LIKE fallback — the same graceful degradation the episodic tier ships.
+// its LIKE fallback. That degradation is one-way: the step is version-gated, so
+// a database stamped v10 on an FTS5-less build never gains `messages_fts` on a
+// later FTS5-capable open (the episodic tier, by contrast, re-applies its FTS
+// DDL with IF NOT EXISTS every open and self-heals). modernc.org/sqlite always
+// ships FTS5, so in practice the channel store never takes this path.
 func migrateV9ToV10(db *sql.DB) error {
 	return applyMessagesFTSMigration(db, fts5Available(db))
 }
@@ -92,7 +100,7 @@ func applyMessagesFTSMigration(db *sql.DB, ftsAvailable bool) error {
 			messagesFTSInsertTriggerDDL,
 			messagesFTSDeleteTriggerDDL,
 			messagesFTSUpdateTriggerDDL,
-			messagesFTSRebuildDDL, // last: index exists + triggers armed before backfill
+			messagesFTSRebuildDDL, // last: ('rebuild') needs the table to exist; it reads `messages` directly and does not fire the triggers.
 		}
 		for _, q := range stmts {
 			if _, err := tx.Exec(q); err != nil {
@@ -116,8 +124,10 @@ func applyMessagesFTSMigration(db *sql.DB, ftsAvailable bool) error {
 // true in every supported build; the probe exists so the channel-store open
 // degrades gracefully (skipping `messages_fts`) on a hypothetical FTS5-less
 // build rather than failing outright. The probe runs outside the migration
-// transaction; the create-then-drop nets to nothing and `IF NOT EXISTS` keeps a
-// re-probe idempotent.
+// transaction; the create-then-drop nets to nothing in the normal case and
+// `IF NOT EXISTS` keeps a re-probe idempotent. The DROP is best-effort — its
+// error is ignored, and a `_fts5_probe` that outlives a failed drop is harmless
+// (the next `CREATE ... IF NOT EXISTS` no-ops), so it never blocks the open.
 func fts5Available(db *sql.DB) bool {
 	if _, err := db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS _fts5_probe USING fts5(probe)`); err != nil {
 		return false
