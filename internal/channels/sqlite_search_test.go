@@ -15,8 +15,10 @@
 //   - Session-span: two messages in the same channel + epoch but different
 //     sessions are both recallable — recall is NOT session-scoped.
 //   - Narrowing: channel_id / sender / after / before each filter and compose.
-//   - Ranking: the more relevant FTS hit ranks first; the LIKE fallback returns
-//     the same row set as FTS.
+//   - Ranking: the more relevant FTS hit ranks first; the LIKE fallback keeps the
+//     identical scope but a substring (not token) text match, so its row set can
+//     diverge (a single term hits a superstring token under LIKE only).
+//   - Unicode: a non-Latin (Cyrillic) term filters, not sanitizes to a match-all.
 //   - MATCH safety: a query carrying FTS5 operator syntax neither errors the
 //     statement nor escapes the membership scope.
 //   - Limit: clamped to the server-side maximum regardless of the request.
@@ -241,37 +243,38 @@ func TestRecallMessages_Ranking(t *testing.T) {
 	assert.Equal(t, "m-dense", got[0].ID, "the term-dense hit ranks first (BM25-dominant, not recency-dominant)")
 }
 
-// TestRecallMessages_LikeFallback_SameRowSetAsFTS pins the FTS5-unavailable
-// degradation: with the index dropped, recall takes the LIKE path and returns
-// the same row set the FTS path did (same scope + epoch + narrowing; ranking is
-// the only thing that differs).
-func TestRecallMessages_LikeFallback_SameRowSetAsFTS(t *testing.T) {
+// TestRecallMessages_LikeFallback_SameScopeDifferentTextMatch pins the true
+// FTS5-unavailable contract: the LIKE fallback keeps the byte-identical scope (an
+// out-of-scope row is unreachable on BOTH paths), but its substring text match is
+// NOT FTS5's token row set — `budget` excludes the `budgets` token under FTS5 yet
+// includes it under LIKE. (The prior revision asserted "same row set", passing
+// only on a fixture whose tokens were also exact substrings.)
+func TestRecallMessages_LikeFallback_SameScopeDifferentTextMatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 	store, err := NewSQLiteStore(path, SQLiteOptions{})
 	require.NoError(t, err)
 	ctx := context.Background()
-	ch := "group:planning"
-	require.NoError(t, store.CreateChannel(ctx, Channel{ID: ch, Name: "planning", Type: ChannelTypeGroup}))
+	require.NoError(t, store.CreateChannel(ctx, Channel{ID: "group:planning", Name: "planning", Type: ChannelTypeGroup}))
+	require.NoError(t, store.CreateChannel(ctx, Channel{ID: "group:secret", Name: "secret", Type: ChannelTypeGroup}))
 
+	// m-exact: token "budget" (FTS+LIKE). m-plural: token "budgets" (LIKE substring
+	// only). m-out: token "budget" but in a channel alice was never in (out of scope).
 	withDB(t, path, func(db *sql.DB) {
-		seedInterval(t, db, ch, "alice", mins(0), nil)
-		seedMsg(t, db, msgSeed{id: "m1", channelID: ch, sender: "bob", content: "the budget review", ts: mins(10)})
-		seedMsg(t, db, msgSeed{id: "m2", channelID: ch, sender: "bob", content: "budget planning notes", ts: mins(20)})
-		seedMsg(t, db, msgSeed{id: "m3", channelID: ch, sender: "bob", content: "unrelated lunch chatter", ts: mins(30)})
+		seedInterval(t, db, "group:planning", "alice", mins(0), nil)
+		seedMsg(t, db, msgSeed{id: "m-exact", channelID: "group:planning", sender: "bob", content: "the budget review", ts: mins(10)})
+		seedMsg(t, db, msgSeed{id: "m-plural", channelID: "group:planning", sender: "bob", content: "two budgets approved", ts: mins(20)})
+		seedMsg(t, db, msgSeed{id: "m-out", channelID: "group:secret", sender: "carol", content: "the budget review", ts: mins(10)})
 	})
 
 	ftsGot, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget"})
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 
-	// Drop the FTS index + its sync triggers; reopen so the store's connection
-	// sees the v10 schema sans messages_fts and must take the LIKE fallback.
+	// Drop the FTS index + triggers; reopen so the store must take the LIKE path.
 	withDB(t, path, func(db *sql.DB) {
 		for _, ddl := range []string{
-			`DROP TRIGGER IF EXISTS messages_ai`,
-			`DROP TRIGGER IF EXISTS messages_ad`,
-			`DROP TRIGGER IF EXISTS messages_au`,
-			`DROP TABLE IF EXISTS messages_fts`,
+			`DROP TRIGGER IF EXISTS messages_ai`, `DROP TRIGGER IF EXISTS messages_ad`,
+			`DROP TRIGGER IF EXISTS messages_au`, `DROP TABLE IF EXISTS messages_fts`,
 		} {
 			_, err := db.Exec(ddl)
 			require.NoError(t, err)
@@ -284,8 +287,12 @@ func TestRecallMessages_LikeFallback_SameRowSetAsFTS(t *testing.T) {
 	likeGot, err := store2.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget"})
 	require.NoError(t, err, "recall still works with FTS5 unavailable (LIKE fallback)")
 
-	assert.ElementsMatch(t, []string{"m1", "m2"}, idSlice(ftsGot), "FTS path matches the two budget rows")
-	assert.ElementsMatch(t, idSlice(ftsGot), idSlice(likeGot), "LIKE fallback returns the same row set as FTS")
+	// Text match diverges (FTS5 token vs LIKE substring, which adds m-plural)...
+	assert.Equal(t, []string{"m-exact"}, idSlice(ftsGot), "FTS5 matches the whole token `budget` only")
+	assert.ElementsMatch(t, []string{"m-exact", "m-plural"}, idSlice(likeGot), "LIKE adds the `budgets` substring — paths diverge")
+	// ...but scope is byte-identical: the out-of-scope row is excluded on BOTH paths.
+	assert.NotContains(t, idSlice(ftsGot), "m-out", "scope excludes the out-of-channel row (FTS path)")
+	assert.NotContains(t, idSlice(likeGot), "m-out", "scope excludes the out-of-channel row (LIKE path)")
 }
 
 // TestRecallMessages_MatchSafety pins the §F injection property: a query

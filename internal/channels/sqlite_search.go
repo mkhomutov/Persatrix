@@ -7,15 +7,23 @@ package channels
 // server-side, in SQL, and bound from trusted request context — the FTS `MATCH`
 // text is a separate AND-ed predicate that can never reach them.
 //
-// The query has two paths, the same degradation the episodic tier ships
-// (agents/memory/episodic_queries.py): an FTS5 MATCH over `messages_fts` when
-// the index is present and the query carries searchable terms, and a `LIKE`
-// substring fallback when FTS5 is unavailable (or the query sanitizes to no
-// terms). Both apply the identical scope + epoch + narrowing predicates, so the
-// fallback can never widen access — what differs is the text match: FTS5 does a
-// BM25-ranked tokenized AND (terms match anywhere, in any order), while the LIKE
-// fallback is a recency-ordered contiguous-substring match. For a single term
-// the two return the same rows; for a multi-term query the row sets can diverge.
+// The query has two paths, mirroring the episodic tier's FTS5/LIKE split
+// (agents/memory/episodic_queries.py) though gated differently: an FTS5 MATCH
+// over `messages_fts` when the index is present and the query carries searchable
+// terms, and a `LIKE` fallback otherwise — FTS5 unavailable, or the query
+// sanitizes to no terms. (The episodic tier ALSO drops to LIKE on a
+// malformed-MATCH runtime error; this query instead quotes every token so MATCH
+// cannot error, so its only fallback triggers are absent-index and empty-query.)
+// Both paths apply the identical scope + epoch + narrowing predicates, so the
+// fallback can never widen ACCESS. The TEXT match, by contrast, is deliberately
+// not equivalent: FTS5 does a BM25-ranked tokenized AND (whole-token matches,
+// anywhere, in any order), while LIKE is a recency-ordered substring match. The
+// two diverge even for a SINGLE term, in both directions — LIKE matches a
+// superstring token (`budget` hits `budgets`), FTS5 matches a case/diacritic-
+// folded token (`café` hits `cafe`) — so the row sets are NOT interchangeable,
+// only the scope is. modernc.org/sqlite always ships FTS5, so the term-carrying
+// LIKE branch is reached only on an FTS5-less build (or a test that drops the
+// index); the only branch prod hits is the empty-query one, a recency listing.
 
 import (
 	"context"
