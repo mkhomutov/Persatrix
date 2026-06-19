@@ -135,13 +135,18 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 		return nil, err
 	}
 
-	return &sqliteStore{
+	store := &sqliteStore{
 		db:                    db,
 		maxChannels:           opts.MaxChannels,
 		maxMessagesPerChannel: opts.MaxMessagesPerChannel,
 		logger:                logger,
 		sessionMetrics:        opts.SessionMetrics,
-	}, nil
+	}
+	// RFC 0036: settle `messages_fts` existence once, now that applySchema has
+	// run migration v10. Cached so recall never re-probes `sqlite_master` per
+	// call against the single pinned connection. See [sqliteStore.probeMessagesFTS].
+	store.ftsAvailable = store.probeMessagesFTS()
+	return store, nil
 }
 
 // buildDSN attaches the PRAGMA flags every channel-store connection needs:
@@ -186,6 +191,11 @@ type sqliteStore struct {
 	maxMessagesPerChannel int
 	logger                *zap.Logger
 	sessionMetrics        *SessionMetrics
+
+	// ftsAvailable records whether the `messages_fts` index exists, probed once
+	// at construction (RFC 0036). Write-once before the store is handed out, then
+	// read-only — so no synchronisation is needed alongside dmMu.
+	ftsAvailable bool
 
 	dmMu sync.Mutex
 }

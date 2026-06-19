@@ -14,16 +14,22 @@ package channels
 // sanitizes to no terms. (The episodic tier ALSO drops to LIKE on a
 // malformed-MATCH runtime error; this query instead quotes every token so MATCH
 // cannot error, so its only fallback triggers are absent-index and empty-query.)
-// Both paths apply the identical scope + epoch + narrowing predicates, so the
-// fallback can never widen ACCESS. The TEXT match, by contrast, is deliberately
-// not equivalent: FTS5 does a BM25-ranked tokenized AND (whole-token matches,
-// anywhere, in any order), while LIKE is a recency-ordered substring match. The
-// two diverge even for a SINGLE term, in both directions — LIKE matches a
-// superstring token (`budget` hits `budgets`), FTS5 matches a case/diacritic-
-// folded token (`café` hits `cafe`) — so the row sets are NOT interchangeable,
-// only the scope is. modernc.org/sqlite always ships FTS5, so the term-carrying
-// LIKE branch is reached only on an FTS5-less build (or a test that drops the
-// index); the only branch prod hits is the empty-query one, a recency listing.
+// Both paths apply the identical scope + epoch + narrowing predicates AND
+// tokenize the query through the same [recallTokens] pass, so the fallback can
+// never widen ACCESS and narrows on the same term set. Their per-token match
+// rule still differs deliberately: FTS5 does a BM25-ranked whole-token AND
+// (matches anywhere, in any order), while LIKE ANDs one `%token%` SUBSTRING per
+// token (recency-ordered — a substring hit is binary, so there is no relevance
+// signal). So the two diverge even for a SINGLE term, in both directions — LIKE
+// matches a superstring token (`budget` hits `budgets`), FTS5 matches a case/
+// diacritic-folded token (`café` hits `cafe`) — and the row sets are NOT
+// interchangeable, only the scope is. (An earlier revision substring-matched the
+// RAW query as one blob, so a multi-term query ALSO demanded the terms be
+// adjacent — `budget report` missed `budget … report`; sharing the tokenizer
+// removed that extra, non-FTS-like divergence.) modernc.org/sqlite always ships
+// FTS5, so the term-carrying LIKE branch is reached only on an FTS5-less build
+// (or a test that drops the index); the only branch prod hits is the empty-query
+// one, a recency listing.
 
 import (
 	"context"
@@ -121,18 +127,16 @@ func (s *sqliteStore) RecallMessages(ctx context.Context, params RecallParams) (
 	narrow, narrowArgs := recallNarrowing(params)
 	match := buildFTS5Match(params.Query)
 
-	if match != "" && s.messagesFTSAvailable(ctx) {
+	if match != "" && s.ftsAvailable {
 		return s.recallViaFTS(ctx, match, scope, scopeArgs, narrow, narrowArgs, limit)
 	}
 
-	// LIKE fallback. A query with no searchable terms (empty / pure punctuation)
-	// becomes a match-all so the caller still gets a recency-ordered scoped
-	// listing; a query with terms on an FTS5-less build is a substring search.
-	pattern := "%%"
-	if match != "" {
-		pattern = escapeLikePattern(params.Query)
-	}
-	return s.recallViaLike(ctx, pattern, scope, scopeArgs, narrow, narrowArgs, limit)
+	// LIKE fallback (FTS5 unavailable, or a query that sanitized to no terms).
+	// Each searchable token becomes one `%token%` substring predicate, AND-ed —
+	// the closest a substring scan gets to FTS5's order-independent token AND. A
+	// query with no terms yields no patterns, so the caller still gets a
+	// recency-ordered scoped listing of the whole in-scope set.
+	return s.recallViaLike(ctx, buildLikePatterns(params.Query), scope, scopeArgs, narrow, narrowArgs, limit)
 }
 
 // recallViaFTS runs the FTS5 MATCH path, ordered BM25-dominant with recency as a
@@ -172,22 +176,31 @@ func (s *sqliteStore) recallViaFTS(
 }
 
 // recallViaLike runs the substring fallback, ordered newest-first (LIKE matches
-// are binary, so there is no relevance signal to rank on). Scope, epoch, and
-// narrowing are byte-identical to the FTS path.
+// are binary, so there is no relevance signal to rank on). It ANDs one
+// `m.content LIKE ?` predicate per pattern in `patterns`; an empty slice emits
+// no text predicate, so the result is a recency listing of the whole in-scope
+// set. Scope, epoch, and narrowing are byte-identical to the FTS path — only the
+// TEXT match differs.
 func (s *sqliteStore) recallViaLike(
-	ctx context.Context, pattern, scope string, scopeArgs []any, narrow string, narrowArgs []any, limit int,
+	ctx context.Context, patterns []string, scope string, scopeArgs []any, narrow string, narrowArgs []any, limit int,
 ) ([]ChannelMessage, error) {
+	var text strings.Builder
+	for range patterns {
+		text.WriteString(` AND m.content LIKE ? ESCAPE '\'`)
+	}
+
 	q := `SELECT ` + recallMessageColumns + `
         FROM messages m
-        WHERE m.content LIKE ? ESCAPE '\'
-          AND ` + scope + narrow + `
+        WHERE ` + scope + narrow + text.String() + `
         ORDER BY m.timestamp DESC
         LIMIT ?`
 
-	args := make([]any, 0, 2+len(scopeArgs)+len(narrowArgs))
-	args = append(args, pattern)
+	args := make([]any, 0, 1+len(scopeArgs)+len(narrowArgs)+len(patterns))
 	args = append(args, scopeArgs...)
 	args = append(args, narrowArgs...)
+	for _, p := range patterns {
+		args = append(args, p)
+	}
 	args = append(args, limit)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -198,29 +211,50 @@ func (s *sqliteStore) recallViaLike(
 	return scanMessageRows(rows)
 }
 
-// messagesFTSAvailable reports whether the `messages_fts` index exists. It is
-// absent on an FTS5-less build (migration v10 skipped the virtual table) — the
-// degradation PR 1 left for this query to detect. The lookup is a single indexed
-// read of `sqlite_master`; recall is not a hot path, so it runs per call rather
-// than caching a flag on the store.
-func (s *sqliteStore) messagesFTSAvailable(ctx context.Context) bool {
+// probeMessagesFTS reports whether the `messages_fts` index exists in this
+// database. It is absent on an FTS5-less build (migration v10 skipped the
+// virtual table) — the degradation PR 1 left for recall to detect.
+//
+// Called ONCE at construction ([NewSQLiteStore]) and cached on the store
+// ([sqliteStore.ftsAvailable]): the table is created (or skipped) by migration
+// v10 during applySchema and never changes for a handle's lifetime, so a
+// per-call catalog lookup would only re-confirm an immutable fact. It would also
+// not be free — the store pins `MaxOpenConns(1)`, so every recall would
+// serialise an extra `sqlite_master` read against that single connection. A lone
+// indexed read at open settles it. Uses [context.Background]: it runs before the
+// store is handed out, with no caller context to honour, and a transient error
+// fails safe to the LIKE fallback (which keeps the identical scope).
+func (s *sqliteStore) probeMessagesFTS() bool {
 	var n int
-	err := s.db.QueryRowContext(ctx,
+	err := s.db.QueryRowContext(context.Background(),
 		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`).Scan(&n)
 	return err == nil && n > 0
 }
 
-// buildFTS5Match turns a free-text query into a safe FTS5 MATCH expression:
-// sanitize to alphanumeric tokens, then double-quote each so it is a literal
-// term (neutralising operator keywords and metacharacters), joined by spaces
-// (an implicit AND of the terms). Returns "" when the query holds no searchable
-// characters — the caller then takes the recency-listing fallback.
-func buildFTS5Match(query string) string {
+// recallTokens sanitizes a free-text query to the alphanumeric token list both
+// search paths share — [buildFTS5Match] quotes each into a literal MATCH term,
+// [buildLikePatterns] wraps each in `%…%`. Centralising the tokenization is what
+// keeps the two paths narrowing on the SAME terms; only their per-token match
+// rule (whole-token vs substring) is allowed to differ. Returns nil when nothing
+// searchable survives the sanitizer (an empty or pure-punctuation query).
+func recallTokens(query string) []string {
 	sanitized := strings.TrimSpace(fts5SanitizeRecall.ReplaceAllString(query, " "))
 	if sanitized == "" {
+		return nil
+	}
+	return strings.Fields(sanitized)
+}
+
+// buildFTS5Match turns a free-text query into a safe FTS5 MATCH expression:
+// double-quote each [recallTokens] token so it is a literal term (neutralising
+// operator keywords and metacharacters), joined by spaces (an implicit AND of
+// the terms). Returns "" when the query holds no searchable characters — the
+// caller then takes the recency-listing fallback.
+func buildFTS5Match(query string) string {
+	tokens := recallTokens(query)
+	if len(tokens) == 0 {
 		return ""
 	}
-	tokens := strings.Fields(sanitized)
 	quoted := make([]string, len(tokens))
 	for i, tok := range tokens {
 		quoted[i] = `"` + tok + `"`
@@ -228,10 +262,28 @@ func buildFTS5Match(query string) string {
 	return strings.Join(quoted, " ")
 }
 
-// escapeLikePattern escapes the LIKE metacharacters (`\`, `%`, `_`) and wraps the
-// query in `%…%` for a substring match — the Go twin of the episodic tier's LIKE
-// escaping, paired with `ESCAPE '\'` at the query site.
-func escapeLikePattern(query string) string {
-	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return "%" + r.Replace(query) + "%"
+// buildLikePatterns turns a free-text query into one `%token%` LIKE pattern per
+// [recallTokens] token, for the FTS5-unavailable fallback to AND together. Using
+// the same tokenizer as [buildFTS5Match] keeps the fallback narrowing on the
+// identical term set, so a multi-term query is an order-independent per-token AND
+// rather than a contiguous-substring match of the raw phrase. Returns nil when
+// the query holds no searchable terms — the caller then lists the in-scope set
+// by recency.
+//
+// recallTokens already stripped every LIKE metacharacter (`%` / `_` / `\` are
+// neither `\p{L}` nor `\p{N}`), so the per-token escape is defense-in-depth: it
+// keeps the pattern safe should that sanitizer ever be loosened, mirroring the
+// FTS path's belt-and-suspenders double-quoting. Paired with `ESCAPE '\'` at the
+// query site.
+func buildLikePatterns(query string) []string {
+	tokens := recallTokens(query)
+	if len(tokens) == 0 {
+		return nil
+	}
+	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	patterns := make([]string, len(tokens))
+	for i, tok := range tokens {
+		patterns[i] = "%" + esc.Replace(tok) + "%"
+	}
+	return patterns
 }

@@ -15,14 +15,16 @@
 //   - Session-span: two messages in the same channel + epoch but different
 //     sessions are both recallable — recall is NOT session-scoped.
 //   - Narrowing: channel_id / sender / after / before each filter and compose.
-//   - Ranking: the more relevant FTS hit ranks first; the LIKE fallback keeps the
-//     identical scope but a substring (not token) text match, so its row set can
-//     diverge (a single term hits a superstring token under LIKE only).
+//   - Ranking: the more relevant FTS hit ranks first.
 //   - Unicode: a non-Latin (Cyrillic) term filters, not sanitizes to a match-all.
 //   - MATCH safety: a query carrying FTS5 operator syntax neither errors the
 //     statement nor escapes the membership scope.
 //   - Limit: clamped to the server-side maximum regardless of the request.
 //   - Retention: a hard-deleted message leaves the index and is unrecallable.
+//
+// The FTS5-UNAVAILABLE `LIKE` fallback contract (same scope, divergent per-token
+// substring match) lives in the sibling sqlite_search_fallback_test.go, which
+// reuses this file's fixtures.
 //
 // Fixtures seed `membership_intervals` and `messages` via direct SQL with
 // `?`-bound `time.Time` values (not string literals) so the join/leave
@@ -243,56 +245,38 @@ func TestRecallMessages_Ranking(t *testing.T) {
 	assert.Equal(t, "m-dense", got[0].ID, "the term-dense hit ranks first (BM25-dominant, not recency-dominant)")
 }
 
-// TestRecallMessages_LikeFallback_SameScopeDifferentTextMatch pins the true
-// FTS5-unavailable contract: the LIKE fallback keeps the byte-identical scope (an
-// out-of-scope row is unreachable on BOTH paths), but its substring text match is
-// NOT FTS5's token row set — `budget` excludes the `budgets` token under FTS5 yet
-// includes it under LIKE. (The prior revision asserted "same row set", passing
-// only on a fixture whose tokens were also exact substrings.)
-func TestRecallMessages_LikeFallback_SameScopeDifferentTextMatch(t *testing.T) {
+// TestRecallMessages_EmptyQuery_RecencyListing pins the documented degrade: a
+// query with no searchable terms (empty, or pure punctuation that sanitizes
+// away) is not an error — it lists the in-scope set newest-first, still bounded
+// by membership + epoch. On the prod build (modernc ships FTS5) a real search
+// takes the FTS path, so this term-less branch is the one production actually
+// reaches here — and it exercises recallViaLike's ZERO-pattern shape: a WHERE
+// carrying the scope predicate and no `content LIKE` clause at all.
+func TestRecallMessages_EmptyQuery_RecencyListing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 	store, err := NewSQLiteStore(path, SQLiteOptions{})
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
 	require.NoError(t, store.CreateChannel(ctx, Channel{ID: "group:planning", Name: "planning", Type: ChannelTypeGroup}))
 	require.NoError(t, store.CreateChannel(ctx, Channel{ID: "group:secret", Name: "secret", Type: ChannelTypeGroup}))
 
-	// m-exact: token "budget" (FTS+LIKE). m-plural: token "budgets" (LIKE substring
-	// only). m-out: token "budget" but in a channel alice was never in (out of scope).
 	withDB(t, path, func(db *sql.DB) {
 		seedInterval(t, db, "group:planning", "alice", mins(0), nil)
-		seedMsg(t, db, msgSeed{id: "m-exact", channelID: "group:planning", sender: "bob", content: "the budget review", ts: mins(10)})
-		seedMsg(t, db, msgSeed{id: "m-plural", channelID: "group:planning", sender: "bob", content: "two budgets approved", ts: mins(20)})
-		seedMsg(t, db, msgSeed{id: "m-out", channelID: "group:secret", sender: "carol", content: "the budget review", ts: mins(10)})
+		seedMsg(t, db, msgSeed{id: "m-old", channelID: "group:planning", sender: "bob", content: "first", ts: mins(10)})
+		seedMsg(t, db, msgSeed{id: "m-new", channelID: "group:planning", sender: "bob", content: "second", ts: mins(20)})
+		// Out of scope (alice was never in group:secret) AND newest — proves the
+		// term-less listing still enforces scope, not just recency.
+		seedMsg(t, db, msgSeed{id: "m-out", channelID: "group:secret", sender: "carol", content: "third", ts: mins(30)})
 	})
 
-	ftsGot, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget"})
-	require.NoError(t, err)
-	require.NoError(t, store.Close())
-
-	// Drop the FTS index + triggers; reopen so the store must take the LIKE path.
-	withDB(t, path, func(db *sql.DB) {
-		for _, ddl := range []string{
-			`DROP TRIGGER IF EXISTS messages_ai`, `DROP TRIGGER IF EXISTS messages_ad`,
-			`DROP TRIGGER IF EXISTS messages_au`, `DROP TABLE IF EXISTS messages_fts`,
-		} {
-			_, err := db.Exec(ddl)
-			require.NoError(t, err)
-		}
-	})
-	store2, err := NewSQLiteStore(path, SQLiteOptions{})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store2.Close() })
-
-	likeGot, err := store2.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget"})
-	require.NoError(t, err, "recall still works with FTS5 unavailable (LIKE fallback)")
-
-	// Text match diverges (FTS5 token vs LIKE substring, which adds m-plural)...
-	assert.Equal(t, []string{"m-exact"}, idSlice(ftsGot), "FTS5 matches the whole token `budget` only")
-	assert.ElementsMatch(t, []string{"m-exact", "m-plural"}, idSlice(likeGot), "LIKE adds the `budgets` substring — paths diverge")
-	// ...but scope is byte-identical: the out-of-scope row is excluded on BOTH paths.
-	assert.NotContains(t, idSlice(ftsGot), "m-out", "scope excludes the out-of-channel row (FTS path)")
-	assert.NotContains(t, idSlice(likeGot), "m-out", "scope excludes the out-of-channel row (LIKE path)")
+	// Empty, whitespace-only, and pure-punctuation queries all sanitize to no terms.
+	for _, q := range []string{"", "   ", "!!! …"} {
+		got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: q})
+		require.NoErrorf(t, err, "term-less query %q lists rather than errors", q)
+		assert.Equalf(t, []string{"m-new", "m-old"}, idSlice(got),
+			"term-less query %q lists the in-scope set newest-first, excluding the out-of-scope row", q)
+	}
 }
 
 // TestRecallMessages_MatchSafety pins the §F injection property: a query
