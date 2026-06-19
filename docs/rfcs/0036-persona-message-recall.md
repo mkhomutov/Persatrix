@@ -3,7 +3,7 @@ id: RFC-0036
 title: Persona Verbatim Message Recall
 summary: Give personas a tool to search the verbatim text of past conversations, scoped server-side to the channels and membership intervals the persona had access to, and retrofit the RFC 0034 conversation window with the same membership filter.
 type: feature
-status: proposed
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-16
 target: v0.3.9
@@ -16,7 +16,7 @@ depends_on:
 # RFC 0036 — Persona Verbatim Message Recall
 
 **Type**: feature
-**Status**: 📋 Proposed
+**Status**: 🚧 Implementing
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
 **Target**: v0.3.9
@@ -215,13 +215,15 @@ persona tool is a thin caller.
 Channel-store schema migration **v10** (RFC 0035 lands v9; this RFC is
 the next step — a `case 10:` arm in `applyMigration`, a `migrateV9ToV10`
 function, `channelStoreSchemaVersion` bumped to 10, `user_version`
-stamped inside the migration transaction). Both the `case` arm and the
-migrate function live in
+stamped inside the migration transaction). The `case 10:` arm lives in
 [`internal/channels/sqlite_migrations.go`](../../internal/channels/sqlite_migrations.go)
 — the dedicated migration runner the channel store extracted out of
-`sqlite_schema.go` after this RFC was first drafted (RFC 0035 PR 1 has
-since taken v9, so v10 is the next free slot as of 2026-06-17 — this
-RFC's).
+`sqlite_schema.go` after this RFC was first drafted — but `migrateV9ToV10`
+itself landed in a sibling file
+[`internal/channels/sqlite_messages_fts_migration.go`](../../internal/channels/sqlite_messages_fts_migration.go),
+because that runner was already near the repo's 500-line cap (mirroring the
+RFC 0035 PR 1 split). RFC 0035 PR 1 has since taken v9, so v10 is the next
+free slot as of 2026-06-17 — this RFC's.
 
 The index mirrors the episodic tier's external-content FTS5 pattern
 ([`agents/memory/migrations.py:369-389`](../../agents/memory/migrations.py#L369-L389),
@@ -573,8 +575,9 @@ scenario.
 Server-side only; testable end-to-end via REST with no persona
 involvement.
 
-1. Channel-store schema migration **v10** (`migrateV9ToV10` + `case 10:`
-   arm in `sqlite_migrations.go`): `messages_fts` virtual table +
+1. Channel-store schema migration **v10** (`migrateV9ToV10` in the sibling
+   file `sqlite_messages_fts_migration.go`; the `case 10:` arm in
+   `sqlite_migrations.go`): `messages_fts` virtual table +
    insert/update/delete triggers, FTS5-availability probe with `LIKE`
    fallback flag; bump `channelStoreSchemaVersion` to 10 in
    `sqlite_schema.go`.
@@ -621,7 +624,8 @@ and separately reviewable.
 
 | Component | Files | Change |
 |-----------|-------|--------|
-| Go orchestrator | `internal/channels/sqlite_migrations.go` | `migrateV9ToV10` + `case 10:` arm: `messages_fts` + triggers, FTS5 probe, backfill |
+| Go orchestrator | `internal/channels/sqlite_messages_fts_migration.go` (new) | `migrateV9ToV10`: `messages_fts` + triggers, FTS5 probe, backfill (own file — `sqlite_migrations.go` was at the 500-line cap) |
+| Go orchestrator | `internal/channels/sqlite_migrations.go` | `case 10:` arm dispatching to `migrateV9ToV10` |
 | Go orchestrator | `internal/channels/sqlite_schema.go` | Bump `channelStoreSchemaVersion` to 10; migration-history header comment |
 | Go orchestrator | `internal/channels/sqlite_search.go` (new) | Scoped search query + `LIKE` fallback; epoch (and possibly session) predicate per OQ #6 |
 | Go orchestrator | `internal/server/channel_handlers.go` | Recall endpoint (incl. server-side RFC 0009 audit emission); `as_participant` on the history handler |

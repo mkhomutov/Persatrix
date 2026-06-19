@@ -55,11 +55,13 @@ func TestSQLiteStore_SchemaV9_FreshDB_HasMembershipIntervalsTable(t *testing.T) 
 	})
 }
 
-// TestSQLiteStore_SchemaV9_Migration_Idempotent pins the schema version at the
-// newest migration. Reopening the same file is a no-op (no duplicate-table /
-// duplicate-index error, user_version stable at the latest). Per the
-// convention the v5..v8 migration-test headers document, the literal-version
-// pin lives in the newest migration's idempotent test — here.
+// TestSQLiteStore_SchemaV9_Migration_Idempotent asserts the no-op-reopen
+// contract: reopening the same file does not error (no duplicate-table /
+// duplicate-index) and leaves user_version stable at the latest. When v9 was
+// the newest migration this test also held the literal "newest == N" pin; that
+// pin moved to the newest migration's idempotent test
+// (TestSQLiteStore_SchemaV10_Migration_Idempotent) when v10 landed, so this
+// test now asserts only the symbolic contract — see the inline note below.
 func TestSQLiteStore_SchemaV9_Migration_Idempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 
@@ -76,8 +78,11 @@ func TestSQLiteStore_SchemaV9_Migration_Idempotent(t *testing.T) {
 		require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
 		assert.Equal(t, channelStoreSchemaVersion, version,
 			"user_version stamped to the latest schema version; reopen is a no-op")
-		assert.Equal(t, 9, channelStoreSchemaVersion,
-			"RFC 0035 PR 1 bumps the channel store to v9")
+		// The literal-version pin moved to the newest migration's idempotent
+		// test (TestSQLiteStore_SchemaV10_Migration_Idempotent) when v10 landed;
+		// this test now asserts only the symbolic no-op-reopen contract.
+		assert.GreaterOrEqual(t, channelStoreSchemaVersion, 9,
+			"RFC 0035 PR 1 introduced v9; the chain continues to the latest")
 	})
 }
 

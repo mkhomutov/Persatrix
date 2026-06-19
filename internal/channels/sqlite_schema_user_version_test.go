@@ -264,6 +264,35 @@ func TestMigrateV8ToV9_StampsUserVersionInTransaction(t *testing.T) {
 		"migrateV8ToV9 must stamp user_version=9 inside its own tx")
 }
 
+// TestMigrateV9ToV10_StampsUserVersionInTransaction asserts the same atomicity
+// property for the v9→v10 step (RFC 0036 PR 1 — the `messages_fts` FTS5 index).
+// The migration is a CREATE VIRTUAL TABLE + three CREATE TRIGGER + a
+// `('rebuild')` backfill; a re-run would fail with "table already exists"
+// rather than corrupt data, so pinning the stamp inside the tx keeps the next
+// boot from attempting that re-run at all, consistent with the v1→v2 … v8→v9
+// discipline.
+func TestMigrateV9ToV10_StampsUserVersionInTransaction(t *testing.T) {
+	db, _ := rawSchemaDB(t)
+
+	_, err := db.Exec(schemaV1SQL)
+	require.NoError(t, err, "apply v1 baseline")
+	require.NoError(t, migrateV1ToV2(db), "advance to v2")
+	require.NoError(t, migrateV2ToV3(db), "advance to v3")
+	require.NoError(t, migrateV3ToV4(db), "advance to v4")
+	require.NoError(t, migrateV4ToV5(db), "advance to v5")
+	require.NoError(t, migrateV5ToV6(db), "advance to v6")
+	require.NoError(t, migrateV6ToV7(db), "advance to v7")
+	require.NoError(t, migrateV7ToV8(db), "advance to v8")
+	require.NoError(t, migrateV8ToV9(db), "advance to v9")
+	require.Equal(t, 9, readUserVersion(t, db),
+		"precondition: at v9 with user_version=9 before exercising v9→v10")
+
+	require.NoError(t, migrateV9ToV10(db))
+
+	assert.Equal(t, 10, readUserVersion(t, db),
+		"migrateV9ToV10 must stamp user_version=10 inside its own tx")
+}
+
 // TestApplySchema_FreshDB_StampsLatestVersion is the integration-shaped
 // counterpart to the two single-step tests above. It is intentionally
 // duplicative with `TestSQLiteStore_SchemaV3_Migration_Idempotent` (which
