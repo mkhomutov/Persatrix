@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.9] - Unreleased
+
+> **Codename:** Conversations you can mine
+
+### Highlights
+
+- **A persona can recall the verbatim text of past conversations — scoped to the channels it was actually present for.** The new `recall_channel_messages` tool searches the exact words of prior messages (not the lossy episodic *summary*), with the access rule enforced server-side in SQL: an FTS5 index over `messages` joined against the RFC 0035 membership-interval ledger, so a persona added → removed → re-added recalls messages from *both* of its stints and from neither the pre-join period nor the removal gap. Recall is `epoch_id`-hard-filtered (run isolation) and spans sessions within the epoch. ([RFC 0036](docs/rfcs/0036-persona-message-recall.md))
+
+### Added
+
+- **`recall_channel_messages` persona tool (RFC 0036 Phase 2).** Verbatim, membership-scoped message recall. The scope participant is closure-bound to the calling persona and sent as the endpoint path segment — the LLM supplies only `query` / `channel_id` / `sender` / `limit` and can never recall another persona's scope. Default call (`query` only) searches every accessible channel; `channel_id` / `sender` narrow it. Wired onto personas post-session alongside the conversation-window history fetcher.
+- **New `channels:recall` permission.** Distinct from `memory:read` — verbatim cross-channel recall is materially more sensitive than reading the persona's own episodic summaries, so an operator can enable episodic recall while leaving verbatim recall off. Deny-by-default: a persona without the grant gets a failed `ToolResult`, and existing configs without the block load unchanged (the tool is simply denied).
+
+### Security
+
+- Each recalled message's `content` is delimiter-escaped per row through the same `<|…|>` sanitizer the RFC 0034 conversation window uses (now centralised in `agents.prompt_safety`), so a `<|user_message|>` literal pulled in from history round-trips inert and cannot impersonate a system instruction. Each row is tagged with its origin `channel_id` + `sender` so the model is aware it is quoting cross-context material.
+
 ## [0.3.8] - 2026-06-16
 
 > **Codename:** Conversations that converge

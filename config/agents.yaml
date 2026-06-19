@@ -152,6 +152,12 @@ agents:
       memory:
         read: true
         write: true
+      # RFC 0036: verbatim recall of past channel messages within Ember
+      # Owl's membership intervals. Distinct from memory.read (episodic
+      # summaries) — deny-by-default, so other personas without this block
+      # keep the recall tool disabled.
+      channels:
+        recall: true
     autonomy:
       level: "semi-autonomous"
       # RFC 0024 PR 2: ``timers: []`` is the v0.3.3 stock-persona default —

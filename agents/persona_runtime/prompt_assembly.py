@@ -29,6 +29,7 @@ from ..observability.metrics import current_agent_id, try_get_instruments
 from ..persona_behavior import render_behavior
 from ..persona_types import AgentEvent, EventType
 from ..prompt_loader import load_persona_section, load_snippet
+from ..prompt_safety import escape_prompt_delimiters
 from ..temporal.rendering import format_now_anchor
 
 if TYPE_CHECKING:
@@ -418,7 +419,10 @@ class _PromptAssemblyMixin:
                     # Also sanitize sender to prevent attribute injection
                     # via embedded double-quotes.
                     # (PR #120 review F-2: delimiter escape injection.)
-                    safe_content = content.replace("<|", "\\<|").replace("|>", "\\|>")
+                    # Shared with the RFC 0036 recall tool's §F per-row
+                    # escape via ``agents.prompt_safety`` — one source of
+                    # truth, never two divergent copies.
+                    safe_content = escape_prompt_delimiters(content)
                     safe_sender = sender.replace('"', "")
                     formatted = (
                         f'<|user_message user_id="{safe_sender}"|>\n'
