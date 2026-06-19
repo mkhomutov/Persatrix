@@ -76,8 +76,11 @@ func TestSQLiteStore_SchemaV9_Migration_Idempotent(t *testing.T) {
 		require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
 		assert.Equal(t, channelStoreSchemaVersion, version,
 			"user_version stamped to the latest schema version; reopen is a no-op")
-		assert.Equal(t, 9, channelStoreSchemaVersion,
-			"RFC 0035 PR 1 bumps the channel store to v9")
+		// The literal-version pin moved to the newest migration's idempotent
+		// test (TestSQLiteStore_SchemaV10_Migration_Idempotent) when v10 landed;
+		// this test now asserts only the symbolic no-op-reopen contract.
+		assert.GreaterOrEqual(t, channelStoreSchemaVersion, 9,
+			"RFC 0035 PR 1 introduced v9; the chain continues to the latest")
 	})
 }
 

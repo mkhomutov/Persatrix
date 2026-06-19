@@ -3,7 +3,7 @@ id: RFC-0036
 title: Persona Verbatim Message Recall
 summary: Give personas a tool to search the verbatim text of past conversations, scoped server-side to the channels and membership intervals the persona had access to, and retrofit the RFC 0034 conversation window with the same membership filter.
 type: feature
-status: proposed
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-16
 target: v0.3.9
@@ -16,7 +16,7 @@ depends_on:
 # RFC 0036 — Persona Verbatim Message Recall
 
 **Type**: feature
-**Status**: 📋 Proposed
+**Status**: 🚧 Implementing
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
 **Target**: v0.3.9

@@ -83,7 +83,23 @@ import (
 //	    database reads back byte-identically. The ledger is the load-bearing
 //	    substrate for RFC 0036 verbatim recall (its scoped search joins this
 //	    table); the write hooks that keep it live land in RFC 0035 PR 3.
-const channelStoreSchemaVersion = 9
+//	v10 — RFC 0036 PR 1 (verbatim-recall FTS index): introduces the
+//	    external-content FTS5 virtual table `messages_fts` over
+//	    `messages.content`, plus the `messages_ai` / `messages_ad` /
+//	    `messages_au` triggers that keep it in sync, then rebuilds it from the
+//	    existing `messages` rows. The `messages_ad` delete trigger is
+//	    load-bearing for the RFC 0036 §H retention story (a cap-pruned message
+//	    leaves the index); `messages_au` is defensive-symmetric (`messages` is
+//	    insert-and-cap-prune only, so it should never fire). A pure addition:
+//	    no existing table, row, or index is touched, so a v0.3.8/v9 database
+//	    reads back byte-identically. The index ships dormant — no query reads
+//	    it until RFC 0036 PR 2's scoped search, which joins it against the v9
+//	    `membership_intervals` ledger. On an FTS5-less build the migration
+//	    advances to v10 without the virtual table and PR 2 falls back to LIKE.
+//	    NOTE: `content_rowid=rowid` aliases `messages`' implicit rowid, which is
+//	    NOT preserved across an explicit `VACUUM`; no code runs `VACUUM` today,
+//	    but any future compaction must be followed by a `('rebuild')`.
+const channelStoreSchemaVersion = 10
 
 // schemaV1SQL is the original schema shipped in PR #231. Applied verbatim
 // when opening a fresh database; the v1→v2 migration below uses
