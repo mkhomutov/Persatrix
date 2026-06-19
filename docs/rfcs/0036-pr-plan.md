@@ -326,9 +326,9 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|-------|--------|--------|-----------|--------|
-| 1 | 1 | Migration v10 — `messages_fts` + triggers + backfill | `feature/v039-rfc0036-fts-migration` | 🔀 PR open | [#675](https://github.com/mkhomutov/Persatrix/pull/675) | — |
-| 2 | 1 | Scoped search query (membership EXISTS + epoch filter) | `feature/v039-rfc0036-scoped-search` | 🔀 PR open | [#676](https://github.com/mkhomutov/Persatrix/pull/676) | — |
-| 3 | 1 | `POST …/recall` endpoint + server-side audit | `feature/v039-rfc0036-recall-endpoint` | ⬜ Not started | — | — |
+| 1 | 1 | Migration v10 — `messages_fts` + triggers + backfill | `feature/v039-rfc0036-fts-migration` | ✅ Merged | [#675](https://github.com/mkhomutov/Persatrix/pull/675) | `5cd5b1e` |
+| 2 | 1 | Scoped search query (membership EXISTS + epoch filter) | `feature/v039-rfc0036-scoped-search` | ✅ Merged | [#676](https://github.com/mkhomutov/Persatrix/pull/676) | `07f79f1` |
+| 3 | 1 | `POST …/recall` endpoint + server-side audit | `feature/v039-rfc0036-recall-endpoint` | 🔀 PR open | [#677](https://github.com/mkhomutov/Persatrix/pull/677) | — |
 | 4 | 2 | Persona tool + `channels:recall` + §F sanitization | `feature/v039-rfc0036-tool-and-permission` | ⬜ Not started | — | — |
 | 5 | 3 | Conversation-window membership filter (independent) | `feature/v039-rfc0036-window-filter` | ⬜ Not started | — | — |
 | 6 | — | Review follow-ups + closeout | `feature/v039-rfc0036-close` | ⬜ Not started | — | — |
