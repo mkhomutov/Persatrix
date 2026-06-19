@@ -12,7 +12,10 @@ package channels
 // the index is present and the query carries searchable terms, and a `LIKE`
 // substring fallback when FTS5 is unavailable (or the query sanitizes to no
 // terms). Both apply the identical scope + epoch + narrowing predicates, so the
-// fallback returns the same row set — only ranking differs.
+// fallback can never widen access — what differs is the text match: FTS5 does a
+// BM25-ranked tokenized AND (terms match anywhere, in any order), while the LIKE
+// fallback is a recency-ordered contiguous-substring match. For a single term
+// the two return the same rows; for a multi-term query the row sets can diverge.
 
 import (
 	"context"
@@ -22,15 +25,23 @@ import (
 	"strings"
 )
 
-// fts5SanitizeRecall collapses every run of non-alphanumeric, non-space
-// characters to a single space — the Go twin of the episodic tier's
-// `_FTS5_SANITIZE` (`re.compile(r'[^a-zA-Z0-9\s]+')`). After this pass a query
-// holds only `[A-Za-z0-9]` runs and whitespace, so each token can be wrapped in
-// FTS5 double quotes with no inner escaping (there are no quotes left to
-// escape). Quoting makes every token a literal term — FTS5 operator keywords
-// (AND/OR/NOT/NEAR) and metacharacters become inert search text rather than
-// syntax, so a crafted query cannot error the statement or alter the scope join.
-var fts5SanitizeRecall = regexp.MustCompile(`[^a-zA-Z0-9\s]+`)
+// fts5SanitizeRecall collapses every run of characters that are neither Unicode
+// letters, Unicode digits, nor whitespace down to a single space. It is the Go
+// cousin of the episodic tier's `_FTS5_SANITIZE` (`re.compile(r'[^a-zA-Z0-9\s]+')`)
+// but DELIBERATELY widened from ASCII to Unicode (`\p{L}\p{N}`): the ASCII regex
+// strips every non-Latin letter, so a Cyrillic / CJK / accented query sanitizes
+// to empty (or a truncated stem) and silently degrades to the match-all recency
+// listing — the search term is discarded with no error. That is wrong for a
+// verbatim recall surface whose stored text is arbitrary persona/human language
+// in any script; the episodic tier tolerates it because its corpus is the
+// agent's own (English-shaped) memory. After this pass a query still holds only
+// letter/digit runs and whitespace — no quote or FTS5 metacharacter survives (a
+// `"` is punctuation, not `\p{L}`/`\p{N}`) — so each token can be wrapped in FTS5
+// double quotes with no inner escaping. Quoting makes every token a literal
+// term — FTS5 operator keywords (AND/OR/NOT/NEAR) and metacharacters become
+// inert search text rather than syntax, so a crafted query cannot error the
+// statement or alter the scope join.
+var fts5SanitizeRecall = regexp.MustCompile(`[^\p{L}\p{N}\s]+`)
 
 // recallMessageColumns is the `messages` projection, m-aliased and in the column
 // order [scanMessage] expects, so recall reuses [scanMessageRows] verbatim.

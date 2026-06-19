@@ -330,6 +330,38 @@ func TestRecallMessages_MatchSafety(t *testing.T) {
 	assert.Equal(t, []string{"m-in"}, idSlice(got), "sanitized query still matches the in-scope row")
 }
 
+// TestRecallMessages_NonLatinQuery pins that a non-Latin search term actually
+// filters rather than sanitizing to empty and dumping the whole in-scope corpus.
+// The ASCII-only `[^a-zA-Z0-9\s]+` sanitizer stripped every Cyrillic / CJK /
+// accented character, so such a query degraded to a recency-ordered match-all —
+// silently discarding the term. The `\p{L}\p{N}` form preserves the term, so the
+// search excludes a message that does NOT contain it (the load-bearing
+// assertion) and still surfaces one that does.
+func TestRecallMessages_NonLatinQuery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	store, err := NewSQLiteStore(path, SQLiteOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	ch := "group:planning"
+	require.NoError(t, store.CreateChannel(ctx, Channel{ID: ch, Name: "planning", Type: ChannelTypeGroup}))
+
+	withDB(t, path, func(db *sql.DB) {
+		seedInterval(t, db, ch, "alice", mins(0), nil)
+		seedMsg(t, db, msgSeed{id: "m-hit", channelID: ch, sender: "bob", content: "обсудили бюджет на квартал", ts: mins(10)})
+		seedMsg(t, db, msgSeed{id: "m-miss", channelID: ch, sender: "bob", content: "lunch logistics thread", ts: mins(20)})
+	})
+
+	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "бюджет"})
+	require.NoError(t, err)
+	// Load-bearing: the term must filter — the non-matching row must not appear
+	// (it would, if the Cyrillic query sanitized away into a match-all listing).
+	assert.NotContains(t, idSlice(got), "m-miss",
+		"a non-Latin query must search, not dump the whole in-scope corpus")
+	assert.Equal(t, []string{"m-hit"}, idSlice(got),
+		"the message containing the Cyrillic term is the only hit")
+}
+
 // TestRecallMessages_LimitClamp pins the server-side bound: a request above the
 // hard maximum is clamped to MaxRecallLimit, a zero/absent limit resolves to
 // DefaultRecallLimit, and an explicit in-range limit is honoured. The clamp lives
