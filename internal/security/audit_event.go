@@ -36,6 +36,12 @@ const (
 	AuditMemoryWrite  AuditEventType = "memory.write"
 	AuditMemoryDenied AuditEventType = "memory.denied"
 
+	// Channel verbatim recall (RFC 0036 PR 3) — emitted server-side by the
+	// recall endpoint on every executed search, recording the calling persona,
+	// the query, the narrowing parameters, and the result COUNT (never the
+	// recalled content). The verbatim sibling of memory.read; telemetry-class.
+	AuditChannelRecall AuditEventType = "channel.recall"
+
 	// Input handling (Phase 2 wiring)
 	AuditInputFlagged AuditEventType = "input.flagged"
 
@@ -91,6 +97,7 @@ func AllAuditEventTypes() []AuditEventType {
 		AuditMemoryRead,
 		AuditMemoryWrite,
 		AuditMemoryDenied,
+		AuditChannelRecall,
 		AuditInputFlagged,
 		AuditHITLGateOpened,
 		AuditHITLApproved,
@@ -157,6 +164,7 @@ var telemetryEvents = map[AuditEventType]struct{}{
 	AuditToolArgInvalid:        {},
 	AuditMemoryRead:            {},
 	AuditMemoryWrite:           {},
+	AuditChannelRecall:         {},
 	AuditRateLimitAgentEvicted: {},
 }
 

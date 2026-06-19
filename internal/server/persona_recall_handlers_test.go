@@ -1,0 +1,451 @@
+package server
+
+// RFC 0036 PR 3 — the audited REST surface over the membership-scoped,
+// epoch-filtered verbatim search (PR 2's [channels.ChannelStore.RecallMessages]).
+//
+// PR 2 proved the scope/epoch/narrowing/ranking SQL at the store level. These
+// tests pin only what the HANDLER adds on top:
+//
+//   - the PATH participant id is the scope subject (never a body field), so a
+//     join → leave → rejoin recalls both stints and excludes the removal gap
+//     through the HTTP layer;
+//   - the caller's epoch is resolved from the request body exactly as publish
+//     resolves it, defaulting to "live" — a cross-epoch message is unreachable;
+//   - the persona-facing response shape (message_id / sender);
+//   - every executed recall emits exactly one server-side `channel.recall` audit
+//     event recording the persona, query, narrowing params, and result COUNT —
+//     and never the recalled content;
+//   - the store-side `limit` clamp holds through the pass-through handler;
+//   - a malformed body is a 400 and an unconfigured store is a 503.
+//
+// Fixtures seed `membership_intervals` + `messages` via direct SQL with
+// `?`-bound `time.Time` boundaries (mirroring sqlite_search_test.go) so the
+// stint/epoch geometry is deterministic and free of wall-clock flake; the HTTP
+// request and the audit assertions are the genuine end-to-end surface.
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	_ "modernc.org/sqlite"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
+	"github.com/mkhomutov/persatrix/internal/channels"
+	"github.com/mkhomutov/persatrix/internal/planner"
+	"github.com/mkhomutov/persatrix/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/security"
+	"github.com/mkhomutov/persatrix/internal/state"
+)
+
+// recallTestServer wires a real on-disk SQLite channel store + router AND a
+// file-backed audit logger onto a fresh test Server. It returns the store (for
+// channel/member setup through the real API), the db path (so fixtures can seed
+// intervals + messages with controlled timestamps), and the audit logger (so
+// tests can Flush + read the emitted `channel.recall` trail). WithBatchSize(1)
+// flushes the telemetry-class recall events eagerly so the trail is on disk
+// without waiting on the batch ticker.
+func recallTestServer(t *testing.T) (*Server, channels.ChannelStore, string, security.AuditLogger) {
+	t.Helper()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "channels.db")
+	store, err := channels.NewSQLiteStore(dbPath, channels.SQLiteOptions{MaxChannels: 50, Logger: zap.NewNop()})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	router := channels.NewChannelRouter(store, channels.NoopDispatcher{}, zap.NewNop(), nil)
+
+	auditor, err := security.NewFileAuditLogger(filepath.Join(dir, "audit.jsonl"), security.WithBatchSize(1))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = auditor.Close() })
+
+	logger := zap.NewNop()
+	srv, err := New("127.0.0.1:0", t.TempDir(),
+		state.NewInMemoryStore(logger),
+		registry.NewInMemoryRegistry(logger),
+		planner.NewYAMLPlanner(logger),
+		logger,
+		WithChannels(store, router),
+		WithAuditLogger(auditor),
+	)
+	require.NoError(t, err)
+	return srv, store, dbPath, auditor
+}
+
+const recallPath = "/api/v1/personas/alice/recall"
+
+// TestRecallEndpoint_JoinLeaveRejoin_BothStintsGapExcluded is the structural
+// half of MT-PERSONA-RECALL-001: against a two-stint fixture, the endpoint
+// scoped by the PATH participant returns messages inside either stint and
+// excludes the pre-join prefix and the removal gap — proving the path id (not a
+// body field) is the access-control subject flowing into the store's EXISTS join.
+func TestRecallEndpoint_JoinLeaveRejoin_BothStintsGapExcluded(t *testing.T) {
+	srv, store, dbPath, _ := recallTestServer(t)
+	ch := "group:planning"
+	require.NoError(t, store.CreateChannel(context.Background(),
+		channels.Channel{ID: ch, Name: "planning", Type: channels.ChannelTypeGroup}))
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	at := func(m int) time.Time { return base.Add(time.Duration(m) * time.Minute) }
+
+	withRecallDB(t, dbPath, func(db *sql.DB) {
+		// alice: closed stint [60,120), open stint [240, ∞) — the half-open ledger.
+		recallSeedInterval(t, db, ch, "alice", at(60), at(120))
+		recallSeedInterval(t, db, ch, "alice", at(240), nil)
+		recallSeedMsg(t, db, "m-before", ch, "bob", "budget before", at(30), "")
+		recallSeedMsg(t, db, "m-stint1", ch, "bob", "budget stint one", at(90), "")
+		recallSeedMsg(t, db, "m-gap", ch, "bob", "budget in gap", at(180), "")
+		recallSeedMsg(t, db, "m-stint2", ch, "bob", "budget stint two", at(300), "")
+	})
+
+	body, _ := json.Marshal(recallRequest{Query: "budget"})
+	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	var resp recallResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.ElementsMatch(t, []string{"m-stint1", "m-stint2"}, recallRespIDs(resp),
+		"both stints recallable via REST; pre-join prefix and removal gap excluded")
+
+	// The persona-facing wire shape is populated (message_id / sender, not the
+	// internal id / sender_id field names).
+	for _, m := range resp.Messages {
+		assert.NotEmpty(t, m.MessageID, "message_id populated")
+		assert.Equal(t, ch, m.ChannelID)
+		assert.Equal(t, "bob", m.Sender, "sender populated from sender_id")
+		assert.NotEmpty(t, m.Content)
+		assert.False(t, m.Timestamp.IsZero())
+	}
+}
+
+// TestRecallEndpoint_CrossEpochExcluded pins the §OQ-6 epoch filter through the
+// endpoint, using SYNTHETICALLY-seeded rows — the only way to get a non-"live"
+// epoch into the store, since the real publish path cannot (it never stamps a
+// non-"live" epoch; see TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable).
+// Two distinct properties:
+//
+//   - default epoch is strict-equality "live": a row seeded under a different
+//     epoch is unreachable through the endpoint (the genuine isolation guard);
+//   - the handler correctly PLUMBS an explicit body `epoch_id` into
+//     RecallParams.EpochID (resolveEpochOverride → EpochOverrideFromContext), so
+//     it selects exactly the seeded rows of that epoch.
+//
+// The second property is plumbing coverage against a synthetic row, NOT proof of
+// a live end-to-end feature: no message published through the real path ever
+// carries a non-"live" epoch, so the explicit-epoch override matches nothing real.
+func TestRecallEndpoint_CrossEpochExcluded(t *testing.T) {
+	srv, store, dbPath, _ := recallTestServer(t)
+	ch := "group:planning"
+	require.NoError(t, store.CreateChannel(context.Background(),
+		channels.Channel{ID: ch, Name: "planning", Type: channels.ChannelTypeGroup}))
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	withRecallDB(t, dbPath, func(db *sql.DB) {
+		recallSeedInterval(t, db, ch, "alice", base, nil) // open from the start
+		recallSeedMsg(t, db, "m-live", ch, "bob", "budget live", base.Add(10*time.Minute), "live")
+		recallSeedMsg(t, db, "m-ci", ch, "bob", "budget ci", base.Add(10*time.Minute), "ci-run-7")
+	})
+
+	// No epoch_id in the body → default "live" → only the live row.
+	body, _ := json.Marshal(recallRequest{Query: "budget"})
+	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	var resp recallResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, []string{"m-live"}, recallRespIDs(resp),
+		"default epoch is strict-equality 'live'; cross-epoch rows excluded through the endpoint")
+
+	// Explicit body epoch_id is plumbed through resolveEpochOverride →
+	// EpochOverrideFromContext → RecallParams.EpochID and selects exactly the rows
+	// of that epoch. This is PLUMBING coverage against a synthetic row (m-ci was
+	// SQL-seeded with epoch_id="ci-run-7") — the real publish path can never write
+	// a non-"live" epoch, so this is not a reachable end-to-end feature.
+	body, _ = json.Marshal(recallRequest{Query: "budget", EpochID: "ci-run-7"})
+	rec = doRequest(srv.Handler(), http.MethodPost, recallPath, body)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, []string{"m-ci"}, recallRespIDs(resp),
+		"body epoch_id is plumbed into RecallParams.EpochID (synthetic-row plumbing coverage, not a live feature)")
+}
+
+// TestRecallEndpoint_EmitsAuditEvent_CountNotContent pins the RFC 0036
+// §Security — Audit contract: every executed recall emits exactly one
+// server-side `channel.recall` event recording the persona, the query, the
+// narrowing params, and the result COUNT — and the recalled CONTENT never
+// reaches the audit log.
+func TestRecallEndpoint_EmitsAuditEvent_CountNotContent(t *testing.T) {
+	srv, store, dbPath, auditor := recallTestServer(t)
+	ch := "group:planning"
+	require.NoError(t, store.CreateChannel(context.Background(),
+		channels.Channel{ID: ch, Name: "planning", Type: channels.ChannelTypeGroup}))
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// The query token appears in both content rows; the unique per-row markers
+	// appear ONLY in content, so a clean "content never logged" assertion can
+	// distinguish the (logged) query from the (never-logged) recalled text.
+	withRecallDB(t, dbPath, func(db *sql.DB) {
+		recallSeedInterval(t, db, ch, "alice", base, nil)
+		recallSeedMsg(t, db, "m1", ch, "bob", "budgetzorp uniquecontentmarkeralpha", base.Add(time.Minute), "")
+		recallSeedMsg(t, db, "m2", ch, "bob", "budgetzorp uniquecontentmarkerbeta", base.Add(2*time.Minute), "")
+	})
+
+	body, _ := json.Marshal(recallRequest{Query: "budgetzorp", ChannelID: ch, Sender: "bob", Limit: 25})
+	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	var resp recallResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp.Messages, 2, "positive control: both in-scope rows returned")
+
+	require.NoError(t, auditor.Flush())
+	recalls := filterRecallEvents(readAuditEvents(t, auditor.Path()))
+	require.Len(t, recalls, 1, "exactly one channel.recall event per executed call")
+
+	ev := recalls[0]
+	assert.Equal(t, "alice", ev.AgentID, "the calling persona is the path participant")
+	assert.Equal(t, "recall", ev.Action)
+	assert.Equal(t, "budgetzorp", ev.Detail["query"], "the query string is recorded")
+	assert.EqualValues(t, 2, ev.Detail["result_count"], "the result COUNT is recorded")
+	assert.Equal(t, ch, ev.Detail["channel_id"], "narrowing channel_id recorded")
+	assert.Equal(t, "bob", ev.Detail["sender"], "narrowing sender recorded")
+	assert.EqualValues(t, 25, ev.Detail["limit"], "effective limit recorded (25 is within bounds, so equals the request)")
+	assert.Equal(t, "live", ev.Detail["epoch_id"], "resolved epoch recorded")
+
+	// The recalled content must never be written anywhere in the audit trail.
+	raw, err := os.ReadFile(auditor.Path())
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "uniquecontentmarkeralpha", "recalled content must never reach the audit log")
+	assert.NotContains(t, string(raw), "uniquecontentmarkerbeta", "recalled content must never reach the audit log")
+}
+
+// TestRecallEndpoint_RealPublishPath_Recallable proves the endpoint works
+// against data written through the REAL RFC 0035 membership write hook
+// (store.AddMember) and the real publish path (store.PublishMessage populates
+// messages_fts via the trigger) — not just SQL-seeded fixtures — and that the
+// audit count reflects the actual result set.
+func TestRecallEndpoint_RealPublishPath_Recallable(t *testing.T) {
+	srv, store, _, auditor := recallTestServer(t)
+	ctx := context.Background()
+	ch := "group:planning"
+	require.NoError(t, store.CreateChannel(ctx, channels.Channel{ID: ch, Name: "planning", Type: channels.ChannelTypeGroup}))
+	require.NoError(t, store.AddMember(ctx, ch, "alice", channels.RespondWhenMentioned)) // real open interval
+	require.NoError(t, store.PublishMessage(ctx, channels.ChannelMessage{
+		ID: "m-real", ChannelID: ch, SenderID: "alice",
+		Content: "recallzorptoken via the real publish path", Timestamp: time.Now().UTC(),
+	}))
+
+	body, _ := json.Marshal(recallRequest{Query: "recallzorptoken"})
+	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	var resp recallResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, []string{"m-real"}, recallRespIDs(resp), "a message published through the real path is recallable via REST")
+
+	require.NoError(t, auditor.Flush())
+	recalls := filterRecallEvents(readAuditEvents(t, auditor.Path()))
+	require.Len(t, recalls, 1)
+	assert.EqualValues(t, 1, recalls[0].Detail["result_count"])
+}
+
+// TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable pins the ACTUAL
+// epoch contract end-to-end — the honest counterpart to the SQL-seeded
+// TestRecallEndpoint_CrossEpochExcluded. A message PUBLISHED THROUGH THE REAL
+// REST PATH with an explicit `epoch_id` override still lands in the store under
+// the "live" column default: the publish override rides the gRPC dispatch rail
+// and is never stamped on the row (channel_epoch_override.go, ISSUE-0085). So the
+// very message "published into ci-run-7" is UNREACHABLE when recalled under
+// ci-run-7, and reachable only under "live" — publish-epoch and recall-epoch are
+// decoupled.
+//
+// This is the tripwire that flips red the day publish begins persisting a per-run
+// epoch on the channel-store row (resolving the RFC 0036 §OQ-6 / ISSUE-0085
+// tension) — at which point this expectation, and the docs/comments that cite it,
+// must be revisited together.
+func TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable(t *testing.T) {
+	srv, store, _, _ := recallTestServer(t)
+	ctx := context.Background()
+	ch := "group:planning"
+	require.NoError(t, store.CreateChannel(ctx, channels.Channel{ID: ch, Name: "planning", Type: channels.ChannelTypeGroup}))
+	require.NoError(t, store.AddMember(ctx, ch, "alice", channels.RespondWhenMentioned)) // real open interval
+
+	// Publish through the REAL REST path WITH an explicit epoch override. The
+	// override only rides the dispatch rail; the persisted row keeps epoch_id
+	// "live" (ISSUE-0085) — which is the entire point being pinned.
+	pubBody, _ := json.Marshal(publishMessageRequest{
+		SenderID: "alice", Content: "epochzorptoken via the real publish path", EpochID: "ci-run-7",
+	})
+	pub := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/group:planning/messages", pubBody)
+	require.Equal(t, http.StatusCreated, pub.Code, "body=%s", pub.Body.String())
+
+	// Recalling under the SAME epoch the message was "published into" finds
+	// nothing — publish never stamped "ci-run-7" onto the row.
+	body, _ := json.Marshal(recallRequest{Query: "epochzorptoken", EpochID: "ci-run-7"})
+	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	var resp recallResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Empty(t, resp.Messages,
+		"a message published via REST under epoch 'ci-run-7' is NOT recallable under 'ci-run-7' — publish does not persist the override epoch (ISSUE-0085)")
+
+	// It IS recallable under the default ("live") epoch — where the row actually
+	// landed. Proves the empty result above is the epoch filter, not a lost write.
+	body, _ = json.Marshal(recallRequest{Query: "epochzorptoken"})
+	rec = doRequest(srv.Handler(), http.MethodPost, recallPath, body)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	resp = recallResponse{}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp.Messages, 1, "the row landed in 'live' and is recallable there")
+	assert.Equal(t, "epochzorptoken via the real publish path", resp.Messages[0].Content)
+}
+
+// TestRecallEndpoint_TimeWindowNarrowing_AuditedAsRFC3339 pins the after
+// (inclusive) / before (exclusive) body params: they narrow the result through
+// the endpoint and are recorded in the audit detail as RFC3339 strings (not raw
+// time structs).
+func TestRecallEndpoint_TimeWindowNarrowing_AuditedAsRFC3339(t *testing.T) {
+	srv, store, dbPath, auditor := recallTestServer(t)
+	ch := "group:planning"
+	require.NoError(t, store.CreateChannel(context.Background(),
+		channels.Channel{ID: ch, Name: "planning", Type: channels.ChannelTypeGroup}))
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	at := func(m int) time.Time { return base.Add(time.Duration(m) * time.Minute) }
+
+	withRecallDB(t, dbPath, func(db *sql.DB) {
+		recallSeedInterval(t, db, ch, "alice", base, nil)
+		recallSeedMsg(t, db, "m-early", ch, "bob", "budget early", at(60), "")
+		recallSeedMsg(t, db, "m-mid", ch, "bob", "budget mid", at(120), "")
+		recallSeedMsg(t, db, "m-late", ch, "bob", "budget late", at(180), "")
+	})
+
+	after, before := at(120), at(180) // half-open [120,180) → only m-mid
+	body, _ := json.Marshal(recallRequest{Query: "budget", After: after, Before: before})
+	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	var resp recallResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, []string{"m-mid"}, recallRespIDs(resp),
+		"after is inclusive, before exclusive — the half-open window narrows to the middle row")
+
+	require.NoError(t, auditor.Flush())
+	recalls := filterRecallEvents(readAuditEvents(t, auditor.Path()))
+	require.Len(t, recalls, 1)
+	assert.Equal(t, after.Format(time.RFC3339), recalls[0].Detail["after"], "after recorded as an RFC3339 string")
+	assert.Equal(t, before.Format(time.RFC3339), recalls[0].Detail["before"], "before recorded as an RFC3339 string")
+}
+
+// TestRecallEndpoint_LimitClampedServerSide pins that the store-side clamp holds
+// through the pass-through handler: the handler forwards the requested limit
+// unmodified and the store clamps it to MaxRecallLimit, so the bound survives a
+// caller that bypasses the persona tool and posts a huge limit directly.
+func TestRecallEndpoint_LimitClampedServerSide(t *testing.T) {
+	srv, store, dbPath, _ := recallTestServer(t)
+	ch := "group:planning"
+	require.NoError(t, store.CreateChannel(context.Background(),
+		channels.Channel{ID: ch, Name: "planning", Type: channels.ChannelTypeGroup}))
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	total := channels.MaxRecallLimit + 5
+	withRecallDB(t, dbPath, func(db *sql.DB) {
+		recallSeedInterval(t, db, ch, "alice", base, nil)
+		for i := 0; i < total; i++ {
+			recallSeedMsg(t, db, "m-"+strconv.Itoa(i), ch, "bob", "budget item", base.Add(time.Duration(i+1)*time.Minute), "")
+		}
+	})
+
+	body, _ := json.Marshal(recallRequest{Query: "budget", Limit: 10_000})
+	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	var resp recallResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Len(t, resp.Messages, channels.MaxRecallLimit,
+		"an over-large limit is clamped server-side even though the handler passes it through")
+}
+
+// TestRecallEndpoint_MalformedBody_BadRequest pins that an unparseable body is a
+// 400 (decodeJSON), not a 500.
+func TestRecallEndpoint_MalformedBody_BadRequest(t *testing.T) {
+	srv, _, _, _ := recallTestServer(t)
+	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, []byte("{not valid json"))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// TestRecallEndpoint_503WhenStoreUnset pins the channel-surface convention: with
+// no channel store wired the endpoint is 503, matching its neighbours.
+func TestRecallEndpoint_503WhenStoreUnset(t *testing.T) {
+	srv, _ := testServer(t) // no WithChannels
+	body, _ := json.Marshal(recallRequest{Query: "budget"})
+	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}
+
+// ─── fixture helpers ─────────────────────────────────────────
+
+func withRecallDB(t *testing.T, dbPath string, fn func(*sql.DB)) {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	fn(db)
+}
+
+func recallSeedInterval(t *testing.T, db *sql.DB, channelID, participantID string, joinedAt time.Time, leftAt any) {
+	t.Helper()
+	_, err := db.Exec(
+		`INSERT INTO membership_intervals (channel_id, participant_id, joined_at, left_at) VALUES (?, ?, ?, ?)`,
+		channelID, participantID, joinedAt, leftAt)
+	require.NoError(t, err)
+}
+
+func recallSeedMsg(t *testing.T, db *sql.DB, id, channelID, sender, content string, ts time.Time, epoch string) {
+	t.Helper()
+	if epoch == "" {
+		epoch = channels.DefaultEpochID
+	}
+	_, err := db.Exec(
+		`INSERT INTO messages (id, channel_id, sender_id, content, timestamp, mentions, metadata, session_id, epoch_id)
+		 VALUES (?, ?, ?, ?, ?, '[]', '{}', ?, ?)`,
+		id, channelID, sender, content, ts, channels.DefaultSessionID, epoch)
+	require.NoError(t, err)
+}
+
+func recallRespIDs(resp recallResponse) []string {
+	out := make([]string, len(resp.Messages))
+	for i, m := range resp.Messages {
+		out[i] = m.MessageID
+	}
+	return out
+}
+
+func readAuditEvents(t *testing.T, path string) []security.AuditEvent {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var out []security.AuditEvent
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev security.AuditEvent
+		require.NoError(t, json.Unmarshal([]byte(line), &ev))
+		out = append(out, ev)
+	}
+	return out
+}
+
+func filterRecallEvents(events []security.AuditEvent) []security.AuditEvent {
+	var out []security.AuditEvent
+	for _, e := range events {
+		if e.EventType == security.AuditChannelRecall {
+			out = append(out, e)
+		}
+	}
+	return out
+}

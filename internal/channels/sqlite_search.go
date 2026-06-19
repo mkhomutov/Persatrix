@@ -122,7 +122,7 @@ func (s *sqliteStore) RecallMessages(ctx context.Context, params RecallParams) (
 		return nil, errors.New("channels: recall requires a participant id")
 	}
 
-	limit := params.effectiveLimit()
+	limit := params.EffectiveLimit()
 	scope, scopeArgs := membershipEpochScope(params.ParticipantID, params.epochOrDefault())
 	narrow, narrowArgs := recallNarrowing(params)
 	match := buildFTS5Match(params.Query)
