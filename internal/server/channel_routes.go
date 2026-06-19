@@ -32,4 +32,10 @@ func (s *Server) registerChannelRoutes() {
 	// apply path, gated server-side on the config_edit_enabled toggle (config/ui.yaml).
 	s.mux.HandleFunc("GET /api/v1/channels/{id}/config", s.handleGetChannelConfig)
 	s.mux.HandleFunc("PATCH /api/v1/channels/{id}/config", s.handlePatchChannelConfig)
+	// RFC 0036 PR 3 — membership-scoped, epoch-filtered verbatim message recall.
+	// Channel-store-backed (RecallMessages joins messages × membership_intervals),
+	// so it mounts with the channel surface even though its path is persona-scoped.
+	// The scope participant is the path segment; every executed call is audited
+	// server-side (channel.recall). Auth inherits the surrounding trust level (OQ #1).
+	s.mux.HandleFunc("POST /api/v1/personas/{participant_id}/recall", s.handleRecallMessages)
 }

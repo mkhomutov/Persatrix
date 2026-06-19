@@ -232,6 +232,56 @@ type channelConfigResponse struct {
 	InteractionBudgetTokens                configFieldResponse `json:"interaction_budget_tokens"`
 }
 
+// recallRequest is the JSON body for POST /api/v1/personas/{participant_id}/recall
+// (RFC 0036 PR 3). The scope participant is the PATH segment, never a body field
+// — so an LLM-supplied tool argument (PR 4) can never widen or redirect the
+// membership scope. Every field below is a non-scope narrowing of an already
+// access-checked result set.
+//
+//   - `query` is the free-text search; empty / pure-punctuation degrades to a
+//     recency-ordered listing of the in-scope set (the store decides), so it is
+//     not required here.
+//   - `channel_id` / `sender` narrow to one channel / one author.
+//   - `after` (inclusive) / `before` (exclusive) bound the time window; an absent
+//     value decodes to the zero [time.Time], which the store reads as "unset". A
+//     non-RFC3339 string is a decode error → 400, like any malformed body.
+//   - `limit` is forwarded unmodified; the store clamps it to
+//     [channels.MaxRecallLimit], so the bound holds even for a caller that
+//     bypasses the persona tool.
+//   - `epoch_id` is the optional ISSUE-0085 run-isolation override, resolved
+//     through the same [Server.resolveEpochOverride] the publish handler uses;
+//     absent ⇒ the boot/default epoch ("live").
+type recallRequest struct {
+	Query     string    `json:"query"`
+	ChannelID string    `json:"channel_id,omitempty"`
+	Sender    string    `json:"sender,omitempty"`
+	After     time.Time `json:"after,omitempty"`
+	Before    time.Time `json:"before,omitempty"`
+	Limit     int       `json:"limit,omitempty"`
+	EpochID   string    `json:"epoch_id,omitempty"`
+}
+
+// recallMessageResponse is one recalled message in the RFC 0036 PR 3 payload.
+// Deliberately a narrower shape than [channelMessageResponse]: recall surfaces
+// only the verbatim quote and its provenance (origin channel + author), not the
+// thread/mentions/metadata plumbing — the persona tool (PR 4) tags each row with
+// `channel_id` + `sender` so the model knows it is quoting cross-context
+// material. `message_id` / `sender` use the persona-facing field names.
+type recallMessageResponse struct {
+	MessageID string    `json:"message_id"`
+	ChannelID string    `json:"channel_id"`
+	Sender    string    `json:"sender"`
+	Timestamp time.Time `json:"timestamp"`
+	Content   string    `json:"content"`
+}
+
+// recallResponse is the envelope for POST /api/v1/personas/{participant_id}/recall.
+// `messages` is always an array (never null), newest-relevant first per the
+// store's BM25-dominant ranking.
+type recallResponse struct {
+	Messages []recallMessageResponse `json:"messages"`
+}
+
 // channelActivityResponse is the envelope for GET /api/v1/channels/{id}/activity
 // (RFC 0048 console presence Tier 1). `Thinking` is the set of participant ids
 // the orchestrator has an in-flight turn for — those it dispatched to and is
