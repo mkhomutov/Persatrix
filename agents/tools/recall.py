@@ -147,13 +147,17 @@ class HttpRecallClient:
             f"{self._base}/api/v1/personas/{quote(participant_id, safe='')}"
             f"/recall"
         )
-        body = {
-            "query": query,
-            "channel_id": channel_id,
-            "sender": sender,
-            "limit": int(limit),
-        }
         try:
+            # ``int(limit)`` coerces the LLM-supplied arg defensively; kept
+            # inside the ``try`` so a non-numeric value degrades to the
+            # ``None``-on-error contract (logged WARN) rather than raising
+            # past it — the server clamps the value to ``MaxRecallLimit``.
+            body = {
+                "query": query,
+                "channel_id": channel_id,
+                "sender": sender,
+                "limit": int(limit),
+            }
             async with self._session.post(
                 url, json=body, timeout=self._timeout,
             ) as resp:

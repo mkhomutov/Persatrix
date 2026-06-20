@@ -323,12 +323,11 @@ EXTERNAL_TOOL_SOURCES: Final[dict[str, str]] = {
     "file_read": CONTEXT_SOURCE_EXTERNAL,
     # RFC 0036 recall surfaces *other participants'* verbatim message text
     # pulled on demand — the most-untrusted tool output in the persona path.
-    # The tool's §F per-row delimiter escape stays (it removes the verbatim
-    # `<|user_message|>` boundary token), but it is applied to a field that is
-    # then JSON-serialized, which doubles the escape backslash and quarantines
-    # nothing structurally; this envelope is the robust, defense-in-depth
-    # boundary, and it covers the un-escaped `sender` / `channel_id` provenance
-    # fields too.
+    # The tool's §F per-row delimiter escape stays (it breaks the literal
+    # `<|user_message|>` boundary token, even after JSON serialization doubles
+    # the escape backslash), but an escape provides no *structural* quarantine;
+    # this envelope is that boundary, and it also fences the un-escaped
+    # `sender` / `channel_id` provenance fields the per-row escape never touches.
     "recall_channel_messages": CONTEXT_SOURCE_EXTERNAL,
 }
 
