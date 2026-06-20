@@ -219,6 +219,32 @@ class TestReplayChannelHistory:
 
         assert any("limit=20" in p for p in state["log"])
 
+    async def test_catchup_fetch_is_scoped_to_agent(self, orchestrator):
+        """RFC 0036 §G: the boot-time catch-up replay passes the agent's id
+        as ``as_participant`` so episodic seeding is membership-scoped — a
+        re-added persona does not re-ingest the removal-gap messages it
+        missed. (The current-state member check that already gates the
+        per-channel fetch stays as the cheap pre-filter; this scopes the
+        *rows* server-side to the agent's stints.)"""
+        base_url, state = orchestrator
+        state["channels"] = [_channel(channel_id="group:planning")]
+        state["members"]["group:planning"] = [
+            {"id": "ember-owl", "respond": "when_mentioned",
+             "joined_at": "2026-05-01T00:00:00+00:00"},
+        ]
+        state["history"]["group:planning"] = []
+
+        agent = _SpyAgent("ember-owl")
+        async with aiohttp.ClientSession() as session:
+            await replay_channel_history(
+                agent=agent, orchestrator_url=base_url, session=session,
+            )
+
+        assert any(
+            "/messages?limit=50&as_participant=ember-owl" in p
+            for p in state["log"]
+        ), f"catch-up fetch must carry as_participant; got {state['log']!r}"
+
     async def test_list_channels_failure_is_logged_and_returns(
         self, orchestrator, caplog,
     ):

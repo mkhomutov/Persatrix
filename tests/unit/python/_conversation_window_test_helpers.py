@@ -74,15 +74,18 @@ class _FakeChannelHistoryFetcher:
         results: list[list[dict[str, Any]] | None] | None = None,
         raises: Exception | None = None,
     ) -> None:
-        self.calls: list[tuple[str, int]] = []
+        # calls record (channel_id, limit, as_participant) — the third slot
+        # lets the RFC 0036 §G suite assert the membership scope subject.
+        self.calls: list[tuple[str, int, str | None]] = []
         self._result = result
         self._results = results
         self._raises = raises
 
     async def fetch(
         self, channel_id: str, *, limit: int,
+        as_participant: str | None = None,
     ) -> list[dict[str, Any]] | None:
-        self.calls.append((channel_id, limit))
+        self.calls.append((channel_id, limit, as_participant))
         if self._raises is not None:
             raise self._raises
         if self._results is not None:

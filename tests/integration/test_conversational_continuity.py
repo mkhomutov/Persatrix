@@ -66,9 +66,8 @@ def _clear_window_cache():
 class _FakeChannelHistoryFetcher:
     """Duck-typed :class:`ChannelHistoryFetcher` — the seam PR 3 wires.
 
-    Returns a per-call curated history (``results``, popped left to
-    right) or raises ``raises`` on every call. Records each ``fetch``
-    call so the test can pin that the window actually consulted it.
+    Returns a per-call curated history (``results``) or raises ``raises``;
+    records each ``fetch`` so a test can pin the window consulted it.
     """
 
     def __init__(
@@ -77,14 +76,15 @@ class _FakeChannelHistoryFetcher:
         results: list[list[dict[str, Any]]] | None = None,
         raises: Exception | None = None,
     ) -> None:
-        self.calls: list[tuple[str, int]] = []
+        self.calls: list[tuple[str, int, str | None]] = []
         self._results = results
         self._raises = raises
 
     async def fetch(
         self, channel_id: str, *, limit: int,
+        as_participant: str | None = None,
     ) -> list[dict[str, Any]] | None:
-        self.calls.append((channel_id, limit))
+        self.calls.append((channel_id, limit, as_participant))
         if self._raises is not None:
             raise self._raises
         assert self._results, "fetcher called more times than scripted"
@@ -273,8 +273,8 @@ async def test_persona_sees_its_own_prior_turn_on_the_next_dm_turn() -> None:
     assert turn2[-1]["role"] == "user"
     assert "what did you just ask?" in turn2[-1]["content"]
 
-    # The window actually consulted the fetcher both turns.
-    assert [c[0] for c in fetcher.calls] == [_CHANNEL, _CHANNEL]
+    # Both turns consulted, each scoped to the persona's agent_id (RFC 0036 §G).
+    assert [(c[0], c[2]) for c in fetcher.calls] == [(_CHANNEL, _AGENT_ID)] * 2
 
 
 @pytest.mark.asyncio

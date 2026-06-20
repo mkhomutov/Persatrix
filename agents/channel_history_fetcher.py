@@ -64,11 +64,19 @@ class ChannelHistoryFetcher(Protocol):
 
     async def fetch(
         self, channel_id: str, *, limit: int,
+        as_participant: str | None = None,
     ) -> list[dict[str, Any]] | None:
         """Return the last ``limit`` messages for ``channel_id``.
 
         ``[]`` when the channel is empty, ``None`` on a best-effort
         failure (already logged WARN).
+
+        ``as_participant`` (RFC 0036 §G) scopes the history to one
+        participant's channel-membership stints: when set, the server
+        returns only messages from windows the participant was present
+        for, so a re-added persona's window excludes its removal-gap
+        messages. ``None`` (the human / CLI default) requests the full
+        unscoped history — byte-identical to the pre-RFC-0036 contract.
         """
         ...
 
@@ -104,13 +112,23 @@ class HttpChannelHistoryFetcher:
 
     async def fetch(
         self, channel_id: str, *, limit: int,
+        as_participant: str | None = None,
     ) -> list[dict[str, Any]] | None:
         """``GET /api/v1/channels/{id}/messages?limit=N`` → message list,
-        or ``None`` on error."""
+        or ``None`` on error.
+
+        When ``as_participant`` is set it is percent-encoded and appended
+        as ``&as_participant=`` (RFC 0036 §G), so the server scopes the
+        history to that participant's membership stints. A falsy value
+        (``None`` or ``""``) omits the param entirely — the full unscoped
+        history, matching the Go handler's blank-is-absent treatment.
+        """
         url = (
             f"{self._base}/api/v1/channels/{quote(channel_id, safe='')}"
             f"/messages?limit={int(limit)}"
         )
+        if as_participant:
+            url += f"&as_participant={quote(as_participant, safe='')}"
         try:
             async with self._session.get(url, timeout=self._timeout) as resp:
                 if resp.status >= 400:

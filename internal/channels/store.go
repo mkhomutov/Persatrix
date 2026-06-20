@@ -132,6 +132,25 @@ type ChannelStore interface {
 	// older than `before`, newest-first. A zero `before` is treated as "now".
 	GetHistory(ctx context.Context, channelID string, limit int, before time.Time) ([]ChannelMessage, error)
 
+	// GetHistoryScoped is [GetHistory] restricted to one participant's
+	// membership stints — the §G membership filter behind the conversation
+	// window / catch-up `?as_participant=` query param (RFC 0036 Phase 3). A
+	// message is returned only if its timestamp falls inside one of
+	// `participantID`'s half-open `[joined_at, left_at)` stints for `channelID`
+	// AND it carries the persisted [DefaultEpochID] ("live") world — the SAME
+	// [membershipEpochScope] fragment [RecallMessages] applies (§OQ-6 lock), so
+	// the live persona prompt obeys the access rule recall does. A re-added
+	// persona's window excludes the removal gap; a member that joined mid-stream
+	// has its pre-join prefix trimmed too — the filter is a no-op ONLY for a
+	// member present from before the first retained message (a from-the-start
+	// single stint), not for current members generally. An empty `participantID`
+	// is rejected with an error (symmetric with [RecallMessages]), never run as
+	// an empty-result query. Ordering, the `before` cursor, and the `limit`
+	// default mirror [GetHistory] exactly; the epoch is the persisted "live"
+	// world (not request-overridable), because the window reads the persisted
+	// transcript, which always carries it.
+	GetHistoryScoped(ctx context.Context, channelID, participantID string, limit int, before time.Time) ([]ChannelMessage, error)
+
 	// GetThread returns all messages whose `thread_id` equals `threadID`,
 	// ordered by `timestamp` ascending. Capped at `limit`; pass 0 for no cap.
 	GetThread(ctx context.Context, threadID string, limit int) ([]ChannelMessage, error)

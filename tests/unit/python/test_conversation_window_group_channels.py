@@ -167,21 +167,21 @@ class TestPeerPrefix:
         assert 'iron"fox' not in content
 
 
-# ─── PR 2 — §F cache is agent-independent across personas ──
+# ─── RFC 0036 §G — fetch cache is agent-SCOPED across personas ──
 
 
-class TestCacheAgentIndependence:
-    """RFC §F: the fetch cache stores raw rows *pre*-role-mapping
-    (:mod:`conversation_window` comment "the cache is agent-independent").
-    On a group channel two same-``max_turns`` personas share one
-    ``(channel_id, limit)`` cache entry for the same inbound message — the
-    preserved §F hit (PR 2) — yet each must re-apply the role split against
-    its *own* ``agent_id``: its own prior messages map to ``assistant`` and
-    every peer's to ``user``. The cache must serve raw rows, never one
-    agent's already-mapped role view, or it would leak persona A's
-    self/peer split onto persona B."""
+class TestCacheAgentScoping:
+    """RFC 0036 §G changes the PR-2 premise: the window fetch now passes
+    ``as_participant=agent_id``, so the rows are membership-scoped *per
+    persona* and ``agent_id`` is part of the cache key. On a group channel
+    two same-``max_turns`` personas reacting to the same inbound message no
+    longer share one cache entry — each issues its OWN scoped fetch. This
+    pins (a) the per-persona scoping means independent fetches (no
+    cross-persona cache serve), and (b) each persona still maps roles
+    against its *own* ``agent_id``: its own prior messages map to
+    ``assistant`` and every peer's to ``user``."""
 
-    async def test_cache_hit_remaps_roles_per_persona(self):
+    async def test_distinct_personas_fetch_independently_and_map_own_roles(self):
         # Newest-first (RFC 0011 §C); reversed to chronological in assembly:
         # neutral peer, then persona-a, then persona-b.
         rows = [
@@ -194,14 +194,15 @@ class TestCacheAgentIndependence:
         a = await _build(fetcher, config=cfg, agent_id="persona-a")
         b = await _build(fetcher, config=cfg, agent_id="persona-b")
 
-        # One shared fetch: persona-b hits the entry persona-a primed
-        # (same channel, message, and limit) — the §F optimization PR 2
-        # preserves.
-        assert len(fetcher.calls) == 1
+        # Two independent fetches: persona-b is a cache MISS despite the
+        # identical (channel, message, limit), because ``agent_id`` differs —
+        # its scoped window may legitimately differ from persona-a's.
+        assert len(fetcher.calls) == 2
+        assert fetcher.calls[0][2] == "persona-a"
+        assert fetcher.calls[1][2] == "persona-b"
 
         # Each persona's *own* row is the lone assistant turn, carrying raw
-        # (unprefixed) content; the cache did not leak the other persona's
-        # role view.
+        # (unprefixed) content — the role split is per its own agent_id.
         a_assistant = [t["content"] for t in a if t["role"] == "assistant"]
         b_assistant = [t["content"] for t in b if t["role"] == "assistant"]
         assert a_assistant == ["from a"]
