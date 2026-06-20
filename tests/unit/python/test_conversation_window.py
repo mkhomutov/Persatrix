@@ -223,7 +223,9 @@ class TestWindowAssembly:
         full ``max_turns`` replayed turns whether or not it has landed."""
         fetcher = _FakeChannelHistoryFetcher([])
         await _build(fetcher, config=ConversationWindowConfig(max_turns=20))
-        assert fetcher.calls == [(_CHANNEL, 21)]
+        # calls record (channel_id, limit, as_participant); _build defaults
+        # the persona to _AGENT_ID, which the window passes as the scope.
+        assert fetcher.calls == [(_CHANNEL, 21, _AGENT_ID)]
 
 
 # ─── Sanitization ──────────────────────────────────────────

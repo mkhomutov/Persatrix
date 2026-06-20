@@ -364,7 +364,7 @@ func (s *Server) handleGetChannelHistory(w http.ResponseWriter, r *http.Request)
 		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
 		return
 	}
-	msgs, err := s.channelStore.GetHistory(r.Context(), id, limit, before)
+	msgs, err := s.loadChannelHistory(r.Context(), r, id, limit, before)
 	if err != nil {
 		s.logger.Error("channels: history failed",
 			zap.String("channel_id", id), zap.Error(err))

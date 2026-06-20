@@ -279,6 +279,51 @@ func (s *sqliteStore) GetHistory(ctx context.Context, channelID string, limit in
 	return scanMessageRows(rows)
 }
 
+// GetHistoryScoped implements [ChannelStore.GetHistoryScoped] — the §G membership
+// filter behind the conversation-window / catch-up `?as_participant=` param.
+//
+// It is [GetHistory] with the [membershipEpochScope] fragment AND-ed in: the SAME
+// `membership_intervals` `EXISTS` + `epoch_id` predicate PR 2's recall query (§C)
+// uses, so the live persona prompt and verbatim recall obey one access rule and
+// cannot drift. The epoch is bound to [DefaultEpochID] ("live"), not a request
+// override: the window reads the persisted `messages` rows, which always carry
+// the "live" column default (persona-side epoch overrides ride the gRPC rail and
+// are never persisted — see channel_epoch_override.go), so "live" is the only
+// world the live transcript has. Ordering (newest-first), the `before` exclusive
+// upper bound, and the `limit<=0 → 50` default all mirror [GetHistory].
+//
+// `messages` is aliased `m` so the shared fragment and the [recallMessageColumns]
+// projection (m-aliased, in [scanMessage] order) both apply unchanged.
+func (s *sqliteStore) GetHistoryScoped(ctx context.Context, channelID, participantID string, limit int, before time.Time) ([]ChannelMessage, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	scope, scopeArgs := membershipEpochScope(participantID, DefaultEpochID)
+
+	q := `SELECT ` + recallMessageColumns + `
+	        FROM messages m
+	       WHERE m.channel_id = ?
+	         AND ` + scope
+	// args order tracks the `?` order: channel_id, then the scope fragment's
+	// [epochID, participantID], then the optional `before`, then `limit`.
+	args := make([]any, 0, 4+len(scopeArgs))
+	args = append(args, channelID)
+	args = append(args, scopeArgs...)
+	if !before.IsZero() {
+		q += ` AND m.timestamp < ?`
+		args = append(args, before)
+	}
+	q += ` ORDER BY m.timestamp DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("channels: scoped history query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanMessageRows(rows)
+}
+
 // GetThread implements [ChannelStore.GetThread].
 func (s *sqliteStore) GetThread(ctx context.Context, threadID string, limit int) ([]ChannelMessage, error) {
 	q := `SELECT id, channel_id, sender_id, content, timestamp, thread_id, mentions, metadata, session_id

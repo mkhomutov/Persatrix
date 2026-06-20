@@ -239,7 +239,14 @@ async def _replay_channel_history_inner(
             # Agent is not a member — skip without fetching history.
             continue
 
-        messages = await history_fetcher.fetch(channel_id, limit=limit)
+        # RFC 0036 §G: scope the replay to the agent's membership stints via
+        # as_participant, so episodic seeding excludes pre-join / removal-gap
+        # messages — a re-added persona does not re-ingest the gap it missed.
+        # The current-state member check above is the cheap pre-filter (skip
+        # non-member channels entirely); this scopes the *rows* server-side.
+        messages = await history_fetcher.fetch(
+            channel_id, limit=limit, as_participant=agent.agent_id,
+        )
         if messages is None:
             continue
         counts["channels"] += 1

@@ -156,30 +156,30 @@ def resolve_conversation_window_config(
     )
 
 
-# ─── In-process fetch cache (RFC §F) ───────────────────────
+# ─── In-process fetch cache (RFC 0034 §F) ──────────────────
 #
-# Maps ``(channel_id, limit)`` to the last ``(message_id, raw_rows)`` seen
-# for that channel *at that fetch limit*. A call whose ``event.message_id``
-# matches the cached id **and** whose fetch limit matches skips the network
-# fetch and re-uses the raw rows; a newer ``message_id`` overwrites the
-# entry (the "cheapest possible" invalidation RFC §F specifies). Raw rows
-# are stored *pre*-role-mapping, so the cache is agent-independent.
+# Maps ``(channel_id, limit, agent_id)`` to the last ``(message_id,
+# raw_rows)`` seen for that channel at that fetch limit *for that persona*.
+# A call whose ``event.message_id`` matches the cached id — same channel,
+# limit, AND agent — skips the network fetch and re-uses the rows; a newer
+# ``message_id`` overwrites the entry (the "cheapest possible" invalidation
+# RFC §F specifies).
 #
-# ``limit`` is in the key for RFC 0034 Phase 2 multi-persona correctness
-# ([0034 PR plan §Future Phases carry-forward]). A DM channel has one
-# persona, so in Phase 1 the same ``(channel_id, message_id)`` was only
-# ever processed under one config and a constant fetch limit — keying on
-# ``channel_id`` alone was sound. A *group* channel hosts multiple personas
-# with independent configs reacting to the same message; under that old key
-# a small-``max_turns`` persona would prime the cache with an undersized
-# row set and serve it to a large-``max_turns`` peer, silently shrinking
-# its window. Keying on ``(channel_id, limit)`` makes a differing limit a
-# miss → the large caller refetches; the same-limit retry path still hits.
+# ``limit`` AND ``agent_id`` are both in the key for multi-persona
+# correctness on a shared (group) channel:
+#   * ``limit`` (RFC 0034 Phase 2): a small-``max_turns`` persona must not
+#     prime an undersized row set that a large-``max_turns`` peer is served.
+#   * ``agent_id`` (RFC 0036 §G): the fetch now passes
+#     ``as_participant=agent_id``, so the rows are membership-scoped per
+#     persona — a re-added persona sees a gap-trimmed window a
+#     continuously-present peer does not, and must never be served the
+#     peer's rows. The rows are therefore agent-SPECIFIC, not the
+#     agent-independent cache Phase 1 shipped.
 #
 # Eviction: there is none — the dict grows with the number of *distinct*
-# ``(channel, limit)`` pairs ever served. Fine at demo scale; RFC 0034
-# Phase 3 (hit-rate telemetry) adds an LRU bound sized from real data.
-_WINDOW_CACHE: dict[tuple[str, int], tuple[str, list[dict[str, Any]]]] = {}
+# ``(channel, limit, agent)`` triples ever served. Fine at demo scale; RFC
+# 0034 Phase 3 (hit-rate telemetry) adds an LRU bound sized from real data.
+_WINDOW_CACHE: dict[tuple[str, int, str], tuple[str, list[dict[str, Any]]]] = {}
 
 
 # ``_PromptAssemblyMixin._format_event`` is a bound method on the persona
@@ -240,12 +240,10 @@ async def build_conversation_messages(
         history_fetcher=history_fetcher,
         channel_id=channel_id,
         message_id=event.message_id,
-        # Over-fetch by one. If the inbound event is already persisted in
-        # the channel store its own row is dropped from the window (dedup
-        # by id in _assemble_replayed_turns); requesting max_turns + 1
-        # keeps a full max_turns replayed turns either way. When the event
-        # is not yet persisted the count cap in _apply_admission trims the
-        # extra oldest row back off.
+        agent_id=agent_id,
+        # Over-fetch by one: the inbound event may already be persisted, so
+        # its own row is dropped from the window (dedup by id); +1 keeps a
+        # full max_turns either way, and _apply_admission trims any excess.
         limit=config.max_turns + 1,
     )
     if raw is None:
@@ -266,22 +264,23 @@ async def _fetch_window(
     channel_id: str,
     message_id: str | None,
     limit: int,
+    agent_id: str,
 ) -> list[dict[str, Any]] | None:
     """Return the raw channel-history rows, or ``None`` on fetch failure.
 
-    Consults the in-process cache first (RFC §F). A Protocol exception
-    degrades to ``None`` with a WARN; a ``None`` return from the fetcher
-    is its own already-logged best-effort failure and degrades to
-    ``None`` silently (no double log).
+    Scoped to ``agent_id`` via the fetch's ``as_participant`` (RFC 0036 §G),
+    so ``agent_id`` keys the cache too. A Protocol exception degrades to
+    ``None`` with a WARN; a ``None`` from the fetcher is its own
+    already-logged best-effort failure and degrades to ``None`` silently.
     """
-    cache_key = (channel_id, limit)
+    cache_key = (channel_id, limit, agent_id)
     if message_id is not None:
         cached = _WINDOW_CACHE.get(cache_key)
         if cached is not None and cached[0] == message_id:
             return cached[1]
 
     try:
-        raw = await history_fetcher.fetch(channel_id, limit=limit)
+        raw = await history_fetcher.fetch(channel_id, limit=limit, as_participant=agent_id)
     except Exception as exc:
         logger.warning(
             "conversation window: history fetch raised for channel %s: %s",

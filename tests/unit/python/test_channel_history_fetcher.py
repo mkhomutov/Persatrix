@@ -460,13 +460,14 @@ class _FakeChannelHistoryFetcher:
     """
 
     def __init__(self, result: list[dict[str, Any]] | None) -> None:
-        self.calls: list[tuple[str, int]] = []
+        self.calls: list[tuple[str, int, str | None]] = []
         self._result = result
 
     async def fetch(
         self, channel_id: str, *, limit: int,
+        as_participant: str | None = None,
     ) -> list[dict[str, Any]] | None:
-        self.calls.append((channel_id, limit))
+        self.calls.append((channel_id, limit, as_participant))
         return self._result
 
 

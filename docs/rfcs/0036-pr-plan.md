@@ -265,10 +265,10 @@ Per [RFC §Test Strategy](0036-persona-message-recall.md#test-strategy) + the §
 
 #### PR checklist
 
-- [ ] `pytest tests/integration/... -q` (window + catch-up legs) passes; `go test ./internal/server/ ./internal/channels/ -run 'AsParticipant|ScopedHistory' -count=1` green.
-- [ ] `conversation_window.py` and `channel_handlers.go` still ≤ 500 lines.
-- [ ] Cache key includes `as_participant`; no-op-for-current-member proof green.
-- [ ] `ruff` + `mypy` clean; `make test` green.
+- [x] `pytest` (window + catch-up + fetcher legs) passes; `go test ./internal/server/ ./internal/channels/ -run 'GetHistoryScoped|HistoryEndpoint' -count=1` green (`-race` clean).
+- [x] `conversation_window.py` (499) and `channel_handlers.go` (494) still ≤ 500 lines; the `as_participant` threading freed a comment line rather than net-adding, and the new server routing lives in `channel_history_scoped.go`.
+- [x] Cache key includes `as_participant` (`(channel_id, limit, agent_id)`); the distinct-personas-don't-share-cache and no-op-for-current-member (store-level `TestGetHistoryScoped_CurrentMemberMatchesUnscopedTail`) proofs are green.
+- [x] `ruff` + `mypy` clean; full Go channels/server suites green (the 5 `TestShellExec` failures are a pre-existing `python`-binary-on-PATH environment issue, unrelated to this PR).
 
 ---
 
@@ -329,8 +329,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 1 | 1 | Migration v10 — `messages_fts` + triggers + backfill | `feature/v039-rfc0036-fts-migration` | ✅ Merged | [#675](https://github.com/mkhomutov/Persatrix/pull/675) | `5cd5b1e` |
 | 2 | 1 | Scoped search query (membership EXISTS + epoch filter) | `feature/v039-rfc0036-scoped-search` | ✅ Merged | [#676](https://github.com/mkhomutov/Persatrix/pull/676) | `07f79f1` |
 | 3 | 1 | `POST …/recall` endpoint + server-side audit | `feature/v039-rfc0036-recall-endpoint` | ✅ Merged | [#677](https://github.com/mkhomutov/Persatrix/pull/677) | `55dfbf5` |
-| 4 | 2 | Persona tool + `channels:recall` + §F sanitization | `feature/v039-rfc0036-tool-and-permission` | 🔀 PR open | [#678](https://github.com/mkhomutov/Persatrix/pull/678) | — |
-| 5 | 3 | Conversation-window membership filter (independent) | `feature/v039-rfc0036-window-filter` | ⬜ Not started | — | — |
+| 4 | 2 | Persona tool + `channels:recall` + §F sanitization | `feature/v039-rfc0036-tool-and-permission` | ✅ Merged | [#678](https://github.com/mkhomutov/Persatrix/pull/678) | `fe14f50` |
+| 5 | 3 | Conversation-window membership filter (independent) | `feature/v039-rfc0036-window-filter` | 🔀 PR open | — | — |
 | 6 | — | Review follow-ups + closeout | `feature/v039-rfc0036-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
