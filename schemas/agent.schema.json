@@ -180,6 +180,13 @@
             "read": { "type": "boolean", "description": "Allow reading notes from memory" },
             "write": { "type": "boolean", "description": "Allow writing/updating/deleting notes in memory" }
           }
+        },
+        "channels": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "recall": { "type": "boolean", "description": "RFC 0036: allow the recall_channel_messages tool — verbatim search of past channel messages within the persona's membership intervals. Distinct from memory.read (episodic summaries); verbatim cross-channel recall is more sensitive, so it is gated separately. Deny-by-default — absent means the tool is denied at call time." }
+          }
         }
       }
     },

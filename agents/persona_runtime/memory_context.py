@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from ..clock import Clock
     from ..memory.facts import FactStore
     from ..persona_types import AgentEvent
+    from ..tools.registry import ToolDefinition
     from .channel_roster import ChannelRosterFetcher
 
 logger = logging.getLogger(__name__)
@@ -193,6 +194,10 @@ class _MemoryContextMixin:
     # history fetcher. ``None`` (default) → no roster section, so the
     # legacy mixin harnesses and DM-only paths are unaffected.
     _roster_fetcher: ChannelRosterFetcher | None = None
+    # Owned by ``_LLMPersonaAgent.__init__`` (set from ``create_memory_tools``)
+    # and consumed by ``_ActionLoopMixin``; redeclared here so ``add_recall_tool``
+    # type-checks against it.
+    _memory_tools: list[ToolDefinition]
 
     # Stub declaration for method provided by concrete class (via composition).
     if TYPE_CHECKING:
@@ -202,6 +207,21 @@ class _MemoryContextMixin:
         """Inject the F-4 channel-roster fetcher (wired in ``server_persona``
         once the shared aiohttp session is open, like the history fetcher)."""
         self._roster_fetcher = fetcher
+
+    def add_recall_tool(self, tool_def: ToolDefinition) -> None:
+        """Append the RFC 0036 ``recall_channel_messages`` tool post-construction.
+
+        Wired by :func:`agents.tools.recall.wire_recall_tools` once the shared
+        ``aiohttp`` session is open — the agent is built before it exists, so
+        the recall tool (which needs the session) is injected here, the same
+        post-session shape as :meth:`set_roster_fetcher` /
+        :meth:`set_history_fetcher`. It joins ``_memory_tools`` so it is
+        surfaced and dispatched per turn alongside the closure-bound memory
+        tools (``_build_tool_definitions`` / ``_execute_tools``). Kept in this
+        mixin rather than the package ``__init__`` to respect that file's
+        zero-headroom size cap (ISSUE-0053).
+        """
+        self._memory_tools.append(tool_def)
 
     async def _inject_memory_context(
         self, event: AgentEvent, *, query: str | None = None,

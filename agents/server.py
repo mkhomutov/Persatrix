@@ -39,6 +39,7 @@ from .server_servicers import (  # noqa: F401
     _extract_chat_reply,
 )
 from .tick import TickScheduler
+from .tools.recall import wire_recall_tools
 from .wallet_client import WalletClient
 
 logger = logging.getLogger("Persatrix.agent.server")
@@ -185,6 +186,9 @@ class AgentServer:
         ))
         # RFC 0034 Phase 1 — wire the conversation-window history fetcher.
         wire_history_fetchers(self.agents, self._session, self.orchestrator_url)
+        # RFC 0036 Phase 2 — wire the verbatim recall tool onto personas
+        # (needs the shared session, so post-construction like the fetcher).
+        wire_recall_tools(self.agents, self._session, self.orchestrator_url)
 
         # RFC 0018 PR 5 — start the log shipper after the structlog chain
         # is configured (configure_logging runs in main()) so the tail
