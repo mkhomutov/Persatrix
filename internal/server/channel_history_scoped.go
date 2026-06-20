@@ -28,10 +28,12 @@ import (
 //
 // The scope subject is the query-param VALUE, never a body field, and the
 // store's `EXISTS` join is the access decision — the same predicate recall
-// applies (§OQ-6). A blank value (`?as_participant=`) is treated as absent, not
-// as a participant whose id is the empty string: GetHistoryScoped would reject
-// the empty id, but more to the point a stray empty param must not silently
-// switch a human caller onto the scoped path.
+// applies (§OQ-6). A blank value (`?as_participant=`) is treated as absent here
+// (the `as != ""` gate routes it to the unscoped query), not as a participant
+// whose id is the empty string: a stray empty param must not silently switch a
+// human caller onto the scoped path. As a backstop, [GetHistoryScoped] itself
+// also rejects an empty id with an error (symmetric with [RecallMessages]), so
+// the contract holds even for a caller that bypasses this gate.
 func (s *Server) loadChannelHistory(
 	ctx context.Context, r *http.Request, channelID string, limit int, before time.Time,
 ) ([]channels.ChannelMessage, error) {

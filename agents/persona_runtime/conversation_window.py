@@ -269,9 +269,10 @@ async def _fetch_window(
     """Return the raw channel-history rows, or ``None`` on fetch failure.
 
     Scoped to ``agent_id`` via the fetch's ``as_participant`` (RFC 0036 §G),
-    so ``agent_id`` keys the cache too. A Protocol exception degrades to
-    ``None`` with a WARN; a ``None`` from the fetcher is its own
-    already-logged best-effort failure and degrades to ``None`` silently.
+    so ``agent_id`` keys the cache too; pass a real id — a falsy ``agent_id``
+    silently fetches UNSCOPED (a falsy ``as_participant`` is omitted). A
+    Protocol exception degrades to ``None`` with a WARN; a ``None`` from the
+    fetcher is its own already-logged best-effort failure, degrading silently.
     """
     cache_key = (channel_id, limit, agent_id)
     if message_id is not None:

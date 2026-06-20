@@ -295,6 +295,14 @@ func (s *sqliteStore) GetHistory(ctx context.Context, channelID string, limit in
 // `messages` is aliased `m` so the shared fragment and the [recallMessageColumns]
 // projection (m-aliased, in [scanMessage] order) both apply unchanged.
 func (s *sqliteStore) GetHistoryScoped(ctx context.Context, channelID, participantID string, limit int, before time.Time) ([]ChannelMessage, error) {
+	if participantID == "" {
+		// Reject, don't run: an empty subject query would return an empty set
+		// that reads as "no in-scope history" rather than "no scope subject".
+		// Mirrors [sqliteStore.RecallMessages] so §C and §G share the input
+		// guard, not just the EXISTS predicate. The handler treats a blank
+		// `?as_participant=` as absent before reaching here.
+		return nil, errors.New("channels: scoped history requires a participant id")
+	}
 	if limit <= 0 {
 		limit = 50
 	}

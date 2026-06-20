@@ -178,11 +178,12 @@ func TestGetHistoryScoped_EpochHardFilter(t *testing.T) {
 		"the scoped window is strict-equality on the live epoch; a cross-epoch row is excluded")
 }
 
-// TestGetHistoryScoped_CurrentMemberMatchesUnscopedTail pins §G's headline
-// promise: for a current single-stint member the scoped window is a no-op on the
-// recent transcript — it equals the tail of the unscoped [GetHistory] window. The
-// filter only ever trims the pre-join prefix, which a from-the-start member has
-// none of.
+// TestGetHistoryScoped_CurrentMemberMatchesUnscopedTail pins the narrow case in
+// which §G is a no-op: a member present from before the first retained message
+// (a from-the-start single stint) has no pre-join prefix to trim, so its scoped
+// window equals the unscoped [GetHistory] window. This is the ONLY no-op case —
+// see TestGetHistoryScoped_CurrentMemberJoinedMidStream_TrimsPreJoin for the
+// common mid-join case, where a current member's window IS trimmed.
 func TestGetHistoryScoped_CurrentMemberMatchesUnscopedTail(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 	store, err := NewSQLiteStore(path, SQLiteOptions{})
@@ -208,4 +209,65 @@ func TestGetHistoryScoped_CurrentMemberMatchesUnscopedTail(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, idSlice(unscoped), idSlice(scoped),
 		"a current from-the-start member's scoped window equals the unscoped window")
+}
+
+// TestGetHistoryScoped_CurrentMemberJoinedMidStream_TrimsPreJoin is the
+// necessary counter-case to the no-op test above: the "no-op for current
+// member" property is NARROW — it holds only for a member present from before
+// the first retained message. A CURRENT member (open stint) that joined
+// mid-conversation still has its pre-join prefix trimmed, so the scoped window
+// is strictly smaller than the unscoped one. This pins that §G is a real filter
+// for the common mid-join case, not the cosmetic no-op the headline suggests.
+func TestGetHistoryScoped_CurrentMemberJoinedMidStream_TrimsPreJoin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	store, err := NewSQLiteStore(path, SQLiteOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	ch := "group:planning"
+	require.NoError(t, store.CreateChannel(ctx, Channel{ID: ch, Name: "planning", Type: ChannelTypeGroup}))
+
+	withDB(t, path, func(db *sql.DB) {
+		// alice is a CURRENT member (open stint) but joined at +30m — after the
+		// channel already had traffic. The half-open lower bound is inclusive.
+		seedInterval(t, db, ch, "alice", mins(30), nil)
+		seedMsg(t, db, msgSeed{id: "m-pre1", channelID: ch, sender: "bob", content: "pre one", ts: mins(10)})
+		seedMsg(t, db, msgSeed{id: "m-pre2", channelID: ch, sender: "bob", content: "pre two", ts: mins(20)})
+		seedMsg(t, db, msgSeed{id: "m-in1", channelID: ch, sender: "bob", content: "in one", ts: mins(40)})
+		seedMsg(t, db, msgSeed{id: "m-in2", channelID: ch, sender: "bob", content: "in two", ts: mins(50)})
+	})
+
+	unscoped, err := store.GetHistory(ctx, ch, 50, time.Time{})
+	require.NoError(t, err)
+	scoped, err := store.GetHistoryScoped(ctx, ch, "alice", 50, time.Time{})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"m-in2", "m-in1"}, idSlice(scoped),
+		"only post-join messages are in scope for a mid-join member")
+	assert.NotEqual(t, idSlice(unscoped), idSlice(scoped),
+		"a mid-join current member's scoped window is NOT a no-op — the pre-join prefix is trimmed")
+}
+
+// TestGetHistoryScoped_EmptyParticipantID_Errors pins the input-validation half
+// of the "one access rule" property §G shares with §C recall: an empty
+// participant id is rejected outright — exactly as [sqliteStore.RecallMessages]
+// rejects it — rather than silently run as a query for the empty-string
+// participant. The latter would return an empty set that reads as "this member
+// has no in-scope history" when the real fault is "no scope subject was
+// supplied", and would mask a caller bug behind a plausible-looking empty
+// window. The handler treats a blank `?as_participant=` as absent (routing to
+// the unscoped query) before reaching here; this guard is the store-level
+// belt-and-suspenders that backs that contract.
+func TestGetHistoryScoped_EmptyParticipantID_Errors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	store, err := NewSQLiteStore(path, SQLiteOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	ch := "group:planning"
+	require.NoError(t, store.CreateChannel(ctx, Channel{ID: ch, Name: "planning", Type: ChannelTypeGroup}))
+
+	_, err = store.GetHistoryScoped(ctx, ch, "", 50, time.Time{})
+	require.Error(t, err,
+		"an empty participant id must be rejected, not run as an empty-result query")
 }

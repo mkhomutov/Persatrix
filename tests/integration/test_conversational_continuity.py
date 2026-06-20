@@ -273,8 +273,8 @@ async def test_persona_sees_its_own_prior_turn_on_the_next_dm_turn() -> None:
     assert turn2[-1]["role"] == "user"
     assert "what did you just ask?" in turn2[-1]["content"]
 
-    # The window actually consulted the fetcher both turns.
-    assert [c[0] for c in fetcher.calls] == [_CHANNEL, _CHANNEL]
+    # Both turns consulted, each scoped to the persona's agent_id (RFC 0036 §G).
+    assert [(c[0], c[2]) for c in fetcher.calls] == [(_CHANNEL, _AGENT_ID)] * 2
 
 
 @pytest.mark.asyncio
