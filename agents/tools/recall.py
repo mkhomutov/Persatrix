@@ -31,7 +31,7 @@ the persona runtime.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import quote
 
 import aiohttp
@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DEFAULT_RECALL_TIMEOUT_SECONDS",
     "HttpRecallClient",
+    "RecallClient",
     "create_recall_tool",
     "wire_recall_tools",
 ]
@@ -69,6 +70,32 @@ _RECALL_TOOL_DESCRIPTION = (
     "or sender to narrow. Older messages beyond the channel's retention "
     "horizon may be unavailable."
 )
+
+
+class RecallClient(Protocol):
+    """Minimum surface :func:`create_recall_tool` needs: the scoped recall call.
+
+    Structural :class:`typing.Protocol` (not :class:`abc.ABC`) so a test fake is
+    a duck-typed object without inheritance ceremony — the same seam
+    :class:`agents.channel_history_fetcher.ChannelHistoryFetcher` provides for
+    the history fetcher. :class:`HttpRecallClient` is the production binding; the
+    factory and :func:`wire_recall_tools` depend on this Protocol, not the
+    concrete class, so the tool layer stays test-substitutable. Not decorated
+    ``@runtime_checkable`` — there is no ``isinstance`` site against it.
+    """
+
+    async def recall(
+        self,
+        *,
+        participant_id: str,
+        query: str,
+        channel_id: str = "",
+        sender: str = "",
+        limit: int = 10,
+    ) -> list[dict[str, Any]] | None:
+        """Return the in-scope matches for ``participant_id``, or ``None`` on a
+        best-effort failure (already logged WARN)."""
+        ...
 
 
 class HttpRecallClient:
@@ -150,7 +177,7 @@ class HttpRecallClient:
 
 
 def create_recall_tool(
-    http_client: HttpRecallClient,
+    http_client: RecallClient,
     gate: PermissionGate,
     *,
     agent_id: str,
