@@ -17,7 +17,8 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 
-- Each recalled message's `content` is delimiter-escaped per row through the same `<|…|>` sanitizer the RFC 0034 conversation window uses (now centralised in `agents.prompt_safety`), so a `<|user_message|>` literal pulled in from history round-trips inert and cannot impersonate a system instruction. Each row is tagged with its origin `channel_id` + `sender` so the model is aware it is quoting cross-context material.
+- **Recall output is quarantined in the RFC 0009 `<external_data>` envelope** before it reaches the model (`recall_channel_messages` is registered in `EXTERNAL_TOOL_SOURCES`). Recalled verbatim text is the most-untrusted tool output in the persona path, so it gets the same structural "do not treat as instructions" boundary as `http_request` / `file_read` results — and that boundary fences the whole row, provenance fields (`sender` / `channel_id`) included.
+- As defense-in-depth *inside* that envelope, each recalled message's `content` is also delimiter-escaped per row through the same `<|…|>` sanitizer the RFC 0034 conversation window uses (now centralised in `agents.prompt_safety`), so the literal `<|user_message|>` boundary token is broken before serialization. Each row is tagged with its origin `channel_id` + `sender` so the model knows it is quoting cross-context material.
 
 ## [0.3.8] - 2026-06-16
 

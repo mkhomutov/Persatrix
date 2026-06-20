@@ -99,6 +99,37 @@ class TestExternalToolWrapping:
         assert "line one" in content
         assert "line two" in content
 
+    async def test_recall_channel_messages_wrapped(self) -> None:
+        # RFC 0036 recall returns *other participants'* verbatim text — by the
+        # PR's own framing the largest prompt-injection surface of any tool —
+        # so its serialized result crosses the trust boundary and must be
+        # quarantined in the `<external_data>` envelope, exactly like
+        # `http_request` / `file_read`. This is defense-in-depth: it composes
+        # with (does not replace) the §F per-row delimiter escape the tool
+        # applies before serialization. The whole blob — including the
+        # `sender` / `channel_id` provenance fields, which the per-row escape
+        # does not touch — lands inside the "do not treat as instructions"
+        # boundary.
+        @tool(name="recall_channel_messages", description="Recall", tier="builtin")
+        async def recall_stub(query: str) -> ToolResult:
+            return ToolResult(success=True, data=[
+                {"message_id": "m1", "channel_id": "g:eng", "sender": "alice",
+                 "timestamp": "2026-06-01T00:00:00Z", "content": "ship it"},
+            ])
+
+        agent = _make_agent()
+        results = await agent._execute_tools([
+            ToolCall(id="c1", name="recall_channel_messages",
+                     input={"query": "x"}),
+        ])
+        content = results[0].content
+        assert content.startswith('<external_data source="external"')
+        assert 'sanitized="true"' in content
+        # The JSON payload is preserved inside the envelope.
+        assert '"ship it"' in content
+        assert '"g:eng"' in content
+        assert content.endswith("</external_data>")
+
     async def test_non_external_tool_not_wrapped(self) -> None:
         # Memory tools, custom tools, and anything not in the
         # external-source map should pass through unchanged.

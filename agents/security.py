@@ -321,6 +321,15 @@ def _match_all(content: str) -> list[str]:
 EXTERNAL_TOOL_SOURCES: Final[dict[str, str]] = {
     "http_request": CONTEXT_SOURCE_EXTERNAL,
     "file_read": CONTEXT_SOURCE_EXTERNAL,
+    # RFC 0036 recall surfaces *other participants'* verbatim message text
+    # pulled on demand — the most-untrusted tool output in the persona path.
+    # The tool's §F per-row delimiter escape stays (it removes the verbatim
+    # `<|user_message|>` boundary token), but it is applied to a field that is
+    # then JSON-serialized, which doubles the escape backslash and quarantines
+    # nothing structurally; this envelope is the robust, defense-in-depth
+    # boundary, and it covers the un-escaped `sender` / `channel_id` provenance
+    # fields too.
+    "recall_channel_messages": CONTEXT_SOURCE_EXTERNAL,
 }
 
 

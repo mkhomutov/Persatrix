@@ -216,8 +216,12 @@ def create_recall_tool(
     # Return the just-registered definition (its ``func`` is the decorator
     # wrapper). Each call re-registers the name globally; the per-agent list
     # holds this instance, so the global slot's last-writer-wins is moot.
+    # Explicit guard rather than ``assert`` (stripped under ``python -O``) since
+    # the non-optional return depends on it — matching the deny-by-default
+    # posture the rest of this module takes.
     td = get_tool("recall_channel_messages")
-    assert td is not None  # the decorator above just registered it
+    if td is None:  # pragma: no cover - the decorator above just registered it
+        raise RuntimeError("recall_channel_messages failed to register")
     return td
 
 
@@ -232,6 +236,14 @@ def _sanitize_row(row: dict[str, Any]) -> dict[str, Any]:
     :mod:`agents.prompt_safety`), and each row is tagged with its origin
     ``channel_id`` + ``sender`` so the model is aware it is quoting
     cross-context material.
+
+    Defense-in-depth: the serialized result is *additionally* wrapped in the
+    RFC 0009 ``<external_data>`` envelope at the dispatch boundary
+    (``recall_channel_messages`` is registered in
+    :data:`agents.security.EXTERNAL_TOOL_SOURCES`). That envelope is the
+    structural quarantine the model actually reads, and it also fences the
+    un-escaped ``sender`` / ``channel_id`` provenance fields the per-row escape
+    here does not touch.
     """
     return {
         "message_id": row.get("message_id", ""),
