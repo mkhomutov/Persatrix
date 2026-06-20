@@ -26,9 +26,14 @@ import (
 // participant's `membership_intervals` stints in the persisted "live" epoch, so
 // a re-added persona's live window excludes its removal-gap messages.
 //
-// The scope subject is the query-param VALUE, never a body field, and the
-// store's `EXISTS` join is the access decision — the same predicate recall
-// applies (§OQ-6). A blank value (`?as_participant=`) is treated as absent here
+// The scope subject is the query-param VALUE, never a body field, and when
+// scoped the store's `EXISTS` join applies the same membership predicate recall
+// does (§OQ-6). That join NARROWS, it is not an access boundary: this GET is
+// unauthenticated and omitting the param returns the full history, so
+// `?as_participant=` only ever removes rows the caller could already read — the
+// persona runtime opts in to honour "scoped to where you were present", not a
+// privilege gate (recall differs — it has no unscoped path). A blank value
+// (`?as_participant=`) is treated as absent here
 // (the `as != ""` gate routes it to the unscoped query), not as a participant
 // whose id is the empty string: a stray empty param must not silently switch a
 // human caller onto the scoped path. As a backstop, [GetHistoryScoped] itself

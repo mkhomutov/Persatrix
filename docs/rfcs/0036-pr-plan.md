@@ -266,7 +266,7 @@ Per [RFC §Test Strategy](0036-persona-message-recall.md#test-strategy) + the §
 #### PR checklist
 
 - [x] `pytest` (window + catch-up + fetcher legs) passes; `go test ./internal/server/ ./internal/channels/ -run 'GetHistoryScoped|HistoryEndpoint' -count=1` green (`-race` clean).
-- [x] `conversation_window.py` (499) and `channel_handlers.go` (494) still ≤ 500 lines; the `as_participant` threading freed a comment line rather than net-adding, and the new server routing lives in `channel_history_scoped.go`.
+- [x] `conversation_window.py` (500, at cap) and `channel_handlers.go` (494) still ≤ 500 lines; the new server routing lives in `channel_history_scoped.go` so the at-cap host files take only minimal edits (the PR-5 review docstring note used the line the `as_participant` threading had freed, leaving the window file back at the 500 cap).
 - [x] Cache key includes `as_participant` (`(channel_id, limit, agent_id)`); the distinct-personas-don't-share-cache and no-op-for-current-member (store-level `TestGetHistoryScoped_CurrentMemberMatchesUnscopedTail`) proofs are green.
 - [x] `ruff` + `mypy` clean; full Go channels/server suites green (the 5 `TestShellExec` failures are a pre-existing `python`-binary-on-PATH environment issue, unrelated to this PR).
 
