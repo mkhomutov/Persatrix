@@ -330,7 +330,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 2 | 1 | Scoped search query (membership EXISTS + epoch filter) | `feature/v039-rfc0036-scoped-search` | ✅ Merged | [#676](https://github.com/mkhomutov/Persatrix/pull/676) | `07f79f1` |
 | 3 | 1 | `POST …/recall` endpoint + server-side audit | `feature/v039-rfc0036-recall-endpoint` | ✅ Merged | [#677](https://github.com/mkhomutov/Persatrix/pull/677) | `55dfbf5` |
 | 4 | 2 | Persona tool + `channels:recall` + §F sanitization | `feature/v039-rfc0036-tool-and-permission` | ✅ Merged | [#678](https://github.com/mkhomutov/Persatrix/pull/678) | `fe14f50` |
-| 5 | 3 | Conversation-window membership filter (independent) | `feature/v039-rfc0036-window-filter` | 🔀 PR open | — | — |
+| 5 | 3 | Conversation-window membership filter (independent) | `feature/v039-rfc0036-window-filter` | 🔀 PR open | [#679](https://github.com/mkhomutov/Persatrix/pull/679) | — |
 | 6 | — | Review follow-ups + closeout | `feature/v039-rfc0036-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
