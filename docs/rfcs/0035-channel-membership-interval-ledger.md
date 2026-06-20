@@ -3,7 +3,7 @@ id: RFC-0035
 title: Channel Membership Interval Ledger
 summary: Add an append-only join/leave ledger to the channel store so the system can answer "was participant X a member of channel Y at time T" — the membership history a current-state-only `memberships` table cannot reconstruct after a remove or a rejoin.
 type: architecture
-status: implementing
+status: implemented
 author: Maksim Khomutov
 created: 2026-05-16
 target: v0.3.9
@@ -14,7 +14,7 @@ depends_on:
 # RFC 0035 — Channel Membership Interval Ledger
 
 **Type**: architecture
-**Status**: 🚧 Implementing
+**Status**: ✅ Implemented — v0.3.9 (Phase 1 ledger + Phase 2 operator inspection endpoint; all five PRs [#671](https://github.com/mkhomutov/Persatrix/pull/671)–[#674](https://github.com/mkhomutov/Persatrix/pull/674) + closeout). Substrate-only — no user-visible behaviour of its own; it is the ledger [RFC 0036](0036-persona-message-recall.md) recall scoping joins. Tracking plan: [0035-pr-plan.md](0035-pr-plan.md).
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
 **Target**: v0.3.9
@@ -605,6 +605,18 @@ Question #2.
    independently or dropped; it does not block RFC 0036.
 4. Regenerate `docs/rfcs/INDEX.md` via `make rfcs` (the index is
    auto-generated from front-matter — do not hand-edit).
+
+### Implemented in v0.3.9
+
+Phases 1 and 2 shipped under the v0.3.9 umbrella (*Conversations you can mine*) per [`0035-pr-plan.md`](0035-pr-plan.md), as workstream 1a of the [v0.3.9 master plan](../v0.3.9-plan.md) — the load-bearing substrate beneath [RFC 0036](0036-persona-message-recall.md) verbatim recall:
+
+- **PR 1** ([#671](https://github.com/mkhomutov/Persatrix/pull/671)) — channel-store migration **v9**: the `membership_intervals` table, `idx_membership_intervals_lookup`, the partial unique `ux_membership_intervals_open` (≤1 open stint per `(channel_id, participant_id)` pair — the open-interval invariant guard), and the §D backfill seeding one open interval per current `memberships` row. Additive, dormant, `user_version`-stamped in-transaction.
+- **PR 2** ([#672](https://github.com/mkhomutov/Persatrix/pull/672)) — the read surface: the `MembershipInterval` type, `GetMembershipIntervals`, the half-open `InScope` predicate helper (§F), and the `ChannelStore` interface method.
+- **PR 3** ([#673](https://github.com/mkhomutov/Persatrix/pull/673)) — the load-bearing write hooks: `AddMember` (now transactional, `RowsAffected`-gated open), `RemoveMember` (closes the open interval; rolls back loudly on a zero-row close — a projection/ledger divergence is treated as a data-exposure bug), `GetOrCreateDM`, and **`CreateChannelWithMembers`** (the fourth hook the RFC's "three call sites" count missed — the primary path config-declared channels enter the store). Each interval write rides its `memberships` mutation's transaction. This PR unblocked RFC 0036 Phase 1.
+- **PR 4** ([#674](https://github.com/mkhomutov/Persatrix/pull/674)) — Phase 2 (cut-tolerant, kept IN): the read-only `GET /api/v1/channels/{id}/members/{participant_id}/history` operator inspection endpoint + `GetAccessibleChannels`. Auth inherits the surrounding channel-surface trust level ([OQ #2](#open-questions)).
+- **Closeout** — this status flip and the ROADMAP / progress-overview updates. No review findings on PRs 1–4 required a code change.
+
+The §D backfill recovers one open interval per *currently present* participant; stints that closed before v9 shipped are permanently absent — an accepted gap ([§D](#d-backfill), [OQ #1](#open-questions)), surfaced as a known recall limitation in RFC 0036's CHANGELOG Upgrade Notes rather than a bug. The ledger carries no `session_id` / `epoch_id` columns; the [§OQ-6 epoch-hard-filter / session-span lock](../v0.3.9-plan.md#open-question-status) lands on RFC 0036's `messages.epoch_id` query predicate, not here.
 
 ## Related Documentation
 
