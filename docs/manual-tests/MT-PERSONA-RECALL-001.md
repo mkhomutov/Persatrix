@@ -77,7 +77,8 @@ event recording the **count, not the content**.
 - [`sqlite_search_test.go`](../../internal/channels/sqlite_search_test.go) — `TestRecallMessages_Scope_JoinLeaveRejoin` (both stints reachable, pre-join + gap excluded), `TestRecallMessages_Epoch_HardFilter`, `TestRecallMessages_SpansSessions`, `TestRecallMessages_Narrowing` / `_Ranking` / `_MatchSafety` / `_NonLatinQuery` / `_LimitClamp` / `_Retention_DeletedMessageGone`
 - [`persona_recall_handlers_test.go`](../../internal/server/persona_recall_handlers_test.go) — `TestRecallEndpoint_JoinLeaveRejoin_BothStintsGapExcluded`, `TestRecallEndpoint_RealPublishPath_Recallable`, `TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable`, `TestRecallEndpoint_EmitsAuditEvent_CountNotContent`, `TestRecallEndpoint_LimitClampedServerSide`
 - [`test_recall_tool.py`](../../tests/unit/python/test_recall_tool.py) — closure-bound `agent_id`, `channels:recall` denial, the `<|user_message|>` round-trip-inert escape
-- [`channel_history_scoped_test.go`](../../internal/server/channel_history_scoped_test.go) — the §G window filter (`?as_participant`); `TestGetHistoryScoped_CurrentMemberMatchesUnscopedTail` (no-op for current members)
+- [`channel_history_scoped_test.go`](../../internal/server/channel_history_scoped_test.go) — the §G window-filter endpoint (`?as_participant`): `TestHistoryEndpoint_AsParticipant_ScopesToMembership` / `_NonMemberEmpty`
+- [`sqlite_history_scoped_test.go`](../../internal/channels/sqlite_history_scoped_test.go) — the store-level §G filter; `TestGetHistoryScoped_CurrentMemberMatchesUnscopedTail` (no-op for current members)
 
 ---
 
@@ -99,7 +100,10 @@ ENABLE_UI=1 docker compose up --build
 ```
 
 Throughout, `$API` is the base URL (default `http://127.0.0.1:8080`) and `$CH`
-is `group:mt-recall-001`.
+is `group:mt-recall-001`. Note the create body posts the **bare** `name`
+(`mt-recall-001`); the server canonicalises it to the `group:`-prefixed id
+(`canonicalID := "group:" + name`), so do **not** pre-prefix the `name` or the
+channel lands at `group:group:mt-recall-001` and every later `$CH` call 404s.
 
 ---
 
@@ -113,7 +117,7 @@ is present.
 
 ```bash
 curl -sS -X POST "$API/api/v1/channels" -H 'Content-Type: application/json' -d '{
-  "name": "group:mt-recall-001",
+  "name": "mt-recall-001",
   "description": "MT-PERSONA-RECALL-001 scoped recall fixture",
   "members": [
     {"id": "ember-owl", "respond": "participant"},
@@ -141,7 +145,7 @@ curl -sS -X POST "$API/api/v1/channels" -H 'Content-Type: application/json' -d '
 curl -sS -X DELETE "$API/api/v1/channels/$CH/members/ember-owl" -i   # → 204
 
 ./bin/persatrix channel send "$CH" \
-  "While Ember is away: the emergency rollback key lives in vault slot 7." --as alex
+  "While Ember is away: if the deploy breaks, the emergency rollback key is in vault slot 7." --as alex
 ```
 
 **Expected**:
@@ -162,10 +166,14 @@ curl -sS -X POST "$API/api/v1/channels/$CH/members" -H 'Content-Type: applicatio
 ./bin/persatrix channel send "$CH" \
   "@ember-owl welcome back — remind me of the deploy window and confirm staffing." --as alex
 
-# Recall the deploy decision — relevant in BOTH stints, never the gap:
+# Recall the single shared term "deploy" — it appears in BOTH stints AND in the
+# gap message, so the gap's absence proves SCOPE (not the query text) decides.
+# (FTS5 MATCH ANDs every query token, so a multi-term query spanning words that
+# never co-occur in one message would return nothing — a single shared term is
+# what isolates the membership filter as the only variable.)
 curl -sS -X POST "$API/api/v1/personas/ember-owl/recall" \
   -H 'Content-Type: application/json' \
-  -d '{"query": "deploy window vault rollback", "channel_id": "group:mt-recall-001", "limit": 20}' \
+  -d '{"query": "deploy", "channel_id": "group:mt-recall-001", "limit": 20}' \
   | jq -r '.messages[] | "\(.sender)\t\(.content)"'
 ```
 
@@ -174,8 +182,9 @@ curl -sS -X POST "$API/api/v1/personas/ember-owl/recall" \
   one closed + one open).
 - The recall payload contains the **stint-1** deploy decision (and `ember-owl`'s
   stint-1 ack), and the **stint-2** turns — but **never** the *vault slot 7*
-  gap message, even though the query word `vault`/`rollback` matches it. The
-  membership `EXISTS` clause, not the query, decides reachability.
+  gap message, **even though that gap message also contains the query term
+  `deploy`**. The membership `EXISTS` clause, not the query text, decides
+  reachability.
 
 **Verification**:
 - [ ] The recalled set includes the Thursday-14:00 decision and stint-2 turns.
