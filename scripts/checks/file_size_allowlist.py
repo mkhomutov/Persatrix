@@ -315,6 +315,13 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # migration-state contract for the two migrations this release adds (channel
     # store v6→v8, persona-memory v14→v15). Archive once v0.3.8 ships.
     "docs/v0.3.8-release-prep-plan.md",
+    # docs/v0.3.9-release-prep-plan.md — v0.3.9 release-prep sequencer; same
+    # accumulator pattern as the v0.3.4/v0.3.6/v0.3.7/v0.3.8 plans above, and
+    # carries the §Schema/migration-state contract for the two channel-store
+    # migrations this release adds (v8→v9 ledger, v9→v10 FTS; persona-memory
+    # unchanged) plus the structural-gate + Known-follow-up inventories for the
+    # verbatim-recall surface. Archive once v0.3.9 ships.
+    "docs/v0.3.9-release-prep-plan.md",
     # docs/guides/persona-agents.md was at 2 867 words on the v0.3.0
     # release-candidate tip; release-prep PR 2 added three §2 callouts
     # (interactions-not-messages per RFC 0020, now-anchor per RFC 0021,
