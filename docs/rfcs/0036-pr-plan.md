@@ -284,6 +284,7 @@ Per [RFC §Test Strategy](0036-persona-message-recall.md#test-strategy) + the §
 | (various) | `From PR N review` follow-ups, populated as PRs are reviewed. |
 | [`docs/rfcs/0036-persona-message-recall.md`](0036-persona-message-recall.md) | Status → `✅ Implemented`; "Implemented in v0.3.9" note in Decision/Next Steps; `make rfcs` to regenerate [INDEX.md](INDEX.md). |
 | [`ROADMAP.md`](../../ROADMAP.md) | RFC 0036 Master-Index row → `✅ Implemented`; `Last updated` refresh. |
+| [`CHANGELOG.md`](../../CHANGELOG.md) | Seed the `[0.3.9]` **Upgrade Notes** — incl. the RFC 0035 §D pre-ship backfill gap as a known recall limitation (stints that closed before migration v9 are unrecallable; [RFC 0035 §D](0035-channel-membership-interval-ledger.md#d-backfill) / [OQ #1](0035-channel-membership-interval-ledger.md#open-questions)). |
 | [`docs/guides/persona-agents.md`](../guides/persona-agents.md), [`docs/diagrams/memory-architecture.md`](../diagrams/memory-architecture.md) | Document the recall tool and the verbatim-vs-summary distinction (also a v0.3.9 release-prep doc-sweep deliverable — coordinate with [v0.3.9-plan Phase 3](../v0.3.9-plan.md#phase-3--v039-release-prep-execution)). |
 | [`docs/rfcs/0036-pr-plan.md`](0036-pr-plan.md) | [Progress Overview](#progress-overview) rows filled. |
 
@@ -292,6 +293,7 @@ Per [RFC §Test Strategy](0036-persona-message-recall.md#test-strategy) + the §
 - [ ] All PR 1–5 review findings addressed inline or tracked with rationale.
 - [ ] `make test` + `make validate` + lint clean.
 - [ ] RFC 0036 status flipped; `make rfcs` regenerated `INDEX.md`.
+- [ ] `CHANGELOG.md` `[0.3.9]` **Upgrade Notes** seeded — incl. the RFC 0035 §D pre-ship backfill-gap recall caveat (the forward-reference RFC 0035's closeout parks here).
 - [ ] `MT-PERSONA-RECALL-001` authored (live execution is [v0.3.9-plan Phase 3](../v0.3.9-plan.md#phase-3--v039-release-prep-execution)).
 - [ ] ROADMAP + [v0.3.9-plan row 1b](../v0.3.9-plan.md#master-progress-overview) reflect the final state.
 

@@ -616,7 +616,7 @@ Phases 1 and 2 shipped under the v0.3.9 umbrella (*Conversations you can mine*) 
 - **PR 4** ([#674](https://github.com/mkhomutov/Persatrix/pull/674)) — Phase 2 (cut-tolerant, kept IN): the read-only `GET /api/v1/channels/{id}/members/{participant_id}/history` operator inspection endpoint + `GetAccessibleChannels`. Auth inherits the surrounding channel-surface trust level ([OQ #2](#open-questions)).
 - **Closeout** — this status flip and the ROADMAP / progress-overview updates. No review findings on PRs 1–4 required a code change.
 
-The §D backfill recovers one open interval per *currently present* participant; stints that closed before v9 shipped are permanently absent — an accepted gap ([§D](#d-backfill), [OQ #1](#open-questions)), surfaced as a known recall limitation in RFC 0036's CHANGELOG Upgrade Notes rather than a bug. The ledger carries no `session_id` / `epoch_id` columns; the [§OQ-6 epoch-hard-filter / session-span lock](../v0.3.9-plan.md#open-question-status) lands on RFC 0036's `messages.epoch_id` query predicate, not here.
+The §D backfill recovers one open interval per *currently present* participant; stints that closed before v9 shipped are permanently absent — an accepted gap ([§D](#d-backfill), [OQ #1](#open-questions)), not a bug; RFC 0036's closeout (PR 6) carries it into the v0.3.9 CHANGELOG Upgrade Notes as a known recall limitation. The ledger carries no `session_id` / `epoch_id` columns; the [§OQ-6 epoch-hard-filter / session-span lock](../v0.3.9-plan.md#open-question-status) lands on RFC 0036's `messages.epoch_id` query predicate, not here.
 
 ## Related Documentation
 
