@@ -3,7 +3,7 @@ id: RFC-0036
 title: Persona Verbatim Message Recall
 summary: Give personas a tool to search the verbatim text of past conversations, scoped server-side to the channels and membership intervals the persona had access to, and retrofit the RFC 0034 conversation window with the same membership filter.
 type: feature
-status: implementing
+status: implemented
 author: Maksim Khomutov
 created: 2026-05-16
 target: v0.3.9
@@ -16,7 +16,7 @@ depends_on:
 # RFC 0036 — Persona Verbatim Message Recall
 
 **Type**: feature
-**Status**: 🚧 Implementing
+**Status**: ✅ Implemented — v0.3.9 (Phases 1–3; all six PRs [#675](https://github.com/mkhomutov/Persatrix/pull/675)–[#679](https://github.com/mkhomutov/Persatrix/pull/679) + closeout). The user-facing win of *Conversations you can mine*: a `recall_channel_messages` persona tool searches the verbatim text of past conversations, scoped server-side against the [RFC 0035](0035-channel-membership-interval-ledger.md) ledger. Tracking plan: [0036-pr-plan.md](0036-pr-plan.md).
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
 **Target**: v0.3.9
@@ -759,6 +759,19 @@ and separately reviewable.
    deployment.
 5. Regenerate `docs/rfcs/INDEX.md` via `make rfcs` (auto-generated from
    front-matter — do not hand-edit).
+
+### Implemented in v0.3.9
+
+Phases 1–3 shipped under the v0.3.9 umbrella (*Conversations you can mine*) per [`0036-pr-plan.md`](0036-pr-plan.md), as workstream 1b of the [v0.3.9 master plan](../v0.3.9-plan.md) — the user-facing recall capability on top of the ✅ Implemented [RFC 0035](0035-channel-membership-interval-ledger.md) ledger:
+
+- **PR 1** ([#675](https://github.com/mkhomutov/Persatrix/pull/675)) — channel-store migration **v10**: the `messages_fts` FTS5 virtual table (external-content over `messages`), the `messages_ai` / `messages_ad` / `messages_au` triggers, the FTS5-availability probe, and the `('rebuild')` backfill. Dormant — no query reads it until PR 2. `user_version`-stamped in-transaction; the `messages_au` trigger is defensive-symmetric (`messages` is insert-and-cap-prune only) and the `VACUUM` rowid-stability caveat is recorded in the migration header.
+- **PR 2** ([#676](https://github.com/mkhomutov/Persatrix/pull/676)) — the load-bearing scoped query (§C): `RecallMessages` in `sqlite_search.go`, whose `membership_intervals` `EXISTS` clause *is* the access-control decision, plus the **non-optional `AND m.epoch_id = ?`** filter ([§OQ-6 lock](../v0.3.9-plan.md#open-question-status)) — `session_id` is **not** filtered. BM25-dominant ranking with a recency tiebreak, `MATCH`-operator escaping, a `LIKE` fallback under the identical scope, and a server-side `limit` clamp.
+- **PR 3** ([#677](https://github.com/mkhomutov/Persatrix/pull/677)) — the REST surface: `POST /api/v1/personas/{participant_id}/recall` in `persona_recall_handlers.go`, the scope participant bound from the **path segment** (never a body field), the caller's epoch resolved exactly as publish does, and the RFC 0009 `channel.recall` audit event emitted **server-side in the handler** (records persona, query, narrowing params, and result *count* — never content).
+- **PR 4** ([#678](https://github.com/mkhomutov/Persatrix/pull/678)) — the persona tool: `create_recall_tool` + `HttpRecallClient` in `agents/tools/recall.py` (closure-bound `agent_id`), the distinct `channels:recall` permission (deny-by-default), and per-row §F delimiter-escape. Review follow-up folded in here: recall output is also quarantined in the RFC 0009 `<external_data>` envelope (registered in `EXTERNAL_TOOL_SOURCES`), and the §F escape was centralised in the neutral `agents.prompt_safety` module.
+- **PR 5** ([#679](https://github.com/mkhomutov/Persatrix/pull/679)) — Phase 3 (independent): `?as_participant=<id>` on `GET …/messages` → `GetHistoryScoped` reusing the **same** `EXISTS` + `epoch_id` fragment; `conversation_window._fetch_window` (cache key now includes `as_participant`), `HttpChannelHistoryFetcher`, and `channel_catchup.py` thread the persona's `agent_id`. A re-added persona's live window and episodic seeding exclude removal-gap messages; a no-op for current single-stint members; human/CLI callers omit the param and are unaffected.
+- **Closeout** (this PR) — the status flip, the ROADMAP / progress-overview updates, the CHANGELOG `[0.3.9]` Upgrade Notes (carrying the RFC 0035 §D pre-ship backfill-gap as a known recall limitation), the persona-agent guide + memory-architecture diagram, and the `MT-PERSONA-RECALL-001` acceptance spec.
+
+Recall reads the live `messages` table, so a cap-pruned or user-deleted message is gone from results ([§H](#h-retention-horizon-and-deletions)); stints that closed before migration v9 shipped are unrecallable (the RFC 0035 §D accepted backfill gap). Open Question #1 (recall-endpoint authorization on the unauthenticated channel surface) remains deferred to RFC 0009 — the scope join is correct regardless of caller and every call is audited; it gates *treating recall as safe on a multi-tenant deployment*, not v0.3.9.
 
 ## Related Documentation
 

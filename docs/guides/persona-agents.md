@@ -344,6 +344,33 @@ prompt
 > in v0.3.3. Society-tier methods raise `SocietyBackendUnavailable` —
 > single-agent mode never opens Postgres.
 
+> **v0.3.9 — verbatim recall vs. the summary tiers.** The three tiers
+> above are the persona's *own summary* of what happened — what it
+> concluded, who it trusts, what fits in the prompt. The **`recall_channel_messages`**
+> tool ([agents/tools/recall.py](../../agents/tools/recall.py)) is the
+> verbatim sibling: it answers *what was literally said*, returning the
+> exact `{message_id, channel_id, sender, timestamp, content}` rows from
+> past conversations. It is **not a fourth memory tier** — it does not go
+> through the `MemoryStore` facade and reads nothing from the persona's
+> `memory.db`. The search runs **server-side in the channel store** (an
+> FTS5 index over `messages`), and the access rule is enforced in SQL: a
+> join against the RFC 0035 `membership_intervals` ledger restricts every
+> result to the channels and stints the persona was actually a member of,
+> so a persona added → removed → re-added recalls *both* stints and
+> neither the pre-join period nor the removal gap. Results are
+> `epoch_id`-hard-filtered (run isolation) but span sessions within the
+> epoch. The scope participant is **closure-bound** to the calling
+> persona (sent as the endpoint path segment) — the model supplies only
+> `query` / `channel_id` / `sender` / `limit` and can never widen or
+> redirect the scope. The tool is gated by a distinct **`channels:recall`**
+> permission (deny-by-default — absent ⇒ unavailable), every call is
+> audited server-side, and each recalled row is delimiter-escaped inside
+> the RFC 0009 `<external_data>` envelope so quoted text cannot inject the
+> prompt. Recall reads the *live* `messages` table, so cap-pruned or
+> deleted messages are gone (no total-recall promise). See
+> [RFC 0036](../rfcs/0036-persona-message-recall.md) and
+> [RFC 0035](../rfcs/0035-channel-membership-interval-ledger.md).
+
 ### Episodic memory
 
 Episodes are ranked, searchable records of past interactions. The agent calls
