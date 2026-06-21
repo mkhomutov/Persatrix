@@ -273,10 +273,10 @@ Doc-only unless a review finding requires a code change.
 
 #### PR checklist
 
-- [ ] All PR 1–4 review findings addressed inline or downgraded to tracked issues with rationale.
-- [ ] `make test` + Go lint clean.
-- [ ] RFC 0035 status flipped; `make rfcs` regenerated `INDEX.md` (front-matter is the source of truth — do not hand-edit the index).
-- [ ] [ROADMAP RFC Master Index](../../ROADMAP.md#rfc-master-index) and [v0.3.9-plan row 1a](../v0.3.9-plan.md#master-progress-overview) reflect the final state.
+- [x] All PR 1–4 review findings addressed inline or downgraded to tracked issues with rationale — **none**: PRs [#671](https://github.com/mkhomutov/Persatrix/pull/671)–[#674](https://github.com/mkhomutov/Persatrix/pull/674) merged with no review threads, so this closeout is doc-only (no `From PR N review` subsections needed).
+- [x] `make test` + Go lint clean — **N/A (doc-only)**: no Go or other code touched; the doc gates that *do* apply are green (`scripts/checks/doc_links.py`, `doc_leaked_markup.py`, `doc_status_markers.py`, `scripts/rfcs.py --check`).
+- [x] RFC 0035 status flipped; `make rfcs` regenerated `INDEX.md` (front-matter is the source of truth — do not hand-edit the index).
+- [x] [ROADMAP RFC Master Index](../../ROADMAP.md#rfc-master-index) and [v0.3.9-plan row 1a](../v0.3.9-plan.md#master-progress-overview) reflect the final state.
 
 ---
 
@@ -311,8 +311,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 1 | Migration v9 — `membership_intervals` table + indexes + backfill | `feature/v039-rfc0035-migration` | ✅ Merged | [#671](https://github.com/mkhomutov/Persatrix/pull/671) | 2026-06-18 |
 | 2 | Read surface — struct, `GetMembershipIntervals`, `InScope`, interface | `feature/v039-rfc0035-read-surface` | ✅ Merged | [#672](https://github.com/mkhomutov/Persatrix/pull/672) | 2026-06-18 |
 | 3 | Write hooks — transactional interval open/close (load-bearing) + `CreateChannelWithMembers` (fourth hook) | `feature/v039-rfc0035-write-hooks` | ✅ Merged | [#673](https://github.com/mkhomutov/Persatrix/pull/673) | 2026-06-18 |
-| 4 | Phase 2 — inspection endpoint + `GetAccessibleChannels` (cut-tolerant) | `feature/v039-rfc0035-inspection-endpoint` | 🔀 PR open | [#674](https://github.com/mkhomutov/Persatrix/pull/674) | — |
-| 5 | Review follow-ups + closeout | `feature/v039-rfc0035-close` | ⬜ Not started | — | — |
+| 4 | Phase 2 — inspection endpoint + `GetAccessibleChannels` (cut-tolerant) | `feature/v039-rfc0035-inspection-endpoint` | ✅ Merged | [#674](https://github.com/mkhomutov/Persatrix/pull/674) | 2026-06-18 |
+| 5 | Review follow-ups + closeout | `feature/v039-rfc0035-close` | 🔀 PR open | [#680](https://github.com/mkhomutov/Persatrix/pull/680) | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 
