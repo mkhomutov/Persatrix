@@ -290,12 +290,13 @@ Per [RFC §Test Strategy](0036-persona-message-recall.md#test-strategy) + the §
 
 #### PR checklist
 
-- [ ] All PR 1–5 review findings addressed inline or tracked with rationale.
-- [ ] `make test` + `make validate` + lint clean.
-- [ ] RFC 0036 status flipped; `make rfcs` regenerated `INDEX.md`.
-- [ ] `CHANGELOG.md` `[0.3.9]` **Upgrade Notes** seeded — incl. the RFC 0035 §D pre-ship backfill-gap recall caveat (the forward-reference RFC 0035's closeout parks here).
-- [ ] `MT-PERSONA-RECALL-001` authored (live execution is [v0.3.9-plan Phase 3](../v0.3.9-plan.md#phase-3--v039-release-prep-execution)).
-- [ ] ROADMAP + [v0.3.9-plan row 1b](../v0.3.9-plan.md#master-progress-overview) reflect the final state.
+- [x] All PR 1–5 review findings addressed inline or tracked with rationale. (Each was folded into its own PR at merge time — notably the RFC 0009 `<external_data>` envelope + the centralised `agents.prompt_safety` escape rode PR 4; no findings remained for this closeout to fold.)
+- [x] `make test` + `make validate` + lint clean.
+- [x] RFC 0036 status flipped; `make rfcs` regenerated `INDEX.md`.
+- [x] `CHANGELOG.md` `[0.3.9]` **Upgrade Notes** seeded — incl. the RFC 0035 §D pre-ship backfill-gap recall caveat (the forward-reference RFC 0035's closeout parks here).
+- [x] `MT-PERSONA-RECALL-001` authored (live execution is [v0.3.9-plan Phase 3](../v0.3.9-plan.md#phase-3--v039-release-prep-execution)).
+- [x] ROADMAP + [v0.3.9-plan row 1b](../v0.3.9-plan.md#master-progress-overview) reflect the final state.
+- [x] `docs/guides/persona-agents.md` + `docs/diagrams/memory-architecture.md` document the recall tool + the verbatim-vs-summary distinction.
 
 ---
 
@@ -332,8 +333,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 2 | 1 | Scoped search query (membership EXISTS + epoch filter) | `feature/v039-rfc0036-scoped-search` | ✅ Merged | [#676](https://github.com/mkhomutov/Persatrix/pull/676) | `07f79f1` |
 | 3 | 1 | `POST …/recall` endpoint + server-side audit | `feature/v039-rfc0036-recall-endpoint` | ✅ Merged | [#677](https://github.com/mkhomutov/Persatrix/pull/677) | `55dfbf5` |
 | 4 | 2 | Persona tool + `channels:recall` + §F sanitization | `feature/v039-rfc0036-tool-and-permission` | ✅ Merged | [#678](https://github.com/mkhomutov/Persatrix/pull/678) | `fe14f50` |
-| 5 | 3 | Conversation-window membership filter (independent) | `feature/v039-rfc0036-window-filter` | 🔀 PR open | [#679](https://github.com/mkhomutov/Persatrix/pull/679) | — |
-| 6 | — | Review follow-ups + closeout | `feature/v039-rfc0036-close` | ⬜ Not started | — | — |
+| 5 | 3 | Conversation-window membership filter (independent) | `feature/v039-rfc0036-window-filter` | ✅ Merged | [#679](https://github.com/mkhomutov/Persatrix/pull/679) | `3132d7b` |
+| 6 | — | Review follow-ups + closeout | `feature/v039-rfc0036-close` | 🔀 PR open | _this PR_ | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 

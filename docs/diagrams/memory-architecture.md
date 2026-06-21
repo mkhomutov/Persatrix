@@ -14,6 +14,22 @@ the other four are backed by a shared SQLite database.
 > `relationships`, and `facts` rows (default `legacy`) — see
 > [§Schema & migrations](#schema--migrations).
 
+> **v0.3.9 — verbatim recall is a separate surface, not a memory tier.** The
+> five tiers below are the persona's own *summary* of past interactions,
+> persisted in its `memory.db` and assembled through the facade / direct read
+> path. **Verbatim recall** (RFC 0036 — the `recall_channel_messages` tool)
+> is deliberately *outside* this diagram: it reads nothing from `memory.db`
+> and does not touch `MemoryStore`. It searches the **channel store**
+> server-side (an FTS5 index over the durable `messages` table), and the
+> access rule is a SQL join against the RFC 0035 `membership_intervals`
+> ledger — so a persona recalls the *exact words* of channels and stints it
+> was a member of, `epoch_id`-hard-filtered and session-spanning. Think of
+> it as the verbatim sibling of the *episodic* tier (which stores a lossy
+> summary keyed by interaction): episodic answers "what did I conclude",
+> recall answers "what was literally said". See
+> [RFC 0036](../rfcs/0036-persona-message-recall.md) and the
+> [persona-agents guide §2](../guides/persona-agents.md#2-the-three-memory-tiers).
+
 In v0.3.0 the **`MemoryFacade`** ([agents/memory/facade.py](../../agents/memory/facade.py),
 [RFC 0008 §B](../rfcs/0008-agent-memory-context-optimization.md#b-memory-facade-shape))
 is the read/write contract for **task agents** —
