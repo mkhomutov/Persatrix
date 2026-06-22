@@ -51,6 +51,12 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-CHANNEL-CONFIG-001](MT-CHANNEL-CONFIG-001.md) | Live-edit a governance knob from the CLI — the running channel honors it without restart, and it survives one (Phase 1) | Active |
 | [MT-CHANNEL-CONFIG-002](MT-CHANNEL-CONFIG-002.md) | Edit a governance knob from the web console — the running channel honors it, and the CLI reads back the same value (Phase 2, G4) | Active |
 
+## Channel Memory / Verbatim Recall (RFC 0036 + RFC 0035)
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-PERSONA-RECALL-001](MT-PERSONA-RECALL-001.md) | Verbatim recall is scoped to where the persona was present — add → remove → re-add recalls both stints, never the removal gap (RFC 0036 over the RFC 0035 ledger) | Active |
+
 ## Web Console (RFC 0048)
 
 | ID | Title | Status |
@@ -161,6 +167,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | v0.3.6 | [v0.3.6-execution-report.md](v0.3.6-execution-report.md) | ✅ Complete |
 | v0.3.7 | [v0.3.7-execution-report.md](v0.3.7-execution-report.md) | ✅ Complete — clean pass on tip `92a5a00` (the first-run blocker [ISSUE-0094](../issues/ISSUE-0094-everyone-broadcast-rejected-by-agent-inbound-validation.md) / MT-CHANNEL-RELEVANCE-001 Step 4 fixed in [#562](https://github.com/mkhomutov/Persatrix/pull/562)/[#563](https://github.com/mkhomutov/Persatrix/pull/563), re-verified live) |
 | v0.3.8 | [v0.3.8-execution-report.md](v0.3.8-execution-report.md) | ✅ Complete — clean pass on tip `8897727` (Tier B no-pile-on + end-vote convergence + chair stall + interaction-summary surface + RFC 0050 channel config + the combined convergence walkthrough, all live; MT-INTERACTION-SUMMARY-001 Part A DM `idle_gap` accepted-with-known-gap, structurally pinned; one non-blocking finding F-1) |
+| v0.3.9 | [v0.3.9-execution-report.md](v0.3.9-execution-report.md) | 🔄 In progress — recall-surface structural / automated release-blocker gates all green live on host (tip `2bd72a8`); the headline live MT (MT-PERSONA-RECALL-001) pending the Docker stack |
 
 ---
 
