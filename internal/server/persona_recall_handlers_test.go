@@ -226,6 +226,55 @@ func TestRecallEndpoint_EmitsAuditEvent_CountNotContent(t *testing.T) {
 	assert.NotContains(t, string(raw), "uniquecontentmarkerbeta", "recalled content must never reach the audit log")
 }
 
+// TestRecallEndpoint_BareChannelNarrowMatchesCanonical pins the ISSUE-0107 fix:
+// the body `channel_id` narrower is canonicalized to the store's prefixed id form
+// before it reaches the membership-scoped query, so a bare, human-facing channel
+// name (`mt-recall-001` — the form a persona/tool sees in context and the form
+// ember-owl actually sent in MT-PERSONA-RECALL-001 Step 5, getting count=0)
+// narrows identically to the canonical `group:mt-recall-001`. Both must equal the
+// un-narrowed result for the single-channel fixture; the pre-fix bare path
+// returned the empty set. It also pins the audit side effect (ISSUE-0107).
+func TestRecallEndpoint_BareChannelNarrowMatchesCanonical(t *testing.T) {
+	srv, store, dbPath, auditor := recallTestServer(t)
+	const name = "mt-recall-001"
+	ch := "group:" + name // the store-canonical id
+	require.NoError(t, store.CreateChannel(context.Background(),
+		channels.Channel{ID: ch, Name: name, Type: channels.ChannelTypeGroup}))
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	withRecallDB(t, dbPath, func(db *sql.DB) {
+		recallSeedInterval(t, db, ch, "alice", base, nil) // open from the start
+		recallSeedMsg(t, db, "m1", ch, "bob", "deploy window decision", base.Add(time.Minute), "")
+		recallSeedMsg(t, db, "m2", ch, "bob", "deploy window confirmed", base.Add(2*time.Minute), "")
+	})
+
+	recall := func(channelID string) []string {
+		body, _ := json.Marshal(recallRequest{Query: "deploy", ChannelID: channelID})
+		rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
+		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+		var resp recallResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		return recallRespIDs(resp)
+	}
+
+	canonical := recall(ch)
+	require.ElementsMatch(t, []string{"m1", "m2"}, canonical, "positive control: canonical id narrows to the in-scope set")
+
+	bare := recall(name)     // the persona's form — pre-fix this returned 0
+	unnarrowed := recall("") // span every accessible channel
+
+	assert.ElementsMatch(t, canonical, bare, "a bare channel name narrows identically to the canonical id (ISSUE-0107)")
+	assert.ElementsMatch(t, canonical, unnarrowed, "single-channel fixture: the narrowed set equals the un-narrowed set")
+
+	// Every narrowed recall is audited as the canonical id, never the raw bare form.
+	require.NoError(t, auditor.Flush())
+	for _, ev := range filterRecallEvents(readAuditEvents(t, auditor.Path())) {
+		if cid, ok := ev.Detail["channel_id"]; ok {
+			assert.Equal(t, ch, cid, "narrowed recall is audited as the canonical channel_id, never the bare form (ISSUE-0107)")
+		}
+	}
+}
+
 // TestRecallEndpoint_RealPublishPath_Recallable proves the endpoint works
 // against data written through the REAL RFC 0035 membership write hook
 // (store.AddMember) and the real publish path (store.PublishMessage populates
