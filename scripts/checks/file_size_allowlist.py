@@ -289,6 +289,15 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # persona-memory v14→v15) + the behaviour-active-by-default caveat, and §6
     # Known Gaps. Archive once the tag ships.
     "docs/v0.3.8-release-checklist.md",
+    # docs/v0.3.9-release-checklist.md — v0.3.9 sibling of the v0.3.3–v0.3.8
+    # checklists above; same release-cycle-record pattern. Crossed the cap on
+    # creation (release-prep PR 2) carrying the verbatim-recall surface (RFC 0036
+    # recall over the RFC 0035 ledger + the §G conversation-window filter), the
+    # §3.1 Upgrade Notes (the opt-in channels:recall permission, the two
+    # channel-store migrations v8→v9→v10, the conversation-window membership
+    # filter, the two accepted recall limitations) + the behaviour-active-by-default
+    # caveat + the version-skew caution, and §6 Known Gaps. Archive once the tag ships.
+    "docs/v0.3.9-release-checklist.md",
     # docs/v0.3.4-release-prep-plan.md is the v0.3.4 release-prep sequencer —
     # same release-cycle-accumulator pattern as the v0.3.0 / v0.3.1 plans and
     # the v0.3.3 checklist above. It crossed the 3 000-word prose cap when PR 1
