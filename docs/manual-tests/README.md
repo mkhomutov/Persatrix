@@ -167,7 +167,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | v0.3.6 | [v0.3.6-execution-report.md](v0.3.6-execution-report.md) | ✅ Complete |
 | v0.3.7 | [v0.3.7-execution-report.md](v0.3.7-execution-report.md) | ✅ Complete — clean pass on tip `92a5a00` (the first-run blocker [ISSUE-0094](../issues/ISSUE-0094-everyone-broadcast-rejected-by-agent-inbound-validation.md) / MT-CHANNEL-RELEVANCE-001 Step 4 fixed in [#562](https://github.com/mkhomutov/Persatrix/pull/562)/[#563](https://github.com/mkhomutov/Persatrix/pull/563), re-verified live) |
 | v0.3.8 | [v0.3.8-execution-report.md](v0.3.8-execution-report.md) | ✅ Complete — clean pass on tip `8897727` (Tier B no-pile-on + end-vote convergence + chair stall + interaction-summary surface + RFC 0050 channel config + the combined convergence walkthrough, all live; MT-INTERACTION-SUMMARY-001 Part A DM `idle_gap` accepted-with-known-gap, structurally pinned; one non-blocking finding F-1) |
-| v0.3.9 | [v0.3.9-execution-report.md](v0.3.9-execution-report.md) | 🔄 In progress — recall-surface structural / automated release-blocker gates all green live on host (tip `2bd72a8`); the headline live MT (MT-PERSONA-RECALL-001) pending the Docker stack |
+| v0.3.9 | [v0.3.9-execution-report.md](v0.3.9-execution-report.md) | ✅ Complete — pass on tip `2bd72a8` (MT-PERSONA-RECALL-001 live on Anthropic: both stints recalled, removal gap unreachable via both paths, persona cannot surface the gap fact, two-interval history + count-not-content audit, cross-session recall after restart; recall-surface structural gates green live on host; one non-blocking finding F-1 / ISSUE-0107 — recall `channel_id` narrowing not canonicalized) |
 
 ---
 
