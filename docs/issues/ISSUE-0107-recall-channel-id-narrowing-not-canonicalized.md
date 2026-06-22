@@ -1,10 +1,12 @@
 ---
 id: ISSUE-0107
 summary: "The persona recall endpoint forwards the body `channel_id` narrowing parameter to the store UNMODIFIED (persona_recall_handlers.go:90), with no `group:`/`dm:` canonicalization — unlike the channel REST paths, which canonicalize their id. The store matches `messages.channel_id` against the canonical (`group:`-prefixed) id, so a caller that narrows by the bare, human-facing channel name (e.g. `mt-recall-001` rather than `group:mt-recall-001`) gets ZERO results. Observed live in MT-PERSONA-RECALL-001 Step 5: ember-owl's own recall tool call narrowed by the bare name `mt-recall-001` and got count=0, so it fell back to its conversation transcript. Non-exposure (narrowing can only REDUCE the result set, never widen scope past the membership filter) but it silently breaks channel-narrowed recall for the natural id form."
-status: open
+status: resolved
 severity: medium
 area: internal/server
 created: 2026-06-22
+closed: 2026-06-22
+closed_pr:
 refs:
   - docs/rfcs/0036-persona-message-recall.md
   - docs/manual-tests/MT-PERSONA-RECALL-001.md
@@ -106,3 +108,18 @@ canonical-or-bare tolerant. Out of scope for v0.3.9 release-prep PR 1
 **Medium** — a shipped feature path (channel-narrowed recall) silently returns
 empty for the natural id form, observed live; no correctness/exposure risk, and
 the un-narrowed path and the deterministic canonical path both work.
+
+## Resolution
+
+Fixed by canonicalizing the body `channel_id` narrower in the recall handler
+before it is bound into `RecallParams`. The new `canonicalNarrowChannelID` helper
+([persona_recall_handlers.go](../../internal/server/persona_recall_handlers.go))
+prepends the `group:` prefix to a bare name (`mt-recall-001` →
+`group:mt-recall-001`), mirroring the `canonicalID := "group:" + name` convention
+the channel path handlers use, while leaving an already-prefixed id
+(`group:`/`dm:`/`thread:`) and the empty/un-narrowed case untouched. `sender` is
+left raw — senders are not namespaced. A bare and a canonical narrow now match the
+same rows; the change is narrowing-only and cannot widen scope past the RFC 0035
+membership `EXISTS` filter. Pinned by
+`TestRecallEndpoint_BareChannelNarrowMatchesCanonical`
+([persona_recall_handlers_test.go](../../internal/server/persona_recall_handlers_test.go)).

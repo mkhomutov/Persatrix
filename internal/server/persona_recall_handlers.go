@@ -18,6 +18,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -87,11 +88,16 @@ func (s *Server) handleRecallMessages(w http.ResponseWriter, r *http.Request) {
 		ParticipantID: participantID,
 		Query:         req.Query,
 		EpochID:       channels.EpochOverrideFromContext(ctx),
-		ChannelID:     req.ChannelID,
-		Sender:        req.Sender,
-		After:         req.After,
-		Before:        req.Before,
-		Limit:         req.Limit, // forwarded unmodified — the store clamps to MaxRecallLimit
+		// ISSUE-0107: the body `channel_id` narrower is canonicalized to the store's
+		// prefixed id form (a bare `mt-recall-001` → `group:mt-recall-001`), so a
+		// persona/tool that narrows by the human-facing channel name it sees in
+		// context matches the same rows as the canonical id. `sender` is NOT
+		// namespaced, so it is bound raw.
+		ChannelID: canonicalNarrowChannelID(req.ChannelID),
+		Sender:    req.Sender,
+		After:     req.After,
+		Before:    req.Before,
+		Limit:     req.Limit, // forwarded unmodified — the store clamps to MaxRecallLimit
 	}
 
 	msgs, err := s.channelStore.RecallMessages(ctx, params)
@@ -118,6 +124,32 @@ func (s *Server) handleRecallMessages(w http.ResponseWriter, r *http.Request) {
 	s.emitRecallAudit(ctx, participantID, params, len(msgs))
 
 	writeJSON(w, recallMessagesToResponse(msgs), http.StatusOK)
+}
+
+// canonicalNarrowChannelID maps the recall body's optional `channel_id` narrowing
+// param to the store-canonical id form before it is bound into RecallParams.
+//
+// The channel store matches `messages.channel_id` against the canonical, prefixed
+// id (`group:<name>` / `dm:<…>` / `thread:<…>`) — the form the channel REST path
+// handlers mint from the URL (channel_handlers.go: `canonicalID := "group:" + name`).
+// Recall, however, takes `channel_id` from the request BODY, so a persona — or the
+// recall tool — naturally narrows by the bare, human-facing channel name it sees
+// in context (`mt-recall-001`), which matched nothing (ISSUE-0107). Prepend the
+// `group:` prefix to a bare name so a bare and a canonical id narrow identically;
+// leave an already-prefixed id (any known channel type) and the empty/un-narrowed
+// case untouched.
+//
+// Narrowing-only — this can never widen scope past the RFC 0035 membership EXISTS
+// filter; at worst a mis-canonicalized id selects the wrong channel and returns a
+// subset (the pre-fix behaviour was the empty set).
+func canonicalNarrowChannelID(id string) string {
+	if id == "" {
+		return "" // un-narrowed — span every accessible channel
+	}
+	if strings.HasPrefix(id, "group:") || strings.HasPrefix(id, "dm:") || strings.HasPrefix(id, "thread:") {
+		return id // already canonical
+	}
+	return "group:" + id // bare group name → canonical id
 }
 
 // emitRecallAudit emits the RFC 0009 `channel.recall` event for one executed
