@@ -248,6 +248,15 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # tipping the report past the 3 000-word cap (~4 280 words). Archive once
     # the tag ships.
     "docs/manual-tests/v0.3.8-execution-report.md",
+    # v0.3.9 sibling — same per-release accumulator pattern (the verbatim-recall
+    # surface: MT-PERSONA-RECALL-001 run live on Anthropic + the recall
+    # store/endpoint/tool + ledger + §G window-filter + the two channel-store
+    # migration (v8→v9, v9→v10) structural-gate tables + the F-1/ISSUE-0107
+    # live finding). The PR 4 final pre-tag verification appended its live gate
+    # table + the channel-store upgrade-on-open verification + the Docker-smoke
+    # carry-forward, tipping the report past the 3 000-word cap. Archive once
+    # the tag ships.
+    "docs/manual-tests/v0.3.9-execution-report.md",
     # docs/v0.3.3-release-checklist.md crossed the 3 000-word prose cap as a
     # release-cycle record: the §3.1 Upgrade Notes table (8 rows — event-driven
     # loop, fire-and-forget channel dispatch, autonomy.timers, scheduled_wakes
