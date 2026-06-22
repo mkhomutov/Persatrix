@@ -1,6 +1,6 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-06-22 (v0.3.9 released-status flip — final pre-tag verification (PR 4) green on the post-bump tip `0a487a8`; Version Map v0.3.9 → ✅ Released. Only the mechanical `v0.3.9` tag + GitHub Release remain.)
+> **Last updated**: 2026-06-22 (v0.3.9 post-release follow-up — `v0.3.9` tagged + [GitHub Release](https://github.com/mkhomutov/Persatrix/releases/tag/v0.3.9) published; next phase v0.4.0 *Agent Organizations*.)
 > **Current phase**: v0.3.9 (Conversations you can mine — RFC 0035 membership-interval ledger + RFC 0036 verbatim message recall) — ✅ Released
 > **Current milestone**: v0.3.9 *Conversations you can mine* — ✅ Released. The headline user-facing story: **personas quote each other accurately, and a human can search the verbatim record of what was said — scoped to the channels each persona was present for**. A new `recall_channel_messages` persona tool searches the verbatim text of past conversations server-side ([RFC 0036](docs/rfcs/0036-persona-message-recall.md) FTS5 over `messages`), joined against an append-only membership-interval ledger ([RFC 0035](docs/rfcs/0035-channel-membership-interval-ledger.md)) so a persona added → removed → re-added recalls *both* stints and neither the pre-join period nor the removal gap. Recall is `epoch_id`-hard-filtered (run isolation) and spans sessions within the epoch; it is audited, permission-gated (`channels:recall`), and delimiter-escaped against prompt injection. The same membership filter is retrofitted onto the live RFC 0034 conversation window. The final pre-tag gate sweep re-ran green live on host (Go `./internal/... -race -cover` 18 pkgs no-races incl. the recall store/endpoint/tool + ledger + §G window-filter + the v8→v9→v10 channel-store migration suites; the recall-tool Python suite; Vitest; Rust; ruff/mypy/clippy/go-vet), the channel-store upgrade-on-open release gate passed (v8→v9→v10; persona-memory unchanged at v15), and the live Anthropic Docker smoke carries forward from the `MT-PERSONA-RECALL-001` PR 1 run; only the mechanical `v0.3.9` tag + GitHub Release ([Phase 4](docs/v0.3.9-plan.md#phase-4--tag-and-post-release-follow-up)) remain. This closes the v0.3.x conversation-realism-and-usefulness arc; the next phase is **v0.4.0** (Agent Organizations — deliberative reasoning).
 
@@ -1283,7 +1283,29 @@ v0.5.0 complete
 | [#664](https://github.com/mkhomutov/Persatrix/pull/664) | docs(v038): PR 2 — README + ROADMAP + guide verification + release checklist | v0.3.8 release prep | 2026-06-16 |
 | [#665](https://github.com/mkhomutov/Persatrix/pull/665) | chore(v038): PR 3 — version bump 0.3.7 → 0.3.8 + changelog [0.3.8] curation | v0.3.8 release prep | 2026-06-16 |
 | [#666](https://github.com/mkhomutov/Persatrix/pull/666) | docs(v038): release-prep PR 4 — final pre-tag verification & release notes | v0.3.8 release prep | 2026-06-16 |
-| [#667](https://github.com/mkhomutov/Persatrix/pull/667) | docs(release): post-release follow-up for v0.3.8 (this PR) | v0.3.8 post-release | 2026-06-16 |
+| [#667](https://github.com/mkhomutov/Persatrix/pull/667) | docs(release): post-release follow-up for v0.3.8 | v0.3.8 post-release | 2026-06-16 |
+| [#668](https://github.com/mkhomutov/Persatrix/pull/668) | docs(v039): re-baseline RFC 0035/0036 against current channel-store schema | v0.3.9 plan | 2026-06-17 |
+| [#669](https://github.com/mkhomutov/Persatrix/pull/669) | docs(v039): Phase 0 — v0.3.9 master plan (Conversations You Can Mine) | v0.3.9 plan | 2026-06-17 |
+| [#670](https://github.com/mkhomutov/Persatrix/pull/670) | docs(v039): RFC 0035 + RFC 0036 PR plans (Phase 1 deliverables) | v0.3.9 plan | 2026-06-17 |
+| [#671](https://github.com/mkhomutov/Persatrix/pull/671) | feat(channels): RFC 0035 PR 1 — channel-store migration v9 (membership_intervals ledger) | 0035 ledger (1) | 2026-06-18 |
+| [#672](https://github.com/mkhomutov/Persatrix/pull/672) | feat(channels): RFC 0035 PR 2 — membership-interval read surface (GetMembershipIntervals + InScope) | 0035 ledger (2) | 2026-06-18 |
+| [#673](https://github.com/mkhomutov/Persatrix/pull/673) | feat(channels): RFC 0035 PR 3 — transactional membership-interval write hooks (live ledger) | 0035 ledger (3) | 2026-06-18 |
+| [#674](https://github.com/mkhomutov/Persatrix/pull/674) | feat(channels): RFC 0035 PR 4 — operator membership-history inspection endpoint + GetAccessibleChannels | 0035 ledger (4) | 2026-06-18 |
+| [#675](https://github.com/mkhomutov/Persatrix/pull/675) | feat(channels): RFC 0036 PR 1 — channel-store migration v10 (messages_fts FTS5 index) | 0036 recall (1) | 2026-06-19 |
+| [#676](https://github.com/mkhomutov/Persatrix/pull/676) | feat(channels): RFC 0036 PR 2 — membership-scoped, epoch-filtered verbatim search (RecallMessages) | 0036 recall (2) | 2026-06-19 |
+| [#677](https://github.com/mkhomutov/Persatrix/pull/677) | feat(channels): RFC 0036 PR 3 — POST …/recall endpoint + server-side audit | 0036 recall (3) | 2026-06-19 |
+| [#678](https://github.com/mkhomutov/Persatrix/pull/678) | feat(agents): RFC 0036 PR 4 — recall_channel_messages persona tool + channels:recall permission | 0036 recall (4) | 2026-06-20 |
+| [#679](https://github.com/mkhomutov/Persatrix/pull/679) | feat(channels): RFC 0036 PR 5 — conversation-window membership filter (?as_participant) | 0036 recall (5) | 2026-06-20 |
+| [#680](https://github.com/mkhomutov/Persatrix/pull/680) | docs(channels): RFC 0035 PR 5 — membership-interval ledger closeout (status → ✅ Implemented) | 0035 ledger (5/close) | 2026-06-21 |
+| [#681](https://github.com/mkhomutov/Persatrix/pull/681) | docs(channels): RFC 0036 PR 6 — verbatim message recall closeout (status → ✅ Implemented) | 0036 recall (6/close) | 2026-06-21 |
+| [#682](https://github.com/mkhomutov/Persatrix/pull/682) | docs(v039): Phase 2 — v0.3.9 release-prep plan | v0.3.9 release prep | 2026-06-22 |
+| [#683](https://github.com/mkhomutov/Persatrix/pull/683) | chore(deps): bump form-data from 4.0.5 to 4.0.6 in /web | deps | 2026-06-22 |
+| [#684](https://github.com/mkhomutov/Persatrix/pull/684) | docs(v039): mark release-prep plan PR 0 as merged in progress tables | v0.3.9 release prep | 2026-06-22 |
+| [#685](https://github.com/mkhomutov/Persatrix/pull/685) | docs(v039): release-prep PR 1 — MT-PERSONA-RECALL-001 execution report | v0.3.9 release prep | 2026-06-22 |
+| [#686](https://github.com/mkhomutov/Persatrix/pull/686) | docs(v039): release-prep PR 2 — README + ROADMAP + persona-agents/diagram verification + release checklist | v0.3.9 release prep | 2026-06-22 |
+| [#687](https://github.com/mkhomutov/Persatrix/pull/687) | chore(v039): release-prep PR 3 — version bump 0.3.8 → 0.3.9 + changelog [0.3.9] curation | v0.3.9 release prep | 2026-06-22 |
+| [#688](https://github.com/mkhomutov/Persatrix/pull/688) | docs(v039): release-prep PR 4 — final pre-tag verification & release notes | v0.3.9 release prep | 2026-06-22 |
+| [#689](https://github.com/mkhomutov/Persatrix/pull/689) | docs(release): post-release follow-up for v0.3.9 (this PR) | v0.3.9 post-release | 2026-06-22 |
 
 ---
 
