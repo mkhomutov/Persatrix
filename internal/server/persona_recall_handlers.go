@@ -131,7 +131,7 @@ func (s *Server) handleRecallMessages(w http.ResponseWriter, r *http.Request) {
 //
 // The channel store matches `messages.channel_id` against the canonical, prefixed
 // id (`group:<name>` / `dm:<…>` / `thread:<…>`) — the form the channel REST path
-// handlers mint from the URL (channel_handlers.go: `canonicalID := "group:" + name`).
+// handlers mint from the request (channel_handlers.go: `canonicalID := "group:" + req.Name`).
 // Recall, however, takes `channel_id` from the request BODY, so a persona — or the
 // recall tool — naturally narrows by the bare, human-facing channel name it sees
 // in context (`mt-recall-001`), which matched nothing (ISSUE-0107). Prepend the

@@ -6,7 +6,7 @@ severity: medium
 area: internal/server
 created: 2026-06-22
 closed: 2026-06-22
-closed_pr:
+closed_pr: 685
 refs:
   - docs/rfcs/0036-persona-message-recall.md
   - docs/manual-tests/MT-PERSONA-RECALL-001.md
@@ -34,14 +34,15 @@ Found live during the first execution of
 tip `2bd72a8`, recorded in the
 [v0.3.9 execution report](../manual-tests/v0.3.9-execution-report.md)). In
 Step 5 the persona `ember-owl` reached for `recall_channel_messages` to quote
-the agreed deploy window. The server-side `channel.recall` audit trail shows the
-tool call it actually made:
+the agreed deploy window. The server-side `channel.recall` audit event records
+the fields the tool call resolved to (the actual `emitRecallAudit` schema —
+`channel_id` / `result_count` / `epoch_id`, never `channel` / `count`):
 
 ```
-{"query":"deploy window decision","channel":"mt-recall-001","count":0,"limit":10}
+{"query":"deploy window decision","epoch_id":"live","channel_id":"mt-recall-001","result_count":0,"limit":10}
 ```
 
-It narrowed by the **bare** `mt-recall-001`, got `count=0`, and (honestly) fell
+It narrowed by the **bare** `mt-recall-001`, got `result_count=0`, and (honestly) fell
 back to its conversation transcript: *"The channel search came back empty …
 That said, it's in our current conversation transcript."* The deterministic
 endpoint, queried with the canonical id, returns the full in-scope set:
@@ -94,14 +95,19 @@ path and is closure-bound — unaffected; only the narrowing `channel_id` is raw
 ## Proposed fix
 
 Canonicalize `req.ChannelID` in the recall handler before binding it into
-`RecallParams` (reuse the same helper the channel path handlers use), so a bare
-`mt-recall-001` and a canonical `group:mt-recall-001` narrow identically.
+`RecallParams`, so a bare `mt-recall-001` and a canonical `group:mt-recall-001`
+narrow identically. The channel path handlers do not expose a reusable helper —
+they inline `canonicalID := "group:" + req.Name` (channel_handlers.go) — so the
+recall handler grows a small sibling helper applying the same `group:` convention.
 Mirror it on the `sender` field only if senders are similarly namespaced (they
 are not — leave as-is). Add an endpoint-level test
 (`persona_recall_handlers_test.go`) asserting a bare-name narrow returns the
-same set as the canonical narrow, and a store/tool note that `channel_id` is
-canonical-or-bare tolerant. Out of scope for v0.3.9 release-prep PR 1
-(execution-only); triage as a fast follow.
+same set as the canonical narrow.
+
+Implemented as described below (see **Resolution**) — folded into the same
+release-prep PR 1 ([#685](https://github.com/mkhomutov/Persatrix/pull/685)) that
+surfaced it rather than deferred, since it is a one-line canonicalization with a
+single pinning test.
 
 ## Severity
 
@@ -115,11 +121,24 @@ Fixed by canonicalizing the body `channel_id` narrower in the recall handler
 before it is bound into `RecallParams`. The new `canonicalNarrowChannelID` helper
 ([persona_recall_handlers.go](../../internal/server/persona_recall_handlers.go))
 prepends the `group:` prefix to a bare name (`mt-recall-001` →
-`group:mt-recall-001`), mirroring the `canonicalID := "group:" + name` convention
-the channel path handlers use, while leaving an already-prefixed id
-(`group:`/`dm:`/`thread:`) and the empty/un-narrowed case untouched. `sender` is
-left raw — senders are not namespaced. A bare and a canonical narrow now match the
-same rows; the change is narrowing-only and cannot widen scope past the RFC 0035
-membership `EXISTS` filter. Pinned by
+`group:mt-recall-001`), mirroring the `canonicalID := "group:" + req.Name`
+convention the channel path handlers use (channel_handlers.go), while leaving an
+already-prefixed id (`group:`/`dm:`/`thread:`) and the empty/un-narrowed case
+untouched. `sender` is left raw — senders are not namespaced. A bare and a
+canonical narrow now match the same rows; the change is narrowing-only and cannot
+widen scope past the RFC 0035 membership `EXISTS` filter. Pinned by
 `TestRecallEndpoint_BareChannelNarrowMatchesCanonical`
 ([persona_recall_handlers_test.go](../../internal/server/persona_recall_handlers_test.go)).
+
+A bare (un-prefixed) id is deliberately treated as a **group** name: `group:` is
+the only id the system mints from a bare, human-facing channel name (the
+`channel_handlers.go` create path), and DM/thread channels carry composite ids
+(`dm:<a>:<b>`, `thread:<…>`) a caller passes through already-prefixed. So the
+bare→`group:` mapping is the complete fix for every channel a persona can name by
+its bare form; there is no bare id that should resolve to a DM/thread.
+
+**Landed in this PR (release-prep PR 1), not deferred.** F-1 was found live while
+executing `MT-PERSONA-RECALL-001` at tip `2bd72a8`; rather than carry it as a
+fast follow, the one-line canonicalization fix + its pinning test were folded
+into the same PR (commit `dbe4d69`). The execution report records it as
+found-and-fixed here.
