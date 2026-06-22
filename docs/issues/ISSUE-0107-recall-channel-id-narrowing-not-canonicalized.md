@@ -130,6 +130,14 @@ widen scope past the RFC 0035 membership `EXISTS` filter. Pinned by
 `TestRecallEndpoint_BareChannelNarrowMatchesCanonical`
 ([persona_recall_handlers_test.go](../../internal/server/persona_recall_handlers_test.go)).
 
+One observable side effect: `emitRecallAudit` runs on the post-canonicalization
+params, so the `channel.recall` audit now records the **canonical** `channel_id`.
+The bare narrow shown in the **Context** JSONL above
+(`"channel_id":"mt-recall-001"`) was the pre-fix live capture; post-fix that same
+call audits `"channel_id":"group:mt-recall-001"` — the id the store actually
+filtered on, not the raw request form. This is more faithful, not a regression
+(result count is unchanged), and is covered by the same pinning test.
+
 A bare (un-prefixed) id is deliberately treated as a **group** name: `group:` is
 the only id the system mints from a bare, human-facing channel name (the
 `channel_handlers.go` create path), and DM/thread channels carry composite ids

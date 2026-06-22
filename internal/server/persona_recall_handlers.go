@@ -139,6 +139,12 @@ func (s *Server) handleRecallMessages(w http.ResponseWriter, r *http.Request) {
 // leave an already-prefixed id (any known channel type) and the empty/un-narrowed
 // case untouched.
 //
+// The prefix set (`group:`/`dm:`/`thread:`) mirrors channels.channelTypeFromID
+// (router.go) and the ChannelType constants (channels.go); that helper is
+// unexported, so the list is duplicated here rather than reused. A new channel
+// type prefix must be added in this guard too — otherwise a bare id of that type
+// would be silently treated as a group and narrow to nothing.
+//
 // Narrowing-only — this can never widen scope past the RFC 0035 membership EXISTS
 // filter; at worst a mis-canonicalized id selects the wrong channel and returns a
 // subset (the pre-fix behaviour was the empty set).
@@ -195,6 +201,12 @@ func (s *Server) emitRecallAudit(ctx context.Context, participantID string, p ch
 	// Record only the narrowing parameters that were actually supplied, so the
 	// event stays compact and an auditor can read at a glance how the search was
 	// scoped beyond membership.
+	//
+	// `channel_id` here is the CANONICALIZED value: emitRecallAudit runs on the
+	// post-canonicalNarrowChannelID params, so a bare request narrow
+	// (`mt-recall-001`) is audited as the id the store actually filtered on
+	// (`group:mt-recall-001`) — the audit names the searched channel, not the raw
+	// request form (ISSUE-0107). Pinned by TestRecallEndpoint_BareChannelNarrowMatchesCanonical.
 	if p.ChannelID != "" {
 		detail["channel_id"] = p.ChannelID
 	}

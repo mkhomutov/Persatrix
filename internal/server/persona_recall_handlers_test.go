@@ -233,9 +233,9 @@ func TestRecallEndpoint_EmitsAuditEvent_CountNotContent(t *testing.T) {
 // ember-owl actually sent in MT-PERSONA-RECALL-001 Step 5, getting count=0)
 // narrows identically to the canonical `group:mt-recall-001`. Both must equal the
 // un-narrowed result for the single-channel fixture; the pre-fix bare path
-// returned the empty set.
+// returned the empty set. It also pins the audit side effect (ISSUE-0107).
 func TestRecallEndpoint_BareChannelNarrowMatchesCanonical(t *testing.T) {
-	srv, store, dbPath, _ := recallTestServer(t)
+	srv, store, dbPath, auditor := recallTestServer(t)
 	const name = "mt-recall-001"
 	ch := "group:" + name // the store-canonical id
 	require.NoError(t, store.CreateChannel(context.Background(),
@@ -265,6 +265,14 @@ func TestRecallEndpoint_BareChannelNarrowMatchesCanonical(t *testing.T) {
 
 	assert.ElementsMatch(t, canonical, bare, "a bare channel name narrows identically to the canonical id (ISSUE-0107)")
 	assert.ElementsMatch(t, canonical, unnarrowed, "single-channel fixture: the narrowed set equals the un-narrowed set")
+
+	// Every narrowed recall is audited as the canonical id, never the raw bare form.
+	require.NoError(t, auditor.Flush())
+	for _, ev := range filterRecallEvents(readAuditEvents(t, auditor.Path())) {
+		if cid, ok := ev.Detail["channel_id"]; ok {
+			assert.Equal(t, ch, cid, "narrowed recall is audited as the canonical channel_id, never the bare form (ISSUE-0107)")
+		}
+	}
 }
 
 // TestRecallEndpoint_RealPublishPath_Recallable proves the endpoint works
