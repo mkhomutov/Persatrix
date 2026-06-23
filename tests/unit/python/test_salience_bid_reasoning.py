@@ -140,6 +140,23 @@ class TestStructuredVerdict:
         )
         assert decision.reason_note is None
 
+    async def test_reason_note_placeholder_echo_is_dropped(self):
+        """A model with nothing to justify may echo the user snippet's literal
+        ``<one short clause on why — optional>`` placeholder verbatim. That is
+        template noise, not a justification — an angle-bracket-wrapped capture
+        must not leak into the operator-debug egress (RFC 0051 §E, wired in a
+        later PR); it drops to ``None`` like a missing note."""
+        decision = await _bid(
+            client=_client(
+                "should_post: no\nreason_code: only_agreeing\n"
+                "reason_note: <one short clause on why — optional>",
+            ),
+            mode=MODE_BID,
+        )
+        assert decision.speak is False
+        assert decision.reason == REASON_ONLY_AGREEING
+        assert decision.reason_note is None
+
     async def test_unknown_reason_code_falls_to_a_safe_default(self):
         """An off-enum ``reason_code`` must not reach the metric verbatim
         (cardinality blow-up). It collapses to the mode-appropriate default —
@@ -166,6 +183,17 @@ class TestStructuredVerdict:
         )
         assert decision.speak is True
         assert decision.reason == REASON_ADDS_SUBSTANCE
+
+    async def test_missing_reason_code_on_a_no_defaults_to_nothing_to_add(self):
+        """The silence-side mirror of the test above: ``should_post: no`` with no
+        ``reason_code`` line collapses to the silence default ``nothing_to_add``,
+        never an empty or raw label (so the metric stays bounded)."""
+        decision = await _bid(
+            client=_client("should_post: no"),
+            mode=MODE_BID,
+        )
+        assert decision.speak is False
+        assert decision.reason == REASON_NOTHING_TO_ADD
 
 
 class TestNoScoreUnderReasoning:
@@ -434,4 +462,30 @@ class TestUnknownModeIsLoud:
         # so the scalar gate silences it — proving the unknown mode degraded to
         # ``off`` rather than taking the structured path.
         assert decision.speak is False
+        assert "unrecognised reasoning mode" in caplog.text
+
+    async def test_unknown_mode_warns_even_when_model_unresolvable(self, caplog):
+        """The unknown-mode diagnostic must not depend on alias resolution: with
+        the shipped ``fast`` alias unconfigured (``resolve`` → ``SystemExit`` →
+        ``model_unresolvable``), a typo'd ``mode`` is *still* logged. Regression
+        guard for the warn-*before*-resolve ordering — otherwise an unresolvable
+        model silently swallows the typo signal."""
+        import logging  # noqa: PLC0415
+
+        # No ``use_alias_map``: the shipped ``fast`` alias is unconfigured, so
+        # ``resolve`` raises ``SystemExit`` and the bid returns model_unresolvable
+        # before it would ever reach the (former) warn site.
+        client = _client("should_post: yes\nreason_code: adds_substance")
+        with caplog.at_level(logging.WARNING):
+            decision = await evaluate_salience(
+                llm_client=client,
+                content="anything",
+                transcript=_TRANSCRIPT,
+                agent_id="ember-owl",
+                persona_name="Ember Owl",
+                persona_role="VP of Engineering",
+                threshold=0.4,
+                mode="garbage",
+            )
+        assert decision.reason == "model_unresolvable"
         assert "unrecognised reasoning mode" in caplog.text

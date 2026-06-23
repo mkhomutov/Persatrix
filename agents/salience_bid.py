@@ -376,6 +376,8 @@ async def evaluate_salience(
     ``CAUSE_CHANNEL_MESSAGE`` for the common channel-message path and for
     direct callers (TB3).
     """
+    # Warn *before* resolution so an unresolvable model can't swallow the signal.
+    deliberation.warn_if_unknown_mode(mode, agent_id=agent_id)
     # Resolve the `fast` alias per-call (RFC 0033). An unconfigured/unknown
     # alias raises SystemExit (a BaseException) by design — swallow it here
     # and degrade to silence rather than crash the hot path (the same
@@ -390,9 +392,7 @@ async def evaluate_salience(
         )
         return SalienceDecision(speak=False, score=None, reason="model_unresolvable")
 
-    deliberation.warn_if_unknown_mode(mode, agent_id=agent_id)
-    # PR 3 — free-text addressing signal. Computed before the call so it both
-    # nudges the prompt and (scalar path only) shifts the deterministic score bar.
+    # PR 3 — free-text addressing: prompt nudge + (scalar path only) score-bar shift.
     addressing = detect_nl_addressing(content=content, persona_name=persona_name)
 
     try:

@@ -139,7 +139,11 @@ def warn_if_unknown_mode(mode: str, *, agent_id: str) -> None:
     ``False`` for any unknown value), so the fallback is *fail-safe* — but
     without this a typo'd ``reasoning.mode`` would silently disable the
     structured verdict with no signal until the Phase-3 config ``validate``
-    (PR 4) rejects an unbacked value outright."""
+    (PR 4) rejects an unbacked value outright.
+
+    The caller invokes this *before* resolving the model alias: the unknown-mode
+    signal is independent of resolution success, so a separately-unresolvable
+    model must not swallow the diagnostic by returning first."""
     if mode not in _KNOWN_MODES:
         logger.warning(
             "Tier B salience bid: unrecognised reasoning mode %r for agent %s; "
@@ -217,6 +221,13 @@ def _parse_reason_note(text: str) -> str | None:
         return None
     note = match.group("v").strip()
     if not note:
+        return None
+    # A model with nothing to justify may echo the user snippet's literal
+    # ``<one short clause on why — optional>`` placeholder verbatim. That is the
+    # snippet's only ``<…>`` field, so an angle-bracket-wrapped capture is the
+    # placeholder, not a justification — drop it to ``None`` rather than leak
+    # template noise into the operator-debug egress (RFC 0051 §E).
+    if note.startswith("<") and note.endswith(">"):
         return None
     return note[:_REASON_NOTE_MAX_CHARS]
 
