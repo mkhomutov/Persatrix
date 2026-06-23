@@ -119,22 +119,27 @@ inbound → idle guard → Tier A (free) → ┌─ DELIBERATE (fast, leased) �
 
 ### C. The deliberation verdict
 
-The deliberation pass returns a small structured object (parsed prompt-side, as the salience bid already does — there is no `response_format` in the provider protocol today):
+The deliberation pass emits **two structurally distinct artifacts**, both parsed prompt-side from one `fast`-model response (there is no `response_format` in the provider protocol today). They are kept as **separate value types** because they have separate consumers: the *gate verdict* is the silence gate's business; the *plan* is compose-stage payload the gate never reads.
+
+**1. The gate verdict** — an enrichment of the existing scalar [`SalienceDecision`](../../agents/salience_bid.py) with the semantic-silence fields. This is all the Tier-B gate consumes to choose `DO_NOTHING` vs. proceed:
 
 ```
-{
-  "should_post": true | false,
-  "reason": "<one short clause — why post / why stay silent>",
-  "plan": {                         // present only when should_post = true
-    "intent": "<what this contribution is for>",
-    "key_points": ["...", "..."],   // ≤3, the substance to land
-    "addressed_to": "<participant_id | 'channel'>",
-    "avoid_restating": ["..."]      // what peers already said; don't repeat
-  }
-}
+{ "should_post": true | false,
+  "reason": "<one short clause — why post / why stay silent>" }
 ```
 
-`should_post=false` short-circuits to the existing `DO_NOTHING` outcome (and still ingests memory: the Tier-B seam already calls `_store_event_episode` on a suppressed turn in [`salience_gate.py`](../../agents/persona_runtime/salience_gate.py) — "decide whether to respond, not whether to remember" — the same rule the Tier-A path enforces in [`gate_suppress.py`](../../agents/persona_runtime/gate_suppress.py)). When `should_post=true`, `plan` is serialized into a single private system-prompt section appended for the Tier-C compose only, alongside the RFC 0034 working-memory sections — never published, never written to the channel store.
+**2. The composition plan** — a *separate* `CompositionPlan` value object, present only when `should_post = true`, owned by the new `deliberation_plan.py` module ([§Phase 2](#phase-2-plan-threaded-compose)) and **never carried on the pure bid's verdict**:
+
+```
+{ "intent": "<what this contribution is for>",
+  "key_points": ["...", "..."],      // ≤3, the substance to land
+  "addressed_to": "<participant_id | 'channel'>",
+  "avoid_restating": ["..."] }       // what peers already said; don't repeat
+```
+
+**Why two types, not one.** The plan is irrelevant to the silence decision — it is *transported through* the gate to the compose stage, not used by it. Folding it onto `SalienceDecision` would couple the gate's return type to compose-stage data and turn the pile-on gate into a carrier for a field it ignores (a leaky value type). Instead the gate verdict stays on `SalienceDecision`; the `CompositionPlan` rides back on the seam's [`SalienceOutcome`](../../agents/persona_runtime/salience_gate.py) as `plan: CompositionPlan | None` — the type that *already* hands the reusable `user_message` + `seed` back to the action loop. One LLM call still yields both fields; "parsed from one response" does not require "one type." The split keeps the pure bid focused, lets the plan be unit-tested in isolation, and makes the plan the artifact Phase 4's `depth: deep` is free to evolve without touching the gate.
+
+`should_post=false` short-circuits to the existing `DO_NOTHING` outcome (and still ingests memory: the Tier-B seam already calls `_store_event_episode` on a suppressed turn in [`salience_gate.py`](../../agents/persona_runtime/salience_gate.py) — "decide whether to respond, not whether to remember" — the same rule the Tier-A path enforces in [`gate_suppress.py`](../../agents/persona_runtime/gate_suppress.py)). When `should_post=true`, the `CompositionPlan` is rendered into a single **private system-prompt section** appended for the Tier-C compose only, alongside the RFC 0034 working-memory sections — never published, never written to the channel store ([§E](#e-privacy-boundary--the-trace-is-walled)).
 
 ### D. Mechanism — three realizations, one recommendation
 
@@ -152,7 +157,7 @@ There is no extended-thinking path in the codebase today; the providers in [`age
 
 The plan and reason are the most context-revealing artifacts a persona produces, so they are fenced:
 
-- **Never a message.** The plan is never wrapped in an `AgentAction` and never published; it cannot reach [`action_executor.py`](../../agents/action_executor.py)'s `SEND_CHANNEL_MESSAGE` path.
+- **Never a message.** The plan is a distinct `CompositionPlan` value type ([§C](#c-the-deliberation-verdict)), never wrapped in an `AgentAction` and never published; it has no path to [`action_executor.py`](../../agents/action_executor.py)'s `SEND_CHANNEL_MESSAGE` handler. Keeping it a *separate type* from the published-message artifacts makes "this is private" a structural property the no-leak test pins — not a convention that the next edit could quietly violate.
 - **Never in the channel store.** It is not persisted as a message, so [RFC 0034](0034-persona-conversational-working-memory.md) transcript reconstruction can never surface it into *another* persona's `messages` array.
 - **Not `<external_data>`.** It is the persona's *own* reasoning, not untrusted external input, so it is a normal trusted system-prompt section — not wrapped in the [RFC 0009](0009-security-sandboxing.md) quarantine envelope (which is for tool/bridge output).
 - **Audit-only egress.** Each deliberation emits one `channel.reason` audit event recording the *decision and counts, not the verbatim plan* — observable without logging the private text, in the RFC 0009 audit shape.
@@ -200,12 +205,12 @@ Dependencies: none beyond shipped RFC 0030 Tier B.
 
 ### Phase 2: Plan-threaded compose
 
-Summary: add the `plan` object to the verdict and thread it as a private system-prompt section into the Tier-C compose.
+Summary: add the `CompositionPlan` artifact ([§C](#c-the-deliberation-verdict)) and thread it as a private system-prompt section into the Tier-C compose. The plan is a *separate type* from the gate verdict and gets a *separate module* — for testability, and because [`action_loop.py`](../../agents/persona_runtime/action_loop.py) is at the 493/500-line review cap and inline plan assembly would bust it (the same cap that already carved out [`channel_ingest.py`](../../agents/persona_runtime/channel_ingest.py), [`llm_call_errors.py`](../../agents/persona_runtime/llm_call_errors.py), [`gate_suppress.py`](../../agents/persona_runtime/gate_suppress.py), and [`salience_gate.py`](../../agents/persona_runtime/salience_gate.py) itself).
 
 Deliverables:
-1. Extend the verdict schema + parser with `plan`.
-2. Private plan-rendering prompt section, appended for compose only; covered by a no-leak test.
-3. Compose-prompt assembly change in `action_loop.py`.
+1. New `agents/persona_runtime/deliberation_plan.py` owning the `CompositionPlan` value type, its regex-tolerant parser (**fail-closed to "no plan"**: an unparseable plan composes as today rather than blocking the post — the bias is opposite the gate's bias-to-*silence*, because by this point the gate has already decided the persona *should* post), and a pure `render_plan_section(plan) -> str` renderer. No `action_loop` / agent coupling — unit-testable in isolation, and the no-leak test points straight at it.
+2. Carry `plan: CompositionPlan | None` back on `SalienceOutcome`; the parser populates it alongside the gate verdict on the speak path. The pure bid's `SalienceDecision` is **not** widened.
+3. `action_loop.py` appends the rendered private section to the Tier-C compose system prompt (alongside the RFC 0034 working-memory sections) via a one-line `render_plan_section` call — not inline assembly. Covered by the no-leak test ([§E](#e-privacy-boundary--the-trace-is-walled)).
 
 Dependencies: Phase 1.
 
@@ -230,9 +235,10 @@ Dependencies: Phase 3; provider-protocol change.
 
 | Component | Files | Change |
 |-----------|-------|--------|
-| Python agents | [`agents/salience_bid.py`](../../agents/salience_bid.py) | Pure-bid verdict schema + regex-tolerant parser (`should_post`, `reason`, `plan`), fail-closed to silence |
-| Python agents | [`agents/persona_runtime/salience_gate.py`](../../agents/persona_runtime/salience_gate.py) | The Tier-B seam: thread the structured verdict through `run_salience_gate` → `SalienceOutcome`; reuse its `DO_NOTHING` + `_store_event_episode` suppressed-ingest path; emit the `channel.reason` audit event |
-| Python agents | [`agents/persona_runtime/action_loop.py`](../../agents/persona_runtime/action_loop.py) | Consume the richer seam outcome; append the private `plan` section to the Tier-C compose system prompt (alongside the RFC 0034 working-memory sections) |
+| Python agents | [`agents/salience_bid.py`](../../agents/salience_bid.py) | Enrich the scalar `SalienceDecision` gate verdict with `should_post` + `reason`, fail-closed to silence (Phase 1). The `plan` is **not** added here — it is a separate type (next row) |
+| Python agents | `agents/persona_runtime/deliberation_plan.py` *(new)* | The `CompositionPlan` value type + regex-tolerant parser (fail-closed to "no plan") + pure `render_plan_section(plan) -> str` renderer. No agent / `action_loop` coupling; the no-leak test targets it directly (Phase 2) |
+| Python agents | [`agents/persona_runtime/salience_gate.py`](../../agents/persona_runtime/salience_gate.py) | The Tier-B seam: thread the gate verdict through `run_salience_gate`; carry `plan: CompositionPlan \| None` back on `SalienceOutcome` (**not** on the pure bid); reuse its `DO_NOTHING` + `_store_event_episode` suppressed-ingest path; emit the `channel.reason` audit event |
+| Python agents | [`agents/persona_runtime/action_loop.py`](../../agents/persona_runtime/action_loop.py) | Consume the richer seam outcome; append the rendered private plan section to the Tier-C compose system prompt via a one-line `render_plan_section` call (keeps the file under the 500-line cap) |
 | Python agents | [`agents/llm_providers.py`](../../agents/llm_providers.py), `agents/llm_types.py` | (Phase 4 only) `thinking` budget on the provider protocol |
 | Go orchestrator | `internal/channels/...`, `internal/server/...` | `reasoning` config field + apply path + REST PATCH/GET (RFC 0050) |
 | Rust CLI | `cli/src/...` | `channel config` surface for `reasoning.*` |
@@ -241,7 +247,7 @@ Dependencies: Phase 3; provider-protocol change.
 
 ## Test Strategy
 
-- **Unit tests**: verdict parser (well-formed, malformed → fail-closed silence); plan serialization; the four-condition idle guard still suppresses with deliberation present.
+- **Unit tests**: gate-verdict parser (well-formed, malformed → fail-closed silence); `deliberation_plan.py` parse + `render_plan_section` (well-formed, malformed → fail-closed "no plan", composes unplanned rather than blocking the post); the four-condition idle guard still suppresses with deliberation present.
 - **Integration tests**: a `should_post=false` turn produces zero `SEND_CHANNEL_MESSAGE` and zero compose calls; a `should_post=true` turn composes once *under* the plan; the plan never appears in the channel store nor in a second persona's reconstructed `messages` (the no-leak gate); both calls meter against one `interaction_id` and a low `interaction_budget_tokens` starves deliberation to silence.
 - **E2E / smoke**: a 3-persona group brainstorm with `reasoning.mode: plan` shows fewer pile-on turns and higher per-post substance than the `off` baseline; one `channel.reason` audit event per deliberation, count-not-content.
 - **Manual tests**: `MT-REASON-001` — *think before posting* — a persona stays silent with a stated reason on a directed-elsewhere / already-answered turn, and posts a plan-shaped contribution on a turn it can add to; the private plan is absent from every other participant's view and from the channel transcript.
@@ -252,6 +258,7 @@ Dependencies: Phase 3; provider-protocol change.
 2. **Default `mode` per disposition.** Should `participant`/`chair` default to `bid` (silence verdict on) while `addressed` stays `off`? Lean yes — the pile-on problem is concentrated in open-floor `participant` turns. Decide at the Phase 3 config PR.
 3. **Single pass vs. draft→critique→revise.** A reflexion loop would raise quality further but multiplies cost per post. Out of scope here; revisit only if single-pass plans prove low-quality.
 4. **Does the plan belong in the persona's own episodic memory?** Storing it agent-locally (not in the channel) could improve continuity, but risks the persona "remembering" intentions it never acted on. Default: audit-only, no episodic write. Revisit with RFC 0027 (reflection-driven consolidation).
+5. **Should the deliberation core become an extractable library?** The pure verdict + plan core (a cheap leased pre-flight LLM call → a structured, fail-closed should-act decision) is a general shape, but it has exactly **one** in-repo consumer and is soaked in Persatrix substrate — the RFC 0023 wallet lease, the `model_aliases` resolver, the `prompt_loader` snippets, the RFC 0034 transcript shape, the gRPC error taxonomy, the OTEL instruments. Extracting a standalone library *now* would be speculative generality (N=1 with a hypothetical second caller). The reuse that matters is internal and is already served by data-contract forward-compat (the `channel.reason` → RFC 0028 `DecisionRecord` precursor, [§A](#a-positioning--distinct-from-rfc-0028)). The one real forcing function is [RFC 0045](0045-open-core-extraction-policy.md) (open-core extraction): *if* that boundary ever places the persona runtime / deliberation core on the extracted side, the library question becomes real — but it is an RFC 0045 call, not this RFC's. Default: keep it in-tree and get the module/type boundaries ([§C](#c-the-deliberation-verdict), [Phase 2](#phase-2-plan-threaded-compose)) library-quality without paying the packaging tax.
 
 ## Decision / Next Steps
 
