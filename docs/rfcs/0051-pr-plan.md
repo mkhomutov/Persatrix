@@ -17,9 +17,9 @@ This plan covers **Phases 1–3 + Phase 5** — the full live feature plus the c
 
 The work splits into **9 PRs** across the four in-scope phases:
 
-- **Phase 1 — structured silence verdict (PR 1–2), ships dark.** PR 1 restructures the bid grammar in [`salience_bid.py`](../../agents/salience_bid.py) behind an internal `mode` parameter that defaults to today's score gate (byte-for-byte); PR 2 threads the verdict through the [`salience_gate.py`](../../agents/persona_runtime/salience_gate.py) seam and adds the `agent.deliberated` audit + the idle-cost gate test. **Behaviourally inert in production** — the structured path is reachable only via tests / config-as-code until [Phase 3](#phase-3--configuration--telemetry-go-live) lands the `reasoning.mode` knob and flips the default.
+- **Phase 1 — structured silence verdict (PR 1–2), ships dark.** PR 1 restructures the bid grammar in [`salience_bid.py`](../../agents/salience_bid.py) behind an internal `mode` parameter that defaults to today's score gate (byte-for-byte); PR 2 threads the verdict through the [`salience_gate.py`](../../agents/persona_runtime/salience_gate.py) seam and adds the `agent.deliberated` audit + the idle-cost gate test. **Behaviourally inert in production** — the structured path is reachable only via tests / config-as-code until [PR 4](#pr-4-featurev0310-rfc0051-config-backend--phase-3a-reasoning-config-backend) lands the `reasoning.mode` knob and [PR 6](#pr-6-featurev0310-rfc0051-telemetry-golive--phase-3c-telemetry--default-flip-go-live) flips the default.
 - **Phase 2 — plan-threaded compose (PR 3), ships dark.** A new `deliberation_plan.py` owns the `CompositionPlan` value type + parser + renderer; `action_loop.py` appends the rendered private plan to the Tier-C compose. The no-leak test pins the privacy wall.
-- **Phase 3 — config + telemetry (PR 4–6), go-live.** PR 4 lands the `reasoning.{mode,model,depth}` router field + RFC 0050 validate/apply/persist (capability-gated, default still `off`); PR 5 the CLI + web surfaces (first enum-valued + first nested/dotted knob); **PR 6 lands the telemetry suite and flips the governed-channel default `off → bid` in lockstep with the kill switch** — the moment the feature becomes live.
+- **Phase 3 — config + telemetry (PR 4–6), go-live.** PR 4 lands the full `reasoning.{mode,model,depth,revise}` schema + RFC 0050 validate/apply/persist (capability-gated, `revise` validate-only until PR 8, default still `off`); PR 5 the CLI + web surfaces (first enum-valued + first nested/dotted knob); **PR 6 lands the telemetry suite and flips the governed-channel default `off → bid` in lockstep with the kill switch** — the moment the feature becomes live.
 - **OQ 6(a) operator reveal (PR 7), separate + cuttable.** The debug-toggled web-console reasoning-reveal affordance + its backing verbatim-`reason_note` egress path. Net-new UI + backend, **not** a `ChannelSettings` row; explicitly its own PR ([OQ 6](0051-reasoning-before-posting.md#open-questions)) and droppable without affecting the headline.
 - **Phase 5 — reflexion loop (PR 8–9), committed, default off.** A new `reflexion.py` critic→revise loop around compose, governed by `reasoning.revise: 0|1|2` (default `0` = single pass); PR 9 extends the no-leak test to discarded drafts and closes the release out.
 
@@ -48,7 +48,8 @@ Phases 1–2 (PR 1–3) are a strict chain — the seam carries the verdict befo
 | [`agents/persona_runtime/action_loop.py`](../../agents/persona_runtime/action_loop.py) | **493** | **7** | The Phase 2 plan-append must be a **one-line `render_plan_section` call**; if it busts the cap, the compose-prompt assembly is the next extraction candidate ([RFC Phase 2](0051-reasoning-before-posting.md#phase-2-plan-threaded-compose)). |
 | [`agents/salience_bid.py`](../../agents/salience_bid.py) | 468 | 32 | Room for the verdict restructure; watch it — the structured grammar adds parser branches. |
 | [`agents/persona_runtime/salience_gate.py`](../../agents/persona_runtime/salience_gate.py) | 235 | ample | Seam threading + audit emit fit. |
-| [`agents/observability/_metrics_salience.py`](../../agents/observability/_metrics_salience.py) | 76 | ample | The parse-failure + Phase 3 counters land here. |
+| [`agents/observability/_metrics_salience.py`](../../agents/observability/_metrics_salience.py) | 76 | ample | **All new deliberation/reasoning instruments land here** (PR 1 parse-failure counter + the PR 6 deliberation-rate / suppress-by-`reason_code` / latency-histogram / starvation / divergence counters). |
+| [`agents/observability/metrics.py`](../../agents/observability/metrics.py) | **500** | **0** | **At the hard cap — must not gain net lines.** PR 6 *reuses* the [`agent.llm.duration`](../../agents/observability/metrics.py) instrument **shape** from `_metrics_salience.py`; it does **not** add the new instrument definitions to `metrics.py`. If any edit to `metrics.py` proves unavoidable, extract first (it is not grandfathered — [`file_size.py`](../../scripts/checks/file_size.py) fails at `> 500`). |
 | New: `deliberation_plan.py`, `reflexion.py` | — | — | Own modules (RFC Phase 2 / 5) precisely so `action_loop.py` stays under cap. |
 
 ---
@@ -67,8 +68,9 @@ RFC 0030 Tier B + RFC 0050 + RFC 0034 P2 (all shipped)        ← HARD PREREQUIS
    ├── PR 3 (Phase 2: deliberation_plan.py CompositionPlan + parser + renderer;
    │     │   plan on SalienceOutcome; action_loop append; no-leak test)   [dark]
    │     ↓
-   ├── PR 4 (Phase 3a: reasoning.{mode,model,depth} router field + RFC 0050 validate/apply/
-   │     │   persist; capability-gated; default still off)
+   ├── PR 4 (Phase 3a: full reasoning.{mode,model,depth,revise} schema + RFC 0050 validate/
+   │     │   apply/persist; deep + revise≥1 capability-rejected (revise validate-only here);
+   │     │   default still off)
    │     ├──────────────────────────────────────────────┐
    │     ↓                                               ↓
    ├── PR 5 (Phase 3b: CLI enum/dotted-key path + web   PR 7 (OQ 6a: operator reveal —
@@ -77,8 +79,8 @@ RFC 0030 Tier B + RFC 0050 + RFC 0034 P2 (all shipped)        ← HARD PREREQUIS
    ├── PR 6 (Phase 3c: telemetry suite + FLIP default
    │     │   off → bid — GO-LIVE)
    │     ↓
-   ├── PR 8 (Phase 5a: reflexion.py critic→revise loop; reasoning.revise Int knob;
-   │     │   capability-gated validate; CLI + web)   [default revise: 0]
+   ├── PR 8 (Phase 5a: reflexion.py critic→revise loop; LIFT reasoning.revise gate +
+   │     │   wire apply/persist (field defined in PR 4); CLI + web)   [default revise: 0]
    │     ↓
    └── PR 9 (Phase 5b + closeout: no-leak test → discarded draft; revise telemetry;
              review follow-ups; RFC + ROADMAP + CHANGELOG + MT-REASON-001)
@@ -105,7 +107,7 @@ RFC 0030 Tier B + RFC 0050 + RFC 0034 P2 (all shipped)        ← HARD PREREQUIS
 
 #### Key implementation details
 
-- **`mode` is an internal parameter here, not yet config-wired** — it threads from a hardcoded `off` default until [PR 4](#pr-4-feature-v0310-rfc0051-config-backend--phase-3a-reasoning-config-backend) supplies it from the channel router. This is what lets Phase 1 ship dark: the score path is the default, the structured path is reachable only when a caller passes `bid`/`plan`.
+- **`mode` is an internal parameter here, not yet config-wired** — it threads from a hardcoded `off` default until [PR 4](#pr-4-featurev0310-rfc0051-config-backend--phase-3a-reasoning-config-backend) supplies it from the channel router. This is what lets Phase 1 ship dark: the score path is the default, the structured path is reachable only when a caller passes `bid`/`plan`.
 - **`reason_code` is a single label, not a third field** — it *is* `SalienceDecision.reason`, the label the metric and the audit both read; folding the LLM's free-text justification onto it would blow up metric cardinality, so the prose lives in `reason_note` (debug egress only).
 - **Mechanism change, not a pure add** — under reasoning the silence decision keys off `should_post` alone; the score/threshold machinery is bypassed. The `mode: off` regression test pins that the scalar path is unchanged.
 
@@ -137,7 +139,7 @@ RFC 0030 Tier B + RFC 0050 + RFC 0034 P2 (all shipped)        ← HARD PREREQUIS
 |------|--------|
 | [`agents/persona_runtime/salience_gate.py`](../../agents/persona_runtime/salience_gate.py) | Thread the verdict through `run_salience_gate` → [`SalienceOutcome`](../../agents/persona_runtime/salience_gate.py) (the path [`action_loop.py`](../../agents/persona_runtime/action_loop.py) consumes); **reuse** the seam's existing `DO_NOTHING` + `_store_event_episode` suppressed-memory-ingest path (decide whether to respond, not whether to remember). Emit the `agent.deliberated` audit event: **decision + `reason_code` + counts, never the verbatim `reason_note` or plan** ([RFC §Security](0051-reasoning-before-posting.md#security-considerations)). |
 | audit event registration | New `agent.deliberated` event in the RFC 0009 audit shape; add to the closed-set classifier (the severity-classification test fails otherwise). Forward-compatible precursor to RFC 0028's `DecisionRecord`. |
-| [`agents/tests/test_persona_tick_shortcircuit.py`](../../agents/tests/test_persona_tick_shortcircuit.py) | Extend the idle-cost gate to assert **no deliberation lease is acquired on a `TICK`** — the seam *is* reached on a tick and no-ops there (`run_salience_gate` early-returns `None` because `reason != "policy_always"`), so the test asserts the no-op rather than assuming the path is unreachable ([RFC §F](0051-reasoning-before-posting.md#f-cost-and-the-idle-invariant)). |
+| [`agents/tests/test_persona_tick_shortcircuit.py`](../../agents/tests/test_persona_tick_shortcircuit.py) | Extend the idle-cost gate to assert **no deliberation lease is acquired on a `TICK`** — the seam *is* reached on a tick and no-ops there (`run_salience_gate` early-returns `None` because a `TICK` is not an open-floor admit — its guard is `if not (is_open_floor_admit(decision) and _governed(event))` at [`salience_gate.py`](../../agents/persona_runtime/salience_gate.py); `policy_always` is the unrelated Tier-A always-respond label in `salience_bid.py`), so the test asserts the no-op rather than assuming the path is unreachable ([RFC §F](0051-reasoning-before-posting.md#f-cost-and-the-idle-invariant)). |
 
 #### Key implementation details
 
@@ -197,13 +199,13 @@ RFC 0030 Tier B + RFC 0050 + RFC 0034 P2 (all shipped)        ← HARD PREREQUIS
 ### PR 4: `feature/v0310-rfc0051-config-backend` — Phase 3a: `reasoning` Config Backend
 
 **Depends on**: PR 3 merged.
-**Purpose**: The `reasoning.{mode,model,depth}` router field on the RFC 0050 surface, capability-gated — **default still `off`** (the flip is PR 6).
+**Purpose**: The full `reasoning.{mode,model,depth,revise}` schema on the RFC 0050 surface, capability-gated — **default still `off`** (the flip is PR 6). `mode`/`model` get the full validate→apply→persist path; `revise` is **defined here but validate-only** (every value `≥ 1` is capability-rejected — its apply/execution wiring lands with the loop in [PR 8](#pr-8-featurev0310-rfc0051-reflexion--phase-5a-reflexion-loop-default-off)). Defining the whole schema in one place keeps the capability-rejection uniform and avoids a window where `reasoning.revise` is an unknown-key error rather than a clean "Phase 5 not yet deployed" rejection.
 
 #### Scope
 
 | File | Change |
 |------|--------|
-| `internal/channels/…`, `internal/server/…` | `reasoning` config field + apply path (router setters) + REST PATCH/GET, through the existing RFC 0050 `validate → apply → persist → bump revision` path (runtime-editable, no restart). **`validate` gates the accepted enum set on *deployed capability*** ([RFC §G](0051-reasoning-before-posting.md#g-configuration--an-rfc-0050-knob)): reject `depth: deep` (Phase 4 unbuilt) and `revise ≥ 1` (Phase 5 not yet deployed) rather than silently degrading; reject `mode != off` on a channel without `salience_gated` (the knob does not by itself arm the gate); reject `depth: deep` unless `mode: plan`; **warn** on `model: quality` (defeats the cheap-pass economics). |
+| `internal/channels/…`, `internal/server/…` | `reasoning` config block (`mode`/`model`/`depth`/`revise`, full schema defined here) + apply path (router setters for `mode`/`model`) + REST PATCH/GET, through the existing RFC 0050 `validate → apply → persist → bump revision` path (runtime-editable, no restart). **`validate` gates the accepted enum set on *deployed capability*** ([RFC §G](0051-reasoning-before-posting.md#g-configuration--an-rfc-0050-knob)): reject `depth: deep` (Phase 4 unbuilt) and `revise ≥ 1` (Phase 5 not yet deployed) rather than silently degrading; reject `mode != off` on a channel without `salience_gated` (the knob does not by itself arm the gate); reject `depth: deep` unless `mode: plan`; **warn** on `model: quality` (defeats the cheap-pass economics). |
 | [`config/channels.yaml`](../../config/channels.yaml) | `reasoning` block (default `mode: off`, `model: fast`, `depth: shallow`). |
 | Go validate/apply tests | Capability-gated rejection + interaction-with-`threshold` tests (below). |
 
@@ -245,6 +247,7 @@ RFC 0030 Tier B + RFC 0050 + RFC 0034 P2 (all shipped)        ← HARD PREREQUIS
 
 - **This is the reasoning *config* knob only** — the [OQ 6(a)](0051-reasoning-before-posting.md#open-questions) reasoning-*reveal* panel (PR 7) is a separate UI surface, **not** bundled here.
 - **Monotonic ladder** — `off → bid → plan` is a strict superset chain, so a channel is promoted/demoted one rung at a time with no re-plumbing.
+- **The `depth` select is forward-compat scaffolding** — in v0.3.10 its only *accepted* value is `shallow` (`deep` is validate-rejected until Phase 4 ships). The enum control is built generically here anyway so adding `deep` later is a value-set change, not a new control; the panel should make `shallow` the only enabled option rather than render a lone dead `deep` entry.
 
 #### Tests
 
@@ -268,7 +271,7 @@ RFC 0030 Tier B + RFC 0050 + RFC 0034 P2 (all shipped)        ← HARD PREREQUIS
 
 | File | Change |
 |------|--------|
-| [`agents/observability/_metrics_salience.py`](../../agents/observability/_metrics_salience.py), [`agents/observability/metrics.py`](../../agents/observability/metrics.py) | Telemetry beyond the PR 1 parse-failure counter: **deliberation-rate**; **suppress-rate by `reason_code`** (silence charted by cause, not just totalled); a **deliberation-latency histogram** (the pass is a serial `fast` call *before* compose — reuse the [`agent.llm.duration`](../../agents/observability/metrics.py) instrument shape); a **budget-starvation counter** (deliberation starved by a low `interaction_budget_tokens` — distinct from "nothing to add"); a **`should_post=true`-but-empty-compose divergence counter**. Kept distinct from the Tier-B `channel.messages.gated` rows. |
+| [`agents/observability/_metrics_salience.py`](../../agents/observability/_metrics_salience.py) (**new instruments land here** — `metrics.py` is at the 500-line cap, see [File-size constraints](#file-size-constraints-verified-at-plan-authoring-cap--500-per-file_sizepy---strict)) | Telemetry beyond the PR 1 parse-failure counter: **deliberation-rate**; **suppress-rate by `reason_code`** (silence charted by cause, not just totalled); a **deliberation-latency histogram** (the pass is a serial `fast` call *before* compose — reuses the [`agent.llm.duration`](../../agents/observability/metrics.py) instrument *shape*, defined here in `_metrics_salience.py`, **without editing `metrics.py`**); a **budget-starvation counter** (deliberation starved by a low `interaction_budget_tokens` — distinct from "nothing to add"); a **`should_post=true`-but-empty-compose divergence counter**. Kept distinct from the Tier-B `channel.messages.gated` rows. |
 | `internal/channels/…` (router default) | **Flip the governed-channel default `off → bid`** ([OQ 2](0051-reasoning-before-posting.md#open-questions)) — the silence-only rung, never `plan`. `off` remains the one-flip kill switch. |
 | cost-delta counterfactual | The two arms cannot run on one turn — measure cost-delta vs. baseline as a **`mode: bid` shadow arm** (the cheaper counterfactual, reuses the ladder) and record which. This deliverable **proves** the [RFC §F](0051-reasoning-before-posting.md#f-cost-and-the-idle-invariant) net-saving claim; it does not gate the ship and may stage in incrementally. |
 
@@ -311,7 +314,7 @@ RFC 0030 Tier B + RFC 0050 + RFC 0034 P2 (all shipped)        ← HARD PREREQUIS
 #### PR checklist
 
 - [ ] The verbatim egress reaches **only** the operator-debug path; the `agent.deliberated` audit stays count-only.
-- [ ] `MT-REASON-001`'s "stayed silent *with a stated reason*" leg is observable via this reveal.
+- [ ] `MT-REASON-001`'s "stayed silent *with a stated reason*" leg is **already** observable via the operator-debug **agent log** ([RFC §E](0051-reasoning-before-posting.md#e-privacy-boundary--the-trace-is-walled) — the log is what the MT reads); this reveal only *additionally* surfaces it in the web console, so cutting this PR does **not** break the `MT-REASON-001` acceptance gate.
 - [ ] Behind a debug toggle, off in prod by default; cuttable from the release without touching the headline.
 
 ---
@@ -326,7 +329,7 @@ RFC 0030 Tier B + RFC 0050 + RFC 0034 P2 (all shipped)        ← HARD PREREQUIS
 | File | Change |
 |------|--------|
 | `agents/persona_runtime/reflexion.py` (new) | The critic + revise loop around the compose call — after Tier-C compose, a **critic** re-reads the draft against the `CompositionPlan` and, if it flags weakness, a **revise** pass rewrites it, bounded to `revise` rounds (`≤ 2`). **Fail-soft**: a parse/critic failure or exhausted lease degrades to the last good draft rather than blocking the post. Own module to keep `action_loop.py` under the 500-line cap (same reason as `deliberation_plan.py`). Discarded drafts + critic notes are walled exactly like the plan ([RFC §E](0051-reasoning-before-posting.md#e-privacy-boundary--the-trace-is-walled)). |
-| `internal/channels/…`, `internal/server/…` | `reasoning.revise` router field + RFC 0050 validate/apply/persist/revision-bump. `validate` rejects `revise ≥ 1` unless `mode: plan` **and** now that Phase 5 is deployed lifts the capability gate for it. |
+| `internal/channels/…`, `internal/server/…` | The `reasoning.revise` field + its `validate` were **defined in [PR 4](#pr-4-featurev0310-rfc0051-config-backend--phase-3a-reasoning-config-backend)** (validate-only, capability-rejected). This PR **lifts the capability gate** now that Phase 5 is deployed and **wires the apply/persist/revision-bump path** so a `revise ≥ 1` override takes effect. `validate` still rejects `revise ≥ 1` unless `mode: plan` (the critic checks the draft *against the plan*). |
 | [`cli/src/commands/channel_config.rs`](../../cli/src/commands/channel_config.rs), [`web/src/panels/ChannelSettings.svelte`](../../web/src/panels/ChannelSettings.svelte) | `reasoning.revise` surface — a **plain `Int` knob** reusing the existing `Int` `KnobType` / `int` render branch; only needs the nested-key path the `reasoning.*` block already established in PR 5 (no new enum control). |
 
 #### Key implementation details
