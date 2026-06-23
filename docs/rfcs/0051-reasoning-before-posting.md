@@ -77,7 +77,7 @@ This is a v0.3.x-sized realism lever with no v0.4.0 dependency. It is explicitly
 2. **Considered posts.** When a persona does post, the message is composed *under a private plan* (intent, key points, who it addresses, what not to restate) rather than reflexively.
 3. **Bounded, metered cost.** The deliberation acquires a wallet lease ([RFC 0023](0023-llm-call-leasing.md)) against the same `interaction_id`, so it is metered against the per-interaction budget and can never blow it.
 4. **Idle stays free.** The deliberation fires only on a real turn; a bored persona ([RFC 0024](0024-event-driven-scheduling.md)) still costs nothing.
-5. **The trace is private and auditable.** The reasoning never enters the channel store, never reaches another persona's working memory, and is recorded only as an audit event (count/decision, not verbatim plan text).
+5. **The trace is private and auditable.** The reasoning never enters the channel store and never reaches another persona's working memory; its only durable egress is a count/decision audit event (never verbatim text), with a separate opt-in operator-debug path for tuning ([§E](#e-privacy-boundary--the-trace-is-walled)).
 6. **Operator-controlled, off by default.** A per-channel `reasoning` knob fits the [RFC 0050](0050-extensible-channel-configuration.md) config surface; the default is conservative.
 
 ## Non-Goals
@@ -87,6 +87,8 @@ This is a v0.3.x-sized realism lever with no v0.4.0 dependency. It is explicitly
 - **A draft → critique → revise (reflexion) loop.** A multi-round self-critique is explicitly deferred ([OQ 3](#open-questions)); Phase 1–3 is a single deliberation pass.
 - **Replacing Tier A.** The free, deterministic addressing gate ([response_gate.py](../../agents/response_gate.py)) stays exactly as it is; deliberation runs only on turns Tier A admits.
 - **A durable reasoning store.** The trace is ephemeral + audit-only; no new persisted "thoughts" tier.
+- **An end-user "watch them think" surface.** Revealing the private reasoning *to people observing the channel* is a separate, explicit egress mode that would change the [§E](#e-privacy-boundary--the-trace-is-walled) privacy contract — not a relaxation of the wall, and not in scope here. Named as a deliberate future, not foreclosed ([OQ 6](#open-questions)).
+- **A persistent reasoning trace for offline eval.** Operator-debug egress ([§E](#e-privacy-boundary--the-trace-is-walled)) is ephemeral log output, not a durable, queryable trace store. A retention-bounded eval sink for prompt tuning is a possible follow-on, not Phase 1–3.
 
 ## Design / Implementation
 
@@ -125,8 +127,12 @@ The deliberation pass emits **two structurally distinct artifacts**, both parsed
 
 ```
 { "should_post": true | false,
-  "reason": "<one short clause — why post / why stay silent>" }
+  "reason_code": "only_agreeing" | "already_answered" | "nothing_to_add"
+               | "adds_substance" | ...,   // closed enum — see below
+  "reason_note": "<optional one short clause — debug only, never a metric/audit attribute>" }
 ```
+
+**Two reason fields, deliberately.** The existing [`SalienceDecision.reason`](../../agents/salience_bid.py) is already a *low-cardinality branch label* (`parse_failure` / `lease_denied` / `llm_error` / …) that the Tier-B seam emits as the `reason` attribute on the `channel.messages.gated{policy=low_salience}` counter ([`salience_gate.py`](../../agents/persona_runtime/salience_gate.py)). Folding the LLM's free-text justification onto that field would blow up metric cardinality (one time series per unique sentence) and make the silence decision un-assertable in a test. So the semantic verdict splits in two: a **closed `reason_code` enum** (the metric- and audit-safe label — the existing fail-closed branch set extended with the *semantic*-silence cases) and an **optional `reason_note`** free clause that egresses to the debug log only ([§E](#e-privacy-boundary--the-trace-is-walled)). The `reason_code` is also the forward-compatible precursor to RFC 0028's `DecisionRecord` reason field — a structured code, not prose.
 
 **2. The composition plan** — a *separate* `CompositionPlan` value object, present only when `should_post = true`, owned by the new `deliberation_plan.py` module ([§Phase 2](#phase-2-plan-threaded-compose)) and **never carried on the pure bid's verdict**:
 
@@ -155,12 +161,20 @@ There is no extended-thinking path in the codebase today; the providers in [`age
 
 ### E. Privacy boundary — the trace is walled
 
-The plan and reason are the most context-revealing artifacts a persona produces, so they are fenced:
+The plan and reason are the most context-revealing artifacts a persona produces, so they are fenced. "Private" here is **not binary** — it resolves against three distinct audiences, and the wall is absolute only for the first two:
+
+| Audience | Sees the plan / reason? | Mechanism |
+|----------|-------------------------|-----------|
+| **Peer personas + channel store** | **Never** | Structural — the plan is not an `AgentAction`, is never persisted, and is unreachable by RFC 0034 reconstruction (bullets below). Load-bearing for the no-pile-on premise. |
+| **Human operator (debug)** | **Opt-in** | The verbatim `reason_note` (and, under a debug flag, the rendered plan) egress to the agent **debug log** — the same channel [MT-CHANNEL-RELEVANCE-001](../manual-tests/MT-CHANNEL-RELEVANCE-001.md) already uses to observe Tier-B silence — plus a proposed web-console reveal ([OQ 6](#open-questions)). *Not* the audit event. |
+| **End-users watching the channel** | **No (deferred)** | A "show the reasoning" product surface is a separate, explicit egress mode, not a relaxation of this wall — out of scope here ([Non-Goals](#non-goals), [OQ 6](#open-questions)). |
+
+The structural wall for the first two audiences:
 
 - **Never a message.** The plan is a distinct `CompositionPlan` value type ([§C](#c-the-deliberation-verdict)), never wrapped in an `AgentAction` and never published; it has no path to [`action_executor.py`](../../agents/action_executor.py)'s `SEND_CHANNEL_MESSAGE` handler. Keeping it a *separate type* from the published-message artifacts makes "this is private" a structural property the no-leak test pins — not a convention that the next edit could quietly violate.
 - **Never in the channel store.** It is not persisted as a message, so [RFC 0034](0034-persona-conversational-working-memory.md) transcript reconstruction can never surface it into *another* persona's `messages` array.
 - **Not `<external_data>`.** It is the persona's *own* reasoning, not untrusted external input, so it is a normal trusted system-prompt section — not wrapped in the [RFC 0009](0009-security-sandboxing.md) quarantine envelope (which is for tool/bridge output).
-- **Audit-only egress.** Each deliberation emits one `channel.reason` audit event recording the *decision and counts, not the verbatim plan* — observable without logging the private text, in the RFC 0009 audit shape.
+- **Two egress paths, not one.** The **audit** event (`channel.reason`) records *decision + `reason_code` + counts, never the verbatim `reason_note` or plan* — low-cardinality, durable trend data in the RFC 0009 audit shape. The **operator-debug** path (agent log, off in prod by default) carries the verbatim `reason_note` for tuning and is what `MT-REASON-001` reads to confirm "stayed silent *with a stated reason*." The two are deliberately separate contracts: audit = low-cardinality + durable; debug = verbatim + ephemeral.
 
 ### F. Cost and the idle invariant
 
@@ -186,20 +200,21 @@ Default `mode: off` (or `bid` for `participant`/`chair` dispositions, [OQ 2](#op
 
 - **Private-reasoning leakage** is the primary new risk. Mitigated structurally ([§E](#e-privacy-boundary--the-trace-is-walled)): the plan is never an action, never persisted to the channel store, and so is unreachable by RFC 0034 cross-persona reconstruction. A regression test asserts no `messages` row and no peer-visible artifact is produced by a deliberation.
 - **Prompt-injection through the plan.** The deliberation reads the same (already-sanitized, RFC 0034 `<|user_message|>`-wrapped) transcript the compose reads; its output is the persona's own trusted text, not external data, and is consumed only by the same persona's next call. No new untrusted ingress.
-- **Audit completeness.** The `channel.reason` event is a post-commit audit and must survive a cancelled turn (the RFC 0009 §G post-commit-emit principle). That section's `context.WithoutCancel` is a Go-orchestrator mechanism; the deliberation runs in the Python runtime, so it applies the same "the decision already happened — don't drop the record" rule on its own emit path rather than the literal Go API. The event records counts/decision, never the verbatim plan.
+- **Audit completeness.** The `channel.reason` event is a post-commit audit and must survive a cancelled turn (the RFC 0009 §G post-commit-emit principle). That section's `context.WithoutCancel` is a Go-orchestrator mechanism; the deliberation runs in the Python runtime, so it applies the same "the decision already happened — don't drop the record" rule on its own emit path rather than the literal Go API. The event records decision + `reason_code` + counts, never the verbatim `reason_note` or plan.
 - **Cost-exhaustion as a denial vector** is bounded by the shared interaction lease ([§F](#f-cost-and-the-idle-invariant)) — deliberation cannot exceed the channel's `interaction_budget_tokens`.
 
 ## Phased Implementation Plan
 
 ### Phase 1: Structured silence verdict (Tier B generalization)
 
-Summary: extend the salience bid to emit `{ should_post, reason }` (plan omitted), short-circuiting to `DO_NOTHING` on false. Pure enrichment of the existing leased seam.
+Summary: extend the salience bid to emit `{ should_post, reason_code, reason_note }` (plan omitted), short-circuiting to `DO_NOTHING` on false. Pure enrichment of the existing leased seam.
 
 Deliverables:
-1. `{ should_post, reason }` prompt + regex-tolerant parser in [`salience_bid.py`](../../agents/salience_bid.py), fail-closed to silence.
+1. `{ should_post, reason_code, reason_note }` prompt + regex-tolerant parser in [`salience_bid.py`](../../agents/salience_bid.py), fail-closed to silence. `reason_code` is the closed enum ([§C](#c-the-deliberation-verdict)); `reason_note` is optional and debug-only.
 2. Thread the verdict through the existing Tier-B seam in [`salience_gate.py`](../../agents/persona_runtime/salience_gate.py) (the `run_salience_gate` → `SalienceOutcome` path that [`action_loop.py`](../../agents/persona_runtime/action_loop.py) consumes); reuse the seam's `DO_NOTHING` + memory-ingest path.
-3. `channel.reason` audit event (decision + counts).
+3. `channel.reason` audit event (decision + `reason_code` + counts; never `reason_note`).
 4. Extend the idle-cost gate test to cover the deliberation pass.
+5. **Minimal observability lands with the feature, not in Phase 3.** A deliberation **parse-failure counter**, kept distinct from the existing Tier-B salience suppression on `channel.messages.gated` so a fail-closed regression is not masked. Without it Phase 1's silence decision ships unobservable: a silent parser break surfaces only as all-silence (gate fail-closed) and is indistinguishable from "working as intended."
 
 Dependencies: none beyond shipped RFC 0030 Tier B.
 
@@ -221,7 +236,7 @@ Summary: the per-channel `reasoning` knob and observability.
 Deliverables:
 1. `reasoning.{mode,model,depth}` router field + RFC 0050 schema/validate/apply/persist + revision bump.
 2. CLI (`channel config set … reasoning.mode=plan`) + web settings surface.
-3. Telemetry: deliberation-rate, suppress-rate, and the cost delta vs. an unreasoned baseline.
+3. Telemetry beyond the Phase 1 parse-failure counter: deliberation-rate; **suppress-rate by `reason_code`** (silence charted *by cause*, not just totalled); a **deliberation-latency histogram** (the pass is a serial `fast` call *before* compose on an interactive turn — reuse the [`agent.llm.duration`](../../agents/observability/metrics.py) instrument shape); a **budget-starvation counter** (deliberation starved to silence by a low `interaction_budget_tokens` — operationally distinct from "nothing to add", per [§F](#f-cost-and-the-idle-invariant)); and a `should_post=true`-but-empty-compose divergence counter. **Cost delta vs. baseline needs a stated counterfactual** — the two arms cannot run on one turn, so measure it as either an A/B-by-channel split or a `mode: bid` shadow arm; record which.
 
 Dependencies: Phases 1–2.
 
@@ -235,7 +250,7 @@ Dependencies: Phase 3; provider-protocol change.
 
 | Component | Files | Change |
 |-----------|-------|--------|
-| Python agents | [`agents/salience_bid.py`](../../agents/salience_bid.py) | Enrich the scalar `SalienceDecision` gate verdict with `should_post` + `reason`, fail-closed to silence (Phase 1). The `plan` is **not** added here — it is a separate type (next row) |
+| Python agents | [`agents/salience_bid.py`](../../agents/salience_bid.py) | Enrich the scalar `SalienceDecision` gate verdict with `should_post` + the closed-enum `reason_code` (extends the existing low-cardinality branch label) + the optional debug-only `reason_note`, fail-closed to silence (Phase 1). The `plan` is **not** added here — it is a separate type (next row) |
 | Python agents | `agents/persona_runtime/deliberation_plan.py` *(new)* | The `CompositionPlan` value type + regex-tolerant parser (fail-closed to "no plan") + pure `render_plan_section(plan) -> str` renderer. No agent / `action_loop` coupling; the no-leak test targets it directly (Phase 2) |
 | Python agents | [`agents/persona_runtime/salience_gate.py`](../../agents/persona_runtime/salience_gate.py) | The Tier-B seam: thread the gate verdict through `run_salience_gate`; carry `plan: CompositionPlan \| None` back on `SalienceOutcome` (**not** on the pure bid); reuse its `DO_NOTHING` + `_store_event_episode` suppressed-ingest path; emit the `channel.reason` audit event |
 | Python agents | [`agents/persona_runtime/action_loop.py`](../../agents/persona_runtime/action_loop.py) | Consume the richer seam outcome; append the rendered private plan section to the Tier-C compose system prompt via a one-line `render_plan_section` call (keeps the file under the 500-line cap) |
@@ -243,14 +258,15 @@ Dependencies: Phase 3; provider-protocol change.
 | Go orchestrator | `internal/channels/...`, `internal/server/...` | `reasoning` config field + apply path + REST PATCH/GET (RFC 0050) |
 | Rust CLI | `cli/src/...` | `channel config` surface for `reasoning.*` |
 | Config | `config/channels.yaml`, `config/ui.yaml` | `reasoning` block + web toggle |
-| Audit | audit event registration | `channel.reason` event |
+| Observability | [`agents/observability/_metrics_salience.py`](../../agents/observability/_metrics_salience.py), [`agents/observability/metrics.py`](../../agents/observability/metrics.py) | Deliberation parse-failure counter (Phase 1); suppress-rate-by-`reason_code`, latency histogram, budget-starvation + empty-compose counters (Phase 3) — kept distinct from the Tier-B `channel.messages.gated{policy=low_salience}` rows |
+| Audit | audit event registration | `channel.reason` event (decision + `reason_code` + counts; never `reason_note`) |
 
 ## Test Strategy
 
-- **Unit tests**: gate-verdict parser (well-formed, malformed → fail-closed silence); `deliberation_plan.py` parse + `render_plan_section` (well-formed, malformed → fail-closed "no plan", composes unplanned rather than blocking the post); the four-condition idle guard still suppresses with deliberation present.
-- **Integration tests**: a `should_post=false` turn produces zero `SEND_CHANNEL_MESSAGE` and zero compose calls; a `should_post=true` turn composes once *under* the plan; the plan never appears in the channel store nor in a second persona's reconstructed `messages` (the no-leak gate); both calls meter against one `interaction_id` and a low `interaction_budget_tokens` starves deliberation to silence.
-- **E2E / smoke**: a 3-persona group brainstorm with `reasoning.mode: plan` shows fewer pile-on turns and higher per-post substance than the `off` baseline; one `channel.reason` audit event per deliberation, count-not-content.
-- **Manual tests**: `MT-REASON-001` — *think before posting* — a persona stays silent with a stated reason on a directed-elsewhere / already-answered turn, and posts a plan-shaped contribution on a turn it can add to; the private plan is absent from every other participant's view and from the channel transcript.
+- **Unit tests**: gate-verdict parser (well-formed → correct `reason_code`; malformed → fail-closed silence *and* the parse-failure counter increments); `deliberation_plan.py` parse + `render_plan_section` (well-formed, malformed → fail-closed "no plan", composes unplanned rather than blocking the post); the four-condition idle guard still suppresses with deliberation present.
+- **Integration tests**: a `should_post=false` turn produces zero `SEND_CHANNEL_MESSAGE` and zero compose calls, and emits one `channel.reason` audit event carrying the `reason_code` (assertable, unlike free text); a `should_post=true` turn composes once *under* the plan; the plan never appears in the channel store nor in a second persona's reconstructed `messages` (the no-leak gate); both calls meter against one `interaction_id` and a low `interaction_budget_tokens` starves deliberation to silence.
+- **E2E / smoke**: a 3-persona group brainstorm with `reasoning.mode: plan` shows fewer pile-on turns than the `off` baseline (a *countable* assertion via suppress-rate) and — as a **qualitative** check, not a regression gate — higher per-post substance. "Substance" has no committed metric yet; if it must become a gate, define it first (e.g. a judged rubric or a restatement-overlap proxy against peer messages) rather than asserting a vibe. One `channel.reason` audit event per deliberation, count-not-content.
+- **Manual tests**: `MT-REASON-001` — *think before posting* — a persona stays silent with a stated reason on a directed-elsewhere / already-answered turn (the reason observed via the operator-debug `reason_note` egress, [§E](#e-privacy-boundary--the-trace-is-walled), not the count-only audit event), and posts a plan-shaped contribution on a turn it can add to; the private plan is absent from every other participant's view and from the channel transcript.
 
 ## Open Questions
 
@@ -259,6 +275,8 @@ Dependencies: Phase 3; provider-protocol change.
 3. **Single pass vs. draft→critique→revise.** A reflexion loop would raise quality further but multiplies cost per post. Out of scope here; revisit only if single-pass plans prove low-quality.
 4. **Does the plan belong in the persona's own episodic memory?** Storing it agent-locally (not in the channel) could improve continuity, but risks the persona "remembering" intentions it never acted on. Default: audit-only, no episodic write. Revisit with RFC 0027 (reflection-driven consolidation).
 5. **Should the deliberation core become an extractable library?** The pure verdict + plan core (a cheap leased pre-flight LLM call → a structured, fail-closed should-act decision) is a general shape, but it has exactly **one** in-repo consumer and is soaked in Persatrix substrate — the RFC 0023 wallet lease, the `model_aliases` resolver, the `prompt_loader` snippets, the RFC 0034 transcript shape, the gRPC error taxonomy, the OTEL instruments. Extracting a standalone library *now* would be speculative generality (N=1 with a hypothetical second caller). The reuse that matters is internal and is already served by data-contract forward-compat (the `channel.reason` → RFC 0028 `DecisionRecord` precursor, [§A](#a-positioning--distinct-from-rfc-0028)). The one real forcing function is [RFC 0045](0045-open-core-extraction-policy.md) (open-core extraction): *if* that boundary ever places the persona runtime / deliberation core on the extracted side, the library question becomes real — but it is an RFC 0045 call, not this RFC's. Default: keep it in-tree and get the module/type boundaries ([§C](#c-the-deliberation-verdict), [Phase 2](#phase-2-plan-threaded-compose)) library-quality without paying the packaging tax.
+
+6. **The three-audience visibility model — who sees the reasoning?** [§E](#e-privacy-boundary--the-trace-is-walled) splits visibility three ways: peer personas / channel store (never), human operator (opt-in debug), end-users watching the channel (deferred). Two sub-questions are live for ratification: **(a)** should the operator-debug path get a *first-class web-console reveal* in the channel-timeline panel (the surface [MT-CHANNEL-RELEVANCE-001](../manual-tests/MT-CHANNEL-RELEVANCE-001.md) already uses), behind a debug toggle, rather than only raw agent logs? Lean **yes** — you cannot tune the plan-generation prompt without seeing plans, and the precedent is established. **(b)** Is an end-user "show the reasoning" mode ever desirable as a demo / interpretability feature, and if so does it stay a *separate explicit egress* so [§E](#e-privacy-boundary--the-trace-is-walled)'s structural wall is never the thing relaxed? Decide **(a)** at the Phase 3 config/telemetry PR; **(b)** is a product call deferred past v0.3.x.
 
 ## Decision / Next Steps
 
