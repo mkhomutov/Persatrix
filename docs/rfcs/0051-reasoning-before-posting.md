@@ -15,6 +15,8 @@ depends_on:
   - RFC-0030
   - RFC-0034
   - RFC-0023
+  - RFC-0024
+  - RFC-0017
   - RFC-0050
   - RFC-0009
 ---
@@ -26,7 +28,7 @@ depends_on:
 **Author**: Maksim Khomutov  
 **Date**: 2026-06-22  
 **Target**: v0.3.x  
-**Depends on**: RFC 0030 (relevance gate / Tier B), RFC 0034 (conversational working memory), RFC 0023 (LLM call leasing), RFC 0050 (extensible channel configuration), RFC 0009 (audit / prompt-safety boundary)
+**Depends on**: RFC 0030 (relevance gate / Tier B), RFC 0034 (conversational working memory), RFC 0023 (LLM call leasing), RFC 0024 (event-driven scheduling — idle-cost invariant), RFC 0017 (memory-injection budget — the empty-context TICK short-circuit), RFC 0050 (extensible channel configuration), RFC 0009 (audit / prompt-safety boundary)
 
 ---
 
@@ -104,10 +106,10 @@ The two **stack**: RFC 0028 decides the persona is in the `publish_channel` lane
 The persona turn already runs a three-tier gate in [`agents/persona_runtime/action_loop.py`](../../agents/persona_runtime/action_loop.py):
 
 - **Tier A** — `evaluate_response_gate` ([`response_gate.py`](../../agents/response_gate.py)): free, deterministic addressing/eligibility. Drop → `DO_NOTHING`.
-- **Tier B** — `run_salience_gate` / [`salience_bid.py`](../../agents/salience_bid.py): a leased `fast`-model bid (≈64 tokens, temp 0.0, bias-to-silence) that runs *only* on the ambiguous open-floor admit. Drop → `DO_NOTHING`.
+- **Tier B** — `run_salience_gate` ([`salience_gate.py`](../../agents/persona_runtime/salience_gate.py)), the action-loop seam that runs the *pure* bid `evaluate_salience` ([`salience_bid.py`](../../agents/salience_bid.py)): a leased `fast`-model bid (≈64 tokens, temp 0.0, bias-to-silence) that runs *only* on the ambiguous open-floor admit. Drop → `DO_NOTHING`.
 - **Tier C** — the `quality`-model compose call (multi-turn tool loop), parsed into actions and published.
 
-Tier B **is the seam.** "Reasoning before posting" is Tier B promoted from a scalar verdict into a structured deliberation. No new orchestration layer is introduced — the bid module's leased call, regex-tolerant parsing, fail-closed-to-silence default, and idle-guard placement are all reused.
+Tier B **is the seam.** "Reasoning before posting" is Tier B promoted from a scalar verdict into a structured deliberation. No new orchestration layer is introduced: the pure bid in [`salience_bid.py`](../../agents/salience_bid.py) (the leased call, regex-tolerant parsing, and fail-closed-to-silence default) and its action-loop seam in [`salience_gate.py`](../../agents/persona_runtime/salience_gate.py) (open-floor gating, channel-size cap, suppression metrics, and the suppressed-message memory ingest) are both reused — `action_loop.py` only *calls* `run_salience_gate` and consumes its outcome.
 
 ```
 inbound → idle guard → Tier A (free) → ┌─ DELIBERATE (fast, leased) ─┐ → Tier C compose (quality) → publish
@@ -132,7 +134,7 @@ The deliberation pass returns a small structured object (parsed prompt-side, as 
 }
 ```
 
-`should_post=false` short-circuits to the existing `DO_NOTHING` outcome (and still ingests memory, exactly as a Tier-A/B suppression does today via [`gate_suppress.py`](../../agents/persona_runtime/gate_suppress.py) — "the gate decides whether to respond, not whether to remember"). When `should_post=true`, `plan` is serialized into a single private system-prompt section appended for the Tier-C compose only, alongside the RFC 0034 working-memory sections — never published, never written to the channel store.
+`should_post=false` short-circuits to the existing `DO_NOTHING` outcome (and still ingests memory: the Tier-B seam already calls `_store_event_episode` on a suppressed turn in [`salience_gate.py`](../../agents/persona_runtime/salience_gate.py) — "decide whether to respond, not whether to remember" — the same rule the Tier-A path enforces in [`gate_suppress.py`](../../agents/persona_runtime/gate_suppress.py)). When `should_post=true`, `plan` is serialized into a single private system-prompt section appended for the Tier-C compose only, alongside the RFC 0034 working-memory sections — never published, never written to the channel store.
 
 ### D. Mechanism — three realizations, one recommendation
 
@@ -157,7 +159,7 @@ The plan and reason are the most context-revealing artifacts a persona produces,
 
 ### F. Cost and the idle invariant
 
-- **After the idle guard.** The deliberation is invoked strictly *after* the empty-context short-circuit in [`action_loop.py`](../../agents/persona_runtime/action_loop.py) (the four-condition TICK guard), so a bored persona never reasons. The "bored persona costs nothing" gate in [`agents/tests/test_persona_tick_shortcircuit.py`](../../agents/tests/test_persona_tick_shortcircuit.py) is extended to assert the deliberation fires zero times on an idle tick.
+- **Never on an idle tick.** Because the deliberation generalizes Tier B, it runs *only* on a `CHANNEL_MESSAGE` open-floor admit — it is not on the autonomous-`TICK` path at all, so a bored persona never reaches it by construction. This is reinforced upstream by the RFC 0017 §F empty-context short-circuit in [`action_loop.py`](../../agents/persona_runtime/action_loop.py) (the four-condition TICK guard), which returns `DO_NOTHING` before any gate runs. The idle-cost gate in [`agents/tests/test_persona_tick_shortcircuit.py`](../../agents/tests/test_persona_tick_shortcircuit.py) is extended to assert no deliberation call is added to the idle-tick path.
 - **Metered, same interaction.** The deliberation call goes through the existing wallet lease in [`agents/llm_client.py`](../../agents/llm_client.py) with the *same* `interaction_id`, so it draws from the same RFC 0050 `interaction_budget_tokens` ceiling. A low budget correctly starves deliberation (fail-closed to silence) rather than overspending.
 - **Net-negative on pile-on.** Because a `should_post=false` verdict suppresses the `quality` compose, deliberation is expected to *reduce* aggregate spend on the exact noisy turns it targets.
 
@@ -179,7 +181,7 @@ Default `mode: off` (or `bid` for `participant`/`chair` dispositions, [OQ 2](#op
 
 - **Private-reasoning leakage** is the primary new risk. Mitigated structurally ([§E](#e-privacy-boundary--the-trace-is-walled)): the plan is never an action, never persisted to the channel store, and so is unreachable by RFC 0034 cross-persona reconstruction. A regression test asserts no `messages` row and no peer-visible artifact is produced by a deliberation.
 - **Prompt-injection through the plan.** The deliberation reads the same (already-sanitized, RFC 0034 `<|user_message|>`-wrapped) transcript the compose reads; its output is the persona's own trusted text, not external data, and is consumed only by the same persona's next call. No new untrusted ingress.
-- **Audit completeness.** Per RFC 0009 §G, the `channel.reason` post-commit audit uses `context.WithoutCancel` semantics where applicable so a cancelled turn still records the decision; the event records counts/decision, never the verbatim plan.
+- **Audit completeness.** The `channel.reason` event is a post-commit audit and must survive a cancelled turn (the RFC 0009 §G post-commit-emit principle). That section's `context.WithoutCancel` is a Go-orchestrator mechanism; the deliberation runs in the Python runtime, so it applies the same "the decision already happened — don't drop the record" rule on its own emit path rather than the literal Go API. The event records counts/decision, never the verbatim plan.
 - **Cost-exhaustion as a denial vector** is bounded by the shared interaction lease ([§F](#f-cost-and-the-idle-invariant)) — deliberation cannot exceed the channel's `interaction_budget_tokens`.
 
 ## Phased Implementation Plan
@@ -190,7 +192,7 @@ Summary: extend the salience bid to emit `{ should_post, reason }` (plan omitted
 
 Deliverables:
 1. `{ should_post, reason }` prompt + regex-tolerant parser in [`salience_bid.py`](../../agents/salience_bid.py), fail-closed to silence.
-2. Wire the verdict into [`action_loop.py`](../../agents/persona_runtime/action_loop.py) at the existing Tier-B seam; reuse the `DO_NOTHING` + memory-ingest path.
+2. Thread the verdict through the existing Tier-B seam in [`salience_gate.py`](../../agents/persona_runtime/salience_gate.py) (the `run_salience_gate` → `SalienceOutcome` path that [`action_loop.py`](../../agents/persona_runtime/action_loop.py) consumes); reuse the seam's `DO_NOTHING` + memory-ingest path.
 3. `channel.reason` audit event (decision + counts).
 4. Extend the idle-cost gate test to cover the deliberation pass.
 
@@ -228,9 +230,9 @@ Dependencies: Phase 3; provider-protocol change.
 
 | Component | Files | Change |
 |-----------|-------|--------|
-| Python agents | [`agents/salience_bid.py`](../../agents/salience_bid.py) | Verdict schema + parser (`should_post`, `reason`, `plan`) |
-| Python agents | [`agents/persona_runtime/action_loop.py`](../../agents/persona_runtime/action_loop.py) | Deliberation invocation at Tier-B seam; private plan section into compose |
-| Python agents | [`agents/persona_runtime/gate_suppress.py`](../../agents/persona_runtime/gate_suppress.py) | Reuse `DO_NOTHING` + memory-ingest for reasoned silence |
+| Python agents | [`agents/salience_bid.py`](../../agents/salience_bid.py) | Pure-bid verdict schema + regex-tolerant parser (`should_post`, `reason`, `plan`), fail-closed to silence |
+| Python agents | [`agents/persona_runtime/salience_gate.py`](../../agents/persona_runtime/salience_gate.py) | The Tier-B seam: thread the structured verdict through `run_salience_gate` → `SalienceOutcome`; reuse its `DO_NOTHING` + `_store_event_episode` suppressed-ingest path; emit the `channel.reason` audit event |
+| Python agents | [`agents/persona_runtime/action_loop.py`](../../agents/persona_runtime/action_loop.py) | Consume the richer seam outcome; append the private `plan` section to the Tier-C compose system prompt (alongside the RFC 0034 working-memory sections) |
 | Python agents | [`agents/llm_providers.py`](../../agents/llm_providers.py), `agents/llm_types.py` | (Phase 4 only) `thinking` budget on the provider protocol |
 | Go orchestrator | `internal/channels/...`, `internal/server/...` | `reasoning` config field + apply path + REST PATCH/GET (RFC 0050) |
 | Rust CLI | `cli/src/...` | `channel config` surface for `reasoning.*` |
