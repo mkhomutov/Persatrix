@@ -7,10 +7,10 @@ id: RFC-0051
 title: "Reasoning Before Posting"
 summary: "A private per-turn deliberation a persona runs before publishing a channel message — generalizes the RFC 0030 Tier-B salience bid into a structured should-post + plan verdict, threaded privately into the compose call so posts are considered rather than reflexive."
 type: feature
-status: proposed
+status: implementing
 author: Maksim Khomutov
 created: 2026-06-22
-target: "v0.3.x"
+target: "v0.3.10"
 depends_on:
   - RFC-0030
   - RFC-0034
@@ -24,10 +24,10 @@ depends_on:
 # RFC 0051 — Reasoning Before Posting
 
 **Type**: feature  
-**Status**: 📋 Proposed  
+**Status**: 🚧 Implementing  
 **Author**: Maksim Khomutov  
 **Date**: 2026-06-22  
-**Target**: v0.3.x  
+**Target**: v0.3.10  
 **Depends on**: RFC 0030 (relevance gate / Tier B), RFC 0034 (conversational working memory), RFC 0023 (LLM call leasing), RFC 0024 (event-driven scheduling — idle-cost invariant), RFC 0017 (memory-injection budget — the empty-context TICK short-circuit), RFC 0050 (extensible channel configuration), RFC 0009 (audit / prompt-safety boundary)
 
 ---
