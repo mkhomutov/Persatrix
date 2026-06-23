@@ -125,6 +125,7 @@ class _Instruments:
     temporal_now_anchor_emitted: Counter
     temporal_recency_rendered: Counter
     channel_messages_salience_skipped: Counter  # RFC 0030 Tier B — _metrics_salience
+    deliberation_parse_failures: Counter  # RFC 0051 Phase 1a — _metrics_salience
 
     def __init__(self, meter: Meter) -> None:
         # ─── Counters ────────────────────────────────────────────────
@@ -144,10 +145,9 @@ class _Instruments:
             description="Input and output tokens billed by the LLM provider.",
         )
         # RFC 0033 Phase 3: the ``persatrix.llm.alias.raw_id_usage`` gate
-        # counter is retired. It was the Phase 3 *entrance* signal (raw-ID
-        # usage reading zero); with Phase 3 landed — the raw-ID pass-through
-        # and the ``_infer_provider`` heuristic both removed, ``resolve``
-        # rejecting any non-alias reference — there is nothing left to count.
+        # counter is retired — with the raw-ID pass-through and ``_infer_provider``
+        # both removed and ``resolve`` rejecting any non-alias reference, there
+        # is nothing left to count.
         self.event_dispatched: Counter = meter.create_counter(
             name="agent.event.dispatched",
             unit="{event}",

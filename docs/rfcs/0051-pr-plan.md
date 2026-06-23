@@ -408,7 +408,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|-------|--------|--------|-----------|--------|
-| 1 | 1a | Structured silence verdict (dark) | `feature/v0310-rfc0051-silence-verdict` | ⬜ Not started | — | — |
+| 1 | 1a | Structured silence verdict (dark) | `feature/v0310-rfc0051-silence-verdict` | 🔀 PR open | [#692](https://github.com/mkhomutov/Persatrix/pull/692) | — |
 | 2 | 1b | Seam threading + `agent.deliberated` audit (dark) | `feature/v0310-rfc0051-deliberate-seam` | ⬜ Not started | — | — |
 | 3 | 2 | Plan-threaded compose + no-leak test (dark) | `feature/v0310-rfc0051-plan-compose` | ⬜ Not started | — | — |
 | 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | ⬜ Not started | — | — |

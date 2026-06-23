@@ -54,6 +54,7 @@ from typing import TYPE_CHECKING, Any, Final
 import grpc
 import grpc.aio
 
+from . import salience_deliberation as deliberation
 from .generated import wallet_pb2 as walletpb
 from .model_aliases import resolve as resolve_model
 from .prompt_loader import load_snippet
@@ -79,12 +80,8 @@ __all__ = [
 # choice is honoured; an unconfigured/unknown alias fails *closed* (silence).
 _BID_MODEL_ALIAS: Final[str] = "fast"
 
-# A short, structured output budget — the bid is a yes/no + score, not prose.
-# If a verbose model truncates before emitting ``score:`` the parse fails and
-# the bid stays silent — the fail-closed direction (TB2), so the tight budget
-# is safe.
-_BID_MAX_OUTPUT_TOKENS: Final[int] = 64
-# Low temperature: the bid is a judgement, not a creative turn.
+# Output-token budget is mode-scaled (see ``salience_deliberation``); truncation
+# fails *closed* to silence (TB2). Low temperature: a judgement, not creative.
 _BID_TEMPERATURE: Final[float] = 0.0
 
 # TB2: the implicit bar an *unset* (``None``) threshold must clear. An unset
@@ -154,26 +151,33 @@ class SalienceDecision:
     """Outcome of :func:`evaluate_salience`.
 
     Attributes:
-        speak: ``True`` when the persona should proceed to the (expensive)
-            quality turn; ``False`` to stay silent (the no-pile-on path).
+        speak: ``True`` → proceed to the (expensive) quality turn; ``False`` →
+            stay silent (the no-pile-on path). Under RFC 0051 reasoning this
+            *is* the ``should_post`` decision.
         score: The parsed salience score in ``[0, 1]``, or ``None`` when the
             bid could not be scored (parse failure / lease denial / error).
-        reason: Low-cardinality branch label. For every *suppressing* verdict
-            the action-loop seam emits it as the ``reason`` attribute on the
-            ``channel.messages.gated`` counter (alongside
-            ``policy=low_salience``) so a fail-closed branch is distinguishable
-            on a dashboard from genuine no-pile-on dampening — not only in a
-            DEBUG log. Values: ``salient`` (a speak verdict — never gated) /
-            ``declined`` (explicit ``speak: no`` veto) / ``below_threshold`` /
-            ``parse_failure`` / ``lease_denied`` (a denied/unreachable lease
-            **or** the wallet's ``RESOURCE_EXHAUSTED`` active-lease cap) /
-            ``llm_error`` (any other provider/gRPC failure) /
-            ``model_unresolvable``.
+            **Always ``None`` under reasoning** — the structured verdict
+            supersedes the score gate, so no score is emitted (RFC 0051 §C).
+        reason: Low-cardinality branch label (the RFC 0051 ``reason_code``). For
+            every *suppressing* verdict the action-loop seam emits it as the
+            ``reason`` attribute on the ``channel.messages.gated`` counter
+            (alongside ``policy=low_salience``) so a fail-closed branch is
+            distinguishable on a dashboard from genuine no-pile-on dampening.
+            Scalar (``mode: off``) values: ``salient`` / ``declined`` /
+            ``below_threshold`` / ``parse_failure`` / ``lease_denied`` (a denied
+            lease **or** the wallet ``RESOURCE_EXHAUSTED`` cap) / ``llm_error`` /
+            ``model_unresolvable``. Under reasoning the score-only
+            ``below_threshold`` gives way to the semantic codes in
+            :mod:`agents.salience_deliberation`.
+        reason_note: Optional one-clause justification the model may attach under
+            reasoning — **debug-egress only** (RFC 0051 §E), never a metric/audit
+            attribute, ``None`` on the scalar path. Its egress is wired later.
     """
 
     speak: bool
     score: float | None
     reason: str
+    reason_note: str | None = None
 
 
 def skip_bid_for_channel_size(
@@ -217,6 +221,7 @@ def _build_bid_messages(
     content: str,
     transcript: list[dict[str, Any]],
     addressing: NLAddressing,
+    mode: str = deliberation.MODE_OFF,
 ) -> list[dict[str, Any]]:
     """Compact the in-round transcript + the inbound message into the bid
     prompt. The transcript is the RFC 0034 group working memory the caller
@@ -251,8 +256,11 @@ def _build_bid_messages(
     # ``transcript_block`` are *concatenated*, never formatted in, so a ``{``
     # in a user message cannot break rendering — the same data-framing
     # discipline ``summarize_close`` uses around ``interaction-summarizer``.
-    # The file must therefore keep ``{note_tail}`` as its only brace pair.
-    instruction = load_snippet("salience-bid-user").format(note_tail=note_tail)
+    # Each snippet must therefore keep ``{note_tail}`` as its only brace pair.
+    # The scalar and RFC 0051-reasoning user snippets both honour it, so the
+    # NL-addressing nudge rides either form (``mode`` selects which; ``off`` is
+    # byte-for-byte the scalar speak/score form).
+    instruction = load_snippet(deliberation.user_snippet(mode)).format(note_tail=note_tail)
     user = (
         "Conversation so far this round:\n"
         f"{transcript_block}\n\n"
@@ -293,13 +301,15 @@ def _bar_for(threshold: float | None, addressing: NLAddressing) -> float:
     return round(max(0.0, min(1.0, bar)), _BAR_PRECISION)
 
 
-def _bid_system_prompt(*, persona_name: str, persona_role: str) -> str:
-    # Externalised to ``prompts/runtime/safety/salience-bid-system.md``. The two
-    # ``{persona_name}`` / ``{persona_role}`` placeholders are the file's only
-    # brace pairs (cf. the ``workspace-root-instructions`` precedent for the
+def _bid_system_prompt(
+    *, persona_name: str, persona_role: str, mode: str = deliberation.MODE_OFF,
+) -> str:
+    # Externalised to the scalar / RFC 0051-reasoning system snippet (chosen by
+    # ``mode``). The ``{persona_name}`` / ``{persona_role}`` placeholders are each
+    # file's only brace pairs (cf. ``workspace-root-instructions`` for the
     # ``.format`` caveat); both are trusted persona-config values, not inbound
     # user text, so formatting them in is safe.
-    return load_snippet("salience-bid-system").format(
+    return load_snippet(deliberation.system_snippet(mode)).format(
         persona_name=persona_name, persona_role=persona_role,
     )
 
@@ -341,13 +351,22 @@ async def evaluate_salience(
     threshold: float | None,
     cause: walletpb.Cause.ValueType = walletpb.CAUSE_CHANNEL_MESSAGE,
     interaction_id: str = "",
+    mode: str = deliberation.MODE_OFF,
 ) -> SalienceDecision:
     """Run the Tier B salience bid for one open-floor admit.
 
-    Returns a :class:`SalienceDecision`. Every non-``salient`` path resolves
-    to ``speak=False`` (bias-to-silence, TB2). The call is leased on the
-    ``fast`` alias (TB3); a lease denial, the wallet active-lease cap
+    Returns a :class:`SalienceDecision`. Every non-speak path resolves to
+    ``speak=False`` (bias-to-silence, TB2). The call is leased on the ``fast``
+    alias (TB3); a lease denial, the wallet active-lease cap
     (``RESOURCE_EXHAUSTED``), or any provider error all fail closed.
+
+    ``mode`` (RFC 0051 §C/§G) selects the verdict grammar and ships **dark** —
+    the seam passes nothing but the ``off`` default until the Phase-3 config knob
+    wires it. ``off`` is the scalar ``speak:``/``score:`` bid against the
+    per-member ``threshold`` (byte-for-byte v0.3.8); ``bid``/``plan`` is the
+    structured ``should_post``/``reason_code`` verdict that **supersedes the
+    score gate** (``threshold`` inert, no ``score``), delegated to
+    :func:`agents.salience_deliberation.parse_verdict`.
 
     ``cause`` is the RFC 0023 wallet cause the lease is billed under. The
     action-loop seam derives it from the inbound event
@@ -357,6 +376,8 @@ async def evaluate_salience(
     ``CAUSE_CHANNEL_MESSAGE`` for the common channel-message path and for
     direct callers (TB3).
     """
+    # Warn *before* resolution so an unresolvable model can't swallow the signal.
+    deliberation.warn_if_unknown_mode(mode, agent_id=agent_id)
     # Resolve the `fast` alias per-call (RFC 0033). An unconfigured/unknown
     # alias raises SystemExit (a BaseException) by design — swallow it here
     # and degrade to silence rather than crash the hot path (the same
@@ -371,8 +392,7 @@ async def evaluate_salience(
         )
         return SalienceDecision(speak=False, score=None, reason="model_unresolvable")
 
-    # PR 3 — free-text addressing signal. Computed before the call so it both
-    # nudges the prompt and shifts the deterministic score bar below.
+    # PR 3 — free-text addressing: prompt nudge + (scalar path only) score-bar shift.
     addressing = detect_nl_addressing(content=content, persona_name=persona_name)
 
     try:
@@ -381,12 +401,13 @@ async def evaluate_salience(
             model_alias=resolved.alias,
             messages=_build_bid_messages(
                 content=content, transcript=transcript, addressing=addressing,
+                mode=mode,
             ),
             system=_bid_system_prompt(
-                persona_name=persona_name, persona_role=persona_role,
+                persona_name=persona_name, persona_role=persona_role, mode=mode,
             ),
             tools=[],
-            max_tokens=_BID_MAX_OUTPUT_TOKENS,
+            max_tokens=deliberation.max_output_tokens_for(mode),
             temperature=_BID_TEMPERATURE,
             cause=cause,
             agent_id=agent_id,
@@ -436,6 +457,17 @@ async def evaluate_salience(
             agent_id, exc,
         )
         return SalienceDecision(speak=False, score=None, reason="llm_error")
+
+    # RFC 0051 — under reasoning the structured verdict supersedes the score gate:
+    # ``should_post`` alone decides (parsed fail-closed to silence). The
+    # NL-addressing ``_bar_for`` shift (TB4) is *part of* that superseded gate, so
+    # here ``addressing`` survives only as the advisory prompt nudge above, not a
+    # deterministic bias. ``mode: off`` (the scalar branch below) is untouched.
+    if deliberation.is_structured(mode):
+        should_post, reason_code, reason_note = deliberation.parse_verdict(response.text, mode=mode)
+        return SalienceDecision(
+            speak=should_post, score=None, reason=reason_code, reason_note=reason_note,
+        )
 
     score = _parse_score(response.text)
     if score is None:
