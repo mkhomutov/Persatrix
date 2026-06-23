@@ -53,7 +53,10 @@ def register(inst: _Instruments, meter: Meter) -> None:
     # reads as intended no-pile-on dampening. This counter is the **mandatory,
     # never-gated** signal that makes a silent parser break alertable. Kept
     # distinct from ``channel.messages.gated`` on purpose (two operational
-    # signals: a broken parser vs. the feature working as designed).
+    # signals: a broken parser vs. the feature working as designed). It is
+    # **additive, not a re-route**: once the seam threads reasoning (PR 2) a
+    # parse failure still also fires ``channel.messages.gated{reason=parse_failure}``,
+    # so the two are not disjoint — do not sum them.
     inst.deliberation_parse_failures = meter.create_counter(
         name="deliberation.parse_failures",
         unit="{failure}",

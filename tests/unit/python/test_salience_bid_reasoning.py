@@ -256,9 +256,10 @@ class TestFailClosedAndCounter:
 
 
 class TestTokenScaling:
-    """``_BID_MAX_OUTPUT_TOKENS`` (scalar 64) scales up with ``mode`` — a modest
-    bump for the structured ``bid`` verdict, a larger ceiling for the eventual
-    ``plan`` ``CompositionPlan`` (PR 3)."""
+    """The output-token cap scales with ``mode``: ``_SCALAR_MAX_OUTPUT_TOKENS``
+    (64) → ``_BID_MAX_OUTPUT_TOKENS`` (128) for the structured verdict →
+    ``_PLAN_MAX_OUTPUT_TOKENS`` (320) for the eventual ``plan``
+    ``CompositionPlan`` (PR 3)."""
 
     def test_token_budget_is_monotonic_in_mode(self):
         off = max_output_tokens_for(MODE_OFF)
@@ -328,3 +329,109 @@ class TestStructuredPromptShape:
         )[0]["content"]
         assert "speak: yes|no" in body
         assert "should_post:" not in body
+
+
+class TestStructuredParserRigor:
+    """The structured ``should_post`` parser keeps the scalar parser's
+    fail-*toward-silence* rigor (cf. ``_SCORE_RE``'s ``(?!\\d)`` guard): a token
+    that merely *starts* with ``yes`` must never partial-match into a speak
+    verdict — the one direction the parser could fail toward speech."""
+
+    async def test_yes_prefixed_word_does_not_leak_to_speak(self):
+        """``should_post: yesterday`` must not clip to ``yes`` and speak; it
+        falls through to ``parse_failure`` → silence (fail-closed)."""
+        decision = await _bid(
+            client=_client("should_post: yesterday\nreason_code: adds_substance"),
+            mode=MODE_BID,
+        )
+        assert decision.speak is False
+        assert decision.reason == "parse_failure"
+
+    @pytest.mark.parametrize(
+        "verdict", ["should_post: yes.", "should_post: yes,", "should_post: yes"],
+    )
+    async def test_trailing_punctuation_after_yes_still_speaks(self, verdict: str):
+        """The word-boundary guard must not over-reject: a sentence-final or
+        comma-trailed ``yes`` still parses as a speak verdict."""
+        decision = await _bid(
+            client=_client(f"{verdict}\nreason_code: adds_substance"), mode=MODE_BID,
+        )
+        assert decision.speak is True
+
+    async def test_no_prefixed_word_falls_closed_to_silence(self):
+        """``should_post: nope`` is outside the asked grammar; whichever way it
+        is read the direction is *silence*, never speech."""
+        decision = await _bid(client=_client("should_post: nope"), mode=MODE_BID)
+        assert decision.speak is False
+
+
+class TestAddressingUnderReasoning:
+    """Under reasoning the NL-addressing signal is **advisory only**: it still
+    rides the prompt as a prose nudge, but the deterministic ``_bar_for`` shift
+    (TB4) is part of the score gate the structured verdict supersedes, so it can
+    no longer change the outcome on its own — ``should_post`` governs. These pin
+    that intended contract (previously untested)."""
+
+    async def test_self_named_does_not_rescue_a_should_post_no(self):
+        """Invited-by-name lowers the *scalar* bar; under reasoning there is no
+        bar, so ``should_post: no`` still silences the named persona."""
+        decision = await _bid(
+            client=_client("should_post: no\nreason_code: only_agreeing"),
+            mode=MODE_BID,
+            content="Let's hear from Ember Owl on this.",
+        )
+        assert decision.speak is False
+        assert decision.reason == REASON_ONLY_AGREEING
+
+    async def test_other_named_does_not_veto_a_should_post_yes(self):
+        """Someone-else-invited raises the *scalar* bar; under reasoning
+        ``should_post: yes`` speaks regardless."""
+        decision = await _bid(
+            client=_client("should_post: yes\nreason_code: adds_substance"),
+            mode=MODE_BID,
+            content="Let's hear from Iron Fox on this.",
+        )
+        assert decision.speak is True
+        assert decision.reason == REASON_ADDS_SUBSTANCE
+
+    def test_addressing_prose_still_rides_under_reasoning(self):
+        """Advisory, not ignored: the self-invite nudge is still rendered into
+        the structured prompt body even though the deterministic shift is gone."""
+        from agents.salience_addressing import NLAddressing  # noqa: PLC0415
+        from agents.salience_bid import _build_bid_messages  # noqa: PLC0415
+
+        body = _build_bid_messages(
+            content="hi",
+            transcript=[],
+            addressing=NLAddressing(self_named=True, other_named=False),
+            mode=MODE_BID,
+        )[0]["content"]
+        assert "invited by name" in body
+
+
+class TestUnknownModeIsLoud:
+    """A typo'd ``mode`` falls back to the scalar gate (fail-safe), but must not
+    do so *silently* — the config-layer ``validate`` that rejects an unbacked
+    ``mode`` outright is a later PR (PR 4), so the bid logs the fallback now."""
+
+    def test_is_known_mode(self):
+        from agents.salience_deliberation import is_known_mode  # noqa: PLC0415
+
+        assert is_known_mode(MODE_OFF) is True
+        assert is_known_mode(MODE_BID) is True
+        assert is_known_mode(MODE_PLAN) is True
+        assert is_known_mode("garbage") is False
+
+    async def test_unknown_mode_warns_and_falls_back_to_scalar(self, caplog):
+        import logging  # noqa: PLC0415
+
+        with caplog.at_level(logging.WARNING):
+            decision = await _bid(
+                client=_client("should_post: yes\nreason_code: adds_substance"),
+                mode="garbage",
+            )
+        # Scalar fallback: a structured-looking text has no parseable ``score:``,
+        # so the scalar gate silences it — proving the unknown mode degraded to
+        # ``off`` rather than taking the structured path.
+        assert decision.speak is False
+        assert "unrecognised reasoning mode" in caplog.text

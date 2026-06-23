@@ -80,10 +80,8 @@ __all__ = [
 # choice is honoured; an unconfigured/unknown alias fails *closed* (silence).
 _BID_MODEL_ALIAS: Final[str] = "fast"
 
-# The bid's output-token budget is mode-scaled in
-# :func:`agents.salience_deliberation.max_output_tokens_for`; truncation fails
-# *closed* to silence (TB2), so the budgets stay conservative. Low temperature:
-# the bid is a judgement, not a creative turn.
+# Output-token budget is mode-scaled (see ``salience_deliberation``); truncation
+# fails *closed* to silence (TB2). Low temperature: a judgement, not creative.
 _BID_TEMPERATURE: Final[float] = 0.0
 
 # TB2: the implicit bar an *unset* (``None``) threshold must clear. An unset
@@ -392,8 +390,9 @@ async def evaluate_salience(
         )
         return SalienceDecision(speak=False, score=None, reason="model_unresolvable")
 
+    deliberation.warn_if_unknown_mode(mode, agent_id=agent_id)
     # PR 3 — free-text addressing signal. Computed before the call so it both
-    # nudges the prompt and shifts the deterministic score bar below.
+    # nudges the prompt and (scalar path only) shifts the deterministic score bar.
     addressing = detect_nl_addressing(content=content, persona_name=persona_name)
 
     try:
@@ -459,10 +458,11 @@ async def evaluate_salience(
         )
         return SalienceDecision(speak=False, score=None, reason="llm_error")
 
-    # RFC 0051 — under reasoning the structured verdict supersedes the score gate
-    # (``should_post`` alone decides, parsed fail-closed to silence). The shared
-    # lease/error handling above applies to both modes; the scalar branch below
-    # is untouched, so ``mode: off`` stays byte-for-byte unchanged.
+    # RFC 0051 — under reasoning the structured verdict supersedes the score gate:
+    # ``should_post`` alone decides (parsed fail-closed to silence). The
+    # NL-addressing ``_bar_for`` shift (TB4) is *part of* that superseded gate, so
+    # here ``addressing`` survives only as the advisory prompt nudge above, not a
+    # deterministic bias. ``mode: off`` (the scalar branch below) is untouched.
     if deliberation.is_structured(mode):
         should_post, reason_code, reason_note = deliberation.parse_verdict(response.text, mode=mode)
         return SalienceDecision(

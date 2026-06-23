@@ -31,11 +31,14 @@ config knob and [PR 6](../docs/rfcs/0051-pr-plan.md) flips the governed default.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Final
 
 from .observability._metrics_salience import deliberation_parse_failure_attrs
 from .observability.metrics import try_get_instruments
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "MODE_BID",
@@ -46,11 +49,13 @@ __all__ = [
     "REASON_NOTHING_TO_ADD",
     "REASON_ONLY_AGREEING",
     "REASON_PARSE_FAILURE",
+    "is_known_mode",
     "is_structured",
     "max_output_tokens_for",
     "parse_verdict",
     "system_snippet",
     "user_snippet",
+    "warn_if_unknown_mode",
 ]
 
 # ``reasoning.mode`` values (RFC 0051 §G). ``off`` is byte-for-byte the scalar
@@ -61,6 +66,7 @@ MODE_OFF: Final[str] = "off"
 MODE_BID: Final[str] = "bid"
 MODE_PLAN: Final[str] = "plan"
 _STRUCTURED_MODES: Final[frozenset[str]] = frozenset({MODE_BID, MODE_PLAN})
+_KNOWN_MODES: Final[frozenset[str]] = frozenset({MODE_OFF, MODE_BID, MODE_PLAN})
 
 # The runtime-prompt snippets the bid loads, keyed by mode. Named here, next to
 # the grammar regexes that parse what they produce, so the prompt form and its
@@ -89,7 +95,10 @@ def system_snippet(mode: str) -> str:
 # lines), and ``plan`` (PR 3) additionally carries a ``CompositionPlan`` — so
 # the cap scales up: a modest bump for ``bid``, a larger ceiling for ``plan``.
 # Truncation still fails closed, but a too-tight cap would manufacture parse
-# failures, so the cap must comfortably fit each rung's output.
+# failures, so the cap must comfortably fit each rung's output. NOTE: until PR 3
+# wires the ``CompositionPlan``, ``plan`` shares the ``bid`` prompt+parser, so
+# its larger cap is forward *headroom* — ``max_tokens`` is a ceiling, not a
+# floor, and today's bid-shaped output stops well short of it (no extra cost).
 _SCALAR_MAX_OUTPUT_TOKENS: Final[int] = 64
 _BID_MAX_OUTPUT_TOKENS: Final[int] = 128
 _PLAN_MAX_OUTPUT_TOKENS: Final[int] = 320
@@ -112,6 +121,30 @@ def is_structured(mode: str) -> bool:
     """``True`` for the reasoning rungs (``bid``/``plan``); ``False`` for ``off``
     and any unknown value (which falls back to the scalar gate, fail-safe)."""
     return mode in _STRUCTURED_MODES
+
+
+def is_known_mode(mode: str) -> bool:
+    """``True`` for a recognised ``reasoning.mode`` (``off``/``bid``/``plan``).
+
+    An unknown value still resolves to the scalar gate fail-safe (via
+    :func:`is_structured` / :func:`max_output_tokens_for`); this predicate exists
+    so the caller can *notice* the typo — see :func:`warn_if_unknown_mode`."""
+    return mode in _KNOWN_MODES
+
+
+def warn_if_unknown_mode(mode: str, *, agent_id: str) -> None:
+    """Log once when an unrecognised ``mode`` reaches the bid.
+
+    The bid then degrades to the scalar score gate (``is_structured`` is
+    ``False`` for any unknown value), so the fallback is *fail-safe* — but
+    without this a typo'd ``reasoning.mode`` would silently disable the
+    structured verdict with no signal until the Phase-3 config ``validate``
+    (PR 4) rejects an unbacked value outright."""
+    if mode not in _KNOWN_MODES:
+        logger.warning(
+            "Tier B salience bid: unrecognised reasoning mode %r for agent %s; "
+            "using the scalar score gate", mode, agent_id,
+        )
 
 
 # ── Reason-code vocabulary ───────────────────────────────────────────────────
@@ -139,10 +172,16 @@ _SILENCE_CODES: Final[frozenset[str]] = frozenset(
 
 # Grammar. Forgiving of surrounding prose (the model may editorialize) but a
 # missing ``should_post:`` is a parse failure → silence (fail-closed). The
-# ``reason_note`` capture is single-line and bounded so a runaway clause cannot
-# bloat the debug log.
+# trailing ``\b`` mirrors the scalar ``_SCORE_RE``'s ``(?!\d)`` guard — it keeps
+# closed the *one* direction the parser could fail *toward* speech: a token that
+# merely starts with ``yes`` (``should_post: yesterday``) must not partial-match
+# into a speak verdict; it falls through to ``parse_failure`` → silence instead.
+# (A ``no``-prefixed token like ``nope`` likewise stops matching, but its
+# direction is already silence, so the guard only ever *removes* a false speak.)
+# The ``reason_note`` capture is single-line and bounded so a runaway clause
+# cannot bloat the debug log.
 _SHOULD_POST_RE: Final[re.Pattern[str]] = re.compile(
-    r"should_post\s*[:=]\s*(?P<v>yes|no)", re.IGNORECASE,
+    r"should_post\s*[:=]\s*(?P<v>yes|no)\b", re.IGNORECASE,
 )
 _REASON_CODE_RE: Final[re.Pattern[str]] = re.compile(
     r"reason_code\s*[:=]\s*(?P<v>[a-z][a-z_]*)", re.IGNORECASE,
@@ -190,9 +229,13 @@ def parse_verdict(text: str | None, *, mode: str) -> tuple[bool, str, str | None
     ``(False, "parse_failure", None)`` **and** increments the first-class
     ``deliberation.parse_failures`` counter — the mandatory, never-gated safety
     net that makes a silent parser break alertable, distinct from genuine
-    no-pile-on dampening on ``channel.messages.gated``. ``mode`` is carried only
-    as the counter's low-cardinality attribute (the caller has already chosen
-    the structured path)."""
+    no-pile-on dampening on ``channel.messages.gated``. The two are
+    **additive, not a re-route**: once the seam is wired (PR 2) a reasoning
+    parse failure still rides ``channel.messages.gated{reason=parse_failure}``
+    too — this counter adds a *second*, never-gated signal, so the two must not
+    be summed as if disjoint. ``mode`` is carried only as the counter's
+    low-cardinality attribute (the caller has already chosen the structured
+    path)."""
     should_post = _parse_should_post(text or "")
     if should_post is None:
         inst = try_get_instruments()
