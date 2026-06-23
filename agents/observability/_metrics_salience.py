@@ -37,13 +37,30 @@ if TYPE_CHECKING:
 
 
 def register(inst: _Instruments, meter: Meter) -> None:
-    """Register ``channel.messages.salience_skipped`` on ``inst``."""
+    """Register the Tier-B salience counters on ``inst``."""
     inst.channel_messages_salience_skipped = meter.create_counter(
         name="channel.messages.salience_skipped",
         unit="{message}",
         description=(
             "Open-floor channel messages where the RFC 0030 Tier B salience "
             "bid was skipped (not run). Attribute: reason (channel_too_large)."
+        ),
+    )
+    # RFC 0051 Phase 1a — the deliberation parse-failure safety net. A
+    # structured ``should_post`` verdict that fails to parse falls *closed* to
+    # silence; without a first-class counter that fail-closed error is buried in
+    # the ``channel.messages.gated{reason=parse_failure}`` suppression totals and
+    # reads as intended no-pile-on dampening. This counter is the **mandatory,
+    # never-gated** signal that makes a silent parser break alertable. Kept
+    # distinct from ``channel.messages.gated`` on purpose (two operational
+    # signals: a broken parser vs. the feature working as designed).
+    inst.deliberation_parse_failures = meter.create_counter(
+        name="deliberation.parse_failures",
+        unit="{failure}",
+        description=(
+            "RFC 0051 structured deliberation verdicts that failed to parse and "
+            "fell closed to silence. Attribute: mode (bid|plan). Distinct from "
+            "channel.messages.gated — a broken parser, not no-pile-on dampening."
         ),
     )
 
@@ -74,3 +91,11 @@ def salience_gated_attrs(*, channel_id: str, reason: str) -> dict[str, str]:
         "policy": POLICY_LOW_SALIENCE,
         "reason": reason,
     }
+
+
+def deliberation_parse_failure_attrs(*, mode: str) -> dict[str, str]:
+    """Attribute set for ``deliberation.parse_failures`` (RFC 0051 Phase 1a).
+    ``mode`` (``bid``/``plan``) is the only dimension — bounded and small —
+    so an operator can see *which* reasoning rung is breaking; the rationale
+    matches :func:`salience_skip_attrs`."""
+    return {"mode": mode}

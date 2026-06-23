@@ -119,6 +119,11 @@ def _touch_all(inst: pmetrics._Instruments) -> None:
     inst.channel_messages_salience_skipped.add(
         1, attributes={"reason": "channel_too_large"},
     )
+    # RFC 0051 Phase 1a (v0.3.10) — the deliberation parse-failure safety net,
+    # registered alongside the skip counter by the ``_metrics_salience`` split.
+    # Touched here for the same rename/unit-drift protection (it is an out-of-line
+    # class annotation, so mypy cannot catch a registration omission).
+    inst.deliberation_parse_failures.add(1, attributes={"mode": "bid"})
 
 
 def _collect(reader: InMemoryMetricReader) -> dict[str, Any]:
@@ -186,6 +191,10 @@ class TestInstrumentInventory:
             # here so the ``_metrics_salience`` split stays wired into the
             # ``_Instruments`` registration loop.
             "channel.messages.salience_skipped",
+            # RFC 0051 Phase 1a (v0.3.10) — the deliberation parse-failure safety
+            # net, the mandatory never-gated signal kept distinct from
+            # ``channel.messages.gated``. Registered by the same split.
+            "deliberation.parse_failures",
         }
         missing = expected - names
         assert not missing, f"Missing instruments: {missing}"
@@ -213,6 +222,7 @@ class TestInstrumentInventory:
             "agent.wake.salience": "{wake}",
             "agent.wake.dropped": "{wake}",
             "channel.messages.salience_skipped": "{message}",
+            "deliberation.parse_failures": "{failure}",
         }
         for name, unit in expected_units.items():
             assert seen.get(name) == unit, f"{name} unit={seen.get(name)!r} expected={unit!r}"
