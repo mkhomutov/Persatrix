@@ -459,8 +459,8 @@ async def evaluate_salience(
         return SalienceDecision(speak=False, score=None, reason="llm_error")
 
     # RFC 0051 — under reasoning the structured verdict supersedes the score gate:
-    # ``should_post`` alone decides (parsed fail-closed to silence). The
-    # NL-addressing ``_bar_for`` shift (TB4) is *part of* that superseded gate, so
+    # ``should_post`` governs; a silence ``reason_code`` vetoes it (TB2, fail-
+    # closed). The NL-addressing ``_bar_for`` shift (TB4) is *part of* that gate, so
     # here ``addressing`` survives only as the advisory prompt nudge above, not a
     # deterministic bias. ``mode: off`` (the scalar branch below) is untouched.
     if deliberation.is_structured(mode):

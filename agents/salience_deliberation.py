@@ -132,8 +132,17 @@ def is_known_mode(mode: str) -> bool:
     return mode in _KNOWN_MODES
 
 
+# An unrecognised ``mode`` is a *config-level* mistake (one bad value, repeated
+# on every governed admit), not a per-message one — so the diagnostic dedups on
+# the value and fires once per distinct typo rather than per bid. Without this,
+# a single mistyped config line would spam a WARNING for every open-floor admit
+# on every channel the agent serves. Process-local: each agent process re-warns
+# once, the right granularity for a per-process config load.
+_WARNED_UNKNOWN_MODES: set[str] = set()
+
+
 def warn_if_unknown_mode(mode: str, *, agent_id: str) -> None:
-    """Log once when an unrecognised ``mode`` reaches the bid.
+    """Log once per distinct unrecognised ``mode`` that reaches the bid.
 
     The bid then degrades to the scalar score gate (``is_structured`` is
     ``False`` for any unknown value), so the fallback is *fail-safe* — but
@@ -141,14 +150,21 @@ def warn_if_unknown_mode(mode: str, *, agent_id: str) -> None:
     structured verdict with no signal until the Phase-3 config ``validate``
     (PR 4) rejects an unbacked value outright.
 
+    Deduped on the value (see :data:`_WARNED_UNKNOWN_MODES`): the typo is a
+    standing config fact, so one warning per distinct bad value is enough and
+    re-warning on every hot-path bid is just noise. ``agent_id`` rides the first
+    warning as context; a later agent hitting the *same* bad value is silent.
+
     The caller invokes this *before* resolving the model alias: the unknown-mode
     signal is independent of resolution success, so a separately-unresolvable
     model must not swallow the diagnostic by returning first."""
-    if mode not in _KNOWN_MODES:
-        logger.warning(
-            "Tier B salience bid: unrecognised reasoning mode %r for agent %s; "
-            "using the scalar score gate", mode, agent_id,
-        )
+    if mode in _KNOWN_MODES or mode in _WARNED_UNKNOWN_MODES:
+        return
+    _WARNED_UNKNOWN_MODES.add(mode)
+    logger.warning(
+        "Tier B salience bid: unrecognised reasoning mode %r for agent %s; "
+        "using the scalar score gate", mode, agent_id,
+    )
 
 
 # ── Reason-code vocabulary ───────────────────────────────────────────────────
@@ -194,6 +210,14 @@ _REASON_NOTE_RE: Final[re.Pattern[str]] = re.compile(
     r"reason_note\s*[:=]\s*(?P<v>\S.*)", re.IGNORECASE,
 )
 _REASON_NOTE_MAX_CHARS: Final[int] = 240
+# The user snippet (``salience-bid-reasoning-user.md``) offers an *optional*
+# ``reason_note: <one short clause on why — optional>`` placeholder; a model with
+# nothing to justify may echo it, whole or in part. Detect it by this stable
+# template phrase, **not** by generic angle brackets: the bracket heuristic both
+# leaked a partially-echoed placeholder (``<…> n/a`` ends past the ``>``) and
+# wrongly dropped a legitimately bracket-wrapped clause (``<iron-fox covered
+# it>``). Keep this marker in sync with that snippet.
+_REASON_NOTE_PLACEHOLDER_MARKER: Final[str] = "one short clause on why"
 
 
 def _parse_should_post(text: str) -> bool | None:
@@ -203,16 +227,25 @@ def _parse_should_post(text: str) -> bool | None:
     return match.group("v").lower() == "yes"
 
 
-def _normalize_reason_code(text: str, *, should_post: bool) -> str:
-    """Map the model's ``reason_code`` onto the closed vocabulary. A speak
-    verdict defaults to ``adds_substance`` (the sole speak-side code); a silence
-    verdict to ``nothing_to_add``. An off-enum value collapses to that default
-    rather than reaching the metric verbatim."""
+def _resolve_reason_code(text: str, *, should_post: bool) -> str:
+    """Map the model's ``reason_code`` onto the closed vocabulary.
+
+    An *explicit* silence code (``only_agreeing`` / ``already_answered`` /
+    ``nothing_to_add``) is preserved verbatim — even on a ``should_post: yes``,
+    where it signals a self-contradiction the caller resolves toward silence
+    (:func:`parse_verdict`). Everything else defaults *by direction* —
+    ``adds_substance`` for a yes, ``nothing_to_add`` for a no — so a missing or
+    off-enum value never reaches the metric raw and never blows its cardinality.
+
+    Note ``adds_substance`` stays the sole *speak-side* (``speak=True``) code:
+    only a non-silence code clears the veto in :func:`parse_verdict`, and a no
+    with a stray ``adds_substance`` label collapses to ``nothing_to_add`` here
+    (a silenced turn is never labelled with the speak code)."""
     match = _REASON_CODE_RE.search(text)
     raw = match.group("v").lower() if match else ""
-    if should_post:
-        return REASON_ADDS_SUBSTANCE
-    return raw if raw in _SILENCE_CODES else REASON_NOTHING_TO_ADD
+    if raw in _SILENCE_CODES:
+        return raw
+    return REASON_ADDS_SUBSTANCE if should_post else REASON_NOTHING_TO_ADD
 
 
 def _parse_reason_note(text: str) -> str | None:
@@ -222,18 +255,27 @@ def _parse_reason_note(text: str) -> str | None:
     note = match.group("v").strip()
     if not note:
         return None
-    # A model with nothing to justify may echo the user snippet's literal
-    # ``<one short clause on why — optional>`` placeholder verbatim. That is the
-    # snippet's only ``<…>`` field, so an angle-bracket-wrapped capture is the
-    # placeholder, not a justification — drop it to ``None`` rather than leak
-    # template noise into the operator-debug egress (RFC 0051 §E).
-    if note.startswith("<") and note.endswith(">"):
+    # Drop an echoed placeholder (whole or partial) so template noise never
+    # leaks into the operator-debug egress (RFC 0051 §E) — see the marker above.
+    if _REASON_NOTE_PLACEHOLDER_MARKER in note.casefold():
         return None
     return note[:_REASON_NOTE_MAX_CHARS]
 
 
+def _parse_failure_mode_label(mode: str) -> str:
+    """The bounded ``mode`` label for the parse-failure counter.
+
+    :func:`parse_verdict` is module-public, so a rogue caller's ``mode`` must not
+    reach the metric verbatim and blow its cardinality — clamp anything outside
+    the structured set to ``off`` (mirrors how ``reason_code`` is clamped to its
+    closed vocabulary). ``evaluate_salience`` only ever passes ``bid``/``plan``,
+    so this only bites a direct misuse, but the metric boundary is the right
+    place to be defensive rather than trusting every caller."""
+    return mode if is_structured(mode) else MODE_OFF
+
+
 def parse_verdict(text: str | None, *, mode: str) -> tuple[bool, str, str | None]:
-    """Parse a structured deliberation response into ``(should_post, reason_code,
+    """Parse a structured deliberation response into ``(speak, reason_code,
     reason_note)``.
 
     Fail-closed to silence: a missing/unparseable ``should_post:`` returns
@@ -244,17 +286,28 @@ def parse_verdict(text: str | None, *, mode: str) -> tuple[bool, str, str | None
     **additive, not a re-route**: once the seam is wired (PR 2) a reasoning
     parse failure still rides ``channel.messages.gated{reason=parse_failure}``
     too — this counter adds a *second*, never-gated signal, so the two must not
-    be summed as if disjoint. ``mode`` is carried only as the counter's
-    low-cardinality attribute (the caller has already chosen the structured
-    path)."""
+    be summed as if disjoint. The counter's ``mode`` attribute is clamped to a
+    bounded value (:func:`_parse_failure_mode_label`).
+
+    Silence-side veto (TB2 parity with the scalar ``speak: no`` one-way veto):
+    an explicit silence ``reason_code`` on a ``should_post: yes`` is a model
+    self-contradiction — it has not given a clean speak verdict, so bias-to-
+    silence resolves it to silence, and the silence code is *preserved* (not
+    laundered into ``adds_substance``) so the contradiction stays visible on the
+    audit/metric. Only a non-silence code on a yes clears the veto and speaks."""
     should_post = _parse_should_post(text or "")
     if should_post is None:
         inst = try_get_instruments()
         if inst is not None:
             inst.deliberation_parse_failures.add(
-                1, attributes=deliberation_parse_failure_attrs(mode=mode),
+                1,
+                attributes=deliberation_parse_failure_attrs(
+                    mode=_parse_failure_mode_label(mode),
+                ),
             )
         return (False, REASON_PARSE_FAILURE, None)
-    reason_code = _normalize_reason_code(text or "", should_post=should_post)
+    reason_code = _resolve_reason_code(text or "", should_post=should_post)
+    # The silence-side veto: a yes survives only with a genuine speak-side code.
+    speak = should_post and reason_code == REASON_ADDS_SUBSTANCE
     reason_note = _parse_reason_note(text or "")
-    return (should_post, reason_code, reason_note)
+    return (speak, reason_code, reason_note)
