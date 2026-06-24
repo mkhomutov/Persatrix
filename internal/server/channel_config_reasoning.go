@@ -149,16 +149,13 @@ func (s *Server) reasoningBaseline(ctx context.Context, id string) *channels.Rea
 // reasoning analogue of [Server.chairIsEnforceableMember] and shares its posture: a
 // store error reading members is treated as "not governed" so the first-edit
 // baseline drops the inert mode and the edit proceeds, rather than blocking it on a
-// transient fault (the apply path that follows surfaces any real outage anyway).
+// transient fault (the apply path that follows surfaces any real outage anyway). The
+// "any gated member?" test is shared with the router-side callers via
+// [channels.AnySalienceGated]; only the GetMembers + error posture is local.
 func (s *Server) channelHasSalienceGatedMember(ctx context.Context, id string) bool {
 	members, err := s.channelStore.GetMembers(ctx, id)
 	if err != nil {
 		return false
 	}
-	for i := range members {
-		if members[i].SalienceGated {
-			return true
-		}
-	}
-	return false
+	return channels.AnySalienceGated(members)
 }

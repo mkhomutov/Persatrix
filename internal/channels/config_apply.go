@@ -175,25 +175,41 @@ func (r *ChannelRouter) ApplyChannelConfig(ctx context.Context, channelID string
 	return nil
 }
 
-// channelGoverned reports whether `channelID` currently has at least one
-// salience-gated (open-floor participant/chair) member — the live-membership
-// signal the RFC 0051 reasoning resolution needs to pick the governed default
-// ([governedReasoningBase]). The router-side counterpart to the load-time
-// [ChannelConfig.governed] and the server's [Server.channelHasSalienceGatedMember],
-// sharing their posture: a store error reading members resolves to "not governed"
-// so the resolve falls back to the package `off` default (the conservative, no-op
-// direction) rather than failing the apply/boot path on a transient fault.
-func (r *ChannelRouter) channelGoverned(ctx context.Context, channelID string) bool {
-	members, err := r.store.GetMembers(ctx, channelID)
-	if err != nil {
-		return false
-	}
+// AnySalienceGated reports whether a resolved roster holds at least one
+// salience-gated (RFC 0030 Tier B open-floor participant/chair) member — the
+// single "is this channel governed?" predicate over the runtime [Member] shape.
+// All three store-read callers fold into it, each keeping its own GetMembers +
+// error posture (which differs by caller): [ChannelRouter.channelGoverned] and the
+// server's channelHasSalienceGatedMember fail a read to "not governed", while
+// [ChannelRouter.validateReasoningGoverned] fails it to an error. The load-time
+// counterpart over the YAML [MemberConfig] shape is [ChannelConfig.governed]; both
+// only read the per-member SalienceGated bool already resolved at unmarshal
+// ([ResolveSalienceSignal]), so the governance *definition* stays single-sourced
+// there and only the loop is shared here.
+func AnySalienceGated(members []Member) bool {
 	for i := range members {
 		if members[i].SalienceGated {
 			return true
 		}
 	}
 	return false
+}
+
+// channelGoverned reports whether `channelID` currently has at least one
+// salience-gated (open-floor participant/chair) member — the live-membership
+// signal the RFC 0051 reasoning resolution needs to pick the governed default
+// ([governedReasoningBase]). The router-side counterpart to the load-time
+// [ChannelConfig.governed] and the server's [Server.channelHasSalienceGatedMember];
+// the "any gated member?" test is shared via [AnySalienceGated]. Posture: a store
+// error reading members resolves to "not governed" so the resolve falls back to the
+// package `off` default (the conservative, no-op direction) rather than failing the
+// apply/boot path on a transient fault.
+func (r *ChannelRouter) channelGoverned(ctx context.Context, channelID string) bool {
+	members, err := r.store.GetMembers(ctx, channelID)
+	if err != nil {
+		return false
+	}
+	return AnySalienceGated(members)
 }
 
 // validateEscalationChair enforces the cross-field escalation-chair rules from
@@ -270,10 +286,8 @@ func (r *ChannelRouter) validateReasoningGoverned(ctx context.Context, channelID
 	if err != nil {
 		return fmt.Errorf("channels: apply config %s: load members: %w", channelID, err)
 	}
-	for i := range members {
-		if members[i].SalienceGated {
-			return nil
-		}
+	if AnySalienceGated(members) {
+		return nil
 	}
 	return fmt.Errorf("channels: apply config %s: %w: %q requires a salience-gated (open-floor participant/chair) member; the knob does not by itself arm the gate",
 		channelID, ErrInvalidReasoningMode, mode)
