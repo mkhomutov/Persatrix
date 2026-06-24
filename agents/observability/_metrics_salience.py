@@ -62,7 +62,8 @@ def register(inst: _Instruments, meter: Meter) -> None:
         unit="{failure}",
         description=(
             "RFC 0051 structured deliberation verdicts that failed to parse and "
-            "fell closed to silence. Attribute: mode (bid|plan). Distinct from "
+            "fell closed to silence. Attribute: mode (bid|plan; off marks a "
+            "non-structured-mode misuse of the public parser). Distinct from "
             "channel.messages.gated — a broken parser, not no-pile-on dampening."
         ),
     )
@@ -100,5 +101,7 @@ def deliberation_parse_failure_attrs(*, mode: str) -> dict[str, str]:
     """Attribute set for ``deliberation.parse_failures`` (RFC 0051 Phase 1a).
     ``mode`` (``bid``/``plan``) is the only dimension — bounded and small —
     so an operator can see *which* reasoning rung is breaking; the rationale
-    matches :func:`salience_skip_attrs`."""
+    matches :func:`salience_skip_attrs`. The caller
+    (:func:`agents.salience_deliberation.parse_verdict`) clamps ``mode`` to the
+    bounded set before passing it, so a rogue value never reaches the label."""
     return {"mode": mode}

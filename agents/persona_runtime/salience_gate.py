@@ -31,9 +31,10 @@ response behaviour.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from ..observability._metrics_salience import salience_gated_attrs, salience_skip_attrs
 from ..observability.metrics import try_get_instruments
@@ -43,6 +44,7 @@ from ..salience_bid import (
     evaluate_salience,
     skip_bid_for_channel_size,
 )
+from ..salience_deliberation import MODE_OFF, is_structured
 from .wallet_cause import cause_for_event, lease_interaction_id_for_event
 
 if TYPE_CHECKING:
@@ -52,6 +54,49 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["SalienceOutcome", "run_salience_gate"]
+
+# RFC 0051 PR 2 — the deliberation audit event name (RFC 0009 §G shape). The
+# canonical registry + severity classification live Go-side in
+# ``internal/security/audit_event.go`` (``AuditAgentDeliberated``,
+# telemetry-class); the decision is made *here* in the Python runtime, which
+# has no Go audit RPC, so it emits the record on this structured-log egress.
+_AUDIT_EVENT_DELIBERATED: Final[str] = "agent.deliberated"
+
+
+def _emit_deliberated_audit(
+    *,
+    agent_id: str,
+    channel_id: str,
+    should_post: bool,
+    reason_code: str,
+    transcript_turns: int,
+) -> None:
+    """Emit the RFC 0051 ``agent.deliberated`` audit record (post-commit).
+
+    Carries the *decision* (``should_post``), the closed-set ``reason_code``,
+    and low-cardinality *counts* — and **never** the verbatim ``reason_note`` or
+    the ``CompositionPlan`` (RFC 0051 §E privacy wall / §Security). The wall is
+    structural: the payload is bool/enum/int by construction, so there is nothing
+    private to leak and no free-text redaction is needed — the seam never reads
+    ``reason_note`` onto it.
+
+    Best-effort, post-commit: the deliberation has already happened, so a
+    structured-log hiccup must never undo or block the turn. This applies the
+    RFC 0009 §G "the decision already happened — don't drop the record" rule on
+    the Python emit path rather than the Go ``context.WithoutCancel`` API
+    (RFC 0051 §Security)."""
+    with contextlib.suppress(Exception):
+        logger.info(
+            _AUDIT_EVENT_DELIBERATED,
+            extra={
+                "audit": True,
+                "agent_id": agent_id,
+                "channel_id": channel_id,
+                "should_post": should_post,
+                "reason_code": reason_code,
+                "transcript_turns": transcript_turns,
+            },
+        )
 
 # Bid inputs carried on the inbound ``CHANNEL_MESSAGE`` payload alongside
 # ``respond_policy`` / ``mentions``. Populated by the Go dispatcher and lifted
@@ -127,6 +172,7 @@ def _max_members(event: AgentEvent) -> int:
 
 async def run_salience_gate(
     agent: Any, event: AgentEvent, decision: GateDecision,
+    *, mode: str = MODE_OFF,
 ) -> SalienceOutcome | None:
     """Run the Tier B salience bid for one admitted event, if applicable.
 
@@ -140,6 +186,15 @@ async def run_salience_gate(
     method to keep ``action_loop.py`` thin); the seam uses its
     ``_format_event`` / ``_build_seed_messages`` / ``_store_event_episode``
     methods and its ``_llm_client`` / identity attributes.
+
+    ``mode`` (RFC 0051 §C/§G) selects the bid's verdict grammar and ships
+    **dark**: the ``action_loop`` call site passes nothing, so production stays
+    on the ``off`` scalar score gate (byte-for-byte v0.3.8) until the Phase-3
+    config knob (PR 4) and default flip (PR 6) wire it. On the structured rungs
+    (``bid``/``plan``) the seam additionally emits the ``agent.deliberated``
+    audit (decision + ``reason_code`` + counts, never the ``reason_note`` or
+    plan, RFC 0051 §E). The TB6 channel-too-large *skip* is not a deliberation,
+    so it emits no audit even under reasoning.
     """
     if not (is_open_floor_admit(decision) and _governed(event)):
         return None
@@ -205,7 +260,27 @@ async def run_salience_gate(
         # RFC 0030 producer plan PR 2: same interaction attribution as the
         # quality turn — see evaluate_salience's interaction_id contract.
         interaction_id=lease_interaction_id_for_event(event),
+        # RFC 0051 PR 2 — dark by default (action_loop passes nothing): ``off``
+        # is the scalar score gate; ``bid``/``plan`` is the structured verdict.
+        mode=mode,
     )
+
+    # RFC 0051 PR 2 — record the deliberation the instant the verdict is in,
+    # *before* the suppression metric / memory ingest below, so the audit
+    # survives a downstream failure (the decision already happened, §Security).
+    # Only the structured rungs deliberate; ``off`` is the scalar gate and stays
+    # byte-for-byte v0.3.8 (no new egress — the dark-ship contract).
+    if is_structured(mode):
+        _emit_deliberated_audit(
+            agent_id=agent.agent_id,
+            channel_id=event.channel_id or "",
+            should_post=salience.speak,
+            reason_code=salience.reason,
+            # ``transcript`` the bid scored is everything *before* the current
+            # message (the seed's last element), per the call above.
+            transcript_turns=max(0, len(seed) - 1),
+        )
+
     if not salience.speak:
         # No-pile-on: suppress the turn before paying for memory recall or
         # the quality LLM call. Still ingest (decide whether to respond, not

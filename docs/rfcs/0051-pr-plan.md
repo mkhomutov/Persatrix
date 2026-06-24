@@ -101,7 +101,7 @@ RFC 0030 Tier B + RFC 0050 + RFC 0034 P2 (all shipped)        ← HARD PREREQUIS
 
 | File | Change |
 |------|--------|
-| [`agents/salience_bid.py`](../../agents/salience_bid.py) | Restructure [`SalienceDecision`](../../agents/salience_bid.py): `should_post` **reuses** the existing `speak` boolean; `reason_code` **is** the existing `reason` low-cardinality label, value-set extended with the semantic cases (`only_agreeing` / `already_answered` / `nothing_to_add` / `adds_substance` / …) and *pruned* of the score-only `below_threshold`; `reason_note` is the one genuinely new field (optional, one short clause, **debug-only**). The bid emits the new `should_post:`/`reason_code:` wire grammar **only under `mode: bid|plan`**; under `mode: off` it emits the byte-for-byte `speak:`/`score:` scalar bid (the per-member `threshold` gate). **No `score` under reasoning** ([OQ 7](0051-reasoning-before-posting.md#open-questions)). Raise `_BID_MAX_OUTPUT_TOKENS` from the scalar 64, **scaled by `mode`** (a modest bump for `bid`). Regex-tolerant parser, **fail-closed to silence**. |
+| [`agents/salience_bid.py`](../../agents/salience_bid.py) | Restructure [`SalienceDecision`](../../agents/salience_bid.py): `should_post` **reuses** the existing `speak` boolean; `reason_code` **is** the existing `reason` low-cardinality label, value-set extended with the semantic cases (`only_agreeing` / `already_answered` / `nothing_to_add` / `adds_substance` / …) and *pruned* of the score-only `below_threshold`; `reason_note` is the one genuinely new field (optional, one short clause, **debug-only**). The bid emits the new `should_post:`/`reason_code:` wire grammar **only under `mode: bid|plan`**; under `mode: off` it emits the byte-for-byte `speak:`/`score:` scalar bid (the per-member `threshold` gate). **No `score` under reasoning** ([OQ 7](0051-reasoning-before-posting.md#open-questions)). Raise the output-token budget from the scalar 64, **scaled by `mode`** (a modest bump for `bid`) — as built, the single `_BID_MAX_OUTPUT_TOKENS` constant split into `_SCALAR_MAX_OUTPUT_TOKENS` (64) → `_BID_MAX_OUTPUT_TOKENS` (128) → `_PLAN_MAX_OUTPUT_TOKENS` (320) in [`salience_deliberation.py`](../../agents/salience_deliberation.py). Regex-tolerant parser, **fail-closed to silence**. |
 | [`agents/observability/_metrics_salience.py`](../../agents/observability/_metrics_salience.py) | A **deliberation parse-failure counter**, kept **distinct** from the existing Tier-B `channel.messages.gated{policy=low_salience}` suppression rows — a fail-closed parse error is otherwise buried in the suppression totals and reads as intended dampening ([RFC Phase 1 §5](0051-reasoning-before-posting.md#phase-1-structured-silence-verdict-tier-b-generalization)). **This counter is the mandatory, never-gated safety net.** |
 | `agents/tests/test_salience_bid.py` | Unit tests (below). |
 
@@ -116,7 +116,7 @@ RFC 0030 Tier B + RFC 0050 + RFC 0034 P2 (all shipped)        ← HARD PREREQUIS
 - Well-formed structured response → correct `should_post` + `reason_code`.
 - Malformed response → **fail-closed silence** *and* the parse-failure counter increments (asserted, not incidental).
 - `mode: off` path is byte-for-byte the existing scalar bid (no `should_post`, score gate intact) — the dark-ship regression.
-- `_BID_MAX_OUTPUT_TOKENS` scales with `mode`.
+- The output-token budget scales with `mode` (as built: `_SCALAR_MAX_OUTPUT_TOKENS` 64 → `_BID_MAX_OUTPUT_TOKENS` 128 → `_PLAN_MAX_OUTPUT_TOKENS` 320).
 
 #### PR checklist
 
@@ -408,8 +408,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 
 | # | Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|-------|--------|--------|-----------|--------|
-| 1 | 1a | Structured silence verdict (dark) | `feature/v0310-rfc0051-silence-verdict` | 🔀 PR open | [#692](https://github.com/mkhomutov/Persatrix/pull/692) | — |
-| 2 | 1b | Seam threading + `agent.deliberated` audit (dark) | `feature/v0310-rfc0051-deliberate-seam` | ⬜ Not started | — | — |
+| 1 | 1a | Structured silence verdict (dark) | `feature/v0310-rfc0051-silence-verdict` | ✅ Merged | [#692](https://github.com/mkhomutov/Persatrix/pull/692) | ✅ |
+| 2 | 1b | Seam threading + `agent.deliberated` audit (dark) | `feature/v0310-rfc0051-deliberate-seam` | 🔀 PR open | [#693](https://github.com/mkhomutov/Persatrix/pull/693) | — |
 | 3 | 2 | Plan-threaded compose + no-leak test (dark) | `feature/v0310-rfc0051-plan-compose` | ⬜ Not started | — | — |
 | 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | ⬜ Not started | — | — |
 | 5 | 3b | CLI + web config surfaces (enum + dotted-key) | `feature/v0310-rfc0051-config-surfaces` | ⬜ Not started | — | — |

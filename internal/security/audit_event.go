@@ -42,6 +42,18 @@ const (
 	// recalled content). The verbatim sibling of memory.read; telemetry-class.
 	AuditChannelRecall AuditEventType = "channel.recall"
 
+	// Reasoning before posting (RFC 0051 PR 2) — a persona's private per-turn
+	// deliberation outcome: the decision (`should_post`), the closed-set
+	// `reason_code`, and low-cardinality counts. NEVER the verbatim
+	// `reason_note` or the CompositionPlan (RFC 0051 §E privacy wall). The
+	// decision happens in the Python runtime, which emits the record on its own
+	// structured-log egress (there is no Python→Go audit RPC), so this constant
+	// is RESERVED — registered to keep the canonical name registry + the
+	// severity-classifier table closed, and as the forward-compatible precursor
+	// to RFC 0028's DecisionRecord (RFC 0051 §A). Telemetry-class, like its
+	// channel.recall / memory.read read-telemetry siblings.
+	AuditAgentDeliberated AuditEventType = "agent.deliberated"
+
 	// Input handling (Phase 2 wiring)
 	AuditInputFlagged AuditEventType = "input.flagged"
 
@@ -98,6 +110,7 @@ func AllAuditEventTypes() []AuditEventType {
 		AuditMemoryWrite,
 		AuditMemoryDenied,
 		AuditChannelRecall,
+		AuditAgentDeliberated,
 		AuditInputFlagged,
 		AuditHITLGateOpened,
 		AuditHITLApproved,
@@ -165,6 +178,7 @@ var telemetryEvents = map[AuditEventType]struct{}{
 	AuditMemoryRead:            {},
 	AuditMemoryWrite:           {},
 	AuditChannelRecall:         {},
+	AuditAgentDeliberated:      {},
 	AuditRateLimitAgentEvicted: {},
 }
 
