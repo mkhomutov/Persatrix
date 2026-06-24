@@ -86,6 +86,15 @@ func (o ChannelConfigOverrides) Validate() error {
 		return fmt.Errorf("%w: %d (must be >= 0)",
 			ErrInvalidInteractionIdleTimeout, *o.InteractionIdleTimeoutSeconds)
 	}
+	// RFC 0051 reasoning block: per-field enum + capability gate (deep / revise≥1
+	// rejected as unbacked). The mode↔governance cross-field rule needs the
+	// channel's membership and so lives in [ChannelRouter.validateReasoningGoverned]
+	// (alongside the escalation-chair rule), not in this pure per-field Validate.
+	if o.Reasoning != nil {
+		if err := o.Reasoning.validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -121,6 +130,18 @@ func (r *ChannelRouter) ApplyChannelConfig(ctx context.Context, channelID string
 	// persists.
 	if err := r.validateEscalationChair(ctx, channelID, patch); err != nil {
 		return err
+	}
+	// RFC 0051: a non-off reasoning mode is also a cross-field rule (it needs a
+	// salience-gated member), validated here against the store's membership.
+	if err := r.validateReasoningGoverned(ctx, channelID, patch); err != nil {
+		return err
+	}
+	// Accepted-but-discouraged: warn (do not reject) on a quality deliberation
+	// model — it defeats the cheap-pass economics (RFC 0051 §F). Logged on the
+	// runtime edit path only; the value still applies.
+	if patch.Reasoning != nil && patch.Reasoning.Model != nil && *patch.Reasoning.Model == ReasoningModelQuality {
+		r.logger.Warn("channels: reasoning.model=quality defeats the cheap-pass economics (RFC 0051 §F); prefer fast",
+			zap.String("channel_id", channelID))
 	}
 
 	// Serialize the persist → re-read → stamp sequence so it is atomic as a
@@ -208,6 +229,34 @@ func (r *ChannelRouter) validateEscalationChair(ctx context.Context, channelID s
 	return nil
 }
 
+// validateReasoningGoverned enforces the RFC 0051 §G cross-field rule against a
+// runtime patch: a non-off `reasoning.mode` requires the channel to have at least
+// one salience-gated member, because the deliberation rides the RFC 0030 Tier B
+// salience seam and is silently inert otherwise. It mirrors the loader's
+// channel-level governed check ([Config.Validate]) against the store's live
+// membership, and runs before the write so a bad mode never persists.
+//
+// An override that does not set `mode` (or sets it to `off`) resolves to the
+// default `off` and needs no membership — so an unrelated first edit on an
+// ungoverned channel is never blocked by a mode the operator did not touch.
+func (r *ChannelRouter) validateReasoningGoverned(ctx context.Context, channelID string, patch ChannelConfigOverrides) error {
+	mode := patch.Reasoning.effectiveMode()
+	if mode == ReasoningModeOff {
+		return nil
+	}
+	members, err := r.store.GetMembers(ctx, channelID)
+	if err != nil {
+		return fmt.Errorf("channels: apply config %s: load members: %w", channelID, err)
+	}
+	for i := range members {
+		if members[i].SalienceGated {
+			return nil
+		}
+	}
+	return fmt.Errorf("channels: apply config %s: %w: %q requires a salience-gated (open-floor participant/chair) member; the knob does not by itself arm the gate",
+		channelID, ErrInvalidReasoningMode, mode)
+}
+
 // applyOverridesToRouter stamps the seven router-held knobs for `channelID` onto
 // the live router from a (canonical) override set: present → the override value,
 // absent → the inherited default. It is the shared seam used by both the runtime
@@ -293,6 +342,12 @@ func (r *ChannelRouter) applyOverridesToRouter(channelID string, o ChannelConfig
 	} else {
 		r.ApplyDefaultInteractionBudget(channelID)
 	}
+
+	// RFC 0051 reasoning block. Absent → the package default rung (off); a present
+	// override overlays its set sub-knobs onto that default. SetReasoning
+	// normalizes any empty field, so a sparse override (`mode: bid` only) resolves
+	// to a complete rung.
+	r.SetReasoning(channelID, o.Reasoning.resolve(DefaultReasoningConfig()))
 }
 
 // ResolveFromStore is the RFC 0050 Phase 1 PR 2 boot repoint: after the per-knob

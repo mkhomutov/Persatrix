@@ -293,6 +293,19 @@ func initChannels(
 			zap.Error(eErr))
 	}
 
+	// RFC 0051 (v0.3.10): resolve the per-channel reasoning-before-posting block
+	// the same way as the salience cap — config channels use their declared (or
+	// load-normalized default) `reasoning` rung, store-resident channels pick up
+	// the default (off). Same non-fatal posture: an enumeration failure leaves the
+	// config channels resolved and any un-resolved channel falls back to the
+	// default rung at read time ([ChannelRouter.ReasoningFor]). Surfacing makes the
+	// rung live in the router and resolves the GET /config value; the agent-side
+	// seam's consumption of `mode`/`model` rides the go-live, not this dark backend.
+	if rsErr := router.ResolveReasoning(context.Background(), chanCfg); rsErr != nil {
+		logger.Warn("channels: reasoning resolution incomplete; config channels resolved, store-resident channels fall back to the default rung until next create/restart",
+			zap.Error(rsErr))
+	}
+
 	// RFC 0050 Phase 1 PR 3: revision-gated YAML reconciliation. Walk every
 	// declared channel and, for any block whose `revision:` is strictly greater
 	// than the store's, adopt the resolved YAML governance set into the canonical

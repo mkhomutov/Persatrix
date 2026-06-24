@@ -258,6 +258,13 @@ type ChannelConfig struct {
 	// [DefaultInteractionIdleTimeoutSeconds]). Negative is rejected. Resolved
 	// via [ChannelConfig.ResolveInteractionIdleTimeoutSeconds].
 	InteractionIdleTimeoutSeconds *int `yaml:"interaction_idle_timeout_seconds"`
+	// Reasoning is the RFC 0051 (v0.3.10) reasoning-before-posting block for this
+	// channel — the deliberation rung (`mode`), the leased model, the depth, and
+	// the reflexion round count. A value type: an absent block is the zero value,
+	// normalized to the shipped default rung (off / fast / shallow / 0) at load
+	// ([ReasoningConfig.normalized]) and validated by [Config.Validate]. Definition
+	// + capability-gated validation live in config_reasoning.go.
+	Reasoning ReasoningConfig `yaml:"reasoning"`
 }
 
 // ResolveMaxRepliesPerParticipant returns the effective RFC 0030 Layer 2 reply
@@ -428,6 +435,11 @@ func LoadConfig(path string) (*Config, error) {
 		if cfg.Channels[i].EndVoteWindow == 0 {
 			cfg.Channels[i].EndVoteWindow = DefaultEndVoteWindow
 		}
+		// RFC 0051: fill any empty reasoning field with the shipped default rung
+		// (off / fast / shallow), so a partial block reads back complete and
+		// Validate sees a populated value. An absent block is the zero value and
+		// normalizes to the full default.
+		cfg.Channels[i].Reasoning = cfg.Channels[i].Reasoning.normalized()
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err

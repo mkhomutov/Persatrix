@@ -123,6 +123,37 @@
           "minimum": 0,
           "description": "This channel's interaction idle window in seconds (the RFC 0030 interaction-id producer, IP3): a publish arriving more than this long after the channel's last one retires the open interaction and mints a fresh one. Tri-state, unlike the integer knobs above: absent inherits `default_interaction_idle_timeout_seconds` (itself defaulting to 600), while an explicit 0 disables idle rotation for this channel — so no `default` is declared here (a schema default would erase the absent-vs-0 distinction the loader's pointer field preserves). Negative is rejected at load time."
         },
+        "reasoning": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "RFC 0051 (v0.3.10) reasoning-before-posting block. Before composing a reply an open-floor `participant`/`chair` privately decides WHETHER the turn is worth a post (`mode: bid`, the silence-only rung — the net pile-on saving) and, one rung up, WHAT the post should accomplish (`mode: plan`, threading a private composition plan into the compose). It generalizes the RFC 0030 Tier B scalar salience bid and RIDES that seam, so it is meaningful only on a channel with a salience-gated `participant`/`chair` member — the Go loader rejects `mode != off` on a channel without one (the knob does not by itself arm the gate). Ships dark in v0.3.10 (default `mode: off` = today's scalar score gate, under which the per-member `threshold` governs); the governed-channel default flips to `bid` in a later step. Absent fields normalize to the default rung (off / fast / shallow / 0).",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["off", "bid", "plan"],
+              "default": "off",
+              "description": "Deliberation rung. `off`: no deliberation — the byte-for-byte RFC 0030 Tier B scalar score gate (the per-member `threshold` governs here). `bid`: the persona privately decides `should_post` before the expensive compose, ending an unworthy turn in DO_NOTHING. `plan`: a `should_post=true` turn additionally threads a private CompositionPlan into the Tier C compose. The ladder is a strict superset chain `off ⊂ bid ⊂ plan`. The Go loader rejects a non-off mode on a channel with no salience-gated member."
+            },
+            "model": {
+              "type": "string",
+              "enum": ["fast", "quality"],
+              "default": "fast",
+              "description": "Which leased model runs the deliberation pass. `fast` is the cheap model already in production for the Tier B bid (the default the net-saving economics assume). `quality` is accepted but warned at load — it defeats the cheap-pass economics (RFC 0051 §F)."
+            },
+            "depth": {
+              "type": "string",
+              "enum": ["shallow", "deep"],
+              "default": "shallow",
+              "description": "Deliberation depth. Only `shallow` is backed in v0.3.10; `deep` (native extended thinking) needs a provider-protocol change and is REJECTED at load by the Go capability gate until RFC 0051 Phase 4 (the enum lists it as the forward-compatible value space, but it is unbacked in this build — set it and the loader errors rather than silently degrading to shallow)."
+            },
+            "revise": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "description": "Reflexion round count (RFC 0051 Phase 5). `0` is single-pass (the default). `>= 1` is REJECTED at load by the Go capability gate until the critic→revise loop is deployed (Phase 5); the schema permits the integer space, the loader is the deployment gate. Meaningful only under `mode: plan` (the critic checks the draft against the plan)."
+            }
+          }
+        },
         "members": {
           "type": "array",
           "minItems": 1,

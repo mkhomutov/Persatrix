@@ -293,6 +293,14 @@ func mergeConfigPatch(current channels.ChannelConfigOverrides, patch map[string]
 				return out, err
 			}
 			out.InteractionIdleTimeoutSeconds = &v
+		case "reasoning":
+			// The first NESTED knob: its value is a JSON object merged sub-key by
+			// sub-key (mergeReasoningPatch), not a scalar. A null clears the block.
+			merged, err := mergeReasoningPatch(out.Reasoning, rawVal)
+			if err != nil {
+				return out, err
+			}
+			out.Reasoning = merged
 		default:
 			return out, errors.New("unknown config knob: " + key)
 		}
@@ -362,6 +370,7 @@ func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (cha
 		EndVoteWindow:                          configField(wWindow, overrides.EndVoteWindow != nil),
 		EscalationChairID:                      configField(chair, overrides.EscalationChairID != nil),
 		InteractionIdleTimeoutSeconds:          configField(idleSeconds, overrides.InteractionIdleTimeoutSeconds != nil),
+		Reasoning:                              reasoningResponse(s.channelRouter.ReasoningFor(id), overrides.Reasoning),
 	}
 	return resp, nil
 }
@@ -415,6 +424,9 @@ func (s *Server) resolvedConfigBaseline(ctx context.Context, id string) channels
 	if chair != "" && s.chairIsEnforceableMember(ctx, id, chair) {
 		base.EscalationChairID = &chair
 	}
+	// RFC 0051: freeze the resolved reasoning rung too (unconditionally, like the
+	// flat router-held knobs) so a sparse first edit does not reset it to default.
+	base.Reasoning = reasoningBaseline(s.channelRouter.ReasoningFor(id))
 	return base
 }
 

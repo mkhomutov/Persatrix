@@ -80,6 +80,12 @@ type ChannelConfigOverrides struct {
 	// ([ChannelConfig.InteractionIdleTimeoutSeconds]). An explicit 0 is idle
 	// rotation off — distinct from nil (inherit the fleet default).
 	InteractionIdleTimeoutSeconds *int `json:"interaction_idle_timeout_seconds,omitempty"`
+	// Reasoning overrides the RFC 0051 (v0.3.10) reasoning-before-posting block
+	// ([ChannelConfig.Reasoning]) — the first NESTED knob on this surface. A nil
+	// pointer inherits the resolved default; a non-nil [ReasoningOverrides] carries
+	// the sparse, per-sub-knob tri-state (each sub-field is itself a pointer). Type
+	// + validate/resolve live in config_reasoning.go.
+	Reasoning *ReasoningOverrides `json:"reasoning,omitempty"`
 }
 
 // IsEmpty reports whether no knob is set — the inherit-all state. Equivalent to
