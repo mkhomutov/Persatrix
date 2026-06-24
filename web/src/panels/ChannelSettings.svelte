@@ -87,6 +87,12 @@
       key: "reasoning.revise",
       label: "Reasoning revise rounds",
       type: "int",
+      // No client-side upper bound, unlike depth offering only `shallow`. The
+      // server gates revise >= 1 (RFC 0051 Phase 5), but a `<select>` can only
+      // OFFER its options whereas a number `max` triggers form constraint
+      // validation: an out-of-range value would make `<form onsubmit>` invalid
+      // and silently block the WHOLE save. So revise defers to the server's 400,
+      // which at least surfaces a reason — the server stays the authority.
     },
   ];
 
