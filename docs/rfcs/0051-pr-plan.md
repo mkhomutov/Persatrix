@@ -228,6 +228,16 @@ RFC 0030 Tier B + RFC 0050 + RFC 0034 P2 (all shipped)        ← HARD PREREQUIS
 - [ ] Governed-channel default still `off` (flip deferred to PR 6).
 - [ ] No CLI/web surface yet (PR 5).
 
+#### Review hardening (in-PR, post-implementation)
+
+A critical read of [#695](https://github.com/mkhomutov/Persatrix/pull/695) surfaced three defects in how the new (router-held) `reasoning` knob threads through the **existing** RFC 0050 freeze/reconcile machinery — the first nested knob exposed seams the flat knobs never did. All three are fixed inside PR 4 (TDD; tests named below), so the knob is a *complete* member of the router-held set rather than wired into only some of its seams:
+
+- **Snapshot omission → boot-clobber + blind drift (the load-bearing one).** `ChannelConfig.toConfigOverrides` — the "COMPLETE resolved governance set" the YAML reconcile persists and hashes — did **not** capture `reasoning`. Consequence for any channel with `revision: > 0` declaring a non-`off` rung: the boot round-trip `ResolveReasoning → ReconcileFromYAML → ResolveFromStore` re-stamped the store snapshot (which lacked reasoning) and **silently reset the rung to `off`**; and `channelConfigContentHash` was **blind** to a reasoning-only YAML edit (`off` and `bid` hashed identically), exactly the divergence drift-detection exists to catch. Fix: a single source of truth `ReasoningConfig.FreezeOverrides()` (per-sub-knob, conditional like the escalation chair), wired into both `toConfigOverrides` and the REST first-edit baseline. Pinned by `TestToConfigOverrides_CapturesNonDefaultReasoning`, `TestReconcileRoundTrip_ReasoningSurvivesBoot`, `TestChannelConfigContentHash_DistinguishesReasoning`. *(Latent on the shipped config — `planning` carries no `revision:` and ships `mode: off` — but a correctness trap for committed `bid` rungs and for PR 6's go-live.)*
+- **Governance-drift blocked unrelated edits.** `validateReasoningGoverned` runs on every apply against the merged patch, so once `mode: bid` was persisted, the departure of the last `salience_gated` member made **every** later config PATCH (even an unrelated knob) 400 on a rung the operator never touched. Fix mirrors the escalation chair's drifted-member handling (`chairIsEnforceableMember`): the **first-edit baseline drops the inert non-off `mode`** when governance has drifted (`channelHasSalienceGatedMember`), matching what dispatch already does. Pinned by `TestChannelConfig_ReasoningFirstEditWithDriftedGovernanceDoesNotBlock`. *(The subsequent-edit case on an already-store-canonical channel remains the same accepted limitation the chair carries.)*
+- **Whole-rung freeze could opt a channel out of the PR 6 flip.** The first-edit freeze keyed on whole-rung equality, so a channel non-default **only** because of `model: quality` (with `mode: off`) was frozen to an *explicit* `mode: off` — silently declining the future `off → bid` default flip an operator who only touched `model` never meant to decline. Fix: `FreezeOverrides` is **per-sub-knob** — `mode: off` stays inherit regardless of siblings (and the non-default `model` still freezes). Pinned by `TestChannelConfig_ReasoningOffModeStaysResponsiveDespiteNonDefaultModel`; the default-rung-stays-inherit branch is now also pinned by `TestChannelConfig_ReasoningFirstEditOnDefaultStaysInherit`.
+
+Plus two non-behavioural cleanups: the dead `warning` return on `ReasoningConfig.validate` was removed (the `model: quality` warning is surfaced by `ResolveReasoning`/`ApplyChannelConfig`, which have a logger), and the stale "six/seven router-held knobs" doc counts were corrected to **eight** across `config_apply.go` and `buildChannelConfigResponse`.
+
 ---
 
 ### PR 5: `feature/v0310-rfc0051-config-surfaces` — Phase 3b: CLI + Web Config Surfaces
@@ -410,8 +420,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 |---|-------|-------|--------|--------|-----------|--------|
 | 1 | 1a | Structured silence verdict (dark) | `feature/v0310-rfc0051-silence-verdict` | ✅ Merged | [#692](https://github.com/mkhomutov/Persatrix/pull/692) | ✅ |
 | 2 | 1b | Seam threading + `agent.deliberated` audit (dark) | `feature/v0310-rfc0051-deliberate-seam` | ✅ Merged | [#693](https://github.com/mkhomutov/Persatrix/pull/693) | ✅ |
-| 3 | 2 | Plan-threaded compose + no-leak test (dark) | `feature/v0310-rfc0051-plan-compose` | 🔀 PR open | [#694](https://github.com/mkhomutov/Persatrix/pull/694) | — |
-| 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | ⬜ Not started | — | — |
+| 3 | 2 | Plan-threaded compose + no-leak test (dark) | `feature/v0310-rfc0051-plan-compose` | ✅ Merged | [#694](https://github.com/mkhomutov/Persatrix/pull/694) | ✅ |
+| 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | 🔀 PR open | [#695](https://github.com/mkhomutov/Persatrix/pull/695) | — |
 | 5 | 3b | CLI + web config surfaces (enum + dotted-key) | `feature/v0310-rfc0051-config-surfaces` | ⬜ Not started | — | — |
 | 6 | 3c | Telemetry + default flip `off → bid` (GO-LIVE) | `feature/v0310-rfc0051-telemetry-golive` | ⬜ Not started | — | — |
 | 7 | OQ 6a | Operator reasoning reveal (separate / cuttable) | `feature/v0310-rfc0051-operator-reveal` | ⬜ Not started | — | — |

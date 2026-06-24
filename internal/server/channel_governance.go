@@ -1,5 +1,7 @@
 package server
 
+import "github.com/mkhomutov/persatrix/internal/channels"
+
 // channel_governance.go holds the server-side glue that stamps the default
 // RFC 0030 governance bundle onto a group channel created at runtime through
 // `POST /api/v1/channels`. Split out of channel_handlers.go (which sits at the
@@ -37,4 +39,8 @@ func (s *Server) applyRuntimeGroupGovernance(canonicalID string) {
 	s.channelRouter.SetSalienceMaxChannelMembers(canonicalID, 0)
 	s.channelRouter.ApplyDefaultReplyBudget(canonicalID)
 	s.channelRouter.ApplyDefaultInteractionBudget(canonicalID)
+	// RFC 0051 (v0.3.10): a runtime-created group ships on the default reasoning
+	// rung (off) — so the GET /config surface reads an explicit entry rather than
+	// the getter's fallback, matching the other seeded knobs above.
+	s.channelRouter.SetReasoning(canonicalID, channels.DefaultReasoningConfig())
 }

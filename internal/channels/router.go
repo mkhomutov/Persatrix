@@ -218,6 +218,13 @@ type ChannelRouter struct {
 	escalationMu     sync.Mutex
 	escalationChairs map[string]string
 
+	// reasoningMu guards reasoning — the resolved RFC 0051 (v0.3.10) per-channel
+	// reasoning-before-posting block, keyed by channel id. Populated via
+	// [ChannelRouter.SetReasoning]; methods + the resolver live in
+	// router_reasoning.go. An absent channel resolves to [DefaultReasoningConfig].
+	reasoningMu sync.Mutex
+	reasoning   map[string]ReasoningConfig
+
 	// applyMu serializes the RFC 0050 Phase 1 PR 2 store-config apply path
 	// ([ChannelRouter.ApplyChannelConfig]). It is NOT a per-knob lock — each knob
 	// already has its own setter mutex above. It exists to make the persist →
@@ -271,6 +278,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		defaultInteractionIdleTimeout: time.Duration(DefaultInteractionIdleTimeoutSeconds) * time.Second,
 		interactionNow:                time.Now,
 		escalationChairs:              make(map[string]string),
+		reasoning:                     make(map[string]ReasoningConfig),
 	}
 }
 

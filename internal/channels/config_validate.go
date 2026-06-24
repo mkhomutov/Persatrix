@@ -193,6 +193,29 @@ func (c *Config) Validate() error {
 				i, ch.Name, ErrInvalidEndVoteWindow, ch.EndVoteWindow)
 		}
 
+		// RFC 0051 (v0.3.10) reasoning block: capability-gated enum validation plus
+		// the cross-field rule that a non-off mode needs a salience-gated member
+		// (the deliberation rides the Tier B seam — `mode != off` is silently inert
+		// without one). The governed signal mirrors the per-member salience-bid
+		// opt-in derived at unmarshal ([ResolveSalienceSignal]); a bare legacy
+		// `always` is open-floor but NOT salience-gated and so does not arm it.
+		// `make validate` checks the enum vocabulary; the capability gate
+		// (deep / revise≥1) and the governance cross-field are Go-only.
+		governed := false
+		for j := range ch.Members {
+			if ch.Members[j].SalienceGated {
+				governed = true
+				break
+			}
+		}
+		// Validate the NORMALIZED rung so a direct Validate() on a hand-built
+		// Config (bypassing LoadConfig's normalize pass) does not trip the enum
+		// check on an empty zero-value block. LoadConfig already normalized in
+		// place, so this is a harmless no-op on the production path.
+		if rerr := ch.Reasoning.normalized().validate(governed); rerr != nil {
+			return fmt.Errorf("channels[%d=%s]: %w", i, ch.Name, rerr)
+		}
+
 		if len(ch.Members) == 0 {
 			return fmt.Errorf("channels[%d=%s]: at least one member required", i, ch.Name)
 		}

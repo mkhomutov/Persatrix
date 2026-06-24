@@ -293,6 +293,14 @@ func mergeConfigPatch(current channels.ChannelConfigOverrides, patch map[string]
 				return out, err
 			}
 			out.InteractionIdleTimeoutSeconds = &v
+		case "reasoning":
+			// The first NESTED knob: its value is a JSON object merged sub-key by
+			// sub-key (mergeReasoningPatch), not a scalar. A null clears the block.
+			merged, err := mergeReasoningPatch(out.Reasoning, rawVal)
+			if err != nil {
+				return out, err
+			}
+			out.Reasoning = merged
 		default:
 			return out, errors.New("unknown config knob: " + key)
 		}
@@ -327,10 +335,10 @@ func decodeKnob[T any](key string, raw json.RawMessage) (T, error) {
 // missing channel surfaces [channels.ErrChannelNotFound] for the caller to map
 // to 404.
 //
-// All eight knobs — interaction budget included, as of the RFC 0050 amendment
-// (interaction-budget enforcement) — are now router-held, so every inherited
-// effective value resolves through a getter (no knob reports a null effective
-// value).
+// All eight flat knobs — interaction budget included, as of the RFC 0050 amendment
+// (interaction-budget enforcement) — plus the nested RFC 0051 reasoning block are
+// router-held, so every inherited effective value resolves through a getter (no
+// knob reports a null effective value).
 //
 // Keep the router-held getters below in sync with [Server.resolvedConfigBaseline]:
 // the two are a matched pair (this method REPORTS each knob's provenance; the
@@ -362,6 +370,7 @@ func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (cha
 		EndVoteWindow:                          configField(wWindow, overrides.EndVoteWindow != nil),
 		EscalationChairID:                      configField(chair, overrides.EscalationChairID != nil),
 		InteractionIdleTimeoutSeconds:          configField(idleSeconds, overrides.InteractionIdleTimeoutSeconds != nil),
+		Reasoning:                              reasoningResponse(s.channelRouter.ReasoningFor(id), overrides.Reasoning),
 	}
 	return resp, nil
 }
@@ -415,6 +424,12 @@ func (s *Server) resolvedConfigBaseline(ctx context.Context, id string) channels
 	if chair != "" && s.chairIsEnforceableMember(ctx, id, chair) {
 		base.EscalationChairID = &chair
 	}
+	// RFC 0051: freeze the resolved reasoning rung too, but CONDITIONALLY (like the
+	// escalation chair, not the unconditional flat knobs): a default-off rung stays
+	// inherit (responsive to the PR 6 flip) and a non-off rung whose governance has
+	// drifted away is dropped so it cannot block an unrelated first edit — see
+	// [Server.reasoningBaseline].
+	base.Reasoning = s.reasoningBaseline(ctx, id)
 	return base
 }
 

@@ -150,6 +150,26 @@ channels:
     # to disable escalation. nova-sparrow pairs naturally with a `chair`
     # disposition, but any non-observer participant may be the synthesizer.
     escalation_chair_id: nova-sparrow
+    # Reasoning before posting (RFC 0051, v0.3.10) — before composing a reply an
+    # open-floor participant privately decides WHETHER the turn is worth a post
+    # (`mode: bid`, the silence-only rung — a net pile-on saving) and, one rung up,
+    # WHAT the post should accomplish (`mode: plan`, threading a private composition
+    # plan into the compose). The deliberation rides the Tier B salience seam, so it
+    # is meaningful only on a channel with a salience-gated `participant`/`chair`
+    # member; `mode != off` on a channel without one is rejected at load. The block
+    # ships DARK in v0.3.10 — `mode: off` (the default, today's scalar score gate)
+    # is shown here for discoverability; the governed-channel default flips to `bid`
+    # in a later step. `model: fast` keeps the deliberation on the cheap leased
+    # model (quality is accepted but defeats the cheap-pass economics). `depth: deep`
+    # (native extended thinking) and `revise >= 1` (the reflexion loop) are not yet
+    # deployed and are rejected at load rather than silently degraded.
+    # `mode` is quoted because YAML 1.1 (PyYAML, used by `make validate`) parses a
+    # bare `off`/`on` as a boolean — the schema and loader want the string "off".
+    reasoning:
+      mode: "off"
+      model: fast
+      depth: shallow
+      revise: 0
     members:
       - id: ember-owl
         respond: addressed
