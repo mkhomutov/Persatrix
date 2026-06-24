@@ -1,24 +1,17 @@
 //! `channel config export / import / diff` — RFC 0050 Phase 1 PR 5 YAML follow-up.
 //!
-//! PR 5 landed the dependency-free core (`get` / `set` / `unset`). These three
-//! verbs were split out because they read or write the declared YAML
-//! (`config/channels.yaml`), which needs the YAML dependency PR 5 deliberately
-//! omitted to stay under the branching size cap. They still ride PR 4's
-//! store-canonical apply path over REST — no verb writes the store directly:
+//! These verbs read/write the declared YAML (`config/channels.yaml`) and so were
+//! split from the dependency-free `get`/`set`/`unset` core. None writes the store
+//! directly — all ride PR 4's store-canonical apply path over REST:
 //!
-//! - `export <name>` — `GET …/config`, then regenerate the channel's YAML block
-//!   from the store, emitting only the **explicitly-overridden** knobs
-//!   (`source == "channel"`) stamped `revision: store + 1` (the export-first
-//!   foot-gun mitigation, RFC §"Foot-gun mitigation"). Inherited knobs are NOT
-//!   frozen into explicit overrides.
-//! - `import <file>` — parse a (possibly hand-edited) YAML doc and apply each
-//!   channel's declared overrides through the same optimistic-concurrency PATCH
-//!   path `set`/`unset` use. This is the **live CLI writer**, not the boot YAML
-//!   loader: it is If-Match guarded, not revision-gated — the file's `revision:`
-//!   is what the *boot* loader consumes once the file is committed to
-//!   `config/channels.yaml`, so `import` does not gate on it.
-//! - `diff <name>` — compare the declared YAML block against the effective
-//!   store config and surface drift (RFC mechanic 4), per knob plus revision.
+//! - `export <name>` — `GET …/config`, then regenerate the channel's YAML block,
+//!   emitting only **explicitly-overridden** knobs (`source == "channel"`) stamped
+//!   `revision: store + 1` (the export-first foot-gun mitigation).
+//! - `import <file>` — apply each channel's declared overrides through the same
+//!   optimistic-concurrency PATCH path. The **live CLI writer**: If-Match guarded,
+//!   not revision-gated (the file's `revision:` is for the *boot* loader).
+//! - `diff <name>` — compare the declared block against the effective store config
+//!   and surface drift (RFC mechanic 4), per knob plus revision.
 
 use colored::Colorize;
 use serde_json::{Map, Value};
@@ -28,7 +21,9 @@ use crate::commands::channel::canonicalize_channel_id;
 use crate::commands::channel_config::{
     apply_config_patch, config_rows, fetch_config, knob_type, ChannelConfigView, KnobType,
 };
-use crate::commands::channel_config_reasoning::coerce_enum;
+use crate::commands::channel_config_reasoning::{
+    classify_yaml_key, coerce_enum, deferred_block_note, flat_dotted_yaml_err, YamlReasoningKey,
+};
 use crate::types::validate_path_param;
 
 // ─── Parsed YAML model ────────────────────────────────────────────────────
@@ -37,23 +32,26 @@ use crate::types::validate_path_param;
 /// optional `revision:` it was stamped at (absent in hand-authored blocks that
 /// predate RFC 0050 — treated as "no declared revision"), and the sparse
 /// `{knob: value}` override patch extracted from the recognised governance keys.
-/// Non-knob keys (`name`, `description`, `members`, …) are ignored — only the
-/// closed [`channel_config::CONFIG_KNOBS`](super::channel_config) set is lifted.
+/// Non-knob keys (`name`, `description`, `members`, …) are ignored; only the FLAT
+/// editable knobs are lifted — the nested RFC 0051 `reasoning:` block is deferred
+/// (see [`parse_channel_block`] and `deferred_reasoning`).
 #[derive(Debug, PartialEq)]
 pub(crate) struct ParsedChannel {
     pub(crate) id: String,
     pub(crate) revision: Option<i64>,
     pub(crate) patch: Map<String, Value>,
+    /// The block declared a nested `reasoning:` mapping. The YAML verbs defer
+    /// reasoning (it lands via the boot loader, not `import`), so the block is
+    /// dropped from `patch` but flagged here for the entry point to surface — not
+    /// silently swallowed (see [`channel_config_reasoning::classify_yaml_key`]).
+    pub(crate) deferred_reasoning: bool,
 }
 
 // ─── Pure helpers (testable without an HTTP server or a file) ──────────────
 
-/// Coerce one declared YAML scalar to its knob's wire-typed JSON value, applying
-/// the same closed-knob-set + strict-type discipline `set`'s `key=value` parser
-/// uses — so an edited `config/channels.yaml` that mistypes a knob
-/// (`floor_control: maybe`, `end_vote_window: "two"`) fails locally with the knob
-/// named, before any round-trip, rather than round-tripping a 400 (or, worse,
-/// silently coercing).
+/// Coerce one declared YAML scalar to its knob's wire-typed JSON value, with the
+/// same closed-knob-set + strict-type discipline `set`'s `key=value` parser uses —
+/// a mistyped knob fails locally with the knob named, not as a round-tripped 400.
 pub(crate) fn yaml_to_knob_json(key: &str, ty: KnobType, y: &Yaml) -> Result<Value, String> {
     match ty {
         KnobType::Bool => y
@@ -64,15 +62,13 @@ pub(crate) fn yaml_to_knob_json(key: &str, ty: KnobType, y: &Yaml) -> Result<Val
             .as_i64()
             .map(|n| Value::Number(n.into()))
             .ok_or_else(|| format!("knob '{key}' expects an integer")),
-        // serde_yaml_ng parses an unquoted YAML scalar as Bool/Number where it can,
-        // so `escalation_chair_id: true` arrives as Bool, not String. Accept only
-        // a genuine string — a non-string here is a typo, not a chair id.
+        // serde_yaml_ng parses an unquoted scalar as Bool/Number where it can, so
+        // accept only a genuine string — a non-string here is a typo, not a value.
         KnobType::Str => y
             .as_str()
             .map(|s| Value::String(s.to_string()))
             .ok_or_else(|| format!("knob '{key}' expects a string")),
-        // A closed string enum (the RFC 0051 reasoning knobs): a genuine string in
-        // the accepted set, reusing the `set` parser's value-set check.
+        // A closed string enum (RFC 0051 reasoning): a string in the accepted set.
         KnobType::Enum(allowed) => y
             .as_str()
             .ok_or_else(|| format!("knob '{key}' expects one of [{}]", allowed.join(", ")))
@@ -80,12 +76,10 @@ pub(crate) fn yaml_to_knob_json(key: &str, ty: KnobType, y: &Yaml) -> Result<Val
     }
 }
 
-/// Lift a single channel mapping into a [`ParsedChannel`]: require a string
-/// `name` (canonicalized to the channel id), read an optional integer
-/// `revision`, and fold every recognised governance knob into the sparse patch.
-/// A YAML `null` for a knob is skipped (absent = inherit), matching the
-/// sparse-merge contract — `unset`-to-inherit is an explicit verb, not a YAML
-/// state.
+/// Lift a single channel mapping into a [`ParsedChannel`]: a string `name`
+/// (canonicalized to the id), an optional integer `revision`, and every recognised
+/// flat governance knob folded into the sparse patch. A YAML `null` is skipped
+/// (absent = inherit); the nested `reasoning:` block is deferred (see the match).
 pub(crate) fn parse_channel_block(block: &Yaml) -> Result<ParsedChannel, String> {
     let map = block
         .as_mapping()
@@ -109,8 +103,20 @@ pub(crate) fn parse_channel_block(block: &Yaml) -> Result<ParsedChannel, String>
     };
 
     let mut patch = Map::new();
+    let mut deferred_reasoning = false;
     for (k, v) in map {
         let Some(key) = k.as_str() else { continue };
+        match classify_yaml_key(key) {
+            // Deferred: dropped from the patch but flagged so the caller can note it
+            // lands at boot, not via this verb — never the pre-PR-5 silent drop.
+            YamlReasoningKey::NestedBlock => {
+                deferred_reasoning = true;
+                continue;
+            }
+            // Can never round-trip — reject locally rather than 400 on the wire.
+            YamlReasoningKey::FlatDotted => return Err(flat_dotted_yaml_err(name, key)),
+            YamlReasoningKey::Other => {}
+        }
         let Some(ty) = knob_type(key) else { continue };
         if v.is_null() {
             continue; // absent/null = inherit; not a sparse-patch entry
@@ -121,6 +127,7 @@ pub(crate) fn parse_channel_block(block: &Yaml) -> Result<ParsedChannel, String>
         id,
         revision,
         patch,
+        deferred_reasoning,
     })
 }
 
@@ -143,11 +150,9 @@ pub(crate) fn parse_channels_doc(text: &str) -> Result<Vec<ParsedChannel>, Strin
         .map(parse_channel_block)
         .collect::<Result<_, _>>()?;
     // Reject a doc that declares the same channel twice (after canonicalization, so
-    // a bare `planning` and a qualified `group:planning` collide). A channel holds
-    // exactly one override set: `import` would otherwise PATCH it twice and `diff`
-    // would silently compare only the first block, so a duplicate `name:` is a
-    // hand-edit mistake to fail loudly on, before any write, rather than resolve
-    // arbitrarily.
+    // bare `planning` and qualified `group:planning` collide). A channel holds one
+    // override set — a duplicate `name:` is a hand-edit mistake to fail loudly on
+    // (before any write) rather than PATCH twice / compare only the first block.
     let mut seen = std::collections::HashSet::with_capacity(parsed.len());
     for ch in &parsed {
         if !seen.insert(ch.id.as_str()) {
@@ -169,21 +174,16 @@ pub(crate) fn validate_channel_ids(channels: &[ParsedChannel]) -> Result<(), Str
     Ok(())
 }
 
-// The YAML config-as-code verbs (`export`/`diff`) filter `config_rows` to the FLAT
-// knobs (`!knob.contains('.')`): the RFC 0051 `reasoning` block is nested on the
-// wire (`{"reasoning": {…}}`), so emitting it as a flat `reasoning.mode:` YAML key
-// would not round-trip through `import` (the server rejects a flat dotted knob).
-// Nested-block YAML is a deliberate follow-up; runtime `set`/`unset`/`get` and the
-// web panel already cover reasoning.
+// `export`/`diff` filter `config_rows` to the FLAT knobs (`!knob.contains('.')`):
+// the nested RFC 0051 `reasoning` block is a deferred follow-up (parse_channel_block
+// flags it; `set`/`unset`/`get` + the web panel cover reasoning today).
 
-/// Regenerate a channel's YAML block from its effective config view, emitting
-/// only the explicitly-overridden knobs (`source == "channel"`) under a
-/// `channels:` list so the output is both a standalone `import` file and a
-/// block that slots straight into `config/channels.yaml`. The block is stamped
-/// `revision: view.revision + 1` — the export-first stamp that makes the
-/// hand-edit loop (export → edit → import/commit) carry a fresh, higher revision
-/// without the operator remembering to bump it. Knob order follows `config_rows`
-/// (registry order); the nested reasoning knobs are filtered out (see above).
+/// Regenerate a channel's YAML block from its effective config view, emitting only
+/// the explicitly-overridden knobs (`source == "channel"`) under a `channels:` list
+/// so the output both stands alone as an `import` file and slots into
+/// `config/channels.yaml`. Stamped `revision: view.revision + 1` (the export-first
+/// stamp, so the hand-edit loop carries a fresh revision automatically). Knob order
+/// follows `config_rows`; the nested reasoning knobs are filtered out (see above).
 pub(crate) fn render_export_doc(name: &str, view: &ChannelConfigView) -> Result<String, String> {
     let mut block = serde_yaml_ng::Mapping::new();
     block.insert(Yaml::from("name"), Yaml::from(name));
@@ -216,16 +216,13 @@ pub(crate) enum DiffStatus {
     Drift,
     /// Not declared in the YAML — the channel inherits this knob.
     Inherited,
-    /// Declared in the YAML, but the effective value the store reports is null,
-    /// so the two cannot be compared: neither a confirmed match nor confirmed
-    /// drift.
+    /// Declared, but the store's effective value is null — uncomparable, so neither
+    /// a confirmed match nor confirmed drift.
     Indeterminate,
-    /// Not declared in the YAML, yet the store carries an explicit per-channel
-    /// override (`source == "channel"`). This IS drift: the boot reconcile
-    /// (`ReconcileChannelConfig`) replaces the whole override blob with the
-    /// declared set, so an override the file omits would be cleared on boot. A
-    /// plain `Inherited` here would falsely reassure the operator that a live
-    /// override is captured in config-as-code when committing the file reverts it.
+    /// Not declared in the YAML, yet the store carries an explicit `channel`-source
+    /// override. This IS drift: the boot reconcile (`ReconcileChannelConfig`) would
+    /// clear an override the file omits, so reporting `Inherited` here would falsely
+    /// reassure the operator that committing the file preserves the live override.
     Undeclared,
 }
 
@@ -244,7 +241,7 @@ impl DiffStatus {
     }
 }
 
-/// One row of a channel `diff`: the knob, its declared YAML value (if any), the
+/// One row of a channel `diff`: the knob, its declared value (if any), the
 /// effective store value, and their relationship.
 #[derive(Debug)]
 pub(crate) struct DiffRow {
@@ -254,15 +251,11 @@ pub(crate) struct DiffRow {
     pub(crate) status: DiffStatus,
 }
 
-/// Compare a declared override patch against an effective config view, one row
-/// per knob in registry order. A knob the YAML declares is `InSync` when its
-/// value equals the effective value and `Drift` when it differs; a knob the YAML
-/// omits is `Inherited` only when the store has no override for it — if the store
-/// carries an explicit `channel`-source override the file omits, that is
-/// `Undeclared` drift (the boot reconcile would clear it), not `Inherited`. The
-/// one exception is a declared knob whose effective value is null →
-/// `Indeterminate`, so a stale "drift" is never reported for a value the server
-/// reports as unresolved.
+/// Compare a declared override patch against an effective config view, one row per
+/// flat knob in registry order. Declared → `InSync`/`Drift` by value equality;
+/// omitted → `Inherited`, unless the store carries an explicit override the file
+/// drops (`Undeclared` drift — the boot reconcile would clear it). A declared knob
+/// whose effective value is null is `Indeterminate` (never a stale "drift").
 pub(crate) fn diff_rows(declared: &Map<String, Value>, view: &ChannelConfigView) -> Vec<DiffRow> {
     config_rows(view)
         .into_iter()
@@ -286,10 +279,8 @@ pub(crate) fn diff_rows(declared: &Map<String, Value>, view: &ChannelConfigView)
         .collect()
 }
 
-/// Whether any row in a diff is drift — a declared knob whose value diverges
-/// (`Drift`) or a store override the file omits (`Undeclared`, which the boot
-/// reconcile would clear). Drives the non-zero "config-as-code diverges from the
-/// store" render and a future exit-code hook.
+/// Whether any row is drift — a diverging declared value (`Drift`) or a store
+/// override the file omits (`Undeclared`). Drives the non-zero divergence render.
 pub(crate) fn has_drift(rows: &[DiffRow]) -> bool {
     rows.iter()
         .any(|r| matches!(r.status, DiffStatus::Drift | DiffStatus::Undeclared))
@@ -346,8 +337,7 @@ fn render_diff(id: &str, declared_rev: Option<i64>, view: &ChannelConfigView, ro
 // ─── Subcommand entry points ────────────────────────────────────────────────
 
 /// `channel config export <name> [--out file]` — regenerate the channel's YAML
-/// override block from the store, stamped `revision: store + 1`. Writes to
-/// `--out` when given, else stdout (so `> patch.yaml` composes).
+/// override block from the store, stamped `revision: store + 1`. `--out` else stdout.
 pub(crate) async fn cmd_config_export(
     client: &reqwest::Client,
     server: &str,
@@ -373,12 +363,10 @@ pub(crate) async fn cmd_config_export(
     Ok(())
 }
 
-/// `channel config import <file>` — apply each declared channel block's overrides
-/// through the optimistic-concurrency PATCH path. Per channel: read the current
-/// revision, then PATCH the declared knobs under its `If-Match`. A block with no
-/// overridden knobs is a no-op (sparse PATCH) and is skipped with a note rather
-/// than silently bumping the revision. The whole file is parsed and validated
-/// before the first write, so a typo'd knob aborts before any channel is touched.
+/// `channel config import <file>` — apply each declared block's overrides through
+/// the optimistic-concurrency PATCH path (read revision, PATCH under `If-Match`). A
+/// block with no overridden knobs is skipped with a note, not a no-op revision bump.
+/// The whole file is parsed + validated before the first write.
 pub(crate) async fn cmd_config_import(
     client: &reqwest::Client,
     server: &str,
@@ -387,17 +375,24 @@ pub(crate) async fn cmd_config_import(
 ) -> Result<(), String> {
     let text = std::fs::read_to_string(file).map_err(|e| format!("cannot read {file}: {e}"))?;
     let channels = parse_channels_doc(&text)?;
-    // Validate every channel id before the first write — the same before-any-write
-    // discipline the knob coercion already gets at parse time, so a malformed
-    // `name:` in a later block cannot leave earlier blocks half-applied.
+    // Validate every channel id before the first write, so a malformed `name:` in a
+    // later block cannot leave earlier blocks half-applied.
     validate_channel_ids(&channels)?;
     let mut raws: Vec<String> = Vec::new();
-    // Track the channels already PATCHed so a mid-run failure can tell the operator
-    // exactly which writes landed. `import` is sparse and per-channel — there is no
-    // cross-channel transaction over REST — so it is best-effort, not atomic: a 409
-    // or wire error on a later block leaves the earlier blocks applied.
+    // `applied` tracks the channels already PATCHed so a mid-run failure can name
+    // what landed: `import` is best-effort (no cross-channel transaction over REST),
+    // so a later 409/wire error leaves earlier blocks applied.
     let mut applied: Vec<String> = Vec::new();
     for ch in &channels {
+        // A deferred nested `reasoning:` block is not applied by `import` (stderr,
+        // suppressed under --json) — say so rather than let the edit vanish silently.
+        if ch.deferred_reasoning && !json_out {
+            eprintln!(
+                "{} {}",
+                "note:".yellow(),
+                deferred_block_note(&ch.id).dimmed()
+            );
+        }
         if ch.patch.is_empty() {
             if !json_out {
                 println!(
@@ -450,9 +445,9 @@ pub(crate) async fn cmd_config_import(
     Ok(())
 }
 
-/// `channel config diff <name> [--file path]` — compare the channel's declared
-/// YAML block (default `config/channels.yaml`) against its effective store
-/// config and surface per-knob drift plus a revision comparison.
+/// `channel config diff <name> [--file path]` — compare the channel's declared YAML
+/// block (default `config/channels.yaml`) against its effective store config and
+/// surface per-knob drift plus a revision comparison.
 pub(crate) async fn cmd_config_diff(
     client: &reqwest::Client,
     server: &str,
@@ -468,6 +463,11 @@ pub(crate) async fn cmd_config_diff(
         .find(|c| c.id == id)
         .ok_or_else(|| format!("channel '{id}' is not declared in {file}"))?;
     let resp = fetch_config(client, server, &id).await?;
+    // `diff` scopes to the flat knobs; a declared nested `reasoning:` block is not
+    // compared, so say so rather than let its absence read as "in sync".
+    if declared.deferred_reasoning && !json_out {
+        eprintln!("{} {}", "note:".yellow(), deferred_block_note(&id).dimmed());
+    }
     let rows = diff_rows(&declared.patch, &resp.view);
     if json_out {
         let cells: Vec<Value> = rows

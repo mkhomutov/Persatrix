@@ -171,3 +171,116 @@ fn build_unset_patch_nests_dotted_reasoning_keys() {
     let patch = build_unset_patch(&["reasoning.mode".to_string()]).unwrap();
     assert_eq!(patch["reasoning"], serde_json::json!({ "mode": null }));
 }
+
+// ─── value-set lockstep: CLI enum vocab == server ACCEPTED values ──────────
+//
+// The cross-switch guards in `channel_config_tests.rs` pin knob NAMES and wire-type
+// CLASSES (an enum rides the wire as `string`) but NOT the accepted value SETS — so
+// a server-side vocab change (rename a mode, or promote `deep` when Phase 4 ships)
+// would silently drift MODES/MODELS/DEPTHS and round-trip 400s instead of failing
+// here. This guard closes that gap: it parses the accepted values straight from the
+// server's `ReasoningOverrides.validate()` (the override path the REST PATCH runs,
+// which is exactly what the CLI mirrors) and pins each CLI value-set to it. `deep`
+// is a defined constant but a REJECTED case, so it is correctly absent from the
+// accepted set — the same capability gate the CLI's DEPTHS encodes by omission.
+
+/// Read the channels-package reasoning source the value-set guard parses.
+fn reasoning_go_src() -> String {
+    std::fs::read_to_string(format!(
+        "{}/../internal/channels/config_reasoning.go",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("internal/channels/config_reasoning.go must be readable for the value-set guard")
+}
+
+/// Map every `Reasoning…* = "literal"` const to its string value (skips aliases
+/// like `DefaultReasoningMode = ReasoningModeOff`, whose RHS is not a quoted lit).
+fn go_reasoning_const_literals(src: &str) -> std::collections::BTreeMap<String, String> {
+    let mut m = std::collections::BTreeMap::new();
+    for raw in src.lines() {
+        // Drop any `//` comment so a commented-out `=` never parses as a const.
+        let line = raw.split("//").next().unwrap_or("").trim();
+        let Some((lhs, rhs)) = line.split_once('=') else {
+            continue;
+        };
+        let name = lhs.trim();
+        if !name.starts_with("Reasoning") || name.contains(char::is_whitespace) {
+            continue;
+        }
+        if let Some(lit) = rhs
+            .trim()
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+        {
+            m.insert(name.to_string(), lit.to_string());
+        }
+    }
+    m
+}
+
+/// The constant names whose arm in `switch_header`'s switch is ACCEPTED — an arm
+/// with no `return` before the next `case`/`default`/closing brace. A rejected
+/// value (e.g. `deep`) sits in its own arm that returns an error.
+fn go_accepted_case_consts(src: &str, switch_header: &str) -> Vec<String> {
+    let lines: Vec<&str> = src
+        .lines()
+        .map(|l| l.split("//").next().unwrap_or("").trim())
+        .collect();
+    let start = lines
+        .iter()
+        .position(|l| l.starts_with(switch_header))
+        .unwrap_or_else(|| panic!("switch `{switch_header}` not found; guard parser is stale"));
+    let mut accepted = Vec::new();
+    for (i, line) in lines.iter().enumerate().skip(start + 1) {
+        if let Some(rest) = line.strip_prefix("case ") {
+            let arm = lines.get(i + 1).copied().unwrap_or("}");
+            // An empty (accepted) arm: the next line is another case/default/close.
+            if arm.starts_with("case ") || arm.starts_with("default:") || arm == "}" {
+                accepted.extend(
+                    rest.trim_end_matches(':')
+                        .split(',')
+                        .map(|c| c.trim().to_string()),
+                );
+            }
+        } else if line.starts_with("default:") || *line == "}" {
+            break; // end of this switch
+        }
+    }
+    accepted
+}
+
+#[test]
+fn cli_enum_value_sets_match_server_accepted_values() {
+    use std::collections::BTreeSet;
+
+    let src = reasoning_go_src();
+    let consts = go_reasoning_const_literals(&src);
+    let resolve = |names: Vec<String>| -> BTreeSet<String> {
+        names
+            .into_iter()
+            .map(|n| {
+                consts
+                    .get(&n)
+                    .unwrap_or_else(|| panic!("no string literal for const {n}; parser is stale"))
+                    .clone()
+            })
+            .collect()
+    };
+
+    for (header, cli_values) in [
+        ("switch *o.Mode {", MODES),
+        ("switch *o.Model {", MODELS),
+        ("switch *o.Depth {", DEPTHS),
+    ] {
+        let server = resolve(go_accepted_case_consts(&src, header));
+        let client: BTreeSet<String> = cli_values.iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            client,
+            server,
+            "CLI enum value-set for `{header}` drifted from the server's accepted \
+             values: missing from CLI = {:?}, extra in CLI = {:?}",
+            server.difference(&client).collect::<Vec<_>>(),
+            client.difference(&server).collect::<Vec<_>>(),
+        );
+    }
+}

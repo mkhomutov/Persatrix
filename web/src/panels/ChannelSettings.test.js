@@ -460,4 +460,34 @@ describe("ChannelSettings", () => {
     const patchCall = fetchMock.mock.calls.find((c) => c[1]?.method === "PATCH");
     expect(JSON.parse(patchCall[1].body)).toEqual({ reasoning: { mode: null } });
   });
+
+  it("sends a changed reasoning.revise as a NESTED numeric PATCH", async () => {
+    // revise is the only NESTED int sub-knob — the enum tests don't exercise the
+    // `int` branch's Number() coercion through setBody. The client nests it as a
+    // JSON number under "reasoning"; the value itself is server-capability-gated
+    // (>= 1 is Phase 5), but that's the server's reject to make, not the panel's.
+    const fetchMock = vi.fn((path, init) =>
+      Promise.resolve(
+        okJSON(init?.method === "PATCH" ? configBody({ revision: 4 }) : configBody()),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn(() => Promise.resolve());
+    renderSettings({ onChanged });
+
+    const inherit = await screen.findByLabelText(
+      "Inherit fleet default for Reasoning revise rounds",
+    );
+    await fireEvent.click(inherit); // -> override
+    const revise = screen.getByLabelText("Reasoning revise rounds");
+    // A number input's `bind:value` updates on the `input` event (not `change`).
+    await fireEvent.input(revise, { target: { value: "1" } });
+    await fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    const patchCall = fetchMock.mock.calls.find((c) => c[1]?.method === "PATCH");
+    // Nested under "reasoning", and a JSON number (1) — not the string "1" or a
+    // flat "reasoning.revise" key.
+    expect(JSON.parse(patchCall[1].body)).toEqual({ reasoning: { revise: 1 } });
+  });
 });

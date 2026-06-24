@@ -171,6 +171,57 @@ fn parse_channel_block_rejects_missing_name_and_bad_types() {
         .contains("mapping"));
 }
 
+#[test]
+fn parse_channel_block_flags_nested_reasoning_block_and_skips_it() {
+    // The nested `reasoning:` mapping is the form config/channels.yaml uses and the
+    // boot loader honors, but `import`/`diff` don't apply it yet (the server takes a
+    // NESTED `{"reasoning": {…}}` PATCH the YAML verbs don't build). It must not
+    // silently vanish: the block is dropped from the patch (so the flat-knob import
+    // still works) but FLAGGED, so the entry point can tell the operator it lands at
+    // boot, not via `import`, rather than swallowing it.
+    let block =
+        yaml_block("name: planning\nfloor_control: true\nreasoning:\n  mode: bid\n  model: fast\n");
+    let parsed = parse_channel_block(&block).unwrap();
+    assert!(parsed.deferred_reasoning, "the reasoning block is flagged");
+    assert!(
+        !parsed.patch.contains_key("reasoning"),
+        "the nested block is not lifted into the flat patch"
+    );
+    assert_eq!(
+        parsed.patch.len(),
+        1,
+        "only the flat floor_control survives"
+    );
+    assert_eq!(
+        parsed.patch.get("floor_control"),
+        Some(&serde_json::json!(true))
+    );
+}
+
+#[test]
+fn parse_channel_block_rejects_flat_dotted_reasoning_key() {
+    // A flat dotted `reasoning.mode:` key can NEVER round-trip — the server's switch
+    // has only the `reasoning` namespace case, no `reasoning.mode` leaf — so the CLI
+    // rejects it client-side (naming the key + steering to the live verb) instead of
+    // lifting it and round-tripping a 400. Unlike the nested block it is not a real
+    // channels.yaml form, so failing loud is safe.
+    let err =
+        parse_channel_block(&yaml_block("name: planning\nreasoning.mode: bid\n")).unwrap_err();
+    assert!(err.contains("reasoning.mode"), "names the key: {err}");
+    assert!(
+        err.contains("channel config set"),
+        "steers to the live verb: {err}"
+    );
+}
+
+#[test]
+fn parse_channel_block_without_reasoning_is_not_flagged() {
+    // A plain block carries no reasoning, so the deferral flag stays clear (no
+    // spurious note for the common case).
+    let parsed = parse_channel_block(&yaml_block("name: planning\nfloor_control: true\n")).unwrap();
+    assert!(!parsed.deferred_reasoning);
+}
+
 // ─── parse_channels_doc ────────────────────────────────────────────────────
 
 #[test]

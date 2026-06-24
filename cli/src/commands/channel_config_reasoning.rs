@@ -107,6 +107,57 @@ pub(crate) fn nest_dotted(flat: Map<String, Value>) -> Map<String, Value> {
     out
 }
 
+// ─── YAML config-as-code deferral ──────────────────────────────────────────
+//
+// The YAML verbs (`import`/`diff`) don't apply reasoning yet: the server consumes
+// a NESTED `{"reasoning": {…}}` PATCH the verbs don't build, so a declared
+// reasoning key is routed here instead of the flat-knob path. Two shapes, two
+// dispositions — neither is the pre-PR-5 silent drop.
+
+/// How a declared-YAML key relates to the deferred nested `reasoning` block.
+pub(crate) enum YamlReasoningKey {
+    /// The bare `reasoning:` mapping — the form `config/channels.yaml` uses and the
+    /// boot loader honors. Skipped by the YAML verbs but FLAGGED (a note tells the
+    /// operator it lands at boot, not via `import`), never silently dropped.
+    NestedBlock,
+    /// A flat dotted `reasoning.<sub>:` key — rejected client-side: it can never
+    /// round-trip (the server's switch has only the `reasoning` namespace, no
+    /// `reasoning.<sub>` leaf case) and is not a real `config/channels.yaml` form.
+    FlatDotted,
+    /// Not a reasoning key — handled by the normal flat-knob path.
+    Other,
+}
+
+/// Classify a declared-YAML key (see [`YamlReasoningKey`]).
+pub(crate) fn classify_yaml_key(key: &str) -> YamlReasoningKey {
+    if key == "reasoning" {
+        YamlReasoningKey::NestedBlock
+    } else if key.starts_with("reasoning.") {
+        YamlReasoningKey::FlatDotted
+    } else {
+        YamlReasoningKey::Other
+    }
+}
+
+/// The client-side rejection for a flat dotted `reasoning.<sub>:` YAML key (see
+/// [`YamlReasoningKey::FlatDotted`]) — names the key and steers to the live verb.
+pub(crate) fn flat_dotted_yaml_err(name: &str, key: &str) -> String {
+    format!(
+        "channel '{name}': flat `{key}:` is not config-as-code YAML — edit reasoning \
+         live with `channel config set {key}=…`, or declare a nested `reasoning:` \
+         block (applied by the boot loader on commit)"
+    )
+}
+
+/// The note an `import`/`diff` entry point emits for a channel whose YAML declares a
+/// nested `reasoning:` block the verb does not apply (see [`YamlReasoningKey`]).
+pub(crate) fn deferred_block_note(id: &str) -> String {
+    format!(
+        "#{id} declares a `reasoning:` block — applied by the boot loader on commit, \
+         not by this verb; edit it live with `channel config set reasoning.<knob>=…`"
+    )
+}
+
 #[cfg(test)]
 #[path = "channel_config_reasoning_tests.rs"]
 mod tests;
