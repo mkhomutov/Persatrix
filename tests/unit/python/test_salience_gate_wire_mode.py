@@ -132,3 +132,30 @@ class TestWireDrivenReasoningMode:
         assert outcome is not None
         assert outcome.silence is False
         assert outcome.plan is None
+
+    async def test_unknown_rung_surfaces_the_diagnostic(self, monkeypatch: Any):
+        """A non-empty *unrecognised* rung (forward version-skew: a newer
+        orchestrator sending a rung this agent predates) must not vanish silently —
+        it fails safe to off AND fires warn_if_unknown_mode (deduped), the one
+        operator signal in that skew window. The bid's own warn never sees it (the
+        seam clamps unknown→off before evaluate_salience), so the seam must warn."""
+        seen: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            "agents.persona_runtime.salience_gate.warn_if_unknown_mode",
+            lambda mode, *, agent_id: seen.append((mode, agent_id)),
+        )
+        await _gate_from_wire(_SCALAR_SPEAK, reasoning_mode="ponder")
+        assert seen == [("ponder", "ember-owl")], "an unknown wire rung is surfaced"
+
+    async def test_empty_and_absent_rung_do_not_warn(self, monkeypatch: Any):
+        """Empty / absent is the additive pre-v0.3.10 case, not a typo — it
+        resolves to off WITHOUT a warning, or every old producer would spam the log
+        on every governed admit. Only a non-empty unrecognised value is a typo."""
+        seen: list[str] = []
+        monkeypatch.setattr(
+            "agents.persona_runtime.salience_gate.warn_if_unknown_mode",
+            lambda mode, *, agent_id: seen.append(mode),
+        )
+        await _gate_from_wire(_SCALAR_SPEAK, reasoning_mode="")
+        await _gate_from_wire(_SCALAR_SPEAK, reasoning_mode=None)
+        assert seen == [], "empty/absent must not warn"

@@ -26,6 +26,7 @@ would be invisible — indistinguishable from the feature working as intended.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
 # ── RFC 0051 PR 6 (v0.3.10) go-live deliberation telemetry ───────────────────
 #
 # The observability that makes an active ``reasoning`` default safe to run: the
-# deliberation rate, the silence rate charted by ``reason_code``, the
+# deliberation rate, the silence rate charted by ``reason_code``/``mode``, the
 # deliberation-latency histogram (the pass is a serial ``fast`` call *before*
 # compose — it reuses the ``agent.llm.duration`` instrument *shape*), and a
 # budget-starvation counter (a deliberation starved to silence by a low
@@ -81,20 +82,29 @@ def record_deliberation(
 
     Always emits the rate (``deliberation.total``) + the latency
     (``deliberation.duration``); on a *silence* verdict additionally emits the
-    suppress-by-``reason_code`` row (``deliberation.suppressed``) and, when the
-    silence was a budget/lease starvation, the ``deliberation.budget_starved``
-    counter. A no-op until :func:`register` has run (metrics unconfigured), so a
-    call site never has to guard. ``reason_code`` is the closed-vocabulary bid
-    label, so its cardinality is bounded — safe as a metric dimension."""
+    suppress row (``deliberation.suppressed``, charted by ``reason_code`` AND
+    ``mode``) and, when the silence was a budget/lease starvation, the
+    ``deliberation.budget_starved`` counter. A no-op until :func:`register` has
+    run (metrics unconfigured), so a call site never has to guard. ``reason_code``
+    is the closed-vocabulary bid label and ``mode`` is the closed rung set, so the
+    cardinality stays bounded — both safe as metric dimensions.
+
+    **Best-effort, like the sibling ``agent.deliberated`` audit emit.** This runs
+    on the active-by-default ``bid`` path *after* the deliberation has already
+    happened, so a metric-export hiccup must never propagate and undo the turn —
+    the same "the decision already happened, don't block on the egress" contract
+    (RFC 0051 §Security). The OTel SDK already swallows recording errors, but the
+    suppress makes the no-block guarantee explicit and matches the audit path."""
     di = _deliberation
     if di is None:
         return
-    di.total.add(1, attributes={"mode": mode})
-    di.duration.record(duration_ms, attributes={"mode": mode})
-    if not spoke:
-        di.suppressed.add(1, attributes={"reason_code": reason_code})
-        if reason_code == _BUDGET_STARVED_REASON:
-            di.budget_starved.add(1, attributes={"mode": mode})
+    with contextlib.suppress(Exception):
+        di.total.add(1, attributes={"mode": mode})
+        di.duration.record(duration_ms, attributes={"mode": mode})
+        if not spoke:
+            di.suppressed.add(1, attributes={"reason_code": reason_code, "mode": mode})
+            if reason_code == _BUDGET_STARVED_REASON:
+                di.budget_starved.add(1, attributes={"mode": mode})
 
 
 def register(inst: _Instruments, meter: Meter) -> None:
@@ -139,18 +149,21 @@ def register(inst: _Instruments, meter: Meter) -> None:
             description=(
                 "RFC 0051 structured deliberations run on an open-floor admit. "
                 "Attribute: mode (bid|plan). The deliberation RATE; the silence "
-                "fraction is deliberation.suppressed / this total."
+                "fraction is deliberation.suppressed / this total (both carry "
+                "mode, so the ratio holds per rung as well as in aggregate)."
             ),
         ),
         suppressed=meter.create_counter(
             name="deliberation.suppressed",
             unit="{deliberation}",
             description=(
-                "RFC 0051 deliberations that resolved to silence, charted by "
-                "cause. Attribute: reason_code (the closed bid vocabulary — "
-                "only_agreeing|already_answered|nothing_to_add|lease_denied|…). "
-                "Distinct from channel.messages.gated (which also counts the "
-                "scalar score gate); this is the reasoning suppress-rate."
+                "RFC 0051 deliberations that resolved to silence, charted by cause "
+                "and rung. Attributes: reason_code (the closed bid vocabulary — "
+                "only_agreeing|already_answered|nothing_to_add|lease_denied|…) and "
+                "mode (bid|plan), so the silence fraction (suppressed/total) is "
+                "computable per rung. Distinct from channel.messages.gated; and a "
+                "TB6 oversized-channel skip is NOT a deliberation, so it rides "
+                "channel.messages.salience_skipped, not this counter."
             ),
         ),
         duration=meter.create_histogram(
@@ -158,9 +171,12 @@ def register(inst: _Instruments, meter: Meter) -> None:
             unit="ms",
             description=(
                 "Wall-clock duration of the RFC 0051 deliberation pass — a serial "
-                "fast-model call before compose. Reuses the agent.llm.duration "
-                "instrument shape. Attribute: mode (bid|plan). Added latency, not "
-                "added spend, is the operational risk a flip introduces."
+                "fast-model call before compose, measured around the bid only (the "
+                "agent.deliberated audit emit is excluded). Reuses the "
+                "agent.llm.duration instrument shape. Attribute: mode (bid|plan). "
+                "Charts the latency the flip adds; the structured rung also costs "
+                "modestly more per bid than the off scalar gate (larger prompt + "
+                "higher max_tokens), captured by existing wallet accounting."
             ),
         ),
         budget_starved=meter.create_counter(

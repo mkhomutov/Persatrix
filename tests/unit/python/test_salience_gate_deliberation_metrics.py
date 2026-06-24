@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
+import agents.observability._metrics_salience as _metrics_salience
 import agents.observability.metrics as pmetrics
 from agents.persona_runtime.salience_gate import run_salience_gate
 from agents.persona_types import AgentEvent, EventType
@@ -132,6 +133,11 @@ class TestDeliberationTelemetry:
         assert suppressed is not None, "a silence verdict charts a suppression"
         codes = {dp.attributes.get("reason_code") for dp in _points(suppressed)}
         assert codes == {REASON_ALREADY_ANSWERED}, "silence is charted by its reason_code"
+        # …and by mode, so the silence fraction (suppressed/total) is computable
+        # per rung, not only in aggregate — total/duration/budget_starved all carry
+        # `mode`, so suppressed must too or a mode-filtered ratio is meaningless.
+        modes = {dp.attributes.get("mode") for dp in _points(suppressed)}
+        assert modes == {MODE_BID}, "suppression carries the mode dimension too"
         # A semantic silence is NOT a budget starvation.
         assert "deliberation.budget_starved" not in metrics
 
@@ -151,6 +157,35 @@ class TestDeliberationTelemetry:
         suppressed = _points(metrics.get("deliberation.suppressed"))
         codes = {dp.attributes.get("reason_code") for dp in suppressed}
         assert codes == {_LEASE_DENIED}
+
+    async def test_record_deliberation_never_propagates_instrument_errors(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A metric-export hiccup must never propagate out of the seam and undo
+        the turn — the same best-effort contract _emit_deliberated_audit holds (the
+        deliberation already happened, RFC 0051 §Security). record_deliberation now
+        runs on the active-by-default ``bid`` path, so an unguarded OTel raise would
+        break real turns. Drives both a speak and a silence verdict (the latter
+        exercises every instrument, including budget_starved)."""
+
+        class _Boom:
+            def add(self, *a: Any, **k: Any) -> None:
+                raise RuntimeError("otel exporter down")
+
+            def record(self, *a: Any, **k: Any) -> None:
+                raise RuntimeError("otel exporter down")
+
+        boom = _metrics_salience._DeliberationInstruments(
+            total=_Boom(), suppressed=_Boom(), duration=_Boom(), budget_starved=_Boom(),
+        )
+        monkeypatch.setattr(_metrics_salience, "_deliberation", boom)
+        # Neither call may raise.
+        _metrics_salience.record_deliberation(
+            mode=MODE_BID, reason_code=REASON_ADDS_SUBSTANCE, spoke=True, duration_ms=1.0,
+        )
+        _metrics_salience.record_deliberation(
+            mode=MODE_BID, reason_code=_LEASE_DENIED, spoke=False, duration_ms=2.0,
+        )
 
     async def test_off_mode_emits_no_deliberation_metrics(
         self, metric_reader: InMemoryMetricReader, monkeypatch: pytest.MonkeyPatch,
