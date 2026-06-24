@@ -360,6 +360,45 @@ class TestDebugLog:
         assert len(suppression_logs) == 0
 
 
+# ─── RFC 0051 §F: a TICK acquires no deliberation lease ───────────────────────
+
+
+class TestTickNoDeliberationLease:
+    """RFC 0051 §F / PR 2 idle-cost regression: a TICK never leases a bid.
+    The Tier-B deliberation fires *only* on a ``CHANNEL_MESSAGE`` open-floor
+    admit. The seam *is* reached on a TICK and no-ops there:
+    :func:`run_salience_gate` early-returns ``None`` because
+    :func:`evaluate_response_gate` returns ``reason="not_channel_message"``, so
+    :func:`is_open_floor_admit` is ``False``. Pinning the *no-op* (not assuming
+    the path is unreachable) trips here if a future change starts leasing a
+    ``fast`` bid on every idle tick. ``mode="plan"`` forces reasoning fully on.
+    """
+
+    @pytest.mark.asyncio
+    async def test_tick_acquires_no_deliberation_lease(self) -> None:
+        from agents.persona_runtime import salience_gate
+        from agents.response_gate import evaluate_response_gate
+
+        tick = AgentEvent(event_type=EventType.TICK)
+        decision = evaluate_response_gate(tick, agent_id="test-agent")
+
+        agent = MagicMock()
+        agent.agent_id = "test-agent"
+        agent._build_seed_messages = AsyncMock()
+        agent._store_event_episode = AsyncMock()
+
+        with patch.object(salience_gate, "evaluate_salience", new=AsyncMock()) as bid:
+            outcome = await salience_gate.run_salience_gate(
+                agent, tick, decision, mode="plan",
+            )
+
+        # None → caller proceeds normally; no lease/fetch/ingest on the idle path.
+        assert outcome is None
+        bid.assert_not_awaited()
+        agent._build_seed_messages.assert_not_called()
+        agent._store_event_episode.assert_not_called()
+
+
 # ─── Accessor unit tests ──────────────────────────────────────────────────────
 
 
