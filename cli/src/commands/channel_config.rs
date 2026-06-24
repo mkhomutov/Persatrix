@@ -12,11 +12,10 @@
 //! so this PR stays under the branching size cap with no new dependency.
 //!
 //! Both writers (`set`, `unset`) are read-then-write: a `GET` reads the current
-//! revision, the `PATCH` carries it back as the `If-Match` optimistic-concurrency
-//! guard. The server merges the sparse `{knob: value}` patch onto the channel's
-//! current overrides (an explicit `null` unsets a knob back to inherit) and
-//! returns the bumped revision + new effective config, so a successful write
-//! renders the post-apply state without a second round-trip.
+//! revision, the `PATCH` carries it back as the `If-Match` guard. The server merges
+//! the sparse patch onto the channel's overrides (`null` unsets a knob) and returns
+//! the bumped revision + new effective config in one round-trip. The nested
+//! `reasoning.*` surface lives in `channel_config_reasoning`.
 
 use colored::Colorize;
 use reqwest::StatusCode;
@@ -24,6 +23,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::commands::channel::canonicalize_channel_id;
+use crate::commands::channel_config_reasoning::{self as reasoning, ReasoningConfigView};
 use crate::types::{api_error_message, validate_path_param};
 
 // ─── Wire DTOs (mirror internal/server/channel_types.go) ─────────────────
@@ -61,6 +61,12 @@ pub(crate) struct ChannelConfigView {
     pub(crate) escalation_chair_id: ConfigField,
     pub(crate) interaction_idle_timeout_seconds: ConfigField,
     pub(crate) interaction_budget_tokens: ConfigField,
+    /// RFC 0051 (v0.3.10): the first NESTED knob — a `reasoning` block whose four
+    /// sub-knobs each carry their own `{value, source}` cell (so an override of
+    /// `mode` alone reports model/depth/revise as inherited). Mirrors the Go
+    /// `reasoningConfigResponse`; rendered as dotted `reasoning.<sub>` rows. The
+    /// type + its sub-knob accessor live in [`channel_config_reasoning`](reasoning).
+    pub(crate) reasoning: ReasoningConfigView,
 }
 
 // ─── Knob registry ──────────────────────────────────────────────────────
@@ -68,20 +74,21 @@ pub(crate) struct ChannelConfigView {
 /// The JSON type a governance knob carries on the wire. The knob set is
 /// heterogeneous, so `set`'s `key=value` parser coerces the value half per type
 /// (and rejects a wrong-typed value locally rather than round-tripping a 400).
+/// `Enum` (the RFC 0051 reasoning knobs) is a string knob restricted to a closed
+/// value set; it rides the wire as a plain JSON string, so the lockstep type guard
+/// treats it as the `string` wire class.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(crate) enum KnobType {
     Bool,
     Int,
     Str,
+    /// A string knob restricted to a closed value set (see [`reasoning`]).
+    Enum(&'static [&'static str]),
 }
 
-/// The closed set of editable governance knobs, paired with their wire type.
-///
-/// This MUST match the `case "<knob>":` set in the server's `mergeConfigPatch`
-/// (internal/server/channel_config_handlers.go) exactly — a knob the CLI admits
-/// that the server rejects (or vice versa) is drift. The set-equality is pinned
-/// by `cli_knob_set_matches_server_merge_switch` against the Go source. The
-/// declaration order here is also the render order for `config get`.
+/// The closed set of editable FLAT governance knobs, paired with their wire type.
+/// The full editable set is this ∪ the nested [`reasoning::KNOBS`] — see
+/// [`editable_knobs`]. Declaration order is also the render order for `config get`.
 pub(crate) const CONFIG_KNOBS: &[(&str, KnobType)] = &[
     ("floor_control", KnobType::Bool),
     ("salience_max_channel_members", KnobType::Int),
@@ -93,20 +100,24 @@ pub(crate) const CONFIG_KNOBS: &[(&str, KnobType)] = &[
     ("interaction_budget_tokens", KnobType::Int),
 ];
 
+/// Every editable knob in render order: the flat [`CONFIG_KNOBS`] followed by the
+/// nested dotted [`reasoning::KNOBS`]. This MUST match the server's editable-knob
+/// set exactly — the flat `mergeConfigPatch` cases ∪ the nested `mergeReasoningPatch`
+/// sub-knobs — a drift either way is pinned by `cli_knob_set_matches_server_merge_switch`.
+pub(crate) fn editable_knobs() -> impl Iterator<Item = &'static (&'static str, KnobType)> {
+    CONFIG_KNOBS.iter().chain(reasoning::KNOBS.iter())
+}
+
 /// The wire type for a knob, or `None` if `key` is not an editable knob.
 /// `pub(crate)` so the YAML follow-up verbs (`channel_config_yaml.rs`) coerce a
 /// declared `config/channels.yaml` value against the same closed knob set.
 pub(crate) fn knob_type(key: &str) -> Option<KnobType> {
-    CONFIG_KNOBS
-        .iter()
-        .find(|(k, _)| *k == key)
-        .map(|(_, t)| *t)
+    editable_knobs().find(|(k, _)| *k == key).map(|(_, t)| *t)
 }
 
 /// A comma-joined list of every editable knob, for the "unknown knob" diagnosis.
 fn knob_vocabulary() -> String {
-    CONFIG_KNOBS
-        .iter()
+    editable_knobs()
         .map(|(k, _)| *k)
         .collect::<Vec<_>>()
         .join(", ")
@@ -140,10 +151,11 @@ pub(crate) fn parse_set_assignment(spec: &str) -> Result<(String, Value), String
             knob_vocabulary()
         )
     })?;
-    // A string knob's empty value is a legitimate override (the explicit
-    // empty-string "disable" sentinel — see the doc above), so only the
-    // numeric/boolean knobs reject empty and steer to `unset`.
-    if raw.is_empty() && ty != KnobType::Str {
+    // A string knob's empty value is a legitimate override (the empty-string
+    // "disable" sentinel — see the doc above), so only the numeric/boolean knobs
+    // reject empty and steer to `unset`. An empty enum value falls through to the
+    // value-set check below, which names the accepted values.
+    if raw.is_empty() && matches!(ty, KnobType::Int | KnobType::Bool) {
         return Err(format!(
             "knob '{key}' has an empty value; supply a {} value, or use \
              `channel config unset {key}` to clear it back to inherit",
@@ -167,41 +179,51 @@ pub(crate) fn parse_set_assignment(spec: &str) -> Result<(String, Value), String
             Value::Number(n.into())
         }
         KnobType::Str => Value::String(raw.to_string()),
+        // A closed string enum: the value-set check lives in `reasoning` (it backs
+        // the dotted reasoning knobs), failing locally rather than round-tripping a 400.
+        KnobType::Enum(allowed) => reasoning::coerce_enum(key, allowed, raw)?,
     };
     Ok((key.to_string(), value))
 }
 
-/// Human-readable name for a knob's wire type, used in error messages.
+/// Human-readable name for a knob's wire type, used in the empty-value steer
+/// (only reached for the numeric/boolean knobs — see [`parse_set_assignment`]).
 fn type_label(ty: KnobType) -> &'static str {
     match ty {
         KnobType::Bool => "boolean",
         KnobType::Int => "integer",
         KnobType::Str => "string",
+        KnobType::Enum(_) => "enum",
     }
 }
 
-/// Fold a list of `key=value` specs into the sparse `{knob: value}` PATCH body.
+/// Fold a list of `key=value` specs into the sparse PATCH body.
 ///
 /// Rejects an empty spec list (a no-op write is a usage error) and a knob set
 /// more than once in one invocation (`floor_control=true floor_control=false` —
 /// ambiguous; reject rather than silently let last-wins decide). Each spec is
-/// validated by [`parse_set_assignment`].
+/// validated by [`parse_set_assignment`]; dotted reasoning keys are nested by
+/// [`reasoning::nest_dotted`] after collection so duplicate detection runs on the
+/// flat key.
 pub(crate) fn build_set_patch(specs: &[String]) -> Result<serde_json::Map<String, Value>, String> {
     if specs.is_empty() {
         return Err("at least one key=value assignment is required".into());
     }
-    let mut patch = serde_json::Map::new();
+    let mut flat = serde_json::Map::new();
     for spec in specs {
         let (key, value) = parse_set_assignment(spec)?;
-        if patch.insert(key.clone(), value).is_some() {
+        if flat.insert(key.clone(), value).is_some() {
             return Err(format!("knob '{key}' set more than once in one command"));
         }
     }
-    Ok(patch)
+    Ok(reasoning::nest_dotted(flat))
 }
 
 /// Fold a list of knob names into the PATCH body that unsets each back to
-/// inherit — every key maps to JSON `null`, the server's unset sentinel.
+/// inherit — every key maps to JSON `null`, the server's unset sentinel. A dotted
+/// reasoning key nests its null ([`nest_dotted`]), so `unset reasoning.mode`
+/// clears just that sub-knob (the server's per-sub-knob null branch) rather than
+/// the whole block.
 ///
 /// Rejects an empty list, an unknown knob (named, with the vocabulary), and a
 /// knob repeated in one invocation.
@@ -209,7 +231,7 @@ pub(crate) fn build_unset_patch(keys: &[String]) -> Result<serde_json::Map<Strin
     if keys.is_empty() {
         return Err("at least one knob name to unset is required".into());
     }
-    let mut patch = serde_json::Map::new();
+    let mut flat = serde_json::Map::new();
     for key in keys {
         let key = key.trim();
         if knob_type(key).is_none() {
@@ -218,11 +240,11 @@ pub(crate) fn build_unset_patch(keys: &[String]) -> Result<serde_json::Map<Strin
                 knob_vocabulary()
             ));
         }
-        if patch.insert(key.to_string(), Value::Null).is_some() {
+        if flat.insert(key.to_string(), Value::Null).is_some() {
             return Err(format!("knob '{key}' unset more than once in one command"));
         }
     }
-    Ok(patch)
+    Ok(reasoning::nest_dotted(flat))
 }
 
 /// The knob cells of a config view in render order, pairing each wire label with
@@ -232,8 +254,7 @@ pub(crate) fn build_unset_patch(keys: &[String]) -> Result<serde_json::Map<Strin
 /// `pub(crate)` so the YAML follow-up verbs walk the same knob→(value, source)
 /// cells (`export` emits the `"channel"` subset; `diff` compares each cell).
 pub(crate) fn config_rows(view: &ChannelConfigView) -> Vec<(&'static str, &ConfigField)> {
-    CONFIG_KNOBS
-        .iter()
+    editable_knobs()
         .map(|(key, _)| {
             let field = match *key {
                 "floor_control" => &view.floor_control,
@@ -246,9 +267,12 @@ pub(crate) fn config_rows(view: &ChannelConfigView) -> Vec<(&'static str, &Confi
                 "escalation_chair_id" => &view.escalation_chair_id,
                 "interaction_idle_timeout_seconds" => &view.interaction_idle_timeout_seconds,
                 "interaction_budget_tokens" => &view.interaction_budget_tokens,
-                // CONFIG_KNOBS is closed and pinned to the view fields by the
-                // lockstep test; an unmatched key is a programming error.
-                other => unreachable!("CONFIG_KNOBS knob {other} has no view field"),
+                // The nested reasoning block resolves its own dotted rows; the
+                // editable set is pinned to the view fields by the lockstep test.
+                other => view
+                    .reasoning
+                    .field(other)
+                    .unwrap_or_else(|| unreachable!("knob {other} has no view field")),
             };
             (*key, field)
         })

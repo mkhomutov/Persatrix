@@ -28,6 +28,7 @@ use crate::commands::channel::canonicalize_channel_id;
 use crate::commands::channel_config::{
     apply_config_patch, config_rows, fetch_config, knob_type, ChannelConfigView, KnobType,
 };
+use crate::commands::channel_config_reasoning::coerce_enum;
 use crate::types::validate_path_param;
 
 // ─── Parsed YAML model ────────────────────────────────────────────────────
@@ -70,6 +71,12 @@ pub(crate) fn yaml_to_knob_json(key: &str, ty: KnobType, y: &Yaml) -> Result<Val
             .as_str()
             .map(|s| Value::String(s.to_string()))
             .ok_or_else(|| format!("knob '{key}' expects a string")),
+        // A closed string enum (the RFC 0051 reasoning knobs): a genuine string in
+        // the accepted set, reusing the `set` parser's value-set check.
+        KnobType::Enum(allowed) => y
+            .as_str()
+            .ok_or_else(|| format!("knob '{key}' expects one of [{}]", allowed.join(", ")))
+            .and_then(|s| coerce_enum(key, allowed, s)),
     }
 }
 
@@ -162,19 +169,29 @@ pub(crate) fn validate_channel_ids(channels: &[ParsedChannel]) -> Result<(), Str
     Ok(())
 }
 
+// The YAML config-as-code verbs (`export`/`diff`) filter `config_rows` to the FLAT
+// knobs (`!knob.contains('.')`): the RFC 0051 `reasoning` block is nested on the
+// wire (`{"reasoning": {…}}`), so emitting it as a flat `reasoning.mode:` YAML key
+// would not round-trip through `import` (the server rejects a flat dotted knob).
+// Nested-block YAML is a deliberate follow-up; runtime `set`/`unset`/`get` and the
+// web panel already cover reasoning.
+
 /// Regenerate a channel's YAML block from its effective config view, emitting
 /// only the explicitly-overridden knobs (`source == "channel"`) under a
 /// `channels:` list so the output is both a standalone `import` file and a
 /// block that slots straight into `config/channels.yaml`. The block is stamped
 /// `revision: view.revision + 1` — the export-first stamp that makes the
 /// hand-edit loop (export → edit → import/commit) carry a fresh, higher revision
-/// without the operator remembering to bump it. Knob order follows
-/// [`config_rows`] (the registry order), keeping exports stable and reviewable.
+/// without the operator remembering to bump it. Knob order follows `config_rows`
+/// (registry order); the nested reasoning knobs are filtered out (see above).
 pub(crate) fn render_export_doc(name: &str, view: &ChannelConfigView) -> Result<String, String> {
     let mut block = serde_yaml_ng::Mapping::new();
     block.insert(Yaml::from("name"), Yaml::from(name));
     block.insert(Yaml::from("revision"), Yaml::from(view.revision + 1));
-    for (knob, field) in config_rows(view) {
+    for (knob, field) in config_rows(view)
+        .into_iter()
+        .filter(|(k, _)| !k.contains('.'))
+    {
         if field.source == "channel" {
             let y = serde_yaml_ng::to_value(&field.value)
                 .map_err(|e| format!("knob '{knob}': cannot encode value as YAML: {e}"))?;
@@ -249,6 +266,7 @@ pub(crate) struct DiffRow {
 pub(crate) fn diff_rows(declared: &Map<String, Value>, view: &ChannelConfigView) -> Vec<DiffRow> {
     config_rows(view)
         .into_iter()
+        .filter(|(knob, _)| !knob.contains('.'))
         .map(|(knob, field)| {
             let declared_val = declared.get(knob).cloned();
             let status = match &declared_val {

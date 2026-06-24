@@ -1,10 +1,11 @@
 <script>
-  // Governance-settings surface for a GROUP channel (RFC 0050 Phase 2 PR 2).
-  // Nested in ChannelTimeline beside ChannelMembers and gated identically (a
-  // capability + a watched non-DM channel). On channel select it reads
-  // GET /api/v1/channels/{id}/config and renders the eight governance knobs,
-  // each with its effective value, a provenance badge derived from `source`
-  // (overridden-here vs inherited fleet default), and an inherit/override
+  // Governance-settings surface for a GROUP channel (RFC 0050 Phase 2 PR 2;
+  // RFC 0051 PR 5 added the nested reasoning block). Nested in ChannelTimeline
+  // beside ChannelMembers and gated identically (a capability + a watched non-DM
+  // channel). On channel select it reads GET /api/v1/channels/{id}/config and
+  // renders the governance knobs (eight flat + the four nested reasoning.* sub-
+  // knobs), each with its effective value, a provenance badge derived from
+  // `source` (overridden-here vs inherited fleet default), and an inherit/override
   // control. Save collects ONLY the knobs the operator actually touched into a
   // sparse PATCH and sends the last-read revision in If-Match (optimistic
   // concurrency). A 409 reloads the latest config rather than blind-overwriting;
@@ -26,10 +27,19 @@
 
   let { channelId, members = [], agentsById = {}, onChanged } = $props();
 
-  // The eight knobs, in render order, each typed so the control and the patch
-  // coercion are driven by one source of truth. `int` knobs are non-negative
-  // integers (mirrored as input bounds; the server stays the authority). `chair`
-  // is a member-constrained persona picker; `bool` is floor_control.
+  // The governance knobs, in render order, each typed so the control and the
+  // patch coercion are driven by one source of truth. `int` knobs are
+  // non-negative integers (mirrored as input bounds; the server stays the
+  // authority). `chair` is a member-constrained persona picker; `bool` is
+  // floor_control. `enum` (RFC 0051 reasoning.{mode,model,depth}) is a generic
+  // string select over a fixed `options` set — `depth` lists only `shallow`
+  // because `deep` is RFC 0051 Phase 4 (validate-rejected), so the panel offers
+  // the accepted value rather than a lone dead `deep` entry.
+  //
+  // The `reasoning.*` keys are DOTTED: the reasoning block is the first NESTED
+  // knob, so it reads back at resp.reasoning.<sub> and patches as
+  // {reasoning: {<sub>: …}}. `fieldFor`/`setBody` resolve the dotted path; every
+  // other (flat) knob is untouched by that.
   const KNOBS = [
     { key: "floor_control", label: "Floor control", type: "bool" },
     {
@@ -55,7 +65,57 @@
       type: "int",
     },
     { key: "escalation_chair_id", label: "Escalation chair", type: "chair" },
+    {
+      key: "reasoning.mode",
+      label: "Reasoning mode",
+      type: "enum",
+      options: ["off", "bid", "plan"],
+    },
+    {
+      key: "reasoning.model",
+      label: "Reasoning model",
+      type: "enum",
+      options: ["fast", "quality"],
+    },
+    {
+      key: "reasoning.depth",
+      label: "Reasoning depth",
+      type: "enum",
+      options: ["shallow"],
+    },
+    {
+      key: "reasoning.revise",
+      label: "Reasoning revise rounds",
+      type: "int",
+    },
   ];
+
+  // Resolve a (possibly dotted) knob key to its {value, source} cell in a config
+  // response. A flat key reads `resp[key]`; a dotted key (`reasoning.mode`) reads
+  // the nested `resp.reasoning.mode`. Falls back to an inherited-null cell so a
+  // knob the server omits still renders honestly rather than crashing.
+  function fieldFor(resp, key) {
+    const dot = key.indexOf(".");
+    const cell =
+      dot === -1
+        ? resp?.[key]
+        : resp?.[key.slice(0, dot)]?.[key.slice(dot + 1)];
+    return cell ?? { value: null, source: "default" };
+  }
+
+  // Write a (possibly dotted) knob key into a sparse PATCH body, nesting a dotted
+  // key under its namespace object (`reasoning.mode` → `{reasoning: {mode: …}}`)
+  // so the body matches the server's nested knob shape. A `null` value (a revert
+  // to inherit) nests identically, clearing just that sub-knob.
+  function setBody(body, key, value) {
+    const dot = key.indexOf(".");
+    if (dot === -1) {
+      body[key] = value;
+      return;
+    }
+    const ns = key.slice(0, dot);
+    (body[ns] ??= {})[key.slice(dot + 1)] = value;
+  }
 
   let config = $state(null); // the last loaded/applied response (carries revision)
   let drafts = $state({}); // key -> { inherit, value } (reactive, bound to inputs)
@@ -89,7 +149,7 @@
     const d = {};
     const o = {};
     for (const k of KNOBS) {
-      const field = resp[k.key] ?? { value: null, source: "default" };
+      const field = fieldFor(resp, k.key);
       const inherit = field.source !== "channel";
       // A null/absent effective value renders as empty, never coerced to 0, so a
       // no-op save emits nothing. (Generic guard: since the RFC 0050
@@ -105,7 +165,7 @@
   function normalize(k, v) {
     if (k.type === "bool") return Boolean(v);
     if (k.type === "int") return v === "" || v == null ? null : Number(v);
-    return v == null ? "" : String(v); // chair
+    return v == null ? "" : String(v); // chair + enum (string-valued selects)
   }
 
   function changed(k) {
@@ -125,21 +185,22 @@
     for (const k of KNOBS) {
       if (!changed(k)) continue;
       if (drafts[k.key].inherit) {
-        body[k.key] = null;
+        setBody(body, k.key, null);
         continue;
       }
       const v = drafts[k.key].value;
-      if (k.type === "bool") body[k.key] = Boolean(v);
+      if (k.type === "bool") setBody(body, k.key, Boolean(v));
       else if (k.type === "int") {
         if (v === "" || v == null) continue;
-        body[k.key] = Number(v);
+        setBody(body, k.key, Number(v));
       } else {
-        // chair: an override with no member picked has nothing concrete to send.
-        // Skip it rather than emit escalation_chair_id:"" (a guaranteed 400) —
-        // the same way a blank int override is skipped above.
+        // chair + enum: a string-valued select. An override with nothing picked
+        // (a blank chair) has nothing concrete to send — skip it rather than emit
+        // escalation_chair_id:"" (a guaranteed 400), the same way a blank int
+        // override is skipped above. An enum always carries one of its options.
         const s = String(v ?? "");
         if (s === "") continue;
-        body[k.key] = s;
+        setBody(body, k.key, s);
       }
     }
     return body;
@@ -308,6 +369,21 @@
                   bind:value={drafts[knob.key].value}
                   disabled={drafts[knob.key].inherit}
                 />
+              {:else if knob.type === "enum"}
+                <!-- Generic enum select: options are a fixed value set on the knob
+                     (reasoning.mode/model/depth). The same <select> primitive as
+                     the chair picker below, generalized off a static list rather
+                     than the member roster. -->
+                <select
+                  class="value"
+                  aria-label={knob.label}
+                  bind:value={drafts[knob.key].value}
+                  disabled={drafts[knob.key].inherit}
+                >
+                  {#each knob.options as opt (opt)}
+                    <option value={opt}>{opt}</option>
+                  {/each}
+                </select>
               {:else}
                 <select
                   class="value"
