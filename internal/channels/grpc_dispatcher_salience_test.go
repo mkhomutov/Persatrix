@@ -47,3 +47,26 @@ func TestChannelMessageToProto_PopulatesSalienceFields(t *testing.T) {
 	assert.False(t, ev.SalienceGated, "a legacy always recipient is not salience-gated")
 	assert.Nil(t, ev.Threshold, "an unset threshold is absent on the wire (distinct from 0.0)")
 }
+
+// TestChannelMessageToProto_CarriesReasoningMode pins the RFC 0051 PR 6 go-live
+// wire half: channelMessageToProto carries the channel's resolved reasoning rung
+// off the envelope onto `ChannelMessageEvent.reasoning_mode`, the field the
+// agent-side seam reads to pick the bid's verdict grammar. An empty rung (a
+// pre-v0.3.10 envelope) stays empty on the wire — the agent maps it to off.
+func TestChannelMessageToProto_CarriesReasoningMode(t *testing.T) {
+	d := &GRPCMessageDispatcher{logger: zap.NewNop()}
+
+	ev := d.channelMessageToProto(
+		ChannelMessage{ID: "m-1", ChannelID: "group:planning", SenderID: "a"},
+		DispatchEnvelope{
+			Recipient:     Member{ParticipantID: "b", RespondPolicy: RespondAlways, SalienceGated: true},
+			ReasoningMode: ReasoningModeBid,
+		})
+	assert.Equal(t, ReasoningModeBid, ev.ReasoningMode, "the resolved rung rides the wire")
+
+	// An unset rung (old envelope) is the empty string — additive, maps to off.
+	ev = d.channelMessageToProto(
+		ChannelMessage{ID: "m-2", ChannelID: "group:planning", SenderID: "a"},
+		DispatchEnvelope{Recipient: Member{ParticipantID: "c", RespondPolicy: RespondAlways}})
+	assert.Equal(t, "", ev.ReasoningMode, "an unset rung stays empty on the wire (back-compat)")
+}

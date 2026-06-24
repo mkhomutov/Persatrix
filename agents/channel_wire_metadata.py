@@ -66,6 +66,11 @@ def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, ob
       ``salience_max_channel_members`` — the RFC 0030 Tier B salience-bid
       inputs (``agents/persona_runtime/salience_gate.py``); ``threshold``
       is ``None`` when absent, a tri-state distinct from an explicit 0.0.
+    * ``reasoning_mode`` — the RFC 0051 PR 6 go-live deliberation rung
+      (``off``/``bid``/``plan``) the same seam reads to pick the bid's verdict
+      grammar. The empty string (a pre-v0.3.10 producer) is carried verbatim;
+      the seam maps it to ``off`` (the scalar score gate), so the lift stays
+      additive across a mixed-version deployment.
     * ``floor_mentions`` / ``floor_mentions_resolved`` — the
       floor-capable-directedness amendment (v0.3.8): the
       orchestrator-resolved Tier A suppression basis plus its
@@ -85,6 +90,10 @@ def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, ob
         "threshold": request.threshold if request.HasField("threshold") else None,
         "channel_size": request.channel_size,
         "salience_max_channel_members": request.salience_max_channel_members,
+        # RFC 0051 PR 6 go-live: the channel's resolved reasoning rung. Carried
+        # verbatim (empty string for a pre-v0.3.10 producer); the salience seam
+        # maps an empty/unknown value to ``off`` (the scalar gate).
+        "reasoning_mode": request.reasoning_mode,
         "floor_mentions": list(request.floor_mentions),
         "floor_mentions_resolved": request.floor_mentions_resolved,
         # Chair-stall-escalation amendment (§C item 2): the forced-turn

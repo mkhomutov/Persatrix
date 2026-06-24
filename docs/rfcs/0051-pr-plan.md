@@ -304,12 +304,20 @@ Plus two non-behavioural cleanups: the dead `warning` return on `ReasoningConfig
 - A newly `salience_gated` channel now defaults to `mode: bid` (the flip); an existing `off` override is preserved.
 - E2E smoke: a 3-persona `reasoning.mode: plan` brainstorm shows **fewer pile-on turns** than the `off` baseline (countable via suppress-rate).
 
+#### Implementation notes (as built)
+
+- **The go-live needed the dispatch wire, not just a router-default change.** Phases 1–2 left the rung dark because the agent-side seam never received a `mode` (the `action_loop` call passed nothing). PR 6 adds a `reasoning_mode` field to `ChannelMessageEvent` (proto field 25, stubs regenerated with the CI-pinned protoc 34.1), stamped at fanout from the (flip-aware) [`ChannelRouter.ReasoningFor`](../../internal/channels/router_reasoning.go) onto the [`DispatchEnvelope`](../../internal/channels/dispatch_envelope.go), lifted onto the event payload in [`channel_wire_metadata.py`](../../agents/channel_wire_metadata.py). **`action_loop.py` is untouched** (it is at the 500-line cap): the seam reads the rung off the payload itself (`_reasoning_mode`) when the caller pins no `mode`, mirroring how it already reads `salience_gated`/`threshold`. An empty/unknown rung fails safe to `off` (the scalar gate).
+- **The flip is governance-aware, not a constant change.** `DefaultReasoningMode` stays `off` (the ungoverned/inherit baseline); a `governedDefaultMode(governed)` helper returns `bid` for a governed channel. It is threaded through every resolution + freeze seam — load-normalize ([`config.go`](../../internal/channels/config.go)), `validate`, `ResolveReasoning`, `applyOverridesToRouter` (now takes a `governed` arg, computed via a new `channelGoverned`), `FreezeOverrides` (now `governed`-aware so an explicit `off` is captured as the kill switch and survives boot replay / the YAML reconcile), the REST first-edit baseline, and the runtime-create path ([`applyRuntimeGroupGovernance`](../../internal/server/channel_governance.go)). So a channel resolves to `bid` the moment it is governed — at YAML load, boot, runtime-create, and runtime-edit — and an explicit `mode: off` is preserved across all of them. Pinned by the kill-switch-survives-boot tests in `config_reasoning_test.go` / `config_reconcile_test.go`.
+- **Telemetry is module-owned in `_metrics_salience.py`.** `deliberation.{total,suppressed,duration,budget_starved}` live in module state with a `record_deliberation()` helper rather than on `_Instruments`, because `metrics.py` is at the 500-line cap and could not gain the class annotations the `inst.X` pattern needs (the File-size constraint above). `register()` recreates them on every `init_metrics`. The parse-failure counter (PR 1) stays on `inst` as the never-gated safety net.
+- **The `should_post=true`-but-empty-compose divergence counter is deferred.** Its only emit site is post-compose in `action_loop.py`, which is at the 500-line cap; adding it needs the compose-prompt extraction the PR plan already names as the next candidate. Deferred to PR 9 closeout (instruments "may stage incrementally"), so PR 6 ships the four seam-side instruments (rate, suppress-by-`reason_code`, latency, starvation).
+- **The cost-delta counterfactual is deferred to the live release-prep run** (Phase 3) — it proves the §F claim, it does not gate the ship.
+
 #### PR checklist
 
-- [ ] `pytest` (metrics) + `go test` (default flip) pass; E2E suppress-rate delta asserted.
-- [ ] Parse-failure counter (PR 1) remains the never-gated safety net; new instruments may stage incrementally.
-- [ ] Governed default is now `bid`; `off` kill switch verified one-flip; cost-delta counterfactual arm recorded.
-- [ ] **Feature is live.** CHANGELOG `[0.3.10]` seeded (the user-facing line lands with this PR).
+- [x] `pytest` (metrics) + `go test` (default flip) pass; suppress-rate / latency / starvation instruments asserted on the right paths. (Live E2E suppress-rate delta is the Phase 3 release-prep deliverable.)
+- [x] Parse-failure counter (PR 1) remains the never-gated safety net; new instruments may stage incrementally (divergence deferred — see notes).
+- [x] Governed default is now `bid`; `off` kill switch verified one-flip and survives boot replay. (Cost-delta counterfactual arm deferred to the live run.)
+- [x] **Feature is live.** CHANGELOG `[0.3.10]` seeded (the user-facing line lands with this PR).
 
 ---
 
@@ -430,8 +438,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 2 | 1b | Seam threading + `agent.deliberated` audit (dark) | `feature/v0310-rfc0051-deliberate-seam` | ✅ Merged | [#693](https://github.com/mkhomutov/Persatrix/pull/693) | ✅ |
 | 3 | 2 | Plan-threaded compose + no-leak test (dark) | `feature/v0310-rfc0051-plan-compose` | ✅ Merged | [#694](https://github.com/mkhomutov/Persatrix/pull/694) | ✅ |
 | 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | ✅ Merged | [#695](https://github.com/mkhomutov/Persatrix/pull/695) | ✅ |
-| 5 | 3b | CLI + web config surfaces (enum + dotted-key) | `feature/v0310-rfc0051-config-surfaces` | 🔀 PR open | [#696](https://github.com/mkhomutov/Persatrix/pull/696) | — |
-| 6 | 3c | Telemetry + default flip `off → bid` (GO-LIVE) | `feature/v0310-rfc0051-telemetry-golive` | ⬜ Not started | — | — |
+| 5 | 3b | CLI + web config surfaces (enum + dotted-key) | `feature/v0310-rfc0051-config-surfaces` | ✅ Merged | [#696](https://github.com/mkhomutov/Persatrix/pull/696) | ✅ |
+| 6 | 3c | Telemetry + default flip `off → bid` (GO-LIVE) | `feature/v0310-rfc0051-telemetry-golive` | 🔀 PR open | [#697](https://github.com/mkhomutov/Persatrix/pull/697) | — |
 | 7 | OQ 6a | Operator reasoning reveal (separate / cuttable) | `feature/v0310-rfc0051-operator-reveal` | ⬜ Not started | — | — |
 | 8 | 5a | Reflexion loop (default `revise: 0`) | `feature/v0310-rfc0051-reflexion` | ⬜ Not started | — | — |
 | 9 | 5b | No-leak extension + closeout | `feature/v0310-rfc0051-close` | ⬜ Not started | — | — |

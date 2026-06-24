@@ -46,6 +46,16 @@ type DispatchEnvelope struct {
 	// zero falls back to the agent-side default. Per-publish, like ChannelSize.
 	SalienceMaxChannelMembers int
 
+	// ReasoningMode (RFC 0051 PR 6 go-live) is the channel's resolved
+	// reasoning-before-posting rung — `off` | `bid` | `plan` — carried on
+	// `ChannelMessageEvent.reasoning_mode` so the agent-side salience seam picks
+	// the bid's verdict grammar. The router resolves it from the (already
+	// flip-aware) [ChannelRouter.ReasoningFor] at fanout, so an inherit governed
+	// channel is `bid` and an explicit `off` stays the kill switch. Channel-level
+	// (identical across recipients), like ChannelSize; the empty string is the
+	// pre-v0.3.10 / untracked case the agent maps to `off`.
+	ReasoningMode string
+
 	// ChairEscalation (the chair-stall-escalation amendment, CE3) marks this
 	// dispatch as the orchestrator's forced turn to the channel's configured
 	// escalation chair after a stalled floor round. Carried on

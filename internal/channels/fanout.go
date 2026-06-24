@@ -260,6 +260,10 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		// `m`/`Recipient`; these two are channel-wide.
 		ChannelSize:               channelSize,
 		SalienceMaxChannelMembers: r.salienceMaxFor(msg.ChannelID),
+		// RFC 0051 PR 6 go-live: the channel's resolved reasoning rung, read off the
+		// (flip-aware) router so a governed channel ships `bid` by default and an
+		// explicit `off` stays the kill switch. Channel-wide, like ChannelSize.
+		ReasoningMode: r.ReasoningFor(msg.ChannelID).Mode,
 		// Floor-capable-directedness amendment (v0.3.8): per-publish, like
 		// ChannelSize — resolved once in [ChannelRouter.fanout].
 		FloorMentions:                floorMentions,

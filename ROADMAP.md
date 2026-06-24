@@ -1,7 +1,7 @@
 # Persatrix Roadmap
 
-> **Last updated**: 2026-06-23 (v0.3.10 planning — [RFC 0051 *Reasoning Before Posting*](docs/rfcs/0051-reasoning-before-posting.md) sequenced as the next v0.3.x realism rung; [v0.3.10 plan](docs/v0.3.10-plan.md) + [RFC 0051 PR plan](docs/rfcs/0051-pr-plan.md) opened. v0.3.9 ✅ Released.)
-> **Current phase**: v0.3.10 (Conversations worth posting into — RFC 0051 reasoning before posting) — 📋 Planning
+> **Last updated**: 2026-06-24 (v0.3.10 — RFC 0051 PR 6 go-live: the resolved `reasoning.mode` reaches the wire and the governed-channel default flips `off → bid` (semantic silence on by default). v0.3.9 ✅ Released.)
+> **Current phase**: v0.3.10 (Conversations worth posting into — RFC 0051 reasoning before posting) — 🚧 Implementing
 > **Current milestone**: v0.3.10 *Conversations worth posting into* — 📋 Planning. The headline user-facing story: **personas think before they speak** — a persona privately decides whether a turn is worth a post and what it should add, staying silent (with a reason) when it has nothing to contribute and composing under a private plan when it does. RFC 0051 generalizes the shipped RFC 0030 Tier-B salience bid into a structured `{ should_post, plan }` verdict on the same leased `fast`-model seam (idle stays free; the trace is walled and audit-only), tunable per channel via a `reasoning` knob on the RFC 0050 config surface. Scope: RFC 0051 Phases 1–3 + 5 (Phase 4 native extended-thinking deferred); RFC 0039 accounts/auth stays parallel → v0.3.11 candidate. See [v0.3.10-plan.md](docs/v0.3.10-plan.md) and the [v0.3.x-sequencing Amendment 2026-06-23](docs/v0.3.x-sequencing.md#amendment-2026-06-23--add-v0310-reasoning-before-posting-as-the-next-realism-rung). v0.4.0 (Agent Organizations — deliberative reasoning) follows.
 
 This document tracks development progress across all versions. Update it when merging PRs or completing milestones.

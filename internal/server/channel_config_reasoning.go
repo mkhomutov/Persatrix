@@ -108,30 +108,33 @@ func reasoningResponse(rc channels.ReasoningConfig, ov *channels.ReasoningOverri
 // unconditionally-frozen flat knobs — it is CONDITIONAL on two counts, both
 // delegated to [channels.ReasoningConfig.FreezeOverrides]:
 //
-//  1. PER-SUB-KNOB / PR-6 RESPONSIVENESS. Only a non-default sub-knob is frozen; a
-//     default sub-knob stays inherit. Critically a `mode: off` is never frozen as
-//     explicit (even when a sibling like `model: quality` is non-default), because
-//     RFC 0051 PR 6 flips the governed-channel default off→bid and an explicit
-//     "off" is preserved across that flip — freezing a default-off channel here,
-//     merely because an operator touched some unrelated knob, would silently opt it
-//     out of a flip it never declined.
+//  1. PER-SUB-KNOB / GOVERNANCE-AWARE FREEZE. Only a sub-knob differing from its
+//     (governance-dependent) default is frozen; a default sub-knob stays inherit.
+//     Post the PR 6 go-live flip the governed default is `bid`, so on a governed
+//     channel `mode: bid` stays inherit while an explicit `mode: off` (the kill
+//     switch) IS frozen — that is what preserves the kill switch across the flip.
+//     A channel non-default ONLY because of a sibling like `model: quality` keeps
+//     `mode` inherit and stays responsive to the `bid` default — an operator who
+//     touched only `model` never declined the flip. The same `governed` read drives
+//     [channels.ReasoningConfig.FreezeOverrides] and the drop below, so they agree.
 //
 //  2. GOVERNANCE-DRIFT DROP (the reasoning analogue of the escalation chair's
-//     [Server.chairIsEnforceableMember]). A frozen non-off `mode` is the one
-//     sub-knob the apply path cross-validates against live membership
-//     ([ChannelRouter.validateReasoningGoverned]). If the channel's salience-gated
-//     member has since drifted away the rung is already inert at dispatch, so
-//     freezing the mode into the baseline would let that cross-field rule REJECT an
-//     unrelated first edit naming a knob the operator never touched. We drop just
-//     the inert mode (any committed model/depth/revise still freeze) — the same
-//     "tolerate the drift, don't resurrect it as a hard error" posture boot replay
-//     and dispatch already take. NOTE this only covers the FIRST edit: once the
-//     channel is store-canonical (revision > 0) the merge base is the stored blob,
-//     so a persisted non-off mode whose member later leaves will still block a
-//     subsequent edit until cleared — the same accepted limitation the chair has.
+//     [Server.chairIsEnforceableMember]). On an UNgoverned channel a frozen non-off
+//     `mode` (drift — the salience-gated member left) is the one sub-knob the apply
+//     path cross-validates against live membership
+//     ([ChannelRouter.validateReasoningGoverned]); the rung is already inert at
+//     dispatch, so freezing it would let that cross-field rule REJECT an unrelated
+//     first edit naming a knob the operator never touched. We drop just the inert
+//     mode (any committed model/depth/revise still freeze) — the same "tolerate the
+//     drift, don't resurrect it as a hard error" posture boot replay and dispatch
+//     already take. NOTE this only covers the FIRST edit: once the channel is
+//     store-canonical (revision > 0) the merge base is the stored blob, so a
+//     persisted non-off mode whose member later leaves will still block a subsequent
+//     edit until cleared — the same accepted limitation the chair has.
 func (s *Server) reasoningBaseline(ctx context.Context, id string) *channels.ReasoningOverrides {
-	froze := s.channelRouter.ReasoningFor(id).FreezeOverrides()
-	if froze != nil && froze.Mode != nil && !s.channelHasSalienceGatedMember(ctx, id) {
+	governed := s.channelHasSalienceGatedMember(ctx, id)
+	froze := s.channelRouter.ReasoningFor(id).FreezeOverrides(governed)
+	if froze != nil && froze.Mode != nil && !governed {
 		froze.Mode = nil // drifted-ungoverned: drop the inert mode (mirror the chair)
 		if froze.IsEmpty() {
 			return nil
@@ -146,16 +149,13 @@ func (s *Server) reasoningBaseline(ctx context.Context, id string) *channels.Rea
 // reasoning analogue of [Server.chairIsEnforceableMember] and shares its posture: a
 // store error reading members is treated as "not governed" so the first-edit
 // baseline drops the inert mode and the edit proceeds, rather than blocking it on a
-// transient fault (the apply path that follows surfaces any real outage anyway).
+// transient fault (the apply path that follows surfaces any real outage anyway). The
+// "any gated member?" test is shared with the router-side callers via
+// [channels.AnySalienceGated]; only the GetMembers + error posture is local.
 func (s *Server) channelHasSalienceGatedMember(ctx context.Context, id string) bool {
 	members, err := s.channelStore.GetMembers(ctx, id)
 	if err != nil {
 		return false
 	}
-	for i := range members {
-		if members[i].SalienceGated {
-			return true
-		}
-	}
-	return false
+	return channels.AnySalienceGated(members)
 }

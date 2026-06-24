@@ -201,18 +201,14 @@ func (c *Config) Validate() error {
 		// `always` is open-floor but NOT salience-gated and so does not arm it.
 		// `make validate` checks the enum vocabulary; the capability gate
 		// (deep / revise≥1) and the governance cross-field are Go-only.
-		governed := false
-		for j := range ch.Members {
-			if ch.Members[j].SalienceGated {
-				governed = true
-				break
-			}
-		}
+		governed := ch.governed()
 		// Validate the NORMALIZED rung so a direct Validate() on a hand-built
 		// Config (bypassing LoadConfig's normalize pass) does not trip the enum
-		// check on an empty zero-value block. LoadConfig already normalized in
-		// place, so this is a harmless no-op on the production path.
-		if rerr := ch.Reasoning.normalized().validate(governed); rerr != nil {
+		// check on an empty zero-value block. Governance-aware normalize so an
+		// absent mode on a governed channel resolves to the PR 6 `bid` default
+		// (and validates clean) rather than `off`. LoadConfig already normalized
+		// in place, so this is a harmless idempotent no-op on the production path.
+		if rerr := ch.Reasoning.normalizedForGovernance(governed).validate(governed); rerr != nil {
 			return fmt.Errorf("channels[%d=%s]: %w", i, ch.Name, rerr)
 		}
 

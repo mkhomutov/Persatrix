@@ -976,8 +976,27 @@ type ChannelMessageEvent struct {
 	// still gets the lift from field 22 and renders the two-outcome framing
 	// (degraded but functional: synthesis is outcome (a) there too).
 	ChairEscalationResynthesize bool `protobuf:"varint,24,opt,name=chair_escalation_resynthesize,json=chairEscalationResynthesize,proto3" json:"chair_escalation_resynthesize,omitempty"`
-	unknownFields               protoimpl.UnknownFields
-	sizeCache                   protoimpl.SizeCache
+	// RFC 0051 (v0.3.10) reasoning-before-posting — the channel's resolved
+	// deliberation rung (`off` | `bid` | `plan`) for this recipient. Carried as
+	// a first-class field for the same reason as the Tier B salience inputs
+	// (`salience_gated = 13` …): `ChannelMessageEvent` has no metadata map, and
+	// the agent-side seam (`agents/persona_runtime/salience_gate.py`) needs the
+	// mode to pick the bid's verdict grammar — scalar score gate (`off`),
+	// structured silence verdict (`bid`), or silence verdict + plan-threaded
+	// compose (`plan`). Channel-level (identical across a fanout's recipients);
+	// the orchestrator stamps `ChannelRouter.ReasoningFor(channelID).Mode`, which
+	// already encodes the PR 6 go-live flip (a governed channel with no explicit
+	// override resolves to `bid`, an explicit `off` stays the kill switch).
+	//
+	// proto3 implicit presence: the empty string (zero value) is the pre-v0.3.10
+	// / untracked case, which the agent maps to `off` (the scalar score gate,
+	// byte-for-byte v0.3.8) — so the field is additive across a mixed-version
+	// deployment exactly like `salience_gated`. The mode only ever arms the
+	// structured path on a `salience_gated` recipient, so an `off` here and a
+	// non-`salience_gated` recipient are both inert.
+	ReasoningMode string `protobuf:"bytes,25,opt,name=reasoning_mode,json=reasoningMode,proto3" json:"reasoning_mode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ChannelMessageEvent) Reset() {
@@ -1176,6 +1195,13 @@ func (x *ChannelMessageEvent) GetChairEscalationResynthesize() bool {
 		return x.ChairEscalationResynthesize
 	}
 	return false
+}
+
+func (x *ChannelMessageEvent) GetReasoningMode() string {
+	if x != nil {
+		return x.ReasoningMode
+	}
+	return ""
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
@@ -1573,7 +1599,7 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xbb\b\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xe2\b\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -1601,7 +1627,8 @@ const file_task_proto_rawDesc = "" +
 	"\"previous_interaction_close_trigger\x18\x15 \x01(\tR\x1fpreviousInteractionCloseTrigger\x12)\n" +
 	"\x10chair_escalation\x18\x16 \x01(\bR\x0fchairEscalation\x12D\n" +
 	"\x1einteraction_close_notification\x18\x17 \x01(\bR\x1cinteractionCloseNotification\x12B\n" +
-	"\x1dchair_escalation_resynthesize\x18\x18 \x01(\bR\x1bchairEscalationResynthesizeB\f\n" +
+	"\x1dchair_escalation_resynthesize\x18\x18 \x01(\bR\x1bchairEscalationResynthesize\x12%\n" +
+	"\x0ereasoning_mode\x18\x19 \x01(\tR\rreasoningModeB\f\n" +
 	"\n" +
 	"_threshold\"H\n" +
 	"\aTaskAck\x12\x18\n" +

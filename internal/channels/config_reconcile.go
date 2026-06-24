@@ -117,12 +117,15 @@ func (c ChannelConfig) toConfigOverrides(cfg *Config) ChannelConfigOverrides {
 		o.EscalationChairID = &chair
 	}
 	// RFC 0051 reasoning block: capture the committed rung the same conditional way
-	// as the chair — a default-off rung stays nil (inherit), a non-default rung is
-	// snapshotted per-sub-knob ([ReasoningConfig.FreezeOverrides]). Omitting it here
-	// is silent data loss: [ChannelRouter.ResolveFromStore] re-stamps from this
-	// snapshot at revision > 0, so an un-captured non-off rung is reset to the
-	// package default at boot AND the drift hash goes blind to it.
-	o.Reasoning = c.Reasoning.FreezeOverrides()
+	// as the chair — a default rung stays nil (inherit), a non-default rung is
+	// snapshotted per-sub-knob ([ReasoningConfig.FreezeOverrides]). The freeze is
+	// governance-aware (PR 6): on a governed channel the default is `bid`, so an
+	// explicit `mode: off` kill switch is captured here and survives the
+	// reconcile→[ChannelRouter.ResolveFromStore] boot round-trip. Omitting it is
+	// silent data loss: boot replay re-stamps from this snapshot at revision > 0,
+	// so an un-captured non-default rung resets to the default at boot AND the
+	// drift hash goes blind to it.
+	o.Reasoning = c.Reasoning.FreezeOverrides(c.governed())
 	return o
 }
 

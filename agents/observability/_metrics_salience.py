@@ -26,18 +26,90 @@ would be invisible — indistinguishable from the feature working as intended.
 
 from __future__ import annotations
 
+import contextlib
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..response_gate import POLICY_LOW_SALIENCE
 
 if TYPE_CHECKING:
-    from opentelemetry.metrics import Meter
+    from opentelemetry.metrics import Counter, Histogram, Meter
 
     from .metrics import _Instruments
 
 
+# ── RFC 0051 PR 6 (v0.3.10) go-live deliberation telemetry ───────────────────
+#
+# The observability that makes an active ``reasoning`` default safe to run: the
+# deliberation rate, the silence rate charted by ``reason_code``/``mode``, the
+# deliberation-latency histogram (the pass is a serial ``fast`` call *before*
+# compose — it reuses the ``agent.llm.duration`` instrument *shape*), and a
+# budget-starvation counter (a deliberation starved to silence by a low
+# ``interaction_budget_tokens`` — operationally distinct from a semantic "nothing
+# to add"). All kept distinct from the Tier-B ``channel.messages.gated`` rows.
+#
+# These instruments live in module state HERE, not on :class:`_Instruments`,
+# because ``metrics.py`` is at the 500-line review cap and cannot gain the class
+# annotations the ``inst.X`` pattern needs (PR plan §File-size constraints —
+# "all new deliberation/reasoning instruments land here ... metrics.py must not
+# gain net lines"). :func:`register` re-creates them on every ``_Instruments``
+# construction (every ``init_metrics``), so they always track the live meter; the
+# parse-failure counter above remains on ``inst`` as the never-gated safety net.
+
+# The bid ``reason_code`` for a budget/lease starvation (a denied lease OR the
+# wallet ``RESOURCE_EXHAUSTED`` cap — see ``agents/salience_bid.py``).
+# Operationally distinct from a semantic-silence code, so it gets its own counter.
+_BUDGET_STARVED_REASON: str = "lease_denied"
+
+
+@dataclass
+class _DeliberationInstruments:
+    """The module-owned RFC 0051 PR 6 deliberation instruments."""
+
+    total: Counter
+    suppressed: Counter
+    duration: Histogram
+    budget_starved: Counter
+
+
+_deliberation: _DeliberationInstruments | None = None
+
+
+def record_deliberation(
+    *, mode: str, reason_code: str, spoke: bool, duration_ms: float,
+) -> None:
+    """Record the go-live telemetry for one structured-rung deliberation.
+
+    Always emits the rate (``deliberation.total``) + the latency
+    (``deliberation.duration``); on a *silence* verdict additionally emits the
+    suppress row (``deliberation.suppressed``, charted by ``reason_code`` AND
+    ``mode``) and, when the silence was a budget/lease starvation, the
+    ``deliberation.budget_starved`` counter. A no-op until :func:`register` has
+    run (metrics unconfigured), so a call site never has to guard. ``reason_code``
+    is the closed-vocabulary bid label and ``mode`` is the closed rung set, so the
+    cardinality stays bounded — both safe as metric dimensions.
+
+    **Best-effort, like the sibling ``agent.deliberated`` audit emit.** This runs
+    on the active-by-default ``bid`` path *after* the deliberation has already
+    happened, so a metric-export hiccup must never propagate and undo the turn —
+    the same "the decision already happened, don't block on the egress" contract
+    (RFC 0051 §Security). The OTel SDK already swallows recording errors, but the
+    suppress makes the no-block guarantee explicit and matches the audit path."""
+    di = _deliberation
+    if di is None:
+        return
+    with contextlib.suppress(Exception):
+        di.total.add(1, attributes={"mode": mode})
+        di.duration.record(duration_ms, attributes={"mode": mode})
+        if not spoke:
+            di.suppressed.add(1, attributes={"reason_code": reason_code, "mode": mode})
+            if reason_code == _BUDGET_STARVED_REASON:
+                di.budget_starved.add(1, attributes={"mode": mode})
+
+
 def register(inst: _Instruments, meter: Meter) -> None:
-    """Register the Tier-B salience counters on ``inst``."""
+    """Register the Tier-B salience counters on ``inst`` plus the module-owned
+    RFC 0051 deliberation instruments (see :data:`_deliberation`)."""
     inst.channel_messages_salience_skipped = meter.create_counter(
         name="channel.messages.salience_skipped",
         unit="{message}",
@@ -65,6 +137,57 @@ def register(inst: _Instruments, meter: Meter) -> None:
             "fell closed to silence. Attribute: mode (bid|plan; off marks a "
             "non-structured-mode misuse of the public parser). Distinct from "
             "channel.messages.gated — a broken parser, not no-pile-on dampening."
+        ),
+    )
+    # RFC 0051 PR 6 go-live — the module-owned deliberation instruments (see the
+    # block comment above for why they are not on ``inst``).
+    global _deliberation
+    _deliberation = _DeliberationInstruments(
+        total=meter.create_counter(
+            name="deliberation.total",
+            unit="{deliberation}",
+            description=(
+                "RFC 0051 structured deliberations run on an open-floor admit. "
+                "Attribute: mode (bid|plan). The deliberation RATE; the silence "
+                "fraction is deliberation.suppressed / this total (both carry "
+                "mode, so the ratio holds per rung as well as in aggregate)."
+            ),
+        ),
+        suppressed=meter.create_counter(
+            name="deliberation.suppressed",
+            unit="{deliberation}",
+            description=(
+                "RFC 0051 deliberations that resolved to silence, charted by cause "
+                "and rung. Attributes: reason_code (the closed bid vocabulary — "
+                "only_agreeing|already_answered|nothing_to_add|lease_denied|…) and "
+                "mode (bid|plan), so the silence fraction (suppressed/total) is "
+                "computable per rung. Distinct from channel.messages.gated; and a "
+                "TB6 oversized-channel skip is NOT a deliberation, so it rides "
+                "channel.messages.salience_skipped, not this counter."
+            ),
+        ),
+        duration=meter.create_histogram(
+            name="deliberation.duration",
+            unit="ms",
+            description=(
+                "Wall-clock duration of the RFC 0051 deliberation pass — a serial "
+                "fast-model call before compose, measured around the bid only (the "
+                "agent.deliberated audit emit is excluded). Reuses the "
+                "agent.llm.duration instrument shape. Attribute: mode (bid|plan). "
+                "Charts the latency the flip adds; the structured rung also costs "
+                "modestly more per bid than the off scalar gate (larger prompt + "
+                "higher max_tokens), captured by existing wallet accounting."
+            ),
+        ),
+        budget_starved=meter.create_counter(
+            name="deliberation.budget_starved",
+            unit="{deliberation}",
+            description=(
+                "RFC 0051 deliberations starved to silence by a denied lease / "
+                "exhausted interaction_budget_tokens (reason_code=lease_denied) — "
+                "operationally distinct from a semantic 'nothing to add'. "
+                "Attribute: mode (bid|plan)."
+            ),
         ),
     )
 

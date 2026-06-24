@@ -394,6 +394,25 @@ message ChannelMessageEvent {
   // still gets the lift from field 22 and renders the two-outcome framing
   // (degraded but functional: synthesis is outcome (a) there too).
   bool chair_escalation_resynthesize = 24;
+  // RFC 0051 (v0.3.10) reasoning-before-posting — the channel's resolved
+  // deliberation rung (`off` | `bid` | `plan`) for this recipient. Carried as
+  // a first-class field for the same reason as the Tier B salience inputs
+  // (`salience_gated = 13` …): `ChannelMessageEvent` has no metadata map, and
+  // the agent-side seam (`agents/persona_runtime/salience_gate.py`) needs the
+  // mode to pick the bid's verdict grammar — scalar score gate (`off`),
+  // structured silence verdict (`bid`), or silence verdict + plan-threaded
+  // compose (`plan`). Channel-level (identical across a fanout's recipients);
+  // the orchestrator stamps `ChannelRouter.ReasoningFor(channelID).Mode`, which
+  // already encodes the PR 6 go-live flip (a governed channel with no explicit
+  // override resolves to `bid`, an explicit `off` stays the kill switch).
+  //
+  // proto3 implicit presence: the empty string (zero value) is the pre-v0.3.10
+  // / untracked case, which the agent maps to `off` (the scalar score gate,
+  // byte-for-byte v0.3.8) — so the field is additive across a mixed-version
+  // deployment exactly like `salience_gated`. The mode only ever arms the
+  // structured path on a `salience_gated` recipient, so an `off` here and a
+  // non-`salience_gated` recipient are both inert.
+  string reasoning_mode = 25;
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)

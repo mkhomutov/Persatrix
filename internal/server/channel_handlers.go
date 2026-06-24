@@ -125,9 +125,11 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// RFC 0030 — stamp the default governance bundle (floor control, the Tier B
-	// salience cap, and the Layer 2 reply budget) so a runtime-created group
-	// channel matches a config-declared one; see applyRuntimeGroupGovernance.
-	s.applyRuntimeGroupGovernance(canonicalID)
+	// salience cap, the Layer 2 reply budget, and the RFC 0051 reasoning rung) so a
+	// runtime-created group channel matches a config-declared one; see
+	// applyRuntimeGroupGovernance (which reads the roster's governance off the store
+	// for the governance-aware reasoning default).
+	s.applyRuntimeGroupGovernance(r.Context(), canonicalID)
 
 	created, err := s.channelStore.GetChannel(r.Context(), canonicalID)
 	if err != nil {

@@ -79,7 +79,11 @@ func (r *ChannelRouter) ResolveReasoning(ctx context.Context, cfg *Config) error
 		if ch.Type != ChannelTypeGroup || configured[ch.ID] {
 			continue
 		}
-		r.SetReasoning(ch.ID, DefaultReasoningConfig())
+		// PR 6 go-live: a store-only group channel (e.g. runtime-created, no YAML
+		// block) picks up the GOVERNED default — `bid` if it has a salience-gated
+		// member, else `off`. So a channel becomes `bid`-by-default the moment it
+		// is governed, without an explicit reasoning block (RFC 0051 §G / OQ 2).
+		r.SetReasoning(ch.ID, governedReasoningBase(r.channelGoverned(ctx, ch.ID)))
 	}
 	return nil
 }
