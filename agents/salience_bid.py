@@ -352,6 +352,7 @@ async def evaluate_salience(
     cause: walletpb.Cause.ValueType = walletpb.CAUSE_CHANNEL_MESSAGE,
     interaction_id: str = "",
     mode: str = deliberation.MODE_OFF,
+    deliberation_out: list[str] | None = None,
 ) -> SalienceDecision:
     """Run the Tier B salience bid for one open-floor admit.
 
@@ -458,13 +459,12 @@ async def evaluate_salience(
         )
         return SalienceDecision(speak=False, score=None, reason="llm_error")
 
-    # RFC 0051 — under reasoning the structured verdict supersedes the score gate:
-    # ``should_post`` governs; a silence ``reason_code`` vetoes it (TB2, fail-
-    # closed). The NL-addressing ``_bar_for`` shift (TB4) is *part of* that gate, so
-    # here ``addressing`` survives only as the advisory prompt nudge above, not a
-    # deterministic bias. ``mode: off`` (the scalar branch below) is untouched.
+    # RFC 0051 — under reasoning the structured verdict supersedes the score gate
+    # (``should_post`` governs); PR 3 surfaces the raw text for the seam's plan parse.
     if deliberation.is_structured(mode):
         should_post, reason_code, reason_note = deliberation.parse_verdict(response.text, mode=mode)
+        if deliberation_out is not None:
+            deliberation_out.append(response.text or "")
         return SalienceDecision(
             speak=should_post, score=None, reason=reason_code, reason_note=reason_note,
         )
