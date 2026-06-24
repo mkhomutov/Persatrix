@@ -175,8 +175,14 @@ class TestDeliberationTelemetry:
             def record(self, *a: Any, **k: Any) -> None:
                 raise RuntimeError("otel exporter down")
 
+        # _Boom duck-types the OTel add/record surface but is neither Counter nor
+        # Histogram, which is the whole point — inject it where the dataclass wants
+        # the real instruments to prove record_deliberation swallows their raises.
         boom = _metrics_salience._DeliberationInstruments(
-            total=_Boom(), suppressed=_Boom(), duration=_Boom(), budget_starved=_Boom(),
+            total=_Boom(),  # type: ignore[arg-type]
+            suppressed=_Boom(),  # type: ignore[arg-type]
+            duration=_Boom(),  # type: ignore[arg-type]
+            budget_starved=_Boom(),  # type: ignore[arg-type]
         )
         monkeypatch.setattr(_metrics_salience, "_deliberation", boom)
         # Neither call may raise.
