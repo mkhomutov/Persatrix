@@ -409,7 +409,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | # | Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|-------|--------|--------|-----------|--------|
 | 1 | 1a | Structured silence verdict (dark) | `feature/v0310-rfc0051-silence-verdict` | ✅ Merged | [#692](https://github.com/mkhomutov/Persatrix/pull/692) | ✅ |
-| 2 | 1b | Seam threading + `agent.deliberated` audit (dark) | `feature/v0310-rfc0051-deliberate-seam` | 🔀 PR open | — | — |
+| 2 | 1b | Seam threading + `agent.deliberated` audit (dark) | `feature/v0310-rfc0051-deliberate-seam` | 🔀 PR open | [#693](https://github.com/mkhomutov/Persatrix/pull/693) | — |
 | 3 | 2 | Plan-threaded compose + no-leak test (dark) | `feature/v0310-rfc0051-plan-compose` | ⬜ Not started | — | — |
 | 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | ⬜ Not started | — | — |
 | 5 | 3b | CLI + web config surfaces (enum + dotted-key) | `feature/v0310-rfc0051-config-surfaces` | ⬜ Not started | — | — |
