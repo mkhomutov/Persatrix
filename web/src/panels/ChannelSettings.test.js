@@ -37,6 +37,14 @@ function configBody(overrides = {}) {
     escalation_chair_id: { value: "ada", source: "channel" },
     interaction_idle_timeout_seconds: { value: 900, source: "default" },
     interaction_budget_tokens: { value: 0, source: "default" },
+    // RFC 0051 PR 5: the nested reasoning block. Each sub-knob is a {value,
+    // source} cell exactly like a flat knob; all inherit the fleet default here.
+    reasoning: {
+      mode: { value: "off", source: "default" },
+      model: { value: "fast", source: "default" },
+      depth: { value: "shallow", source: "default" },
+      revise: { value: 0, source: "default" },
+    },
     ...overrides,
   };
 }
@@ -77,9 +85,10 @@ describe("ChannelSettings", () => {
     const floor = await screen.findByLabelText("Floor control");
     expect(floor.checked).toBe(true);
     // Two knobs are overridden (floor_control, escalation_chair_id); the rest
-    // inherit. The provenance vocabulary is the user-facing rendering of `source`.
+    // inherit — six flat + the four nested reasoning.* sub-knobs = ten. The
+    // provenance vocabulary is the user-facing rendering of `source`.
     expect(screen.getAllByText("Overridden on this channel").length).toBe(2);
-    expect(screen.getAllByText("Inherited default").length).toBe(6);
+    expect(screen.getAllByText("Inherited default").length).toBe(10);
 
     // It fetched the encoded config route, not anything else.
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -355,5 +364,130 @@ describe("ChannelSettings", () => {
     );
     expect(screen.queryByText("Settings saved.")).toBeNull();
     expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  // ─── RFC 0051 PR 5: the nested reasoning block ──────────────────────
+
+  it("renders the reasoning mode select with its option set and effective value", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        okJSON(
+          configBody({
+            reasoning: {
+              mode: { value: "bid", source: "channel" },
+              model: { value: "fast", source: "default" },
+              depth: { value: "shallow", source: "default" },
+              revise: { value: 0, source: "default" },
+            },
+          }),
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    // The mode select reads back its effective value and offers off/bid/plan.
+    const mode = await screen.findByLabelText("Reasoning mode");
+    expect(mode.value).toBe("bid");
+    const options = [...mode.querySelectorAll("option")].map((o) => o.value);
+    expect(options).toEqual(["off", "bid", "plan"]);
+
+    // depth offers only the v0.3.10-accepted `shallow` — not a dead `deep` entry.
+    const depth = screen.getByLabelText("Reasoning depth");
+    expect([...depth.querySelectorAll("option")].map((o) => o.value)).toEqual([
+      "shallow",
+    ]);
+  });
+
+  it("sends a changed reasoning sub-knob as a NESTED sparse PATCH", async () => {
+    const fetchMock = vi.fn((path, init) =>
+      Promise.resolve(
+        okJSON(init?.method === "PATCH" ? configBody({ revision: 4 }) : configBody()),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn(() => Promise.resolve());
+    renderSettings({ onChanged });
+
+    // Override reasoning.mode: inherit -> bid. The knob defaults to inherited, so
+    // flip it to an override first, then pick the value.
+    const inherit = await screen.findByLabelText(
+      "Inherit fleet default for Reasoning mode",
+    );
+    await fireEvent.click(inherit); // -> override
+    const mode = screen.getByLabelText("Reasoning mode");
+    await fireEvent.change(mode, { target: { value: "bid" } });
+    await fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    const patchCall = fetchMock.mock.calls.find((c) => c[1]?.method === "PATCH");
+    // The body nests the sub-knob under "reasoning" — NOT a flat "reasoning.mode"
+    // key (the server's nested merge would reject that).
+    expect(JSON.parse(patchCall[1].body)).toEqual({ reasoning: { mode: "bid" } });
+  });
+
+  it("reverting an overridden reasoning sub-knob nests an explicit null", async () => {
+    const fetchMock = vi.fn((path, init) =>
+      Promise.resolve(
+        okJSON(
+          init?.method === "PATCH"
+            ? configBody({ revision: 4 })
+            : configBody({
+                reasoning: {
+                  mode: { value: "plan", source: "channel" },
+                  model: { value: "fast", source: "default" },
+                  depth: { value: "shallow", source: "default" },
+                  revise: { value: 0, source: "default" },
+                },
+              }),
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    // reasoning.mode is overridden ("plan"); reverting it to inherit nests an
+    // explicit null so the server clears just that sub-knob.
+    const revert = await screen.findByLabelText(
+      "Inherit fleet default for Reasoning mode",
+    );
+    await fireEvent.click(revert);
+    await fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((c) => c[1]?.method === "PATCH")).toBe(true),
+    );
+    const patchCall = fetchMock.mock.calls.find((c) => c[1]?.method === "PATCH");
+    expect(JSON.parse(patchCall[1].body)).toEqual({ reasoning: { mode: null } });
+  });
+
+  it("sends a changed reasoning.revise as a NESTED numeric PATCH", async () => {
+    // revise is the only NESTED int sub-knob — the enum tests don't exercise the
+    // `int` branch's Number() coercion through setBody. The client nests it as a
+    // JSON number under "reasoning"; the value itself is server-capability-gated
+    // (>= 1 is Phase 5), but that's the server's reject to make, not the panel's.
+    const fetchMock = vi.fn((path, init) =>
+      Promise.resolve(
+        okJSON(init?.method === "PATCH" ? configBody({ revision: 4 }) : configBody()),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn(() => Promise.resolve());
+    renderSettings({ onChanged });
+
+    const inherit = await screen.findByLabelText(
+      "Inherit fleet default for Reasoning revise rounds",
+    );
+    await fireEvent.click(inherit); // -> override
+    const revise = screen.getByLabelText("Reasoning revise rounds");
+    // A number input's `bind:value` updates on the `input` event (not `change`).
+    await fireEvent.input(revise, { target: { value: "1" } });
+    await fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    const patchCall = fetchMock.mock.calls.find((c) => c[1]?.method === "PATCH");
+    // Nested under "reasoning", and a JSON number (1) — not the string "1" or a
+    // flat "reasoning.revise" key.
+    expect(JSON.parse(patchCall[1].body)).toEqual({ reasoning: { revise: 1 } });
   });
 });

@@ -259,10 +259,18 @@ Plus two non-behavioural cleanups: the dead `warning` return on `ReasoningConfig
 - **Monotonic ladder** — `off → bid → plan` is a strict superset chain, so a channel is promoted/demoted one rung at a time with no re-plumbing.
 - **The `depth` select is forward-compat scaffolding** — in v0.3.10 its only *accepted* value is `shallow` (`deep` is validate-rejected until Phase 4 ships). The enum control is built generically here anyway so adding `deep` later is a value-set change, not a new control; the panel should make `shallow` the only enabled option rather than render a lone dead `deep` entry.
 
+#### Implementation notes (as built)
+
+- **`config/ui.yaml` was a no-op.** `ui.yaml` is a panel-level feature-toggle surface (`enabled`/`create_enabled`/`config_edit_enabled`) with `additionalProperties: false`; reasoning editing rides the **existing** `channel_timeline.config_edit_enabled` toggle (already on) like every other governance knob, so there is no per-knob `reasoning` toggle to author — adding one would be a schema-validation error.
+- **File-size cap forced a module split (mirrors the server).** The CLI surface pushed `channel_config.rs` over the 500-line cap, so the reasoning surface (value-sets, the dotted `KNOBS` slice, `ReasoningConfigView` + sub-knob accessor, the `nest_dotted` lifter, the enum value-set check) lives in a new [`channel_config_reasoning.rs`](../../cli/src/commands/channel_config_reasoning.rs) — exactly as the server split `channel_config_reasoning.go` out of `channel_config_handlers.go`. The flat `CONFIG_KNOBS` ∪ `reasoning::KNOBS` union is exposed via `editable_knobs()`.
+- **The lockstep guards now span both Go switches.** `cli_knob_set_matches_server_merge_switch` / `cli_knob_types_match_server_decode_types` treat `reasoning` as a *namespace* (its `mergeConfigPatch` arm delegates, no `decodeKnob`) and parse the nested `reasoning.<sub>` leaf knobs from `channel_config_reasoning.go`, so the union stays pinned to the server. The name/type guards do **not** cover the enum *value-sets*, so a third guard — `cli_enum_value_sets_match_server_accepted_values` — parses the **accepted** values from the server's `ReasoningOverrides.validate()` switches and pins `MODES`/`MODELS`/`DEPTHS` to them (a Phase-4 `deep` promotion or a renamed value now fails here instead of round-tripping a 400; `deep` is correctly absent because it is a *rejected* case, the same gate `DEPTHS` encodes by omission).
+- **YAML verbs (`export`/`import`/`diff`) defer the nested block — but loudly.** `export`/`diff` filter `config_rows` to the flat knobs. On the parse side `parse_channel_block` routes a reasoning key by shape: a flat dotted `reasoning.mode:` key is **rejected client-side** (it can never round-trip — the server's switch has only the `reasoning` namespace, no `reasoning.<sub>` leaf), and a nested `reasoning:` block (the form `config/channels.yaml` uses, applied by the boot loader) is dropped from the patch but sets `ParsedChannel.deferred_reasoning`, so `import`/`diff` emit a note (stderr) rather than silently swallowing it. Runtime `set`/`unset`/`get` and the web panel cover reasoning fully today; nested-block YAML round-tripping stays a follow-up.
+
 #### Tests
 
-- CLI `channel config set … reasoning.mode=plan` round-trips through PATCH/GET; the dotted-key parser + enum validation reject a bad value client-side and the registry stays pinned to the Go switch.
-- Web panel renders the `mode`/`depth` selects and persists an edit via `If-Match`.
+- CLI `channel config set … reasoning.mode=plan` round-trips through PATCH/GET; the dotted-key parser nests `{reasoning: {mode}}`, enum validation rejects a bad value client-side, the registry stays pinned to the Go switches, and the value-set guard pins the enum vocab to the server's accepted set.
+- CLI YAML: a flat dotted `reasoning.mode:` key is rejected client-side and a nested `reasoning:` block is flagged-and-skipped (`parse_channel_block_*` tests), so neither vanishes silently.
+- Web panel renders the `mode`/`model`/`depth` selects, persists a **nested** sparse edit via `If-Match`, reverts a sub-knob with a nested explicit `null`, and nests `revise` as a JSON number.
 
 #### PR checklist
 
@@ -421,8 +429,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 1 | 1a | Structured silence verdict (dark) | `feature/v0310-rfc0051-silence-verdict` | ✅ Merged | [#692](https://github.com/mkhomutov/Persatrix/pull/692) | ✅ |
 | 2 | 1b | Seam threading + `agent.deliberated` audit (dark) | `feature/v0310-rfc0051-deliberate-seam` | ✅ Merged | [#693](https://github.com/mkhomutov/Persatrix/pull/693) | ✅ |
 | 3 | 2 | Plan-threaded compose + no-leak test (dark) | `feature/v0310-rfc0051-plan-compose` | ✅ Merged | [#694](https://github.com/mkhomutov/Persatrix/pull/694) | ✅ |
-| 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | 🔀 PR open | [#695](https://github.com/mkhomutov/Persatrix/pull/695) | — |
-| 5 | 3b | CLI + web config surfaces (enum + dotted-key) | `feature/v0310-rfc0051-config-surfaces` | ⬜ Not started | — | — |
+| 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | ✅ Merged | [#695](https://github.com/mkhomutov/Persatrix/pull/695) | ✅ |
+| 5 | 3b | CLI + web config surfaces (enum + dotted-key) | `feature/v0310-rfc0051-config-surfaces` | 🔀 PR open | [#696](https://github.com/mkhomutov/Persatrix/pull/696) | — |
 | 6 | 3c | Telemetry + default flip `off → bid` (GO-LIVE) | `feature/v0310-rfc0051-telemetry-golive` | ⬜ Not started | — | — |
 | 7 | OQ 6a | Operator reasoning reveal (separate / cuttable) | `feature/v0310-rfc0051-operator-reveal` | ⬜ Not started | — | — |
 | 8 | 5a | Reflexion loop (default `revise: 0`) | `feature/v0310-rfc0051-reflexion` | ⬜ Not started | — | — |

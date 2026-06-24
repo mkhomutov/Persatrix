@@ -40,6 +40,19 @@ fn view(revision: i64, over: &[(&str, Value)]) -> ChannelConfigView {
     let mut payload = serde_json::Map::new();
     payload.insert("revision".to_string(), serde_json::json!(revision));
     payload.extend(knobs);
+    // The nested reasoning block always reads back as default here — the YAML
+    // config-as-code verbs (export/diff) filter `config_rows` to the FLAT knobs;
+    // nested-block YAML support is a follow-up, so reasoning is never overridden in
+    // these fixtures.
+    payload.insert(
+        "reasoning".to_string(),
+        serde_json::json!({
+            "mode":   {"value": "off",     "source": "default"},
+            "model":  {"value": "fast",    "source": "default"},
+            "depth":  {"value": "shallow", "source": "default"},
+            "revise": {"value": 0,         "source": "default"},
+        }),
+    );
     serde_json::from_value(Value::Object(payload)).expect("view payload deserializes")
 }
 
@@ -158,6 +171,57 @@ fn parse_channel_block_rejects_missing_name_and_bad_types() {
         .contains("mapping"));
 }
 
+#[test]
+fn parse_channel_block_flags_nested_reasoning_block_and_skips_it() {
+    // The nested `reasoning:` mapping is the form config/channels.yaml uses and the
+    // boot loader honors, but `import`/`diff` don't apply it yet (the server takes a
+    // NESTED `{"reasoning": {…}}` PATCH the YAML verbs don't build). It must not
+    // silently vanish: the block is dropped from the patch (so the flat-knob import
+    // still works) but FLAGGED, so the entry point can tell the operator it lands at
+    // boot, not via `import`, rather than swallowing it.
+    let block =
+        yaml_block("name: planning\nfloor_control: true\nreasoning:\n  mode: bid\n  model: fast\n");
+    let parsed = parse_channel_block(&block).unwrap();
+    assert!(parsed.deferred_reasoning, "the reasoning block is flagged");
+    assert!(
+        !parsed.patch.contains_key("reasoning"),
+        "the nested block is not lifted into the flat patch"
+    );
+    assert_eq!(
+        parsed.patch.len(),
+        1,
+        "only the flat floor_control survives"
+    );
+    assert_eq!(
+        parsed.patch.get("floor_control"),
+        Some(&serde_json::json!(true))
+    );
+}
+
+#[test]
+fn parse_channel_block_rejects_flat_dotted_reasoning_key() {
+    // A flat dotted `reasoning.mode:` key can NEVER round-trip — the server's switch
+    // has only the `reasoning` namespace case, no `reasoning.mode` leaf — so the CLI
+    // rejects it client-side (naming the key + steering to the live verb) instead of
+    // lifting it and round-tripping a 400. Unlike the nested block it is not a real
+    // channels.yaml form, so failing loud is safe.
+    let err =
+        parse_channel_block(&yaml_block("name: planning\nreasoning.mode: bid\n")).unwrap_err();
+    assert!(err.contains("reasoning.mode"), "names the key: {err}");
+    assert!(
+        err.contains("channel config set"),
+        "steers to the live verb: {err}"
+    );
+}
+
+#[test]
+fn parse_channel_block_without_reasoning_is_not_flagged() {
+    // A plain block carries no reasoning, so the deferral flag stays clear (no
+    // spurious note for the common case).
+    let parsed = parse_channel_block(&yaml_block("name: planning\nfloor_control: true\n")).unwrap();
+    assert!(!parsed.deferred_reasoning);
+}
+
 // ─── parse_channels_doc ────────────────────────────────────────────────────
 
 #[test]
@@ -252,6 +316,52 @@ fn render_export_with_no_overrides_is_inherit_only_block() {
     let reparsed = parse_channels_doc(&doc).unwrap();
     assert_eq!(reparsed[0].revision, Some(8));
     assert!(reparsed[0].patch.is_empty());
+}
+
+// A config view carrying an explicit `reasoning` override on the wire — the YAML
+// verbs must still treat the nested block as out of their (flat-only) scope.
+fn view_with_reasoning_override() -> ChannelConfigView {
+    serde_json::from_value(serde_json::json!({
+        "revision": 3,
+        "floor_control": {"value": true, "source": "channel"},
+        "salience_max_channel_members": {"value": 20, "source": "default"},
+        "max_replies_per_participant_per_interaction": {"value": 0, "source": "default"},
+        "end_vote_threshold": {"value": 2, "source": "default"},
+        "end_vote_window": {"value": 3, "source": "default"},
+        "escalation_chair_id": {"value": "", "source": "default"},
+        "interaction_idle_timeout_seconds": {"value": 600, "source": "default"},
+        "interaction_budget_tokens": {"value": null, "source": "default"},
+        "reasoning": {
+            "mode":   {"value": "bid",     "source": "channel"},
+            "model":  {"value": "fast",    "source": "default"},
+            "depth":  {"value": "shallow", "source": "default"},
+            "revise": {"value": 0,         "source": "default"},
+        },
+    }))
+    .expect("view payload deserializes")
+}
+
+#[test]
+fn export_and_diff_defer_the_nested_reasoning_block() {
+    // The nested reasoning block is NOT yet config-as-code: export emits only the
+    // flat knobs (a flat `reasoning.mode:` key would not round-trip through the
+    // server's nested merge), and diff scopes to the flat knobs too. Runtime
+    // editing via set/unset/get + the web panel already covers reasoning; nested-
+    // block YAML is a deliberate follow-up. This pins that scope so the block is
+    // never half-emitted by accident.
+    let v = view_with_reasoning_override();
+
+    let doc = render_export_doc("planning", &v).unwrap();
+    assert!(
+        !doc.contains("reasoning"),
+        "export must not emit the nested reasoning block: {doc}"
+    );
+
+    let rows = diff_rows(&Map::new(), &v);
+    assert!(
+        rows.iter().all(|r| !r.knob.contains('.')),
+        "diff must not surface dotted reasoning rows",
+    );
 }
 
 // ─── diff_rows / has_drift ─────────────────────────────────────────────────

@@ -23,6 +23,12 @@ fn channel_config_view_deserializes_full_payload() {
         "escalation_chair_id":                          {"value": "ada", "source": "channel"},
         "interaction_idle_timeout_seconds":             {"value": 600,   "source": "default"},
         "interaction_budget_tokens":                    {"value": null,  "source": "default"},
+        "reasoning": {
+            "mode":   {"value": "bid",     "source": "channel"},
+            "model":  {"value": "fast",    "source": "default"},
+            "depth":  {"value": "shallow", "source": "default"},
+            "revise": {"value": 0,         "source": "default"},
+        },
     });
     let view: ChannelConfigView = serde_json::from_value(json).unwrap();
     assert_eq!(view.revision, 3);
@@ -33,6 +39,13 @@ fn channel_config_view_deserializes_full_payload() {
     // than being dropped — the dynamic cell tolerates a null knob defensively.
     assert!(view.interaction_budget_tokens.value.is_null());
     assert_eq!(view.interaction_budget_tokens.source, "default");
+    // The nested reasoning block deserializes per-sub-knob, each with its own
+    // value + provenance (mode overridden here, the rest inherited).
+    assert_eq!(view.reasoning.mode.value, serde_json::json!("bid"));
+    assert_eq!(view.reasoning.mode.source, "channel");
+    assert_eq!(view.reasoning.model.value, serde_json::json!("fast"));
+    assert_eq!(view.reasoning.model.source, "default");
+    assert_eq!(view.reasoning.revise.value, serde_json::json!(0));
 }
 
 // ─── parse_set_assignment ──────────────────────────────────────────
@@ -203,6 +216,9 @@ fn build_unset_patch_rejects_empty_and_unknown_and_dupe() {
         .contains("more than once"));
 }
 
+// (RFC 0051 reasoning: enum + dotted-key parse/build tests live in
+// channel_config_reasoning_tests.rs, beside the module they exercise.)
+
 // ─── render_value ──────────────────────────────────────────────────
 
 #[test]
@@ -263,9 +279,9 @@ fn passthrough_json_preserves_unmodeled_server_fields() {
 
 #[test]
 fn config_rows_covers_every_knob_in_registry_order() {
-    // config_rows drives off CONFIG_KNOBS, so the render set is exactly the
-    // editable set, in declaration order. This also exercises the match arm
-    // for every knob (an unmatched key would `unreachable!`).
+    // config_rows drives off editable_knobs(), so the render set is exactly the
+    // full editable set (flat + nested reasoning), in declaration order. This also
+    // exercises the match arm for every knob (an unmatched key would `unreachable!`).
     let view: ChannelConfigView = serde_json::from_value(serde_json::json!({
         "revision": 0,
         "floor_control": {"value": false, "source": "default"},
@@ -276,63 +292,131 @@ fn config_rows_covers_every_knob_in_registry_order() {
         "escalation_chair_id": {"value": "", "source": "default"},
         "interaction_idle_timeout_seconds": {"value": 600, "source": "default"},
         "interaction_budget_tokens": {"value": null, "source": "default"},
+        "reasoning": {
+            "mode":   {"value": "off",     "source": "default"},
+            "model":  {"value": "fast",    "source": "default"},
+            "depth":  {"value": "shallow", "source": "default"},
+            "revise": {"value": 0,         "source": "default"},
+        },
     }))
     .unwrap();
     let rows = config_rows(&view);
     let labels: Vec<&str> = rows.iter().map(|(k, _)| *k).collect();
-    let expected: Vec<&str> = CONFIG_KNOBS.iter().map(|(k, _)| *k).collect();
+    let expected: Vec<&str> = editable_knobs().map(|(k, _)| *k).collect();
     assert_eq!(labels, expected);
+    // The dotted reasoning rows resolve to the nested view cells (also exercising
+    // the reasoning.* match arms — an unmatched dotted key would `unreachable!`).
+    let mode = rows.iter().find(|(k, _)| *k == "reasoning.mode").unwrap().1;
+    assert_eq!(mode.value, serde_json::json!("off"));
 }
 
-// ─── lockstep guard: CLI knob set == server merge switch ────────────
+// ─── lockstep guard: CLI knob set == server merge switches ──────────
+
+/// Parse the server's COMPLETE leaf-knob set + wire types straight from the Go
+/// source — the lockstep ground truth both guards below read. The regression this
+/// prevents is "the CLI editable-knob set/types drift from the server's closed
+/// set". A hardcoded list can't catch that; parsing the Go source means adding a
+/// knob server-side and forgetting the CLI fails here with the token named.
+///
+/// `reasoning` made this span TWO switches (it is the first NESTED knob):
+///   * `channel_config_handlers.go` — `mergeConfigPatch`. A `case "<knob>":` arm
+///     that decodes a scalar (`decodeKnob[T]`) is a LEAF knob; the `case
+///     "reasoning":` arm instead delegates to `mergeReasoningPatch` (a `…Patch(`
+///     call, no `decodeKnob`), so it is a NAMESPACE, not a leaf — skipped here, its
+///     sub-knobs come from the nested file.
+///   * `channel_config_reasoning.go` — `mergeReasoningPatch`. Each
+///     `decodeKnob[T]("reasoning.<sub>", …)` is one nested leaf knob whose CLI key
+///     is the dotted literal in that first argument.
+///
+/// The CLI registry mirrors the union as dotted keys, so the guards compare it
+/// against this. Go `int`/`int64` both map to the CLI's single integer class; an
+/// enum knob rides the wire as a `string` (`decodeKnob[string]`).
+fn server_leaf_knob_types() -> std::collections::BTreeMap<String, &'static str> {
+    use std::collections::BTreeMap;
+
+    fn class_of(go_type: &str) -> &'static str {
+        match go_type {
+            "bool" => "bool",
+            "string" => "string",
+            "int" | "int64" => "int",
+            other => panic!("unmapped server knob type {other:?}; extend the map"),
+        }
+    }
+    // The `<T>` of a `decodeKnob[<T>]…` occurrence, given the slice starting at it.
+    fn decode_type(at_kw: &str) -> &str {
+        let open = at_kw.find('[').expect("decodeKnob must be followed by [");
+        let rest = &at_kw[open + 1..];
+        &rest[..rest.find(']').expect("decodeKnob[ must close with ]")]
+    }
+    let read = |rel: &str| {
+        std::fs::read_to_string(format!("{}/../{}", env!("CARGO_MANIFEST_DIR"), rel)).unwrap_or_else(
+            |e| panic!("{rel} must be readable for the knob lockstep guard ({e}); update the path if it moved"),
+        )
+    };
+
+    let mut server: BTreeMap<String, &'static str> = BTreeMap::new();
+
+    // Flat knobs — mergeConfigPatch's switch (the reasoning namespace is skipped).
+    let handlers = read("internal/server/channel_config_handlers.go");
+    let mut current: Option<String> = None;
+    for line in handlers.lines().map(str::trim_start) {
+        if let Some(rest) = line.strip_prefix("case \"") {
+            current = rest.find('"').map(|e| rest[..e].to_string());
+        } else if line.starts_with("default:") {
+            current = None;
+        } else if let Some(open) = line.find("decodeKnob[") {
+            // First `decodeKnob[<T>]` in an open arm is that knob's wire type (the
+            // null-unset branch returns before the decode). The `func decodeKnob[T
+            // any]` definition also matches but is reached with no open case.
+            if let Some(knob) = current.take() {
+                server.insert(knob, class_of(decode_type(&line[open..])));
+            }
+        } else if line.contains("Patch(") && current.is_some() {
+            // A namespace arm (e.g. `reasoning` → mergeReasoningPatch): no
+            // decodeKnob, its leaves come from the nested file. Drop the namespace
+            // name without recording it as a leaf knob.
+            current = None;
+        }
+    }
+
+    // Nested reasoning sub-knobs — mergeReasoningPatch's decodeKnob lines, whose
+    // first string-literal argument IS the dotted key (e.g. "reasoning.mode").
+    let reasoning = read("internal/server/channel_config_reasoning.go");
+    for line in reasoning.lines().map(str::trim_start) {
+        let Some(open) = line.find("decodeKnob[") else {
+            continue;
+        };
+        let at_kw = &line[open..];
+        let ty = decode_type(at_kw);
+        let Some(q1) = at_kw.find('"') else { continue };
+        let tail = &at_kw[q1 + 1..];
+        let Some(q2) = tail.find('"') else { continue };
+        server.insert(tail[..q2].to_string(), class_of(ty));
+    }
+
+    assert!(
+        !server.is_empty(),
+        "parsed no knobs from the Go config sources — the switch / decodeKnob \
+             format changed; update this guard's parser",
+    );
+    server
+}
 
 // TRUE lockstep guard — the same shape as `respond_policy_covers_server_
-// vocabulary` in channel_dispatch. The regression this prevents is "the CLI
-// editable-knob set drifts from the server's closed set". A hardcoded list
-// can't catch that — it stays green when the server grows a knob. So we parse
-// the `case "<knob>":` labels straight out of the server's mergeConfigPatch
-// and assert the CLI registry covers exactly that set. Add a knob server-side
-// and forget the CLI, and this fails with the missing token named.
+// vocabulary` in channel_dispatch: the CLI editable-knob set must equal the
+// server's closed leaf set (flat mergeConfigPatch knobs ∪ nested reasoning.*).
 #[test]
 fn cli_knob_set_matches_server_merge_switch() {
     use std::collections::BTreeSet;
 
-    let go_src = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../internal/server/channel_config_handlers.go"
-    ))
-    .expect(
-        "channel_config_handlers.go must be readable for the knob lockstep \
-             guard; update the path if it moved",
-    );
-
-    // mergeConfigPatch's switch has one `case "<knob>":` per editable knob.
-    // The `default:` arm (unknown knob) carries no quoted token, so a trimmed
-    // line starting with `case "` and bearing a quoted token selects exactly
-    // the knob cases.
-    let server: BTreeSet<String> = go_src
-        .lines()
-        .map(str::trim_start)
-        .filter(|l| l.starts_with("case \""))
-        .filter_map(|l| {
-            let start = l.find('"')? + 1;
-            let end = l[start..].find('"')? + start;
-            Some(l[start..end].to_string())
-        })
-        .collect();
-
-    assert!(
-        !server.is_empty(),
-        "parsed no `case \"<knob>\"` labels from channel_config_handlers.go — \
-             the switch format changed; update this guard's parser",
-    );
-
-    let client: BTreeSet<String> = CONFIG_KNOBS.iter().map(|(k, _)| k.to_string()).collect();
+    let server: BTreeSet<String> = server_leaf_knob_types().into_keys().collect();
+    let client: BTreeSet<String> = editable_knobs().map(|(k, _)| k.to_string()).collect();
 
     assert_eq!(
         client,
         server,
-        "CLI config-knob set drifted from server mergeConfigPatch: \
+        "CLI config-knob set drifted from the server merge switches \
+             (flat mergeConfigPatch + nested mergeReasoningPatch): \
              missing from CLI = {:?}, extra in CLI = {:?}",
         server.difference(&client).collect::<Vec<_>>(),
         client.difference(&server).collect::<Vec<_>>(),
@@ -344,61 +428,20 @@ fn cli_knob_set_matches_server_merge_switch() {
 // reason to exist is mirroring the server's wire TYPE so a wrong-typed value
 // fails before the round-trip — a guarantee that silently rots under a name-only
 // check. So we also pin each knob's CLI [`KnobType`] against the Go type the
-// server's `decodeKnob[T]` instantiates for that case. Go `int`/`int64` both map
-// to the CLI's single integer type.
+// server's `decodeKnob[T]` instantiates for it. An enum knob rides the wire as a
+// `string`, so it maps to the `string` class here.
 #[test]
 fn cli_knob_types_match_server_decode_types() {
     use std::collections::BTreeMap;
 
-    let go_src = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../internal/server/channel_config_handlers.go"
-    ))
-    .expect(
-        "channel_config_handlers.go must be readable for the knob-type lockstep \
-             guard; update the path if it moved",
-    );
-
-    // Walk mergeConfigPatch: a `case "<knob>":` opens a knob arm; the first
-    // `decodeKnob[<goType>]` that follows is that knob's wire type (the null-unset
-    // branch returns before the decode, so first-after-case is unambiguous). The
-    // `func decodeKnob[T any]` definition also contains `decodeKnob[` but is
-    // reached with no open case, so it is skipped.
-    let mut server: BTreeMap<String, &str> = BTreeMap::new();
-    let mut current: Option<String> = None;
-    for line in go_src.lines().map(str::trim_start) {
-        if let Some(rest) = line.strip_prefix("case \"") {
-            if let Some(end) = rest.find('"') {
-                current = Some(rest[..end].to_string());
-            }
-        } else if let Some(open) = line.find("decodeKnob[") {
-            if let Some(knob) = current.take() {
-                let ty = &line[open + "decodeKnob[".len()..];
-                let ty = &ty[..ty.find(']').expect("decodeKnob[ must close with ]")];
-                let class = match ty {
-                    "bool" => "bool",
-                    "string" => "string",
-                    "int" | "int64" => "int",
-                    other => panic!("unmapped server knob type {other:?}; extend the map"),
-                };
-                server.insert(knob, class);
-            }
-        }
-    }
-
-    assert!(
-        !server.is_empty(),
-        "parsed no knob decode types from channel_config_handlers.go — the \
-             case/decodeKnob format changed; update this guard's parser",
-    );
-
-    let client: BTreeMap<String, &str> = CONFIG_KNOBS
-        .iter()
+    let server = server_leaf_knob_types();
+    let client: BTreeMap<String, &str> = editable_knobs()
         .map(|(k, t)| {
             let class = match t {
                 KnobType::Bool => "bool",
                 KnobType::Int => "int",
                 KnobType::Str => "string",
+                KnobType::Enum(_) => "string",
             };
             (k.to_string(), class)
         })
