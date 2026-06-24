@@ -44,7 +44,8 @@ from ..salience_bid import (
     evaluate_salience,
     skip_bid_for_channel_size,
 )
-from ..salience_deliberation import MODE_OFF, is_structured
+from ..salience_deliberation import MODE_OFF, MODE_PLAN, is_structured
+from .deliberation_plan import CompositionPlan, parse_plan
 from .wallet_cause import cause_for_event, lease_interaction_id_for_event
 
 if TYPE_CHECKING:
@@ -121,11 +122,20 @@ class SalienceOutcome:
         seed: When ``silence`` is ``False``, the conversation-window seed
             the seam already built for the bid — handed back so the action
             loop reuses it instead of re-fetching channel history.
+        plan: When ``silence`` is ``False`` *and* ``mode: plan`` produced a
+            parseable plan, the private :class:`CompositionPlan` the action loop
+            threads into the Tier-C compose (RFC 0051 §C). ``None`` on every
+            other rung (``off``/``bid``) and when the plan failed to parse —
+            compose then proceeds unplanned, never blocked. The plan rides here,
+            **not** on the pure bid's ``SalienceDecision`` (RFC 0051 §C
+            "why two types"); it is never an ``AgentAction`` / never persisted
+            (the §E wall, pinned by ``test_deliberation_no_leak.py``).
     """
 
     silence: bool
     user_message: str | None = None
     seed: list[dict[str, Any]] | None = None
+    plan: CompositionPlan | None = None
 
 
 def _governed(event: AgentEvent) -> bool:
@@ -230,6 +240,10 @@ async def run_salience_gate(
     # cheap-bid-vs-full-turn trade is the whole point, but a busy governed
     # channel does see one extra fetch + bid per open-floor message.
     seed = await agent._build_seed_messages(event, user_message)
+    # RFC 0051 PR 3 — collect the bid's raw verdict text *only* on the ``plan``
+    # rung, so the seam can parse the private CompositionPlan from it on the
+    # speak path. ``None`` on ``off``/``bid`` means the bid surfaces nothing.
+    deliberation_text: list[str] | None = [] if mode == MODE_PLAN else None
     salience = await evaluate_salience(
         llm_client=agent._llm_client,
         content=(event.payload or {}).get("content", ""),
@@ -263,6 +277,10 @@ async def run_salience_gate(
         # RFC 0051 PR 2 — dark by default (action_loop passes nothing): ``off``
         # is the scalar score gate; ``bid``/``plan`` is the structured verdict.
         mode=mode,
+        # RFC 0051 PR 3 — under ``plan`` the bid hands its raw verdict text back
+        # here so the seam can parse the CompositionPlan (keeps the pure bid's
+        # SalienceDecision un-widened, RFC 0051 §C). ``None`` off the ``plan`` rung.
+        deliberation_out=deliberation_text,
     )
 
     # RFC 0051 PR 2 — record the deliberation the instant the verdict is in,
@@ -307,4 +325,11 @@ async def run_salience_gate(
         await agent._store_event_episode(event, [])
         return SalienceOutcome(silence=True)
 
-    return SalienceOutcome(silence=False, user_message=user_message, seed=seed)
+    # RFC 0051 PR 3 — on the ``plan`` rung, parse the private CompositionPlan
+    # from the bid's verdict text and carry it back for the Tier-C compose.
+    # Fail-closed to *no plan* (not to silence): an unparseable plan composes
+    # unplanned rather than blocking a post the gate already admitted (§Phase 2).
+    plan = parse_plan(deliberation_text[0]) if deliberation_text else None
+    return SalienceOutcome(
+        silence=False, user_message=user_message, seed=seed, plan=plan,
+    )

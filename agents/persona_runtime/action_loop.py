@@ -30,6 +30,7 @@ from ..tools.registry import ToolDefinition, get_tool, list_tools
 from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
 from .channel_reply import synthesize_channel_reply
+from .deliberation_plan import render_plan_section
 from .gate_suppress import suppressed_event_actions
 from .llm_call_errors import handle_llm_call_exception_with_cost_close
 from .salience_gate import run_salience_gate
@@ -376,6 +377,12 @@ class _ActionLoopMixin:
             # the prompt to avoid confusing the LLM with metadata noise.
             memory_text = "\n\n".join(s["content"] for s in memory_sections)
             system_prompt += "\n\n" + memory_text
+
+        # RFC 0051 PR 3 — thread the private CompositionPlan into the Tier-C
+        # compose (never an AgentAction, never persisted — the §E wall). Dark in
+        # prod: the seam passes mode: off, so ``plan`` stays None until PR 4/6.
+        if salience is not None and salience.plan is not None:
+            system_prompt += "\n\n" + render_plan_section(salience.plan)
 
         # 2. Multi-turn tool-use loop — RFC 0034 seed (reuse the seam's seed).
         messages = seam_seed if seam_seed is not None else (

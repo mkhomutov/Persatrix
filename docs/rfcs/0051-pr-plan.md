@@ -189,10 +189,10 @@ RFC 0030 Tier B + RFC 0050 + RFC 0034 P2 (all shipped)        ← HARD PREREQUIS
 
 #### PR checklist
 
-- [ ] `pytest agents/tests/test_deliberation_plan.py tests/integration/persona/test_deliberation_no_leak.py -q` passes.
-- [ ] `action_loop.py` ≤ 500 lines (one-line append, or compose-assembly extracted).
-- [ ] No-leak test green; `SalienceDecision` **not** widened (plan rides `SalienceOutcome` only).
-- [ ] Still dark — the plan path is reachable only under `mode: plan`, not yet config-exposed.
+- [x] `pytest tests/unit/python/test_deliberation_plan.py tests/unit/python/test_salience_gate_plan.py tests/integration/test_deliberation_no_leak.py -q` passes (the seam-threading leg landed as its own `test_salience_gate_plan.py`; the no-leak test lives under `tests/integration/`, matching the repo's actual test layout — there is no `tests/integration/persona/`).
+- [x] `action_loop.py` ≤ 500 lines (one-line `render_plan_section` append; the section assembly lives in `deliberation_plan.py`). `salience_bid.py` held at 500 net-zero (the bid surfaces its raw text via an optional `deliberation_out`, the plan is parsed seam-side).
+- [x] No-leak test green; `SalienceDecision` **not** widened (plan rides `SalienceOutcome` only; the bid hands back raw text, the seam parses the plan).
+- [x] Still dark — the plan path is reachable only under `mode: plan`, not yet config-exposed (the `action_loop` seam call passes no `mode`, so prod stays `off`).
 
 ---
 
@@ -409,8 +409,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | # | Phase | Title | Branch | Status | GitHub PR | Merged |
 |---|-------|-------|--------|--------|-----------|--------|
 | 1 | 1a | Structured silence verdict (dark) | `feature/v0310-rfc0051-silence-verdict` | ✅ Merged | [#692](https://github.com/mkhomutov/Persatrix/pull/692) | ✅ |
-| 2 | 1b | Seam threading + `agent.deliberated` audit (dark) | `feature/v0310-rfc0051-deliberate-seam` | 🔀 PR open | [#693](https://github.com/mkhomutov/Persatrix/pull/693) | — |
-| 3 | 2 | Plan-threaded compose + no-leak test (dark) | `feature/v0310-rfc0051-plan-compose` | ⬜ Not started | — | — |
+| 2 | 1b | Seam threading + `agent.deliberated` audit (dark) | `feature/v0310-rfc0051-deliberate-seam` | ✅ Merged | [#693](https://github.com/mkhomutov/Persatrix/pull/693) | ✅ |
+| 3 | 2 | Plan-threaded compose + no-leak test (dark) | `feature/v0310-rfc0051-plan-compose` | 🔀 PR open | — | — |
 | 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | ⬜ Not started | — | — |
 | 5 | 3b | CLI + web config surfaces (enum + dotted-key) | `feature/v0310-rfc0051-config-surfaces` | ⬜ Not started | — | — |
 | 6 | 3c | Telemetry + default flip `off → bid` (GO-LIVE) | `feature/v0310-rfc0051-telemetry-golive` | ⬜ Not started | — | — |

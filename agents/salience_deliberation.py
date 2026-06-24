@@ -75,15 +75,26 @@ _SCALAR_SYSTEM_SNIPPET: Final[str] = "salience-bid-system"
 _SCALAR_USER_SNIPPET: Final[str] = "salience-bid-user"
 REASONING_SYSTEM_SNIPPET: Final[str] = "salience-bid-reasoning-system"
 REASONING_USER_SNIPPET: Final[str] = "salience-bid-reasoning-user"
+# RFC 0051 PR 3 — ``plan`` additionally asks for the ``CompositionPlan`` fields
+# (intent / key_points / addressed_to / avoid_restating) on the speak path, so it
+# gets its own richer snippets; ``bid`` keeps the silence-verdict-only reasoning
+# form (it never produces a plan). Same parser entry point (the plan fields ride
+# the same response), parsed by :func:`agents.persona_runtime.deliberation_plan.parse_plan`.
+_PLAN_SYSTEM_SNIPPET: Final[str] = "salience-bid-plan-system"
+_PLAN_USER_SNIPPET: Final[str] = "salience-bid-plan-user"
 
 
 def user_snippet(mode: str) -> str:
-    """The user-prompt snippet name for ``mode`` (structured vs. scalar)."""
+    """The user-prompt snippet name for ``mode`` (plan vs. bid vs. scalar)."""
+    if mode == MODE_PLAN:
+        return _PLAN_USER_SNIPPET
     return REASONING_USER_SNIPPET if is_structured(mode) else _SCALAR_USER_SNIPPET
 
 
 def system_snippet(mode: str) -> str:
-    """The system-prompt snippet name for ``mode`` (structured vs. scalar)."""
+    """The system-prompt snippet name for ``mode`` (plan vs. bid vs. scalar)."""
+    if mode == MODE_PLAN:
+        return _PLAN_SYSTEM_SNIPPET
     return REASONING_SYSTEM_SNIPPET if is_structured(mode) else _SCALAR_SYSTEM_SNIPPET
 
 
