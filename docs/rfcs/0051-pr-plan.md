@@ -410,8 +410,8 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 |---|-------|-------|--------|--------|-----------|--------|
 | 1 | 1a | Structured silence verdict (dark) | `feature/v0310-rfc0051-silence-verdict` | ✅ Merged | [#692](https://github.com/mkhomutov/Persatrix/pull/692) | ✅ |
 | 2 | 1b | Seam threading + `agent.deliberated` audit (dark) | `feature/v0310-rfc0051-deliberate-seam` | ✅ Merged | [#693](https://github.com/mkhomutov/Persatrix/pull/693) | ✅ |
-| 3 | 2 | Plan-threaded compose + no-leak test (dark) | `feature/v0310-rfc0051-plan-compose` | 🔀 PR open | [#694](https://github.com/mkhomutov/Persatrix/pull/694) | — |
-| 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | ⬜ Not started | — | — |
+| 3 | 2 | Plan-threaded compose + no-leak test (dark) | `feature/v0310-rfc0051-plan-compose` | ✅ Merged | [#694](https://github.com/mkhomutov/Persatrix/pull/694) | ✅ |
+| 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | 🔀 PR open | [#695](https://github.com/mkhomutov/Persatrix/pull/695) | — |
 | 5 | 3b | CLI + web config surfaces (enum + dotted-key) | `feature/v0310-rfc0051-config-surfaces` | ⬜ Not started | — | — |
 | 6 | 3c | Telemetry + default flip `off → bid` (GO-LIVE) | `feature/v0310-rfc0051-telemetry-golive` | ⬜ Not started | — | — |
 | 7 | OQ 6a | Operator reasoning reveal (separate / cuttable) | `feature/v0310-rfc0051-operator-reveal` | ⬜ Not started | — | — |
