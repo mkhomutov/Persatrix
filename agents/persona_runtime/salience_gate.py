@@ -34,9 +34,14 @@ from __future__ import annotations
 import contextlib
 import logging
 from dataclasses import dataclass
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, Final
 
-from ..observability._metrics_salience import salience_gated_attrs, salience_skip_attrs
+from ..observability._metrics_salience import (
+    record_deliberation,
+    salience_gated_attrs,
+    salience_skip_attrs,
+)
 from ..observability.metrics import try_get_instruments
 from ..response_gate import is_open_floor_admit
 from ..salience_bid import (
@@ -44,7 +49,7 @@ from ..salience_bid import (
     evaluate_salience,
     skip_bid_for_channel_size,
 )
-from ..salience_deliberation import MODE_OFF, MODE_PLAN, is_structured
+from ..salience_deliberation import MODE_OFF, MODE_PLAN, is_known_mode, is_structured
 from .deliberation_plan import CompositionPlan, parse_plan
 from .wallet_cause import cause_for_event, lease_interaction_id_for_event
 
@@ -106,6 +111,11 @@ _SALIENCE_GATED_KEY: str = "salience_gated"
 _SALIENCE_THRESHOLD_KEY: str = "threshold"
 _SALIENCE_CHANNEL_SIZE_KEY: str = "channel_size"
 _SALIENCE_MAX_MEMBERS_KEY: str = "salience_max_channel_members"
+# RFC 0051 PR 6 go-live — the channel's resolved reasoning rung, lifted off the
+# wire by ``channel_wire_metadata.channel_event_payload``. Absent / empty (a
+# pre-v0.3.10 producer) or any unrecognised value resolves to ``off``, the scalar
+# score gate (byte-for-byte v0.3.8), so the wiring is additive.
+_REASONING_MODE_KEY: str = "reasoning_mode"
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,9 +190,23 @@ def _max_members(event: AgentEvent) -> int:
     return raw
 
 
+def _reasoning_mode(event: AgentEvent) -> str:
+    """The channel's resolved reasoning rung off the wire payload (RFC 0051 PR 6).
+
+    Resolves to ``off`` for an absent / empty / non-string value (a pre-v0.3.10
+    producer) and for any unrecognised string — so a malformed or future rung
+    fails *safe* to the scalar score gate rather than reaching the structured
+    path. A recognised ``bid``/``plan`` (or an explicit ``off``) is returned
+    verbatim; the downstream bid clamps the budget/grammar off it."""
+    raw = (event.payload or {}).get(_REASONING_MODE_KEY)
+    if isinstance(raw, str) and is_known_mode(raw):
+        return raw
+    return MODE_OFF
+
+
 async def run_salience_gate(
     agent: Any, event: AgentEvent, decision: GateDecision,
-    *, mode: str = MODE_OFF,
+    *, mode: str | None = None,
 ) -> SalienceOutcome | None:
     """Run the Tier B salience bid for one admitted event, if applicable.
 
@@ -197,17 +221,26 @@ async def run_salience_gate(
     ``_format_event`` / ``_build_seed_messages`` / ``_store_event_episode``
     methods and its ``_llm_client`` / identity attributes.
 
-    ``mode`` (RFC 0051 §C/§G) selects the bid's verdict grammar and ships
-    **dark**: the ``action_loop`` call site passes nothing, so production stays
-    on the ``off`` scalar score gate (byte-for-byte v0.3.8) until the Phase-3
-    config knob (PR 4) and default flip (PR 6) wire it. On the structured rungs
-    (``bid``/``plan``) the seam additionally emits the ``agent.deliberated``
-    audit (decision + ``reason_code`` + counts, never the ``reason_note`` or
-    plan, RFC 0051 §E). The TB6 channel-too-large *skip* is not a deliberation,
-    so it emits no audit even under reasoning.
+    ``mode`` (RFC 0051 §C/§G) selects the bid's verdict grammar. **Live as of PR
+    6**: ``None`` (the ``action_loop`` call site, which passes nothing) resolves
+    the rung off the wire payload (:func:`_reasoning_mode`) — the channel's
+    router-resolved ``reasoning.mode``, ``off`` for a pre-v0.3.10 / ungoverned
+    channel and ``bid`` for a governed one post the go-live default flip. An
+    explicit ``mode`` argument overrides the payload (test injection). On the
+    structured rungs (``bid``/``plan``) the seam additionally emits the
+    ``agent.deliberated`` audit (decision + ``reason_code`` + counts, never the
+    ``reason_note`` or plan, RFC 0051 §E). The TB6 channel-too-large *skip* is not
+    a deliberation, so it emits no audit even under reasoning.
     """
     if not (is_open_floor_admit(decision) and _governed(event)):
         return None
+
+    # RFC 0051 PR 6 — resolve the rung off the wire when the caller did not pin
+    # one (the production ``action_loop`` path). An explicit ``mode`` (tests)
+    # wins. Resolved only after the open-floor + governed guard so an ungoverned
+    # or non-admit event short-circuits without touching the payload.
+    if mode is None:
+        mode = _reasoning_mode(event)
 
     # TB6 — oversized channel: skip the bid entirely and fall back to
     # ``addressed``-only. An un-addressed open-floor participant therefore
@@ -244,6 +277,9 @@ async def run_salience_gate(
     # rung, so the seam can parse the private CompositionPlan from it on the
     # speak path. ``None`` on ``off``/``bid`` means the bid surfaces nothing.
     deliberation_text: list[str] | None = [] if mode == MODE_PLAN else None
+    # RFC 0051 PR 6 — time the deliberation pass (a serial ``fast`` call before
+    # compose) so the latency histogram can chart the added cost of the flip.
+    _delib_start = perf_counter()
     salience = await evaluate_salience(
         llm_client=agent._llm_client,
         content=(event.payload or {}).get("content", ""),
@@ -297,6 +333,15 @@ async def run_salience_gate(
             # ``transcript`` the bid scored is everything *before* the current
             # message (the seed's last element), per the call above.
             transcript_turns=max(0, len(seed) - 1),
+        )
+        # RFC 0051 PR 6 go-live telemetry: the deliberation rate + latency, and on
+        # a silence verdict the suppress-by-reason_code + budget-starvation rows.
+        # Distinct from the ``channel.messages.gated`` suppression counter below.
+        record_deliberation(
+            mode=mode,
+            reason_code=salience.reason,
+            spoke=salience.speak,
+            duration_ms=(perf_counter() - _delib_start) * 1000.0,
         )
 
     if not salience.speak:

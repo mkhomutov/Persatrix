@@ -46,12 +46,14 @@ func decodeReasoning(t *testing.T, raw []byte) map[string]struct {
 // TestChannelConfig_ReasoningDefaults: a never-edited channel reports the default
 // rung (off / fast / shallow / 0), every sub-knob sourced from the default.
 func TestChannelConfig_ReasoningDefaults(t *testing.T) {
-	srv, id := reasoningTestServer(t, true)
+	srv, id := reasoningTestServer(t, true) // governed roster
 	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/channels/"+id+"/config", nil)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 
 	r := decodeReasoning(t, rec.Body.Bytes())
-	assert.Equal(t, "off", r["mode"].Value)
+	// PR 6 go-live: a never-edited GOVERNED channel reports the governed default
+	// rung — bid / fast / shallow / 0 — every sub-knob still inherit-sourced.
+	assert.Equal(t, "bid", r["mode"].Value, "governed channel reports the bid default")
 	assert.Equal(t, "default", r["mode"].Source)
 	assert.Equal(t, "fast", r["model"].Value)
 	assert.Equal(t, "shallow", r["depth"].Value)
@@ -59,6 +61,19 @@ func TestChannelConfig_ReasoningDefaults(t *testing.T) {
 	for _, k := range []string{"mode", "model", "depth", "revise"} {
 		assert.Equal(t, "default", r[k].Source, "sub-knob %s", k)
 	}
+}
+
+// TestChannelConfig_ReasoningUngovernedDefaults: a never-edited UNgoverned channel
+// reports the package default (off / fast / shallow / 0) — the flip takes effect
+// only on a governed channel.
+func TestChannelConfig_ReasoningUngovernedDefaults(t *testing.T) {
+	srv, id := channelConfigTestServer(t, true) // alice/bob, not salience-gated
+	rec := doRequest(srv.Handler(), http.MethodGet, "/api/v1/channels/"+id+"/config", nil)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	r := decodeReasoning(t, rec.Body.Bytes())
+	assert.Equal(t, "off", r["mode"].Value, "ungoverned channel stays off")
+	assert.Equal(t, "default", r["mode"].Source)
 }
 
 // TestChannelConfig_ReasoningPatchModeBid: the happy path — PATCH reasoning.mode
@@ -143,7 +158,7 @@ func TestChannelConfig_ReasoningPatchNullClears(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 
 	r := decodeReasoning(t, rec.Body.Bytes())
-	assert.Equal(t, "off", r["mode"].Value, "cleared block inherits the default rung")
+	assert.Equal(t, "bid", r["mode"].Value, "cleared block inherits the governed default rung (bid, PR 6)")
 	assert.Equal(t, "default", r["mode"].Source)
 }
 
@@ -190,33 +205,38 @@ func TestChannelConfig_ReasoningPatchUnknownSubKnobRejected(t *testing.T) {
 }
 
 // TestChannelConfig_ReasoningFirstEditFreezesRung: a sparse first edit of an
-// UNRELATED knob must not reset the channel's (default) reasoning rung — the
-// ISSUE-0103 baseline freeze covers reasoning too.
+// UNRELATED knob must not reset the channel's non-default reasoning rung — the
+// ISSUE-0103 baseline freeze covers reasoning too. Uses an explicit `mode: off`
+// kill switch on a governed channel: post the PR 6 flip the governed default is
+// `bid`, so `off` is the non-default rung the freeze must preserve (a broken freeze
+// would re-resolve the channel to bid and silently disarm the kill switch).
 func TestChannelConfig_ReasoningFirstEditFreezesRung(t *testing.T) {
 	srv, id := reasoningTestServer(t, true)
-	// Pre-seed a non-default rung on the router as a stand-in for a YAML-resolved
-	// value, then edit a different knob.
-	srv.channelRouter.SetReasoning(id, channels.ReasoningConfig{Mode: channels.ReasoningModeBid})
+	// Pre-seed an explicit off kill switch on the router as a stand-in for a
+	// YAML-resolved value, then edit a different knob.
+	srv.channelRouter.SetReasoning(id, channels.ReasoningConfig{Mode: channels.ReasoningModeOff})
 
 	body, _ := json.Marshal(map[string]any{"floor_control": false})
 	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
 		body, map[string]string{"If-Match": "0"})
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 
-	assert.Equal(t, channels.ReasoningModeBid, srv.channelRouter.ReasoningFor(id).Mode,
-		"the first edit must freeze the resolved reasoning rung, not reset it to off")
+	assert.Equal(t, channels.ReasoningModeOff, srv.channelRouter.ReasoningFor(id).Mode,
+		"the first edit must freeze the explicit off kill switch, not re-resolve it to bid")
 	r := decodeReasoning(t, rec.Body.Bytes())
-	assert.Equal(t, "bid", r["mode"].Value)
+	assert.Equal(t, "off", r["mode"].Value)
+	assert.Equal(t, "channel", r["mode"].Source, "the frozen kill switch is channel-sourced")
 }
 
 // TestChannelConfig_ReasoningFirstEditOnDefaultStaysInherit is the F3 coverage
 // gap: the conditional freeze's OTHER branch. A first edit of an unrelated knob on
-// a DEFAULT-off channel must NOT freeze reasoning — it stays inherit ("default"
-// source) so the channel keeps tracking the package default and remains responsive
-// to the RFC 0051 PR 6 default flip (off→bid). The non-default branch is pinned by
-// TestChannelConfig_ReasoningFirstEditFreezesRung; this pins the nil branch.
+// a channel sitting at its (governance-resolved) DEFAULT rung must NOT freeze
+// reasoning — it stays inherit ("default" source) so the channel keeps tracking
+// the default. On this governed roster the default is `bid` (PR 6), and an explicit
+// `mode: off` kill switch IS frozen by TestChannelConfig_ReasoningFirstEditFreezesRung;
+// this pins the default-stays-inherit branch.
 func TestChannelConfig_ReasoningFirstEditOnDefaultStaysInherit(t *testing.T) {
-	srv, id := reasoningTestServer(t, true) // default-off rung, governed roster
+	srv, id := reasoningTestServer(t, true) // governed roster → bid default rung
 
 	body, _ := json.Marshal(map[string]any{"floor_control": false})
 	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
@@ -228,7 +248,7 @@ func TestChannelConfig_ReasoningFirstEditOnDefaultStaysInherit(t *testing.T) {
 		assert.Equalf(t, "default", r[k].Source,
 			"a default reasoning rung must stay inherit through an unrelated first edit (sub-knob %s)", k)
 	}
-	assert.Equal(t, "off", r["mode"].Value)
+	assert.Equal(t, "bid", r["mode"].Value, "the governed default (bid) stays inherit, not frozen")
 }
 
 // TestChannelConfig_ReasoningOffModeStaysResponsiveDespiteNonDefaultModel is the

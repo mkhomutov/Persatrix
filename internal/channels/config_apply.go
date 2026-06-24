@@ -170,9 +170,30 @@ func (r *ChannelRouter) ApplyChannelConfig(ctx context.Context, channelID string
 		return fmt.Errorf("channels: apply config %s: re-read: %w", channelID, err)
 	}
 	if revision > 0 {
-		r.applyOverridesToRouter(channelID, overrides)
+		r.applyOverridesToRouter(channelID, overrides, r.channelGoverned(ctx, channelID))
 	}
 	return nil
+}
+
+// channelGoverned reports whether `channelID` currently has at least one
+// salience-gated (open-floor participant/chair) member — the live-membership
+// signal the RFC 0051 reasoning resolution needs to pick the governed default
+// ([governedReasoningBase]). The router-side counterpart to the load-time
+// [ChannelConfig.governed] and the server's [Server.channelHasSalienceGatedMember],
+// sharing their posture: a store error reading members resolves to "not governed"
+// so the resolve falls back to the package `off` default (the conservative, no-op
+// direction) rather than failing the apply/boot path on a transient fault.
+func (r *ChannelRouter) channelGoverned(ctx context.Context, channelID string) bool {
+	members, err := r.store.GetMembers(ctx, channelID)
+	if err != nil {
+		return false
+	}
+	for i := range members {
+		if members[i].SalienceGated {
+			return true
+		}
+	}
+	return false
 }
 
 // validateEscalationChair enforces the cross-field escalation-chair rules from
@@ -284,10 +305,12 @@ func (r *ChannelRouter) validateReasoningGoverned(ctx context.Context, channelID
 //   - interaction budget: absent → ApplyDefaultInteractionBudget, which stamps
 //     the captured fleet default (zero is a meaningful "uncapped" value, like the
 //     reply budget, so it cannot inherit via Set(_, 0)).
-//   - reasoning block: absent → SetReasoning of the package default rung (off); a
-//     present override overlays its set sub-knobs onto that default via
-//     [ReasoningOverrides.resolve].
-func (r *ChannelRouter) applyOverridesToRouter(channelID string, o ChannelConfigOverrides) {
+//   - reasoning block: absent → SetReasoning of the GOVERNED default rung — `bid`
+//     on a governed channel (the PR 6 go-live flip), `off` otherwise; a present
+//     override overlays its set sub-knobs (including an explicit `mode: off` kill
+//     switch) onto that base via [ReasoningOverrides.resolve]. `governed` is the
+//     caller's live-membership read ([ChannelRouter.channelGoverned]).
+func (r *ChannelRouter) applyOverridesToRouter(channelID string, o ChannelConfigOverrides, governed bool) {
 	// Floor control. Preserve the channel's resolved per-turn timeout (it rides
 	// a separate YAML knob, not the override set); a non-positive value falls
 	// back to the default inside SetFloorControl.
@@ -347,11 +370,14 @@ func (r *ChannelRouter) applyOverridesToRouter(channelID string, o ChannelConfig
 		r.ApplyDefaultInteractionBudget(channelID)
 	}
 
-	// RFC 0051 reasoning block. Absent → the package default rung (off); a present
-	// override overlays its set sub-knobs onto that default. SetReasoning
+	// RFC 0051 reasoning block. Absent → the GOVERNED default rung (`bid` when the
+	// channel has a salience-gated member, else `off`); a present override overlays
+	// its set sub-knobs onto that base. So an inherit (no mode) governed channel
+	// resolves to `bid` (the PR 6 flip), an explicit `mode: off` override overlays
+	// back to the kill switch, and an ungoverned channel stays `off`. SetReasoning
 	// normalizes any empty field, so a sparse override (`mode: bid` only) resolves
 	// to a complete rung.
-	r.SetReasoning(channelID, o.Reasoning.resolve(DefaultReasoningConfig()))
+	r.SetReasoning(channelID, o.Reasoning.resolve(governedReasoningBase(governed)))
 }
 
 // ResolveFromStore is the RFC 0050 Phase 1 PR 2 boot repoint: after the per-knob
@@ -400,7 +426,7 @@ func (r *ChannelRouter) ResolveFromStore(ctx context.Context) error {
 		if revision == 0 {
 			continue // never edited — YAML/default seeding stands.
 		}
-		r.applyOverridesToRouter(ch.ID, overrides)
+		r.applyOverridesToRouter(ch.ID, overrides, r.channelGoverned(ctx, ch.ID))
 		applied++
 	}
 	if applied > 0 {

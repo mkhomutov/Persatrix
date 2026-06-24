@@ -61,8 +61,11 @@ func channelConfigTestServerWithMembers(t *testing.T, enabled bool, members []ch
 		members,
 	))
 	// Match the runtime-create governance seeding so the router has live entries
-	// for the channel (floor on, default salience + reply budget).
-	srv.applyRuntimeGroupGovernance(id)
+	// for the channel (floor on, default salience + reply budget, and the
+	// governance-aware RFC 0051 reasoning rung). A salience-gated roster resolves
+	// to the PR 6 `bid` default, exactly like production's create handler / boot
+	// ResolveReasoning (governance is read off the store members just written).
+	srv.applyRuntimeGroupGovernance(t.Context(), id)
 	return srv, id
 }
 

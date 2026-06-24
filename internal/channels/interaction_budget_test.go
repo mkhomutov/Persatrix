@@ -63,9 +63,9 @@ func TestApplyOverridesToRouter_InteractionBudget(t *testing.T) {
 	require.NoError(t, router.ResolveInteractionBudgets(context.Background(), &Config{DefaultInteractionBudgetTokens: 600}))
 
 	v := int64(2500)
-	router.applyOverridesToRouter("group:c", ChannelConfigOverrides{InteractionBudgetTokens: &v})
+	router.applyOverridesToRouter("group:c", ChannelConfigOverrides{InteractionBudgetTokens: &v}, false)
 	assert.EqualValues(t, 2500, router.InteractionBudgetTokensFor("group:c"), "present override stamps its value")
 
-	router.applyOverridesToRouter("group:c", ChannelConfigOverrides{})
+	router.applyOverridesToRouter("group:c", ChannelConfigOverrides{}, false)
 	assert.EqualValues(t, 600, router.InteractionBudgetTokensFor("group:c"), "absent override re-inherits the fleet default")
 }

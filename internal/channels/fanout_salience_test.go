@@ -110,3 +110,33 @@ func TestFanout_StampsDefaultCapWhenUnresolved(t *testing.T) {
 		"an unresolved channel falls back to the default cap, never zero")
 	assert.Equal(t, 2, calls[0].ChannelSize)
 }
+
+// TestFanout_StampsResolvedReasoningModeOnEnvelope is the RFC 0051 PR 6 go-live
+// end-to-end: fanout stamps the channel's router-resolved reasoning rung onto
+// every dispatch envelope, so the (flip-aware) ReasoningFor value reaches the
+// agent-side seam. A governed channel resolved through ResolveReasoning carries
+// the bid default; without it the agent never leaves the dark `off` scalar gate.
+func TestFanout_StampsResolvedReasoningModeOnEnvelope(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &envelopeRecorder{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	ctx := context.Background()
+
+	id := mustCreateGroupWithPolicies(t, store, "planning",
+		map[string]RespondPolicy{
+			"alice": RespondParticipant, // sender; salience-gated → governed
+			"bob":   RespondParticipant,
+		}, "alice", "bob")
+
+	// Boot resolve: a governed channel flips to the bid default on the router.
+	require.NoError(t, router.ResolveReasoning(ctx, &Config{}))
+
+	require.NoError(t, router.Publish(ctx, ChannelMessage{
+		ID: uuid.NewString(), ChannelID: id, SenderID: "alice", Content: "hi",
+	}, ""))
+
+	calls := disp.snapshot()
+	require.Len(t, calls, 1, "fanout to bob")
+	assert.Equal(t, ReasoningModeBid, calls[0].ReasoningMode,
+		"the resolved governed default (bid) is stamped onto the dispatch envelope")
+}

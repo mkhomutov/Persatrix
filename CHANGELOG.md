@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.10] - Unreleased
+
+> **Codename:** Conversations worth posting into
+
+### Highlights
+
+- **Personas now think before they speak — semantic silence ships on by default once a channel is governed.** On an open-floor turn a persona privately decides *whether* the turn is worth a post; if it would only be agreeing, restating, or piling on, it stays silent *with a reason* instead of posting. This generalizes the RFC 0030 Tier-B salience bid into a structured `{ should_post }` verdict on the same leased `fast`-model seam — the idle path stays free, and the private trace never becomes a message, never reaches the channel store, and is never visible to another persona (audit-only). The plan-threaded *considered* compose (`mode: plan`) is a one-rung-up, per-channel operator opt-in. ([RFC 0051](docs/rfcs/0051-reasoning-before-posting.md))
+
+### Upgrade Notes
+
+| Notable change | Detail |
+|----------------|--------|
+| **[Behaviour — active by default on governed channels]** Governed-channel reasoning default flips `off → bid` | A channel with a salience-gated (`participant`/`chair`) member now defaults to `reasoning.mode: bid` — the silence-only rung — so open-floor turns gain semantic silence out of the box. An **ungoverned** channel is unchanged (the knob is inert and `validate` forbids a non-off mode there). The flip takes effect the moment a channel becomes governed. **One-flip kill switch:** setting `reasoning.mode: off` restores byte-for-byte the prior RFC 0030 scalar score gate at runtime, no restart; an explicit `off` is preserved across the default flip. |
+| **[Capability-gated]** `reasoning.depth: deep` and `reasoning.revise ≥ 1` are rejected at `validate` | Native extended-thinking depth (Phase 4) and the reflexion loop (Phase 5) are not yet deployed, so an unbacked value is rejected with a 400 rather than silently downgraded. |
+| **[Version-skew — additive]** New `reasoning_mode` wire field | `ChannelMessageEvent` gains a `reasoning_mode` field. A pre-v0.3.10 producer leaves it empty, which the agent maps to `off` (the scalar gate), so the field is additive across a mixed-version deployment. **Upgrade the orchestrator together with (or before) the agents** to arm the flip. |
+
+### 🚀 Features
+
+- **RFC 0051 go-live (PR 6): the resolved `reasoning.mode` rung reaches the agent over the wire, and the governed-channel default flips `off → bid` in lockstep with the kill switch and telemetry.** The router stamps the channel's resolved rung onto every dispatch (`ChannelMessageEvent.reasoning_mode`); the salience seam reads it to pick the bid's verdict grammar (scalar gate / structured silence verdict / plan-threaded compose). Governed channels resolve to `bid` by default at load, boot, runtime-create, and runtime-edit; an explicit `off` is preserved as a kill switch across all of them. New deliberation telemetry — `deliberation.total` (rate), `deliberation.suppressed` (silence charted by `reason_code`), `deliberation.duration` (latency histogram), and `deliberation.budget_starved` — makes the active default safe to run.
+
 ## [0.3.9] - 2026-06-22
 
 > **Codename:** Conversations you can mine

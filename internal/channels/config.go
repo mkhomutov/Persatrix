@@ -435,11 +435,14 @@ func LoadConfig(path string) (*Config, error) {
 		if cfg.Channels[i].EndVoteWindow == 0 {
 			cfg.Channels[i].EndVoteWindow = DefaultEndVoteWindow
 		}
-		// RFC 0051: fill any empty reasoning field with the shipped default rung
-		// (off / fast / shallow), so a partial block reads back complete and
-		// Validate sees a populated value. An absent block is the zero value and
-		// normalizes to the full default.
-		cfg.Channels[i].Reasoning = cfg.Channels[i].Reasoning.normalized()
+		// RFC 0051: fill any empty reasoning field with the shipped default rung,
+		// so a partial block reads back complete and Validate sees a populated
+		// value. Governance-aware (PR 6 go-live): an ABSENT mode takes the governed
+		// default — `bid` on a channel with a salience-gated member, `off`
+		// otherwise — while an explicit `mode: off` kill switch is left untouched.
+		// The members' SalienceGated signal is already resolved at unmarshal
+		// (ResolveSalienceSignal), so governed() reads true here.
+		cfg.Channels[i].Reasoning = cfg.Channels[i].Reasoning.normalizedForGovernance(cfg.Channels[i].governed())
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -454,6 +457,22 @@ func LoadConfig(path string) (*Config, error) {
 // (`group:<name>`). The store-side `Channel.ID` PK uses the same value.
 func (cc ChannelConfig) CanonicalID() string {
 	return "group:" + cc.Name
+}
+
+// governed reports whether this declared channel has at least one salience-gated
+// (open-floor participant/chair) member — the RFC 0030 Tier B signal the RFC 0051
+// reasoning block rides. It mirrors the per-member opt-in derived at unmarshal
+// ([ResolveSalienceSignal]); a bare legacy `always` is open-floor but NOT
+// salience-gated, so it does not arm the gate. It is the load-side counterpart to
+// the router's [ChannelRouter.channelGoverned] (which reads live store members)
+// and feeds the PR 6 governed default flip plus the reasoning validate/freeze paths.
+func (cc ChannelConfig) governed() bool {
+	for j := range cc.Members {
+		if cc.Members[j].SalienceGated {
+			return true
+		}
+	}
+	return false
 }
 
 // FloorControlEnabled resolves the RFC 0030 Layer 2.5 floor-control flag for

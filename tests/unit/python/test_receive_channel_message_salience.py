@@ -116,3 +116,24 @@ class TestReceiveChannelMessageSalience:
         event = _enqueued_event(dispatcher)
         assert event.payload["salience_gated"] is False
         assert event.payload["threshold"] is None
+
+    async def test_unpacks_reasoning_mode_into_payload(self):
+        """RFC 0051 PR 6 go-live: the resolved reasoning rung rides the wire and
+        the servicer lifts it onto the payload key the salience seam reads."""
+        servicer, dispatcher = _make_servicer()
+        await servicer.ReceiveChannelMessage(
+            _channel_event(salience_gated=True, reasoning_mode="bid"),
+            MagicMock(spec=grpc.aio.ServicerContext),
+        )
+        event = _enqueued_event(dispatcher)
+        assert event.payload["reasoning_mode"] == "bid"
+
+    async def test_absent_reasoning_mode_unpacks_to_empty(self):
+        """A pre-v0.3.10 producer omits reasoning_mode: the proto3 default empty
+        string survives onto the payload, and the seam maps it to off."""
+        servicer, dispatcher = _make_servicer()
+        await servicer.ReceiveChannelMessage(
+            _channel_event(salience_gated=True), MagicMock(spec=grpc.aio.ServicerContext)
+        )
+        event = _enqueued_event(dispatcher)
+        assert event.payload["reasoning_mode"] == ""

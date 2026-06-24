@@ -407,6 +407,11 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		Threshold:                 env.Recipient.Threshold,
 		ChannelSize:               int32(env.ChannelSize),
 		SalienceMaxChannelMembers: int32(env.SalienceMaxChannelMembers),
+		// RFC 0051 PR 6 go-live: the channel's resolved reasoning rung
+		// (`off`|`bid`|`plan`), stamped by the router at fanout. Channel-level
+		// (identical across recipients); the agent-side seam reads it to pick the
+		// bid's verdict grammar. Empty (a pre-v0.3.10 envelope) maps to `off`.
+		ReasoningMode: env.ReasoningMode,
 		// RFC 0030 deterministic governance layers (v0.3.8), PR 1: lift any
 		// publish-side `interaction_id` (the RFC 0020 Interaction — lifecycle
 		// §B/§C, per-channel scope §G) onto the typed proto field so Layers

@@ -59,14 +59,58 @@ const (
 	ReasoningDepthDeep    = "deep"
 )
 
-// Reasoning block defaults — the shipped rung. `off` keeps the feature dark until
-// the PR 6 flip; `fast`/`shallow`/`revise: 0` are the cheap single-pass baseline.
+// Reasoning block defaults — the shipped rung. `DefaultReasoningMode` is the
+// PACKAGE default (`off`): the value an UNgoverned channel resolves to, the
+// inherit sentinel the freeze paths key off, and the byte-for-byte v0.3.8 score
+// gate. `fast`/`shallow`/`revise: 0` are the cheap single-pass baseline.
 const (
 	DefaultReasoningMode   = ReasoningModeOff
 	DefaultReasoningModel  = ReasoningModelFast
 	DefaultReasoningDepth  = ReasoningDepthShallow
 	DefaultReasoningRevise = 0
 )
+
+// GovernedDefaultReasoningMode is the RFC 0051 PR 6 GO-LIVE default: a
+// Tier-B-governed channel (≥1 salience-gated open-floor member) with no explicit
+// `mode` override resolves to the silence-only `bid` rung, not `off`. This is the
+// flip that makes reasoning live — Phases 1–2 shipped the mechanism dark behind
+// the package `off` default; PR 6 promotes the governed default to `bid` in
+// lockstep with the kill switch and telemetry.
+//
+// It is the `bid` rung, never `plan`: semantic silence ships out of the box, but
+// the plan-threaded compose stays an explicit `off → bid → plan` operator step.
+// `off` remains a true one-flip kill switch (an explicit `off` override is
+// preserved across the flip, [ReasoningConfig.FreezeOverrides]). An ungoverned
+// channel keeps the package `off` default — the knob is inert there and
+// `validate` forbids a non-off mode anyway — so the `bid` default takes effect at
+// the moment a channel becomes governed (RFC 0051 §G / OQ 2).
+const GovernedDefaultReasoningMode = ReasoningModeBid
+
+// governedDefaultMode is the default `mode` for a channel given its live
+// governance: `bid` when governed (the PR 6 flip), else the package `off`. It is
+// the single source of truth shared by the resolution base
+// ([governedReasoningBase]), the load-time normalize
+// ([ReasoningConfig.normalizedForGovernance]), and the per-sub-knob freeze
+// ([ReasoningConfig.FreezeOverrides]) so all three agree on which `mode` is "the
+// default" (and therefore inherit) versus an explicit override worth committing.
+func governedDefaultMode(governed bool) string {
+	if governed {
+		return GovernedDefaultReasoningMode
+	}
+	return DefaultReasoningMode
+}
+
+// governedReasoningBase is the resolution base a sparse override overlays onto,
+// governance-aware: the full default rung with `mode` set to the governed default
+// ([governedDefaultMode]). An override that does not touch `mode` therefore
+// inherits `bid` on a governed channel and `off` elsewhere; an explicit
+// `mode: off` override overlays back to the kill switch. Used by the runtime
+// apply / boot-replay path ([ChannelRouter.applyOverridesToRouter]).
+func governedReasoningBase(governed bool) ReasoningConfig {
+	base := DefaultReasoningConfig()
+	base.Mode = governedDefaultMode(governed)
+	return base
+}
 
 // Reasoning validation sentinels — defined here rather than in the channels.go
 // central block, which is itself at the 500-line cap. Matched by [errors.Is]; the
@@ -117,13 +161,19 @@ func DefaultReasoningConfig() ReasoningConfig {
 	}
 }
 
-// normalized fills any empty string field with its default — so a block that
-// declares only `mode: bid` reads back as a complete rung (bid / fast / shallow)
-// rather than carrying empty model/depth downstream. `Revise` needs no
-// normalization: its zero IS the default (single pass).
-func (rc ReasoningConfig) normalized() ReasoningConfig {
+// normalizedForGovernance fills any empty string field with its default — so a
+// block that declares only `mode: bid` reads back as a complete rung
+// (bid / fast / shallow) rather than carrying empty model/depth downstream.
+// `Revise` needs no normalization: its zero IS the default (single pass).
+//
+// An ABSENT `mode` (the empty string — distinct from an explicit `mode: off`, the
+// only point this distinction still exists, before the empty is filled) takes the
+// GOVERNED default ([governedDefaultMode]): `bid` on a governed channel (the PR 6
+// flip), `off` otherwise. An explicitly-declared `mode` is left untouched, so a
+// YAML `mode: off` kill switch on a governed channel stays `off`.
+func (rc ReasoningConfig) normalizedForGovernance(governed bool) ReasoningConfig {
 	if rc.Mode == "" {
-		rc.Mode = DefaultReasoningMode
+		rc.Mode = governedDefaultMode(governed)
 	}
 	if rc.Model == "" {
 		rc.Model = DefaultReasoningModel
@@ -132,6 +182,16 @@ func (rc ReasoningConfig) normalized() ReasoningConfig {
 		rc.Depth = DefaultReasoningDepth
 	}
 	return rc
+}
+
+// normalized is the ungoverned normalization — an absent `mode` fills to the
+// package `off` default. It is the back-compat entry point for callers with no
+// governance context (e.g. [ChannelRouter.SetReasoning], which receives an
+// already-resolved rung). The load and validate paths use
+// [ReasoningConfig.normalizedForGovernance] so an absent mode picks up the PR 6
+// governed `bid` default.
+func (rc ReasoningConfig) normalized() ReasoningConfig {
+	return rc.normalizedForGovernance(false)
 }
 
 // validate enforces the per-field reasoning invariants — the enum vocabulary plus
@@ -186,26 +246,30 @@ func (rc ReasoningConfig) validate(governed bool) error {
 // single source of truth for "which sub-knobs of a resolved rung are worth
 // committing".
 //
-// The freeze is PER-SUB-KNOB, not whole-rung: only a sub-knob that differs from
-// its package default is captured; a default sub-knob stays inherit (nil). Two
-// consequences this shape exists for:
+// The freeze is PER-SUB-KNOB and GOVERNANCE-AWARE: only a sub-knob that differs
+// from its default is captured; a default sub-knob stays inherit (nil). The
+// `mode` default is governance-dependent ([governedDefaultMode]) — `bid` on a
+// governed channel (post the PR 6 flip), `off` otherwise — so:
 //
-//   - `mode: off` (the default) is never frozen as an explicit override, even when
-//     a SIBLING sub-knob is non-default (e.g. `model: quality`). An explicit
-//     `mode: off` would silently opt the channel out of the RFC 0051 PR 6 default
-//     flip (off→bid) — a flip an operator who only touched `model` never declined.
-//     Leaving `mode` inherit keeps the channel responsive to the future default.
-//   - a committed non-off `mode` (or a non-default model/depth/revise) IS captured,
-//     so the reconcile→[ChannelRouter.ResolveFromStore] boot round-trip and the
-//     first-edit baseline both preserve it instead of resetting it to the package
-//     default. The drift hash ([channelConfigContentHash]) likewise sees the change.
+//   - On a GOVERNED channel `mode: bid` is the default and stays inherit, while an
+//     explicit `mode: off` (the kill switch) IS captured — it differs from the
+//     governed `bid` default, so freezing it is what preserves the kill switch
+//     across the reconcile→[ChannelRouter.ResolveFromStore] boot round-trip and in
+//     the first-edit baseline (otherwise boot replay would re-resolve it to `bid`).
+//   - On an UNGOVERNED channel `mode: off` is the default and stays inherit; a
+//     non-off mode (drift — a member left) is captured here and dropped by the
+//     baseline's drifted-ungoverned handling ([Server.reasoningBaseline]).
+//   - a non-default model/depth/revise is always captured (independent of `mode`),
+//     so a channel non-default ONLY because of `model: quality` keeps `mode`
+//     inherit and stays responsive to the governed default — an operator who
+//     touched only `model` never declined the `bid` flip.
 //
 // Returns nil for a fully-default rung (every sub-knob inherit) so a never-
 // deliberated channel snapshots identically to never-set (no `reasoning` key in
 // the blob), exactly like the escalation chair's absent-stays-nil treatment.
-func (rc ReasoningConfig) FreezeOverrides() *ReasoningOverrides {
+func (rc ReasoningConfig) FreezeOverrides(governed bool) *ReasoningOverrides {
 	var ov ReasoningOverrides
-	if rc.Mode != DefaultReasoningMode {
+	if rc.Mode != governedDefaultMode(governed) {
 		mode := rc.Mode
 		ov.Mode = &mode
 	}

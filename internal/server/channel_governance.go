@@ -1,6 +1,10 @@
 package server
 
-import "github.com/mkhomutov/persatrix/internal/channels"
+import (
+	"context"
+
+	"github.com/mkhomutov/persatrix/internal/channels"
+)
 
 // channel_governance.go holds the server-side glue that stamps the default
 // RFC 0030 governance bundle onto a group channel created at runtime through
@@ -31,7 +35,12 @@ import "github.com/mkhomutov/persatrix/internal/channels"
 // None of these has a REST field, so startup resolution re-forces them on
 // restart; this runtime path keeps the channel governed in the meantime. A nil
 // router (channels subsystem disabled) is a no-op.
-func (s *Server) applyRuntimeGroupGovernance(canonicalID string) {
+//
+// The RFC 0051 reasoning rung is governance-aware, so it reads whether the
+// just-created channel has a salience-gated member off the store
+// ([Server.channelHasSalienceGatedMember]) — the same live-membership signal the
+// config apply path uses — to pick the go-live default rung.
+func (s *Server) applyRuntimeGroupGovernance(ctx context.Context, canonicalID string) {
 	if s.channelRouter == nil {
 		return
 	}
@@ -39,8 +48,16 @@ func (s *Server) applyRuntimeGroupGovernance(canonicalID string) {
 	s.channelRouter.SetSalienceMaxChannelMembers(canonicalID, 0)
 	s.channelRouter.ApplyDefaultReplyBudget(canonicalID)
 	s.channelRouter.ApplyDefaultInteractionBudget(canonicalID)
-	// RFC 0051 (v0.3.10): a runtime-created group ships on the default reasoning
-	// rung (off) — so the GET /config surface reads an explicit entry rather than
-	// the getter's fallback, matching the other seeded knobs above.
-	s.channelRouter.SetReasoning(canonicalID, channels.DefaultReasoningConfig())
+	// RFC 0051 (v0.3.10) PR 6 go-live: a runtime-created group ships on the
+	// GOVERNED default rung — `bid` if it has a salience-gated member, else `off` —
+	// matching what startup's ResolveReasoning resolves it to, so the channel is
+	// `bid`-by-default from creation (not a second-class `off` until the next
+	// restart) and the GET /config surface reads an explicit entry rather than the
+	// getter's package-default fallback. An explicit `off` stays a kill switch via
+	// the apply path.
+	rc := channels.DefaultReasoningConfig()
+	if s.channelHasSalienceGatedMember(ctx, canonicalID) {
+		rc.Mode = channels.GovernedDefaultReasoningMode
+	}
+	s.channelRouter.SetReasoning(canonicalID, rc)
 }

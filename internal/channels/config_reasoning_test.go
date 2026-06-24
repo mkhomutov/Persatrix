@@ -32,9 +32,11 @@ func mustCreateGovernedGroup(t *testing.T, store ChannelStore, name string) stri
 
 // --- YAML load + validate -------------------------------------------------
 
-// TestLoadConfig_ReasoningDefaults: an absent reasoning block normalizes to the
-// shipped default rung (off / fast / shallow / 0).
-func TestLoadConfig_ReasoningDefaults(t *testing.T) {
+// TestLoadConfig_ReasoningGovernedDefaultsToBid: PR 6 go-live — an absent
+// reasoning block on a GOVERNED channel (a salience-gated `participant`) resolves
+// to the `bid` default, the rest of the rung filling from the package defaults
+// (fast / shallow / 0).
+func TestLoadConfig_ReasoningGovernedDefaultsToBid(t *testing.T) {
 	body := `
 channels:
   - name: planning
@@ -45,10 +47,49 @@ channels:
 	cfg, err := LoadConfig(writeYAML(t, body))
 	require.NoError(t, err)
 	rc := cfg.Channels[0].Reasoning
-	assert.Equal(t, ReasoningModeOff, rc.Mode)
+	assert.Equal(t, ReasoningModeBid, rc.Mode, "governed channel flips to the bid default (PR 6)")
 	assert.Equal(t, ReasoningModelFast, rc.Model)
 	assert.Equal(t, ReasoningDepthShallow, rc.Depth)
 	assert.Equal(t, 0, rc.Revise)
+}
+
+// TestLoadConfig_ReasoningUngovernedDefaultsToOff: an absent reasoning block on an
+// UNgoverned channel (a non-salience-gated `addressed` member) keeps the package
+// `off` default — the flip takes effect only at the moment a channel is governed.
+func TestLoadConfig_ReasoningUngovernedDefaultsToOff(t *testing.T) {
+	body := `
+channels:
+  - name: planning
+    members:
+      - id: ada
+        respond: addressed
+`
+	cfg, err := LoadConfig(writeYAML(t, body))
+	require.NoError(t, err)
+	rc := cfg.Channels[0].Reasoning
+	assert.Equal(t, ReasoningModeOff, rc.Mode, "ungoverned channel stays off")
+	assert.Equal(t, ReasoningModelFast, rc.Model)
+	assert.Equal(t, ReasoningDepthShallow, rc.Depth)
+	assert.Equal(t, 0, rc.Revise)
+}
+
+// TestLoadConfig_ReasoningExplicitOffKillSwitch: an EXPLICIT `mode: off` on a
+// governed channel is the kill switch — it is NOT flipped to bid (only an absent
+// mode picks up the governed default).
+func TestLoadConfig_ReasoningExplicitOffKillSwitch(t *testing.T) {
+	body := `
+channels:
+  - name: planning
+    members:
+      - id: ada
+        respond: participant
+    reasoning:
+      mode: "off"
+`
+	cfg, err := LoadConfig(writeYAML(t, body))
+	require.NoError(t, err)
+	assert.Equal(t, ReasoningModeOff, cfg.Channels[0].Reasoning.Mode,
+		"explicit off is the kill switch, not flipped to bid")
 }
 
 // TestLoadConfig_ReasoningPartialNormalizes: a block that sets only `mode` fills
@@ -207,8 +248,12 @@ func TestApplyChannelConfig_ReasoningModeRoundTrips(t *testing.T) {
 	router, store, ctx := newApplyRouter(t)
 	id := mustCreateGovernedGroup(t, store, "planning")
 
-	// Default (no override): off.
-	assert.Equal(t, ReasoningModeOff, router.ReasoningFor(id).Mode)
+	// Default (no override) on a governed channel: bid (the PR 6 go-live flip).
+	// Seeded through the governance-aware boot resolver (the channel is revision 0,
+	// so it is a store-only group channel ResolveReasoning stamps with the governed
+	// default rather than ResolveFromStore, which skips never-edited channels).
+	require.NoError(t, router.ResolveReasoning(ctx, &Config{}))
+	assert.Equal(t, ReasoningModeBid, router.ReasoningFor(id).Mode)
 
 	for i, mode := range []string{ReasoningModeBid, ReasoningModePlan} {
 		m := mode
@@ -249,10 +294,12 @@ func TestApplyChannelConfig_ReasoningRejectsUngoverned(t *testing.T) {
 	assert.Equal(t, int64(0), revision)
 }
 
-// TestApplyChannelConfig_ReasoningAbsentResolvesToDefault: an apply that omits the
-// reasoning block resolves it to the default `off` on the router (store-canonical
-// shadow-the-whole-block semantics, like every other knob).
-func TestApplyChannelConfig_ReasoningAbsentResolvesToDefault(t *testing.T) {
+// TestApplyChannelConfig_ReasoningAbsentResolvesToGovernedDefault: an apply that
+// omits the reasoning block resolves it to the GOVERNED default on the router —
+// `bid` on this governed channel (the PR 6 flip), via the store-canonical
+// shadow-the-whole-block semantics every knob uses. (A prior explicit `plan` is
+// shadowed away because the patch omits reasoning.)
+func TestApplyChannelConfig_ReasoningAbsentResolvesToGovernedDefault(t *testing.T) {
 	router, store, ctx := newApplyRouter(t)
 	id := mustCreateGovernedGroup(t, store, "planning")
 	router.SetReasoning(id, ReasoningConfig{Mode: ReasoningModePlan})
@@ -261,6 +308,26 @@ func TestApplyChannelConfig_ReasoningAbsentResolvesToDefault(t *testing.T) {
 	require.NoError(t, router.ApplyChannelConfig(ctx, id,
 		ChannelConfigOverrides{FloorControl: &fc}, 0, ""))
 
+	assert.Equal(t, ReasoningModeBid, router.ReasoningFor(id).Mode,
+		"an absent reasoning override falls back to the governed default (bid)")
+}
+
+// TestApplyChannelConfig_ReasoningExplicitOffKillSwitchPreserved: an explicit
+// `mode: off` override on a governed channel is preserved across the persist →
+// boot-replay round-trip — the one-flip kill switch survives the go-live default.
+func TestApplyChannelConfig_ReasoningExplicitOffKillSwitchPreserved(t *testing.T) {
+	router, store, ctx := newApplyRouter(t)
+	id := mustCreateGovernedGroup(t, store, "planning")
+
+	off := ReasoningModeOff
+	patch := ChannelConfigOverrides{Reasoning: &ReasoningOverrides{Mode: &off}}
+	require.NoError(t, router.ApplyChannelConfig(ctx, id, patch, 0, ""))
+	assert.Equal(t, ReasoningModeOff, router.ReasoningFor(id).Mode, "explicit off applied")
+
+	// Simulate a fresh boot: drop the live router state and re-overlay from the
+	// store. The explicit off must survive rather than re-resolving to bid.
+	router.SetReasoning(id, ReasoningConfig{Mode: ReasoningModeBid}) // poison the map
+	require.NoError(t, router.ResolveFromStore(ctx))
 	assert.Equal(t, ReasoningModeOff, router.ReasoningFor(id).Mode,
-		"an absent reasoning override falls back to the package default (off)")
+		"the explicit off kill switch survives boot replay (not re-flipped to bid)")
 }
