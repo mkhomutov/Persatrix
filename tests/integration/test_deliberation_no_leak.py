@@ -42,15 +42,20 @@ pytestmark = pytest.mark.asyncio
 # Patch the seam where the action loop looks it up.
 _SEAM_PATH = "agents.persona_runtime.action_loop.run_salience_gate"
 
-# A distinctive marker — if it surfaces in any published message or stored
-# episode the §E wall has been breached.
+# Distinctive markers — one per genuinely-private field. If any surfaces in a
+# published message or stored episode the §E wall has been breached. Every field
+# that carries *content* (not the public ``addressed_to`` participant id) gets its
+# own marker so a partial leak of any single field is caught, not just ``intent``.
 _PRIVATE_INTENT = "WALLED-PLAN-7f3a name the write-path risk no peer can see"
+_PRIVATE_POINT = "WALLED-PLAN-kp9 Redis serializes writes under contention"
+_PRIVATE_AVOID = "WALLED-PLAN-av2 that Redis is fast for reads"
+_PRIVATE_MARKERS = (_PRIVATE_INTENT, _PRIVATE_POINT, _PRIVATE_AVOID)
 
 _PLAN = CompositionPlan(
     intent=_PRIVATE_INTENT,
-    key_points=("Redis serializes writes", "our p99 is write-heavy"),
+    key_points=(_PRIVATE_POINT, "our p99 is write-heavy"),
     addressed_to="iron-fox",
-    avoid_restating=("that Redis is fast for reads",),
+    avoid_restating=(_PRIVATE_AVOID,),
 )
 
 _SEED = [
@@ -154,25 +159,32 @@ class TestPlanThreadsIntoComposeButNeverLeaks:
                 patch.object(agent, "_store_event_episode", side_effect=_capture_store):
             actions = await agent.on_event(_event())
 
-        # Positive control: the private plan threaded into the compose prompt.
+        # Positive control: *every* private field threaded into the compose
+        # prompt (not just intent), so a silently-dropped field fails loudly here
+        # rather than passing the no-leak scan below vacuously.
         compose.assert_awaited_once()
         system_prompt = compose.await_args.kwargs["system"]
-        assert _PRIVATE_INTENT in system_prompt, "plan must reach the compose prompt"
+        for marker in _PRIVATE_MARKERS:
+            assert marker in system_prompt, f"plan field must reach the compose prompt: {marker}"
 
         # The turn actually posted (so the no-leak assertions are about a real
         # published message, not a suppressed turn).
         published = [a for a in actions if a.action_type is ActionType.SEND_CHANNEL_MESSAGE]
         assert published, "the should_post=true turn must publish a message"
 
-        # No leak to the channel: the plan is in zero published payloads.
+        # No leak to the channel: no private field is in any published payload.
         for action in actions:
-            assert _PRIVATE_INTENT not in _action_text(action)
+            text = _action_text(action)
+            for marker in _PRIVATE_MARKERS:
+                assert marker not in text
 
-        # No leak to the store: the plan is in zero persisted-episode actions
-        # (what an RFC 0034 reconstruction would hand a peer).
+        # No leak to the store: no private field is in any persisted-episode
+        # action (what an RFC 0034 reconstruction would hand a peer).
         assert stored_actions, "the turn must store an episode"
         for action in stored_actions:
-            assert _PRIVATE_INTENT not in _action_text(action)
+            text = _action_text(action)
+            for marker in _PRIVATE_MARKERS:
+                assert marker not in text
 
     async def test_no_plan_outcome_composes_without_a_plan_section(self):
         """The dark default: a speak outcome with ``plan=None`` (today's

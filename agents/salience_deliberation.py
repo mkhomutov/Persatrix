@@ -106,10 +106,14 @@ def system_snippet(mode: str) -> str:
 # lines), and ``plan`` (PR 3) additionally carries a ``CompositionPlan`` — so
 # the cap scales up: a modest bump for ``bid``, a larger ceiling for ``plan``.
 # Truncation still fails closed, but a too-tight cap would manufacture parse
-# failures, so the cap must comfortably fit each rung's output. NOTE: until PR 3
-# wires the ``CompositionPlan``, ``plan`` shares the ``bid`` prompt+parser, so
-# its larger cap is forward *headroom* — ``max_tokens`` is a ceiling, not a
-# floor, and today's bid-shaped output stops well short of it (no extra cost).
+# failures, so the cap must comfortably fit each rung's output. As of PR 3 the
+# ``plan`` cap is load-bearing, not headroom: ``plan`` now has its own snippets
+# (``salience-bid-plan-{system,user}``) and carries the ``CompositionPlan`` fields
+# (intent / key_points / addressed_to / avoid_restating) on the speak path, so the
+# 320 ceiling sizes the verdict *plus* the plan. ``max_tokens`` is still a ceiling,
+# not a floor — a silence verdict stops far short of it — and truncation degrades
+# gracefully: the verdict lines lead, so a cut response keeps the should_post
+# decision and merely drops the (fail-closed-to-none) plan tail.
 _SCALAR_MAX_OUTPUT_TOKENS: Final[int] = 64
 _BID_MAX_OUTPUT_TOKENS: Final[int] = 128
 _PLAN_MAX_OUTPUT_TOKENS: Final[int] = 320

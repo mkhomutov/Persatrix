@@ -114,6 +114,75 @@ class TestParsePlanDefaults:
         assert plan.intent == "add the missing write-path caveat"
 
 
+class TestParsePlanDropsEchoedPlaceholders:
+    """A small ``fast`` model with nothing to fill a field may echo the user
+    snippet's literal ``<…>`` placeholder verbatim — the same failure the verdict
+    parser already guards for ``reason_note``
+    (``test_salience_bid_reasoning.py::…placeholder_echo_is_dropped``). The plan
+    parser must not let that template noise become a "plan": an echoed ``intent``
+    is no anchor, and an echoed list/addressed field is no value. This matters
+    twice over — the echo is garbage *and*, because the plan is rendered into the
+    Tier-C compose as a trusted system-prompt section, an un-stripped echo would
+    inject template instructions into that prompt (RFC 0051 §E inbound-direction
+    note)."""
+
+    def test_echoed_intent_placeholder_is_no_plan(self):
+        assert parse_plan(
+            "should_post: yes\nreason_code: adds_substance\n"
+            "intent: <one clause — what your post should accomplish; only if posting>\n",
+        ) is None
+
+    def test_echoed_list_placeholders_are_dropped(self):
+        plan = parse_plan(
+            "intent: name the unraised write-path risk\n"
+            "key_points: <up to 3 points to land, separated by ';'; only if posting>\n"
+            "avoid_restating: <what's already been said that you won't repeat, "
+            "';'-separated — optional>\n",
+        )
+        assert plan is not None
+        assert plan.key_points == ()
+        assert plan.avoid_restating == ()
+
+    def test_echoed_addressed_to_placeholder_falls_back_to_channel(self):
+        plan = parse_plan(
+            "intent: name the unraised write-path risk\n"
+            "addressed_to: <a participant's name, or 'channel'; only if posting>\n",
+        )
+        assert plan is not None
+        assert plan.addressed_to == "channel"
+
+
+class TestParsePlanBoundsFieldLength:
+    """Each field is length-bounded (mirrors the verdict's ``reason_note`` 240-char
+    cap) so a runaway clause cannot bloat the trusted compose prompt — the
+    primary bound on how much transcript-derived text the plan can carry into it
+    (RFC 0051 §E inbound-direction note)."""
+
+    def test_long_intent_is_truncated(self):
+        plan = parse_plan("intent: " + "x" * 500)
+        assert plan is not None
+        assert len(plan.intent) == 240
+
+    def test_long_list_payload_is_bounded(self):
+        plan = parse_plan("intent: x\nkey_points: " + "y" * 500)
+        assert plan is not None
+        assert plan.key_points  # still parses a (bounded) point
+        assert all(len(point) <= 240 for point in plan.key_points)
+        assert sum(len(point) for point in plan.key_points) <= 240
+
+
+class TestParsePlanCapsAvoidRestating:
+    def test_avoid_restating_capped_like_key_points(self):
+        """``avoid_restating`` carries the same anti-essay bound as ``key_points``
+        — both are rendered verbatim into the compose prompt, so neither may
+        smuggle an unbounded list past the gate (RFC 0051 §C)."""
+        plan = parse_plan(
+            "intent: x\navoid_restating: a; b; c; d; e; f\n",
+        )
+        assert plan is not None
+        assert plan.avoid_restating == ("a", "b", "c")
+
+
 class TestParsePlanFailClosedToNoPlan:
     def test_missing_intent_is_no_plan(self):
         """No anchor → ``None`` → compose *unplanned* (not blocked). The bias is

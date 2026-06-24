@@ -52,6 +52,20 @@ __all__ = [
 # lists more is trimmed to the first three rather than rejected.
 _MAX_KEY_POINTS: Final[int] = 3
 
+# ``avoid_restating`` carries the *same* anti-essay bound as ``key_points``: both
+# render verbatim into the trusted compose prompt, so an unbounded list on either
+# is the same smuggling risk. Capping it here closes the asymmetry the PR-3 review
+# flagged (``key_points`` was capped, this field was not).
+_MAX_AVOID_RESTATING: Final[int] = 3
+
+# Per-field character bound (mirrors the verdict's ``reason_note`` 240-char cap in
+# :mod:`agents.salience_deliberation`). The plan is rendered into the compose
+# prompt as a *trusted* section yet is shaped by the **untrusted** transcript the
+# bid read, so this cap is the primary bound on how much transcript-derived text a
+# single field can carry into that prompt — see :func:`render_plan_section` and
+# the RFC 0051 §E inbound-direction note.
+_MAX_FIELD_CHARS: Final[int] = 240
+
 # The default audience when the plan names none — an open-floor post addresses
 # the whole channel, matching the gate's open-floor admit ([RFC 0051 §B/§C]).
 _DEFAULT_ADDRESSED_TO: Final[str] = "channel"
@@ -60,6 +74,19 @@ _DEFAULT_ADDRESSED_TO: Final[str] = "channel"
 # delimiter the plan prompt asks for; splitting on it (and dropping blanks) keeps
 # parsing forgiving of a trailing ``;`` or a doubled ``;;``.
 _LIST_DELIMITER: Final[str] = ";"
+
+# Echoed-placeholder markers. A model with nothing to put in a field may echo the
+# ``salience-bid-plan-user.md`` ``<…>`` placeholder verbatim — the same template
+# noise the verdict parser strips from ``reason_note``. These are distinctive
+# instruction-voice slices of each placeholder (not a generic ``<…>`` heuristic,
+# which the verdict parser rejects for both leaking partial echoes and dropping
+# legitimate bracket-wrapped clauses). Keep in sync with that snippet.
+_PLACEHOLDER_MARKERS: Final[tuple[str, ...]] = (
+    "what your post should accomplish",       # intent
+    "points to land, separated by",           # key_points
+    "a participant's name, or",               # addressed_to
+    "already been said that you won't repeat",  # avoid_restating
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,12 +132,21 @@ _ADDRESSED_TO_RE: Final[re.Pattern[str]] = _field_re("addressed_to")
 _AVOID_RESTATING_RE: Final[re.Pattern[str]] = _field_re("avoid_restating")
 
 
+def _is_echoed_placeholder(value: str) -> bool:
+    """True if ``value`` is the prompt's ``<…>`` placeholder echoed back — template
+    noise, not a real field (see :data:`_PLACEHOLDER_MARKERS`)."""
+    folded = value.casefold()
+    return any(marker in folded for marker in _PLACEHOLDER_MARKERS)
+
+
 def _scalar(pattern: re.Pattern[str], text: str) -> str | None:
     match = pattern.search(text)
     if match is None:
         return None
     value = match.group("v").strip()
-    return value or None
+    if not value or _is_echoed_placeholder(value):
+        return None
+    return value[:_MAX_FIELD_CHARS]
 
 
 def _list(pattern: re.Pattern[str], text: str, *, cap: int | None = None) -> tuple[str, ...]:
@@ -131,9 +167,11 @@ def parse_plan(text: str | None) -> CompositionPlan | None:
     ``intent`` — the load-bearing anchor — so the caller composes *unplanned*
     rather than blocking the post. The other fields are best-effort around the
     intent: ``key_points`` is capped at :data:`_MAX_KEY_POINTS`, ``addressed_to``
-    defaults to :data:`_DEFAULT_ADDRESSED_TO`, and ``avoid_restating`` may be
-    empty. Tolerant of the should_post/reason_code verdict lines that ride the
-    same response.
+    defaults to :data:`_DEFAULT_ADDRESSED_TO`, and ``avoid_restating`` is capped at
+    :data:`_MAX_AVOID_RESTATING` and may be empty. Every field is additionally
+    length-bounded (:data:`_MAX_FIELD_CHARS`), and an echoed ``<…>`` placeholder is
+    discarded as no value (:func:`_is_echoed_placeholder`). Tolerant of the
+    should_post/reason_code verdict lines that ride the same response.
     """
     if not text:
         return None
@@ -144,7 +182,7 @@ def parse_plan(text: str | None) -> CompositionPlan | None:
         intent=intent,
         key_points=_list(_KEY_POINTS_RE, text, cap=_MAX_KEY_POINTS),
         addressed_to=_scalar(_ADDRESSED_TO_RE, text) or _DEFAULT_ADDRESSED_TO,
-        avoid_restating=_list(_AVOID_RESTATING_RE, text),
+        avoid_restating=_list(_AVOID_RESTATING_RE, text, cap=_MAX_AVOID_RESTATING),
     )
 
 
@@ -170,6 +208,19 @@ def render_plan_section(plan: CompositionPlan) -> str:
     is the persona's *own* trusted reasoning, so it is a normal system-prompt
     section, **not** the RFC 0009 ``<external_data>`` quarantine envelope (which
     is for untrusted tool/bridge output) (RFC 0051 §E).
+
+    Inbound direction (§E note, PR-3 review): the plan is treated as trusted here,
+    yet it is *shaped by* the untrusted transcript the bid read — so a peer message
+    can attempt to steer the bid's fields and thereby reach this trusted section.
+    The §E privacy wall guards the plan leaking *out*; this is the opposite
+    direction. The current mitigation is to keep the laundering surface small at
+    the parser, not the renderer: :func:`parse_plan` discards echoed placeholders,
+    caps the list fields (:data:`_MAX_KEY_POINTS` / :data:`_MAX_AVOID_RESTATING`),
+    and length-bounds every field (:data:`_MAX_FIELD_CHARS`). The residual
+    trust-elevation (bounded free text crossing from quarantined transcript to
+    trusted prompt) is a contract item to resolve before the ``plan`` rung goes
+    live (see ``docs/rfcs/0051-amendment-reasoning-kernel.md``); it is acceptable
+    only while the path ships dark.
     """
     lines = [_SECTION_OPEN, _SECTION_PREAMBLE, f"Intent: {plan.intent}"]
     if plan.key_points:
