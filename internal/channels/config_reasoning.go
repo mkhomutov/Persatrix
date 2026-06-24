@@ -141,42 +141,90 @@ func (rc ReasoningConfig) normalized() ReasoningConfig {
 // member; a non-off mode on an ungoverned channel is rejected because the
 // deliberation rides the Tier B seam and would otherwise be silently inert.
 //
-// Returns a warning string (non-empty) for accepted-but-discouraged values
-// (`model: quality`) so the caller can surface it without failing the load.
-func (rc ReasoningConfig) validate(governed bool) (warning string, err error) {
+// `model: quality` is accepted (not an error) — it is merely discouraged. The
+// discouraged-economics WARNING is not surfaced here (validation has no logger and
+// its only caller discards a return); it is logged at the two paths that DO have a
+// logger and act on the value: [ChannelRouter.ResolveReasoning] (YAML/boot) and
+// [ChannelRouter.ApplyChannelConfig] (runtime PATCH).
+func (rc ReasoningConfig) validate(governed bool) error {
 	switch rc.Mode {
 	case ReasoningModeOff, ReasoningModeBid, ReasoningModePlan:
 	default:
-		return "", fmt.Errorf("%w: %q (must be one of off, bid, plan)", ErrInvalidReasoningMode, rc.Mode)
+		return fmt.Errorf("%w: %q (must be one of off, bid, plan)", ErrInvalidReasoningMode, rc.Mode)
 	}
 	if rc.Mode != ReasoningModeOff && !governed {
-		return "", fmt.Errorf("%w: %q requires a salience-gated (open-floor participant/chair) member; the knob does not by itself arm the gate",
+		return fmt.Errorf("%w: %q requires a salience-gated (open-floor participant/chair) member; the knob does not by itself arm the gate",
 			ErrInvalidReasoningMode, rc.Mode)
 	}
 
 	switch rc.Model {
-	case ReasoningModelFast:
-	case ReasoningModelQuality:
-		warning = "reasoning.model: quality defeats the cheap-pass economics — prefer fast (RFC 0051 §F)"
+	case ReasoningModelFast, ReasoningModelQuality: // quality accepted-but-discouraged; warned by the caller paths
 	default:
-		return "", fmt.Errorf("%w: %q (must be one of fast, quality)", ErrInvalidReasoningModel, rc.Model)
+		return fmt.Errorf("%w: %q (must be one of fast, quality)", ErrInvalidReasoningModel, rc.Model)
 	}
 
 	switch rc.Depth {
 	case ReasoningDepthShallow:
 	case ReasoningDepthDeep:
-		return "", fmt.Errorf("%w: %q is not yet deployed (native extended thinking is RFC 0051 Phase 4)", ErrInvalidReasoningDepth, rc.Depth)
+		return fmt.Errorf("%w: %q is not yet deployed (native extended thinking is RFC 0051 Phase 4)", ErrInvalidReasoningDepth, rc.Depth)
 	default:
-		return "", fmt.Errorf("%w: %q (must be shallow)", ErrInvalidReasoningDepth, rc.Depth)
+		return fmt.Errorf("%w: %q (must be shallow)", ErrInvalidReasoningDepth, rc.Depth)
 	}
 
 	if rc.Revise < 0 {
-		return "", fmt.Errorf("%w: %d (must be >= 0)", ErrInvalidReasoningRevise, rc.Revise)
+		return fmt.Errorf("%w: %d (must be >= 0)", ErrInvalidReasoningRevise, rc.Revise)
 	}
 	if rc.Revise >= 1 {
-		return "", fmt.Errorf("%w: %d is not yet deployed (the reflexion loop is RFC 0051 Phase 5)", ErrInvalidReasoningRevise, rc.Revise)
+		return fmt.Errorf("%w: %d is not yet deployed (the reflexion loop is RFC 0051 Phase 5)", ErrInvalidReasoningRevise, rc.Revise)
 	}
-	return warning, nil
+	return nil
+}
+
+// FreezeOverrides snapshots this RESOLVED rung into a sparse override for the
+// config-freeze paths — the YAML reconcile snapshot ([ChannelConfig.toConfigOverrides])
+// and the REST first-edit baseline ([Server.resolvedConfigBaseline]). It is the
+// single source of truth for "which sub-knobs of a resolved rung are worth
+// committing".
+//
+// The freeze is PER-SUB-KNOB, not whole-rung: only a sub-knob that differs from
+// its package default is captured; a default sub-knob stays inherit (nil). Two
+// consequences this shape exists for:
+//
+//   - `mode: off` (the default) is never frozen as an explicit override, even when
+//     a SIBLING sub-knob is non-default (e.g. `model: quality`). An explicit
+//     `mode: off` would silently opt the channel out of the RFC 0051 PR 6 default
+//     flip (off→bid) — a flip an operator who only touched `model` never declined.
+//     Leaving `mode` inherit keeps the channel responsive to the future default.
+//   - a committed non-off `mode` (or a non-default model/depth/revise) IS captured,
+//     so the reconcile→[ChannelRouter.ResolveFromStore] boot round-trip and the
+//     first-edit baseline both preserve it instead of resetting it to the package
+//     default. The drift hash ([channelConfigContentHash]) likewise sees the change.
+//
+// Returns nil for a fully-default rung (every sub-knob inherit) so a never-
+// deliberated channel snapshots identically to never-set (no `reasoning` key in
+// the blob), exactly like the escalation chair's absent-stays-nil treatment.
+func (rc ReasoningConfig) FreezeOverrides() *ReasoningOverrides {
+	var ov ReasoningOverrides
+	if rc.Mode != DefaultReasoningMode {
+		mode := rc.Mode
+		ov.Mode = &mode
+	}
+	if rc.Model != DefaultReasoningModel {
+		model := rc.Model
+		ov.Model = &model
+	}
+	if rc.Depth != DefaultReasoningDepth {
+		depth := rc.Depth
+		ov.Depth = &depth
+	}
+	if rc.Revise != DefaultReasoningRevise {
+		revise := rc.Revise
+		ov.Revise = &revise
+	}
+	if ov.IsEmpty() {
+		return nil
+	}
+	return &ov
 }
 
 // ReasoningOverrides is the sparse, tri-state-aware runtime override of the

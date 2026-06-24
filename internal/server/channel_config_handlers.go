@@ -335,10 +335,10 @@ func decodeKnob[T any](key string, raw json.RawMessage) (T, error) {
 // missing channel surfaces [channels.ErrChannelNotFound] for the caller to map
 // to 404.
 //
-// All eight knobs — interaction budget included, as of the RFC 0050 amendment
-// (interaction-budget enforcement) — are now router-held, so every inherited
-// effective value resolves through a getter (no knob reports a null effective
-// value).
+// All eight flat knobs — interaction budget included, as of the RFC 0050 amendment
+// (interaction-budget enforcement) — plus the nested RFC 0051 reasoning block are
+// router-held, so every inherited effective value resolves through a getter (no
+// knob reports a null effective value).
 //
 // Keep the router-held getters below in sync with [Server.resolvedConfigBaseline]:
 // the two are a matched pair (this method REPORTS each knob's provenance; the
@@ -424,9 +424,12 @@ func (s *Server) resolvedConfigBaseline(ctx context.Context, id string) channels
 	if chair != "" && s.chairIsEnforceableMember(ctx, id, chair) {
 		base.EscalationChairID = &chair
 	}
-	// RFC 0051: freeze the resolved reasoning rung too (unconditionally, like the
-	// flat router-held knobs) so a sparse first edit does not reset it to default.
-	base.Reasoning = reasoningBaseline(s.channelRouter.ReasoningFor(id))
+	// RFC 0051: freeze the resolved reasoning rung too, but CONDITIONALLY (like the
+	// escalation chair, not the unconditional flat knobs): a default-off rung stays
+	// inherit (responsive to the PR 6 flip) and a non-off rung whose governance has
+	// drifted away is dropped so it cannot block an unrelated first edit — see
+	// [Server.reasoningBaseline].
+	base.Reasoning = s.reasoningBaseline(ctx, id)
 	return base
 }
 

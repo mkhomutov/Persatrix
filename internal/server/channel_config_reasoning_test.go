@@ -208,3 +208,76 @@ func TestChannelConfig_ReasoningFirstEditFreezesRung(t *testing.T) {
 	r := decodeReasoning(t, rec.Body.Bytes())
 	assert.Equal(t, "bid", r["mode"].Value)
 }
+
+// TestChannelConfig_ReasoningFirstEditOnDefaultStaysInherit is the F3 coverage
+// gap: the conditional freeze's OTHER branch. A first edit of an unrelated knob on
+// a DEFAULT-off channel must NOT freeze reasoning — it stays inherit ("default"
+// source) so the channel keeps tracking the package default and remains responsive
+// to the RFC 0051 PR 6 default flip (off→bid). The non-default branch is pinned by
+// TestChannelConfig_ReasoningFirstEditFreezesRung; this pins the nil branch.
+func TestChannelConfig_ReasoningFirstEditOnDefaultStaysInherit(t *testing.T) {
+	srv, id := reasoningTestServer(t, true) // default-off rung, governed roster
+
+	body, _ := json.Marshal(map[string]any{"floor_control": false})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	r := decodeReasoning(t, rec.Body.Bytes())
+	for _, k := range []string{"mode", "model", "depth", "revise"} {
+		assert.Equalf(t, "default", r[k].Source,
+			"a default reasoning rung must stay inherit through an unrelated first edit (sub-knob %s)", k)
+	}
+	assert.Equal(t, "off", r["mode"].Value)
+}
+
+// TestChannelConfig_ReasoningOffModeStaysResponsiveDespiteNonDefaultModel is the
+// F4 regression: the freeze must be PER-SUB-KNOB, not whole-rung. A channel whose
+// rung is non-default ONLY because of model=quality (mode still off) must keep
+// `mode` inherited — freezing an explicit mode=off would silently opt it out of the
+// PR 6 default flip, a flip the operator (who only touched model) never declined.
+// The non-default model still freezes.
+func TestChannelConfig_ReasoningOffModeStaysResponsiveDespiteNonDefaultModel(t *testing.T) {
+	srv, id := channelConfigTestServer(t, true) // ungoverned roster (mode stays off → no governance needed)
+	// A YAML-resolved rung: mode off, model quality (the discouraged-but-accepted
+	// economics value). Non-default rung, but mode is still the responsive default.
+	srv.channelRouter.SetReasoning(id, channels.ReasoningConfig{
+		Mode: channels.ReasoningModeOff, Model: channels.ReasoningModelQuality})
+
+	body, _ := json.Marshal(map[string]any{"interaction_idle_timeout_seconds": 60})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	r := decodeReasoning(t, rec.Body.Bytes())
+	assert.Equal(t, "default", r["mode"].Source,
+		"mode=off must stay inherit (responsive to the PR 6 flip) even when model is non-default")
+	assert.Equal(t, "channel", r["model"].Source, "the non-default model still freezes")
+	assert.Equal(t, "quality", r["model"].Value)
+}
+
+// TestChannelConfig_ReasoningFirstEditWithDriftedGovernanceDoesNotBlock is the F2
+// regression — the reasoning analogue of the escalation chair's drifted-member
+// footgun (TestChannelConfig_FirstEditWithDriftedChairDoesNotBlockUnrelatedEdit).
+// A router-resolved non-off rung whose salience-gated member has since left is
+// inert at dispatch; freezing it into the first-edit baseline would let the
+// cross-field governance rule reject an UNRELATED edit naming a knob the operator
+// never touched. The baseline must drop the inert mode, so the edit succeeds and
+// reasoning falls back to off — the same outcome dispatch already produces.
+func TestChannelConfig_ReasoningFirstEditWithDriftedGovernanceDoesNotBlock(t *testing.T) {
+	srv, id := channelConfigTestServer(t, true) // alice/bob — NOT salience-gated
+	// A non-off rung the boot path seated on the router for a channel whose
+	// salience-gated member has since drifted away: governance drift the rest of
+	// the system absorbs silently (dispatch treats the rung as inert).
+	srv.channelRouter.SetReasoning(id, channels.ReasoningConfig{Mode: channels.ReasoningModeBid})
+
+	body, _ := json.Marshal(map[string]any{"interaction_idle_timeout_seconds": 60})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code,
+		"an unrelated edit must not be blocked by a drifted, inert reasoning rung, body=%s", rec.Body.String())
+
+	r := decodeReasoning(t, rec.Body.Bytes())
+	assert.Equal(t, "off", r["mode"].Value, "the inert rung drops to off (matching dispatch), not frozen")
+	assert.Equal(t, "default", r["mode"].Source)
+}

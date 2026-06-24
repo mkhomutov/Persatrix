@@ -212,7 +212,7 @@ func (c *Config) Validate() error {
 		// Config (bypassing LoadConfig's normalize pass) does not trip the enum
 		// check on an empty zero-value block. LoadConfig already normalized in
 		// place, so this is a harmless no-op on the production path.
-		if _, rerr := ch.Reasoning.normalized().validate(governed); rerr != nil {
+		if rerr := ch.Reasoning.normalized().validate(governed); rerr != nil {
 			return fmt.Errorf("channels[%d=%s]: %w", i, ch.Name, rerr)
 		}
 

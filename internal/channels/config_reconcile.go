@@ -70,10 +70,13 @@ var ErrInvalidConfigRevision = errors.New("channels: invalid revision")
 // stable: both sides of an
 // equal-revision comparison are computed the same canonical way.
 //
-// The one exception is the escalation chair: an absent chair stays nil (no
-// escalation — the opt-in default), distinct from an explicit empty string, so
-// an un-configured channel does not hash differently from one that explicitly
-// cleared the chair.
+// Two knobs are captured CONDITIONALLY rather than as a flat explicit value:
+//   - the escalation chair: an absent chair stays nil (no escalation — the opt-in
+//     default), distinct from an explicit empty string, so an un-configured channel
+//     does not hash differently from one that explicitly cleared the chair.
+//   - the RFC 0051 reasoning block ([ReasoningConfig.FreezeOverrides]): a default-off
+//     rung stays nil (inherit, responsive to the PR 6 flip) and a non-default rung is
+//     snapshotted per-sub-knob, so only the committed sub-knobs survive into the row.
 //
 // FREEZE CONSEQUENCE (RFC 0050 follow-up). Because this captures the FULLY
 // RESOLVED set — every INHERITED fleet default snapshotted as an explicit value
@@ -113,6 +116,13 @@ func (c ChannelConfig) toConfigOverrides(cfg *Config) ChannelConfigOverrides {
 		chair := c.EscalationChairID
 		o.EscalationChairID = &chair
 	}
+	// RFC 0051 reasoning block: capture the committed rung the same conditional way
+	// as the chair — a default-off rung stays nil (inherit), a non-default rung is
+	// snapshotted per-sub-knob ([ReasoningConfig.FreezeOverrides]). Omitting it here
+	// is silent data loss: [ChannelRouter.ResolveFromStore] re-stamps from this
+	// snapshot at revision > 0, so an un-captured non-off rung is reset to the
+	// package default at boot AND the drift hash goes blind to it.
+	o.Reasoning = c.Reasoning.FreezeOverrides()
 	return o
 }
 
