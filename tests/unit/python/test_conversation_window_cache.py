@@ -22,7 +22,7 @@ from agents.persona_runtime._conversation_window_cache import (
     _WindowCache,
 )
 
-_ROWS = [{"id": "m1", "sender_id": "user", "content": "hi"}]
+_ROWS: list[dict[str, object]] = [{"id": "m1", "sender_id": "user", "content": "hi"}]
 
 
 def _val(message_id: str) -> tuple[str, list[dict[str, object]]]:
