@@ -30,9 +30,10 @@ from ..tools.registry import ToolDefinition, get_tool, list_tools
 from .action_parser import parse_actions
 from .channel_ingest import sanitize_inbound_event
 from .channel_reply import synthesize_channel_reply
-from .deliberation_plan import render_plan_section
+from .compose_prompt import build_compose_system_prompt
 from .gate_suppress import suppressed_event_actions
 from .llm_call_errors import handle_llm_call_exception_with_cost_close
+from .reflexion import maybe_revise_channel_message
 from .salience_gate import run_salience_gate
 from .wallet_cause import lease_attribution_for_event
 
@@ -358,31 +359,12 @@ class _ActionLoopMixin:
                 )
             return [AgentAction(action_type=ActionType.DO_NOTHING, payload={})]
 
-        # 1. Build system prompt and append working memory context.
-        system_prompt = self._build_system_prompt()
-
-        # Retrieve assembled working memory (episodic, relationship, notes)
-        # and append to the system prompt so the LLM sees relevant memories.
-        # build_context() returns sections sorted by priority (highest first),
-        # dropping those that exceed the token budget.
-        # (F-60-R2-1: build_context() was never called — injected memory
-        #  sections were silently discarded with no effect on LLM behavior.)
-        memory_sections = self._working_memory.build_context()
-        if memory_sections:
-            # Each element is a dict with "role" (the section name, e.g.
-            # "episodic_recall") and "content" (the text to inject).
-            # "role" is a WorkingMemory section identifier — NOT an LLM
-            # conversation role (user/assistant/system).  We use only
-            # "content" here; "role" labels are intentionally omitted from
-            # the prompt to avoid confusing the LLM with metadata noise.
-            memory_text = "\n\n".join(s["content"] for s in memory_sections)
-            system_prompt += "\n\n" + memory_text
-
-        # RFC 0051 PR 3 — thread the private CompositionPlan into the Tier-C
-        # compose (never an AgentAction, never persisted — the §E wall). Dark in
-        # prod: the seam passes mode: off, so ``plan`` stays None until PR 4/6.
-        if salience is not None and salience.plan is not None:
-            system_prompt += "\n\n" + render_plan_section(salience.plan)
+        # 1. Build the compose system prompt: persona base + RFC 0034 working
+        # memory + (mode: plan only) the private CompositionPlan section. The
+        # assembly lives in ``compose_prompt.py`` so this file stays under the
+        # 500-line cap once the Phase 5 reflexion call lands below (the §E wall:
+        # the plan is a normal trusted section, never an AgentAction).
+        system_prompt = build_compose_system_prompt(self, salience)
 
         # 2. Multi-turn tool-use loop — RFC 0034 seed (reuse the seam's seed).
         messages = seam_seed if seam_seed is not None else (
@@ -484,6 +466,19 @@ class _ActionLoopMixin:
         # action schema returns conversational text that ``_parse_actions``
         # folds into ``COMPLETE_TASK``, leaving chat-as-DM to 504).
         actions = synthesize_channel_reply(event, actions, self.agent_id)
+
+        # 4c. RFC 0051 PR 8 (Phase 5a) — reflexion: under ``mode: plan`` with a
+        # ``reasoning.revise >= 1`` override (default 0 = single-pass), a cheap
+        # critic re-reads the composed reply against the private plan and a
+        # quality revise rewrites it if weak. Fail-soft + walled (a discarded
+        # draft is never an AgentAction); a no-op returns ``actions`` unchanged.
+        # Billed against the SAME interaction as the compose (a low budget starves
+        # the later rounds first, the §F cost bound).
+        actions = await maybe_revise_channel_message(
+            self, actions, salience,
+            cause=lease_cause, agent_id=lease_agent_id,
+            interaction_id=lease_interaction_id, max_tokens=max_tokens,
+        )
 
         # 5. Drain energy per action
         for action in actions:

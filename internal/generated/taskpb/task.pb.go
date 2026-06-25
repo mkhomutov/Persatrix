@@ -995,8 +995,24 @@ type ChannelMessageEvent struct {
 	// structured path on a `salience_gated` recipient, so an `off` here and a
 	// non-`salience_gated` recipient are both inert.
 	ReasoningMode string `protobuf:"bytes,25,opt,name=reasoning_mode,json=reasoningMode,proto3" json:"reasoning_mode,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// RFC 0051 PR 8 (v0.3.10) Phase 5a — the channel's resolved reflexion round
+	// count (`reasoning.revise`, 0..2) for this recipient. Carried as a first-class
+	// field for the same reason as `reasoning_mode = 25`: `ChannelMessageEvent` has
+	// no metadata map, and the agent-side reflexion loop
+	// (`agents/persona_runtime/reflexion.py`) needs the count to bound its
+	// critic→revise rounds after the Tier-C compose. Channel-level (identical
+	// across a fanout's recipients); the orchestrator stamps
+	// `ChannelRouter.ReasoningFor(channelID).Revise`.
+	//
+	// proto3 implicit presence: 0 (the zero value) is single-pass — no reflexion —
+	// and is both the default and the pre-Phase-5 / untracked case, so the field is
+	// additive across a mixed-version deployment. It is meaningful only paired with
+	// `reasoning_mode = plan` (the critic re-reads the draft against the plan); the
+	// config `validate` rejects `revise >= 1` on any other rung, and the agent seam
+	// pins it to 0 off the `plan` path, so a stray non-zero value here is inert.
+	ReasoningRevise int32 `protobuf:"varint,26,opt,name=reasoning_revise,json=reasoningRevise,proto3" json:"reasoning_revise,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ChannelMessageEvent) Reset() {
@@ -1202,6 +1218,13 @@ func (x *ChannelMessageEvent) GetReasoningMode() string {
 		return x.ReasoningMode
 	}
 	return ""
+}
+
+func (x *ChannelMessageEvent) GetReasoningRevise() int32 {
+	if x != nil {
+		return x.ReasoningRevise
+	}
+	return 0
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
@@ -1599,7 +1622,7 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xe2\b\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\x8d\t\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -1628,7 +1651,8 @@ const file_task_proto_rawDesc = "" +
 	"\x10chair_escalation\x18\x16 \x01(\bR\x0fchairEscalation\x12D\n" +
 	"\x1einteraction_close_notification\x18\x17 \x01(\bR\x1cinteractionCloseNotification\x12B\n" +
 	"\x1dchair_escalation_resynthesize\x18\x18 \x01(\bR\x1bchairEscalationResynthesize\x12%\n" +
-	"\x0ereasoning_mode\x18\x19 \x01(\tR\rreasoningModeB\f\n" +
+	"\x0ereasoning_mode\x18\x19 \x01(\tR\rreasoningMode\x12)\n" +
+	"\x10reasoning_revise\x18\x1a \x01(\x05R\x0freasoningReviseB\f\n" +
 	"\n" +
 	"_threshold\"H\n" +
 	"\aTaskAck\x12\x18\n" +

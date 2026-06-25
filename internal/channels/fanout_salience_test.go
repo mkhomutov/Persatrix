@@ -140,3 +140,36 @@ func TestFanout_StampsResolvedReasoningModeOnEnvelope(t *testing.T) {
 	assert.Equal(t, ReasoningModeBid, calls[0].ReasoningMode,
 		"the resolved governed default (bid) is stamped onto the dispatch envelope")
 }
+
+// TestFanout_StampsResolvedReasoningReviseOnEnvelope is the RFC 0051 PR 8
+// (Phase 5a) wire end-to-end: fanout stamps the channel's router-resolved
+// reflexion round count onto every dispatch envelope, so an operator's `plan` +
+// `revise` opt-in reaches the agent-side reflexion loop.
+func TestFanout_StampsResolvedReasoningReviseOnEnvelope(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &envelopeRecorder{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	ctx := context.Background()
+
+	id := mustCreateGroupWithPolicies(t, store, "planning",
+		map[string]RespondPolicy{
+			"alice": RespondParticipant, // sender; salience-gated → governed
+			"bob":   RespondParticipant,
+		}, "alice", "bob")
+	require.NoError(t, router.ResolveReasoning(ctx, &Config{}))
+
+	// Promote to the plan rung with 2 reflexion rounds (the operator opt-in).
+	router.SetReasoning(id, ReasoningConfig{
+		Mode: ReasoningModePlan, Model: ReasoningModelFast,
+		Depth: ReasoningDepthShallow, Revise: 2,
+	})
+
+	require.NoError(t, router.Publish(ctx, ChannelMessage{
+		ID: uuid.NewString(), ChannelID: id, SenderID: "alice", Content: "hi",
+	}, ""))
+
+	calls := disp.snapshot()
+	require.Len(t, calls, 1, "fanout to bob")
+	assert.Equal(t, 2, calls[0].ReasoningRevise,
+		"the resolved revise count is stamped onto the dispatch envelope")
+}

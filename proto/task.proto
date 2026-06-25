@@ -413,6 +413,22 @@ message ChannelMessageEvent {
   // structured path on a `salience_gated` recipient, so an `off` here and a
   // non-`salience_gated` recipient are both inert.
   string reasoning_mode = 25;
+  // RFC 0051 PR 8 (v0.3.10) Phase 5a — the channel's resolved reflexion round
+  // count (`reasoning.revise`, 0..2) for this recipient. Carried as a first-class
+  // field for the same reason as `reasoning_mode = 25`: `ChannelMessageEvent` has
+  // no metadata map, and the agent-side reflexion loop
+  // (`agents/persona_runtime/reflexion.py`) needs the count to bound its
+  // critic→revise rounds after the Tier-C compose. Channel-level (identical
+  // across a fanout's recipients); the orchestrator stamps
+  // `ChannelRouter.ReasoningFor(channelID).Revise`.
+  //
+  // proto3 implicit presence: 0 (the zero value) is single-pass — no reflexion —
+  // and is both the default and the pre-Phase-5 / untracked case, so the field is
+  // additive across a mixed-version deployment. It is meaningful only paired with
+  // `reasoning_mode = plan` (the critic re-reads the draft against the plan); the
+  // config `validate` rejects `revise >= 1` on any other rung, and the agent seam
+  // pins it to 0 off the `plan` path, so a stray non-zero value here is inert.
+  int32 reasoning_revise = 26;
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
