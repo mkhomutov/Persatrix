@@ -199,6 +199,35 @@ _SECTION_PREAMBLE: Final[str] = (
     "see it. Use it to shape the post, then write the post itself."
 )
 
+# Match the ``<deliberation_plan>`` envelope's own open AND close tags so a field
+# value cannot forge one. Both arms, because — exactly as for the ``<external_data>``
+# envelope in :mod:`agents.security` (PR #253 deep-review F1/M1):
+#   - a literal *close* tag mid-field would terminate the envelope early, making the
+#     trailing (attacker-steered) text appear *outside* it — as top-level trusted
+#     prompt rather than the persona's private plan (F1); and
+#   - a literal *open* tag would mint a fake nested envelope (M1).
+# Whitespace tolerance (``<\s*/?\s*…\b[^>]*>``) covers tokenisers more permissive
+# than ``re`` (``</ deliberation_plan >``, attributes on the open) so the escape is
+# not a covert-bypass channel (PR #253 deep-review L1). ``\b`` stops
+# ``deliberation_planning`` etc. from matching.
+_PLAN_TAG_RE: Final[re.Pattern[str]] = re.compile(
+    r"<\s*/?\s*deliberation_plan\b[^>]*>",
+    re.IGNORECASE,
+)
+
+
+def _neutralize_envelope_tags(value: str) -> str:
+    """Break any literal ``<deliberation_plan>`` open/close tag in ``value`` so it
+    cannot escape — or fake a nested copy of — the private-plan envelope.
+
+    Mirrors :func:`agents.security.wrap_external`'s body escaping (kept local so
+    this module stays stdlib-only / extraction-ready, amendment invariant #1): the
+    leading ``<`` of every tag is rewritten to ``<\\``, which no tokeniser we know
+    of reads as a tag, while the original form survives for forensic review of what
+    a peer tried to inject.
+    """
+    return _PLAN_TAG_RE.sub(lambda m: "<\\" + m.group(0)[1:], value)
+
 
 def render_plan_section(plan: CompositionPlan) -> str:
     """Render ``plan`` as a private system-prompt section for the Tier-C compose.
@@ -209,24 +238,45 @@ def render_plan_section(plan: CompositionPlan) -> str:
     section, **not** the RFC 0009 ``<external_data>`` quarantine envelope (which
     is for untrusted tool/bridge output) (RFC 0051 §E).
 
-    Inbound direction (§E note, PR-3 review): the plan is treated as trusted here,
-    yet it is *shaped by* the untrusted transcript the bid read — so a peer message
-    can attempt to steer the bid's fields and thereby reach this trusted section.
-    The §E privacy wall guards the plan leaking *out*; this is the opposite
-    direction. The current mitigation is to keep the laundering surface small at
-    the parser, not the renderer: :func:`parse_plan` discards echoed placeholders,
-    caps the list fields (:data:`_MAX_KEY_POINTS` / :data:`_MAX_AVOID_RESTATING`),
-    and length-bounds every field (:data:`_MAX_FIELD_CHARS`). The residual
-    trust-elevation (bounded free text crossing from quarantined transcript to
-    trusted prompt) is a contract item to resolve before the ``plan`` rung goes
-    live (see ``docs/rfcs/0051-amendment-reasoning-kernel.md``); it is acceptable
-    only while the path ships dark.
+    Inbound direction (§E note, PR-3 review; amendment invariant #6): the plan is
+    treated as trusted here, yet it is *shaped by* the untrusted transcript the bid
+    read — so a peer message can attempt to steer the bid's fields and thereby reach
+    this trusted section. The §E privacy wall guards the plan leaking *out*; this is
+    the opposite direction. Two layers bound it:
+
+    * **Parser** keeps the laundering surface small — :func:`parse_plan` discards
+      echoed placeholders, caps the list fields (:data:`_MAX_KEY_POINTS` /
+      :data:`_MAX_AVOID_RESTATING`), and length-bounds every field
+      (:data:`_MAX_FIELD_CHARS`).
+    * **Renderer** closes the *structural* breakout — every field is run through
+      :func:`_neutralize_envelope_tags` before splicing, so an attacker-steered
+      value cannot terminate the ``<deliberation_plan>`` envelope early (and have
+      its trailing text read as top-level trusted prompt) or mint a fake nested
+      one. With the close tag un-forgeable, all field text is trapped inside the
+      one private-plan envelope: it can neither break out nor masquerade as a
+      sibling top-level frame, which is what discharges the amendment invariant #6
+      obligation (``docs/rfcs/0051-amendment-reasoning-kernel.md``) — the structural
+      half is now closed, not merely accepted-as-risk.
+
+    The residual is then *bounded free text that stays inside the persona's own,
+    clearly-labelled-private envelope* steering its own post — the deliberately
+    accepted trust elevation, sound because the structural escape above is in place.
     """
-    lines = [_SECTION_OPEN, _SECTION_PREAMBLE, f"Intent: {plan.intent}"]
+    lines = [
+        _SECTION_OPEN,
+        _SECTION_PREAMBLE,
+        f"Intent: {_neutralize_envelope_tags(plan.intent)}",
+    ]
     if plan.key_points:
-        lines.append("Key points to land: " + "; ".join(plan.key_points))
-    lines.append(f"Addressed to: {plan.addressed_to}")
+        lines.append(
+            "Key points to land: "
+            + "; ".join(_neutralize_envelope_tags(p) for p in plan.key_points),
+        )
+    lines.append(f"Addressed to: {_neutralize_envelope_tags(plan.addressed_to)}")
     if plan.avoid_restating:
-        lines.append("Already said — do not restate: " + "; ".join(plan.avoid_restating))
+        lines.append(
+            "Already said — do not restate: "
+            + "; ".join(_neutralize_envelope_tags(p) for p in plan.avoid_restating),
+        )
     lines.append(_SECTION_CLOSE)
     return "\n".join(lines)

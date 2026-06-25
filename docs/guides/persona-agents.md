@@ -789,6 +789,50 @@ runes, not bytes, so emoji and CJK text are measured consistently) and
 rejects unknown agent IDs with `404`. Both behaviours are exercised by
 [MT-CHAT-001](../manual-tests/MT-CHAT-001.md).
 
+### Reasoning before posting (v0.3.10)
+
+In a multi-persona group channel, personas **think before they speak**: on an
+open-floor turn a persona privately decides *whether* the turn is worth a post
+before paying for the reply. If it would only be agreeing, restating, or piling
+on, it **stays silent with a reason** rather than posting; if it does post, it
+can compose under a private *plan* so the message reads as considered rather than
+reflexive. This is [RFC 0051](../rfcs/0051-reasoning-before-posting.md),
+generalizing the RFC 0030 Tier-B salience bid; it runs on the same leased `fast`
+model (the idle path stays free) and the private trace is **walled** — never a
+channel message, never persisted, never visible to another persona (audit-only).
+
+It is tuned per channel with the `reasoning` knob on the
+[RFC 0050](../rfcs/0050-extensible-channel-configuration.md) config surface — a
+monotonic `off → bid → plan` ladder, live-editable with no restart (the same
+`persatrix channel config` / web `ChannelSettings` mechanics as every other
+governance knob):
+
+| `reasoning.mode` | Behaviour |
+|------------------|-----------|
+| `off` | The prior RFC 0030 scalar **score gate** (the per-member `threshold` governs). The one-flip **kill switch**. |
+| `bid` | **Semantic silence** — the structured `{ should_post }` verdict supersedes the numeric score; a turn with nothing to add ends in silence *with a reason*. **The default once a channel is governed.** |
+| `plan` | `bid` **plus** a private `CompositionPlan` (intent / key points / addressed-to / avoid-restating) threaded into the compose. A per-channel operator **opt-in**. |
+
+Companion sub-knobs: `reasoning.model` (the deliberation model; default `fast` —
+`quality` is accepted but warns, as it defeats the cheap-pass economics),
+`reasoning.depth` (`shallow`; `deep` native extended-thinking is deferred and
+**rejected at validate**), and `reasoning.revise` (`0|1|2`, default `0`) — the
+opt-in **reflexion** loop: under `mode: plan`, a cheap critic re-reads the draft
+against the plan and a quality revise rewrites it if weak, bounded and fail-soft
+(a hiccup keeps the last good draft; the post is never blocked). `validate`
+gates `revise ≥ 1` to `mode: plan`.
+
+> **Default flip on upgrade.** A channel with a `participant`/`chair` member
+> gains `reasoning.mode: bid` out of the box — open-floor turns get semantic
+> silence. An **ungoverned** channel is unchanged (the knob is inert there). To
+> keep the old numeric score gate and honour per-member `threshold` floors, pin
+> `reasoning.mode: off`. Upgrade the orchestrator together with (or before) the
+> agents — the resolved rung rides the wire as additive fields.
+
+The operator-observable behaviour (silence-with-reason read from the agent log,
+the plan-threaded post, the walled trace, the reflexion opt-in, and the kill
+switch) is exercised by [MT-REASON-001](../manual-tests/MT-REASON-001.md).
+
 ---
 
 ## 5. Observability (v0.2.3)

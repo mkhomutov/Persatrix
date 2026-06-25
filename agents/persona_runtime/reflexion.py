@@ -40,6 +40,7 @@ per-channel operator opt-in on top of the plan rung.
 
 from __future__ import annotations
 
+import enum
 import logging
 import re
 from dataclasses import dataclass
@@ -48,6 +49,7 @@ from typing import TYPE_CHECKING, Any, Final
 from ..generated import wallet_pb2 as walletpb
 from ..llm_types import StopReason
 from ..model_aliases import resolve as resolve_model
+from ..observability._metrics_salience import record_reflexion
 from ..persona_types import ActionType, AgentAction
 from ..prompt_loader import load_snippet
 from ..wallet_client import BudgetExceededError
@@ -104,6 +106,25 @@ _REVISE_SYSTEM_SNIPPET: Final[str] = "reflexion-revise-system"
 _REVISE_USER_SNIPPET: Final[str] = "reflexion-revise-user"
 
 
+class _ReflexionSignal(enum.Enum):
+    """A control signal a critic/revise pass returns *instead of* a value.
+
+    ``DEGRADED`` marks a **fail-soft degradation** — a denied/exhausted lease, a
+    provider error, a missing/malformed prompt snippet, an unresolvable alias, or a
+    truncated/empty rewrite. Distinct from a clean stop (a strong draft / a converged
+    rewrite, signalled by ``None``) and from a weak-draft critique (a ``str``). It
+    lets the loop report ``degraded`` so a silent fast-model outage or budget
+    starvation that disables reflexion is separable on a dashboard from "drafts are
+    strong, no revise needed" — the same fail-soft-vs-intended split the sibling
+    ``deliberation.budget_starved`` counter draws (RFC 0051 §Security). An ``Enum``
+    member (not a bare ``object()``) so static analysis narrows ``x is _DEGRADED``."""
+
+    DEGRADED = enum.auto()
+
+
+_DEGRADED: Final = _ReflexionSignal.DEGRADED
+
+
 @dataclass(frozen=True, slots=True)
 class ReflexionResult:
     """The outcome of :func:`run_reflexion`.
@@ -113,15 +134,26 @@ class ReflexionResult:
             the original draft on a no-op / any fail-soft degradation. Always a
             post-able message (reflexion never blocks the turn).
         rounds: How many revise rounds actually rewrote the draft (``0`` on a
-            no-op or a strong draft). The forward-compatible signal the PR 9
-            revise-round telemetry reads.
+            no-op or a strong draft). Counts real rewrites even when a later round
+            cancels them out (an A→B→A oscillation reports ``rounds=2``,
+            ``changed=False``); the telemetry gates its round emit on ``changed``
+            so a net-unchanged turn still contributes ``0`` to the mean.
         changed: ``True`` iff ``text`` differs from the draft passed in — the
             draft-changed / no-op-revise signal (PR 9 telemetry).
+        degraded: ``True`` iff the loop fail-soft degraded at least once — a
+            denied/exhausted lease, a provider/prompt error, an unresolvable critic
+            alias, or a truncated/empty rewrite kept the draft. Distinct from a
+            clean strong-draft stop (a critic that *ran* and read not-weak), so the
+            PR 9 telemetry can chart ``outcome=degraded`` apart from ``noop`` — a
+            silent fast-model/budget outage stays alertable. Can be ``True``
+            alongside ``changed`` when an earlier round rewrote and a later one
+            degraded.
     """
 
     text: str
     rounds: int
     changed: bool
+    degraded: bool = False
 
 
 def _plan_brief(plan: CompositionPlan) -> str:
@@ -210,11 +242,12 @@ async def run_reflexion(
             "Reflexion: critic model alias %r unresolvable for agent %s: %s; "
             "skipping revise", _CRITIC_MODEL_ALIAS, agent_id, exc,
         )
-        return ReflexionResult(text=draft, rounds=0, changed=False)
+        return ReflexionResult(text=draft, rounds=0, changed=False, degraded=True)
 
     plan_brief = _plan_brief(plan)
     current = draft
     rounds = 0
+    degraded = False
     for _ in range(rounds_cap):
         critique = await _run_critic(
             llm_client, critic_model=critic.model, critic_alias=critic.alias,
@@ -222,7 +255,10 @@ async def run_reflexion(
             persona_role=persona_role, cause=cause, agent_id=agent_id,
             interaction_id=interaction_id,
         )
-        if critique is None:  # not weak, or a fail-soft signal → stop
+        if critique is _DEGRADED:  # the critic call could not complete → fail-soft stop
+            degraded = True
+            break
+        if critique is None:  # a strong draft (critic ran, read not-weak) → clean stop
             break
         revised = await _run_revise(
             llm_client, model=compose_model, model_alias=compose_model_alias,
@@ -230,19 +266,23 @@ async def run_reflexion(
             persona_name=persona_name, persona_role=persona_role, cause=cause,
             agent_id=agent_id, interaction_id=interaction_id, max_tokens=max_tokens,
         )
-        if revised is None:  # rewrite failed/empty → keep the last good draft
+        if revised is _DEGRADED:  # rewrite failed/truncated/empty → keep last good draft
+            degraded = True
             break
         if revised == current:
             # The revise returned byte-identical text — the model converged on the
-            # current draft despite the critic's flag. Stop WITHOUT counting a round:
-            # ``rounds`` must count only real rewrites (PR 9 telemetry pairs it with
-            # ``changed``), and re-running the critic would re-flag the same text and
-            # burn the lease for no progress.
+            # current draft despite the critic's flag. Stop WITHOUT counting a round
+            # and WITHOUT marking degraded: this is a clean convergence (the call
+            # succeeded), not a failure. ``rounds`` must count only real rewrites (PR 9
+            # telemetry pairs it with ``changed``), and re-running the critic would
+            # re-flag the same text and burn the lease for no progress.
             break
         current = revised
         rounds += 1
 
-    return ReflexionResult(text=current, rounds=rounds, changed=current != draft)
+    return ReflexionResult(
+        text=current, rounds=rounds, changed=current != draft, degraded=degraded,
+    )
 
 
 async def _run_critic(
@@ -257,17 +297,19 @@ async def _run_critic(
     cause: walletpb.Cause.ValueType,
     agent_id: str,
     interaction_id: str,
-) -> str | None:
+) -> str | None | _ReflexionSignal:
     """The cheap critic pass. Returns the critique note (``""`` if none) when the
-    draft is **weak** — the signal to revise — or ``None`` to stop (a strong
-    draft, OR any fail-soft degradation: parse failure, denied/exhausted lease,
-    provider error). Distinguishing weak-with-no-note (``""``) from stop
-    (``None``) is what lets the caller keep the loop fail-soft.
+    draft is **weak** — the signal to revise; ``None`` to stop on a **strong draft**
+    (the critic *ran* and read not-weak, INCLUDING a missing/unparseable verdict,
+    which is deliberately read as not-weak); or :data:`_DEGRADED` when the call
+    itself **could not complete** — a denied/exhausted lease, a provider error, or a
+    missing/malformed prompt snippet. The three-way return is what lets the caller
+    chart a fail-soft degradation apart from a genuine strong-draft no-op.
 
     The prompt assembly (``load_snippet`` + ``.format``) is INSIDE the guard so a
     missing/misnamed snippet (``PromptLoadError``) or a stray brace in a snippet
-    (``str.format`` raising) degrades to a no-op like every other signal, rather
-    than propagating and losing a post the gate already admitted."""
+    (``str.format`` raising) degrades like every other call failure, rather than
+    propagating and losing a post the gate already admitted."""
     try:
         system = load_snippet(_CRITIC_SYSTEM_SNIPPET).format(
             persona_name=persona_name, persona_role=persona_role,
@@ -285,10 +327,10 @@ async def _run_critic(
         )
     except BudgetExceededError:
         logger.debug("Reflexion: critic lease denied for agent %s; keeping draft", agent_id)
-        return None
+        return _DEGRADED
     except Exception as exc:  # noqa: BLE001 - prompt-load/format OR provider error → keep the draft
         logger.warning("Reflexion: critic error for agent %s: %s; keeping draft", agent_id, exc)
-        return None
+        return _DEGRADED
     if not _parse_weak(response.text):
         return None
     return _parse_critique(response.text)
@@ -308,11 +350,12 @@ async def _run_revise(
     agent_id: str,
     interaction_id: str,
     max_tokens: int,
-) -> str | None:
-    """The quality rewrite pass. Returns the revised message, or ``None`` to keep
-    the last good draft (a denied/exhausted lease, a provider error, an empty
+) -> str | _ReflexionSignal:
+    """The quality rewrite pass. Returns the revised message, or :data:`_DEGRADED`
+    to keep the last good draft (a denied/exhausted lease, a provider error, an empty
     rewrite, a missing/malformed prompt snippet, OR a ``max_tokens``-truncated
-    rewrite — all fail-soft).
+    rewrite — all fail-soft). Every non-string return is a degradation: unlike the
+    critic, a revise has no clean "nothing to do" outcome — it was asked to rewrite.
 
     The prompt assembly is inside the guard for the same reason as the critic:
     a snippet-load or ``.format`` failure keeps the draft rather than raising."""
@@ -335,10 +378,10 @@ async def _run_revise(
         )
     except BudgetExceededError:
         logger.debug("Reflexion: revise lease denied for agent %s; keeping draft", agent_id)
-        return None
+        return _DEGRADED
     except Exception as exc:  # noqa: BLE001 - prompt-load/format OR provider error → keep the draft
         logger.warning("Reflexion: revise error for agent %s: %s; keeping draft", agent_id, exc)
-        return None
+        return _DEGRADED
     # A truncated rewrite is a half-sentence — strictly worse than the complete
     # draft. Degrade to the last good draft, the same hard-stop the compose path
     # applies to MAX_TOKENS (action_loop step 3a) rather than posting the fragment.
@@ -346,9 +389,9 @@ async def _run_revise(
         logger.warning(
             "Reflexion: revise truncated (max_tokens) for agent %s; keeping draft", agent_id,
         )
-        return None
+        return _DEGRADED
     revised = (response.text or "").strip()
-    return revised or None
+    return revised or _DEGRADED
 
 
 async def maybe_revise_channel_message(
@@ -416,6 +459,13 @@ async def maybe_revise_channel_message(
             "Reflexion: glue error for agent %s: %s; keeping composed draft", agent_id, exc,
         )
         return actions
+    # The loop ran to completion — chart its outcome (PR 9 telemetry). Emitted on the
+    # rewrite (revised), a strong-draft no-op (noop), and a fail-soft degradation
+    # (degraded — kept separable so a silent critic/budget outage stays alertable), so
+    # the draft-changed fraction is computable; best-effort, never blocks the post (the
+    # guard above already returned on any pre-loop short-circuit, so this counts only
+    # real runs).
+    record_reflexion(rounds=result.rounds, changed=result.changed, degraded=result.degraded)
     if not result.changed:
         return actions
     # Replace only the message content; build a fresh action + list so a frozen
