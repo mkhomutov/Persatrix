@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock
 
+from agents.generated import wallet_pb2 as walletpb
 from agents.llm_client import LLMClient, LLMResponse
 from agents.llm_types import StopReason
 from agents.model_aliases import use_alias_map
@@ -391,7 +392,8 @@ async def _glue(
     with use_alias_map(_FAST_ALIAS_MAP):
         return await maybe_revise_channel_message(
             _agent(provider), actions, salience,
-            cause=0, agent_id="ember-owl", interaction_id="i-1", max_tokens=4096,
+            cause=walletpb.CAUSE_CHANNEL_MESSAGE, agent_id="ember-owl",
+            interaction_id="i-1", max_tokens=4096,
         )
 
 
@@ -467,7 +469,8 @@ class TestActionLoopGlue:
         with use_alias_map(_FAST_ALIAS_MAP):
             out = await maybe_revise_channel_message(
                 agent, actions, SalienceOutcome(silence=False, plan=_PLAN, revise=1),
-                cause=0, agent_id="ember-owl", interaction_id="i-1", max_tokens=4096,
+                cause=walletpb.CAUSE_CHANNEL_MESSAGE, agent_id="ember-owl",
+                interaction_id="i-1", max_tokens=4096,
             )
         assert out is actions  # identity-preserved no-op
         provider.create_message.assert_not_awaited()
