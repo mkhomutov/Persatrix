@@ -92,9 +92,9 @@ Opt the channel up one further rung (meaningful only under `mode: plan`):
 persatrix channel config set group:planning reasoning.revise=1
 ```
 
-Drive a turn whose first-pass draft is weak enough for the critic to flag. Only the **revised** message is published; the **discarded draft** and the **critic note** never appear in the transcript or a peer's recall. `reflexion.runs{outcome=revised}` and `reflexion.rounds` increment; a strong draft instead charts `reflexion.runs{outcome=noop}` with no rounds.
+Drive a turn whose first-pass draft is weak enough for the critic to flag. Only the **revised** message is published; the **discarded draft** and the **critic note** never appear in the transcript or a peer's recall. `reflexion.runs{outcome=revised}` and `reflexion.rounds` increment; a strong draft instead charts `reflexion.runs{outcome=noop}` with no rounds, and a fail-soft hiccup (a starved critic lease / provider error) charts `reflexion.runs{outcome=degraded}` — kept separable from `noop` so a silent outage that disables the loop stays alertable.
 
-**Pass**: the published message is the revised text; the discarded draft + critic note never surface; the loop is fail-soft (a starved lease keeps the last good draft — the post is never blocked). Reset with `persatrix channel config set group:planning reasoning.revise=0`.
+**Pass**: the published message is the revised text; the discarded draft + critic note never surface; the loop is fail-soft (a starved lease keeps the last good draft — the post is never blocked — and charts `outcome=degraded`, not `noop`). Reset with `persatrix channel config set group:planning reasoning.revise=0`.
 
 ### Step 5: The kill switch is one flip
 
@@ -115,7 +115,7 @@ Re-drive the Step 2 turn. The channel reverts to **byte-for-byte the prior RFC 0
 | 1 | Governed default | `reasoning.mode: bid` by default on a governed channel; `off` + non-off rejected on an ungoverned one |
 | 2 | Semantic silence | a would-be-pile-on `participant` posts nothing; the agent log carries the `reason_code` + `reason_note`; `deliberation.suppressed{reason_code,mode}` fires |
 | 3 | Plan-threaded post | a plan-shaped post ships; the private plan is in **zero** messages and **zero** of a peer's `?as_participant` recall |
-| 4 | Reflexion (opt-in) | only the revised message ships; discarded draft + critic note never surface; `reflexion.runs`/`reflexion.rounds` chart the loop; fail-soft never blocks the post |
+| 4 | Reflexion (opt-in) | only the revised message ships; discarded draft + critic note never surface; `reflexion.runs` (`revised`/`noop`/`degraded`) + `reflexion.rounds` chart the loop; fail-soft never blocks the post (and charts `degraded`, not `noop`) |
 | 5 | Kill switch | `mode: off` restores the scalar score gate at runtime, emits no `deliberation.*`, and survives boot |
 
 ---

@@ -39,6 +39,7 @@ from agents.persona_runtime.deliberation_plan import CompositionPlan
 from agents.persona_runtime.reflexion import maybe_revise_channel_message
 from agents.persona_runtime.salience_gate import SalienceOutcome
 from agents.persona_types import ActionType, AgentAction
+from agents.wallet_client import BudgetExceededError
 
 pytestmark = pytest.mark.asyncio
 
@@ -87,9 +88,12 @@ def _points(metric: Any) -> list[Any]:
     return list(metric.data.data_points) if metric is not None else []
 
 
-def _provider(*texts: str) -> AsyncMock:
+def _provider(*texts: str, raises: Exception | None = None) -> AsyncMock:
     provider = AsyncMock()
-    provider.create_message = AsyncMock(side_effect=[LLMResponse(text=t) for t in texts])
+    if raises is not None:
+        provider.create_message = AsyncMock(side_effect=raises)
+    else:
+        provider.create_message = AsyncMock(side_effect=[LLMResponse(text=t) for t in texts])
     return provider
 
 
@@ -137,6 +141,25 @@ class TestReflexionTelemetry:
         assert rounds is not None, "a rewrite charts its revise-round count"
         assert sum(dp.value for dp in _points(rounds)) == 1, "exactly one round rewrote"
 
+    async def test_multi_round_rewrite_sums_each_round(
+        self, metric_reader: InMemoryMetricReader,
+    ) -> None:
+        """``revise=2`` with both rounds flagged weak rewrites twice; ``reflexion.rounds``
+        is the *sum* (2), the numerator of the mean-rounds-per-rewrite ratio. The
+        single-round test pins ``add(1)``; this pins the per-round accumulation."""
+        # critic(weak) → revise → critic(weak) → revise: two real rewrites, capped at 2.
+        provider = _provider(
+            "weak: yes\ncritique: first", "draft v1",
+            "weak: yes\ncritique: second", "draft v2",
+        )
+        await _glue(provider, SalienceOutcome(silence=False, plan=_PLAN, revise=2))
+
+        metrics = _collect(metric_reader)
+        outcomes = {dp.attributes.get("outcome") for dp in _points(metrics.get("reflexion.runs"))}
+        assert outcomes == {"revised"}
+        rounds = metrics.get("reflexion.rounds")
+        assert sum(dp.value for dp in _points(rounds)) == 2, "both rewrite rounds are summed"
+
     async def test_strong_draft_charts_noop_without_rounds(
         self, metric_reader: InMemoryMetricReader,
     ) -> None:
@@ -150,6 +173,40 @@ class TestReflexionTelemetry:
         assert outcomes == {"noop"}, "a kept draft is charted as outcome=noop"
         # A no-op contributes nothing to the round counter (mean rounds stays honest).
         assert "reflexion.rounds" not in metrics, "a no-op adds no revise rounds"
+
+    async def test_fail_soft_degradation_charts_degraded_not_noop(
+        self, metric_reader: InMemoryMetricReader,
+    ) -> None:
+        """A fail-soft degradation (here a denied critic lease) must chart as its own
+        ``outcome=degraded``, NOT fold into ``noop`` with a genuinely strong draft. A
+        silent fast-model outage / budget starvation that disables the loop is not the
+        feature working as intended — the same signal-separation the sibling
+        ``deliberation.budget_starved`` counter exists to give."""
+        provider = _provider(raises=BudgetExceededError("no budget"))
+        await _glue(provider, SalienceOutcome(silence=False, plan=_PLAN, revise=1))
+
+        metrics = _collect(metric_reader)
+        outcomes = {dp.attributes.get("outcome") for dp in _points(metrics.get("reflexion.runs"))}
+        assert outcomes == {"degraded"}, "a fail-soft degradation is its own outcome, not noop"
+        assert "reflexion.rounds" not in metrics, "a degradation adds no revise rounds"
+
+    async def test_rewrite_back_to_draft_charts_noop_with_zero_rounds(
+        self, metric_reader: InMemoryMetricReader,
+    ) -> None:
+        """A later round rewrites byte-for-byte back to the original (A→B→A): the net
+        draft is unchanged, so it charts ``noop`` and contributes **0** rounds. Counting
+        the rounds here would inflate ``reflexion.rounds / runs{outcome=revised}`` with a
+        turn the denominator never counts (the round counter gates on the net change)."""
+        provider = _provider(
+            "weak: yes\ncritique: first", "a different draft",
+            "weak: yes\ncritique: second", _DRAFT,  # round 2 returns the original draft
+        )
+        await _glue(provider, SalienceOutcome(silence=False, plan=_PLAN, revise=2))
+
+        metrics = _collect(metric_reader)
+        outcomes = {dp.attributes.get("outcome") for dp in _points(metrics.get("reflexion.runs"))}
+        assert outcomes == {"noop"}, "a net-unchanged draft is a noop even after real rewrites"
+        assert "reflexion.rounds" not in metrics, "a net-unchanged turn contributes 0 rounds"
 
     async def test_loop_not_reached_emits_nothing(
         self, metric_reader: InMemoryMetricReader,
@@ -185,8 +242,9 @@ class TestReflexionTelemetry:
         original = _metrics_salience._reflexion
         _metrics_salience._reflexion = boom
         try:
-            # Neither a revised nor a no-op record may raise.
-            _metrics_salience.record_reflexion(rounds=1, changed=True)
-            _metrics_salience.record_reflexion(rounds=0, changed=False)
+            # No outcome — revised, noop, or degraded — may raise.
+            _metrics_salience.record_reflexion(rounds=1, changed=True, degraded=False)
+            _metrics_salience.record_reflexion(rounds=0, changed=False, degraded=False)
+            _metrics_salience.record_reflexion(rounds=0, changed=False, degraded=True)
         finally:
             _metrics_salience._reflexion = original

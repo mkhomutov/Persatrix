@@ -144,6 +144,10 @@ class TestCriticGate:
         result = await _reflect(provider, revise=1)
         assert result.text == _DRAFT
         assert result.changed is False
+        # The critic *ran* and returned a parseable-as-not-weak answer — this is a
+        # clean strong-draft stop, NOT a degradation (the call did not fail). Pins the
+        # boundary the telemetry depends on: only a failed/denied call is degraded.
+        assert result.degraded is False
         assert provider.create_message.await_count == 1
 
 
@@ -220,6 +224,9 @@ class TestFailSoft:
         result = await _reflect(provider, revise=2)
         assert result.text == _DRAFT
         assert result.changed is False
+        # A denied lease is a degradation, not a strong-draft no-op — the loop reports
+        # it so the telemetry can keep a fast-model/budget outage separable.
+        assert result.degraded is True
 
     async def test_revise_error_degrades_to_last_good_draft(self):
         # critic flags weak, but the revise call errors → keep the pre-revise draft.
@@ -252,6 +259,10 @@ class TestFailSoft:
         assert result.text == v1
         assert result.changed is True
         assert result.rounds == 1
+        # A degradation on a *later* round is still reported, even though an earlier
+        # round did rewrite — the turn charts as revised (the rewrite wins), but the
+        # degraded flag stays truthful about the starved round.
+        assert result.degraded is True
 
     async def test_unresolvable_fast_alias_is_a_noop(self):
         """If the ``fast`` critic alias does not resolve the loop degrades to a
@@ -271,6 +282,9 @@ class TestFailSoft:
         )
         assert result.text == _DRAFT
         assert result.changed is False
+        # An unresolvable critic alias is a misconfiguration degradation, not a
+        # strong-draft no-op — reported so a silent misconfig stays alertable.
+        assert result.degraded is True
         provider.create_message.assert_not_awaited()
 
 
