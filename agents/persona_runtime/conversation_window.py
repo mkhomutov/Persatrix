@@ -41,12 +41,16 @@ Design anchors (see ``docs/rfcs/0034-persona-conversational-working-memory.md``)
   separately from the RFC 0017 system-prompt memory budget. Per-turn
   admission applies token-overflow FIFO first, then count-overflow FIFO
   (OQ #2 resolution 2a — tighter bound wins).
-* **§F — caching.** An in-process cache keyed by ``(channel_id, limit)``
-  skips the network fetch when the same event is seen twice at the same
-  fetch limit (retries, sub-agent return paths). ``limit`` is in the key
-  so a group channel's small-``max_turns`` persona cannot serve an
-  undersized window to a large-``max_turns`` peer reacting to the same
-  message (RFC 0034 Phase 2 correctness). Steady-state turn-over-turn
+* **§F — caching.** An in-process cache keyed by ``(channel_id, limit,
+  agent_id)`` skips the network fetch when the same event is seen twice
+  at the same fetch limit *for the same persona* (retries, sub-agent
+  return paths). ``limit`` is in the key so a group channel's
+  small-``max_turns`` persona cannot serve an undersized window to a
+  large-``max_turns`` peer reacting to the same message (RFC 0034 Phase 2
+  correctness); ``agent_id`` is in the key because the fetch is
+  membership-scoped per persona (``as_participant``, RFC 0036 §G), so the
+  cached rows are agent-specific and must never cross personas (full
+  rationale in :mod:`._conversation_window_cache`). Steady-state turn-over-turn
   hit rate is low *by design* — the cache key advances with every
   inbound message; Phase 3 telemetry is the arbiter for any re-spec
   (RFC §F "Known gap" framing (a)). The cache is bounded by an LRU

@@ -123,12 +123,22 @@ class TestFallbackTelemetry:
         assert fallback == {"fetch_failed": 1}
 
     async def test_fetch_none_charts_fallback(self, metric_reader: InMemoryMetricReader) -> None:
-        # The fetcher's own best-effort failure surfaces as a ``None`` return.
+        # The fetcher's own best-effort failure surfaces as a ``None`` return —
+        # and in production this, not a raised exception, is the *dominant*
+        # failure mode: HttpChannelHistoryFetcher catches HTTP errors and
+        # timeouts and returns None rather than raising.
         messages = await _build(_FakeChannelHistoryFetcher(None))
 
         assert len(messages) == 1, "a None fetch degrades to current-event-only"
-        fallback = _by_attr(_collect(metric_reader).get("conversation_window.fallback"), "reason")
+        metrics = _collect(metric_reader)
+        fallback = _by_attr(metrics.get("conversation_window.fallback"), "reason")
         assert fallback == {"fetch_none": 1}
+        # A None return is a failed fetch: charted by the fallback counter only,
+        # never the latency histogram. Folding a timeout's latency into
+        # fetch_duration would skew the steady-state cost the defaults are
+        # re-tuned against — the same contract test_failed_fetch_records_no_duration
+        # pins for the raises path.
+        assert "conversation_window.fetch_duration" not in metrics
 
     async def test_failed_fetch_records_no_duration(
         self, metric_reader: InMemoryMetricReader,

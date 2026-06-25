@@ -23,6 +23,17 @@ a shared (group) channel:
   gap-trimmed window a continuously-present peer does not, and must never be
   served the peer's rows. The rows are therefore agent-SPECIFIC, not the
   agent-independent cache Phase 1 shipped.
+
+Concurrency: :data:`_WINDOW_CACHE` is a process-global :class:`OrderedDict`
+shared across personas, and :meth:`_WindowCache.put` is a multi-step
+read-modify-write (``__setitem__`` → ``move_to_end`` → conditional
+``popitem``). It is correct only under a single asyncio event loop, where no
+``await`` interleaves the steps — the persona runtime's execution model.
+:func:`_fetch_window` also does **not** coalesce: the ``await`` between a miss
+look-up and the ``put`` means N concurrent turns for the same key each issue
+their own fetch (a benign thundering herd, last write wins). Both are unchanged
+in character from the Phase 1 dict; revisit if the runtime ever fans personas
+across OS threads.
 """
 
 from __future__ import annotations
@@ -160,11 +171,17 @@ async def _fetch_window(
         )
         record_fallback(reason="fetch_failed")
         return None
-    record_fetch_duration((time.perf_counter() - start) * 1000.0)
-
     if raw is None:
         record_fallback(reason="fetch_none")
         return None
+    # Chart latency *after* the None guard, for a genuinely successful fetch
+    # only. The production fetcher (HttpChannelHistoryFetcher) catches HTTP
+    # errors AND timeouts and returns ``None`` rather than raising, so ``None``
+    # — not the ``except`` branch above — is the dominant real failure mode.
+    # Recording above this guard would fold failed-fetch latency (a timeout is
+    # the worst case) into the steady-state histogram the max_turns/max_tokens
+    # retune reads, the exact skew this metric's contract promises to avoid.
+    record_fetch_duration((time.perf_counter() - start) * 1000.0)
 
     if message_id is not None:
         evicted = _WINDOW_CACHE.put(cache_key, (message_id, raw))

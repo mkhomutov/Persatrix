@@ -327,9 +327,10 @@ Per-turn fetches dominate the cost. Mitigations:
 > (b) re-spec the cache to short-circuit *window assembly* on
 > `(channel_id, last_message_id_in_returned_window)` while still
 > issuing the fetch, separating "did the channel change?" from "do I
-> have to re-render the window?". Phase 3 telemetry
-> (`persatrix.persona.conversation_window.cache_hit_rate`) is the
-> arbiter; the default is (a) until measurement justifies (b).
+> have to re-render the window?". Phase 3 telemetry — the hit rate
+> derived from `conversation_window.cache_access` (`result=hit|miss`),
+> shipped in v0.3.10 — is the arbiter; the default is (a) until
+> measurement justifies (b).
 
 A measurement harness is part of [Phase 3](#phase-3-instrumentation-and-tuning):
 the cache-hit rate, fetch latency, and the share of LLM calls that
