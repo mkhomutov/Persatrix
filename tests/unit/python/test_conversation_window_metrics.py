@@ -108,6 +108,21 @@ class TestCacheAccessTelemetry:
         assert duration is not None, "a real fetch records its latency"
         assert sum(dp.count for dp in _points(duration)) == 1
 
+    async def test_uncacheable_turn_charts_duration_not_access(
+        self, metric_reader: InMemoryMetricReader,
+    ) -> None:
+        # An event with no message_id has no key for the §F invalidation, so the
+        # turn never consults the cache (no hit/miss) and is never stored — yet
+        # the real fetch still happened, so its cost IS charted. Pins the split:
+        # an uncacheable turn charts fetch_duration but not cache_access.
+        fetcher = _FakeChannelHistoryFetcher([_row("m-old", "user", "hi")])
+        await _build(fetcher, event=_event(message_id=None))
+
+        metrics = _collect(metric_reader)
+        assert "conversation_window.cache_access" not in metrics
+        assert metrics.get("conversation_window.fetch_duration") is not None
+        assert len(fetcher.calls) == 1
+
 
 class TestFallbackTelemetry:
     async def test_fetch_failure_charts_fallback_and_degrades(

@@ -77,6 +77,11 @@ from ..persona_types import AgentEvent, EventType
 
 # ``_WINDOW_CACHE`` is re-exported here (its home is _conversation_window_cache,
 # RFC §F) so the test-suite cache-reset fixtures can clear it via this module.
+# This is a *name binding* to the shared object: clearing it (``.clear()``)
+# mutates the one cache ``_fetch_window`` reads, so those fixtures work. But
+# *rebinding* it (``monkeypatch.setattr``) does NOT reach ``_fetch_window`` —
+# that resolves ``_WINDOW_CACHE`` in _conversation_window_cache, so a test
+# swapping the cache must patch it there (see test_conversation_window_metrics).
 from ._conversation_window_cache import _WINDOW_CACHE, _fetch_window  # noqa: F401
 from .prompt_assembly import _PromptAssemblyMixin
 
