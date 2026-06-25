@@ -3,10 +3,10 @@ id: RFC-0034
 title: Persona Conversational Working Memory
 summary: Reconstruct the LLM `messages` array from the channel store on every persona turn so the model sees the in-progress conversation as a transcript instead of a single isolated message; closes the "persona forgets its own previous question" defect captured in ISSUE-0052.
 type: architecture
-status: partially_implemented
+status: implemented
 author: Maksim Khomutov
 created: 2026-05-15
-target: v0.3.1 (Phase 1) + v0.3.7 (Phase 2 — group working memory) + v0.3.x (Phase 3)
+target: v0.3.1 (Phase 1) + v0.3.7 (Phase 2 — group working memory) + v0.3.10 (Phase 3 — instrumentation + cache LRU bound)
 depends_on:
   - RFC-0011
   - RFC-0017
@@ -17,10 +17,10 @@ depends_on:
 # RFC 0034 — Persona Conversational Working Memory
 
 **Type**: architecture
-**Status**: ⚠️ Partially Implemented (Phases 1–2)
+**Status**: ✅ Implemented — v0.3.1 (Phase 1 — DM working memory) + v0.3.7 (Phase 2 — group working memory) + v0.3.10 (Phase 3 — `conversation_window.*` instrumentation + the fetch-cache LRU bound). Tracking plan: [0034-phase3-pr-plan.md](0034-phase3-pr-plan.md).
 **Author**: Maksim Khomutov
 **Date**: 2026-05-15
-**Target**: v0.3.1 (Phase 1) + v0.3.7 (Phase 2 — group working memory) + v0.3.x (Phase 3)
+**Target**: v0.3.1 (Phase 1) + v0.3.7 (Phase 2 — group working memory) + v0.3.10 (Phase 3 — instrumentation + cache LRU bound)
 **Depends on**: RFC 0011 (Channels — provides the persistent message store and `GET /channels/{id}/messages` history endpoint), RFC 0017 (Memory Injection Token Budget — defines the budget surface this RFC must coexist with), RFC 0020 (Interaction Lifecycle — defines the episode/interaction boundary the transcript window aligns with), RFC 0031 Phase 1 (Per-Session Namespacing — provides the `chat_session_id` / `persatrix_session_id` columns this RFC filters on)
 **Relates to**: RFC 0026 (Declarative Facts Tier — fact extraction will inherit the same conversational context surface as a follow-up), RFC 0030 (Multi-Agent Conversation Governance — group-channel role-mapping problem space)
 
@@ -327,9 +327,10 @@ Per-turn fetches dominate the cost. Mitigations:
 > (b) re-spec the cache to short-circuit *window assembly* on
 > `(channel_id, last_message_id_in_returned_window)` while still
 > issuing the fetch, separating "did the channel change?" from "do I
-> have to re-render the window?". Phase 3 telemetry
-> (`persatrix.persona.conversation_window.cache_hit_rate`) is the
-> arbiter; the default is (a) until measurement justifies (b).
+> have to re-render the window?". Phase 3 telemetry — the hit rate
+> derived from `conversation_window.cache_access` (`result=hit|miss`),
+> shipped in v0.3.10 — is the arbiter; the default is (a) until
+> measurement justifies (b).
 
 A measurement harness is part of [Phase 3](#phase-3-instrumentation-and-tuning):
 the cache-hit rate, fetch latency, and the share of LLM calls that
@@ -458,12 +459,25 @@ landed:
 
 ### Phase 3: Instrumentation and tuning
 
-- Cache-hit rate, fetch latency, fallback-to-empty-window count
-  exposed as OTEL metrics
-  (`persatrix.persona.conversation_window.*`).
-- Re-tune defaults from a one-week telemetry sample on the
-  dogfood persona.
-- Document the tunables in
+**Implemented in v0.3.10** ([0034-phase3-pr-plan.md](0034-phase3-pr-plan.md)).
+
+- ✅ Cache-access (hit/miss), eviction, fetch latency, and
+  fallback-to-current-event counts exposed as OTEL metrics under
+  `conversation_window.*`, owned by
+  [`agents/observability/_metrics_conversation_window.py`](../../agents/observability/_metrics_conversation_window.py)
+  (`metrics.py` is at the 500-line review cap, so the instruments are
+  module-owned, the same split RFC 0051 used).
+- ✅ The fetch cache is bounded by an LRU
+  ([`agents/persona_runtime/_conversation_window_cache.py`](../../agents/persona_runtime/_conversation_window_cache.py)),
+  closing the unbounded-growth gap [§Future Phases](0034-pr-plan.md#future-phases)
+  recorded — the cache concern was extracted into its own module so
+  `conversation_window.py` stays under the review cap.
+- ⏭ **Re-tune `max_turns` / `max_tokens` defaults from a telemetry
+  sample** — a follow-up, *gated on collecting* the telemetry this phase
+  ships (there is no dogfood sample to tune against until the new metrics
+  run). The defaults (`N=20`, `max_tokens=2048`) are unchanged; the
+  retune is a one-line constant change once the sample exists.
+- ✅ Tunables documented in
   [`docs/guides/persona-agents.md`](../guides/persona-agents.md).
 
 Phases 2 and 3 are part of the v0.3.1 RFC 0034 PR plan but reviewed
@@ -582,10 +596,10 @@ v0.3.1.
 
 **Phase 1 implemented in v0.3.1** ([v0.3.1-plan.md](../v0.3.1-plan.md),
 [0034-pr-plan.md](0034-pr-plan.md)); **Phase 2 implemented in v0.3.7**
-([0034-phase2-pr-plan.md](0034-phase2-pr-plan.md)). Status is
-`⚠️ Partially Implemented (Phases 1–2)`; the RFC remains open until
-Phase 3 (instrumentation/tuning + cache LRU bound) lands in a later
-v0.3.x patch. All four [Open Questions](#open-questions) were resolved at
+([0034-phase2-pr-plan.md](0034-phase2-pr-plan.md)); **Phase 3 implemented
+in v0.3.10** ([0034-phase3-pr-plan.md](0034-phase3-pr-plan.md)). Status is
+`✅ Implemented` — all three phases have landed. All four
+[Open Questions](#open-questions) were resolved at
 plan-authoring time before Phase 1 shipped its non-additive surface
 ([0034-pr-plan.md §Open-question resolutions](0034-pr-plan.md#open-question-resolutions-locked-at-plan-authoring-time));
 OQ #3 (the inline `[<peer_id>]: ` prefix) was the Phase 2 deliverable.
@@ -604,15 +618,17 @@ OQ #3 (the inline `[<peer_id>]: ` prefix) was the Phase 2 deliverable.
    multi-persona fetch-cache correctness) implemented in v0.3.7 —
    [0034-phase2-pr-plan.md](0034-phase2-pr-plan.md). The group-channel
    residual of ISSUE-0052 is closed.
+6. Phase 3 (instrumentation + the fetch-cache LRU bound) implemented in
+   v0.3.10 — [0034-phase3-pr-plan.md](0034-phase3-pr-plan.md). The
+   `conversation_window.*` metrics and the bounded LRU closed the two
+   gaps [§Future Phases](0034-pr-plan.md#future-phases) recorded.
 
-**Remaining before moving to `👍 Accepted`:**
+**Remaining:**
 
-- Phase 3 — instrumentation and tuning of `max_turns` / `max_tokens`
-  from a dogfood telemetry sample, plus the cache LRU/eviction bound.
-
-Phase 3 is a later v0.3.x patch per
-[0034-pr-plan.md §Future Phases](0034-pr-plan.md#future-phases); it does
-not block the v0.3.7 release.
+- A one-line **retune of the `max_turns` / `max_tokens` defaults** once a
+  telemetry sample exists — gated on the Phase 3 metrics collecting real
+  data, not a code change blocking the RFC. The RFC is `✅ Implemented`;
+  this retune is the only outstanding follow-up.
 
 ## Related Documentation
 

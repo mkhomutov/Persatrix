@@ -41,17 +41,25 @@ Design anchors (see ``docs/rfcs/0034-persona-conversational-working-memory.md``)
   separately from the RFC 0017 system-prompt memory budget. Per-turn
   admission applies token-overflow FIFO first, then count-overflow FIFO
   (OQ #2 resolution 2a — tighter bound wins).
-* **§F — caching.** An in-process cache keyed by ``(channel_id, limit)``
-  skips the network fetch when the same event is seen twice at the same
-  fetch limit (retries, sub-agent return paths). ``limit`` is in the key
-  so a group channel's small-``max_turns`` persona cannot serve an
-  undersized window to a large-``max_turns`` peer reacting to the same
-  message (RFC 0034 Phase 2 correctness). Steady-state turn-over-turn
+* **§F — caching.** An in-process cache keyed by ``(channel_id, limit,
+  agent_id)`` skips the network fetch when the same event is seen twice
+  at the same fetch limit *for the same persona* (retries, sub-agent
+  return paths). ``limit`` is in the key so a group channel's
+  small-``max_turns`` persona cannot serve an undersized window to a
+  large-``max_turns`` peer reacting to the same message (RFC 0034 Phase 2
+  correctness); ``agent_id`` is in the key because the fetch is
+  membership-scoped per persona (``as_participant``, RFC 0036 §G), so the
+  cached rows are agent-specific and must never cross personas (full
+  rationale in :mod:`._conversation_window_cache`). Steady-state turn-over-turn
   hit rate is low *by design* — the cache key advances with every
   inbound message; Phase 3 telemetry is the arbiter for any re-spec
-  (RFC §F "Known gap" framing (a)). On any fetch failure the window
-  degrades to current-event-only — the persona is no worse off than it
-  is today.
+  (RFC §F "Known gap" framing (a)). The cache is bounded by an LRU
+  (:class:`_WindowCache`, RFC 0034 Phase 3) so it cannot grow without
+  bound over a long-lived process, and the hit/miss/eviction/fetch-latency
+  /fallback instruments land in
+  :mod:`agents.observability._metrics_conversation_window`. On any fetch
+  failure the window degrades to current-event-only — the persona is no
+  worse off than it is today.
 
 OQ #1 resolution 1a (per-channel, no session filter): the window
 filters on ``event.channel_id`` only; rows are admitted regardless of
@@ -61,20 +69,26 @@ under a fresh session id preserves in-channel transcript continuity.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from ..memory.working import estimate_tokens
 from ..persona_types import AgentEvent, EventType
+
+# ``_WINDOW_CACHE`` is re-exported here (its home is _conversation_window_cache,
+# RFC §F) so the test-suite cache-reset fixtures can clear it via this module.
+# This is a *name binding* to the shared object: clearing it (``.clear()``)
+# mutates the one cache ``_fetch_window`` reads, so those fixtures work. But
+# *rebinding* it (``monkeypatch.setattr``) does NOT reach ``_fetch_window`` —
+# that resolves ``_WINDOW_CACHE`` in _conversation_window_cache, so a test
+# swapping the cache must patch it there (see test_conversation_window_metrics).
+from ._conversation_window_cache import _WINDOW_CACHE, _fetch_window  # noqa: F401
 from .prompt_assembly import _PromptAssemblyMixin
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ..channel_history_fetcher import ChannelHistoryFetcher
-
-logger = logging.getLogger(__name__)
 
 __all__ = [
     "ConversationWindowConfig",
@@ -156,32 +170,6 @@ def resolve_conversation_window_config(
     )
 
 
-# ─── In-process fetch cache (RFC 0034 §F) ──────────────────
-#
-# Maps ``(channel_id, limit, agent_id)`` to the last ``(message_id,
-# raw_rows)`` seen for that channel at that fetch limit *for that persona*.
-# A call whose ``event.message_id`` matches the cached id — same channel,
-# limit, AND agent — skips the network fetch and re-uses the rows; a newer
-# ``message_id`` overwrites the entry (the "cheapest possible" invalidation
-# RFC §F specifies).
-#
-# ``limit`` AND ``agent_id`` are both in the key for multi-persona
-# correctness on a shared (group) channel:
-#   * ``limit`` (RFC 0034 Phase 2): a small-``max_turns`` persona must not
-#     prime an undersized row set that a large-``max_turns`` peer is served.
-#   * ``agent_id`` (RFC 0036 §G): the fetch now passes
-#     ``as_participant=agent_id``, so the rows are membership-scoped per
-#     persona — a re-added persona sees a gap-trimmed window a
-#     continuously-present peer does not, and must never be served the
-#     peer's rows. The rows are therefore agent-SPECIFIC, not the
-#     agent-independent cache Phase 1 shipped.
-#
-# Eviction: there is none — the dict grows with the number of *distinct*
-# ``(channel, limit, agent)`` triples ever served. Fine at demo scale; RFC
-# 0034 Phase 3 (hit-rate telemetry) adds an LRU bound sized from real data.
-_WINDOW_CACHE: dict[tuple[str, int, str], tuple[str, list[dict[str, Any]]]] = {}
-
-
 # ``_PromptAssemblyMixin._format_event`` is a bound method on the persona
 # agent, but its ``CHANNEL_MESSAGE`` branch reads only ``event`` fields
 # (verified against current code 2026-05-15 — RFC §D), so the unbound
@@ -256,50 +244,6 @@ async def build_conversation_messages(
         config=config,
     )
     return [*replayed, current_turn]
-
-
-async def _fetch_window(
-    *,
-    history_fetcher: ChannelHistoryFetcher,
-    channel_id: str,
-    message_id: str | None,
-    limit: int,
-    agent_id: str,
-) -> list[dict[str, Any]] | None:
-    """Return the raw channel-history rows, or ``None`` on fetch failure.
-
-    Scoped to ``agent_id`` via the fetch's ``as_participant`` (RFC 0036 §G),
-    so ``agent_id`` keys the cache too; pass a real id — a falsy ``agent_id``
-    silently fetches UNSCOPED (a falsy ``as_participant`` is omitted). A
-    Protocol exception degrades to ``None`` with a WARN; a ``None`` from the
-    fetcher is its own already-logged best-effort failure, degrading silently.
-    """
-    cache_key = (channel_id, limit, agent_id)
-    if message_id is not None:
-        cached = _WINDOW_CACHE.get(cache_key)
-        if cached is not None and cached[0] == message_id:
-            return cached[1]
-
-    try:
-        raw = await history_fetcher.fetch(channel_id, limit=limit, as_participant=agent_id)
-    except Exception as exc:
-        logger.warning(
-            "conversation window: history fetch raised for channel %s: %s",
-            channel_id,
-            exc,
-            extra={
-                "reason": "conversation_window_fetch_failed",
-                "channel_id": channel_id,
-            },
-        )
-        return None
-
-    if raw is None:
-        return None
-
-    if message_id is not None:
-        _WINDOW_CACHE[cache_key] = (message_id, raw)
-    return raw
 
 
 def _assemble_replayed_turns(
