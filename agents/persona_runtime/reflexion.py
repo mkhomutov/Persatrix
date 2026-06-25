@@ -232,6 +232,13 @@ async def run_reflexion(
         )
         if revised is None:  # rewrite failed/empty → keep the last good draft
             break
+        if revised == current:
+            # The revise returned byte-identical text — the model converged on the
+            # current draft despite the critic's flag. Stop WITHOUT counting a round:
+            # ``rounds`` must count only real rewrites (PR 9 telemetry pairs it with
+            # ``changed``), and re-running the critic would re-flag the same text and
+            # burn the lease for no progress.
+            break
         current = revised
         rounds += 1
 
@@ -384,20 +391,31 @@ async def maybe_revise_channel_message(
     if idx is None:
         return actions
 
-    result = await run_reflexion(
-        llm_client=agent._llm_client,
-        draft=str(actions[idx].payload["content"]),
-        plan=salience.plan,
-        revise=salience.revise,
-        persona_name=agent.name,
-        persona_role=agent.role,
-        compose_model=agent.config["model"],
-        compose_model_alias=agent.config.get("model_alias"),
-        cause=cause,
-        agent_id=agent_id,
-        interaction_id=interaction_id,
-        max_tokens=max_tokens,
-    )
+    # Fail-soft at the glue seam too. ``run_reflexion`` never raises, but the agent
+    # attribute/config reads that feed it (``agent.name`` / ``agent.config["model"]``)
+    # sit OUTSIDE its guard — a malformed agent would otherwise propagate and lose a
+    # post the gate already admitted. Degrade to the composed draft instead, the same
+    # bias-to-posting the loop itself applies to every other reflexion hiccup.
+    try:
+        result = await run_reflexion(
+            llm_client=agent._llm_client,
+            draft=str(actions[idx].payload["content"]),
+            plan=salience.plan,
+            revise=salience.revise,
+            persona_name=agent.name,
+            persona_role=agent.role,
+            compose_model=agent.config["model"],
+            compose_model_alias=agent.config.get("model_alias"),
+            cause=cause,
+            agent_id=agent_id,
+            interaction_id=interaction_id,
+            max_tokens=max_tokens,
+        )
+    except Exception as exc:  # noqa: BLE001 - any agent-shape error → keep the composed draft
+        logger.warning(
+            "Reflexion: glue error for agent %s: %s; keeping composed draft", agent_id, exc,
+        )
+        return actions
     if not result.changed:
         return actions
     # Replace only the message content; build a fresh action + list so a frozen

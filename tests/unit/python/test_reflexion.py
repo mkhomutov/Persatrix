@@ -183,6 +183,19 @@ class TestRevisePath:
         assert result.rounds == 2
         assert provider.create_message.await_count == 4
 
+    async def test_revise_returning_identical_text_stops_without_counting_a_round(self):
+        """A revise that echoes the draft back byte-for-byte (the model converged
+        on the current text despite the critic's flag) stops without counting a
+        no-op round — ``rounds`` tracks only real rewrites — and does not burn a
+        second critic call re-flagging the same text."""
+        provider = _provider("weak: yes", _DRAFT)  # revise returns the draft unchanged
+        result = await _reflect(provider, revise=2)
+        assert result.text == _DRAFT
+        assert result.changed is False
+        assert result.rounds == 0
+        # critic(weak) → revise(identical) → stop; no second critic round.
+        assert provider.create_message.await_count == 2
+
     async def test_revise_count_is_hard_capped(self):
         """A request above ``MAX_REVISE_ROUNDS`` is clamped — the config validate
         also rejects it, but the loop is defensive in depth."""
@@ -441,3 +454,20 @@ class TestActionLoopGlue:
         out = await _glue(provider, actions, SalienceOutcome(silence=False, plan=_PLAN, revise=1))
         assert out[0].payload["content"] == revised
         assert out[1] is other
+
+    async def test_failsoft_on_malformed_agent_keeps_composed_actions(self):
+        """``run_reflexion`` never raises, but the agent attribute/config reads that
+        feed it sit outside its guard. A malformed agent (here a config missing the
+        ``model`` key) degrades to the composed actions rather than propagating —
+        the post the gate already admitted is never lost to a glue error."""
+        provider = _provider("weak: yes", "revised")
+        agent = _agent(provider)
+        agent.config = {}  # no "model" → KeyError while building the run_reflexion args
+        actions = _channel_actions()
+        with use_alias_map(_FAST_ALIAS_MAP):
+            out = await maybe_revise_channel_message(
+                agent, actions, SalienceOutcome(silence=False, plan=_PLAN, revise=1),
+                cause=0, agent_id="ember-owl", interaction_id="i-1", max_tokens=4096,
+            )
+        assert out is actions  # identity-preserved no-op
+        provider.create_message.assert_not_awaited()
