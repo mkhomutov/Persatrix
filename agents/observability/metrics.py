@@ -197,14 +197,14 @@ class _Instruments:
             ),
         )
 
-        # Helper-module counter registrations (file-size cap; surface unchanged).
+        from . import _metrics_conversation_window as _mcw
         from . import _metrics_facts as _mf
         from . import _metrics_interactions as _mi
         from . import _metrics_persona_tick as _mp
         from . import _metrics_salience as _msal
         from . import _metrics_temporal as _mt
         from . import _metrics_wakes as _mw
-        for mod in (_mi, _mf, _mp, _mw, _mt, _msal):
+        for mod in (_mi, _mf, _mp, _mw, _mt, _msal, _mcw):  # registered under the file-size cap
             mod.register(self, meter)
 
         # ─── Shared memory pools (RFC 0008 PR plan PR 4) ─────────────

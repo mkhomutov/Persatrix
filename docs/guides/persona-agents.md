@@ -311,6 +311,30 @@ prompt
 > [RFC 0034 §G](../rfcs/0034-persona-conversational-working-memory.md#g-group-channel-handling)
 > and [MT-PERSONA-CONVERSATION-002](../manual-tests/MT-PERSONA-CONVERSATION-002.md).
 
+> **v0.3.10 — the conversation window is instrumented and bounded.** The
+> per-turn transcript fetch is fronted by an in-process cache (RFC 0034
+> §F). Phase 3 closes two gaps the earlier phases deferred. First, the
+> cache is now a **bounded LRU** — it can no longer grow without bound
+> over a long-lived orchestrator that serves many channels. The bound is
+> a process-global constant (`DEFAULT_WINDOW_CACHE_CAPACITY`, 256 entries,
+> in
+> [`agents/persona_runtime/_conversation_window_cache.py`](../../agents/persona_runtime/_conversation_window_cache.py)),
+> a one-line retune like the `max_turns` default — not a per-agent knob,
+> because the cache is shared across personas in a process. Second, the
+> window now emits OTEL metrics so the `max_turns` / `max_tokens` defaults
+> and the cache bound can be re-tuned **from data** rather than guessed:
+> `conversation_window.cache_access` (charted `result=hit|miss`; hit rate
+> = hit / (hit + miss)), `conversation_window.cache_evictions` (a
+> sustained rate means the bound is undersized and thrashing),
+> `conversation_window.fetch_duration` (the per-turn fetch cost the cache
+> avoids), and `conversation_window.fallback` (`reason=fetch_failed|
+> fetch_none` — the silent degrade-to-current-event-only that §F warned
+> could mask a history-endpoint outage). The `max_turns` / `max_tokens`
+> defaults and the `conversation_window.enabled: false` escape hatch are
+> unchanged; the data-driven retune is a follow-up gated on collecting
+> this telemetry. See
+> [RFC 0034 §Phase 3](../rfcs/0034-persona-conversational-working-memory.md#phase-3-instrumentation-and-tuning).
+
 > **v0.3.8 — *whether* the persona speaks on the open floor: the salience
 > bid.** A persona's role on a group channel is its **disposition** (the
 > channel-config `respond` field). A `participant`/`chair` admitted on an
