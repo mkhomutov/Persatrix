@@ -251,6 +251,11 @@ const (
 func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member, channelSize int, floorMentions []string, marker dispatchMarker) error {
 	dispatchCtx, cancel := context.WithTimeout(ctx, channelFanoutPerRecipientTimeout)
 	defer cancel()
+	// Resolve the channel's reasoning rung ONCE so Mode and Revise come from a
+	// single locked snapshot: two separate ReasoningFor reads could be torn by a
+	// concurrent SetReasoning (a runtime config apply) landing between them, and a
+	// single read also drops the redundant mutex acquisition per recipient.
+	reasoning := r.ReasoningFor(msg.ChannelID)
 	err := r.dispatcher.Dispatch(dispatchCtx, DispatchEnvelope{
 		Recipient:            m,
 		ThreadParentSenderID: threadParentSenderID,
@@ -263,10 +268,10 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		// RFC 0051 PR 6 go-live: the channel's resolved reasoning rung, read off the
 		// (flip-aware) router so a governed channel ships `bid` by default and an
 		// explicit `off` stays the kill switch. Channel-wide, like ChannelSize.
-		ReasoningMode: r.ReasoningFor(msg.ChannelID).Mode,
+		ReasoningMode: reasoning.Mode,
 		// RFC 0051 PR 8 (Phase 5a): the channel's resolved reflexion round count,
-		// off the same flip-aware router resolve. Channel-wide; 0 = single-pass.
-		ReasoningRevise: r.ReasoningFor(msg.ChannelID).Revise,
+		// off the same single resolve. Channel-wide; 0 = single-pass.
+		ReasoningRevise: reasoning.Revise,
 		// Floor-capable-directedness amendment (v0.3.8): per-publish, like
 		// ChannelSize — resolved once in [ChannelRouter.fanout].
 		FloorMentions:                floorMentions,

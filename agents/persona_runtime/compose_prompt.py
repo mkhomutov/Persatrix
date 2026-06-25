@@ -38,7 +38,10 @@ def build_compose_system_prompt(
     only when the Tier-B seam carried a parseable plan back (``mode: plan``);
     ``off``/``bid`` and an unparseable plan compose unplanned (RFC 0051 §Phase 2).
     """
-    system_prompt = agent._build_system_prompt()
+    # Annotated ``str`` (not inferred): ``agent`` is ``Any`` to keep action_loop
+    # thin, so ``_build_system_prompt()`` is untyped — without this the function
+    # would return ``Any`` from a ``-> str`` signature (mypy ``no-any-return``).
+    system_prompt: str = agent._build_system_prompt()
 
     # Retrieve assembled working memory (episodic, relationship, notes) and append
     # to the system prompt so the LLM sees relevant memories. build_context()

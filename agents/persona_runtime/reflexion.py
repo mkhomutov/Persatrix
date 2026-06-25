@@ -14,11 +14,12 @@ Two load-bearing properties, both mirrored on the gate's discipline but with the
 
 * **Fail-soft, never block.** The gate biases to *silence*; reflexion biases to
   *posting*. A critic parse failure, a denied/exhausted lease, an unresolvable
-  ``fast`` alias, or an empty revise output all degrade to the **last good
-  draft** — the gate already decided the persona *should* post, so a reflexion
-  hiccup must never swallow that turn. This is the same fail-closed-to-the-safe-
-  direction rule :func:`~agents.persona_runtime.deliberation_plan.parse_plan`
-  applies, pointed the other way.
+  ``fast`` alias, a missing/malformed prompt snippet, a ``max_tokens``-truncated
+  rewrite, or an empty revise output all degrade to the **last good draft** — the
+  gate already decided the persona *should* post, so a reflexion hiccup must never
+  swallow that turn. This is the same fail-closed-to-the-safe-direction rule
+  :func:`~agents.persona_runtime.deliberation_plan.parse_plan` applies, pointed
+  the other way.
 * **Bounded cost.** The critic is the cheap leased ``fast`` call (a yes/no
   judgement, NOT one of the composes the RFC §F cost model counts); only a
   *weak* verdict pays the ``quality`` rewrite. So an ``N``-round post costs up to
@@ -45,6 +46,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
 from ..generated import wallet_pb2 as walletpb
+from ..llm_types import StopReason
 from ..model_aliases import resolve as resolve_model
 from ..persona_types import ActionType, AgentAction
 from ..prompt_loader import load_snippet
@@ -253,16 +255,21 @@ async def _run_critic(
     draft is **weak** — the signal to revise — or ``None`` to stop (a strong
     draft, OR any fail-soft degradation: parse failure, denied/exhausted lease,
     provider error). Distinguishing weak-with-no-note (``""``) from stop
-    (``None``) is what lets the caller keep the loop fail-soft."""
-    system = load_snippet(_CRITIC_SYSTEM_SNIPPET).format(
-        persona_name=persona_name, persona_role=persona_role,
-    )
-    user = (
-        f"Your private plan for the message:\n{plan_brief}\n\n"
-        f"Your draft message:\n{draft}\n\n"
-        f"{load_snippet(_CRITIC_USER_SNIPPET)}"
-    )
+    (``None``) is what lets the caller keep the loop fail-soft.
+
+    The prompt assembly (``load_snippet`` + ``.format``) is INSIDE the guard so a
+    missing/misnamed snippet (``PromptLoadError``) or a stray brace in a snippet
+    (``str.format`` raising) degrades to a no-op like every other signal, rather
+    than propagating and losing a post the gate already admitted."""
     try:
+        system = load_snippet(_CRITIC_SYSTEM_SNIPPET).format(
+            persona_name=persona_name, persona_role=persona_role,
+        )
+        user = (
+            f"Your private plan for the message:\n{plan_brief}\n\n"
+            f"Your draft message:\n{draft}\n\n"
+            f"{load_snippet(_CRITIC_USER_SNIPPET)}"
+        )
         response = await llm_client.create_message(
             model=critic_model, model_alias=critic_alias,
             messages=[{"role": "user", "content": user}], system=system, tools=[],
@@ -272,7 +279,7 @@ async def _run_critic(
     except BudgetExceededError:
         logger.debug("Reflexion: critic lease denied for agent %s; keeping draft", agent_id)
         return None
-    except Exception as exc:  # noqa: BLE001 - any provider error → keep the draft
+    except Exception as exc:  # noqa: BLE001 - prompt-load/format OR provider error → keep the draft
         logger.warning("Reflexion: critic error for agent %s: %s; keeping draft", agent_id, exc)
         return None
     if not _parse_weak(response.text):
@@ -296,19 +303,23 @@ async def _run_revise(
     max_tokens: int,
 ) -> str | None:
     """The quality rewrite pass. Returns the revised message, or ``None`` to keep
-    the last good draft (a denied/exhausted lease, a provider error, or an empty
-    rewrite — fail-soft)."""
-    system = load_snippet(_REVISE_SYSTEM_SNIPPET).format(
-        persona_name=persona_name, persona_role=persona_role,
-    )
-    critique_block = f"A reviewer flagged: {critique}\n\n" if critique else ""
-    user = (
-        f"Your private plan for the message:\n{plan_brief}\n\n"
-        f"{critique_block}"
-        f"Your current draft:\n{draft}\n\n"
-        f"{load_snippet(_REVISE_USER_SNIPPET)}"
-    )
+    the last good draft (a denied/exhausted lease, a provider error, an empty
+    rewrite, a missing/malformed prompt snippet, OR a ``max_tokens``-truncated
+    rewrite — all fail-soft).
+
+    The prompt assembly is inside the guard for the same reason as the critic:
+    a snippet-load or ``.format`` failure keeps the draft rather than raising."""
     try:
+        system = load_snippet(_REVISE_SYSTEM_SNIPPET).format(
+            persona_name=persona_name, persona_role=persona_role,
+        )
+        critique_block = f"A reviewer flagged: {critique}\n\n" if critique else ""
+        user = (
+            f"Your private plan for the message:\n{plan_brief}\n\n"
+            f"{critique_block}"
+            f"Your current draft:\n{draft}\n\n"
+            f"{load_snippet(_REVISE_USER_SNIPPET)}"
+        )
         response = await llm_client.create_message(
             model=model, model_alias=model_alias,
             messages=[{"role": "user", "content": user}], system=system, tools=[],
@@ -318,8 +329,16 @@ async def _run_revise(
     except BudgetExceededError:
         logger.debug("Reflexion: revise lease denied for agent %s; keeping draft", agent_id)
         return None
-    except Exception as exc:  # noqa: BLE001 - any provider error → keep the draft
+    except Exception as exc:  # noqa: BLE001 - prompt-load/format OR provider error → keep the draft
         logger.warning("Reflexion: revise error for agent %s: %s; keeping draft", agent_id, exc)
+        return None
+    # A truncated rewrite is a half-sentence — strictly worse than the complete
+    # draft. Degrade to the last good draft, the same hard-stop the compose path
+    # applies to MAX_TOKENS (action_loop step 3a) rather than posting the fragment.
+    if response.stop_reason is StopReason.MAX_TOKENS:
+        logger.warning(
+            "Reflexion: revise truncated (max_tokens) for agent %s; keeping draft", agent_id,
+        )
         return None
     revised = (response.text or "").strip()
     return revised or None
@@ -351,6 +370,9 @@ async def maybe_revise_channel_message(
     the only ``AgentAction``-aware seam."""
     if salience is None or salience.plan is None or salience.revise < 1:
         return actions
+    # The first postable channel message — a turn composes one reply against one
+    # plan (``synthesize_channel_reply`` yields a single SEND_CHANNEL_MESSAGE), so
+    # there is exactly one draft to critique. Any sibling messages ship as composed.
     idx = next(
         (
             i for i, a in enumerate(actions)

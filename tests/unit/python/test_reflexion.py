@@ -21,6 +21,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 from agents.llm_client import LLMClient, LLMResponse
+from agents.llm_types import StopReason
 from agents.model_aliases import use_alias_map
 from agents.persona_runtime.deliberation_plan import CompositionPlan
 from agents.persona_runtime.reflexion import (
@@ -31,6 +32,7 @@ from agents.persona_runtime.reflexion import (
 )
 from agents.persona_runtime.salience_gate import SalienceOutcome
 from agents.persona_types import ActionType, AgentAction
+from agents.prompt_loader import PromptLoadError, load_snippet
 from agents.wallet_client import BudgetExceededError
 
 # The mock ``fast`` alias the critic resolves (mirrors the bid reasoning tests).
@@ -256,6 +258,98 @@ class TestFailSoft:
         assert result.text == _DRAFT
         assert result.changed is False
         provider.create_message.assert_not_awaited()
+
+
+class TestFailSoftPromptErrors:
+    """A snippet-load or template-format failure must degrade to the draft like
+    every other fail-soft signal — never propagate and lose a post the gate
+    already admitted. The prompt assembly was previously *outside* the guard, so a
+    missing/misnamed snippet (``PromptLoadError``) or a stray brace in a snippet
+    (``str.format`` raising) crashed the turn instead of keeping the draft."""
+
+    async def test_critic_snippet_load_failure_keeps_draft(self, monkeypatch):
+        def boom(name: str, *a: Any, **k: Any) -> str:
+            raise PromptLoadError(f"missing {name}")
+
+        monkeypatch.setattr("agents.persona_runtime.reflexion.load_snippet", boom)
+        # The provider is primed to revise — proving we degrade *before* the LLM
+        # call, not after a spurious one.
+        provider = _provider("weak: yes", "revised")
+        result = await _reflect(provider, revise=1)
+        assert result.text == _DRAFT
+        assert result.changed is False
+        provider.create_message.assert_not_awaited()
+
+    async def test_critic_template_brace_failure_keeps_draft(self, monkeypatch):
+        """A reflexion-critic-system.md edited to carry a literal brace not in the
+        kwargs (e.g. a JSON example) makes ``str.format`` raise — must fail soft."""
+        def with_bad_brace(name: str, *a: Any, **k: Any) -> str:
+            if name == "reflexion-critic-system":
+                return "You are {persona_name}; example: {not_a_kwarg}"
+            return load_snippet(name, *a, **k)
+
+        monkeypatch.setattr(
+            "agents.persona_runtime.reflexion.load_snippet", with_bad_brace,
+        )
+        provider = _provider("weak: yes", "revised")
+        result = await _reflect(provider, revise=1)
+        assert result.text == _DRAFT
+        assert result.changed is False
+        provider.create_message.assert_not_awaited()
+
+    async def test_revise_snippet_load_failure_keeps_draft(self, monkeypatch):
+        """The critic flags weak (real snippets), but the *revise* snippet then
+        fails to load → keep the pre-revise draft, never raise."""
+        def selective(name: str, *a: Any, **k: Any) -> str:
+            if "revise" in name:
+                raise PromptLoadError(f"missing {name}")
+            return load_snippet(name, *a, **k)
+
+        monkeypatch.setattr(
+            "agents.persona_runtime.reflexion.load_snippet", selective,
+        )
+        provider = _provider("weak: yes", "revised")
+        result = await _reflect(provider, revise=1)
+        assert result.text == _DRAFT
+        assert result.changed is False
+        # critic ran (1 call); the revise never reached the provider.
+        assert provider.create_message.await_count == 1
+
+
+class TestReviseTruncation:
+    """A revise that hits the token ceiling returns text truncated mid-sentence;
+    accepting it would replace a *complete* draft with a half-sentence — strictly
+    worse than the draft reflexion exists to improve. Degrade to the last good
+    draft on ``MAX_TOKENS``, the same hard-stop the compose path applies."""
+
+    async def test_revise_truncation_degrades_to_last_good_draft(self):
+        provider = AsyncMock()
+        provider.create_message = AsyncMock(side_effect=[
+            LLMResponse(text="weak: yes"),  # critic flags weak
+            LLMResponse(
+                text="Redis fits: sub-millisecond rea",
+                stop_reason=StopReason.MAX_TOKENS,
+            ),
+        ])
+        result = await _reflect(provider, revise=1)
+        assert result.text == _DRAFT
+        assert result.changed is False
+        assert result.rounds == 0
+
+    async def test_truncation_on_round_two_keeps_first_revision(self):
+        """A clean round-1 revision survives a round-2 truncation (last *good*
+        draft, not the truncated one)."""
+        v1 = "Redis fits: sub-ms reads, native TTL eviction."
+        provider = AsyncMock()
+        provider.create_message = AsyncMock(side_effect=[
+            LLMResponse(text="weak: yes"), LLMResponse(text=v1),       # round 1 ok
+            LLMResponse(text="weak: yes"),                             # round 2 weak
+            LLMResponse(text="trunc", stop_reason=StopReason.MAX_TOKENS),  # round 2 truncated
+        ])
+        result = await _reflect(provider, revise=2)
+        assert result.text == v1
+        assert result.changed is True
+        assert result.rounds == 1
 
 
 def _agent(provider: AsyncMock) -> Any:

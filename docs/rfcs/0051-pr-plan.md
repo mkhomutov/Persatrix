@@ -447,7 +447,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 3 | 2 | Plan-threaded compose + no-leak test (dark) | `feature/v0310-rfc0051-plan-compose` | ✅ Merged | [#694](https://github.com/mkhomutov/Persatrix/pull/694) | ✅ |
 | 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | ✅ Merged | [#695](https://github.com/mkhomutov/Persatrix/pull/695) | ✅ |
 | 5 | 3b | CLI + web config surfaces (enum + dotted-key) | `feature/v0310-rfc0051-config-surfaces` | ✅ Merged | [#696](https://github.com/mkhomutov/Persatrix/pull/696) | ✅ |
-| 6 | 3c | Telemetry + default flip `off → bid` (GO-LIVE) | `feature/v0310-rfc0051-telemetry-golive` | 🔀 PR open | [#697](https://github.com/mkhomutov/Persatrix/pull/697) | — |
+| 6 | 3c | Telemetry + default flip `off → bid` (GO-LIVE) | `feature/v0310-rfc0051-telemetry-golive` | ✅ Merged | [#697](https://github.com/mkhomutov/Persatrix/pull/697) | ✅ |
 | 7 | OQ 6a | Operator reasoning reveal (separate / cuttable) | `feature/v0310-rfc0051-operator-reveal` | ⬜ Not started | — | — |
 | 8 | 5a | Reflexion loop (default `revise: 0`) | `feature/v0310-rfc0051-reflexion` | 🔀 PR open | [#698](https://github.com/mkhomutov/Persatrix/pull/698) | — |
 | 9 | 5b | No-leak extension + closeout | `feature/v0310-rfc0051-close` | ⬜ Not started | — | — |
