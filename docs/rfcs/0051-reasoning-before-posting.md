@@ -7,7 +7,7 @@ id: RFC-0051
 title: "Reasoning Before Posting"
 summary: "A private per-turn deliberation a persona runs before publishing a channel message — generalizes the RFC 0030 Tier-B salience bid into a structured should-post + plan verdict, threaded privately into the compose call so posts are considered rather than reflexive."
 type: feature
-status: implementing
+status: implemented
 author: Maksim Khomutov
 created: 2026-06-22
 target: "v0.3.10"
@@ -24,7 +24,7 @@ depends_on:
 # RFC 0051 — Reasoning Before Posting
 
 **Type**: feature  
-**Status**: 🚧 Implementing  
+**Status**: ✅ Implemented  
 **Author**: Maksim Khomutov  
 **Date**: 2026-06-22  
 **Target**: v0.3.10  
@@ -309,13 +309,7 @@ Dependencies: Phases 2–3 (the plan to critique against, and the config surface
 
 ## Decision / Next Steps
 
-**Status**: 📋 Proposed (this PR). On ratification:
-
-1. Open `docs/rfcs/0051-pr-plan.md` modeled on the recent per-RFC PR plans.
-2. Sequence into the v0.3.x tail — a candidate v0.3.10 headline alongside the still-open [RFC 0039](0039-user-accounts-authentication.md) (accounts/auth) and [RFC 0045](0045-open-core-extraction-policy.md) (open-core gate); record the call in [`docs/v0.3.x-sequencing.md`](../v0.3.x-sequencing.md).
-3. Flip the [ROADMAP RFC Master Index](../../ROADMAP.md#rfc-master-index) row to `🚧 Implementing` when the v0.3.10 plan opens.
-
-If a reviewer judges per-turn reasoning to belong inside RFC 0028, the fallback is to fold this in as an RFC 0028 *pre-compose sub-checkpoint* — but that bundles a small v0.3.x realism win into a large v0.4.0 surface and slips it past adoption; the default keeps it a standalone, shippable patch.
+**Status**: ✅ Implemented in v0.3.10 per the [RFC 0051 PR plan](0051-pr-plan.md). Phases 1–3 landed the dark verdict/plan then the config surface, CLI/web controls, and the go-live telemetry + `off → bid` flip in lockstep with the one-flip `off` kill switch (PRs 1–6); Phase 5 shipped the committed reflexion loop default-off (`revise: 0`, PR 8); PR 9 extended the privacy wall to the reflexion intermediates, added revise telemetry, documented the knob, and authored [`MT-REASON-001`](../manual-tests/MT-REASON-001.md). **Phase 4 (`depth: deep`) is deferred** behind the OQ 1 telemetry trigger + a provider-protocol change (`validate` rejects it as unbacked); the OQ 6(a) operator reasoning-reveal panel (PR 7) was cut as the plan's explicitly-cuttable surface, leaving the silence-with-reason leg observable via the operator-debug agent log (§E).
 
 ## Related Documentation
 

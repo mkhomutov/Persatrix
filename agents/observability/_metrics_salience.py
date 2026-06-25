@@ -107,9 +107,58 @@ def record_deliberation(
                 di.budget_starved.add(1, attributes={"mode": mode})
 
 
+# ── RFC 0051 PR 9 (v0.3.10, Phase 5b) reflexion-loop telemetry ───────────────
+#
+# The Phase 5 reflexion loop (critic→revise, default ``revise: 0``) sharpens a
+# ``mode: plan`` post before it ships. These instruments make the opt-in loop
+# legible: the draft-changed / no-op-revise outcome and the revise-round count.
+# Module-owned for the same reason as the deliberation block above — ``metrics.py``
+# is at the 500-line cap — and re-created by :func:`register` on every
+# ``init_metrics`` so they always track the live meter.
+
+
+@dataclass
+class _ReflexionInstruments:
+    """The module-owned RFC 0051 PR 9 reflexion instruments."""
+
+    runs: Counter
+    rounds: Counter
+
+
+_reflexion: _ReflexionInstruments | None = None
+
+
+def record_reflexion(*, rounds: int, changed: bool) -> None:
+    """Record one completed reflexion loop (RFC 0051 Phase 5b).
+
+    Emits ``reflexion.runs`` with ``outcome=revised`` when the critic flagged the
+    draft and a revise rewrote it (``changed``) or ``outcome=noop`` when a strong
+    draft / a fail-soft degradation kept the composed draft — the draft-changed /
+    no-op-revise signal. On a rewrite it additionally adds the actual round count
+    to ``reflexion.rounds`` (the revise-round counter); a no-op contributes ``0``,
+    so the mean rounds-per-rewrite (``rounds / runs{outcome=revised}``) stays
+    honest. A no-op until :func:`register` has run, so a call site never guards.
+
+    **Best-effort, like the sibling :func:`record_deliberation` emit.** This runs
+    on the compose hot path *after* the rewrite has already happened, so a
+    metric-export hiccup must never propagate and undo a post the gate already
+    admitted — the same "the work already happened, don't block on the egress"
+    contract (RFC 0051 §Security). The ``outcome`` label is a closed two-value set
+    and ``rounds`` is bounded by :data:`MAX_REVISE_ROUNDS`, so cardinality stays
+    bounded — both safe as a metric dimension / value."""
+    ri = _reflexion
+    if ri is None:
+        return
+    with contextlib.suppress(Exception):
+        ri.runs.add(1, attributes={"outcome": "revised" if changed else "noop"})
+        if rounds > 0:
+            ri.rounds.add(rounds)
+
+
 def register(inst: _Instruments, meter: Meter) -> None:
     """Register the Tier-B salience counters on ``inst`` plus the module-owned
-    RFC 0051 deliberation instruments (see :data:`_deliberation`)."""
+    RFC 0051 deliberation + reflexion instruments (see :data:`_deliberation` /
+    :data:`_reflexion`)."""
     inst.channel_messages_salience_skipped = meter.create_counter(
         name="channel.messages.salience_skipped",
         unit="{message}",
@@ -141,7 +190,7 @@ def register(inst: _Instruments, meter: Meter) -> None:
     )
     # RFC 0051 PR 6 go-live — the module-owned deliberation instruments (see the
     # block comment above for why they are not on ``inst``).
-    global _deliberation
+    global _deliberation, _reflexion
     _deliberation = _DeliberationInstruments(
         total=meter.create_counter(
             name="deliberation.total",
@@ -187,6 +236,34 @@ def register(inst: _Instruments, meter: Meter) -> None:
                 "exhausted interaction_budget_tokens (reason_code=lease_denied) — "
                 "operationally distinct from a semantic 'nothing to add'. "
                 "Attribute: mode (bid|plan)."
+            ),
+        ),
+    )
+    # RFC 0051 PR 9 (Phase 5b) — the module-owned reflexion instruments (see the
+    # block comment above :func:`record_reflexion`).
+    _reflexion = _ReflexionInstruments(
+        runs=meter.create_counter(
+            name="reflexion.runs",
+            unit="{reflexion}",
+            description=(
+                "RFC 0051 Phase 5 reflexion loops that ran on an admitted "
+                "mode:plan + reasoning.revise>=1 turn. Attribute: outcome "
+                "(revised — the critic flagged the draft and a revise rewrote it; "
+                "noop — a strong draft or a fail-soft degradation kept the composed "
+                "draft). The draft-changed fraction is revised/(revised+noop). Only "
+                "the plan rung with revise>=1 reaches the loop, so a turn that "
+                "single-passes (the revise:0 default) charts nothing."
+            ),
+        ),
+        rounds=meter.create_counter(
+            name="reflexion.rounds",
+            unit="{round}",
+            description=(
+                "RFC 0051 Phase 5 revise rounds that actually rewrote the draft "
+                "(the sum; 0..MAX_REVISE_ROUNDS per turn). Mean rounds per rewrite "
+                "= reflexion.rounds / reflexion.runs{outcome=revised}; a no-op turn "
+                "contributes 0. A revise that echoes the draft back unchanged does "
+                "NOT count a round (it charts as outcome=noop on reflexion.runs)."
             ),
         ),
     )

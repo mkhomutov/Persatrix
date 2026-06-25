@@ -404,11 +404,11 @@ Plus two non-behavioural cleanups: the dead `warning` return on `ReasoningConfig
 
 #### PR checklist
 
-- [ ] No-leak test covers a discarded draft + critic note (privacy wall complete).
-- [ ] `make test` + `make validate` + lint clean across Go/Python/Rust/web.
-- [ ] RFC 0051 status flipped; `make rfcs` regenerated `INDEX.md`.
-- [ ] `CHANGELOG.md` `[0.3.10]` finalized; ROADMAP + [v0.3.10-plan](../v0.3.10-plan.md#master-progress-overview) reflect final state.
-- [ ] `MT-REASON-001` authored; `docs/guides/persona-agents.md` documents the knob.
+- [x] No-leak test covers a discarded draft + critic note (privacy wall complete) — `tests/integration/test_deliberation_no_leak.py::TestReflexionDraftAndCritiqueNeverLeak`.
+- [x] `make validate` + lint clean across Python (ruff/mypy); `pytest` green for the reflexion/metrics/no-leak suites. (Full `make test` Go/Rust/web + live Docker smoke is the Phase 3 release-prep deliverable.)
+- [x] RFC 0051 status flipped; `make rfcs` regenerated `INDEX.md`.
+- [x] `CHANGELOG.md` `[0.3.10]` finalized; ROADMAP + [v0.3.10-plan](../v0.3.10-plan.md#master-progress-overview) reflect final state.
+- [x] `MT-REASON-001` authored; `docs/guides/persona-agents.md` documents the knob.
 
 ---
 
@@ -448,9 +448,9 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 4 | 3a | `reasoning` config backend (capability-gated) | `feature/v0310-rfc0051-config-backend` | ✅ Merged | [#695](https://github.com/mkhomutov/Persatrix/pull/695) | ✅ |
 | 5 | 3b | CLI + web config surfaces (enum + dotted-key) | `feature/v0310-rfc0051-config-surfaces` | ✅ Merged | [#696](https://github.com/mkhomutov/Persatrix/pull/696) | ✅ |
 | 6 | 3c | Telemetry + default flip `off → bid` (GO-LIVE) | `feature/v0310-rfc0051-telemetry-golive` | ✅ Merged | [#697](https://github.com/mkhomutov/Persatrix/pull/697) | ✅ |
-| 7 | OQ 6a | Operator reasoning reveal (separate / cuttable) | `feature/v0310-rfc0051-operator-reveal` | ⬜ Not started | — | — |
-| 8 | 5a | Reflexion loop (default `revise: 0`) | `feature/v0310-rfc0051-reflexion` | 🔀 PR open | [#698](https://github.com/mkhomutov/Persatrix/pull/698) | — |
-| 9 | 5b | No-leak extension + closeout | `feature/v0310-rfc0051-close` | ⬜ Not started | — | — |
+| 7 | OQ 6a | Operator reasoning reveal (separate / cuttable) | `feature/v0310-rfc0051-operator-reveal` | ⏭ Cut from v0.3.10 | — | — |
+| 8 | 5a | Reflexion loop (default `revise: 0`) | `feature/v0310-rfc0051-reflexion` | ✅ Merged | [#698](https://github.com/mkhomutov/Persatrix/pull/698) | ✅ |
+| 9 | 5b | No-leak extension + closeout | `feature/v0310-rfc0051-close` | 🔀 PR open | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred
 **Excluded from v0.3.10**: Phase 4 (`depth: deep` native extended thinking) — deferred behind the OQ-1 telemetry trigger + a provider-protocol change.

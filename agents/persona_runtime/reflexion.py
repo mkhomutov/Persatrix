@@ -48,6 +48,7 @@ from typing import TYPE_CHECKING, Any, Final
 from ..generated import wallet_pb2 as walletpb
 from ..llm_types import StopReason
 from ..model_aliases import resolve as resolve_model
+from ..observability._metrics_salience import record_reflexion
 from ..persona_types import ActionType, AgentAction
 from ..prompt_loader import load_snippet
 from ..wallet_client import BudgetExceededError
@@ -416,6 +417,11 @@ async def maybe_revise_channel_message(
             "Reflexion: glue error for agent %s: %s; keeping composed draft", agent_id, exc,
         )
         return actions
+    # The loop ran to completion — chart its outcome (PR 9 telemetry). Emitted on
+    # both the rewrite and the no-op (strong draft / fail-soft) so the draft-changed
+    # fraction is computable; best-effort, never blocks the post (the guard above
+    # already returned on any pre-loop short-circuit, so this counts only real runs).
+    record_reflexion(rounds=result.rounds, changed=result.changed)
     if not result.changed:
         return actions
     # Replace only the message content; build a fresh action + list so a frozen

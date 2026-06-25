@@ -20,6 +20,16 @@ This is the load-bearing test of that wall. It drives the real
 * **No leak to the store** — the plan text appears in **zero** of the actions
   handed to ``_store_event_episode`` (the channel/episodic store an RFC 0034
   reconstruction reads), so no peer can ever reconstruct it.
+
+PR 9 (Phase 5b) extends the wall to the **reflexion** intermediates (RFC 0051
+§E): under ``mode: plan`` with ``reasoning.revise ≥ 1`` a cheap critic flags a
+weak draft and a quality revise rewrites it — only the *final* revised message is
+published. ``TestReflexionDraftAndCritiqueNeverLeak`` drives a real rewrite turn
+and asserts the **discarded first-pass draft** and the **critic note** appear in
+zero published messages and zero stored episodes (only the revised text ships).
+The wall is structural: reflexion replaces the message content *before* the store
+(``action_loop`` runs ``maybe_revise_channel_message`` then ``_store_event_episode``),
+and the discarded draft / critic note are never wrapped in an ``AgentAction``.
 """
 
 from __future__ import annotations
@@ -30,6 +40,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
+from agents.model_aliases import use_alias_map
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_runtime.deliberation_plan import CompositionPlan
@@ -56,6 +67,35 @@ _PLAN = CompositionPlan(
     key_points=(_PRIVATE_POINT, "our p99 is write-heavy"),
     addressed_to="iron-fox",
     avoid_restating=(_PRIVATE_AVOID,),
+)
+
+# PR 9 reflexion markers. The discarded first-pass draft (the compose output the
+# critic flags) and the critic's note are the Phase-5 intermediates the §E wall
+# must also cover; only the final revised message (``_REVISED_MESSAGE``, carrying
+# no marker) may ship.
+_DISCARDED_DRAFT = "WALLED-DRAFT-1a first-pass reply no peer should ever see"
+_PRIVATE_CRITIQUE = "WALLED-CRITIQUE-2b the draft buries the write-path risk"
+_REVISED_MESSAGE = "Final answer: Redis, with write-path caveats noted."
+_REFLEXION_MARKERS = (_DISCARDED_DRAFT, _PRIVATE_CRITIQUE)
+
+# The leased ``fast`` alias the reflexion critic resolves to — a mock model whose
+# ``model`` name (``mock-fast``) lets the provider tell a critic call apart from
+# the compose / revise quality calls (mirrors the reflexion unit tests).
+_FAST_ALIAS_MAP: dict[str, dict] = {
+    "fast": {
+        "provider": "mock",
+        "model": "mock-fast",
+        "input_per_1m_tokens": 0.0,
+        "output_per_1m_tokens": 0.0,
+    },
+}
+
+# The Tier-C compose emits this first-pass draft; built with json.dumps so the
+# marker can never break the action JSON (no brace-escaping in an f-string).
+_COMPOSE_DRAFT_TEXT = (
+    '```json\n[{"action_type": "send_channel_message", '
+    '"payload": {"channel_id": "group:planning", "content": '
+    + json.dumps(_DISCARDED_DRAFT) + "}}]\n```"
 )
 
 _SEED = [
@@ -115,6 +155,52 @@ def _compose_client() -> tuple[LLMClient, MagicMock]:
 
 async def _make_agent(agent_id: str = "ember-owl") -> tuple[_LLMPersonaAgent, MagicMock]:
     client, create_message = _compose_client()
+    agent = create_persona_agent(
+        agent_id=agent_id, config=_persona_config(agent_id), llm_client=client,
+    )
+    await agent.initialize_memory()
+    return agent, create_message
+
+
+def _reflexion_client() -> tuple[LLMClient, MagicMock]:
+    """A provider that drives a real reflexion rewrite over one turn. It tells the
+    three call shapes apart so each produces the right artifact:
+
+    * the **critic** (``model == 'mock-fast'``) flags the first draft weak (with a
+      private critique note) then passes the rewrite — ``weak: yes`` → ``weak: no``;
+    * the first **quality** call is the Tier-C **compose** → the discarded first-pass
+      draft (``_DISCARDED_DRAFT``);
+    * the next quality call is the **revise** → the clean ``_REVISED_MESSAGE`` (no
+      marker), the only text that may ship.
+    """
+    provider = AsyncMock()
+    critic_verdicts = iter([f"weak: yes\ncritique: {_PRIVATE_CRITIQUE}", "weak: no"])
+    quality_calls = {"n": 0}
+
+    def _respond(**kwargs):
+        if kwargs.get("model") == "mock-fast":  # the leased critic pass
+            return LLMResponse(
+                text=next(critic_verdicts), stop_reason=StopReason.END_TURN, usage=Usage(5, 3),
+            )
+        quality_calls["n"] += 1
+        if quality_calls["n"] == 1:  # the Tier-C compose → discarded first draft
+            return LLMResponse(
+                text=_COMPOSE_DRAFT_TEXT, stop_reason=StopReason.END_TURN, usage=Usage(10, 5),
+            )
+        return LLMResponse(  # the revise → the only text that ships
+            text=_REVISED_MESSAGE, stop_reason=StopReason.END_TURN, usage=Usage(8, 4),
+        )
+
+    provider.create_message = AsyncMock(side_effect=_respond)
+    provider.format_tool_definitions = MagicMock(return_value=[])
+    provider.append_tool_round = MagicMock(side_effect=lambda msgs, resp, results: msgs)
+    return LLMClient(provider), provider.create_message
+
+
+async def _make_reflexion_agent(
+    agent_id: str = "ember-owl",
+) -> tuple[_LLMPersonaAgent, MagicMock]:
+    client, create_message = _reflexion_client()
     agent = create_persona_agent(
         agent_id=agent_id, config=_persona_config(agent_id), llm_client=client,
     )
@@ -199,3 +285,60 @@ class TestPlanThreadsIntoComposeButNeverLeaks:
 
         compose.assert_awaited_once()
         assert _PRIVATE_INTENT not in compose.await_args.kwargs["system"]
+
+
+class TestReflexionDraftAndCritiqueNeverLeak:
+    """RFC 0051 PR 9 (Phase 5b) — the privacy wall extends to the reflexion loop.
+
+    A ``mode: plan`` + ``reasoning.revise ≥ 1`` turn produces two new private
+    intermediates: the **discarded first-pass draft** (the compose output the
+    critic flags) and the **critic note**. Only the *final revised* message is
+    published; the §E wall must keep both intermediates out of every published
+    message AND out of the episodic store (an RFC 0034 reconstruction)."""
+
+    async def test_discarded_draft_and_critique_never_reach_messages_or_store(self):
+        agent, create_message = await _make_reflexion_agent()
+        stored_actions: list = []
+        original_store = agent._store_event_episode
+
+        async def _capture_store(event, actions):
+            stored_actions.extend(actions)
+            return await original_store(event, actions)
+
+        # ``revise=1`` arms the loop; ``plan`` is what the critic critiques against.
+        outcome = SalienceOutcome(
+            silence=False, user_message="formatted", seed=list(_SEED), plan=_PLAN, revise=1,
+        )
+        with use_alias_map(_FAST_ALIAS_MAP), \
+                patch(_SEAM_PATH, new=AsyncMock(return_value=outcome)), \
+                patch.object(agent, "_store_event_episode", side_effect=_capture_store):
+            actions = await agent.on_event(_event())
+
+        # The critic actually ran (a 'mock-fast' call) → the rewrite genuinely
+        # happened, so the discarded draft below is a real intermediate rather than
+        # a draft that was never produced (a vacuous pass).
+        models = [c.kwargs.get("model") for c in create_message.await_args_list]
+        assert "mock-fast" in models, "the reflexion critic must have run"
+
+        # Positive control: the published message is the REVISED text — the post
+        # the turn actually shipped is the rewrite, not the discarded draft.
+        published = [a for a in actions if a.action_type is ActionType.SEND_CHANNEL_MESSAGE]
+        assert published, "the should_post=true turn must publish a message"
+        assert any(_REVISED_MESSAGE in _action_text(a) for a in published), (
+            "the revised draft is what ships"
+        )
+
+        # No leak to the channel: neither the discarded draft nor the critic note
+        # appears in any published payload.
+        for action in actions:
+            text = _action_text(action)
+            for marker in _REFLEXION_MARKERS:
+                assert marker not in text, f"reflexion intermediate must not ship: {marker}"
+
+        # No leak to the store: neither reaches the episodic store a peer would
+        # reconstruct from (the store runs AFTER reflexion replaces the content).
+        assert stored_actions, "the turn must store an episode"
+        for action in stored_actions:
+            text = _action_text(action)
+            for marker in _REFLEXION_MARKERS:
+                assert marker not in text, f"reflexion intermediate must not persist: {marker}"
