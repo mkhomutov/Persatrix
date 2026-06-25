@@ -30,8 +30,10 @@ pub(crate) const DEPTHS: &[&str] = &["shallow"];
 /// The dotted reasoning knobs, appended to the flat `CONFIG_KNOBS` set so the
 /// registry covers the union the server's two merge switches accept (flat
 /// `mergeConfigPatch` ∪ nested `mergeReasoningPatch`). `mode`/`model`/`depth` are
-/// closed enums; `revise` is a plain int whose `≥1` values the server capability-
-/// gates (Phase 5), so the CLI only type-checks it.
+/// closed enums; `revise` is a plain int (0..2) whose `≥1` values the server gates
+/// to `mode: plan` (RFC 0051 Phase 5 — the reflexion critic re-reads the draft
+/// against the plan), a cross-field rule the CLI cannot pre-check, so it only
+/// type-checks `revise` and defers the range/mode gate to the server.
 pub(crate) const KNOBS: &[(&str, KnobType)] = &[
     ("reasoning.mode", KnobType::Enum(MODES)),
     ("reasoning.model", KnobType::Enum(MODELS)),

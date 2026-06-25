@@ -57,6 +57,7 @@ from ..salience_deliberation import (
     warn_if_unknown_mode,
 )
 from .deliberation_plan import CompositionPlan, parse_plan
+from .reflexion import MAX_REVISE_ROUNDS
 from .wallet_cause import cause_for_event, lease_interaction_id_for_event
 
 if TYPE_CHECKING:
@@ -122,6 +123,14 @@ _SALIENCE_MAX_MEMBERS_KEY: str = "salience_max_channel_members"
 # pre-v0.3.10 producer) or any unrecognised value resolves to ``off``, the scalar
 # score gate (byte-for-byte v0.3.8), so the wiring is additive.
 _REASONING_MODE_KEY: str = "reasoning_mode"
+# RFC 0051 PR 8 (Phase 5a) — the channel's resolved reflexion round count, lifted
+# off the wire by ``channel_wire_metadata.channel_event_payload``. Absent / a
+# non-int (a pre-Phase-5 producer) resolves to ``0`` (single-pass, no reflexion);
+# clamped to ``[0, MAX_REVISE_ROUNDS]`` here as defense-in-depth (the Go config
+# ``validate`` already caps it). Carried back on ``SalienceOutcome`` only under
+# ``mode: plan`` — the critic re-reads the draft *against the plan*, so reflexion
+# is inert without one.
+_REASONING_REVISE_KEY: str = "reasoning_revise"
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,12 +155,20 @@ class SalienceOutcome:
             **not** on the pure bid's ``SalienceDecision`` (RFC 0051 §C
             "why two types"); it is never an ``AgentAction`` / never persisted
             (the §E wall, pinned by ``test_deliberation_no_leak.py``).
+        revise: The channel's resolved reflexion round count (RFC 0051 Phase 5a),
+            ``0`` on every rung but ``mode: plan`` with a ``reasoning.revise ≥ 1``
+            override. The action loop hands it (with ``plan``) to
+            :func:`agents.persona_runtime.reflexion.maybe_revise_channel_message`
+            to critic→revise the composed draft. ``0`` is single-pass (the
+            default — no reflexion); it is meaningless without ``plan``, so the
+            seam pins it to ``0`` off the ``plan`` rung.
     """
 
     silence: bool
     user_message: str | None = None
     seed: list[dict[str, Any]] | None = None
     plan: CompositionPlan | None = None
+    revise: int = 0
 
 
 def _governed(event: AgentEvent) -> bool:
@@ -220,6 +237,20 @@ def _reasoning_mode(event: AgentEvent, *, agent_id: str) -> str:
         return raw
     warn_if_unknown_mode(raw, agent_id=agent_id)
     return MODE_OFF
+
+
+def _reasoning_revise(event: AgentEvent) -> int:
+    """The channel's resolved reflexion round count off the wire (RFC 0051 PR 8).
+
+    Absent / a non-int / a bool (an ``int`` subclass that is never a count) / a
+    non-positive value resolves to ``0`` (single-pass, no reflexion) — the
+    additive pre-Phase-5 default. Clamped to :data:`MAX_REVISE_ROUNDS` as
+    defense-in-depth: the Go config ``validate`` already caps it, but a
+    future/compromised producer must not drive an unbounded revise fan-out."""
+    raw = (event.payload or {}).get(_REASONING_REVISE_KEY)
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+        return 0
+    return min(raw, MAX_REVISE_ROUNDS)
 
 
 async def run_salience_gate(
@@ -397,6 +428,11 @@ async def run_salience_gate(
     # Fail-closed to *no plan* (not to silence): an unparseable plan composes
     # unplanned rather than blocking a post the gate already admitted (§Phase 2).
     plan = parse_plan(deliberation_text[0]) if deliberation_text else None
+    # RFC 0051 PR 8 — carry the reflexion round count only when a plan rode back
+    # (``mode: plan``); the critic re-reads the draft *against* the plan, so a
+    # revise without one is inert. An unparseable plan (``plan is None``) keeps
+    # ``revise=0`` — compose unrevised rather than block, the same fail-open bias.
+    revise = _reasoning_revise(event) if plan is not None else 0
     return SalienceOutcome(
-        silence=False, user_message=user_message, seed=seed, plan=plan,
+        silence=False, user_message=user_message, seed=seed, plan=plan, revise=revise,
     )

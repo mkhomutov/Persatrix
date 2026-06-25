@@ -70,3 +70,26 @@ func TestChannelMessageToProto_CarriesReasoningMode(t *testing.T) {
 		DispatchEnvelope{Recipient: Member{ParticipantID: "c", RespondPolicy: RespondAlways}})
 	assert.Equal(t, "", ev.ReasoningMode, "an unset rung stays empty on the wire (back-compat)")
 }
+
+// TestChannelMessageToProto_CarriesReasoningRevise pins the RFC 0051 PR 8
+// (Phase 5a) wire half: channelMessageToProto carries the channel's resolved
+// reflexion round count off the envelope onto `ChannelMessageEvent.reasoning_revise`,
+// the field the agent-side reflexion loop reads to bound its rounds. An unset
+// count (a pre-Phase-5 envelope) stays 0 — single-pass, additive.
+func TestChannelMessageToProto_CarriesReasoningRevise(t *testing.T) {
+	d := &GRPCMessageDispatcher{logger: zap.NewNop()}
+
+	ev := d.channelMessageToProto(
+		ChannelMessage{ID: "m-1", ChannelID: "group:planning", SenderID: "a"},
+		DispatchEnvelope{
+			Recipient:       Member{ParticipantID: "b", RespondPolicy: RespondAlways, SalienceGated: true},
+			ReasoningMode:   ReasoningModePlan,
+			ReasoningRevise: 2,
+		})
+	assert.Equal(t, int32(2), ev.ReasoningRevise, "the resolved revise count rides the wire")
+
+	ev = d.channelMessageToProto(
+		ChannelMessage{ID: "m-2", ChannelID: "group:planning", SenderID: "a"},
+		DispatchEnvelope{Recipient: Member{ParticipantID: "c", RespondPolicy: RespondAlways}})
+	assert.Equal(t, int32(0), ev.ReasoningRevise, "an unset count stays 0 on the wire (back-compat)")
+}

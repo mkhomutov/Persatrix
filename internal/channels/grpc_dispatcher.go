@@ -412,6 +412,10 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		// (identical across recipients); the agent-side seam reads it to pick the
 		// bid's verdict grammar. Empty (a pre-v0.3.10 envelope) maps to `off`.
 		ReasoningMode: env.ReasoningMode,
+		// RFC 0051 PR 8 (Phase 5a): the channel's resolved reflexion round count,
+		// stamped by the router at fanout. Channel-level; the agent reflexion loop
+		// reads it to bound critic→revise rounds. 0 (pre-Phase-5) is single-pass.
+		ReasoningRevise: int32(env.ReasoningRevise),
 		// RFC 0030 deterministic governance layers (v0.3.8), PR 1: lift any
 		// publish-side `interaction_id` (the RFC 0020 Interaction — lifecycle
 		// §B/§C, per-channel scope §G) onto the typed proto field so Layers

@@ -88,11 +88,14 @@
       label: "Reasoning revise rounds",
       type: "int",
       // No client-side upper bound, unlike depth offering only `shallow`. The
-      // server gates revise >= 1 (RFC 0051 Phase 5), but a `<select>` can only
-      // OFFER its options whereas a number `max` triggers form constraint
-      // validation: an out-of-range value would make `<form onsubmit>` invalid
-      // and silently block the WHOLE save. So revise defers to the server's 400,
-      // which at least surfaces a reason — the server stays the authority.
+      // server gates revise: it must be 0..2 and `>= 1` requires mode: plan (the
+      // reflexion critic re-reads the draft against the plan, RFC 0051 Phase 5).
+      // A `<select>` can only OFFER its options whereas a number `max` triggers
+      // form constraint validation: an out-of-range value would make
+      // `<form onsubmit>` invalid and silently block the WHOLE save. The
+      // revise↔mode rule cannot be a static `max` at all. So revise defers to the
+      // server's 400, which at least surfaces a reason — the server stays the
+      // authority.
     },
   ];
 

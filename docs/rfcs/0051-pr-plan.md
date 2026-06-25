@@ -371,9 +371,17 @@ Plus two non-behavioural cleanups: the dead `warning` return on `ReasoningConfig
 
 #### PR checklist
 
-- [ ] `pytest` (reflexion) + `go test` (validate) pass; fail-soft degradation proven.
-- [ ] `reasoning.revise` reuses the `Int` knob path (no new enum control).
-- [ ] Default `revise: 0`; capability gate lifted only now that Phase 5 is deployed.
+- [x] `pytest` (reflexion) + `go test` (validate) pass; fail-soft degradation proven.
+- [x] `reasoning.revise` reuses the `Int` knob path (no new enum control).
+- [x] Default `revise: 0`; capability gate lifted only now that Phase 5 is deployed.
+
+#### Implementation notes (as built)
+
+- **The CLI + web `reasoning.revise` surface was already built in [PR 5](#pr-5-featurev0310-rfc0051-config-surfaces).** PR 5 added the whole `reasoning.*` block — `("reasoning.revise", KnobType::Int)` in the CLI `reasoning::KNOBS` and a nested `int` knob in the web `KNOBS` array — so PR 8's surface work is *only* correcting the now-stale "capability-gated / Phase 5 not deployed" comments to the new "`revise ≥ 1` requires `mode: plan`" rule. No new control; the `Int` path the plan named was already in place.
+- **`validate` lifts the blanket Phase-5 gate and replaces it with a cross-field rule + a cap.** `revise < 0` or `> MaxReasoningRevise (2)` is rejected per-field (both the load-time `ReasoningConfig.validate` and the REST `ReasoningOverrides.validate`); `revise ≥ 1` additionally requires the **effective** `mode: plan`. The full-struct path checks `rc.Mode` directly; the override path's cross-field check lives in `validateReasoningGoverned` (alongside the mode↔governance rule) because it needs the *merged* mode — a `revise` PATCH may not touch `mode`. Since `plan` is never a default, an effective `plan` can only come from an explicit override, so this is a clean reject of "set revise without promoting the rung."
+- **The revise count crosses the wire like the mode (PR 6).** A new proto field `ChannelMessageEvent.reasoning_revise = 26` (`int32`, stubs regenerated with the CI-pinned protoc 34.1), stamped at fanout from `ChannelRouter.ReasoningFor(channelID).Revise` onto the `DispatchEnvelope`, lifted onto the event payload in `channel_wire_metadata.py`. The seam carries it onto `SalienceOutcome.revise` **only on the `plan` rung** (and pins it to 0 when the plan failed to parse — fail-open), clamped to `MAX_REVISE_ROUNDS` as defense-in-depth.
+- **`action_loop.py` stayed under the 500-line cap via the named extraction.** The compose-prompt assembly (persona base + working memory + plan section) moved to a new `compose_prompt.py` — the next extraction candidate the plan named — freeing room for a one-line `maybe_revise_channel_message` call after `synthesize_channel_reply`. `run_reflexion` itself imports no agent/action type (unit-testable in isolation); the thin `maybe_revise_channel_message` glue in `reflexion.py` is the only `AgentAction`-aware seam, replacing only the one `SEND_CHANNEL_MESSAGE` action's content on a successful rewrite.
+- **Critic on `fast`, revise on the compose model.** The critic is the cheap leased `fast` judgement (not one of the §F composes); only a `weak: yes` verdict pays the `quality` rewrite, so the cost is the RFC's `N+1` composes. Both passes bill against the same interaction lease as the compose, so a low budget starves the later rounds first. The no-leak extension to a discarded draft + critic note is [PR 9](#pr-9-featurev0310-rfc0051-close)'s leg (the existing plan-leak test stays green here).
 
 ---
 
@@ -441,7 +449,7 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 | 5 | 3b | CLI + web config surfaces (enum + dotted-key) | `feature/v0310-rfc0051-config-surfaces` | ✅ Merged | [#696](https://github.com/mkhomutov/Persatrix/pull/696) | ✅ |
 | 6 | 3c | Telemetry + default flip `off → bid` (GO-LIVE) | `feature/v0310-rfc0051-telemetry-golive` | 🔀 PR open | [#697](https://github.com/mkhomutov/Persatrix/pull/697) | — |
 | 7 | OQ 6a | Operator reasoning reveal (separate / cuttable) | `feature/v0310-rfc0051-operator-reveal` | ⬜ Not started | — | — |
-| 8 | 5a | Reflexion loop (default `revise: 0`) | `feature/v0310-rfc0051-reflexion` | ⬜ Not started | — | — |
+| 8 | 5a | Reflexion loop (default `revise: 0`) | `feature/v0310-rfc0051-reflexion` | 🔀 PR open | _pending_ | — |
 | 9 | 5b | No-leak extension + closeout | `feature/v0310-rfc0051-close` | ⬜ Not started | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged · ⏭ Deferred

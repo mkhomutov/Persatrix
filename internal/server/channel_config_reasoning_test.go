@@ -172,14 +172,35 @@ func TestChannelConfig_ReasoningPatchDepthDeepRejected(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
 }
 
-// TestChannelConfig_ReasoningPatchReviseRejected: `revise >= 1` is a 400 (Phase 5
-// not deployed).
-func TestChannelConfig_ReasoningPatchReviseRejected(t *testing.T) {
+// TestChannelConfig_ReasoningPatchReviseRequiresPlan: PR 8 lifts the blanket
+// Phase-5 capability gate; `revise >= 1` is now a 400 only when the merged
+// effective mode is not `plan` — the critic re-reads the draft against the plan.
+// `revise` alone (mode inherits the governed `bid` default) and `revise` with an
+// explicit non-plan mode both reject; an over-cap value rejects under plan too.
+func TestChannelConfig_ReasoningPatchReviseRequiresPlan(t *testing.T) {
+	for _, tc := range []map[string]any{
+		{"revise": 1},                  // mode inherits → bid, not plan
+		{"mode": "bid", "revise": 1},   // explicit non-plan mode
+		{"mode": "plan", "revise": 99}, // over the cap, even under plan
+	} {
+		srv, id := reasoningTestServer(t, true)
+		body, _ := json.Marshal(map[string]any{"reasoning": tc})
+		rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+			body, map[string]string{"If-Match": "0"})
+		assert.Equal(t, http.StatusBadRequest, rec.Code, "patch=%v body=%s", tc, rec.Body.String())
+	}
+}
+
+// TestChannelConfig_ReasoningPatchReviseAcceptedUnderPlan: `mode: plan` + `revise`
+// now round-trips (the Phase-5 deployment) and reaches the router.
+func TestChannelConfig_ReasoningPatchReviseAcceptedUnderPlan(t *testing.T) {
 	srv, id := reasoningTestServer(t, true)
-	body, _ := json.Marshal(map[string]any{"reasoning": map[string]any{"mode": "plan", "revise": 1}})
+	body, _ := json.Marshal(map[string]any{"reasoning": map[string]any{"mode": "plan", "revise": 2}})
 	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
 		body, map[string]string{"If-Match": "0"})
-	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	assert.Equal(t, channels.ReasoningModePlan, srv.channelRouter.ReasoningFor(id).Mode)
+	assert.Equal(t, 2, srv.channelRouter.ReasoningFor(id).Revise, "revise reaches the router")
 }
 
 // TestChannelConfig_ReasoningPatchUngovernedRejected: `mode != off` on a channel

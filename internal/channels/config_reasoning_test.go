@@ -183,8 +183,10 @@ channels:
 
 // TestLoadConfig_ReasoningReviseRejected: `revise >= 1` is capability-rejected
 // (Phase 5 not yet deployed); negative is an outright invalid value.
+// TestLoadConfig_ReasoningReviseRejected: out-of-range revise (negative, or above
+// MaxReasoningRevise) is rejected at load even under `mode: plan`.
 func TestLoadConfig_ReasoningReviseRejected(t *testing.T) {
-	for _, revise := range []int{1, 2, -1} {
+	for _, revise := range []int{-1, MaxReasoningRevise + 1} {
 		body := `
 channels:
   - name: planning
@@ -198,6 +200,46 @@ channels:
 		_, err := LoadConfig(writeYAML(t, body))
 		require.Error(t, err, "revise=%d", revise)
 		assert.ErrorIs(t, err, ErrInvalidReasoningRevise, "revise=%d", revise)
+	}
+}
+
+// TestLoadConfig_ReasoningReviseRequiresPlan: a `revise >= 1` on any rung but
+// `plan` is rejected — the reflexion critic re-reads the draft against the plan,
+// so a revise without one is inert (RFC 0051 Phase 5). PR 8 lifts the old
+// blanket Phase-5 capability gate; this mode gate replaces it.
+func TestLoadConfig_ReasoningReviseRequiresPlan(t *testing.T) {
+	body := `
+channels:
+  - name: planning
+    members:
+      - id: ada
+        respond: participant
+    reasoning:
+      mode: bid
+      revise: 1
+`
+	_, err := LoadConfig(writeYAML(t, body))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidReasoningRevise)
+}
+
+// TestLoadConfig_ReasoningReviseAcceptedUnderPlan: `mode: plan` + `revise: 1|2`
+// now LOADS (the Phase-5 deployment) and the count is preserved.
+func TestLoadConfig_ReasoningReviseAcceptedUnderPlan(t *testing.T) {
+	for _, revise := range []int{1, MaxReasoningRevise} {
+		body := `
+channels:
+  - name: planning
+    members:
+      - id: ada
+        respond: participant
+    reasoning:
+      mode: plan
+      revise: ` + itoa(int64(revise)) + `
+`
+		cfg, err := LoadConfig(writeYAML(t, body))
+		require.NoError(t, err, "revise=%d", revise)
+		assert.Equal(t, revise, cfg.Channels[0].Reasoning.Revise, "revise=%d", revise)
 	}
 }
 
@@ -227,12 +269,19 @@ channels:
 // not the JSON schema).
 func TestReasoningOverridesValidate_CapabilityGate(t *testing.T) {
 	deep := ReasoningDepthDeep
-	revise := 1
+	overCap := MaxReasoningRevise + 1
 	bad := ChannelConfigOverrides{Reasoning: &ReasoningOverrides{Depth: &deep}}
 	assert.ErrorIs(t, bad.Validate(), ErrInvalidReasoningDepth)
 
-	bad = ChannelConfigOverrides{Reasoning: &ReasoningOverrides{Revise: &revise}}
+	// Per-field: an out-of-range revise is rejected here; the `revise >= 1 ⇒ plan`
+	// cross-field rule needs the merged mode and is checked at apply
+	// (TestApplyChannelConfig_ReasoningReviseRequiresPlan), not in this per-field
+	// path — so a lone in-range `revise: 1` passes Validate() now.
+	bad = ChannelConfigOverrides{Reasoning: &ReasoningOverrides{Revise: &overCap}}
 	assert.ErrorIs(t, bad.Validate(), ErrInvalidReasoningRevise)
+	inRange := 1
+	ok := ChannelConfigOverrides{Reasoning: &ReasoningOverrides{Revise: &inRange}}
+	assert.NoError(t, ok.Validate(), "in-range revise passes the per-field validate")
 
 	junk := "ponder"
 	bad = ChannelConfigOverrides{Reasoning: &ReasoningOverrides{Mode: &junk}}
@@ -273,6 +322,48 @@ func TestApplyChannelConfig_ReasoningModeRoundTrips(t *testing.T) {
 		assert.Equal(t, ReasoningModelFast, rc.Model)
 		assert.Equal(t, ReasoningDepthShallow, rc.Depth)
 	}
+}
+
+// TestApplyChannelConfig_ReasoningReviseRequiresPlan: the Phase-5 cross-field rule
+// at apply — `revise >= 1` is rejected unless the merged effective mode is `plan`
+// (inherit/bid both reject), and accepted + stamped onto the router under `plan`.
+func TestApplyChannelConfig_ReasoningReviseRequiresPlan(t *testing.T) {
+	router, store, ctx := newApplyRouter(t)
+	id := mustCreateGovernedGroup(t, store, "planning")
+	require.NoError(t, router.ResolveReasoning(ctx, &Config{}))
+
+	one := 1
+	bid := ReasoningModeBid
+	plan := ReasoningModePlan
+	two := MaxReasoningRevise
+
+	// revise alone (mode inherits → not plan) → rejected, no write.
+	err := router.ApplyChannelConfig(ctx, id,
+		ChannelConfigOverrides{Reasoning: &ReasoningOverrides{Revise: &one}}, 0, "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidReasoningRevise)
+
+	// revise with an explicit non-plan mode → rejected.
+	err = router.ApplyChannelConfig(ctx, id,
+		ChannelConfigOverrides{Reasoning: &ReasoningOverrides{Mode: &bid, Revise: &one}}, 0, "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidReasoningRevise)
+
+	_, revision, err := store.GetChannelConfig(ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), revision, "rejected applies never write")
+
+	// mode: plan + revise: 2 → accepted, persisted, and stamped onto the router.
+	err = router.ApplyChannelConfig(ctx, id,
+		ChannelConfigOverrides{Reasoning: &ReasoningOverrides{Mode: &plan, Revise: &two}}, 0, "")
+	require.NoError(t, err)
+	got, revision, err := store.GetChannelConfig(ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), revision)
+	require.NotNil(t, got.Reasoning)
+	require.NotNil(t, got.Reasoning.Revise)
+	assert.Equal(t, two, *got.Reasoning.Revise)
+	assert.Equal(t, two, router.ReasoningFor(id).Revise, "revise reaches the router")
 }
 
 // TestApplyChannelConfig_ReasoningRejectsUngoverned: a `mode != off` override on a

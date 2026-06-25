@@ -464,8 +464,9 @@ describe("ChannelSettings", () => {
   it("sends a changed reasoning.revise as a NESTED numeric PATCH", async () => {
     // revise is the only NESTED int sub-knob — the enum tests don't exercise the
     // `int` branch's Number() coercion through setBody. The client nests it as a
-    // JSON number under "reasoning"; the value itself is server-capability-gated
-    // (>= 1 is Phase 5), but that's the server's reject to make, not the panel's.
+    // JSON number under "reasoning"; the value's range (0..2) and the `>= 1 ⇒
+    // mode: plan` cross-field rule (RFC 0051 Phase 5) are the server's reject to
+    // make, not the panel's.
     const fetchMock = vi.fn((path, init) =>
       Promise.resolve(
         okJSON(init?.method === "PATCH" ? configBody({ revision: 4 }) : configBody()),

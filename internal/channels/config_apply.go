@@ -277,8 +277,20 @@ func (r *ChannelRouter) validateEscalationChair(ctx context.Context, channelID s
 // An override that does not set `mode` (or sets it to `off`) resolves to the
 // default `off` and needs no membership — so an unrelated first edit on an
 // ungoverned channel is never blocked by a mode the operator did not touch.
+//
+// It ALSO enforces the RFC 0051 Phase 5 cross-field rule that `reasoning.revise
+// >= 1` requires `mode: plan` (the reflexion critic re-reads the draft against
+// the plan). That check needs the MERGED effective mode — a `revise` PATCH may
+// not touch `mode` — which is why it lives here rather than in the per-field
+// [ReasoningOverrides.validate]. `plan` is never a default, so an effective plan
+// mode can only come from an explicit override, making this a clean reject of an
+// operator who set `revise` without promoting the rung to `plan`.
 func (r *ChannelRouter) validateReasoningGoverned(ctx context.Context, channelID string, patch ChannelConfigOverrides) error {
 	mode := patch.Reasoning.effectiveMode()
+	if patch.Reasoning.effectiveRevise() >= 1 && mode != ReasoningModePlan {
+		return fmt.Errorf("channels: apply config %s: %w: requires mode: plan (the reflexion critic re-reads the draft against the plan)",
+			channelID, ErrInvalidReasoningRevise)
+	}
 	if mode == ReasoningModeOff {
 		return nil
 	}

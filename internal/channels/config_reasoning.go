@@ -70,6 +70,14 @@ const (
 	DefaultReasoningRevise = 0
 )
 
+// MaxReasoningRevise is the hard ceiling on `reasoning.revise` (RFC 0051 §Phase 5
+// — `revise: 0 | 1 | 2`). Each round is another quality-model rewrite, so an
+// N-round post costs up to N+1 composes; the cap bounds that. The agent-side loop
+// (`agents/persona_runtime/reflexion.py` `MAX_REVISE_ROUNDS`) clamps to the same
+// value as defense-in-depth — kept in lockstep by `validate` rejecting anything
+// above it, so a config can never request more rounds than the loop will run.
+const MaxReasoningRevise = 2
+
 // GovernedDefaultReasoningMode is the RFC 0051 PR 6 GO-LIVE default: a
 // Tier-B-governed channel (≥1 salience-gated open-floor member) with no explicit
 // `mode` override resolves to the silence-only `bid` rung, not `off`. This is the
@@ -127,8 +135,10 @@ var (
 	// structurally-valid `deep` that Phase 4 has not yet built (capability-gated:
 	// rejected loudly rather than silently degraded to shallow).
 	ErrInvalidReasoningDepth = errors.New("channels: invalid reasoning.depth")
-	// ErrInvalidReasoningRevise — `reasoning.revise` is negative, OR is `>= 1`
-	// before Phase 5 (the reflexion loop) is deployed (capability-gated).
+	// ErrInvalidReasoningRevise — `reasoning.revise` is negative, above
+	// MaxReasoningRevise, OR `>= 1` without `mode: plan` (the reflexion critic
+	// re-reads the draft against the plan, so a revise without one is inert —
+	// RFC 0051 §Phase 5). The Phase-5 capability gate is lifted as of PR 8.
 	ErrInvalidReasoningRevise = errors.New("channels: invalid reasoning.revise")
 )
 
@@ -231,11 +241,17 @@ func (rc ReasoningConfig) validate(governed bool) error {
 		return fmt.Errorf("%w: %q (must be shallow)", ErrInvalidReasoningDepth, rc.Depth)
 	}
 
-	if rc.Revise < 0 {
-		return fmt.Errorf("%w: %d (must be >= 0)", ErrInvalidReasoningRevise, rc.Revise)
+	if rc.Revise < 0 || rc.Revise > MaxReasoningRevise {
+		return fmt.Errorf("%w: %d (must be 0..%d)", ErrInvalidReasoningRevise, rc.Revise, MaxReasoningRevise)
 	}
-	if rc.Revise >= 1 {
-		return fmt.Errorf("%w: %d is not yet deployed (the reflexion loop is RFC 0051 Phase 5)", ErrInvalidReasoningRevise, rc.Revise)
+	// RFC 0051 Phase 5: a reflexion round count is meaningful only under the plan
+	// rung — the critic re-reads the draft *against* the plan. Reject `revise >= 1`
+	// on any other mode rather than silently running it inert. (Full-struct path:
+	// `rc.Mode` is the resolved effective mode; the override path's cross-field
+	// check is [ChannelRouter.validateReasoningGoverned], which has the merged mode.)
+	if rc.Revise >= 1 && rc.Mode != ReasoningModePlan {
+		return fmt.Errorf("%w: %d requires mode: plan (the reflexion critic re-reads the draft against the plan)",
+			ErrInvalidReasoningRevise, rc.Revise)
 	}
 	return nil
 }
@@ -342,13 +358,12 @@ func (o ReasoningOverrides) validate() error {
 			return fmt.Errorf("%w: %q (must be shallow)", ErrInvalidReasoningDepth, *o.Depth)
 		}
 	}
-	if o.Revise != nil {
-		if *o.Revise < 0 {
-			return fmt.Errorf("%w: %d (must be >= 0)", ErrInvalidReasoningRevise, *o.Revise)
-		}
-		if *o.Revise >= 1 {
-			return fmt.Errorf("%w: %d is not yet deployed (the reflexion loop is RFC 0051 Phase 5)", ErrInvalidReasoningRevise, *o.Revise)
-		}
+	// Per-field range only. The `revise >= 1 ⇒ mode: plan` cross-field rule needs
+	// the MERGED effective mode (a `revise` PATCH may not touch `mode`), so it
+	// lives in [ChannelRouter.validateReasoningGoverned] alongside the mode↔governance
+	// rule — this per-field path cannot see the inherited mode.
+	if o.Revise != nil && (*o.Revise < 0 || *o.Revise > MaxReasoningRevise) {
+		return fmt.Errorf("%w: %d (must be 0..%d)", ErrInvalidReasoningRevise, *o.Revise, MaxReasoningRevise)
 	}
 	return nil
 }
@@ -383,4 +398,14 @@ func (o *ReasoningOverrides) effectiveMode() string {
 		return *o.Mode
 	}
 	return DefaultReasoningMode
+}
+
+// effectiveRevise reports the revise round count this override resolves to — the
+// set `revise` or, if absent, the default (`0`, single-pass). Used by the
+// cross-field check so a PATCH that does not touch `revise` never trips the rule.
+func (o *ReasoningOverrides) effectiveRevise() int {
+	if o != nil && o.Revise != nil {
+		return *o.Revise
+	}
+	return DefaultReasoningRevise
 }

@@ -56,6 +56,15 @@ type DispatchEnvelope struct {
 	// pre-v0.3.10 / untracked case the agent maps to `off`.
 	ReasoningMode string
 
+	// ReasoningRevise (RFC 0051 PR 8, Phase 5a) is the channel's resolved reflexion
+	// round count (`reasoning.revise`, 0..2), carried on
+	// `ChannelMessageEvent.reasoning_revise` so the agent-side reflexion loop bounds
+	// its critic→revise rounds after compose. Resolved from the same
+	// [ChannelRouter.ReasoningFor] as ReasoningMode at fanout; channel-level. 0 (the
+	// default / pre-Phase-5 case) is single-pass, and it is meaningful only paired
+	// with ReasoningMode `plan` — the seam pins it to 0 off the plan path.
+	ReasoningRevise int
+
 	// ChairEscalation (the chair-stall-escalation amendment, CE3) marks this
 	// dispatch as the orchestrator's forced turn to the channel's configured
 	// escalation chair after a stalled floor round. Carried on

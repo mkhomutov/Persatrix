@@ -71,6 +71,11 @@ def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, ob
       grammar. The empty string (a pre-v0.3.10 producer) is carried verbatim;
       the seam maps it to ``off`` (the scalar score gate), so the lift stays
       additive across a mixed-version deployment.
+    * ``reasoning_revise`` — the RFC 0051 PR 8 (Phase 5a) reflexion round count
+      (0..2) the seam carries onto ``SalienceOutcome.revise`` on the ``plan`` rung
+      for the post-compose critic→revise loop. 0 (the proto3 default / a
+      pre-Phase-5 producer) is single-pass, so the lift is additive and inert
+      off the ``plan`` path.
     * ``floor_mentions`` / ``floor_mentions_resolved`` — the
       floor-capable-directedness amendment (v0.3.8): the
       orchestrator-resolved Tier A suppression basis plus its
@@ -94,6 +99,11 @@ def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, ob
         # verbatim (empty string for a pre-v0.3.10 producer); the salience seam
         # maps an empty/unknown value to ``off`` (the scalar gate).
         "reasoning_mode": request.reasoning_mode,
+        # RFC 0051 PR 8 (Phase 5a): the channel's resolved reflexion round count
+        # (0..2). 0 (the proto3 default / a pre-Phase-5 producer) is single-pass;
+        # the salience seam carries it onto ``SalienceOutcome.revise`` only on the
+        # ``plan`` rung, so it is additive and inert elsewhere.
+        "reasoning_revise": request.reasoning_revise,
         "floor_mentions": list(request.floor_mentions),
         "floor_mentions_resolved": request.floor_mentions_resolved,
         # Chair-stall-escalation amendment (§C item 2): the forced-turn
