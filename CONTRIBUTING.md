@@ -149,6 +149,23 @@ By submitting a contribution, you agree that your contribution will be distribut
 under the same license terms as the rest of the repository, including the stated
 change date and transition to Apache License, Version 2.0 in [LICENSE](LICENSE).
 
+### Sign-off (DCO) — extracted MIT repositories
+
+[RFC 0045](docs/rfcs/0045-open-core-extraction-policy.md) plans to extract a few
+small, generically-useful primitives into standalone permissive (MIT)
+repositories. **Those repositories will require a Developer Certificate of
+Origin (DCO) sign-off on every contribution** — a `Signed-off-by:` line added
+with `git commit -s` asserting you have the right to submit the code under the
+repo's license. The DCO defends both the MIT library and the BUSL product that
+consumes it against code a contributor does not own.
+
+This is a scaffold note recorded with the dependency-direction CI gate
+([RFC 0045 §B](docs/rfcs/0045-open-core-extraction-policy.md#b-the-dependency-direction-invariant)).
+**This BUSL repository does not require a `Signed-off-by:` line today** — the
+requirement attaches to each extracted repo when it is created (RFC 0045 §E),
+and a brief legal confirmation that MIT-with-DCO inbound is cleanly consumable
+in the BUSL product is the one residual open question there.
+
 ---
 
 ## Pull Request Process

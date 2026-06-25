@@ -68,7 +68,7 @@ Collected via `go-licenses report ./cmd/... ./internal/...` (38 packages).
 
 ## Python dependencies
 
-Collected via `pip-licenses --from=mixed` against the `agents` extras (72 packages).
+Collected via `pip-licenses --from=mixed` against the `agents` extras (78 packages).
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
@@ -82,23 +82,28 @@ Collected via `pip-licenses --from=mixed` against the `agents` extras (72 packag
 | `attrs` | 26.1.0 | MIT | [link](https://www.attrs.org/en/stable/changelog.html) |
 | `certifi` | 2026.2.25 | Mozilla Public License 2.0 (MPL 2.0) | [link](https://github.com/certifi/python-certifi) |
 | `charset-normalizer` | 3.4.7 | MIT | [link](https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md) |
+| `click` | 8.4.2 | BSD-3-Clause | [link](https://github.com/pallets/click/) |
 | `colorama` | 0.4.6 | BSD License | [link](https://github.com/tartley/colorama) |
 | `distro` | 1.9.0 | Apache Software License | [link](https://github.com/python-distro/distro) |
 | `docstring_parser` | 0.18.0 | MIT License | [link](https://github.com/rr-/docstring_parser) |
 | `frozenlist` | 1.8.0 | Apache-2.0 | [link](https://github.com/aio-libs/frozenlist) |
 | `googleapis-common-protos` | 1.74.0 | Apache Software License | [link](https://github.com/googleapis/google-cloud-python/tree/main/packages/googleapis-common-protos) |
+| `grimp` | 3.14 | BSD License | [link](https://grimp.readthedocs.io/) |
 | `grpcio` | 1.80.0 | Apache-2.0 | [link](https://grpc.io) |
 | `grpcio-tools` | 1.71.2 | Apache Software License | [link](https://grpc.io) |
 | `h11` | 0.16.0 | MIT License | [link](https://github.com/python-hyper/h11) |
 | `httpcore` | 1.0.9 | BSD-3-Clause | [link](https://www.encode.io/httpcore/) |
 | `httpx` | 0.28.1 | BSD License | [link](https://github.com/encode/httpx) |
 | `idna` | 3.11 | BSD-3-Clause | [link](https://github.com/kjd/idna) |
+| `import-linter` | 2.12 | BSD License | [link](https://import-linter.readthedocs.io/) |
 | `importlib_metadata` | 8.7.1 | Apache-2.0 | [link](https://github.com/python/importlib_metadata) |
 | `iniconfig` | 2.3.0 | MIT | [link](https://github.com/pytest-dev/iniconfig) |
 | `jiter` | 0.14.0 | MIT | [link](https://github.com/pydantic/jiter/) |
 | `jsonschema` | 4.26.0 | MIT | [link](https://github.com/python-jsonschema/jsonschema) |
 | `jsonschema-specifications` | 2025.9.1 | MIT | [link](https://github.com/python-jsonschema/jsonschema-specifications) |
 | `librt` | 0.9.0 | MIT | [link](https://github.com/mypyc/librt) |
+| `markdown-it-py` | 4.2.0 | MIT License | [link](https://github.com/executablebooks/markdown-it-py) |
+| `mdurl` | 0.1.2 | MIT License | [link](https://github.com/executablebooks/mdurl) |
 | `multidict` | 6.7.1 | Apache License 2.0 | [link](https://github.com/aio-libs/multidict) |
 | `mypy` | 1.20.1 | MIT | [link](https://www.mypy-lang.org/) |
 | `mypy-protobuf` | 3.6.0 | Apache License 2.0 | [link](https://github.com/nipunn1313/mypy-protobuf) |
@@ -128,6 +133,7 @@ Collected via `pip-licenses --from=mixed` against the `agents` extras (72 packag
 | `referencing` | 0.37.0 | MIT | [link](https://github.com/python-jsonschema/referencing) |
 | `regex` | 2026.4.4 | Apache-2.0 AND CNRI-Python | [link](https://github.com/mrabarnett/mrab-regex) |
 | `requests` | 2.33.1 | Apache Software License | [link](https://github.com/psf/requests) |
+| `rich` | 15.0.0 | MIT License | [link](https://github.com/Textualize/rich) |
 | `rpds-py` | 0.30.0 | MIT | [link](https://github.com/crate-py/rpds) |
 | `ruff` | 0.15.11 | MIT | [link](https://docs.astral.sh/ruff) |
 | `sniffio` | 1.3.1 | Apache Software License; MIT License | [link](https://github.com/python-trio/sniffio) |

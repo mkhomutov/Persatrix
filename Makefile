@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -183,13 +183,26 @@ lint: lint-go lint-python lint-rust ## Lint all code
 lint-go:
 	golangci-lint run ./...
 
-lint-python:
+lint-python: imports-check
 	cd agents && $(PYTHON) -m ruff check . && $(PYTHON) -m mypy .
 	@# ISSUE-0056 + ISSUE-0062: the line above runs `cd agents`, leaving the
 	@# repo-root tests/ tree unchecked. Lint and type-check it from the repo
 	@# root via the root ruff.toml / mypy.ini.
 	$(PYTHON) -m ruff check tests/
 	$(PYTHON) -m mypy tests/
+
+imports-check: ## Fail if an MIT-candidate primitive imports orchestrator-coupled (BUSL) code (RFC 0045 §B dependency-direction gate)
+	@# RFC 0045 §B — the MIT↛BUSL dependency-direction gate. Runs the
+	@# `[tool.importlinter]` forbidden contract in agents/pyproject.toml so a
+	@# leaf MIT-candidate (wallet client, prompt-safety kit, mock provider)
+	@# that grows an import into orchestrator-internal (BUSL) code fails the
+	@# build before the next mirror/release ships BUSL source under MIT terms.
+	@# `lint-imports` auto-discovers the contract from the cwd's pyproject and
+	@# needs the editable install (`make build-agents`) so root_package
+	@# `persatrix_agents` resolves. Regression suite:
+	@# tests/unit/python/test_dependency_direction_imports.py. `--no-cache`
+	@# keeps the one-shot CI gate deterministic and leaves no cache dir behind.
+	cd agents && lint-imports --no-cache
 
 lint-rust:
 	cd cli && $(CARGO) clippy -- -D warnings

@@ -3,10 +3,10 @@ id: RFC-0045
 title: Open-Core Library Extraction Policy
 summary: Foundational three-tier open-core policy and governance — MIT funnel libraries below, the self-hostable BUSL-1.1 product in the middle, a never-published Private moat above. Fixes the license boundary, the MIT ← BUSL ← Private dependency-direction invariant and its CI enforcement, the source-of-truth/sync model, contribution governance, the reserved proprietary seams and a no-retraction rule, and the naming/versioning conventions every per-extraction RFC inherits. Moves no code and stands up no private track.
 type: process
-status: proposed
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-24
-target: v0.3.x (policy + dependency-direction CI gate) + v0.4.0+ (per-extraction RFCs)
+target: v0.3.10 (policy + dependency-direction CI gate) + v0.4.0+ (per-extraction RFCs)
 depends_on:
   - RFC-0023
   - RFC-0024
@@ -16,10 +16,10 @@ depends_on:
 # RFC 0045 — Open-Core Library Extraction Policy
 
 **Type**: process
-**Status**: 📋 Proposed
+**Status**: 🚧 Implementing
 **Author**: Maksim Khomutov
 **Date**: 2026-05-24
-**Target**: v0.3.x (policy doc + dependency-direction CI gate) + v0.4.0+ (per-extraction RFCs)
+**Target**: v0.3.10 (policy doc + dependency-direction CI gate) + v0.4.0+ (per-extraction RFCs)
 **Relates to**: RFC 0023 (LLM Call Leasing — the flagship extraction candidate), RFC 0024 (Event-Driven Agent Scheduling — the idle-loop candidate), RFC 0022 (Persona Prompt Section Templating — the prompt-safety candidate), RFC 0029 (Personal/Society Storage Split — the memory tiers kept BUSL and the managed society backend reserved for the Private tier), RFC 0033 (Provider-Agnostic Model Alias Layer — adjacent to the provider/mock candidate), RFC 0012 (Protocols & Organizations) and RFC 0039 (User Accounts & Authentication — the identity/tenancy seams the Private tier attaches to)
 
 ---
@@ -252,6 +252,8 @@ Accepting RFC 0045 produces these in-tree deliverables (no extraction, no privat
 3. **A reserved-seams note** ([§C](#c-the-private-tier-reserved-seams-and-the-no-retraction-rule)) recording the four plug-points and the no-retraction rule, so future BUSL work shapes those interfaces deliberately.
 4. **A `CONTRIBUTING`/DCO scaffold** note describing the sign-off requirement future extracted repos will carry ([§E](#e-contribution-governance)).
 5. **RFC number reservations** for the follow-on extraction RFCs, recorded in the [ROADMAP RFC Master Index](../../ROADMAP.md#rfc-master-index) per the [reservation process](README.md#reserved-rfc-numbers). The commercial-architecture (Private) RFC is *named but not numbered* until its forcing function arrives.
+
+**Implementation status (v0.3.10).** Deliverables 1–4 landed as a v0.3.10 fold-in: the dependency-direction CI gate (the Python `import-linter` forbidden contract in [`agents/pyproject.toml`](../../agents/pyproject.toml) run by `make imports-check`, plus the Go [`internal/archpolicy`](../../internal/archpolicy) check in the `go test ./internal/...` lane), the [reserved-seams note](../open-core-reserved-seams.md), and the [CONTRIBUTING DCO scaffold](../../CONTRIBUTING.md#sign-off-dco--extracted-mit-repositories). Deliverable 5 was already satisfied — [RFC 0046](0046-budget-lease-extraction.md) / [RFC 0047](0047-low-coupling-batch-extraction.md) are reserved. The Go gate is seeded on the genuinely-leaf `internal/generated/walletpb` only; `internal/wallet` stays BUSL (RFC 0046 §D) and is not leaf on `main` (it reaches `internal/executor/packaging` via `internal/cost`), so it joins the gate only after that split ([§B](#b-the-dependency-direction-invariant)).
 
 ## Security Considerations
 

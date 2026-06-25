@@ -69,6 +69,13 @@ dev = [
     # (see grpcio-tools constraint). Bump deliberately, regenerate the
     # *.pyi, and commit in the same change.
     "mypy-protobuf==3.6.0",
+    # RFC 0045 §B — the MIT↛BUSL dependency-direction gate. import-linter's
+    # `lint-imports` runs the `[tool.importlinter]` forbidden contract below as
+    # a hard CI gate (`make imports-check`), failing the build if an
+    # MIT-candidate primitive grows an import into orchestrator-coupled (BUSL)
+    # code. Pinned `>=2` for the `forbidden`-contract + child-wildcard
+    # (`<root>.*`) semantics the contract relies on.
+    "import-linter>=2.0,<3",
 ]
 
 [project.scripts]
@@ -175,4 +182,50 @@ markers = [
 # observe the warning: they install their own always-filter.
 filterwarnings = [
     "ignore:Direct construction of:DeprecationWarning",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RFC 0045 §B — the MIT↛BUSL dependency-direction gate (Python half).
+#
+# Open-core rests on one load-bearing rule: imports may only point *down*-tier
+# (`MIT ← BUSL ← Private`). A small, generically-useful "MIT-candidate"
+# primitive must never import an orchestrator-internal (BUSL) module — on the
+# next mirror/release that one-line diff would ship BUSL source under an MIT
+# grant (RFC 0045 §M-4). This `forbidden` contract makes that a hard CI gate
+# (`make imports-check`), seeded *before* any code physically moves.
+#
+# The candidates below are each already leaf on `main` (they import only
+# stdlib, third-party SDKs, the generated wallet stubs, or a fellow MIT leaf),
+# so the contract is green today and only a future up-import turns it red.
+#
+# `forbidden_modules` lists the *children* of the root (`persatrix_agents.*`),
+# NOT the root itself: forbidding the ancestor package is silently vacuous —
+# import-linter does not count a source importing a sibling under that same
+# ancestor as a violation. The child wildcard also auto-covers any new
+# top-level orchestrator module without a config edit.
+# The regression suite is tests/unit/python/test_dependency_direction_imports.py.
+[tool.importlinter]
+root_package = "persatrix_agents"
+
+[[tool.importlinter.contracts]]
+name = "MIT-candidate primitives must not import orchestrator-coupled (BUSL) modules"
+type = "forbidden"
+source_modules = [
+    "persatrix_agents.wallet_client",
+    "persatrix_agents.prompt_loader",
+    "persatrix_agents.prompt_safety",
+    "persatrix_agents.llm_types",
+    "persatrix_agents.llm_offline",
+]
+forbidden_modules = [
+    "persatrix_agents.*",
+]
+# The only first-party imports a candidate may make: a fellow MIT leaf, or the
+# generated wallet proto stubs (the published MIT wire contract, RFC 0046 §D).
+# Every entry's right-hand side must stay an MIT leaf — never an
+# orchestrator-coupled module (asserted by the regression suite).
+ignore_imports = [
+    "persatrix_agents.llm_offline -> persatrix_agents.llm_types",
+    "persatrix_agents.wallet_client -> persatrix_agents.generated.wallet_pb2",
+    "persatrix_agents.wallet_client -> persatrix_agents.generated.wallet_pb2_grpc",
 ]
