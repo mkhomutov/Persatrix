@@ -353,6 +353,72 @@ class TestForeignStdlibBridge:
         assert record["message"] == "foreign-record"
         assert "timestamp" in record
 
+    def test_stdlib_extra_dict_is_surfaced(
+        self, captured_stderr: io.StringIO
+    ) -> None:
+        """ISSUE-0108: the ``extra=`` dict on a stdlib record reaches the
+        rendered JSON line. The repo's audit convention (``agent.deliberated``,
+        the ``fact.*`` family) emits its payload this way; without ``ExtraAdder``
+        in ``foreign_pre_chain`` these keys were silently dropped, leaving the
+        record presence-only."""
+        import logging as _stdlib_logging
+
+        configure_logging(service_kind="agent", service_instance="ember-owl")
+        _stdlib_logging.getLogger("agents.audit.example").info(
+            "an.audit.event",
+            extra={"audit": True, "reason_code": "already_answered", "count": 3},
+        )
+
+        record = json.loads(captured_stderr.getvalue().strip().splitlines()[-1])
+        assert record["message"] == "an.audit.event"
+        assert record["audit"] is True
+        assert record["reason_code"] == "already_answered"
+        assert record["count"] == 3
+
+    def test_stdlib_extra_keys_cannot_clobber_required_fields(
+        self, captured_stderr: io.StringIO
+    ) -> None:
+        """A hostile/careless ``extra`` key that collides with a schema-required
+        field must not overwrite it — ``ExtraAdder`` runs *before* the
+        schema-field processors, so ``level`` / ``message`` / ``schema_version``
+        are re-set afterwards and win."""
+        import logging as _stdlib_logging
+
+        configure_logging(service_kind="agent", service_instance="ember-owl")
+        _stdlib_logging.getLogger("agents.audit.example").info(
+            "real-message",
+            extra={"schema_version": "999", "reason_code": "kept"},
+        )
+
+        record = json.loads(captured_stderr.getvalue().strip().splitlines()[-1])
+        assert record["schema_version"] == SCHEMA_VERSION  # not "999"
+        assert record["message"] == "real-message"
+        assert record["reason_code"] == "kept"  # a non-colliding extra survives
+
+    def test_stdlib_extra_dict_is_redacted(
+        self, captured_stderr: io.StringIO
+    ) -> None:
+        """Surfaced ``extra`` keys flow through the redactor like any other
+        field — ``ExtraAdder`` is placed *before* :func:`_apply_redactor`, so an
+        operator's redaction policy still applies to audit payloads."""
+        import logging as _stdlib_logging
+
+        class _MaskingRedactor:
+            def redact(self, record: dict[str, Any]) -> dict[str, Any]:
+                if "secret" in record:
+                    record["secret"] = "***"
+                return record
+
+        configure_logging(service_kind="agent", service_instance="ember-owl")
+        set_redactor(_MaskingRedactor())
+        _stdlib_logging.getLogger("agents.audit.example").info(
+            "an.audit.event", extra={"secret": "raw-value", "reason_code": "x"},
+        )
+
+        record = json.loads(captured_stderr.getvalue().strip().splitlines()[-1])
+        assert record["secret"] == "***"  # the redactor saw the surfaced extra
+        assert record["reason_code"] == "x"
+
 
 # ─── 10. Raising redactor falls back (PR #164 review — Must Fix #1) ─────────
 #

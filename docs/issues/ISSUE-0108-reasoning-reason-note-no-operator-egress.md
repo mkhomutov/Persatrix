@@ -1,6 +1,6 @@
 ---
 id: ISSUE-0108
-summary: "The RFC 0051 reasoning trace's verbatim `reason_note` has NO operator egress in shipped v0.3.10. It is parsed (`agents/salience_deliberation.py`) and carried on the `SalienceDecision` (`agents/salience_bid.py:469`) but no log statement ever writes it — the code/tests call its egress 'the operator-debug path, wired in a later PR' (`tests/unit/python/test_salience_bid_reasoning.py:78`), and that later PR was the operator-reveal PR 7, which was CUT from v0.3.10. Compounding it, the count-only `agent.deliberated` audit (`agents/persona_runtime/salience_gate.py:102`) attaches `reason_code`/`should_post` via stdlib `extra=`, but the structlog `ProcessorFormatter.foreign_pre_chain` (`agents/observability/logging.py`) has no `ExtraAdder`, so those fields are dropped from the rendered log line — the audit log is presence-only. Net: the deliberation REASON is observable only as the `deliberation.suppressed{reason_code,mode}` metric LABEL, never in the agent log; the verbatim `reason_note` is observable nowhere. MT-REASON-001 Step 2 and RFC 0051 §E both describe the agent log as the reason_note's egress; that description is aspirational, not wired."
+summary: "The RFC 0051 reasoning trace's verbatim `reason_note` has NO operator egress in shipped v0.3.10. It is parsed (`agents/salience_deliberation.py`) and carried on the `SalienceDecision` (`agents/salience_bid.py:469`) but no log statement ever writes it — the code/tests call its egress 'the operator-debug path, wired in a later PR' (`tests/unit/python/test_salience_bid_reasoning.py:78`), and that later PR was the operator-reveal PR 7, which was CUT from v0.3.10. Compounding it, the count-only `agent.deliberated` audit (`agents/persona_runtime/salience_gate.py:102`) attaches `reason_code`/`should_post` via stdlib `extra=`, but the structlog `ProcessorFormatter.foreign_pre_chain` (`agents/observability/logging.py`) has no `ExtraAdder`, so those fields are dropped from the rendered log line — the audit log is presence-only. Net: the deliberation REASON is observable only as the `deliberation.suppressed{reason_code,mode}` metric LABEL, never in the agent log; the verbatim `reason_note` is observable nowhere. MT-REASON-001 Step 2 and RFC 0051 §E both describe the agent log as the reason_note's egress; that description is aspirational, not wired. UPDATE: the `agent.deliberated` (and latent `fact.*`) audit-drop half — the missing `ExtraAdder` — is now FIXED; the audit payload reaches the rendered line. Remaining open scope is the verbatim `reason_note` egress + the §E/MT-REASON-001 doc correction (Gap B), deferred to its own PR."
 status: open
 severity: low
 area: agents
@@ -48,6 +48,29 @@ Net effect: the deliberation **reason** is observable **only** as the
 agent log shows *that* a deliberation happened (countable `agent.deliberated`
 events) but not *why*, and the verbatim `reason_note` is observable **nowhere**.
 
+## Update — fact (2) resolved (Gap A)
+
+The `agent.deliberated` audit-drop above (fact 2) is **fixed**. The root cause
+was repo-wide: the audit convention emits its payload via the stdlib
+`logger.info(event, extra={…})` idiom — both `agent.deliberated`
+([`salience_gate.py`][gate]) and the whole `fact.*` family
+([`agents/memory/_facts_audit.py`][facts]) — but the structlog
+`ProcessorFormatter` chain had no `ExtraAdder`, so every such payload was
+dropped from the rendered/shipped line (not just the deliberation audit). The
+fix adds `structlog.stdlib.ExtraAdder()` to the shared processor chain
+([`agents/observability/logging.py`][log] `_build_processors`), placed *before*
+redaction (so surfaced extras are still redacted) and *before* the
+schema-required processors (so a colliding `extra` key can never clobber a
+required field). The `agent.deliberated` `reason_code` / `should_post` /
+`transcript_turns` — and every `fact.*` audit payload — now reach the rendered
+JSON. New tests assert at the *rendered* layer (the egress an operator reads),
+not the `caplog` `LogRecord` layer where the bug was invisible.
+
+**Still open (Gap B):** the verbatim `reason_note` (fact 1) still has **zero**
+egress, and the RFC 0051 §E / MT-REASON-001 Step 2 docs still describe the agent
+log as its egress. That half is intentionally deferred to its own PR (see below)
+and keeps this issue open.
+
 ## Impact
 
 - **Not a privacy defect — the opposite.** The §E wall is *stronger* than
@@ -71,14 +94,17 @@ and no `reason_note` appeared in any agent log at INFO or DEBUG. The reason was
 read from the **metric label**, which is what the execution report records as the
 v0.3.10 silence-with-a-reason evidence.
 
-## Proposed fix (deferred — its own reviewed PR, not release-prep)
+## Proposed fix
 
-Wire the deferred operator-debug egress (the cut PR 7's agent-log half):
+1. ~~Add an `ExtraAdder` to the structlog `foreign_pre_chain` (or emit the audit
+   via a structlog-native bound logger) so the count-only `agent.deliberated`
+   audit's `reason_code` / `should_post` reach the rendered line — the audit's
+   intended payload.~~ **Done (Gap A)** — `ExtraAdder` added to the shared chain
+   (see *Update* above); fixes the `fact.*` audit drop in the same stroke.
 
-1. Add an `ExtraAdder` to the structlog `foreign_pre_chain` (or emit the audit via
-   a structlog-native bound logger) so the count-only `agent.deliberated` audit's
-   `reason_code` / `should_post` reach the rendered line — the audit's intended
-   payload.
+The remaining steps are **deferred — their own reviewed PR, not release-prep**
+(Gap B: wiring the cut PR 7's verbatim-`reason_note` agent-log half):
+
 2. Add a single **DEBUG**-level egress for the verbatim `reason_note` on the
    suppression path ([`salience_gate.py`][gate]), guarded to the agent log only,
    with a no-leak test that it reaches the debug log but **never** a message, the
@@ -99,5 +125,6 @@ deferred.
 [bid]: ../../agents/salience_bid.py
 [test]: ../../tests/unit/python/test_salience_bid_reasoning.py
 [gate]: ../../agents/persona_runtime/salience_gate.py
+[facts]: ../../agents/memory/_facts_audit.py
 [log]: ../../agents/observability/logging.py
 [noleak]: ../../tests/integration/test_deliberation_no_leak.py

@@ -32,6 +32,12 @@ the root handler.  Two consequences:
 2. Third-party libraries that emit through stdlib ``logging`` (grpc, anthropic,
    openai) flow through the same ``ProcessorFormatter`` and are rendered in the
    same JSON schema, so a single CLI consumer sees one wire format.
+3. The ``extra=`` dict on a stdlib ``LogRecord`` is surfaced into the rendered
+   line by ``structlog.stdlib.ExtraAdder`` in the shared chain (ISSUE-0108).
+   The repo's audit convention (``agent.deliberated``, the ``fact.*`` family)
+   carries its structured payload via ``logger.info(event, extra={...})``; the
+   ``ExtraAdder`` is what makes those keys reach the JSON line rather than being
+   dropped to a presence-only record.
 
 Cross-RFC coupling
 ------------------
@@ -278,6 +284,26 @@ def _build_processors() -> list[structlog.types.Processor]:
         # 1. Per-async-task contextvars (execution_id / step_id / agent_id
         #    bound by the gRPC interceptor in RFC 0018 PR 3).
         structlog.contextvars.merge_contextvars,
+        # 1b. Surface the stdlib ``extra=`` dict on foreign records (ISSUE-0108).
+        #    The repo's audit convention emits structured payloads via stdlib
+        #    ``logger.info(event, extra={...})`` — ``agent.deliberated``
+        #    (``agents/persona_runtime/salience_gate.py``) and the ``fact.*``
+        #    family (``agents/memory/_facts_audit.py``). Without ``ExtraAdder``
+        #    in ``foreign_pre_chain`` those keys were silently dropped from the
+        #    rendered/shipped line: the records arrived presence-only (message +
+        #    trace context), so the audit *decision* (``reason_code`` /
+        #    ``should_post`` / counts) never reached an operator. ``ExtraAdder``
+        #    surfaces exactly the caller-supplied ``extra`` keys (it diffs the
+        #    LogRecord against the standard attribute set), so no stdlib internals
+        #    leak. Placed *before* the schema-field processors so a colliding
+        #    ``extra`` key can never clobber a required field (``schema_version``
+        #    / ``level`` / ``timestamp`` / ``message`` are re-set below and win),
+        #    and *before* :func:`_apply_redactor` so the surfaced extras are
+        #    redacted like any other field. No-op on the structlog-native path:
+        #    there is no ``_record`` until ``ProcessorFormatter`` attaches one, so
+        #    this only fires for foreign/stdlib records — exactly where ``extra=``
+        #    audits live (native callers pass kwargs straight into the event_dict).
+        structlog.stdlib.ExtraAdder(),
         # 2. Schema-required fields.
         _add_schema_version,
         structlog.processors.TimeStamper(fmt="iso", utc=True),
