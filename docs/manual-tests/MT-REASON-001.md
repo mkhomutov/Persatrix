@@ -151,7 +151,15 @@ Setting `reasoning.mode: bid|plan` on a channel with no `participant`/`chair` me
 
 ## Test Results
 
-_Not yet executed live. To be filled at v0.3.10 release-prep (Phase 3) against a real provider, with the per-sender reply counts, the captured `reason_note` log line, the `?as_participant` recall cross-check, and the suppression-delta figure._
+**✅ Executed live (Anthropic) — Pass.** v0.3.10 release-prep PR 1, 2026-06-26 — full record in [v0.3.10-execution-report.md](v0.3.10-execution-report.md#mt-reason-001--reasoning-before-posting-live-anthropic).
+
+- **Step 1** (governed default `bid`): ✅ — after fixing **F-1** (the demo `config/channels.yaml` had pinned `planning` to `mode: "off"` with a stale dark-phase comment; fixed to inherit the governed `bid` default in the same PR). A newly `salience_gated` runtime channel also resolved to `bid`; an ungoverned channel showed `off` and rejected a non-`off` mode.
+- **Step 2** (semantic silence): ✅ at **reason_code** granularity — `deliberation.suppressed{reason_code=nothing_to_add, mode=bid}` = 8 of `deliberation.total{bid}` = 10 (**80% suppress-rate**), suppressed turns produced no message. **Caveat (F-2 / [ISSUE-0108](../issues/ISSUE-0108-reasoning-reason-note-no-operator-egress.md)):** the verbatim `reason_note` has **no operator egress** in v0.3.10 (the agent-log egress was deferred with the cut PR 7, and the `agent.deliberated` audit's `reason_code` is dropped by the structlog formatter) — the reason is read from the **suppression metric label**, not the agent log. The §E / Step 2 wording above should be corrected accordingly (tracked in ISSUE-0108).
+- **Step 3** (plan-threaded post + no-leak): ✅ — considered single-item posts shipped; the private plan markers appear 0× in the transcript and 0× in both peers' `?as_participant` recall.
+- **Step 4** (reflexion `revise=1`): ✅ — `reflexion.runs{outcome=revised}` = 2, `reflexion.rounds` = 2; discarded draft + critic note walled; fail-soft (`budget_starved`=0).
+- **Step 5** (kill switch `off`): ✅ — `deliberation.*` flat under `off` (scalar `below_threshold` gate restored), explicit `off` preserved and survives a boot.
+- **Edge cases**: ✅ — `depth: deep`, `revise≥1` without `mode: plan`, and `revise > 2` all rejected at validate (400 / client enum); a non-`off` mode on an ungoverned channel rejected.
+- **Telemetry**: `deliberation.duration` histogram populated (~2.3 s `bid` / ~4.6 s `plan`), `budget_starved` = 0, `parse_failures` = 0.
 
 ---
 
