@@ -51,10 +51,16 @@ The downward (MIT) boundary is enforced, not just documented: the
 A leaf MIT-candidate primitive that imports orchestrator-internal (BUSL) code
 fails the build —
 
-- **Python:** the `[tool.importlinter]` forbidden contract in
-  [`agents/pyproject.toml`](../agents/pyproject.toml), run by `make imports-check`.
-- **Go:** the `internal/archpolicy` package, checked in the existing
-  `go test ./internal/...` lane.
+- **Python (the live edge):** the `[tool.importlinter]` forbidden contract in
+  [`agents/pyproject.toml`](../agents/pyproject.toml), run by `make imports-check`,
+  seeded on the five already-leaf MIT candidates. This is the half that protects
+  real code today — the flagship MIT artifact is a Python library ([RFC 0046 §D](rfcs/0046-budget-lease-extraction.md)).
+- **Go (forward-looking):** the `internal/archpolicy` package, checked in the
+  existing `go test ./internal/...` lane. It currently guards only the generated
+  `internal/generated/walletpb` wire stubs — leaf by construction, so the Go gate
+  has **no live protection to give yet**; it is the seam that gains teeth when the
+  first hand-written MIT Go package is added (e.g. after the RFC 0046 engine/metrics
+  split lets `internal/cost`/`internal/wallet` join).
 
 The upward (BUSL ↛ Private) boundary has no live check yet — there is no Private
 code in this repo to import. It is enforced by *keeping intended-private

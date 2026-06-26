@@ -28,6 +28,23 @@ vacuous — import-linter does not treat a source importing a sibling under that
 same ancestor as a violation. Only forbidding the *children*
 (``persatrix_agents.*``) has teeth, so the suite proves that shape works rather
 than trusting it.
+
+Known limitations (residual blind spots, documented rather than silently
+assumed away):
+
+* **Static analysis only.** import-linter/grimp sees ``import``/``from`` AST
+  statements, not dynamic imports (``importlib.import_module("persatrix_agents.
+  server")``). A candidate that reaches BUSL code dynamically would slip the
+  gate. This mirrors every static import checker and is acceptable because the
+  realistic regression is an ordinary top-level ``import``, not deliberate
+  obfuscation.
+* **The teeth test is a shape proxy.** Point (4) exercises the ``<root>.*``
+  shape against a throwaway package, not the production contract's full
+  ``source_modules``/``ignore_imports`` against the real tree (which would mean
+  mutating tracked source). A regression that *weakened* the real contract is
+  still caught — by point (1)'s structural assertions (child wildcard present,
+  bare ancestor absent) and point (3)'s on-tree run — so the proxy plus those
+  two is the coverage, not the teeth test alone.
 """
 
 from __future__ import annotations
@@ -75,13 +92,41 @@ def _lint_imports_cmd() -> str | None:
     the entry point is the ``lint-imports`` script. It is usually on ``PATH``,
     but in a non-activated venv it sits next to the interpreter that has
     import-linter installed — check both. Returning ``None`` lets the
-    subprocess tests skip cleanly when the dev/CI extra is not installed.
+    subprocess tests skip cleanly in *local* dev when the extra is not installed
+    (in CI a missing tool is a hard failure — see ``_require_lint_imports``).
     """
     found = shutil.which("lint-imports")
     if found:
         return found
     candidate = Path(sys.executable).parent / "lint-imports"
     return str(candidate) if candidate.exists() else None
+
+
+# Resolved once at import time. The two subprocess-backed tests below are the
+# only ones that actually *run* the contract — the rest merely parse the TOML.
+# They may skip in local dev when import-linter is absent, but they must NOT skip
+# in CI: a green run that silently skipped the gate's only executable tests would
+# report it "passing" while never exercising it (exactly the silent-toothless
+# failure the gate exists to prevent). `CI` is set by GitHub Actions (and most
+# providers), so there a missing tool is a hard failure, not a skip.
+_LINT_IMPORTS = _lint_imports_cmd()
+_IN_CI = bool(os.environ.get("CI"))
+
+
+def _require_lint_imports() -> str:
+    """Return the ``lint-imports`` path, failing loudly when it is required.
+
+    Reached only when the ``skipif`` below did not skip — i.e. either the tool is
+    present, or we are in CI where its absence is a setup error rather than a
+    reason to skip.
+    """
+    if _LINT_IMPORTS is None:
+        pytest.fail(
+            "import-linter (lint-imports) is not installed, so the RFC 0045 §B "
+            "dependency-direction gate cannot run. Install the agents [dev] extra "
+            "(`make build-agents`). Hard failure in CI rather than a silent skip."
+        )
+    return _LINT_IMPORTS
 
 
 def _load_forbidden_contract() -> dict:
@@ -124,11 +169,13 @@ def test_ignore_imports_never_whitelists_an_orchestrator_module() -> None:
         )
 
 
-@pytest.mark.skipif(_lint_imports_cmd() is None, reason="import-linter not installed")
+@pytest.mark.skipif(
+    _LINT_IMPORTS is None and not _IN_CI,
+    reason="import-linter not installed (local dev only; required and enforced in CI)",
+)
 def test_dependency_direction_contract_passes_on_current_tree() -> None:
     """The seeded contract is green on ``main`` (every candidate is leaf)."""
-    cmd = _lint_imports_cmd()
-    assert cmd is not None  # guaranteed by skipif; narrows the type for mypy
+    cmd = _require_lint_imports()
     result = subprocess.run(
         [cmd, "--no-cache"],
         cwd=AGENTS_DIR,
@@ -143,7 +190,10 @@ def test_dependency_direction_contract_passes_on_current_tree() -> None:
     )
 
 
-@pytest.mark.skipif(_lint_imports_cmd() is None, reason="import-linter not installed")
+@pytest.mark.skipif(
+    _LINT_IMPORTS is None and not _IN_CI,
+    reason="import-linter not installed (local dev only; required and enforced in CI)",
+)
 def test_forbidden_child_wildcard_has_teeth(tmp_path: Path) -> None:
     """A ``forbidden = <root>.*`` contract catches a real up-import.
 
@@ -172,8 +222,7 @@ def test_forbidden_child_wildcard_has_teeth(tmp_path: Path) -> None:
         "    demo_pkg.*\n"
     )
 
-    cmd = _lint_imports_cmd()
-    assert cmd is not None  # guaranteed by skipif; narrows the type for mypy
+    cmd = _require_lint_imports()
     result = subprocess.run(
         [cmd, "--config", str(config), "--no-cache"],
         cwd=tmp_path,

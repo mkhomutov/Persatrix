@@ -93,6 +93,17 @@ func TestForbiddenInternalImports(t *testing.T) {
 			allowed: nil,
 			want:    nil,
 		},
+		{
+			name: "a repeated violation is collapsed to a single entry",
+			pkg:  "example.com/proj/leaf",
+			deps: []string{
+				"example.com/proj/leaf",
+				"example.com/proj/internal/cost",
+				"example.com/proj/internal/cost", // duplicate — must not double-report
+			},
+			allowed: nil,
+			want:    []string{"example.com/proj/internal/cost"},
+		},
 	}
 
 	for _, tt := range tests {

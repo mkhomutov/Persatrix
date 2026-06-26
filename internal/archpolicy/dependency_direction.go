@@ -27,6 +27,16 @@ const ModulePath = "github.com/mkhomutov/persatrix"
 // paths it is permitted to depend on. RFC 0045 §B seeds the gate only on
 // packages that are already leaf on `main`.
 //
+// The allow-list is matched by exact path against the package's *full
+// transitive* dependency list (the `go list -deps` output), and matching is not
+// transitive: allowing path X permits an edge to X but not to X's own
+// dependencies. So when a future MIT Go package is added with a non-empty
+// allow-list, that list must enumerate the entire transitive closure of the
+// in-module packages it is permitted to reach, not just its direct imports —
+// otherwise a transitively-reached allowed package's own in-module deps surface
+// as violations. (walletpb's list is empty because it reaches nothing
+// in-module.)
+//
 //   - internal/generated/walletpb — the generated wallet proto stubs: the
 //     published MIT wire contract (RFC 0045 §F / RFC 0046 §D). Leaf today
 //     (imports only the protobuf runtime), so its allow-list is empty.
@@ -44,7 +54,9 @@ var ExtractableGoPackages = map[string][]string{
 // modulePath as a path prefix) that are neither pkg itself nor on its allowed
 // list. deps is the full transitive dependency list (as produced by
 // `go list -deps`), so stdlib and third-party entries — which do not share the
-// module prefix — are ignored. The result is sorted for stable reporting.
+// module prefix — are ignored. The result is sorted and de-duplicated for
+// stable reporting (`go list -deps` is already unique, but de-duping keeps the
+// classifier honest for any caller that passes a repeated dependency).
 func ForbiddenInternalImports(modulePath, pkg string, deps, allowed []string) []string {
 	allowedSet := make(map[string]bool, len(allowed))
 	for _, a := range allowed {
@@ -52,6 +64,7 @@ func ForbiddenInternalImports(modulePath, pkg string, deps, allowed []string) []
 	}
 
 	inModulePrefix := modulePath + "/"
+	seen := make(map[string]bool)
 	var bad []string
 	for _, dep := range deps {
 		switch {
@@ -59,7 +72,10 @@ func ForbiddenInternalImports(modulePath, pkg string, deps, allowed []string) []
 			continue
 		case allowedSet[dep]: // an explicitly-permitted leaf dependency
 			continue
+		case seen[dep]: // already recorded — collapse duplicates
+			continue
 		case len(dep) > len(inModulePrefix) && dep[:len(inModulePrefix)] == inModulePrefix:
+			seen[dep] = true
 			bad = append(bad, dep)
 		}
 	}
