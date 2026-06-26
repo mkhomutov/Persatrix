@@ -127,6 +127,20 @@ func TestForbiddenInternalImports(t *testing.T) {
 // is not leaf. It joins the gate only once that engine/metrics split lands
 // (RFC 0045 §B; deferred to RFC 0023's extraction).
 func TestExtractableGoPackagesStayLeaf(t *testing.T) {
+	// Non-vacuity guard. A `for range` over an empty map runs zero subtests and
+	// the parent test still reports PASS — so an emptied or renamed guarded set
+	// (a future refactor commenting out the walletpb entry, or a bad merge) would
+	// leave this gate silently toothless while `go test ./internal/...` stays
+	// green. Assert the set is populated and still seeds the walletpb leaf before
+	// looping. This mirrors the Python half's test_contract_covers_every_mit_candidate
+	// (which pins source_modules against an independent expected set, RFC 0045 §B);
+	// without it the two halves are asymmetric and only the Python gate is
+	// protected against a silently-dropped guarded entry.
+	require.NotEmpty(t, ExtractableGoPackages,
+		"the Go MIT↛BUSL guarded set is empty — the gate would be vacuous (RFC 0045 §B)")
+	require.Contains(t, ExtractableGoPackages, ModulePath+"/internal/generated/walletpb",
+		"the seeded walletpb leaf must stay in the guarded set (RFC 0045 §B)")
+
 	for pkg, allowed := range ExtractableGoPackages {
 		t.Run(pkg, func(t *testing.T) {
 			deps := goListDeps(t, pkg)
