@@ -55,16 +55,47 @@ was repo-wide: the audit convention emits its payload via the stdlib
 `logger.info(event, extra={…})` idiom — both `agent.deliberated`
 ([`salience_gate.py`][gate]) and the whole `fact.*` family
 ([`agents/memory/_facts_audit.py`][facts]) — but the structlog
-`ProcessorFormatter` chain had no `ExtraAdder`, so every such payload was
+`ProcessorFormatter` chain surfaced no `extra=` keys, so every such payload was
 dropped from the rendered/shipped line (not just the deliberation audit). The
-fix adds `structlog.stdlib.ExtraAdder()` to the shared processor chain
-([`agents/observability/logging.py`][log] `_build_processors`), placed *before*
-redaction (so surfaced extras are still redacted) and *before* the
-schema-required processors (so a colliding `extra` key can never clobber a
-required field). The `agent.deliberated` `reason_code` / `should_post` /
-`transcript_turns` — and every `fact.*` audit payload — now reach the rendered
-JSON. New tests assert at the *rendered* layer (the egress an operator reads),
-not the `caplog` `LogRecord` layer where the bug was invisible.
+fix adds a `surface_stdlib_extra` processor
+([`agents/observability/_stdlib_extra.py`][extra], wired into the shared chain in
+[`logging.py`][log] `_build_processors`), placed *before* redaction (so surfaced
+extras are still redacted) and *after* `merge_contextvars` (so a bound execution
+identity is already present). The `agent.deliberated` `reason_code` /
+`should_post` / `transcript_turns` — and every `fact.*` audit payload — now reach
+the rendered JSON.
+
+It is **not** a bare `structlog.stdlib.ExtraAdder()`, which is wrong on two axes:
+
+1. **Clobbering.** `ExtraAdder` copies every `extra` key over whatever the chain
+   already set, so a colliding key silently replaces (a) `level` —
+   `_normalise_level` *prefers* an existing `level` key, so `extra={"level":
+   "ERROR"}` on an `info()` call rendered as `ERROR`; (b) the OTEL `trace_id` /
+   `span_id` when no span is active (forged correlation); or (c) a
+   contextvar-bound identity such as `agent_id` / `service.*` (merged just above)
+   — which the deliberation/`fact.*` audits *do* carry, so the audit value was
+   overriding the trace-context identity on every line. The guard instead drops a
+   surfaced key when it is reserved (schema machinery / OTEL IDs) or already
+   present (the contextvar/service value wins), and otherwise lets it *fill the
+   gap* — so an audit's own `agent_id` still surfaces when no contextvar is bound
+   (early startup / CLI / migrations).
+
+2. **Third-party blast radius — and a CI hang.** A bare adder also surfaces the
+   attributes of *third-party* records (`grpc`, `asyncio`, `anthropic`/`openai`).
+   That hung CI: the real log shipper's own `grpc` channel (hammering a dead
+   orchestrator in the `TestStartupCatchUpWiring` startup tests) emitted foreign
+   records whose surfaced attributes flowed to the shipper's `record_to_proto` →
+   `Struct` conversion, while the shipper's error path re-logged through the same
+   chain and *re-enqueued into its own queue* — a feedback loop that wedged the
+   tests into a multi-minute hang (the parent commit, with no surfacing, ships
+   those records empty and passes). The processor is therefore **scoped to our
+   own application logger roots** (`agents` / `persatrix_agents` / `Persatrix`);
+   third-party records render exactly as they did before ISSUE-0108.
+
+New tests assert at the *rendered* layer (the egress an operator reads), not the
+`caplog` `LogRecord` layer where the bug was invisible, covering each clobber
+case, the third-party-not-surfaced scope, and the `fact.*` triple's redacted
+egress.
 
 **Still open (Gap B):** the verbatim `reason_note` (fact 1) still has **zero**
 egress, and the RFC 0051 §E / MT-REASON-001 Step 2 docs still describe the agent
@@ -99,8 +130,10 @@ v0.3.10 silence-with-a-reason evidence.
 1. ~~Add an `ExtraAdder` to the structlog `foreign_pre_chain` (or emit the audit
    via a structlog-native bound logger) so the count-only `agent.deliberated`
    audit's `reason_code` / `should_post` reach the rendered line — the audit's
-   intended payload.~~ **Done (Gap A)** — `ExtraAdder` added to the shared chain
-   (see *Update* above); fixes the `fact.*` audit drop in the same stroke.
+   intended payload.~~ **Done (Gap A)** — a guarded `_surface_stdlib_extra`
+   processor added to the shared chain (see *Update* above); fixes the `fact.*`
+   audit drop in the same stroke, and (unlike a bare `ExtraAdder`) guarantees a
+   caller's `extra` can never overwrite a chain-owned or bound-identity field.
 
 The remaining steps are **deferred — their own reviewed PR, not release-prep**
 (Gap B: wiring the cut PR 7's verbatim-`reason_note` agent-log half):
@@ -127,4 +160,5 @@ deferred.
 [gate]: ../../agents/persona_runtime/salience_gate.py
 [facts]: ../../agents/memory/_facts_audit.py
 [log]: ../../agents/observability/logging.py
+[extra]: ../../agents/observability/_stdlib_extra.py
 [noleak]: ../../tests/integration/test_deliberation_no_leak.py
