@@ -1,3 +1,4 @@
+import logging
 import os
 import tempfile
 
@@ -18,6 +19,40 @@ from agents.tools.registry import clear_registry
 # 500-line review cap after adding the timestamp / explicit-limit
 # tests.)
 from ._catchup_test_helpers import orchestrator  # noqa: F401
+
+
+@pytest.fixture(autouse=True)
+def _no_leaked_log_handlers():
+    """Strip any stdlib root handler a test installs via ``configure_logging``.
+
+    ``agents.observability.logging.configure_logging`` installs a
+    ``ProcessorFormatter`` handler on the **root** logger whose
+    ``foreign_pre_chain`` runs ``_ship_to_orchestrator`` — i.e. it enqueues every
+    propagated record onto the *active* log shipper. The observability/audit
+    rendered-egress tests call ``configure_logging`` and never remove that
+    handler, so it leaks onto the root logger.
+
+    Left in place, a *later* real-``AgentServer`` test (e.g.
+    ``test_server_catchup_wiring`` / ``test_registration``'s ``TestSessionLifecycle``)
+    starts a real shipper against a dead orchestrator; the shipper's
+    stream-error path re-logs through that leaked handler, which re-enqueues onto
+    the shipper's own queue — a self-feeding loop that wedged CI into a
+    multi-minute hang (ISSUE-0108; not reproducible on macOS, only under the CI
+    runner's gRPC/event-loop behaviour). Snapshot the root handler set and remove
+    anything a test added, so no test can leak the ship-enqueueing handler into a
+    later one."""
+    root = logging.getLogger()
+    saved = root.handlers[:]
+    yield
+    leaked = [h for h in root.handlers if h not in saved]
+    if leaked:
+        for handler in leaked:
+            root.removeHandler(handler)
+        # Force the next configure_logging() to rebuild rather than early-return
+        # on its idempotency guard (the handler it would reuse is now gone).
+        import agents.observability.logging as _obs_logging
+
+        _obs_logging._configured = False
 
 
 @pytest.fixture(autouse=True)
