@@ -156,17 +156,21 @@ channels:
     # WHAT the post should accomplish (`mode: plan`, threading a private composition
     # plan into the compose). The deliberation rides the Tier B salience seam, so it
     # is meaningful only on a channel with a salience-gated `participant`/`chair`
-    # member; `mode != off` on a channel without one is rejected at load. The block
-    # ships DARK in v0.3.10 — `mode: off` (the default, today's scalar score gate)
-    # is shown here for discoverability; the governed-channel default flips to `bid`
-    # in a later step. `model: fast` keeps the deliberation on the cheap leased
-    # model (quality is accepted but defeats the cheap-pass economics). `depth: deep`
-    # (native extended thinking) and `revise >= 1` (the reflexion loop) are not yet
-    # deployed and are rejected at load rather than silently degraded.
+    # member; `mode != off` on a channel without one is rejected at load. GO-LIVE
+    # (RFC 0051 PR 6, v0.3.10): a governed channel defaults to `bid` — semantic
+    # silence is on out of the box. `mode: "bid"` is set explicitly here for
+    # discoverability; it equals the governed default, so `config get` still reports
+    # it as governed-default provenance (not an operator override). Set `mode: "off"`
+    # for the one-flip kill switch (byte-for-byte the prior scalar score gate), or
+    # `mode: "plan"` to opt one rung up into the considered, plan-threaded compose.
+    # `model: fast` keeps the deliberation on the cheap leased model (quality is
+    # accepted but defeats the cheap-pass economics). `depth: deep` (native extended
+    # thinking) and `revise >= 1` (the reflexion loop) are not yet deployed and are
+    # rejected at load rather than silently degraded.
     # `mode` is quoted because YAML 1.1 (PyYAML, used by `make validate`) parses a
-    # bare `off`/`on` as a boolean — the schema and loader want the string "off".
+    # bare `off`/`on` as a boolean — the schema and loader want the string.
     reasoning:
-      mode: "off"
+      mode: "bid"
       model: fast
       depth: shallow
       revise: 0
