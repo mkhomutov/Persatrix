@@ -80,17 +80,39 @@ It is **not** a bare `structlog.stdlib.ExtraAdder()`, which is wrong on two axes
    gap* — so an audit's own `agent_id` still surfaces when no contextvar is bound
    (early startup / CLI / migrations).
 
-2. **Third-party blast radius — and a CI hang.** A bare adder also surfaces the
-   attributes of *third-party* records (`grpc`, `asyncio`, `anthropic`/`openai`).
-   That hung CI: the real log shipper's own `grpc` channel (hammering a dead
-   orchestrator in the `TestStartupCatchUpWiring` startup tests) emitted foreign
-   records whose surfaced attributes flowed to the shipper's `record_to_proto` →
-   `Struct` conversion, while the shipper's error path re-logged through the same
-   chain and *re-enqueued into its own queue* — a feedback loop that wedged the
-   tests into a multi-minute hang (the parent commit, with no surfacing, ships
-   those records empty and passes). The processor is therefore **scoped to our
-   own application logger roots** (`agents` / `persatrix_agents` / `Persatrix`);
-   third-party records render exactly as they did before ISSUE-0108.
+2. **Third-party blast radius.** A bare adder also surfaces the attributes of
+   *third-party* records (`grpc`, `asyncio`, `anthropic`/`openai`) into our
+   schema'd line and ships them, when the `extra=` audit convention is ours
+   alone. The processor is therefore **scoped to our own application logger
+   roots** (`agents` / `persatrix_agents` / `Persatrix`); third-party records
+   render exactly as they did before ISSUE-0108.
+
+### The CI hang (separate cause — test isolation, not the chain)
+
+The first pushes hung the `Python (lint + test)` job for ~9–13 min in a real-`AgentServer`
+test (`TestStartupCatchUpWiring` / `test_registration`'s `TestSessionLifecycle`),
+not reproducible on macOS even with the full ordered suite. Root cause was **a
+leaked log handler between tests**, not the chain logic:
+
+* `configure_logging` installs a `ProcessorFormatter` handler on the **root**
+  logger whose `foreign_pre_chain` runs `_ship_to_orchestrator` — every
+  propagated record is enqueued onto the *active* log shipper.
+* The only `tests/unit/python/` tests that call `configure_logging` are this PR's
+  new rendered-egress tests (the pre-existing fact-audit tests only mention it in
+  docstrings — which is why the parent never hung), and their fixtures never
+  removed the handler. It leaked onto the root logger.
+* A *later* real-`AgentServer` test starts a real shipper against a dead
+  orchestrator; the shipper's stream-error path re-logs through the leaked
+  handler, which re-enqueues onto the shipper's own queue — a self-feeding loop
+  that wedges under the CI runner's gRPC/event-loop behaviour (macOS
+  drains/cancels it, so it passed locally).
+
+Fix: an autouse fixture in
+[`tests/unit/python/conftest.py`](../../tests/unit/python/conftest.py) snapshots
+the root handler set and strips anything a test added (resetting
+`configure_logging`'s idempotency guard). No production change. The deeper
+shipper self-feedback loop (the shipper re-shipping its own error logs) is a
+real latent design smell tracked as a separate follow-up.
 
 New tests assert at the *rendered* layer (the egress an operator reads), not the
 `caplog` `LogRecord` layer where the bug was invisible, covering each clobber
