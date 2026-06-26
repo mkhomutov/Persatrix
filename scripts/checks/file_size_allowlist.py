@@ -340,6 +340,15 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # unchanged) plus the structural-gate + Known-follow-up inventories for the
     # verbatim-recall surface. Archive once v0.3.9 ships.
     "docs/v0.3.9-release-prep-plan.md",
+    # docs/v0.3.10-release-prep-plan.md — v0.3.10 release-prep sequencer; same
+    # accumulator pattern as the v0.3.4–v0.3.9 plans above. This release adds NO
+    # store migration (channel store stays v10, persona-memory unchanged), so in
+    # place of the §Schema/migration-state contract it carries the reasoning
+    # go-live gate trio (the privacy-wall no-leak test, the off→bid flip + kill
+    # switch, the deliberation/reflexion telemetry) plus the additive-proto-field
+    # wire-compat contract and the structural-gate + Known-follow-up inventories
+    # for the reasoning-before-posting surface. Archive once v0.3.10 ships.
+    "docs/v0.3.10-release-prep-plan.md",
     # docs/guides/persona-agents.md was at 2 867 words on the v0.3.0
     # release-candidate tip; release-prep PR 2 added three §2 callouts
     # (interactions-not-messages per RFC 0020, now-anchor per RFC 0021,
