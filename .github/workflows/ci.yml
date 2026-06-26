@@ -184,6 +184,17 @@ jobs:
       - name: Type check tests/ tree with mypy
         run: mypy tests/
 
+      # RFC 0045 §B — the MIT↛BUSL dependency-direction gate (Python half).
+      # Runs the [tool.importlinter] forbidden contract so a leaf MIT-candidate
+      # primitive (wallet client, prompt-safety kit, mock provider) that grows
+      # an import into orchestrator-internal (BUSL) code fails the build — a
+      # licensing leak (BUSL source under an MIT grant on the next mirror), not
+      # a style nit. Hard gate, alongside the proto/license gates. The editable
+      # install above resolves the `persatrix_agents` root_package the contract
+      # analyses. Regression suite: tests/unit/python/test_dependency_direction_imports.py.
+      - name: Check MIT↛BUSL import direction (RFC 0045)
+        run: make imports-check
+
       # ISSUE-0017 + ISSUE-0023: lock agents/generated/*.py + *.pyi to
       # proto/*.proto. The .pyi gate already shipped (ISSUE-0017); the
       # broadened proto-python-check target now also catches hand-edits
