@@ -29,12 +29,19 @@ resolution (that is ``test_salience_bid_reasoning.py``'s job).
 
 from __future__ import annotations
 
+import io
+import json
 import logging
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import structlog
 
+from agents.observability import logging as logging_mod
+from agents.observability.logging import configure_logging
+from agents.observability.redact import NoopRedactor
 from agents.persona_runtime.salience_gate import SalienceOutcome, run_salience_gate
 from agents.persona_types import AgentEvent, EventType
 from agents.response_gate import POLICY_ALWAYS, GateDecision
@@ -300,3 +307,110 @@ class TestNoDeliberationNoAudit:
         assert outcome == SalienceOutcome(silence=True)
         bid.assert_not_awaited()
         assert _audit_records(caplog) == []
+
+
+# ─── ISSUE-0108: the audit payload reaches the *rendered* egress ─────────────
+#
+# Every test above asserts on the stdlib ``LogRecord`` (via ``caplog``) — the
+# layer the bug was invisible at, because the record always carried the
+# ``extra=`` keys as attributes. ISSUE-0108 was that those keys were dropped
+# from the *rendered / shipped* JSON line: ``foreign_pre_chain`` had no
+# ``ExtraAdder``, so the operator saw a presence-only ``agent.deliberated``
+# event (message + trace context) with no ``reason_code`` / ``should_post``.
+# These tests drive the seam through ``configure_logging``'s real renderer and
+# assert on the emitted JSON — the surface an operator actually reads.
+
+
+@pytest.fixture
+def _rendered_log(monkeypatch: pytest.MonkeyPatch) -> Iterator[io.StringIO]:
+    """Force ``configure_logging`` to rebuild its chain and render to a buffer.
+
+    Mirrors ``agents/tests/test_observability_logging.py``'s capture: reset the
+    module-global ``_configured`` flag + structlog defaults so the chain is
+    rebuilt, and swap ``sys.stderr`` (and ``logging_mod.sys``, since the
+    ``StreamHandler`` binds the module's ``sys`` reference at build time) for a
+    ``StringIO`` the handler writes into."""
+    import sys as _real_sys
+
+    structlog.contextvars.clear_contextvars()
+    logging_mod._configured = False
+    logging_mod._redactor = NoopRedactor()
+    structlog.reset_defaults()
+
+    buf = io.StringIO()
+
+    class _SysShim:
+        stderr = buf
+
+        def __getattr__(self, name: str) -> Any:  # pragma: no cover - trivial
+            return getattr(_real_sys, name)
+
+    monkeypatch.setattr("sys.stderr", buf)
+    monkeypatch.setattr(logging_mod, "sys", _SysShim())
+    yield buf
+
+    structlog.contextvars.clear_contextvars()
+    logging_mod._configured = False
+    logging_mod._redactor = NoopRedactor()
+    structlog.reset_defaults()
+
+
+def _rendered_audit_line(buf: io.StringIO) -> dict[str, Any]:
+    """The single rendered ``agent.deliberated`` JSON line in the buffer."""
+    lines = [
+        json.loads(line)
+        for line in buf.getvalue().strip().splitlines()
+        if line.startswith("{")
+    ]
+    audit = [rec for rec in lines if rec.get("message") == _AUDIT_EVENT]
+    assert len(audit) == 1, f"expected one rendered audit line, got {audit}"
+    return audit[0]
+
+
+class TestDeliberatedAuditRenderedEgress:
+    async def test_reason_code_and_decision_reach_the_rendered_line(
+        self, _rendered_log: io.StringIO, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The payload the audit was *designed* to carry now renders: the
+        operator can read the deliberation ``reason_code`` / ``should_post`` /
+        ``transcript_turns`` off the JSON line (ISSUE-0108 Gap A)."""
+        await _patched_bid(
+            monkeypatch,
+            SalienceDecision(
+                speak=False, score=None, reason=REASON_ALREADY_ANSWERED,
+                reason_note=_SECRET_NOTE,
+            ),
+        )
+        configure_logging(service_kind="agent", service_instance="ember-owl")
+        await run_salience_gate(
+            _stub_agent(), _event(), _open_floor_decision(), mode=MODE_BID,
+        )
+
+        rec = _rendered_audit_line(_rendered_log)
+        assert rec["audit"] is True
+        assert rec["should_post"] is False
+        assert rec["reason_code"] == REASON_ALREADY_ANSWERED
+        assert rec["transcript_turns"] == 2
+        assert rec["agent_id"] == "ember-owl"
+
+    async def test_reason_note_never_reaches_the_rendered_line(
+        self, _rendered_log: io.StringIO, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Surfacing the audit payload must not surface the verbatim
+        ``reason_note`` — the §E wall is structural (the seam never reads it onto
+        the record), so it appears in no field of the rendered JSON either."""
+        await _patched_bid(
+            monkeypatch,
+            SalienceDecision(
+                speak=False, score=None, reason=REASON_ALREADY_ANSWERED,
+                reason_note=_SECRET_NOTE,
+            ),
+        )
+        configure_logging(service_kind="agent", service_instance="ember-owl")
+        await run_salience_gate(
+            _stub_agent(), _event(), _open_floor_decision(), mode=MODE_BID,
+        )
+
+        rec = _rendered_audit_line(_rendered_log)
+        assert "reason_note" not in rec
+        assert _SECRET_NOTE not in json.dumps(rec)

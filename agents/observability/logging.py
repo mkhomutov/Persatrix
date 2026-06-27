@@ -32,6 +32,12 @@ the root handler.  Two consequences:
 2. Third-party libraries that emit through stdlib ``logging`` (grpc, anthropic,
    openai) flow through the same ``ProcessorFormatter`` and are rendered in the
    same JSON schema, so a single CLI consumer sees one wire format.
+3. The ``extra=`` dict on *our own* stdlib ``LogRecord``\\s is surfaced into the
+   rendered line by :func:`agents.observability._stdlib_extra.surface_stdlib_extra`
+   (ISSUE-0108) — this is how the audit convention's payload (``agent.deliberated``,
+   the ``fact.*`` family) reaches the JSON, guarded so a caller's ``extra`` can
+   never clobber a chain-owned field and scoped so third-party records are
+   untouched.
 
 Cross-RFC coupling
 ------------------
@@ -57,6 +63,7 @@ from typing import Any
 import structlog
 from opentelemetry import trace
 
+from ._stdlib_extra import surface_stdlib_extra
 from .redact import NoopRedactor, Redactor
 
 # ─── Schema constants (RFC 0018 § B) ─────────────────────────────────────────
@@ -278,6 +285,12 @@ def _build_processors() -> list[structlog.types.Processor]:
         # 1. Per-async-task contextvars (execution_id / step_id / agent_id
         #    bound by the gRPC interceptor in RFC 0018 PR 3).
         structlog.contextvars.merge_contextvars,
+        # 1b. Surface the stdlib ``extra=`` audit payload (ISSUE-0108) — scoped to
+        #    our own records and guarded so a colliding key can never clobber a
+        #    chain-owned field. After ``merge_contextvars`` (a bound identity wins)
+        #    and before :func:`_apply_redactor` (surfaced extras are redacted).
+        #    See :mod:`agents.observability._stdlib_extra`.
+        surface_stdlib_extra,
         # 2. Schema-required fields.
         _add_schema_version,
         structlog.processors.TimeStamper(fmt="iso", utc=True),
