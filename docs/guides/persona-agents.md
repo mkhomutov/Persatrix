@@ -853,9 +853,16 @@ gates `revise ≥ 1` to `mode: plan`.
 > `reasoning.mode: off`. Upgrade the orchestrator together with (or before) the
 > agents — the resolved rung rides the wire as additive fields.
 
-The operator-observable behaviour (silence-with-reason read from the agent log,
-the plan-threaded post, the walled trace, the reflexion opt-in, and the kill
-switch) is exercised by [MT-REASON-001](../manual-tests/MT-REASON-001.md).
+The operator-observable behaviour (the semantic-silence verdict, the
+plan-threaded post, the walled trace, the reflexion opt-in, and the kill switch)
+is exercised by [MT-REASON-001](../manual-tests/MT-REASON-001.md). The **reason**
+a turn went silent is observable at **`reason_code`** granularity — the closed-set
+code on the `agent.deliberated` audit log line and on the
+`deliberation.suppressed{reason_code, mode}` metric label. The free-text
+`reason_note` the model may attach is parsed but has **no operator egress** in
+v0.3.10 (the OQ 6(a) operator-reveal surface was cut;
+[ISSUE-0108](../issues/ISSUE-0108-reasoning-reason-note-no-operator-egress.md)),
+which makes the §E privacy wall *stronger* than the RFC describes, not weaker.
 
 ---
 
