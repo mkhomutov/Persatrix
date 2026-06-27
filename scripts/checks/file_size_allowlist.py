@@ -307,6 +307,19 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # filter, the two accepted recall limitations) + the behaviour-active-by-default
     # caveat + the version-skew caution, and §6 Known Gaps. Archive once the tag ships.
     "docs/v0.3.9-release-checklist.md",
+    # docs/v0.3.10-release-checklist.md — v0.3.10 sibling of the v0.3.3–v0.3.9
+    # checklists above; same release-cycle-record pattern. Crossed the cap on
+    # creation (release-prep PR 2) carrying the reasoning-before-posting surface
+    # (RFC 0051 semantic silence + plan-threaded compose + reflexion, the two
+    # fold-ins RFC 0034 P3 + RFC 0045), the reasoning go-live gate inventory (the
+    # privacy-wall no-leak test, the off→bid flip + kill switch, the deliberation/
+    # reflexion telemetry, the validate capability-gating, the additive-proto-field
+    # wire-compat gate), the §3.1 Upgrade Notes (the off→bid default flip, the
+    # one-flip kill switch, the per-member threshold supersession, the depth:deep
+    # rejection, the revise opt-in gated to mode:plan, the additive wire fields +
+    # orchestrator-first ordering, the no-store-migration note) + §6 Known Gaps.
+    # No store migrates this release. Archive once the tag ships.
+    "docs/v0.3.10-release-checklist.md",
     # docs/v0.3.4-release-prep-plan.md is the v0.3.4 release-prep sequencer —
     # same release-cycle-accumulator pattern as the v0.3.0 / v0.3.1 plans and
     # the v0.3.3 checklist above. It crossed the 3 000-word prose cap when PR 1
