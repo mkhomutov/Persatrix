@@ -324,6 +324,21 @@ RFC 0011/0030/0024/0050/0051/0020/0023/0033/0048 (all shipped)        ← HARD P
 
 ---
 
+## Documentation & diagrams
+
+A new channel *mode* + CLI/web surfaces needs real doc + diagram **edits**, not the "verify" pass the release-prep template inherits. Authored **in the feature PRs** that ship the behaviour (the RFC 0051 precedent — guide/diagram changes ride the PR that makes them true), then *verified* at release-prep:
+
+| Artifact | Change | Owning PR |
+|----------|--------|-----------|
+| [`docs/guides/channels.md`](../guides/channels.md) | New **§Autonomous channels** — `autonomous.enabled`, the mandatory cost cap, convener vs. chair ([OQ #1](0052-autonomous-agent-channels.md#open-questions)), standing schedule, the "no human in the loop" contract; CLI + web how-to. | PR 3 (once convene is demoable) |
+| [`docs/guides/persona-agents.md`](../guides/persona-agents.md) | New **§Autonomous channels** (persona side) — anti-collapse scoping, semantic-silence-still-applies, the convener's agenda role. | PR 6 (anti-collapse) |
+| [`docs/guides/web-console.md`](../guides/web-console.md) | Note the Channel-settings panel now renders the `autonomous` block + a Convene action. | PR 2 (web surfaces) |
+| [`docs/diagrams/workflow-execution.md`](../diagrams/workflow-execution.md) | A **third sequence** — autonomous brainstorm: convene (or timer-fire) → discussion loop with anti-collapse → metered bounded close → synthesis. | PR 5 (full flow exists) |
+| [`docs/diagrams/component-architecture.md`](../diagrams/component-architecture.md) | **Pre-existing staleness fix** — `channels/` (line 34) and `security/` (line 36) are still marked `(stub)` though both shipped in v0.3.0; flip to solid. Rides this RFC's diagram work. | PR 5 |
+| `docs/manual-tests/MT-AUTONOMOUS-00{1,2,3}.md` + `docs/manual-tests/README.md` index | The three acceptance MTs + the index rows. | PR 5 / PR 6 / PR 7 |
+
+> `docs/diagrams/system-overview.md` (provider list) is owned by the [RFC 0053 PR plan](0053-pr-plan.md#documentation--diagrams) since RFC 0053 adds the vendors. README + ROADMAP version rows + the release checklist are release-prep (master plan Phase 2).
+
 ## Risk and Mitigations
 
 | Risk | Mitigation |

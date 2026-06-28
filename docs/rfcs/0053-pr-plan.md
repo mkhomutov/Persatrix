@@ -145,6 +145,18 @@ RFC 0033 §H seam + §F pricing + RFC 0023 lease (all shipped)        ← HARD P
 
 ---
 
+## Documentation & diagrams
+
+Authored in the feature PRs, verified at release-prep:
+
+| Artifact | Change | Owning PR |
+|----------|--------|-----------|
+| [`docs/guides/model-providers.md`](../guides/model-providers.md) | Add **Gemini** + **watsonx.ai** rows to the provider table; update the "**The four providers are peers**" header ([line 54](../guides/model-providers.md)) → six (Anthropic / OpenAI / Ollama / mock + Gemini + watsonx); note Gemini is the second RFC 0033 §H dogfood after Ollama; the secret-vs-`provider_config` split for watsonx. | PR 1 (Gemini) + PR 2 (watsonx) |
+| [`docs/diagrams/system-overview.md`](../diagrams/system-overview.md) | The `LLM providers` node ([line 14](../diagrams/system-overview.md)) lists only "Anthropic · OpenAI" — add **Gemini · watsonx** (and Ollama/mock if the node is widened). | PR 1 / PR 2 |
+| `docs/manual-tests/MT-PROVIDER-{GEMINI,WATSONX}-001.md` + `docs/manual-tests/README.md` index | The two single-provider smoke MTs + index rows. | PR 1 / PR 2 |
+
+> The cross-vendor `MT-AUTONOMOUS-MULTIPROVIDER-001` + the four-vendor diagram/demo narrative live in [RFC 0052 PR 9](0052-pr-plan.md#pr-9-featurev0311-rfc0052-demo-multivendor--phase-4b-four-vendor-headline--closeout-cuttable). If RFC 0053 slips, these provider docs slip with it (or land as a docs-only PR in v0.3.12).
+
 ## Risk and Mitigations
 
 | Risk | Mitigation |
