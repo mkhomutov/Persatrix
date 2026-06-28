@@ -52,7 +52,7 @@ depends_on:
 
 ## Summary
 
-Add **Google Gemini** and **IBM watsonx.ai** as first-class LLM providers, selectable the same config-driven way as `anthropic` / `openai` / `ollama` / `mock`. This is the **second concrete dogfood of the [RFC 0033 §H multi-provider extensibility](0033-model-alias-layer.md#h-multi-provider-extensibility) seam** — which already names Gemini as a worked example — so each provider is *one new class + one `create_provider` branch + N priced alias entries*, with no heuristic-table or routing-rule changes.
+Add **Google Gemini** and **IBM watsonx.ai** as first-class LLM providers, selectable the same config-driven way as `anthropic` / `openai` / `ollama` / `mock`. This is the **second concrete dogfood of the [RFC 0033 §H multi-provider extensibility](0033-model-alias-layer.md#h-multi-provider-extensibility) seam** — which already names Gemini among its candidate providers — so each provider is *one new class + one `create_provider` branch + N priced alias entries*, with no heuristic-table or routing-rule changes.
 
 The motivating consumer is the [RFC 0052](0052-autonomous-agent-channels.md) autonomous channel: with four cloud vendors configurable, the flagship demo becomes **Anthropic + OpenAI + Gemini + watsonx.ai personas brainstorming in one channel with no human** — a striking cross-vendor showcase that the provider-agnostic architecture (RFC 0033) was built to enable.
 
