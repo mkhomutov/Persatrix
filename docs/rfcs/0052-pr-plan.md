@@ -15,7 +15,7 @@ RFC 0052 makes a channel **run a productive discussion with no human in the loop
 
 This plan covers **all four phases** ([master-plan scope lock](../v0.3.11-plan.md#scope-decisions-locked-at-plan-authoring-time-2026-06-28)) across **9 PRs**:
 
-- **Phase 1 — convene + bounded one-shot brainstorm (PR 1–5).** A channel that opens itself on a topic, runs to a bound, and synthesizes — operator-creatable from CLI **and** web, with the mandatory cap enforced from the first PR. PR 1 lands the `autonomous` config **backend** (Go validate/apply/persist + the RFC 0050 REST PATCH/GET layer; dark); **PR 2 the CLI + web config surfaces** so an operator can author/edit an autonomous channel without hand-editing YAML; PR 3 the self-convening opening turn + the **convene action across all three surfaces** (CLI verb, REST endpoint, web button); PR 4 the deterministic bounded close + the **two-call** wallet synthesis reserve + the OQ #6 summary-metering edit + mandatory synthesis-on-close; PR 5 the Phase-1 integration suite + `MT-AUTONOMOUS-001`.
+- **Phase 1 — convene + bounded one-shot brainstorm (PR 1–5).** A channel that opens itself on a topic, runs to a bound, and synthesizes — operator-creatable from CLI **and** web, with the mandatory cap enforced from the first PR. PR 1 lands the `autonomous` config **backend** (Go validate/apply/persist + the RFC 0050 REST PATCH/GET layer; dark); **PR 2 the CLI + web config surfaces** so an operator can author/edit an autonomous channel without hand-editing YAML; PR 3 the self-convening opening turn + the **convene action across all three surfaces** (CLI verb, REST endpoint, web button); PR 4 the deterministic bounded close + the **roster-scaled (`1 + N`)** wallet synthesis reserve + the OQ #6 summary-metering edit + the interaction-closed wallet eviction + mandatory synthesis-on-close; PR 5 the Phase-1 integration suite + `MT-AUTONOMOUS-001`.
 - **Phase 2 — anti-collapse cadence (PR 6).** The convener per-agenda-item escalation ration (generalizing the shipped CE5 one-shot ration) with the per-item loop guard preserved, scoped to `autonomous.enabled`; `MT-AUTONOMOUS-002` + the human-channel regression.
 - **Phase 3 — standing / scheduled convening (PR 7).** `autonomous.schedule` over RFC 0024 timers via the config-round-trip seam + the mandatory standing **aggregate** bound + `validate` gate + the web convening-count/aggregate-bound readout; `MT-AUTONOMOUS-003`.
 - **Phase 4 — flagship demo (PR 8–9).** PR 8 the offline `make demo-autonomous` (curated roster, mock provider, zero keys); PR 9 the four-vendor cross-vendor headline blueprint + `MT-AUTONOMOUS-MULTIPROVIDER-001` (live, depends on RFC 0053) + RFC/ROADMAP/CHANGELOG closeout.
@@ -30,7 +30,7 @@ Locked with the maintainer at plan opening (see [master plan §Scope decisions](
 
 - **[OQ #1](0052-autonomous-agent-channels.md#open-questions) — distinct `convener` role** *(reverses the RFC's "lean chair = convener")*. The **convener** (a new `autonomous.convener` agent id) owns the agenda lifecycle — authors the opening turn and **advances the agenda** on a stall; the **chair** (the RFC 0050 `escalation_chair_id`) keeps its shipped v0.3.8 role (stall-escalation → propose synthesis → end-vote). **Consequence for PR 6:** the anti-collapse per-agenda-item ration lives on the **convener** path, *not* the chair path — the chair's CE5 one-shot ration is untouched.
 - **[OQ #2](0052-autonomous-agent-channels.md#open-questions) — anti-collapse scoped to `autonomous.enabled`** (not a general `liveness` knob). The convener ration is gated by `autonomous.enabled`; human channels keep the shipped bias-to-silence + CE5 guard. PR 6 carries the human-channel regression that proves it.
-- **[OQ #6](0052-autonomous-agent-channels.md#open-questions) — meter the closing summary; reserve covers two calls** *(takes the heaviest option)*. Verified that the RFC 0020 close summary is **currently unmetered** — it passes no `cause`/`interaction_id` so it bypasses the wallet lease ([`agents/llm_client.py:212`](../../agents/llm_client.py), [`agents/persona_runtime/summarize_close.py:172`](../../agents/persona_runtime/summarize_close.py)). PR 4 brings the **autonomous-close** summary under a lease (stamped with the interaction's `interaction_id`) so it counts toward the cap, and sizes the synthesis reserve for **both** close-path calls (chair synthesis turn + summary).
+- **[OQ #6](0052-autonomous-agent-channels.md#open-questions) — meter the closing summary; reserve scales with the roster** *(takes the heaviest option)*. Verified that the RFC 0020 close summary is **currently unmetered** — it passes no `cause`/`interaction_id` so it bypasses the wallet lease ([`agents/llm_client.py:212`](../../agents/llm_client.py), [`agents/persona_runtime/summarize_close.py:172`](../../agents/persona_runtime/summarize_close.py)). PR 4 brings the **autonomous-close** summary under a lease (stamped with the interaction's `interaction_id`) so it counts toward the cap. **The close summary is authored per-agent** ([`close_path.py`](../../agents/persona_runtime/close_path.py) spawns one `finalize_closed_interaction` per `agent_id`), so an N-persona roster issues **N** metered summary calls on the *shared* per-interaction budget — the reserve is therefore sized for **`1 + N`** (chair synthesis turn + one summary per persona), **not** the fixed "two" an earlier framing assumed.
 - **[OQ #3](0052-autonomous-agent-channels.md#open-questions) / [#4](0052-autonomous-agent-channels.md#open-questions) / [#5](0052-autonomous-agent-channels.md#open-questions)** — free-text `goal` for v0.3.x; Phase 3 ships fixed/rotating topic + the **config-round-trip** timer seam (not the deferred runtime `RegisterTimer` API; topic *queue* is a follow-up); conservative defaults + an OQ #5 calibration tracked-issue.
 
 ### Sequencing
@@ -43,7 +43,7 @@ Phase 1 (PR 1–5) is a near-strict chain: the config backend (PR 1) precedes th
 
 | File | Lines | Headroom | Routing |
 |------|-------|----------|---------|
-| [`internal/wallet/wallet.go`](../../internal/wallet/wallet.go) | **499** | **1** | **At the cap.** The PR 4 two-call **synthesis-reserve accounting** lands in [`internal/wallet/interaction_budget.go`](../../internal/wallet/interaction_budget.go) (155, ample) or a new `synthesis_reserve.go`, **not** `wallet.go`. |
+| [`internal/wallet/wallet.go`](../../internal/wallet/wallet.go) | **499** | **1** | **At the cap.** The PR 4 roster-scaled (`1 + N`) **synthesis-reserve accounting** + the interaction-closed eviction land in [`internal/wallet/interaction_budget.go`](../../internal/wallet/interaction_budget.go) (155, ample) or a new `synthesis_reserve.go`, **not** `wallet.go`. |
 | [`internal/channels/channels.go`](../../internal/channels/channels.go) | **499** | **1** | **At the cap.** The PR 3 convene publish logic routes through [`router.go`](../../internal/channels/router.go) / a new `convene.go`; do not grow `channels.go`. |
 | [`cli/src/commands/channel_config.rs`](../../cli/src/commands/channel_config.rs) | **500** | **0** | **At the cap — must split.** PR 2's `autonomous.*` nested knobs go in a **new `channel_config_autonomous.rs`**, mirroring the [`channel_config_reasoning.rs`](../../cli/src/commands/channel_config_reasoning.rs) (165) split RFC 0051 used for its first nested knob. |
 | [`web/src/panels/ChannelSettings.svelte`](../../web/src/panels/ChannelSettings.svelte) | **483** | **17** | **Tight.** PR 2's ~6 autonomous fields + control blocks + the PR 3 Convene button would bust the cap — extract the autonomous section into a **new child component** (`web/src/panels/AutonomousSettings.svelte`) consumed by `ChannelSettings.svelte`. |
@@ -77,11 +77,12 @@ RFC 0011/0030/0024/0050/0051/0020/0023/0033/0048 (all shipped)        ← HARD P
    │     │   POST /api/v1/channels/{id}/convene + web "Convene" button [conveneChannel()])
    │     ↓
    ├── PR 4 (Phase 1d: deterministic bounded close [max_rounds / soft-budget / agenda-exhausted];
-   │     │   two-call wallet synthesis reserve [new accounting]; OQ #6 meter the autonomous-close
+   │     │   roster-scaled (1+N) wallet synthesis reserve [new accounting] + interaction-closed eviction;
+   │     │   OQ #6 meter the autonomous-close
    │     │   summary; mandatory synthesis-on-close — chair synthesis turn + interaction summary)
    │     ↓
    ├── PR 5 (Phase 1e: integration suite + MT-AUTONOMOUS-001 — convene→converge→terminate→
-   │     │   both artifacts; no-runaway leg; close-by-budget leg honours the two-call reserve)
+   │     │   both artifacts; no-runaway leg; close-by-budget leg honours the 1+N roster-scaled reserve)
    │     ↓
    ├── PR 6 (Phase 2: convener per-agenda-item escalation ration [generalizes CE5, per-item loop
    │     │   guard preserved, autonomous-scoped] + best-effort liveness target; MT-AUTONOMOUS-002;
@@ -186,17 +187,19 @@ RFC 0011/0030/0024/0050/0051/0020/0023/0033/0048 (all shipped)        ← HARD P
 - **Convening = "author the seed turn under a fresh interaction id"** ([RFC §B](0052-autonomous-agent-channels.md#b-self-convening--starting-without-a-human-turn)) — reuses the publish path end-to-end; the three surfaces are thin wrappers over the one endpoint.
 - **First action button in the web panel** — `ChannelSettings.svelte` has only a "Save settings" submit today; "Convene" is the first per-channel *action*. Keep it a small affordance (button → `conveneChannel()` → toast), not a new sub-panel.
 - **The `<external_data>` wrap is mandatory** — operator config is a distinct trust class from persona-authored content.
+- **The opening turn resolves *uncapped*** ([RFC §B](0052-autonomous-agent-channels.md#b-self-convening--starting-without-a-human-turn)) — the wallet snapshots the per-interaction cap at first commit, so the lease that *produces* the opening message predates the snapshot and is uncapped ([`interaction_budget.go`](../../internal/wallet/interaction_budget.go) `resolveInteractionBudget`). For a standing channel that is one uncapped opening turn *per convening*. PR 3 either documents this (the Layer-0 depth cap is the always-on net + the §E aggregate bound limits the count) or has the convener's opening lease carry the channel's resolved cap explicitly.
 
 #### PR checklist
 
 - [ ] `pytest agents/tests/test_convener.py -q`; `cargo test` (CLI); `npm run test` (web); `go test ./internal/channels/... ./internal/server/... -race`.
 - [ ] Convener authors exactly one opening turn; fresh `interaction_id`; `<external_data>` wrap asserted.
+- [ ] The opening-turn cap behaviour is settled (documented-uncapped or explicitly-capped), not left implicit.
 - [ ] `persatrix channel convene`, `POST /convene`, and the web button all trigger a convene against the local orchestrator.
 - [ ] No new wake type / transport / store table (assembly only).
 
 ---
 
-### PR 4: `feature/v0311-rfc0052-bounded-close` — Phase 1d: Deterministic bounded close + two-call synthesis reserve
+### PR 4: `feature/v0311-rfc0052-bounded-close` — Phase 1d: Deterministic bounded close + roster-scaled synthesis reserve
 
 **Depends on**: PR 3 merged.
 **Purpose**: Guarantee an autonomous interaction **terminates** and **always leaves both artifacts**, even on a budget-exhausted close — the part of [RFC §D](0052-autonomous-agent-channels.md#d-termination-and-synthesis--always-produce-an-artifact) that is not pure reuse.
@@ -205,17 +208,18 @@ RFC 0011/0030/0024/0050/0051/0020/0023/0033/0048 (all shipped)        ← HARD P
 
 | File | Change |
 |------|--------|
-| New `internal/channels/convene.go` (or a sibling) | The **deterministic bounded-close trigger** — fires on agenda-exhausted *or* `max_rounds` *or* a **soft** budget threshold; dispatches the chair synthesis turn and *then* closes the interaction (respecting RFC 0030 CE4 — the chair still cannot close itself). This is what finally enforces `max_rounds`. |
-| New `internal/wallet/synthesis_reserve.go` (sibling of [`interaction_budget.go`](../../internal/wallet/interaction_budget.go)) | The **two-call synthesis reserve** — new wallet accounting (no shipped analog): split the cap so the discussion is bounded by `interaction_budget_tokens` and a reserve is held back for the close path. The **soft** threshold trips synthesize-and-close *before* the hard cap denies leases. Sized for **both** close-path calls. **`wallet.go` (499) gains no net lines.** |
-| [`agents/persona_runtime/summarize_close.py`](../../agents/persona_runtime/summarize_close.py) (480) | **OQ #6 metering edit** — on the **autonomous** close path, thread `cause` + the interaction's `interaction_id` into the existing `create_message` call ([line 172](../../agents/persona_runtime/summarize_close.py)) so the summary is leased and counts toward the cap. Minimal edit; human-channel close unchanged. |
+| New `internal/channels/convene.go` (or a sibling) | The **deterministic bounded-close trigger** — fires on agenda-exhausted *or* `max_rounds` *or* a **soft** budget threshold; dispatches the chair synthesis turn and *then* closes the interaction (respecting RFC 0030 CE4 — the chair still cannot close itself). This is what finally enforces `max_rounds`. **It also emits the wallet's interaction-closed eviction** (next row). |
+| New `internal/wallet/synthesis_reserve.go` (sibling of [`interaction_budget.go`](../../internal/wallet/interaction_budget.go)) | The **roster-scaled synthesis reserve** — new wallet accounting (no shipped analog): split the cap so the discussion is bounded by `interaction_budget_tokens` and a reserve is held back for the close path. The **soft** threshold trips synthesize-and-close *before* the hard cap denies leases. Sized for **`1 + N` close-path calls** — the chair turn **plus one RFC 0020 summary per participating persona** (the close summary is authored per-agent — see the `summarize_close.py` row), **not** a fixed two. **Plus an interaction-closed eviction** of the wallet's `interactionTokens` residue (the shipped wallet never prunes a capped interaction that settled non-zero spend — [`interaction_budget.go`](../../internal/wallet/interaction_budget.go) "nothing currently evicts it" — which would leak one map entry per standing convening; PR 7). **`wallet.go` (499) gains no net lines.** |
+| [`agents/persona_runtime/summarize_close.py`](../../agents/persona_runtime/summarize_close.py) (480) | **OQ #6 metering edit** — on the **autonomous** close path, thread `cause` + the interaction's `interaction_id` into the existing `create_message` call ([line 172](../../agents/persona_runtime/summarize_close.py)) so the summary is leased and counts toward the cap. **This file is the per-agent close path ([`close_path.py`](../../agents/persona_runtime/close_path.py) spawns one `finalize_closed_interaction` per `agent_id`), so the edit meters every participating persona's summary** — hence the reserve is sized for `1 + N`. Minimal edit; human-channel close unchanged. |
 | `agents/` chair synthesis turn | Mandatory goal-directed synthesis turn against `autonomous.goal`, drawn from the reserve. |
-| Tests | Bounded close fires on each trigger; reserve covers two calls; close-by-budget unit test proves both leases honoured; human close byte-for-byte unchanged. |
+| Tests | Bounded close fires on each trigger; reserve covers `1 + N` calls on a **≥2-persona** roster; close-by-budget unit test proves the chair turn + every persona's summary lease are honoured; the closed-interaction eviction drops the wallet residue; human close byte-for-byte unchanged. |
 
 #### PR checklist
 
 - [ ] `go test ./internal/wallet/... ./internal/channels/... -race -cover`; `pytest agents/tests/ -q`.
 - [ ] `wallet.go` net line delta = 0 (reserve in a sibling file).
-- [ ] Reserve sized for two calls; close-by-budget test proves both leases honoured.
+- [ ] Reserve sized for `1 + N` (chair + one summary per persona); close-by-budget test on a ≥2-persona roster proves every lease honoured.
+- [ ] The bounded close evicts the interaction's wallet `interactionTokens` entry (no residue leak).
 - [ ] Human-channel summarization path byte-for-byte unchanged (metering is autonomous-only).
 
 ---
@@ -229,14 +233,14 @@ RFC 0011/0030/0024/0050/0051/0020/0023/0033/0048 (all shipped)        ← HARD P
 
 | File | Change |
 |------|--------|
-| `internal/channels/` + `agents/tests/` integration | Full convene→converge→terminate→synthesis cycle on the mock provider, **zero human turns**, spend ≤ cap; the **no-runaway leg** (turns + tokens bounded under an adversarial roster); the **close-by-budget leg** asserting **both** artifacts are still produced (chair synthesis turn + a real RFC 0020 summary, not the `[interaction summary unavailable]` placeholder). |
+| `internal/channels/` + `agents/tests/` integration | Full convene→converge→terminate→synthesis cycle on the mock provider, **zero human turns**, spend ≤ cap; the **no-runaway leg** (turns + tokens bounded under an adversarial roster); the **close-by-budget leg** (on a **≥2-persona** roster) asserting **both** artifacts are still produced (chair synthesis turn + a real RFC 0020 summary **for each persona**, not the `[interaction summary unavailable]` placeholder — exercising the `1 + N` reserve). |
 | `docs/manual-tests/MT-AUTONOMOUS-001.md` | One-shot brainstorm, live provider — converges + synthesizes, no human; convened from the CLI and (smoke) the web button. |
 
 #### PR checklist
 
 - [ ] Integration suite green on mock; no-runaway + close-by-budget legs assert their invariants.
 - [ ] `MT-AUTONOMOUS-001` documented + dry-run on mock (live run is master-plan Phase 3).
-- [ ] CHANGELOG `[0.3.11]` seeded (autonomous channels — opt-in, mandatory cap, CLI + web).
+- [ ] CHANGELOG `[0.3.11]` entry extended with the Phase-1 acceptance (seeded at PR 1 merge per [ROADMAP Hygiene](#roadmap-hygiene); this PR adds the convene→synthesize close).
 
 ---
 
@@ -274,12 +278,13 @@ RFC 0011/0030/0024/0050/0051/0020/0023/0033/0048 (all shipped)        ← HARD P
 | `internal/channels/` + `agents/` timer wiring | `autonomous.schedule` (an RFC 0024 timer spec + a topic source) reaches the convener via the **config-round-trip** seam — write into the convener's `agents.yaml` timer set ([OQ #4](0052-autonomous-agent-channels.md#open-questions); the runtime `RegisterTimer` API stays deferred). Phase 3 ships **fixed/rotating** topic; an operator-supplied queue is a follow-up. |
 | [`internal/channels/config_validate.go`](../../internal/channels/config_validate.go) | The **standing aggregate-bound gate** — `validate` rejects a standing (`autonomous.schedule`-bearing) channel without `max_convenings` and/or a standing-window cost budget. |
 | CLI + web config surfaces | `autonomous.schedule` + `max_convenings` join the `channel_config_autonomous.rs` / `AutonomousSettings.svelte` surfaces (PR 2); the web panel shows a **convening-count / aggregate-bound readout** so an operator sees how close a standing channel is to its bound. |
-| Tests | `MT-AUTONOMOUS-003` — a standing channel convenes a fresh interaction on schedule across a window, unattended, **and stops at the aggregate bound**. |
+| Tests | `MT-AUTONOMOUS-003` — a standing channel convenes a fresh interaction on schedule across a window, unattended, **and stops at the aggregate bound**; **and the wallet footprint stays bounded** — each convening's `interactionTokens` residue is evicted on close (PR 4), so the map does not grow one entry per convening across the window. |
 
 #### PR checklist
 
 - [ ] `go test ./internal/channels/... -race`; `validate` rejects an unbounded standing channel.
 - [ ] Standing leg asserts the aggregate bound stops re-convening; the web readout reflects the count.
+- [ ] Standing leg asserts the wallet `interactionTokens` map does not accumulate one residual entry per convening (PR 4 eviction holds across the window).
 - [ ] `MT-AUTONOMOUS-003` documented; timer wiring is config-round-trip (no new runtime API).
 
 ---
@@ -313,7 +318,7 @@ RFC 0011/0030/0024/0050/0051/0020/0023/0033/0048 (all shipped)        ← HARD P
 | File | Change |
 |------|--------|
 | `blueprints/` | The **four-vendor blueprint** — four personas, each pinned by RFC 0033 alias to a *different cloud vendor* (Anthropic + OpenAI + Gemini + watsonx.ai), brainstorming one topic in one channel with no human. Pure alias config (RFC 0053 Phase 3 handoff). |
-| `docs/manual-tests/MT-AUTONOMOUS-MULTIPROVIDER-001.md` | The headline cross-vendor MT — live, all four vendors keyed; converge + synthesize, no human; spend ≤ cap per seat. |
+| `docs/manual-tests/MT-AUTONOMOUS-MULTIPROVIDER-001.md` | The headline cross-vendor MT — live, all four vendors keyed; converge + synthesize, no human; total interaction spend ≤ the mandatory cap (a single shared per-interaction ceiling, **not** a per-seat cap). |
 | RFC + ROADMAP + CHANGELOG | RFC 0052 front-matter → `✅ Implemented`; Master-Index row; CHANGELOG `[0.3.11]` finalized; the OQ #5 calibration tracked-issue filed. |
 
 #### PR checklist
@@ -346,6 +351,9 @@ A new channel *mode* + CLI/web surfaces needs real doc + diagram **edits**, not 
 | An at-cap file busts the 500 cap (`wallet.go` 499, `channels.go` 499, **`channel_config.rs` 500**, `ChannelSettings.svelte` 483, `action_loop.py` 495). | New modules/components per the [file-size table](#file-size-constraints-verified-at-plan-authoring-cap--500-per-file_sizepy---strict): `synthesis_reserve.go`, `convene.go`, `channel_config_autonomous.{rs,go}`, **`AutonomousSettings.svelte`**, `channel_convene.rs`, `convener.py`, `convener_cadence.go`. The CLI + web both follow the RFC 0051 nested-knob extraction precedent. |
 | CLI/web surface work is under-scoped (the RFC's Files-Touched omitted `web/`). | Corrected here: **PR 2** dedicates a config-surfaces PR and **PR 3** carries the convene action on all three surfaces; the RFC [Files-Touched table](0052-autonomous-agent-channels.md#files-touched-estimated) is annotated to add the `web/` row. |
 | Metering the summary (OQ #6) regresses the human-channel close. | The metering edit is **autonomous-path-only**; PR 4 carries a regression proving the human close is byte-for-byte unchanged. |
+| A fixed "two-call" reserve under-sizes the close path: the RFC 0020 summary is authored **per persona** ([`close_path.py`](../../agents/persona_runtime/close_path.py)), so a roster issues `1 + N` leased close calls on the shared interaction budget — a 2-call reserve denies all but one persona's summary → placeholder. | PR 4 sizes the reserve **roster-scaled (`1 + N`)**; the close-by-budget leg runs on a **≥2-persona** roster and asserts every persona's summary survives. Fallback if `1 + N` eats too much cap: scope metering + reserve to one designated summarizer, documented. |
+| A standing channel leaks one wallet `interactionTokens` entry per convening — the shipped wallet never prunes a settled-nonzero capped interaction ([`interaction_budget.go`](../../internal/wallet/interaction_budget.go)). | PR 4's bounded close emits the interaction-closed **eviction**; PR 7's standing leg asserts the wallet footprint stays bounded across the convening window. |
+| The convener's **opening turn is uncapped** — the wallet snapshots the cap at first commit, so the lease producing the opening message predates it ([`interaction_budget.go`](../../internal/wallet/interaction_budget.go)); one uncapped turn per convening on a standing channel. | PR 3 settles this explicitly (documented-uncapped, with the Layer-0 depth cap + the §E aggregate bound as the nets, **or** the opening lease carries the resolved cap). |
 | Anti-collapse re-introduces pile-on on human channels. | Scoped to `autonomous.enabled` (OQ #2); PR 6 human-channel regression. |
 | The four-vendor demo gates the release on two new SDKs. | PR 9 is cuttable; the offline demo (PR 8) carries the headline if RFC 0053 slips. |
 | `max_rounds` / cap / reserve defaults are uncalibrated. | Conservative defaults + an OQ #5 calibration tracked-issue (tune after a soak). |
@@ -367,7 +375,7 @@ A new channel *mode* + CLI/web surfaces needs real doc + diagram **edits**, not 
 | 1 | 1a — config backend + cap gate + REST (dark) | `feature/v0311-rfc0052-config-backend` | ⬜ |
 | 2 | 1b — CLI + web config surfaces | `feature/v0311-rfc0052-config-surfaces` | ⬜ |
 | 3 | 1c — self-convening + convene action (CLI/REST/web) | `feature/v0311-rfc0052-convene` | ⬜ |
-| 4 | 1d — bounded close + two-call reserve + OQ #6 metering | `feature/v0311-rfc0052-bounded-close` | ⬜ |
+| 4 | 1d — bounded close + roster-scaled (1+N) reserve + eviction + OQ #6 metering | `feature/v0311-rfc0052-bounded-close` | ⬜ |
 | 5 | 1e — acceptance suite + MT-AUTONOMOUS-001 | `feature/v0311-rfc0052-phase1-mt` | ⬜ |
 | 6 | 2 — anti-collapse cadence (convener, scoped) | `feature/v0311-rfc0052-anti-collapse` | ⬜ |
 | 7 | 3 — standing/scheduled + aggregate bound + web readout | `feature/v0311-rfc0052-standing` | ⬜ |

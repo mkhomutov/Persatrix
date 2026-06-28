@@ -53,7 +53,7 @@ RFC 0033 §H seam + §F pricing + RFC 0023 lease (all shipped)        ← HARD P
    │     │   project_id/url validation [fail-closed at construction] + tool-round mapping       │ both
    │     │   + config/demo/watsonx/ + make demo-watsonx + docker-compose.watsonx.yaml           │ feed
    │     │   + WATSONX_API_KEY redactor patterns + docs + MT-PROVIDER-WATSONX-001)              │ 0052
-   │     │      (independent of PR 1 — either order)                                            │ PR 8
+   │     │      (independent of PR 1 — either order)                                            │ PR 9
    │     ↓                                                                                       ┘
    └── PR 3 (Phase 3: extras packaging [persatrix[gemini,watsonx]] + model-providers guide
              finalize + RFC closeout; the four-vendor blueprint + MT live in RFC 0052 PR 9)
@@ -192,6 +192,6 @@ Authored in the feature PRs, verified at release-prep:
 
 - [RFC 0053 — Gemini and watsonx.ai LLM Providers](0053-gemini-watsonx-providers.md) — the spec.
 - [RFC 0033 — Provider-Agnostic Model Alias Layer](0033-model-alias-layer.md) — the [§H seam](0033-model-alias-layer.md#h-multi-provider-extensibility) + [§F pricing](0033-model-alias-layer.md#f-pricing-keyed-by-alias) this dogfoods.
-- [RFC 0052 PR plan](0052-pr-plan.md) — the consuming four-vendor demo (PR 8) + the bundling.
+- [RFC 0052 PR plan](0052-pr-plan.md) — the consuming four-vendor demo (PR 9; PR 8 is the offline mock demo, zero keys) + the bundling.
 - [v0.3.11-plan.md](../v0.3.11-plan.md) — the master version plan + locked decisions.
 - [docs/guides/model-providers.md](../guides/model-providers.md) — the operator-facing provider setup guide this extends.
