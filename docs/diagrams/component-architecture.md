@@ -28,12 +28,12 @@ graph TB
         TELE["telemetry/<br/>OTEL"]
         MCPG["mcp/"]
         PROTOS["protocols/"]
+        CHAN["channels/"]
+        SEC["security/"]
 
         A2A["a2a/ (stub)"]:::stub
         BRIDGES["bridges/ (stub)"]:::stub
-        CHAN["channels/ (stub)"]:::stub
         RES["resilience/ (stub)"]:::stub
-        SEC["security/ (stub)"]:::stub
         MESH["mesh/ (stub)"]:::stub
 
         SERVER --> PLANNER
@@ -104,8 +104,9 @@ graph TB
 | v0.1 | `planner/`, `scheduler/`, `executor/`, `registry/`, `state/`, `server/`, `mcp/`, `protocols/`, `agents/task_agent.py`, `agents/tools/` |
 | v0.2 | `cost/`, `telemetry/`, `agents/persona*`, `agents/persona_runtime/`, `agents/memory/`, `agents/sub_agents/` |
 | v0.2.1 | `agents/participant.py` (`UserParticipant`, `UserStore`), `internal/server/chat_handler.go` (`POST /api/v1/agents/{id}/chat`), `internal/executor/` chat path (`SendChatMessage` gRPC), `cli/src/commands/chat` (`persatrix chat`) |
+| v0.3.0 | `internal/channels/` (RFC 0011 — internal agent-to-agent messaging), `internal/security/` (RFC 0009 Phases 1–2 — redactor, audit log, rate limiter) |
 | v0.3.2 | `internal/wallet/` (RFC 0023 — LLM-call leasing `WalletService`; Phases 1–6 implemented: enforcement + TTL reaper + per-agent active-lease cap composed over `cost/`, with the Python `WalletClient` wired into all five LLM-call origins — workflow task, chat, autonomous TICK, sub-agent, channel-message) |
-| v0.3+ (stubs) | `a2a/`, `bridges/`, `channels/`, `resilience/`, `security/`, `mesh/` |
+| v0.3+ (stubs) | `a2a/`, `bridges/`, `resilience/`, `mesh/` |
 
 The labeled `SERVER -->|chat dispatch| EXECUTOR` edge represents the chat
 path (`POST /api/v1/agents/{id}/chat` → `GRPCChatExecutor.SendChatMessage`);
