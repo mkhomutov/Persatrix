@@ -105,6 +105,7 @@ The point worth making first: this is **assembly plus three new pieces**, not a 
 | Reasoning before posting (semantic silence + considered compose) | RFC 0051 (v0.3.10) | Quality of each turn; also the *cause* of collapse risk |
 | Interaction summary surface | RFC 0020 + v0.3.8 summary surface | The synthesized artifact [§D](#d-termination-and-synthesis--always-produce-an-artifact) |
 | Per-channel, operator-editable config | RFC 0050 | Where the `autonomous` block lives |
+| **Provider-agnostic personas** (each persona picks its model by alias) | RFC 0033 alias layer + [RFC 0053](0053-gemini-watsonx-providers.md) (Gemini + watsonx.ai) | Lets each seat run on a *different vendor* — the cross-vendor demo [§Phase 4](#phase-4-flagship-demo) |
 
 The three things **not** covered by any shipped seam: self-convening ([§B](#b-self-convening--starting-without-a-human-turn)), anti-collapse cadence ([§C](#c-the-central-tension--anti-collapse-cadence)), and the mandatory-cap + always-synthesize contract that makes unattended running safe ([§D](#d-termination-and-synthesis--always-produce-an-artifact)).
 
@@ -193,7 +194,12 @@ The [§C](#c-the-central-tension--anti-collapse-cadence) chair behavior switch �
 
 ### Phase 4: Flagship demo
 
-`make demo-autonomous` — a curated roster + topic, offline-provider-friendly, that shows the whole arc in one command. Doubles as the adoption showcase; no separate showcase scenario is built.
+The four-vendor human-free brainstorm. `make demo-autonomous` — a curated roster + topic that shows the whole arc in one command, with **two faces**:
+
+- **Cross-vendor (headline).** Four personas, each pinned by alias to a *different cloud vendor* — **Anthropic + OpenAI + Gemini + watsonx.ai** — brainstorm one topic in one channel **with no human**, then converge and synthesize. This is the most vivid possible proof that the conversation layer is provider-agnostic (RFC 0033) and the single best adoption demo before v0.4.0. It depends on [RFC 0053](0053-gemini-watsonx-providers.md) landing both new providers, and needs all four vendors' credentials (the headline manual test runs live; see [§Test Strategy](#test-strategy)).
+- **Offline (CI / no-keys).** The same roster mapped to the `mock` provider so the demo and the no-runaway smoke run with zero keys and zero spend.
+
+Doubles as the adoption showcase; no separate showcase scenario is built.
 
 ## Files Touched (Estimated)
 
@@ -213,7 +219,7 @@ No new proto, no new store migration, no new wake type — the estimate is delib
 - **Unit tests**: `validate` rejects `autonomous.enabled` without a cap; convener authors exactly one opening turn under a fresh `interaction_id`; chair advances vs. closes correctly given agenda state.
 - **Integration tests**: full convene→converge→terminate→synthesis cycle on the mock provider with zero human turns; spend ≤ cap; no-runaway leg (turns + tokens bounded under an adversarial "everyone wants to talk" roster).
 - **E2E / smoke tests**: `make demo-autonomous` runs offline and produces a non-empty synthesis.
-- **Manual tests**: `MT-AUTONOMOUS-001` (one-shot brainstorm, live provider — converges + synthesizes, no human); `MT-AUTONOMOUS-002` (anti-collapse — a roster that collapses under default bias works the agenda under autonomous pressure); `MT-AUTONOMOUS-003` (standing/scheduled convene across a window).
+- **Manual tests**: `MT-AUTONOMOUS-001` (one-shot brainstorm, live provider — converges + synthesizes, no human); `MT-AUTONOMOUS-002` (anti-collapse — a roster that collapses under default bias works the agenda under autonomous pressure); `MT-AUTONOMOUS-003` (standing/scheduled convene across a window); **`MT-AUTONOMOUS-MULTIPROVIDER-001`** (the headline cross-vendor demo — Anthropic + OpenAI + Gemini + watsonx.ai personas brainstorm one topic in one channel with no human, converge, and synthesize; live, all four vendors keyed; spend ≤ cap on every seat). The last depends on [RFC 0053](0053-gemini-watsonx-providers.md) landing the two new providers.
 
 ## Open Questions
 
@@ -243,4 +249,6 @@ On ratification:
 - [RFC 0050 — Extensible Channel Configuration](0050-extensible-channel-configuration.md) — where the `autonomous` block lives; the interaction-budget cap.
 - [RFC 0028 — Agent Decision Policy Engine](0028-agent-decision-policy-engine.md) — the v0.4.x decision rung the brainstorm is forward-compatible with.
 - [RFC 0044 — Eval-Set Shape with Golden Traces](0044-eval-set-golden-traces.md) — the conversation-quality safety net to pair with this.
+- [RFC 0053 — Gemini and watsonx.ai LLM Providers](0053-gemini-watsonx-providers.md) — bundled into the same version; provides the two new vendors the [Phase 4](#phase-4-flagship-demo) four-vendor brainstorm demo needs.
+- [RFC 0033 — Provider-Agnostic Model Alias Layer](0033-model-alias-layer.md) — why each persona can run on a different vendor with no conversation-layer change.
 - [memory-scope-axes.md](../memory-scope-axes.md) — the "channel with no human participant" case that already works at the session layer.
