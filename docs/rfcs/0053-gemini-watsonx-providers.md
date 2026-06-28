@@ -7,10 +7,10 @@ id: RFC-0053
 title: "Gemini and watsonx.ai LLM Providers"
 summary: "Add Google Gemini and IBM watsonx.ai as first-class LLM providers — the second concrete dogfood of the RFC 0033 §H multi-provider extensibility seam (one provider class + one factory branch + priced alias entries each). Brings the configurable provider roster to four cloud vendors (Anthropic, OpenAI, Gemini, watsonx.ai) plus local Ollama and the offline mock, which is what makes the RFC 0052 four-vendor human-free brainstorm demo possible."
 type: feature
-status: proposed
+status: implementing
 author: Maksim Khomutov
 created: 2026-06-28
-target: "v0.3.x (next realism rung — bundled with RFC 0052; see docs/v0.3.x-sequencing.md Amendment 2026-06-28)"
+target: "v0.3.11"
 depends_on:
   - RFC-0033
   - RFC-0023
@@ -20,10 +20,10 @@ depends_on:
 # RFC 0053 — Gemini and watsonx.ai LLM Providers
 
 **Type**: feature
-**Status**: 📋 Proposed
+**Status**: 🚧 Implementing (v0.3.11 — bundled with [RFC 0052](0052-autonomous-agent-channels.md); [plan](../v0.3.11-plan.md), [PR plan](0053-pr-plan.md))
 **Author**: Maksim Khomutov
 **Date**: 2026-06-28
-**Target**: v0.3.x (next realism rung — bundled with [RFC 0052](0052-autonomous-agent-channels.md); sequenced by [v0.3.x-sequencing Amendment 2026-06-28](../v0.3.x-sequencing.md#amendment-2026-06-28--add-the-autonomous-agent-only-channel-as-the-v03x-realism-capstone))
+**Target**: v0.3.11 (bundled with [RFC 0052](0052-autonomous-agent-channels.md), independently shippable/cuttable; sequenced by [v0.3.x-sequencing Amendment 2026-06-28](../v0.3.x-sequencing.md#amendment-2026-06-28--add-the-autonomous-agent-only-channel-as-the-v03x-realism-capstone), pinned at [plan opening](../v0.3.11-plan.md#scope-decisions-locked-at-plan-authoring-time-2026-06-28))
 **Depends on**: RFC 0033 (Provider-Agnostic Model Alias Layer — the extension seam), RFC 0023 (LLM Call Leasing — non-local providers must be priced), RFC 0004 (the `LLMProvider` Protocol)
 
 ---
@@ -158,20 +158,22 @@ The Go cost table needs no per-provider code — it is derived from `models.alia
 
 ## Open Questions
 
-1. **Gemini via native SDK or the OpenAI-compatible endpoint?** Native `google-genai` is the default (clean provider identity, native tool-calling, distinct pricing/telemetry). The OpenAI-compat endpoint would need *zero* new code (`OpenAIProvider` + `base_url`) but files Gemini traffic under `openai` for cost/telemetry and forfeits native features. Lean **native**; revisit if the native SDK proves heavy.
+> **Status — resolved 2026-06-28 at [v0.3.11 plan opening](../v0.3.11-plan.md#scope-decisions-locked-at-plan-authoring-time-2026-06-28).** **#1 → native `google-genai`** (the documented default); **#4 → ship the SDKs as extras**; **#2 → watsonx model/region calibrated at PR time**; **#3 → provider-native knobs out of scope**. Detail in the [RFC 0053 PR plan](0053-pr-plan.md#open-question-resolutions-locked-at-plan-authoring-time).
+
+1. **Gemini via native SDK or the OpenAI-compatible endpoint?** Native `google-genai` is the default (clean provider identity, native tool-calling, distinct pricing/telemetry). The OpenAI-compat endpoint would need *zero* new code (`OpenAIProvider` + `base_url`) but files Gemini traffic under `openai` for cost/telemetry and forfeits native features. Lean **native**; revisit if the native SDK proves heavy. — **Resolved (v0.3.11): native `google-genai`** (first-class `GeminiProvider`; the OpenAI-compat path is the documented fallback if the SDK proves heavy).
 2. **watsonx model + region defaults for the demo.** Which hosted model is the demo `quality` alias (a Llama-3.3-70B vs Granite vs Mistral-Large), and which region URL ships as the example? Pick a broadly-available default; document how to change it. Calibrate at PR time against the current watsonx catalog.
 3. **Surface provider-native knobs (Gemini thinking budget, watsonx decoding params)?** Out of scope here (the Protocol doesn't model them). If the RFC 0052 brainstorm benefits from Gemini "thinking," that pairs naturally with the deferred RFC 0051 Phase 4 (`depth: deep` native extended thinking) rather than this RFC.
 4. **Dependency packaging.** Ship `google-genai` / `ibm-watsonx-ai` as extras (`pip install persatrix[gemini,watsonx]`) vs. base requirements? Lean **extras** so a single-provider deployment stays lean — consistent with the optional-install `ImportError` hint pattern.
 
 ## Decision / Next Steps
 
-**Status**: 📋 Proposed. Bundled with [RFC 0052](0052-autonomous-agent-channels.md) into the next version per the [v0.3.x-sequencing Amendment 2026-06-28](../v0.3.x-sequencing.md#amendment-2026-06-28--add-the-autonomous-agent-only-channel-as-the-v03x-realism-capstone).
+**Status**: 🚧 Implementing (v0.3.11). Bundled with [RFC 0052](0052-autonomous-agent-channels.md) into v0.3.11 per the ratified [v0.3.x-sequencing Amendment 2026-06-28](../v0.3.x-sequencing.md#amendment-2026-06-28--add-the-autonomous-agent-only-channel-as-the-v03x-realism-capstone) ([#709](https://github.com/mkhomutov/Persatrix/pull/709)); independently shippable/cuttable per the [v0.3.11 plan](../v0.3.11-plan.md#scope-decisions-locked-at-plan-authoring-time-2026-06-28).
 
-On ratification:
+Done at plan opening:
 
-1. Open `docs/rfcs/0053-pr-plan.md` — Phase 1 (Gemini) then Phase 2 (watsonx), each one provider class + factory branch + demo config + compose + redactor patterns + docs.
-2. Resolve [OQ #1](#open-questions) (Gemini native vs OpenAI-compat) before Phase 1 begins — it shapes whether Phase 1 is a new class or an alias config.
-3. Hand off Phase 3 (four-vendor enablement) to [RFC 0052 Phase 4](0052-autonomous-agent-channels.md#phase-4-flagship-demo) once both providers land.
+1. ✅ [`docs/rfcs/0053-pr-plan.md`](0053-pr-plan.md) — Phase 1 (Gemini) then Phase 2 (watsonx), each one provider class + factory branch + demo config + compose + redactor patterns + docs; Phase 3 is the extras/closeout + handoff.
+2. ✅ [OQ #1](#open-questions) (Gemini native vs OpenAI-compat) resolved — **native** `google-genai`; see the §Status note above.
+3. Hand off Phase 3 (four-vendor enablement) to [RFC 0052 Phase 4](0052-autonomous-agent-channels.md#phase-4-flagship-demo) once both providers land ([RFC 0052 PR 8](0052-pr-plan.md#pr-8-featurev0311-rfc0052-demo-multivendor--phase-4b-four-vendor-headline--closeout-cuttable)).
 
 ## Related Documentation
 
