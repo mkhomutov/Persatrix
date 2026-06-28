@@ -173,7 +173,7 @@ Done at plan opening:
 
 1. ✅ [`docs/rfcs/0053-pr-plan.md`](0053-pr-plan.md) — Phase 1 (Gemini) then Phase 2 (watsonx), each one provider class + factory branch + demo config + compose + redactor patterns + docs; Phase 3 is the extras/closeout + handoff.
 2. ✅ [OQ #1](#open-questions) (Gemini native vs OpenAI-compat) resolved — **native** `google-genai`; see the §Status note above.
-3. Hand off Phase 3 (four-vendor enablement) to [RFC 0052 Phase 4](0052-autonomous-agent-channels.md#phase-4-flagship-demo) once both providers land ([RFC 0052 PR 8](0052-pr-plan.md#pr-8-featurev0311-rfc0052-demo-multivendor--phase-4b-four-vendor-headline--closeout-cuttable)).
+3. Hand off Phase 3 (four-vendor enablement) to [RFC 0052 Phase 4](0052-autonomous-agent-channels.md#phase-4-flagship-demo) once both providers land ([RFC 0052 PR 9](0052-pr-plan.md#pr-9-featurev0311-rfc0052-demo-multivendor--phase-4b-four-vendor-headline--closeout-cuttable)).
 
 ## Related Documentation
 

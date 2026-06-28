@@ -17,7 +17,7 @@ This plan covers all three phases across **3 PRs**, mirroring the RFC's [phasing
 
 - **Phase 1 — Gemini (PR 1).** `GeminiProvider` on the native `google-genai` SDK + factory branch + tool-round mapping + `config/demo/gemini/` + `make demo-gemini` + `docker-compose.gemini.yaml` + redactor patterns + docs.
 - **Phase 2 — watsonx.ai (PR 2).** `WatsonxProvider` on the native `ibm-watsonx-ai` SDK + factory branch (with **required** `project_id`/`url` validation, fail-closed at construction) + tool-round mapping + `config/demo/watsonx/` + `make demo-watsonx` + `docker-compose.watsonx.yaml` + redactor patterns + docs.
-- **Phase 3 — four-vendor handoff + closeout (PR 3).** Config-only — no new provider code. The cross-vendor blueprint + MT live in [RFC 0052 PR 8](0052-pr-plan.md#pr-8-featurev0311-rfc0052-demo-multivendor--phase-4b-four-vendor-headline--closeout-cuttable); this PR finalizes the extras packaging + the model-providers guide and flips RFC 0053 to ✅ Implemented.
+- **Phase 3 — four-vendor handoff + closeout (PR 3).** Config-only — no new provider code. The cross-vendor blueprint + MT live in [RFC 0052 PR 9](0052-pr-plan.md#pr-9-featurev0311-rfc0052-demo-multivendor--phase-4b-four-vendor-headline--closeout-cuttable); this PR finalizes the extras packaging + the model-providers guide and flips RFC 0053 to ✅ Implemented.
 
 **Hard prerequisites (all shipped):** RFC 0033 alias layer + §F alias-keyed pricing + §H extension seam (v0.3.4 ✅), RFC 0023 leasing — non-local providers must be priced (v0.3.2 ✅), RFC 0004 the `LLMProvider` Protocol (✅).
 
@@ -56,7 +56,7 @@ RFC 0033 §H seam + §F pricing + RFC 0023 lease (all shipped)        ← HARD P
    │     │      (independent of PR 1 — either order)                                            │ PR 8
    │     ↓                                                                                       ┘
    └── PR 3 (Phase 3: extras packaging [persatrix[gemini,watsonx]] + model-providers guide
-             finalize + RFC closeout; the four-vendor blueprint + MT live in RFC 0052 PR 8)
+             finalize + RFC closeout; the four-vendor blueprint + MT live in RFC 0052 PR 9)
 ```
 
 ---
@@ -127,7 +127,7 @@ RFC 0033 §H seam + §F pricing + RFC 0023 lease (all shipped)        ← HARD P
 ### PR 3: `feature/v0311-rfc0053-closeout` — Phase 3: Extras packaging + handoff + closeout
 
 **Depends on**: PR 1 + PR 2 merged.
-**Purpose**: Finalize the packaging + docs; hand the four-vendor enablement to [RFC 0052 PR 8](0052-pr-plan.md#pr-8-featurev0311-rfc0052-demo-multivendor--phase-4b-four-vendor-headline--closeout-cuttable). **No new provider code** — pinning four personas to four vendors in one channel is pure RFC 0033 alias config, and that blueprint + the cross-vendor MT live in RFC 0052.
+**Purpose**: Finalize the packaging + docs; hand the four-vendor enablement to [RFC 0052 PR 9](0052-pr-plan.md#pr-9-featurev0311-rfc0052-demo-multivendor--phase-4b-four-vendor-headline--closeout-cuttable). **No new provider code** — pinning four personas to four vendors in one channel is pure RFC 0033 alias config, and that blueprint + the cross-vendor MT live in RFC 0052.
 
 #### Scope
 
@@ -140,7 +140,7 @@ RFC 0033 §H seam + §F pricing + RFC 0023 lease (all shipped)        ← HARD P
 #### PR checklist
 
 - [ ] Extras resolve; the model-providers guide documents all four cloud vendors.
-- [ ] Handoff note points at RFC 0052 PR 8 for the cross-vendor blueprint + MT.
+- [ ] Handoff note points at RFC 0052 PR 9 for the cross-vendor blueprint + MT.
 - [ ] RFC 0053 → ✅ Implemented; ROADMAP + CHANGELOG updated.
 
 ---
