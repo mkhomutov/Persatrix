@@ -69,6 +69,13 @@ var (
 	// ErrInvalidAutonomousAgenda — the agenda is longer than [MaxAutonomousAgendaItems]
 	// or carries a blank item.
 	ErrInvalidAutonomousAgenda = errors.New("channels: invalid autonomous.agenda")
+	// ErrAutonomousNotGroup — `autonomous.enabled` on a non-group (DM/thread)
+	// channel. Autonomous convening is an open-floor GROUP concept:
+	// [ChannelRouter.ResolveAutonomous] seeds only group channels and the convene
+	// path (PR 3) dispatches an open-floor seed turn, so arming a DM/thread would
+	// create a channel the convene path can never act on. Rejected at the apply path
+	// (the load path declares only group channels). The REST layer maps it to 400.
+	ErrAutonomousNotGroup = errors.New("channels: autonomous.enabled requires a group channel")
 )
 
 // validateConvenerMembership enforces the load-path OQ #1 convener rules for an

@@ -76,6 +76,28 @@ func (r *ChannelRouter) ResolveAutonomous(ctx context.Context, cfg *Config) erro
 	return nil
 }
 
+// validateAutonomousChannelType rejects arming a non-group (DM/thread) channel.
+// Autonomous convening is an open-floor GROUP concept — [ChannelRouter.ResolveAutonomous]
+// seeds only group channels and the convene path (PR 3) dispatches an open-floor seed
+// turn — so an armed DM/thread is un-convenable by construction and the validation
+// otherwise accepts it (the dark-backend footgun this guard closes). The load path
+// needs no mirror: config declares only group channels. Runs only when the merged
+// block is armed and before the write, so a non-group arm never persists.
+func (r *ChannelRouter) validateAutonomousChannelType(ctx context.Context, channelID string, patch ChannelConfigOverrides) error {
+	if !patch.Autonomous.effectiveEnabled() {
+		return nil
+	}
+	ch, err := r.store.GetChannel(ctx, channelID)
+	if err != nil {
+		return fmt.Errorf("channels: apply config %s: load channel: %w", channelID, err)
+	}
+	if ch.Type != ChannelTypeGroup {
+		return fmt.Errorf("channels: apply config %s: %w: %q is a %s channel (autonomous convening is an open-floor group concept)",
+			channelID, ErrAutonomousNotGroup, channelID, ch.Type)
+	}
+	return nil
+}
+
 // validateAutonomousConvener enforces the cross-field convener rules that need the
 // live roster (RFC 0052 OQ #1) against a runtime patch: when the merged autonomous
 // block is armed, the convener must be a declared member of the channel AND not an
@@ -89,6 +111,21 @@ func (r *ChannelRouter) ResolveAutonomous(ctx context.Context, cfg *Config) erro
 // mandatory cap are computable from the override struct and live in
 // [ChannelConfigOverrides.validateAutonomous]; this method adds only the parts that
 // need the live roster.
+//
+// DRIFT LOCKOUT (deliberate, escalation-chair-symmetric). On a STORE-CANONICAL
+// channel (revision > 0) the merge base is the stored blob, which still carries the
+// convener even after that member leaves the roster (RemoveMember does not touch the
+// config blob). So once a convener drifts out of membership, this rule rejects EVERY
+// subsequent edit — even an unrelated one — until the operator fixes it. That is the
+// safety contract surfacing a broken armed channel loudly, exactly as
+// [ChannelRouter.validateEscalationChair] does for the chair; it is NOT softened
+// convener-only, because diverging from the chair would create a worse asymmetry.
+// It is always RECOVERABLE: disarming (`autonomous.enabled:false`), clearing the
+// block (`autonomous:null`), or re-pointing the convener short-circuits the rule via
+// [AutonomousOverrides.effectiveEnabled] / a valid member. The revision-0 first edit
+// instead DROPS a drifted block ([Server.autonomousBaseline]) so an unrelated first
+// edit is never blocked; the two paths differ because a revision-0 block is not yet
+// canonical. (Pinned by TestChannelConfig_AutonomousConvenerDriftLocksThenRecovers.)
 func (r *ChannelRouter) validateAutonomousConvener(ctx context.Context, channelID string, patch ChannelConfigOverrides) error {
 	if !patch.Autonomous.effectiveEnabled() {
 		return nil

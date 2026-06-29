@@ -139,22 +139,26 @@ func agendaValue(agenda []string) []string {
 // otherwise customized) rung is frozen; a disabled default stays inherit.
 //
 // It carries the same governance-drift drop as the chair / reasoning: if the
-// frozen rung is ARMED but its convener is no longer ENFORCEABLE — it has drifted
-// out of the channel's membership OR become an `observer` (respond: never) —
-// freezing it would let the convener cross-field rule
-// ([ChannelRouter.validateAutonomousConvener]) REJECT an unrelated first edit
-// naming a knob the operator never touched. The armed rung is already un-convenable
-// at dispatch (a non-member or observer convener cannot author the opening turn), so
-// the baseline drops the whole block — the "tolerate the drift, don't resurrect it
-// as a hard error" posture boot replay and the other conditional knobs already take.
+// frozen rung is ARMED but UN-CONVENABLE — it has no convener at all, or its
+// convener is no longer ENFORCEABLE (drifted out of the channel's membership OR
+// become an `observer`, respond: never) — freezing it would let the convener
+// cross-field rules ([ChannelConfigOverrides.validateAutonomous] for the empty
+// case, [ChannelRouter.validateAutonomousConvener] for the drift/observer case)
+// REJECT an unrelated first edit naming a knob the operator never touched. The
+// armed rung is already un-convenable at dispatch (no convener, or a non-member /
+// observer one cannot author the opening turn), so the baseline drops the whole
+// block — the "tolerate the drift, don't resurrect it as a hard error" posture boot
+// replay and the other conditional knobs already take. The empty-convener case is a
+// degenerate state validation blocks at every write path, but the guard keys on
+// "armed AND un-convenable" so a direct router stamp cannot smuggle it past either.
 func (s *Server) autonomousBaseline(ctx context.Context, id string) *channels.AutonomousOverrides {
 	froze := s.channelRouter.AutonomousFor(id).FreezeOverrides()
 	if froze == nil {
 		return nil
 	}
-	if froze.Enabled != nil && *froze.Enabled && froze.Convener != nil &&
-		!s.convenerIsEnforceableMember(ctx, id, *froze.Convener) {
-		return nil // drifted/observer convener: drop the inert armed block (mirror the chair)
+	if froze.Enabled != nil && *froze.Enabled &&
+		(froze.Convener == nil || !s.convenerIsEnforceableMember(ctx, id, *froze.Convener)) {
+		return nil // un-convenable armed block (no/drifted/observer convener): drop it (mirror the chair)
 	}
 	return froze
 }

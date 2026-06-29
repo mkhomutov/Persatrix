@@ -335,6 +335,72 @@ func TestChannelConfig_AutonomousFirstEditDropsObserverConvener(t *testing.T) {
 	assert.False(t, srv.channelRouter.AutonomousFor(id).Enabled)
 }
 
+// TestChannelConfig_AutonomousFirstEditDropsArmedWithoutConvener: the freeze's
+// drift branch must also drop an armed rung with NO convener at all — a degenerate
+// state validation blocks at every write path, reachable here only via a direct
+// router stamp. Freezing such a rung would make the apply-path convener rule REJECT
+// (400) an unrelated first edit on the empty-convener case, exactly as a drifted
+// convener would. The drop guard therefore keys on "armed AND un-convenable", which
+// includes an absent convener, not only a drifted one.
+func TestChannelConfig_AutonomousFirstEditDropsArmedWithoutConvener(t *testing.T) {
+	srv, id := autonomousTestServer(t)
+	// Arm the router with NO convener (and a cap, so only the missing convener — not
+	// the cap — is under test).
+	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{Enabled: true})
+	srv.channelRouter.SetInteractionBudgetTokens(id, 200000)
+
+	body, _ := json.Marshal(map[string]any{"floor_control": false})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code,
+		"an armed-but-convenerless rung must not block an unrelated first edit; body=%s", rec.Body.String())
+
+	a := decodeAutonomous(t, rec.Body.Bytes())
+	assert.Equal(t, false, a["enabled"].Value, "the inert armed block is dropped, not frozen")
+	assert.Equal(t, "default", a["enabled"].Source)
+	assert.False(t, srv.channelRouter.AutonomousFor(id).Enabled)
+}
+
+// TestChannelConfig_AutonomousConvenerDriftLocksThenRecovers pins the deliberate,
+// escalation-chair-symmetric contract for a STORE-CANONICAL (revision > 0) armed
+// channel whose convener later leaves the roster. Unlike the revision-0 first edit
+// — where the baseline DROPS the drifted block — a revision > 0 edit merges over the
+// stored blob, which still carries the convener, so the apply-path convener rule
+// rejects EVERY subsequent edit, even an unrelated one. That lockout is the safety
+// contract surfacing a broken armed channel loudly (the same way the escalation
+// chair behaves), and it is always RECOVERABLE: disarming (or re-pointing/clearing
+// the convener) clears the gate. Member removal deliberately does not clear the
+// config reference — see [ChannelRouter.validateAutonomousConvener].
+func TestChannelConfig_AutonomousConvenerDriftLocksThenRecovers(t *testing.T) {
+	srv, id := autonomousTestServer(t) // members: nova + ada
+
+	// Arm via REST → the channel becomes store-canonical at revision 1.
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		armBody(nil), map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	// The convener leaves the roster. RemoveMember does not touch the config blob,
+	// so the stored autonomous rung still names nova.
+	require.NoError(t, srv.channelStore.RemoveMember(t.Context(), id, "nova"))
+
+	// An UNRELATED edit is now locked: the merged patch (stored blob + floor_control)
+	// still carries the drifted convener, which the apply-path rule rejects.
+	body, _ := json.Marshal(map[string]any{"floor_control": false})
+	rec = doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"a drifted convener locks unrelated edits on a store-canonical channel; body=%s", rec.Body.String())
+
+	// Recovery: disarming the channel clears the gate (the revision is unchanged by
+	// the rejected edit, so If-Match is still 1).
+	body, _ = json.Marshal(map[string]any{"autonomous": map[string]any{"enabled": false}})
+	rec = doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "1"})
+	require.Equal(t, http.StatusOK, rec.Code,
+		"disarming the channel must recover from the drift lockout; body=%s", rec.Body.String())
+	assert.False(t, srv.channelRouter.AutonomousFor(id).Enabled)
+}
+
 // TestChannelConfig_AutonomousFirstEditOnDefaultStaysInherit: the conditional
 // freeze's other branch — a channel at the default (disabled) rung stays inherit
 // through an unrelated first edit.

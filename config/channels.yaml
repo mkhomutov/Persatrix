@@ -195,6 +195,8 @@ channels:
   #     lifecycle (opens + advances) while the chair keeps its shipped synthesis/close
   #     role (RFC 0052 OQ #1). An observer convener would be suppressed by its
   #     receiver gate before any LLM, exactly like an observer chair.
+  #   - arming is GROUP-only — a DM/thread cannot be made autonomous (convening is
+  #     an open-floor group concept); the apply path rejects an enabled non-group.
   - name: roundtable
     description: "RFC 0052 example — an autonomous, human-free brainstorm (dark in v0.3.11 PR 1)"
     interaction_budget_tokens: 200000

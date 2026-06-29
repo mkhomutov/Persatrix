@@ -387,3 +387,30 @@ func TestAutonomousFor_DefaultForUnconfigured(t *testing.T) {
 	assert.False(t, a.Enabled)
 	assert.Equal(t, DefaultAutonomousMaxRounds, a.MaxRounds)
 }
+
+// TestApplyChannelConfig_AutonomousRejectedOnNonGroup: autonomous convening is an
+// open-floor GROUP concept — [ChannelRouter.ResolveAutonomous] seeds only group
+// channels and the PR 3 convene path dispatches an open-floor seed turn. Arming a
+// DM (or thread) would create a channel the convene path can never act on — an
+// armed-but-unconvenable channel the validation otherwise accepted — so the apply
+// path rejects it. The convener here IS a DM member, so only the channel-type rule
+// (not the convener-membership rule) is under test.
+func TestApplyChannelConfig_AutonomousRejectedOnNonGroup(t *testing.T) {
+	router, store, ctx := newApplyRouter(t)
+	dm, err := store.GetOrCreateDM(ctx, "nova", "ada")
+	require.NoError(t, err)
+
+	enabled := true
+	convener := "nova"
+	budget := int64(200000)
+	err = router.ApplyChannelConfig(ctx, dm.ID, ChannelConfigOverrides{
+		Autonomous:              &AutonomousOverrides{Enabled: &enabled, Convener: &convener},
+		InteractionBudgetTokens: &budget,
+	}, 0, "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAutonomousNotGroup)
+
+	_, revision, err := store.GetChannelConfig(ctx, dm.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), revision, "rejected applies never write")
+}
