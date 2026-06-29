@@ -78,9 +78,16 @@ impl AutonomousConfigView {
 /// items — the wire shape the server's `decodeKnob[[]string]` decodes. The CLI
 /// delimiter is the comma (agenda items are short sub-topic phrases); an item that
 /// needs a literal comma is the case for the nested `autonomous:` YAML
-/// config-as-code path the boot loader applies, not this convenience surface. Each
-/// item is whitespace-trimmed and blanks are dropped, mirroring the server's
-/// non-blank, trimmed agenda-item check.
+/// config-as-code path the boot loader applies, not this convenience surface.
+///
+/// The trim + blank-drop here is a CLIENT-SIDE convenience of the comma surface, NOT
+/// a mirror of the server: `decodeKnob[[]string]` stores items VERBATIM, and the
+/// server's agenda-item check (`AutonomousConfig.validateFields`) trims only to
+/// REJECT a blank/whitespace-only item (a `400`), never to normalize. So the same
+/// whitespace-bearing input persists differently across the two entry surfaces — the
+/// boot-loader YAML path keeps `" Cost "` verbatim and `400`s on a blank item, where
+/// this surface stores `"Cost"` and drops the blank. Kept deliberately forgiving so a
+/// stray space or trailing comma in `set` is not a round-trip error.
 ///
 /// An empty (or all-separator/blank) raw value yields `[]` — an explicit empty-
 /// agenda override, the list analogue of `escalation_chair_id=`'s empty-string
