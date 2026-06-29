@@ -17,13 +17,14 @@
 //! the bumped revision + new effective config in one round-trip. The nested
 //! `reasoning.*` surface lives in `channel_config_reasoning`.
 
-use colored::Colorize;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::commands::channel::canonicalize_channel_id;
+use crate::commands::channel_config_autonomous::{self as autonomous, AutonomousConfigView};
 use crate::commands::channel_config_reasoning::{self as reasoning, ReasoningConfigView};
+use crate::commands::channel_config_render::render_config_view;
 use crate::types::{api_error_message, validate_path_param};
 
 // ─── Wire DTOs (mirror internal/server/channel_types.go) ─────────────────
@@ -67,6 +68,10 @@ pub(crate) struct ChannelConfigView {
     /// `reasoningConfigResponse`; rendered as dotted `reasoning.<sub>` rows. The
     /// type + its sub-knob accessor live in [`channel_config_reasoning`](reasoning).
     pub(crate) reasoning: ReasoningConfigView,
+    /// RFC 0052 (v0.3.11): the SECOND nested knob — an `autonomous` block (six
+    /// sub-knobs, dotted `autonomous.<sub>` rows) carrying the first LIST-valued
+    /// sub-knob (`agenda`). Type + accessor in [`channel_config_autonomous`](autonomous).
+    pub(crate) autonomous: AutonomousConfigView,
 }
 
 // ─── Knob registry ──────────────────────────────────────────────────────
@@ -84,6 +89,9 @@ pub(crate) enum KnobType {
     Str,
     /// A string knob restricted to a closed value set (see [`reasoning`]).
     Enum(&'static [&'static str]),
+    /// A string LIST knob (RFC 0052 `autonomous.agenda`) — rides the wire as a JSON
+    /// array; the CLI splits a comma-delimited value (see [`autonomous::coerce_list`]).
+    List,
 }
 
 /// The closed set of editable FLAT governance knobs, paired with their wire type.
@@ -101,11 +109,15 @@ pub(crate) const CONFIG_KNOBS: &[(&str, KnobType)] = &[
 ];
 
 /// Every editable knob in render order: the flat [`CONFIG_KNOBS`] followed by the
-/// nested dotted [`reasoning::KNOBS`]. This MUST match the server's editable-knob
-/// set exactly — the flat `mergeConfigPatch` cases ∪ the nested `mergeReasoningPatch`
-/// sub-knobs — a drift either way is pinned by `cli_knob_set_matches_server_merge_switch`.
+/// nested dotted [`reasoning::KNOBS`] then [`autonomous::KNOBS`]. This MUST match the
+/// server's editable-knob set exactly — the flat `mergeConfigPatch` cases ∪ the
+/// nested `mergeReasoningPatch` ∪ `mergeAutonomousPatch` sub-knobs — a drift either
+/// way is pinned by `cli_knob_set_matches_server_merge_switch`.
 pub(crate) fn editable_knobs() -> impl Iterator<Item = &'static (&'static str, KnobType)> {
-    CONFIG_KNOBS.iter().chain(reasoning::KNOBS.iter())
+    CONFIG_KNOBS
+        .iter()
+        .chain(reasoning::KNOBS.iter())
+        .chain(autonomous::KNOBS.iter())
 }
 
 /// The wire type for a knob, or `None` if `key` is not an editable knob.
@@ -182,6 +194,9 @@ pub(crate) fn parse_set_assignment(spec: &str) -> Result<(String, Value), String
         // A closed string enum: the value-set check lives in `reasoning` (it backs
         // the dotted reasoning knobs), failing locally rather than round-tripping a 400.
         KnobType::Enum(allowed) => reasoning::coerce_enum(key, allowed, raw)?,
+        // A string list (RFC 0052 `autonomous.agenda`): comma-split into a JSON array
+        // client-side (infallible — empty maps to an explicit empty agenda).
+        KnobType::List => autonomous::coerce_list(raw),
     };
     Ok((key.to_string(), value))
 }
@@ -194,6 +209,7 @@ fn type_label(ty: KnobType) -> &'static str {
         KnobType::Int => "integer",
         KnobType::Str => "string",
         KnobType::Enum(_) => "enum",
+        KnobType::List => "list",
     }
 }
 
@@ -267,56 +283,18 @@ pub(crate) fn config_rows(view: &ChannelConfigView) -> Vec<(&'static str, &Confi
                 "escalation_chair_id" => &view.escalation_chair_id,
                 "interaction_idle_timeout_seconds" => &view.interaction_idle_timeout_seconds,
                 "interaction_budget_tokens" => &view.interaction_budget_tokens,
-                // The nested reasoning block resolves its own dotted rows; the
-                // editable set is pinned to the view fields by the lockstep test.
+                // The nested reasoning + autonomous blocks resolve their own dotted
+                // rows; the editable set is pinned to the view fields by the lockstep
+                // test, so a key matching neither is an `unreachable!` invariant break.
                 other => view
                     .reasoning
                     .field(other)
+                    .or_else(|| view.autonomous.field(other))
                     .unwrap_or_else(|| unreachable!("knob {other} has no view field")),
             };
             (*key, field)
         })
         .collect()
-}
-
-/// Render one knob's effective value for the human view. A JSON `null` reads as
-/// `—` so it is not mistaken for the literal string "null"; a JSON string drops
-/// its quotes.
-///
-/// An empty string renders as `(none)` rather than a blank cell. The one string
-/// knob is `escalation_chair_id`, whose empty value means "no chair" — either an
-/// explicit `[channel]` disable (the empty-string sentinel) or an inherited
-/// `[default]` with no chair configured. A blank cell would read as a render
-/// glitch / missing field; `(none)` names the state, and the provenance tag still
-/// distinguishes the two cases. Kept distinct from `—` (a JSON null) so the two
-/// are not conflated.
-fn render_value(value: &Value) -> String {
-    match value {
-        Value::Null => "\u{2014}".to_string(),
-        Value::String(s) if s.is_empty() => "(none)".to_string(),
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
-}
-
-/// Render the effective-config block: a header carrying the channel id and
-/// current revision, then one aligned row per knob with its value and a
-/// `[channel]` / `[default]` provenance tag.
-fn render_config_view(id: &str, view: &ChannelConfigView) {
-    println!(
-        "{}  {}",
-        format!("#{id}").cyan(),
-        format!("revision {}", view.revision).dimmed()
-    );
-    let rows = config_rows(view);
-    let width = rows.iter().map(|(k, _)| k.len()).max().unwrap_or(0);
-    for (key, field) in rows {
-        println!(
-            "  {key:<width$}  {}  {}",
-            render_value(&field.value),
-            format!("[{}]", field.source).dimmed(),
-        );
-    }
 }
 
 // ─── HTTP helpers ───────────────────────────────────────────────────────

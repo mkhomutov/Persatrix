@@ -45,6 +45,10 @@ function configBody(overrides = {}) {
       depth: { value: "shallow", source: "default" },
       revise: { value: 0, source: "default" },
     },
+    // RFC 0052's nested autonomous block is omitted here on purpose: the panel
+    // renders its six rows via fieldFor's inherited-default fallback even when the
+    // response leaves the block out, so the count below still holds. The block's
+    // own round-trip lives in ChannelSettings.autonomous.test.js.
     ...overrides,
   };
 }
@@ -85,10 +89,10 @@ describe("ChannelSettings", () => {
     const floor = await screen.findByLabelText("Floor control");
     expect(floor.checked).toBe(true);
     // Two knobs are overridden (floor_control, escalation_chair_id); the rest
-    // inherit — six flat + the four nested reasoning.* sub-knobs = ten. The
-    // provenance vocabulary is the user-facing rendering of `source`.
+    // inherit — eight flat + the four reasoning.* + the six autonomous.* sub-knobs
+    // = sixteen. The provenance vocabulary is the user-facing rendering of `source`.
     expect(screen.getAllByText("Overridden on this channel").length).toBe(2);
-    expect(screen.getAllByText("Inherited default").length).toBe(10);
+    expect(screen.getAllByText("Inherited default").length).toBe(16);
 
     // It fetched the encoded config route, not anything else.
     expect(fetchMock).toHaveBeenCalledTimes(1);

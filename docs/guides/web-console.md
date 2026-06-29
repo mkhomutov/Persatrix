@@ -295,13 +295,14 @@ revision as an `If-Match` guard:
 
 - A reverted knob sends an explicit "unset → inherit"; an override left blank is
   skipped, not sent as `0` (a no-op save sends nothing).
-- The **escalation chair** picker offers only members that can hold the floor (an
-  observer cannot chair). A chair still requires `floor_control` on; setting one
-  alongside `floor_control: off` round-trips to a `400` the panel surfaces — the
-  picker cannot prevent that cross-field conflict.
-- `interaction_budget_tokens` is now **router-wired and live-enforced** (RFC 0050
-  interaction-budget-enforcement amendment), so an inherited value resolves to its
-  concrete effective number, not empty.
+- The **escalation chair** picker offers only floor-capable members (an observer
+  cannot chair); a chair needs `floor_control` on, else the save `400`s (a
+  cross-field conflict the picker cannot prevent).
+- `interaction_budget_tokens` is **router-wired and live-enforced** (RFC 0050
+  amendment), so an inherited value resolves to a concrete number, not empty.
+- Since v0.3.11 the panel renders an **Autonomous channel** section (RFC 0052) —
+  the `autonomous` block's knobs (enable, Topic/Goal, Agenda, Convener, Max rounds)
+  on the same sparse PATCH, **dark** until convening (PR 3).
 - On a concurrent edit, the save returns `409`; the panel **reloads the latest
   config and replays your pending edits on top** rather than blind-overwriting,
   and asks you to review and save again.
@@ -310,11 +311,10 @@ revision as an `If-Match` guard:
 > a YAML-seeded channel **preserves** its other knobs (including the YAML chair):
 > the first edit seeds its merge base from the channel's resolved governance
 > ([ISSUE-0103](../issues/ISSUE-0103-first-config-edit-detaches-yaml-seeded-knobs.md)).
-> Expect two things: the first edit makes the channel **store-canonical**, so
-> previously-inherited knobs now show source `channel` and stop tracking fleet
-> defaults; and a lone `floor_control: false` on a chaired channel is now
-> **rejected** — clear the chair in the same save to turn floor control off. Still
-> a governance write **before auth** — see
+> Expect the channel to become **store-canonical** (previously-inherited knobs now
+> read source `channel`), and a lone `floor_control: false` on a chaired channel to
+> be **rejected** — clear the chair in the same save. Still a governance write
+> **before auth** — see
 > [Security](#security--do-not-expose-beyond-localhost) before exposing the
 > console beyond localhost.
 

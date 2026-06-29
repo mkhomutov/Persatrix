@@ -523,6 +523,17 @@ persatrix channel config diff planning
   wallet on the lease path (RFC 0050 interaction-budget-enforcement amendment) —
   the `get` view resolves a concrete effective value for both the overridden and
   the inherited case, so it no longer carries a deferral note or reads as `—`.
+- **Nested dotted knobs.** Beyond the flat knobs above, the surface carries two
+  nested blocks edited with dotted keys: `reasoning.*` (RFC 0051) and, since
+  v0.3.11, `autonomous.*` (RFC 0052) — `autonomous.enabled`, `.topic`,
+  `.agenda` (a comma-separated list → a `[]string`), `.convener`, `.goal`,
+  `.max_rounds`. Each `set`/`unset` nests under its block (`set planning
+  autonomous.enabled=true autonomous.agenda='Cost, Coupling'`); `get` renders them
+  as `autonomous.<sub>` rows. The block is **dark in v0.3.11** (no convening yet —
+  RFC 0052 PR 3); `validate` rejects an `autonomous.enabled` channel without a
+  positive `interaction_budget_tokens` cap and a convener that is not a declared,
+  floor-capable member distinct from `escalation_chair_id`. `export`/`import`/`diff`
+  defer both nested blocks (the boot loader applies a declared `autonomous:` block).
 
 - **Export-first, revision-stamped.** `export` regenerates the YAML from the
   store stamped `revision: store + 1`, so the hand-edit loop (export → edit →

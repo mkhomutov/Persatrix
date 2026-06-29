@@ -53,6 +53,20 @@ fn view(revision: i64, over: &[(&str, Value)]) -> ChannelConfigView {
             "revise": {"value": 0,         "source": "default"},
         }),
     );
+    // The nested autonomous block (RFC 0052) reads back as default for the same
+    // reason: export/diff filter `config_rows` to the FLAT knobs, so the dotted
+    // autonomous.* keys (agenda included) are never emitted/compared by these verbs.
+    payload.insert(
+        "autonomous".to_string(),
+        serde_json::json!({
+            "enabled":    {"value": false, "source": "default"},
+            "topic":      {"value": "",    "source": "default"},
+            "agenda":     {"value": [],    "source": "default"},
+            "convener":   {"value": "",    "source": "default"},
+            "goal":       {"value": "",    "source": "default"},
+            "max_rounds": {"value": 12,    "source": "default"},
+        }),
+    );
     serde_json::from_value(Value::Object(payload)).expect("view payload deserializes")
 }
 
@@ -336,6 +350,14 @@ fn view_with_reasoning_override() -> ChannelConfigView {
             "model":  {"value": "fast",    "source": "default"},
             "depth":  {"value": "shallow", "source": "default"},
             "revise": {"value": 0,         "source": "default"},
+        },
+        "autonomous": {
+            "enabled":    {"value": false, "source": "default"},
+            "topic":      {"value": "",    "source": "default"},
+            "agenda":     {"value": [],    "source": "default"},
+            "convener":   {"value": "",    "source": "default"},
+            "goal":       {"value": "",    "source": "default"},
+            "max_rounds": {"value": 12,    "source": "default"},
         },
     }))
     .expect("view payload deserializes")

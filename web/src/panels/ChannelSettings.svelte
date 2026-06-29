@@ -19,11 +19,13 @@
   // members    — [{ id, respond, … }] from the list row; sources the chair picker.
   // agentsById — id → agent, for chair display names.
   // onChanged  — async () => …; called after a successful save to refresh siblings.
+  import { getChannelConfig, patchChannelConfig, ApiError } from "../lib/api.js";
+  import AutonomousSettings from "./AutonomousSettings.svelte";
   import {
-    getChannelConfig,
-    patchChannelConfig,
-    ApiError,
-  } from "../lib/api.js";
+    AUTONOMOUS_KNOBS,
+    agendaToText,
+    agendaToList,
+  } from "../lib/autonomousKnobs.js";
 
   let { channelId, members = [], agentsById = {}, onChanged } = $props();
 
@@ -99,6 +101,11 @@
     },
   ];
 
+  // The flat + reasoning knobs render inline; the RFC 0052 `autonomous` block
+  // renders in the AutonomousSettings child (this panel is at the file-size cap).
+  // All knobs share ONE draft/patch/save path, so the logic iterates the union.
+  const allKnobs = [...KNOBS, ...AUTONOMOUS_KNOBS];
+
   // Resolve a (possibly dotted) knob key to its {value, source} cell in a config
   // response. A flat key reads `resp[key]`; a dotted key (`reasoning.mode`) reads
   // the nested `resp.reasoning.mode`. Falls back to an inherited-null cell so a
@@ -157,15 +164,16 @@
     config = resp;
     const d = {};
     const o = {};
-    for (const k of KNOBS) {
+    for (const k of allKnobs) {
       const field = fieldFor(resp, k.key);
       const inherit = field.source !== "channel";
-      // A null/absent effective value renders as empty, never coerced to 0, so a
-      // no-op save emits nothing. (Generic guard: since the RFC 0050
-      // interaction-budget amendment every knob is router-held and resolves a
-      // real value, but a defensive null still renders honestly.)
-      d[k.key] = { inherit, value: field.value == null ? "" : field.value };
-      o[k.key] = { inherit, value: field.value };
+      // A null/absent value renders empty, never coerced to 0 (so a no-op save
+      // emits nothing). A `list` (agenda) is a JSON array on the wire — render it
+      // as the newline text its <textarea> binds to; `o` keeps the raw array.
+      const v = field.value;
+      const draft = k.type === "list" ? agendaToText(v) : v == null ? "" : v;
+      d[k.key] = { inherit, value: draft };
+      o[k.key] = { inherit, value: v };
     }
     drafts = d;
     original = o;
@@ -174,7 +182,10 @@
   function normalize(k, v) {
     if (k.type === "bool") return Boolean(v);
     if (k.type === "int") return v === "" || v == null ? null : Number(v);
-    return v == null ? "" : String(v); // chair + enum (string-valued selects)
+    // A list (agenda): compare item-by-item, so a draft (text) and the original
+    // (a wire array) normalize through one shape — agendaToList tolerates both.
+    if (k.type === "list") return agendaToList(v).join("\n");
+    return v == null ? "" : String(v); // chair + enum + text + convener
   }
 
   function changed(k) {
@@ -191,7 +202,7 @@
   // than sent as 0. Derived so the Save button and the request share one source.
   const patch = $derived.by(() => {
     const body = {};
-    for (const k of KNOBS) {
+    for (const k of allKnobs) {
       if (!changed(k)) continue;
       if (drafts[k.key].inherit) {
         setBody(body, k.key, null);
@@ -202,6 +213,9 @@
       else if (k.type === "int") {
         if (v === "" || v == null) continue;
         setBody(body, k.key, Number(v));
+      } else if (k.type === "list") {
+        // The agenda override rides as a JSON array (empty box -> []).
+        setBody(body, k.key, agendaToList(v));
       } else {
         // chair + enum: a string-valued select. An override with nothing picked
         // (a blank chair) has nothing concrete to send — skip it rather than emit
@@ -262,7 +276,7 @@
   // rather than stamping this channel's state/warning onto another channel.
   async function reloadAfterConflict(id, token) {
     const pending = {};
-    for (const k of KNOBS) {
+    for (const k of allKnobs) {
       if (changed(k)) pending[k.key] = { ...drafts[k.key] };
     }
     try {
@@ -419,6 +433,9 @@
           </li>
         {/each}
       </ul>
+
+      <!-- RFC 0052: renders in its own child, shares this form's save. -->
+      <AutonomousSettings knobs={AUTONOMOUS_KNOBS} {drafts} {members} {agentsById} />
 
       <button type="submit" class="save" disabled={!dirty || saving}>
         {saving ? "Saving…" : "Save settings"}

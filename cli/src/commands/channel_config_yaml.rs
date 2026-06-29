@@ -73,6 +73,8 @@ pub(crate) fn yaml_to_knob_json(key: &str, ty: KnobType, y: &Yaml) -> Result<Val
             .as_str()
             .ok_or_else(|| format!("knob '{key}' expects one of [{}]", allowed.join(", ")))
             .and_then(|s| coerce_enum(key, allowed, s)),
+        // A string list (RFC 0052 `autonomous.agenda`): a YAML sequence → a JSON array.
+        KnobType::List => super::channel_config_autonomous::coerce_yaml_list(key, y),
     }
 }
 
@@ -174,9 +176,7 @@ pub(crate) fn validate_channel_ids(channels: &[ParsedChannel]) -> Result<(), Str
     Ok(())
 }
 
-// `export`/`diff` filter `config_rows` to the FLAT knobs (`!knob.contains('.')`):
-// the nested RFC 0051 `reasoning` block is a deferred follow-up (parse_channel_block
-// flags it; `set`/`unset`/`get` + the web panel cover reasoning today).
+// `export`/`diff` filter `config_rows` to FLAT knobs: nested `reasoning`/`autonomous` deferred.
 
 /// Regenerate a channel's YAML block from its effective config view, emitting only
 /// the explicitly-overridden knobs (`source == "channel"`) under a `channels:` list
