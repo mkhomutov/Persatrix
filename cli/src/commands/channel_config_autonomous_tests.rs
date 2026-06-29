@@ -6,6 +6,8 @@
 
 use super::*;
 use crate::commands::channel_config::{build_set_patch, build_unset_patch, parse_set_assignment};
+use crate::commands::channel_config_reasoning::{classify_yaml_key, YamlNestedKey};
+use crate::commands::channel_config_yaml::parse_channel_block;
 
 // ─── autonomous module: coerce_list ────────────────────────────────
 
@@ -138,4 +140,101 @@ fn build_unset_patch_nests_a_null_to_clear_one_autonomous_sub_knob() {
     // null branch), not the whole block — the nested null analogue of reasoning.
     let patch = build_unset_patch(&["autonomous.topic".to_string()]).unwrap();
     assert_eq!(patch["autonomous"], serde_json::json!({ "topic": null }));
+}
+
+// ─── YAML config-as-code deferral: the autonomous nested block ──────
+// The autonomous analogue of the reasoning deferral tests in
+// channel_config_yaml_tests.rs. The classifier is registry-driven, so adding the
+// autonomous dotted knobs makes `autonomous:` defer (and `autonomous.<sub>:` reject)
+// with no extra wiring — these pin that it actually happens, not just for reasoning.
+
+fn yaml_block(text: &str) -> serde_yaml_ng::Value {
+    serde_yaml_ng::from_str(text).expect("test YAML parses")
+}
+
+#[test]
+fn classify_yaml_key_recognises_the_autonomous_namespace() {
+    // Derived from the registry: `autonomous` defers like `reasoning`, a dotted
+    // sub-key is FlatDotted (rejectable), and a flat knob stays on the normal path.
+    assert!(matches!(
+        classify_yaml_key("autonomous"),
+        YamlNestedKey::NestedBlock("autonomous")
+    ));
+    assert!(matches!(
+        classify_yaml_key("autonomous.agenda"),
+        YamlNestedKey::FlatDotted
+    ));
+    assert!(matches!(
+        classify_yaml_key("floor_control"),
+        YamlNestedKey::Other
+    ));
+}
+
+#[test]
+fn parse_channel_block_flags_nested_autonomous_block_and_skips_it() {
+    // A declared `autonomous:` mapping is the config-as-code form the boot loader
+    // honors; import/diff don't build the nested PATCH, so it must be FLAGGED (a
+    // note), not silently dropped — exactly as the reasoning block is.
+    let block = yaml_block(
+        "name: planning\nfloor_control: true\nautonomous:\n  enabled: true\n  convener: nova-sparrow\n",
+    );
+    let parsed = parse_channel_block(&block).unwrap();
+    assert!(
+        parsed.deferred_blocks.contains(&"autonomous"),
+        "the autonomous block is flagged"
+    );
+    assert!(
+        !parsed.patch.contains_key("autonomous"),
+        "the nested block is not lifted into the flat patch"
+    );
+    assert_eq!(
+        parsed.patch.len(),
+        1,
+        "only the flat floor_control survives"
+    );
+}
+
+#[test]
+fn parse_channel_block_rejects_flat_dotted_autonomous_key() {
+    // A flat dotted `autonomous.enabled:` can never round-trip (the server switch has
+    // only the `autonomous` namespace, no leaf case) — rejected client-side, naming
+    // the key + steering to the live verb, not lifted into a 400-bound patch.
+    let err =
+        parse_channel_block(&yaml_block("name: planning\nautonomous.enabled: true\n")).unwrap_err();
+    assert!(err.contains("autonomous.enabled"), "names the key: {err}");
+    assert!(err.contains("autonomous:"), "names the nested block: {err}");
+    assert!(
+        err.contains("channel config set"),
+        "steers to the live verb: {err}"
+    );
+}
+
+#[test]
+fn parse_channel_block_defers_both_nested_blocks_at_once() {
+    // reasoning + autonomous in one block: BOTH defer (each recorded for its note),
+    // only the flat knob is lifted — the deferral is generic over every namespace.
+    let block = yaml_block(
+        "name: planning\nfloor_control: true\nreasoning:\n  mode: bid\nautonomous:\n  enabled: true\n",
+    );
+    let parsed = parse_channel_block(&block).unwrap();
+    assert!(parsed.deferred_blocks.contains(&"reasoning"));
+    assert!(parsed.deferred_blocks.contains(&"autonomous"));
+    assert_eq!(parsed.patch.len(), 1, "only the flat knob is lifted");
+}
+
+// ─── coerce_yaml_list (the List wire-type arm) ─────────────────────
+
+#[test]
+fn coerce_yaml_list_maps_a_string_sequence_to_a_trimmed_json_array() {
+    // The YAML analogue of coerce_list: a sequence of string scalars → a trimmed,
+    // non-empty JSON array (the `[]string` wire shape). Exhaustive over KnobType
+    // even though the agenda rides the nested block, not a flat YAML key.
+    let seq = yaml_block("- Build cost\n- '  Coupling risk '\n- ''\n");
+    assert_eq!(
+        coerce_yaml_list("autonomous.agenda", &seq).unwrap(),
+        serde_json::json!(["Build cost", "Coupling risk"])
+    );
+    // A non-sequence (a bare scalar) is a typo worth naming.
+    let bad = coerce_yaml_list("autonomous.agenda", &yaml_block("not a list\n"));
+    assert!(bad.unwrap_err().contains("autonomous.agenda"));
 }

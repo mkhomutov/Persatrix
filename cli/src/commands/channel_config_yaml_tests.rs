@@ -196,7 +196,10 @@ fn parse_channel_block_flags_nested_reasoning_block_and_skips_it() {
     let block =
         yaml_block("name: planning\nfloor_control: true\nreasoning:\n  mode: bid\n  model: fast\n");
     let parsed = parse_channel_block(&block).unwrap();
-    assert!(parsed.deferred_reasoning, "the reasoning block is flagged");
+    assert!(
+        parsed.deferred_blocks.contains(&"reasoning"),
+        "the reasoning block is flagged"
+    );
     assert!(
         !parsed.patch.contains_key("reasoning"),
         "the nested block is not lifted into the flat patch"
@@ -233,7 +236,7 @@ fn parse_channel_block_without_reasoning_is_not_flagged() {
     // A plain block carries no reasoning, so the deferral flag stays clear (no
     // spurious note for the common case).
     let parsed = parse_channel_block(&yaml_block("name: planning\nfloor_control: true\n")).unwrap();
-    assert!(!parsed.deferred_reasoning);
+    assert!(parsed.deferred_blocks.is_empty());
 }
 
 // ─── parse_channels_doc ────────────────────────────────────────────────────

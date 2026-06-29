@@ -13,6 +13,7 @@
 //! collected dotted keys into the nested PATCH body, and [`ReasoningConfigView`]
 //! is the nested cell of its `ChannelConfigView`.
 
+use colored::Colorize;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -109,55 +110,88 @@ pub(crate) fn nest_dotted(flat: Map<String, Value>) -> Map<String, Value> {
     out
 }
 
-// ─── YAML config-as-code deferral ──────────────────────────────────────────
+// ─── Nested-block YAML config-as-code deferral ──────────────────────────────
 //
-// The YAML verbs (`import`/`diff`) don't apply reasoning yet: the server consumes
-// a NESTED `{"reasoning": {…}}` PATCH the verbs don't build, so a declared
-// reasoning key is routed here instead of the flat-knob path. Two shapes, two
-// dispositions — neither is the pre-PR-5 silent drop.
+// The YAML verbs (`import`/`diff`) apply only the FLAT knobs: the server consumes a
+// NESTED `{"<ns>": {…}}` PATCH (`reasoning`, `autonomous`, …) the verbs don't build,
+// so a declared nested key is routed here instead of the flat-knob path. The logic
+// is GENERIC over every nested namespace — derived from the registry, never a
+// hardcoded `"reasoning"` — so a new nested block defers uniformly the day its
+// dotted knobs join the registry. It lives in this module only because reasoning was
+// the first nested block. Two shapes, two dispositions — neither is a silent drop.
 
-/// How a declared-YAML key relates to the deferred nested `reasoning` block.
-pub(crate) enum YamlReasoningKey {
-    /// The bare `reasoning:` mapping — the form `config/channels.yaml` uses and the
-    /// boot loader honors. Skipped by the YAML verbs but FLAGGED (a note tells the
-    /// operator it lands at boot, not via `import`), never silently dropped.
-    NestedBlock,
-    /// A flat dotted `reasoning.<sub>:` key — rejected client-side: it can never
-    /// round-trip (the server's switch has only the `reasoning` namespace, no
-    /// `reasoning.<sub>` leaf case) and is not a real `config/channels.yaml` form.
+/// How a declared-YAML key relates to a deferred nested block (`reasoning:`,
+/// `autonomous:`, …).
+pub(crate) enum YamlNestedKey {
+    /// A bare nested-namespace mapping (`reasoning:` / `autonomous:`) — the form
+    /// `config/channels.yaml` uses and the boot loader honors. Skipped by the YAML
+    /// verbs but FLAGGED (a note tells the operator it lands at boot, not via
+    /// `import`), never silently dropped. Carries the namespace so the note names it.
+    NestedBlock(&'static str),
+    /// A flat dotted `<ns>.<sub>:` key — rejected client-side: it can never
+    /// round-trip (the server's switch has only the `<ns>` namespace, no
+    /// `<ns>.<sub>` leaf case) and is not a real `config/channels.yaml` form.
     FlatDotted,
-    /// Not a reasoning key — handled by the normal flat-knob path.
+    /// Not a nested key — handled by the normal flat-knob path.
     Other,
 }
 
-/// Classify a declared-YAML key (see [`YamlReasoningKey`]).
-pub(crate) fn classify_yaml_key(key: &str) -> YamlReasoningKey {
-    if key == "reasoning" {
-        YamlReasoningKey::NestedBlock
-    } else if key.starts_with("reasoning.") {
-        YamlReasoningKey::FlatDotted
-    } else {
-        YamlReasoningKey::Other
+/// Classify a declared-YAML key against the nested namespaces the registry knows —
+/// the prefix of every dotted knob (`reasoning`, `autonomous`) — so it stays in
+/// lockstep with [`editable_knobs`](super::channel_config::editable_knobs) rather
+/// than hardcoding a namespace that could drift as new blocks land.
+pub(crate) fn classify_yaml_key(key: &str) -> YamlNestedKey {
+    for (knob, _) in super::channel_config::editable_knobs() {
+        let Some((ns, _)) = knob.split_once('.') else {
+            continue; // a flat knob has no namespace
+        };
+        if key == ns {
+            return YamlNestedKey::NestedBlock(ns);
+        }
+        if let Some(rest) = key.strip_prefix(ns) {
+            if rest.starts_with('.') {
+                return YamlNestedKey::FlatDotted;
+            }
+        }
     }
+    YamlNestedKey::Other
 }
 
-/// The client-side rejection for a flat dotted `reasoning.<sub>:` YAML key (see
-/// [`YamlReasoningKey::FlatDotted`]) — names the key and steers to the live verb.
+/// The client-side rejection for a flat dotted `<ns>.<sub>:` YAML key (see
+/// [`YamlNestedKey::FlatDotted`]) — names the key + its block and steers to the
+/// live `set` verb (or a declared nested block, which the boot loader applies).
 pub(crate) fn flat_dotted_yaml_err(name: &str, key: &str) -> String {
+    let ns = key.split_once('.').map_or(key, |(ns, _)| ns);
     format!(
-        "channel '{name}': flat `{key}:` is not config-as-code YAML — edit reasoning \
-         live with `channel config set {key}=…`, or declare a nested `reasoning:` \
+        "channel '{name}': flat `{key}:` is not config-as-code YAML — edit it \
+         live with `channel config set {key}=…`, or declare a nested `{ns}:` \
          block (applied by the boot loader on commit)"
     )
 }
 
 /// The note an `import`/`diff` entry point emits for a channel whose YAML declares a
-/// nested `reasoning:` block the verb does not apply (see [`YamlReasoningKey`]).
-pub(crate) fn deferred_block_note(id: &str) -> String {
+/// nested `<ns>:` block the verb does not apply (see [`YamlNestedKey`]).
+fn deferred_block_note(id: &str, ns: &str) -> String {
     format!(
-        "#{id} declares a `reasoning:` block — applied by the boot loader on commit, \
-         not by this verb; edit it live with `channel config set reasoning.<knob>=…`"
+        "#{id} declares a `{ns}:` block — applied by the boot loader on commit, \
+         not by this verb; edit it live with `channel config set {ns}.<knob>=…`"
     )
+}
+
+/// Emit a boot-loader-defer note (stderr, suppressed under `--json`) for each nested
+/// block the YAML declared but the verb does not apply — never the silent drop.
+/// Shared by `import` and `diff` so both surfaces report deferral identically.
+pub(crate) fn note_deferred_blocks(id: &str, blocks: &[&'static str], json_out: bool) {
+    if json_out {
+        return;
+    }
+    for ns in blocks {
+        eprintln!(
+            "{} {}",
+            "note:".yellow(),
+            deferred_block_note(id, ns).dimmed()
+        );
+    }
 }
 
 #[cfg(test)]
