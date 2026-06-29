@@ -138,9 +138,10 @@ func (c ChannelConfig) toConfigOverrides(cfg *Config) ChannelConfigOverrides {
 	// from this snapshot at revision > 0, so an un-captured armed rung resets to the
 	// disabled default at boot (the channel an operator armed via a revisioned YAML
 	// block reads back DISABLED, and PR 3 would never convene it) AND the drift hash
-	// goes blind to an autonomous edit. The chair freeze above already runs through
-	// ResolveInteractionBudgetTokens so the budget that satisfies this block's
-	// mandatory cap is in the snapshot too.
+	// goes blind to an autonomous edit. The mandatory cap the armed block depends on
+	// is captured UNCONDITIONALLY above (`InteractionBudgetTokens: &budget`, resolved
+	// against the fleet default) — independent of this block and of the chair — so the
+	// budget that satisfies the cap is in the same snapshot.
 	o.Autonomous = c.Autonomous.FreezeOverrides()
 	return o
 }

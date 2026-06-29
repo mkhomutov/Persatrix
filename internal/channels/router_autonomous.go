@@ -76,17 +76,19 @@ func (r *ChannelRouter) ResolveAutonomous(ctx context.Context, cfg *Config) erro
 	return nil
 }
 
-// validateAutonomousConvener enforces the cross-field convener-membership rule
-// (RFC 0052 OQ #1) against a runtime patch: when the merged autonomous block is
-// armed, the convener must be a declared member of the channel — it authors the
-// opening turn, so a non-member convener is a guaranteed dispatch failure, failed
-// loudly at apply instead. Mirrors [ChannelRouter.validateEscalationChair]; runs
-// before the write so a bad convener never persists.
+// validateAutonomousConvener enforces the cross-field convener rules that need the
+// live roster (RFC 0052 OQ #1) against a runtime patch: when the merged autonomous
+// block is armed, the convener must be a declared member of the channel AND not an
+// `observer` (respond: never). It authors the opening turn, so a non-member is a
+// guaranteed dispatch failure and an observer is suppressed by the receiver gate
+// before any LLM — both failed loudly at apply instead. Mirrors
+// [ChannelRouter.validateEscalationChair] (member + observer); runs before the write
+// so a bad convener never persists.
 //
 // The non-membership convener rules (non-empty, distinct from the chair) and the
 // mandatory cap are computable from the override struct and live in
-// [ChannelConfigOverrides.validateAutonomous]; this method adds only the part that
-// needs the live roster.
+// [ChannelConfigOverrides.validateAutonomous]; this method adds only the parts that
+// need the live roster.
 func (r *ChannelRouter) validateAutonomousConvener(ctx context.Context, channelID string, patch ChannelConfigOverrides) error {
 	if !patch.Autonomous.effectiveEnabled() {
 		return nil
@@ -101,6 +103,12 @@ func (r *ChannelRouter) validateAutonomousConvener(ctx context.Context, channelI
 	}
 	for i := range members {
 		if members[i].ParticipantID == convener {
+			// An observer (legacy `never`) convener can never author the opening turn
+			// — its receiver gate suppresses it — so reject it, mirroring the chair.
+			if members[i].RespondPolicy.Normalize() == RespondNever {
+				return fmt.Errorf("channels: apply config %s: %w: %q is an observer (respond: never) and can never author the opening turn",
+					channelID, ErrInvalidAutonomousConvener, convener)
+			}
 			return nil
 		}
 	}

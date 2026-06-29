@@ -3,6 +3,7 @@ package channels
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // config_autonomous.go holds the RFC 0052 (v0.3.11) per-channel `autonomous` block
@@ -56,8 +57,11 @@ var (
 	// uncapped autonomy is un-creatable.
 	ErrAutonomousCapRequired = errors.New("channels: autonomous.enabled requires a positive interaction_budget_tokens cap")
 	// ErrInvalidAutonomousConvener — `autonomous.convener` is empty, names a
-	// non-member, or collides with `escalation_chair_id`. The convener owns the
-	// agenda lifecycle and is a DISTINCT role from the chair (RFC 0052 OQ #1).
+	// non-member, names an `observer` (respond: never) member, or collides with
+	// `escalation_chair_id`. The convener owns the agenda lifecycle and is a DISTINCT
+	// role from the chair (RFC 0052 OQ #1); it authors the opening turn, so — exactly
+	// like the escalation chair — an observer (whose receiver gate suppresses it
+	// before any LLM) can never fill the role.
 	ErrInvalidAutonomousConvener = errors.New("channels: invalid autonomous.convener")
 	// ErrInvalidAutonomousMaxRounds — `autonomous.max_rounds` is negative (zero
 	// normalizes to the default before validate runs).
@@ -70,11 +74,14 @@ var (
 // validateConvenerMembership enforces the load-path OQ #1 convener rules for an
 // ARMED channel: the convener is non-empty, distinct from the escalation chair
 // (the convener owns the agenda lifecycle, a separate role from the chair's
-// shipped close role), and a declared member of the channel (it authors the
-// opening turn, so a non-member is a guaranteed dispatch failure). The override
-// path's mirror is split across [ChannelConfigOverrides.validateAutonomous]
-// (non-empty + chair-distinct) and [ChannelRouter.validateAutonomousConvener]
-// (membership, which needs the live store).
+// shipped close role), a declared member of the channel, and not an `observer`
+// (respond: never). It authors the opening turn, so — exactly like the escalation
+// chair ([Config.Validate]) — a non-member is a guaranteed dispatch failure and an
+// observer is suppressed by the receiver gate before any LLM; both are rejected
+// loudly at load. The override path's mirror is split across
+// [ChannelConfigOverrides.validateAutonomous] (non-empty + chair-distinct) and
+// [ChannelRouter.validateAutonomousConvener] (member + observer, which need the
+// live store).
 func validateConvenerMembership(ch ChannelConfig) error {
 	if ch.Autonomous.Convener == "" {
 		return fmt.Errorf("%w: an autonomous channel needs a convener to author the opening turn", ErrInvalidAutonomousConvener)
@@ -85,6 +92,13 @@ func validateConvenerMembership(ch ChannelConfig) error {
 	}
 	for j := range ch.Members {
 		if ch.Members[j].ID == ch.Autonomous.Convener {
+			// An observer (legacy `never`) convener is as guaranteed-futile as a
+			// non-member — the receiver gate suppresses it before any LLM — so reject
+			// it loudly, mirroring the escalation-chair observer rule.
+			if ch.Members[j].RespondPolicy.Normalize() == RespondNever {
+				return fmt.Errorf("%w: %q is an observer (respond: never) and can never author the opening turn",
+					ErrInvalidAutonomousConvener, ch.Autonomous.Convener)
+			}
 			return nil
 		}
 	}
@@ -155,7 +169,10 @@ func (a AutonomousConfig) validateFields() error {
 		return fmt.Errorf("%w: %d items (max %d)", ErrInvalidAutonomousAgenda, len(a.Agenda), MaxAutonomousAgendaItems)
 	}
 	for i, item := range a.Agenda {
-		if item == "" {
+		// Trim before the blank check: a whitespace-only item is blank in spirit and
+		// slips past both the schema's `minLength: 1` and a bare `== ""` test, yet
+		// reaches the convener prompt (PR 3) as an empty agenda entry.
+		if strings.TrimSpace(item) == "" {
 			return fmt.Errorf("%w: item %d is blank", ErrInvalidAutonomousAgenda, i)
 		}
 	}
@@ -245,7 +262,9 @@ func (o *AutonomousOverrides) validateFields() error {
 			return fmt.Errorf("%w: %d items (max %d)", ErrInvalidAutonomousAgenda, len(*o.Agenda), MaxAutonomousAgendaItems)
 		}
 		for i, item := range *o.Agenda {
-			if item == "" {
+			// Trim before the blank check — a whitespace-only item is blank in spirit
+			// (see [AutonomousConfig.validateFields]).
+			if strings.TrimSpace(item) == "" {
 				return fmt.Errorf("%w: item %d is blank", ErrInvalidAutonomousAgenda, i)
 			}
 		}

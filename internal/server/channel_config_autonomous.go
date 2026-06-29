@@ -139,38 +139,42 @@ func agendaValue(agenda []string) []string {
 // otherwise customized) rung is frozen; a disabled default stays inherit.
 //
 // It carries the same governance-drift drop as the chair / reasoning: if the
-// frozen rung is ARMED but its convener has drifted out of the channel's
-// membership, freezing it would let the convener-membership cross-field rule
+// frozen rung is ARMED but its convener is no longer ENFORCEABLE — it has drifted
+// out of the channel's membership OR become an `observer` (respond: never) —
+// freezing it would let the convener cross-field rule
 // ([ChannelRouter.validateAutonomousConvener]) REJECT an unrelated first edit
 // naming a knob the operator never touched. The armed rung is already un-convenable
-// at dispatch (a non-member convener cannot author the opening turn), so the
-// baseline drops the whole block — the "tolerate the drift, don't resurrect it as a
-// hard error" posture boot replay and the other conditional knobs already take.
+// at dispatch (a non-member or observer convener cannot author the opening turn), so
+// the baseline drops the whole block — the "tolerate the drift, don't resurrect it
+// as a hard error" posture boot replay and the other conditional knobs already take.
 func (s *Server) autonomousBaseline(ctx context.Context, id string) *channels.AutonomousOverrides {
 	froze := s.channelRouter.AutonomousFor(id).FreezeOverrides()
 	if froze == nil {
 		return nil
 	}
 	if froze.Enabled != nil && *froze.Enabled && froze.Convener != nil &&
-		!s.channelHasMember(ctx, id, *froze.Convener) {
-		return nil // drifted-convener: drop the inert armed block (mirror the chair)
+		!s.convenerIsEnforceableMember(ctx, id, *froze.Convener) {
+		return nil // drifted/observer convener: drop the inert armed block (mirror the chair)
 	}
 	return froze
 }
 
-// channelHasMember reports whether `participantID` is a declared member of the
-// channel — the membership signal the OQ #1 convener rule needs. A store error
-// reading members is treated as "not a member" so a drifted/unreadable convener is
-// dropped from the first-edit baseline and the edit proceeds, rather than blocking
-// it on a transient fault (the apply path that follows surfaces any real outage).
-func (s *Server) channelHasMember(ctx context.Context, id, participantID string) bool {
+// convenerIsEnforceableMember reports whether `participantID` would survive
+// [ChannelRouter.validateAutonomousConvener]'s roster rules — it is a declared
+// member of the channel and not an `observer` (respond: never). It is the convener
+// analogue of [Server.chairIsEnforceableMember] and shares its posture: a store
+// error reading members is treated as "not enforceable" so a drifted/observer/
+// unreadable convener is dropped from the first-edit baseline and the edit proceeds,
+// rather than blocking it on a transient fault (the apply path that follows surfaces
+// any real outage).
+func (s *Server) convenerIsEnforceableMember(ctx context.Context, id, participantID string) bool {
 	members, err := s.channelStore.GetMembers(ctx, id)
 	if err != nil {
 		return false
 	}
 	for i := range members {
 		if members[i].ParticipantID == participantID {
-			return true
+			return members[i].RespondPolicy.Normalize() != channels.RespondNever
 		}
 	}
 	return false

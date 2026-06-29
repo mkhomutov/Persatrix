@@ -190,9 +190,11 @@ channels:
   #   - interaction_budget_tokens MUST be positive — the loader rejects an
   #     `autonomous.enabled` channel with no enforced cost cap (no human is present
   #     to stop a runaway), so uncapped autonomy is un-creatable.
-  #   - autonomous.convener MUST be a declared member, DISTINCT from
-  #     escalation_chair_id — the convener owns the agenda lifecycle (opens + advances)
-  #     while the chair keeps its shipped synthesis/close role (RFC 0052 OQ #1).
+  #   - autonomous.convener MUST be a declared member, NOT an observer (respond:
+  #     never), and DISTINCT from escalation_chair_id — the convener owns the agenda
+  #     lifecycle (opens + advances) while the chair keeps its shipped synthesis/close
+  #     role (RFC 0052 OQ #1). An observer convener would be suppressed by its
+  #     receiver gate before any LLM, exactly like an observer chair.
   - name: roundtable
     description: "RFC 0052 example — an autonomous, human-free brainstorm (dark in v0.3.11 PR 1)"
     interaction_budget_tokens: 200000

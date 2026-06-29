@@ -173,6 +173,43 @@ channels:
 	assert.ErrorIs(t, err, ErrInvalidAutonomousConvener)
 }
 
+// TestLoadConfig_AutonomousConvenerMustNotBeObserver: the convener authors the
+// opening turn, so an `observer` (respond: never) convener is as guaranteed-futile
+// as a non-member — the receiver gate suppresses it before any LLM — exactly the
+// rule the escalation chair already enforces. Rejected at load.
+func TestLoadConfig_AutonomousConvenerMustNotBeObserver(t *testing.T) {
+	body := `
+channels:
+  - name: roundtable
+    interaction_budget_tokens: 200000
+    autonomous:
+      enabled: true
+      topic: "Tradeoffs"
+      convener: ghost
+    members:
+      - id: ghost
+        respond: never
+      - id: ada
+        respond: participant
+`
+	_, err := LoadConfig(writeYAML(t, body))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidAutonomousConvener)
+}
+
+// TestAutonomousValidateFields_RejectsBlankAgendaItem: a whitespace-only agenda
+// item is blank in spirit — the schema's `minLength: 1` and a bare `== ""` check
+// both miss it — so validateFields trims before the blank check. Pinned on both the
+// load value type and the override mirror.
+func TestAutonomousValidateFields_RejectsBlankAgendaItem(t *testing.T) {
+	loaded := AutonomousConfig{Agenda: []string{"   "}}.normalized()
+	assert.ErrorIs(t, loaded.validateFields(), ErrInvalidAutonomousAgenda)
+
+	ws := "\t "
+	ov := &AutonomousOverrides{Agenda: &[]string{ws}}
+	assert.ErrorIs(t, ov.validateFields(), ErrInvalidAutonomousAgenda)
+}
+
 // TestLoadConfig_AutonomousNegativeMaxRounds: a negative `max_rounds` is a typo the
 // loader rejects (zero normalizes to the default before validate runs).
 func TestLoadConfig_AutonomousNegativeMaxRounds(t *testing.T) {
@@ -317,6 +354,29 @@ func TestApplyChannelConfig_AutonomousConvenerMustBeMember(t *testing.T) {
 	}, 0, "")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidAutonomousConvener)
+}
+
+// TestApplyChannelConfig_AutonomousConvenerMustNotBeObserver: the convener-observer
+// rule is cross-field (it needs the live roster's respond policy), enforced at apply
+// against the store — the mirror of the escalation chair's observer rejection.
+func TestApplyChannelConfig_AutonomousConvenerMustNotBeObserver(t *testing.T) {
+	router, store, ctx := newApplyRouter(t)
+	id := mustCreateGroupWithPolicies(t, store, "roundtable",
+		map[string]RespondPolicy{"ghost": RespondNever, "ada": RespondAlways}, "ghost", "ada")
+
+	enabled := true
+	convener := "ghost"
+	budget := int64(200000)
+	err := router.ApplyChannelConfig(ctx, id, ChannelConfigOverrides{
+		Autonomous:              &AutonomousOverrides{Enabled: &enabled, Convener: &convener},
+		InteractionBudgetTokens: &budget,
+	}, 0, "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidAutonomousConvener)
+
+	_, revision, err := store.GetChannelConfig(ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), revision, "rejected applies never write")
 }
 
 // TestAutonomousFor_DefaultForUnconfigured: a channel with no resolved entry falls

@@ -145,9 +145,9 @@ func (r *ChannelRouter) ApplyChannelConfig(ctx context.Context, channelID string
 	if err := r.validateReasoningGoverned(ctx, channelID, patch); err != nil {
 		return err
 	}
-	// RFC 0052: an armed autonomous channel's convener must be a declared member —
-	// a cross-field rule (it needs the store's membership), validated here before
-	// the write so a bad convener never persists.
+	// RFC 0052: an armed autonomous channel's convener must be a declared member and
+	// not an observer — a cross-field rule (it needs the store's live roster),
+	// validated here before the write so a bad convener never persists.
 	if err := r.validateAutonomousConvener(ctx, channelID, patch); err != nil {
 		return err
 	}

@@ -120,6 +120,72 @@ func TestChannelConfig_AutonomousConvenerMustBeMember(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
 }
 
+// TestChannelConfig_AutonomousConvenerMustNotBeObserver: an `observer` (respond:
+// never) convener is a 400 — it can never author the opening turn, the same
+// guaranteed-futile case the escalation chair already rejects.
+func TestChannelConfig_AutonomousConvenerMustNotBeObserver(t *testing.T) {
+	srv, id := channelConfigTestServerWithMembers(t, true,
+		[]channels.Member{{ParticipantID: "ghost", RespondPolicy: channels.RespondNever}, {ParticipantID: "ada"}})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		armBody(map[string]any{"convener": "ghost"}), map[string]string{"If-Match": "0"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+}
+
+// TestChannelConfig_AutonomousArmsViaInheritedCap: an operator who caps the fleet
+// may arm autonomy WITHOUT setting a per-channel `interaction_budget_tokens` — the
+// documented invariant on the REST path. The first-edit baseline freezes the
+// channel's resolved budget into the blob, so the merged patch carries a positive
+// cap even though the arming PATCH never named one. Pre-seeding the router budget
+// stands in for a positive resolved (fleet-default) value.
+func TestChannelConfig_AutonomousArmsViaInheritedCap(t *testing.T) {
+	srv, id := autonomousTestServer(t)
+	srv.channelRouter.SetInteractionBudgetTokens(id, 200000) // resolved (e.g. fleet-default) cap
+
+	body, _ := json.Marshal(map[string]any{"autonomous": map[string]any{"enabled": true, "convener": "nova"}})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code,
+		"a positive resolved cap should let an arming PATCH omit the per-channel budget; body=%s", rec.Body.String())
+
+	a := decodeAutonomous(t, rec.Body.Bytes())
+	assert.Equal(t, true, a["enabled"].Value)
+	assert.True(t, srv.channelRouter.AutonomousFor(id).Enabled)
+}
+
+// TestChannelConfig_AutonomousUncapRejectedOnArmed: lowering an armed channel's cap
+// to 0 (uncapped) is a 400 — the mandatory cost cap holds across edits, not just at
+// arming time. Uncapped autonomy is un-creatable AND un-reachable.
+func TestChannelConfig_AutonomousUncapRejectedOnArmed(t *testing.T) {
+	srv, id := autonomousTestServer(t)
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		armBody(nil), map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	body, _ := json.Marshal(map[string]any{"interaction_budget_tokens": 0})
+	rec = doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"uncapping an armed channel must be rejected; body=%s", rec.Body.String())
+}
+
+// TestChannelConfig_AutonomousClearCapRejectedOnArmed: clearing an armed channel's
+// per-channel cap (`interaction_budget_tokens: null`) is a 400 on the REST path. The
+// apply-path gate cannot see the fleet default the cleared value would inherit, so
+// it conservatively rejects rather than risk arming on an unverifiable cap — the
+// documented load-vs-apply asymmetry, pinned in the safe direction.
+func TestChannelConfig_AutonomousClearCapRejectedOnArmed(t *testing.T) {
+	srv, id := autonomousTestServer(t)
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		armBody(nil), map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	body, _ := json.Marshal(map[string]any{"interaction_budget_tokens": nil})
+	rec = doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"clearing the cap on an armed channel must be rejected; body=%s", rec.Body.String())
+}
+
 // TestChannelConfig_AutonomousConvenerDistinctFromChair: a convener that collides
 // with the escalation chair is a 400 (OQ #1 — distinct roles).
 func TestChannelConfig_AutonomousConvenerDistinctFromChair(t *testing.T) {
@@ -241,6 +307,32 @@ func TestChannelConfig_AutonomousFirstEditDropsDriftedConvener(t *testing.T) {
 	assert.Equal(t, "default", a["enabled"].Source)
 	assert.False(t, srv.channelRouter.AutonomousFor(id).Enabled,
 		"the dropped block leaves the channel disabled on the router")
+}
+
+// TestChannelConfig_AutonomousFirstEditDropsObserverConvener: the freeze's
+// drift branch must treat a convener that is a member but an OBSERVER (respond:
+// never) the same as a non-member one — both are un-convenable at dispatch, so an
+// unrelated first edit must DROP the inert armed block rather than freeze it.
+// Freezing it would make the apply-path observer rule REJECT (400) an edit naming a
+// knob the operator never touched (the bug that would surface if the baseline drop
+// only checked membership and not enforceability).
+func TestChannelConfig_AutonomousFirstEditDropsObserverConvener(t *testing.T) {
+	srv, id := channelConfigTestServerWithMembers(t, true,
+		[]channels.Member{{ParticipantID: "ghost", RespondPolicy: channels.RespondNever}, {ParticipantID: "ada"}})
+	// Arm the router with a convener that is a member but an observer — un-convenable.
+	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{Enabled: true, Convener: "ghost"})
+	srv.channelRouter.SetInteractionBudgetTokens(id, 200000)
+
+	body, _ := json.Marshal(map[string]any{"floor_control": false})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code,
+		"an observer convener must not block an unrelated first edit; body=%s", rec.Body.String())
+
+	a := decodeAutonomous(t, rec.Body.Bytes())
+	assert.Equal(t, false, a["enabled"].Value, "the inert armed block is dropped, not frozen")
+	assert.Equal(t, "default", a["enabled"].Source)
+	assert.False(t, srv.channelRouter.AutonomousFor(id).Enabled)
 }
 
 // TestChannelConfig_AutonomousFirstEditOnDefaultStaysInherit: the conditional
