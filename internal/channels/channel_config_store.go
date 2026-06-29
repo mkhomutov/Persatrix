@@ -86,6 +86,12 @@ type ChannelConfigOverrides struct {
 	// the sparse, per-sub-knob tri-state (each sub-field is itself a pointer). Type
 	// + validate/resolve live in config_reasoning.go.
 	Reasoning *ReasoningOverrides `json:"reasoning,omitempty"`
+	// Autonomous overrides the RFC 0052 (v0.3.11) autonomous-discussion block
+	// ([ChannelConfig.Autonomous]) — the second NESTED knob on this surface (after
+	// reasoning). A nil pointer inherits the disabled default; a non-nil
+	// [AutonomousOverrides] carries the sparse, per-sub-knob tri-state. Type +
+	// validate/resolve live in config_autonomous.go.
+	Autonomous *AutonomousOverrides `json:"autonomous,omitempty"`
 }
 
 // IsEmpty reports whether no knob is set — the inherit-all state. Equivalent to

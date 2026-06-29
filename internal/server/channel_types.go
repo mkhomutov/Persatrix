@@ -221,16 +221,17 @@ type configFieldResponse struct {
 // `If-Match` header; a knob's `source` lets an operator see at a glance which
 // values are inherited vs explicitly set.
 type channelConfigResponse struct {
-	Revision                               int64                   `json:"revision"`
-	FloorControl                           configFieldResponse     `json:"floor_control"`
-	SalienceMaxChannelMembers              configFieldResponse     `json:"salience_max_channel_members"`
-	MaxRepliesPerParticipantPerInteraction configFieldResponse     `json:"max_replies_per_participant_per_interaction"`
-	EndVoteThreshold                       configFieldResponse     `json:"end_vote_threshold"`
-	EndVoteWindow                          configFieldResponse     `json:"end_vote_window"`
-	EscalationChairID                      configFieldResponse     `json:"escalation_chair_id"`
-	InteractionIdleTimeoutSeconds          configFieldResponse     `json:"interaction_idle_timeout_seconds"`
-	InteractionBudgetTokens                configFieldResponse     `json:"interaction_budget_tokens"`
-	Reasoning                              reasoningConfigResponse `json:"reasoning"`
+	Revision                               int64                    `json:"revision"`
+	FloorControl                           configFieldResponse      `json:"floor_control"`
+	SalienceMaxChannelMembers              configFieldResponse      `json:"salience_max_channel_members"`
+	MaxRepliesPerParticipantPerInteraction configFieldResponse      `json:"max_replies_per_participant_per_interaction"`
+	EndVoteThreshold                       configFieldResponse      `json:"end_vote_threshold"`
+	EndVoteWindow                          configFieldResponse      `json:"end_vote_window"`
+	EscalationChairID                      configFieldResponse      `json:"escalation_chair_id"`
+	InteractionIdleTimeoutSeconds          configFieldResponse      `json:"interaction_idle_timeout_seconds"`
+	InteractionBudgetTokens                configFieldResponse      `json:"interaction_budget_tokens"`
+	Reasoning                              reasoningConfigResponse  `json:"reasoning"`
+	Autonomous                             autonomousConfigResponse `json:"autonomous"`
 }
 
 // reasoningConfigResponse is the RFC 0051 (v0.3.10) `reasoning` block's nested
@@ -243,6 +244,21 @@ type reasoningConfigResponse struct {
 	Model  configFieldResponse `json:"model"`
 	Depth  configFieldResponse `json:"depth"`
 	Revise configFieldResponse `json:"revise"`
+}
+
+// autonomousConfigResponse is the RFC 0052 (v0.3.11) `autonomous` block's nested
+// view in the config payload — the second NESTED knob on the RFC 0050 surface
+// (after reasoning). Each sub-knob carries its own effective value + provenance, so
+// an operator sees which fields are inherited vs explicitly set. `agenda` is always
+// an array (never null). The block ships dark: reported and editable, but no
+// convene path consults it until PR 3.
+type autonomousConfigResponse struct {
+	Enabled   configFieldResponse `json:"enabled"`
+	Topic     configFieldResponse `json:"topic"`
+	Agenda    configFieldResponse `json:"agenda"`
+	Convener  configFieldResponse `json:"convener"`
+	Goal      configFieldResponse `json:"goal"`
+	MaxRounds configFieldResponse `json:"max_rounds"`
 }
 
 // recallRequest is the JSON body for POST /api/v1/personas/{participant_id}/recall

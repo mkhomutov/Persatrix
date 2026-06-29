@@ -60,4 +60,9 @@ func (s *Server) applyRuntimeGroupGovernance(ctx context.Context, canonicalID st
 		rc.Mode = channels.GovernedDefaultReasoningMode
 	}
 	s.channelRouter.SetReasoning(canonicalID, rc)
+	// RFC 0052 (v0.3.11): a runtime-created group ships with the disabled autonomous
+	// default, so the GET /config surface reads an explicit entry rather than the
+	// getter's package-default fallback (and a first sparse PATCH freezes the right
+	// baseline). Autonomy is opt-in: the channel stays an ordinary one until armed.
+	s.channelRouter.SetAutonomous(canonicalID, channels.DefaultAutonomousConfig())
 }

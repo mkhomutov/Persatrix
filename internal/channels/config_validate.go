@@ -212,6 +212,27 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("channels[%d=%s]: %w", i, ch.Name, rerr)
 		}
 
+		// RFC 0052 (v0.3.11) autonomous block: per-field ranges always, plus the
+		// safety-critical cross-field gates ONLY when the channel is armed
+		// (`autonomous.enabled`). The mandatory cost cap (uncapped autonomy is
+		// un-creatable — the first line of the no-runaway defense) and the OQ #1
+		// convener rules (a declared member, distinct from the escalation chair)
+		// are enforced here against the channel's resolved budget + declared
+		// roster. LoadConfig normalized the block in place, so validateFields runs
+		// on the filled rung. `make validate` checks the field vocabulary; the
+		// cap/convener cross-field rules are Go-only.
+		if aerr := ch.Autonomous.normalized().validateFields(); aerr != nil {
+			return fmt.Errorf("channels[%d=%s]: %w", i, ch.Name, aerr)
+		}
+		if ch.Autonomous.Enabled {
+			if ch.ResolveInteractionBudgetTokens(c.DefaultInteractionBudgetTokens) <= 0 {
+				return fmt.Errorf("channels[%d=%s]: %w", i, ch.Name, ErrAutonomousCapRequired)
+			}
+			if aerr := validateConvenerMembership(ch); aerr != nil {
+				return fmt.Errorf("channels[%d=%s]: %w", i, ch.Name, aerr)
+			}
+		}
+
 		if len(ch.Members) == 0 {
 			return fmt.Errorf("channels[%d=%s]: at least one member required", i, ch.Name)
 		}

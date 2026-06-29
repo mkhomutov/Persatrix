@@ -306,6 +306,15 @@ func initChannels(
 			zap.Error(rsErr))
 	}
 
+	// RFC 0052 (v0.3.11) PR 1: surface the per-channel autonomous block onto the
+	// router so the GET /config value resolves and (PR 3 onward) the convene path
+	// can read it. Dark backend — nothing convenes yet; an un-resolved channel
+	// falls back to the disabled default at read time ([ChannelRouter.AutonomousFor]).
+	if aErr := router.ResolveAutonomous(context.Background(), chanCfg); aErr != nil {
+		logger.Warn("channels: autonomous resolution incomplete; config channels resolved, store-resident channels fall back to the disabled default until next create/restart",
+			zap.Error(aErr))
+	}
+
 	// RFC 0050 Phase 1 PR 3: revision-gated YAML reconciliation. Walk every
 	// declared channel and, for any block whose `revision:` is strictly greater
 	// than the store's, adopt the resolved YAML governance set into the canonical

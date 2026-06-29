@@ -181,3 +181,40 @@ channels:
         respond: participant
       - id: nova-sparrow
         respond: participant
+
+  # Autonomous agent-only channel (RFC 0052, v0.3.11) — a roster that convenes
+  # itself on a topic and runs a human-free discussion. SHIPS DARK in v0.3.11 PR 1:
+  # the block is parsed, validated, persisted, and surfaced over the RFC 0050
+  # config API, but no convene path consults it yet (PR 3 adds convening), so this
+  # channel is inert until then. It is the canonical example of the safety contract:
+  #   - interaction_budget_tokens MUST be positive — the loader rejects an
+  #     `autonomous.enabled` channel with no enforced cost cap (no human is present
+  #     to stop a runaway), so uncapped autonomy is un-creatable.
+  #   - autonomous.convener MUST be a declared member, NOT an observer (respond:
+  #     never), and DISTINCT from escalation_chair_id — the convener owns the agenda
+  #     lifecycle (opens + advances) while the chair keeps its shipped synthesis/close
+  #     role (RFC 0052 OQ #1). An observer convener would be suppressed by its
+  #     receiver gate before any LLM, exactly like an observer chair.
+  #   - arming is GROUP-only — a DM/thread cannot be made autonomous (convening is
+  #     an open-floor group concept); the apply path rejects an enabled non-group.
+  - name: roundtable
+    description: "RFC 0052 example — an autonomous, human-free brainstorm (dark in v0.3.11 PR 1)"
+    interaction_budget_tokens: 200000
+    escalation_chair_id: ember-owl
+    autonomous:
+      enabled: true
+      topic: "Should we adopt a monorepo? Lay out the tradeoffs."
+      agenda:
+        - "Build tooling and CI cost"
+        - "Cross-team coupling risk"
+        - "Migration effort"
+      convener: nova-sparrow
+      goal: "A synthesized recommendation with the strongest argument on each side."
+      max_rounds: 12
+    members:
+      - id: nova-sparrow
+        respond: participant
+      - id: ember-owl
+        respond: chair
+      - id: iron-fox
+        respond: participant
