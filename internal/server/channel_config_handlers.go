@@ -301,6 +301,14 @@ func mergeConfigPatch(current channels.ChannelConfigOverrides, patch map[string]
 				return out, err
 			}
 			out.Reasoning = merged
+		case "autonomous":
+			// RFC 0052 (v0.3.11): the second NESTED knob — a JSON object merged
+			// sub-key by sub-key (mergeAutonomousPatch). A null clears the block.
+			merged, err := mergeAutonomousPatch(out.Autonomous, rawVal)
+			if err != nil {
+				return out, err
+			}
+			out.Autonomous = merged
 		default:
 			return out, errors.New("unknown config knob: " + key)
 		}
@@ -371,6 +379,7 @@ func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (cha
 		EscalationChairID:                      configField(chair, overrides.EscalationChairID != nil),
 		InteractionIdleTimeoutSeconds:          configField(idleSeconds, overrides.InteractionIdleTimeoutSeconds != nil),
 		Reasoning:                              reasoningResponse(s.channelRouter.ReasoningFor(id), overrides.Reasoning),
+		Autonomous:                             autonomousResponse(s.channelRouter.AutonomousFor(id), overrides.Autonomous),
 	}
 	return resp, nil
 }
@@ -430,6 +439,11 @@ func (s *Server) resolvedConfigBaseline(ctx context.Context, id string) channels
 	// drifted away is dropped so it cannot block an unrelated first edit — see
 	// [Server.reasoningBaseline].
 	base.Reasoning = s.reasoningBaseline(ctx, id)
+	// RFC 0052: freeze the resolved autonomous rung too, CONDITIONALLY (like the
+	// chair / reasoning, not the unconditional flat knobs): a disabled default stays
+	// inherit, and an armed rung whose convener has drifted out of membership is
+	// dropped so it cannot block an unrelated first edit — see [Server.autonomousBaseline].
+	base.Autonomous = s.autonomousBaseline(ctx, id)
 	return base
 }
 

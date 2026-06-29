@@ -96,6 +96,14 @@ func (o ChannelConfigOverrides) Validate() error {
 			return err
 		}
 	}
+	// RFC 0052 autonomous block: per-field ranges + the cross-field rules
+	// computable without the live roster (the mandatory cost cap, and the convener
+	// being non-empty + distinct from the chair). The convener-IS-a-member rule
+	// needs the store and lives in [ChannelRouter.validateAutonomousConvener],
+	// alongside the escalation-chair membership rule.
+	if err := o.validateAutonomous(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -135,6 +143,12 @@ func (r *ChannelRouter) ApplyChannelConfig(ctx context.Context, channelID string
 	// RFC 0051: a non-off reasoning mode is also a cross-field rule (it needs a
 	// salience-gated member), validated here against the store's membership.
 	if err := r.validateReasoningGoverned(ctx, channelID, patch); err != nil {
+		return err
+	}
+	// RFC 0052: an armed autonomous channel's convener must be a declared member —
+	// a cross-field rule (it needs the store's membership), validated here before
+	// the write so a bad convener never persists.
+	if err := r.validateAutonomousConvener(ctx, channelID, patch); err != nil {
 		return err
 	}
 	// Accepted-but-discouraged: warn (do not reject) on a quality deliberation
@@ -412,6 +426,13 @@ func (r *ChannelRouter) applyOverridesToRouter(channelID string, o ChannelConfig
 	// normalizes any empty field, so a sparse override (`mode: bid` only) resolves
 	// to a complete rung.
 	r.SetReasoning(channelID, o.Reasoning.resolve(governedReasoningBase(governed)))
+
+	// RFC 0052 autonomous block. Absent → the disabled default; a present override
+	// overlays its set sub-knobs onto that base via [AutonomousOverrides.resolve].
+	// SetAutonomous normalizes any zero max_rounds, so a sparse override (e.g.
+	// `enabled: true` only) resolves to a complete rung. Governance-independent
+	// (unlike reasoning) — autonomy has no membership-derived default.
+	r.SetAutonomous(channelID, o.Autonomous.resolve(DefaultAutonomousConfig()))
 }
 
 // ResolveFromStore is the RFC 0050 Phase 1 PR 2 boot repoint: after the per-knob

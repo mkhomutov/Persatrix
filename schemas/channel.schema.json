@@ -154,6 +154,43 @@
             }
           }
         },
+        "autonomous": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "RFC 0052 (v0.3.11) autonomous-discussion block — opt-in human-free convening. An armed channel (`enabled: true`) convenes a roster of personas on a topic and runs a discussion that converges, terminates, and synthesizes with no human in the loop. SAFETY: an armed channel cannot be created without an enforced per-interaction cost cap — the Go loader rejects `autonomous.enabled` unless the channel's resolved `interaction_budget_tokens` (per-channel, else `default_interaction_budget_tokens`) is positive — and its `convener` must be a declared member distinct from `escalation_chair_id` (the convener owns the agenda lifecycle, a separate role from the chair). Ships dark in v0.3.11 PR 1: parsed, validated, persisted, and surfaced over the RFC 0050 REST layer, but no convene path consults it yet. Ordinary channels omit the block and are byte-for-byte unchanged.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Arm the channel for human-free convening. Opt-in: false (the default) is an ordinary channel. The Go loader rejects an armed channel that has no enforced `interaction_budget_tokens` cap and one whose `convener` is empty, a non-member, or equal to `escalation_chair_id`."
+            },
+            "topic": {
+              "type": "string",
+              "description": "Free-text subject the convener opens the discussion on. Wrapped as an RFC 0009 `<external_data>` envelope before injection (operator config is a distinct trust class from persona-authored content)."
+            },
+            "agenda": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "maxItems": 64,
+              "description": "Optional ordered sub-topics the convener advances through on a stall (PR 6). Empty is a single-topic discussion. Bounded (max 64) because each item gets its own per-item escalation ration, so the agenda length bounds total convener turns."
+            },
+            "convener": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+              "description": "Agent id of the persona that authors the opening turn and advances the agenda. Must be one of this channel's declared members and DISTINCT from `escalation_chair_id` (RFC 0052 OQ #1: the convener owns the agenda lifecycle; the chair keeps its shipped synthesis/close role). Same id vocabulary as `escalation_chair_id`."
+            },
+            "goal": {
+              "type": "string",
+              "description": "Free-text outcome the chair's goal-directed synthesis turn aims at on close (PR 4). Empty is a generic synthesis."
+            },
+            "max_rounds": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 12,
+              "description": "Hard floor-round bound — a second independent terminator alongside the cost cap. Absent/0 uses the 12 default; negative is rejected at load."
+            }
+          }
+        },
         "members": {
           "type": "array",
           "minItems": 1,

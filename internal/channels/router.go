@@ -225,6 +225,13 @@ type ChannelRouter struct {
 	reasoningMu sync.Mutex
 	reasoning   map[string]ReasoningConfig
 
+	// autonomousMu guards autonomous — the resolved RFC 0052 (v0.3.11) per-channel
+	// autonomous-discussion block, keyed by channel id. Populated via
+	// [ChannelRouter.SetAutonomous]; methods + the resolver live in
+	// router_autonomous.go. An absent channel resolves to [DefaultAutonomousConfig].
+	autonomousMu sync.Mutex
+	autonomous   map[string]AutonomousConfig
+
 	// applyMu serializes the RFC 0050 Phase 1 PR 2 store-config apply path
 	// ([ChannelRouter.ApplyChannelConfig]). It is NOT a per-knob lock — each knob
 	// already has its own setter mutex above. It exists to make the persist →
@@ -279,6 +286,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		interactionNow:                time.Now,
 		escalationChairs:              make(map[string]string),
 		reasoning:                     make(map[string]ReasoningConfig),
+		autonomous:                    make(map[string]AutonomousConfig),
 	}
 }
 

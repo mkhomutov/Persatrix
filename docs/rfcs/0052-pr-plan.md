@@ -371,7 +371,7 @@ A new channel *mode* + CLI/web surfaces needs real doc + diagram **edits**, not 
 
 | PR | Phase | Branch | Status |
 |----|-------|--------|--------|
-| 1 | 1a — config backend + cap gate + REST (dark) | `feature/v0311-rfc0052-config-backend` | ⬜ |
+| 1 | 1a — config backend + cap gate + REST (dark) | `feature/v0311-rfc0052-config-backend` | 🔀 PR open |
 | 2 | 1b — CLI + web config surfaces | `feature/v0311-rfc0052-config-surfaces` | ⬜ |
 | 3 | 1c — self-convening + convene action (CLI/REST/web) | `feature/v0311-rfc0052-convene` | ⬜ |
 | 4 | 1d — bounded close + roster-scaled (1+N) reserve + eviction + OQ #6 metering | `feature/v0311-rfc0052-bounded-close` | ⬜ |

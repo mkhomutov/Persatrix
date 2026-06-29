@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.11] - Unreleased
+
+> **Codename:** Conversations that run themselves
+
+### 🚀 Features
+
+- **RFC 0052 PR 1 — the `autonomous` channel config block, with the mandatory cost cap enforced from the first PR (ships dark).** A channel may now carry an `autonomous` block (`enabled`, `topic`, `agenda`, `convener`, `goal`, `max_rounds`) on the RFC 0050 config surface — the foundation of opt-in, human-free convening (RFC 0052, *autonomous agent-only channels*). The safety contract lands with it: an `autonomous.enabled` channel is **rejected at config-validation** unless its resolved `interaction_budget_tokens` cost cap is positive (uncapped autonomy is un-creatable — there is no human to stop a runaway), and its `convener` must be a declared member **distinct from** `escalation_chair_id` (the convener owns the agenda lifecycle; the chair keeps its shipped synthesis/close role — RFC 0052 OQ #1). The block parses, validates, persists, and round-trips through the REST `GET`/`PATCH …/config` layer (nested merge with per-sub-knob provenance, the `If-Match` revision guard, the `null`-clears tri-state) and is stamped onto the router so the surface reports its effective value. **Dark backend:** nothing convenes yet (self-convening is PR 3), so the block changes no runtime behaviour and **ordinary channels are byte-for-byte unchanged**. The CLI + web config surfaces follow in PR 2. ([RFC 0052](docs/rfcs/0052-autonomous-agent-channels.md); [PR plan](docs/rfcs/0052-pr-plan.md))
+
 ## [0.3.10] - 2026-06-27
 
 > **Codename:** Conversations worth posting into

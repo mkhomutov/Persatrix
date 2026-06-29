@@ -34,7 +34,11 @@ func (s *Server) writeChannelError(w http.ResponseWriter, err error) {
 		errors.Is(err, channels.ErrInvalidReasoningMode), // RFC 0051 PR 4 reasoning validation
 		errors.Is(err, channels.ErrInvalidReasoningModel),
 		errors.Is(err, channels.ErrInvalidReasoningDepth),
-		errors.Is(err, channels.ErrInvalidReasoningRevise):
+		errors.Is(err, channels.ErrInvalidReasoningRevise),
+		errors.Is(err, channels.ErrAutonomousCapRequired), // RFC 0052 PR 1 autonomous validation
+		errors.Is(err, channels.ErrInvalidAutonomousConvener),
+		errors.Is(err, channels.ErrInvalidAutonomousMaxRounds),
+		errors.Is(err, channels.ErrInvalidAutonomousAgenda):
 		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
 	case errors.Is(err, channels.ErrNotMember):
 		writeError(w, "FORBIDDEN", "sender is not a member of the channel", http.StatusForbidden)

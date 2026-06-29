@@ -265,6 +265,9 @@ type ChannelConfig struct {
 	// ([ReasoningConfig.normalized]) and validated by [Config.Validate]. Definition
 	// + capability-gated validation live in config_reasoning.go.
 	Reasoning ReasoningConfig `yaml:"reasoning"`
+	// Autonomous is the RFC 0052 (v0.3.11) opt-in human-free convening block (absent
+	// = disabled); definition + validation live in config_autonomous.go.
+	Autonomous AutonomousConfig `yaml:"autonomous"`
 }
 
 // ResolveMaxRepliesPerParticipant returns the effective RFC 0030 Layer 2 reply
@@ -443,6 +446,8 @@ func LoadConfig(path string) (*Config, error) {
 		// The members' SalienceGated signal is already resolved at unmarshal
 		// (ResolveSalienceSignal), so governed() reads true here.
 		cfg.Channels[i].Reasoning = cfg.Channels[i].Reasoning.normalizedForGovernance(cfg.Channels[i].governed())
+		// RFC 0052: fill the zero autonomous max_rounds so Validate sees a complete rung.
+		cfg.Channels[i].Autonomous = cfg.Channels[i].Autonomous.normalized()
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
