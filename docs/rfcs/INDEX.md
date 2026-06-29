@@ -9,6 +9,8 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 |----|--------|------|--------|---------|-------|
 | [RFC-0030](0030-multi-agent-conversation-governance.md) | 🚧 Implementing | architecture | v0.3.6 (Layer 2.5 — shipped); v0.3.7–v0.3.9 (Phase 1 — relevance gate + deterministic layers); v0.4.0 (Phase 2 — moderator); v0.5.0+ (Phase 3) | 2026-05-11 | Multi-Agent Conversation Governance |
 | [RFC-0045](0045-open-core-extraction-policy.md) | 🚧 Implementing | process | v0.3.10 (policy + dependency-direction CI gate) + v0.4.0+ (per-extraction RFCs) | 2026-05-24 | Open-Core Library Extraction Policy |
+| [RFC-0052](0052-autonomous-agent-channels.md) | 🚧 Implementing | feature | v0.3.11 | 2026-06-28 | Autonomous Agent-Only Channels |
+| [RFC-0053](0053-gemini-watsonx-providers.md) | 🚧 Implementing | feature | v0.3.11 | 2026-06-28 | Gemini and watsonx.ai LLM Providers |
 | [RFC-0007](0007-conditional-looped-workflow-control-flow.md) | 📋 Proposed | feature | v0.4.0 | 2026-04-15 | Conditional and Looped Workflow Control Flow |
 | [RFC-0012](0012-protocols-organizations.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3 — organizations & authority); v0.5.0 (Phases 4–5 — meeting/negotiation protocols, inter-org federation) | 2026-05-16 | Protocols & Organizations |
 | [RFC-0013](0013-legal-ethical-compliance.md) | 📋 Proposed | architecture | v0.5.0 | 2026-04-16 | Legal, Ethical & Regulatory Compliance Framework |
@@ -22,8 +24,6 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0046](0046-budget-lease-extraction.md) | 📋 Proposed | architecture | v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate) | 2026-05-25 | Budget-Lease Library Extraction (persatrix-budget) |
 | [RFC-0047](0047-low-coupling-batch-extraction.md) | 📋 Proposed | architecture | v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate) | 2026-05-25 | Low-Coupling Batch Library Extraction (prompt kit, mock LLM, schemas) |
 | [RFC-0049](0049-memory-consolidation-gradient.md) | 📋 Proposed | architecture | v0.4.0 (design lands v0.3.7) | 2026-06-06 | Memory Consolidation Gradient & Scope Reconciliation |
-| [RFC-0052](0052-autonomous-agent-channels.md) | 📋 Proposed | feature | v0.3.x (next realism rung — candidate; see docs/v0.3.x-sequencing.md Amendment 2026-06-28) | 2026-06-28 | Autonomous Agent-Only Channels |
-| [RFC-0053](0053-gemini-watsonx-providers.md) | 📋 Proposed | feature | v0.3.x (next realism rung — bundled with RFC 0052; see docs/v0.3.x-sequencing.md Amendment 2026-06-28) | 2026-06-28 | Gemini and watsonx.ai LLM Providers |
 | [RFC-0032](0032-channel-interaction-layer.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-12 | Wire-Level Channel Interaction Layer and Chat-Façade Unification |
 | [RFC-0040](0040-agent-orchestrator-transport-unification.md) | 🔨 Draft | protocol | v0.3.x (Phase 1) + v0.4.0 (Phases 2–4) | 2026-05-17 | Agent–Orchestrator Transport Unification |
 | [RFC-0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-20 | Typed Event Taxonomy and Lifecycle Callbacks |
