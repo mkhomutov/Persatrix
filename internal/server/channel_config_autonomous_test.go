@@ -215,6 +215,34 @@ func TestChannelConfig_AutonomousFirstEditFreezesArmed(t *testing.T) {
 	assert.Equal(t, "channel", a["enabled"].Source, "the frozen armed rung is channel-sourced")
 }
 
+// TestChannelConfig_AutonomousFirstEditDropsDriftedConvener: the freeze's
+// governance-drift branch (mirroring the escalation chair). An armed rung whose
+// convener has drifted OUT of the channel's membership is already un-convenable at
+// dispatch, so an unrelated first edit must DROP the inert block rather than freeze
+// it — freezing would make the convener-membership cross-field rule REJECT (400) an
+// edit naming a knob the operator never touched. The edit proceeds and the channel
+// reads back inherit/disabled.
+func TestChannelConfig_AutonomousFirstEditDropsDriftedConvener(t *testing.T) {
+	srv, id := autonomousTestServer(t)
+	// Arm the router with a convener that is NOT a member (drifted out), standing in
+	// for a YAML-armed channel whose convener has since left the roster. A cap is
+	// present so only the drift — not a missing cap — is under test.
+	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{Enabled: true, Convener: "ghost"})
+	srv.channelRouter.SetInteractionBudgetTokens(id, 200000)
+
+	body, _ := json.Marshal(map[string]any{"floor_control": false})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code,
+		"a drifted convener must not block an unrelated first edit; body=%s", rec.Body.String())
+
+	a := decodeAutonomous(t, rec.Body.Bytes())
+	assert.Equal(t, false, a["enabled"].Value, "the inert armed block is dropped, not frozen")
+	assert.Equal(t, "default", a["enabled"].Source)
+	assert.False(t, srv.channelRouter.AutonomousFor(id).Enabled,
+		"the dropped block leaves the channel disabled on the router")
+}
+
 // TestChannelConfig_AutonomousFirstEditOnDefaultStaysInherit: the conditional
 // freeze's other branch — a channel at the default (disabled) rung stays inherit
 // through an unrelated first edit.

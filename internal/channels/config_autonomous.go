@@ -162,13 +162,16 @@ func (a AutonomousConfig) validateFields() error {
 	return nil
 }
 
-// FreezeOverrides snapshots this RESOLVED rung into a sparse override for the
-// config-freeze paths (the RFC 0050 first-edit baseline). CONDITIONAL like the
-// escalation chair, not unconditional like the flat knobs: only a non-default
-// sub-knob is captured, and a fully-default (disabled) rung returns nil so a
-// never-autonomous channel snapshots identically to never-set (no `autonomous`
-// key in the blob). A frozen `enabled:true` is what preserves an armed channel
-// across an unrelated first edit.
+// FreezeOverrides snapshots this RESOLVED rung into a sparse override for BOTH
+// config-freeze paths: the RFC 0050 first-edit baseline ([Server.autonomousBaseline])
+// and the YAML reconcile snapshot ([ChannelConfig.toConfigOverrides]). CONDITIONAL
+// like the escalation chair, not unconditional like the flat knobs: only a
+// non-default sub-knob is captured, and a fully-default (disabled) rung returns nil
+// so a never-autonomous channel snapshots identically to never-set (no `autonomous`
+// key in the blob). A frozen `enabled:true` is what preserves an armed channel both
+// across an unrelated first edit (baseline) and across the reconcile→ResolveFromStore
+// boot round-trip (snapshot) — omit it from either path and a revisioned armed
+// channel silently reads back disabled.
 func (a AutonomousConfig) FreezeOverrides() *AutonomousOverrides {
 	var ov AutonomousOverrides
 	if a.Enabled != DefaultAutonomousEnabled {

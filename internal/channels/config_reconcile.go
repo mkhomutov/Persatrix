@@ -70,13 +70,16 @@ var ErrInvalidConfigRevision = errors.New("channels: invalid revision")
 // stable: both sides of an
 // equal-revision comparison are computed the same canonical way.
 //
-// Two knobs are captured CONDITIONALLY rather than as a flat explicit value:
+// Three knobs are captured CONDITIONALLY rather than as a flat explicit value:
 //   - the escalation chair: an absent chair stays nil (no escalation — the opt-in
 //     default), distinct from an explicit empty string, so an un-configured channel
 //     does not hash differently from one that explicitly cleared the chair.
 //   - the RFC 0051 reasoning block ([ReasoningConfig.FreezeOverrides]): a default-off
 //     rung stays nil (inherit, responsive to the PR 6 flip) and a non-default rung is
 //     snapshotted per-sub-knob, so only the committed sub-knobs survive into the row.
+//   - the RFC 0052 autonomous block ([AutonomousConfig.FreezeOverrides]): a disabled
+//     default rung stays nil (inherit), an armed/customized rung is snapshotted
+//     per-sub-knob, so only the committed sub-knobs survive into the row.
 //
 // FREEZE CONSEQUENCE (RFC 0050 follow-up). Because this captures the FULLY
 // RESOLVED set — every INHERITED fleet default snapshotted as an explicit value
@@ -126,6 +129,19 @@ func (c ChannelConfig) toConfigOverrides(cfg *Config) ChannelConfigOverrides {
 	// so an un-captured non-default rung resets to the default at boot AND the
 	// drift hash goes blind to it.
 	o.Reasoning = c.Reasoning.FreezeOverrides(c.governed())
+	// RFC 0052 autonomous block: capture the committed rung the same conditional way
+	// as the chair / reasoning — a disabled default rung stays nil (inherit), an
+	// armed (or otherwise-customized) rung is snapshotted per-sub-knob
+	// ([AutonomousConfig.FreezeOverrides]). Governance-INDEPENDENT (no governed arg),
+	// unlike reasoning: autonomy has no membership-derived default. Omitting it is the
+	// SAME silent data loss the reasoning note above describes — boot replay re-stamps
+	// from this snapshot at revision > 0, so an un-captured armed rung resets to the
+	// disabled default at boot (the channel an operator armed via a revisioned YAML
+	// block reads back DISABLED, and PR 3 would never convene it) AND the drift hash
+	// goes blind to an autonomous edit. The chair freeze above already runs through
+	// ResolveInteractionBudgetTokens so the budget that satisfies this block's
+	// mandatory cap is in the snapshot too.
+	o.Autonomous = c.Autonomous.FreezeOverrides()
 	return o
 }
 
