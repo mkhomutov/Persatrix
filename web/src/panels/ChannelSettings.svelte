@@ -217,12 +217,12 @@
         // The agenda override rides as a JSON array (empty box -> []).
         setBody(body, k.key, agendaToList(v));
       } else {
-        // chair + enum: a string-valued select. An override with nothing picked
-        // (a blank chair) has nothing concrete to send — skip it rather than emit
-        // escalation_chair_id:"" (a guaranteed 400), the same way a blank int
-        // override is skipped above. An enum always carries one of its options.
+        // chair/convener selects + enum: a blank pick has nothing concrete to
+        // send — skip it rather than emit escalation_chair_id:"" (a 400), as a
+        // blank int is skipped above. Free TEXT (topic/goal) is the exception:
+        // "" is a valid explicit override (CLI parity, server accepts it).
         const s = String(v ?? "");
-        if (s === "") continue;
+        if (s === "" && k.type !== "text") continue;
         setBody(body, k.key, s);
       }
     }

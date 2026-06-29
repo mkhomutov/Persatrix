@@ -237,4 +237,8 @@ fn coerce_yaml_list_maps_a_string_sequence_to_a_trimmed_json_array() {
     // A non-sequence (a bare scalar) is a typo worth naming.
     let bad = coerce_yaml_list("autonomous.agenda", &yaml_block("not a list\n"));
     assert!(bad.unwrap_err().contains("autonomous.agenda"));
+    // A sequence carrying a non-string scalar (an int item) is also rejected,
+    // naming the knob — the `[]string` wire shape admits only string items.
+    let mixed = coerce_yaml_list("autonomous.agenda", &yaml_block("- ok\n- 7\n"));
+    assert!(mixed.unwrap_err().contains("autonomous.agenda"));
 }

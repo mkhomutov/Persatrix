@@ -152,6 +152,63 @@ describe("ChannelSettings — autonomous block", () => {
     });
   });
 
+  it("sends a changed convener as a NESTED PATCH", async () => {
+    const fetchMock = vi.fn((path, init) =>
+      Promise.resolve(
+        okJSON(init?.method === "PATCH" ? configBody({ revision: 4 }) : configBody()),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    // The convener starts inherited (a disabled picker). Override it and pick the
+    // one floor-capable member (ada; bob is an observer), and confirm it nests
+    // under "autonomous" — the convener (a string-valued select) was previously
+    // only read back, never exercised through the patch path.
+    await fireEvent.click(
+      await screen.findByLabelText("Inherit fleet default for Convener"),
+    );
+    await fireEvent.change(screen.getByLabelText("Convener"), {
+      target: { value: "ada" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((c) => c[1]?.method === "PATCH")).toBe(true),
+    );
+    const patchCall = fetchMock.mock.calls.find((c) => c[1]?.method === "PATCH");
+    expect(JSON.parse(patchCall[1].body)).toEqual({ autonomous: { convener: "ada" } });
+  });
+
+  it("sends an emptied free-text override explicitly (does not silently drop it)", async () => {
+    // Regression: a `text` knob (topic) overridden to "" must ride as an explicit
+    // empty-string override — parity with the CLI's `autonomous.topic=` — NOT be
+    // skipped like an unpicked select. Skipping it would leave the patch empty, so
+    // the next adopt would silently revert the operator's clear back to the old value.
+    const fetchMock = vi.fn((path, init) =>
+      Promise.resolve(
+        okJSON(
+          init?.method === "PATCH"
+            ? configBody({ revision: 4 })
+            : configBody({ autonomous: overriddenAutonomous }),
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    const topic = await screen.findByLabelText("Topic");
+    expect(topic.value).toBe("Monorepo?"); // overridden on the channel
+    await fireEvent.input(topic, { target: { value: "" } });
+    await fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((c) => c[1]?.method === "PATCH")).toBe(true),
+    );
+    const patchCall = fetchMock.mock.calls.find((c) => c[1]?.method === "PATCH");
+    expect(JSON.parse(patchCall[1].body)).toEqual({ autonomous: { topic: "" } });
+  });
+
   it("reverting an overridden autonomous sub-knob nests an explicit null", async () => {
     const fetchMock = vi.fn((path, init) =>
       Promise.resolve(

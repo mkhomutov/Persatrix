@@ -88,9 +88,9 @@ describe("ChannelSettings", () => {
     // The floor-control override reads back true and is flagged as overridden.
     const floor = await screen.findByLabelText("Floor control");
     expect(floor.checked).toBe(true);
-    // Two knobs are overridden (floor_control, escalation_chair_id); the rest
-    // inherit — eight flat + the four reasoning.* + the six autonomous.* sub-knobs
-    // = sixteen. The provenance vocabulary is the user-facing rendering of `source`.
+    // 18 knobs total (8 flat + 4 reasoning.* + 6 autonomous.*); two are overridden
+    // (floor_control, escalation_chair_id), so 18 - 2 = 16 inherit. The provenance
+    // vocabulary is the user-facing rendering of `source`.
     expect(screen.getAllByText("Overridden on this channel").length).toBe(2);
     expect(screen.getAllByText("Inherited default").length).toBe(16);
 
