@@ -83,14 +83,35 @@ var ErrChannelNotArmed = errors.New("channels: channel is not autonomous-enabled
 var ErrChannelAlreadyConvening = errors.New("channels: channel already has an open interaction")
 
 // ErrAutonomousNoAudience — [ChannelRouter.ConveneChannel] against an armed
-// channel whose live roster has no floor-capable member OTHER than the convener
-// (everyone else is an observer, or the convener is the lone member). The
-// convener opens "a discussion among the other participants"; with no audience
-// the opening turn lands in an empty room — a guaranteed-futile convene that
-// burns an uncapped opener for nothing, the same dead-on-arrival class as an
-// observer convener. Roster drift, like the drifted convener, so the REST layer
-// maps it to 409 Conflict (a precondition on the channel's current state).
-var ErrAutonomousNoAudience = errors.New("channels: autonomous channel has no floor-capable audience besides the convener")
+// channel with no member, OTHER than the convener, that would answer the
+// opening turn (every other member is an observer or only responds when
+// mentioned, or the convener is the lone member). The convener's opener is an
+// OPEN-FLOOR turn by construction (prompts/runtime/safety/convener-opening.md
+// mandates "address the room as a whole, not one named member"), and the
+// response gate (agents/response_gate.py) admits only an `always` (participant)
+// member to an open-floor, unmentioned message — a `when_mentioned` member
+// stays silent (`not_mentioned`) until someone @-mentions it, and with no
+// `always` member to do the mentioning the opener simply lands in a silent
+// room. So a roster whose only non-convener floor-capable members are
+// `when_mentioned` is the same dead-on-arrival convene as an observer-only one:
+// a guaranteed-futile convene that burns an uncapped opener for nothing.
+// Counting `when_mentioned` members as audience (the earlier `!= RespondNever`
+// test) let exactly that case through. Roster drift, like the drifted convener,
+// so the REST layer maps it to 409 Conflict.
+var ErrAutonomousNoAudience = errors.New("channels: autonomous channel has no open-floor responder besides the convener")
+
+// ErrAutonomousNoTopic — [ChannelRouter.ConveneChannel] against an armed channel
+// whose resolved block carries no topic, agenda, OR goal, so
+// [composeConveneDirective] assembles an EMPTY directive. The convener would be
+// framed to "open the discussion on the topic below" with nothing below — an
+// empty `<external_data>` envelope — and would author a degenerate opener on no
+// subject, an uncapped LLM turn on an unattended channel. PR 1 config validation
+// requires a convener but not a subject, so this is the convene-time guard for
+// that gap; it is the content sibling of the no-audience precondition, so the
+// REST layer maps it to 409 Conflict. (Enforcing it at config-validation would
+// fail faster but would retroactively invalidate channels armed under the looser
+// PR 1 contract, so the non-breaking convene-time refusal is the PR 3 posture.)
+var ErrAutonomousNoTopic = errors.New("channels: autonomous channel has no topic, agenda, or goal to convene on")
 
 // ConveneChannel opens an autonomous channel by dispatching the convene forced
 // turn to its configured convener. It returns the convener's agent id on a
@@ -106,7 +127,8 @@ var ErrAutonomousNoAudience = errors.New("channels: autonomous channel has no fl
 // rather than dispatch into a silent gate suppression or an empty room.
 //
 // The disposition checks map to HTTP as: missing channel → 404, unarmed → 409,
-// already-convening → 409, no audience → 409, every convener problem → 400.
+// already-convening → 409, no audience → 409, no subject → 409, every convener
+// problem → 400.
 func (r *ChannelRouter) ConveneChannel(ctx context.Context, channelID string) (string, error) {
 	// Existence first, so a fat-fingered/deleted channel reports 404 (the
 	// `AutonomousFor` read below resolves the disabled DEFAULT for an unknown
@@ -141,13 +163,20 @@ func (r *ChannelRouter) ConveneChannel(ctx context.Context, channelID string) (s
 		return "", fmt.Errorf("channels: convene %s: load members: %w", channelID, err)
 	}
 	var convenerMember *Member
-	audience := 0 // floor-capable members other than the convener
+	audience := 0 // members OTHER than the convener that answer an open-floor opener
 	for i := range members {
 		if members[i].ParticipantID == convener {
 			convenerMember = &members[i]
 			continue
 		}
-		if members[i].RespondPolicy.Normalize() != RespondNever {
+		// Only an `always` (participant) member replies to the convener's
+		// OPEN-FLOOR opener; a `when_mentioned` member stays silent until
+		// @-mentioned (the gate's `not_mentioned` suppress) and the opener
+		// names no one, so it can never draw one in. Counting only the
+		// open-floor responders is what makes the empty-room guard real — the
+		// earlier `!= RespondNever` test admitted a `when_mentioned`-only
+		// roster, which lands the opener in a silent room.
+		if members[i].RespondPolicy.Normalize() == RespondAlways {
 			audience++
 		}
 	}
@@ -160,7 +189,7 @@ func (r *ChannelRouter) ConveneChannel(ctx context.Context, channelID string) (s
 			channelID, ErrInvalidAutonomousConvener, convener)
 	}
 	if audience == 0 {
-		return "", fmt.Errorf("channels: convene %s: %w: only the convener %q can hold the floor; the opening turn would land in an empty room",
+		return "", fmt.Errorf("channels: convene %s: %w: only the convener %q answers an open-floor opener; every other member is an observer or only responds when mentioned, so the opening turn would land in a silent room",
 			channelID, ErrAutonomousNoAudience, convener)
 	}
 
@@ -168,12 +197,20 @@ func (r *ChannelRouter) ConveneChannel(ctx context.Context, channelID string) (s
 	// resolved block. The convener wraps it in the RFC 0009 `<external_data>`
 	// envelope before injection (agents/persona_runtime/convener.py) — it is
 	// operator config, a distinct trust class, the one genuinely new injection
-	// surface this RFC opens.
+	// surface this RFC opens. Composed once here so the empty-directive guard
+	// below and the dispatched message read the same value.
+	directive := composeConveneDirective(a)
+	if directive == "" {
+		// No topic, agenda, or goal — the convener would open on nothing (an
+		// empty `<external_data>` envelope). Refuse rather than burn an
+		// uncapped opener on a degenerate prompt. See [ErrAutonomousNoTopic].
+		return "", fmt.Errorf("channels: convene %s: %w", channelID, ErrAutonomousNoTopic)
+	}
 	msg := ChannelMessage{
 		ID:        uuid.NewString(),
 		ChannelID: channelID,
 		SenderID:  ConveneDispatchSenderID,
-		Content:   composeConveneDirective(a),
+		Content:   directive,
 	}
 
 	// Mark the convener active so the RFC 0048 console (and the web "Convene"
@@ -188,12 +225,23 @@ func (r *ChannelRouter) ConveneChannel(ctx context.Context, channelID string) (s
 	return convener, nil
 }
 
+// maxConveneDirectiveBytes is a hard wire-safety ceiling on the assembled
+// directive. The convener-side prompt bound (`_CONVENE_DIRECTIVE_MAX_CHARS` in
+// agents/persona_runtime/convener.py) owns the prompt-level trim; this larger
+// ceiling exists only so a pathological operator free-text — the `topic`/`goal`
+// fields carry NO maxLength (PR 1 added none) — cannot dispatch a multi-MB
+// directive over the gRPC fanout. Sized far above any realistic
+// topic + 64-item agenda + goal, so a well-formed directive is never clipped
+// here; the Python bound does the user-visible truncation.
+const maxConveneDirectiveBytes = 64 * 1024
+
 // composeConveneDirective assembles the operator topic/agenda/goal into the
 // directive the convener opens on. Empty sections are omitted (topic and goal
 // are optional free-text; an empty agenda is a single-topic discussion). The
 // result is wrapped in the RFC 0009 envelope receiver-side, so this is plain
 // assembly with no escaping — the trust boundary is the envelope, not this
-// string.
+// string. Returns "" iff every section is empty (the [ErrAutonomousNoTopic]
+// case the caller refuses).
 func composeConveneDirective(a AutonomousConfig) string {
 	var b strings.Builder
 	if topic := strings.TrimSpace(a.Topic); topic != "" {
@@ -208,5 +256,11 @@ func composeConveneDirective(a AutonomousConfig) string {
 	if goal := strings.TrimSpace(a.Goal); goal != "" {
 		fmt.Fprintf(&b, "\nGoal: %s\n", goal)
 	}
-	return strings.TrimSpace(b.String())
+	out := strings.TrimSpace(b.String())
+	if len(out) > maxConveneDirectiveBytes {
+		// Rune-safe hard trim: ToValidUTF8 drops the partial rune a byte-slice
+		// cut can leave, so the dispatched proto3 string stays valid UTF-8.
+		out = strings.ToValidUTF8(out[:maxConveneDirectiveBytes], "")
+	}
+	return out
 }

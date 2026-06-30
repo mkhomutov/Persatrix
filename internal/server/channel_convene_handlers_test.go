@@ -28,7 +28,14 @@ func armConvene(t *testing.T, srv *Server, id, convener string) {
 }
 
 func TestConveneHandler_ArmedChannel_Accepted(t *testing.T) {
-	srv, id := channelConfigTestServer(t, true)
+	// A convenable channel needs an OPEN-FLOOR responder besides the convener:
+	// seed bob as `always` explicitly, since an unspecified member defaults to
+	// `when_mentioned` (sqlite.go) — which never answers the open-floor opener,
+	// so the default alice/bob roster is correctly a no-audience 409.
+	srv, id := channelConfigTestServerWithMembers(t, true, []channels.Member{
+		{ParticipantID: "alice", RespondPolicy: channels.RespondAlways},
+		{ParticipantID: "bob", RespondPolicy: channels.RespondAlways},
+	})
 	armConvene(t, srv, id, "alice")
 
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/"+id+"/convene", nil)
@@ -77,4 +84,18 @@ func TestConveneHandler_MissingChannel_NotFound(t *testing.T) {
 
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/group%3Aabsent/convene", nil)
 	assert.Equal(t, http.StatusNotFound, rec.Code, "body=%s", rec.Body.String())
+}
+
+// TestConveneHandler_NoTopic_Conflict — an armed channel with a real audience but
+// no topic/agenda/goal 409s (the convener would open on an empty directive).
+func TestConveneHandler_NoTopic_Conflict(t *testing.T) {
+	srv, id := channelConfigTestServerWithMembers(t, true, []channels.Member{
+		{ParticipantID: "alice", RespondPolicy: channels.RespondAlways},
+		{ParticipantID: "bob", RespondPolicy: channels.RespondAlways},
+	})
+	// Armed with a valid convener + audience, but deliberately no topic/agenda/goal.
+	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{Enabled: true, Convener: "alice"})
+
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/"+id+"/convene", nil)
+	assert.Equal(t, http.StatusConflict, rec.Code, "body=%s", rec.Body.String())
 }

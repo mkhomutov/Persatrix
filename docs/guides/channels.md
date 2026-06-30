@@ -1024,8 +1024,15 @@ the lease that *produces* the opener predates its own snapshot); the always-on
 RFC 0030 Layer-0 depth cap bounds that first call.
 
 Convene is reachable on all three RFC 0050 surfaces, each gated behind the **same**
-`config_edit_enabled` toggle as the config surface (convening triggers real LLM
-spend on an unattended channel, so it sits behind the one operator opt-in):
+`config_edit_enabled` toggle as the config surface. Be aware of what that toggle
+actually is: the bundled `config/ui.yaml` ships it **`true`** (and it is loaded
+even without `--enable-ui`), so in a default deployment convene is reachable as
+soon as a channel is armed — it is **not** a dark, dedicated convene opt-in.
+Because convene shares the config-edit gate, the same `config_edit_enabled: false`
+that lands the config surface dark also disables convene; the deliberate human
+steps that gate an unattended discussion are *arming* the channel (a config edit)
+and pressing convene. Convening does trigger real LLM spend on an unattended
+channel, so treat enabling the operator surface as also enabling convene:
 
 ```bash
 # CLI — POST /api/v1/channels/{id}/convene
@@ -1038,10 +1045,19 @@ persatrix channel convene planning --json     # {channel_id, convener, status}
 POST /api/v1/channels/{id}/convene      → 202 {channel_id, convener, status:"convening"}
                                           403 toggle off · 404 no such channel
                                           409 not autonomous.enabled · 409 already has a
-                                              live interaction · 409 no floor-capable
-                                              audience besides the convener
+                                              live interaction · 409 no open-floor responder
+                                              besides the convener · 409 no topic/agenda/goal
+                                              to convene on
                                           400 convener drifted out of the roster
 ```
+
+> **The audience must answer an *open-floor* opener.** The convener's opening
+> turn addresses the room as a whole (it names no one), and only `participant`
+> (`always`) members reply to an open-floor message — a `when_mentioned` member
+> stays silent until @-mentioned. Note an unspecified member defaults to
+> `when_mentioned`, so give the intended discussants `respond: always` (the
+> `participant` disposition), or convene 409s with *no open-floor responder
+> besides the convener*.
 
 Convening targets an **idle** channel: a channel that already has a live
 interaction is refused (`409`) rather than silently joined — the convener opens

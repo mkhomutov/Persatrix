@@ -201,7 +201,8 @@ pub(crate) enum ChannelCommands {
     /// discussion by dispatching the convene forced turn to the channel's
     /// configured `autonomous.convener`. Gated server-side behind the same
     /// `config_edit_enabled` toggle as `config` (`403` = off); `409` = not
-    /// `autonomous.enabled`, already convening, or no audience.
+    /// `autonomous.enabled`, already convening, no open-floor responder, or
+    /// no topic/agenda/goal to convene on.
     Convene {
         /// Channel id (a bare name is canonicalized to `group:<name>`)
         name: String,

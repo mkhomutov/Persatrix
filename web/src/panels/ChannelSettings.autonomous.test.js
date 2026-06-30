@@ -312,6 +312,37 @@ describe("ChannelSettings — convene action", () => {
     expect(screen.getByText(/save your changes before convening/i)).toBeTruthy();
   });
 
+  it("latches disabled after a successful convene (no accidental second opener)", async () => {
+    let conveneCalls = 0;
+    const fetchMock = vi.fn((path, init) => {
+      if (String(path).endsWith("/convene") && init?.method === "POST") {
+        conveneCalls += 1;
+        return Promise.resolve({
+          ok: true,
+          status: 202,
+          json: () =>
+            Promise.resolve({ channel_id: "group:planning", convener: "ada", status: "convening" }),
+        });
+      }
+      return Promise.resolve(okJSON(configBody({ autonomous: overriddenAutonomous })));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    const button = await screen.findByRole("button", { name: /convene/i });
+    await fireEvent.click(button);
+    await waitFor(() => expect(screen.getByText(/ada is opening the discussion/i)).toBeTruthy());
+
+    // The button is now latched disabled (re-convening an idle channel is not
+    // yet aggregate-bounded; a second POST before the first opener commits would
+    // dispatch a second uncapped opener).
+    await waitFor(() => expect(button.disabled).toBe(true));
+    expect(button.textContent).toMatch(/convened/i);
+    // A second click does nothing — still exactly one convene POST.
+    await fireEvent.click(button);
+    expect(conveneCalls).toBe(1);
+  });
+
   it("surfaces the server's wording when convene fails", async () => {
     const fetchMock = vi.fn((path) => {
       if (String(path).endsWith("/convene")) {

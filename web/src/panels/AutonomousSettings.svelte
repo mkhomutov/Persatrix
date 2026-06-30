@@ -43,9 +43,26 @@
   let convening = $state(false);
   let conveneError = $state(""); // a hard failure (the server's wording)
   let conveneNotice = $state(""); // a success confirmation
+  // Latches true after a successful convene so the button cannot fire a second
+  // opener. Re-convening an idle channel is not yet aggregate-bounded
+  // server-side (the §E count bound is a later PR), and in the window before the
+  // convener's first reply commits an interaction a second POST is NOT caught by
+  // the already-convening 409 — so a stray double-click would dispatch a second
+  // uncapped opener. Reload (or switch channels) to convene again.
+  let convened = $state(false);
+
+  // Reset the action state when the operator switches to a different channel — a
+  // fresh channel has its own armed/convened status. Tracks `channelId` only, so
+  // it never clobbers a notice the convene() handler just set on this channel.
+  $effect(() => {
+    channelId;
+    convened = false;
+    conveneError = "";
+    conveneNotice = "";
+  });
 
   async function convene() {
-    if (convening || !armed || dirty) return;
+    if (convening || !armed || dirty || convened) return;
     convening = true;
     conveneError = "";
     conveneNotice = "";
@@ -53,6 +70,7 @@
       const resp = await conveneChannel(channelId);
       const who = resp?.convener || "the convener";
       conveneNotice = `Convening — ${who} is opening the discussion.`;
+      convened = true; // one opener per panel session; see `convened` above
     } catch (err) {
       conveneError =
         err instanceof ApiError
@@ -177,10 +195,14 @@
         type="button"
         class="convene"
         onclick={convene}
-        disabled={convening || dirty}
-        title={dirty ? "Save your changes before convening" : ""}
+        disabled={convening || dirty || convened}
+        title={dirty
+          ? "Save your changes before convening"
+          : convened
+            ? "Convened — reload to convene again"
+            : ""}
       >
-        {convening ? "Convening…" : "Convene now"}
+        {convening ? "Convening…" : convened ? "Convened" : "Convene now"}
       </button>
       {#if dirty}
         <span class="convene-hint">Save your changes before convening.</span>

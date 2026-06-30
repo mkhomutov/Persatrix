@@ -5,15 +5,18 @@ package channels
 // directed convene forced turn to the configured convener, carrying the
 // `markerConvene` marker and the operator topic/agenda/goal directive, and
 // that it fails loudly (no dispatch) on a missing channel, an unarmed channel,
-// a channel with a live interaction, a drifted/observer convener, or a roster
-// with no floor-capable audience — the runaway-class failures the safety
+// a channel with a live interaction, a drifted/observer convener, a roster with
+// no open-floor responder (an observer- or when_mentioned-only audience), or a
+// channel with no subject to convene on — the runaway-class failures the safety
 // contract exists to catch — plus the invariant that the synthetic convene
 // sender can never be a legal participant id (so a convener can never collide
 // with it and self-suppress its own opener).
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -214,10 +217,67 @@ func TestConvene_RejectsNoAudience(t *testing.T) {
 			"nova-sparrow": RespondAlways, // the convener — the lone floor-capable member
 			"watcher":      RespondNever,  // an observer, never an audience
 		}, "nova-sparrow", "watcher")
-	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, Convener: "nova-sparrow"})
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, Convener: "nova-sparrow", Topic: "x"})
 
 	_, err := router.ConveneChannel(context.Background(), ch)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrAutonomousNoAudience)
 	assert.Empty(t, conveneEnvelopes(disp))
+}
+
+// TestConvene_RejectsWhenMentionedOnlyAudience — the deep-review fix: a
+// `when_mentioned` member is NOT an audience for the convener's open-floor
+// opener (the gate suppresses it `not_mentioned`, and the opener names no one),
+// so a roster of {convener=always, member=when_mentioned} is the same
+// dead-on-arrival convene as an observer-only one. The earlier `!= RespondNever`
+// audience test let this through, dispatching an opener nobody answers.
+func TestConvene_RejectsWhenMentionedOnlyAudience(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &messageRecordingDispatcher{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	ch := mustCreateGroupWithPolicies(t, store, "planning",
+		map[string]RespondPolicy{
+			"nova-sparrow": RespondAlways,        // the convener
+			"quiet-quokka": RespondWhenMentioned, // only replies when @-mentioned — never to the open-floor opener
+		}, "nova-sparrow", "quiet-quokka")
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, Convener: "nova-sparrow", Topic: "x"})
+
+	_, err := router.ConveneChannel(context.Background(), ch)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAutonomousNoAudience)
+	assert.Empty(t, conveneEnvelopes(disp), "an opener must not be dispatched into a room nobody answers")
+}
+
+// TestConvene_RejectsEmptyDirective — an armed channel with a valid convener and
+// a real audience but NO topic/agenda/goal is refused: the directive composes
+// empty, so the convener would open on nothing (an empty `<external_data>`
+// envelope) — a degenerate, uncapped opener. PR 1 validation requires a convener
+// but not a subject, so this is the convene-time guard for that gap.
+func TestConvene_RejectsEmptyDirective(t *testing.T) {
+	// conveneHarness gives nova/ember/iron all RespondAlways — a real audience —
+	// so only the no-subject guard can fire here.
+	router, disp, ch := conveneHarness(t, AutonomousConfig{Enabled: true, Convener: "nova-sparrow"})
+
+	_, err := router.ConveneChannel(context.Background(), ch)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAutonomousNoTopic)
+	assert.Empty(t, conveneEnvelopes(disp), "a subject-less channel dispatches no opener")
+}
+
+// TestComposeConveneDirective_EmptyWhenAllSectionsBlank — the empty-directive
+// case the convene guard keys on (returns "" so the caller can refuse).
+func TestComposeConveneDirective_EmptyWhenAllSectionsBlank(t *testing.T) {
+	assert.Empty(t, composeConveneDirective(AutonomousConfig{}))
+	// Whitespace-only topic trims to empty, too.
+	assert.Empty(t, composeConveneDirective(AutonomousConfig{Topic: "   "}))
+}
+
+// TestComposeConveneDirective_BoundsHugeDirective — a pathological multi-MB
+// operator free-text (the topic/goal fields carry no maxLength) is hard-trimmed
+// at the wire-safety ceiling so the gRPC dispatch can never carry a multi-MB
+// directive; the result stays valid UTF-8.
+func TestComposeConveneDirective_BoundsHugeDirective(t *testing.T) {
+	got := composeConveneDirective(AutonomousConfig{Topic: strings.Repeat("x", maxConveneDirectiveBytes*2)})
+	assert.LessOrEqual(t, len(got), maxConveneDirectiveBytes)
+	assert.True(t, utf8.ValidString(got), "the dispatched directive must stay valid UTF-8")
 }

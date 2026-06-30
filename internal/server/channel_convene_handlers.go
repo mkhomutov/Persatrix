@@ -8,12 +8,19 @@
 // discussion. This is the single endpoint the CLI `persatrix channel convene`
 // verb and the web "Convene" button both call.
 //
-// Gated behind the same `config_edit_enabled` toggle as the RFC 0050
-// config surface: the whole RFC 0050/0052 operator surface ships dark behind
-// one server-side opt-in, and convening triggers real LLM spend on an
-// unattended channel, so an explicit operator opt-in is the more defensible
-// posture, not less. Until an operator turns the toggle on, convene 403s
-// exactly as GET/PATCH …/config do.
+// Gated behind the same `config_edit_enabled` toggle as the RFC 0050 config
+// surface. Be precise about what that buys: this toggle is NOT a dedicated
+// convene opt-in and does NOT ship dark — the bundled `config/ui.yaml` sets
+// `config_edit_enabled: true`, and it is loaded UNCONDITIONALLY (even with
+// `--enable-ui` off — see cmd/orchestrator/ui.go), so in a default deployment
+// convene is reachable as soon as a channel is armed. The one server-side step
+// that gates the whole operator surface is `config_edit_enabled: false`, which
+// also disables config editing — there is no separate gate for the higher-risk
+// convene action versus a low-risk config edit. What still requires a deliberate
+// human action is *arming* the channel (a config PATCH through this same
+// surface) and pressing convene; convene 403s only when the shared toggle is
+// off, exactly as GET/PATCH …/config do. (A dedicated convene opt-in is a
+// possible future hardening, deliberately not added here.)
 package server
 
 import "net/http"

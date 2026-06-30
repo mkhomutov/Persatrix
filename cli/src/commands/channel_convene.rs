@@ -5,11 +5,14 @@
 //! orchestrator dispatches a convene forced turn to the channel's configured
 //! `autonomous.convener`, which authors the opening turn; from there the
 //! discussion sustains itself. The endpoint is gated server-side behind the
-//! `config_edit_enabled` toggle (a `403` means the operator surface is off);
-//! it `404`s an unknown channel and `409`s one that is not `autonomous.enabled`,
-//! already has a live interaction, or has no floor-capable audience besides the
-//! convener. The server's wording is surfaced verbatim via `api_error_message`,
-//! so the verb needs no per-status handling.
+//! `config_edit_enabled` toggle (a `403` means the operator surface is off — note
+//! the bundled `config/ui.yaml` ships that toggle ON, so this is the same gate as
+//! `config`, not a dedicated convene opt-in); it `404`s an unknown channel and
+//! `409`s one that is not `autonomous.enabled`, already has a live interaction,
+//! has no open-floor responder besides the convener (only `always` members answer
+//! the open-floor opener), or has no topic/agenda/goal to convene on. The server's
+//! wording is surfaced verbatim via `api_error_message`, so the verb needs no
+//! per-status handling.
 //!
 //! Extracted to its own module (mirroring `channel_convene_handlers.go` and the
 //! `channel_config_autonomous.rs` split) so `channel.rs` / `channel_dispatch.rs`
