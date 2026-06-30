@@ -429,6 +429,28 @@ message ChannelMessageEvent {
   // config `validate` rejects `revise >= 1` on any other rung, and the agent seam
   // pins it to 0 off the `plan` path, so a stray non-zero value here is inert.
   int32 reasoning_revise = 26;
+  // RFC 0052 §B (v0.3.11): true iff this dispatch is the orchestrator's
+  // CONVENE forced turn — the directed dispatch that opens an autonomous
+  // agent-only channel (`internal/channels/convene.go`). The convener
+  // persona authors the opening turn from which the existing
+  // `InboundEventWake` chain carries the discussion with no human message.
+  // The dispatch's `content` carries the operator topic/agenda/goal
+  // (assembled from the channel's `autonomous` config); the receiver wraps
+  // it in the RFC 0009 `<external_data>` envelope before injection (it is
+  // operator config, a distinct trust class — the one genuinely new
+  // injection surface). The receiver admits a marked event down the same
+  // directed lane as `chair_escalation = 22` (gate admit for any non-`never`
+  // policy, Tier B bid skipped so the bias-to-silence verdict never silences
+  // the opener) and renders the convener framing
+  // (`prompts/runtime/safety/convener-opening.md`) instead of the
+  // peer-message shape. Orchestrator-authored, the same trust class as
+  // `chair_escalation = 22`; never set by ordinary fanout, honoured only from
+  // this typed field and strictly boolean receiver-side. proto3 implicit
+  // presence: false (the zero value) is every non-convene dispatch, so the
+  // field is additive — an old producer never sets it and an old consumer
+  // ignoring it sees an ordinary open-floor message (no opener authored —
+  // the channel simply never convenes, the inert pre-v0.3.11 posture).
+  bool convene = 27;
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)

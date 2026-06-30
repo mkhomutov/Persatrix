@@ -24,6 +24,11 @@ func (s *Server) writeChannelError(w http.ResponseWriter, err error) {
 		writeError(w, "CONFLICT", "max_channels cap exceeded", http.StatusConflict)
 	case errors.Is(err, channels.ErrConfigRevisionConflict): // RFC 0050 PR 4 optimistic concurrency
 		writeError(w, "CONFLICT", err.Error(), http.StatusConflict)
+	case errors.Is(err, channels.ErrChannelNotArmed), // RFC 0052 PR 3 — convene against an unarmed channel
+		errors.Is(err, channels.ErrChannelAlreadyConvening), // RFC 0052 PR 3 — convene a channel with a live interaction
+		errors.Is(err, channels.ErrAutonomousNoAudience),    // RFC 0052 PR 3 — convene a roster with no open-floor responder
+		errors.Is(err, channels.ErrAutonomousNoTopic):       // RFC 0052 PR 3 — convene a channel with no topic/agenda/goal
+		writeError(w, "CONFLICT", err.Error(), http.StatusConflict)
 	case errors.Is(err, channels.ErrInvalidSalienceMaxChannelMembers), // RFC 0050 PR 4 config validation
 		errors.Is(err, channels.ErrInvalidInteractionBudgetTokens),
 		errors.Is(err, channels.ErrInvalidMaxRepliesPerParticipant),

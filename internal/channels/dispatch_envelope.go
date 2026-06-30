@@ -96,6 +96,19 @@ type DispatchEnvelope struct {
 	// ordinary dispatch.
 	InteractionCloseNotification bool
 
+	// Convene (RFC 0052 §B) marks this dispatch as the orchestrator's convene
+	// forced turn to the channel's configured `autonomous.convener` — the
+	// directed dispatch that opens an autonomous agent-only channel. Carried
+	// on `ChannelMessageEvent.convene`; the receiver admits a marked event
+	// down the same directed lane as `ChairEscalation` (gate admit + Tier B
+	// bypass) and renders the convener framing, then authors the opening turn
+	// from which the existing `InboundEventWake` chain carries the discussion.
+	// Set only by [ChannelRouter.ConveneChannel]'s dispatch — false (the
+	// proto3 default) on every ordinary fanout. Never set together with
+	// ChairEscalation/InteractionCloseNotification (a convene is its own
+	// directed lane, the same never-alias discipline [dispatchMarker] keeps).
+	Convene bool
+
 	// FloorMentions (RFC 0030 floor-capable-directedness amendment) is the
 	// subset of the message's mentions naming floor-capable members —
 	// resolved once per publish by [resolveFloorMentions] in

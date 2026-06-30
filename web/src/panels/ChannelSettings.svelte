@@ -434,8 +434,8 @@
         {/each}
       </ul>
 
-      <!-- RFC 0052: renders in its own child, shares this form's save. -->
-      <AutonomousSettings knobs={AUTONOMOUS_KNOBS} {drafts} {members} {agentsById} />
+      <!-- RFC 0052: own child, shares this save; hosts the Convene action (PR 3, armed off `config`). -->
+      <AutonomousSettings knobs={AUTONOMOUS_KNOBS} {drafts} {members} {agentsById} {channelId} {config} {dirty} />
 
       <button type="submit" class="save" disabled={!dirty || saving}>
         {saving ? "Saving…" : "Save settings"}

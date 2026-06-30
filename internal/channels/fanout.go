@@ -231,6 +231,13 @@ const (
 	// {ChairEscalation, CloseNotification}; a resynthesize marker still never
 	// sets CloseNotification, so that invariant holds.
 	markerChairEscalationResynthesize
+	// markerConvene is the RFC 0052 §B convene forced turn, stamped only by
+	// [ChannelRouter.ConveneChannel]'s dispatch. It is its OWN directed lane,
+	// not a refinement of any other marker: dispatchTo stamps only `Convene`
+	// for it, so the never-alias invariant between {ChairEscalation,
+	// CloseNotification, Convene} holds — a convene dispatch never sets a
+	// chair-escalation or close-notification flag, and vice versa.
+	markerConvene
 )
 
 // dispatchTo delivers `msg` to a single recipient with the per-recipient
@@ -278,6 +285,7 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		ChairEscalation:              marker == markerChairEscalation || marker == markerChairEscalationResynthesize,
 		ChairEscalationResynthesize:  marker == markerChairEscalationResynthesize,
 		InteractionCloseNotification: marker == markerCloseNotification,
+		Convene:                      marker == markerConvene,
 	}, msg)
 	status := "ok"
 	if err != nil {

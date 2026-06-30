@@ -468,3 +468,20 @@ export async function patchChannelConfig(channelID, patch, revision) {
     { "If-Match": String(revision) },
   );
 }
+
+// conveneChannel opens an autonomous channel (RFC 0052 §B) — the operator action
+// behind the Channel-settings "Convene" button. POST /api/v1/channels/{id}/convene
+// dispatches the convene forced turn to the channel's configured
+// `autonomous.convener`, which authors the opening turn; the discussion then
+// sustains itself. Returns the 202 `{channel_id, convener, status}` ack. The
+// endpoint is gated behind the same `config_edit_enabled` toggle as the config
+// surface, so 403 (off) / 404 (no such channel) / 409 (not autonomous.enabled,
+// already convening, no open-floor responder, or no topic/agenda/goal) / 400
+// (drifted convener) / 503 (store/router unwired) survive onto ApiError with the
+// server's wording.
+export async function conveneChannel(channelID) {
+  // No body — the topic/agenda/goal come from the channel's persisted
+  // `autonomous` config, not the request. Encode the id (canonical ids carry a
+  // type-prefix colon) so the request stays pinned to the {id}/convene route.
+  return postJSON(`/api/v1/channels/${encodeURIComponent(channelID)}/convene`, {});
+}

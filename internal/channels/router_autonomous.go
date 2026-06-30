@@ -138,17 +138,37 @@ func (r *ChannelRouter) validateAutonomousConvener(ctx context.Context, channelI
 	if err != nil {
 		return fmt.Errorf("channels: apply config %s: load members: %w", channelID, err)
 	}
+	if _, err := classifyConvenerMember(members, convener); err != nil {
+		return fmt.Errorf("channels: apply config %s: %w", channelID, err)
+	}
+	return nil
+}
+
+// classifyConvenerMember locates `convener` in the channel's live roster and
+// reports why it cannot author the opening turn, or returns the resolved
+// *Member (a pointer into `members`) when it can. The error wraps
+// [ErrInvalidAutonomousConvener] with the shared operator-facing reason and NO
+// op-prefix — each caller adds its own "channels: <op> %s:" context via %w, so
+// the apply path keeps its "apply config" wording and the convene path its
+// "convene" wording while the convener disposition rule itself lives in exactly
+// one place. Single-sourcing it across [ChannelRouter.validateAutonomousConvener]
+// (config-apply) and [ChannelRouter.ConveneChannel] (convene) is what stops the
+// two enforcement points drifting — e.g. a future `addressed`-convener allowance
+// or a new disposition must change only here. (The load path's mirror,
+// [validateConvenerMembership], reads the distinct config-level member slice and
+// stays separate by type.)
+func classifyConvenerMember(members []Member, convener string) (*Member, error) {
 	for i := range members {
 		if members[i].ParticipantID == convener {
 			// An observer (legacy `never`) convener can never author the opening turn
 			// — its receiver gate suppresses it — so reject it, mirroring the chair.
 			if members[i].RespondPolicy.Normalize() == RespondNever {
-				return fmt.Errorf("channels: apply config %s: %w: %q is an observer (respond: never) and can never author the opening turn",
-					channelID, ErrInvalidAutonomousConvener, convener)
+				return nil, fmt.Errorf("%w: %q is an observer (respond: never) and can never author the opening turn",
+					ErrInvalidAutonomousConvener, convener)
 			}
-			return nil
+			return &members[i], nil
 		}
 	}
-	return fmt.Errorf("channels: apply config %s: %w: %q is not a declared member; the convener authors the opening turn",
-		channelID, ErrInvalidAutonomousConvener, convener)
+	return nil, fmt.Errorf("%w: %q is not a declared member; the convener authors the opening turn",
+		ErrInvalidAutonomousConvener, convener)
 }

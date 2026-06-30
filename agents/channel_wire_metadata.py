@@ -133,6 +133,16 @@ def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, ob
     # persona to the synthesize-only snippet.
     if request.chair_escalation_resynthesize:
         payload["chair_escalation_resynthesize"] = True
+    # RFC 0052 §B: the convene forced-turn marker — the directed dispatch that
+    # opens an autonomous channel. Seeded typed-field-only (like
+    # ``interaction_close_notification`` / ``chair_escalation_resynthesize``
+    # above, NOT ``chair_escalation``'s unconditional copy) so ordinary
+    # traffic keeps key-ABSENCE: the gate's admission and the prompt-assembly
+    # framing both read strict ``is True``, and pinning absence on unmarked
+    # events keeps the marked/unmarked distinction the strict consumers rely
+    # on.
+    if request.convene:
+        payload["convene"] = True
     return payload
 
 

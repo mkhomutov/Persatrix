@@ -529,10 +529,11 @@ persatrix channel config diff planning
   `.agenda` (a comma-separated list → a `[]string`), `.convener`, `.goal`,
   `.max_rounds`. Each `set`/`unset` nests under its block (`set planning
   autonomous.enabled=true autonomous.agenda='Cost, Coupling'`); `get` renders them
-  as `autonomous.<sub>` rows. The block is **dark in v0.3.11** (no convening yet —
-  RFC 0052 PR 3); `validate` rejects an `autonomous.enabled` channel without a
-  positive `interaction_budget_tokens` cap and a convener that is not a declared,
-  floor-capable member distinct from `escalation_chair_id`. `export`/`import`/`diff`
+  as `autonomous.<sub>` rows. `validate` rejects an `autonomous.enabled` channel
+  without a positive `interaction_budget_tokens` cap and a convener that is not a
+  declared, floor-capable member distinct from `escalation_chair_id`. Since v0.3.11
+  (RFC 0052 PR 3) an armed channel can be **convened** — see
+  [§13 Autonomous channels](#13-autonomous-channels-rfc-0052). `export`/`import`/`diff`
   defer both nested blocks (the boot loader applies a declared `autonomous:` block).
 
 - **Export-first, revision-stamped.** `export` regenerates the YAML from the
@@ -981,9 +982,109 @@ orchestrator + four agents via the channel manual-test series:
 
 ---
 
+## 13. Autonomous channels (RFC 0052)
+
+An **autonomous channel** runs a discussion with **no human in the loop**: no
+human seeds the topic, no human keeps it alive. It is an ordinary group channel
+carrying an `autonomous` block (configured exactly like the governance knobs in
+[§4](#4-the-response-gate-who-replies-and-when) — YAML, `channel config`, or the
+web panel) plus one operator action — **convene** — that opens the discussion.
+
+```yaml
+# config/channels.yaml — an armed channel
+autonomous:
+  enabled: true
+  topic: "Should we adopt a monorepo? Lay out the tradeoffs."
+  agenda: ["Build tooling cost", "Cross-team coupling", "Migration effort"]
+  convener: nova-sparrow          # authors the opening turn; a DISTINCT role from
+                                  # escalation_chair_id (RFC 0052 OQ #1)
+  goal: "A synthesized recommendation with the strongest argument on each side."
+  interaction_budget_tokens: 200000   # MANDATORY — validate rejects uncapped autonomy
+```
+
+**The safety contract (enforced at config-validation, RFC 0052 PR 1).** An
+unattended channel has no human circuit-breaker, so an `autonomous.enabled`
+channel is **un-creatable** without a positive resolved `interaction_budget_tokens`
+cap; arming is **group-only** (a DM/thread cannot be made autonomous); and the
+`convener` must be a declared, floor-capable member (not an `observer`) distinct
+from `escalation_chair_id`.
+
+**Convening.** Convening = the convener authors the **opening turn** under a
+fresh interaction, with no human message; from that publish the ordinary
+[response gate](#4-the-response-gate-who-replies-and-when) + `InboundEventWake`
+chain carries the discussion. Under the hood the orchestrator dispatches a
+directed **convene forced turn** to the convener (the sibling of the chair-stall
+escalation — same directed-lane admission, so the opener is never silenced by the
+bias-to-silence salience bid). The operator-supplied `topic`/`agenda`/`goal` are
+wrapped in the RFC 0009 `<external_data>` envelope before they reach the
+convener's prompt — operator config is a distinct trust class, the one genuinely
+new injection surface this opens. The opening turn resolves **uncapped** (the
+wallet snapshots the per-interaction cap at the interaction's first commit, so
+the lease that *produces* the opener predates its own snapshot); the always-on
+RFC 0030 Layer-0 depth cap bounds that first call.
+
+Convene is reachable on all three RFC 0050 surfaces, each gated behind the **same**
+`config_edit_enabled` toggle as the config surface. Be aware of what that toggle
+actually is: the bundled `config/ui.yaml` ships it **`true`** (and it is loaded
+even without `--enable-ui`), so in a default deployment convene is reachable as
+soon as a channel is armed — it is **not** a dark, dedicated convene opt-in.
+Because convene shares the config-edit gate, the same `config_edit_enabled: false`
+that lands the config surface dark also disables convene; the deliberate human
+steps that gate an unattended discussion are *arming* the channel (a config edit)
+and pressing convene. Convening does trigger real LLM spend on an unattended
+channel, so treat enabling the operator surface as also enabling convene:
+
+```bash
+# CLI — POST /api/v1/channels/{id}/convene
+persatrix channel convene group:planning
+persatrix channel convene planning --json     # {channel_id, convener, status}
+```
+
+```text
+# REST
+POST /api/v1/channels/{id}/convene      → 202 {channel_id, convener, status:"convening"}
+                                          403 toggle off · 404 no such channel
+                                          409 not autonomous.enabled · 409 already has a
+                                              live interaction · 409 no open-floor responder
+                                              besides the convener · 409 no topic/agenda/goal
+                                              to convene on
+                                          400 convener drifted out of the roster
+```
+
+> **The audience must answer an *open-floor* opener.** The convener's opening
+> turn addresses the room as a whole (it names no one), and only `participant`
+> (`always`) members reply to an open-floor message — a `when_mentioned` member
+> stays silent until @-mentioned. Note an unspecified member defaults to
+> `when_mentioned`, so give the intended discussants `respond: always` (the
+> `participant` disposition), or convene 409s with *no open-floor responder
+> besides the convener*.
+
+Convening targets an **idle** channel: a channel that already has a live
+interaction is refused (`409`) rather than silently joined — the convener opens
+one discussion, not a second one over a running one (forcing-fresh on a standing
+re-convene is a later RFC 0052 PR). Note the convene ack is `202 Accepted` —
+"the convener was woken", not "the discussion ran" — and repeated convening of an
+*idle* channel is not yet aggregate-bounded (the §E count bound is a later PR), so
+treat convene as an operator-initiated, not a scripted-loop, action until then.
+
+- **Web console** — a **Convene** button in the Channel-settings panel's
+  *Autonomous channel* section, shown only when the channel is armed per the
+  *saved* config and disabled while there are unsaved edits (convening reads the
+  persisted block, so save first). See the
+  [web-console guide § Channel settings](web-console.md#channel-settings--edit-governance-from-the-browser).
+
+> **Scope in v0.3.11.** PR 3 ships convening + the opening turn. The mechanisms
+> that make a human-free discussion *productive and bounded* — the anti-collapse
+> cadence, the deterministic bounded close, the roster-scaled synthesis reserve,
+> and standing/scheduled convening — land in the subsequent RFC 0052 PRs (see the
+> [PR plan](../rfcs/0052-pr-plan.md)).
+
+---
+
 ## Related documentation
 
 - [RFC 0011](../rfcs/0011-channels-bridges.md) — full channel spec
+- [RFC 0052](../rfcs/0052-autonomous-agent-channels.md) — autonomous agent-only channels (§13 above)
 - [RFC 0011 amendment — chat-as-DM](../rfcs/0011-amendment-chat-as-dm.md) — v0.2.1 chat unified under channels
 - [RFC 0008](../rfcs/0008-agent-memory-context-optimization.md) — `MemoryFacade` / `MemoryBudget` (used by channel-history injection)
 - [RFC 0020](../rfcs/0020-interaction-lifecycle.md) — `InteractionTracker` (channel turns route through `add_turn`)

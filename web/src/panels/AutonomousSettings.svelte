@@ -13,7 +13,73 @@
   //              no callback. Adopt populates these before this renders.
   // members    — [{id, respond, …}] for the convener picker (observers excluded).
   // agentsById — id -> agent, for convener display names.
-  let { knobs, drafts, members = [], agentsById = {} } = $props();
+  // channelId  — the group channel id, for the Convene action's POST.
+  // config     — the parent's loaded/applied config response; the Convene action
+  //              derives the SAVED armed state from it (config.autonomous.enabled),
+  //              NOT from `drafts` — convening reads the persisted block the server
+  //              holds, so a just-toggled-but-unsaved draft must not offer it.
+  // dirty      — whether the parent has unsaved edits; convening reads the
+  //              PERSISTED block, so we disable Convene while dirty and tell the
+  //              operator to save first rather than convene a stale config.
+  import { conveneChannel, ApiError } from "../lib/api.js";
+  let {
+    knobs,
+    drafts,
+    members = [],
+    agentsById = {},
+    channelId = "",
+    config = null,
+    dirty = false,
+  } = $props();
+
+  // The SAVED armed state — the persisted `autonomous.enabled` cell, not the
+  // editable draft. The Convene action shows only when the channel is armed per
+  // the block the server actually reads.
+  const armed = $derived(Boolean(config?.autonomous?.enabled?.value));
+
+  // RFC 0052 §B Convene action state — independent of the parent's save flow
+  // (this is an action, not a config edit), so it owns its own pending flag and
+  // result messages.
+  let convening = $state(false);
+  let conveneError = $state(""); // a hard failure (the server's wording)
+  let conveneNotice = $state(""); // a success confirmation
+  // Latches true after a successful convene so the button cannot fire a second
+  // opener. Re-convening an idle channel is not yet aggregate-bounded
+  // server-side (the §E count bound is a later PR), and in the window before the
+  // convener's first reply commits an interaction a second POST is NOT caught by
+  // the already-convening 409 — so a stray double-click would dispatch a second
+  // uncapped opener. Reload (or switch channels) to convene again.
+  let convened = $state(false);
+
+  // Reset the action state when the operator switches to a different channel — a
+  // fresh channel has its own armed/convened status. Tracks `channelId` only, so
+  // it never clobbers a notice the convene() handler just set on this channel.
+  $effect(() => {
+    channelId;
+    convened = false;
+    conveneError = "";
+    conveneNotice = "";
+  });
+
+  async function convene() {
+    if (convening || !armed || dirty || convened) return;
+    convening = true;
+    conveneError = "";
+    conveneNotice = "";
+    try {
+      const resp = await conveneChannel(channelId);
+      const who = resp?.convener || "the convener";
+      conveneNotice = `Convening — ${who} is opening the discussion.`;
+      convened = true; // one opener per panel session; see `convened` above
+    } catch (err) {
+      conveneError =
+        err instanceof ApiError
+          ? err.message
+          : `Could not convene: ${err.message}`;
+    } finally {
+      convening = false;
+    }
+  }
 
   // Convener candidates: members that can hold the floor. Observers (respond
   // "never") are server-rejected, so omit them — exactly as the parent's chair
@@ -117,6 +183,38 @@
       {/if}
     {/each}
   </ul>
+
+  <!-- RFC 0052 §B PR 3: the Convene action — the panel's first per-channel
+       action button. Shown only when the channel is armed per the SAVED config;
+       disabled while a convene is in flight or the operator has unsaved edits
+       (convening reads the persisted block, so a stale draft must be saved
+       first). type="button" so it never submits the parent's save form. -->
+  {#if armed}
+    <div class="convene-action">
+      <button
+        type="button"
+        class="convene"
+        onclick={convene}
+        disabled={convening || dirty || convened}
+        title={dirty
+          ? "Save your changes before convening"
+          : convened
+            ? "Convened — reload to convene again"
+            : ""}
+      >
+        {convening ? "Convening…" : convened ? "Convened" : "Convene now"}
+      </button>
+      {#if dirty}
+        <span class="convene-hint">Save your changes before convening.</span>
+      {/if}
+      {#if conveneError}
+        <p class="boot error" role="alert">{conveneError}</p>
+      {/if}
+      {#if conveneNotice}
+        <p class="notice" role="status">{conveneNotice}</p>
+      {/if}
+    </div>
+  {/if}
 </fieldset>
 
 <style>
@@ -179,5 +277,16 @@
     flex: 1 1 14rem;
     resize: vertical;
     font: inherit;
+  }
+  .convene-action {
+    margin-top: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+  .convene-hint {
+    font-size: 0.8rem;
+    opacity: 0.7;
   }
 </style>
