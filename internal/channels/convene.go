@@ -162,31 +162,30 @@ func (r *ChannelRouter) ConveneChannel(ctx context.Context, channelID string) (s
 	if err != nil {
 		return "", fmt.Errorf("channels: convene %s: load members: %w", channelID, err)
 	}
-	var convenerMember *Member
-	audience := 0 // members OTHER than the convener that answer an open-floor opener
+	// The convener membership + observer rule is shared with the config-apply
+	// path ([classifyConvenerMember]) so the two enforcement points cannot
+	// drift: a drifted (non-member) or observer convener fails the convene
+	// loudly here, mapping to 400 via ErrInvalidAutonomousConvener.
+	convenerMember, err := classifyConvenerMember(members, convener)
+	if err != nil {
+		return "", fmt.Errorf("channels: convene %s: %w", channelID, err)
+	}
+	// The open-floor audience is a convene-only precondition (config-validate
+	// requires a convener but not a live audience). Count the members OTHER than
+	// the convener that answer the convener's OPEN-FLOOR opener: only an
+	// `always` (participant) member does — a `when_mentioned` member stays
+	// silent until @-mentioned (the gate's `not_mentioned` suppress) and the
+	// opener names no one, so it can never draw one in. A `when_mentioned`-only
+	// roster lands the opener in a silent room, the same dead-on-arrival convene
+	// as an observer-only one (the earlier `!= RespondNever` test let it through).
+	audience := 0
 	for i := range members {
 		if members[i].ParticipantID == convener {
-			convenerMember = &members[i]
 			continue
 		}
-		// Only an `always` (participant) member replies to the convener's
-		// OPEN-FLOOR opener; a `when_mentioned` member stays silent until
-		// @-mentioned (the gate's `not_mentioned` suppress) and the opener
-		// names no one, so it can never draw one in. Counting only the
-		// open-floor responders is what makes the empty-room guard real — the
-		// earlier `!= RespondNever` test admitted a `when_mentioned`-only
-		// roster, which lands the opener in a silent room.
 		if members[i].RespondPolicy.Normalize() == RespondAlways {
 			audience++
 		}
-	}
-	if convenerMember == nil {
-		return "", fmt.Errorf("channels: convene %s: %w: %q is not a member; the convener authors the opening turn",
-			channelID, ErrInvalidAutonomousConvener, convener)
-	}
-	if convenerMember.RespondPolicy.Normalize() == RespondNever {
-		return "", fmt.Errorf("channels: convene %s: %w: %q is an observer (respond: never) and can never author the opening turn",
-			channelID, ErrInvalidAutonomousConvener, convener)
 	}
 	if audience == 0 {
 		return "", fmt.Errorf("channels: convene %s: %w: only the convener %q answers an open-floor opener; every other member is an observer or only responds when mentioned, so the opening turn would land in a silent room",
