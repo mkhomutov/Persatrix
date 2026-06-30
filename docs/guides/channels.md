@@ -1036,9 +1036,20 @@ persatrix channel convene planning --json     # {channel_id, convener, status}
 ```text
 # REST
 POST /api/v1/channels/{id}/convene      → 202 {channel_id, convener, status:"convening"}
-                                          403 toggle off · 409 not autonomous.enabled
+                                          403 toggle off · 404 no such channel
+                                          409 not autonomous.enabled · 409 already has a
+                                              live interaction · 409 no floor-capable
+                                              audience besides the convener
                                           400 convener drifted out of the roster
 ```
+
+Convening targets an **idle** channel: a channel that already has a live
+interaction is refused (`409`) rather than silently joined — the convener opens
+one discussion, not a second one over a running one (forcing-fresh on a standing
+re-convene is a later RFC 0052 PR). Note the convene ack is `202 Accepted` —
+"the convener was woken", not "the discussion ran" — and repeated convening of an
+*idle* channel is not yet aggregate-bounded (the §E count bound is a later PR), so
+treat convene as an operator-initiated, not a scripted-loop, action until then.
 
 - **Web console** — a **Convene** button in the Channel-settings panel's
   *Autonomous channel* section, shown only when the channel is armed per the

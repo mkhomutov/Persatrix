@@ -30,10 +30,11 @@ type conveneResponse struct {
 
 // handleConveneChannel handles POST /api/v1/channels/{id}/convene. Order
 // mirrors the other channel writers: availability (503) → toggle (403) →
-// convene (the router validates armed-state + convener membership, mapping to
-// 409 unarmed / 400 invalid convener / 404 missing channel / 500 store error).
-// On success it returns 202 Accepted — the convener was woken; the opening turn
-// is being authored.
+// convene (the router validates existence + armed-state + convener membership +
+// live audience, mapping to 404 missing channel / 409 unarmed / 409
+// already-convening / 409 no-audience / 400 invalid convener / 500 store
+// error). On success it returns 202 Accepted — the convener was woken; the
+// opening turn is being authored.
 func (s *Server) handleConveneChannel(w http.ResponseWriter, r *http.Request) {
 	if s.channelStore == nil || s.channelRouter == nil {
 		writeError(w, "UNAVAILABLE", "channel config surface not configured", http.StatusServiceUnavailable)

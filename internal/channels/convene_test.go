@@ -4,9 +4,12 @@ package channels
 // TDD-first: pins that [ChannelRouter.ConveneChannel] dispatches exactly one
 // directed convene forced turn to the configured convener, carrying the
 // `markerConvene` marker and the operator topic/agenda/goal directive, and
-// that it fails loudly (no dispatch) on an unarmed channel or a
-// drifted/observer convener — the runaway-class failures the safety contract
-// exists to catch.
+// that it fails loudly (no dispatch) on a missing channel, an unarmed channel,
+// a channel with a live interaction, a drifted/observer convener, or a roster
+// with no floor-capable audience — the runaway-class failures the safety
+// contract exists to catch — plus the invariant that the synthetic convene
+// sender can never be a legal participant id (so a convener can never collide
+// with it and self-suppress its own opener).
 
 import (
 	"context"
@@ -150,4 +153,71 @@ func TestComposeConveneDirective_OmitsEmptySections(t *testing.T) {
 	assert.Equal(t, "Topic: Just a topic", got)
 	assert.NotContains(t, got, "Agenda:")
 	assert.NotContains(t, got, "Goal:")
+}
+
+// TestConveneDispatchSenderID_IsNotAValidParticipantID — the deep-review fix:
+// the synthetic convene sender MUST be a value no roster member can ever hold,
+// or a convener whose agent id equals it would have its opening turn silently
+// suppressed by the receiver gate's self-sender defence (a 202-then-nothing on
+// an unattended channel). The `:` makes the collision impossible by
+// construction; this locks the invariant so a future edit cannot reintroduce
+// the hazard by picking a participant-id-shaped sentinel.
+func TestConveneDispatchSenderID_IsNotAValidParticipantID(t *testing.T) {
+	assert.Error(t, ValidateParticipantID(ConveneDispatchSenderID),
+		"the convene dispatch sender must never be a legal participant id, else a "+
+			"convener sharing it would self-suppress its own opening turn")
+}
+
+// TestConvene_RejectsMissingChannel — convening a channel that does not exist
+// reports 404 (ErrChannelNotFound), not 409 not-armed: the existence check runs
+// before the AutonomousFor read, which would otherwise resolve the disabled
+// default for an unknown channel and mis-report it as "not armed".
+func TestConvene_RejectsMissingChannel(t *testing.T) {
+	router, disp, _ := conveneHarness(t, AutonomousConfig{Enabled: true, Convener: "nova-sparrow"})
+
+	_, err := router.ConveneChannel(context.Background(), "group:does-not-exist")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrChannelNotFound)
+	assert.NotErrorIs(t, err, ErrChannelNotArmed, "a missing channel must not masquerade as unarmed")
+	assert.Empty(t, conveneEnvelopes(disp))
+}
+
+// TestConvene_RejectsWhenInteractionOpen — convening a channel that already has
+// an open committed interaction is refused loudly (ErrChannelAlreadyConvening)
+// rather than silently joining the live discussion. Convening is "open an idle
+// channel"; the live case is PR 7's force-fresh territory.
+func TestConvene_RejectsWhenInteractionOpen(t *testing.T) {
+	router, disp, ch := conveneHarness(t, AutonomousConfig{
+		Enabled: true, Convener: "nova-sparrow", Topic: "Live already",
+	})
+
+	// Open + commit an interaction so the channel is no longer idle.
+	_, _, commit := router.resolveInteractionID(context.Background(), ch, ChannelTypeGroup, "")
+	commit(true)
+
+	_, err := router.ConveneChannel(context.Background(), ch)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrChannelAlreadyConvening)
+	assert.Empty(t, conveneEnvelopes(disp), "a live channel dispatches no second opener")
+}
+
+// TestConvene_RejectsNoAudience — an armed channel whose only floor-capable
+// member is the convener (everyone else is an observer) is refused: the opening
+// turn would land in an empty room, a guaranteed-futile convene that burns an
+// uncapped opener for nothing.
+func TestConvene_RejectsNoAudience(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &messageRecordingDispatcher{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	ch := mustCreateGroupWithPolicies(t, store, "planning",
+		map[string]RespondPolicy{
+			"nova-sparrow": RespondAlways, // the convener — the lone floor-capable member
+			"watcher":      RespondNever,  // an observer, never an audience
+		}, "nova-sparrow", "watcher")
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, Convener: "nova-sparrow"})
+
+	_, err := router.ConveneChannel(context.Background(), ch)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAutonomousNoAudience)
+	assert.Empty(t, conveneEnvelopes(disp))
 }

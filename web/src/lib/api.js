@@ -475,7 +475,8 @@ export async function patchChannelConfig(channelID, patch, revision) {
 // `autonomous.convener`, which authors the opening turn; the discussion then
 // sustains itself. Returns the 202 `{channel_id, convener, status}` ack. The
 // endpoint is gated behind the same `config_edit_enabled` toggle as the config
-// surface, so 403 (off) / 409 (not autonomous.enabled) / 400 (drifted convener) /
+// surface, so 403 (off) / 404 (no such channel) / 409 (not autonomous.enabled,
+// already convening, or no floor-capable audience) / 400 (drifted convener) /
 // 503 (store/router unwired) survive onto ApiError with the server's wording.
 export async function conveneChannel(channelID) {
   // No body — the topic/agenda/goal come from the channel's persisted

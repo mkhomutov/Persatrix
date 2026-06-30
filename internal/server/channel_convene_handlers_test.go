@@ -67,3 +67,14 @@ func TestConveneHandler_DriftedConvener_BadRequest(t *testing.T) {
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/"+id+"/convene", nil)
 	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
 }
+
+// TestConveneHandler_MissingChannel_NotFound — convening a channel id that does
+// not exist reports 404, consistent with GET/PATCH …/config (the deep-review
+// fix: it previously fell through AutonomousFor's disabled default and 409'd as
+// "not armed", masking a fat-fingered/deleted id).
+func TestConveneHandler_MissingChannel_NotFound(t *testing.T) {
+	srv, _ := channelConfigTestServer(t, true) // toggle on; convene a different id
+
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/group%3Aabsent/convene", nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code, "body=%s", rec.Body.String())
+}

@@ -200,8 +200,8 @@ pub(crate) enum ChannelCommands {
     /// Convene an autonomous channel (RFC 0052 §B) — open a human-free
     /// discussion by dispatching the convene forced turn to the channel's
     /// configured `autonomous.convener`. Gated server-side behind the same
-    /// `config_edit_enabled` toggle as `config` (`403` = off); `409` = the
-    /// channel is not `autonomous.enabled`.
+    /// `config_edit_enabled` toggle as `config` (`403` = off); `409` = not
+    /// `autonomous.enabled`, already convening, or no audience.
     Convene {
         /// Channel id (a bare name is canonicalized to `group:<name>`)
         name: String,
