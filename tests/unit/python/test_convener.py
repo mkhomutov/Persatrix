@@ -161,6 +161,28 @@ class TestConvenerFraming:
         assert oversized not in framed
         assert "truncated" in framed.lower()
 
+    def test_format_convener_opening_logs_when_truncating(self, caplog) -> None:
+        """The defensive truncation is observable, not silent. The operator
+        surface only sees the convene ``202`` (the opener is authored async)
+        and the Go wire ceiling sits far above this prompt bound, so a
+        directive that clears dispatch yet loses its tail here MUST surface a
+        WARNING. A well-formed directive logs nothing."""
+        import logging
+
+        from agents.persona_runtime.convener import (
+            _CONVENE_DIRECTIVE_MAX_CHARS,
+            format_convener_opening,
+        )
+
+        with caplog.at_level(logging.WARNING, logger="agents.persona_runtime.convener"):
+            format_convener_opening("x" * (_CONVENE_DIRECTIVE_MAX_CHARS + 1))
+        assert "truncated" in caplog.text
+
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="agents.persona_runtime.convener"):
+            format_convener_opening("Topic: a small, well-formed directive")
+        assert "truncated" not in caplog.text
+
     def test_format_convener_opening_escapes_envelope_breakout(self) -> None:
         """The wrap_external escape: a directive that smuggles a literal
         ``</external_data>`` close tag cannot break out of the envelope and

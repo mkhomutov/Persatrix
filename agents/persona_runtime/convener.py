@@ -34,8 +34,12 @@ channel.
 
 from __future__ import annotations
 
+import logging
+
 from agents.prompt_loader import load_snippet
 from agents.security import CONTEXT_SOURCE_EXTERNAL, wrap_external
+
+logger = logging.getLogger(__name__)
 
 # Defensive upper bound (UTF-8-agnostic character count) on the operator
 # convene directive at the injection seam. Generous over a realistic
@@ -56,9 +60,24 @@ def _bound_directive(directive: str) -> str:
     directive is a pathological-but-armed channel, and an opening turn on a
     truncated-but-bounded topic still convenes — strictly better than a
     silent dispatch failure on an unattended channel.
+
+    The drop is logged at WARNING so it is not *silent*. The operator surface
+    only sees the convene ``202`` (the opener is authored async), and the Go
+    wire ceiling (``maxConveneDirectiveBytes`` = 64 KiB in
+    ``internal/channels/convene.go``) sits far above this prompt bound, so a
+    directive between the two limits clears dispatch intact yet loses its tail
+    here — the WARN is the same interim operator signal the inbound sanitizer
+    relies on (see :func:`format_convener_opening`).
     """
     if len(directive) <= _CONVENE_DIRECTIVE_MAX_CHARS:
         return directive
+    logger.warning(
+        "convene directive truncated to %d chars (was %d); the operator "
+        "topic/agenda/goal exceeds the prompt bound, so its tail is dropped "
+        "from the opening turn",
+        _CONVENE_DIRECTIVE_MAX_CHARS,
+        len(directive),
+    )
     return directive[:_CONVENE_DIRECTIVE_MAX_CHARS] + _TRUNCATION_MARKER
 
 
