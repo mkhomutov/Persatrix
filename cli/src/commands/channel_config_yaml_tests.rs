@@ -53,6 +53,20 @@ fn view(revision: i64, over: &[(&str, Value)]) -> ChannelConfigView {
             "revise": {"value": 0,         "source": "default"},
         }),
     );
+    // The nested autonomous block (RFC 0052) reads back as default for the same
+    // reason: export/diff filter `config_rows` to the FLAT knobs, so the dotted
+    // autonomous.* keys (agenda included) are never emitted/compared by these verbs.
+    payload.insert(
+        "autonomous".to_string(),
+        serde_json::json!({
+            "enabled":    {"value": false, "source": "default"},
+            "topic":      {"value": "",    "source": "default"},
+            "agenda":     {"value": [],    "source": "default"},
+            "convener":   {"value": "",    "source": "default"},
+            "goal":       {"value": "",    "source": "default"},
+            "max_rounds": {"value": 12,    "source": "default"},
+        }),
+    );
     serde_json::from_value(Value::Object(payload)).expect("view payload deserializes")
 }
 
@@ -182,7 +196,10 @@ fn parse_channel_block_flags_nested_reasoning_block_and_skips_it() {
     let block =
         yaml_block("name: planning\nfloor_control: true\nreasoning:\n  mode: bid\n  model: fast\n");
     let parsed = parse_channel_block(&block).unwrap();
-    assert!(parsed.deferred_reasoning, "the reasoning block is flagged");
+    assert!(
+        parsed.deferred_blocks.contains(&"reasoning"),
+        "the reasoning block is flagged"
+    );
     assert!(
         !parsed.patch.contains_key("reasoning"),
         "the nested block is not lifted into the flat patch"
@@ -219,7 +236,7 @@ fn parse_channel_block_without_reasoning_is_not_flagged() {
     // A plain block carries no reasoning, so the deferral flag stays clear (no
     // spurious note for the common case).
     let parsed = parse_channel_block(&yaml_block("name: planning\nfloor_control: true\n")).unwrap();
-    assert!(!parsed.deferred_reasoning);
+    assert!(parsed.deferred_blocks.is_empty());
 }
 
 // ─── parse_channels_doc ────────────────────────────────────────────────────
@@ -336,6 +353,14 @@ fn view_with_reasoning_override() -> ChannelConfigView {
             "model":  {"value": "fast",    "source": "default"},
             "depth":  {"value": "shallow", "source": "default"},
             "revise": {"value": 0,         "source": "default"},
+        },
+        "autonomous": {
+            "enabled":    {"value": false, "source": "default"},
+            "topic":      {"value": "",    "source": "default"},
+            "agenda":     {"value": [],    "source": "default"},
+            "convener":   {"value": "",    "source": "default"},
+            "goal":       {"value": "",    "source": "default"},
+            "max_rounds": {"value": 12,    "source": "default"},
         },
     }))
     .expect("view payload deserializes")

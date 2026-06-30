@@ -29,6 +29,14 @@ fn channel_config_view_deserializes_full_payload() {
             "depth":  {"value": "shallow", "source": "default"},
             "revise": {"value": 0,         "source": "default"},
         },
+        "autonomous": {
+            "enabled":    {"value": true,             "source": "channel"},
+            "topic":      {"value": "Monorepo?",      "source": "channel"},
+            "agenda":     {"value": ["Cost"],         "source": "channel"},
+            "convener":   {"value": "nova-sparrow",   "source": "channel"},
+            "goal":       {"value": "",               "source": "default"},
+            "max_rounds": {"value": 12,               "source": "default"},
+        },
     });
     let view: ChannelConfigView = serde_json::from_value(json).unwrap();
     assert_eq!(view.revision, 3);
@@ -46,6 +54,12 @@ fn channel_config_view_deserializes_full_payload() {
     assert_eq!(view.reasoning.model.value, serde_json::json!("fast"));
     assert_eq!(view.reasoning.model.source, "default");
     assert_eq!(view.reasoning.revise.value, serde_json::json!(0));
+    // The nested autonomous block deserializes per-sub-knob too, including the
+    // list-valued `agenda` cell (a JSON array, not a flattened string).
+    assert_eq!(view.autonomous.enabled.value, serde_json::json!(true));
+    assert_eq!(view.autonomous.enabled.source, "channel");
+    assert_eq!(view.autonomous.agenda.value, serde_json::json!(["Cost"]));
+    assert_eq!(view.autonomous.max_rounds.value, serde_json::json!(12));
 }
 
 // ─── parse_set_assignment ──────────────────────────────────────────
@@ -219,29 +233,6 @@ fn build_unset_patch_rejects_empty_and_unknown_and_dupe() {
 // (RFC 0051 reasoning: enum + dotted-key parse/build tests live in
 // channel_config_reasoning_tests.rs, beside the module they exercise.)
 
-// ─── render_value ──────────────────────────────────────────────────
-
-#[test]
-fn render_value_dashes_null_and_unquotes_string() {
-    // An inherited interaction_budget reports JSON null — render as `—`, not
-    // the literal "null". Strings drop their quotes; numbers/bools stay.
-    assert_eq!(render_value(&Value::Null), "\u{2014}");
-    assert_eq!(render_value(&Value::String("ada".into())), "ada");
-    assert_eq!(render_value(&serde_json::json!(600)), "600");
-    assert_eq!(render_value(&Value::Bool(true)), "true");
-}
-
-#[test]
-fn render_value_names_empty_string_rather_than_blanking() {
-    // The one string knob (escalation_chair_id) renders empty as `(none)`, not a
-    // blank cell that reads as a missing field — the empty value is a real state
-    // (no chair / escalation disabled). Kept distinct from `—` (a JSON null);
-    // the row's [channel]/[default] tag separates an explicit disable from an
-    // inherited no-chair.
-    assert_eq!(render_value(&Value::String(String::new())), "(none)");
-    assert_ne!(render_value(&Value::String(String::new())), "\u{2014}");
-}
-
 // ─── conflict_hint (409 recovery copy) ─────────────────────────────
 
 #[test]
@@ -298,6 +289,14 @@ fn config_rows_covers_every_knob_in_registry_order() {
             "depth":  {"value": "shallow", "source": "default"},
             "revise": {"value": 0,         "source": "default"},
         },
+        "autonomous": {
+            "enabled":    {"value": false, "source": "default"},
+            "topic":      {"value": "",    "source": "default"},
+            "agenda":     {"value": [],    "source": "default"},
+            "convener":   {"value": "",    "source": "default"},
+            "goal":       {"value": "",    "source": "default"},
+            "max_rounds": {"value": 12,    "source": "default"},
+        },
     }))
     .unwrap();
     let rows = config_rows(&view);
@@ -308,6 +307,14 @@ fn config_rows_covers_every_knob_in_registry_order() {
     // the reasoning.* match arms — an unmatched dotted key would `unreachable!`).
     let mode = rows.iter().find(|(k, _)| *k == "reasoning.mode").unwrap().1;
     assert_eq!(mode.value, serde_json::json!("off"));
+    // The dotted autonomous rows resolve through the `.or_else(autonomous.field)`
+    // arm — the list-valued agenda cell renders too (an unmatched key would panic).
+    let agenda = rows
+        .iter()
+        .find(|(k, _)| *k == "autonomous.agenda")
+        .unwrap()
+        .1;
+    assert_eq!(agenda.value, serde_json::json!([]));
 }
 
 // ─── lockstep guard: CLI knob set == server merge switches ──────────
@@ -327,10 +334,14 @@ fn config_rows_covers_every_knob_in_registry_order() {
 ///   * `channel_config_reasoning.go` — `mergeReasoningPatch`. Each
 ///     `decodeKnob[T]("reasoning.<sub>", …)` is one nested leaf knob whose CLI key
 ///     is the dotted literal in that first argument.
+///   * `channel_config_autonomous.go` — `mergeAutonomousPatch` (RFC 0052). Same
+///     nested shape as reasoning; its `decodeKnob[[]string]("autonomous.agenda", …)`
+///     is the first SLICE-typed leaf, which maps to the CLI's `list` class.
 ///
 /// The CLI registry mirrors the union as dotted keys, so the guards compare it
 /// against this. Go `int`/`int64` both map to the CLI's single integer class; an
-/// enum knob rides the wire as a `string` (`decodeKnob[string]`).
+/// enum knob rides the wire as a `string` (`decodeKnob[string]`); a `[]string`
+/// (the agenda list) maps to the CLI's `list` class.
 fn server_leaf_knob_types() -> std::collections::BTreeMap<String, &'static str> {
     use std::collections::BTreeMap;
 
@@ -339,14 +350,31 @@ fn server_leaf_knob_types() -> std::collections::BTreeMap<String, &'static str> 
             "bool" => "bool",
             "string" => "string",
             "int" | "int64" => "int",
+            "[]string" => "list",
             other => panic!("unmapped server knob type {other:?}; extend the map"),
         }
     }
     // The `<T>` of a `decodeKnob[<T>]…` occurrence, given the slice starting at it.
+    // Walks to the bracket that BALANCES the opening one, so a slice type whose own
+    // `[]` nests inside (`decodeKnob[[]string]`) yields `[]string`, not a truncated
+    // `[`. A plain `[bool]` closes at the first `]` exactly as before.
     fn decode_type(at_kw: &str) -> &str {
         let open = at_kw.find('[').expect("decodeKnob must be followed by [");
-        let rest = &at_kw[open + 1..];
-        &rest[..rest.find(']').expect("decodeKnob[ must close with ]")]
+        let bytes = at_kw.as_bytes();
+        let mut depth = 0usize;
+        for (i, &b) in bytes.iter().enumerate().skip(open) {
+            match b {
+                b'[' => depth += 1,
+                b']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &at_kw[open + 1..i];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("decodeKnob[ must close with ]");
     }
     let read = |rel: &str| {
         std::fs::read_to_string(format!("{}/../{}", env!("CARGO_MANIFEST_DIR"), rel)).unwrap_or_else(
@@ -379,19 +407,26 @@ fn server_leaf_knob_types() -> std::collections::BTreeMap<String, &'static str> 
         }
     }
 
-    // Nested reasoning sub-knobs — mergeReasoningPatch's decodeKnob lines, whose
-    // first string-literal argument IS the dotted key (e.g. "reasoning.mode").
-    let reasoning = read("internal/server/channel_config_reasoning.go");
-    for line in reasoning.lines().map(str::trim_start) {
-        let Some(open) = line.find("decodeKnob[") else {
-            continue;
-        };
-        let at_kw = &line[open..];
-        let ty = decode_type(at_kw);
-        let Some(q1) = at_kw.find('"') else { continue };
-        let tail = &at_kw[q1 + 1..];
-        let Some(q2) = tail.find('"') else { continue };
-        server.insert(tail[..q2].to_string(), class_of(ty));
+    // Nested sub-knobs — each `merge<Block>Patch`'s decodeKnob lines, whose first
+    // string-literal argument IS the dotted key (e.g. "reasoning.mode",
+    // "autonomous.agenda"). Both nested files share one shape, so parse them the
+    // same way: reasoning (RFC 0051) and autonomous (RFC 0052).
+    for rel in [
+        "internal/server/channel_config_reasoning.go",
+        "internal/server/channel_config_autonomous.go",
+    ] {
+        let nested = read(rel);
+        for line in nested.lines().map(str::trim_start) {
+            let Some(open) = line.find("decodeKnob[") else {
+                continue;
+            };
+            let at_kw = &line[open..];
+            let ty = decode_type(at_kw);
+            let Some(q1) = at_kw.find('"') else { continue };
+            let tail = &at_kw[q1 + 1..];
+            let Some(q2) = tail.find('"') else { continue };
+            server.insert(tail[..q2].to_string(), class_of(ty));
+        }
     }
 
     assert!(
@@ -416,7 +451,7 @@ fn cli_knob_set_matches_server_merge_switch() {
         client,
         server,
         "CLI config-knob set drifted from the server merge switches \
-             (flat mergeConfigPatch + nested mergeReasoningPatch): \
+             (flat mergeConfigPatch + nested mergeReasoningPatch + mergeAutonomousPatch): \
              missing from CLI = {:?}, extra in CLI = {:?}",
         server.difference(&client).collect::<Vec<_>>(),
         client.difference(&server).collect::<Vec<_>>(),
@@ -442,6 +477,7 @@ fn cli_knob_types_match_server_decode_types() {
                 KnobType::Int => "int",
                 KnobType::Str => "string",
                 KnobType::Enum(_) => "string",
+                KnobType::List => "list",
             };
             (k.to_string(), class)
         })

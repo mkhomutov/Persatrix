@@ -22,7 +22,7 @@ use crate::commands::channel_config::{
     apply_config_patch, config_rows, fetch_config, knob_type, ChannelConfigView, KnobType,
 };
 use crate::commands::channel_config_reasoning::{
-    classify_yaml_key, coerce_enum, deferred_block_note, flat_dotted_yaml_err, YamlReasoningKey,
+    classify_yaml_key, coerce_enum, flat_dotted_yaml_err, note_deferred_blocks, YamlNestedKey,
 };
 use crate::types::validate_path_param;
 
@@ -33,18 +33,18 @@ use crate::types::validate_path_param;
 /// predate RFC 0050 — treated as "no declared revision"), and the sparse
 /// `{knob: value}` override patch extracted from the recognised governance keys.
 /// Non-knob keys (`name`, `description`, `members`, …) are ignored; only the FLAT
-/// editable knobs are lifted — the nested RFC 0051 `reasoning:` block is deferred
-/// (see [`parse_channel_block`] and `deferred_reasoning`).
+/// editable knobs are lifted — the nested `reasoning:` / `autonomous:` blocks are
+/// deferred (see [`parse_channel_block`] and `deferred_blocks`).
 #[derive(Debug, PartialEq)]
 pub(crate) struct ParsedChannel {
     pub(crate) id: String,
     pub(crate) revision: Option<i64>,
     pub(crate) patch: Map<String, Value>,
-    /// The block declared a nested `reasoning:` mapping. The YAML verbs defer
-    /// reasoning (it lands via the boot loader, not `import`), so the block is
-    /// dropped from `patch` but flagged here for the entry point to surface — not
-    /// silently swallowed (see [`channel_config_reasoning::classify_yaml_key`]).
-    pub(crate) deferred_reasoning: bool,
+    /// The nested blocks (`reasoning:`, `autonomous:`) the YAML declared. The YAML
+    /// verbs defer every nested block (it lands via the boot loader, not `import`),
+    /// so each is dropped from `patch` but recorded here for the entry point to note
+    /// — not silently swallowed (see [`channel_config_reasoning::classify_yaml_key`]).
+    pub(crate) deferred_blocks: Vec<&'static str>,
 }
 
 // ─── Pure helpers (testable without an HTTP server or a file) ──────────────
@@ -73,6 +73,8 @@ pub(crate) fn yaml_to_knob_json(key: &str, ty: KnobType, y: &Yaml) -> Result<Val
             .as_str()
             .ok_or_else(|| format!("knob '{key}' expects one of [{}]", allowed.join(", ")))
             .and_then(|s| coerce_enum(key, allowed, s)),
+        // A string list (RFC 0052 `autonomous.agenda`): a YAML sequence → a JSON array.
+        KnobType::List => super::channel_config_autonomous::coerce_yaml_list(key, y),
     }
 }
 
@@ -103,19 +105,19 @@ pub(crate) fn parse_channel_block(block: &Yaml) -> Result<ParsedChannel, String>
     };
 
     let mut patch = Map::new();
-    let mut deferred_reasoning = false;
+    let mut deferred_blocks: Vec<&'static str> = Vec::new();
     for (k, v) in map {
         let Some(key) = k.as_str() else { continue };
         match classify_yaml_key(key) {
-            // Deferred: dropped from the patch but flagged so the caller can note it
+            // Deferred: dropped from the patch but recorded so the caller can note it
             // lands at boot, not via this verb — never the pre-PR-5 silent drop.
-            YamlReasoningKey::NestedBlock => {
-                deferred_reasoning = true;
+            YamlNestedKey::NestedBlock(ns) => {
+                deferred_blocks.push(ns);
                 continue;
             }
             // Can never round-trip — reject locally rather than 400 on the wire.
-            YamlReasoningKey::FlatDotted => return Err(flat_dotted_yaml_err(name, key)),
-            YamlReasoningKey::Other => {}
+            YamlNestedKey::FlatDotted => return Err(flat_dotted_yaml_err(name, key)),
+            YamlNestedKey::Other => {}
         }
         let Some(ty) = knob_type(key) else { continue };
         if v.is_null() {
@@ -127,7 +129,7 @@ pub(crate) fn parse_channel_block(block: &Yaml) -> Result<ParsedChannel, String>
         id,
         revision,
         patch,
-        deferred_reasoning,
+        deferred_blocks,
     })
 }
 
@@ -174,9 +176,7 @@ pub(crate) fn validate_channel_ids(channels: &[ParsedChannel]) -> Result<(), Str
     Ok(())
 }
 
-// `export`/`diff` filter `config_rows` to the FLAT knobs (`!knob.contains('.')`):
-// the nested RFC 0051 `reasoning` block is a deferred follow-up (parse_channel_block
-// flags it; `set`/`unset`/`get` + the web panel cover reasoning today).
+// `export`/`diff` filter `config_rows` to FLAT knobs: nested `reasoning`/`autonomous` deferred.
 
 /// Regenerate a channel's YAML block from its effective config view, emitting only
 /// the explicitly-overridden knobs (`source == "channel"`) under a `channels:` list
@@ -384,15 +384,9 @@ pub(crate) async fn cmd_config_import(
     // so a later 409/wire error leaves earlier blocks applied.
     let mut applied: Vec<String> = Vec::new();
     for ch in &channels {
-        // A deferred nested `reasoning:` block is not applied by `import` (stderr,
-        // suppressed under --json) — say so rather than let the edit vanish silently.
-        if ch.deferred_reasoning && !json_out {
-            eprintln!(
-                "{} {}",
-                "note:".yellow(),
-                deferred_block_note(&ch.id).dimmed()
-            );
-        }
+        // Deferred nested blocks (`reasoning:` / `autonomous:`) are not applied by
+        // `import` — note each (suppressed under --json) rather than let it vanish.
+        note_deferred_blocks(&ch.id, &ch.deferred_blocks, json_out);
         if ch.patch.is_empty() {
             if !json_out {
                 println!(
@@ -463,11 +457,9 @@ pub(crate) async fn cmd_config_diff(
         .find(|c| c.id == id)
         .ok_or_else(|| format!("channel '{id}' is not declared in {file}"))?;
     let resp = fetch_config(client, server, &id).await?;
-    // `diff` scopes to the flat knobs; a declared nested `reasoning:` block is not
-    // compared, so say so rather than let its absence read as "in sync".
-    if declared.deferred_reasoning && !json_out {
-        eprintln!("{} {}", "note:".yellow(), deferred_block_note(&id).dimmed());
-    }
+    // `diff` scopes to the flat knobs; a declared nested block (`reasoning:` /
+    // `autonomous:`) is not compared, so note it rather than read as "in sync".
+    note_deferred_blocks(&id, &declared.deferred_blocks, json_out);
     let rows = diff_rows(&declared.patch, &resp.view);
     if json_out {
         let cells: Vec<Value> = rows

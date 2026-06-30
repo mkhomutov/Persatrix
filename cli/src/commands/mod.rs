@@ -1,7 +1,9 @@
 pub(crate) mod agent;
 pub(crate) mod channel;
 pub(crate) mod channel_config;
+pub(crate) mod channel_config_autonomous;
 pub(crate) mod channel_config_reasoning;
+pub(crate) mod channel_config_render;
 pub(crate) mod channel_config_yaml;
 pub(crate) mod channel_dispatch;
 pub(crate) mod channel_manage;
