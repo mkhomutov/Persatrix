@@ -13,6 +13,7 @@ use crate::commands::channel::{
 };
 use crate::commands::channel_config::{cmd_config_get, cmd_config_set, cmd_config_unset};
 use crate::commands::channel_config_yaml::{cmd_config_diff, cmd_config_export, cmd_config_import};
+use crate::commands::channel_convene::cmd_convene;
 use crate::commands::channel_manage::{cmd_channel_create, cmd_channel_info};
 
 /// Default declared-config path the `diff` verb reads when `--file` is omitted —
@@ -195,6 +196,18 @@ pub(crate) enum ChannelCommands {
     Config {
         #[command(subcommand)]
         action: ConfigAction,
+    },
+    /// Convene an autonomous channel (RFC 0052 §B) — open a human-free
+    /// discussion by dispatching the convene forced turn to the channel's
+    /// configured `autonomous.convener`. Gated server-side behind the same
+    /// `config_edit_enabled` toggle as `config` (`403` = off); `409` = the
+    /// channel is not `autonomous.enabled`.
+    Convene {
+        /// Channel id (a bare name is canonicalized to `group:<name>`)
+        name: String,
+        /// Emit JSON instead of a human line
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -388,6 +401,7 @@ pub(crate) async fn dispatch(
                 cmd_config_diff(client, server, &name, file, json).await
             }
         },
+        ChannelCommands::Convene { name, json } => cmd_convene(client, server, &name, json).await,
     }
 }
 

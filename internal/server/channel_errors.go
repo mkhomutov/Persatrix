@@ -24,6 +24,8 @@ func (s *Server) writeChannelError(w http.ResponseWriter, err error) {
 		writeError(w, "CONFLICT", "max_channels cap exceeded", http.StatusConflict)
 	case errors.Is(err, channels.ErrConfigRevisionConflict): // RFC 0050 PR 4 optimistic concurrency
 		writeError(w, "CONFLICT", err.Error(), http.StatusConflict)
+	case errors.Is(err, channels.ErrChannelNotArmed): // RFC 0052 PR 3 — convene against an unarmed channel
+		writeError(w, "CONFLICT", err.Error(), http.StatusConflict)
 	case errors.Is(err, channels.ErrInvalidSalienceMaxChannelMembers), // RFC 0050 PR 4 config validation
 		errors.Is(err, channels.ErrInvalidInteractionBudgetTokens),
 		errors.Is(err, channels.ErrInvalidMaxRepliesPerParticipant),

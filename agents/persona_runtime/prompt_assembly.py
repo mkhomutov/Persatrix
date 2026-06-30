@@ -31,6 +31,7 @@ from ..persona_types import AgentEvent, EventType
 from ..prompt_loader import load_persona_section, load_snippet
 from ..prompt_safety import escape_prompt_delimiters
 from ..temporal.rendering import format_now_anchor
+from .convener import format_convener_opening
 
 if TYPE_CHECKING:
     from ..clock import Clock
@@ -408,6 +409,20 @@ class _PromptAssemblyMixin:
                 # enum members into ``CHANNEL_MESSAGE``).
                 sender = event.sender_id or "unknown"
                 content = event.payload.get("content", "")
+                # RFC 0052 §B: a convene forced turn opens an autonomous
+                # channel. The operator topic/agenda/goal ride in `content`
+                # as a DISTINCT trust class (operator config, not
+                # persona-authored), so this branch renders them wrapped in
+                # the RFC 0009 `<external_data>` envelope with the convener
+                # framing — NOT the peer-message `<|user_message|>` /
+                # "Message from" shapes below. Strict `is True`, mirroring the
+                # response gate's read and `chair_escalation`; the framing
+                # lives in `convener.py` (the sibling of
+                # `format_chair_escalation`), so this stays a one-line branch
+                # and self-independent (the conversation-window seam casts
+                # this method with `self=None`).
+                if event.payload.get("convene") is True:
+                    return format_convener_opening(content)
                 # Wrap user participant messages in XML-style delimiters
                 # to help the LLM distinguish human input from system
                 # instructions (OQ 4, OQ 14 — prompt injection mitigation).

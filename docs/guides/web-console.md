@@ -301,8 +301,9 @@ revision as an `If-Match` guard:
 - `interaction_budget_tokens` is **router-wired and live-enforced** (RFC 0050
   amendment), so an inherited value resolves to a concrete number, not empty.
 - Since v0.3.11 the panel renders an **Autonomous channel** section (RFC 0052) —
-  the `autonomous` block's knobs (enable, Topic/Goal, Agenda, Convener, Max rounds)
-  on the same sparse PATCH, **dark** until convening (PR 3).
+  the `autonomous` knobs (enable, Topic/Goal, Agenda, Convener, Max rounds) on the
+  same PATCH, plus (PR 3) a **Convene** action
+  ([§13](channels.md#13-autonomous-channels-rfc-0052)).
 - On a concurrent edit, the save returns `409`; the panel **reloads the latest
   config and replays your pending edits on top** rather than blind-overwriting,
   and asks you to review and save again.

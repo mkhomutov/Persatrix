@@ -1011,8 +1011,30 @@ type ChannelMessageEvent struct {
 	// config `validate` rejects `revise >= 1` on any other rung, and the agent seam
 	// pins it to 0 off the `plan` path, so a stray non-zero value here is inert.
 	ReasoningRevise int32 `protobuf:"varint,26,opt,name=reasoning_revise,json=reasoningRevise,proto3" json:"reasoning_revise,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// RFC 0052 §B (v0.3.11): true iff this dispatch is the orchestrator's
+	// CONVENE forced turn — the directed dispatch that opens an autonomous
+	// agent-only channel (`internal/channels/convene.go`). The convener
+	// persona authors the opening turn from which the existing
+	// `InboundEventWake` chain carries the discussion with no human message.
+	// The dispatch's `content` carries the operator topic/agenda/goal
+	// (assembled from the channel's `autonomous` config); the receiver wraps
+	// it in the RFC 0009 `<external_data>` envelope before injection (it is
+	// operator config, a distinct trust class — the one genuinely new
+	// injection surface). The receiver admits a marked event down the same
+	// directed lane as `chair_escalation = 22` (gate admit for any non-`never`
+	// policy, Tier B bid skipped so the bias-to-silence verdict never silences
+	// the opener) and renders the convener framing
+	// (`prompts/runtime/safety/convener-opening.md`) instead of the
+	// peer-message shape. Orchestrator-authored, the same trust class as
+	// `chair_escalation = 22`; never set by ordinary fanout, honoured only from
+	// this typed field and strictly boolean receiver-side. proto3 implicit
+	// presence: false (the zero value) is every non-convene dispatch, so the
+	// field is additive — an old producer never sets it and an old consumer
+	// ignoring it sees an ordinary open-floor message (no opener authored —
+	// the channel simply never convenes, the inert pre-v0.3.11 posture).
+	Convene       bool `protobuf:"varint,27,opt,name=convene,proto3" json:"convene,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ChannelMessageEvent) Reset() {
@@ -1225,6 +1247,13 @@ func (x *ChannelMessageEvent) GetReasoningRevise() int32 {
 		return x.ReasoningRevise
 	}
 	return 0
+}
+
+func (x *ChannelMessageEvent) GetConvene() bool {
+	if x != nil {
+		return x.Convene
+	}
+	return false
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
@@ -1622,7 +1651,7 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\x8d\t\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xa7\t\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -1652,7 +1681,8 @@ const file_task_proto_rawDesc = "" +
 	"\x1einteraction_close_notification\x18\x17 \x01(\bR\x1cinteractionCloseNotification\x12B\n" +
 	"\x1dchair_escalation_resynthesize\x18\x18 \x01(\bR\x1bchairEscalationResynthesize\x12%\n" +
 	"\x0ereasoning_mode\x18\x19 \x01(\tR\rreasoningMode\x12)\n" +
-	"\x10reasoning_revise\x18\x1a \x01(\x05R\x0freasoningReviseB\f\n" +
+	"\x10reasoning_revise\x18\x1a \x01(\x05R\x0freasoningRevise\x12\x18\n" +
+	"\aconvene\x18\x1b \x01(\bR\aconveneB\f\n" +
 	"\n" +
 	"_threshold\"H\n" +
 	"\aTaskAck\x12\x18\n" +

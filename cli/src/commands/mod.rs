@@ -5,6 +5,7 @@ pub(crate) mod channel_config_autonomous;
 pub(crate) mod channel_config_reasoning;
 pub(crate) mod channel_config_render;
 pub(crate) mod channel_config_yaml;
+pub(crate) mod channel_convene;
 pub(crate) mod channel_dispatch;
 pub(crate) mod channel_manage;
 pub(crate) mod channel_render;

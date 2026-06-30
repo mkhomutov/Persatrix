@@ -325,6 +325,25 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
     ):
         return GateDecision(respond=True, policy=policy, reason="chair_escalation")
 
+    # RFC 0052 §B: the orchestrator's convene forced turn — the directed
+    # dispatch that opens an autonomous channel — admits the configured
+    # convener down the same directed lane as the chair escalation, for
+    # either canonical non-`never` policy (the convener may be `addressed`,
+    # whose unmarked gate would suppress an unmentioned opener). The
+    # dedicated `convene` reason keeps it out of :func:`is_open_floor_admit`,
+    # so the Tier B salience bid never runs on (and silences) the opening
+    # turn — the human-free analogue of TB1: re-running the bias-to-silence
+    # bid would defeat the convene. Defence-in-depth mirrors
+    # `chair_escalation`: strict `is True` (a spoofed truthy non-bool on the
+    # cleartext port must not widen admission), and the fail-closed branches
+    # above (DM self-sender / self-sender / close-notification / `never`)
+    # already won, so a marked self-echo or a marked `never` stays
+    # suppressed.
+    if payload.get("convene") is True and policy in (
+        POLICY_ALWAYS, POLICY_WHEN_MENTIONED,
+    ):
+        return GateDecision(respond=True, policy=policy, reason="convene")
+
     if policy == POLICY_ALWAYS:
         # RFC 0030 relevance amendment Tier A (v0.3.7): the directed-elsewhere
         # filter. A ``participant`` (``always``) member no longer answers a

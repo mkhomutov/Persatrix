@@ -236,3 +236,103 @@ describe("ChannelSettings — autonomous block", () => {
     expect(JSON.parse(patchCall[1].body)).toEqual({ autonomous: { topic: null } });
   });
 });
+
+// RFC 0052 §B PR 3: the Convene action — the panel's first per-channel action
+// button. It lives in the AutonomousSettings child but is driven here through
+// ChannelSettings (the integration the operator actually uses), gated on the
+// SAVED armed state and disabled while there are unsaved edits.
+describe("ChannelSettings — convene action", () => {
+  it("hides the Convene button when the channel is not armed", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(okJSON(configBody())));
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    // Wait for the panel to load (the topic field renders), then assert no button.
+    await screen.findByLabelText("Topic");
+    expect(screen.queryByRole("button", { name: /convene/i })).toBeNull();
+  });
+
+  it("shows Convene and posts to the convene endpoint when armed", async () => {
+    const fetchMock = vi.fn((path, init) => {
+      if (String(path).endsWith("/convene")) {
+        return Promise.resolve({
+          ok: true,
+          status: 202,
+          json: () =>
+            Promise.resolve({
+              channel_id: "group:planning",
+              convener: "ada",
+              status: "convening",
+            }),
+        });
+      }
+      return Promise.resolve(okJSON(configBody({ autonomous: overriddenAutonomous })));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    const button = await screen.findByRole("button", { name: /convene/i });
+    await fireEvent.click(button);
+
+    // The POST lands on the encoded {id}/convene route…
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          (c) =>
+            String(c[0]).endsWith("/convene") && c[1]?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    const conveneCall = fetchMock.mock.calls.find((c) =>
+      String(c[0]).endsWith("/convene"),
+    );
+    expect(conveneCall[0]).toBe("/api/v1/channels/group%3Aplanning/convene");
+    // …and the convener from the ack surfaces in the success notice.
+    await waitFor(() =>
+      expect(screen.getByText(/ada is opening the discussion/i)).toBeTruthy(),
+    );
+  });
+
+  it("disables Convene while there are unsaved edits", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(okJSON(configBody({ autonomous: overriddenAutonomous }))),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    const button = await screen.findByRole("button", { name: /convene/i });
+    expect(button.disabled).toBe(false);
+
+    // Editing a knob makes the panel dirty; convening reads the persisted block,
+    // so the action disables and tells the operator to save first.
+    await fireEvent.input(screen.getByLabelText("Topic"), {
+      target: { value: "Monorepo? (revised)" },
+    });
+    await waitFor(() => expect(button.disabled).toBe(true));
+    expect(screen.getByText(/save your changes before convening/i)).toBeTruthy();
+  });
+
+  it("surfaces the server's wording when convene fails", async () => {
+    const fetchMock = vi.fn((path) => {
+      if (String(path).endsWith("/convene")) {
+        return Promise.resolve({
+          ok: false,
+          status: 409,
+          json: () =>
+            Promise.resolve({
+              error: "channel is not autonomous-enabled",
+              code: "CONFLICT",
+            }),
+        });
+      }
+      return Promise.resolve(okJSON(configBody({ autonomous: overriddenAutonomous })));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    await fireEvent.click(await screen.findByRole("button", { name: /convene/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/not autonomous-enabled/i)).toBeTruthy(),
+    );
+  });
+});

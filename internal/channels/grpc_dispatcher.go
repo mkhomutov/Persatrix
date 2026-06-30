@@ -469,5 +469,9 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		// marker, set only by [ChannelRouter.notifyInteractionClose]'s
 		// dispatch — false (the proto3 default) on every ordinary fanout.
 		InteractionCloseNotification: env.InteractionCloseNotification,
+		// RFC 0052 §B: the convene forced-turn marker, set only by
+		// [ChannelRouter.ConveneChannel]'s dispatch — false (the proto3
+		// default) on every ordinary fanout.
+		Convene: env.Convene,
 	}
 }
