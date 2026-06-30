@@ -66,6 +66,13 @@ var (
 	// ErrInvalidAutonomousMaxRounds — `autonomous.max_rounds` is negative (zero
 	// normalizes to the default before validate runs).
 	ErrInvalidAutonomousMaxRounds = errors.New("channels: invalid autonomous.max_rounds")
+	// ErrAutonomousChairRequired — `autonomous.enabled` on a channel that declares no
+	// `escalation_chair_id`. RFC 0052 §D "always produce an artifact" makes the chair
+	// load-bearing: it authors the mandatory synthesis turn the bounded close draws
+	// from the synthesis reserve (PR 4). PR 1 validated only `convener != chair`, which
+	// is vacuous when no chair exists; PR 4 closes that gap — an armed channel must
+	// declare the role that synthesizes on close. The REST layer maps it to 400.
+	ErrAutonomousChairRequired = errors.New("channels: autonomous.enabled requires an escalation_chair_id to author the synthesis turn on close")
 	// ErrInvalidAutonomousAgenda — the agenda is longer than [MaxAutonomousAgendaItems]
 	// or carries a blank item.
 	ErrInvalidAutonomousAgenda = errors.New("channels: invalid autonomous.agenda")
@@ -360,7 +367,19 @@ func (o ChannelConfigOverrides) validateAutonomous() error {
 	if convener == "" {
 		return fmt.Errorf("%w: an autonomous channel needs a convener to author the opening turn", ErrInvalidAutonomousConvener)
 	}
-	if o.EscalationChairID != nil && *o.EscalationChairID == convener {
+	// Chair-required (RFC 0052 §D / PR 4): the chair authors the mandatory synthesis
+	// turn on close, so an armed channel must declare one. The merge base freezes the
+	// resolved chair into the override set (the matched pair in [Server.resolvedConfigBaseline]
+	// + [Server.autonomousBaseline]), so an armed channel carries an explicit chair by
+	// the time it is edited — and a drifted/absent chair drops the whole armed block
+	// from the first-edit baseline (the chair leg of the un-closeable drop), so this
+	// gate is the apply-time mirror of the load-path [Config.Validate] check, never a
+	// lockout on an unrelated edit. The membership/observer/floor-control rules on a
+	// SET chair stay in [ChannelRouter.validateEscalationChair].
+	if o.EscalationChairID == nil || *o.EscalationChairID == "" {
+		return ErrAutonomousChairRequired
+	}
+	if *o.EscalationChairID == convener {
 		return fmt.Errorf("%w: %q is also the escalation_chair_id; the convener owns the agenda lifecycle and is a distinct role from the chair (RFC 0052 OQ #1)",
 			ErrInvalidAutonomousConvener, convener)
 	}

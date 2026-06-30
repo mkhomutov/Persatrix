@@ -231,6 +231,15 @@ func (c *Config) Validate() error {
 			if aerr := validateConvenerMembership(ch); aerr != nil {
 				return fmt.Errorf("channels[%d=%s]: %w", i, ch.Name, aerr)
 			}
+			// Chair-required (RFC 0052 §D / PR 4): an armed channel must declare the
+			// `escalation_chair_id` that authors the mandatory synthesis turn on close
+			// (the role the bounded close draws from the synthesis reserve). PR 1
+			// validated only convener != chair, which is vacuous with no chair; this
+			// closes that gap. The chair-is-a-member / not-observer / floor-control rules
+			// already ran above for any SET chair.
+			if ch.EscalationChairID == "" {
+				return fmt.Errorf("channels[%d=%s]: %w", i, ch.Name, ErrAutonomousChairRequired)
+			}
 		}
 
 		if len(ch.Members) == 0 {

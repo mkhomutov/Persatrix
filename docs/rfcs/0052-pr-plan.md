@@ -220,6 +220,10 @@ Items surfaced by the PR 1 deep review (commit `700fa72`) that are **deliberatel
 **Depends on**: PR 3 merged.
 **Purpose**: Guarantee an autonomous interaction **terminates** and **always leaves both artifacts**, even on a budget-exhausted close — the part of [RFC §D](0052-autonomous-agent-channels.md#d-termination-and-synthesis--always-produce-an-artifact) that is not pure reuse.
 
+> **Split into 4a (backend, dark) + 4b (the close path), following the PR 1 → PR 3 backend-then-path precedent.** The deterministic bounded-close trigger threads a new round counter through the floor-round/fanout governance hot path and spans Python (OQ #6 metering + the chair synthesis turn), so the self-contained, unit-testable accounting + validation landed first:
+> - **PR 4a** (`feature/v0311-rfc0052-close-backend`, this slice): the roster-scaled (`1 + N`) synthesis-reserve accounting (new `internal/wallet/synthesis_reserve.go` — soft-budget split + `WalletService.InteractionSpend`), the interaction-closed `WalletService.EvictInteraction`, and the **mandatory-chair `validate` gate** (load + REST apply + the symmetric first-edit-baseline drop of an armed-but-un-closeable block). **Dark** — `AcquireLease` still enforces only the hard cap; nothing consults the reserve/eviction yet.
+> - **PR 4b** (`feature/v0311-rfc0052-bounded-close`): the deterministic bounded-close trigger (agenda-exhausted / `max_rounds` / soft-budget) that dispatches the chair synthesis turn, closes the interaction (CE4-respecting), and *emits* the eviction; the [`summarize_close.py`](../../agents/persona_runtime/summarize_close.py) OQ #6 metering edit; and the chair synthesis turn against `autonomous.goal`.
+
 #### Scope
 
 | File | Change |
@@ -390,8 +394,9 @@ A new channel *mode* + CLI/web surfaces needs real doc + diagram **edits**, not 
 |----|-------|--------|--------|
 | 1 | 1a — config backend + cap gate + REST (dark) | `feature/v0311-rfc0052-config-backend` | ✅ Merged |
 | 2 | 1b — CLI + web config surfaces | `feature/v0311-rfc0052-config-surfaces` | ✅ Merged |
-| 3 | 1c — self-convening + convene action (CLI/REST/web) | `feature/v0311-rfc0052-convene` | 🔀 PR open |
-| 4 | 1d — bounded close + roster-scaled (1+N) reserve + eviction + OQ #6 metering | `feature/v0311-rfc0052-bounded-close` | ⬜ |
+| 3 | 1c — self-convening + convene action (CLI/REST/web) | `feature/v0311-rfc0052-convene` | ✅ Merged |
+| 4a | 1d — close-path backend: roster-scaled (1+N) reserve + interaction-closed eviction + mandatory-chair gate (dark) | `feature/v0311-rfc0052-close-backend` | 🔀 PR open |
+| 4b | 1d — deterministic bounded-close trigger + OQ #6 close-summary metering + chair synthesis turn | `feature/v0311-rfc0052-bounded-close` | ⬜ |
 | 5 | 1e — acceptance suite + MT-AUTONOMOUS-001 | `feature/v0311-rfc0052-phase1-mt` | ⬜ |
 | 6 | 2 — anti-collapse cadence (convener, scoped) | `feature/v0311-rfc0052-anti-collapse` | ⬜ |
 | 7 | 3 — standing/scheduled + aggregate bound + web readout | `feature/v0311-rfc0052-standing` | ⬜ |

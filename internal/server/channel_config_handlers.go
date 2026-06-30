@@ -430,7 +430,8 @@ func (s *Server) resolvedConfigBaseline(ctx context.Context, id string) channels
 		EndVoteWindow:                          &wWindow,
 		InteractionIdleTimeoutSeconds:          &idleSeconds,
 	}
-	if chair != "" && s.chairIsEnforceableMember(ctx, id, chair) {
+	chairEnforceable := chair != "" && s.chairIsEnforceableMember(ctx, id, chair)
+	if chairEnforceable {
 		base.EscalationChairID = &chair
 	}
 	// RFC 0051: freeze the resolved reasoning rung too, but CONDITIONALLY (like the
@@ -441,9 +442,12 @@ func (s *Server) resolvedConfigBaseline(ctx context.Context, id string) channels
 	base.Reasoning = s.reasoningBaseline(ctx, id)
 	// RFC 0052: freeze the resolved autonomous rung too, CONDITIONALLY (like the
 	// chair / reasoning, not the unconditional flat knobs): a disabled default stays
-	// inherit, and an armed rung whose convener has drifted out of membership is
-	// dropped so it cannot block an unrelated first edit — see [Server.autonomousBaseline].
-	base.Autonomous = s.autonomousBaseline(ctx, id)
+	// inherit, and an armed rung that is un-convenable (drifted convener) OR
+	// un-closeable (drifted/absent chair — PR 4 made the chair mandatory) is dropped so
+	// it cannot block an unrelated first edit — see [Server.autonomousBaseline]. The
+	// chair-enforceability already computed for the chair freeze is threaded in so the
+	// two stay consistent.
+	base.Autonomous = s.autonomousBaseline(ctx, id, chairEnforceable)
 	return base
 }
 

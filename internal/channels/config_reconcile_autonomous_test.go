@@ -24,6 +24,7 @@ channels:
   - name: roundtable
     revision: 1
     interaction_budget_tokens: 200000
+    escalation_chair_id: ada
     autonomous:
       enabled: true
       topic: "` + topic + `"

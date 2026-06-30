@@ -43,8 +43,10 @@ func decodeAutonomous(t *testing.T, raw []byte) map[string]struct {
 	return env.Autonomous
 }
 
-// armBody is a PATCH body that arms a channel: a positive cap + an autonomous
-// block naming `nova` as convener. The shared happy-path edit.
+// armBody is a PATCH body that arms a channel: a positive cap, an escalation chair
+// (`ada`, the role that authors the synthesis turn on close — RFC 0052 §D / PR 4),
+// and an autonomous block naming `nova` as convener (distinct from the chair). The
+// shared happy-path edit.
 func armBody(extra map[string]any) []byte {
 	auto := map[string]any{"enabled": true, "convener": "nova"}
 	for k, v := range extra {
@@ -52,6 +54,7 @@ func armBody(extra map[string]any) []byte {
 	}
 	body, _ := json.Marshal(map[string]any{
 		"interaction_budget_tokens": 200000,
+		"escalation_chair_id":       "ada",
 		"autonomous":                auto,
 	})
 	return body
@@ -112,6 +115,20 @@ func TestChannelConfig_AutonomousCapRequired(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
 }
 
+// TestChannelConfig_AutonomousChairRequired: arming without an `escalation_chair_id`
+// is a 400 — RFC 0052 §D / PR 4 makes the chair (the role that synthesizes on close)
+// mandatory on an armed channel. The body carries a cap + a convener but no chair.
+func TestChannelConfig_AutonomousChairRequired(t *testing.T) {
+	srv, id := autonomousTestServer(t)
+	body, _ := json.Marshal(map[string]any{
+		"interaction_budget_tokens": 200000,
+		"autonomous":                map[string]any{"enabled": true, "convener": "nova"},
+	})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+}
+
 // TestChannelConfig_AutonomousConvenerMustBeMember: a non-member convener is a 400.
 func TestChannelConfig_AutonomousConvenerMustBeMember(t *testing.T) {
 	srv, id := autonomousTestServer(t)
@@ -141,7 +158,10 @@ func TestChannelConfig_AutonomousArmsViaInheritedCap(t *testing.T) {
 	srv, id := autonomousTestServer(t)
 	srv.channelRouter.SetInteractionBudgetTokens(id, 200000) // resolved (e.g. fleet-default) cap
 
-	body, _ := json.Marshal(map[string]any{"autonomous": map[string]any{"enabled": true, "convener": "nova"}})
+	body, _ := json.Marshal(map[string]any{
+		"escalation_chair_id": "ada",
+		"autonomous":          map[string]any{"enabled": true, "convener": "nova"},
+	})
 	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
 		body, map[string]string{"If-Match": "0"})
 	require.Equal(t, http.StatusOK, rec.Code,
@@ -264,12 +284,17 @@ func TestChannelConfig_AutonomousUnknownSubKnobRejected(t *testing.T) {
 // block) — the ISSUE-0103 baseline freeze covers autonomous too.
 func TestChannelConfig_AutonomousFirstEditFreezesArmed(t *testing.T) {
 	srv, id := autonomousTestServer(t)
-	// Pre-seed an armed rung on the router + a cap, standing in for a YAML-resolved
-	// autonomous channel at revision 0.
+	// Pre-seed an armed rung on the router + a cap + a chair (PR 4 made the chair
+	// mandatory and the un-closeable drop keys on it), standing in for a YAML-resolved
+	// autonomous channel at revision 0. The unrelated edit is a chair-neutral knob
+	// (salience_max_channel_members) — `floor_control:false` would now be rejected by
+	// the chair's floor-control rule, so it is no longer a valid "unrelated" edit on a
+	// chaired channel.
 	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{Enabled: true, Convener: "nova"})
+	srv.channelRouter.SetEscalationChair(id, "ada")
 	srv.channelRouter.SetInteractionBudgetTokens(id, 200000)
 
-	body, _ := json.Marshal(map[string]any{"floor_control": false})
+	body, _ := json.Marshal(map[string]any{"salience_max_channel_members": 8})
 	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
 		body, map[string]string{"If-Match": "0"})
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
@@ -361,6 +386,56 @@ func TestChannelConfig_AutonomousFirstEditDropsArmedWithoutConvener(t *testing.T
 	assert.False(t, srv.channelRouter.AutonomousFor(id).Enabled)
 }
 
+// TestChannelConfig_AutonomousFirstEditDropsChairlessArmed: the chair leg of the
+// freeze's un-closeable drop (PR 4). An armed rung with NO `escalation_chair_id` is
+// un-closeable (no role to author the synthesis turn), so an unrelated first edit must
+// DROP it rather than freeze it — freezing would make the apply-path chair-required
+// rule REJECT (400) an edit naming a knob the operator never touched, the chair
+// mirror of the convenerless drop. The edit proceeds and the channel reads back
+// inherit/disabled.
+func TestChannelConfig_AutonomousFirstEditDropsChairlessArmed(t *testing.T) {
+	srv, id := autonomousTestServer(t)
+	// Arm the router with a valid convener but NO chair (and a cap, so only the missing
+	// chair — not the cap or convener — is under test).
+	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{Enabled: true, Convener: "nova"})
+	srv.channelRouter.SetInteractionBudgetTokens(id, 200000)
+
+	body, _ := json.Marshal(map[string]any{"salience_max_channel_members": 8})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code,
+		"a chairless armed rung must not block an unrelated first edit; body=%s", rec.Body.String())
+
+	a := decodeAutonomous(t, rec.Body.Bytes())
+	assert.Equal(t, false, a["enabled"].Value, "the un-closeable armed block is dropped, not frozen")
+	assert.Equal(t, "default", a["enabled"].Source)
+	assert.False(t, srv.channelRouter.AutonomousFor(id).Enabled)
+}
+
+// TestChannelConfig_AutonomousFirstEditDropsDriftedChair: the drift variant of the
+// chair leg — an armed rung whose chair has drifted OUT of membership (here a
+// non-member chair) is un-closeable, so an unrelated first edit drops it. Without the
+// chair-enforceability check threaded into [Server.autonomousBaseline], the apply-path
+// chair rule ([ChannelRouter.validateEscalationChair]) would 400 the unrelated edit.
+func TestChannelConfig_AutonomousFirstEditDropsDriftedChair(t *testing.T) {
+	srv, id := autonomousTestServer(t) // members: nova + ada
+	// Arm with a valid convener (nova) but a chair that is NOT a member (drifted out).
+	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{Enabled: true, Convener: "nova"})
+	srv.channelRouter.SetEscalationChair(id, "ghost")
+	srv.channelRouter.SetInteractionBudgetTokens(id, 200000)
+
+	body, _ := json.Marshal(map[string]any{"salience_max_channel_members": 8})
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		body, map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code,
+		"a drifted chair must not block an unrelated first edit; body=%s", rec.Body.String())
+
+	a := decodeAutonomous(t, rec.Body.Bytes())
+	assert.Equal(t, false, a["enabled"].Value, "the un-closeable armed block is dropped, not frozen")
+	assert.Equal(t, "default", a["enabled"].Source)
+	assert.False(t, srv.channelRouter.AutonomousFor(id).Enabled)
+}
+
 // TestChannelConfig_AutonomousConvenerDriftLocksThenRecovers pins the deliberate,
 // escalation-chair-symmetric contract for a STORE-CANONICAL (revision > 0) armed
 // channel whose convener later leaves the roster. Unlike the revision-0 first edit
@@ -383,9 +458,12 @@ func TestChannelConfig_AutonomousConvenerDriftLocksThenRecovers(t *testing.T) {
 	// so the stored autonomous rung still names nova.
 	require.NoError(t, srv.channelStore.RemoveMember(t.Context(), id, "nova"))
 
-	// An UNRELATED edit is now locked: the merged patch (stored blob + floor_control)
-	// still carries the drifted convener, which the apply-path rule rejects.
-	body, _ := json.Marshal(map[string]any{"floor_control": false})
+	// An UNRELATED edit is now locked: the merged patch (stored blob + an unrelated,
+	// chair-neutral knob) still carries the drifted convener, which the apply-path rule
+	// rejects. (The knob is salience_max_channel_members, not floor_control:false —
+	// the latter would now be rejected by the chair's floor-control rule and mask the
+	// convener-drift lockout this test pins.)
+	body, _ := json.Marshal(map[string]any{"salience_max_channel_members": 8})
 	rec = doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
 		body, map[string]string{"If-Match": "1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code,
