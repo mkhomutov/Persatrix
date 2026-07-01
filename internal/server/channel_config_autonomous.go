@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 
+	"go.uber.org/zap"
+
 	"github.com/mkhomutov/persatrix/internal/channels"
 )
 
@@ -138,27 +140,52 @@ func agendaValue(agenda []string) []string {
 // [channels.AutonomousConfig.FreezeOverrides]: only a non-default (armed or
 // otherwise customized) rung is frozen; a disabled default stays inherit.
 //
-// It carries the same governance-drift drop as the chair / reasoning: if the
-// frozen rung is ARMED but UN-CONVENABLE — it has no convener at all, or its
-// convener is no longer ENFORCEABLE (drifted out of the channel's membership OR
-// become an `observer`, respond: never) — freezing it would let the convener
-// cross-field rules ([ChannelConfigOverrides.validateAutonomous] for the empty
-// case, [ChannelRouter.validateAutonomousConvener] for the drift/observer case)
-// REJECT an unrelated first edit naming a knob the operator never touched. The
-// armed rung is already un-convenable at dispatch (no convener, or a non-member /
-// observer one cannot author the opening turn), so the baseline drops the whole
-// block — the "tolerate the drift, don't resurrect it as a hard error" posture boot
-// replay and the other conditional knobs already take. The empty-convener case is a
-// degenerate state validation blocks at every write path, but the guard keys on
-// "armed AND un-convenable" so a direct router stamp cannot smuggle it past either.
-func (s *Server) autonomousBaseline(ctx context.Context, id string) *channels.AutonomousOverrides {
+// It carries the same governance-drift drop as the chair / reasoning. If the frozen
+// rung is ARMED but EITHER:
+//
+//   - UN-CONVENABLE — no convener at all, or a convener no longer ENFORCEABLE
+//     (drifted out of membership OR an `observer`, respond: never) — so the convener
+//     cross-field rules ([ChannelConfigOverrides.validateAutonomous] for the empty
+//     case, [ChannelRouter.validateAutonomousConvener] for the drift/observer case)
+//     would reject; OR
+//   - UN-CLOSEABLE — `chairEnforceable` is false: no `escalation_chair_id`, or a
+//     chair that drifted out of membership / became an observer (PR 4 made the chair
+//     mandatory on an armed channel, the role that authors the synthesis turn on
+//     close), so the chair cross-field rules
+//     ([ChannelConfigOverrides.validateAutonomous] chair-required,
+//     [ChannelRouter.validateEscalationChair] membership/observer) would reject —
+//
+// then freezing the rung would let one of those rules REJECT an unrelated first edit
+// naming a knob the operator never touched. The armed rung is already inert at
+// dispatch in both cases (it cannot open OR cannot synthesize-and-close), so the
+// baseline drops the whole block — the "tolerate the drift, don't resurrect it as a
+// hard error" posture boot replay and the other conditional knobs already take. The
+// empty-role cases are degenerate states validation blocks at every write path, but
+// the guard keys on "armed AND (un-convenable OR un-closeable)" so a direct router
+// stamp cannot smuggle either past. `chairEnforceable` is computed once by the caller
+// ([Server.resolvedConfigBaseline], where the chair freeze needs the same fact) and
+// threaded in so the chair-drop and chair-freeze stay consistent.
+func (s *Server) autonomousBaseline(ctx context.Context, id string, chairEnforceable bool) *channels.AutonomousOverrides {
 	froze := s.channelRouter.AutonomousFor(id).FreezeOverrides()
 	if froze == nil {
 		return nil
 	}
-	if froze.Enabled != nil && *froze.Enabled &&
-		(froze.Convener == nil || !s.convenerIsEnforceableMember(ctx, id, *froze.Convener)) {
-		return nil // un-convenable armed block (no/drifted/observer convener): drop it (mirror the chair)
+	if froze.Enabled != nil && *froze.Enabled {
+		convenable := froze.Convener != nil && s.convenerIsEnforceableMember(ctx, id, *froze.Convener)
+		if !convenable || !chairEnforceable {
+			// Dropping the whole armed block silently DISARMS the channel — a bigger
+			// blast radius than dropping a bare chair / reasoning knob — so surface it:
+			// an operator whose unrelated first edit disarmed their autonomous channel
+			// (because its convener or chair had drifted inert) gets a reason, not a
+			// mystery. Warn, don't reject — the drop itself is the deliberate
+			// lockout-avoidance posture this method's doc describes.
+			s.logger.Warn("channels: first-edit baseline dropped an armed autonomous block (channel disarmed) — convener or chair no longer enforceable",
+				zap.String("channel_id", id),
+				zap.Bool("convenable", convenable),
+				zap.Bool("chair_enforceable", chairEnforceable),
+			)
+			return nil // un-convenable or un-closeable armed block: drop it (mirror the chair)
+		}
 	}
 	return froze
 }

@@ -43,8 +43,10 @@ func decodeAutonomous(t *testing.T, raw []byte) map[string]struct {
 	return env.Autonomous
 }
 
-// armBody is a PATCH body that arms a channel: a positive cap + an autonomous
-// block naming `nova` as convener. The shared happy-path edit.
+// armBody is a PATCH body that arms a channel: a positive cap, an escalation chair
+// (`ada`, the role that authors the synthesis turn on close — RFC 0052 §D / PR 4),
+// and an autonomous block naming `nova` as convener (distinct from the chair). The
+// shared happy-path edit.
 func armBody(extra map[string]any) []byte {
 	auto := map[string]any{"enabled": true, "convener": "nova"}
 	for k, v := range extra {
@@ -52,6 +54,7 @@ func armBody(extra map[string]any) []byte {
 	}
 	body, _ := json.Marshal(map[string]any{
 		"interaction_budget_tokens": 200000,
+		"escalation_chair_id":       "ada",
 		"autonomous":                auto,
 	})
 	return body
@@ -141,7 +144,10 @@ func TestChannelConfig_AutonomousArmsViaInheritedCap(t *testing.T) {
 	srv, id := autonomousTestServer(t)
 	srv.channelRouter.SetInteractionBudgetTokens(id, 200000) // resolved (e.g. fleet-default) cap
 
-	body, _ := json.Marshal(map[string]any{"autonomous": map[string]any{"enabled": true, "convener": "nova"}})
+	body, _ := json.Marshal(map[string]any{
+		"escalation_chair_id": "ada",
+		"autonomous":          map[string]any{"enabled": true, "convener": "nova"},
+	})
 	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
 		body, map[string]string{"If-Match": "0"})
 	require.Equal(t, http.StatusOK, rec.Code,
@@ -264,12 +270,17 @@ func TestChannelConfig_AutonomousUnknownSubKnobRejected(t *testing.T) {
 // block) — the ISSUE-0103 baseline freeze covers autonomous too.
 func TestChannelConfig_AutonomousFirstEditFreezesArmed(t *testing.T) {
 	srv, id := autonomousTestServer(t)
-	// Pre-seed an armed rung on the router + a cap, standing in for a YAML-resolved
-	// autonomous channel at revision 0.
+	// Pre-seed an armed rung on the router + a cap + a chair (PR 4 made the chair
+	// mandatory and the un-closeable drop keys on it), standing in for a YAML-resolved
+	// autonomous channel at revision 0. The unrelated edit is a chair-neutral knob
+	// (salience_max_channel_members) — `floor_control:false` would now be rejected by
+	// the chair's floor-control rule, so it is no longer a valid "unrelated" edit on a
+	// chaired channel.
 	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{Enabled: true, Convener: "nova"})
+	srv.channelRouter.SetEscalationChair(id, "ada")
 	srv.channelRouter.SetInteractionBudgetTokens(id, 200000)
 
-	body, _ := json.Marshal(map[string]any{"floor_control": false})
+	body, _ := json.Marshal(map[string]any{"salience_max_channel_members": 8})
 	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
 		body, map[string]string{"If-Match": "0"})
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
@@ -383,9 +394,12 @@ func TestChannelConfig_AutonomousConvenerDriftLocksThenRecovers(t *testing.T) {
 	// so the stored autonomous rung still names nova.
 	require.NoError(t, srv.channelStore.RemoveMember(t.Context(), id, "nova"))
 
-	// An UNRELATED edit is now locked: the merged patch (stored blob + floor_control)
-	// still carries the drifted convener, which the apply-path rule rejects.
-	body, _ := json.Marshal(map[string]any{"floor_control": false})
+	// An UNRELATED edit is now locked: the merged patch (stored blob + an unrelated,
+	// chair-neutral knob) still carries the drifted convener, which the apply-path rule
+	// rejects. (The knob is salience_max_channel_members, not floor_control:false —
+	// the latter would now be rejected by the chair's floor-control rule and mask the
+	// convener-drift lockout this test pins.)
+	body, _ := json.Marshal(map[string]any{"salience_max_channel_members": 8})
 	rec = doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
 		body, map[string]string{"If-Match": "1"})
 	assert.Equal(t, http.StatusBadRequest, rec.Code,

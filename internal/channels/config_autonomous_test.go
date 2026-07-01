@@ -63,6 +63,7 @@ func TestLoadConfig_AutonomousAcceptedWithCap(t *testing.T) {
 channels:
   - name: roundtable
     interaction_budget_tokens: 200000
+    escalation_chair_id: ada
     autonomous:
       enabled: true
       topic: "Should we adopt a monorepo?"
@@ -94,6 +95,7 @@ func TestLoadConfig_AutonomousFleetDefaultCapSatisfies(t *testing.T) {
 default_interaction_budget_tokens: 150000
 channels:
   - name: roundtable
+    escalation_chair_id: ada
     autonomous:
       enabled: true
       topic: "Tradeoffs"
@@ -197,6 +199,30 @@ channels:
 	assert.ErrorIs(t, err, ErrInvalidAutonomousConvener)
 }
 
+// TestLoadConfig_AutonomousChairRequired: RFC 0052 §D / PR 4 — an armed channel
+// must declare an `escalation_chair_id`, the role that authors the mandatory
+// synthesis turn on close (PR 1 validated only convener != chair, vacuous with no
+// chair). A capped, convened, but chairless armed channel is rejected at load.
+func TestLoadConfig_AutonomousChairRequired(t *testing.T) {
+	body := `
+channels:
+  - name: roundtable
+    interaction_budget_tokens: 200000
+    autonomous:
+      enabled: true
+      topic: "Tradeoffs"
+      convener: nova
+    members:
+      - id: nova
+        respond: participant
+      - id: ada
+        respond: participant
+`
+	_, err := LoadConfig(writeYAML(t, body))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAutonomousChairRequired)
+}
+
 // TestAutonomousValidateFields_RejectsBlankAgendaItem: a whitespace-only agenda
 // item is blank in spirit — the schema's `minLength: 1` and a bare `== ""` check
 // both miss it — so validateFields trims before the blank check. Pinned on both the
@@ -259,15 +285,25 @@ func TestAutonomousOverridesValidate(t *testing.T) {
 	neg := -1
 	budget := int64(200000)
 	convener := "nova"
+	okChair := "ada"
 
 	// enabled without a cap → cap-required.
 	capMissing := ChannelConfigOverrides{Autonomous: &AutonomousOverrides{Enabled: &enabled, Convener: &convener}}
 	assert.ErrorIs(t, capMissing.Validate(), ErrAutonomousCapRequired)
 
-	// enabled with a positive cap + convener → clean.
+	// enabled + cap + convener but NO chair → chair-required (RFC 0052 §D / PR 4: the
+	// chair authors the synthesis turn on close, so an armed channel must declare one).
+	chairMissing := ChannelConfigOverrides{
+		Autonomous:              &AutonomousOverrides{Enabled: &enabled, Convener: &convener},
+		InteractionBudgetTokens: &budget,
+	}
+	assert.ErrorIs(t, chairMissing.Validate(), ErrAutonomousChairRequired)
+
+	// enabled with a positive cap + convener + a distinct chair → clean.
 	ok := ChannelConfigOverrides{
 		Autonomous:              &AutonomousOverrides{Enabled: &enabled, Convener: &convener},
 		InteractionBudgetTokens: &budget,
+		EscalationChairID:       &okChair,
 	}
 	assert.NoError(t, ok.Validate())
 
@@ -295,6 +331,7 @@ func TestApplyChannelConfig_AutonomousRoundTrips(t *testing.T) {
 
 	enabled := true
 	convener := "nova"
+	chair := "ada"
 	budget := int64(200000)
 	topic := "Should we adopt a monorepo?"
 	patch := ChannelConfigOverrides{
@@ -304,6 +341,7 @@ func TestApplyChannelConfig_AutonomousRoundTrips(t *testing.T) {
 			Topic:    &topic,
 		},
 		InteractionBudgetTokens: &budget,
+		EscalationChairID:       &chair,
 	}
 	require.NoError(t, router.ApplyChannelConfig(ctx, id, patch, 0, ""))
 
@@ -347,10 +385,12 @@ func TestApplyChannelConfig_AutonomousConvenerMustBeMember(t *testing.T) {
 
 	enabled := true
 	ghost := "ghost"
+	chair := "ada"
 	budget := int64(200000)
 	err := router.ApplyChannelConfig(ctx, id, ChannelConfigOverrides{
 		Autonomous:              &AutonomousOverrides{Enabled: &enabled, Convener: &ghost},
 		InteractionBudgetTokens: &budget,
+		EscalationChairID:       &chair,
 	}, 0, "")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidAutonomousConvener)
@@ -366,13 +406,37 @@ func TestApplyChannelConfig_AutonomousConvenerMustNotBeObserver(t *testing.T) {
 
 	enabled := true
 	convener := "ghost"
+	chair := "ada"
+	budget := int64(200000)
+	err := router.ApplyChannelConfig(ctx, id, ChannelConfigOverrides{
+		Autonomous:              &AutonomousOverrides{Enabled: &enabled, Convener: &convener},
+		InteractionBudgetTokens: &budget,
+		EscalationChairID:       &chair,
+	}, 0, "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidAutonomousConvener)
+
+	_, revision, err := store.GetChannelConfig(ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), revision, "rejected applies never write")
+}
+
+// TestApplyChannelConfig_AutonomousChairRequired: the chair-required gate (RFC 0052
+// §D / PR 4) holds on the runtime apply path too — arming with a cap + convener but
+// no `escalation_chair_id` is rejected and never writes.
+func TestApplyChannelConfig_AutonomousChairRequired(t *testing.T) {
+	router, store, ctx := newApplyRouter(t)
+	id := mustCreateGroup(t, store, "roundtable", "nova", "ada")
+
+	enabled := true
+	convener := "nova"
 	budget := int64(200000)
 	err := router.ApplyChannelConfig(ctx, id, ChannelConfigOverrides{
 		Autonomous:              &AutonomousOverrides{Enabled: &enabled, Convener: &convener},
 		InteractionBudgetTokens: &budget,
 	}, 0, "")
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrInvalidAutonomousConvener)
+	assert.ErrorIs(t, err, ErrAutonomousChairRequired)
 
 	_, revision, err := store.GetChannelConfig(ctx, id)
 	require.NoError(t, err)
@@ -402,10 +466,12 @@ func TestApplyChannelConfig_AutonomousRejectedOnNonGroup(t *testing.T) {
 
 	enabled := true
 	convener := "nova"
+	chair := "ada" // DM members are created `always`, so this is a valid chair — only the channel-type rule is under test
 	budget := int64(200000)
 	err = router.ApplyChannelConfig(ctx, dm.ID, ChannelConfigOverrides{
 		Autonomous:              &AutonomousOverrides{Enabled: &enabled, Convener: &convener},
 		InteractionBudgetTokens: &budget,
+		EscalationChairID:       &chair,
 	}, 0, "")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrAutonomousNotGroup)
