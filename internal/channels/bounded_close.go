@@ -166,12 +166,22 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 		if budget, capped := r.ResolveInteractionBudgetForInteraction(interactionID); capped && budget > 0 {
 			// 4b-ii consistency (deep review): this soft threshold is derived from
 			// `channelSize`; PR 4a's reserve is sized from a persona roster N. While
-			// the reserve is dark (AcquireLease enforces only the hard cap) any basis
-			// is safe, but once the reserve is ENFORCED the two roster bases MUST
-			// match — a soft threshold computed from a larger roster than the reserve
-			// was carved for would let the close fire at a spend the reserve cannot
-			// actually cover, re-opening the "close leases denied" hole the reserve
-			// closes. Lock the two bases together when 4b-ii wires enforcement.
+			// the reserve is dark (AcquireLease enforces only the hard cap) the basis
+			// does not matter, but it stays load-bearing once the reserve is ENFORCED.
+			// The safe requirement is ONE-DIRECTIONAL, not equality: the threshold
+			// basis must never be SMALLER than the roster the reserve was carved for.
+			// `channelSize` is always >= that persona roster (it counts every member,
+			// including the observer/operator seats that author no summary — see this
+			// method's doc), so `SynthesisReserveTokens` (monotonic in the roster) holds
+			// back a reserve at least as large as the true close cost and trips the
+			// close no LATER than a roster-exact threshold would: remaining budget at
+			// close is >= the close-path cost, so the reserve covers it. The hazard is
+			// the OPPOSITE mismatch — a threshold from a SMALLER roster than the reserve
+			// — which would fire the close at a spend the reserve cannot cover,
+			// re-opening the "close leases denied" hole. So when 4b-ii wires
+			// enforcement, keep the threshold basis >= the reserve basis; matching them
+			// exactly only trades the slightly-early close (this method's doc) for a
+			// tighter bound and is not required for safety.
 			soft := wallet.SynthesisSoftBudgetTokens(budget, channelSize)
 			if soft > 0 && r.spend.InteractionSpend(interactionID) >= soft {
 				budgetExceeded = true
@@ -209,21 +219,14 @@ func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct
 	r.endVoteMu.Unlock()
 
 	r.recordInteractionClosedBounded(ctx, msg, ct, interactionID, trigger)
-	// Layer 4 → Layer 2 composition seam (mirrors processEndVote): record the
-	// leftover reply allowances BEFORE discarding the counters, so the
-	// reply_budget_remaining histogram observes the interaction's final state.
-	r.recordReplyBudgetRemainingAtClose(ctx, msg.ChannelID, interactionID, ct)
-	r.DiscardInteractionReplyBudget(interactionID)
-	// Retire the id (IP8) so the channel is re-convenable and the next publish
-	// mints fresh — carrying the truthful bounded-close cause, not end_votes.
-	r.markInteractionClosed(msg.ChannelID, interactionID, trigger)
-	// Deliver the close so each agent-local tracker closes its scope NOW and
-	// produces its RFC 0020 summary (the §D artifact). Fire-and-forget, off-path.
-	// excludeSender=false — unlike the end-vote close (where the voter's own vote
-	// closed its tracker), `msg` here is only the round-triggering stimulus, so
-	// its sender (routinely the convener/chair whose reply drove the round) needs
-	// the notification too or it strands on "went idle" and authors no summary.
-	r.notifyInteractionClose(ctx, msg, ct, false)
+	// The shared close-teardown tail ([ChannelRouter.finalizeInteractionClose]):
+	// reply-budget snapshot → discard → retire the id (truthful bounded-close
+	// cause, not end_votes) → fan the RFC 0020 summary notification. excludeSender
+	// is FALSE — unlike the end-vote close (where the voter's own vote closed its
+	// tracker), `msg` here is only the round-triggering stimulus, so its sender
+	// (routinely the convener/chair whose reply drove the round) needs the
+	// notification too or it strands on "went idle" and authors no summary.
+	r.finalizeInteractionClose(ctx, msg, ct, interactionID, trigger, false)
 	// NOTE: no wallet EvictInteraction here — deferred to PR 7 (file header).
 }
 

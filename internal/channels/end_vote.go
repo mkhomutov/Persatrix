@@ -229,29 +229,14 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 	}
 	if closed {
 		r.recordInteractionClosed(ctx, msg, ct, interactionID, recent)
-		// Layer 4 → Layer 2 composition seam: record each tracked participant's
-		// leftover reply allowance BEFORE discarding the counters, so the
-		// reply_budget_remaining histogram observes the interaction's final state.
-		r.recordReplyBudgetRemainingAtClose(ctx, msg.ChannelID, interactionID, ct)
-		// Wire the §F reset seam: the interaction is closing, so its per-
-		// participant reply counters are discarded (the seam reply_budget.go
-		// reserved for the Layer 4 close path).
-		r.DiscardInteractionReplyBudget(interactionID)
-		// Producer IP8: notify the resolver so the channel's NEXT publish mints
-		// a fresh interaction — the quorum ends one conversation, not the
-		// channel. The closed id parks as the pending retiree; its tombstone
-		// (added above) survives until the deferred discard, suppressing and
-		// self-healing any commit that raced this close.
-		r.markInteractionClosed(msg.ChannelID, interactionID, endVotesTrigger)
-		// End-vote-close-propagation amendment (CP1/CP5): the closing vote's
-		// fanout is suppressed (the caller's early return this `true` buys),
-		// so the close must be DELIVERED, not inferred — fan the closing
-		// message to every dispatch-served non-sender member as the marked
-		// close notification, fire-and-forget, so each agent-local tracker
-		// closes the scope now with the truthful `end_votes` cause instead
-		// of burying the converged discussion as "went idle" an idle window
-		// later.
-		r.notifyInteractionClose(ctx, msg, ct, true) // exclude the voter: its own vote closed its tracker.
+		// The shared close-teardown tail ([ChannelRouter.finalizeInteractionClose]):
+		// reply-budget snapshot → discard → retire the id (IP8; truthful `end_votes`
+		// cause) → fan the marked close notification. End-vote-close-propagation
+		// amendment (CP1/CP5): the closing vote's own fanout is suppressed (the
+		// caller's early return this `true` buys), so the close must be DELIVERED,
+		// not inferred. excludeSender is TRUE — the voter's own vote action already
+		// closed its local tracker, so re-notifying it is redundant.
+		r.finalizeInteractionClose(ctx, msg, ct, interactionID, endVotesTrigger, true)
 		return true
 	}
 	// Suppress fanout of a redundant in-window duplicate vote. An end-vote is

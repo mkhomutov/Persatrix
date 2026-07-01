@@ -33,6 +33,39 @@ const (
 	closeNotificationDispatchError = "dispatch_error"
 )
 
+// finalizeInteractionClose runs the shared close-teardown tail both deterministic
+// close causes produce — the Layer 4 quorum end-vote
+// ([ChannelRouter.processEndVote]) and the RFC 0052 bounded close
+// ([ChannelRouter.boundedClose]) — AFTER each has done its cause-specific work:
+// the single-shot `closedInteractions` CAS and the `interaction_closed{…}` record
+// emit (whose args differ — the end-vote's quorum count vs the bounded close's
+// structural/cost trigger). The steps here are cause-agnostic and ORDER-SENSITIVE:
+//
+//  1. record each tracked participant's leftover reply allowance BEFORE the
+//     counters are discarded, so the reply_budget_remaining histogram observes the
+//     interaction's final state (the Layer 4 → Layer 2 composition seam);
+//  2. discard the per-participant reply counters (the §F reset seam
+//     reply_budget.go reserved for the Layer 4 close path);
+//  3. retire the id (IP8) so the channel's NEXT publish mints a FRESH interaction
+//     — the close ends one conversation, not the channel — recording `trigger` as
+//     the OQ 5 close cause; the closed id parks as the pending retiree, its
+//     tombstone (added by the caller's CAS) surviving until the deferred discard so
+//     any commit racing this close is suppressed and self-healed;
+//  4. fan the marked close NOTIFICATION so every agent-local tracker closes its
+//     scope NOW and authors its RFC 0020 summary instead of burying the converged
+//     discussion as "went idle" a window later. `excludeSender` differs by cause
+//     (see [ChannelRouter.notifyInteractionClose]).
+//
+// Keeping the tail in one place means a future teardown change — e.g. the deferred
+// PR 7 wallet EvictInteraction step — lands for both causes at once and cannot
+// silently drift between the two close sites.
+func (r *ChannelRouter) finalizeInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType, interactionID, trigger string, excludeSender bool) {
+	r.recordReplyBudgetRemainingAtClose(ctx, msg.ChannelID, interactionID, ct)
+	r.DiscardInteractionReplyBudget(interactionID)
+	r.markInteractionClosed(msg.ChannelID, interactionID, trigger)
+	r.notifyInteractionClose(ctx, msg, ct, excludeSender)
+}
+
 // notifyInteractionClose fans a channel-close signal to every dispatch-served
 // member as the CP2 marked dispatch, so each agent-local tracker closes the
 // channel scope NOW instead of idling out a window later. Shared by the two
