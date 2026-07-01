@@ -131,11 +131,18 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 			// floor-speaker set is cleared — the chair's reply must re-fanout
 			// as a fresh open-floor stimulus, which a floor turn would
 			// suppress. A send, never an await (CE7).
-			r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
-			// RFC 0052 §D bounded close: after the round settles, deterministically
-			// terminate an autonomous interaction that crossed max_rounds or the
-			// soft budget. Sibling of the stall tail; a no-op on human channels.
+			//
+			// RFC 0052 §D bounded close runs FIRST (deep review): if this round
+			// crossed max_rounds / the soft budget, the interaction is at its
+			// terminal bound and must CLOSE, not be revived. The close retires the
+			// id, so maybeEscalateStall then reads no open interaction and no-ops —
+			// avoiding a forced chair turn (and its LLM spend) dispatched onto an
+			// interaction closing this same tail, whose reply would otherwise mint a
+			// FRESH interaction and reopen the just-closed discussion. On a sub-bound
+			// round the close is a no-op and the escalation proceeds unchanged. Both
+			// are no-ops on human channels.
 			r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize)
+			r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
 			return
 		}
 	}

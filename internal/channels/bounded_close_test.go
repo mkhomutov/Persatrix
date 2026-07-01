@@ -176,3 +176,106 @@ func TestBoundedClose_ClosesOnTheBoundingRound(t *testing.T) {
 	_, _, tracked := router.openInteractionEscalationState(ch)
 	assert.False(t, tracked)
 }
+
+// TestBoundedClose_ConcurrentPathClosesInteraction pins the OTHER fanout tail
+// (fanout.go, the concurrent path) that the floor-controlled harness never
+// exercises: an autonomous channel with floor control OFF routes every publish
+// through dispatchConcurrent, and the bounded close must still fire there. Here
+// the tally counts messages (no floor round), so max_rounds=2 closes on the 2nd.
+func TestBoundedClose_ConcurrentPathClosesInteraction(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+	ctr, err := mp.Meter("test").Int64Counter("channel.conversation.interaction_closed")
+	require.NoError(t, err)
+	store := newTestStore(t, SQLiteOptions{})
+	router := NewChannelRouter(store, &envelopeRecorder{}, zap.NewNop(), &RouterMetrics{InteractionClosed: ctr})
+	// Floor control deliberately left OFF → the fanout falls through to the
+	// concurrent path and maybeBoundedClose runs at that tail instead.
+	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
+		map[string]RespondPolicy{
+			"operator":  RespondNever,
+			"ember-owl": RespondAlways,
+		}, "operator", "ember-owl")
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 2, Convener: "ember-owl"})
+
+	tick(t, router, ch)
+	assert.Zero(t, closedCount(t, reader, structuralTrigger), "no close before the round bound")
+
+	tick(t, router, ch) // the 2nd message on the concurrent path hits max_rounds
+
+	assert.Equal(t, int64(1), closedCount(t, reader, structuralTrigger),
+		"the concurrent-path tail closes the interaction at max_rounds")
+	_, _, tracked := router.openInteractionEscalationState(ch)
+	assert.False(t, tracked, "the concurrent-path bounded close retires the id too")
+}
+
+// TestBoundedClose_NotifiesTriggeringSender is the regression for the deep-review
+// finding: the bounded close reuses notifyInteractionClose, which excludes
+// msg.SenderID — correct for the end-vote close (the voter self-closed) but WRONG
+// here, where the sender is only the round-triggering participant. Every
+// dispatch-served member, INCLUDING the sender, must get the close notification so
+// it produces its RFC 0020 summary rather than idling out mislabeled.
+func TestBoundedClose_NotifiesTriggeringSender(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &envelopeRecorder{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
+		map[string]RespondPolicy{
+			"chair-x":   RespondAlways, // the triggering sender — a real participant
+			"ember-owl": RespondAlways,
+			"iron-fox":  RespondAlways,
+		}, "chair-x", "ember-owl", "iron-fox")
+	router.SetFloorControl(ch, true, time.Millisecond)
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 1, Convener: "ember-owl"})
+
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "chair-x", Content: "let's wrap",
+	}, ""))
+	router.WaitForPendingFanout()
+
+	notified := map[string]bool{}
+	for _, env := range disp.snapshot() {
+		if env.InteractionCloseNotification {
+			notified[env.Recipient.ParticipantID] = true
+		}
+	}
+	assert.True(t, notified["chair-x"], "the round-triggering sender must receive the bounded close notification")
+	assert.True(t, notified["ember-owl"], "other members receive it too")
+	assert.True(t, notified["iron-fox"], "other members receive it too")
+}
+
+// TestBoundedClose_SuppressesEscalationOnBoundingRound pins the deep-review
+// ordering fix: when the bounding round is also a stall, the bounded close runs
+// BEFORE the chair-stall escalation and retires the id, so the escalation tail
+// no-ops. Otherwise the forced chair turn is dispatched onto a closing
+// interaction and its reply would mint a FRESH interaction, reopening the
+// discussion the close just terminated.
+func TestBoundedClose_SuppressesEscalationOnBoundingRound(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &envelopeRecorder{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	ch := mustCreateGroupWithPolicies(t, store, "planning",
+		map[string]RespondPolicy{
+			"operator":     RespondNever, // stimulus author
+			"ember-owl":    RespondAlways,
+			"nova-sparrow": RespondAlways, // the escalation chair
+		}, "operator", "ember-owl", "nova-sparrow")
+	router.SetFloorControl(ch, true, time.Millisecond)
+	router.SetEscalationChair(ch, "nova-sparrow")
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 1, Convener: "ember-owl"})
+
+	// Personas never reply (recorder swallows) → the round stalls, and it is the
+	// bounding round (max_rounds=1). The close must win the tail.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "operator", Content: "thoughts?",
+	}, ""))
+	router.WaitForPendingFanout()
+
+	_, _, tracked := router.openInteractionEscalationState(ch)
+	assert.False(t, tracked, "the bounding round closes the interaction")
+	for _, env := range disp.snapshot() {
+		assert.False(t, env.ChairEscalation,
+			"no forced chair turn on the bounding round — the close retired the id first")
+	}
+}

@@ -93,11 +93,15 @@ func (r *ChannelRouter) SetInteractionSpender(s interactionSpender) {
 	r.spend = s
 }
 
-// advanceInteractionRound increments and returns the bounded-close floor-round
-// tally for the channel's open interaction, but only while it still matches
+// advanceInteractionRound increments and returns the bounded-close round tally
+// for the channel's open interaction, but only while it still matches
 // interactionID and is committed (a rotation/close between the fanout tail's
 // read and this advance drops it). Returns (0, false) when the interaction moved
 // on. Rides the resolver entry under interactionMu, the CE5-ration pattern.
+//
+// UNIT: one tick per fanout cycle — a full floor round under floor control (the
+// expected autonomous posture), a single message without it. See
+// [DefaultAutonomousMaxRounds] for why the two differ.
 func (r *ChannelRouter) advanceInteractionRound(channelID, interactionID string) (int, bool) {
 	r.interactionMu.Lock()
 	defer r.interactionMu.Unlock()
@@ -154,6 +158,14 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	budgetExceeded := false
 	if r.spend != nil {
 		if budget, capped := r.ResolveInteractionBudgetForInteraction(interactionID); capped && budget > 0 {
+			// 4b-ii consistency (deep review): this soft threshold is derived from
+			// `channelSize`; PR 4a's reserve is sized from a persona roster N. While
+			// the reserve is dark (AcquireLease enforces only the hard cap) any basis
+			// is safe, but once the reserve is ENFORCED the two roster bases MUST
+			// match — a soft threshold computed from a larger roster than the reserve
+			// was carved for would let the close fire at a spend the reserve cannot
+			// actually cover, re-opening the "close leases denied" hole the reserve
+			// closes. Lock the two bases together when 4b-ii wires enforcement.
 			soft := wallet.SynthesisSoftBudgetTokens(budget, channelSize)
 			if soft > 0 && r.spend.InteractionSpend(interactionID) >= soft {
 				budgetExceeded = true
@@ -200,7 +212,11 @@ func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct
 	r.markInteractionClosed(msg.ChannelID, interactionID, trigger)
 	// Deliver the close so each agent-local tracker closes its scope NOW and
 	// produces its RFC 0020 summary (the §D artifact). Fire-and-forget, off-path.
-	r.notifyInteractionClose(ctx, msg, ct)
+	// excludeSender=false — unlike the end-vote close (where the voter's own vote
+	// closed its tracker), `msg` here is only the round-triggering stimulus, so
+	// its sender (routinely the convener/chair whose reply drove the round) needs
+	// the notification too or it strands on "went idle" and authors no summary.
+	r.notifyInteractionClose(ctx, msg, ct, false)
 	// NOTE: no wallet EvictInteraction here — deferred to PR 7 (file header).
 }
 

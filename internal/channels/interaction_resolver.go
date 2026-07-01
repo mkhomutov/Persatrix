@@ -129,10 +129,11 @@ type openInteraction struct {
 	// the misfired reply's — the reply is a different message in the tree.
 	// Meaningless ("") off threads, like the value it mirrors.
 	escalatedThreadParent string
-	// roundCount is the RFC 0052 bounded-close floor-round tally (v0.3.11 PR 4b):
-	// the number of fanout cycles this autonomous interaction has run, advanced
-	// once per fanout by [ChannelRouter.advanceInteractionRound] and compared
-	// against `autonomous.max_rounds` (bounded_close.go). Rides the entry like
+	// roundCount is the RFC 0052 bounded-close round tally (v0.3.11 PR 4b): the
+	// number of fanout cycles this autonomous interaction has run (one floor round
+	// under floor control, one message without it), advanced once per fanout by
+	// [ChannelRouter.advanceInteractionRound] and compared against
+	// `autonomous.max_rounds` (bounded_close.go). Rides the entry like
 	// chairEscalated — rotation/close replaces the id and the fresh mint below
 	// zeroes it, so the tally dies with the interaction and needs no lifetime map.
 	// Guarded by interactionMu.

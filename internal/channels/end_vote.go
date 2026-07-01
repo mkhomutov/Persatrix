@@ -251,7 +251,7 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 		// closes the scope now with the truthful `end_votes` cause instead
 		// of burying the converged discussion as "went idle" an idle window
 		// later.
-		r.notifyInteractionClose(ctx, msg, ct)
+		r.notifyInteractionClose(ctx, msg, ct, true) // exclude the voter: its own vote closed its tracker.
 		return true
 	}
 	// Suppress fanout of a redundant in-window duplicate vote. An end-vote is
