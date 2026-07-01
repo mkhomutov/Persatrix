@@ -279,3 +279,49 @@ func TestBoundedClose_SuppressesEscalationOnBoundingRound(t *testing.T) {
 			"no forced chair turn on the bounding round — the close retired the id first")
 	}
 }
+
+// TestBoundedClose_ConcurrentPathDoesNotDispatchBoundingStimulus is the
+// deep-review regression for the concurrent-path REOPEN: on that path a
+// dispatched reply re-enters Publish (no floor-speaker suppression), so
+// dispatching the bounding stimulus and THEN closing would let the reply mint a
+// fresh interaction and reopen the just-closed discussion — an endless
+// convene→bound→reopen loop on any single-responder autonomous round. The fix
+// runs the close BEFORE the dispatch and skips the live dispatch on close: the
+// bounding message goes out only as the close notification (which the recipient
+// ingests as its final turn and does NOT reply to), never as a fresh stimulus.
+//
+// Discriminating: with dispatch-then-close the responder would see TWO ordinary
+// stimuli (rounds 1 and 2); the fix leaves exactly one (round 1) plus one close
+// notification.
+func TestBoundedClose_ConcurrentPathDoesNotDispatchBoundingStimulus(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &envelopeRecorder{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	// Floor control OFF → every publish takes the concurrent path.
+	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
+		map[string]RespondPolicy{
+			"operator":  RespondNever, // stimulus author
+			"ember-owl": RespondAlways,
+		}, "operator", "ember-owl")
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 2, Convener: "ember-owl"})
+
+	tick(t, router, ch) // round 1: dispatched normally
+	tick(t, router, ch) // round 2 == max_rounds: closes; the stimulus must NOT be dispatched
+	router.WaitForPendingFanout()
+
+	var ordinary, closeNotifications int
+	for _, env := range disp.snapshot() {
+		if env.Recipient.ParticipantID != "ember-owl" {
+			continue
+		}
+		if env.InteractionCloseNotification {
+			closeNotifications++
+		} else {
+			ordinary++
+		}
+	}
+	assert.Equal(t, 1, ordinary,
+		"only round 1 is dispatched live; the bounding stimulus is withheld so its reply cannot reopen the interaction")
+	assert.Equal(t, 1, closeNotifications,
+		"the bounding message reaches the responder as the close notification instead (ingested as the final turn, not replied to)")
+}

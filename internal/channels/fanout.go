@@ -134,24 +134,39 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 			//
 			// RFC 0052 §D bounded close runs FIRST (deep review): if this round
 			// crossed max_rounds / the soft budget, the interaction is at its
-			// terminal bound and must CLOSE, not be revived. The close retires the
-			// id, so maybeEscalateStall then reads no open interaction and no-ops —
-			// avoiding a forced chair turn (and its LLM spend) dispatched onto an
-			// interaction closing this same tail, whose reply would otherwise mint a
-			// FRESH interaction and reopen the just-closed discussion. On a sub-bound
-			// round the close is a no-op and the escalation proceeds unchanged. Both
-			// are no-ops on human channels.
-			r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize)
+			// terminal bound and must CLOSE, not be revived. A `true` return means
+			// the id is retired, so we skip the stall escalation outright — a forced
+			// chair turn (and its LLM spend) dispatched onto an interaction closing
+			// this same tail would mint a FRESH interaction on its reply and reopen
+			// the just-closed discussion. On a sub-bound round the close returns
+			// false and the escalation proceeds unchanged. Both are no-ops on human
+			// channels.
+			if r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize) {
+				return
+			}
 			r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
 			return
 		}
 	}
 
+	// RFC 0052 §D bounded close on the concurrent path. Runs BEFORE the dispatch
+	// (deep-review follow-up): unlike the floor path — where the round's replies
+	// are suppressed as floor speakers and cannot re-fan — a concurrent
+	// dispatch's replies DO re-enter Publish, so dispatching the bounding
+	// stimulus first would let those replies mint a FRESH interaction and reopen
+	// the discussion the close just terminated. That reopen is not a corner case:
+	// any autonomous round with a single responder (e.g. a two-persona roster)
+	// takes this path even under floor control, and dispatch-then-close would
+	// loop convene→bound→reopen→bound without end. Closing first and skipping the
+	// dispatch stops it, losslessly: the bounding message is still persisted, and
+	// the close notification re-delivers it as the marked control event every
+	// member ingests as its record's final turn (close_notification.py) before
+	// closing — so nothing depends on the suppressed live dispatch. A no-op
+	// (returns false, dispatch proceeds) on human channels and on sub-bound rounds.
+	if r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize) {
+		return
+	}
 	r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions)
-	// RFC 0052 §D bounded close on the concurrent path too — a no-op on human
-	// channels and on the ≥2-responder autonomous common case (handled above),
-	// but keeps the terminator robust for a degenerate single-responder round.
-	r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize)
 }
 
 // dispatchConcurrent fans `msg` out to every member of `members` other than

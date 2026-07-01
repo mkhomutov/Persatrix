@@ -114,14 +114,20 @@ func (r *ChannelRouter) advanceInteractionRound(channelID, interactionID string)
 }
 
 // maybeBoundedClose is the RFC 0052 §D deterministic bounded-close trigger, run
-// at the floor round's tail (the [ChannelRouter.maybeEscalateStall] sibling) for
-// autonomous channels only. It advances the interaction's floor-round tally and,
-// when the round bound (`autonomous.max_rounds`) or the wallet SOFT budget
-// threshold is crossed, closes the interaction. A send-side teardown, never an
-// await; every degraded branch nets to "no close" (the status quo).
+// at the fanout tail (the [ChannelRouter.maybeEscalateStall] sibling) for
+// autonomous channels only. It advances the interaction's round tally and, when
+// the round bound (`autonomous.max_rounds`) or the wallet SOFT budget threshold
+// is crossed, closes the interaction. A send-side teardown, never an await;
+// every degraded branch nets to "no close" (the status quo).
 //
-// A no-op on human channels (autonomous disabled) and on untracked/diverged
-// traffic, so ordinary channels are byte-for-byte unchanged.
+// Returns whether the bound was crossed and the close fired (or the interaction
+// was already closing) — `true` means the interaction is retired, so the caller
+// MUST skip any follow-on work that would re-open it: a forced chair turn
+// (maybeEscalateStall) or, on the concurrent path, the stimulus dispatch itself
+// (fanout.go). `false` means the interaction is still open and the caller
+// proceeds unchanged. A no-op returning `false` on human channels (autonomous
+// disabled) and on untracked/diverged traffic, so ordinary channels are
+// byte-for-byte unchanged.
 //
 // `channelSize` (the fanout's member count) is a conservative upper bound on the
 // roster size N the reserve is sized for (`1 + N` close-path calls): it includes
@@ -129,24 +135,24 @@ func (r *ChannelRouter) advanceInteractionRound(channelID, interactionID string)
 // slightly larger reserve than the true roster, tripping the soft close a touch
 // earlier — the safe direction (more hard-cap headroom for the close path), not
 // less.
-func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, channelSize int) {
+func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, channelSize int) bool {
 	a := r.AutonomousFor(msg.ChannelID)
 	if !a.Enabled {
-		return // OQ #2 scope gate: human channels are untouched.
+		return false // OQ #2 scope gate: human channels are untouched.
 	}
 	interactionID, _, tracked := r.openInteractionEscalationState(msg.ChannelID)
 	if !tracked {
-		return // no open committed interaction to bound.
+		return false // no open committed interaction to bound.
 	}
 	// Divergence guard (mirrors maybeEscalateStall): a fanout that outlived its
 	// interaction — a concurrent rotation/close moved the open id on between the
 	// stimulus commit and this tail — must not advance or close the successor.
 	if stamped := readInteractionID(msg.Metadata); stamped != "" && stamped != interactionID {
-		return
+		return false
 	}
 	round, ok := r.advanceInteractionRound(msg.ChannelID, interactionID)
 	if !ok {
-		return
+		return false
 	}
 
 	maxRounds := a.MaxRounds
@@ -174,7 +180,7 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	}
 
 	if !roundExceeded && !budgetExceeded {
-		return
+		return false
 	}
 	// Prefer the cost label when spend crossed the soft budget (the reserve
 	// earned its keep); otherwise it is the structural (max_rounds) bound.
@@ -183,6 +189,7 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 		trigger = costTrigger
 	}
 	r.boundedClose(ctx, msg, ct, interactionID, trigger)
+	return true
 }
 
 // boundedClose runs the artifact-bearing close teardown for an autonomous

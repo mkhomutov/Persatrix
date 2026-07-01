@@ -54,7 +54,6 @@ from agents.memory.interactions import Interaction, InteractionTracker
 from agents.persona_types import AgentAction, AgentEvent, EventType
 from agents.response_gate import (
     POLICY_ALWAYS,
-    POLICY_DEFENSE_IN_DEPTH,
     POLICY_NEVER,
     POLICY_UNKNOWN,
     evaluate_response_gate,
@@ -193,11 +192,13 @@ class TestCloseNotificationGateOrdering:
     decision's ``policy`` may only ever carry a bounded label onto the
     ``channel.messages.gated`` counter (the :class:`GateDecision`
     docstring contract; the ``chair_escalation`` branch's discipline).
-    Only the two self-sender defence-in-depth refusals stay ahead of
-    it: the orchestrator excludes the sender from the notification fan
-    by contract, and the voter's own ``vote_close`` owns its record —
-    honouring a marked self-echo would bypass the own-echo-ingest
-    guard and double-close."""
+    RFC 0052 bounded-close fix (PR 4b-i deep review): on a GROUP channel
+    the marker now outranks self_sender too — the bounded close fans to
+    the round-triggering sender (``excludeSender=false``), whose tracker
+    no vote closed, so its self-addressed notification must close the
+    scope, not be dismissed as a self-echo. (DM keeps ``dm_self_sender``
+    first: no close cause fans a self-echo to a DM, so that ordering is
+    never exercised by a real self-echo.)"""
 
     def test_marked_dm_event_is_refused(self):
         """The DM override admits every ordinary message ("a DM with no
@@ -267,18 +268,18 @@ class TestCloseNotificationGateOrdering:
         assert decision.respond is False
         assert decision.policy == POLICY_UNKNOWN
 
-    def test_marked_self_sender_keeps_the_defense_in_depth_refusal(self):
-        """Ordering pin: the self-sender re-check wins over the marker.
-        Go never fans the notification to the voter (its own vote_close
-        already closed its record), so a marked self-echo is spoofed or
-        a contract break — refuse it exactly like any other self-echo
-        (no ingest, no close)."""
+    def test_marked_group_self_sender_closes_the_senders_scope(self):
+        """RFC 0052 bounded-close regression (PR 4b-i deep review): on a
+        GROUP channel a marked SELF-echo now takes the close lane, NOT the
+        self_sender refusal — the bounded close fans to the round-triggering
+        sender too and nothing else closed its tracker, so its own
+        re-dispatched message must close its scope and author the RFC 0020
+        summary. Before the fix self_sender swallowed it (no summary)."""
         decision = evaluate_response_gate(
             _notification_event(), agent_id="iron-fox",
         )
         assert decision.respond is False
-        assert decision.policy == POLICY_DEFENSE_IN_DEPTH
-        assert decision.reason == "self_sender"
+        assert decision.reason == "close_notification"
 
 
 class TestCloseNotificationClosesTracker:
