@@ -132,11 +132,19 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 			// as a fresh open-floor stimulus, which a floor turn would
 			// suppress. A send, never an await (CE7).
 			r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
+			// RFC 0052 §D bounded close: after the round settles, deterministically
+			// terminate an autonomous interaction that crossed max_rounds or the
+			// soft budget. Sibling of the stall tail; a no-op on human channels.
+			r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize)
 			return
 		}
 	}
 
 	r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions)
+	// RFC 0052 §D bounded close on the concurrent path too — a no-op on human
+	// channels and on the ≥2-responder autonomous common case (handled above),
+	// but keeps the terminator robust for a degenerate single-responder round.
+	r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize)
 }
 
 // dispatchConcurrent fans `msg` out to every member of `members` other than

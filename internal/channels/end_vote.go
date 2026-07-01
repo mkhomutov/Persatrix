@@ -242,7 +242,7 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 		// channel. The closed id parks as the pending retiree; its tombstone
 		// (added above) survives until the deferred discard, suppressing and
 		// self-healing any commit that raced this close.
-		r.markInteractionClosed(msg.ChannelID, interactionID)
+		r.markInteractionClosed(msg.ChannelID, interactionID, endVotesTrigger)
 		// End-vote-close-propagation amendment (CP1/CP5): the closing vote's
 		// fanout is suppressed (the caller's early return this `true` buys),
 		// so the close must be DELIVERED, not inferred — fan the closing

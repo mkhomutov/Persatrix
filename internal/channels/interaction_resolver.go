@@ -129,6 +129,14 @@ type openInteraction struct {
 	// the misfired reply's — the reply is a different message in the tree.
 	// Meaningless ("") off threads, like the value it mirrors.
 	escalatedThreadParent string
+	// roundCount is the RFC 0052 bounded-close floor-round tally (v0.3.11 PR 4b):
+	// the number of fanout cycles this autonomous interaction has run, advanced
+	// once per fanout by [ChannelRouter.advanceInteractionRound] and compared
+	// against `autonomous.max_rounds` (bounded_close.go). Rides the entry like
+	// chairEscalated — rotation/close replaces the id and the fresh mint below
+	// zeroes it, so the tally dies with the interaction and needs no lifetime map.
+	// Guarded by interactionMu.
+	roundCount int
 }
 
 // previousClose is the resolver's OQ 5 close-cause attribution for one
@@ -216,6 +224,9 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 		entry.chairEscalated = false
 		entry.escalatedStimulus = nil
 		entry.escalatedThreadParent = ""
+		// RFC 0052: a fresh interaction bounds independently — a re-convened
+		// autonomous discussion gets its own max_rounds tally, not the retiree's.
+		entry.roundCount = 0
 	}
 	resolved := entry.id
 	prev := entry.prev
@@ -337,17 +348,18 @@ func (r *ChannelRouter) settleInteraction(channelID, resolved string, now time.T
 	}
 }
 
-// markInteractionClosed is the Layer 4 → resolver close notification (IP8):
-// the quorum close site calls it so the channel's next publish mints fresh
-// instead of stamping the closed id into post-close suppression for the rest
-// of the idle window. The closed id parks as the pending retiree — its
-// `closedInteractions` tombstone (left by the close) survives until the
-// deferred discard, long enough to suppress and self-heal any commit racing
-// the close — and is recorded as the channel's OQ 5 close cause
-// (trigger=end_votes) so the successor interaction's publishes carry the
-// truthful "ended by vote" attribution. A stale call (the open id moved on
-// already) is a no-op, including for the cause record.
-func (r *ChannelRouter) markInteractionClosed(channelID, interactionID string) {
+// markInteractionClosed is the resolver close notification (IP8): a close site
+// calls it so the channel's next publish mints fresh instead of stamping the
+// closed id into post-close suppression for the rest of the idle window. The
+// closed id parks as the pending retiree — its `closedInteractions` tombstone
+// (left by the close) survives until the deferred discard, long enough to
+// suppress and self-heal any commit racing the close — and is recorded as the
+// channel's OQ 5 close cause with `trigger` (`end_votes` for the Layer 4 quorum
+// close; `structural`/`cost` for the RFC 0052 bounded close, bounded_close.go)
+// so the successor interaction's publishes carry the truthful close attribution.
+// A stale call (the open id moved on already) is a no-op, including for the cause
+// record.
+func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger string) {
 	r.interactionMu.Lock()
 	entry := r.openInteractions[channelID]
 	var discard string
@@ -355,7 +367,7 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID string) {
 		discard = entry.retired
 		entry.retired = interactionID
 		entry.id = ""
-		entry.prev = previousClose{id: interactionID, trigger: endVotesTrigger}
+		entry.prev = previousClose{id: interactionID, trigger: trigger}
 	}
 	r.interactionMu.Unlock()
 

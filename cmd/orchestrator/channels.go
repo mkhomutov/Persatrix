@@ -173,6 +173,12 @@ func initChannels(
 	// producer stamps — i.e. uncapped).
 	if walletSvc != nil {
 		walletSvc.SetInteractionBudgetResolver(router.ResolveInteractionBudgetForInteraction)
+		// RFC 0052 (v0.3.11) PR 4b: the reverse read — the router's bounded-close
+		// soft-budget trigger reads the wallet's per-interaction running total, so
+		// an autonomous discussion synthesize-and-closes before the hard cap denies
+		// the close-path leases. Nil-safe: a deployment with no wallet leaves the
+		// soft-budget trigger inert (max_rounds still bounds the close).
+		router.SetInteractionSpender(walletSvc)
 	}
 	// Drain in-flight detached fanout (RFC 0048 console publish-latency fix:
 	// the REST handler returns at the persistence boundary and runs fanout on a
