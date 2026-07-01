@@ -245,6 +245,66 @@ func TestBoundedClose_NotifiesTriggeringSender(t *testing.T) {
 	assert.True(t, notified["iron-fox"], "other members receive it too")
 }
 
+// TestBoundedClose_SuppressesResynthesizeOnBoundingRound is the regression for
+// the THIRD reopen vector (the sibling of the escalation- and concurrent-path
+// fixes): when the bounding round is the chair's own MISFIRED forced-turn reply,
+// the ISSUE-0099 resynthesize must NOT re-force a synthesize-only chair turn. A
+// resynthesize forced turn is dispatched off any floor round, so its reply
+// re-enters Publish and — with the id already retired by the close — mints a
+// FRESH interaction, reopening the just-closed discussion. PR 4a makes the
+// escalation chair MANDATORY on every armed channel, so this path is live: a
+// stall escalates, the chair hands off to the RespondNever operator (a routine
+// misfire the §D framing invites), and that reply both crosses the bound and
+// would re-force. The fix runs the bounded close first and gates the resynthesize
+// on it.
+//
+// Discriminating: pre-fix the chair's reply (round 2) produces a resynthesize
+// dispatch (maybeResynthesizeMisfire ran at the fanout head, before the close);
+// the fix leaves none.
+func TestBoundedClose_SuppressesResynthesizeOnBoundingRound(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &envelopeRecorder{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	ch := mustCreateGroupWithPolicies(t, store, "planning",
+		map[string]RespondPolicy{
+			"alex":         RespondNever,  // stimulus author + the misfire hand-off target
+			"nova-sparrow": RespondAlways, // the escalation chair
+			"ember-owl":    RespondAlways,
+			"iron-fox":     RespondAlways,
+		}, "alex", "nova-sparrow", "ember-owl", "iron-fox")
+	router.SetFloorControl(ch, true, time.Millisecond)
+	router.SetEscalationChair(ch, "nova-sparrow")
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 2, Convener: "ember-owl"})
+
+	// Round 1: a stalled floor round (recorder never replies) escalates → forced
+	// turn to the chair, arming the ISSUE-0099 stash. Sub-bound (round 1 < 2).
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "alex", Content: "thoughts?",
+	}, ""))
+	router.WaitForPendingFanout()
+	forced := 0
+	for _, env := range disp.snapshot() {
+		if env.ChairEscalation && !env.ChairEscalationResynthesize {
+			forced++
+		}
+	}
+	require.Equal(t, 1, forced, "round 1 escalates and arms the resynthesize stash")
+
+	// Round 2 (round 2 == max_rounds, the bounding round): the chair's reply
+	// misfires — it @-mentions only the RespondNever operator, so its floor-mention
+	// subset is empty. It crosses the bound; the resynthesize must be suppressed.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "nova-sparrow",
+		Content: "alex, your call?", Mentions: []string{"alex"},
+	}, ""))
+	router.WaitForPendingFanout()
+
+	assert.Empty(t, resynthesizeEnvelopes(disp),
+		"the bounding round closed the interaction — no resynthesize forced turn to reopen it")
+	_, _, tracked := router.openInteractionEscalationState(ch)
+	assert.False(t, tracked, "the interaction is closed and its id retired")
+}
+
 // TestBoundedClose_SuppressesEscalationOnBoundingRound pins the deep-review
 // ordering fix: when the bounding round is also a stall, the bounded close runs
 // BEFORE the chair-stall escalation and retires the id, so the escalation tail

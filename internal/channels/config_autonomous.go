@@ -47,6 +47,16 @@ const (
 	// control explicitly OFF, or on a degenerate <2-responder round, a cycle is a
 	// single message, so the same number bounds far fewer conversational rounds.
 	// Keep floor control on (the default) for the round reading to hold.
+	//
+	// The two paths also differ by one at the boundary, a consequence of the
+	// no-reopen ordering (bounded_close.go / fanout.go): the FLOOR path counts and
+	// closes AFTER the round runs, so the `max_rounds`-th round's discussion
+	// happens and then the interaction closes; the CONCURRENT path counts and
+	// closes BEFORE the dispatch, so the `max_rounds`-th message is NOT dispatched
+	// live — it reaches members only as the close-notification artifact. So on a
+	// concurrent (e.g. two-persona) roster `max_rounds` bounds `max_rounds - 1`
+	// live exchanges. Immaterial at the default; visible only at a tiny bound
+	// (`max_rounds = 1` on the concurrent path closes on the opening turn).
 	DefaultAutonomousMaxRounds = 12
 )
 
