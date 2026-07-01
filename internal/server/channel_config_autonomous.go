@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 
+	"go.uber.org/zap"
+
 	"github.com/mkhomutov/persatrix/internal/channels"
 )
 
@@ -171,6 +173,17 @@ func (s *Server) autonomousBaseline(ctx context.Context, id string, chairEnforce
 	if froze.Enabled != nil && *froze.Enabled {
 		convenable := froze.Convener != nil && s.convenerIsEnforceableMember(ctx, id, *froze.Convener)
 		if !convenable || !chairEnforceable {
+			// Dropping the whole armed block silently DISARMS the channel — a bigger
+			// blast radius than dropping a bare chair / reasoning knob — so surface it:
+			// an operator whose unrelated first edit disarmed their autonomous channel
+			// (because its convener or chair had drifted inert) gets a reason, not a
+			// mystery. Warn, don't reject — the drop itself is the deliberate
+			// lockout-avoidance posture this method's doc describes.
+			s.logger.Warn("channels: first-edit baseline dropped an armed autonomous block (channel disarmed) — convener or chair no longer enforceable",
+				zap.String("channel_id", id),
+				zap.Bool("convenable", convenable),
+				zap.Bool("chair_enforceable", chairEnforceable),
+			)
 			return nil // un-convenable or un-closeable armed block: drop it (mirror the chair)
 		}
 	}

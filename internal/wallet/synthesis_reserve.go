@@ -41,6 +41,20 @@ package wallet
 // metered summary to a single designated close-summarizer per RFC §D — are PR
 // 4b/OQ #5 calibration decisions, not accounting-layer ones).
 //
+// KNOWN GAP #2 (tracked, not fixed here): even when the clamp does NOT bite, the
+// `1` of `1 + N` under-sizes the CHAIR synthesis turn — and this is the more likely
+// §D failure of the two. [DefaultSynthesisCallReserveTokens] is derived from the
+// BOUNDED RFC 0020 summary (a fixed input window), but the chair turn synthesizes
+// over the FULL discussion context — its input scales with the discussion, up to
+// ~[SynthesisSoftBudgetTokens] worth of tokens — so its true per-call cost can
+// exceed the whole reserve on a large discussion under ANY cap, clamped or not.
+// When it does, the hard cap denies the CHAIR TURN ITSELF (not just a tail-end
+// persona summary), and "always produce an artifact" fails for the one artifact the
+// reserve most exists to protect. This is INDEPENDENT of and ADDITIVE to the clamp
+// gap above. The flat placeholder ships here; the real per-call reserve for the
+// chair turn — a FRACTION of the soft budget, not a flat unit — is the same PR
+// 4b/OQ #5 calibration decision (see the PR-plan "Deep-review follow-ups").
+//
 // PR 4a ships these DARK: AcquireLease still enforces only the hard cap, and no
 // bounded-close path consults the soft threshold or the eviction yet. PR 4b wires
 // the bounded close to [WalletService.InteractionSpend] / [SynthesisSoftBudgetTokens]
@@ -152,6 +166,15 @@ func (w *WalletService) InteractionSpend(interactionID string) int64 {
 // the map entry from zero, silently discarding the running total this call just
 // dropped and letting that lease's spend (plus everything after it) evade the
 // interaction's cost ceiling for the rest of that interaction's life.
+//
+// PR 4a ships NO barrier to ENFORCE that ordering — and it is not trivially
+// upheld: the close-path per-persona summaries are fire-and-forget background tasks
+// (agents/persona_runtime/close_path.py) spawned by N independent, CROSS-PROCESS
+// persona runtimes that close their views at independent times, so nothing here can
+// observe that all their (OQ #6-metered) leases have settled. PR 4b must supply the
+// settle ordering — an all-agents-finalized signal, or a settle/refcount barrier —
+// before calling this, rather than treating the precondition as a checkable caller
+// contract. See the RFC 0052 PR-plan "Deep-review follow-ups" [tracked].
 func (w *WalletService) EvictInteraction(interactionID string) bool {
 	if interactionID == "" {
 		return false
