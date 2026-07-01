@@ -26,6 +26,21 @@ package wallet
 // so an N-persona roster issues N metered summary calls on the shared per-
 // interaction budget — hence `1 + N`, not the fixed two an earlier framing assumed.
 //
+// KNOWN GAP (tracked, not fixed here): the half-cap clamp on [SynthesisReserveTokens]
+// guarantees the DISCUSSION a positive working budget, but on a small cap with a
+// large roster it can hold back LESS than the raw `1 + N` sizing calls for — the two
+// guarantees ("discussion survives" and "every persona's close summary is funded")
+// trade off against each other, and this accounting picks the former. When the clamp
+// bites, the close path can still exhaust the (smaller) reserve mid-close, and the
+// personas whose summary lease is then denied fall through to the RFC 0020 janitor's
+// `"[interaction summary unavailable]"` placeholder — the same documented floor as
+// any other non-budget synthesis failure, not a new failure mode, but one this
+// clamp can trigger under a realistic (modest cap, full-size roster) config. See the
+// RFC 0052 PR-plan "Deep-review follow-ups" for the tracked calibration item; PR 4a
+// does not attempt a fix (the alternatives — a per-roster minimum cap, or scoping the
+// metered summary to a single designated close-summarizer per RFC §D — are PR
+// 4b/OQ #5 calibration decisions, not accounting-layer ones).
+//
 // PR 4a ships these DARK: AcquireLease still enforces only the hard cap, and no
 // bounded-close path consults the soft threshold or the eviction yet. PR 4b wires
 // the bounded close to [WalletService.InteractionSpend] / [SynthesisSoftBudgetTokens]
@@ -35,18 +50,31 @@ package wallet
 // ONE close-path LLM call, used to size the reserve. It tracks the RFC 0020 close
 // summary's bounds (agents/persona_runtime/summarize_close.py:
 // SUMMARIZATION_TARGET_TOKENS=2000 input context + SUMMARIZATION_MAX_OUTPUT_TOKENS=1024
-// output ≈ 3024) with headroom for the prompt/envelope overhead and the chair
-// synthesis turn (the "1" of `1 + N`, bounded by the same Layer-0 depth cap). A
-// conservative default (RFC 0052 OQ #5); the calibration tracked-issue tunes it
-// after a soak on real rosters.
+// output ≈ 3024) with headroom for the prompt/envelope overhead.
+//
+// The SAME unit also stands in for the chair synthesis turn (the "1" of `1 + N`).
+// That is a distinct call shape — a goal-directed synthesis over the full discussion
+// context, not a bounded per-persona summary — and is NOT actually bounded in size by
+// this constant; the Layer-0 depth cap (RFC 0030) bounds recursion *depth*, not a
+// single call's token cost, so it is not a sizing argument for reusing this unit.
+// Reusing the summary-derived unit for the chair turn is a placeholder, not a
+// verified bound: a real per-call reserve for the chair turn is one of the OQ #5
+// calibration inputs (see the package doc's KNOWN GAP note), not settled by this
+// constant. A conservative default; the calibration tracked-issue tunes it after a
+// soak on real rosters.
 const DefaultSynthesisCallReserveTokens int64 = 3500
 
 // maxSynthesisReserveNumerator / maxSynthesisReserveDenominator cap the reserve at
 // HALF the cap, so the discussion always retains a positive working budget even
 // under a tiny per-interaction cap where the raw `1 + N` reserve would otherwise
-// swallow the whole ceiling and starve the conversation to nothing. The clamp only
-// bites for small caps; with a realistic cap the raw `(1 + N) × unit` reserve is a
-// small fraction. Expressed as a fraction (not a float) to stay integer-exact.
+// swallow the whole ceiling and starve the conversation to nothing. This clamp
+// protects the DISCUSSION, not the close: it does NOT scale down with roster size,
+// so it bites for any cap/roster combination where `(1 + N) × unit` exceeds half the
+// cap — which includes realistic configs, not only tiny caps (e.g. a full
+// [DefaultSalienceMaxChannelMembers]-sized roster against a "modest" six-figure cap
+// already exceeds it). When it bites, the close path is the one left under-funded —
+// see the package doc's KNOWN GAP note. Expressed as a fraction (not a float) to
+// stay integer-exact.
 const (
 	maxSynthesisReserveNumerator   int64 = 1
 	maxSynthesisReserveDenominator int64 = 2
@@ -94,7 +122,8 @@ func SynthesisSoftBudgetTokens(budgetTokens int64, rosterSize int) int64 {
 // the bounded close (PR 4b) compares against [SynthesisSoftBudgetTokens] to decide
 // when to synthesize-and-close. An untracked id (never seen, uncapped, already
 // evicted, or the empty id) reads as zero. Takes w.mu for the map read, the same
-// lock the grant/finalize helpers in interaction_budget.go hold.
+// (non-reentrant) lock the grant/finalize helpers in interaction_budget.go hold —
+// like those helpers, this must never be called while the caller already holds w.mu.
 func (w *WalletService) InteractionSpend(interactionID string) int64 {
 	if interactionID == "" {
 		return 0
@@ -113,7 +142,16 @@ func (w *WalletService) InteractionSpend(interactionID string) int64 {
 // close path's leases have settled — so the entry is released once the interaction
 // is done. Returns whether an entry was removed (idempotent: a second call, an
 // untracked id, or the empty id is a no-op returning false). Takes w.mu, the same
-// lock the grant/finalize helpers hold.
+// (non-reentrant) lock the grant/finalize helpers hold — must never be called while
+// the caller already holds w.mu.
+//
+// PRECONDITION the caller must uphold: every lease of interactionID must have
+// already settled (granted, then either finalized or reversed) before this is
+// called — including the close path's own leases, not just the discussion's. A
+// lease that grants (recordInteractionGrantLocked) AFTER this eviction re-creates
+// the map entry from zero, silently discarding the running total this call just
+// dropped and letting that lease's spend (plus everything after it) evade the
+// interaction's cost ceiling for the rest of that interaction's life.
 func (w *WalletService) EvictInteraction(interactionID string) bool {
 	if interactionID == "" {
 		return false

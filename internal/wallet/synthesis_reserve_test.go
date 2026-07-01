@@ -75,6 +75,30 @@ func TestSynthesisReserveTokens_ClampedSoDiscussionSurvives(t *testing.T) {
 	assert.LessOrEqual(t, reserve, budget/2, "the reserve is clamped to at most half the cap")
 }
 
+// TestSynthesisReserveTokens_ClampCanUnderfundClose pins a KNOWN, tracked gap (see
+// the package doc's KNOWN GAP note): the half-cap clamp protects the discussion, not
+// the close, and it does not scale down with roster size. So a REALISTIC config — a
+// full-size roster against a merely "modest" cap, not an extreme/tiny one — can still
+// clamp the reserve below what the 1+N sizing says the close path needs. This does
+// NOT assert a fix (none exists yet; it is PR 4b / OQ #5 calibration territory) — it
+// documents the tradeoff so a future change to the clamp or the default unit is forced
+// to consciously re-examine this case rather than silently shift it.
+func TestSynthesisReserveTokens_ClampCanUnderfundClose(t *testing.T) {
+	// 20 mirrors internal/channels.DefaultSalienceMaxChannelMembers — a full,
+	// realistic roster, not a contrived edge case. 100_000 is a "modest" cap, well
+	// above the tiny-cap regime the clamp doc-comment's rationale is framed around.
+	const fullRoster = 20
+	const modestBudget = int64(100_000)
+
+	raw := int64(1+fullRoster) * DefaultSynthesisCallReserveTokens // what 1+N calls for
+	reserve := SynthesisReserveTokens(modestBudget, fullRoster)
+
+	require.Greater(t, raw, modestBudget/2, "fixture must actually exercise the clamp")
+	assert.Less(t, reserve, raw,
+		"a full roster against a modest cap clamps the reserve below the 1+N sizing — "+
+			"the close path, not just a tiny/degenerate cap, can be under-funded")
+}
+
 // TestSynthesisSoftBudgetTokens_IsCapMinusReserve pins the soft threshold as the
 // exact complement of the reserve, and uncapped as no threshold (0).
 func TestSynthesisSoftBudgetTokens_IsCapMinusReserve(t *testing.T) {

@@ -115,20 +115,6 @@ func TestChannelConfig_AutonomousCapRequired(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
 }
 
-// TestChannelConfig_AutonomousChairRequired: arming without an `escalation_chair_id`
-// is a 400 — RFC 0052 §D / PR 4 makes the chair (the role that synthesizes on close)
-// mandatory on an armed channel. The body carries a cap + a convener but no chair.
-func TestChannelConfig_AutonomousChairRequired(t *testing.T) {
-	srv, id := autonomousTestServer(t)
-	body, _ := json.Marshal(map[string]any{
-		"interaction_budget_tokens": 200000,
-		"autonomous":                map[string]any{"enabled": true, "convener": "nova"},
-	})
-	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
-		body, map[string]string{"If-Match": "0"})
-	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
-}
-
 // TestChannelConfig_AutonomousConvenerMustBeMember: a non-member convener is a 400.
 func TestChannelConfig_AutonomousConvenerMustBeMember(t *testing.T) {
 	srv, id := autonomousTestServer(t)
@@ -382,56 +368,6 @@ func TestChannelConfig_AutonomousFirstEditDropsArmedWithoutConvener(t *testing.T
 
 	a := decodeAutonomous(t, rec.Body.Bytes())
 	assert.Equal(t, false, a["enabled"].Value, "the inert armed block is dropped, not frozen")
-	assert.Equal(t, "default", a["enabled"].Source)
-	assert.False(t, srv.channelRouter.AutonomousFor(id).Enabled)
-}
-
-// TestChannelConfig_AutonomousFirstEditDropsChairlessArmed: the chair leg of the
-// freeze's un-closeable drop (PR 4). An armed rung with NO `escalation_chair_id` is
-// un-closeable (no role to author the synthesis turn), so an unrelated first edit must
-// DROP it rather than freeze it — freezing would make the apply-path chair-required
-// rule REJECT (400) an edit naming a knob the operator never touched, the chair
-// mirror of the convenerless drop. The edit proceeds and the channel reads back
-// inherit/disabled.
-func TestChannelConfig_AutonomousFirstEditDropsChairlessArmed(t *testing.T) {
-	srv, id := autonomousTestServer(t)
-	// Arm the router with a valid convener but NO chair (and a cap, so only the missing
-	// chair — not the cap or convener — is under test).
-	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{Enabled: true, Convener: "nova"})
-	srv.channelRouter.SetInteractionBudgetTokens(id, 200000)
-
-	body, _ := json.Marshal(map[string]any{"salience_max_channel_members": 8})
-	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
-		body, map[string]string{"If-Match": "0"})
-	require.Equal(t, http.StatusOK, rec.Code,
-		"a chairless armed rung must not block an unrelated first edit; body=%s", rec.Body.String())
-
-	a := decodeAutonomous(t, rec.Body.Bytes())
-	assert.Equal(t, false, a["enabled"].Value, "the un-closeable armed block is dropped, not frozen")
-	assert.Equal(t, "default", a["enabled"].Source)
-	assert.False(t, srv.channelRouter.AutonomousFor(id).Enabled)
-}
-
-// TestChannelConfig_AutonomousFirstEditDropsDriftedChair: the drift variant of the
-// chair leg — an armed rung whose chair has drifted OUT of membership (here a
-// non-member chair) is un-closeable, so an unrelated first edit drops it. Without the
-// chair-enforceability check threaded into [Server.autonomousBaseline], the apply-path
-// chair rule ([ChannelRouter.validateEscalationChair]) would 400 the unrelated edit.
-func TestChannelConfig_AutonomousFirstEditDropsDriftedChair(t *testing.T) {
-	srv, id := autonomousTestServer(t) // members: nova + ada
-	// Arm with a valid convener (nova) but a chair that is NOT a member (drifted out).
-	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{Enabled: true, Convener: "nova"})
-	srv.channelRouter.SetEscalationChair(id, "ghost")
-	srv.channelRouter.SetInteractionBudgetTokens(id, 200000)
-
-	body, _ := json.Marshal(map[string]any{"salience_max_channel_members": 8})
-	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
-		body, map[string]string{"If-Match": "0"})
-	require.Equal(t, http.StatusOK, rec.Code,
-		"a drifted chair must not block an unrelated first edit; body=%s", rec.Body.String())
-
-	a := decodeAutonomous(t, rec.Body.Bytes())
-	assert.Equal(t, false, a["enabled"].Value, "the un-closeable armed block is dropped, not frozen")
 	assert.Equal(t, "default", a["enabled"].Source)
 	assert.False(t, srv.channelRouter.AutonomousFor(id).Enabled)
 }

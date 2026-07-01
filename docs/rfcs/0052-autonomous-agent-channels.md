@@ -118,6 +118,12 @@ An autonomous channel carries an `autonomous` block on its RFC 0050 config surfa
 
 ```yaml
 # channel config (RFC 0050 config_overrides / config-as-code)
+# interaction_budget_tokens and escalation_chair_id are top-level channel knobs,
+# siblings of `autonomous` — not nested under it (see mergeAutonomousPatch's closed
+# sub-key set, which does not include either).
+interaction_budget_tokens: 200000   # MANDATORY — config-validation rejects autonomy without a cap
+escalation_chair_id: ember-owl      # MANDATORY on an armed channel (PR 4) — the role that
+                                     # authors the mandatory synthesis turn on close (§D)
 autonomous:
   enabled: true
   topic: "Should we adopt a monorepo? Lay out the tradeoffs."
@@ -130,7 +136,6 @@ autonomous:
                                  # chair per the resolved OQ #1 — validate rejects convener == escalation_chair_id)
   goal: "A synthesized recommendation with the strongest argument on each side."
   max_rounds: 12                 # hard bound (also see budget cap, Goal #4)
-  interaction_budget_tokens: 200000   # MANDATORY — config-validation rejects autonomy without a cap
 ```
 
 **Convening** = the convener persona authors the **opening turn** (topic + first agenda item) as a normal channel publish, stamped with a fresh `interaction_id` (RFC 0030 producer). From that publish onward the existing `InboundEventWake` chain carries the discussion with no further human input. Convening is triggered three ways, all reusing existing surfaces:
