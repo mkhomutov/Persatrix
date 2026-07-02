@@ -134,14 +134,20 @@ func (r *ChannelRouter) advanceBoundedCloseRound(channelID, stampedID string) (s
 // is crossed, closes the interaction. A send-side teardown, never an await;
 // every degraded branch nets to "no close" (the status quo).
 //
-// Returns whether the bound was crossed and the close fired (or the interaction
-// was already closing) — `true` means the interaction is retired, so the caller
-// MUST skip any follow-on work that would re-open it: a forced chair turn
-// (maybeEscalateStall) or, on the concurrent path, the stimulus dispatch itself
-// (fanout.go). `false` means the interaction is still open and the caller
-// proceeds unchanged. A no-op returning `false` on human channels (autonomous
-// disabled) and on untracked/diverged traffic, so ordinary channels are
-// byte-for-byte unchanged.
+// Returns (closed, stale). `closed` — the bound was crossed and the close fired
+// (or the interaction was already closing): the interaction is retired, so the
+// caller MUST skip any follow-on work that would re-open it — a forced chair
+// turn (maybeEscalateStall) or, on the concurrent path, the stimulus dispatch
+// itself (fanout.go). `stale` — no close fired here, but the stamped stimulus no
+// longer belongs to an open committed interaction (a sibling close or rotation
+// landed between its commit and this tail): the concurrent dispatch must ALSO be
+// skipped, since fanning it would draw LLM replies into a discussion that
+// already terminated — replies the publish-path no-reopen latch then absorbs
+// with the spend already spent (PR #716 review; the resynthesize dispatch's
+// openness re-check is this same rule at its own seam). (false, false) — the
+// interaction is open and the caller proceeds unchanged; always the pair on
+// human channels (autonomous disabled), so ordinary channels are byte-for-byte
+// unchanged.
 //
 // `channelSize` (the fanout's member count) is a conservative upper bound on the
 // roster size N the reserve is sized for (`1 + N` close-path calls): it includes
@@ -153,16 +159,16 @@ func (r *ChannelRouter) advanceBoundedCloseRound(channelID, stampedID string) (s
 // `dispatchPending` says the caller's dispatch for THIS cycle has not happened
 // yet and a close would withhold it (the concurrent path's close-before-dispatch
 // ordering; false on the floor path, whose round has already run).
-func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, channelSize int, dispatchPending bool) bool {
+func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, channelSize int, dispatchPending bool) (closed, stale bool) {
 	a := r.AutonomousFor(msg.ChannelID)
 	if !a.Enabled {
-		return false // OQ #2 scope gate: human channels are untouched.
+		return false, false // OQ #2 scope gate: human channels are untouched.
 	}
 	// One locked read of the resolver entry: the open committed id, the stamped-
 	// divergence guard, and the round advance fold into a single acquisition.
 	interactionID, round, ok := r.advanceBoundedCloseRound(msg.ChannelID, readInteractionID(msg.Metadata))
 	if !ok {
-		return false
+		return false, true
 	}
 	// §D artifact guarantee (PR #716 review): never close before the
 	// interaction's FIRST live dispatch. With the dispatch still pending, a
@@ -176,7 +182,7 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	// `max_rounds = 1` the same meaning on both paths: one live exchange, then
 	// close — the floor path's bounding round has already run when it counts.
 	if dispatchPending && round == 1 {
-		return false
+		return false, false
 	}
 
 	// AutonomousFor returns a NORMALIZED config on every path (SetAutonomous
@@ -214,7 +220,7 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	}
 
 	if !roundExceeded && !budgetExceeded {
-		return false
+		return false, false
 	}
 	// Prefer the cost label when spend crossed the soft budget (the reserve
 	// earned its keep); otherwise it is the structural (max_rounds) bound.
@@ -223,7 +229,7 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 		trigger = costTrigger
 	}
 	r.boundedClose(ctx, msg, ct, interactionID, trigger)
-	return true
+	return true, false
 }
 
 // boundedClose runs the artifact-bearing close teardown for an autonomous

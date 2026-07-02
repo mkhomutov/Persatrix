@@ -160,18 +160,22 @@ type previousClose struct {
 // resolveInteractionID returns the open interaction id for `channelID`,
 // minting or rotating as needed, and is the ONLY writer of the governance
 // interaction key space (IP2). `inbound` is the publisher's claim, used for
-// the divergence debug log and — when `latchClaim` is set (an AUTONOMOUS
-// channel, publishCommit's scope decision) — for the RFC 0052 no-reopen
-// latch: a claim naming a deliberately closed interaction is KEPT, not
-// overridden, and the fourth return reports it. The latch reads the ledger in
-// the SAME critical section that would otherwise mint, so a concurrent close
-// cannot slip between the decision and the mint (PR #716 review; the ledger's
-// story lives in interaction_close_latch.go). A latched resolve touches no
-// resolver state: the settle hook is a no-op and the close-cause attribution
-// is zero (the publish is the closed record's tail, not a successor's
-// boundary signal). Seam firing and telemetry run outside interactionMu — the
-// discard seams take their own leaf mutexes, and holding two governance
-// mutexes at once would mint a lock-ordering edge no other path has.
+// the divergence debug log and — on an AUTONOMOUS channel — for the RFC 0052
+// no-reopen latch: a claim naming a deliberately closed interaction is KEPT,
+// not overridden, and the fourth return reports it. The latch SCOPE (OQ #2)
+// is resolved HERE, not by the caller (PR #716 review): the resolver already
+// holds the channel id, so deriving the gate beside the ledger read it gates
+// keeps the rule in one place — a future publish-adjacent caller (a standing
+// convene, a synthesis dispatch) cannot silently opt out by copying a
+// latch-less call shape. The latch reads the ledger in the SAME critical
+// section that would otherwise mint, so a concurrent close cannot slip
+// between the decision and the mint (the ledger's story lives in
+// interaction_close_latch.go). A latched resolve touches no resolver state:
+// the settle hook is a no-op and the close-cause attribution is zero (the
+// publish is the closed record's tail, not a successor's boundary signal).
+// Seam firing and telemetry run outside interactionMu — the discard seams
+// take their own leaf mutexes, and holding two governance mutexes at once
+// would mint a lock-ordering edge no other path has.
 //
 // The second return is the channel's OQ 5 close-cause attribution (the most
 // recently closed id + its trigger, zero when none) — read under the same
@@ -194,8 +198,17 @@ type previousClose struct {
 // growth), and a throttled participant's in-window retries hold its own
 // exhausted interaction open forever, so the idle rotation that would reset
 // its budget never fires.
-func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID string, ct ChannelType, inbound string, latchClaim bool) (string, previousClose, func(persisted bool), bool) {
+func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID string, ct ChannelType, inbound string) (string, previousClose, func(persisted bool), bool) {
 	now := r.interactionNow()
+
+	// The latch scope gate: only a stamped claim on an autonomous channel can
+	// latch — human channels never latch and keep minting fresh (byte-for-byte
+	// unchanged), and an unstamped publish (the operator, the convener's
+	// opening turn) never latches, so the channel stays re-convenable (IP8).
+	// AutonomousFor takes its own leaf mutex, read BEFORE interactionMu below,
+	// so the resolve still holds one governance mutex at a time; the
+	// short-circuit keeps unstamped (human) traffic off that mutex entirely.
+	latchClaim := inbound != "" && r.AutonomousFor(channelID).Enabled
 
 	r.interactionMu.Lock()
 	entry := r.openInteractions[channelID]

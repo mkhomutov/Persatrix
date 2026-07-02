@@ -47,17 +47,9 @@ func liveDispatches(disp *envelopeRecorder) int {
 // fanout-tail guards could not reach, because the straggler arrives on its own
 // publish, outside the closing fanout's call frame.
 func TestPostCloseLatch_StragglerClaimDoesNotReopen(t *testing.T) {
-	store := newTestStore(t, SQLiteOptions{})
-	disp := &envelopeRecorder{}
-	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
-	// Floor control OFF → the concurrent path, whose dispatched replies
+	// The concurrent-path stage (bounded_close_test.go): dispatched replies
 	// re-enter Publish — the racing-sibling shape.
-	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
-		map[string]RespondPolicy{
-			"operator":  RespondNever,
-			"ember-owl": RespondAlways,
-		}, "operator", "ember-owl")
-	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 2, Convener: "ember-owl"})
+	router, disp, ch, _ := concurrentCloseHarness(t, 2)
 
 	tick(t, router, ch) // round 1: dispatched live
 	closedID, _, tracked := router.openInteractionEscalationState(ch)
@@ -145,15 +137,7 @@ func TestPostCloseLatch_ForeignChannelCloseNeverLatches(t *testing.T) {
 // — reopening the unattended channel. The ledger spans generations, so the
 // claim latches regardless of how many closes landed since.
 func TestPostCloseLatch_SurvivesSuccessorGenerations(t *testing.T) {
-	store := newTestStore(t, SQLiteOptions{})
-	disp := &envelopeRecorder{}
-	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
-	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
-		map[string]RespondPolicy{
-			"operator":  RespondNever,
-			"ember-owl": RespondAlways,
-		}, "operator", "ember-owl")
-	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 2, Convener: "ember-owl"})
+	router, disp, ch, _ := concurrentCloseHarness(t, 2)
 
 	// Generation A: opens on round 1, bounded-closes on round 2.
 	tick(t, router, ch)
@@ -193,35 +177,45 @@ func TestPostCloseLatch_SurvivesSuccessorGenerations(t *testing.T) {
 }
 
 // TestPostCloseLatch_LatchDecisionIsInsideTheResolve — the PR #716 review
-// TOCTOU pin, at the resolver seam: once markInteractionClosed has run, a
-// latch-scoped resolve of the closed claim returns the claim itself (latched,
-// no mint, zero close-cause, no-op settle), because the decision and the
-// would-be mint share one interactionMu critical section. The round-5 shape —
-// predicate on the publish path, resolve in a second acquisition — let a
-// close land between the two and mint fresh for the very straggler the latch
-// suppresses; with the decision inside the resolve there is no "between".
+// TOCTOU pin, at the resolver seam: once markInteractionClosed has run, an
+// autonomous channel's resolve of the closed claim returns the claim itself
+// (latched, no mint, zero close-cause, no-op settle), because the decision and
+// the would-be mint share one interactionMu critical section. The round-5
+// shape — predicate on the publish path, resolve in a second acquisition —
+// let a close land between the two and mint fresh for the very straggler the
+// latch suppresses; with the decision inside the resolve there is no
+// "between". The scope gate is likewise the RESOLVER's own (derived from the
+// channel's autonomous config), so the human leg below drives the production
+// disabled-default rather than a caller-supplied flag.
 func TestPostCloseLatch_LatchDecisionIsInsideTheResolve(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
 	router := NewChannelRouter(store, &envelopeRecorder{}, zap.NewNop(), nil)
 	ch := "group:atomic-latch"
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, Convener: "ember-owl"})
 	ctx := context.Background()
 
-	id, _, settle, latched := router.resolveInteractionID(ctx, ch, ChannelTypeGroup, "", false)
+	id, _, settle, latched := router.resolveInteractionID(ctx, ch, ChannelTypeGroup, "")
 	require.False(t, latched)
 	settle(true)
 	router.markInteractionClosed(ch, id, structuralTrigger)
 
 	// The straggler's resolve, an instant after the close.
-	got, prev, _, nowLatched := router.resolveInteractionID(ctx, ch, ChannelTypeGroup, id, true)
+	got, prev, _, nowLatched := router.resolveInteractionID(ctx, ch, ChannelTypeGroup, id)
 	assert.True(t, nowLatched, "a deliberately closed claim latches inside the resolve")
 	assert.Equal(t, id, got, "the latched resolve rides the closed id — no mint")
 	assert.Empty(t, prev.id, "a latched publish carries no close-cause attribution (it is the closed record's tail)")
 
-	// The same claim WITHOUT the autonomous latch scope (a human channel's
-	// publish): IP2 overrides and mints fresh, byte-for-byte unchanged.
-	fresh, _, settleFresh, humanLatched := router.resolveInteractionID(ctx, ch, ChannelTypeGroup, id, false)
+	// The same close-then-claim shape on a channel OUTSIDE the latch scope
+	// (autonomous stays the disabled default — a human channel): the ledger is
+	// written all the same, but the resolver's scope gate declines it and IP2
+	// overrides and mints fresh, byte-for-byte unchanged.
+	chHuman := "group:atomic-latch-human"
+	idHuman, _, settleHuman, _ := router.resolveInteractionID(ctx, chHuman, ChannelTypeGroup, "")
+	settleHuman(true)
+	router.markInteractionClosed(chHuman, idHuman, structuralTrigger)
+	fresh, _, settleFresh, humanLatched := router.resolveInteractionID(ctx, chHuman, ChannelTypeGroup, idHuman)
 	assert.False(t, humanLatched)
-	assert.NotEqual(t, id, fresh, "outside the latch scope the closed claim still mints fresh (IP2)")
+	assert.NotEqual(t, idHuman, fresh, "outside the latch scope the closed claim still mints fresh (IP2)")
 	settleFresh(false)
 }
 

@@ -178,16 +178,18 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	//     `max_rounds = 1` delivers the opening turn live and closes on the next
 	//     tail, so every close leaves an artifact (§D).
 	//
-	// A `true` return means the id is retired, so every follow-on that could
+	// A `closed` return means the id is retired, so every follow-on that could
 	// revive the interaction is skipped: the stall escalation (a forced chair
 	// turn's reply would mint fresh and reopen), the concurrent stimulus
 	// dispatch, and the pending ISSUE-0099 re-force (its reply is not a floor
 	// speaker, so it too would re-enter Publish and mint fresh — the arm died
 	// with the retired interaction, and no consumed-arm cleanup is owed). A
-	// no-op returning false on human channels (autonomous disabled → the hook
-	// returns before touching state) and on sub-bound rounds, so ordinary
-	// channels and mid-discussion rounds proceed byte-for-byte unchanged.
-	if r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize, !floorPath) {
+	// `stale` return gates only the concurrent dispatch below. A (false, false)
+	// no-op on human channels (autonomous disabled → the hook returns before
+	// touching state) and on sub-bound rounds, so ordinary channels and
+	// mid-discussion rounds proceed byte-for-byte unchanged.
+	closed, stale := r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize, !floorPath)
+	if closed {
 		if !floorPath {
 			// The withheld dispatch is the one mark/clear seam with NO reply to
 			// re-enter publishCommit — the same "no reply can ever clear it"
@@ -213,6 +215,24 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// await (CE7).
 	if floorPath {
 		r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
+	} else if stale {
+		// PR #716 review: the stimulus outlived its interaction — a sibling
+		// fanout's close (or a rotation) landed between this publish's commit
+		// and its tail. Dispatching it would fan a terminated discussion's
+		// stimulus live and draw LLM replies the publish-path no-reopen latch
+		// then absorbs with the spend already spent; withholding keeps that
+		// wasted fan-out off the wire, the same close-before-dispatch goal as
+		// the ordering above (the resynthesize dispatch runs the same openness
+		// rule at its own seam, chair_escalation.go). The head's activity marks
+		// are cleared like the close branch's: the withheld dispatch has no
+		// reply to re-enter publishCommit and clear them.
+		for _, id := range respIDs {
+			r.clearActivity(msg.ChannelID, id)
+		}
+		r.logger.Debug("channels: concurrent stimulus outlived its interaction; dispatch withheld",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("message_id", msg.ID),
+			zap.String("stamped_interaction_id", readInteractionID(msg.Metadata)))
 	} else {
 		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions)
 	}

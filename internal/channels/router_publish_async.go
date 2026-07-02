@@ -224,15 +224,12 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// latch DECISION lives inside resolveInteractionID's critical section:
 	// deciding it here and resolving there raced a concurrent bounded close
 	// into minting fresh for the very straggler the latch suppresses (review
-	// #716, the TOCTOU fix). `latchClaim` is this path's scope gate (OQ #2):
-	// human channels never latch and keep minting fresh, byte-for-byte
-	// unchanged; an unstamped publish (the operator, the convener's opening
-	// turn) never latches, so the channel stays re-convenable (IP8). Ledger
-	// scope and lifetime — channel-scoped, deliberate closes only, spanning
-	// generations — live in interaction_close_latch.go.
+	// #716, the TOCTOU fix). The SCOPE gate (OQ #2 — autonomous channels only,
+	// stamped claims only) is the resolver's own, beside the ledger read it
+	// gates. Ledger scope and lifetime — channel-scoped, deliberate closes
+	// only, spanning generations — live in interaction_close_latch.go.
 	inboundClaim := readInteractionID(msg.Metadata)
-	latchClaim := inboundClaim != "" && r.AutonomousFor(msg.ChannelID).Enabled
-	resolvedInteractionID, prevClose, settleInteraction, latched := r.resolveInteractionID(ctx, msg.ChannelID, derivedType, inboundClaim, latchClaim)
+	resolvedInteractionID, prevClose, settleInteraction, latched := r.resolveInteractionID(ctx, msg.ChannelID, derivedType, inboundClaim)
 	if latched {
 		r.logger.Debug("channels: post-close claim latched on autonomous channel; publish rides the closed interaction",
 			zap.String("channel_id", msg.ChannelID),

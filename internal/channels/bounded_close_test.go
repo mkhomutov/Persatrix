@@ -57,6 +57,31 @@ func boundedCloseHarness(t *testing.T, enabled bool, maxRounds int) (*ChannelRou
 	return router, disp, ch, reader
 }
 
+// concurrentCloseHarness is boundedCloseHarness's CONCURRENT-path sibling
+// (PR #716 review — one stage for the six tests that hand-rolled it): the same
+// autonomous group with floor control OFF and a single responder, so every
+// publish falls through to dispatchConcurrent and the bounded close runs at
+// that tail; here the tally counts messages, not floor rounds. Autonomous is
+// always ON — the human-channel regression rides the floor harness.
+func concurrentCloseHarness(t *testing.T, maxRounds int) (*ChannelRouter, *envelopeRecorder, string, *sdkmetric.ManualReader) {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+	ctr, err := mp.Meter("test").Int64Counter("channel.conversation.interaction_closed")
+	require.NoError(t, err)
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &envelopeRecorder{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), &RouterMetrics{InteractionClosed: ctr})
+	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
+		map[string]RespondPolicy{
+			"operator":  RespondNever, // the stimulus author (no seat in the discussion)
+			"ember-owl": RespondAlways,
+		}, "operator", "ember-owl")
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: maxRounds, Convener: "ember-owl"})
+	return router, disp, ch, reader
+}
+
 // tick publishes one open-floor stimulus from the operator seat; with the
 // recorder never replying it is one stalled floor round.
 func tick(t *testing.T, router *ChannelRouter, ch string) {
@@ -183,21 +208,7 @@ func TestBoundedClose_ClosesOnTheBoundingRound(t *testing.T) {
 // through dispatchConcurrent, and the bounded close must still fire there. Here
 // the tally counts messages (no floor round), so max_rounds=2 closes on the 2nd.
 func TestBoundedClose_ConcurrentPathClosesInteraction(t *testing.T) {
-	reader := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
-	ctr, err := mp.Meter("test").Int64Counter("channel.conversation.interaction_closed")
-	require.NoError(t, err)
-	store := newTestStore(t, SQLiteOptions{})
-	router := NewChannelRouter(store, &envelopeRecorder{}, zap.NewNop(), &RouterMetrics{InteractionClosed: ctr})
-	// Floor control deliberately left OFF → the fanout falls through to the
-	// concurrent path and maybeBoundedClose runs at that tail instead.
-	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
-		map[string]RespondPolicy{
-			"operator":  RespondNever,
-			"ember-owl": RespondAlways,
-		}, "operator", "ember-owl")
-	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 2, Convener: "ember-owl"})
+	router, _, ch, reader := concurrentCloseHarness(t, 2)
 
 	tick(t, router, ch)
 	assert.Zero(t, closedCount(t, reader, structuralTrigger), "no close before the round bound")
@@ -355,16 +366,7 @@ func TestBoundedClose_SuppressesEscalationOnBoundingRound(t *testing.T) {
 // stimuli (rounds 1 and 2); the fix leaves exactly one (round 1) plus one close
 // notification.
 func TestBoundedClose_ConcurrentPathDoesNotDispatchBoundingStimulus(t *testing.T) {
-	store := newTestStore(t, SQLiteOptions{})
-	disp := &envelopeRecorder{}
-	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
-	// Floor control OFF → every publish takes the concurrent path.
-	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
-		map[string]RespondPolicy{
-			"operator":  RespondNever, // stimulus author
-			"ember-owl": RespondAlways,
-		}, "operator", "ember-owl")
-	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 2, Convener: "ember-owl"})
+	router, disp, ch, _ := concurrentCloseHarness(t, 2)
 
 	tick(t, router, ch) // round 1: dispatched normally
 	tick(t, router, ch) // round 2 == max_rounds: closes; the stimulus must NOT be dispatched
@@ -400,16 +402,7 @@ func TestBoundedClose_ConcurrentPathDoesNotDispatchBoundingStimulus(t *testing.T
 // `max_rounds = 1` has on the floor path (whose bounding round runs before it
 // counts — TestBoundedClose_ClosesOnTheBoundingRound).
 func TestBoundedClose_ConcurrentPathTinyBoundStillDeliversOpener(t *testing.T) {
-	store := newTestStore(t, SQLiteOptions{})
-	disp := &envelopeRecorder{}
-	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
-	// Floor control OFF → every publish takes the concurrent path.
-	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
-		map[string]RespondPolicy{
-			"operator":  RespondNever,
-			"ember-owl": RespondAlways,
-		}, "operator", "ember-owl")
-	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 1, Convener: "ember-owl"})
+	router, disp, ch, _ := concurrentCloseHarness(t, 1)
 
 	tick(t, router, ch) // round 1 == max_rounds — but it is the opening turn
 	router.WaitForPendingFanout()
@@ -449,17 +442,7 @@ func TestBoundedClose_ConcurrentPathTinyBoundStillDeliversOpener(t *testing.T) {
 // the console strands every responder "thinking" for the full activityTTL
 // (90s) on a discussion that just terminated.
 func TestBoundedClose_ConcurrentPathClearsActivityMarks(t *testing.T) {
-	store := newTestStore(t, SQLiteOptions{})
-	disp := &envelopeRecorder{}
-	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
-	// Floor control OFF → every publish takes the concurrent path, whose
-	// bounding round withholds the stimulus dispatch.
-	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
-		map[string]RespondPolicy{
-			"operator":  RespondNever,
-			"ember-owl": RespondAlways,
-		}, "operator", "ember-owl")
-	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 2, Convener: "ember-owl"})
+	router, _, ch, _ := concurrentCloseHarness(t, 2)
 
 	tick(t, router, ch) // round 1: dispatched live; the mark stands until a reply or the TTL
 	tick(t, router, ch) // round 2 == max_rounds: close fires, dispatch withheld
@@ -467,4 +450,42 @@ func TestBoundedClose_ConcurrentPathClearsActivityMarks(t *testing.T) {
 
 	assert.Empty(t, router.ChannelActivity(ch),
 		"the withheld bounding dispatch draws no reply — the close must clear the responders' thinking marks, not strand them until the TTL")
+}
+
+// TestBoundedClose_ConcurrentPathStaleStimulusNotDispatched — the PR #716
+// review racing-sibling pin: a concurrent-path fanout whose stimulus committed
+// BEFORE a sibling's bounded close but whose tail runs AFTER it must not
+// dispatch — the stimulus outlived its interaction, and fanning it live would
+// draw LLM replies into the terminated discussion (replies the no-reopen latch
+// then absorbs, with the spend already spent). maybeBoundedClose's `stale`
+// return distinguishes exactly this from a live sub-bound round; pre-fix both
+// fell into the same `false` and the stale stimulus fanned. The tail is driven
+// directly (fanout with the retired id stamped) because everything downstream
+// of the commit is fanout's — the sibling interleaving has no deterministic
+// seam through Publish.
+func TestBoundedClose_ConcurrentPathStaleStimulusNotDispatched(t *testing.T) {
+	router, disp, ch, reader := concurrentCloseHarness(t, 2)
+
+	tick(t, router, ch) // round 1: opens the interaction, dispatched live
+	staleID, _, tracked := router.openInteractionEscalationState(ch)
+	require.True(t, tracked)
+	tick(t, router, ch) // round 2 == max_rounds → the "sibling" close retires the id
+	router.WaitForPendingFanout()
+	_, _, tracked = router.openInteractionEscalationState(ch)
+	require.False(t, tracked, "the sibling bounded close retired the id")
+	require.Equal(t, int64(1), closedCount(t, reader, structuralTrigger))
+	before := liveDispatches(disp)
+
+	// The racing sibling's tail: its stimulus committed under the now-retired
+	// id (resolver-stamped pre-close) and its detached fanout runs only now.
+	router.fanout(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "operator", Content: "raced the close",
+		Metadata: map[string]any{interactionIDMetadataKey: staleID},
+	}, ChannelTypeGroup, "")
+
+	assert.Equal(t, before, liveDispatches(disp),
+		"a stale stimulus is withheld — dispatching it would draw replies into a closed discussion")
+	assert.Equal(t, int64(1), closedCount(t, reader, structuralTrigger), "and the stale tail does not double-close")
+	assert.Empty(t, router.ChannelActivity(ch),
+		"the withheld dispatch clears its head marks — no reply will ever re-enter to clear them")
 }

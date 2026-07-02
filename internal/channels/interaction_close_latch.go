@@ -38,8 +38,9 @@ package channels
 // posture a discussion surviving an idle rotation depends on. The ledger is
 // per-entry, so it is channel-scoped by construction: a forged claim naming a
 // FOREIGN channel's closed id never latches and keeps the IP2 override.
-// Whether the ledger is CONSULTED is the caller's autonomous-only decision
-// (publishCommit) — human channels never latch, byte-for-byte unchanged.
+// Whether the ledger is CONSULTED is the resolver's own autonomous-only scope
+// gate (resolveInteractionID, PR #716 review) — human channels never latch,
+// byte-for-byte unchanged.
 //
 // LIFETIME. In-memory, dies with the process like the rest of the resolver
 // table (IP5): a straggler arriving after a restart mints fresh, the accepted
@@ -59,9 +60,13 @@ const postCloseLatchGenerations = 8
 
 // rememberClosed appends a deliberately closed interaction id to the
 // channel's no-reopen ledger (newest last), evicting the oldest past
-// [postCloseLatchGenerations]. Idempotent for an id already on the ledger (a
-// second close notification for the same id must not spend a generation
-// slot). Caller holds interactionMu.
+// [postCloseLatchGenerations]. The Contains guard is DEFENSIVE ONLY: no
+// production path closes the same id twice today — both close causes sit
+// behind the single-shot tombstone CAS under endVoteMu, and ids are minted
+// fresh per generation, so a double-remember has no live producer (PR #716
+// review). It stays as cheap insurance for a future second close path (the
+// ledger outlives the tombstone, so the CAS alone would not cover one).
+// Caller holds interactionMu.
 func (e *openInteraction) rememberClosed(interactionID string) {
 	if slices.Contains(e.recentlyClosed, interactionID) {
 		return

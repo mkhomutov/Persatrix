@@ -396,12 +396,12 @@ func (r *ChannelRouter) dispatchResynthesizeMisfire(
 	// (a floor speaker's reply runs processEndVote mid-round) or an idle
 	// rotation on a concurrent publish to retire the interaction. The
 	// bounded-close gate in fanout.go cannot stand in for this check: its
-	// `false` conflates "sub-bound" with "diverged/closed", and it is inert on
-	// human channels — where a re-forced turn onto a retired id draws a chair
-	// reply that mints FRESH and REOPENS the closed discussion (no post-close
-	// latch there). Re-checking here restores the pre-split guard-beside-
-	// dispatch adjacency; the residual window is dispatch-call jitter, the
-	// accepted pre-4b-i posture. Dropping is correct, not a loss: the
+	// `stale` return distinguishes "diverged/closed" from "sub-bound" only on
+	// AUTONOMOUS channels — the gate is inert on human ones, where a re-forced
+	// turn onto a retired id draws a chair reply that mints FRESH and REOPENS
+	// the closed discussion (no post-close latch there). Re-checking here
+	// restores the pre-split guard-beside-dispatch adjacency; the residual
+	// window is dispatch-call jitter, the accepted pre-4b-i posture. Dropping is correct, not a loss: the
 	// interaction the re-force was owed to is over, and the arm died with it
 	// (no consumed-arm cleanup is owed — the claim's contract). Silent like the
 	// bounding-round drop, debug-logged like the claim's divergence branch.

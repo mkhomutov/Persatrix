@@ -32,7 +32,7 @@ import (
 // interaction without a stalling setup publish.
 func commitOpenInteraction(t *testing.T, router *ChannelRouter, ch string) string {
 	t.Helper()
-	id, _, settle, _ := router.resolveInteractionID(context.Background(), ch, ChannelTypeGroup, "", false)
+	id, _, settle, _ := router.resolveInteractionID(context.Background(), ch, ChannelTypeGroup, "")
 	settle(true)
 	return id
 }
