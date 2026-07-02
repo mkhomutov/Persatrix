@@ -54,8 +54,6 @@ package channels
 import (
 	"context"
 
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 
 	"github.com/mkhomutov/persatrix/internal/wallet"
@@ -93,24 +91,40 @@ func (r *ChannelRouter) SetInteractionSpender(s interactionSpender) {
 	r.spend = s
 }
 
-// advanceInteractionRound increments and returns the bounded-close round tally
-// for the channel's open interaction, but only while it still matches
-// interactionID and is committed (a rotation/close between the fanout tail's
-// read and this advance drops it). Returns (0, false) when the interaction moved
-// on. Rides the resolver entry under interactionMu, the CE5-ration pattern.
+// advanceBoundedCloseRound reads the channel's open committed interaction and,
+// unless a stamped divergence shows the fanout outlived it, increments and
+// returns the bounded-close round tally — all in ONE interactionMu acquisition.
+// It folds what used to be three locked reads on the fanout tail (an
+// openInteractionEscalationState id read, the divergence guard, and a separate
+// round advance) into a single critical section, closing the TOCTOU window
+// between them (the entry could rotate mid-read, forcing an extra guard) and one
+// lock+lookup on the autonomous hot path.
+//
+// `stampedID` is the interaction id stamped on the triggering message
+// ([readInteractionID] of msg.Metadata); "" (unstamped) tolerantly falls through,
+// the [ChannelRouter.maybeEscalateStall] posture. Returns (interactionID, round,
+// true) on a live advance; ("", 0, false) when there is no open committed
+// interaction to bound, or the fanout diverged from the one it was stamped for.
+// Rides the resolver entry under interactionMu, the CE5-ration pattern.
 //
 // UNIT: one tick per fanout cycle — a full floor round under floor control (the
 // expected autonomous posture), a single message without it. See
 // [DefaultAutonomousMaxRounds] for why the two differ.
-func (r *ChannelRouter) advanceInteractionRound(channelID, interactionID string) (int, bool) {
+func (r *ChannelRouter) advanceBoundedCloseRound(channelID, stampedID string) (string, int, bool) {
 	r.interactionMu.Lock()
 	defer r.interactionMu.Unlock()
 	entry := r.openInteractions[channelID]
-	if entry == nil || entry.id != interactionID || !entry.idCommitted {
-		return 0, false
+	if entry == nil || entry.id == "" || !entry.idCommitted {
+		return "", 0, false // no open committed interaction to bound.
+	}
+	// Divergence guard (mirrors maybeEscalateStall): a fanout that outlived its
+	// interaction — a concurrent rotation/close moved the open id on between the
+	// stimulus commit and this tail — must not advance or close the successor.
+	if stampedID != "" && stampedID != entry.id {
+		return "", 0, false
 	}
 	entry.roundCount++
-	return entry.roundCount, true
+	return entry.id, entry.roundCount, true
 }
 
 // maybeBoundedClose is the RFC 0052 §D deterministic bounded-close trigger, run
@@ -140,17 +154,9 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	if !a.Enabled {
 		return false // OQ #2 scope gate: human channels are untouched.
 	}
-	interactionID, _, tracked := r.openInteractionEscalationState(msg.ChannelID)
-	if !tracked {
-		return false // no open committed interaction to bound.
-	}
-	// Divergence guard (mirrors maybeEscalateStall): a fanout that outlived its
-	// interaction — a concurrent rotation/close moved the open id on between the
-	// stimulus commit and this tail — must not advance or close the successor.
-	if stamped := readInteractionID(msg.Metadata); stamped != "" && stamped != interactionID {
-		return false
-	}
-	round, ok := r.advanceInteractionRound(msg.ChannelID, interactionID)
+	// One locked read of the resolver entry: the open committed id, the stamped-
+	// divergence guard, and the round advance fold into a single acquisition.
+	interactionID, round, ok := r.advanceBoundedCloseRound(msg.ChannelID, readInteractionID(msg.Metadata))
 	if !ok {
 		return false
 	}
@@ -241,10 +247,5 @@ func (r *ChannelRouter) recordInteractionClosedBounded(ctx context.Context, msg 
 		zap.String("interaction_id", interactionID),
 		zap.String("trigger", trigger),
 	)
-	if r.metrics != nil && r.metrics.InteractionClosed != nil {
-		r.metrics.InteractionClosed.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("channel_type", string(ct)),
-			attribute.String("trigger", trigger),
-		))
-	}
+	r.recordInteractionClosedMetric(ctx, ct, trigger)
 }

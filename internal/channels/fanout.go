@@ -153,12 +153,17 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 		// reopen is not a corner case: any autonomous round with a single
 		// responder (e.g. a two-persona roster) takes this path even under floor
 		// control, and dispatch-then-close would loop convene→bound→reopen→bound
-		// without end. Closing first and skipping the dispatch stops it,
-		// losslessly: the bounding message is still persisted, and the close
-		// notification re-delivers it as the marked control event every member
-		// ingests as its record's final turn (close_notification.py) before
-		// closing — so nothing depends on the suppressed live dispatch. A no-op
-		// (returns false, dispatch proceeds) on human channels and sub-bound rounds.
+		// without end. Closing first and skipping the dispatch stops it: the
+		// bounding message is still persisted, and the close notification
+		// re-delivers it as the marked control event a member with an OPEN scope
+		// ingests as its record's final turn before closing (close_notification.py).
+		// The one gap this leaves is a member with NO open scope: that handler
+		// no-ops rather than fabricate a 1-turn record, so the bounding turn does
+		// not land in its local summary. In practice every responder opened a scope
+		// on the prior live rounds (1..N-1), so it only bites at max_rounds=1 on
+		// this path — the interaction closes on the opening turn with no live
+		// exchange at all, the documented tiny-bound edge ([DefaultAutonomousMaxRounds]).
+		// A no-op (returns false, dispatch proceeds) on human channels and sub-bound rounds.
 		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions)
 	}
 

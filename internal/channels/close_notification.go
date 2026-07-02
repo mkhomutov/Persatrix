@@ -66,6 +66,26 @@ func (r *ChannelRouter) finalizeInteractionClose(ctx context.Context, msg Channe
 	r.notifyInteractionClose(ctx, msg, ct, excludeSender)
 }
 
+// recordInteractionClosedMetric bumps the `interaction_closed{channel_type,
+// trigger}` counter — the one cause-agnostic step every close-cause record
+// function shares. The three siblings ([ChannelRouter.recordInteractionClosed]
+// (end_votes), [ChannelRouter.recordInteractionClosedIdle] (idle), and
+// [ChannelRouter.recordInteractionClosedBounded] (structural/cost)) differ only
+// in their structured log line; the instrument emit is identical, so it lives
+// here once. Centralizing it means a future change to the instrument (a new
+// attribute, an exemplar, a unit) lands for every close cause at once and cannot
+// silently drift between them — the same anti-drift rationale
+// [ChannelRouter.finalizeInteractionClose] centralizes the teardown for. Nil-safe
+// like every other channel instrument.
+func (r *ChannelRouter) recordInteractionClosedMetric(ctx context.Context, ct ChannelType, trigger string) {
+	if r.metrics != nil && r.metrics.InteractionClosed != nil {
+		r.metrics.InteractionClosed.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("channel_type", string(ct)),
+			attribute.String("trigger", trigger),
+		))
+	}
+}
+
 // notifyInteractionClose fans a channel-close signal to every dispatch-served
 // member as the CP2 marked dispatch, so each agent-local tracker closes the
 // channel scope NOW instead of idling out a window later. Shared by the two
