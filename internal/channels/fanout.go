@@ -106,88 +106,120 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// vote disarms the trigger (it still consumes the stash below) without
 	// re-forcing.
 	misfired := namedNoFloorCapable && !readEndInteractionVote(msg.Metadata)
+	// ISSUE-0099 resynthesize, CLAIM half — at the fanout HEAD, before any floor
+	// round can park it (PR 4b-i review round 5): the once-bound is "the chair's
+	// FIRST publish after the forced turn consumes the arm". Claiming at the tail
+	// (the round-4 shape) let two chair publishes on different path shapes invert
+	// by a whole multi-turn floor round — the real forced-turn reply parked in
+	// its round while a later innocuous chair message raced down the fast
+	// concurrent path, reached its tail first, and claimed the arm with ITS
+	// misfire flag. The head claim shrinks that inversion window to detached-
+	// goroutine spawn jitter (PublishAsync fans on a detached goroutine, so
+	// strict commit order is not literally guaranteed) — the pre-4b-i posture,
+	// where the window was never observed to bite. Run for EVERY chair publish
+	// in an escalated interaction, not only the misfiring ones, so a clean
+	// hand-off disarms the trigger (see [ChannelRouter.claimResynthesizeMisfire]);
+	// a no-op (nil) for every non-chair publish. Only the re-force DISPATCH
+	// waits for the tail, gated on the bounded-close outcome below.
+	pendingResynth := r.claimResynthesizeMisfire(msg, misfired)
 
 	// Mark the responders as having an in-flight turn for the console presence
 	// signal (RFC 0048 Tier 1) — exactly the members [orderResponders] expects
 	// to reply, not the ingestion-only recipients dispatchConcurrent also
 	// delivers to (marking those would strand a "thinking" line on a member that
 	// will never answer). Cleared per-member when its reply re-enters
-	// (publishCommit) or by the TTL backstop. See activity.go.
+	// (publishCommit), by the TTL backstop, or — on the concurrent path's
+	// bounding round, whose dispatch is withheld so no reply can ever re-enter —
+	// by the close branch below. See activity.go.
 	responders, nonResponders := orderResponders(members, msg, threadParentSenderID)
-	r.markActivity(msg.ChannelID, responderIDs(responders))
+	respIDs := responderIDs(responders)
+	r.markActivity(msg.ChannelID, respIDs)
 
-	// RFC 0052 §D bounded close runs at the fanout tail on BOTH paths, and
-	// `closed` carries its outcome to the ISSUE-0099 resynthesize below: a
-	// resynthesize forced turn dispatched around a close reopens the interaction
-	// the close just terminated (its reply mints fresh), the same reopen hazard
-	// the two paths below already guard, so it must be suppressed on close too.
-	// `closed` stays false on human channels — autonomous disabled → the hook
-	// returns before touching state — so ordinary channels are unchanged.
-	closed := false
-	if settings, floorOn := r.floorSettingsFor(msg.ChannelID); floorOn && settings.enabled && len(responders) >= 2 {
-		outcome := r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
-		// Chair-stall-escalation amendment §C 1: the stall tail runs in the
-		// round's CALLER, after the floor is released and the round's
-		// floor-speaker set is cleared — the chair's reply must re-fanout as a
-		// fresh open-floor stimulus, which a floor turn would suppress. A send,
-		// never an await (CE7).
-		//
-		// RFC 0052 §D bounded close runs FIRST (deep review): if this round
-		// crossed max_rounds / the soft budget, the interaction is at its
-		// terminal bound and must CLOSE, not be revived. A `true` return means
-		// the id is retired, so we skip the stall escalation outright — a forced
-		// chair turn (and its LLM spend) dispatched onto an interaction closing
-		// this same tail would mint a FRESH interaction on its reply and reopen
-		// the just-closed discussion. On a sub-bound round the close returns
-		// false and the escalation proceeds unchanged.
-		if closed = r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize); !closed {
-			r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
-		}
-	} else if closed = r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize); !closed {
-		// RFC 0052 §D bounded close on the concurrent path. Runs BEFORE the
-		// dispatch (deep-review follow-up): unlike the floor path — where the
-		// round's replies are suppressed as floor speakers and cannot re-fan — a
-		// concurrent dispatch's replies DO re-enter Publish, so dispatching the
-		// bounding stimulus first would let those replies mint a FRESH
-		// interaction and reopen the discussion the close just terminated. That
-		// reopen is not a corner case: any autonomous round with a single
-		// responder (e.g. a two-persona roster) takes this path even under floor
-		// control, and dispatch-then-close would loop convene→bound→reopen→bound
-		// without end. Closing first and skipping the dispatch stops it: the
-		// bounding message is still persisted, and the close notification
-		// re-delivers it as the marked control event a member with an OPEN scope
-		// ingests as its record's final turn before closing (close_notification.py).
-		// The one gap this leaves is a member with NO open scope: that handler
-		// no-ops rather than fabricate a 1-turn record, so the bounding turn does
-		// not land in its local summary. In practice every responder opened a scope
-		// on the prior live rounds (1..N-1), so it only bites at max_rounds=1 on
-		// this path — the interaction closes on the opening turn with no live
-		// exchange at all, the documented tiny-bound edge ([DefaultAutonomousMaxRounds]).
-		// A no-op (returns false, dispatch proceeds) on human channels and sub-bound rounds.
-		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions)
+	// The two dispatch paths (floor round vs concurrent), resolved once so the
+	// RFC 0052 §D bounded close below has ONE call site serving both.
+	settings, floorOn := r.floorSettingsFor(msg.ChannelID)
+	floorPath := floorOn && settings.enabled && len(responders) >= 2
+	var outcome floorRoundOutcome
+	if floorPath {
+		outcome = r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
 	}
 
-	// ISSUE-0099 resynthesize — run for EVERY chair publish in an escalated
-	// interaction, not only the misfiring ones: the chair's first reply after the
-	// forced turn disarms the trigger whether it misfired (re-force one
-	// synthesize-only turn) or handed the floor cleanly (consume the arm and
-	// stop), so a later innocuous chair message cannot be mistaken for the reply's
-	// misfire. A no-op for every non-chair publish. Detached, fire-and-forget.
+	// RFC 0052 §D bounded close, at the fanout tail on BOTH paths — one call
+	// site (review round 5), with the per-path ordering the deep review pinned
+	// preserved by POSITION relative to each path's dispatch:
 	//
-	// Gated on `!closed` (RFC 0052 §D deep review): the resynthesize is a THIRD
-	// way a bounding round can reopen the interaction it just closed, alongside
-	// the two dispatch decisions above. The chair's re-forced reply is NOT a floor
-	// speaker (the forced turn is dispatched off any round), so it re-enters
-	// Publish and — with the id already retired — mints a FRESH interaction. The
-	// path is live on an armed channel: the mandatory chair (PR 4a) means a stall
-	// escalates, the chair's hand-off routinely names the operator/observer (a
-	// misfire the §D framing invites), and that reply's fanout can both cross the
-	// bound and re-force. Suppressing it on close closes the vector; a sub-bound
-	// round (closed=false) re-forces unchanged. No consumed-arm cleanup is owed on
-	// the close path — the retired id's stash dies with the interaction at the
-	// next fresh mint (interaction_resolver.go).
-	if !closed {
-		r.maybeResynthesizeMisfire(context.WithoutCancel(ctx), msg, ct, members, channelSize, misfired)
+	//   - FLOOR path: the close runs AFTER the round (floorRound above), so the
+	//     `max_rounds`-th round's discussion happens and then the interaction is
+	//     at its terminal bound and must CLOSE, not be revived. KNOWN COST
+	//     (review finding, complete fix deferred): the bounding stimulus was
+	//     already delivered live inside the round, and the close notification
+	//     re-delivers it under a fresh wire id, which every non-sender recipient
+	//     ingests again (close_notification.py) — one duplicated final turn on
+	//     each closed record. Distinguishing "re-delivery, close only" from
+	//     "sole delivery, ingest then close" needs a redelivery marker on the
+	//     wire, and ChannelMessageEvent has no metadata map — a typed proto
+	//     field, which this Go-only slice deliberately does not touch; it lands
+	//     with PR 4b-ii's wire work (docs/rfcs/0052-pr-plan.md).
+	//   - CONCURRENT path: the close runs BEFORE the dispatch — unlike the floor
+	//     path, whose round replies are suppressed as floor speakers, a
+	//     concurrent dispatch's replies re-enter Publish, so dispatching the
+	//     bounding stimulus first would let those replies re-fan (the resolver's
+	//     post-close claim latch, router_publish_async.go, now also suppresses
+	//     them — this ordering keeps the wasted dispatch and its LLM spend off
+	//     the wire in the first place). Not a corner case: any autonomous round
+	//     with a single responder (e.g. a two-persona roster) takes this path
+	//     even under floor control. The bounding message is still persisted, and
+	//     the close notification delivers it as the marked control event a
+	//     member with an OPEN scope ingests as its record's final turn before
+	//     closing (close_notification.py). The one gap: a member with NO open
+	//     scope no-ops rather than fabricate a 1-turn record — in practice every
+	//     responder opened a scope on the prior live rounds (1..N-1), so it only
+	//     bites at max_rounds=1 on this path, the documented tiny-bound edge
+	//     ([DefaultAutonomousMaxRounds]).
+	//
+	// A `true` return means the id is retired, so every follow-on that could
+	// revive the interaction is skipped: the stall escalation (a forced chair
+	// turn's reply would mint fresh and reopen), the concurrent stimulus
+	// dispatch, and the pending ISSUE-0099 re-force (its reply is not a floor
+	// speaker, so it too would re-enter Publish and mint fresh — the arm died
+	// with the retired interaction, and no consumed-arm cleanup is owed). A
+	// no-op returning false on human channels (autonomous disabled → the hook
+	// returns before touching state) and on sub-bound rounds, so ordinary
+	// channels and mid-discussion rounds proceed byte-for-byte unchanged.
+	if r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize) {
+		if !floorPath {
+			// The withheld dispatch is the one mark/clear seam with NO reply to
+			// re-enter publishCommit — the same "no reply can ever clear it"
+			// condition the escalation error branches unmark for
+			// (chair_escalation.go). Without this, the close strands every
+			// responder "thinking" on the console for the full TTL on a
+			// discussion that just terminated. The floor path needs no twin:
+			// its round already dispatched, so repliers cleared via
+			// publishCommit and silent speakers keep the pre-existing
+			// stalled-round TTL decay.
+			for _, id := range respIDs {
+				r.clearActivity(msg.ChannelID, id)
+			}
+		}
+		return
+	}
+
+	// Sub-bound round: the interaction is still open and the path's dispatch
+	// proceeds unchanged. Chair-stall-escalation amendment §C 1: the stall tail
+	// runs in the round's CALLER, after the floor is released and the round's
+	// floor-speaker set is cleared — the chair's reply must re-fanout as a fresh
+	// open-floor stimulus, which a floor turn would suppress. A send, never an
+	// await (CE7).
+	if floorPath {
+		r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
+	} else {
+		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions)
+	}
+	// ISSUE-0099 resynthesize, DISPATCH half — the re-force the head claimed,
+	// dispatched only now that the bounded close has ruled the round sub-bound.
+	// Detached, fire-and-forget, like the stall tail.
+	if pendingResynth != nil {
+		r.dispatchResynthesizeMisfire(context.WithoutCancel(ctx), msg, ct, members, channelSize, pendingResynth)
 	}
 }
 
@@ -275,7 +307,7 @@ const (
 	// stamped only by [ChannelRouter.notifyInteractionClose]'s dispatches.
 	markerCloseNotification
 	// markerChairEscalationResynthesize is the ISSUE-0099 second forced turn,
-	// stamped only by [ChannelRouter.maybeResynthesizeMisfire]'s dispatch. It
+	// stamped only by [ChannelRouter.dispatchResynthesizeMisfire]. It
 	// is a REFINEMENT of markerChairEscalation, not a peer: dispatchTo stamps
 	// BOTH `ChairEscalation` and `ChairEscalationResynthesize` for it, so the
 	// admission lift (which keys on ChairEscalation) is unchanged and only the

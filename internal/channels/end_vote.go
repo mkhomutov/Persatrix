@@ -143,16 +143,21 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 		// suppression IS a Layer 4 governance drop (the conversation has
 		// terminated and this publish is barred from cascading), so attribute it
 		// like every other layer's drop. Since the producer's IP8 hook landed,
-		// ordinary post-close traffic cannot reach here via Publish — the close
-		// notified the resolver, so the channel's next publish mints fresh — and
-		// this path catches only a commit that resolved the closing id just
-		// before the quorum landed (the racing-commit window the tombstone
-		// exists to cover) or a caller bypassing the resolver. The metric's
-		// steady state is therefore ~zero; a sustained nonzero rate on
-		// governance_drop{layer=end_vote} outside vote-spam is a resolver-bypass
-		// signal, not converged-conversation noise. No Warn here: a racing
-		// commit is expected, not anomalous (unlike a duplicate vote), so it is
-		// metered and traced but not logged. Fired outside the lock.
+		// ordinary post-close traffic cannot RESOLVE here — the close notified
+		// the resolver, so the channel's next publish mints fresh — leaving
+		// three producers of a closed stamped id: a commit that resolved the
+		// closing id just before the quorum landed (the racing-commit window the
+		// tombstone exists to cover), a caller bypassing the resolver, and — on
+		// AUTONOMOUS channels — the RFC 0052 no-reopen latch (publishCommit),
+		// which deliberately keeps a post-close CLAIM as the stamped id so a
+		// straggler or race-dispatched reply lands here instead of minting fresh
+		// and reopening the terminated discussion. The metric's steady state is
+		// therefore ~zero on human channels; on an autonomous channel a small
+		// nonzero rate at each bounded close is the latch absorbing stragglers,
+		// while a SUSTAINED rate outside closes remains the resolver-bypass
+		// signal. No Warn here: a racing commit or a latched straggler is
+		// expected, not anomalous (unlike a duplicate vote), so it is metered
+		// and traced but not logged. Fired outside the lock.
 		r.recordGovernanceDropEndVote(ctx, ct)
 		// Lifecycle: a post-close NON-vote reply ran enforceReplyBudget BEFORE this
 		// hook in Publish, which lazily RE-CREATES replyCounts[interactionID] (it
@@ -346,6 +351,23 @@ func (r *ChannelRouter) DiscardInteractionEndVotes(interactionID string) {
 	delete(r.endVotes, interactionID)
 	delete(r.closedInteractions, interactionID)
 	r.endVoteMu.Unlock()
+}
+
+// interactionTombstoned reports whether `interactionID` was deliberately closed
+// (end-vote quorum, or the RFC 0052 bounded close) and its single-shot
+// tombstone still stands — the read the publish path's RFC 0052 no-reopen
+// latch keys on (publishCommit, router_publish_async.go). The tombstone lives
+// from the close until the retiree's deferred discard (see
+// [ChannelRouter.DiscardInteractionEndVotes]'s ordering notes) — the entire
+// successor generation, comfortably covering the seconds-scale straggler /
+// racing-dispatch window the latch exists for. Idle rotations never tombstone,
+// so a reply claiming an idle-rotated predecessor is untouched by the latch
+// and still mints fresh (the IP2 posture).
+func (r *ChannelRouter) interactionTombstoned(interactionID string) bool {
+	r.endVoteMu.Lock()
+	defer r.endVoteMu.Unlock()
+	_, done := r.closedInteractions[interactionID]
+	return done
 }
 
 // ResolveEndVotes applies the RFC 0030 Layer 4 (v0.3.8) end-vote quorum/window

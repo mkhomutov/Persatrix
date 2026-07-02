@@ -171,6 +171,20 @@ async def close_interaction_on_notification(
     # end-vote voter's own no-self-ingest close. An inbound closing message (any
     # other sender — every end-vote recipient, and every non-triggering member
     # on a bounded close) ingests as before.
+    #
+    # KNOWN LIMIT (PR 4b-i review round 5, deferred to 4b-ii): on a
+    # FLOOR-CONTROLLED bounded close the inbound ingest below is a
+    # RE-delivery — the bounding stimulus already reached every member live
+    # inside its floor round (unlike the end-vote close, whose vote's own
+    # fanout is suppressed, and the concurrent-path bounded close, which
+    # withholds the bounding dispatch), so this appends a duplicate final
+    # turn and inflates ``turn_count`` by one on the closed record.
+    # Distinguishing "re-delivery, close only" from "sole delivery, ingest
+    # then close" is not decidable here (the fresh wire id defeats any
+    # id-based check by design, and ``ChannelMessageEvent`` has no metadata
+    # map to smuggle a hint through) — it needs a typed redelivery marker on
+    # the wire, which lands with PR 4b-ii's proto work
+    # (docs/rfcs/0052-pr-plan.md).
     if event.sender_id != agent.agent_id:
         await agent._store_event_episode(event, [])
         if agent._interaction_tracker.get(scope) is not open_interaction:

@@ -255,12 +255,13 @@ func TestBoundedClose_NotifiesTriggeringSender(t *testing.T) {
 // escalation chair MANDATORY on every armed channel, so this path is live: a
 // stall escalates, the chair hands off to the RespondNever operator (a routine
 // misfire the §D framing invites), and that reply both crosses the bound and
-// would re-force. The fix runs the bounded close first and gates the resynthesize
-// on it.
+// would re-force. The fix gates the re-force DISPATCH on the bounded-close
+// outcome (the CLAIM still runs at the fanout head — review round 5 — so the
+// once-bound keeps its first-publish ordering; a bounding round consumes the
+// arm and drops the pending re-force).
 //
 // Discriminating: pre-fix the chair's reply (round 2) produces a resynthesize
-// dispatch (maybeResynthesizeMisfire ran at the fanout head, before the close);
-// the fix leaves none.
+// dispatch regardless of the close outcome; the fix leaves none.
 func TestBoundedClose_SuppressesResynthesizeOnBoundingRound(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
 	disp := &envelopeRecorder{}
@@ -384,4 +385,33 @@ func TestBoundedClose_ConcurrentPathDoesNotDispatchBoundingStimulus(t *testing.T
 		"only round 1 is dispatched live; the bounding stimulus is withheld so its reply cannot reopen the interaction")
 	assert.Equal(t, 1, closeNotifications,
 		"the bounding message reaches the responder as the close notification instead (ingested as the final turn, not replied to)")
+}
+
+// TestBoundedClose_ConcurrentPathClearsActivityMarks is the review round 5
+// presence regression: the concurrent-path bounding round marks its responders
+// "thinking" at the fanout head (RFC 0048 Tier 1) and then WITHHOLDS the
+// dispatch — so no reply can ever re-enter publishCommit to clear the marks,
+// the same "no reply can ever clear it" condition the escalation error
+// branches unmark for (chair_escalation.go). Without the close-branch clear,
+// the console strands every responder "thinking" for the full activityTTL
+// (90s) on a discussion that just terminated.
+func TestBoundedClose_ConcurrentPathClearsActivityMarks(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &envelopeRecorder{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	// Floor control OFF → every publish takes the concurrent path, whose
+	// bounding round withholds the stimulus dispatch.
+	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
+		map[string]RespondPolicy{
+			"operator":  RespondNever,
+			"ember-owl": RespondAlways,
+		}, "operator", "ember-owl")
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 2, Convener: "ember-owl"})
+
+	tick(t, router, ch) // round 1: dispatched live; the mark stands until a reply or the TTL
+	tick(t, router, ch) // round 2 == max_rounds: close fires, dispatch withheld
+	router.WaitForPendingFanout()
+
+	assert.Empty(t, router.ChannelActivity(ch),
+		"the withheld bounding dispatch draws no reply — the close must clear the responders' thinking marks, not strand them until the TTL")
 }

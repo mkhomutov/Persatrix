@@ -45,7 +45,7 @@ const (
 	// guaranteed-futile and why the ration stays unspent.
 	chairEscalationSelfStimulus = "self_stimulus"
 	// chairEscalationResynthesized (ISSUE-0099) is the one synthesize-only
-	// re-dispatch [ChannelRouter.maybeResynthesizeMisfire] sends after the
+	// re-dispatch [ChannelRouter.dispatchResynthesizeMisfire] sends after the
 	// chair's first forced-turn reply provably reached no floor-capable
 	// member. Unlike the stall dispositions above it is NOT a stall count — it
 	// fires at the chair-reply publish seam, not the round tail — so it shares
@@ -279,17 +279,30 @@ func (r *ChannelRouter) maybeEscalateStall(
 	r.recordChairEscalation(ctx, ct, chairEscalationDispatched)
 }
 
-// maybeResynthesizeMisfire is the ISSUE-0099 trigger, run for every fanout of
-// a chair publish inside an escalated interaction (the seam in
-// [ChannelRouter.fanout] passes `misfired` = the publish named mentions but no
-// floor-capable member). It closes the one escalation failure the orchestrator
-// can PROVE at publish time: the escalation chair's own forced-turn reply
-// handed the floor to a target that lifts to a real id but cannot take it (a
-// `respond: never` observer, the operator, or itself), so the hand-off reached
-// nobody. The fix is option 2 (re-dispatch one synthesize-only forced turn)
-// rather than option 1 (refund the ration): a refund is inert here because the
-// misfired reply is itself chair-authored, so the refunded re-escalation would
-// trip [ChannelRouter.maybeEscalateStall]'s self_stimulus guard and never fire.
+// pendingResynthesize is a claimed-but-not-yet-dispatched ISSUE-0099 re-force:
+// the stashed original stimulus, its thread context, and the (chair,
+// interaction) generation the claim ran against. Produced by
+// [ChannelRouter.claimResynthesizeMisfire] at the fanout HEAD and consumed by
+// [ChannelRouter.dispatchResynthesizeMisfire] at the tail — split so the
+// once-bound claim keeps the "chair's FIRST publish" ordering while the
+// re-force dispatch waits for the RFC 0052 bounded-close outcome (fanout.go).
+type pendingResynthesize struct {
+	stimulus             ChannelMessage
+	threadParentSenderID string
+	interactionID        string
+	chairID              string
+}
+
+// claimResynthesizeMisfire is the ISSUE-0099 trigger's CLAIM half, run at the
+// fanout HEAD for every publish (PR 4b-i review round 5 moved it back there).
+// It identifies the one escalation failure the orchestrator can PROVE at
+// publish time: the escalation chair's own forced-turn reply handed the floor
+// to a target that lifts to a real id but cannot take it (a `respond: never`
+// observer, the operator, or itself), so the hand-off reached nobody. The fix
+// is option 2 (re-dispatch one synthesize-only forced turn) rather than option
+// 1 (refund the ration): a refund is inert here because the misfired reply is
+// itself chair-authored, so the refunded re-escalation would trip
+// [ChannelRouter.maybeEscalateStall]'s self_stimulus guard and never fire.
 //
 // The trigger is the chair's FIRST publish after the forced turn — its
 // forced-turn reply — identified by consuming the stash that
@@ -297,32 +310,31 @@ func (r *ChannelRouter) maybeEscalateStall(
 // That consumption happens whether or not the reply misfired: a clean hand-off
 // disarms the trigger so a LATER innocuous chair message naming no floor-capable
 // member (an "@alex, thanks") cannot be mistaken for the reply's misfire and
-// re-inject a now-stale stimulus. Only when that first reply actually misfired
-// (`misfired`) do we re-force.
+// re-inject a now-stale stimulus. The head position is what keeps "FIRST
+// publish" honest: claiming at the fanout TAIL instead (the round-4 shape) let
+// two chair publishes on different path shapes invert by a whole multi-turn
+// floor round — the real forced-turn reply parked in its round while a later
+// innocuous chair message raced down the fast concurrent path, reached its
+// tail first, and claimed the arm with ITS misfire flag — exactly the false
+// positive the claim-on-first-reply contract exists to prevent. The head claim
+// shrinks that window back to detached-goroutine spawn jitter (strict commit
+// order is not literally guaranteed under PublishAsync), the pre-4b-i posture.
+// Only the re-force DISPATCH waits for the tail, gated on the bounded-close
+// outcome.
 //
-// The re-dispatch reuses the STASHED original stimulus and its thread parent,
-// not this reply — the stash carries a non-chair sender, so the gate admits it
-// (re-sending the chair's own reply to the chair self-suppresses). Once per
-// interaction, since the stash is consumed; a send, never an await, like the
-// stall tail.
-func (r *ChannelRouter) maybeResynthesizeMisfire(
-	ctx context.Context,
-	msg ChannelMessage,
-	ct ChannelType,
-	members []Member,
-	channelSize int,
-	misfired bool,
-) {
+// Returns nil unless the claim succeeded AND the reply misfired — i.e. a
+// re-force is actually owed. A no-op (nil) for every non-chair publish.
+func (r *ChannelRouter) claimResynthesizeMisfire(msg ChannelMessage, misfired bool) *pendingResynthesize {
 	// Only the escalation chair's OWN reply can misfire a hand-off. Every other
 	// publish (a non-chair member, or the chair outside an escalated
 	// interaction) is not an escalation failure and must not re-force.
 	chairID := r.escalationChairFor(msg.ChannelID)
 	if chairID == "" || msg.SenderID != chairID {
-		return
+		return nil
 	}
 	interactionID, escalated, tracked := r.openInteractionEscalationState(msg.ChannelID)
 	if !tracked || !escalated {
-		return
+		return nil
 	}
 	// Same divergence guard as the stall tail: a reply that outlived its
 	// interaction (a concurrent rotation/close moved the open id on) must not
@@ -333,7 +345,7 @@ func (r *ChannelRouter) maybeResynthesizeMisfire(
 			zap.String("channel_id", msg.ChannelID),
 			zap.String("stamped_interaction_id", stamped),
 			zap.String("open_interaction_id", interactionID))
-		return
+		return nil
 	}
 	stimulus, threadParentSenderID, ok := r.claimChairReply(msg.ChannelID, interactionID)
 	if !ok {
@@ -341,16 +353,44 @@ func (r *ChannelRouter) maybeResynthesizeMisfire(
 		// the forced-turn reply was already consumed (a clean hand-off, or a
 		// prior misfire's re-dispatch — the once-bound). A later chair publish
 		// is an ordinary message, not the reply's misfire. No metric.
-		return
+		return nil
 	}
 	if !misfired {
 		// The forced-turn reply took or handed the floor cleanly (it named a
 		// floor-capable member, or opened the floor with no mention). Consuming
 		// the stash above is the whole job — it disarms the trigger so no later
 		// chair message is mistaken for a misfire. Nothing to recover, no metric.
-		return
+		return nil
 	}
+	return &pendingResynthesize{
+		stimulus:             stimulus,
+		threadParentSenderID: threadParentSenderID,
+		interactionID:        interactionID,
+		chairID:              chairID,
+	}
+}
 
+// dispatchResynthesizeMisfire is the ISSUE-0099 trigger's DISPATCH half, run at
+// the fanout tail with the [pendingResynthesize] the head claimed — after the
+// RFC 0052 bounded close has decided the round's fate (fanout.go gates this
+// call on "not closed"; a bounding round drops the pending re-force silently,
+// since the arm died with the retired interaction and a re-forced reply would
+// mint a fresh one and reopen the just-closed discussion).
+//
+// The re-dispatch reuses the STASHED original stimulus and its thread parent,
+// not the chair's reply — the stash carries a non-chair sender, so the gate
+// admits it (re-sending the chair's own reply to the chair self-suppresses).
+// Once per interaction, since the claim consumed the stash; a send, never an
+// await, like the stall tail.
+func (r *ChannelRouter) dispatchResynthesizeMisfire(
+	ctx context.Context,
+	msg ChannelMessage,
+	ct ChannelType,
+	members []Member,
+	channelSize int,
+	pending *pendingResynthesize,
+) {
+	chairID := pending.chairID
 	var chair *Member
 	for i := range members {
 		if members[i].ParticipantID == chairID {
@@ -378,10 +418,10 @@ func (r *ChannelRouter) maybeResynthesizeMisfire(
 	// mentions — the chair is admitted by the escalation lift, not by
 	// directedness. Marked thinking before the send; a failed send unmarks (no
 	// reply will ever clear it), mirroring the stall tail.
-	forced := stimulus
+	forced := pending.stimulus
 	forced.ID = uuid.NewString()
 	r.markActivity(msg.ChannelID, []string{chairID})
-	if err := r.dispatchTo(ctx, forced, ct, threadParentSenderID, *chair, channelSize, nil, markerChairEscalationResynthesize); err != nil {
+	if err := r.dispatchTo(ctx, forced, ct, pending.threadParentSenderID, *chair, channelSize, nil, markerChairEscalationResynthesize); err != nil {
 		r.clearActivity(msg.ChannelID, chairID)
 		r.logger.Warn("channels: chair resynthesize dispatch failed; misfire stands",
 			zap.String("channel_id", msg.ChannelID),
@@ -392,7 +432,7 @@ func (r *ChannelRouter) maybeResynthesizeMisfire(
 	}
 	r.logger.Info("channels: chair hand-off misfired; re-forced a synthesize-only turn",
 		zap.String("channel_id", msg.ChannelID),
-		zap.String("interaction_id", interactionID),
+		zap.String("interaction_id", pending.interactionID),
 		zap.String("escalation_chair_id", chairID))
 	r.recordChairEscalation(ctx, ct, chairEscalationResynthesized)
 }

@@ -32,6 +32,29 @@ func (r *ChannelRouter) openInteractionEscalationState(channelID string) (intera
 	return entry.id, entry.chairEscalated, true
 }
 
+// retiredInteractionFor returns the channel's pending retiree id — the most
+// recently rotated/closed interaction whose deferred discard has not fired —
+// or "" when none. The RFC 0052 no-reopen latch (publishCommit,
+// router_publish_async.go) uses it to scope its tombstone check to the
+// channel's OWN closed interaction: the tombstone map is keyed by id alone,
+// and without this scoping a member could stamp a FOREIGN channel's tombstoned
+// id onto its publish and have it persist under an interaction that never
+// existed on this channel (self-harm only — its own fanout is what gets
+// suppressed — but polluted attribution all the same). The retiree slot and
+// the tombstone move in lockstep (a displaced retiree's tombstone is discarded
+// in the same critical path), so `claim == retiree && tombstoned(claim)` holds
+// exactly for the latch's intended window. Lives here rather than
+// interaction_resolver.go for the same reason as its siblings above — the
+// resolver file sits at the 500-line review cap.
+func (r *ChannelRouter) retiredInteractionFor(channelID string) string {
+	r.interactionMu.Lock()
+	defer r.interactionMu.Unlock()
+	if entry := r.openInteractions[channelID]; entry != nil {
+		return entry.retired
+	}
+	return ""
+}
+
 // markChairEscalated spends the interaction's CE5 ration — compare-and-set
 // under interactionMu so two concurrently-stalled rounds racing the same
 // ration resolve to exactly one dispatched escalation. Returns false when the
