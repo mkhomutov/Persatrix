@@ -103,28 +103,53 @@ func (r *ChannelRouter) SetInteractionSpender(s interactionSpender) {
 // `stampedID` is the interaction id stamped on the triggering message
 // ([readInteractionID] of msg.Metadata); "" (unstamped) tolerantly falls through,
 // the [ChannelRouter.maybeEscalateStall] posture. Returns (interactionID, round,
-// true) on a live advance; ("", 0, false) when there is no open committed
-// interaction to bound, or the fanout diverged from the one it was stamped for.
-// Rides the resolver entry under interactionMu, the CE5-ration pattern.
+// true, false) on a live advance. A no-advance is one of two distinct cases the
+// caller must treat differently (PR #716 review — the round-7 shape withheld
+// BOTH, silently losing a live committed message to a benign interleaving):
+//
+//   - ("", 0, false, true) — the stamped stimulus belongs to a deliberately
+//     CLOSED interaction (the no-reopen ledger, interaction_close_latch.go):
+//     a sibling fanout's bounded close or an end-vote quorum landed between
+//     this publish's commit and its tail. Fanning it would draw LLM replies
+//     into a terminated discussion, so the dispatch must be withheld.
+//   - ("", 0, false, false) — there is no open committed interaction to bound,
+//     or the fanout diverged from the one it was stamped for WITHOUT a
+//     deliberate close: the resolver's orphan-park interleaving (its doc calls
+//     it "an interleaving artefact, not a close") or an idle rotation, neither
+//     of which terminates the discussion — the message is live and the caller
+//     dispatches it exactly as the pre-bounded-close router did. (Idle-rotated
+//     ids never enter the ledger — the latch's own IP2 posture — so rotation
+//     always lands here.)
+//
+// Rides the resolver entry under interactionMu, the CE5-ration pattern; the
+// ledger read shares the same acquisition, so a close cannot slip between the
+// staleness verdict and the tally advance.
 //
 // UNIT: one tick per fanout cycle — a full floor round under floor control (the
 // expected autonomous posture), a single message without it. See
 // [DefaultAutonomousMaxRounds] for why the two differ.
-func (r *ChannelRouter) advanceBoundedCloseRound(channelID, stampedID string) (string, int, bool) {
+func (r *ChannelRouter) advanceBoundedCloseRound(channelID, stampedID string) (interactionID string, round int, ok, closedStale bool) {
 	r.interactionMu.Lock()
 	defer r.interactionMu.Unlock()
 	entry := r.openInteractions[channelID]
-	if entry == nil || entry.id == "" || !entry.idCommitted {
-		return "", 0, false // no open committed interaction to bound.
+	// Deliberate-close staleness first: it holds whether the successor is
+	// already open (divergence) or not yet minted (entry.id == "" until the
+	// next resolve), and in both shapes the withhold is the same.
+	if entry != nil && stampedID != "" && entry.latchedClaim(stampedID) {
+		return "", 0, false, true
+	}
+	if !entry.openCommitted() {
+		return "", 0, false, false // no open committed interaction to bound.
 	}
 	// Divergence guard (mirrors maybeEscalateStall): a fanout that outlived its
-	// interaction — a concurrent rotation/close moved the open id on between the
-	// stimulus commit and this tail — must not advance or close the successor.
+	// interaction must not advance or close the successor. Reaching here means
+	// the stamped id is NOT in the close ledger, so the divergence is an
+	// interleaving artefact and the message itself is still deliverable.
 	if stampedID != "" && stampedID != entry.id {
-		return "", 0, false
+		return "", 0, false, false
 	}
 	entry.roundCount++
-	return entry.id, entry.roundCount, true
+	return entry.id, entry.roundCount, true, false
 }
 
 // maybeBoundedClose is the RFC 0052 §D deterministic bounded-close trigger, run
@@ -134,20 +159,25 @@ func (r *ChannelRouter) advanceBoundedCloseRound(channelID, stampedID string) (s
 // is crossed, closes the interaction. A send-side teardown, never an await;
 // every degraded branch nets to "no close" (the status quo).
 //
-// Returns (closed, stale). `closed` — the bound was crossed and the close fired
-// (or the interaction was already closing): the interaction is retired, so the
-// caller MUST skip any follow-on work that would re-open it — a forced chair
-// turn (maybeEscalateStall) or, on the concurrent path, the stimulus dispatch
-// itself (fanout.go). `stale` — no close fired here, but the stamped stimulus no
-// longer belongs to an open committed interaction (a sibling close or rotation
-// landed between its commit and this tail): the concurrent dispatch must ALSO be
-// skipped, since fanning it would draw LLM replies into a discussion that
-// already terminated — replies the publish-path no-reopen latch then absorbs
-// with the spend already spent (PR #716 review; the resynthesize dispatch's
-// openness re-check is this same rule at its own seam). (false, false) — the
-// interaction is open and the caller proceeds unchanged; always the pair on
-// human channels (autonomous disabled), so ordinary channels are byte-for-byte
-// unchanged.
+// Returns (closed, stale). `closed` — the bound was crossed and THIS fanout's
+// close fired: the interaction is retired, so the caller MUST skip any
+// follow-on work that would re-open it — a forced chair turn
+// (maybeEscalateStall) or, on the concurrent path, the stimulus dispatch
+// itself (fanout.go). `stale` — no close fired here, but the stamped stimulus
+// belongs to a discussion that already terminated: its id is in the no-reopen
+// ledger (a sibling close or end-vote landed between its commit and this
+// tail), or it crossed the bound and lost the closing race to a concurrent
+// closer (the tombstone CAS). The concurrent dispatch must ALSO be skipped,
+// since fanning it would draw LLM replies into that terminated discussion —
+// replies the publish-path no-reopen latch then absorbs with the spend
+// already spent (PR #716 review; the resynthesize dispatch's openness
+// re-check is this same rule at its own seam). A divergence WITHOUT a
+// deliberate close — the resolver's orphan-park artefact, an idle rotation —
+// is NOT stale: the message is live and returns (false, false) so it
+// dispatches exactly as before this trigger existed (see
+// [ChannelRouter.advanceBoundedCloseRound]). (false, false) is also always
+// the pair on human channels (autonomous disabled), so ordinary channels are
+// byte-for-byte unchanged.
 //
 // `channelSize` (the fanout's member count) is a conservative upper bound on the
 // roster size N the reserve is sized for (`1 + N` close-path calls): it includes
@@ -164,11 +194,14 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	if !a.Enabled {
 		return false, false // OQ #2 scope gate: human channels are untouched.
 	}
-	// One locked read of the resolver entry: the open committed id, the stamped-
-	// divergence guard, and the round advance fold into a single acquisition.
-	interactionID, round, ok := r.advanceBoundedCloseRound(msg.ChannelID, readInteractionID(msg.Metadata))
+	// One locked read of the resolver entry: the open committed id, the
+	// close-ledger staleness verdict, the stamped-divergence guard, and the
+	// round advance fold into a single acquisition. Only a DELIBERATE close
+	// makes the stimulus stale; every other no-advance is a live message the
+	// caller dispatches unchanged (PR #716 review).
+	interactionID, round, ok, closedStale := r.advanceBoundedCloseRound(msg.ChannelID, readInteractionID(msg.Metadata))
 	if !ok {
-		return false, true
+		return false, closedStale
 	}
 	// §D artifact guarantee (PR #716 review): never close before the
 	// interaction's FIRST live dispatch. With the dispatch still pending, a
@@ -228,7 +261,17 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	if budgetExceeded {
 		trigger = costTrigger
 	}
-	r.boundedClose(ctx, msg, ct, interactionID, trigger)
+	if !r.boundedClose(ctx, msg, ct, interactionID, trigger) {
+		// The tombstone CAS lost to a racing closer (a sibling bound-crossing
+		// fanout, or an end-vote quorum): the interaction IS closing, but not
+		// by this fanout's hand, and this fanout's message is not the one the
+		// winner's close notification carries. Report stale, not closed, so
+		// the caller's withhold is LOGGED as an outlived sibling instead of
+		// silently masquerading as the close itself (PR #716 review — the
+		// round-7 shape returned closed=true here, and the loser's committed
+		// message vanished from every member's record with no trace).
+		return false, true
+	}
 	return true, false
 }
 
@@ -238,13 +281,15 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 // PR 7; see the file header). The shared close-write
 // ([ChannelRouter.tombstoneInteractionLocked]) makes it single-shot: a second
 // bound-crossing fanout, or a racing end-vote quorum, finds the tombstone
-// standing and returns.
-func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, interactionID, trigger string) {
+// standing and returns false — the caller reports that fanout's stimulus as a
+// stale sibling, not as the close (PR #716 review). Returns true when THIS
+// call won the tombstone and ran the teardown.
+func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, interactionID, trigger string) bool {
 	r.endVoteMu.Lock()
 	won := r.tombstoneInteractionLocked(interactionID)
 	r.endVoteMu.Unlock()
 	if !won {
-		return
+		return false
 	}
 
 	r.recordInteractionClosedBounded(ctx, msg, ct, interactionID, trigger)
@@ -257,6 +302,7 @@ func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct
 	// notification too or it strands on "went idle" and authors no summary.
 	r.finalizeInteractionClose(ctx, msg, ct, interactionID, trigger, false)
 	// NOTE: no wallet EvictInteraction here — deferred to PR 7 (file header).
+	return true
 }
 
 // recordInteractionClosedBounded fires the structured close log + the

@@ -115,6 +115,7 @@ class ActionExecutor:
         actions: list[AgentAction],
         *,
         cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
+        origin_channel_id: str = "", origin_interaction_id: str = "",
     ) -> list[dict[str, Any]]:
         """Execute actions and return per-action status dicts.
 
@@ -135,10 +136,21 @@ class ActionExecutor:
         as chain-origin (chat surface, dispatcher's first hop) pass
         ``cascade_depth=0`` explicitly; the safe default only fires for
         omitting callers.
+
+        ``origin_channel_id`` / ``origin_interaction_id``: the inbound
+        event's channel and dispatched-under interaction id (seeded by
+        ``seed_wire_metadata``). A SAME-channel publish echoes the id as its
+        ``interaction_id`` claim — the RFC 0052 no-reopen latch's read
+        (PR #716 review: unstamped post-close stragglers minted fresh and
+        REOPENED the closed discussion). The resolver stays authoritative
+        (IP2); origin-less callers stamp nothing (IP8 re-convene).
         """
         results: list[dict[str, Any]] = []
         for action in actions:
-            result = await self._execute_one(agent_id, action, cascade_depth=cascade_depth)
+            result = await self._execute_one(
+                agent_id, action, cascade_depth=cascade_depth,
+                origin_channel_id=origin_channel_id,
+                origin_interaction_id=origin_interaction_id)
             results.append(result)
         return results
 
@@ -148,6 +160,7 @@ class ActionExecutor:
         action: AgentAction,
         *,
         cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
+        origin_channel_id: str = "", origin_interaction_id: str = "",
     ) -> dict[str, Any]:
         """Execute a single action; status contract is documented in the README of this module.
 
@@ -174,7 +187,8 @@ class ActionExecutor:
             case ActionType.SEND_CHANNEL_MESSAGE:
                 return await self._handle_send_channel_message(
                     agent_id, action, cascade_depth=cascade_depth,
-                )
+                    origin_channel_id=origin_channel_id,
+                    origin_interaction_id=origin_interaction_id)
             case ActionType.USE_TOOL:
                 # Tool execution happens inside _on_event_inner() via
                 # _execute_tools(). USE_TOOL as a final action means the
@@ -228,7 +242,8 @@ class ActionExecutor:
                 result = await publish_end_interaction_vote(
                     self._channel_publisher, agent_id, action,
                     cascade_depth=cascade_depth,
-                )
+                    origin_channel_id=origin_channel_id,
+                    origin_interaction_id=origin_interaction_id)
                 # PR 607 review finding 5: tell the voter how its publish
                 # went so the parked local close is discharged — close on
                 # "published", drop on any failure status.
@@ -299,6 +314,7 @@ class ActionExecutor:
         action: AgentAction,
         *,
         cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
+        origin_channel_id: str = "", origin_interaction_id: str = "",
     ) -> dict[str, Any]:
         """Route SEND_CHANNEL_MESSAGE.
 
@@ -309,6 +325,10 @@ class ActionExecutor:
           fans out via the Go ``GRPCMessageDispatcher``).
         * Otherwise → in-process :class:`EventDispatcher` cascade,
           preserved for the chat-reply path until PR 4a-ii-β-2.
+
+        A reply to the ORIGINATING channel echoes its dispatched-under
+        interaction id as the wire claim (see :meth:`execute`); cross-channel
+        publishes stamp nothing.
         """
         target_channel = action.payload.get("channel_id", "")
         content = action.payload.get("content", "")
@@ -338,6 +358,10 @@ class ActionExecutor:
 
         # ── REST publish branch (channel-routed) ──
         if target_channel and self._channel_publisher is not None:
+            # RFC 0052 no-reopen claim (docstring); None keeps the clean body.
+            publish_metadata: dict[str, Any] | None = None
+            if origin_interaction_id and target_channel == origin_channel_id:
+                publish_metadata = {"interaction_id": origin_interaction_id}
             try:
                 await asyncio.wait_for(
                     self._channel_publisher.publish(
@@ -345,6 +369,7 @@ class ActionExecutor:
                         sender_id=sender_id,
                         content=content,
                         mentions=list(mentions),
+                        metadata=publish_metadata,
                         # RFC 0011 amendment "Cascade-depth wire propagation"
                         # (PR 3 of v0.3.0 channel test-findings plan): the
                         # ``+1`` increment lives on the dispatcher side

@@ -57,6 +57,11 @@ class TestRESTPublishBranch:
             sender_id="agent-a",
             content="hi",
             mentions=["agent-b"],
+            # No inbound origin was threaded, so no RFC 0052 interaction
+            # claim is stamped (PR #716 review) — ``None`` keeps the POST
+            # body's clean no-metadata shape. The echo contract is pinned in
+            # ``test_action_executor.py``'s interaction-claim tests.
+            metadata=None,
             cascade_depth=DEFAULT_MAX_CASCADE_DEPTH,
         )
         assert result == {

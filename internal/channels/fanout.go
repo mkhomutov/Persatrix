@@ -129,8 +129,8 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// delivers to (marking those would strand a "thinking" line on a member that
 	// will never answer). Cleared per-member when its reply re-enters
 	// (publishCommit), by the TTL backstop, or — on the concurrent path's
-	// bounding round, whose dispatch is withheld so no reply can ever re-enter —
-	// by the close branch below. See activity.go.
+	// bounding/stale rounds, whose dispatch is withheld so no reply can ever
+	// re-enter — by the withhold seam below. See activity.go.
 	responders, nonResponders := orderResponders(members, msg, threadParentSenderID)
 	respIDs := responderIDs(responders)
 	r.markActivity(msg.ChannelID, respIDs)
@@ -184,26 +184,30 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// dispatch, and the pending ISSUE-0099 re-force (its reply is not a floor
 	// speaker, so it too would re-enter Publish and mint fresh — the arm died
 	// with the retired interaction, and no consumed-arm cleanup is owed). A
-	// `stale` return gates only the concurrent dispatch below. A (false, false)
+	// `stale` return — the stimulus belongs to a discussion a DELIBERATE close
+	// terminated (PR #716 review) — skips the same revival tails plus the
+	// concurrent dispatch below. A (false, false)
 	// no-op on human channels (autonomous disabled → the hook returns before
 	// touching state) and on sub-bound rounds, so ordinary channels and
 	// mid-discussion rounds proceed byte-for-byte unchanged.
 	closed, stale := r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize, !floorPath)
-	if closed {
-		if !floorPath {
-			// The withheld dispatch is the one mark/clear seam with NO reply to
-			// re-enter publishCommit — the same "no reply can ever clear it"
-			// condition the escalation error branches unmark for
-			// (chair_escalation.go). Without this, the close strands every
-			// responder "thinking" on the console for the full TTL on a
-			// discussion that just terminated. The floor path needs no twin:
-			// its round already dispatched, so repliers cleared via
-			// publishCommit and silent speakers keep the pre-existing
-			// stalled-round TTL decay.
-			for _, id := range respIDs {
-				r.clearActivity(msg.ChannelID, id)
-			}
+	// The ONE withhold seam (PR #716 review — this clear had been duplicated
+	// verbatim across the close and stale branches): a concurrent dispatch
+	// withheld after markActivity is the mark/clear case with NO reply to
+	// re-enter publishCommit — the same "no reply can ever clear it" condition
+	// the escalation error branches unmark for (chair_escalation.go). Without
+	// this, a close or stale withhold strands every responder "thinking" on
+	// the console for the full TTL on a discussion that just terminated. The
+	// floor path needs no twin: its round already dispatched, so repliers
+	// cleared via publishCommit and silent speakers keep the pre-existing
+	// stalled-round TTL decay. Any future branch that decides not to dispatch
+	// belongs behind this same seam, or it re-strands the marks.
+	if !floorPath && (closed || stale) {
+		for _, id := range respIDs {
+			r.clearActivity(msg.ChannelID, id)
 		}
+	}
+	if closed {
 		return
 	}
 
@@ -213,33 +217,44 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// floor-speaker set is cleared — the chair's reply must re-fanout as a fresh
 	// open-floor stimulus, which a floor turn would suppress. A send, never an
 	// await (CE7).
-	if floorPath {
-		r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
-	} else if stale {
-		// PR #716 review: the stimulus outlived its interaction — a sibling
-		// fanout's close (or a rotation) landed between this publish's commit
-		// and its tail. Dispatching it would fan a terminated discussion's
-		// stimulus live and draw LLM replies the publish-path no-reopen latch
-		// then absorbs with the spend already spent; withholding keeps that
-		// wasted fan-out off the wire, the same close-before-dispatch goal as
-		// the ordering above (the resynthesize dispatch runs the same openness
-		// rule at its own seam, chair_escalation.go). The head's activity marks
-		// are cleared like the close branch's: the withheld dispatch has no
-		// reply to re-enter publishCommit and clear them.
-		for _, id := range respIDs {
-			r.clearActivity(msg.ChannelID, id)
-		}
-		r.logger.Debug("channels: concurrent stimulus outlived its interaction; dispatch withheld",
+	if stale {
+		// PR #716 review: the stimulus belongs to a discussion that DELIBERATELY
+		// terminated — its id is in the no-reopen ledger, or it lost the closing
+		// race to a concurrent bound-crossing sibling (maybeBoundedClose). On
+		// the concurrent path its dispatch is withheld: fanning it would draw
+		// LLM replies the publish-path no-reopen latch then absorbs with the
+		// spend already spent, the same close-before-dispatch goal as the
+		// ordering above. On the floor path the round already ran, so nothing
+		// is withheld here — but the stall escalation below is skipped like
+		// the resynthesize dispatch: both revive the terminated discussion.
+		// KNOWN COST (accepted, PR #716 review): a withheld message is
+		// committed history but reaches no member's agent-side record — the
+		// winner's close notification carries only the winner's message.
+		// Bounded to close-racing siblings; true losslessness needs the 4b-ii
+		// redelivery marker (docs/rfcs/0052-pr-plan.md), the same vehicle as
+		// the floor path's duplicate-final-turn limit. A divergence WITHOUT a
+		// deliberate close (orphan-park artefact, idle rotation) is NOT stale
+		// and dispatches normally below.
+		r.logger.Debug("channels: stimulus outlived its closed interaction; dispatch and revival tails withheld",
 			zap.String("channel_id", msg.ChannelID),
 			zap.String("message_id", msg.ID),
+			zap.Bool("floor_path", floorPath),
 			zap.String("stamped_interaction_id", readInteractionID(msg.Metadata)))
+	} else if floorPath {
+		r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
 	} else {
 		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions)
 	}
 	// ISSUE-0099 resynthesize, DISPATCH half — the re-force the head claimed,
-	// dispatched only now that the bounded close has ruled the round sub-bound.
+	// dispatched only now that the bounded close has ruled the round sub-bound
+	// AND live. A stale stimulus skips it like a closed one (PR #716 review):
+	// stale means the discussion terminated (or is terminating — a CAS-losing
+	// bound-crosser can land while the winner's teardown is mid-flight, before
+	// the id retires, when the dispatch's own openness re-check still passes),
+	// and a re-forced chair turn's reply would revive it. The consumed arm
+	// died with the terminated interaction, the closed branch's own posture.
 	// Detached, fire-and-forget, like the stall tail.
-	if pendingResynth != nil {
+	if pendingResynth != nil && !stale {
 		r.dispatchResynthesizeMisfire(context.WithoutCancel(ctx), msg, ct, members, channelSize, pendingResynth)
 	}
 }

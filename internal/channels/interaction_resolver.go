@@ -146,6 +146,15 @@ type openInteraction struct {
 	recentlyClosed []string
 }
 
+// openCommitted reports whether this entry holds an open COMMITTED
+// interaction — the ONE shared predicate behind the escalation read, the
+// bounded-close round advance, and the idle-rotation eligibility below
+// (PR #716 review: the copied expression would drift on any tightening).
+// Nil-tolerant so map-miss callers need no guard. Caller holds interactionMu.
+func (e *openInteraction) openCommitted() bool {
+	return e != nil && e.id != "" && e.idCommitted
+}
+
 // previousClose is the resolver's OQ 5 close-cause attribution for one
 // channel, returned by [ChannelRouter.resolveInteractionID] from the same
 // critical section that resolved the open id — reading it later would race a
@@ -207,7 +216,9 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 	// opening turn) never latches, so the channel stays re-convenable (IP8).
 	// AutonomousFor takes its own leaf mutex, read BEFORE interactionMu below,
 	// so the resolve still holds one governance mutex at a time; the
-	// short-circuit keeps unstamped (human) traffic off that mutex entirely.
+	// short-circuit keeps unstamped (human-TYPED) traffic off that mutex.
+	// Agent replies claim their dispatched-under id on every channel type
+	// (the PR #716 echo); on a human channel the claim stops at this gate.
 	latchClaim := inbound != "" && r.AutonomousFor(channelID).Enabled
 
 	r.interactionMu.Lock()
@@ -228,7 +239,7 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 	// is exactly that precondition; when it holds the gap is a rotation
 	// DECISION (fired or not), logged below for ISSUE-0095 — the no-fire path
 	// was otherwise traceless.
-	eligible := entry.id != "" && entry.idCommitted && ct != ChannelTypeThread && window > 0
+	eligible := entry.openCommitted() && ct != ChannelTypeThread && window > 0
 	var gap time.Duration
 	var lastActivity time.Time
 	if eligible {

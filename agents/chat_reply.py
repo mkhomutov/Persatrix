@@ -328,8 +328,18 @@ async def process_inbound_channel_event(
 
     async def _decide_and_execute() -> None:
         actions = await agent.on_event(event)
+        # RFC 0052 no-reopen claim (PR #716 review): thread the interaction id
+        # this event was dispatched under (seeded off the wire by
+        # ``seed_wire_metadata``) so a same-channel reply echoes it — the
+        # latch's production input. Non-string (never seeded, or a replay
+        # anomaly) reads as absent, the untracked posture.
+        origin_interaction = event.metadata.get("interaction_id", "")
         await executor.execute(
             agent.agent_id, actions, cascade_depth=depth + 1,
+            origin_channel_id=event.channel_id or "",
+            origin_interaction_id=(
+                origin_interaction if isinstance(origin_interaction, str) else ""
+            ),
         )
 
     await dispatch_channel_event_with_chat_error_recovery(

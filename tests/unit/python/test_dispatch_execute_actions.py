@@ -133,6 +133,46 @@ class TestExecuteActionsFlag:
         # agent_b never received anything
         agent_b.on_event.assert_not_called()
 
+    async def test_dispatch_threads_interaction_origin_to_executor(self):
+        """The event's seeded ``interaction_id`` reaches the executor as the
+        origin pair (RFC 0052 no-reopen claim, PR #716 review).
+
+        ``seed_wire_metadata`` puts the dispatched-under id on
+        ``event.metadata["interaction_id"]``; the dispatcher must thread it —
+        with the event's channel — into ``executor.execute`` the same way it
+        threads ``cascade_depth``, or same-channel replies publish unstamped
+        and the Go latch never sees a claim.
+        """
+        actions = [AgentAction(ActionType.DO_NOTHING, {})]
+        dispatcher, _ = _make_dispatcher("ember-owl", actions)
+        executor_mock = AsyncMock(return_value=[])
+        dispatcher._executor.execute = executor_mock
+
+        event = AgentEvent(
+            event_type=EventType.CHANNEL_MESSAGE,
+            payload={"content": "hello"},
+            channel_id="group:planning",
+            metadata={"interaction_id": "itx-1234"},
+        )
+        await dispatcher.dispatch("ember-owl", event)
+
+        kwargs = executor_mock.await_args.kwargs
+        assert kwargs["origin_channel_id"] == "group:planning"
+        assert kwargs["origin_interaction_id"] == "itx-1234"
+
+    async def test_dispatch_origin_defaults_empty_without_seeded_id(self):
+        """An event with no seeded id threads an empty origin pair — the
+        executor stamps nothing and the publish stays chain-origin (IP8)."""
+        actions = [AgentAction(ActionType.DO_NOTHING, {})]
+        dispatcher, _ = _make_dispatcher("ember-owl", actions)
+        executor_mock = AsyncMock(return_value=[])
+        dispatcher._executor.execute = executor_mock
+
+        await dispatcher.dispatch("ember-owl", _chat_event())
+
+        kwargs = executor_mock.await_args.kwargs
+        assert kwargs["origin_interaction_id"] == ""
+
     async def test_unknown_agent_returns_empty_list(self):
         """dispatch() to an unknown agent returns [] regardless of execute_actions."""
         dispatcher = EventDispatcher(agents={})

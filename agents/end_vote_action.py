@@ -41,6 +41,8 @@ async def publish_end_interaction_vote(
     action: AgentAction,
     *,
     cascade_depth: int,
+    origin_channel_id: str = "",
+    origin_interaction_id: str = "",
 ) -> dict[str, Any]:
     """Publish an RFC 0030 Layer 4 end-of-interaction vote (producer plan
     PR 2, IP6).
@@ -53,6 +55,14 @@ async def publish_end_interaction_vote(
     the cross-language drift test). Mentions stay empty: a vote addresses
     the room's process, not a member, and must not direct the floor.
     ``cascade_depth`` rides verbatim, the send-branch posture.
+
+    A same-channel vote also echoes ``origin_interaction_id`` as the wire
+    ``interaction_id`` claim — the RFC 0052 no-reopen latch input (PR #716
+    review; see ``ActionExecutor.execute``). A vote is post-persistence
+    channel traffic like any reply, so a vote straggling in after a bounded
+    close must latch rather than mint fresh and re-fan; the resolver still
+    scopes a LIVE vote to its own resolved interaction (IP2 — the claim
+    never keys quorum state).
 
     The legacy in-process dispatcher path keeps the pre-producer
     ``not_implemented`` status — votes are a channels-governance concept
@@ -116,6 +126,9 @@ async def publish_end_interaction_vote(
     content = str(action.payload.get("content", "") or "").strip()
     if not content:
         content = _END_VOTE_DEFAULT_CONTENT
+    metadata: dict[str, Any] = {"end_interaction_vote": True}
+    if origin_interaction_id and target_channel == origin_channel_id:
+        metadata["interaction_id"] = origin_interaction_id
     try:
         await asyncio.wait_for(
             publisher.publish(
@@ -124,7 +137,7 @@ async def publish_end_interaction_vote(
                 content=content,
                 mentions=[],
                 cascade_depth=cascade_depth,
-                metadata={"end_interaction_vote": True},
+                metadata=metadata,
             ),
             timeout=DEFAULT_PUBLISH_TIMEOUT_SECONDS,
         )

@@ -255,9 +255,17 @@ class EventDispatcher:
 
         # Propagate cascade depth into action execution so that
         # SEND_CHANNEL_MESSAGE child dispatches inherit the current depth.
+        # The interaction id the event was dispatched under rides along the
+        # same way (RFC 0052 no-reopen claim, PR #716 review) so a
+        # same-channel reply echoes it — see ``ActionExecutor.execute``.
         if execute_actions:
+            origin_interaction = event.metadata.get("interaction_id", "")
             await self._executor.execute(
                 target_id, actions, cascade_depth=depth + 1,
+                origin_channel_id=event.channel_id or "",
+                origin_interaction_id=(
+                    origin_interaction if isinstance(origin_interaction, str) else ""
+                ),
             )
 
         return actions
