@@ -390,6 +390,27 @@ func (r *ChannelRouter) dispatchResynthesizeMisfire(
 	channelSize int,
 	pending *pendingResynthesize,
 ) {
+	// Openness re-check (PR #716 review): the claim validated stamped-vs-open
+	// at the fanout HEAD, but on the floor path a whole multi-turn round ran
+	// between the claim and this dispatch — long enough for an end-vote quorum
+	// (a floor speaker's reply runs processEndVote mid-round) or an idle
+	// rotation on a concurrent publish to retire the interaction. The
+	// bounded-close gate in fanout.go cannot stand in for this check: its
+	// `false` conflates "sub-bound" with "diverged/closed", and it is inert on
+	// human channels — where a re-forced turn onto a retired id draws a chair
+	// reply that mints FRESH and REOPENS the closed discussion (no post-close
+	// latch there). Re-checking here restores the pre-split guard-beside-
+	// dispatch adjacency; the residual window is dispatch-call jitter, the
+	// accepted pre-4b-i posture. Dropping is correct, not a loss: the
+	// interaction the re-force was owed to is over, and the arm died with it
+	// (no consumed-arm cleanup is owed — the claim's contract). Silent like the
+	// bounding-round drop, debug-logged like the claim's divergence branch.
+	if openID, _, tracked := r.openInteractionEscalationState(msg.ChannelID); !tracked || openID != pending.interactionID {
+		r.logger.Debug("channels: pending resynthesize outlived its interaction; re-force dropped",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("interaction_id", pending.interactionID))
+		return
+	}
 	chairID := pending.chairID
 	var chair *Member
 	for i := range members {

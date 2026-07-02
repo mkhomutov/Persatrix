@@ -171,11 +171,12 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	//     even under floor control. The bounding message is still persisted, and
 	//     the close notification delivers it as the marked control event a
 	//     member with an OPEN scope ingests as its record's final turn before
-	//     closing (close_notification.py). The one gap: a member with NO open
-	//     scope no-ops rather than fabricate a 1-turn record — in practice every
-	//     responder opened a scope on the prior live rounds (1..N-1), so it only
-	//     bites at max_rounds=1 on this path, the documented tiny-bound edge
-	//     ([DefaultAutonomousMaxRounds]).
+	//     closing (close_notification.py). A member with NO open scope would
+	//     no-op instead of fabricating a 1-turn record — which is why the close
+	//     never fires before the interaction's first live dispatch
+	//     (maybeBoundedClose's round-1 guard, PR #716 review): even
+	//     `max_rounds = 1` delivers the opening turn live and closes on the next
+	//     tail, so every close leaves an artifact (§D).
 	//
 	// A `true` return means the id is retired, so every follow-on that could
 	// revive the interaction is skipped: the stall escalation (a forced chair
@@ -186,7 +187,7 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// no-op returning false on human channels (autonomous disabled → the hook
 	// returns before touching state) and on sub-bound rounds, so ordinary
 	// channels and mid-discussion rounds proceed byte-for-byte unchanged.
-	if r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize) {
+	if r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize, !floorPath) {
 		if !floorPath {
 			// The withheld dispatch is the one mark/clear seam with NO reply to
 			// re-enter publishCommit — the same "no reply can ever clear it"

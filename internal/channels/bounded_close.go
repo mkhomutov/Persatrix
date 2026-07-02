@@ -149,7 +149,11 @@ func (r *ChannelRouter) advanceBoundedCloseRound(channelID, stampedID string) (s
 // slightly larger reserve than the true roster, tripping the soft close a touch
 // earlier — the safe direction (more hard-cap headroom for the close path), not
 // less.
-func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, channelSize int) bool {
+//
+// `dispatchPending` says the caller's dispatch for THIS cycle has not happened
+// yet and a close would withhold it (the concurrent path's close-before-dispatch
+// ordering; false on the floor path, whose round has already run).
+func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, channelSize int, dispatchPending bool) bool {
 	a := r.AutonomousFor(msg.ChannelID)
 	if !a.Enabled {
 		return false // OQ #2 scope gate: human channels are untouched.
@@ -160,12 +164,26 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	if !ok {
 		return false
 	}
-
-	maxRounds := a.MaxRounds
-	if maxRounds <= 0 {
-		maxRounds = DefaultAutonomousMaxRounds
+	// §D artifact guarantee (PR #716 review): never close before the
+	// interaction's FIRST live dispatch. With the dispatch still pending, a
+	// close at round 1 would withhold the OPENING turn itself: no member ever
+	// opened a scope, the close notification no-ops agent-side
+	// (close_notification.py's no-open-scope posture), and the channel would
+	// terminate having delivered nothing and produced no artifact — reachable
+	// at the legal `max_rounds = 1` (or a tiny budget) on any single-responder
+	// roster. Deferring to the next tail costs at most one live round past the
+	// bound (the wallet hard cap still backstops the budget trigger) and gives
+	// `max_rounds = 1` the same meaning on both paths: one live exchange, then
+	// close — the floor path's bounding round has already run when it counts.
+	if dispatchPending && round == 1 {
+		return false
 	}
-	roundExceeded := round >= maxRounds
+
+	// AutonomousFor returns a NORMALIZED config on every path (SetAutonomous
+	// normalizes on write; the miss fallback DefaultAutonomousConfig is
+	// pre-filled), so MaxRounds is always positive here — re-filling a zero
+	// locally would re-implement the one normalization rule and drift from it.
+	roundExceeded := round >= a.MaxRounds
 
 	budgetExceeded := false
 	if r.spend != nil {
@@ -211,18 +229,17 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 // boundedClose runs the artifact-bearing close teardown for an autonomous
 // interaction that crossed a hard bound — the deterministic-terminator mirror of
 // [ChannelRouter.processEndVote]'s close branch, minus the eviction (deferred to
-// PR 7; see the file header). A CAS on `closedInteractions` makes it single-shot:
-// a second bound-crossing fanout, or a racing end-vote quorum, finds the
-// interaction already closed and returns.
+// PR 7; see the file header). The shared close-write
+// ([ChannelRouter.tombstoneInteractionLocked]) makes it single-shot: a second
+// bound-crossing fanout, or a racing end-vote quorum, finds the tombstone
+// standing and returns.
 func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, interactionID, trigger string) {
 	r.endVoteMu.Lock()
-	if _, done := r.closedInteractions[interactionID]; done {
-		r.endVoteMu.Unlock()
+	won := r.tombstoneInteractionLocked(interactionID)
+	r.endVoteMu.Unlock()
+	if !won {
 		return
 	}
-	r.closedInteractions[interactionID] = struct{}{}
-	delete(r.endVotes, interactionID)
-	r.endVoteMu.Unlock()
 
 	r.recordInteractionClosedBounded(ctx, msg, ct, interactionID, trigger)
 	// The shared close-teardown tail ([ChannelRouter.finalizeInteractionClose]):

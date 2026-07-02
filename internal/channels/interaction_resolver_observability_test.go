@@ -75,7 +75,7 @@ func TestInteractionResolver_RotationDecision_UncommittedMintNotLogged(t *testin
 	router.logger = zap.New(core)
 
 	// resolve without settling persisted: the mint stays tentative.
-	_, _, settle := router.resolveInteractionID(t.Context(), ch, ChannelTypeGroup, "")
+	_, _, settle, _ := router.resolveInteractionID(t.Context(), ch, ChannelTypeGroup, "", false)
 	settle(false)
 
 	assert.Empty(t, logs.FilterMessage(rotationDecisionMsg).All(),

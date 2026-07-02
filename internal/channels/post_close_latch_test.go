@@ -1,16 +1,19 @@
 package channels
 
 // post_close_latch_test.go — the RFC 0052 no-reopen latch (PR 4b-i review
-// round 5), the publish-path half of the bounded close's no-reopen guarantee.
-// The fanout-tail guards (bounded_close_test.go) stop the CLOSING fanout from
-// reviving its own interaction; this latch stops the traffic those guards
-// cannot see — a floor straggler whose reply lands after its bounding round
-// ended, or a reply drawn by a sub-bound sibling fanout that raced the close
-// on the concurrent path. Both re-enter Publish CLAIMING the retired id;
-// pre-latch, IP2 overrode the claim and minted fresh, re-fanning the reply and
-// reopening the unattended discussion (the §D runaway). The latch keeps the
-// claim so the publish rides processEndVote's tombstone branch instead:
-// persisted, fanout suppressed, no mint. Scoped to `autonomous.enabled` —
+// rounds 5–6), the publish-path half of the bounded close's no-reopen
+// guarantee. The fanout-tail guards (bounded_close_test.go) stop the CLOSING
+// fanout from reviving its own interaction; this latch stops the traffic
+// those guards cannot see — a floor straggler whose reply lands after its
+// bounding round ended, or a reply drawn by a sub-bound sibling fanout that
+// raced the close on the concurrent path. Both re-enter Publish CLAIMING the
+// retired id; pre-latch, IP2 overrode the claim and minted fresh, re-fanning
+// the reply and reopening the unattended discussion (the §D runaway). The
+// latch keeps the claim and publishCommit suppresses the fanout directly:
+// persisted as the closed record's late final word, metered as the Layer 4
+// governance drop, no mint. The decision lives INSIDE the resolver's critical
+// section, keyed on the per-channel ledger of deliberately closed ids
+// (interaction_close_latch.go). Scoped to `autonomous.enabled` —
 // human-channel post-close traffic keeps minting fresh, byte-for-byte
 // unchanged.
 
@@ -87,14 +90,13 @@ func TestPostCloseLatch_StragglerClaimDoesNotReopen(t *testing.T) {
 	assert.True(t, tracked, "an unstamped publish still mints fresh — the channel stays re-convenable")
 }
 
-// TestPostCloseLatch_ForeignChannelTombstoneNeverLatches — the channel-scoping
-// pin: the tombstone map is keyed by interaction id alone, so without the
-// retiree comparison a member of autonomous channel B could stamp channel A's
-// tombstoned id onto its publish and have it persist under an interaction that
-// never existed on B (its own fanout suppressed — self-harm, but polluted
-// attribution). The latch must fire only for THIS channel's pending retiree; a
-// foreign claim keeps the IP2 override and mints fresh like any stale claim.
-func TestPostCloseLatch_ForeignChannelTombstoneNeverLatches(t *testing.T) {
+// TestPostCloseLatch_ForeignChannelCloseNeverLatches — the channel-scoping
+// pin: the no-reopen ledger is per-channel by construction, so a member of
+// autonomous channel B stamping channel A's closed id onto its publish must
+// not have it persist under an interaction that never existed on B (its own
+// fanout suppressed — self-harm, but polluted attribution). A foreign claim
+// keeps the IP2 override and mints fresh like any stale claim.
+func TestPostCloseLatch_ForeignChannelCloseNeverLatches(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
 	disp := &envelopeRecorder{}
 	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
@@ -108,20 +110,21 @@ func TestPostCloseLatch_ForeignChannelTombstoneNeverLatches(t *testing.T) {
 			"operator":  RespondNever,
 			"ember-owl": RespondAlways,
 		}, "operator", "ember-owl")
-	router.SetAutonomous(chA, AutonomousConfig{Enabled: true, MaxRounds: 1, Convener: "ember-owl"})
+	router.SetAutonomous(chA, AutonomousConfig{Enabled: true, MaxRounds: 2, Convener: "ember-owl"})
 	router.SetAutonomous(chB, AutonomousConfig{Enabled: true, MaxRounds: 100, Convener: "ember-owl"})
 
-	// Bound-close channel A on its opening turn; its id is now tombstoned.
-	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
-		ID: uuid.NewString(), ChannelID: chA, SenderID: "operator", Content: "go",
-	}, ""))
+	// Bound-close channel A: round 1 opens (and is dispatched live — the §D
+	// round-1 guard), round 2 crosses the bound and closes.
+	tick(t, router, chA)
+	foreignID, _, tracked := router.openInteractionEscalationState(chA)
+	require.True(t, tracked, "channel A's round 1 opens the interaction")
+	tick(t, router, chA)
 	router.WaitForPendingFanout()
-	foreignID := router.retiredInteractionFor(chA)
-	require.NotEmpty(t, foreignID, "channel A's bounded close parked its id as the retiree")
-	require.True(t, router.interactionTombstoned(foreignID))
+	_, _, tracked = router.openInteractionEscalationState(chA)
+	require.False(t, tracked, "channel A's bounded close retired its id")
 
-	// A publish on channel B claiming channel A's tombstoned id: NOT B's
-	// retiree, so the latch must not fire — IP2 overrides and mints fresh.
+	// A publish on channel B claiming channel A's closed id: not on B's
+	// ledger, so the latch must not fire — IP2 overrides and mints fresh.
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
 		ID: uuid.NewString(), ChannelID: chB, SenderID: "ember-owl", Content: "hello",
 		Metadata: map[string]any{interactionIDMetadataKey: foreignID},
@@ -131,6 +134,95 @@ func TestPostCloseLatch_ForeignChannelTombstoneNeverLatches(t *testing.T) {
 	openB, _, tracked := router.openInteractionEscalationState(chB)
 	assert.True(t, tracked, "the foreign claim keeps the IP2 override — channel B mints its own interaction")
 	assert.NotEqual(t, foreignID, openB, "and never adopts the foreign id")
+}
+
+// TestPostCloseLatch_SurvivesSuccessorGenerations — the PR #716 review
+// one-generation escape: the round-5 latch keyed on the channel's single
+// retiree slot plus the tombstone, BOTH displaced when the next generation
+// closes (markInteractionClosed discharges the previous retiree's tombstone).
+// A very late straggler claiming generation A after close(A) → re-convene →
+// close(B) escaped both conjuncts, fell into IP2, minted fresh, and re-fanned
+// — reopening the unattended channel. The ledger spans generations, so the
+// claim latches regardless of how many closes landed since.
+func TestPostCloseLatch_SurvivesSuccessorGenerations(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &envelopeRecorder{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
+		map[string]RespondPolicy{
+			"operator":  RespondNever,
+			"ember-owl": RespondAlways,
+		}, "operator", "ember-owl")
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 2, Convener: "ember-owl"})
+
+	// Generation A: opens on round 1, bounded-closes on round 2.
+	tick(t, router, ch)
+	closedA, _, tracked := router.openInteractionEscalationState(ch)
+	require.True(t, tracked)
+	tick(t, router, ch)
+	router.WaitForPendingFanout()
+	_, _, tracked = router.openInteractionEscalationState(ch)
+	require.False(t, tracked, "generation A bounded-closed")
+
+	// Generation B: re-convene and close AGAIN. B's close overwrites the
+	// retiree slot and discharges A's tombstone — the exact state the pre-fix
+	// latch keyed on.
+	tick(t, router, ch)
+	closedB, _, tracked := router.openInteractionEscalationState(ch)
+	require.True(t, tracked, "the channel re-convenes into generation B")
+	require.NotEqual(t, closedA, closedB)
+	tick(t, router, ch)
+	router.WaitForPendingFanout()
+	_, _, tracked = router.openInteractionEscalationState(ch)
+	require.False(t, tracked, "generation B bounded-closed")
+	before := liveDispatches(disp)
+
+	// The very late straggler: a reply claiming generation A, in flight since
+	// before B ran (a slow LLM reply plus a fast re-convene compresses B's
+	// whole lifetime inside one dispatch window). Must latch: no mint, no fan.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "ember-owl", Content: "very late thought",
+		Metadata: map[string]any{interactionIDMetadataKey: closedA},
+	}, ""))
+	router.WaitForPendingFanout()
+
+	_, _, tracked = router.openInteractionEscalationState(ch)
+	assert.False(t, tracked,
+		"a straggler of a DISPLACED generation must still latch — its mint is the reopen")
+	assert.Equal(t, before, liveDispatches(disp), "and it draws no fanout")
+}
+
+// TestPostCloseLatch_LatchDecisionIsInsideTheResolve — the PR #716 review
+// TOCTOU pin, at the resolver seam: once markInteractionClosed has run, a
+// latch-scoped resolve of the closed claim returns the claim itself (latched,
+// no mint, zero close-cause, no-op settle), because the decision and the
+// would-be mint share one interactionMu critical section. The round-5 shape —
+// predicate on the publish path, resolve in a second acquisition — let a
+// close land between the two and mint fresh for the very straggler the latch
+// suppresses; with the decision inside the resolve there is no "between".
+func TestPostCloseLatch_LatchDecisionIsInsideTheResolve(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	router := NewChannelRouter(store, &envelopeRecorder{}, zap.NewNop(), nil)
+	ch := "group:atomic-latch"
+	ctx := context.Background()
+
+	id, _, settle, latched := router.resolveInteractionID(ctx, ch, ChannelTypeGroup, "", false)
+	require.False(t, latched)
+	settle(true)
+	router.markInteractionClosed(ch, id, structuralTrigger)
+
+	// The straggler's resolve, an instant after the close.
+	got, prev, _, nowLatched := router.resolveInteractionID(ctx, ch, ChannelTypeGroup, id, true)
+	assert.True(t, nowLatched, "a deliberately closed claim latches inside the resolve")
+	assert.Equal(t, id, got, "the latched resolve rides the closed id — no mint")
+	assert.Empty(t, prev.id, "a latched publish carries no close-cause attribution (it is the closed record's tail)")
+
+	// The same claim WITHOUT the autonomous latch scope (a human channel's
+	// publish): IP2 overrides and mints fresh, byte-for-byte unchanged.
+	fresh, _, settleFresh, humanLatched := router.resolveInteractionID(ctx, ch, ChannelTypeGroup, id, false)
+	assert.False(t, humanLatched)
+	assert.NotEqual(t, id, fresh, "outside the latch scope the closed claim still mints fresh (IP2)")
+	settleFresh(false)
 }
 
 // TestPostCloseLatch_HumanChannelClaimStillMintsFresh — the OQ #2 scope pin:

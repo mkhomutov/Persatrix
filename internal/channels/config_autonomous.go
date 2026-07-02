@@ -55,8 +55,11 @@ const (
 	// closes BEFORE the dispatch, so the `max_rounds`-th message is NOT dispatched
 	// live — it reaches members only as the close-notification artifact. So on a
 	// concurrent (e.g. two-persona) roster `max_rounds` bounds `max_rounds - 1`
-	// live exchanges. Immaterial at the default; visible only at a tiny bound
-	// (`max_rounds = 1` on the concurrent path closes on the opening turn).
+	// live exchanges. Immaterial at the default; at the tiny-bound extreme the
+	// §D artifact guarantee takes over — the close never fires before the
+	// interaction's first live dispatch (maybeBoundedClose's round-1 guard,
+	// PR #716 review), so `max_rounds = 1` means one live exchange on either
+	// path, never a zero-delivery close.
 	DefaultAutonomousMaxRounds = 12
 )
 

@@ -387,6 +387,59 @@ func TestBoundedClose_ConcurrentPathDoesNotDispatchBoundingStimulus(t *testing.T
 		"the bounding message reaches the responder as the close notification instead (ingested as the final turn, not replied to)")
 }
 
+// TestBoundedClose_ConcurrentPathTinyBoundStillDeliversOpener — the PR #716
+// review §D artifact pin: `max_rounds = 1` is a legal config (validation
+// rejects only negatives; zero fills the default), and on the concurrent path
+// the close runs BEFORE the dispatch — so pre-fix the bounding round WAS the
+// opening turn: the opener was withheld, no member ever opened a scope, the
+// close notification no-opped agent-side (close_notification.py), and the
+// channel closed having delivered nothing and produced no artifact — a
+// silently useless convene. The round-1 guard defers the close past the
+// interaction's FIRST live dispatch: the opener goes out live and the next
+// tail closes — one live exchange, artifact guaranteed, the same meaning
+// `max_rounds = 1` has on the floor path (whose bounding round runs before it
+// counts — TestBoundedClose_ClosesOnTheBoundingRound).
+func TestBoundedClose_ConcurrentPathTinyBoundStillDeliversOpener(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &envelopeRecorder{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	// Floor control OFF → every publish takes the concurrent path.
+	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
+		map[string]RespondPolicy{
+			"operator":  RespondNever,
+			"ember-owl": RespondAlways,
+		}, "operator", "ember-owl")
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 1, Convener: "ember-owl"})
+
+	tick(t, router, ch) // round 1 == max_rounds — but it is the opening turn
+	router.WaitForPendingFanout()
+
+	var ordinary int
+	for _, env := range disp.snapshot() {
+		if env.Recipient.ParticipantID == "ember-owl" && !env.InteractionCloseNotification {
+			ordinary++
+		}
+	}
+	assert.Equal(t, 1, ordinary,
+		"the opening turn is dispatched live — withholding it would close an empty record")
+	_, _, tracked := router.openInteractionEscalationState(ch)
+	require.True(t, tracked, "the interaction survives its opening round")
+
+	tick(t, router, ch) // round 2: past the deferred bound → close, dispatch withheld
+	router.WaitForPendingFanout()
+
+	_, _, tracked = router.openInteractionEscalationState(ch)
+	assert.False(t, tracked, "the next tail closes the interaction")
+	var closeNotifications int
+	for _, env := range disp.snapshot() {
+		if env.Recipient.ParticipantID == "ember-owl" && env.InteractionCloseNotification {
+			closeNotifications++
+		}
+	}
+	assert.Equal(t, 1, closeNotifications,
+		"the close notification reaches the member whose scope the live opener opened — the §D artifact")
+}
+
 // TestBoundedClose_ConcurrentPathClearsActivityMarks is the review round 5
 // presence regression: the concurrent-path bounding round marks its responders
 // "thinking" at the fanout head (RFC 0048 Tier 1) and then WITHHOLDS the

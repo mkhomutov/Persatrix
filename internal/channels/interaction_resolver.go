@@ -35,8 +35,10 @@ package channels
 // at most one per channel, the deliberate bounded residue. At most one
 // pending retiree per channel, and a rejected publish never retains an entry
 // ([ChannelRouter.settleInteraction] deletes a never-committed one), so the
-// table holds ≤ 2 ids per channel WITH PERSISTED HISTORY — bounded by real
-// channels, not by caller-supplied channel ids, and not a leak.
+// table holds ≤ 2 ids per channel WITH PERSISTED HISTORY — plus the RFC 0052
+// no-reopen ledger's ≤ [postCloseLatchGenerations] deliberately closed ids
+// (interaction_close_latch.go) — bounded by real channels, not by
+// caller-supplied channel ids, and not a leak.
 //
 // The Layer 4 quorum close notifies the resolver via
 // [ChannelRouter.markInteractionClosed] (IP8) so the next publish mints fresh
@@ -136,6 +138,12 @@ type openInteraction struct {
 	// zeroes it, so the tally dies with the interaction and needs no lifetime map.
 	// Guarded by interactionMu.
 	roundCount int
+	// recentlyClosed is the RFC 0052 no-reopen ledger: this channel's
+	// deliberately closed interaction ids, newest last, bounded to
+	// [postCloseLatchGenerations]. Written by the close notification, read by
+	// the resolve's latch — story, scope, and lifetime in
+	// interaction_close_latch.go. Guarded by interactionMu.
+	recentlyClosed []string
 }
 
 // previousClose is the resolver's OQ 5 close-cause attribution for one
@@ -151,11 +159,19 @@ type previousClose struct {
 
 // resolveInteractionID returns the open interaction id for `channelID`,
 // minting or rotating as needed, and is the ONLY writer of the governance
-// interaction key space (IP2). `inbound` is the publisher's claim, used solely
-// for the divergence debug log. Seam firing and telemetry run outside
-// interactionMu — the discard seams take their own leaf mutexes, and holding
-// two governance mutexes at once would mint a lock-ordering edge no other
-// path has.
+// interaction key space (IP2). `inbound` is the publisher's claim, used for
+// the divergence debug log and — when `latchClaim` is set (an AUTONOMOUS
+// channel, publishCommit's scope decision) — for the RFC 0052 no-reopen
+// latch: a claim naming a deliberately closed interaction is KEPT, not
+// overridden, and the fourth return reports it. The latch reads the ledger in
+// the SAME critical section that would otherwise mint, so a concurrent close
+// cannot slip between the decision and the mint (PR #716 review; the ledger's
+// story lives in interaction_close_latch.go). A latched resolve touches no
+// resolver state: the settle hook is a no-op and the close-cause attribution
+// is zero (the publish is the closed record's tail, not a successor's
+// boundary signal). Seam firing and telemetry run outside interactionMu — the
+// discard seams take their own leaf mutexes, and holding two governance
+// mutexes at once would mint a lock-ordering edge no other path has.
 //
 // The second return is the channel's OQ 5 close-cause attribution (the most
 // recently closed id + its trigger, zero when none) — read under the same
@@ -178,11 +194,15 @@ type previousClose struct {
 // growth), and a throttled participant's in-window retries hold its own
 // exhausted interaction open forever, so the idle rotation that would reset
 // its budget never fires.
-func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID string, ct ChannelType, inbound string) (string, previousClose, func(persisted bool)) {
+func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID string, ct ChannelType, inbound string, latchClaim bool) (string, previousClose, func(persisted bool), bool) {
 	now := r.interactionNow()
 
 	r.interactionMu.Lock()
 	entry := r.openInteractions[channelID]
+	if latchClaim && entry != nil && entry.latchedClaim(inbound) {
+		r.interactionMu.Unlock()
+		return inbound, previousClose{}, func(bool) {}, true
+	}
 	if entry == nil {
 		entry = &openInteraction{}
 		r.openInteractions[channelID] = entry
@@ -275,7 +295,7 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 			zap.String("claimed", inbound),
 			zap.String("resolved", resolved))
 	}
-	return resolved, prev, func(persisted bool) { r.settleInteraction(channelID, resolved, now, persisted) }
+	return resolved, prev, func(persisted bool) { r.settleInteraction(channelID, resolved, now, persisted) }, false
 }
 
 // settleInteraction reconciles the resolver table to the persist outcome of
@@ -344,36 +364,6 @@ func (r *ChannelRouter) settleInteraction(channelID, resolved string, now time.T
 
 	if firstCommit {
 		r.snapshotInteractionBudget(resolved, channelID)
-	}
-}
-
-// markInteractionClosed is the resolver close notification (IP8): a close site
-// calls it so the channel's next publish mints fresh instead of stamping the
-// closed id into post-close suppression for the rest of the idle window. The
-// closed id parks as the pending retiree — its `closedInteractions` tombstone
-// (left by the close) survives until the deferred discard, long enough to
-// suppress and self-heal any commit racing the close — and is recorded as the
-// channel's OQ 5 close cause with `trigger` (`end_votes` for the Layer 4 quorum
-// close; `structural`/`cost` for the RFC 0052 bounded close, bounded_close.go)
-// so the successor interaction's publishes carry the truthful close attribution.
-// A stale call (the open id moved on already) is a no-op, including for the cause
-// record.
-func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger string) {
-	r.interactionMu.Lock()
-	entry := r.openInteractions[channelID]
-	var discard string
-	if entry != nil && entry.id == interactionID {
-		discard = entry.retired
-		entry.retired = interactionID
-		entry.id = ""
-		entry.prev = previousClose{id: interactionID, trigger: trigger}
-	}
-	r.interactionMu.Unlock()
-
-	if discard != "" {
-		r.DiscardInteractionReplyBudget(discard)
-		r.DiscardInteractionEndVotes(discard)
-		r.DiscardInteractionBudget(discard)
 	}
 }
 

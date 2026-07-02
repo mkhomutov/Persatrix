@@ -33,8 +33,8 @@ func TestInteractionResolver_OrphanedCommitParksAsRetiree(t *testing.T) {
 	// P and Q race on the channel's first publish: both resolve the same
 	// tentative mint (publishCommit calls resolve before the store persist,
 	// so two in-flight publishes share it).
-	_, _, settleP := router.resolveInteractionID(ctx, ch, ChannelTypeGroup, "")
-	orphan, _, settleQ := router.resolveInteractionID(ctx, ch, ChannelTypeGroup, "")
+	_, _, settleP, _ := router.resolveInteractionID(ctx, ch, ChannelTypeGroup, "", false)
+	orphan, _, settleQ, _ := router.resolveInteractionID(ctx, ch, ChannelTypeGroup, "", false)
 
 	// P's persist fails and settles first: the sole-tentative entry is
 	// deleted (the rejected-publish bound). R publishes before Q settles,

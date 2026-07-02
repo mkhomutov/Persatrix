@@ -216,64 +216,48 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// publish neither retains a resolver entry nor advances the idle clock
 	// (see [ChannelRouter.settleInteraction]).
 	//
-	// RFC 0052 no-reopen latch (PR 4b-i review round 5): on an AUTONOMOUS
-	// channel, IP2's override is exempted for a claim naming a deliberately
-	// CLOSED (tombstoned) interaction. Such a publish is post-close traffic of
-	// the discussion a bounded close (or end-vote) just terminated — a floor
-	// straggler whose reply landed after its bounding round ended
-	// (clearFloorSpeakers drops the suppression set at round end, so it
-	// "re-fanouts normally"), or a reply drawn by a sub-bound sibling fanout
-	// that raced the close on the concurrent path. Minting fresh here was the
-	// hole under the fanout-tail no-reopen guards: the reply re-fanned under a
-	// fresh id and REOPENED the unattended discussion (the §D runaway).
-	// Keeping the claim routes the publish into processEndVote's tombstone
-	// branch below — persisted as the closed record's late final word, fanout
-	// suppressed as the governance drop, reply-budget residue re-discarded —
-	// the same suppress-and-self-heal a commit racing the close already gets.
-	// Scope (OQ #2): human channels never latch and keep minting fresh,
-	// byte-for-byte unchanged. An unstamped publish (the operator, the
-	// convener's opening turn) never latches, so the channel stays
-	// re-convenable (IP8); an idle-rotated predecessor is never tombstoned, so
-	// a discussion surviving an idle rotation is untouched. The claim must
-	// name THIS channel's pending retiree ([ChannelRouter.retiredInteractionFor])
-	// — the tombstone map is keyed by id alone, and a forged claim naming a
-	// FOREIGN channel's tombstoned id must keep the IP2 override rather than
-	// persist under an interaction that never existed here. Best-effort within
-	// the tombstone's lifetime ([ChannelRouter.interactionTombstoned]) — the
-	// entire successor generation, comfortably past the seconds-scale
-	// straggler window.
+	// RFC 0052 no-reopen latch (PR 4b-i review rounds 5–6): on an AUTONOMOUS
+	// channel a claim naming a deliberately CLOSED interaction is kept, not
+	// overridden — such a publish is post-close traffic of a discussion a
+	// bounded close (or end-vote) just terminated, and minting fresh would
+	// re-fan it and REOPEN the unattended discussion (the §D runaway). The
+	// latch DECISION lives inside resolveInteractionID's critical section:
+	// deciding it here and resolving there raced a concurrent bounded close
+	// into minting fresh for the very straggler the latch suppresses (review
+	// #716, the TOCTOU fix). `latchClaim` is this path's scope gate (OQ #2):
+	// human channels never latch and keep minting fresh, byte-for-byte
+	// unchanged; an unstamped publish (the operator, the convener's opening
+	// turn) never latches, so the channel stays re-convenable (IP8). Ledger
+	// scope and lifetime — channel-scoped, deliberate closes only, spanning
+	// generations — live in interaction_close_latch.go.
 	inboundClaim := readInteractionID(msg.Metadata)
-	settleInteraction := func(bool) {} // the latched path touches no resolver state
-	if inboundClaim != "" && r.AutonomousFor(msg.ChannelID).Enabled &&
-		r.retiredInteractionFor(msg.ChannelID) == inboundClaim && r.interactionTombstoned(inboundClaim) {
+	latchClaim := inboundClaim != "" && r.AutonomousFor(msg.ChannelID).Enabled
+	resolvedInteractionID, prevClose, settleInteraction, latched := r.resolveInteractionID(ctx, msg.ChannelID, derivedType, inboundClaim, latchClaim)
+	if latched {
 		r.logger.Debug("channels: post-close claim latched on autonomous channel; publish rides the closed interaction",
 			zap.String("channel_id", msg.ChannelID),
 			zap.String("claimed", inboundClaim))
-		// The claim stays as the stamped id. Publisher-supplied close-cause
-		// keys are still dropped — resolver-authoritative, and this publish is
-		// the closed record's tail, not a successor's boundary signal.
-		delete(msg.Metadata, previousInteractionIDMetadataKey)
-		delete(msg.Metadata, previousInteractionTriggerMetadataKey)
-	} else {
-		resolvedInteractionID, prevClose, settle := r.resolveInteractionID(ctx, msg.ChannelID, derivedType, inboundClaim)
-		settleInteraction = settle
-		if msg.Metadata == nil {
-			msg.Metadata = map[string]any{}
-		}
-		msg.Metadata[interactionIDMetadataKey] = resolvedInteractionID
-		// OQ 5 close-cause attribution: stamp the retired predecessor's id +
-		// trigger ("idle"/"end_votes") so the agent-side rotation close can pick
-		// the truthful close reason. Inbound claims are deleted first — like the
-		// interaction id itself, the cause is resolver-authoritative and a
-		// publisher-supplied value must never drive receiver close labels. No
-		// retiree (fresh channel, post-restart re-mint) stamps nothing: absent is
-		// the documented "unknown" the receiver keeps its legacy label for.
-		delete(msg.Metadata, previousInteractionIDMetadataKey)
-		delete(msg.Metadata, previousInteractionTriggerMetadataKey)
-		if prevClose.id != "" {
-			msg.Metadata[previousInteractionIDMetadataKey] = prevClose.id
-			msg.Metadata[previousInteractionTriggerMetadataKey] = prevClose.trigger
-		}
+	}
+	if msg.Metadata == nil {
+		msg.Metadata = map[string]any{}
+	}
+	msg.Metadata[interactionIDMetadataKey] = resolvedInteractionID
+	// OQ 5 close-cause attribution: stamp the retired predecessor's id +
+	// trigger ("idle"/"end_votes") so the agent-side rotation close can pick
+	// the truthful close reason. Inbound claims are deleted first — like the
+	// interaction id itself, the cause is resolver-authoritative and a
+	// publisher-supplied value must never drive receiver close labels — and
+	// the delete runs unconditionally (review #716 hoisted it out of the
+	// latch's branch arms, where the pair had been duplicated verbatim). No
+	// retiree (fresh channel, post-restart re-mint, or a latched publish —
+	// the closed record's tail, whose prevClose is zero) stamps nothing:
+	// absent is the documented "unknown" the receiver keeps its legacy label
+	// for.
+	delete(msg.Metadata, previousInteractionIDMetadataKey)
+	delete(msg.Metadata, previousInteractionTriggerMetadataKey)
+	if prevClose.id != "" {
+		msg.Metadata[previousInteractionIDMetadataKey] = prevClose.id
+		msg.Metadata[previousInteractionTriggerMetadataKey] = prevClose.trigger
 	}
 
 	// RFC 0030 Layer 2 (v0.3.8) per-participant reply budget + store commit:
@@ -302,6 +286,21 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// agent that just ended the conversation in the indicator until the TTL. See
 	// activity.go.
 	r.clearActivity(msg.ChannelID, msg.SenderID)
+
+	// RFC 0052 no-reopen latch, suppression half: the latched publish is the
+	// closed record's late final word — persisted above, barred from fanout
+	// like any post-close traffic. Deliberately NOT delegated to
+	// processEndVote's tombstone branch below: the latch ledger spans
+	// generations while the tombstone lives one, so a straggler landing after
+	// the NEXT close discharged its tombstone would sail through processEndVote
+	// unsuppressed and fan out stamped with a dead id — every reply re-latching
+	// and re-fanning, an unbounded post-close ping-pong. The drop accounting is
+	// the tombstone branch's own ([ChannelRouter.dropPostCloseTraffic]), so the
+	// two suppression sites meter identically.
+	if latched {
+		r.dropPostCloseTraffic(ctx, derivedType, resolvedInteractionID)
+		return nil, nil
+	}
 
 	// RFC 0030 Layer 4 (v0.3.8) end-of-interaction signal: accumulate this
 	// publish's end-vote (if any) into the interaction's quorum and, when K
