@@ -34,10 +34,16 @@ invent. Sequence:
    no open window to land the final turn in, and ingesting would
    either fabricate the record above or leave a 1-turn successor
    dangling toward its own "went idle" burial;
-4. otherwise ingest (the closing vote lands as the record's final
-   turn) and close with :data:`REASON_STRUCTURAL` — guarded by
-   identity: if the ingest itself closed or rotated the interaction
-   (max-turns cap, wire-id rotation), that close's own cause stands
+4. otherwise ingest (the closing message lands as the record's final
+   turn) and close with :data:`REASON_STRUCTURAL` — but SKIP the ingest
+   for a self-echo (the RFC 0052 bounded close fans to the round-
+   triggering sender, so the convener/chair receives its own message;
+   ingesting it would write a ``sender == agent_id`` turn and inflate
+   ``turn_count``, the self-echo the gate keeps out of memory), closing
+   the scope without it so the sender still authors its summary. The
+   ingest is guarded by identity: if the ingest itself closed or rotated
+   the interaction (max-turns cap, wire-id rotation), that close's own
+   cause stands
    and no second close is layered on a different interaction than the
    one the notification found open. A rotation's fresh successor —
    opened by the ingest, holding only the notification — is
@@ -77,6 +83,7 @@ if TYPE_CHECKING:
         """The composed-agent surface
         :func:`close_interaction_on_notification` needs."""
 
+        agent_id: str
         _interaction_tracker: InteractionTracker
         _MULTI_TURN_EVENT_TYPES: frozenset[EventType]
 
@@ -144,19 +151,37 @@ async def close_interaction_on_notification(
         # Already idled out (or never tracked): the close stands
         # recorded orchestrator-side; invent nothing locally.
         return
-    # The closing vote lands as the closed record's final turn — ingest
-    # BEFORE close (closing first would strand the message in a
-    # successor interaction).
-    await agent._store_event_episode(event, [])
-    if agent._interaction_tracker.get(scope) is not open_interaction:
-        # The ingest itself closed or replaced the interaction (the
-        # max-turns inline close, a wire-id rotation): that close's own
-        # cause stands; never layer a structural close on a different
-        # interaction than the one the notification found open. A
-        # rotation's 1-turn successor stays open for its own boundaries
-        # — closing it here would be the fabrication the no-open branch
-        # above refuses (module docstring, step 4).
-        return
+    # The closing message lands as the closed record's final turn — ingest
+    # BEFORE close (closing first would strand the message in a successor
+    # interaction).
+    #
+    # EXCEPT a SELF-echo (RFC 0052 bounded-close fix): the bounded close fans
+    # the notification to the round-triggering sender too
+    # ([ChannelRouter.boundedClose] passes ``excludeSender=false``), so the
+    # convener/chair receives its OWN message back — with a fresh wire id, so
+    # the conversation-window dedup does not catch it. Ingesting it would append
+    # a turn whose ``payload.sender == agent_id`` and inflate ``turn_count`` —
+    # the exact self-echo the gate's ``POLICY_DEFENSE_IN_DEPTH`` refusal keeps
+    # out of episodic memory (:mod:`.gate_suppress`), and which the end-vote
+    # close never hit because it excludes the sender. The sender's own final
+    # words already ride its record as the action envelope of the turn it
+    # replied on, so the record needs no echo turn; it needs only to CLOSE so
+    # the sender authors its RFC 0020 summary. So skip the ingest for a
+    # self-echo and fall straight through to the structural close, matching the
+    # end-vote voter's own no-self-ingest close. An inbound closing message (any
+    # other sender — every end-vote recipient, and every non-triggering member
+    # on a bounded close) ingests as before.
+    if event.sender_id != agent.agent_id:
+        await agent._store_event_episode(event, [])
+        if agent._interaction_tracker.get(scope) is not open_interaction:
+            # The ingest itself closed or replaced the interaction (the
+            # max-turns inline close, a wire-id rotation): that close's own
+            # cause stands; never layer a structural close on a different
+            # interaction than the one the notification found open. A
+            # rotation's 1-turn successor stays open for its own boundaries
+            # — closing it here would be the fabrication the no-open branch
+            # above refuses (module docstring, step 4).
+            return
     closed = agent._interaction_tracker.close(scope, reason=REASON_STRUCTURAL)
     if closed is not None:
         await agent._persist_closed_interaction(closed)
