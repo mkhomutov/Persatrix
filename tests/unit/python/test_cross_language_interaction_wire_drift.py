@@ -242,6 +242,7 @@ def test_close_trigger_values_agree() -> None:
     silently disabling the ``predecessor_wire_id`` straggler defence on
     every bounded-close boundary."""
     from agents.channel_wire_metadata import (
+        WIRE_BOUNDED_CLOSE_TRIGGERS,
         WIRE_CLOSE_TRIGGER_COST,
         WIRE_CLOSE_TRIGGER_END_VOTES,
         WIRE_CLOSE_TRIGGER_IDLE,
@@ -260,6 +261,12 @@ def test_close_trigger_values_agree() -> None:
     assert WIRE_CLOSE_TRIGGER_STRUCTURAL == structural
     assert WIRE_CLOSE_TRIGGER_COST == cost
     assert WIRE_CLOSE_TRIGGERS == {idle, end_votes, structural, cost}
+    # PR #718 review: the bounded-close subset (the OQ #6 metering key) must
+    # equal exactly the pair Go stamps — pinned here so a future third bounded
+    # cause has to extend the one shared constant both Python allowlist sites
+    # consume, not silently diverge across the three enumeration points.
+    assert WIRE_BOUNDED_CLOSE_TRIGGERS == {structural, cost}
+    assert WIRE_BOUNDED_CLOSE_TRIGGERS <= WIRE_CLOSE_TRIGGERS
     # The boundary seam consumes the import, not a re-declaration.
     assert interaction_boundary.WIRE_CLOSE_TRIGGER_IDLE is WIRE_CLOSE_TRIGGER_IDLE
 

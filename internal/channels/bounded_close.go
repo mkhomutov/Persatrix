@@ -290,8 +290,13 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	switch r.maybeArmSynthesisClose(ctx, msg, ct, members, channelSize, interactionID, trigger, !dispatchPending, a) {
 	case synthesisArmed, synthesisAlreadyArmed:
 		return false, true
-	case synthesisUnavailable:
-		// fall through to the immediate close below.
+	case synthesisEntryMovedOn, synthesisUnavailable:
+		// Fall through to the immediate close below. synthesisUnavailable — no
+		// viable chair / failed dispatch — takes the 4b-i artifact-bearing
+		// close. synthesisEntryMovedOn — the interaction rotated or closed under
+		// this arm — relies on boundedClose's tombstone CAS: a benign rotation
+		// wins and delivers `msg` as the close, a racing deliberate close loses
+		// and is reported stale below (never withhold-swallowed, PR #718 review).
 	}
 	// The floor path's bounding stimulus was already delivered live inside
 	// its round (`dispatchPending` false), so the close notification carrying

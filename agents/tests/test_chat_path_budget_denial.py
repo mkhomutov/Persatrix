@@ -377,6 +377,50 @@ class TestProcessInboundBudgetDenial:
 
         assert publisher.publish.await_count == 0
 
+    async def test_synthesis_turn_budget_denial_suppresses_error_reply(self) -> None:
+        """PR #718 review finding 1: a §D synthesis turn whose dispatch is
+        budget-denied must NOT publish the apology reply.
+
+        The synthesis turn's reply is the closing artifact the fanout head
+        claims by (sender == chair, armed interaction id). An error-recovery
+        apology published under the chair's id with that same claim would be
+        indistinguishable from the real synthesis and get fanned to every
+        member as the goal-directed close — and this fires precisely under
+        the spend pressure that triggered the cost close. The orchestrator's
+        timeout net owns the no-reply branch instead, so the recovery arm
+        must stay silent for a synthesis turn.
+        """
+        denial = BudgetExceededError(
+            "interaction budget exceeded during synthesis turn",
+            scope="per_interaction", reason="budget_exceeded",
+        )
+        agent, executor, publisher = _make_agent_executor(
+            on_event_side_effect=denial,
+        )
+        event = _make_channel_event()
+        event.payload["synthesis_turn"] = True  # the orchestrator's §D marker
+
+        await _process(agent, executor, event)
+
+        assert publisher.publish.await_count == 0, (
+            "a synthesis turn's budget denial must not publish an apology the "
+            "fanout head would mistake for the synthesis — the timeout net closes"
+        )
+
+    async def test_resource_exhausted_on_synthesis_turn_also_suppressed(self) -> None:
+        """The ISSUE-0066 arm of finding 1: a RESOURCE_EXHAUSTED lease
+        denial on a synthesis turn is likewise not published."""
+        exc = grpc.aio.AioRpcError(
+            grpc.StatusCode.RESOURCE_EXHAUSTED, None, None, details="max leases",
+        )
+        agent, executor, publisher = _make_agent_executor(on_event_side_effect=exc)
+        event = _make_channel_event()
+        event.payload["synthesis_turn"] = True
+
+        await _process(agent, executor, event)
+
+        assert publisher.publish.await_count == 0
+
     async def test_no_channel_publisher_falls_back_to_log_only(self) -> None:
         """When no channel publisher is wired, log-only is the safe fallback.
 

@@ -29,8 +29,25 @@ import (
 func (r *ChannelRouter) SetAutonomous(channelID string, a AutonomousConfig) {
 	a = a.normalized()
 	r.autonomousMu.Lock()
-	defer r.autonomousMu.Unlock()
 	r.autonomous[channelID] = a
+	r.autonomousMu.Unlock()
+	if !a.Enabled {
+		// RFC 0052 PR 4b-ii (PR #718 review): a block disabled mid-arm MUST
+		// also drop any armed synthesis close. Every arm seam — the reply claim,
+		// the traffic withhold, the timeout net's own re-check — gates on
+		// `autonomous.enabled`, so once disabled the chair's synthesis reply
+		// re-fans as an ordinary stimulus and reopens the discussion, while the
+		// orphaned timeout net (whose identity CAS still matches) closes that
+		// now-live conversation ~2 minutes later, racing the replies it just
+		// permitted. Disarming here abandons the pending close and leaves the
+		// interaction open under the operator's manual control — the point of
+		// disabling. Done OUTSIDE autonomousMu so the resolve's
+		// autonomousMu→interactionMu lock order is never inverted (this is the
+		// single chokepoint both startup ResolveAutonomous and the RFC 0050
+		// applyOverridesToRouter path flow through). A no-op at startup (nothing
+		// is armed yet) and on any still-enabled apply.
+		r.disarmChannelSynthesis(channelID)
+	}
 }
 
 // AutonomousFor returns the resolved RFC 0052 autonomous block for `channelID`. A

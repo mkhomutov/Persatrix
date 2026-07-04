@@ -257,7 +257,20 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// TTL decay. Any future branch that decides not to dispatch belongs
 	// behind this same seam, or it re-strands the marks.
 	if staleAtHead || (!floorPath && (closed || stale)) {
+		// PR #718 review finding 8: while a synthesis close is armed, the chair
+		// has a directed synthesis turn genuinely in flight — its "thinking"
+		// mark (set by maybeArmSynthesisClose) must survive this clear, or the
+		// console shows nobody thinking for the whole up-to-120s armed window on
+		// the concurrent path (the arm reports stale, so the withhold runs in
+		// the same fanout that just marked the chair). Spare exactly that mark;
+		// every other withheld responder still clears (no reply will re-enter to
+		// clear it). "" when nothing is armed, so ordinary stale/closed
+		// withholds are unchanged.
+		armedChair := r.armedSynthesisChair(msg.ChannelID)
 		for _, id := range respIDs {
+			if id == armedChair {
+				continue
+			}
 			r.clearActivity(msg.ChannelID, id)
 		}
 	}

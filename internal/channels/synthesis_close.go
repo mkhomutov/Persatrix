@@ -128,6 +128,17 @@ const (
 	// (both advanced the tally before either armed). Withhold, dispatch
 	// nothing, close nothing: the winner's reply/timer owns the close.
 	synthesisAlreadyArmed
+	// synthesisEntryMovedOn — the resolver entry rotated or was closed between
+	// the bound's tally advance and this arm (a racing end-vote close, or a
+	// benign idle rotation). The caller falls THROUGH to the immediate
+	// boundedClose, whose tombstone CAS separates the two: it LOSES to a
+	// deliberate close (the caller then reports stale) and WINS a benign
+	// rotation (delivering `msg` as the close). Reporting synthesisAlreadyArmed
+	// here instead would map to the deliberate-close withhold and silently
+	// swallow a live committed message on a benign rotation — the rotated id
+	// never entered the no-reopen ledger, so nothing else would ever account
+	// for it (PR 4b-i review finding 8; PR #718 review).
+	synthesisEntryMovedOn
 	// synthesisUnavailable — no viable chair or the dispatch failed; the
 	// caller falls back to the 4b-i immediate artifact-bearing close.
 	synthesisUnavailable
@@ -222,9 +233,13 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 	entry := r.openInteractions[msg.ChannelID]
 	if entry == nil || entry.id != interactionID {
 		// The interaction moved on between the tally advance and this arm (a
-		// racing end-vote close, an idle rotation) — nothing left to close.
+		// racing end-vote close, or a benign idle rotation). Do NOT report
+		// already-armed — that withholds the message as deliberately-closed
+		// traffic and loses it on a benign rotation. Fall through to the
+		// caller's immediate close so the tombstone CAS decides (see
+		// [synthesisEntryMovedOn]).
 		r.interactionMu.Unlock()
-		return synthesisAlreadyArmed
+		return synthesisEntryMovedOn
 	}
 	if entry.pendingSynthesis != nil {
 		r.interactionMu.Unlock()
@@ -347,6 +362,34 @@ func (r *ChannelRouter) disarmSynthesis(channelID string, pending *pendingSynthe
 	if entry := r.openInteractions[channelID]; entry != nil && entry.pendingSynthesis == pending {
 		entry.pendingSynthesis = nil
 	}
+	r.interactionMu.Unlock()
+}
+
+// armedSynthesisChair returns the chair id of the channel's armed synthesis
+// close, or "" if none is armed. The fanout withhold seam uses it to spare the
+// chair's in-flight "thinking" mark when it clears the withheld responders'
+// presence: while a synthesis is armed a directed turn IS genuinely in flight
+// on the chair, so clearing its mark would blank the console for the whole
+// armed window (PR #718 review finding 8). Cheap read under interactionMu, only
+// on the withhold path.
+func (r *ChannelRouter) armedSynthesisChair(channelID string) string {
+	r.interactionMu.Lock()
+	defer r.interactionMu.Unlock()
+	if entry := r.openInteractions[channelID]; entry != nil && entry.pendingSynthesis != nil {
+		return entry.pendingSynthesis.chairID
+	}
+	return ""
+}
+
+// disarmChannelSynthesis drops WHATEVER synthesis close is armed on the
+// channel's resolver entry (stopping its timer), independent of any particular
+// pending pointer — the RFC 0050 disable path ([ChannelRouter.SetAutonomous])
+// uses it so a block disabled mid-arm leaves no orphaned timeout net to close
+// the now-ordinary interaction a window later. Nil-tolerant like
+// [openInteraction.disarmPendingSynthesisLocked], which it wraps under the lock.
+func (r *ChannelRouter) disarmChannelSynthesis(channelID string) {
+	r.interactionMu.Lock()
+	r.openInteractions[channelID].disarmPendingSynthesisLocked()
 	r.interactionMu.Unlock()
 }
 

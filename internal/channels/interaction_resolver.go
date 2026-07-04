@@ -233,7 +233,11 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 	// is exactly that precondition; when it holds the gap is a rotation
 	// DECISION (fired or not), logged below for ISSUE-0095 — the no-fire path
 	// was otherwise traceless.
-	eligible := entry.openCommitted() && ct != ChannelTypeThread && window > 0
+	// RFC 0052 PR 4b-ii (PR #718 review): an armed synthesis close is
+	// terminating — never idle-rotate it, or the fresh-mint reset below disarms
+	// the pending close without running it and silently drops the §D artifact.
+	eligible := entry.openCommitted() && ct != ChannelTypeThread && window > 0 &&
+		entry.pendingSynthesis == nil
 	var gap time.Duration
 	var lastActivity time.Time
 	if eligible {

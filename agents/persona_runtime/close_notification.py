@@ -80,8 +80,8 @@ import logging
 from typing import TYPE_CHECKING, Protocol
 
 from ..channel_wire_metadata import (
+    WIRE_BOUNDED_CLOSE_TRIGGERS,
     WIRE_CLOSE_TRIGGER_COST,
-    WIRE_CLOSE_TRIGGER_STRUCTURAL,
 )
 from ..memory.boundary_detectors import REASON_COST, REASON_STRUCTURAL
 
@@ -195,6 +195,34 @@ async def close_interaction_on_notification(
     # which it is via the typed ``close_notification_redelivery`` field —
     # strict ``is True``, because a spoofed truthy non-bool suppressing
     # the ingest would LOSE a sole-delivered closing turn.
+    # RFC 0052 PR 4b-ii: the truthful bounded-close cause. The wire lift
+    # (``channel_wire_metadata.channel_event_payload``) allowlists the field
+    # to the two causes the bounded close stamps, and this consumer
+    # re-checks (defence-in-depth, the strict-marker posture): ``cost``
+    # closes with the truthful :data:`REASON_COST` — the wallet soft-budget
+    # close IS a cost close, not the "ended" the structural label claims —
+    # while ``structural`` (max_rounds) and every unmarked/unrecognised
+    # notification keep the established :data:`REASON_STRUCTURAL` mapping.
+    # Resolved BEFORE the ingest so the OQ #6 metering mark can ride the
+    # record whichever path closes it (see below).
+    trigger = payload.get("close_notification_close_trigger")
+    bounded = trigger in WIRE_BOUNDED_CLOSE_TRIGGERS
+    reason = REASON_COST if trigger == WIRE_CLOSE_TRIGGER_COST else REASON_STRUCTURAL
+    if bounded:
+        # OQ #6 (PR 4b-ii; PR #718 review): a bounded close is autonomous by
+        # construction (the trigger field is stamped by nothing else), so its
+        # per-persona RFC 0020 summary must draw a lease against the mandatory
+        # cap the PR 4a ``1 + N`` reserve was carved from — ``summarize_close.py``
+        # threads that lease off ``meter_close_summary``. Mark the record HERE,
+        # on the still-open interaction the notification found, BEFORE the
+        # ingest: when the ingest's own final turn is the max-turns cap-crossing
+        # turn (or a wire-id rotation), ``_store_event_episode`` inline-closes
+        # AND persists THIS interaction and the identity guard below returns
+        # past the post-close mark — so a mark set only after ``close()`` would
+        # miss it and the summary would run UNLEASED, silently evading the cap.
+        # Setting it on the live record covers both paths; the post-close mark
+        # below is then idempotent on the ordinary path (same object).
+        open_interaction.meter_close_summary = True
     redelivery = payload.get("close_notification_redelivery") is True
     if event.sender_id != agent.agent_id and not redelivery:
         await agent._store_event_episode(event, [])
@@ -205,28 +233,15 @@ async def close_interaction_on_notification(
             # interaction than the one the notification found open. A
             # rotation's 1-turn successor stays open for its own boundaries
             # — closing it here would be the fabrication the no-open branch
-            # above refuses (module docstring, step 4).
+            # above refuses (module docstring, step 4). The metered-summary
+            # mark already rode the closed record (set above), so its summary
+            # still draws its lease.
             return
-    # RFC 0052 PR 4b-ii: the truthful bounded-close cause. The wire lift
-    # (``channel_wire_metadata.channel_event_payload``) allowlists the field
-    # to the two causes the bounded close stamps, and this consumer
-    # re-checks (defence-in-depth, the strict-marker posture): ``cost``
-    # closes with the truthful :data:`REASON_COST` — the wallet soft-budget
-    # close IS a cost close, not the "ended" the structural label claims —
-    # while ``structural`` (max_rounds) and every unmarked/unrecognised
-    # notification keep the established :data:`REASON_STRUCTURAL` mapping.
-    trigger = payload.get("close_notification_close_trigger")
-    bounded = trigger in (WIRE_CLOSE_TRIGGER_STRUCTURAL, WIRE_CLOSE_TRIGGER_COST)
-    reason = REASON_COST if trigger == WIRE_CLOSE_TRIGGER_COST else REASON_STRUCTURAL
     closed = agent._interaction_tracker.close(scope, reason=reason)
     if closed is not None:
-        # OQ #6 (PR 4b-ii): a bounded close is autonomous by construction
-        # (the trigger field is stamped by nothing else), so mark the closed
-        # record for the metered close summary — ``summarize_close.py``
-        # threads the lease attribution off this flag, and the summary's
-        # spend counts toward the mandatory cap the PR 4a ``1 + N`` reserve
-        # was carved from. Set between close and persistence, so every other
-        # close path keeps the flag's unmetered default.
+        # The ordinary path: the notification's ingest did not close the
+        # interaction, so close it now with the truthful cause. The metering
+        # mark is idempotent with the pre-ingest set above (same record).
         if bounded:
             closed.meter_close_summary = True
         await agent._persist_closed_interaction(closed)

@@ -175,6 +175,12 @@ This file is referenced by both `.github/CLAUDE.md` and
   discussion moving. In v0.3.8 a chair is a *facilitator only* — it **cannot**
   close, wrap up, or terminate an interaction (that is the Layer 5 moderator,
   v0.4.0). Convergence comes from the governance layers, not the chair.
+  **v0.3.11 (RFC 0052 §D)** adds one bounded exception on *autonomous* channels:
+  when a bounded close fires, the **escalation chair** authors the goal-directed
+  [Closing Synthesis](#closing-synthesis) (its [Synthesis Turn](#synthesis-turn))
+  as the discussion's final message — but the **orchestrator** still runs the
+  close on that reply (CE4: the chair proposes, it does not close), so the
+  "cannot close/terminate" rule holds for the close *act* and for human channels.
 - **Example:** "Mark the lead persona as `chair` so it nudges the brainstorm
   along without dominating it."
 
@@ -836,6 +842,46 @@ the deterministic bounded close.
   (`internal/channels/interaction_close_latch.go`).
 - **Example:** "The straggler's reply latched — the no-reopen latch kept the
   terminated discussion closed."
+
+## RFC 0052 — Autonomous Channels (PR 4b-ii)
+
+Terms from [RFC 0052](rfcs/0052-autonomous-agent-channels.md) §D PR 4b-ii,
+the goal-directed chair synthesis turn (close-on-reply).
+
+### Closing Synthesis
+- **Aliases:** "synthesis artifact", "the §D artifact".
+- **Disallowed:** "summary" (the per-persona RFC 0020 record is distinct),
+  "verdict", "chair ruling".
+- **Definition:** The goal-directed message the **escalation chair** authors
+  against `autonomous.goal` when a bounded close fires on a chaired autonomous
+  channel, delivered to every member as the discussion's final turn (RFC 0052
+  §D "always produce an artifact"). The chair proposes it; the **orchestrator**
+  runs the close on the reply (CE4).
+- **Example:** "The bound fired, so the chair produced the closing synthesis and
+  the room closed on it."
+
+### Synthesis Turn
+- **Aliases:** "chair synthesis turn".
+- **Disallowed:** "close vote", "final turn" (ambiguous with the record's last
+  ingested turn).
+- **Definition:** The directed forced turn the orchestrator dispatches to the
+  escalation chair to elicit the [Closing Synthesis](#closing-synthesis) — the
+  convene dispatch shape (synthetic sender, marked lane, operator goal in the
+  content), carried on the `synthesis_turn` wire field
+  (`internal/channels/synthesis_close.go`).
+- **Example:** "The synthesis turn dispatched to the chair; its reply is the
+  closing artifact."
+
+### Close-on-Reply
+- **Aliases:** —
+- **Disallowed:** "close-on-vote", "reply close".
+- **Definition:** The RFC 0052 §D ordering on a chaired bounded close: the
+  interaction does not close inline at the bound — it **arms**, withholds all
+  further discussion traffic, and closes when the chair's synthesis reply lands
+  (or a timeout net fires), so the reply is recognised as the closing artifact
+  instead of reopening the discussion.
+- **Example:** "Close-on-reply means the armed window withholds stragglers until
+  the chair replies."
 
 ## RFC 0009 — Security & Sandboxing (PR plan)
 

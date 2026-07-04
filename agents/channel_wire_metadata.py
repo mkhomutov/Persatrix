@@ -67,6 +67,20 @@ WIRE_CLOSE_TRIGGERS = frozenset({
     WIRE_CLOSE_TRIGGER_STRUCTURAL,
     WIRE_CLOSE_TRIGGER_COST,
 })
+# The subset of causes the RFC 0052 bounded close actually stamps on
+# ``close_notification_close_trigger`` — the OQ #6 metering key. Both the wire
+# lift (below) and the receiver's defence-in-depth re-check
+# (``persona_runtime/close_notification.py``) allowlist against THIS name rather
+# than re-spelling the pair as anonymous ``(STRUCTURAL, COST)`` tuples (PR #718
+# review): the pair was enumerated at three independent sites, and PR #716 has
+# already shipped once with a bounded-close cause missing from an allowlist
+# while every suite stayed green. One named subset (pinned equal in
+# ``test_cross_language_interaction_wire_drift.py``) is the single source a
+# future third bounded cause must extend.
+WIRE_BOUNDED_CLOSE_TRIGGERS = frozenset({
+    WIRE_CLOSE_TRIGGER_STRUCTURAL,
+    WIRE_CLOSE_TRIGGER_COST,
+})
 
 
 def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, object]:
@@ -174,9 +188,7 @@ def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, ob
     # so an ``idle``/``end_votes``/garbage value from a non-Go (or
     # compromised) producer must degrade to absent — never widen the set of
     # closes whose summaries draw a lease, and never relabel a close reason.
-    if request.close_notification_close_trigger in (
-        WIRE_CLOSE_TRIGGER_STRUCTURAL, WIRE_CLOSE_TRIGGER_COST,
-    ):
+    if request.close_notification_close_trigger in WIRE_BOUNDED_CLOSE_TRIGGERS:
         payload["close_notification_close_trigger"] = (
             request.close_notification_close_trigger
         )

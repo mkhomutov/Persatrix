@@ -349,6 +349,13 @@ func TestSynthesisClose_ConcurrentPathWithholdsBoundingStimulusAndCloses(t *test
 			"the bounding stimulus is withheld on the concurrent path — no reply can re-fan")
 	}
 
+	// PR #718 review finding 8: the chair (ember-owl, the sole responder that
+	// took the withheld bounding round) has a synthesis turn in flight, so its
+	// "thinking" mark must survive the withhold seam's clear — the console must
+	// not blank for the armed window.
+	assert.Contains(t, router.ChannelActivity(ch), "ember-owl",
+		"the chair's in-flight synthesis-turn presence mark survives the armed-window withhold")
+
 	chairReply(t, router, ch, "ember-owl", openID, "Synthesis: done.")
 	router.WaitForPendingFanout()
 	assert.Equal(t, int64(1), closedCount(t, reader, structuralTrigger))
