@@ -8,6 +8,7 @@ so that file stays under the 500-line review limit, mirroring the
 from __future__ import annotations
 
 from ..base import TaskInput
+from ..channel_wire_metadata import wire_interaction_id
 from ..generated import wallet_pb2 as walletpb
 from ..persona_types import AgentEvent, EventType
 
@@ -115,6 +116,11 @@ def lease_interaction_id_for_event(event: AgentEvent) -> str:
     the untracked empty string — ``WalletClient.lease`` treats that as "no
     interaction attribution", every ceiling at its uncapped default. The
     same tolerance as every other metadata read at this boundary.
+
+    Delegates to the shared drift-pinned reader (PR #716 review — this was a
+    byte-identical inline copy): the lease id this returns is what interaction
+    spend bills under, and the router's soft-budget bounded-close trigger
+    reads spend by the id the no-reopen claim carries, so the two reads
+    diverging would leave the cost close blind to the very spend it bounds.
     """
-    value = event.metadata.get("interaction_id", "")
-    return value if isinstance(value, str) else ""
+    return wire_interaction_id(event)

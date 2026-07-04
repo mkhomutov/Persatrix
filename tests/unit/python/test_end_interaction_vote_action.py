@@ -28,6 +28,7 @@ import pytest
 from agents.action_executor import ActionExecutor
 from agents.persona_runtime.channel_reply import bind_end_vote_channel
 from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
+from agents.channel_wire_metadata import DispatchContext
 
 
 def _vote(payload: dict | None = None) -> AgentAction:
@@ -56,7 +57,7 @@ class TestExecutorPublishesVote:
 
         results = await executor.execute("ember-owl", [
             _vote({"channel_id": "group:planning"}),
-        ], cascade_depth=3)
+        ], context=DispatchContext(cascade_depth=3))
 
         assert results[0]["status"] == "published"
         assert results[0]["action_type"] == "end_interaction_vote"
@@ -84,7 +85,7 @@ class TestExecutorPublishesVote:
         results = await executor.execute("ember-owl", [
             _vote({"channel_id": "group:planning",
                    "vote_close_token": "tok-1"}),
-        ])
+        ], context=DispatchContext())
 
         assert results[0]["vote_close_token"] == "tok-1"
         kwargs = publisher.publish.await_args.kwargs
@@ -103,7 +104,7 @@ class TestExecutorPublishesVote:
         results = await executor.execute("ember-owl", [
             _vote({"channel_id": "group:planning",
                    "vote_close_token": "tok-2"}),
-        ])
+        ], context=DispatchContext())
 
         assert results[0]["status"] == "failed"
         assert results[0]["vote_close_token"] == "tok-2"
@@ -118,7 +119,7 @@ class TestExecutorPublishesVote:
         await executor.execute("ember-owl", [
             _vote({"channel_id": "group:planning",
                    "content": "Nothing further from me — I support option B."}),
-        ])
+        ], context=DispatchContext())
 
         kwargs = publisher.publish.await_args.kwargs
         assert kwargs["content"] == "Nothing further from me — I support option B."
@@ -132,7 +133,7 @@ class TestExecutorPublishesVote:
 
         results = await executor.execute("ember-owl", [
             _vote({"channel_id": "group:planning"}),
-        ])
+        ], context=DispatchContext())
 
         assert results[0]["status"] == "not_implemented"
 
@@ -145,7 +146,7 @@ class TestExecutorPublishesVote:
         publisher.publish = AsyncMock(return_value=None)
         executor = ActionExecutor(channel_publisher=publisher)
 
-        results = await executor.execute("ember-owl", [_vote({})])
+        results = await executor.execute("ember-owl", [_vote({})], context=DispatchContext())
 
         assert results[0]["status"] == "no_channel_id"
         publisher.publish.assert_not_awaited()
@@ -160,7 +161,7 @@ class TestExecutorPublishesVote:
 
         results = await executor.execute("ember-owl", [
             _vote({"channel_id": "group:planning"}),
-        ])
+        ], context=DispatchContext())
 
         assert results[0]["status"] == "failed"
 
@@ -184,7 +185,7 @@ class TestExecutorPublishesVote:
 
         results = await executor.execute("ember-owl", [
             _vote({"channel_id": "dm:ember-owl:alice"}),
-        ])
+        ], context=DispatchContext())
 
         assert results[0]["status"] == "dm_channel"
         assert results[0]["channel_id"] == "dm:ember-owl:alice"
@@ -204,7 +205,7 @@ class TestExecutorPublishesVote:
         publisher.publish = AsyncMock(return_value=None)
         executor = ActionExecutor(channel_publisher=publisher)
 
-        results = await executor.execute("ember-owl", [_vote({"channel_id": "  "})])
+        results = await executor.execute("ember-owl", [_vote({"channel_id": "  "})], context=DispatchContext())
 
         assert results[0]["status"] == "no_channel_id"
         publisher.publish.assert_not_awaited()
@@ -225,7 +226,7 @@ class TestExecutorPublishesVote:
         with caplog.at_level(logging.WARNING):
             await executor.execute("ember-owl", [
                 _vote({"channel_id": "group:planning"}),
-            ])
+            ], context=DispatchContext())
 
         assert any(
             record.name == "agents.end_vote_action" for record in caplog.records
@@ -367,7 +368,7 @@ class TestVotePublishOutcomeCallback:
         await executor.execute("ember-owl", [
             _vote({"channel_id": "group:planning",
                    "vote_close_token": "tok-1"}),
-        ])
+        ], context=DispatchContext())
 
         agent.resolve_end_vote_publish.assert_awaited_once_with(
             "group:planning", published=True, token="tok-1",
@@ -385,7 +386,7 @@ class TestVotePublishOutcomeCallback:
 
         await executor.execute("ember-owl", [
             _vote({"channel_id": "group:planning"}),
-        ])
+        ], context=DispatchContext())
 
         agent.resolve_end_vote_publish.assert_awaited_once_with(
             "group:planning", published=True, token="",
@@ -400,7 +401,7 @@ class TestVotePublishOutcomeCallback:
         await executor.execute("ember-owl", [
             _vote({"channel_id": "group:planning",
                    "vote_close_token": "tok-1"}),
-        ])
+        ], context=DispatchContext())
 
         agent.resolve_end_vote_publish.assert_awaited_once_with(
             "group:planning", published=False, token="tok-1",
@@ -416,7 +417,7 @@ class TestVotePublishOutcomeCallback:
         results = await executor.execute("ember-owl", [
             _vote({"channel_id": "group:planning",
                    "vote_close_token": "tok-1"}),
-        ])
+        ], context=DispatchContext())
 
         assert results[0]["status"] == "not_implemented"
         agent.resolve_end_vote_publish.assert_awaited_once_with(
@@ -431,7 +432,7 @@ class TestVotePublishOutcomeCallback:
         publisher.publish = AsyncMock(return_value=None)
         executor, agent = self._executor_with_agent(publisher)
 
-        await executor.execute("ember-owl", [_vote({})])
+        await executor.execute("ember-owl", [_vote({})], context=DispatchContext())
 
         agent.resolve_end_vote_publish.assert_not_awaited()
 
@@ -447,7 +448,7 @@ class TestVotePublishOutcomeCallback:
 
         results = await executor.execute("ember-owl", [
             _vote({"channel_id": "group:planning"}),
-        ])
+        ], context=DispatchContext())
 
         assert results[0]["status"] == "published"
 
@@ -463,7 +464,7 @@ class TestVotePublishOutcomeCallback:
         with caplog.at_level(logging.WARNING, logger="agents.action_executor"):
             results = await executor.execute("ember-owl", [
                 _vote({"channel_id": "group:planning"}),
-            ])
+            ], context=DispatchContext())
 
         assert results[0]["status"] == "published"
         assert any(
@@ -492,7 +493,7 @@ class TestVotePublishOutcomeCallback:
         with caplog.at_level(logging.WARNING, logger="agents.action_executor"):
             results = await executor.execute("ember-owl", [
                 _vote({"channel_id": "group:planning"}),
-            ])
+            ], context=DispatchContext())
 
         assert results[0]["status"] == "published"
         assert not caplog.records

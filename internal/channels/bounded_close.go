@@ -191,8 +191,15 @@ func (r *ChannelRouter) advanceBoundedCloseRound(channelID, stampedID string) (i
 // `dispatchPending` says the caller's dispatch for THIS cycle has not happened
 // yet and a close would withhold it (the concurrent path's close-before-dispatch
 // ordering; false on the floor path, whose round has already run).
-func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, channelSize int, dispatchPending bool) (closed, stale bool) {
-	a := r.AutonomousFor(msg.ChannelID)
+//
+// `a` is the fanout's single per-publish [ChannelRouter.AutonomousFor]
+// snapshot (PR #716 review), shared with the floor head check so the two
+// reads cannot be torn by a concurrent RFC 0050 apply; the OQ #2 scope gate
+// itself stays HERE, not at the call site, so a caller cannot silently opt
+// out of it (the resolver's latch-gate posture). A head-stale floor stimulus
+// never reaches this trigger at all — fanout branches on the head verdict
+// first, since the tail's ledger read would only re-derive it.
+func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, channelSize int, dispatchPending bool, a AutonomousConfig) (closed, stale bool) {
 	if !a.Enabled {
 		return false, false // OQ #2 scope gate: human channels are untouched.
 	}

@@ -17,7 +17,7 @@ from .channel_publisher import (
     ChannelPublisher,
     ChannelsDisabledError,
 )
-from .channel_wire_metadata import same_channel_claim
+from .channel_wire_metadata import DispatchContext, same_channel_claim
 from .persona_types import VOTE_CLOSE_TOKEN_KEY, AgentAction
 
 logger = logging.getLogger(__name__)
@@ -41,9 +41,7 @@ async def publish_end_interaction_vote(
     sender_id: str,
     action: AgentAction,
     *,
-    cascade_depth: int,
-    origin_channel_id: str = "",
-    origin_interaction_id: str = "",
+    context: DispatchContext,
 ) -> dict[str, Any]:
     """Publish an RFC 0030 Layer 4 end-of-interaction vote (producer plan
     PR 2, IP6).
@@ -55,10 +53,10 @@ async def publish_end_interaction_vote(
     metadata (the literal mirrors Go's ``endVoteMetadataKey``; pinned by
     the cross-language drift test). Mentions stay empty: a vote addresses
     the room's process, not a member, and must not direct the floor.
-    ``cascade_depth`` rides verbatim, the send-branch posture.
+    ``context.cascade_depth`` rides verbatim, the send-branch posture.
 
-    A same-channel vote also echoes ``origin_interaction_id`` as the wire
-    ``interaction_id`` claim — the RFC 0052 no-reopen latch input (PR #716
+    A same-channel vote also echoes the context's origin interaction id as
+    the wire ``interaction_id`` claim — the RFC 0052 no-reopen latch input (PR #716
     review; see ``ActionExecutor.execute``). A vote is post-persistence
     channel traffic like any reply, so a vote straggling in after a bounded
     close must latch rather than mint fresh and re-fan; the resolver still
@@ -130,7 +128,8 @@ async def publish_end_interaction_vote(
     metadata: dict[str, Any] = {"end_interaction_vote": True}
     # The RFC 0052 no-reopen claim, via the shared rule (see the docstring).
     claim = same_channel_claim(
-        origin_channel_id, origin_interaction_id, target_channel)
+        context.origin_channel_id, context.origin_interaction_id,
+        target_channel)
     if claim:
         metadata.update(claim)
     try:
@@ -140,7 +139,7 @@ async def publish_end_interaction_vote(
                 sender_id=sender_id,
                 content=content,
                 mentions=[],
-                cascade_depth=cascade_depth,
+                cascade_depth=context.cascade_depth,
                 metadata=metadata,
             ),
             timeout=DEFAULT_PUBLISH_TIMEOUT_SECONDS,

@@ -15,6 +15,7 @@ from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_types import ActionType, AgentAction
 from agents.tools.registry import clear_registry
+from agents.channel_wire_metadata import DispatchContext
 
 # ─── Fixtures ───────────────────────────────────────────────
 
@@ -124,7 +125,7 @@ class TestActionExecutor:
         executor = ActionExecutor()
         results = await executor.execute("ember-owl", [
             AgentAction(ActionType.COMPLETE_TASK, {"result": "done"}),
-        ])
+        ], context=DispatchContext())
         assert len(results) == 1
         assert results[0]["action_type"] == "complete_task"
         assert results[0]["status"] == "completed"
@@ -134,49 +135,49 @@ class TestActionExecutor:
         executor = ActionExecutor()
         results = await executor.execute("ember-owl", [
             AgentAction(ActionType.DO_NOTHING, {}),
-        ])
+        ], context=DispatchContext())
         assert results[0]["status"] == "ok"
 
     async def test_use_tool_skipped(self):
         executor = ActionExecutor()
         results = await executor.execute("ember-owl", [
             AgentAction(ActionType.USE_TOOL, {"tool": "file_read"}),
-        ])
+        ], context=DispatchContext())
         assert results[0]["status"] == "skipped"
 
     async def test_delegate_not_implemented(self):
         executor = ActionExecutor()
         results = await executor.execute("ember-owl", [
             AgentAction(ActionType.DELEGATE, {"agent_id": "iron-fox", "task": "test"}),
-        ])
+        ], context=DispatchContext())
         assert results[0]["status"] == "not_implemented"
 
     async def test_spawn_sub_agent_not_implemented(self):
         executor = ActionExecutor()
         results = await executor.execute("ember-owl", [
             AgentAction(ActionType.SPAWN_SUB_AGENT, {"role": "helper", "task": "test"}),
-        ])
+        ], context=DispatchContext())
         assert results[0]["status"] == "not_implemented"
 
     async def test_request_approval_not_implemented(self):
         executor = ActionExecutor()
         results = await executor.execute("ember-owl", [
             AgentAction(ActionType.REQUEST_APPROVAL, {}),
-        ])
+        ], context=DispatchContext())
         assert results[0]["status"] == "not_implemented"
 
     async def test_grant_approval_not_implemented(self):
         executor = ActionExecutor()
         results = await executor.execute("ember-owl", [
             AgentAction(ActionType.GRANT_APPROVAL, {}),
-        ])
+        ], context=DispatchContext())
         assert results[0]["status"] == "not_implemented"
 
     async def test_deny_approval_not_implemented(self):
         executor = ActionExecutor()
         results = await executor.execute("ember-owl", [
             AgentAction(ActionType.DENY_APPROVAL, {}),
-        ])
+        ], context=DispatchContext())
         assert results[0]["status"] == "not_implemented"
 
     async def test_end_interaction_vote_recognised(self):
@@ -186,7 +187,7 @@ class TestActionExecutor:
         executor = ActionExecutor()
         results = await executor.execute("ember-owl", [
             AgentAction(ActionType.END_INTERACTION_VOTE, {}),
-        ])
+        ], context=DispatchContext())
         assert results[0]["action_type"] == "end_interaction_vote"
         assert results[0]["status"] == "not_implemented"
 
@@ -200,7 +201,7 @@ class TestActionExecutor:
         results = await executor.execute("ember-owl", [
             AgentAction(ActionType.DO_NOTHING, {}),
             AgentAction(ActionType.COMPLETE_TASK, {"result": "ok"}),
-        ])
+        ], context=DispatchContext())
         assert len(results) == 2
         assert results[0]["action_type"] == "do_nothing"
         assert results[1]["action_type"] == "complete_task"
@@ -213,7 +214,7 @@ class TestActionExecutor:
                 "content": "Hello!",
                 "mentions": ["iron-fox"],
             }),
-        ])
+        ], context=DispatchContext())
         assert results[0]["status"] == "no_dispatcher"
 
     async def test_send_message_with_dispatcher(self):
@@ -228,7 +229,7 @@ class TestActionExecutor:
                 "content": "Hey Mike!",
                 "mentions": ["iron-fox"],
             }),
-        ])
+        ], context=DispatchContext())
         assert results[0]["status"] == "dispatched"
         assert results[0]["dispatched_to"] == 1
         await agent.close_memory()
@@ -246,7 +247,7 @@ class TestActionExecutor:
                 "content": "Hello team!",
                 "mentions": [],
             }),
-        ])
+        ], context=DispatchContext())
         assert results[0]["dispatched_to"] == 0
         assert results[0]["status"] == "no_targets"
 
@@ -272,7 +273,7 @@ class TestActionExecutor:
                     "content": "Hello team!",
                     "mentions": [],
                 }),
-            ])
+            ], context=DispatchContext())
         assert results[0]["dispatched_to"] == 0
         assert results[0]["status"] == "no_targets"
         assert any(
@@ -296,7 +297,7 @@ class TestActionExecutor:
                     "content": "Hello!",
                     "mentions": [],
                 }),
-            ])
+            ], context=DispatchContext())
         assert results[0]["dispatched_to"] == 0
         assert results[0]["status"] == "no_targets"
 
@@ -333,7 +334,7 @@ class TestActionExecutor:
                 "content": "Hey everyone!",
                 "mentions": ["bad-agent", "iron-fox"],
             }),
-        ])
+        ], context=DispatchContext())
         # Both top-level mentions were attempted despite "bad-agent" raising.
         # iron-fox's own response can trigger a follow-on cascade now that the
         # response gate admits mentioned recipients (RFC 0011 PR 4b legacy
@@ -367,7 +368,7 @@ class TestActionExecutor:
                 "content": "Hello!",
                 "mentions": many_mentions,
             }),
-        ])
+        ], context=DispatchContext())
         # Only 10 dispatches attempted (truncated from 15)
         assert results[0]["dispatched_to"] <= 10
         await agent.close_memory()
@@ -404,7 +405,7 @@ class TestActionExecutor:
                 "content": "Hey!",
                 "mentions": ["iron-fox"],
             }),
-        ], cascade_depth=3)
+        ], context=DispatchContext(cascade_depth=3))
 
         # _handle_send_channel_message() should create an event with cascade_depth=3
         # (the depth it received from execute()), and the dispatcher will
@@ -436,7 +437,7 @@ class TestActionExecutor:
                 # channel_id intentionally omitted
             },
         )
-        results = await executor.execute("iron-fox", [action])
+        results = await executor.execute("iron-fox", [action], context=DispatchContext())
         assert len(results) == 1
         assert results[0]["status"] == "dispatched"
         assert results[0]["dispatched_to"] == 1
@@ -466,7 +467,7 @@ class TestActionExecutor:
                 "content": "hi",
                 "mentions": ["agent-b"],
             }),
-        ], cascade_depth=3)
+        ], context=DispatchContext(cascade_depth=3))
 
         publisher.publish.assert_awaited_once()
         kwargs = publisher.publish.await_args.kwargs

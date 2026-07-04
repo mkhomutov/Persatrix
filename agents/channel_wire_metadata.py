@@ -14,6 +14,9 @@ This module reconciles the wire and event shapes at the single
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .generated import task_pb2
 from .persona_types import AgentEvent
 
@@ -31,12 +34,13 @@ from .persona_types import AgentEvent
 # over the 36-byte uuid4.
 _INTERACTION_ID_MAX_BYTES = 128
 
-# The close triggers the orchestrator's resolver actually stamps onto
+# The close triggers the orchestrator's close sites actually stamp onto
 # ``previous_interaction_close_trigger`` (producer plan OQ 5) — the §L
-# instrument vocabulary, mirroring Go's ``idleTrigger`` /
-# ``endVotesTrigger`` (``internal/channels/interaction_resolver.go`` /
-# ``end_vote.go``; pinned by the cross-language drift test). Allowlisted at
-# this seed point because the value drives the close *reason* persisted on
+# instrument vocabulary, mirroring Go's ``idleTrigger`` / ``endVotesTrigger``
+# / ``structuralTrigger`` / ``costTrigger``
+# (``internal/channels/interaction_resolver.go`` / ``end_vote.go`` /
+# ``bounded_close.go``; pinned by the cross-language drift test). Allowlisted
+# at this seed point because the value drives the close *reason* persisted on
 # the local interaction record: an unrecognised string from a non-Go (or
 # compromised) producer must degrade to the legacy label, never ride into
 # ``close_reason`` verbatim.
@@ -44,13 +48,24 @@ _INTERACTION_ID_MAX_BYTES = 128
 # Public (PR 607 second-pass review): this module is the single Python
 # source of the trigger vocabulary — the rotation-close seam
 # (``persona_runtime/interaction_boundary.py``) imports the idle value
-# instead of re-declaring it, so growing the vocabulary (the reserved
-# ``cost`` trigger) is one edit per language, held to Go by one drift pin.
+# instead of re-declaring it, so growing the vocabulary is one edit per
+# language, held to Go by one drift pin.
 WIRE_CLOSE_TRIGGER_IDLE = "idle"
 WIRE_CLOSE_TRIGGER_END_VOTES = "end_votes"
+# The RFC 0052 bounded close's two causes — max_rounds and the wallet soft
+# budget (PR #716 review: these were missing while the bounded close started
+# stamping them, and because the seed validates the pair both-or-nothing the
+# omission dropped ``previous_interaction_id`` too — silently disabling the
+# ``predecessor_wire_id`` straggler defence on every bounded-close boundary.
+# The rotation-close *reason* maps both to the structural label, the
+# documented 4b-i fallback; the truthful cost cause lands with 4b-ii).
+WIRE_CLOSE_TRIGGER_STRUCTURAL = "structural"
+WIRE_CLOSE_TRIGGER_COST = "cost"
 WIRE_CLOSE_TRIGGERS = frozenset({
     WIRE_CLOSE_TRIGGER_IDLE,
     WIRE_CLOSE_TRIGGER_END_VOTES,
+    WIRE_CLOSE_TRIGGER_STRUCTURAL,
+    WIRE_CLOSE_TRIGGER_COST,
 })
 
 
@@ -275,19 +290,67 @@ def seed_replay_metadata(
 def wire_interaction_id(event: AgentEvent) -> str:
     """The interaction id ``event`` was dispatched under, read tolerantly off
     the metadata key this module's ingress lifts seed (:func:`seed_wire_metadata`
-    / :func:`seed_replay_metadata`) — the shared reader behind the RFC 0052
+    / :func:`seed_replay_metadata`) — the ONE shared reader behind the RFC 0052
     no-reopen claim's origin threading (PR #716 review: the executor entry
     points each re-implemented this read inline, OUTSIDE the cross-language
     drift pin, so a coordinated rename of the pinned sites would have left
     them silently returning ``""`` — no claim echoed, the latch blind, and a
     post-close straggler minting fresh and reopening the closed discussion).
-    Absent and non-string values read as ``""``, the untracked posture — the
-    same tolerance as ``wallet_cause.lease_interaction_id_for_event``, the
-    lease-side sibling this reader deliberately mirrors (kept separate: the
-    executor entry points must not grow a hard dep on the persona subpackage).
+    Absent and non-string values read as ``""``, the untracked posture.
+
+    Also the body behind ``wallet_cause.lease_interaction_id_for_event`` and
+    the rotation-boundary wire-id read (``episode_routing``), which delegate
+    here rather than keeping byte-identical copies (PR #716 review): a
+    semantics change applied to one copy and not the others would have wallet
+    spend billed under an id the no-reopen latch and the soft-budget close
+    trigger never see. The import direction is persona_runtime → here — the
+    executor entry points must not grow a hard dep on the persona subpackage.
     """
     value = event.metadata.get("interaction_id", "")
     return value if isinstance(value, str) else ""
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchContext:
+    """The originating dispatch's ambient context, threaded WHOLE through the
+    executor entry points: ``cascade_depth`` plus the RFC 0052 no-reopen
+    claim's origin pair (the inputs :func:`same_channel_claim` builds the wire
+    claim from).
+
+    One required parameter instead of three parallel defaulted kwargs
+    (PR #716 review): with per-value threading, "unstamped" was the silent
+    fallback for any entry point or action arm that forgot one kwarg — a
+    claim-less publish the no-reopen latch cannot see, post-close stragglers
+    minting fresh and reopening the closed discussion, with only
+    site-enumerating pin tests as protection. A required ``context``
+    parameter makes the choice visible at every call site: event-driven
+    ingress builds via :meth:`for_event` (the origin pair cannot be
+    half-threaded), and an event-less caller constructs the origin-less
+    posture explicitly.
+
+    ``cascade_depth`` keeps the terminate-at-clamp default the executor's
+    kwarg carried: a caller with no inbound event to derive depth from (the
+    tick scheduler) publishes at the cap so the orchestrator's per-hop clamp
+    drops fan-out — the v0.3.0 demo runaway was the consequence of a
+    publish-at-depth-0 default. Chain-origin callers (chat surface, the
+    dispatcher's first hop) state their depth explicitly.
+    """
+
+    cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH
+    origin_channel_id: str = ""
+    origin_interaction_id: str = ""
+
+    @classmethod
+    def for_event(cls, event: AgentEvent, *, cascade_depth: int) -> DispatchContext:
+        """The context for actions produced in reply to ``event``: the origin
+        pair is derived here, structurally — through the drift-pinned
+        :func:`wire_interaction_id` reader — so an ingress site cannot thread
+        the channel without the interaction id (or vice versa)."""
+        return cls(
+            cascade_depth=cascade_depth,
+            origin_channel_id=event.channel_id or "",
+            origin_interaction_id=wire_interaction_id(event),
+        )
 
 
 def same_channel_claim(
@@ -312,9 +375,12 @@ def same_channel_claim(
 
 
 __all__ = [
+    "WIRE_CLOSE_TRIGGER_COST",
     "WIRE_CLOSE_TRIGGER_END_VOTES",
     "WIRE_CLOSE_TRIGGER_IDLE",
+    "WIRE_CLOSE_TRIGGER_STRUCTURAL",
     "WIRE_CLOSE_TRIGGERS",
+    "DispatchContext",
     "channel_event_payload",
     "same_channel_claim",
     "seed_replay_metadata",

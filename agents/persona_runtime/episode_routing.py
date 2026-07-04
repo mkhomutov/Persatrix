@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from ..persona_types import AgentAction, AgentEvent
     from . import MemoryNamespace
 
+from ..channel_wire_metadata import wire_interaction_id
 from ..memory.boundary_detectors import (
     DEFAULT_CLOSING_GRACE_SEC,
     REASON_STRUCTURAL,
@@ -388,11 +389,10 @@ class _EpisodeRoutingMixin:
         # the thread — the resolver's IP3 rule ("the thread IS the
         # interaction"): thread-scoped locals keep idle / session-end
         # closes only.
-        wire_id = (
-            ""
-            if is_thread_scope(scope)
-            else str(event.metadata.get("interaction_id", "") or "")
-        )
+        # PR #716 review: the shared drift-pinned reader, not an inline copy —
+        # this read and the wallet-lease read must resolve the SAME id or
+        # spend bills under an id the rotation boundary never keys.
+        wire_id = "" if is_thread_scope(scope) else wire_interaction_id(event)
         stale = self._interaction_tracker.get(scope)
         # The not-None check narrows ``stale`` for the reason call.
         if stale is not None and wire_rotation_closes(stale, wire_id):

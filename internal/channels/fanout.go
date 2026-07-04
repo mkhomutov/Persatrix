@@ -139,18 +139,27 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// RFC 0052 §D bounded close below has ONE call site serving both.
 	settings, floorOn := r.floorSettingsFor(msg.ChannelID)
 	floorPath := floorOn && settings.enabled && len(responders) >= 2
+	// The RFC 0052 autonomous block, resolved ONCE per fanout and threaded to
+	// both consumers below — the head staleness check and the tail trigger —
+	// so they read a single snapshot (the [ChannelRouter.dispatchTo]
+	// ReasoningFor posture: two separate reads could be torn by a concurrent
+	// RFC 0050 apply landing between them) and the per-publish autonomousMu
+	// traffic drops to one acquisition in this scope (PR #716 review).
+	autonomous := r.AutonomousFor(msg.ChannelID)
 	// The floor path's HEAD staleness check (PR #716 review): the concurrent
 	// path's close-before-dispatch ordering runs its ledger read at the tail,
 	// BEFORE its dispatch — but the floor round runs before that tail, so a
 	// deliberate close landing between this publish's commit and this detached
 	// fanout would still dispatch every responder's LLM turn into the
-	// terminated discussion. Withhold the round up front instead; the tail's
-	// own ledger read below then rules the same stimulus stale and skips the
-	// revival tails, exactly as on the concurrent path. Like the concurrent
-	// withhold, the message is committed history that reaches no member (the
-	// non-responder ingestion delivery is withheld with the round) — the
-	// documented KNOWN COST, same 4b-ii redelivery-marker vehicle.
-	staleAtHead := floorPath && r.stimulusOutlivedClose(msg)
+	// terminated discussion. Withhold the round up front instead; the head
+	// verdict then rules the stimulus stale for the whole fanout (the tail
+	// trigger is skipped below — its ledger read would only re-derive the
+	// same verdict) and the revival tails are withheld, exactly as on the
+	// concurrent path. Like the concurrent withhold, the message is committed
+	// history that reaches no member (the non-responder ingestion delivery is
+	// withheld with the round) — the documented KNOWN COST, same 4b-ii
+	// redelivery-marker vehicle.
+	staleAtHead := floorPath && r.stimulusOutlivedClose(msg, autonomous)
 	var outcome floorRoundOutcome
 	if floorPath && !staleAtHead {
 		outcome = r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
@@ -202,13 +211,21 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// no-op on human channels (autonomous disabled → the hook returns before
 	// touching state) and on sub-bound rounds, so ordinary channels and
 	// mid-discussion rounds proceed byte-for-byte unchanged.
-	closed, stale := r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize, !floorPath)
-	// Fold the head verdict in: the tail's ledger read re-derives it on every
-	// realistic interleaving, but the fold makes the downstream branches
-	// immune to the one theoretical divergence (the id evicted from the
-	// bounded ledger between head and tail) — a head-withheld round must
-	// never feed a zero-value `outcome` into the escalation tail below.
-	stale = stale || staleAtHead
+	// The head verdict is authoritative for a head-withheld floor round: the
+	// tail call would repeat the same ledger read only to re-derive `stale` —
+	// its latched branch returns before the tally advance, so no round is
+	// counted, no close can fire, and no metric or state mutation is owed
+	// (PR #716 review; was an unconditional call plus a `stale || staleAtHead`
+	// fold). Branching first keeps the downstream branches immune to the one
+	// theoretical divergence the fold defended against (the id evicted from
+	// the bounded ledger between head and tail) — a head-withheld round still
+	// never feeds a zero-value `outcome` into the escalation tail below.
+	var closed, stale bool
+	if staleAtHead {
+		stale = true
+	} else {
+		closed, stale = r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize, !floorPath, autonomous)
+	}
 	// The ONE withhold seam (PR #716 review — this clear had been duplicated
 	// verbatim across the close and stale branches): a dispatch withheld
 	// after markActivity is the mark/clear case with NO reply to re-enter

@@ -40,6 +40,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
+from .channel_wire_metadata import DispatchContext
 from .event_loop import EventLoop, ScheduledWake
 from .persona_types import ActionType
 
@@ -241,11 +242,13 @@ class TickScheduler:
         # SEND_CHANNEL_MESSAGE an on_tick produces must publish at the cap so
         # the orchestrator's cascade_depth >= max_cascade_depth clamp drops
         # fan-out. The v0.3.0 demo runaway cascade was the consequence of
-        # the previous publish-at-depth-0 default.
+        # the previous publish-at-depth-0 default. Origin-less by design: a
+        # tick has no dispatched-under interaction to echo as the RFC 0052
+        # no-reopen claim (the resolver mints/resolves fresh — IP8).
         if self._executor is not None:
             await self._executor.execute(
                 self._agent.agent_id, actions,
-                cascade_depth=DEFAULT_MAX_CASCADE_DEPTH,
+                context=DispatchContext(cascade_depth=DEFAULT_MAX_CASCADE_DEPTH),
             )
         elif not all_do_nothing:
             # No executor configured but agent produced actionable output —

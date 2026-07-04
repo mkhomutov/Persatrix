@@ -11,15 +11,19 @@ close. This file pins the whole echo contract:
   under; cross-channel and origin-less publishes stamp nothing (IP8 keeps
   chain-origin publishes unstamped so a closed channel stays re-convenable);
 * the fire-and-forget inbound path (``process_inbound_channel_event``, the
-  DOMINANT channel-reply route) — threads the event's seeded id and channel
-  into ``executor.execute``; ``EventDispatcher.dispatch``'s twin threading is
-  pinned in ``test_dispatch_execute_actions.py``.
+  DOMINANT channel-reply route) — builds ONE ``DispatchContext`` off the
+  event (the origin pair derived structurally by ``for_event``, PR #716
+  review applied — previously two parallel kwargs a site could
+  half-forget) and threads it into ``executor.execute``;
+  ``EventDispatcher.dispatch``'s twin threading is pinned in
+  ``test_dispatch_execute_actions.py``.
 """
 
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+from agents.channel_wire_metadata import DispatchContext
 from agents.chat_reply import process_inbound_channel_event
 from agents.dispatch import ActionExecutor
 from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
@@ -66,10 +70,11 @@ class TestExecutorInteractionClaim:
             AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                 "channel_id": "group:planning", "content": "my take",
             }),
-        ], cascade_depth=2,
+        ], context=DispatchContext(
+            cascade_depth=2,
             origin_channel_id="group:planning",
             origin_interaction_id="itx-1234",
-        )
+        ))
 
         kwargs = publisher.publish.await_args.kwargs
         assert kwargs["metadata"] == {"interaction_id": "itx-1234"}, (
@@ -87,16 +92,19 @@ class TestExecutorInteractionClaim:
             AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                 "channel_id": "group:other-room", "content": "cross-post",
             }),
-        ], cascade_depth=2,
+        ], context=DispatchContext(
+            cascade_depth=2,
             origin_channel_id="group:planning",
             origin_interaction_id="itx-1234",
-        )
+        ))
 
         assert publisher.publish.await_args.kwargs["metadata"] is None
 
     async def test_claim_absent_without_origin(self):
         """Callers with no inbound channel event (tick scheduler, chat surface)
-        omit the origin pair — chain-origin publishes stay unstamped (IP8)."""
+        construct an origin-less context — chain-origin publishes stay
+        unstamped (IP8), and the omission is now explicit at the call site
+        rather than a silently-defaulted kwarg (PR #716 review applied)."""
         publisher = _publisher()
         executor = ActionExecutor(channel_publisher=publisher)
 
@@ -104,7 +112,7 @@ class TestExecutorInteractionClaim:
             AgentAction(ActionType.SEND_CHANNEL_MESSAGE, {
                 "channel_id": "group:planning", "content": "fresh convene",
             }),
-        ], cascade_depth=0)
+        ], context=DispatchContext(cascade_depth=0))
 
         assert publisher.publish.await_args.kwargs["metadata"] is None
 
@@ -120,10 +128,11 @@ class TestExecutorInteractionClaim:
             AgentAction(ActionType.END_INTERACTION_VOTE, {
                 "channel_id": "group:planning", "content": "nothing further",
             }),
-        ], cascade_depth=2,
+        ], context=DispatchContext(
+            cascade_depth=2,
             origin_channel_id="group:planning",
             origin_interaction_id="itx-1234",
-        )
+        ))
 
         assert publisher.publish.await_args.kwargs["metadata"] == {
             "end_interaction_vote": True,
@@ -142,9 +151,10 @@ class TestProcessInboundInteractionOrigin:
             event=event, max_cascade_depth=5,
         )
 
-        kwargs = executor.execute.await_args.kwargs
-        assert kwargs["origin_channel_id"] == "group:planning"
-        assert kwargs["origin_interaction_id"] == "itx-1234"
+        context = executor.execute.await_args.kwargs["context"]
+        assert context.origin_channel_id == "group:planning"
+        assert context.origin_interaction_id == "itx-1234"
+        assert context.cascade_depth == 2  # inbound depth + 1
 
     async def test_unseeded_event_threads_empty_origin(self):
         """No seeded id → empty pair, so the executor stamps nothing (IP8)."""
@@ -155,7 +165,8 @@ class TestProcessInboundInteractionOrigin:
             event=_inbound_event({"cascade_depth": 1}), max_cascade_depth=5,
         )
 
-        assert executor.execute.await_args.kwargs["origin_interaction_id"] == ""
+        context = executor.execute.await_args.kwargs["context"]
+        assert context.origin_interaction_id == ""
 
     async def test_non_string_seeded_id_reads_as_absent(self):
         """A non-string metadata value (replay anomaly) degrades to untracked
@@ -169,4 +180,5 @@ class TestProcessInboundInteractionOrigin:
             event=event, max_cascade_depth=5,
         )
 
-        assert executor.execute.await_args.kwargs["origin_interaction_id"] == ""
+        context = executor.execute.await_args.kwargs["context"]
+        assert context.origin_interaction_id == ""

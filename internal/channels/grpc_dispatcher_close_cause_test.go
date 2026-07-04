@@ -33,15 +33,24 @@ func TestChannelMessageToProto_LiftsPreviousInteractionCloseCause(t *testing.T) 
 	assert.Equal(t, "int-A", ev.PreviousInteractionId)
 	assert.Equal(t, idleTrigger, ev.PreviousInteractionCloseTrigger)
 
-	// The end-vote trigger is the other allowlisted value.
-	ev = d.channelMessageToProto(ChannelMessage{
-		ID: "m-2", ChannelID: "group:planning", SenderID: "a",
-		Metadata: map[string]any{
-			previousInteractionIDMetadataKey:      "int-A",
-			previousInteractionTriggerMetadataKey: endVotesTrigger,
-		},
-	}, DispatchEnvelope{Recipient: Member{ParticipantID: "b", RespondPolicy: RespondAlways}})
-	assert.Equal(t, endVotesTrigger, ev.PreviousInteractionCloseTrigger)
+	// The other three allowlisted values: the end-vote quorum and the RFC
+	// 0052 bounded close's structural/cost pair (PR #716 review: the bounded
+	// triggers were missing from the allowlist, and because the pair lifts
+	// both-or-neither the omission zeroed `previous_interaction_id` too —
+	// disabling the predecessor straggler defence on bounded-close
+	// boundaries while the drift pin stayed green).
+	for _, trigger := range []string{endVotesTrigger, structuralTrigger, costTrigger} {
+		ev = d.channelMessageToProto(ChannelMessage{
+			ID: "m-2", ChannelID: "group:planning", SenderID: "a",
+			Metadata: map[string]any{
+				previousInteractionIDMetadataKey:      "int-A",
+				previousInteractionTriggerMetadataKey: trigger,
+			},
+		}, DispatchEnvelope{Recipient: Member{ParticipantID: "b", RespondPolicy: RespondAlways}})
+		assert.Equal(t, trigger, ev.PreviousInteractionCloseTrigger)
+		assert.Equal(t, "int-A", ev.PreviousInteractionId,
+			"the pair must ride the wire whole for trigger %q", trigger)
+	}
 
 	// Unrecognised trigger → the whole PAIR lifts as empty. proto field 21
 	// is documented "Set iff `= 20` is set", and the receiver-side seed

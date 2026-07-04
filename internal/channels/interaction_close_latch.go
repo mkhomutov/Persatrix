@@ -100,9 +100,14 @@ func (e *openInteraction) latchedClaim(claim string) bool {
 // the cheap unstamped check runs first so human-typed traffic touches no
 // mutex), and DELIBERATE closes only — a divergence without a close (orphan
 // park, idle rotation) reads false and the round runs exactly as before.
-func (r *ChannelRouter) stimulusOutlivedClose(msg ChannelMessage) bool {
+// `a` is the fanout's single per-publish [ChannelRouter.AutonomousFor]
+// snapshot (PR #716 review), shared with the tail trigger so the two reads
+// cannot be torn by a concurrent RFC 0050 apply; the scope gate itself stays
+// HERE, not at the call site, so a caller cannot silently opt out of it (the
+// resolver's latch-gate posture).
+func (r *ChannelRouter) stimulusOutlivedClose(msg ChannelMessage, a AutonomousConfig) bool {
 	stamped := readInteractionID(msg.Metadata)
-	if stamped == "" || !r.AutonomousFor(msg.ChannelID).Enabled {
+	if stamped == "" || !a.Enabled {
 		return false
 	}
 	r.interactionMu.Lock()

@@ -134,14 +134,14 @@ class TestExecuteActionsFlag:
         agent_b.on_event.assert_not_called()
 
     async def test_dispatch_threads_interaction_origin_to_executor(self):
-        """The event's seeded ``interaction_id`` reaches the executor as the
-        origin pair (RFC 0052 no-reopen claim, PR #716 review).
+        """The event's seeded ``interaction_id`` reaches the executor inside
+        the ``DispatchContext`` (RFC 0052 no-reopen claim, PR #716 review).
 
         ``seed_wire_metadata`` puts the dispatched-under id on
-        ``event.metadata["interaction_id"]``; the dispatcher must thread it —
-        with the event's channel — into ``executor.execute`` the same way it
-        threads ``cascade_depth``, or same-channel replies publish unstamped
-        and the Go latch never sees a claim.
+        ``event.metadata["interaction_id"]``; the dispatcher must build its
+        context via ``DispatchContext.for_event`` — which derives the origin
+        pair with the event's channel, structurally — or same-channel replies
+        publish unstamped and the Go latch never sees a claim.
         """
         actions = [AgentAction(ActionType.DO_NOTHING, {})]
         dispatcher, _ = _make_dispatcher("ember-owl", actions)
@@ -156,9 +156,9 @@ class TestExecuteActionsFlag:
         )
         await dispatcher.dispatch("ember-owl", event)
 
-        kwargs = executor_mock.await_args.kwargs
-        assert kwargs["origin_channel_id"] == "group:planning"
-        assert kwargs["origin_interaction_id"] == "itx-1234"
+        context = executor_mock.await_args.kwargs["context"]
+        assert context.origin_channel_id == "group:planning"
+        assert context.origin_interaction_id == "itx-1234"
 
     async def test_dispatch_origin_defaults_empty_without_seeded_id(self):
         """An event with no seeded id threads an empty origin pair — the
@@ -170,8 +170,8 @@ class TestExecuteActionsFlag:
 
         await dispatcher.dispatch("ember-owl", _chat_event())
 
-        kwargs = executor_mock.await_args.kwargs
-        assert kwargs["origin_interaction_id"] == ""
+        context = executor_mock.await_args.kwargs["context"]
+        assert context.origin_interaction_id == ""
 
     async def test_unknown_agent_returns_empty_list(self):
         """dispatch() to an unknown agent returns [] regardless of execute_actions."""

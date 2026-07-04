@@ -83,22 +83,31 @@ def test_end_vote_metadata_key_agrees() -> None:
 
 
 def test_interaction_id_metadata_key_agrees() -> None:
-    """Go's ``interactionIDMetadataKey`` and every Python loop-side read
-    MUST be equal — the lease-threading seam (``wallet_cause``), the
-    rotation-boundary wire-id read (``episode_routing``, PR 607
-    second-pass review: previously unpinned, so a coordinated rename of
-    the other sites would have left it silently dead with green
-    suites), and the RFC 0052 no-reopen claim's shared home
-    (``channel_wire_metadata`` — the ingress seed plus the
-    ``wire_interaction_id`` / ``same_channel_claim`` pair, PR #716
-    review: the executor entry points' inline copies sat outside this
-    pin, the exact drift this test exists to catch)."""
+    """Go's ``interactionIDMetadataKey`` and the ONE Python home of the key
+    literal (``channel_wire_metadata`` — the ingress seed plus the
+    ``wire_interaction_id`` / ``same_channel_claim`` pair) MUST be equal,
+    and the two former inline readers MUST delegate to the shared reader
+    (PR #716 review, applied): ``wallet_cause``'s lease-threading read and
+    ``episode_routing``'s rotation-boundary wire-id read were byte-identical
+    copies sitting beside the pinned home — a semantics change applied to
+    one and not the others would have wallet spend billed under an id the
+    no-reopen latch and the soft-budget close trigger never see. Pinning
+    the delegation (not the literal) in those two files means the key
+    literal now lives in exactly one Python module."""
     go_value = _go_const(_INTERACTION_ID_GO, "interactionIDMetadataKey")
-    for py_path in (_WALLET_CAUSE_PY, _EPISODE_ROUTING_PY, _CHANNEL_WIRE_METADATA_PY):
-        if f'"{go_value}"' not in py_path.read_text(encoding="utf-8"):
+    if f'"{go_value}"' not in _CHANNEL_WIRE_METADATA_PY.read_text(encoding="utf-8"):
+        _parse_miss(
+            f"a read of the {go_value!r} metadata key "
+            f"(Go interactionIDMetadataKey)",
+            _CHANNEL_WIRE_METADATA_PY,
+        )
+    for py_path, pin in {
+        _WALLET_CAUSE_PY: "return wire_interaction_id(event)",
+        _EPISODE_ROUTING_PY: "wire_interaction_id(event)",
+    }.items():
+        if pin not in py_path.read_text(encoding="utf-8"):
             _parse_miss(
-                f"a read of the {go_value!r} metadata key "
-                f"(Go interactionIDMetadataKey)",
+                f"the shared-reader delegation `{pin}`",
                 py_path,
             )
 
@@ -140,22 +149,39 @@ def test_lease_call_sites_thread_the_interaction() -> None:
 # latch blind, and post-close stragglers minting fresh and reopening the
 # closed discussion (the exact regression the shared home closed).
 _NO_REOPEN_CLAIM_PINS = {
-    Path("agents/dispatch.py"): "origin_interaction_id=wire_interaction_id(event)",
-    Path("agents/chat_reply.py"): "origin_interaction_id=wire_interaction_id(event)",
-    Path("agents/action_executor.py"): "publish_metadata = same_channel_claim(",
-    _END_VOTE_ACTION_PY: "claim = same_channel_claim(",
+    Path("agents/dispatch.py"): [
+        "context=DispatchContext.for_event(event",
+    ],
+    Path("agents/chat_reply.py"): [
+        "context = DispatchContext.for_event(event",
+        # The error-recovery publish is the THIRD same-channel path (PR #716
+        # review: it was missed when the reply and end-vote publishes were
+        # stamped, so a post-close budget-denial straggler minted fresh and
+        # reopened the closed discussion).
+        "claim = same_channel_claim(",
+    ],
+    Path("agents/action_executor.py"): [
+        "publish_metadata = same_channel_claim(",
+    ],
+    _END_VOTE_ACTION_PY: [
+        "claim = same_channel_claim(",
+    ],
 }
 
 
 def test_no_reopen_claim_sites_share_reader_and_rule() -> None:
-    """Every executor entry point MUST thread the origin id through
-    ``channel_wire_metadata.wire_interaction_id`` and every publish site
-    MUST build its claim through ``same_channel_claim`` — the shared,
-    drift-pinned home (see ``test_interaction_id_metadata_key_agrees``)."""
-    for path, pin in _NO_REOPEN_CLAIM_PINS.items():
+    """Every event-driven executor ingress MUST build its context through
+    ``DispatchContext.for_event`` (which derives the origin pair through the
+    drift-pinned ``wire_interaction_id`` reader, structurally — PR #716
+    review applied: the pair was previously threaded as parallel kwargs a
+    site could half-forget) and every same-channel publish site MUST build
+    its claim through ``same_channel_claim`` — the shared, drift-pinned
+    home (see ``test_interaction_id_metadata_key_agrees``)."""
+    for path, pins in _NO_REOPEN_CLAIM_PINS.items():
         src = path.read_text(encoding="utf-8")
-        if pin not in src:
-            _parse_miss(f"the no-reopen claim literal `{pin}`", path)
+        for pin in pins:
+            if pin not in src:
+                _parse_miss(f"the no-reopen claim literal `{pin}`", path)
 
 
 # ─── Producer plan OQ 5: the retired-close cause pair ────────────────
@@ -195,27 +221,45 @@ def test_previous_interaction_metadata_keys_agree() -> None:
                 )
 
 
+_BOUNDED_CLOSE_GO = Path("internal/channels/bounded_close.go")
+
+
 def test_close_trigger_values_agree() -> None:
-    """The trigger vocabulary the resolver stamps (Go ``idleTrigger`` /
-    ``endVotesTrigger``) MUST equal the single Python source
-    (``channel_wire_metadata`` — the PR 607 second-pass review collapsed
-    the boundary seam's re-declared copy into an import, so growing the
-    vocabulary is one edit per language).  Imported and compared
-    directly — stronger than a text pin — while the Go side stays
-    text-pinned (no Go toolchain dependency)."""
+    """The trigger vocabulary the close sites stamp (Go ``idleTrigger`` /
+    ``endVotesTrigger`` / ``structuralTrigger`` / ``costTrigger``) MUST
+    equal the single Python source (``channel_wire_metadata`` — the PR 607
+    second-pass review collapsed the boundary seam's re-declared copy into
+    an import, so growing the vocabulary is one edit per language).
+    Imported and compared directly — stronger than a text pin — while the
+    Go side stays text-pinned (no Go toolchain dependency).
+
+    The RFC 0052 bounded-close pair is compared against the WHOLE-set
+    equality below deliberately (PR #716 review): the bounded close shipped
+    stamping ``structural``/``cost`` while both allowlists still held only
+    the original two values, and this test stayed green because it never
+    parsed ``bounded_close.go`` — the seed's pair-or-nothing validation
+    then zeroed ``previous_interaction_id`` along with the trigger,
+    silently disabling the ``predecessor_wire_id`` straggler defence on
+    every bounded-close boundary."""
     from agents.channel_wire_metadata import (
+        WIRE_CLOSE_TRIGGER_COST,
         WIRE_CLOSE_TRIGGER_END_VOTES,
         WIRE_CLOSE_TRIGGER_IDLE,
+        WIRE_CLOSE_TRIGGER_STRUCTURAL,
         WIRE_CLOSE_TRIGGERS,
     )
     from agents.persona_runtime import interaction_boundary
 
     idle = _go_const(_INTERACTION_RESOLVER_GO, "idleTrigger")
     end_votes = _go_const(_END_VOTE_GO, "endVotesTrigger")
+    structural = _go_grouped_const(_BOUNDED_CLOSE_GO, "structuralTrigger")
+    cost = _go_grouped_const(_BOUNDED_CLOSE_GO, "costTrigger")
 
     assert WIRE_CLOSE_TRIGGER_IDLE == idle
     assert WIRE_CLOSE_TRIGGER_END_VOTES == end_votes
-    assert WIRE_CLOSE_TRIGGERS == {idle, end_votes}
+    assert WIRE_CLOSE_TRIGGER_STRUCTURAL == structural
+    assert WIRE_CLOSE_TRIGGER_COST == cost
+    assert WIRE_CLOSE_TRIGGERS == {idle, end_votes, structural, cost}
     # The boundary seam consumes the import, not a re-declaration.
     assert interaction_boundary.WIRE_CLOSE_TRIGGER_IDLE is WIRE_CLOSE_TRIGGER_IDLE
 
