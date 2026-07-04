@@ -217,7 +217,7 @@ func (r *ChannelRouter) ConveneChannel(ctx context.Context, channelID string) (s
 	// failed-dispatch branch clears it, mirroring the chair escalation — no
 	// reply can ever clear a mark whose dispatch never landed.
 	r.markActivity(channelID, []string{convener})
-	if err := r.dispatchTo(ctx, msg, ChannelTypeGroup, "", *convenerMember, len(members), nil, markerConvene); err != nil {
+	if err := r.dispatchTo(ctx, msg, ChannelTypeGroup, "", *convenerMember, len(members), nil, dispatchControl{marker: markerConvene}); err != nil {
 		r.clearActivity(channelID, convener)
 		return "", fmt.Errorf("channels: convene %s: dispatch to convener %q: %w", channelID, convener, err)
 	}

@@ -473,5 +473,14 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		// [ChannelRouter.ConveneChannel]'s dispatch — false (the proto3
 		// default) on every ordinary fanout.
 		Convene: env.Convene,
+		// RFC 0052 §D (PR 4b-ii): the close-notification redelivery marker +
+		// the truthful bounded-close cause (set only by
+		// [ChannelRouter.notifyInteractionClose]'s dispatch; the trigger only
+		// for a bounded close) and the synthesis forced-turn marker (set only
+		// by [ChannelRouter.maybeArmSynthesisClose]'s dispatch). Zero values
+		// on every ordinary fanout — the additive mixed-version contract.
+		CloseNotificationRedelivery:   env.InteractionCloseRedelivery,
+		CloseNotificationCloseTrigger: env.InteractionCloseTrigger,
+		SynthesisTurn:                 env.SynthesisTurn,
 	}
 }

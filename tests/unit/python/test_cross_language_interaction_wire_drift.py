@@ -425,3 +425,67 @@ def test_chair_escalation_resynthesize_marker_agrees() -> None:
             "chair_escalation = 22. A gate read here means the lift posture "
             "drifted — update the contract deliberately.",
         )
+
+
+def test_synthesis_close_wire_fields_agree() -> None:
+    """The RFC 0052 PR 4b-ii wire fields MUST agree across the proto, the
+    Go dispatcher lift, the Python payload lift, and their strict
+    consumers — the same one-sided-rename guard as the sibling markers. A
+    drifted `synthesis_turn` leaves the bounded close dispatching a
+    directive nobody answers (every §D close degrades to the timeout
+    fallback); a drifted redelivery/trigger pair silently reverts the
+    duplicate-final-turn fix and unmeters every close summary (OQ #6) with
+    all suites green.
+    """
+    proto_src = _TASK_PROTO.read_text(encoding="utf-8")
+    for decl in (
+        r"^\s*bool close_notification_redelivery = 28;",
+        r"^\s*string close_notification_close_trigger = 29;",
+        r"^\s*bool synthesis_turn = 30;",
+    ):
+        if not re.search(decl, proto_src, re.MULTILINE):
+            _parse_miss(f"`{decl}`", _TASK_PROTO)
+
+    # gofmt aligns the struct-literal lift block, so the pin tolerates the
+    # alignment whitespace rather than a byte-exact template.
+    go_src = _GRPC_DISPATCHER_GO.read_text(encoding="utf-8")
+    for field, env in (
+        ("CloseNotificationRedelivery", "env.InteractionCloseRedelivery"),
+        ("CloseNotificationCloseTrigger", "env.InteractionCloseTrigger"),
+        ("SynthesisTurn", "env.SynthesisTurn"),
+    ):
+        if not re.search(rf"{field}:\s+{re.escape(env)}", go_src):
+            _parse_miss(f"the dispatcher lift `{field}: {env}`", _GRPC_DISPATCHER_GO)
+
+    # All three lifts are CONDITIONAL (typed-field-only, key-ABSENCE on
+    # ordinary traffic); the trigger lift is additionally allowlisted to the
+    # two causes the bounded close stamps.
+    lift_src = _CHANNEL_WIRE_METADATA_PY.read_text(encoding="utf-8")
+    for lift in (
+        'payload["close_notification_redelivery"] = True',
+        'payload["close_notification_close_trigger"] = (',
+        'payload["synthesis_turn"] = True',
+    ):
+        if lift not in lift_src:
+            _parse_miss(
+                f"the conditional payload lift `{lift}`", _CHANNEL_WIRE_METADATA_PY,
+            )
+
+    # Strict consumers: the close dispatch reads the redelivery marker as a
+    # strict boolean and the trigger through the allowlisted vocabulary; the
+    # gate and the framing seam read the synthesis marker as strict booleans.
+    close_src = _CLOSE_NOTIFICATION_PY.read_text(encoding="utf-8")
+    if 'payload.get("close_notification_redelivery") is True' not in close_src:
+        _parse_miss(
+            'a strict `…get("close_notification_redelivery") is True` read',
+            _CLOSE_NOTIFICATION_PY,
+        )
+    if 'payload.get("close_notification_close_trigger")' not in close_src:
+        _parse_miss(
+            'the `…get("close_notification_close_trigger")` read',
+            _CLOSE_NOTIFICATION_PY,
+        )
+    for path in (_RESPONSE_GATE_PY, _PROMPT_ASSEMBLY_PY):
+        src = path.read_text(encoding="utf-8")
+        if 'payload.get("synthesis_turn") is True' not in src:
+            _parse_miss('a strict `…get("synthesis_turn") is True` read', path)

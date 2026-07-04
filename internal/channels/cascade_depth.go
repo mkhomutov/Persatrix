@@ -131,3 +131,21 @@ func (r *ChannelRouter) recordCascadeCap(ctx context.Context, msg ChannelMessage
 		)
 	}
 }
+
+// SetMaxCascadeDepth overrides the default cap. Non-positive values
+// are ignored so a zero/negative config row cannot silently disable
+// the backstop. MUST run at startup before any [ChannelRouter.Publish]
+// call — `maxCascadeDepth` is unsynchronised, so a runtime-reload path
+// needs an [sync/atomic.Int64] promotion first (PR #319 review 5.1).
+// (Moved here from router.go when PR 4b-ii pushed that file past the
+// 500-line cap — the field's story already lived in this file.)
+func (r *ChannelRouter) SetMaxCascadeDepth(d int) {
+	if d > 0 {
+		r.maxCascadeDepth = d
+	}
+}
+
+// MaxCascadeDepth returns the active cap (exposed for tests + ops logs).
+func (r *ChannelRouter) MaxCascadeDepth() int {
+	return r.maxCascadeDepth
+}

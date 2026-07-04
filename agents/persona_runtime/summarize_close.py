@@ -29,8 +29,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from ..generated import wallet_pb2 as walletpb
 from ..memory.interactions import SUMMARY_UNAVAILABLE_TEXT
 from ..memory.store import CompressedView, MemoryEntry, MemoryStore
 from ..model_aliases import resolve as resolve_model
@@ -168,6 +169,24 @@ async def summarize_closed_interaction(
         )
         _emit_summary_failed("model_unresolvable")
         return (SUMMARY_UNAVAILABLE_TEXT, True, None)
+    # RFC 0052 PR 4b-ii (OQ #6): on the AUTONOMOUS bounded close — the
+    # interaction ``close_notification.py`` marked ``meter_close_summary`` off
+    # the typed wire trigger — the summariser call draws an RFC 0023 wallet
+    # lease billed to the GOVERNANCE interaction id, so the summary's spend
+    # counts toward the mandatory cap: this is the ``N`` of the PR 4a
+    # ``1 + N`` reserve (one summary per persona; the soft-budget close fires
+    # early precisely so these leases keep hard-cap headroom). CONDITIONAL — an
+    # unmarked (human / end-vote / idle) close keeps the pre-4b-ii unleased
+    # call signature byte-for-byte (test_summarize_close_metering.py), and an
+    # empty wire id (unreachable by CP2 construction) defensively stays
+    # unleased rather than lease against no cap with a fail-closed mode.
+    lease_kwargs: dict[str, Any] = {}
+    if interaction.meter_close_summary and interaction.wire_interaction_id:
+        lease_kwargs = {
+            "cause": walletpb.CAUSE_CHANNEL_MESSAGE,
+            "agent_id": agent_id,
+            "interaction_id": interaction.wire_interaction_id,
+        }
     try:
         response = await asyncio.wait_for(
             llm_client.create_message(
@@ -181,6 +200,7 @@ async def summarize_closed_interaction(
                 tools=[],
                 max_tokens=SUMMARIZATION_MAX_OUTPUT_TOKENS,
                 temperature=0.2,
+                **lease_kwargs,
             ),
             timeout=SUMMARIZATION_TIMEOUT_SEC,
         )

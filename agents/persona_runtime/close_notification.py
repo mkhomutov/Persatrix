@@ -35,8 +35,14 @@ invent. Sequence:
    either fabricate the record above or leave a 1-turn successor
    dangling toward its own "went idle" burial;
 4. otherwise ingest (the closing message lands as the record's final
-   turn) and close with :data:`REASON_STRUCTURAL` — but SKIP the ingest
-   for a self-echo (the RFC 0052 bounded close fans to the round-
+   turn) and close — with :data:`REASON_STRUCTURAL`, or the truthful
+   :data:`REASON_COST` when the notification carries the RFC 0052
+   bounded close's ``cost`` trigger (PR 4b-ii; the same typed field's
+   presence marks the record for the OQ #6 metered summary). SKIP the
+   ingest for a marked RE-delivery (PR 4b-ii — the floor-path bounded
+   close's closing message already reached every member live inside its
+   round; re-ingesting it duplicated the final turn) and for
+   a self-echo (the RFC 0052 bounded close fans to the round-
    triggering sender, so the convener/chair receives its own message;
    ingesting it would write a ``sender == agent_id`` turn and inflate
    ``turn_count``, the self-echo the gate keeps out of memory), closing
@@ -73,7 +79,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol
 
-from ..memory.boundary_detectors import REASON_STRUCTURAL
+from ..channel_wire_metadata import (
+    WIRE_CLOSE_TRIGGER_COST,
+    WIRE_CLOSE_TRIGGER_STRUCTURAL,
+)
+from ..memory.boundary_detectors import REASON_COST, REASON_STRUCTURAL
 
 if TYPE_CHECKING:
     from ..memory.interactions import Interaction, InteractionTracker
@@ -172,20 +182,21 @@ async def close_interaction_on_notification(
     # other sender — every end-vote recipient, and every non-triggering member
     # on a bounded close) ingests as before.
     #
-    # KNOWN LIMIT (PR 4b-i review round 5, deferred to 4b-ii): on a
-    # FLOOR-CONTROLLED bounded close the inbound ingest below is a
-    # RE-delivery — the bounding stimulus already reached every member live
-    # inside its floor round (unlike the end-vote close, whose vote's own
-    # fanout is suppressed, and the concurrent-path bounded close, which
-    # withholds the bounding dispatch), so this appends a duplicate final
-    # turn and inflates ``turn_count`` by one on the closed record.
-    # Distinguishing "re-delivery, close only" from "sole delivery, ingest
-    # then close" is not decidable here (the fresh wire id defeats any
-    # id-based check by design, and ``ChannelMessageEvent`` has no metadata
-    # map to smuggle a hint through) — it needs a typed redelivery marker on
-    # the wire, which lands with PR 4b-ii's proto work
-    # (docs/rfcs/0052-pr-plan.md).
-    if event.sender_id != agent.agent_id:
+    # ... and skip it for a marked RE-delivery (PR 4b-ii, resolving the
+    # 4b-i round-5 KNOWN LIMIT): on a FLOOR-CONTROLLED bounded close the
+    # bounding stimulus already reached every member live inside its floor
+    # round (unlike the end-vote close, whose vote's own fanout is
+    # suppressed, and the concurrent-path bounded close, which withholds
+    # the bounding dispatch — both sole-delivery), so ingesting it again
+    # appended a duplicate final turn and inflated ``turn_count`` by one
+    # per non-sender member per close. "Re-delivery, close only" vs "sole
+    # delivery, ingest then close" is not decidable locally (the fresh
+    # wire id defeats any id-based check by design), so the producer says
+    # which it is via the typed ``close_notification_redelivery`` field —
+    # strict ``is True``, because a spoofed truthy non-bool suppressing
+    # the ingest would LOSE a sole-delivered closing turn.
+    redelivery = payload.get("close_notification_redelivery") is True
+    if event.sender_id != agent.agent_id and not redelivery:
         await agent._store_event_episode(event, [])
         if agent._interaction_tracker.get(scope) is not open_interaction:
             # The ingest itself closed or replaced the interaction (the
@@ -196,6 +207,26 @@ async def close_interaction_on_notification(
             # — closing it here would be the fabrication the no-open branch
             # above refuses (module docstring, step 4).
             return
-    closed = agent._interaction_tracker.close(scope, reason=REASON_STRUCTURAL)
+    # RFC 0052 PR 4b-ii: the truthful bounded-close cause. The wire lift
+    # (``channel_wire_metadata.channel_event_payload``) allowlists the field
+    # to the two causes the bounded close stamps, and this consumer
+    # re-checks (defence-in-depth, the strict-marker posture): ``cost``
+    # closes with the truthful :data:`REASON_COST` — the wallet soft-budget
+    # close IS a cost close, not the "ended" the structural label claims —
+    # while ``structural`` (max_rounds) and every unmarked/unrecognised
+    # notification keep the established :data:`REASON_STRUCTURAL` mapping.
+    trigger = payload.get("close_notification_close_trigger")
+    bounded = trigger in (WIRE_CLOSE_TRIGGER_STRUCTURAL, WIRE_CLOSE_TRIGGER_COST)
+    reason = REASON_COST if trigger == WIRE_CLOSE_TRIGGER_COST else REASON_STRUCTURAL
+    closed = agent._interaction_tracker.close(scope, reason=reason)
     if closed is not None:
+        # OQ #6 (PR 4b-ii): a bounded close is autonomous by construction
+        # (the trigger field is stamped by nothing else), so mark the closed
+        # record for the metered close summary — ``summarize_close.py``
+        # threads the lease attribution off this flag, and the summary's
+        # spend counts toward the mandatory cap the PR 4a ``1 + N`` reserve
+        # was carved from. Set between close and persistence, so every other
+        # close path keeps the flag's unmetered default.
+        if bounded:
+            closed.meter_close_summary = True
         await agent._persist_closed_interaction(closed)

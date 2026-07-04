@@ -227,8 +227,10 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 		// amendment (CP1/CP5): the closing vote's own fanout is suppressed (the
 		// caller's early return this `true` buys), so the close must be DELIVERED,
 		// not inferred. excludeSender is TRUE — the voter's own vote action already
-		// closed its local tracker, so re-notifying it is redundant.
-		r.finalizeInteractionClose(ctx, msg, ct, interactionID, endVotesTrigger, true)
+		// closed its local tracker, so re-notifying it is redundant. redelivery is
+		// FALSE for the same suppression: the notification is the vote's SOLE
+		// delivery, so receivers must keep the ingest (PR 4b-ii).
+		r.finalizeInteractionClose(ctx, msg, ct, interactionID, endVotesTrigger, true, false)
 		return true
 	}
 	// Suppress fanout of a redundant in-window duplicate vote. An end-vote is

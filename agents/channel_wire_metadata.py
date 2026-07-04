@@ -158,6 +158,34 @@ def channel_event_payload(request: task_pb2.ChannelMessageEvent) -> dict[str, ob
     # on.
     if request.convene:
         payload["convene"] = True
+    # RFC 0052 PR 4b-ii: the close-notification redelivery marker — true iff
+    # the marked notification's closing message was ALREADY delivered live
+    # (the FLOOR-path bounded close). Typed-field-only so ordinary traffic
+    # and every sole-delivery notification keep key-ABSENCE; the consumer
+    # (``close_notification.py``) skips the final-turn ingest on strict
+    # ``is True``.
+    if request.close_notification_redelivery:
+        payload["close_notification_redelivery"] = True
+    # RFC 0052 PR 4b-ii: the truthful bounded-close cause riding the close
+    # notification. Allowlisted at the seed point like the field-21 pair —
+    # but to the two causes the bounded close actually STAMPS, not the full
+    # ``WIRE_CLOSE_TRIGGERS`` vocabulary: the field's presence doubles as
+    # the OQ #6 metering key ("this close is an autonomous bounded close"),
+    # so an ``idle``/``end_votes``/garbage value from a non-Go (or
+    # compromised) producer must degrade to absent — never widen the set of
+    # closes whose summaries draw a lease, and never relabel a close reason.
+    if request.close_notification_close_trigger in (
+        WIRE_CLOSE_TRIGGER_STRUCTURAL, WIRE_CLOSE_TRIGGER_COST,
+    ):
+        payload["close_notification_close_trigger"] = (
+            request.close_notification_close_trigger
+        )
+    # RFC 0052 §D (PR 4b-ii): the synthesis forced-turn marker — the
+    # directed dispatch asking the chair to author the closing synthesis.
+    # Typed-field-only like ``convene``; the gate's admission and the
+    # prompt-assembly framing both read strict ``is True``.
+    if request.synthesis_turn:
+        payload["synthesis_turn"] = True
     return payload
 
 

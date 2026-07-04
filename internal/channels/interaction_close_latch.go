@@ -105,15 +105,28 @@ func (e *openInteraction) latchedClaim(claim string) bool {
 // cannot be torn by a concurrent RFC 0050 apply; the scope gate itself stays
 // HERE, not at the call site, so a caller cannot silently opt out of it (the
 // resolver's latch-gate posture).
+// Since PR 4b-ii the head verdict also covers the ARMED synthesis window
+// (synthesis_close.go): once a bound-crossing round dispatched the chair
+// synthesis turn, the discussion has terminated and only the closing artifact
+// is outstanding — running a floor round on any further stimulus would fan
+// LLM turns into it exactly like the post-close case, so an armed channel
+// withholds at the head regardless of the stamp (the chair's reply itself
+// never reaches this check — [ChannelRouter.claimSynthesisReply] runs first).
 func (r *ChannelRouter) stimulusOutlivedClose(msg ChannelMessage, a AutonomousConfig) bool {
-	stamped := readInteractionID(msg.Metadata)
-	if stamped == "" || !a.Enabled {
+	if !a.Enabled {
 		return false
 	}
 	r.interactionMu.Lock()
 	defer r.interactionMu.Unlock()
 	entry := r.openInteractions[msg.ChannelID]
-	return entry != nil && entry.latchedClaim(stamped)
+	if entry == nil {
+		return false
+	}
+	if entry.pendingSynthesis != nil {
+		return true
+	}
+	stamped := readInteractionID(msg.Metadata)
+	return stamped != "" && entry.latchedClaim(stamped)
 }
 
 // markInteractionClosed is the resolver close notification (IP8): a close site
@@ -135,6 +148,13 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger 
 	var discard string
 	if entry != nil {
 		entry.rememberClosed(interactionID)
+		// PR 4b-ii: a deliberate close disarms any pending synthesis for the
+		// SAME interaction — the racing end-vote quorum keeps its supremacy
+		// (CE4), and the orphaned arm's reply then lands in the ledger above
+		// as post-close traffic instead of double-closing.
+		if p := entry.pendingSynthesis; p != nil && p.interactionID == interactionID {
+			entry.disarmPendingSynthesisLocked()
+		}
 		if entry.id == interactionID {
 			discard = entry.retired
 			entry.retired = interactionID
@@ -149,4 +169,17 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger 
 		r.DiscardInteractionEndVotes(discard)
 		r.DiscardInteractionBudget(discard)
 	}
+}
+
+// previousClose is the resolver's OQ 5 close-cause attribution for one
+// channel, returned by [ChannelRouter.resolveInteractionID] from the same
+// critical section that resolved the open id — reading it later would race a
+// concurrent rotation into stamping a cause from a different generation than
+// the resolved id's. A zero value means no retiree is known (fresh channel
+// or post-restart re-mint). (Moved here from interaction_resolver.go when
+// PR 4b-ii pushed that file past the 500-line cap — this file already owns
+// the close-side resolver state the record belongs to.)
+type previousClose struct {
+	id      string
+	trigger string
 }

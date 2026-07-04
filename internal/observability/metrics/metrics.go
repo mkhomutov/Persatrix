@@ -123,10 +123,9 @@ type Instruments struct {
 	//
 	// Names follow the documented `orchestrator.<area>.<noun>` scheme
 	// (RFC 0019 §F): event/class-labelled emit counter, dedicated
-	// chain-recovery counter, and emit-latency histogram. The
-	// histogram drives the capability-fsync amplification SLO
-	// documented in docs/observability.md §13 (PR #234 review
-	// Medium-1).
+	// chain-recovery counter, and emit-latency histogram. The histogram
+	// drives the capability-fsync amplification SLO documented in
+	// docs/observability.md §13 (PR #234 review Medium-1).
 	AuditEventsTotal         metric.Int64Counter
 	AuditChainRecoveredTotal metric.Int64Counter
 	AuditEmitLatencySeconds  metric.Float64Histogram
@@ -137,7 +136,7 @@ type Instruments struct {
 	ChannelMessagesPublished metric.Int64Counter
 	// ChannelMessagesCascadeCapped — RFC 0011 cascade-depth amendment; see channel_instruments.go.
 	ChannelMessagesCascadeCapped metric.Int64Counter
-	// ChannelConversation* — RFC 0030 Layer 2.5 floor-control + v0.3.8 governance-layer telemetry; see channel_instruments.go.
+	// ChannelConversation* — RFC 0030 Layer 2.5 floor-control + v0.3.8 governance-layer + RFC 0052 synthesis-turn telemetry; see channel_instruments.go.
 	ChannelConversationFloorTurn            metric.Int64Counter
 	ChannelConversationFloorRoundDuration   metric.Float64Histogram
 	ChannelConversationGovernanceDrop       metric.Int64Counter
@@ -146,6 +145,7 @@ type Instruments struct {
 	ChannelConversationReplyBudgetRemaining metric.Float64Histogram
 	ChannelConversationChairEscalation      metric.Int64Counter
 	ChannelConversationCloseNotification    metric.Int64Counter
+	ChannelConversationSynthesisTurn        metric.Int64Counter
 	// SessionsWrites — RFC 0031 Phase 1; see channel_instruments.go.
 	SessionsWrites metric.Int64Counter
 }

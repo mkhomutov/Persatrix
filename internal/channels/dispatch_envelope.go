@@ -109,6 +109,44 @@ type DispatchEnvelope struct {
 	// directed lane, the same never-alias discipline [dispatchMarker] keeps).
 	Convene bool
 
+	// InteractionCloseRedelivery (RFC 0052 PR 4b-ii) marks a close
+	// notification whose closing message was ALREADY delivered live via
+	// ordinary fanout — the FLOOR-path bounded close, whose bounding stimulus
+	// reached every member inside its round (the end-vote and concurrent-path
+	// closes are sole-delivery). Carried on
+	// `ChannelMessageEvent.close_notification_redelivery`; the receiver skips
+	// the duplicate final-turn ingest and closes its scope directly. Set only
+	// with InteractionCloseNotification, by
+	// [ChannelRouter.notifyInteractionClose] — the zero value is every
+	// sole-delivery notification and every ordinary dispatch.
+	InteractionCloseRedelivery bool
+
+	// InteractionCloseTrigger (RFC 0052 PR 4b-ii) is the truthful bounded-
+	// close cause riding a close notification — "structural"
+	// (`autonomous.max_rounds`) | "cost" (the wallet soft budget), the same §L
+	// vocabulary as the OQ 5 retiree pair. Stamped ONLY for the RFC 0052
+	// bounded close ([ChannelRouter.finalizeInteractionClose] maps every other
+	// trigger to empty), so its presence doubles as the receiver's OQ #6
+	// metering key: a non-empty value marks the closed interaction's RFC 0020
+	// summary for a wallet lease against the mandatory cap. Carried on
+	// `ChannelMessageEvent.close_notification_close_trigger`; empty is every
+	// end-vote/idle notification and every ordinary dispatch.
+	InteractionCloseTrigger string
+
+	// SynthesisTurn (RFC 0052 §D, PR 4b-ii) marks this dispatch as the
+	// orchestrator's synthesis forced turn to the channel's escalation chair —
+	// the directed dispatch, sent when the bounded close trips, asking the
+	// chair to author the goal-directed closing synthesis. Carried on
+	// `ChannelMessageEvent.synthesis_turn`; the receiver admits a marked event
+	// down the same directed lane as Convene (gate admit + Tier B bypass),
+	// wraps the operator goal in the RFC 0009 envelope, and renders the
+	// synthesis framing. The reply's echoed interaction-id claim is how the
+	// orchestrator recognises the closing artifact (close-on-reply). Set only
+	// by [ChannelRouter.maybeArmSynthesisClose]'s dispatch — never together
+	// with the other control markers (the [dispatchMarker] never-alias
+	// discipline).
+	SynthesisTurn bool
+
 	// FloorMentions (RFC 0030 floor-capable-directedness amendment) is the
 	// subset of the message's mentions naming floor-capable members —
 	// resolved once per publish by [resolveFloorMentions] in

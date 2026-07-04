@@ -144,6 +144,11 @@ type openInteraction struct {
 	// the resolve's latch — story, scope, and lifetime in
 	// interaction_close_latch.go. Guarded by interactionMu.
 	recentlyClosed []string
+	// pendingSynthesis is the RFC 0052 §D armed close-on-reply (PR 4b-ii):
+	// non-nil while the chair's synthesis turn is outstanding — story, claim,
+	// and timeout in synthesis_close.go. Rides the entry like chairEscalated
+	// (dies with the generation); guarded by interactionMu.
+	pendingSynthesis *pendingSynthesisClose
 }
 
 // openCommitted reports whether this entry holds an open COMMITTED
@@ -153,17 +158,6 @@ type openInteraction struct {
 // Nil-tolerant so map-miss callers need no guard. Caller holds interactionMu.
 func (e *openInteraction) openCommitted() bool {
 	return e != nil && e.id != "" && e.idCommitted
-}
-
-// previousClose is the resolver's OQ 5 close-cause attribution for one
-// channel, returned by [ChannelRouter.resolveInteractionID] from the same
-// critical section that resolved the open id — reading it later would race a
-// concurrent rotation into stamping a cause from a different generation than
-// the resolved id's. A zero value means no retiree is known (fresh channel
-// or post-restart re-mint).
-type previousClose struct {
-	id      string
-	trigger string
 }
 
 // resolveInteractionID returns the open interaction id for `channelID`,
@@ -268,8 +262,12 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 		entry.escalatedStimulus = nil
 		entry.escalatedThreadParent = ""
 		// RFC 0052: a fresh interaction bounds independently — a re-convened
-		// autonomous discussion gets its own max_rounds tally, not the retiree's.
+		// autonomous discussion gets its own max_rounds tally, not the retiree's
+		// — and never inherits an armed synthesis close (PR 4b-ii): the arm
+		// belonged to the retired generation, so its reply/timer must not close
+		// (or withhold traffic on) the successor.
 		entry.roundCount = 0
+		entry.disarmPendingSynthesisLocked()
 	}
 	resolved := entry.id
 	prev := entry.prev

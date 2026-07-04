@@ -59,11 +59,25 @@ const (
 // Keeping the tail in one place means a future teardown change — e.g. the deferred
 // PR 7 wallet EvictInteraction step — lands for both causes at once and cannot
 // silently drift between the two close sites.
-func (r *ChannelRouter) finalizeInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType, interactionID, trigger string, excludeSender bool) {
+// `redelivery` (PR 4b-ii) says the closing message was already delivered live
+// via ordinary fanout — true only for the floor-path bounded close's stimulus;
+// always false on the end-vote path (the closing vote's own fanout is
+// suppressed, so the notification is its sole delivery).
+func (r *ChannelRouter) finalizeInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType, interactionID, trigger string, excludeSender, redelivery bool) {
 	r.recordReplyBudgetRemainingAtClose(ctx, msg.ChannelID, interactionID, ct)
 	r.DiscardInteractionReplyBudget(interactionID)
 	r.markInteractionClosed(msg.ChannelID, interactionID, trigger)
-	r.notifyInteractionClose(ctx, msg, ct, excludeSender)
+	// The wire-stamped close cause (PR 4b-ii): ONLY the RFC 0052 bounded
+	// close's structural/cost triggers ride the notification — the field's
+	// presence doubles as the receiver's OQ #6 metering key ("this close is
+	// an autonomous bounded close"), so the end-vote trigger must map to the
+	// empty pre-4b-ii wire shape or every human end-vote close would start
+	// leasing its summaries.
+	boundedTrigger := ""
+	if trigger == structuralTrigger || trigger == costTrigger {
+		boundedTrigger = trigger
+	}
+	r.notifyInteractionClose(ctx, msg, ct, excludeSender, boundedTrigger, redelivery)
 }
 
 // recordInteractionClosedMetric bumps the `interaction_closed{channel_type,
@@ -158,7 +172,12 @@ func (r *ChannelRouter) recordInteractionClosedMetric(ctx context.Context, ct Ch
 // interaction). `threadParentSenderID` is deliberately empty: it exists
 // to serve receiver-side directedness decisions, and a marked event
 // never reaches them — the gate refuses it pre-LLM (CP3).
-func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType, excludeSender bool) {
+// `closeTrigger` / `redelivery` (PR 4b-ii) are the two typed wire fields the
+// fan stamps on every recipient's envelope: the truthful bounded-close cause
+// ("" on the end-vote path — see [ChannelRouter.finalizeInteractionClose]) and
+// the already-delivered-live marker that lets receivers skip the duplicate
+// final-turn ingest on a floor-path bounded close.
+func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType, excludeSender bool, closeTrigger string, redelivery bool) {
 	notifyCtx := context.WithoutCancel(ctx)
 	r.fanoutWG.Add(1)
 	go func() {
@@ -205,7 +224,11 @@ func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelM
 				defer func() { <-sem }()
 				defer r.recoverFanout("close_notification", msg.ChannelID, notification.ID)
 				outcome := closeNotificationDispatched
-				if err := r.dispatchTo(notifyCtx, notification, ct, "", recipient, channelSize, nil, markerCloseNotification); err != nil {
+				if err := r.dispatchTo(notifyCtx, notification, ct, "", recipient, channelSize, nil, dispatchControl{
+					marker:          markerCloseNotification,
+					closeTrigger:    closeTrigger,
+					closeRedelivery: redelivery,
+				}); err != nil {
 					// dispatchTo already warned with the recipient + error; the
 					// outcome label is this path's own failure surface (CP5).
 					outcome = closeNotificationDispatchError

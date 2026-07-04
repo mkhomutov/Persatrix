@@ -182,6 +182,13 @@ type ChannelRouter struct {
 	// Unsynchronised like maxCascadeDepth — set at startup before traffic.
 	spend interactionSpender
 
+	// synthesisTimeout bounds the RFC 0052 §D close-on-reply's wait for the
+	// chair's synthesis reply before the timeout net closes without it
+	// ([defaultSynthesisReplyTimeout]; story in synthesis_close.go).
+	// Unsynchronised like maxCascadeDepth — set at startup (or by a test)
+	// before traffic.
+	synthesisTimeout time.Duration
+
 	// fanoutWG tracks the detached fanout goroutines spawned by
 	// [ChannelRouter.PublishAsync] so a graceful shutdown (or a test) can drain
 	// them via [ChannelRouter.WaitForPendingFanout] rather than racing a
@@ -294,6 +301,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		escalationChairs:              make(map[string]string),
 		reasoning:                     make(map[string]ReasoningConfig),
 		autonomous:                    make(map[string]AutonomousConfig),
+		synthesisTimeout:              defaultSynthesisReplyTimeout,
 	}
 }
 
@@ -336,22 +344,6 @@ func (r *ChannelRouter) floorSettingsFor(channelID string) (channelFloorSettings
 func (r *ChannelRouter) FloorControlFor(channelID string) (enabled bool, turnTimeout time.Duration, set bool) {
 	s, ok := r.floorSettingsFor(channelID)
 	return s.enabled, s.turnTimeout, ok
-}
-
-// SetMaxCascadeDepth overrides the default cap. Non-positive values
-// are ignored so a zero/negative config row cannot silently disable
-// the backstop. MUST run at startup before any [ChannelRouter.Publish]
-// call — `maxCascadeDepth` is unsynchronised, so a runtime-reload path
-// needs an [sync/atomic.Int64] promotion first (PR #319 review 5.1).
-func (r *ChannelRouter) SetMaxCascadeDepth(d int) {
-	if d > 0 {
-		r.maxCascadeDepth = d
-	}
-}
-
-// MaxCascadeDepth returns the active cap (exposed for tests + ops logs).
-func (r *ChannelRouter) MaxCascadeDepth() int {
-	return r.maxCascadeDepth
 }
 
 // Publish runs steps 1+2 synchronously; on success, fanout (step 3) runs

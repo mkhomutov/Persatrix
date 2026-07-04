@@ -32,6 +32,7 @@ from ..prompt_loader import load_persona_section, load_snippet
 from ..prompt_safety import escape_prompt_delimiters
 from ..temporal.rendering import format_now_anchor
 from .convener import format_convener_opening
+from .synthesis_turn import format_synthesis_turn
 
 if TYPE_CHECKING:
     from ..clock import Clock
@@ -423,6 +424,14 @@ class _PromptAssemblyMixin:
                 # this method with `self=None`).
                 if event.payload.get("convene") is True:
                     return format_convener_opening(content)
+                # RFC 0052 §D (PR 4b-ii): the synthesis forced turn asks the
+                # chair to author the closing synthesis against the operator
+                # goal — the same operator-config trust class as the convene
+                # directive, so the same envelope-wrapped rendering (the
+                # framing lives in `synthesis_turn.py`, the `convener.py`
+                # sibling). Strict `is True`, mirroring the gate's read.
+                if event.payload.get("synthesis_turn") is True:
+                    return format_synthesis_turn(content)
                 # Wrap user participant messages in XML-style delimiters
                 # to help the LLM distinguish human input from system
                 # instructions (OQ 4, OQ 14 — prompt injection mitigation).
