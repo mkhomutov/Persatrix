@@ -26,9 +26,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agents.action_executor import ActionExecutor
+from agents.channel_wire_metadata import DispatchContext
 from agents.persona_runtime.channel_reply import bind_end_vote_channel
 from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
-from agents.channel_wire_metadata import DispatchContext
 
 
 def _vote(payload: dict | None = None) -> AgentAction:
@@ -205,7 +205,8 @@ class TestExecutorPublishesVote:
         publisher.publish = AsyncMock(return_value=None)
         executor = ActionExecutor(channel_publisher=publisher)
 
-        results = await executor.execute("ember-owl", [_vote({"channel_id": "  "})], context=DispatchContext())
+        results = await executor.execute(
+            "ember-owl", [_vote({"channel_id": "  "})], context=DispatchContext())
 
         assert results[0]["status"] == "no_channel_id"
         publisher.publish.assert_not_awaited()

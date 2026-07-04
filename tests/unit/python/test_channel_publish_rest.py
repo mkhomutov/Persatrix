@@ -15,9 +15,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agents.channel_publisher import ChannelsDisabledError
+from agents.channel_wire_metadata import DispatchContext
 from agents.dispatch import ActionExecutor, EventDispatcher
 from agents.persona_types import ActionType, AgentAction
-from agents.channel_wire_metadata import DispatchContext
 
 
 @pytest.fixture

@@ -10,13 +10,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agents.channel_wire_metadata import DispatchContext
 from agents.dispatch import ActionExecutor, EventDispatcher
 from agents.llm_client import LLMClient, LLMResponse
 from agents.persona import create_persona_agent
 from agents.persona_runtime import _LLMPersonaAgent
 from agents.persona_types import ActionType, AgentAction, AgentEvent, EventType
 from agents.tools.registry import clear_registry
-from agents.channel_wire_metadata import DispatchContext
 
 # ─── Fixtures ───────────────────────────────────────────────
 
@@ -217,7 +217,8 @@ class TestPerDispatchTimeout:
                 "mentions": ["ember-owl"],
             },
         )
-        results = await executor.execute("ember-owl", [action], context=DispatchContext(cascade_depth=0))
+        results = await executor.execute(
+            "ember-owl", [action], context=DispatchContext(cascade_depth=0))
         assert len(results) == 1
         # Dispatch timed out, so dispatched_to == 0 (timeout is caught, not counted).
         assert results[0]["dispatched_to"] == 0
