@@ -20,6 +20,7 @@ from opentelemetry.trace import Link
 from .action_executor import ActionExecutor
 from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .channel_publisher import ChannelPublisher
+from .channel_wire_metadata import DispatchContext
 from .event_loop import InboundEventWake, SyncDispatchHandle
 from .persona_types import AgentAction, AgentEvent
 
@@ -253,11 +254,16 @@ class EventDispatcher:
                 scheduler.wake()
             actions = await agent.on_event(event)
 
-        # Propagate cascade depth into action execution so that
-        # SEND_CHANNEL_MESSAGE child dispatches inherit the current depth.
+        # Propagate the dispatch context whole so SEND_CHANNEL_MESSAGE child
+        # dispatches inherit the current depth and a same-channel reply
+        # echoes the interaction id the event was dispatched under (RFC 0052
+        # no-reopen claim, PR #716 review) — the origin pair is derived
+        # structurally by ``DispatchContext.for_event``, never threaded
+        # per-value; see ``ActionExecutor.execute``.
         if execute_actions:
             await self._executor.execute(
-                target_id, actions, cascade_depth=depth + 1,
+                target_id, actions,
+                context=DispatchContext.for_event(event, cascade_depth=depth + 1),
             )
 
         return actions

@@ -30,6 +30,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
+from agents.channel_wire_metadata import DispatchContext
 from agents.dispatch import ActionExecutor, EventDispatcher
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.observability.spans import (
@@ -193,6 +194,7 @@ class TestSubAgentSpawnSpan:
                 action_type=ActionType.SPAWN_SUB_AGENT,
                 payload={"role": "researcher"},
             )],
+            context=DispatchContext(),
         )
 
         spans = [

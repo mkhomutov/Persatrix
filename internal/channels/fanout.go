@@ -106,37 +106,193 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// vote disarms the trigger (it still consumes the stash below) without
 	// re-forcing.
 	misfired := namedNoFloorCapable && !readEndInteractionVote(msg.Metadata)
-	// Run for EVERY chair publish in an escalated interaction, not only the
-	// misfiring ones: the chair's first reply after the forced turn disarms the
-	// trigger whether it misfired (re-force one synthesize-only turn) or handed
-	// the floor cleanly (consume the arm and stop), so a later innocuous chair
-	// message cannot be mistaken for the reply's misfire. Detached and
-	// fire-and-forget like the stall tail; a no-op for every non-chair publish.
-	r.maybeResynthesizeMisfire(context.WithoutCancel(ctx), msg, ct, members, channelSize, misfired)
+	// ISSUE-0099 resynthesize, CLAIM half — at the fanout HEAD, before any floor
+	// round can park it (PR 4b-i review round 5): the once-bound is "the chair's
+	// FIRST publish after the forced turn consumes the arm". Claiming at the tail
+	// (the round-4 shape) let two chair publishes on different path shapes invert
+	// by a whole multi-turn floor round — the real forced-turn reply parked in
+	// its round while a later innocuous chair message raced down the fast
+	// concurrent path, reached its tail first, and claimed the arm with ITS
+	// misfire flag. The head claim shrinks that inversion window to detached-
+	// goroutine spawn jitter (PublishAsync fans on a detached goroutine, so
+	// strict commit order is not literally guaranteed) — the pre-4b-i posture,
+	// where the window was never observed to bite. Run for EVERY chair publish
+	// in an escalated interaction, not only the misfiring ones, so a clean
+	// hand-off disarms the trigger (see [ChannelRouter.claimResynthesizeMisfire]);
+	// a no-op (nil) for every non-chair publish. Only the re-force DISPATCH
+	// waits for the tail, gated on the bounded-close outcome below.
+	pendingResynth := r.claimResynthesizeMisfire(msg, misfired)
 
 	// Mark the responders as having an in-flight turn for the console presence
 	// signal (RFC 0048 Tier 1) — exactly the members [orderResponders] expects
 	// to reply, not the ingestion-only recipients dispatchConcurrent also
 	// delivers to (marking those would strand a "thinking" line on a member that
 	// will never answer). Cleared per-member when its reply re-enters
-	// (publishCommit) or by the TTL backstop. See activity.go.
+	// (publishCommit), by the TTL backstop, or — on the concurrent path's
+	// bounding/stale rounds, whose dispatch is withheld so no reply can ever
+	// re-enter — by the withhold seam below. See activity.go.
 	responders, nonResponders := orderResponders(members, msg, threadParentSenderID)
-	r.markActivity(msg.ChannelID, responderIDs(responders))
+	respIDs := responderIDs(responders)
+	r.markActivity(msg.ChannelID, respIDs)
 
-	if settings, ok := r.floorSettingsFor(msg.ChannelID); ok && settings.enabled {
-		if len(responders) >= 2 {
-			outcome := r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
-			// Chair-stall-escalation amendment §C 1: the stall tail runs in
-			// the round's CALLER, after the floor is released and the round's
-			// floor-speaker set is cleared — the chair's reply must re-fanout
-			// as a fresh open-floor stimulus, which a floor turn would
-			// suppress. A send, never an await (CE7).
-			r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
-			return
-		}
+	// The two dispatch paths (floor round vs concurrent), resolved once so the
+	// RFC 0052 §D bounded close below has ONE call site serving both.
+	settings, floorOn := r.floorSettingsFor(msg.ChannelID)
+	floorPath := floorOn && settings.enabled && len(responders) >= 2
+	// The RFC 0052 autonomous block, resolved ONCE per fanout and threaded to
+	// both consumers below — the head staleness check and the tail trigger —
+	// so they read a single snapshot (the [ChannelRouter.dispatchTo]
+	// ReasoningFor posture: two separate reads could be torn by a concurrent
+	// RFC 0050 apply landing between them) and the per-publish autonomousMu
+	// traffic drops to one acquisition in this scope (PR #716 review).
+	autonomous := r.AutonomousFor(msg.ChannelID)
+	// The floor path's HEAD staleness check (PR #716 review): the concurrent
+	// path's close-before-dispatch ordering runs its ledger read at the tail,
+	// BEFORE its dispatch — but the floor round runs before that tail, so a
+	// deliberate close landing between this publish's commit and this detached
+	// fanout would still dispatch every responder's LLM turn into the
+	// terminated discussion. Withhold the round up front instead; the head
+	// verdict then rules the stimulus stale for the whole fanout (the tail
+	// trigger is skipped below — its ledger read would only re-derive the
+	// same verdict) and the revival tails are withheld, exactly as on the
+	// concurrent path. Like the concurrent withhold, the message is committed
+	// history that reaches no member (the non-responder ingestion delivery is
+	// withheld with the round) — the documented KNOWN COST, same 4b-ii
+	// redelivery-marker vehicle.
+	staleAtHead := floorPath && r.stimulusOutlivedClose(msg, autonomous)
+	var outcome floorRoundOutcome
+	if floorPath && !staleAtHead {
+		outcome = r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
 	}
 
-	r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions)
+	// RFC 0052 §D bounded close, at the fanout tail on BOTH paths — one call
+	// site (review round 5), with the per-path ordering the deep review pinned
+	// preserved by POSITION relative to each path's dispatch:
+	//
+	//   - FLOOR path: the close runs AFTER the round (floorRound above), so the
+	//     `max_rounds`-th round's discussion happens and then the interaction is
+	//     at its terminal bound and must CLOSE, not be revived. KNOWN COST
+	//     (review finding, complete fix deferred): the bounding stimulus was
+	//     already delivered live inside the round, and the close notification
+	//     re-delivers it under a fresh wire id, which every non-sender recipient
+	//     ingests again (close_notification.py) — one duplicated final turn on
+	//     each closed record. Distinguishing "re-delivery, close only" from
+	//     "sole delivery, ingest then close" needs a redelivery marker on the
+	//     wire, and ChannelMessageEvent has no metadata map — a typed proto
+	//     field, which this Go-only slice deliberately does not touch; it lands
+	//     with PR 4b-ii's wire work (docs/rfcs/0052-pr-plan.md).
+	//   - CONCURRENT path: the close runs BEFORE the dispatch — unlike the floor
+	//     path, whose round replies are suppressed as floor speakers, a
+	//     concurrent dispatch's replies re-enter Publish, so dispatching the
+	//     bounding stimulus first would let those replies re-fan (the resolver's
+	//     post-close claim latch, router_publish_async.go, now also suppresses
+	//     them — this ordering keeps the wasted dispatch and its LLM spend off
+	//     the wire in the first place). Not a corner case: any autonomous round
+	//     with a single responder (e.g. a two-persona roster) takes this path
+	//     even under floor control. The bounding message is still persisted, and
+	//     the close notification delivers it as the marked control event a
+	//     member with an OPEN scope ingests as its record's final turn before
+	//     closing (close_notification.py). A member with NO open scope would
+	//     no-op instead of fabricating a 1-turn record — which is why the close
+	//     never fires before the interaction's first live dispatch
+	//     (maybeBoundedClose's round-1 guard, PR #716 review): even
+	//     `max_rounds = 1` delivers the opening turn live and closes on the next
+	//     tail, so every close leaves an artifact (§D).
+	//
+	// A `closed` return means the id is retired, so every follow-on that could
+	// revive the interaction is skipped: the stall escalation (a forced chair
+	// turn's reply would mint fresh and reopen), the concurrent stimulus
+	// dispatch, and the pending ISSUE-0099 re-force (its reply is not a floor
+	// speaker, so it too would re-enter Publish and mint fresh — the arm died
+	// with the retired interaction, and no consumed-arm cleanup is owed). A
+	// `stale` return — the stimulus belongs to a discussion a DELIBERATE close
+	// terminated (PR #716 review) — skips the same revival tails plus the
+	// concurrent dispatch below. A (false, false)
+	// no-op on human channels (autonomous disabled → the hook returns before
+	// touching state) and on sub-bound rounds, so ordinary channels and
+	// mid-discussion rounds proceed byte-for-byte unchanged.
+	// The head verdict is authoritative for a head-withheld floor round: the
+	// tail call would repeat the same ledger read only to re-derive `stale` —
+	// its latched branch returns before the tally advance, so no round is
+	// counted, no close can fire, and no metric or state mutation is owed
+	// (PR #716 review; was an unconditional call plus a `stale || staleAtHead`
+	// fold). Branching first keeps the downstream branches immune to the one
+	// theoretical divergence the fold defended against (the id evicted from
+	// the bounded ledger between head and tail) — a head-withheld round still
+	// never feeds a zero-value `outcome` into the escalation tail below.
+	var closed, stale bool
+	if staleAtHead {
+		stale = true
+	} else {
+		closed, stale = r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize, !floorPath, autonomous)
+	}
+	// The ONE withhold seam (PR #716 review — this clear had been duplicated
+	// verbatim across the close and stale branches): a dispatch withheld
+	// after markActivity is the mark/clear case with NO reply to re-enter
+	// publishCommit — the same "no reply can ever clear it" condition the
+	// escalation error branches unmark for (chair_escalation.go). Without
+	// this, a close or stale withhold strands every responder "thinking" on
+	// the console for the full TTL on a discussion that just terminated. The
+	// floor path joins the seam exactly when its round was withheld at the
+	// head; a floor round that RAN needs no clear — repliers cleared via
+	// publishCommit and silent speakers keep the pre-existing stalled-round
+	// TTL decay. Any future branch that decides not to dispatch belongs
+	// behind this same seam, or it re-strands the marks.
+	if staleAtHead || (!floorPath && (closed || stale)) {
+		for _, id := range respIDs {
+			r.clearActivity(msg.ChannelID, id)
+		}
+	}
+	if closed {
+		return
+	}
+
+	// Sub-bound round: the interaction is still open and the path's dispatch
+	// proceeds unchanged. Chair-stall-escalation amendment §C 1: the stall tail
+	// runs in the round's CALLER, after the floor is released and the round's
+	// floor-speaker set is cleared — the chair's reply must re-fanout as a fresh
+	// open-floor stimulus, which a floor turn would suppress. A send, never an
+	// await (CE7).
+	if stale {
+		// PR #716 review: the stimulus belongs to a discussion that DELIBERATELY
+		// terminated — its id is in the no-reopen ledger, or it lost the closing
+		// race to a concurrent bound-crossing sibling (maybeBoundedClose). Its
+		// dispatch is withheld on BOTH paths — the concurrent dispatch below,
+		// the floor round at the head check above: fanning it would draw
+		// LLM replies the publish-path no-reopen latch then absorbs with the
+		// spend already spent, the same close-before-dispatch goal as the
+		// ordering above. The stall escalation below is skipped like
+		// the resynthesize dispatch: both revive the terminated discussion.
+		// KNOWN COST (accepted, PR #716 review): a withheld message is
+		// committed history but reaches no member's agent-side record — the
+		// winner's close notification carries only the winner's message.
+		// Bounded to close-racing siblings; true losslessness needs the 4b-ii
+		// redelivery marker (docs/rfcs/0052-pr-plan.md), the same vehicle as
+		// the floor path's duplicate-final-turn limit. A divergence WITHOUT a
+		// deliberate close (orphan-park artefact, idle rotation) is NOT stale
+		// and dispatches normally below.
+		r.logger.Debug("channels: stimulus outlived its closed interaction; dispatch and revival tails withheld",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("message_id", msg.ID),
+			zap.Bool("floor_path", floorPath),
+			zap.String("stamped_interaction_id", readInteractionID(msg.Metadata)))
+	} else if floorPath {
+		r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
+	} else {
+		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions)
+	}
+	// ISSUE-0099 resynthesize, DISPATCH half — the re-force the head claimed,
+	// dispatched only now that the bounded close has ruled the round sub-bound
+	// AND live. A stale stimulus skips it like a closed one (PR #716 review):
+	// stale means the discussion terminated (or is terminating — a CAS-losing
+	// bound-crosser can land while the winner's teardown is mid-flight, before
+	// the id retires, when the dispatch's own openness re-check still passes),
+	// and a re-forced chair turn's reply would revive it. The consumed arm
+	// died with the terminated interaction, the closed branch's own posture.
+	// Detached, fire-and-forget, like the stall tail.
+	if pendingResynth != nil && !stale {
+		r.dispatchResynthesizeMisfire(context.WithoutCancel(ctx), msg, ct, members, channelSize, pendingResynth)
+	}
 }
 
 // dispatchConcurrent fans `msg` out to every member of `members` other than
@@ -223,7 +379,7 @@ const (
 	// stamped only by [ChannelRouter.notifyInteractionClose]'s dispatches.
 	markerCloseNotification
 	// markerChairEscalationResynthesize is the ISSUE-0099 second forced turn,
-	// stamped only by [ChannelRouter.maybeResynthesizeMisfire]'s dispatch. It
+	// stamped only by [ChannelRouter.dispatchResynthesizeMisfire]. It
 	// is a REFINEMENT of markerChairEscalation, not a peer: dispatchTo stamps
 	// BOTH `ChairEscalation` and `ChairEscalationResynthesize` for it, so the
 	// admission lift (which keys on ChairEscalation) is unchanged and only the

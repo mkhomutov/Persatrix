@@ -35,6 +35,7 @@ import grpc
 import grpc.aio
 
 from .channel_publisher import ChannelPublisher
+from .channel_wire_metadata import DispatchContext, same_channel_claim
 from .generated import task_pb2
 from .persona_types import ActionType, AgentAction
 from .wallet_client import BudgetExceededError
@@ -160,6 +161,7 @@ async def publish_chat_error_on_channel(
     inbound_sender_id: str | None,
     reply: str,
     reason: str,
+    origin_interaction_id: str = "",
 ) -> None:
     """Publish a structured-error reply on a chat-bearing channel.
 
@@ -170,6 +172,18 @@ async def publish_chat_error_on_channel(
     ``"error"``. ``sender_id=agent_id`` wakes the orchestrator's
     ``replyWaiter`` (keyed on ``(channelID, awaitFromAgentID)``);
     ``cascade_depth=0`` because this is a chat reply, not a fanout.
+
+    ``origin_interaction_id`` — the interaction id the FAILED dispatch was
+    delivered under, echoed as the wire ``interaction_id`` claim via the
+    shared rule (PR #716 review: this third same-channel publish path was
+    missed when the reply and end-vote publishes were stamped, so a
+    budget-denied member's error reply landing after a bounded close —
+    exactly the spend pressure that fires the cost trigger — bypassed the
+    no-reopen latch, minted a FRESH interaction, and re-fanned into the
+    terminated discussion, drawing the whole roster back in). The publish
+    below targets the originating channel by construction, so the claim is
+    definitionally same-channel; "" (a non-channel or pre-producer event)
+    claims nothing, the untracked posture.
 
     ``channel_id`` / ``inbound_sender_id`` are typed ``Optional`` to
     match ``AgentEvent``'s declared shape; a ``None`` ``channel_id`` is
@@ -194,6 +208,11 @@ async def publish_chat_error_on_channel(
             agent_id,
         )
         return
+    metadata: dict[str, Any] = {"reply_status": "error", "error_reason": reason}
+    # The RFC 0052 no-reopen claim, via the shared rule (see the docstring).
+    claim = same_channel_claim(channel_id, origin_interaction_id, channel_id)
+    if claim:
+        metadata.update(claim)
     try:
         await publisher.publish(
             channel_id=channel_id,
@@ -201,7 +220,7 @@ async def publish_chat_error_on_channel(
             content=reply,
             mentions=[inbound_sender_id] if inbound_sender_id else [],
             cascade_depth=0,
-            metadata={"reply_status": "error", "error_reason": reason},
+            metadata=metadata,
         )
     except Exception:  # noqa: BLE001 — never let the error-publish raise
         logger.exception(
@@ -217,6 +236,7 @@ async def dispatch_channel_event_with_chat_error_recovery(
     agent_id: str,
     channel_id: str | None,
     inbound_sender_id: str | None,
+    origin_interaction_id: str = "",
 ) -> None:
     """ISSUE-0065 / ISSUE-0066 — chat-error recovery wrapper for the
     persona action-loop dispatch fired from
@@ -241,6 +261,11 @@ async def dispatch_channel_event_with_chat_error_recovery(
     dashboard config currently selects on this prefix, but the field
     deliberately stays uniform across the BudgetExceededError /
     AioRpcError / generic arms so it can be relied on later.)
+
+    ``origin_interaction_id`` rides into both error-reply arms so the
+    recovery publish carries the RFC 0052 no-reopen claim of the dispatch
+    it recovers (PR #716 review; see
+    :func:`publish_chat_error_on_channel`).
     """
     try:
         try:
@@ -256,6 +281,7 @@ async def dispatch_channel_event_with_chat_error_recovery(
                 publisher, agent_id=agent_id, channel_id=channel_id,
                 inbound_sender_id=inbound_sender_id,
                 reply=exc.message, reason=exc.reason,
+                origin_interaction_id=origin_interaction_id,
             )
         except grpc.aio.AioRpcError as exc:
             if exc.code() != grpc.StatusCode.RESOURCE_EXHAUSTED:
@@ -272,6 +298,7 @@ async def dispatch_channel_event_with_chat_error_recovery(
                 inbound_sender_id=inbound_sender_id,
                 reply="Agent is at capacity — please retry in a moment.",
                 reason="resource_exhausted",
+                origin_interaction_id=origin_interaction_id,
             )
     except Exception as exc:  # noqa: BLE001 — final boundary
         logger.exception(
@@ -326,11 +353,16 @@ async def process_inbound_channel_event(
         )
         return
 
+    # RFC 0052 no-reopen claim (PR #716 review): one context carries the
+    # interaction id this event was dispatched under (seeded off the wire by
+    # ``seed_wire_metadata``, derived structurally by ``for_event``) so BOTH
+    # the same-channel reply publish and the error-recovery publish echo it —
+    # the latch's production input on every same-channel path.
+    context = DispatchContext.for_event(event, cascade_depth=depth + 1)
+
     async def _decide_and_execute() -> None:
         actions = await agent.on_event(event)
-        await executor.execute(
-            agent.agent_id, actions, cascade_depth=depth + 1,
-        )
+        await executor.execute(agent.agent_id, actions, context=context)
 
     await dispatch_channel_event_with_chat_error_recovery(
         _decide_and_execute(),
@@ -338,4 +370,5 @@ async def process_inbound_channel_event(
         agent_id=agent.agent_id,
         channel_id=event.channel_id,
         inbound_sender_id=event.sender_id,
+        origin_interaction_id=context.origin_interaction_id,
     )

@@ -15,12 +15,12 @@ from typing import TYPE_CHECKING, Any
 
 from opentelemetry import trace
 
-from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .channel_publisher import (
     DEFAULT_PUBLISH_TIMEOUT_SECONDS,
     ChannelPublisher,
     ChannelsDisabledError,
 )
+from .channel_wire_metadata import DispatchContext, same_channel_claim
 from .end_vote_action import publish_end_interaction_vote
 from .observability.spans import SUBAGENT_SPAWN_SPAN
 from .persona_types import (
@@ -114,31 +114,34 @@ class ActionExecutor:
         agent_id: str,
         actions: list[AgentAction],
         *,
-        cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
+        context: DispatchContext,
     ) -> list[dict[str, Any]]:
         """Execute actions and return per-action status dicts.
 
-        Non-fatal failures are logged but do not propagate. ``cascade_depth``
-        is propagated to child dispatches so the cascade depth limit is
-        enforced across the full event chain.
+        Non-fatal failures are logged but do not propagate.
 
-        ``cascade_depth`` defaults to :data:`DEFAULT_MAX_CASCADE_DEPTH`
-        rather than ``0``: callers that omit the kwarg (notably the tick
-        scheduler, which has no inbound event to derive depth from) get
-        the orchestrator's terminate-at-clamp behaviour on any
-        ``SEND_CHANNEL_MESSAGE`` they produce, instead of silently
-        publishing at depth 0 and resetting any cascade in flight. The
-        v0.3.0 demo runaway cascade was a direct consequence of the
-        previous default — every channel message woke the tick scheduler,
-        the woken tick published at depth 0, and the orchestrator's
-        per-hop cap never fired. Callers that legitimately mark a publish
-        as chain-origin (chat surface, dispatcher's first hop) pass
-        ``cascade_depth=0`` explicitly; the safe default only fires for
-        omitting callers.
+        ``context`` is the originating dispatch's ambient context, threaded
+        WHOLE (PR #716 review — previously three parallel defaulted kwargs,
+        where "unstamped" was the silent fallback for a caller that forgot
+        one):
+
+        * ``cascade_depth`` propagates to child dispatches so the cascade
+          depth limit is enforced across the full event chain; its dataclass
+          default keeps the terminate-at-clamp posture (see
+          :class:`DispatchContext` for the v0.3.0 runaway rationale).
+        * ``origin_channel_id`` / ``origin_interaction_id``: the inbound
+          event's channel and dispatched-under interaction id (seeded by
+          ``seed_wire_metadata``; derived structurally by
+          :meth:`DispatchContext.for_event`). A SAME-channel publish echoes
+          the id as its ``interaction_id`` claim — the RFC 0052 no-reopen
+          latch's read (PR #716 review: unstamped post-close stragglers
+          minted fresh and REOPENED the closed discussion). The resolver
+          stays authoritative (IP2); an origin-less context stamps nothing
+          (IP8 re-convene).
         """
         results: list[dict[str, Any]] = []
         for action in actions:
-            result = await self._execute_one(agent_id, action, cascade_depth=cascade_depth)
+            result = await self._execute_one(agent_id, action, context=context)
             results.append(result)
         return results
 
@@ -147,7 +150,7 @@ class ActionExecutor:
         agent_id: str,
         action: AgentAction,
         *,
-        cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
+        context: DispatchContext,
     ) -> dict[str, Any]:
         """Execute a single action; status contract is documented in the README of this module.
 
@@ -173,8 +176,7 @@ class ActionExecutor:
                 }
             case ActionType.SEND_CHANNEL_MESSAGE:
                 return await self._handle_send_channel_message(
-                    agent_id, action, cascade_depth=cascade_depth,
-                )
+                    agent_id, action, context=context)
             case ActionType.USE_TOOL:
                 # Tool execution happens inside _on_event_inner() via
                 # _execute_tools(). USE_TOOL as a final action means the
@@ -226,9 +228,7 @@ class ActionExecutor:
                 # RFC 0030 Layer 4 vote producer (producer plan PR 2, IP6) —
                 # carved into end_vote_action.py for the 500-line cap.
                 result = await publish_end_interaction_vote(
-                    self._channel_publisher, agent_id, action,
-                    cascade_depth=cascade_depth,
-                )
+                    self._channel_publisher, agent_id, action, context=context)
                 # PR 607 review finding 5: tell the voter how its publish
                 # went so the parked local close is discharged — close on
                 # "published", drop on any failure status.
@@ -298,7 +298,7 @@ class ActionExecutor:
         sender_id: str,
         action: AgentAction,
         *,
-        cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH,
+        context: DispatchContext,
     ) -> dict[str, Any]:
         """Route SEND_CHANNEL_MESSAGE.
 
@@ -309,6 +309,10 @@ class ActionExecutor:
           fans out via the Go ``GRPCMessageDispatcher``).
         * Otherwise → in-process :class:`EventDispatcher` cascade,
           preserved for the chat-reply path until PR 4a-ii-β-2.
+
+        A reply to the ORIGINATING channel echoes its dispatched-under
+        interaction id as the wire claim (see :meth:`execute`); cross-channel
+        publishes stamp nothing.
         """
         target_channel = action.payload.get("channel_id", "")
         content = action.payload.get("content", "")
@@ -338,6 +342,10 @@ class ActionExecutor:
 
         # ── REST publish branch (channel-routed) ──
         if target_channel and self._channel_publisher is not None:
+            # RFC 0052 no-reopen claim (docstring) via the shared rule; None keeps the clean body.
+            publish_metadata = same_channel_claim(
+                context.origin_channel_id, context.origin_interaction_id,
+                target_channel)
             try:
                 await asyncio.wait_for(
                     self._channel_publisher.publish(
@@ -345,6 +353,7 @@ class ActionExecutor:
                         sender_id=sender_id,
                         content=content,
                         mentions=list(mentions),
+                        metadata=publish_metadata,
                         # RFC 0011 amendment "Cascade-depth wire propagation"
                         # (PR 3 of v0.3.0 channel test-findings plan): the
                         # ``+1`` increment lives on the dispatcher side
@@ -354,7 +363,7 @@ class ActionExecutor:
                         # verbatim. Re-incrementing here would fire the
                         # orchestrator's fanout cap one hop early relative
                         # to RFC 0011 §D's depth-5 ceiling.
-                        cascade_depth=cascade_depth,
+                        cascade_depth=context.cascade_depth,
                     ),
                     timeout=_DEFAULT_PUBLISH_HTTP_TIMEOUT,
                 )
@@ -445,7 +454,7 @@ class ActionExecutor:
                     },
                     channel_id=target_channel,
                     sender_id=sender_id,
-                    metadata={"cascade_depth": cascade_depth},
+                    metadata={"cascade_depth": context.cascade_depth},
                 )
                 await asyncio.wait_for(
                     self._dispatcher.dispatch(target_id, event),

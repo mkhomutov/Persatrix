@@ -26,7 +26,7 @@ func (r *ChannelRouter) openInteractionEscalationState(channelID string) (intera
 	r.interactionMu.Lock()
 	defer r.interactionMu.Unlock()
 	entry := r.openInteractions[channelID]
-	if entry == nil || entry.id == "" || !entry.idCommitted {
+	if !entry.openCommitted() {
 		return "", false, false
 	}
 	return entry.id, entry.chairEscalated, true

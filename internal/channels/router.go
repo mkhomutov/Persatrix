@@ -176,6 +176,12 @@ type ChannelRouter struct {
 	maxCascadeDepth  int
 	defaultSessionID string
 
+	// spend is the RFC 0052 (v0.3.11) bounded-close soft-budget read — the wallet's
+	// per-interaction running total ([interactionSpender]; wired via
+	// [ChannelRouter.SetInteractionSpender], contract + methods in bounded_close.go).
+	// Unsynchronised like maxCascadeDepth — set at startup before traffic.
+	spend interactionSpender
+
 	// fanoutWG tracks the detached fanout goroutines spawned by
 	// [ChannelRouter.PublishAsync] so a graceful shutdown (or a test) can drain
 	// them via [ChannelRouter.WaitForPendingFanout] rather than racing a
@@ -229,7 +235,8 @@ type ChannelRouter struct {
 	// autonomous-discussion block, keyed by channel id. Populated via
 	// [ChannelRouter.SetAutonomous]; methods + the resolver live in
 	// router_autonomous.go. An absent channel resolves to [DefaultAutonomousConfig].
-	autonomousMu sync.Mutex
+	// An RWMutex, unlike the sibling knob mutexes: see [ChannelRouter.AutonomousFor].
+	autonomousMu sync.RWMutex
 	autonomous   map[string]AutonomousConfig
 
 	// applyMu serializes the RFC 0050 Phase 1 PR 2 store-config apply path

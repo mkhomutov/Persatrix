@@ -249,41 +249,40 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
             )
         return GateDecision(respond=True, policy=POLICY_ALWAYS, reason="dm")
 
-    # Sender-side filter (defence in depth). The router already drops
-    # the sender on fanout; the gate re-checks because the cleartext
-    # gRPC port cannot be trusted to carry a non-spoofed ``sender_id``.
-    # The configured wire policy is intentionally **not** used as the
-    # metric label here — see POLICY_DEFENSE_IN_DEPTH.
-    if event.sender_id == agent_id:
-        return GateDecision(
-            respond=False,
-            policy=POLICY_DEFENSE_IN_DEPTH,
-            reason="self_sender",
-        )
-
-    # End-vote-close-propagation amendment (CP3): the orchestrator's close
-    # NOTIFICATION — the closing quorum vote re-dispatched after an
-    # `end_votes` close so the local tracker can close with the truthful
-    # cause. Control, never stimulus: refused for EVERY policy (`never`
-    # included — the orchestrator excludes RespondNever members from the
-    # fan by contract, but if one arrives anyway the dedicated reason
-    # beats the routing-regression warn: the suppress path's close
-    # dispatch keys on it, and closing a stale record truthfully is
-    # strictly better than warning and letting it idle out), before any
-    # admitting lane (a notification may well @-mention the room — it is
-    # still not an invitation to speak), so no turn, no Tier B bid, no
-    # LLM call ever runs on it. Only the self-sender defence-in-depth
-    # refusals above outrank it: Go never fans the notification to the
-    # voter (its own vote_close owns its record), so a marked self-echo
-    # is spoofed or a contract break and refuses like any other
-    # self-echo. Strict `is True` — the `floor_mentions_resolved`
-    # posture: a spoofed truthy non-bool on the cleartext port must not
-    # fabricate a close signal (it falls through to the ordinary policy
-    # branches below). PR #614 review finding 1: the decision's `policy`
-    # is clamped to the canonical triple, else POLICY_UNKNOWN — it
-    # becomes the `channel.messages.gated` label, and the bounded-label
-    # discipline (see POLICY_UNKNOWN; the chair-escalation branch's
-    # explicit policy guard) forbids echoing a raw wire string there.
+    # Close NOTIFICATION (CP3) — control, never stimulus: the orchestrator's
+    # deterministic-close signal re-dispatched so the local tracker closes its
+    # scope NOW (with the truthful cause) instead of burying the converged
+    # discussion as "went idle" an idle window later. Refused for EVERY policy
+    # (`never` included — the orchestrator excludes RespondNever members from
+    # the fan by contract, but if one arrives anyway the dedicated reason beats
+    # the routing-regression warn: the suppress path's close dispatch keys on
+    # it, and closing a stale record truthfully beats warning and letting it
+    # idle out), before any admitting lane (a notification may well @-mention
+    # the room — still not an invitation to speak), so no turn, no Tier B bid,
+    # no LLM call ever runs on it.
+    #
+    # It also OUTRANKS the group self-sender defence-in-depth below (RFC 0052
+    # bounded-close fix, PR 4b-i deep review). The end-vote close excludes the
+    # sender from its fan (its own `vote_close` already closed its record), so
+    # historically "Go never fans the notification to the sender" and a marked
+    # self-echo could be dismissed as a spoof. The RFC 0052 bounded close
+    # breaks that premise deliberately: it fans to the round-triggering sender
+    # too ([ChannelRouter.boundedClose] passes excludeSender=false), because
+    # that participant — routinely the convener/chair — cast no vote, so
+    # nothing closed its tracker, and excluding it would strand it on the very
+    # "went idle" bury this dispatch exists to prevent, authoring no RFC 0020
+    # summary §D requires. So a self-addressed marked notification MUST reach
+    # the close dispatch, not the self_sender refusal. The blast radius stays
+    # bounded: strict `is True` (the `floor_mentions_resolved` posture) bars a
+    # truthy non-bool on the cleartext port from fabricating a close, and a
+    # genuinely spoofed self-close can only trigger a premature LOCAL summary —
+    # the same bound as any other spoofed close notification this lane already
+    # admits. (The DM path keeps dm_self_sender ahead of its own marked check:
+    # no close cause fans a self-echo to a DM — end-vote excludes the sender
+    # and the bounded close is group-only — so that ordering is never exercised
+    # by a real self-echo and is left untouched.) PR #614 review finding 1: the
+    # `policy` is clamped to the canonical triple, else POLICY_UNKNOWN, so the
+    # `channel.messages.gated` label stays bounded.
     if payload.get("interaction_close_notification") is True:
         if policy not in (POLICY_ALWAYS, POLICY_WHEN_MENTIONED, POLICY_NEVER):
             logger.warning(
@@ -294,6 +293,20 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
             policy = POLICY_UNKNOWN
         return GateDecision(
             respond=False, policy=policy, reason="close_notification",
+        )
+
+    # Sender-side filter (defence in depth). The router already drops
+    # the sender on fanout; the gate re-checks because the cleartext
+    # gRPC port cannot be trusted to carry a non-spoofed ``sender_id``.
+    # Only a NON-close self-echo reaches here now — the marked close
+    # notification above is admitted for its scope-closing side effect even
+    # when self-addressed. The configured wire policy is intentionally **not**
+    # used as the metric label here — see POLICY_DEFENSE_IN_DEPTH.
+    if event.sender_id == agent_id:
+        return GateDecision(
+            respond=False,
+            policy=POLICY_DEFENSE_IN_DEPTH,
+            reason="self_sender",
         )
 
     if policy == POLICY_NEVER:

@@ -294,6 +294,46 @@ func TestGovernance_ReplyBudgetRemainingExcludesNonReplyingParticipants(t *testi
 	assert.Equal(t, float64(2), sum, "alice left 2 of 3; no full-allowance samples from non-repliers")
 }
 
+// TestGovernance_ReplyBudgetRemainingRecordedAtBoundedClose is the bounded-close
+// twin of TestGovernance_ReplyBudgetRemainingRecordedAtClose: the Layer 4 → Layer 2
+// composition seam fires for the RFC 0052 deterministic bounded close too, not only
+// the quorum end-vote. Both causes now route this snapshot through the shared
+// [ChannelRouter.finalizeInteractionClose] tail, so this pins that boundedClose
+// drives that tail's budget-snapshot step — the one step the never-replying
+// bounded_close_test harness (personas swallow every dispatch) cannot exercise:
+// when max_rounds retires the interaction, each replying participant's leftover
+// allowance is recorded on reply_budget_remaining BEFORE the counters are discarded.
+func TestGovernance_ReplyBudgetRemainingRecordedAtBoundedClose(t *testing.T) {
+	router, store, reader := routerWithGovernanceMetrics(t)
+	id := mustCreateGroup(t, store, "planning", "alice", "bob")
+	router.SetReplyBudget(id, 3) // K=3 — Layer 2 active so replies are tracked.
+	// Floor control left OFF → every publish takes the concurrent path, where the
+	// bounded-close tally counts one per message and closes BEFORE the bounding
+	// message's dispatch. max_rounds=3: alice's two replies (rounds 1-2) then bob's
+	// (round 3) crosses the bound. bob's slot is reserved pre-persistence, so it is
+	// counted in the snapshot the fanout-tail close then records.
+	router.SetAutonomous(id, AutonomousConfig{Enabled: true, MaxRounds: 3, Convener: "alice"})
+
+	// alice spends 2 of 3 (remaining 1); bob spends 1 of 3 (remaining 2). The
+	// interaction id is left to the resolver (IP2 overrides any inbound claim), so
+	// all three replies land in the one open interaction the tally bounds.
+	require.NoError(t, publishReply(t, router, id, "alice", "", "agent")) // round 1
+	require.NoError(t, publishReply(t, router, id, "alice", "", "agent")) // round 2
+	require.NoError(t, publishReply(t, router, id, "bob", "", "agent"))   // round 3 == max_rounds → close
+	router.WaitForPendingFanout()
+
+	rm := collect(t, reader)
+	require.Equal(t, int64(1), interactionClosedCount(t, rm, "group", structuralTrigger),
+		"the max_rounds bound closed the interaction")
+
+	cnt, sum := replyBudgetRemainingHist(t, rm, "group")
+	assert.Equal(t, uint64(2), cnt, "one remaining-allowance point per replying participant (alice, bob)")
+	assert.Equal(t, float64(3), sum, "alice left 1 + bob left 2 = 3 leftover replies, recorded before discard")
+
+	_, _, tracked := router.openInteractionEscalationState(id)
+	assert.False(t, tracked, "the bounded close retired the interaction id")
+}
+
 // TestGovernance_PostCloseSuppressionEmitsGovernanceDrop pins Layer 4's dominant
 // effect: once an interaction has closed, EVERY later publish to it is suppressed
 // from fanout — and that suppression IS a governance drop. Without attributing

@@ -33,24 +33,90 @@ const (
 	closeNotificationDispatchError = "dispatch_error"
 )
 
-// notifyInteractionClose fans the closing quorum vote to every
-// dispatch-served non-sender member as the CP2 marked dispatch, so each
-// agent-local tracker closes the channel scope NOW with the truthful
-// `end_votes` cause instead of idling out a window later.
+// finalizeInteractionClose runs the shared close-teardown tail both deterministic
+// close causes produce — the Layer 4 quorum end-vote
+// ([ChannelRouter.processEndVote]) and the RFC 0052 bounded close
+// ([ChannelRouter.boundedClose]) — AFTER each has done its cause-specific work:
+// the single-shot `closedInteractions` CAS and the `interaction_closed{…}` record
+// emit (whose args differ — the end-vote's quorum count vs the bounded close's
+// structural/cost trigger). The steps here are cause-agnostic and ORDER-SENSITIVE:
 //
-// Contract (CP1): recipients are the members the dispatcher serves —
-// `RespondAlways` / `RespondWhenMentioned`, excluding the closing vote's
-// sender (its own vote action already closed its local tracker).
-// `RespondNever` members (the human seam) sit outside the dispatch
-// contract by design: fanout's v0.3.0 short-circuit and
+//  1. record each tracked participant's leftover reply allowance BEFORE the
+//     counters are discarded, so the reply_budget_remaining histogram observes the
+//     interaction's final state (the Layer 4 → Layer 2 composition seam);
+//  2. discard the per-participant reply counters (the §F reset seam
+//     reply_budget.go reserved for the Layer 4 close path);
+//  3. retire the id (IP8) so the channel's NEXT publish mints a FRESH interaction
+//     — the close ends one conversation, not the channel — recording `trigger` as
+//     the OQ 5 close cause; the closed id parks as the pending retiree, its
+//     tombstone (added by the caller's CAS) surviving until the deferred discard so
+//     any commit racing this close is suppressed and self-healed;
+//  4. fan the marked close NOTIFICATION so every agent-local tracker closes its
+//     scope NOW and authors its RFC 0020 summary instead of burying the converged
+//     discussion as "went idle" a window later. `excludeSender` differs by cause
+//     (see [ChannelRouter.notifyInteractionClose]).
+//
+// Keeping the tail in one place means a future teardown change — e.g. the deferred
+// PR 7 wallet EvictInteraction step — lands for both causes at once and cannot
+// silently drift between the two close sites.
+func (r *ChannelRouter) finalizeInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType, interactionID, trigger string, excludeSender bool) {
+	r.recordReplyBudgetRemainingAtClose(ctx, msg.ChannelID, interactionID, ct)
+	r.DiscardInteractionReplyBudget(interactionID)
+	r.markInteractionClosed(msg.ChannelID, interactionID, trigger)
+	r.notifyInteractionClose(ctx, msg, ct, excludeSender)
+}
+
+// recordInteractionClosedMetric bumps the `interaction_closed{channel_type,
+// trigger}` counter — the one cause-agnostic step every close-cause record
+// function shares. The three siblings ([ChannelRouter.recordInteractionClosed]
+// (end_votes), [ChannelRouter.recordInteractionClosedIdle] (idle), and
+// [ChannelRouter.recordInteractionClosedBounded] (structural/cost)) differ only
+// in their structured log line; the instrument emit is identical, so it lives
+// here once. Centralizing it means a future change to the instrument (a new
+// attribute, an exemplar, a unit) lands for every close cause at once and cannot
+// silently drift between them — the same anti-drift rationale
+// [ChannelRouter.finalizeInteractionClose] centralizes the teardown for. Nil-safe
+// like every other channel instrument.
+func (r *ChannelRouter) recordInteractionClosedMetric(ctx context.Context, ct ChannelType, trigger string) {
+	if r.metrics != nil && r.metrics.InteractionClosed != nil {
+		r.metrics.InteractionClosed.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("channel_type", string(ct)),
+			attribute.String("trigger", trigger),
+		))
+	}
+}
+
+// notifyInteractionClose fans a channel-close signal to every dispatch-served
+// member as the CP2 marked dispatch, so each agent-local tracker closes the
+// channel scope NOW instead of idling out a window later. Shared by the two
+// deterministic close causes: the Layer 4 quorum end-vote
+// ([ChannelRouter.processEndVote]) and the RFC 0052 bounded close
+// ([ChannelRouter.boundedClose]).
+//
+// `excludeSender` selects the recipient set the two causes need, and the
+// distinction is load-bearing (bounded-close deep review):
+//   - END-VOTE (`excludeSender` true): `msg` is the closing vote and its
+//     sender's own vote action ALREADY closed its local tracker, so
+//     re-notifying it is redundant — skip it.
+//   - BOUNDED CLOSE (`excludeSender` false): `msg` is merely the round-
+//     triggering stimulus; nothing closed its sender's tracker. Excluding it
+//     would strand that participant — routinely the convener/chair whose reply
+//     drove the open-floor round — on the very "went idle" bury this fan exists
+//     to prevent, authoring no RFC 0020 summary the §D artifact requires. So the
+//     bounded close notifies the sender too.
+//
+// Contract (CP1): recipients are otherwise the members the dispatcher serves —
+// `RespondAlways` / `RespondWhenMentioned`. `RespondNever` members (the human
+// seam) sit outside the dispatch contract by design regardless of
+// `excludeSender`: fanout's v0.3.0 short-circuit and
 // [DispatchEnvelope.Recipient]'s invariant exclude them upstream of the
-// dispatcher, they run no agent-local tracker to starve, and their
-// surface reads the persisted closing vote from the store on demand.
+// dispatcher, they run no agent-local tracker to starve, and their surface reads
+// the persisted message from the store on demand.
 //
 // Posture (CP5): fire-and-forget, off the publish path — called from
-// [ChannelRouter.processEndVote]'s close branch, never awaited, every
-// degraded branch nets to the status quo (the member's tracker idles out
-// with the legacy label). The WHOLE fan is off-path (PR #613 review):
+// [ChannelRouter.processEndVote]'s close branch and [ChannelRouter.boundedClose],
+// never awaited, every degraded branch nets to the status quo (the member's
+// tracker idles out with the legacy label). The WHOLE fan is off-path (PR #613 review):
 // the member lookup and the spawning loop run on a detached, tracked
 // wrapper goroutine, so the closing publish pays one goroutine spawn,
 // never a store read — and the per-recipient loop applies the same
@@ -92,7 +158,7 @@ const (
 // interaction). `threadParentSenderID` is deliberately empty: it exists
 // to serve receiver-side directedness decisions, and a marked event
 // never reaches them — the gate refuses it pre-LLM (CP3).
-func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType) {
+func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType, excludeSender bool) {
 	notifyCtx := context.WithoutCancel(ctx)
 	r.fanoutWG.Add(1)
 	go func() {
@@ -115,7 +181,7 @@ func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelM
 			// `_DISPOSITION_ALIASES`): identity for store-canonical rows,
 			// but CP1 defines the recipient set as the set fanout serves,
 			// so the two predicates must not diverge (PR #613 review).
-			if m.ParticipantID == msg.SenderID || m.RespondPolicy.Normalize() == RespondNever {
+			if (excludeSender && m.ParticipantID == msg.SenderID) || m.RespondPolicy.Normalize() == RespondNever {
 				continue
 			}
 			notification := msg

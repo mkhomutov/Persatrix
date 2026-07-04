@@ -35,9 +35,31 @@ const (
 	// absent block (and every existing channel) is disabled and byte-for-byte
 	// unchanged.
 	DefaultAutonomousEnabled = false
-	// DefaultAutonomousMaxRounds is the hard floor-round bound an absent/zero
+	// DefaultAutonomousMaxRounds is the hard round bound an absent/zero
 	// `max_rounds` fills to — a second independent terminator alongside the cost
 	// cap ([RFC 0052 §D](../../docs/rfcs/0052-autonomous-agent-channels.md)).
+	//
+	// UNIT (deep review): the tally advances once per fanout cycle at the fanout
+	// tail (bounded_close.go). Under floor control — the group default and the
+	// expected autonomous posture, since autonomous convening is an open-floor
+	// group concept — one cycle is one FLOOR ROUND (every responder speaking once
+	// inside the serialized round), so the bound reads as floor rounds. With floor
+	// control explicitly OFF, or on a degenerate <2-responder round, a cycle is a
+	// single message, so the same number bounds far fewer conversational rounds.
+	// Keep floor control on (the default) for the round reading to hold.
+	//
+	// The two paths also differ by one at the boundary, a consequence of the
+	// no-reopen ordering (bounded_close.go / fanout.go): the FLOOR path counts and
+	// closes AFTER the round runs, so the `max_rounds`-th round's discussion
+	// happens and then the interaction closes; the CONCURRENT path counts and
+	// closes BEFORE the dispatch, so the `max_rounds`-th message is NOT dispatched
+	// live — it reaches members only as the close-notification artifact. So on a
+	// concurrent (e.g. two-persona) roster `max_rounds` bounds `max_rounds - 1`
+	// live exchanges. Immaterial at the default; at the tiny-bound extreme the
+	// §D artifact guarantee takes over — the close never fires before the
+	// interaction's first live dispatch (maybeBoundedClose's round-1 guard,
+	// PR #716 review), so `max_rounds = 1` means one live exchange on either
+	// path, never a zero-delivery close.
 	DefaultAutonomousMaxRounds = 12
 )
 
@@ -143,9 +165,10 @@ type AutonomousConfig struct {
 	// Goal is the free-text outcome the chair's synthesis turn aims at on close
 	// (PR 4). Empty = a generic synthesis.
 	Goal string `yaml:"goal"`
-	// MaxRounds is the hard floor-round bound — a second independent terminator
-	// alongside the cost cap. Zero/absent fills [DefaultAutonomousMaxRounds] at
-	// load; negative is rejected.
+	// MaxRounds is the hard round bound — a second independent terminator
+	// alongside the cost cap. The unit is a fanout cycle (one floor round under
+	// floor control, one message without it — see [DefaultAutonomousMaxRounds]).
+	// Zero/absent fills [DefaultAutonomousMaxRounds] at load; negative is rejected.
 	MaxRounds int `yaml:"max_rounds"`
 }
 

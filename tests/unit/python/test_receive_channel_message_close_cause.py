@@ -3,11 +3,11 @@
 RFC 0030 interaction-id producer plan OQ 5: the gRPC receive path seeds
 ``previous_interaction_id`` + ``previous_interaction_close_trigger``
 from the typed proto fields as a validated PAIR (id within the byte
-cap, trigger in the resolver's ``idle``/``end_votes`` vocabulary) so
-the rotation-close seam can label the boundary truthfully.  Anything
-else seeds nothing — the rotation close then keeps its legacy
-structural label (the mixed-version contract for an old orchestrator
-and the post-restart re-mint).
+cap, trigger in the close sites' ``idle``/``end_votes``/``structural``/
+``cost`` vocabulary) so the rotation-close seam can label the boundary
+truthfully.  Anything else seeds nothing — the rotation close then
+keeps its legacy structural label (the mixed-version contract for an
+old orchestrator and the post-restart re-mint).
 
 Split out of :mod:`test_receive_channel_message` for the 500-line cap;
 the servicer/event builders live in
@@ -53,6 +53,32 @@ class TestReceiveChannelMessagePreviousInteractionCloseCause:
         )
         event = enqueued_event(dispatcher)
         assert event.metadata.get("previous_interaction_close_trigger") == "end_votes"
+
+    async def test_bounded_close_triggers_seed_the_pair(self):
+        """The RFC 0052 bounded close's ``structural``/``cost`` triggers
+        seed like any other vocabulary member (PR #716 review: they were
+        missing from the allowlist while the bounded close stamped them,
+        and the pair-or-nothing validation then dropped
+        ``previous_interaction_id`` too — so every successor record after
+        a bounded close opened with no ``predecessor_wire_id`` and the
+        one-generation straggler defence was silently disarmed exactly on
+        bounded-close boundaries)."""
+        for trigger in ("structural", "cost"):
+            servicer, dispatcher = make_servicer()
+            await servicer.ReceiveChannelMessage(
+                channel_event(
+                    previous_interaction_id="int-A",
+                    previous_interaction_close_trigger=trigger,
+                ),
+                MagicMock(spec=grpc.aio.ServicerContext),
+            )
+            event = enqueued_event(dispatcher)
+            assert event.metadata.get("previous_interaction_id") == "int-A", (
+                f"the id must survive the seed for trigger {trigger!r}"
+            )
+            assert (
+                event.metadata.get("previous_interaction_close_trigger") == trigger
+            )
 
     async def test_absent_pair_not_seeded(self):
         """Old orchestrator / fresh channel / post-restart re-mint: both

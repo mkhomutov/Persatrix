@@ -32,7 +32,7 @@ import (
 // interaction without a stalling setup publish.
 func commitOpenInteraction(t *testing.T, router *ChannelRouter, ch string) string {
 	t.Helper()
-	id, _, settle := router.resolveInteractionID(context.Background(), ch, ChannelTypeGroup, "")
+	id, _, settle, _ := router.resolveInteractionID(context.Background(), ch, ChannelTypeGroup, "")
 	settle(true)
 	return id
 }
@@ -356,6 +356,45 @@ channels:
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidEscalationChair,
 		"an escalation chair on a floor-control-disabled channel can never act and must fail at load")
+}
+
+// TestChairEscalation_ResynthesizeDroppedWhenInteractionClosedMidRound — the
+// PR #716 review openness re-check: the ISSUE-0099 claim validates
+// stamped-vs-open at the fanout HEAD, but the re-force DISPATCH runs at the
+// tail — on the floor path a whole multi-turn round apart, long enough for an
+// end-vote quorum (a floor speaker's reply runs processEndVote mid-round) or
+// an idle rotation to retire the interaction. The bounded-close gate cannot
+// stand in (its `false` conflates "sub-bound" with "diverged/closed", and it
+// is inert on human channels), so pre-fix the tail re-forced a stale
+// synthesize-only turn onto the retired id — whose chair reply mints FRESH on
+// a human channel and REOPENS the vote-closed discussion. The dispatch must
+// re-check openness beside the send, the pre-split adjacency.
+func TestChairEscalation_ResynthesizeDroppedWhenInteractionClosedMidRound(t *testing.T) {
+	router, disp, _, ch, reader := escalationHarness(t)
+	open := commitOpenInteraction(t, router, ch)
+	members := []Member{member("nova-sparrow", RespondAlways), member("ember-owl", RespondAlways)}
+
+	// Forced turn 1: stall on alex's stimulus → escalate, arm the stash.
+	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", open), ChannelTypeGroup, "",
+		floorRoundOutcome{granted: 2}, members, 4, nil)
+	require.Len(t, escalationEnvelopes(disp), 1)
+
+	// The chair's misfired reply claims the arm at the fanout head...
+	reply := chairMisfireReply(ch, open)
+	pending := router.claimResynthesizeMisfire(reply, true)
+	require.NotNil(t, pending, "the misfired forced-turn reply claims the arm at the head")
+
+	// ...then, during the floor round between head and tail, an end-vote
+	// quorum retires the interaction.
+	router.markInteractionClosed(ch, open, endVotesTrigger)
+
+	router.dispatchResynthesizeMisfire(context.Background(), reply, ChannelTypeGroup, members, 4, pending)
+
+	assert.Empty(t, resynthesizeEnvelopes(disp),
+		"the interaction closed between claim and dispatch — re-forcing onto the retired id would draw a reply that mints fresh and reopens it")
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	assert.Zero(t, chairEscalationCount(t, rm, "group", "resynthesized"))
 }
 
 // TestLoadConfig_EscalationChair_FloorControlBoundary — explicit true and

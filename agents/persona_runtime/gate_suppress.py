@@ -35,6 +35,7 @@ if TYPE_CHECKING:
         needs — its own ingest seam plus everything
         :func:`close_interaction_on_notification` requires."""
 
+        agent_id: str
         _interaction_tracker: InteractionTracker
         _MULTI_TURN_EVENT_TYPES: frozenset[EventType]
 
