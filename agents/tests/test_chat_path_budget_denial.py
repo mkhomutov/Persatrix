@@ -411,7 +411,8 @@ class TestProcessInboundBudgetDenial:
         """The ISSUE-0066 arm of finding 1: a RESOURCE_EXHAUSTED lease
         denial on a synthesis turn is likewise not published."""
         exc = grpc.aio.AioRpcError(
-            grpc.StatusCode.RESOURCE_EXHAUSTED, None, None, details="max leases",
+            grpc.StatusCode.RESOURCE_EXHAUSTED,
+            grpc.aio.Metadata(), grpc.aio.Metadata(), details="max leases",
         )
         agent, executor, publisher = _make_agent_executor(on_event_side_effect=exc)
         event = _make_channel_event()
