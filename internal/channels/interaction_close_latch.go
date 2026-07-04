@@ -86,6 +86,31 @@ func (e *openInteraction) latchedClaim(claim string) bool {
 	return slices.Contains(e.recentlyClosed, claim)
 }
 
+// stimulusOutlivedClose reports whether `msg` is stamped with an interaction id
+// the no-reopen ledger holds — the floor path's fanout-HEAD staleness check
+// (PR #716 review). [ChannelRouter.advanceBoundedCloseRound] reads the same
+// ledger at the fanout TAIL, which suffices for the concurrent path (its
+// dispatch follows the tail) but sat AFTER the floor path's round: a deliberate
+// close landing between a publish's commit and its detached fanout still
+// dispatched a full multi-speaker floor round of LLM turns into the terminated
+// discussion — replies the publish-path latch then absorbed with the spend
+// already spent, the exact cost the concurrent path's close-before-dispatch
+// ordering exists to avoid. Same scope and semantics as the tail read: gated on
+// `autonomous.enabled` (human channels never latch, byte-for-byte unchanged —
+// the cheap unstamped check runs first so human-typed traffic touches no
+// mutex), and DELIBERATE closes only — a divergence without a close (orphan
+// park, idle rotation) reads false and the round runs exactly as before.
+func (r *ChannelRouter) stimulusOutlivedClose(msg ChannelMessage) bool {
+	stamped := readInteractionID(msg.Metadata)
+	if stamped == "" || !r.AutonomousFor(msg.ChannelID).Enabled {
+		return false
+	}
+	r.interactionMu.Lock()
+	defer r.interactionMu.Unlock()
+	entry := r.openInteractions[msg.ChannelID]
+	return entry != nil && entry.latchedClaim(stamped)
+}
+
 // markInteractionClosed is the resolver close notification (IP8): a close site
 // calls it so the channel's next publish mints fresh instead of stamping the
 // closed id into post-close suppression for the rest of the idle window. The

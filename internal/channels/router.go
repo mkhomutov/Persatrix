@@ -235,7 +235,8 @@ type ChannelRouter struct {
 	// autonomous-discussion block, keyed by channel id. Populated via
 	// [ChannelRouter.SetAutonomous]; methods + the resolver live in
 	// router_autonomous.go. An absent channel resolves to [DefaultAutonomousConfig].
-	autonomousMu sync.Mutex
+	// An RWMutex, unlike the sibling knob mutexes: see [ChannelRouter.AutonomousFor].
+	autonomousMu sync.RWMutex
 	autonomous   map[string]AutonomousConfig
 
 	// applyMu serializes the RFC 0050 Phase 1 PR 2 store-config apply path

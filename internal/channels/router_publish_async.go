@@ -294,7 +294,19 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// and re-fanning, an unbounded post-close ping-pong. The drop accounting is
 	// the tombstone branch's own ([ChannelRouter.dropPostCloseTraffic]), so the
 	// two suppression sites meter identically.
+	//
+	// Notify-then-suppress (PR #716 review): the latched reply IS persisted —
+	// it is the awaited speaker's real final word — so the (channel, sender)-
+	// keyed reply waiter below must still fire before the drop. A deliberate
+	// close retiring the id mid-floor-round otherwise starves runFloorTurn
+	// (floor_control.go selects only on the waiter and its timer; no close
+	// path touches the waiter table), burning the full turn timeout for every
+	// remaining speaker of an already-terminated round and mislabeling each as
+	// floor_turn{timeout}. Pre-latch a post-close straggler minted fresh and
+	// always reached Notify, so this preserves the waiter's pre-PR contract;
+	// FANOUT suppression, not Notify starvation, is what prevents the reopen.
 	if latched {
+		r.waiter.Notify(msg)
 		r.dropPostCloseTraffic(ctx, derivedType, resolvedInteractionID)
 		return nil, nil
 	}

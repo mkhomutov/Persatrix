@@ -272,11 +272,52 @@ def seed_replay_metadata(
     )
 
 
+def wire_interaction_id(event: AgentEvent) -> str:
+    """The interaction id ``event`` was dispatched under, read tolerantly off
+    the metadata key this module's ingress lifts seed (:func:`seed_wire_metadata`
+    / :func:`seed_replay_metadata`) — the shared reader behind the RFC 0052
+    no-reopen claim's origin threading (PR #716 review: the executor entry
+    points each re-implemented this read inline, OUTSIDE the cross-language
+    drift pin, so a coordinated rename of the pinned sites would have left
+    them silently returning ``""`` — no claim echoed, the latch blind, and a
+    post-close straggler minting fresh and reopening the closed discussion).
+    Absent and non-string values read as ``""``, the untracked posture — the
+    same tolerance as ``wallet_cause.lease_interaction_id_for_event``, the
+    lease-side sibling this reader deliberately mirrors (kept separate: the
+    executor entry points must not grow a hard dep on the persona subpackage).
+    """
+    value = event.metadata.get("interaction_id", "")
+    return value if isinstance(value, str) else ""
+
+
+def same_channel_claim(
+    origin_channel_id: str, origin_interaction_id: str, target_channel: str,
+) -> dict[str, object] | None:
+    """Build a publish's RFC 0052 no-reopen claim: a SAME-channel publish
+    echoes its dispatched-under interaction id as the wire ``interaction_id``
+    claim; a cross-channel publish — or an origin-less caller (IP8
+    re-convene) — claims nothing (``None``). The claim is the no-reopen
+    latch's sole production input on BOTH publish paths (the reply publish
+    and the end-vote publish), so the rule lives here, beside the ingress
+    seeding that owns the key, rather than once per publish site (PR #716
+    review): a rule change applied to one site and not the other would leave
+    that path's post-close stragglers minting fresh and re-fanning into the
+    closed discussion. The resolver stays authoritative (IP2): the claim
+    never keys governance state, it only lets the latch recognise post-close
+    traffic.
+    """
+    if origin_interaction_id and target_channel == origin_channel_id:
+        return {"interaction_id": origin_interaction_id}
+    return None
+
+
 __all__ = [
     "WIRE_CLOSE_TRIGGER_END_VOTES",
     "WIRE_CLOSE_TRIGGER_IDLE",
     "WIRE_CLOSE_TRIGGERS",
     "channel_event_payload",
+    "same_channel_claim",
     "seed_replay_metadata",
     "seed_wire_metadata",
+    "wire_interaction_id",
 ]

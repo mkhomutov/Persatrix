@@ -20,6 +20,7 @@ from opentelemetry.trace import Link
 from .action_executor import ActionExecutor
 from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .channel_publisher import ChannelPublisher
+from .channel_wire_metadata import wire_interaction_id
 from .event_loop import InboundEventWake, SyncDispatchHandle
 from .persona_types import AgentAction, AgentEvent
 
@@ -257,15 +258,13 @@ class EventDispatcher:
         # SEND_CHANNEL_MESSAGE child dispatches inherit the current depth.
         # The interaction id the event was dispatched under rides along the
         # same way (RFC 0052 no-reopen claim, PR #716 review) so a
-        # same-channel reply echoes it — see ``ActionExecutor.execute``.
+        # same-channel reply echoes it — read via the shared drift-pinned
+        # reader, never inline; see ``ActionExecutor.execute``.
         if execute_actions:
-            origin_interaction = event.metadata.get("interaction_id", "")
             await self._executor.execute(
                 target_id, actions, cascade_depth=depth + 1,
                 origin_channel_id=event.channel_id or "",
-                origin_interaction_id=(
-                    origin_interaction if isinstance(origin_interaction, str) else ""
-                ),
+                origin_interaction_id=wire_interaction_id(event),
             )
 
         return actions

@@ -263,3 +263,85 @@ func TestPostCloseLatch_HumanChannelClaimStillMintsFresh(t *testing.T) {
 	assert.True(t, tracked, "human-channel post-close traffic still mints fresh (IP2 unchanged)")
 	assert.Greater(t, liveDispatches(disp), before, "and still fans out")
 }
+
+// TestPostCloseLatch_LatchedReplyStillNotifiesFloorWaiter — the PR #716 review
+// carry-forward, made live by the round-8 publish-claim echo: a floor round's
+// awaited speaker replies echoing the id it was dispatched under, and a
+// mid-round deliberate close (an end-vote quorum on an earlier speaker, or a
+// racing sibling's bounded close) has just retired that id — so the reply
+// latches. The round's reply waiter (runFloorTurn, floor_control.go) is keyed
+// on (channel, sender) and knows nothing of the close; a latch that returns
+// BEFORE waiter.Notify starves it, burning the full turn timeout per remaining
+// speaker on a terminated discussion and mislabeling each as
+// floor_turn{timeout}. The reply IS persisted, so notifying is truthful —
+// fanout suppression, not Notify starvation, is what prevents the reopen
+// (Notify-then-suppress). The waiter is registered directly here, the round's
+// own seam, because a real mid-round close cannot be interleaved
+// deterministically through Publish.
+func TestPostCloseLatch_LatchedReplyStillNotifiesFloorWaiter(t *testing.T) {
+	router, disp, ch, _ := concurrentCloseHarness(t, 2)
+
+	tick(t, router, ch) // round 1: opens the interaction, dispatched live
+	closedID, _, tracked := router.openInteractionEscalationState(ch)
+	require.True(t, tracked)
+	tick(t, router, ch) // round 2 == max_rounds → the deliberate close retires the id
+	router.WaitForPendingFanout()
+	_, _, tracked = router.openInteractionEscalationState(ch)
+	require.False(t, tracked, "the bounded close retired the id")
+	before := liveDispatches(disp)
+
+	// The mid-flight round awaits ember-owl's reply, exactly as runFloorTurn
+	// registers it.
+	replyCh, cancel, err := router.waiter.Register(ch, "ember-owl")
+	require.NoError(t, err)
+	defer cancel()
+
+	// The awaited reply arrives echoing the now-closed id: it latches.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "ember-owl", Content: "late reply",
+		Metadata: map[string]any{interactionIDMetadataKey: closedID},
+	}, ""))
+
+	select {
+	case <-replyCh:
+		// Notified: the round advances on the reply instead of burning its
+		// turn timeout against a discussion that already terminated.
+	default:
+		t.Fatal("a latched reply must still satisfy the floor round's reply waiter — fanout suppression, not Notify starvation, prevents the reopen")
+	}
+	router.WaitForPendingFanout()
+	assert.Equal(t, before, liveDispatches(disp), "and the latched reply still draws no fanout")
+}
+
+// TestPostCloseLatch_FloorRoundWithheldWhenStimulusOutlivedClose — the floor
+// path's fanout-HEAD ledger read (PR #716 review). The concurrent path's
+// close-before-dispatch ordering withholds an outlived stimulus at the tail,
+// BEFORE its dispatch; the floor round runs before that tail, so without the
+// head check a deliberate close landing between a publish's commit and its
+// detached fanout still dispatched a full multi-speaker round of LLM turns
+// into the terminated discussion — replies the publish-path latch absorbed
+// with the spend already spent. The fanout is invoked directly, standing in
+// for the detached goroutine whose message committed before the close: a
+// sequential Publish cannot reproduce the race, because a post-close claim
+// latches at commit and never reaches fanout at all.
+func TestPostCloseLatch_FloorRoundWithheldWhenStimulusOutlivedClose(t *testing.T) {
+	router, disp, ch, _ := boundedCloseHarness(t, true, 10)
+
+	tick(t, router, ch) // opens the interaction: one stalled floor round
+	open, _, tracked := router.openInteractionEscalationState(ch)
+	require.True(t, tracked)
+	before := liveDispatches(disp)
+
+	// The mid-flight deliberate close: an end-vote quorum (or a sibling's
+	// bounded close) retires the id after the straggler's commit.
+	router.markInteractionClosed(ch, open, endVotesTrigger)
+
+	// The outlived fanout runs, its message stamped with the now-closed id.
+	router.fanout(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "operator", Content: "straggler",
+		Metadata: map[string]any{interactionIDMetadataKey: open},
+	}, ChannelTypeGroup, "")
+
+	assert.Equal(t, before, liveDispatches(disp),
+		"the floor round is withheld at the fanout head — running it would draw a full round of LLM replies into the terminated discussion")
+}

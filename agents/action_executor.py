@@ -21,6 +21,7 @@ from .channel_publisher import (
     ChannelPublisher,
     ChannelsDisabledError,
 )
+from .channel_wire_metadata import same_channel_claim
 from .end_vote_action import publish_end_interaction_vote
 from .observability.spans import SUBAGENT_SPAWN_SPAN
 from .persona_types import (
@@ -358,10 +359,9 @@ class ActionExecutor:
 
         # ── REST publish branch (channel-routed) ──
         if target_channel and self._channel_publisher is not None:
-            # RFC 0052 no-reopen claim (docstring); None keeps the clean body.
-            publish_metadata: dict[str, Any] | None = None
-            if origin_interaction_id and target_channel == origin_channel_id:
-                publish_metadata = {"interaction_id": origin_interaction_id}
+            # RFC 0052 no-reopen claim (docstring) via the shared rule; None keeps the clean body.
+            publish_metadata = same_channel_claim(
+                origin_channel_id, origin_interaction_id, target_channel)
             try:
                 await asyncio.wait_for(
                     self._channel_publisher.publish(

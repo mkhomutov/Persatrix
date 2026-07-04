@@ -35,6 +35,7 @@ import grpc
 import grpc.aio
 
 from .channel_publisher import ChannelPublisher
+from .channel_wire_metadata import wire_interaction_id
 from .generated import task_pb2
 from .persona_types import ActionType, AgentAction
 from .wallet_client import BudgetExceededError
@@ -331,15 +332,12 @@ async def process_inbound_channel_event(
         # RFC 0052 no-reopen claim (PR #716 review): thread the interaction id
         # this event was dispatched under (seeded off the wire by
         # ``seed_wire_metadata``) so a same-channel reply echoes it — the
-        # latch's production input. Non-string (never seeded, or a replay
-        # anomaly) reads as absent, the untracked posture.
-        origin_interaction = event.metadata.get("interaction_id", "")
+        # latch's production input, read via the shared drift-pinned reader
+        # (absent / non-string reads as untracked).
         await executor.execute(
             agent.agent_id, actions, cascade_depth=depth + 1,
             origin_channel_id=event.channel_id or "",
-            origin_interaction_id=(
-                origin_interaction if isinstance(origin_interaction, str) else ""
-            ),
+            origin_interaction_id=wire_interaction_id(event),
         )
 
     await dispatch_channel_event_with_chat_error_recovery(

@@ -38,6 +38,7 @@ _WALLET_CAUSE_PY = Path("agents/persona_runtime/wallet_cause.py")
 _ACTION_LOOP_PY = Path("agents/persona_runtime/action_loop.py")
 _SALIENCE_GATE_PY = Path("agents/persona_runtime/salience_gate.py")
 _EPISODE_ROUTING_PY = Path("agents/persona_runtime/episode_routing.py")
+_CHANNEL_WIRE_METADATA_PY = Path("agents/channel_wire_metadata.py")
 
 
 def _parse_miss(what: str, where: Path) -> NoReturn:
@@ -83,13 +84,17 @@ def test_end_vote_metadata_key_agrees() -> None:
 
 def test_interaction_id_metadata_key_agrees() -> None:
     """Go's ``interactionIDMetadataKey`` and every Python loop-side read
-    MUST be equal — the lease-threading seam (``wallet_cause``) and the
+    MUST be equal — the lease-threading seam (``wallet_cause``), the
     rotation-boundary wire-id read (``episode_routing``, PR 607
     second-pass review: previously unpinned, so a coordinated rename of
     the other sites would have left it silently dead with green
-    suites)."""
+    suites), and the RFC 0052 no-reopen claim's shared home
+    (``channel_wire_metadata`` — the ingress seed plus the
+    ``wire_interaction_id`` / ``same_channel_claim`` pair, PR #716
+    review: the executor entry points' inline copies sat outside this
+    pin, the exact drift this test exists to catch)."""
     go_value = _go_const(_INTERACTION_ID_GO, "interactionIDMetadataKey")
-    for py_path in (_WALLET_CAUSE_PY, _EPISODE_ROUTING_PY):
+    for py_path in (_WALLET_CAUSE_PY, _EPISODE_ROUTING_PY, _CHANNEL_WIRE_METADATA_PY):
         if f'"{go_value}"' not in py_path.read_text(encoding="utf-8"):
             _parse_miss(
                 f"a read of the {go_value!r} metadata key "
@@ -126,10 +131,36 @@ def test_lease_call_sites_thread_the_interaction() -> None:
             _parse_miss(f"the lease-threading literal `{pin}`", path)
 
 
+# The RFC 0052 no-reopen claim's shared seams (PR #716 review): the executor
+# entry points read the origin id through the ONE drift-pinned reader, and
+# both publish sites build the claim through the ONE shared rule. Exact
+# call-site literals, the _LEASE_THREADING_PINS posture: a site quietly
+# reverting to an inline read/build would sit outside the drift pin again —
+# and a coordinated key rename would then leave it echoing no claim, the
+# latch blind, and post-close stragglers minting fresh and reopening the
+# closed discussion (the exact regression the shared home closed).
+_NO_REOPEN_CLAIM_PINS = {
+    Path("agents/dispatch.py"): "origin_interaction_id=wire_interaction_id(event)",
+    Path("agents/chat_reply.py"): "origin_interaction_id=wire_interaction_id(event)",
+    Path("agents/action_executor.py"): "publish_metadata = same_channel_claim(",
+    _END_VOTE_ACTION_PY: "claim = same_channel_claim(",
+}
+
+
+def test_no_reopen_claim_sites_share_reader_and_rule() -> None:
+    """Every executor entry point MUST thread the origin id through
+    ``channel_wire_metadata.wire_interaction_id`` and every publish site
+    MUST build its claim through ``same_channel_claim`` — the shared,
+    drift-pinned home (see ``test_interaction_id_metadata_key_agrees``)."""
+    for path, pin in _NO_REOPEN_CLAIM_PINS.items():
+        src = path.read_text(encoding="utf-8")
+        if pin not in src:
+            _parse_miss(f"the no-reopen claim literal `{pin}`", path)
+
+
 # ─── Producer plan OQ 5: the retired-close cause pair ────────────────
 
 _INTERACTION_RESOLVER_GO = Path("internal/channels/interaction_resolver.go")
-_CHANNEL_WIRE_METADATA_PY = Path("agents/channel_wire_metadata.py")
 _INTERACTION_BOUNDARY_PY = Path("agents/persona_runtime/interaction_boundary.py")
 
 

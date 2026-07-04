@@ -171,7 +171,9 @@ func (r *ChannelRouter) advanceBoundedCloseRound(channelID, stampedID string) (i
 // since fanning it would draw LLM replies into that terminated discussion —
 // replies the publish-path no-reopen latch then absorbs with the spend
 // already spent (PR #716 review; the resynthesize dispatch's openness
-// re-check is this same rule at its own seam). A divergence WITHOUT a
+// re-check is this same rule at its own seam, and the floor path runs the
+// same ledger read at the fanout HEAD — [ChannelRouter.stimulusOutlivedClose]
+// — because its round dispatches before this tail). A divergence WITHOUT a
 // deliberate close — the resolver's orphan-park artefact, an idle rotation —
 // is NOT stale: the message is live and returns (false, false) so it
 // dispatches exactly as before this trigger existed (see

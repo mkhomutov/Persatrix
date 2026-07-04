@@ -139,8 +139,20 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// RFC 0052 §D bounded close below has ONE call site serving both.
 	settings, floorOn := r.floorSettingsFor(msg.ChannelID)
 	floorPath := floorOn && settings.enabled && len(responders) >= 2
+	// The floor path's HEAD staleness check (PR #716 review): the concurrent
+	// path's close-before-dispatch ordering runs its ledger read at the tail,
+	// BEFORE its dispatch — but the floor round runs before that tail, so a
+	// deliberate close landing between this publish's commit and this detached
+	// fanout would still dispatch every responder's LLM turn into the
+	// terminated discussion. Withhold the round up front instead; the tail's
+	// own ledger read below then rules the same stimulus stale and skips the
+	// revival tails, exactly as on the concurrent path. Like the concurrent
+	// withhold, the message is committed history that reaches no member (the
+	// non-responder ingestion delivery is withheld with the round) — the
+	// documented KNOWN COST, same 4b-ii redelivery-marker vehicle.
+	staleAtHead := floorPath && r.stimulusOutlivedClose(msg)
 	var outcome floorRoundOutcome
-	if floorPath {
+	if floorPath && !staleAtHead {
 		outcome = r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
 	}
 
@@ -191,18 +203,25 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// touching state) and on sub-bound rounds, so ordinary channels and
 	// mid-discussion rounds proceed byte-for-byte unchanged.
 	closed, stale := r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize, !floorPath)
+	// Fold the head verdict in: the tail's ledger read re-derives it on every
+	// realistic interleaving, but the fold makes the downstream branches
+	// immune to the one theoretical divergence (the id evicted from the
+	// bounded ledger between head and tail) — a head-withheld round must
+	// never feed a zero-value `outcome` into the escalation tail below.
+	stale = stale || staleAtHead
 	// The ONE withhold seam (PR #716 review — this clear had been duplicated
-	// verbatim across the close and stale branches): a concurrent dispatch
-	// withheld after markActivity is the mark/clear case with NO reply to
-	// re-enter publishCommit — the same "no reply can ever clear it" condition
-	// the escalation error branches unmark for (chair_escalation.go). Without
+	// verbatim across the close and stale branches): a dispatch withheld
+	// after markActivity is the mark/clear case with NO reply to re-enter
+	// publishCommit — the same "no reply can ever clear it" condition the
+	// escalation error branches unmark for (chair_escalation.go). Without
 	// this, a close or stale withhold strands every responder "thinking" on
 	// the console for the full TTL on a discussion that just terminated. The
-	// floor path needs no twin: its round already dispatched, so repliers
-	// cleared via publishCommit and silent speakers keep the pre-existing
-	// stalled-round TTL decay. Any future branch that decides not to dispatch
-	// belongs behind this same seam, or it re-strands the marks.
-	if !floorPath && (closed || stale) {
+	// floor path joins the seam exactly when its round was withheld at the
+	// head; a floor round that RAN needs no clear — repliers cleared via
+	// publishCommit and silent speakers keep the pre-existing stalled-round
+	// TTL decay. Any future branch that decides not to dispatch belongs
+	// behind this same seam, or it re-strands the marks.
+	if staleAtHead || (!floorPath && (closed || stale)) {
 		for _, id := range respIDs {
 			r.clearActivity(msg.ChannelID, id)
 		}
@@ -220,12 +239,12 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	if stale {
 		// PR #716 review: the stimulus belongs to a discussion that DELIBERATELY
 		// terminated — its id is in the no-reopen ledger, or it lost the closing
-		// race to a concurrent bound-crossing sibling (maybeBoundedClose). On
-		// the concurrent path its dispatch is withheld: fanning it would draw
+		// race to a concurrent bound-crossing sibling (maybeBoundedClose). Its
+		// dispatch is withheld on BOTH paths — the concurrent dispatch below,
+		// the floor round at the head check above: fanning it would draw
 		// LLM replies the publish-path no-reopen latch then absorbs with the
 		// spend already spent, the same close-before-dispatch goal as the
-		// ordering above. On the floor path the round already ran, so nothing
-		// is withheld here — but the stall escalation below is skipped like
+		// ordering above. The stall escalation below is skipped like
 		// the resynthesize dispatch: both revive the terminated discussion.
 		// KNOWN COST (accepted, PR #716 review): a withheld message is
 		// committed history but reaches no member's agent-side record — the

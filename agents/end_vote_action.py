@@ -17,6 +17,7 @@ from .channel_publisher import (
     ChannelPublisher,
     ChannelsDisabledError,
 )
+from .channel_wire_metadata import same_channel_claim
 from .persona_types import VOTE_CLOSE_TOKEN_KEY, AgentAction
 
 logger = logging.getLogger(__name__)
@@ -127,8 +128,11 @@ async def publish_end_interaction_vote(
     if not content:
         content = _END_VOTE_DEFAULT_CONTENT
     metadata: dict[str, Any] = {"end_interaction_vote": True}
-    if origin_interaction_id and target_channel == origin_channel_id:
-        metadata["interaction_id"] = origin_interaction_id
+    # The RFC 0052 no-reopen claim, via the shared rule (see the docstring).
+    claim = same_channel_claim(
+        origin_channel_id, origin_interaction_id, target_channel)
+    if claim:
+        metadata.update(claim)
     try:
         await asyncio.wait_for(
             publisher.publish(
