@@ -414,6 +414,10 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 	// concurrent SetReasoning (a runtime config apply) landing between them, and a
 	// single read also drops the redundant mutex acquisition per recipient.
 	reasoning := r.ReasoningFor(msg.ChannelID)
+	// Both close-notification extras are gated once, on the whole payload, so
+	// the envelope cannot honour one without the other or leak either off the
+	// marker (the dispatchControl contract).
+	closeTrigger, closeRedelivery := control.closeNotificationWireFields()
 	err := r.dispatcher.Dispatch(dispatchCtx, DispatchEnvelope{
 		Recipient:            m,
 		ThreadParentSenderID: threadParentSenderID,
@@ -438,11 +442,12 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		InteractionCloseNotification: marker == markerCloseNotification,
 		Convene:                      marker == markerConvene,
 		SynthesisTurn:                marker == markerSynthesisTurn,
-		// The close-notification extras ride ONLY under their marker (the
-		// dispatchControl contract): a stray value on any other dispatch is
-		// structurally unrepresentable on the wire.
-		InteractionCloseTrigger:    ifCloseNotification(marker, control.closeTrigger),
-		InteractionCloseRedelivery: marker == markerCloseNotification && control.closeRedelivery,
+		// The close-notification extras ride ONLY under their marker, gated as
+		// one payload by closeNotificationWireFields (the dispatchControl
+		// contract): a stray value on any other dispatch is structurally
+		// unrepresentable on the wire.
+		InteractionCloseTrigger:    closeTrigger,
+		InteractionCloseRedelivery: closeRedelivery,
 	}, msg)
 	status := "ok"
 	if err != nil {

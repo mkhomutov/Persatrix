@@ -36,17 +36,18 @@ from __future__ import annotations
 
 import logging
 
-from .operator_directive import format_operator_directive
+from .operator_directive import (
+    OPERATOR_DIRECTIVE_MAX_CHARS,
+    format_operator_directive,
+)
 
 logger = logging.getLogger(__name__)
 
-# Defensive upper bound (UTF-8-agnostic character count) on the operator
-# convene directive at the injection seam. Generous over a realistic
-# topic + multi-item agenda + goal (a 64-item agenda at ~120 chars/item is
-# well under this), so it never clips a well-formed directive — it exists to
-# bound prompt bloat and abuse from an unattended channel, not to validate
-# shape (that is the Go config-validate gate's job, PR 1).
-_CONVENE_DIRECTIVE_MAX_CHARS = 8_000
+# The shared operator-directive prompt bound (see
+# :data:`~agents.persona_runtime.operator_directive.OPERATOR_DIRECTIVE_MAX_CHARS`);
+# kept as a module-local name so this seam's ``caplog``-scoped tests still import
+# it by its convene-specific spelling.
+_CONVENE_DIRECTIVE_MAX_CHARS = OPERATOR_DIRECTIVE_MAX_CHARS
 
 
 def format_convener_opening(directive: str) -> str:

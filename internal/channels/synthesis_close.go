@@ -164,13 +164,8 @@ func composeSynthesisDirective(a AutonomousConfig) string {
 	if out == "" {
 		out = "No goal was configured for this discussion; synthesize the outcome of the conversation so far."
 	}
-	if len(out) > maxConveneDirectiveBytes {
-		// The convene wire ceiling, same rationale: `topic`/`goal` carry no
-		// schema maxLength, and the Python prompt bound owns the user-visible
-		// trim — this only stops a pathological multi-MB dispatch.
-		out = strings.ToValidUTF8(out[:maxConveneDirectiveBytes], "")
-	}
-	return out
+	// The convene wire ceiling, shared rune-safe clamp ([clampDirectiveBytes]).
+	return clampDirectiveBytes(out)
 }
 
 // maybeArmSynthesisClose is the bound-crossing branch of
@@ -337,6 +332,17 @@ func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
 	entry.pendingSynthesis = nil
 	r.interactionMu.Unlock()
 
+	// This timeout won the identity CAS, so it owns the teardown — and the
+	// chair's synthesis reply never arrived (that is WHY the net fired), so
+	// nothing re-enters publishCommit to clear the "thinking" mark
+	// [ChannelRouter.maybeArmSynthesisClose] set on the chair. Clear it here,
+	// mirroring the failed-dispatch unwind's clearActivity at the OTHER no-reply
+	// abandon terminal, so a timed-out close does not strand the chair as
+	// composing for the activity TTL. A no-op when the mark already aged out (a
+	// default timeout past the TTL) — it earns its keep under an OQ #5 timeout
+	// calibrated below activityTTL.
+	r.clearActivity(pending.stimulus.ChannelID, pending.chairID)
+
 	ctx := context.Background()
 	r.logger.Warn("channels: synthesis reply timed out; closing without the synthesis artifact",
 		zap.String("channel_id", pending.stimulus.ChannelID),
@@ -383,8 +389,22 @@ func (r *ChannelRouter) armedSynthesisChair(channelID string) string {
 // [openInteraction.disarmPendingSynthesisLocked], which it wraps under the lock.
 func (r *ChannelRouter) disarmChannelSynthesis(channelID string) {
 	r.interactionMu.Lock()
-	r.openInteractions[channelID].disarmPendingSynthesisLocked()
+	entry := r.openInteractions[channelID]
+	var chairID string
+	if entry != nil && entry.pendingSynthesis != nil {
+		chairID = entry.pendingSynthesis.chairID
+	}
+	entry.disarmPendingSynthesisLocked() // nil-tolerant receiver.
 	r.interactionMu.Unlock()
+	// The arm marked the chair "thinking" ([ChannelRouter.maybeArmSynthesisClose]);
+	// disabling the block abandons the arm and kills its timer, so no reply and
+	// no timeout net will re-enter to clear that mark. Clear it here — the same
+	// no-reply abandon posture as [ChannelRouter.onSynthesisTimeout] — so the
+	// operator who just took manual control is not shown the chair composing a
+	// turn that will never come for the activity TTL.
+	if chairID != "" {
+		r.clearActivity(channelID, chairID)
+	}
 }
 
 // disarmPendingSynthesisLocked drops any armed synthesis close off this entry,

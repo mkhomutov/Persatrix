@@ -234,6 +234,22 @@ func (r *ChannelRouter) ConveneChannel(ctx context.Context, channelID string) (s
 // here; the Python bound does the user-visible truncation.
 const maxConveneDirectiveBytes = 64 * 1024
 
+// clampDirectiveBytes hard-trims an assembled operator directive to the
+// [maxConveneDirectiveBytes] wire ceiling, rune-safely: ToValidUTF8 drops the
+// partial rune a byte-slice cut can leave, so the dispatched proto3 string
+// stays valid UTF-8. Shared by the convene opener ([composeConveneDirective])
+// and the §D synthesis directive ([composeSynthesisDirective]) so the one
+// ceiling and its one rune-safety rationale are not re-spelled per seam
+// (PR #718 review). The Python prompt bound owns the user-visible trim; this
+// only stops a pathological multi-MB dispatch of the maxLength-less
+// `topic`/`goal` free-text.
+func clampDirectiveBytes(out string) string {
+	if len(out) > maxConveneDirectiveBytes {
+		out = strings.ToValidUTF8(out[:maxConveneDirectiveBytes], "")
+	}
+	return out
+}
+
 // composeConveneDirective assembles the operator topic/agenda/goal into the
 // directive the convener opens on. Empty sections are omitted (topic and goal
 // are optional free-text; an empty agenda is a single-topic discussion). The
@@ -255,11 +271,5 @@ func composeConveneDirective(a AutonomousConfig) string {
 	if goal := strings.TrimSpace(a.Goal); goal != "" {
 		fmt.Fprintf(&b, "\nGoal: %s\n", goal)
 	}
-	out := strings.TrimSpace(b.String())
-	if len(out) > maxConveneDirectiveBytes {
-		// Rune-safe hard trim: ToValidUTF8 drops the partial rune a byte-slice
-		// cut can leave, so the dispatched proto3 string stays valid UTF-8.
-		out = strings.ToValidUTF8(out[:maxConveneDirectiveBytes], "")
-	}
-	return out
+	return clampDirectiveBytes(strings.TrimSpace(b.String()))
 }

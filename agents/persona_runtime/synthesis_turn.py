@@ -24,15 +24,20 @@ from __future__ import annotations
 
 import logging
 
-from .operator_directive import format_operator_directive
+from .operator_directive import (
+    OPERATOR_DIRECTIVE_MAX_CHARS,
+    format_operator_directive,
+)
 
 logger = logging.getLogger(__name__)
 
-# Defensive upper bound on the operator synthesis directive at the injection
-# seam — the ``_CONVENE_DIRECTIVE_MAX_CHARS`` twin (the directive is composed
-# from the same ``goal``/``topic`` fields the convene directive draws on, so
-# the same generous-over-realistic sizing applies).
-_SYNTHESIS_DIRECTIVE_MAX_CHARS = 8_000
+# The shared operator-directive prompt bound (see
+# :data:`~agents.persona_runtime.operator_directive.OPERATOR_DIRECTIVE_MAX_CHARS`) —
+# the synthesis directive is composed from the same ``goal``/``topic`` fields
+# the convene directive draws on, so it inherits the one value rather than
+# re-declaring a twin. Kept as a module-local name so this seam's
+# ``caplog``-scoped tests still import it by its synthesis-specific spelling.
+_SYNTHESIS_DIRECTIVE_MAX_CHARS = OPERATOR_DIRECTIVE_MAX_CHARS
 
 
 def format_synthesis_turn(directive: str) -> str:

@@ -74,11 +74,16 @@ type dispatchControl struct {
 	closeRedelivery bool
 }
 
-// ifCloseNotification passes `v` through only under the close-notification
-// marker — the structural half of the [dispatchControl] extras contract.
-func ifCloseNotification(marker dispatchMarker, v string) string {
-	if marker == markerCloseNotification {
-		return v
+// closeNotificationWireFields returns the two typed close-notification wire
+// values ([dispatchTo] stamps them on the envelope) — but ONLY under
+// [markerCloseNotification]. Gating the WHOLE extras payload once here (rather
+// than re-spelling the marker check per field at the call site) is the
+// structural half of the [dispatchControl] extras contract: a stray trigger or
+// redelivery flag on any other dispatch is unrepresentable on the wire. Off the
+// marker it returns the proto3 zero pair — the pre-4b-ii wire shape.
+func (c dispatchControl) closeNotificationWireFields() (trigger string, redelivery bool) {
+	if c.marker != markerCloseNotification {
+		return "", false
 	}
-	return ""
+	return c.closeTrigger, c.closeRedelivery
 }
