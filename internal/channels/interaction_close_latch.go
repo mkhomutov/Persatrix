@@ -145,14 +145,23 @@ func (r *ChannelRouter) stimulusOutlivedClose(msg ChannelMessage, a AutonomousCo
 func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger string) {
 	r.interactionMu.Lock()
 	entry := r.openInteractions[channelID]
-	var discard string
+	var discard, disarmedChair string
 	if entry != nil {
 		entry.rememberClosed(interactionID)
 		// PR 4b-ii: a deliberate close disarms any pending synthesis for the
 		// SAME interaction — the racing end-vote quorum keeps its supremacy
 		// (CE4), and the orphaned arm's reply then lands in the ledger above
-		// as post-close traffic instead of double-closing.
+		// as post-close traffic instead of double-closing. Capture the chair id
+		// so its in-flight "thinking" mark is cleared below (PR #718 review):
+		// this disarm kills the timeout net, so — exactly like
+		// [ChannelRouter.onSynthesisTimeout] and
+		// [ChannelRouter.disarmChannelSynthesis], the other two no-reply abandon
+		// terminals — nothing else re-enters to clear the mark
+		// [ChannelRouter.maybeArmSynthesisClose] set on the chair if its
+		// synthesis reply never lands (the chair is now latch-suppressed), which
+		// would strand it as composing for the whole activity TTL.
 		if p := entry.pendingSynthesis; p != nil && p.interactionID == interactionID {
+			disarmedChair = p.chairID
 			entry.disarmPendingSynthesisLocked()
 		}
 		if entry.id == interactionID {
@@ -164,6 +173,12 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger 
 	}
 	r.interactionMu.Unlock()
 
+	// Cleared OUTSIDE interactionMu (clearActivity takes its own leaf mutex —
+	// the disarmChannelSynthesis posture). A no-op when the chair already
+	// re-published its reply (publishCommit cleared it) or nothing was armed.
+	if disarmedChair != "" {
+		r.clearActivity(channelID, disarmedChair)
+	}
 	if discard != "" {
 		r.DiscardInteractionReplyBudget(discard)
 		r.DiscardInteractionEndVotes(discard)

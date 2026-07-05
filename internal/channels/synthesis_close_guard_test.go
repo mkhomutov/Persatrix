@@ -128,3 +128,41 @@ func TestSynthesisClose_EntryMovedOnFallsThroughNotWithheld(t *testing.T) {
 	router.interactionMu.Unlock()
 	assert.False(t, stillArmed, "a moved-on arm leaves nothing armed on the successor")
 }
+
+// TestSynthesisClose_RacingEndVoteClearsChairMark — this review: a racing
+// end-vote quorum keeps its close supremacy (CE4) and disarms the pending
+// synthesis through the shared close seam (finalizeInteractionClose →
+// markInteractionClosed), which stops the timeout net's timer AND latches the
+// interaction closed. The arm marked the chair composing its synthesis turn
+// (maybeArmSynthesisClose → markActivity), and — unlike the timeout-net and
+// disable disarm terminals — this racing-close disarm used to omit the paired
+// clearActivity. With the timer dead and the chair's reply now latch-suppressed
+// (it never re-enters publishCommit), nothing else cleared the mark, stranding
+// the chair as "thinking" for the whole activity TTL on a channel whose
+// interaction had already closed. The pin: the racing-close disarm clears the
+// chair's mark, matching its three sibling disarm sites.
+func TestSynthesisClose_RacingEndVoteClearsChairMark(t *testing.T) {
+	router, _, ch, _ := synthesisCloseHarness(t, 2)
+
+	tick(t, router, ch)
+	openID, _, _ := router.openInteractionEscalationState(ch)
+	tick(t, router, ch) // bound → synthesis turn dispatched, chair marked "thinking"
+
+	router.interactionMu.Lock()
+	armed := router.openInteractions[ch].pendingSynthesis != nil
+	router.interactionMu.Unlock()
+	require.True(t, armed, "precondition: the close is armed")
+	require.Contains(t, router.ChannelActivity(ch), "iron-fox",
+		"precondition: the arm marked the chair composing the synthesis turn")
+
+	// An end-vote quorum races the arm and closes the SAME interaction through
+	// the seam both deterministic close causes route through.
+	router.markInteractionClosed(ch, openID, endVotesTrigger)
+
+	router.interactionMu.Lock()
+	stillArmed := router.openInteractions[ch].pendingSynthesis != nil
+	router.interactionMu.Unlock()
+	assert.False(t, stillArmed, "the racing close disarms the pending synthesis (CE4 supremacy)")
+	assert.NotContains(t, router.ChannelActivity(ch), "iron-fox",
+		"the racing-close disarm clears the chair's mark — no thinking indicator stranded for the TTL")
+}

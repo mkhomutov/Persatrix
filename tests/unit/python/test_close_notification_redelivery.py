@@ -181,6 +181,35 @@ class TestRedeliverySkipsTheIngest:
         assert len(agent.ingested) == 1
         assert agent.persisted[0].turn_count == 2
 
+    async def test_redelivery_without_bounded_trigger_still_ingests(self):
+        """PR #718 review — the redelivery ingest-skip is co-gated on
+        ``bounded``. A ``redelivery=True`` marker WITHOUT a recognized
+        bounded trigger is a SOLE delivery: the message did not reach the
+        member live (only the FLOOR-path bounded close redelivers), so
+        skipping its ingest would LOSE the closing turn. This is the
+        post-lift shape of a non-Go (or compromised) producer sending
+        ``redelivery`` beside an ``idle``/``end_votes``/garbage cause —
+        the trigger is allowlisted away at the lift, leaving ``bounded``
+        False. Only a genuine bounded-close redelivery skips."""
+        from agents.persona_runtime.close_notification import (
+            close_interaction_on_notification,
+        )
+
+        tracker = InteractionTracker()
+        tracker.add_turn("group:planning", now=time.time())
+        agent = _CloseNotificationAgent(tracker)  # non-sender recipient
+
+        await close_interaction_on_notification(
+            agent, _notification_event(redelivery=True),  # no bounded trigger
+        )
+
+        assert tracker.get("group:planning") is None, "the close still fires"
+        assert len(agent.ingested) == 1, (
+            "redelivery without a bounded trigger is a sole delivery — the "
+            "closing turn must still be ingested, not silently dropped"
+        )
+        assert agent.persisted[0].turn_count == 2
+
     async def test_redelivery_marker_is_strictly_boolean(self):
         """A truthy non-bool on the cleartext port must not suppress the
         ingest — dropping a sole-delivered closing turn is exactly the

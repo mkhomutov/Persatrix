@@ -224,7 +224,17 @@ async def close_interaction_on_notification(
         # below is then idempotent on the ordinary path (same object).
         open_interaction.meter_close_summary = True
     redelivery = payload.get("close_notification_redelivery") is True
-    if event.sender_id != agent.agent_id and not redelivery:
+    # Co-gate the redelivery ingest-skip on ``bounded`` (PR #718 review): the
+    # skip is safe ONLY for a recognized bounded close, whose closing message
+    # genuinely already reached every member live inside the floor round. A
+    # ``redelivery`` marker on a notification that is NOT a bounded close — an
+    # ``idle``/``end_votes``/garbage trigger from a non-Go (or compromised)
+    # producer, so ``bounded`` is False — is a SOLE delivery, and skipping its
+    # ingest would LOSE the closing turn. The Go orchestrator only ever stamps
+    # ``redelivery`` alongside a bounded trigger, so this is producer-hardening
+    # in the same tolerant-wire-reader posture as the trigger allowlist above,
+    # never a change to the live path.
+    if event.sender_id != agent.agent_id and not (redelivery and bounded):
         await agent._store_event_episode(event, [])
         if agent._interaction_tracker.get(scope) is not open_interaction:
             # The ingest itself closed or replaced the interaction (the
