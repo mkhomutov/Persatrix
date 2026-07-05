@@ -31,10 +31,9 @@ from _otel_test_helpers import counter_total
 
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.memory.interactions import SUMMARY_UNAVAILABLE_TEXT, Interaction, Turn
+from agents.persona_runtime.finalize_close import JANITOR_INTERVAL_SEC, maybe_run_janitor
 from agents.persona_runtime.summarize_close import (
-    JANITOR_INTERVAL_SEC,
     _interaction_to_entries,
-    maybe_run_janitor,
     summarize_closed_interaction,
 )
 

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..memory.episodic import EpisodicMemory
 from ..memory.interactions import SUMMARY_PENDING_TEXT, Interaction
-from .summarize_close import finalize_closed_interaction
+from .finalize_close import finalize_closed_interaction
 
 if TYPE_CHECKING:
     from ..llm_client import LLMClient

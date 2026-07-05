@@ -254,6 +254,45 @@ func TestSynthesisClose_ReplyTimeoutFallsBackToImmediateClose(t *testing.T) {
 	}
 }
 
+// TestSynthesisClose_ArmRidesSeparateDrainFromFanout is the PR #718 review
+// finding 1 regression: the armed timeout net rides synthesisWG, NOT fanoutWG, so
+// [ChannelRouter.WaitForPendingFanout] returns while the arm is DELIBERATELY still
+// pending (the arm is a long-lived wait on the chair's reply, not in-flight
+// fanout — blocking on it would hang every test that arms then asserts the arm).
+// The shutdown [ChannelRouter.DrainPendingFanout] disarms the arm and settles
+// PROMPTLY — it never waits the full timeout window, nor lets the detached timer
+// fire into its own fanoutWG.Wait.
+func TestSynthesisClose_ArmRidesSeparateDrainFromFanout(t *testing.T) {
+	router, disp, ch, _ := synthesisCloseHarness(t, 2)
+	// An effectively-unreachable timeout: if either drain waited on the arm's
+	// timer, this test would hang far past its deadline rather than fail fast.
+	router.synthesisTimeout = time.Hour
+
+	tick(t, router, ch)
+	tick(t, router, ch) // round 2 == max_rounds → synthesis dispatched, close armed
+
+	require.Len(t, disp.synthesisTurns(), 1, "the bound armed the synthesis close")
+	require.Equal(t, "iron-fox", router.armedSynthesisChair(ch), "the close is armed on the chair")
+
+	// WaitForPendingFanout must NOT block on the pending arm.
+	waited := make(chan struct{})
+	go func() { router.WaitForPendingFanout(); close(waited) }()
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitForPendingFanout blocked on the pending synthesis arm (finding 1 regression)")
+	}
+	require.Equal(t, "iron-fox", router.armedSynthesisChair(ch),
+		"WaitForPendingFanout neither waited on nor disarmed the still-pending arm")
+
+	// The shutdown drain disarms the arm and drains well under the hour timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	assert.True(t, router.DrainPendingFanout(ctx),
+		"the shutdown drain disarms the arm and settles without waiting the timeout")
+	assert.Empty(t, router.armedSynthesisChair(ch), "the drain disarmed the pending synthesis")
+}
+
 // TestSynthesisClose_NoChairFallsBackToImmediateClose — the 4b-i posture is the
 // fallback, not a regression: with no escalation chair resolvable the bound
 // closes immediately (every 4b-i test rides this branch; this pins it explicitly

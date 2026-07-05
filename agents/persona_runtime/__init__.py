@@ -70,10 +70,10 @@ from .conversation_seed import _ConversationWindowMixin
 from .conversation_window import ConversationWindowConfig, build_conversation_messages
 from .episode_routing import _EpisodeRoutingMixin
 from .event_timeout import _coerce_event_timeout  # noqa: F401 — re-exported (ISSUE-0053 extraction)
+from .finalize_close import JANITOR_INTERVAL_SEC, maybe_run_janitor
 from .memory_context import _MemoryContextMixin, _truncate_with_ellipsis  # noqa: F401
 from .prompt_assembly import _PromptAssemblyMixin
 from .state_persistence import _StatePersistenceMixin
-from .summarize_close import JANITOR_INTERVAL_SEC, maybe_run_janitor
 from .vote_close import PendingVoteClose, discharge_end_vote_publish
 
 logger = logging.getLogger(__name__)

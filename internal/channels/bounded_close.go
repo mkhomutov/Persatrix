@@ -348,7 +348,7 @@ func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct
 	// synthesis reply, whose publish closed nothing agent-side either), so its
 	// sender needs the notification too or it strands on "went idle" and
 	// authors no summary.
-	r.finalizeInteractionClose(ctx, msg, ct, interactionID, trigger, false, redelivery)
+	r.finalizeInteractionClose(ctx, msg, ct, interactionID, trigger, closeNotify{redelivery: redelivery})
 	// NOTE: no wallet EvictInteraction here — deferred to PR 7 (file header).
 	return true
 }

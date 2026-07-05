@@ -146,6 +146,7 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger 
 	r.interactionMu.Lock()
 	entry := r.openInteractions[channelID]
 	var discard, disarmedChair string
+	var disarmedTimer bool
 	if entry != nil {
 		entry.rememberClosed(interactionID)
 		// PR 4b-ii: a deliberate close disarms any pending synthesis for the
@@ -162,7 +163,7 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger 
 		// would strand it as composing for the whole activity TTL.
 		if p := entry.pendingSynthesis; p != nil && p.interactionID == interactionID {
 			disarmedChair = p.chairID
-			entry.disarmPendingSynthesisLocked()
+			disarmedTimer = entry.disarmPendingSynthesisLocked()
 		}
 		if entry.id == interactionID {
 			discard = entry.retired
@@ -173,6 +174,13 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger 
 	}
 	r.interactionMu.Unlock()
 
+	// This close disarmed the timeout net before it fired, so it owns the arm's
+	// synthesisWG Done() (PR #718 review finding 1) — the racing end-vote quorum
+	// (or any other deliberate closer) that beat the chair's reply must release
+	// the count the arm registered, or the shutdown drain never settles.
+	if disarmedTimer {
+		r.synthesisWG.Done()
+	}
 	// Cleared OUTSIDE interactionMu (clearActivity takes its own leaf mutex —
 	// the disarmChannelSynthesis posture). A no-op when the chair already
 	// re-published its reply (publishCommit cleared it) or nothing was armed.

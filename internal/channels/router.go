@@ -196,6 +196,14 @@ type ChannelRouter struct {
 	// touch it (its fanout completes before the call returns). Zero value ready.
 	fanoutWG sync.WaitGroup
 
+	// synthesisWG tracks the RFC 0052 PR 4b-ii armed synthesis timeout nets
+	// (synthesis_close.go) — detached [time.Timer] goroutines whose close work
+	// Add(1)s to fanoutWG. SEPARATE from fanoutWG on purpose (PR #718 finding 1):
+	// the arm is a long-lived wait on the chair's reply, so WaitForPendingFanout
+	// must not block on it; only the shutdown drain DrainPendingFanout waits it,
+	// after disarming, so no timer races the fanoutWG.Wait. Zero value ready.
+	synthesisWG sync.WaitGroup
+
 	// fanoutInFlight counts the detached fanout goroutines currently running,
 	// and maxInFlightFanout caps that count (0 = unbounded). The async seam
 	// removed the backpressure the blocking POST used to apply, so without a

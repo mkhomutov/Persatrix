@@ -136,9 +136,18 @@ func (r *ChannelRouter) inFlightFanout() int64 {
 // barrier. When `ctx` expires, the internal waiter goroutine outlives this call
 // until the fanout eventually finishes — benign at shutdown, where the process
 // exits immediately after.
+//
+// PR #718 review finding 1: it first DISARMS every armed RFC 0052 synthesis
+// timeout net (synthesis_close.go), so no detached timer fires into — or races —
+// the fanoutWG.Wait below, then waits synthesisWG BEFORE fanoutWG. That order is
+// load-bearing: a timer caught mid-fire completes its close work (a fanoutWG.Add
+// that precedes its synthesisWG.Done) before synthesisWG settles, so the
+// fanoutWG.Wait that follows captures it instead of racing its Add.
 func (r *ChannelRouter) DrainPendingFanout(ctx context.Context) bool {
+	r.disarmAllPendingSyntheses()
 	done := make(chan struct{})
 	go func() {
+		r.synthesisWG.Wait()
 		r.fanoutWG.Wait()
 		close(done)
 	}()

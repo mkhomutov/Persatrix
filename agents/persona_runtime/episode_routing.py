@@ -44,12 +44,12 @@ from ..memory.interactions import (
 from ..persona_types import EventType
 from ..session_id import current_session_id
 from .close_path import persist_closed_interaction
+from .finalize_close import drain_pending_summary_tasks
 from .interaction_boundary import (
     is_session_end_event,
     wire_rotation_close_reason,
     wire_rotation_closes,
 )
-from .summarize_close import drain_pending_summary_tasks
 from .vote_close import PendingVoteClose, park_end_vote_close
 
 logger = logging.getLogger(__name__)

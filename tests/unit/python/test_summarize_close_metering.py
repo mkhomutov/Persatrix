@@ -23,6 +23,8 @@ explicit defaults — the call signature itself is the regression surface).
 
 from __future__ import annotations
 
+import logging
+
 from agents.generated import wallet_pb2 as walletpb
 from agents.llm_client import LLMResponse, StopReason, Usage
 from agents.memory.interactions import Interaction, Turn
@@ -87,22 +89,33 @@ class TestAutonomousCloseSummaryIsLeased:
         )
         assert call.get("agent_id") == "ember-owl"
 
-    async def test_metered_but_untracked_interaction_stays_unleased(self):
+    async def test_metered_but_untracked_interaction_stays_unleased(self, caplog):
         """No governance wire id, nothing to bill: a lease with an empty
         ``interaction_id`` would draw against no cap while changing the
         call's failure mode (a wallet outage would fail it closed), so
         the defensive posture is the unleased status quo. By CP2
         construction a bounded-close notification always carries the
-        retired record's wire id, so this is drift defence, not a path."""
+        retired record's wire id, so this is drift defence, not a path.
+
+        PR #718 review finding 2: the fall-through also WARNS, so an
+        unmetered summary from a drifted/compromised producer is
+        observable rather than a silent hole once the reserve is enforced."""
         client = _SpyClient()
 
-        await summarize_closed_interaction(
-            client, "ember-owl", _interaction(metered=True, wire_id=""),
-        )
+        with caplog.at_level(
+            logging.WARNING, logger="agents.persona_runtime.summarize_close",
+        ):
+            await summarize_closed_interaction(
+                client, "ember-owl", _interaction(metered=True, wire_id=""),
+            )
 
         call = client.calls[0]
         assert "cause" not in call
         assert "interaction_id" not in call
+        assert any(
+            "no wire interaction id" in r.getMessage() and "UNLEASED" in r.getMessage()
+            for r in caplog.records
+        ), "the unmetered fall-through warns (finding 2)"
 
     async def test_human_close_call_signature_is_unchanged(self):
         """The regression the PR plan demands: the human-channel close is

@@ -266,6 +266,17 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 	// fire into its identity check for nothing.
 	r.interactionMu.Lock()
 	if entry := r.openInteractions[msg.ChannelID]; entry != nil && entry.pendingSynthesis == pending {
+		// Register the timeout net on synthesisWG BEFORE arming the timer (PR #718
+		// review finding 1) so the shutdown drain can bound the otherwise-invisible
+		// timer goroutine: without it a graceful shutdown returns past an
+		// armed-but-unreplied close (abandoning the §D artifact) and the timer's
+		// later onSynthesisTimeout → notifyInteractionClose Add(1) races the drain's
+		// fanoutWG.Wait. synthesisWG (NOT fanoutWG) so WaitForPendingFanout — which
+		// the tests call while an arm is deliberately still pending — does not block
+		// on the whole timeout window. The paired Done() is owned by whoever RESOLVES
+		// the arm: onSynthesisTimeout on fire, or the disarm that stops the timer in
+		// time (Stop()==true) — mutually exclusive, so the count balances once.
+		r.synthesisWG.Add(1)
 		pending.timer = time.AfterFunc(r.synthesisTimeout, func() { r.onSynthesisTimeout(pending) })
 	}
 	r.interactionMu.Unlock()
@@ -306,8 +317,12 @@ func (r *ChannelRouter) claimSynthesisReply(msg ChannelMessage, a AutonomousConf
 	if msg.SenderID != pending.chairID || claim != pending.interactionID {
 		return nil
 	}
-	if pending.timer != nil {
-		pending.timer.Stop()
+	// Stop the timeout net; when Stop()==true we PREVENTED its fire, so this
+	// path owns the timer's synthesisWG Done() (PR #718 review finding 1). A false
+	// return means onSynthesisTimeout already fired and will Done() itself —
+	// releasing here too would double-Done.
+	if pending.timer != nil && pending.timer.Stop() {
+		r.synthesisWG.Done()
 	}
 	entry.pendingSynthesis = nil
 	return pending
@@ -322,6 +337,15 @@ func (r *ChannelRouter) claimSynthesisReply(msg ChannelMessage, a AutonomousConf
 // markInteractionClosed. Runs on the timer goroutine — recovered like every
 // detached channel worker (an unrecovered panic would down the orchestrator).
 func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
+	// The fire path owns the arm's synthesisWG count (Added at
+	// [ChannelRouter.maybeArmSynthesisClose], PR #718 review finding 1): release
+	// it unconditionally — this runs iff the timer fired, and the disarm sites
+	// only Done() when they Stop()ped the fire (Stop()==true), so the two never
+	// both release. Deferred FIRST so it runs LAST — after recover, and crucially
+	// after the boundedClose → notifyInteractionClose fanoutWG.Add(1)s below, so
+	// synthesisWG hits zero only once those fanoutWG counts are already held (the
+	// ordering DrainPendingFanout's synthesisWG-then-fanoutWG wait relies on).
+	defer r.synthesisWG.Done()
 	defer r.recoverFanout("synthesis_timeout", pending.stimulus.ChannelID, pending.stimulus.ID)
 	r.interactionMu.Lock()
 	entry := r.openInteractions[pending.stimulus.ChannelID]
@@ -394,8 +418,14 @@ func (r *ChannelRouter) disarmChannelSynthesis(channelID string) {
 	if entry != nil && entry.pendingSynthesis != nil {
 		chairID = entry.pendingSynthesis.chairID
 	}
-	entry.disarmPendingSynthesisLocked() // nil-tolerant receiver.
+	timerStopped := entry.disarmPendingSynthesisLocked() // nil-tolerant receiver.
 	r.interactionMu.Unlock()
+	// This disarm stopped the timeout net before it fired, so it owns the arm's
+	// synthesisWG Done() (PR #718 review finding 1) — release outside the lock, the
+	// clearActivity posture below.
+	if timerStopped {
+		r.synthesisWG.Done()
+	}
 	// The arm marked the chair "thinking" ([ChannelRouter.maybeArmSynthesisClose]);
 	// disabling the block abandons the arm and kills its timer, so no reply and
 	// no timeout net will re-enter to clear that mark. Clear it here — the same
@@ -407,20 +437,51 @@ func (r *ChannelRouter) disarmChannelSynthesis(channelID string) {
 	}
 }
 
+// disarmAllPendingSyntheses stops every channel's armed synthesis timeout net —
+// the shutdown-drain precondition ([ChannelRouter.DrainPendingFanout], PR #718
+// review finding 1). The timers run on detached runtime goroutines whose close
+// work Add(1)s to fanoutWG, so an undisarmed timer could fire into (and race)
+// the drain's fanoutWG.Wait. Abandoning an armed-but-unreplied close is the
+// deliberate shutdown trade — the §D artifact is best-effort across process
+// exit, and holding the drain budget open for a reply that may never come would
+// starve the real in-flight fanout deliveries. Each stopped timer releases its
+// synthesisWG count here; a timer already mid-fire (Stop()==false) is left to
+// its onSynthesisTimeout, which releases its own count and whose tracked close
+// work the subsequent fanoutWG.Wait still bounds.
+func (r *ChannelRouter) disarmAllPendingSyntheses() {
+	var stopped int
+	r.interactionMu.Lock()
+	for _, entry := range r.openInteractions {
+		if entry.disarmPendingSynthesisLocked() {
+			stopped++
+		}
+	}
+	r.interactionMu.Unlock()
+	for i := 0; i < stopped; i++ {
+		r.synthesisWG.Done()
+	}
+}
+
 // disarmPendingSynthesisLocked drops any armed synthesis close off this entry,
 // stopping its timer — the unconditional disarm the resolver's fresh-mint
 // reset and [ChannelRouter.markInteractionClosed] share (a fire after the
 // clear is an identity-CAS no-op regardless; stopping just saves the spin).
 // Nil-tolerant like [openInteraction.openCommitted]. Caller holds
 // interactionMu.
-func (e *openInteraction) disarmPendingSynthesisLocked() {
+//
+// Returns whether it STOPPED a live timer before it fired (Stop()==true): the
+// caller then owns that timer's synthesisWG Done() (PR #718 review finding 1). A
+// false return — no timer yet, or the timer already fired — means the caller
+// owes nothing: an already-fired onSynthesisTimeout releases the count itself.
+func (e *openInteraction) disarmPendingSynthesisLocked() (timerStopped bool) {
 	if e == nil || e.pendingSynthesis == nil {
-		return
+		return false
 	}
 	if e.pendingSynthesis.timer != nil {
-		e.pendingSynthesis.timer.Stop()
+		timerStopped = e.pendingSynthesis.timer.Stop()
 	}
 	e.pendingSynthesis = nil
+	return timerStopped
 }
 
 // recordSynthesisTurn emits `channel.conversation.synthesis_turn{channel_type,

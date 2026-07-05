@@ -59,11 +59,11 @@ const (
 // Keeping the tail in one place means a future teardown change — e.g. the deferred
 // PR 7 wallet EvictInteraction step — lands for both causes at once and cannot
 // silently drift between the two close sites.
-// `redelivery` (PR 4b-ii) says the closing message was already delivered live
-// via ordinary fanout — true only for the floor-path bounded close's stimulus;
-// always false on the end-vote path (the closing vote's own fanout is
-// suppressed, so the notification is its sole delivery).
-func (r *ChannelRouter) finalizeInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType, interactionID, trigger string, excludeSender, redelivery bool) {
+// The two per-cause choices ride in `n` ([closeNotify]) as NAMED fields, not a
+// run of positional bools a silent transposition defeats — the dispatchControl
+// discipline (dispatch_control.go), applied to this teardown seam (PR #718
+// review finding 3).
+func (r *ChannelRouter) finalizeInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType, interactionID, trigger string, n closeNotify) {
 	r.recordReplyBudgetRemainingAtClose(ctx, msg.ChannelID, interactionID, ct)
 	r.DiscardInteractionReplyBudget(interactionID)
 	r.markInteractionClosed(msg.ChannelID, interactionID, trigger)
@@ -77,7 +77,29 @@ func (r *ChannelRouter) finalizeInteractionClose(ctx context.Context, msg Channe
 	if trigger == structuralTrigger || trigger == costTrigger {
 		boundedTrigger = trigger
 	}
-	r.notifyInteractionClose(ctx, msg, ct, excludeSender, boundedTrigger, redelivery)
+	r.notifyInteractionClose(ctx, msg, ct, n.excludeSender, boundedTrigger, n.redelivery)
+}
+
+// closeNotify bundles the two per-cause choices [ChannelRouter.finalizeInteractionClose]
+// makes — which recipients to serve and whether the closing message already
+// reached them live — as NAMED fields rather than the two adjacent positional
+// bools it used to take, where a silent `..., true, false)` vs `..., false,
+// true)` transposition compiled clean and either lost a sole-delivered closing
+// turn or double-ingested a floor-path one (PR #718 review finding 3, the
+// [dispatchControl] never-alias discipline applied to the teardown seam). The
+// zero value is the bounded-close default: notify the sender too, sole delivery.
+type closeNotify struct {
+	// excludeSender drops the closing message's own sender from the fan. TRUE
+	// for the end-vote cause — its sender's own vote already closed its local
+	// tracker, so re-notifying it is redundant. FALSE for the bounded close —
+	// its sender is merely the round-triggering stimulus (routinely the
+	// convener/chair), which still needs the notification to author its summary.
+	excludeSender bool
+	// redelivery marks the closing message as already delivered live via
+	// ordinary fanout (the floor-path bounded close's stimulus), so receivers
+	// skip the duplicate final-turn ingest. Always false on the end-vote path
+	// (the closing vote's own fanout is suppressed — sole delivery).
+	redelivery bool
 }
 
 // recordInteractionClosedMetric bumps the `interaction_closed{channel_type,

@@ -271,7 +271,7 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 		// belonged to the retired generation, so its reply/timer must not close
 		// (or withhold traffic on) the successor.
 		entry.roundCount = 0
-		entry.disarmPendingSynthesisLocked()
+		entry.disarmPendingSynthesisLocked() // nil-arm no-op here; owes no WG Done.
 	}
 	resolved := entry.id
 	prev := entry.prev
