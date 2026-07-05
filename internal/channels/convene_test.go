@@ -195,7 +195,7 @@ func TestConvene_RejectsWhenInteractionOpen(t *testing.T) {
 	})
 
 	// Open + commit an interaction so the channel is no longer idle.
-	_, _, commit := router.resolveInteractionID(context.Background(), ch, ChannelTypeGroup, "")
+	_, _, commit, _ := router.resolveInteractionID(context.Background(), ch, ChannelTypeGroup, "")
 	commit(true)
 
 	_, err := router.ConveneChannel(context.Background(), ch)

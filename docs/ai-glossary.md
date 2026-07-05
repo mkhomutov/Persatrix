@@ -819,6 +819,24 @@ Terms from [RFC 0020](rfcs/0020-interaction-lifecycle.md) PR 4.
   summary-unavailable sentinel. Invoked from `on_tick` at most once
   per `JANITOR_INTERVAL_SEC` (default 300 s).
 
+## RFC 0052 — Autonomous Channels (PR 4b-i)
+
+Terms from [RFC 0052](rfcs/0052-autonomous-agent-channels.md) PR 4b-i,
+the deterministic bounded close.
+
+### No-Reopen Latch
+- **Aliases:** "post-close latch" (the test-file name); "no-reopen ledger"
+  (specifically the backing resolver-side state).
+- **Disallowed:** "reopen guard", "close lock".
+- **Definition:** The RFC 0052 publish-path suppression keeping post-close
+  traffic that claims a deliberately closed interaction id from minting a
+  fresh interaction and re-fanning — the bounded close's no-reopen
+  guarantee. Backed by a per-channel ledger of recently closed ids, read
+  inside the resolver's critical section
+  (`internal/channels/interaction_close_latch.go`).
+- **Example:** "The straggler's reply latched — the no-reopen latch kept the
+  terminated discussion closed."
+
 ## RFC 0009 — Security & Sandboxing (PR plan)
 
 Terms pinned by [RFC 0009 PR plan](rfcs/0009-pr-plan.md) Open-Question

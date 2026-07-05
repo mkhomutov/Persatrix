@@ -139,32 +139,23 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 	r.endVoteMu.Lock()
 	if _, done := r.closedInteractions[interactionID]; done {
 		r.endVoteMu.Unlock()
-		// Already closed — keep suppressing fanout for late traffic. That
-		// suppression IS a Layer 4 governance drop (the conversation has
-		// terminated and this publish is barred from cascading), so attribute it
-		// like every other layer's drop. Since the producer's IP8 hook landed,
-		// ordinary post-close traffic cannot reach here via Publish — the close
-		// notified the resolver, so the channel's next publish mints fresh — and
-		// this path catches only a commit that resolved the closing id just
-		// before the quorum landed (the racing-commit window the tombstone
-		// exists to cover) or a caller bypassing the resolver. The metric's
-		// steady state is therefore ~zero; a sustained nonzero rate on
-		// governance_drop{layer=end_vote} outside vote-spam is a resolver-bypass
-		// signal, not converged-conversation noise. No Warn here: a racing
-		// commit is expected, not anomalous (unlike a duplicate vote), so it is
-		// metered and traced but not logged. Fired outside the lock.
-		r.recordGovernanceDropEndVote(ctx, ct)
-		// Lifecycle: a post-close NON-vote reply ran enforceReplyBudget BEFORE this
-		// hook in Publish, which lazily RE-CREATES replyCounts[interactionID] (it
-		// gates on interaction_id, not on closedInteractions). The close-time
-		// DiscardInteractionReplyBudget already fired and never runs again for this
-		// interaction, so without re-pruning here that re-created counter map would
-		// leak for the orchestrator's lifetime — the per-interaction growth the
-		// discard seam exists to bound. Re-discard it: the interaction is terminated,
-		// so its reply budget is moot (final headroom was already recorded at close)
-		// and post-close fanout is suppressed regardless. Idempotent and a no-op when
-		// nothing was re-created (e.g. a post-close vote — votes never reserve a slot).
-		r.DiscardInteractionReplyBudget(interactionID)
+		// Already closed — keep suppressing fanout for late traffic. Since the
+		// producer's IP8 hook landed, ordinary post-close traffic cannot RESOLVE
+		// here — the close notified the resolver, so the channel's next publish
+		// mints fresh — and an autonomous channel's post-close CLAIMS are
+		// latched and dropped in publishCommit before this hook runs (the
+		// RFC 0052 no-reopen latch shares [ChannelRouter.dropPostCloseTraffic],
+		// so both suppressions land on the same instrument). That leaves two
+		// producers of a closed stamped id here: a commit that resolved the
+		// closing id just before the quorum landed (the racing-commit window
+		// the tombstone exists to cover) and a caller bypassing the resolver.
+		// The metric's steady state is therefore ~zero — on an autonomous
+		// channel a small nonzero rate at each close is the latch absorbing
+		// stragglers, while a SUSTAINED rate outside closes remains the
+		// resolver-bypass signal. No Warn here: a racing commit is expected,
+		// not anomalous (unlike a duplicate vote), so it is metered and traced
+		// but not logged. Fired outside the lock.
+		r.dropPostCloseTraffic(ctx, ct, interactionID)
 		return true
 	}
 	state := r.endVotes[interactionID]
@@ -207,8 +198,9 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 	}
 	closed := isVote && recent >= k
 	if closed {
-		r.closedInteractions[interactionID] = struct{}{}
-		delete(r.endVotes, interactionID)
+		// Cannot lose the CAS: a standing tombstone already returned above,
+		// and endVoteMu has been held continuously since that check.
+		r.tombstoneInteractionLocked(interactionID)
 	}
 	r.endVoteMu.Unlock()
 
@@ -229,29 +221,14 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 	}
 	if closed {
 		r.recordInteractionClosed(ctx, msg, ct, interactionID, recent)
-		// Layer 4 → Layer 2 composition seam: record each tracked participant's
-		// leftover reply allowance BEFORE discarding the counters, so the
-		// reply_budget_remaining histogram observes the interaction's final state.
-		r.recordReplyBudgetRemainingAtClose(ctx, msg.ChannelID, interactionID, ct)
-		// Wire the §F reset seam: the interaction is closing, so its per-
-		// participant reply counters are discarded (the seam reply_budget.go
-		// reserved for the Layer 4 close path).
-		r.DiscardInteractionReplyBudget(interactionID)
-		// Producer IP8: notify the resolver so the channel's NEXT publish mints
-		// a fresh interaction — the quorum ends one conversation, not the
-		// channel. The closed id parks as the pending retiree; its tombstone
-		// (added above) survives until the deferred discard, suppressing and
-		// self-healing any commit that raced this close.
-		r.markInteractionClosed(msg.ChannelID, interactionID)
-		// End-vote-close-propagation amendment (CP1/CP5): the closing vote's
-		// fanout is suppressed (the caller's early return this `true` buys),
-		// so the close must be DELIVERED, not inferred — fan the closing
-		// message to every dispatch-served non-sender member as the marked
-		// close notification, fire-and-forget, so each agent-local tracker
-		// closes the scope now with the truthful `end_votes` cause instead
-		// of burying the converged discussion as "went idle" an idle window
-		// later.
-		r.notifyInteractionClose(ctx, msg, ct)
+		// The shared close-teardown tail ([ChannelRouter.finalizeInteractionClose]):
+		// reply-budget snapshot → discard → retire the id (IP8; truthful `end_votes`
+		// cause) → fan the marked close notification. End-vote-close-propagation
+		// amendment (CP1/CP5): the closing vote's own fanout is suppressed (the
+		// caller's early return this `true` buys), so the close must be DELIVERED,
+		// not inferred. excludeSender is TRUE — the voter's own vote action already
+		// closed its local tracker, so re-notifying it is redundant.
+		r.finalizeInteractionClose(ctx, msg, ct, interactionID, endVotesTrigger, true)
 		return true
 	}
 	// Suppress fanout of a redundant in-window duplicate vote. An end-vote is
@@ -283,12 +260,7 @@ func (r *ChannelRouter) recordInteractionClosed(ctx context.Context, msg Channel
 		zap.Int("votes", votes),
 		zap.String("trigger", endVotesTrigger),
 	)
-	if r.metrics != nil && r.metrics.InteractionClosed != nil {
-		r.metrics.InteractionClosed.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("channel_type", string(ct)),
-			attribute.String("trigger", endVotesTrigger),
-		))
-	}
+	r.recordInteractionClosedMetric(ctx, ct, endVotesTrigger)
 }
 
 // recordEndVoteSpam logs a duplicate end-vote so an adversarial vote-spam
@@ -366,6 +338,43 @@ func (r *ChannelRouter) DiscardInteractionEndVotes(interactionID string) {
 	delete(r.endVotes, interactionID)
 	delete(r.closedInteractions, interactionID)
 	r.endVoteMu.Unlock()
+}
+
+// tombstoneInteractionLocked is the single close-write on the Layer 4 maps:
+// mark `interactionID` deliberately closed (the tombstone the post-close
+// branch of [ChannelRouter.processEndVote] suppresses on) and drop its
+// accumulator. Returns false when the tombstone already stands — the
+// single-shot CAS a racing second close loses. Caller holds endVoteMu.
+// Shared by the quorum close (processEndVote) and the RFC 0052 bounded close
+// ([ChannelRouter.boundedClose]) so the close-write shape cannot drift
+// between the two causes — the map-level mirror of the teardown sharing in
+// [ChannelRouter.finalizeInteractionClose].
+func (r *ChannelRouter) tombstoneInteractionLocked(interactionID string) bool {
+	if _, done := r.closedInteractions[interactionID]; done {
+		return false
+	}
+	r.closedInteractions[interactionID] = struct{}{}
+	delete(r.endVotes, interactionID)
+	return true
+}
+
+// dropPostCloseTraffic accounts one COMMITTED publish whose fanout was
+// suppressed because its stamped interaction is deliberately closed: the
+// Layer 4 governance drop (counter + trace span) plus a reply-budget
+// re-prune. The re-prune closes a lifecycle leak: enforceReplyBudget ran
+// BEFORE the suppression decision and lazily RE-CREATES
+// replyCounts[interactionID] (it gates on interaction_id, not on the close),
+// while the close-time DiscardInteractionReplyBudget never runs again for
+// this interaction — without the re-prune that re-created counter map would
+// leak for the orchestrator's lifetime. Idempotent, and a no-op when nothing
+// was re-created (a post-close vote — votes never reserve a slot). Shared by
+// [ChannelRouter.processEndVote]'s tombstone branch (a commit racing the
+// close, a resolver bypass) and publishCommit's RFC 0052 no-reopen latch (a
+// post-close claim on an autonomous channel), so the two suppression sites
+// account identically and cannot drift.
+func (r *ChannelRouter) dropPostCloseTraffic(ctx context.Context, ct ChannelType, interactionID string) {
+	r.recordGovernanceDropEndVote(ctx, ct)
+	r.DiscardInteractionReplyBudget(interactionID)
 }
 
 // ResolveEndVotes applies the RFC 0030 Layer 4 (v0.3.8) end-vote quorum/window

@@ -23,7 +23,11 @@ import grpc.aio
 
 from .base import BaseAgent, TaskInput, TaskInputConfig, TaskOutput, TaskStatus
 from .channel_validation import validate_channel_message_event
-from .channel_wire_metadata import channel_event_payload, seed_wire_metadata
+from .channel_wire_metadata import (
+    DispatchContext,
+    channel_event_payload,
+    seed_wire_metadata,
+)
 from .chat_reply import chat_error_response as _chat_error_response
 from .chat_reply import extract_chat_reply as _extract_chat_reply
 from .closed_interactions_read import handle_get_closed_interactions
@@ -304,10 +308,12 @@ class AgentServiceServicer(task_pb2_grpc.AgentServiceServicer):
         # cascade_depth=1 is correct because SendChatMessage is always a
         # top-level call (not invoked from within a nested dispatch).  If
         # this changes in the future, derive depth from the dispatch context.
-        # (PR 6 review fix: PR 3 finding #3.)
+        # (PR 6 review fix: PR 3 finding #3.)  Origin-less by design: the
+        # chat surface has no channel-dispatched event to echo as the RFC
+        # 0052 no-reopen claim.
         try:
             await self._dispatcher.executor.execute(
-                agent_id, actions, cascade_depth=1,
+                agent_id, actions, context=DispatchContext(cascade_depth=1),
             )
         except Exception:
             logger.warning(

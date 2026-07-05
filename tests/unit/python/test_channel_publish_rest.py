@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agents.channel_publisher import ChannelsDisabledError
+from agents.channel_wire_metadata import DispatchContext
 from agents.dispatch import ActionExecutor, EventDispatcher
 from agents.persona_types import ActionType, AgentAction
 
@@ -36,7 +37,8 @@ class TestRESTPublishBranch:
             {"channel_id": "group:planning", "content": "hi", "mentions": ["agent-b"]},
         )
 
-        result = await executor._handle_send_channel_message("agent-a", action)
+        result = await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         # The executor forwards its ``cascade_depth`` kwarg verbatim to
         # the publisher (no +1 — the increment lives upstream in
@@ -57,6 +59,11 @@ class TestRESTPublishBranch:
             sender_id="agent-a",
             content="hi",
             mentions=["agent-b"],
+            # No inbound origin was threaded, so no RFC 0052 interaction
+            # claim is stamped (PR #716 review) — ``None`` keeps the POST
+            # body's clean no-metadata shape. The echo contract is pinned in
+            # ``test_action_executor.py``'s interaction-claim tests.
+            metadata=None,
             cascade_depth=DEFAULT_MAX_CASCADE_DEPTH,
         )
         assert result == {
@@ -76,7 +83,8 @@ class TestRESTPublishBranch:
             {"channel_id": "group:planning", "content": "hi", "mentions": []},
         )
 
-        result = await executor._handle_send_channel_message("agent-a", action)
+        result = await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         assert result["status"] == "failed"
         assert result["channel_id"] == "group:planning"
@@ -90,7 +98,8 @@ class TestRESTPublishBranch:
             {"channel_id": "group:planning", "content": "hi", "mentions": many},
         )
 
-        await executor._handle_send_channel_message("agent-a", action)
+        await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         called = publisher.publish.await_args
         assert len(called.kwargs["mentions"]) == 10
@@ -132,7 +141,7 @@ class TestRESTPublishBranch:
                     },
                 )
                 result = await executor._handle_send_channel_message(
-                    "agent-a", action,
+                    "agent-a", action, context=DispatchContext(),
                 )
 
             # Publish still went out — content delivery is the priority.
@@ -167,7 +176,8 @@ class TestRESTPublishBranch:
             {"content": "reply", "mentions": ["user"]},
         )
 
-        result = await executor._handle_send_channel_message("agent-a", action)
+        result = await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         publisher.publish.assert_not_awaited()
         # Falls into the in-process dispatch loop; with a stub dispatcher
@@ -182,7 +192,8 @@ class TestRESTPublishBranch:
             {"content": "hi"},  # no channel_id, no mentions
         )
 
-        result = await executor._handle_send_channel_message("agent-a", action)
+        result = await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         publisher.publish.assert_not_awaited()
         assert result["status"] == "no_targets"
@@ -209,7 +220,8 @@ class TestResultDictSymmetry:
             {"channel_id": "group:planning", "content": "hi", "mentions": []},
         )
 
-        result = await executor._handle_send_channel_message("agent-a", action)
+        result = await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         assert set(result.keys()) == self._REQUIRED_KEYS
         assert result["status"] == "published"
@@ -227,7 +239,8 @@ class TestResultDictSymmetry:
             {"channel_id": "group:planning", "content": "hi", "mentions": []},
         )
 
-        result = await executor._handle_send_channel_message("agent-a", action)
+        result = await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         assert set(result.keys()) == self._REQUIRED_KEYS
         assert result["status"] == "failed"
@@ -243,7 +256,8 @@ class TestResultDictSymmetry:
             {"content": "reply", "mentions": ["user"]},
         )
 
-        result = await executor._handle_send_channel_message("agent-a", action)
+        result = await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         assert set(result.keys()) == self._REQUIRED_KEYS
         assert result["status"] == "dispatched"
@@ -261,7 +275,8 @@ class TestResultDictSymmetry:
             {"content": "hi"},
         )
 
-        result = await executor._handle_send_channel_message("agent-a", action)
+        result = await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         assert set(result.keys()) == self._REQUIRED_KEYS
         assert result["status"] == "no_targets"
@@ -278,7 +293,8 @@ class TestResultDictSymmetry:
             {"channel_id": "group:planning", "content": "hi", "mentions": []},
         )
 
-        result = await executor._handle_send_channel_message("agent-a", action)
+        result = await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         assert set(result.keys()) == self._REQUIRED_KEYS
         assert result["status"] == "no_targets"
@@ -293,7 +309,8 @@ class TestResultDictSymmetry:
             {"content": "hi", "mentions": ["user"]},
         )
 
-        result = await executor._handle_send_channel_message("agent-a", action)
+        result = await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         assert set(result.keys()) == self._REQUIRED_KEYS
         assert result["status"] == "no_dispatcher"
@@ -319,7 +336,8 @@ class TestSetChannelPublisher:
             ActionType.SEND_CHANNEL_MESSAGE,
             {"channel_id": "group:x", "content": "hi", "mentions": []},
         )
-        result = await dispatcher._executor._handle_send_channel_message("agent-a", action)
+        result = await dispatcher._executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
         assert result["status"] == "published"
         publisher.publish.assert_awaited_once()
 
@@ -345,7 +363,8 @@ class TestChannelsDisabledStatus:
             {"channel_id": "group:planning", "content": "hi", "mentions": []},
         )
 
-        result = await executor._handle_send_channel_message("agent-a", action)
+        result = await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         assert result == {
             "action_type": "send_channel_message",
@@ -369,7 +388,8 @@ class TestChannelsDisabledStatus:
         )
 
         with caplog.at_level("WARNING", logger="agents.action_executor"):
-            await executor._handle_send_channel_message("agent-a", action)
+            await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         assert not [
             r for r in caplog.records
@@ -386,6 +406,7 @@ class TestChannelsDisabledStatus:
             {"channel_id": "group:planning", "content": "hi", "mentions": []},
         )
 
-        result = await executor._handle_send_channel_message("agent-a", action)
+        result = await executor._handle_send_channel_message(
+            "agent-a", action, context=DispatchContext())
 
         assert result["status"] == "failed"

@@ -44,8 +44,9 @@ const interactionIDMaxBytes = 128
 
 // previousInteractionIDMetadataKey / previousInteractionTriggerMetadataKey
 // carry the channel's most recently retired interaction id and the trigger
-// that retired it ("idle" / "end_votes" — the §L instrument vocabulary) onto
-// the publishes of the SUCCESSOR interaction (producer plan OQ 5). The id
+// that retired it ("idle" / "end_votes" / "structural" / "cost" — the §L
+// instrument vocabulary) onto the publishes of the SUCCESSOR interaction
+// (producer plan OQ 5). The id
 // rotation alone carries no cause, so the agent-side rotation close had to
 // label every observed rotation "structural"; these keys let the receiver
 // pick the truthful close reason (idle_gap vs structural). Producer:
@@ -76,8 +77,12 @@ func readInteractionID(metadata map[string]any) string {
 // dispatch-time lift onto `ChannelMessageEvent.previous_interaction_id` /
 // `.previous_interaction_close_trigger`. The id gets the same bound and
 // tolerance as [readInteractionID]; the trigger is allowlisted to the §L
-// vocabulary the resolver actually stamps ([idleTrigger] /
-// [endVotesTrigger]). Both-or-neither (PR 607 second-pass review): the
+// vocabulary the close sites actually stamp ([idleTrigger] /
+// [endVotesTrigger] / [structuralTrigger] / [costTrigger] — the bounded
+// close's pair was missing here, PR #716 review: because the pair validates
+// both-or-neither, the omission zeroed `previous_interaction_id` too,
+// silently disabling the predecessor straggler defence on every
+// bounded-close boundary). Both-or-neither (PR 607 second-pass review): the
 // proto contract on field 21 is "Set iff `= 20` is set", and the
 // receiver-side seed point applies the pair only as a validated unit — a
 // half pair (an id whose trigger failed the allowlist, a trigger whose id
@@ -92,7 +97,8 @@ func readPreviousClose(metadata map[string]any) previousClose {
 		return previousClose{}
 	}
 	if v, ok := metadata[previousInteractionTriggerMetadataKey].(string); ok {
-		if v == idleTrigger || v == endVotesTrigger {
+		switch v {
+		case idleTrigger, endVotesTrigger, structuralTrigger, costTrigger:
 			return previousClose{id: id, trigger: v}
 		}
 	}

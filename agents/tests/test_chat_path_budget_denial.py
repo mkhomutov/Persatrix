@@ -286,6 +286,41 @@ class TestProcessInboundBudgetDenial:
         # else and the orchestrator's depth clamp would drop the reply.
         assert call_kwargs.get("cascade_depth", -1) == 0
 
+    async def test_budget_denied_error_reply_echoes_interaction_claim(self) -> None:
+        """The error reply carries the RFC 0052 no-reopen claim of the
+        dispatch it recovers (PR #716 review).
+
+        The recovery publish is same-channel post-persistence traffic like
+        any reply, and it fires under exactly the spend pressure that trips
+        the bounded close's cost trigger — so an unstamped error reply
+        landing after the close bypassed the resolver's no-reopen latch
+        (``latchClaim`` requires a non-empty inbound claim), minted a FRESH
+        interaction, and re-fanned the roster into the terminated
+        discussion. The claim must ride the same ``interaction_id``
+        metadata key the reply and end-vote publishes echo.
+        """
+        denial = BudgetExceededError(
+            "per_agent budget exceeded",
+            scope="per_agent",
+            reason="budget_exceeded",
+        )
+        agent, executor, publisher = _make_agent_executor(
+            on_event_side_effect=denial,
+        )
+        event = _make_channel_event()
+        event.metadata["interaction_id"] = "itx-9"  # seed_wire_metadata's key
+
+        await _process(agent, executor, event)
+
+        metadata = publisher.publish.await_args.kwargs.get("metadata") or {}
+        assert metadata.get("interaction_id") == "itx-9", (
+            "the error reply must echo the dispatched-under interaction id "
+            "as its no-reopen claim, or a post-close budget-denial straggler "
+            f"reopens the closed discussion; got metadata={metadata!r}"
+        )
+        # The error discriminator still rides beside the claim.
+        assert metadata.get("reply_status") == "error"
+
     async def test_wallet_unreachable_also_publishes_error_reply(self) -> None:
         """``reason='wallet_unreachable'`` takes the same publish arm.
 

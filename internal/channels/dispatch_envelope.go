@@ -81,7 +81,7 @@ type DispatchEnvelope struct {
 	// admission is unchanged (it keys on ChairEscalation), so this flips only
 	// the persona framing to the synthesize-only variant. Never set without
 	// ChairEscalation, and never on ordinary fanout. Set only by
-	// [ChannelRouter.maybeResynthesizeMisfire].
+	// [ChannelRouter.dispatchResynthesizeMisfire].
 	ChairEscalationResynthesize bool
 
 	// InteractionCloseNotification (the end-vote-close-propagation

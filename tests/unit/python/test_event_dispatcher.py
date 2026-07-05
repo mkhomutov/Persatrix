@@ -385,9 +385,9 @@ class TestEventDispatcher:
 
         recording_executor.execute.assert_awaited_once()
         call = recording_executor.execute.await_args
-        assert call.kwargs.get("cascade_depth") == 5, (
-            f"executor must receive inbound depth+1 as kwarg; "
-            f"got {call.kwargs!r}"
+        assert call.kwargs["context"].cascade_depth == 5, (
+            f"executor must receive inbound depth+1 on the dispatch "
+            f"context; got {call.kwargs!r}"
         )
         await agent.close_memory()
 

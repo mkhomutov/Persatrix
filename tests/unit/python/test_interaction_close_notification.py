@@ -1,41 +1,22 @@
 """CP acceptance — the end-vote close reaches the agent-local tracker.
 
-RFC 0030 end-vote-close-propagation amendment (§E, TDD): these tests
-land with the amendment doc (PR 1 of the workstream) and pin the
+RFC 0030 end-vote-close-propagation amendment (§E): these tests pin the
 receiver half of the contract at the seams the existing close paths
 already use — the servicer wire lift (the OQ 5 / ``chair_escalation``
 posture), the response gate (the canonical no-turn enforcement point),
 and the agent-side close dispatch (the ``cost_close`` / ``vote_close``
-pattern).  Written red against the planned API where the seam does not
-exist yet (the :mod:`test_end_interaction_vote_action` precedent), and
-skip-guarded so ``main`` stays green; PR 3 removes the skips when:
-
-* PR 2's proto regen gives :func:`channel_event` the
-  ``interaction_close_notification`` kwarg (until then the marked-lift
-  body cannot construct the event), and
-* the agent-side consumption exists: the gate's ``close_notification``
-  refusal branch and ``agents.persona_runtime.close_notification``
-  (amendment §C.2 names both).
-
-PR 3 may extend shared fixtures it needs (scaffolding); the committed
-assertions are the acceptance and do not change.
-
-The unmarked-event negative runs UNSKIPPED today: nothing may seed the
-marker for an event that does not carry the typed field — the
-typed-field-only posture (``floor_mentions_resolved``; OQ 5's
-"anything else seeds nothing").
+pattern). Nothing may seed the marker for an event that does not carry
+the typed field — the typed-field-only posture
+(``floor_mentions_resolved``; OQ 5's "anything else seeds nothing").
 
 The contract (amendment CP3): a dispatch marked
 ``interaction_close_notification`` is control, never stimulus — the
-gate refuses it pre-LLM (no turn, no Tier B bid, no LLM call; the
-action loop's ingest-on-suppress still appends the closing message to
-the window), and the close dispatch closes the channel scope's open
-interaction immediately with the established ``end_votes`` mapping —
-:data:`REASON_STRUCTURAL`, the "ended" render
-(:mod:`agents.persona_runtime.interaction_boundary`: the quorum close
-IS the explicit end the structural label claims) — instead of burying
-it as "went idle" an idle window later.  Honoured strictly: a truthy
-non-bool impostor takes no close path on either seam.
+gate refuses it pre-LLM (no turn, no Tier B bid, no LLM call), and the
+close dispatch closes the channel scope's open interaction immediately
+with the established ``end_votes`` mapping (:data:`REASON_STRUCTURAL`,
+the "ended" render) instead of burying it as "went idle" an idle window
+later. Honoured strictly: a truthy non-bool impostor takes no close
+path on either seam.
 """
 
 from __future__ import annotations
@@ -54,7 +35,6 @@ from agents.memory.interactions import Interaction, InteractionTracker
 from agents.persona_types import AgentAction, AgentEvent, EventType
 from agents.response_gate import (
     POLICY_ALWAYS,
-    POLICY_DEFENSE_IN_DEPTH,
     POLICY_NEVER,
     POLICY_UNKNOWN,
     evaluate_response_gate,
@@ -102,7 +82,12 @@ class _CloseNotificationAgent:
         {EventType.CHANNEL_MESSAGE},
     )
 
-    def __init__(self, tracker: InteractionTracker) -> None:
+    def __init__(
+        self, tracker: InteractionTracker, agent_id: str = "ember-owl",
+    ) -> None:
+        # agent_id defaults NON-sender so the fixtures (sender "iron-fox")
+        # ingest as inbound; set it to the sender id for the self-echo.
+        self.agent_id = agent_id
         self._interaction_tracker = tracker
         self.persisted: list[Interaction] = []
         self.ingested: list[AgentEvent] = []
@@ -188,23 +173,23 @@ class TestCloseNotificationProducesNoTurn:
 
 
 class TestCloseNotificationGateOrdering:
-    """PR #614 review findings 1+2: the marked refusal must outrank
-    EVERY admitting lane — the DM always-override included — and the
-    decision's ``policy`` may only ever carry a bounded label onto the
-    ``channel.messages.gated`` counter (the :class:`GateDecision`
-    docstring contract; the ``chair_escalation`` branch's discipline).
-    Only the two self-sender defence-in-depth refusals stay ahead of
-    it: the orchestrator excludes the sender from the notification fan
-    by contract, and the voter's own ``vote_close`` owns its record —
-    honouring a marked self-echo would bypass the own-echo-ingest
-    guard and double-close."""
+    """PR #614 review findings 1+2: the marked refusal must outrank EVERY
+    admitting lane — the DM always-override included — and the decision's
+    ``policy`` may only ever carry a bounded label onto the
+    ``channel.messages.gated`` counter. RFC 0052 bounded-close fix (PR
+    4b-i deep review): on a GROUP channel the marker now outranks
+    self_sender too — the bounded close fans to the round-triggering
+    sender (``excludeSender=false``), whose tracker no vote closed, so its
+    self-addressed notification must close the scope, not be dismissed as
+    a self-echo. (DM keeps ``dm_self_sender`` first: no close cause fans a
+    self-echo to a DM, so that ordering is never exercised.)"""
 
     def test_marked_dm_event_is_refused(self):
         """The DM override admits every ordinary message ("a DM with no
         reply is broken by definition") — but a close notification is
-        control, not a message awaiting reply. DMs are interaction-
-        tracked orchestrator-side, so the lane is reachable; labelled
-        with the POLICY_ALWAYS the override applies (bounded)."""
+        control, not a message awaiting reply. DMs are interaction-tracked
+        orchestrator-side, so the lane is reachable; labelled POLICY_ALWAYS
+        (bounded)."""
         decision = evaluate_response_gate(
             _notification_event(channel_id="dm:ember-owl:iron-fox",
                                 channel_type="dm"),
@@ -216,11 +201,9 @@ class TestCloseNotificationGateOrdering:
 
     def test_dm_impostor_marker_keeps_the_dm_admit(self):
         """Strict ``is True`` on the DM branch too — the group branch's
-        ``test_marker_is_strictly_boolean`` twin: a truthy non-bool
-        marker is no notification, so the event keeps the ordinary DM
-        always-admit. Pinned per site: the strict-bool rule is checked
-        inline at each consumer (the ``chair_escalation`` convention —
-        no shared helper to drift in lockstep)."""
+        ``test_marker_is_strictly_boolean`` twin: a truthy non-bool marker
+        is no notification, so the event keeps the ordinary DM always-admit
+        (the strict-bool rule is checked inline per consumer)."""
         decision = evaluate_response_gate(
             _notification_event(marker="true",
                                 channel_id="dm:ember-owl:iron-fox",
@@ -267,18 +250,18 @@ class TestCloseNotificationGateOrdering:
         assert decision.respond is False
         assert decision.policy == POLICY_UNKNOWN
 
-    def test_marked_self_sender_keeps_the_defense_in_depth_refusal(self):
-        """Ordering pin: the self-sender re-check wins over the marker.
-        Go never fans the notification to the voter (its own vote_close
-        already closed its record), so a marked self-echo is spoofed or
-        a contract break — refuse it exactly like any other self-echo
-        (no ingest, no close)."""
+    def test_marked_group_self_sender_closes_the_senders_scope(self):
+        """RFC 0052 bounded-close regression (PR 4b-i deep review): on a
+        GROUP channel a marked SELF-echo now takes the close lane, NOT the
+        self_sender refusal — the bounded close fans to the round-triggering
+        sender too and nothing else closed its tracker, so its own
+        re-dispatched message must close its scope and author the RFC 0020
+        summary. Before the fix self_sender swallowed it (no summary)."""
         decision = evaluate_response_gate(
             _notification_event(), agent_id="iron-fox",
         )
         assert decision.respond is False
-        assert decision.policy == POLICY_DEFENSE_IN_DEPTH
-        assert decision.reason == "self_sender"
+        assert decision.reason == "close_notification"
 
 
 class TestCloseNotificationClosesTracker:
@@ -313,6 +296,30 @@ class TestCloseNotificationClosesTracker:
         assert agent.persisted[0].turn_count == 2, (
             "the closing vote ingested as the closed record's final turn"
         )
+
+    async def test_self_echo_closes_scope_without_ingesting_the_turn(self):
+        """RFC 0052 bounded-close regression: the bounded close fans to the
+        round-triggering sender too (``excludeSender=false``), so the
+        convener/chair gets its OWN message back (fresh wire id → dedup
+        misses it). It must still CLOSE the sender's scope but must NOT
+        ingest the echo — that would write a ``sender == agent_id`` turn
+        and inflate ``turn_count``, the self-echo the gate keeps out of
+        memory. Contrast the inbound case above, which DOES ingest."""
+        from agents.persona_runtime.close_notification import (
+            close_interaction_on_notification,
+        )
+
+        tracker = InteractionTracker()
+        tracker.add_turn("group:planning", now=time.time())
+        agent = _CloseNotificationAgent(tracker, agent_id="iron-fox")  # == sender
+
+        await close_interaction_on_notification(agent, _notification_event())
+
+        assert tracker.get("group:planning") is None, "self-echo still closes scope"
+        assert agent.ingested == [], "the sender's own echo is NOT ingested"
+        assert len(agent.persisted) == 1
+        assert agent.persisted[0].close_reason == REASON_STRUCTURAL
+        assert agent.persisted[0].turn_count == 1, "turn_count not inflated by the echo"
 
     async def test_impostor_marker_closes_nothing(self):
         """Defence-in-depth (CP3): a truthy non-bool marker must not
@@ -350,13 +357,12 @@ class TestCloseNotificationClosesTracker:
         assert agent.persisted == []
 
     async def test_already_idle_scope_ingests_nothing(self):
-        """PR #614 review finding 3: the no-op above must hold through
-        the INGEST half too. Ingesting first would ``add_turn`` the
-        notification into a freshly-opened interaction and the close
-        would then persist a fabricated 1-turn "ended" record — exactly
-        the record the no-op contract promises never to invent. So the
-        dispatch owns the whole arc: open-scope check first, ingest only
-        when there is an open interaction to land the final turn in."""
+        """PR #614 review finding 3: the no-op above must hold through the
+        INGEST half too. Ingesting first would ``add_turn`` into a
+        freshly-opened interaction and the close would persist a fabricated
+        1-turn "ended" record the no-op contract promises never to invent.
+        So the dispatch checks the open scope first, ingests only when
+        there is one to land the final turn in."""
         from agents.persona_runtime.close_notification import (
             close_interaction_on_notification,
         )
@@ -377,13 +383,9 @@ class TestCloseNotificationClosesTracker:
     async def test_expired_open_scope_flushes_by_the_idle_rule(self):
         """PR #614 review finding 3, the stale-open half: an interaction
         whose idle window expired before the notification landed belongs
-        to the idle rule, not to the late signal — the dispatch runs the
-        same staleness pass every ingest runs, sees nothing left open,
-        and stops. Conservative by design: relabelling a window the
-        agent's own boundary rules already ended would put an "ended"
-        cause on turns the idle contract says are a different
-        conversation; the orchestrator's authoritative "ended" record
-        stands regardless. No structural successor is fabricated."""
+        to the idle rule, not the late signal — the dispatch runs the same
+        staleness pass every ingest runs, sees nothing open, and stops.
+        Conservative by design; no structural successor is fabricated."""
         from agents.persona_runtime.close_notification import (
             close_interaction_on_notification,
         )
@@ -422,10 +424,9 @@ class TestCloseNotificationClosesTracker:
     async def test_ingest_max_turns_close_stands_alone(self):
         """Identity-guard pin, the cap half: when the notification's own
         ingest pushes the interaction over the max-turns cap, ``add_turn``
-        closes it inline with :data:`REASON_MAX_TURNS` and the ingest
-        persists it in the same step (the ``episode_routing`` contract).
-        That close's own cause stands — exactly one persisted record,
-        labelled by the cap, with nothing layered after it."""
+        closes it inline with :data:`REASON_MAX_TURNS` and persists it in
+        the same step. That close's own cause stands — exactly one
+        persisted record, labelled by the cap, nothing layered after."""
         from agents.persona_runtime.close_notification import (
             close_interaction_on_notification,
         )

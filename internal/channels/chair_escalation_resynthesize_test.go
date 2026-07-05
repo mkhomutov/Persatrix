@@ -19,7 +19,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	"go.uber.org/zap"
 )
+
+// driveResynthesize composes the trigger's two halves exactly as the fanout
+// seam does off a bounded close — claim at the head, dispatch iff a re-force is
+// owed — so these unit pins exercise the same claim→dispatch arc a real publish
+// runs (fanout.go; the split is the PR 4b-i review round 5 ordering fix).
+func driveResynthesize(router *ChannelRouter, msg ChannelMessage, ct ChannelType, members []Member, channelSize int, misfired bool) {
+	if pending := router.claimResynthesizeMisfire(msg, misfired); pending != nil {
+		router.dispatchResynthesizeMisfire(context.Background(), msg, ct, members, channelSize, pending)
+	}
+}
 
 // resynthesizeEnvelopes filters the recorder's calls down to the resynthesize
 // re-dispatches (both flags set; the lift still rides ChairEscalation).
@@ -61,7 +72,7 @@ func TestChairResynthesize_MisfiredReply_ReForcesSynthesizeOnly(t *testing.T) {
 	// The chair's reply misfires: it @-mentions the operator, who cannot take
 	// the floor → the resynthesize re-dispatch fires (misfired = true, the
 	// value the fanout seam computes from the empty floor-mention subset).
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open),
+	driveResynthesize(router, chairMisfireReply(ch, open),
 		ChannelTypeGroup, members, 4, true)
 
 	re := resynthesizeEnvelopes(disp)
@@ -158,7 +169,7 @@ func TestChairResynthesize_CarriesOriginalNonChairSender(t *testing.T) {
 	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", open), ChannelTypeGroup, "",
 		floorRoundOutcome{granted: 2}, members, 4, nil)
 	reply := chairMisfireReply(ch, open)
-	router.maybeResynthesizeMisfire(context.Background(), reply, ChannelTypeGroup, members, 4, true)
+	driveResynthesize(router, reply, ChannelTypeGroup, members, 4, true)
 
 	var forced []ChannelMessage
 	for i, env := range rec.envelopes {
@@ -184,8 +195,8 @@ func TestChairResynthesize_BoundOncePerInteraction(t *testing.T) {
 
 	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", open), ChannelTypeGroup, "",
 		floorRoundOutcome{granted: 2}, members, 4, nil)
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, members, 4, true)
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, members, 4, true)
+	driveResynthesize(router, chairMisfireReply(ch, open), ChannelTypeGroup, members, 4, true)
+	driveResynthesize(router, chairMisfireReply(ch, open), ChannelTypeGroup, members, 4, true)
 
 	assert.Len(t, resynthesizeEnvelopes(disp), 1, "the resynthesize re-dispatch is bounded to once")
 	var rm metricdata.ResourceMetrics
@@ -208,7 +219,7 @@ func TestChairResynthesize_OnlyTheChairsOwnReply(t *testing.T) {
 	// ember-owl (not the chair) names the operator — not a hand-off misfire.
 	notChair := stalledMsg(ch, "ember-owl", open)
 	notChair.Mentions = []string{"alex"}
-	router.maybeResynthesizeMisfire(context.Background(), notChair, ChannelTypeGroup, members, 4, true)
+	driveResynthesize(router, notChair, ChannelTypeGroup, members, 4, true)
 
 	assert.Empty(t, resynthesizeEnvelopes(disp), "only the chair's own reply misfires a hand-off")
 	var rm metricdata.ResourceMetrics
@@ -225,7 +236,7 @@ func TestChairResynthesize_NotEscalated_NoReForce(t *testing.T) {
 	open := commitOpenInteraction(t, router, ch)
 	members := []Member{member("nova-sparrow", RespondAlways), member("ember-owl", RespondAlways)}
 
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, members, 4, true)
+	driveResynthesize(router, chairMisfireReply(ch, open), ChannelTypeGroup, members, 4, true)
 
 	assert.Empty(t, resynthesizeEnvelopes(disp))
 	var rm metricdata.ResourceMetrics
@@ -246,7 +257,7 @@ func TestChairResynthesize_RoundOutlivedInteraction_NotReForced(t *testing.T) {
 		floorRoundOutcome{granted: 2}, members, 4, nil)
 
 	stale := chairMisfireReply(ch, uuid.NewString()) // a retired generation's id
-	router.maybeResynthesizeMisfire(context.Background(), stale, ChannelTypeGroup, members, 4, true)
+	driveResynthesize(router, stale, ChannelTypeGroup, members, 4, true)
 
 	assert.Empty(t, resynthesizeEnvelopes(disp), "a reply that outlived its interaction does not re-force")
 	var rm metricdata.ResourceMetrics
@@ -268,9 +279,9 @@ func TestChairResynthesize_ChairGone_ResynthesizeError(t *testing.T) {
 		floorRoundOutcome{granted: 2}, full, 4, nil)
 
 	withoutChair := []Member{member("ember-owl", RespondAlways)}
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, withoutChair, 4, true)
+	driveResynthesize(router, chairMisfireReply(ch, open), ChannelTypeGroup, withoutChair, 4, true)
 	// The arm is consumed on the drift error — a second misfire re-forces nothing.
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, full, 4, true)
+	driveResynthesize(router, chairMisfireReply(ch, open), ChannelTypeGroup, full, 4, true)
 
 	assert.Empty(t, resynthesizeEnvelopes(disp))
 	var rm metricdata.ResourceMetrics
@@ -294,7 +305,7 @@ func TestChairResynthesize_FreshInteractionClearsState(t *testing.T) {
 	first := commitOpenInteraction(t, router, ch)
 	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", first), ChannelTypeGroup, "",
 		floorRoundOutcome{granted: 2}, members, 4, nil)
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, first), ChannelTypeGroup, members, 4, true)
+	driveResynthesize(router, chairMisfireReply(ch, first), ChannelTypeGroup, members, 4, true)
 	require.Len(t, resynthesizeEnvelopes(disp), 1)
 
 	// Idle past the window: the next commit rotates to a fresh interaction. The
@@ -305,7 +316,7 @@ func TestChairResynthesize_FreshInteractionClearsState(t *testing.T) {
 	require.NotEqual(t, first, second)
 	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", second), ChannelTypeGroup, "",
 		floorRoundOutcome{granted: 2}, members, 4, nil)
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, second), ChannelTypeGroup, members, 4, true)
+	driveResynthesize(router, chairMisfireReply(ch, second), ChannelTypeGroup, members, 4, true)
 
 	assert.Len(t, resynthesizeEnvelopes(disp), 2, "a fresh interaction re-forces again")
 }
@@ -328,13 +339,13 @@ func TestChairResynthesize_CleanReplyDisarms_NoLaterMisfire(t *testing.T) {
 	// The chair's forced-turn reply hands the floor cleanly (misfired = false):
 	// it consumes the arm without re-forcing.
 	cleanReply := stalledMsg(ch, "nova-sparrow", open)
-	router.maybeResynthesizeMisfire(context.Background(), cleanReply, ChannelTypeGroup, members, 4, false)
+	driveResynthesize(router, cleanReply, ChannelTypeGroup, members, 4, false)
 	require.Empty(t, resynthesizeEnvelopes(disp), "a clean forced-turn reply does not re-force")
 
 	// A later chair message names only the operator — a provable empty floor
 	// mention. The arm is already consumed, so this stands; pre-fix it would
 	// have spuriously re-forced from the stale stimulus.
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open), ChannelTypeGroup, members, 4, true)
+	driveResynthesize(router, chairMisfireReply(ch, open), ChannelTypeGroup, members, 4, true)
 
 	assert.Empty(t, resynthesizeEnvelopes(disp),
 		"a clean hand-off disarms the trigger; a later innocuous chair message is not a misfire")
@@ -385,11 +396,97 @@ func TestChairResynthesize_CarriesOriginalThreadParent(t *testing.T) {
 	router.maybeEscalateStall(context.Background(), stalledMsg(ch, "alex", open), ChannelTypeGroup,
 		"thread-root-author", floorRoundOutcome{granted: 2}, members, 4, nil)
 
-	router.maybeResynthesizeMisfire(context.Background(), chairMisfireReply(ch, open),
+	driveResynthesize(router, chairMisfireReply(ch, open),
 		ChannelTypeGroup, members, 4, true)
 
 	re := resynthesizeEnvelopes(disp)
 	require.Len(t, re, 1)
 	assert.Equal(t, "thread-root-author", re[0].ThreadParentSenderID,
 		"the re-dispatch reproduces the stimulus's thread parent, stashed at escalation — not the reply's")
+}
+
+// TestChairResynthesize_ClaimAtHead_LaterFastPublishCannotStealArm pins the
+// PR 4b-i review round 5 ordering fix: the once-bound stash is claimed at the
+// fanout HEAD (publishes reach their heads in commit order), never the tail.
+// Tail-claiming let a later chair publish STEAL the arm: the real forced-turn
+// reply — a clean hand-off naming two floor-capable members — parks in a
+// multi-turn floor round before its tail runs, while a later innocuous
+// "@alex, thanks" (misfired at the seam, but NOT the forced-turn reply)
+// reclassifies to open floor, finds a single always responder, takes the fast
+// concurrent path, reaches its tail first, and claims the stash with ITS
+// misfire flag — re-forcing a stale stimulus, the exact false positive the
+// claim-on-first-reply contract exists to prevent.
+//
+// Discriminating deterministically: the pin is that the arm is ALREADY
+// consumed while the clean reply's floor round is still RUNNING (its speakers
+// registered, the round parked on its first turn). The head claim precedes
+// floorRound in program order on the fanout goroutine, so post-fix that holds
+// by construction; the tail claim cannot run until the round ends, so pre-fix
+// the mid-round check fails outright — no timing luck involved. The fast
+// publish then lands mid-round to exercise the full steal shape the tail
+// ordering allowed (pre-fix its tail would claim the still-armed stash and
+// re-force a stale stimulus).
+func TestChairResynthesize_ClaimAtHead_LaterFastPublishCannotStealArm(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &envelopeRecorder{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	ch := mustCreateGroupWithPolicies(t, store, "planning",
+		map[string]RespondPolicy{
+			"alex":         RespondNever,         // the operator — the misfire hand-off target
+			"nova-sparrow": RespondAlways,        // the escalation chair
+			"ember-owl":    RespondAlways,        // the sole open-floor responder
+			"iron-fox":     RespondWhenMentioned, // floor-capable only when named
+		}, "alex", "nova-sparrow", "ember-owl", "iron-fox")
+	// Long enough that the clean reply's 2-speaker floor round is still running
+	// when the fast publish lands (the pre-fix discriminator window), short
+	// enough to keep the test quick.
+	router.SetFloorControl(ch, true, 250*time.Millisecond)
+	router.SetEscalationChair(ch, "nova-sparrow")
+
+	// Round 1: alex's stimulus names both floor-capable members → a 2-speaker
+	// floor round that stalls (the recorder swallows every dispatch) → forced
+	// turn to the chair, arming the stash.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "alex",
+		Content: "thoughts?", Mentions: []string{"ember-owl", "iron-fox"},
+	}, ""))
+	router.WaitForPendingFanout()
+	require.Len(t, escalationEnvelopes(disp), 1, "round 1 stalls and escalates, arming the stash")
+
+	// The chair's forced-turn reply: a CLEAN hand-off naming two floor-capable
+	// members (misfired=false). Async — its 2-speaker floor round parks the
+	// fanout for ~2×turnTimeout; a tail claim would park with it.
+	require.NoError(t, router.PublishAsync(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "nova-sparrow",
+		Content: "ember-owl, iron-fox — your take?", Mentions: []string{"ember-owl", "iron-fox"},
+	}, ""))
+	// Wait only for the round to have STARTED (its floor speakers registered) —
+	// the round itself is still parked on its first 250ms turn.
+	require.Eventually(t, func() bool {
+		return router.isFloorSpeakerReply(ch, "ember-owl") || router.isFloorSpeakerReply(ch, "iron-fox")
+	}, time.Second, 2*time.Millisecond, "the clean reply's floor round starts")
+	// THE discriminating pin: mid-round, the arm is already consumed. The head
+	// claim ran before floorRound on the same goroutine; a tail claim cannot
+	// have run yet — pre-fix the stash is provably still armed here.
+	armed := func() bool {
+		router.interactionMu.Lock()
+		defer router.interactionMu.Unlock()
+		entry := router.openInteractions[ch]
+		return entry != nil && entry.escalatedStimulus != nil
+	}
+	require.False(t, armed(),
+		"the fanout HEAD consumes the arm before the round runs — a tail claim would still be parked behind it")
+
+	// A later innocuous chair message lands mid-round: "@alex" is misfired at
+	// the seam (alex is not floor-capable), reclassifies to open floor with a
+	// single always responder, and takes the FAST concurrent path — the shape
+	// that stole the parked tail claim pre-fix.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "nova-sparrow",
+		Content: "alex, thanks", Mentions: []string{"alex"},
+	}, ""))
+	router.WaitForPendingFanout()
+
+	assert.Empty(t, resynthesizeEnvelopes(disp),
+		"the forced-turn reply's head claim already disarmed the trigger — a later fast publish cannot steal the arm and re-force a stale stimulus")
 }

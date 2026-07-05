@@ -36,10 +36,17 @@ func (r *ChannelRouter) SetAutonomous(channelID string, a AutonomousConfig) {
 // AutonomousFor returns the resolved RFC 0052 autonomous block for `channelID`. A
 // channel with no resolved entry falls back to [DefaultAutonomousConfig] — the
 // disabled default an un-configured channel ships with — so the read is always a
-// complete, sensible value.
+// complete, sensible value. A read lock, unlike the sibling knob getters
+// (PR #716 review): the bounded close put this read on the per-publish hot
+// path of EVERY channel — the resolver's latch gate (resolveInteractionID)
+// and the fanout's per-publish snapshot (resolved once in
+// [ChannelRouter.fanout] and threaded to the floor head check and the tail
+// trigger) — where a plain Mutex would serialize all publishes on one
+// router-global lock just to read a value written at startup and on the rare
+// RFC 0050 apply.
 func (r *ChannelRouter) AutonomousFor(channelID string) AutonomousConfig {
-	r.autonomousMu.Lock()
-	defer r.autonomousMu.Unlock()
+	r.autonomousMu.RLock()
+	defer r.autonomousMu.RUnlock()
 	if a, ok := r.autonomous[channelID]; ok {
 		return a
 	}

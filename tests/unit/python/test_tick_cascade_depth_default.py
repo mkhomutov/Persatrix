@@ -18,16 +18,19 @@ message wakes the tick scheduler via :meth:`EventDispatcher.dispatch`'s
 actions then publish at depth 0. The agents trade replies indefinitely
 instead of capping at five hops.
 
-The contract pinned here:
+The contract pinned here (PR #716 review moved the executor's ambient
+threading onto one required ``DispatchContext`` parameter; the safe
+default now lives on the context's ``cascade_depth`` FIELD, so the
+guarantee is unchanged — a context built without an explicit depth still
+terminates at the clamp):
 
 * ``agents.dispatch.DEFAULT_MAX_CASCADE_DEPTH`` is a module-level
   constant — callers that need the "no inbound depth known, terminate"
   value can import it without reflecting on a default kwarg.
-* ``ActionExecutor.execute`` (and the executor's nested helpers) and
-  ``ChannelPublisher.publish`` default ``cascade_depth`` to
-  ``DEFAULT_MAX_CASCADE_DEPTH`` so callers that omit the kwarg get the
-  safe "terminate at the orchestrator clamp" behaviour rather than
-  the cascade-resetting "chain origin" behaviour.
+* ``DispatchContext.cascade_depth`` defaults to
+  ``DEFAULT_MAX_CASCADE_DEPTH`` so a context constructed without an
+  explicit depth gets the safe "terminate at the orchestrator clamp"
+  behaviour rather than the cascade-resetting "chain origin" behaviour.
 * ``TickScheduler`` invokes ``executor.execute`` without forwarding a
   per-event depth (it has none); the safe default therefore reaches the
   publisher and the orchestrator's
@@ -47,6 +50,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agents.channel_wire_metadata import DispatchContext
 from agents.dispatch import ActionExecutor, EventDispatcher
 from agents.event_loop import EventLoop
 from agents.llm_client import LLMClient, LLMResponse
@@ -156,21 +160,20 @@ class TestDefaultMaxCascadeDepthConstant:
 
 
 class TestActionExecutorDefaultCascadeDepth:
-    """``ActionExecutor.execute`` callers that omit the kwarg must hit
+    """A ``DispatchContext`` built without an explicit depth must carry
     the "terminate at the orchestrator clamp" default, not the
     cascade-origin ``0`` that previously masked the regression.
     """
 
-    async def test_execute_default_cascade_depth_forwards_to_publisher(self) -> None:
-        """``executor.execute(...)`` without an explicit ``cascade_depth``
-        forwards :data:`DEFAULT_MAX_CASCADE_DEPTH` to the channel
-        publisher.
+    async def test_default_context_cascade_depth_forwards_to_publisher(self) -> None:
+        """``executor.execute(..., context=DispatchContext())`` forwards
+        :data:`DEFAULT_MAX_CASCADE_DEPTH` to the channel publisher.
 
         Pins the contract for the tick-scheduler call site at
         ``agents/tick.py`` — the scheduler does not thread a per-event
-        depth (it has none), so the executor's default is what reaches
-        the wire. ``DEFAULT_MAX_CASCADE_DEPTH`` is the only safe choice:
-        the orchestrator's
+        depth (it has none), so the context field's default is what
+        reaches the wire. ``DEFAULT_MAX_CASCADE_DEPTH`` is the only safe
+        choice: the orchestrator's
         :func:`internal/channels.ChannelRouter.Publish` clamps incoming
         depth to ``[0, max]`` and drops fanout on
         ``clamped >= max_cascade_depth``, so a tick-originated publish
@@ -194,12 +197,13 @@ class TestActionExecutorDefaultCascadeDepth:
                     },
                 ),
             ],
+            context=DispatchContext(),
         )
 
         publisher.publish.assert_awaited_once()
         kwargs = publisher.publish.await_args.kwargs
         assert kwargs["cascade_depth"] == DEFAULT_MAX_CASCADE_DEPTH, (
-            "executor.execute() without an explicit cascade_depth must "
+            "DispatchContext() without an explicit cascade_depth must "
             "default to DEFAULT_MAX_CASCADE_DEPTH so tick-originated "
             "channel publishes are clamp-and-dropped at the orchestrator "
             f"rather than resetting cascade-in-flight; got {kwargs.get('cascade_depth')!r}"
@@ -207,12 +211,12 @@ class TestActionExecutorDefaultCascadeDepth:
 
     async def test_execute_explicit_zero_still_honored(self) -> None:
         """An explicit ``cascade_depth=0`` is still respected — the safe
-        default only kicks in when the caller omits the kwarg.
+        default only kicks in when the context omits the field.
 
         Without this, the chat surface and the orchestrator-driven
         dispatcher path (both of which legitimately mark a publish as
-        chain-origin) would silently get clamped to cap. The kwarg
-        contract is "default to safe; explicit overrides".
+        chain-origin) would silently get clamped to cap. The contract is
+        "default to safe; explicit overrides".
         """
         publisher = AsyncMock()
         publisher.publish = AsyncMock(return_value=None)
@@ -230,7 +234,7 @@ class TestActionExecutorDefaultCascadeDepth:
                     },
                 ),
             ],
-            cascade_depth=0,
+            context=DispatchContext(cascade_depth=0),
         )
 
         kwargs = publisher.publish.await_args.kwargs

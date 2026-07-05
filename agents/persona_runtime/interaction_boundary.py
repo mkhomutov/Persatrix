@@ -222,11 +222,15 @@ def wire_rotation_close_reason(
 
     Mapping: ``idle`` → :data:`REASON_IDLE_GAP` (the channel's window
     elapsed; "went idle" is the truthful label even when the agent's own
-    longer window had not), ``end_votes`` — and any absent, mismatched,
-    or unrecognised value — → :data:`REASON_STRUCTURAL`.  The quorum
-    close IS the explicit end the structural label claims, and the
-    fallback keeps the exact pre-OQ5 behaviour for an old orchestrator
-    or a post-restart re-mint (the mixed-version contract).  A neutral
+    longer window had not), ``end_votes`` / ``structural`` / ``cost`` —
+    and any absent, mismatched, or unrecognised value — →
+    :data:`REASON_STRUCTURAL`.  The quorum close and the RFC 0052
+    bounded close ARE the explicit end the structural label claims (the
+    truthful cost cause is 4b-ii's wire work — the pair still must
+    survive the seed so ``predecessor_wire_id`` keeps the straggler
+    defence armed across bounded-close boundaries, PR #716 review), and
+    the fallback keeps the exact pre-OQ5 behaviour for an old
+    orchestrator or a post-restart re-mint (the mixed-version contract).  A neutral
     "unknown" reason was considered for the fallback and rejected: the
     wire cannot distinguish "old producer" from "new producer with no
     retiree", so a neutral label would relabel every legacy deployment's
