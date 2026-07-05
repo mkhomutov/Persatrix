@@ -212,13 +212,7 @@ func (r *ChannelRouter) maybeEscalateStall(
 		return
 	}
 
-	var chair *Member
-	for i := range members {
-		if members[i].ParticipantID == chairID {
-			chair = &members[i]
-			break
-		}
-	}
+	chair := memberByID(members, chairID)
 	if chair == nil {
 		// Config load validates membership, so this is runtime drift (the
 		// chair left the channel after startup). The ration is spent — CE5
@@ -412,13 +406,7 @@ func (r *ChannelRouter) dispatchResynthesizeMisfire(
 		return
 	}
 	chairID := pending.chairID
-	var chair *Member
-	for i := range members {
-		if members[i].ParticipantID == chairID {
-			chair = &members[i]
-			break
-		}
-	}
+	chair := memberByID(members, chairID)
 	if chair == nil {
 		// Runtime drift (the chair left after the first escalation). The
 		// re-dispatch is spent — like the stall tail's chair-gone branch, the

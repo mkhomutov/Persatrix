@@ -168,6 +168,21 @@ func (r *ChannelRouter) validateAutonomousConvener(ctx context.Context, channelI
 	return nil
 }
 
+// memberByID returns a pointer to the member with ParticipantID `id`, or nil
+// when `id` names no member of `members`. The result aliases the slice element
+// (callers pass it to [ChannelRouter.dispatchTo] by value), so it is valid only
+// while `members` is — every caller uses it within the same resolve. This
+// single-sources the by-id lookup the chair-escalation, config-apply,
+// convene-classify, and §D synthesis-close paths otherwise repeated inline.
+func memberByID(members []Member, id string) *Member {
+	for i := range members {
+		if members[i].ParticipantID == id {
+			return &members[i]
+		}
+	}
+	return nil
+}
+
 // classifyConvenerMember locates `convener` in the channel's live roster and
 // reports why it cannot author the opening turn, or returns the resolved
 // *Member (a pointer into `members`) when it can. The error wraps
@@ -182,17 +197,16 @@ func (r *ChannelRouter) validateAutonomousConvener(ctx context.Context, channelI
 // [validateConvenerMembership], reads the distinct config-level member slice and
 // stays separate by type.)
 func classifyConvenerMember(members []Member, convener string) (*Member, error) {
-	for i := range members {
-		if members[i].ParticipantID == convener {
-			// An observer (legacy `never`) convener can never author the opening turn
-			// — its receiver gate suppresses it — so reject it, mirroring the chair.
-			if members[i].RespondPolicy.Normalize() == RespondNever {
-				return nil, fmt.Errorf("%w: %q is an observer (respond: never) and can never author the opening turn",
-					ErrInvalidAutonomousConvener, convener)
-			}
-			return &members[i], nil
-		}
+	convenerMember := memberByID(members, convener)
+	if convenerMember == nil {
+		return nil, fmt.Errorf("%w: %q is not a declared member; the convener authors the opening turn",
+			ErrInvalidAutonomousConvener, convener)
 	}
-	return nil, fmt.Errorf("%w: %q is not a declared member; the convener authors the opening turn",
-		ErrInvalidAutonomousConvener, convener)
+	// An observer (legacy `never`) convener can never author the opening turn
+	// — its receiver gate suppresses it — so reject it, mirroring the chair.
+	if convenerMember.RespondPolicy.Normalize() == RespondNever {
+		return nil, fmt.Errorf("%w: %q is an observer (respond: never) and can never author the opening turn",
+			ErrInvalidAutonomousConvener, convener)
+	}
+	return convenerMember, nil
 }

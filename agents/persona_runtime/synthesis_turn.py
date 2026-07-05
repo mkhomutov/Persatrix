@@ -24,8 +24,7 @@ from __future__ import annotations
 
 import logging
 
-from agents.prompt_loader import load_snippet
-from agents.security import CONTEXT_SOURCE_EXTERNAL, wrap_external
+from .operator_directive import format_operator_directive
 
 logger = logging.getLogger(__name__)
 
@@ -35,33 +34,12 @@ logger = logging.getLogger(__name__)
 # the same generous-over-realistic sizing applies).
 _SYNTHESIS_DIRECTIVE_MAX_CHARS = 8_000
 
-_TRUNCATION_MARKER = "\n[... synthesis directive truncated ...]"
-
-
-def _bound_directive(directive: str) -> str:
-    """Cap the operator free-text at :data:`_SYNTHESIS_DIRECTIVE_MAX_CHARS`.
-
-    Truncation over rejection, the convene rationale: a synthesis on a
-    truncated-but-bounded goal still closes the discussion with an
-    artifact — strictly better than a silent dispatch failure that would
-    leave the bounded close to its artifact-less timeout fallback. The
-    drop is WARN-logged so it is not silent.
-    """
-    if len(directive) <= _SYNTHESIS_DIRECTIVE_MAX_CHARS:
-        return directive
-    logger.warning(
-        "synthesis directive truncated to %d chars (was %d); the operator "
-        "goal/topic exceeds the prompt bound, so its tail is dropped from "
-        "the synthesis turn",
-        _SYNTHESIS_DIRECTIVE_MAX_CHARS,
-        len(directive),
-    )
-    return directive[:_SYNTHESIS_DIRECTIVE_MAX_CHARS] + _TRUNCATION_MARKER
-
 
 def format_synthesis_turn(directive: str) -> str:
     """Wrap the operator synthesis directive in the RFC 0009 envelope and
-    prepend the synthesis framing.
+    prepend the synthesis framing — the shared operator-directive framing
+    (:func:`agents.persona_runtime.operator_directive.format_operator_directive`)
+    bound to this seam's snippet, char cap, and logger.
 
     ``directive`` is the operator ``goal``/``topic`` assembled
     orchestrator-side and carried in the synthesis event's ``content``. It
@@ -73,13 +51,13 @@ def format_synthesis_turn(directive: str) -> str:
     escaping (``wrap_external``) defends the structural separation
     regardless.
     """
-    envelope = wrap_external(
-        _bound_directive(directive),
-        source=CONTEXT_SOURCE_EXTERNAL,
-        flagged=False,
-        sanitized=True,
+    return format_operator_directive(
+        directive,
+        snippet="synthesis-turn",
+        max_chars=_SYNTHESIS_DIRECTIVE_MAX_CHARS,
+        kind="synthesis",
+        logger=logger,
     )
-    return f"{load_snippet('synthesis-turn')}\n\n{envelope}"
 
 
 __all__ = ["format_synthesis_turn"]

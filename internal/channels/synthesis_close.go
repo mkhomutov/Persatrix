@@ -90,11 +90,11 @@ const defaultSynthesisReplyTimeout = 120 * time.Second
 // `dispatched` (a racing end-vote close can orphan the arm, in which case
 // neither fires — the close is counted on interaction_closed{end_votes}).
 const (
-	synthesisTurnDispatched     = "dispatched"
-	synthesisTurnChairMissing   = "chair_missing"
-	synthesisTurnDispatchError  = "dispatch_error"
-	synthesisTurnClosedOnReply  = "closed_on_reply"
-	synthesisTurnClosedOnTimout = "closed_on_timeout"
+	synthesisTurnDispatched      = "dispatched"
+	synthesisTurnChairMissing    = "chair_missing"
+	synthesisTurnDispatchError   = "dispatch_error"
+	synthesisTurnClosedOnReply   = "closed_on_reply"
+	synthesisTurnClosedOnTimeout = "closed_on_timeout"
 )
 
 // pendingSynthesisClose is one armed close-on-reply: the bound has fired, the
@@ -198,13 +198,7 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 		r.recordSynthesisTurn(ctx, ct, synthesisTurnChairMissing)
 		return synthesisUnavailable
 	}
-	var chair *Member
-	for i := range members {
-		if members[i].ParticipantID == chairID {
-			chair = &members[i]
-			break
-		}
-	}
+	chair := memberByID(members, chairID)
 	if chair == nil || chair.RespondPolicy.Normalize() == RespondNever {
 		// Membership drift (the chair left, or turned observer) — the
 		// stall-escalation chair-gone posture: the directive would land in a
@@ -350,7 +344,7 @@ func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
 		zap.String("trigger", pending.trigger),
 		zap.String("escalation_chair_id", pending.chairID))
 	if r.boundedClose(ctx, pending.stimulus, pending.ct, pending.interactionID, pending.trigger, pending.stimulusDelivered) {
-		r.recordSynthesisTurn(ctx, pending.ct, synthesisTurnClosedOnTimout)
+		r.recordSynthesisTurn(ctx, pending.ct, synthesisTurnClosedOnTimeout)
 	}
 }
 
