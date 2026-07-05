@@ -106,22 +106,6 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// vote disarms the trigger (it still consumes the stash below) without
 	// re-forcing.
 	misfired := namedNoFloorCapable && !readEndInteractionVote(msg.Metadata)
-	// ISSUE-0099 resynthesize, CLAIM half — at the fanout HEAD, before any floor
-	// round can park it (PR 4b-i review round 5): the once-bound is "the chair's
-	// FIRST publish after the forced turn consumes the arm". Claiming at the tail
-	// (the round-4 shape) let two chair publishes on different path shapes invert
-	// by a whole multi-turn floor round — the real forced-turn reply parked in
-	// its round while a later innocuous chair message raced down the fast
-	// concurrent path, reached its tail first, and claimed the arm with ITS
-	// misfire flag. The head claim shrinks that inversion window to detached-
-	// goroutine spawn jitter (PublishAsync fans on a detached goroutine, so
-	// strict commit order is not literally guaranteed) — the pre-4b-i posture,
-	// where the window was never observed to bite. Run for EVERY chair publish
-	// in an escalated interaction, not only the misfiring ones, so a clean
-	// hand-off disarms the trigger (see [ChannelRouter.claimResynthesizeMisfire]);
-	// a no-op (nil) for every non-chair publish. Only the re-force DISPATCH
-	// waits for the tail, gated on the bounded-close outcome below.
-	pendingResynth := r.claimResynthesizeMisfire(msg, misfired)
 
 	// The RFC 0052 autonomous block, resolved ONCE per fanout and threaded to
 	// every consumer below — the synthesis-reply claim, the head staleness
@@ -141,6 +125,19 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// when this reply re-entered. A lost tombstone CAS means a racing closer
 	// (an end-vote quorum landing mid-arm) beat this reply to the close — the
 	// synthesis stays committed history, the 4b-i degraded artifact shape.
+	//
+	// Checked BEFORE the ISSUE-0099 resynthesize claim below (PR #718 review):
+	// the two claims are independent arms on the same chair (a stall escalation
+	// and an RFC 0052 bound can both be live on one interaction at once) and
+	// [ChannelRouter.claimResynthesizeMisfire] unconditionally consumes its
+	// stash the instant the chair publishes, with no way to un-consume it once
+	// this branch's early `return` below discards `pendingResynth`. Ordering
+	// the synthesis claim first means a message that closes the arm is never
+	// also fed to the escalation claim, so no half-claimed escalation state can
+	// be orphaned. [ChannelRouter.claimSynthesisReply] is side-effect-free on
+	// every non-matching message (a channel with nothing armed, or armed for a
+	// different chair/interaction) beyond its own short-held lock, so moving it
+	// ahead of the resynthesize claim costs nothing on the common path.
 	if pendingSynth := r.claimSynthesisReply(msg, autonomous); pendingSynth != nil {
 		synthCtx := context.WithoutCancel(ctx)
 		if r.boundedClose(synthCtx, msg, ct, pendingSynth.interactionID, pendingSynth.trigger, false) {
@@ -152,6 +149,24 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 		}
 		return
 	}
+
+	// ISSUE-0099 resynthesize, CLAIM half — at the fanout HEAD, before any floor
+	// round can park it (PR 4b-i review round 5): the once-bound is "the chair's
+	// FIRST publish after the forced turn consumes the arm". Claiming at the tail
+	// (the round-4 shape) let two chair publishes on different path shapes invert
+	// by a whole multi-turn floor round — the real forced-turn reply parked in
+	// its round while a later innocuous chair message raced down the fast
+	// concurrent path, reached its tail first, and claimed the arm with ITS
+	// misfire flag. The head claim shrinks that inversion window to detached-
+	// goroutine spawn jitter (PublishAsync fans on a detached goroutine, so
+	// strict commit order is not literally guaranteed) — the pre-4b-i posture,
+	// where the window was never observed to bite. Run for EVERY chair publish
+	// in an escalated interaction that the synthesis-reply claim above didn't
+	// already consume, not only the misfiring ones, so a clean hand-off disarms
+	// the trigger (see [ChannelRouter.claimResynthesizeMisfire]); a no-op (nil)
+	// for every non-chair publish. Only the re-force DISPATCH waits for the
+	// tail, gated on the bounded-close outcome below.
+	pendingResynth := r.claimResynthesizeMisfire(msg, misfired)
 
 	// Mark the responders as having an in-flight turn for the console presence
 	// signal (RFC 0048 Tier 1) — exactly the members [orderResponders] expects

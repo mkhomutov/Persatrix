@@ -50,6 +50,18 @@ func (r *ChannelRouter) SetAutonomous(channelID string, a AutonomousConfig) {
 	}
 }
 
+// DisarmChannelSynthesis is the exported form of [ChannelRouter.disarmChannelSynthesis]
+// for callers outside the package whose action retires a channel out from under any
+// armed synthesis close — currently the channel-delete HTTP handler (PR #718 review:
+// deleting a channel mid-arm left the timeout net orphaned, firing ~120s later against
+// a channel the store no longer has). Same disarm [SetAutonomous]'s disable branch
+// above uses, exported rather than duplicated. Safe to call on a channel with no armed
+// close (nil-tolerant) and safe to call redundantly (each disarm is idempotent past the
+// first).
+func (r *ChannelRouter) DisarmChannelSynthesis(channelID string) {
+	r.disarmChannelSynthesis(channelID)
+}
+
 // AutonomousFor returns the resolved RFC 0052 autonomous block for `channelID`. A
 // channel with no resolved entry falls back to [DefaultAutonomousConfig] — the
 // disabled default an un-configured channel ships with — so the read is always a

@@ -177,16 +177,10 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger 
 	// This close disarmed the timeout net before it fired, so it owns the arm's
 	// synthesisWG Done() (PR #718 review finding 1) — the racing end-vote quorum
 	// (or any other deliberate closer) that beat the chair's reply must release
-	// the count the arm registered, or the shutdown drain never settles.
-	if disarmedTimer {
-		r.synthesisWG.Done()
-	}
-	// Cleared OUTSIDE interactionMu (clearActivity takes its own leaf mutex —
-	// the disarmChannelSynthesis posture). A no-op when the chair already
-	// re-published its reply (publishCommit cleared it) or nothing was armed.
-	if disarmedChair != "" {
-		r.clearActivity(channelID, disarmedChair)
-	}
+	// the count the arm registered, or the shutdown drain never settles. A
+	// no-op when the chair already re-published its reply (publishCommit
+	// cleared it) or nothing was armed.
+	r.releaseSynthesisArm(channelID, disarmedChair, disarmedTimer)
 	if discard != "" {
 		r.DiscardInteractionReplyBudget(discard)
 		r.DiscardInteractionEndVotes(discard)

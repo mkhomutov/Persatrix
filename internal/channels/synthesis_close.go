@@ -408,9 +408,9 @@ func (r *ChannelRouter) armedSynthesisChair(channelID string) string {
 // disarmChannelSynthesis drops WHATEVER synthesis close is armed on the
 // channel's resolver entry (stopping its timer), independent of any particular
 // pending pointer — the RFC 0050 disable path ([ChannelRouter.SetAutonomous])
-// uses it so a block disabled mid-arm leaves no orphaned timeout net to close
-// the now-ordinary interaction a window later. Nil-tolerant like
-// [openInteraction.disarmPendingSynthesisLocked], which it wraps under the lock.
+// and the exported [ChannelRouter.DisarmChannelSynthesis] both use it so an
+// interaction abandoned mid-arm leaves no orphaned timeout net behind. Nil-
+// tolerant like [openInteraction.disarmPendingSynthesisLocked], which it wraps.
 func (r *ChannelRouter) disarmChannelSynthesis(channelID string) {
 	r.interactionMu.Lock()
 	entry := r.openInteractions[channelID]
@@ -420,18 +420,20 @@ func (r *ChannelRouter) disarmChannelSynthesis(channelID string) {
 	}
 	timerStopped := entry.disarmPendingSynthesisLocked() // nil-tolerant receiver.
 	r.interactionMu.Unlock()
-	// This disarm stopped the timeout net before it fired, so it owns the arm's
-	// synthesisWG Done() (PR #718 review finding 1) — release outside the lock, the
-	// clearActivity posture below.
+	// No reply/timeout will re-enter to clear the chair's "thinking" mark once
+	// abandoned here — same no-reply posture as [ChannelRouter.onSynthesisTimeout].
+	r.releaseSynthesisArm(channelID, chairID, timerStopped)
+}
+
+// releaseSynthesisArm is the disarm tail shared by every terminal path (PR #718
+// review): release synthesisWG if THIS call stopped the live timer (owning it —
+// see [openInteraction.disarmPendingSynthesisLocked]), and clear the chair's
+// stranded "thinking" mark. Both args no-op when empty/false. Runs OUTSIDE
+// interactionMu — clearActivity takes its own leaf mutex.
+func (r *ChannelRouter) releaseSynthesisArm(channelID, chairID string, timerStopped bool) {
 	if timerStopped {
 		r.synthesisWG.Done()
 	}
-	// The arm marked the chair "thinking" ([ChannelRouter.maybeArmSynthesisClose]);
-	// disabling the block abandons the arm and kills its timer, so no reply and
-	// no timeout net will re-enter to clear that mark. Clear it here — the same
-	// no-reply abandon posture as [ChannelRouter.onSynthesisTimeout] — so the
-	// operator who just took manual control is not shown the chair composing a
-	// turn that will never come for the activity TTL.
 	if chairID != "" {
 		r.clearActivity(channelID, chairID)
 	}
