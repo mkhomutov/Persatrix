@@ -343,9 +343,12 @@ class ActionExecutor:
         # ── REST publish branch (channel-routed) ──
         if target_channel and self._channel_publisher is not None:
             # RFC 0052 no-reopen claim (docstring) via the shared rule; None keeps the clean body.
+            # ``synthesis_reply`` (PR #718 review): a reply to the §D synthesis
+            # directive says so on the wire — the fanout-head claim's third
+            # conjunct (see same_channel_claim's docstring).
             publish_metadata = same_channel_claim(
                 context.origin_channel_id, context.origin_interaction_id,
-                target_channel)
+                target_channel, synthesis_reply=context.origin_synthesis_turn)
             try:
                 await asyncio.wait_for(
                     self._channel_publisher.publish(

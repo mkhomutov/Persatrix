@@ -195,3 +195,73 @@ class TestSynthesisFraming:
         # Close-on-reply is ORCHESTRATOR-driven (CE4 intact): the framing
         # must not tell the chair to hand off or wait for further replies.
         assert "hand off" not in snippet
+
+
+class TestSynthesisReplyEcho:
+    """PR #718 review — the reply-echo discriminator. The fanout-head claim
+    (``claimSynthesisReply``, internal/channels/synthesis_close.go) cannot
+    tell the synthesis reply from an ordinary chair reply by sender+claim
+    alone (the interaction id spans every round and every reply echoes it),
+    so a publish authored in reply to the synthesis directive additionally
+    carries the ``synthesis_reply`` marker: derived structurally by
+    ``DispatchContext.for_event`` (strict ``is True``, the gate's read) and
+    stamped beside the id claim by ``same_channel_claim``."""
+
+    def test_for_event_derives_the_origin_marker(self) -> None:
+        from agents.channel_wire_metadata import DispatchContext
+
+        event = _synthesis_event(
+            extra={"interaction_id": "int-1"},
+        )
+        event.metadata["interaction_id"] = "int-1"
+        context = DispatchContext.for_event(event, cascade_depth=1)
+        assert context.origin_synthesis_turn is True
+
+    def test_for_event_is_strictly_boolean(self) -> None:
+        """A spoofed truthy non-bool must not mint a claimable reply — the
+        same strict-bool posture as the gate admit and the framing."""
+        from agents.channel_wire_metadata import DispatchContext
+
+        for spoofed in ("true", 1, [True]):
+            event = _synthesis_event(synthesis_turn=spoofed)
+            context = DispatchContext.for_event(event, cascade_depth=1)
+            assert context.origin_synthesis_turn is False
+
+    def test_for_event_defaults_false_on_ordinary_traffic(self) -> None:
+        from agents.channel_wire_metadata import DispatchContext
+
+        event = _synthesis_event(synthesis_turn=False)
+        del event.payload["synthesis_turn"]
+        context = DispatchContext.for_event(event, cascade_depth=1)
+        assert context.origin_synthesis_turn is False
+
+    def test_same_channel_claim_stamps_the_echo_beside_the_id(self) -> None:
+        """The marker rides BESIDE the interaction-id claim, never instead
+        of it: the id claim is what lets an orphaned reply latch instead of
+        minting fresh and reopening."""
+        from agents.channel_wire_metadata import same_channel_claim
+
+        claim = same_channel_claim(
+            "group:planning", "int-1", "group:planning", synthesis_reply=True,
+        )
+        assert claim == {"interaction_id": "int-1", "synthesis_reply": True}
+
+    def test_same_channel_claim_omits_the_echo_by_default(self) -> None:
+        """Ordinary replies keep the pre-4b-ii claim shape byte-for-byte —
+        an unmarked publish must never be claimable as the artifact."""
+        from agents.channel_wire_metadata import same_channel_claim
+
+        claim = same_channel_claim("group:planning", "int-1", "group:planning")
+        assert claim == {"interaction_id": "int-1"}
+
+    def test_cross_channel_publish_never_carries_the_echo(self) -> None:
+        """A cross-channel (or origin-less) publish cannot be the closing
+        artifact of an interaction it does not claim."""
+        from agents.channel_wire_metadata import same_channel_claim
+
+        assert same_channel_claim(
+            "group:planning", "int-1", "group:other", synthesis_reply=True,
+        ) is None
+        assert same_channel_claim(
+            "group:planning", "", "group:planning", synthesis_reply=True,
+        ) is None

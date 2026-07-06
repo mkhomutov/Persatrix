@@ -22,7 +22,10 @@ package channels
 //  2. While armed, ALL discussion traffic is withheld (the fanout's stale
 //     posture — committed history, no dispatch, no revival tails): the
 //     discussion has terminated; only the closing artifact is outstanding.
-//  3. The chair's claimed reply is intercepted at the fanout HEAD
+//  3. The chair's claimed reply — the publish that echoes the armed id AND
+//     carries the `synthesis_reply` marker the persona stamps off the
+//     dispatched `synthesis_turn` marker (see [synthesisReplyMetadataKey]) —
+//     is intercepted at the fanout HEAD
 //     ([ChannelRouter.claimSynthesisReply]) and handed to the 4b-i teardown as
 //     the CLOSING MESSAGE: the close-notification fan delivers the synthesis
 //     to every member (sole delivery — redelivery=false) with the truthful
@@ -289,22 +292,66 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 	return synthesisArmed
 }
 
+// synthesisReplyMetadataKey is the wire-level publish-metadata flag the
+// persona runtime stamps on every same-channel publish authored IN REPLY TO
+// the synthesis directive: `DispatchContext.for_event` derives it from the
+// dispatched `synthesis_turn` marker and `same_channel_claim` stamps it
+// beside the interaction-id claim (agents/channel_wire_metadata.py; the key
+// literal is pinned by the cross-language drift test). Centralised like
+// [endVoteMetadataKey], its metadata-bag vehicle sibling.
+const synthesisReplyMetadataKey = "synthesis_reply"
+
+// readSynthesisReply reports whether a publish metadata bag flags the message
+// as a reply to the synthesis directive. Tolerant like the other wire readers
+// ([readEndInteractionVote] / [readInteractionID]): absent or non-bool reads
+// false — an unmarked publish is ordinary traffic, never a closing artifact.
+func readSynthesisReply(metadata map[string]any) bool {
+	if metadata == nil {
+		return false
+	}
+	v, ok := metadata[synthesisReplyMetadataKey].(bool)
+	return ok && v
+}
+
 // claimSynthesisReply is the fanout-HEAD intercept: when `msg` is the chair's
 // reply claiming the armed interaction, consume the arm (stop the timer) and
 // return it — the caller closes with `msg` as the closing artifact and skips
 // the entire fanout (no round, no concurrent dispatch, no revival tails: a
 // fanned synthesis would draw replies into the closed discussion, the reopen
-// §D forbids). Anything else — a straggler responder claiming the armed id, an
-// unstamped operator publish, a non-chair sender — returns nil and the armed
-// withhold in [ChannelRouter.advanceBoundedCloseRound] /
-// [ChannelRouter.stimulusOutlivedClose] owns it. Runs before the head
-// staleness check; nil for every publish on an unarmed channel.
+// §D forbids).
+//
+// The claim requires THREE conjuncts: sender == chair, claim == the armed id,
+// AND the [synthesisReplyMetadataKey] marker (PR #718 review). Sender+claim
+// alone cannot discriminate BY CONSTRUCTION: the interaction id spans every
+// round of the discussion and every agent reply echoes its dispatched-under
+// id (the 4b-i rail), so an ORDINARY chair reply from an earlier round still
+// in flight when the bound crossed (concurrent-path replies re-enter Publish
+// on detached goroutines) matches both — and would be fanned to every member
+// as the goal-directed synthesis while the REAL synthesis reply lands
+// post-close in the no-reopen latch, silently discarded. Only the persona
+// knows which of its publishes replies to the synthesis directive, so it says
+// so on the wire; the marker rides BESIDE the interaction-id claim rather than
+// replacing it with a synthesis nonce, because the id claim is load-bearing
+// for the orphan posture (a disarmed arm's late reply must latch on the
+// closed id — a nonce the ledger never held would mint fresh and REOPEN).
+// The marker is a correlation discriminator, not an auth token: sender
+// identity is the publish boundary's concern, and a forged marker without
+// sender == chair still fails the claim.
+//
+// Anything else — an unmarked chair reply from an earlier round, a straggler
+// responder claiming the armed id, an unstamped operator publish, a non-chair
+// sender — returns nil and the armed withhold in
+// [ChannelRouter.advanceBoundedCloseRound] /
+// [ChannelRouter.stimulusOutlivedClose] owns it. A producer that never stamps
+// the marker (a pre-4b-ii agent, gate drift) degrades to the timeout net —
+// the documented no-reply branch, sized for exactly this. Runs before the
+// head staleness check; nil for every publish on an unarmed channel.
 func (r *ChannelRouter) claimSynthesisReply(msg ChannelMessage, a AutonomousConfig) *pendingSynthesisClose {
 	if !a.Enabled {
 		return nil // OQ #2: human channels never arm; skip the mutex entirely.
 	}
 	claim := readInteractionID(msg.Metadata)
-	if claim == "" {
+	if claim == "" || !readSynthesisReply(msg.Metadata) {
 		return nil
 	}
 	r.interactionMu.Lock()
@@ -376,114 +423,6 @@ func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
 	if r.boundedClose(ctx, pending.stimulus, pending.ct, pending.interactionID, pending.trigger, pending.stimulusDelivered) {
 		r.recordSynthesisTurn(ctx, pending.ct, synthesisTurnClosedOnTimeout)
 	}
-}
-
-// disarmSynthesis clears `pending` off the channel's resolver entry iff it is
-// still the armed one — the failed-dispatch unwind (the timer does its own
-// inline CAS, and markInteractionClosed owns the racing-close disarm).
-func (r *ChannelRouter) disarmSynthesis(channelID string, pending *pendingSynthesisClose) {
-	r.interactionMu.Lock()
-	if entry := r.openInteractions[channelID]; entry != nil && entry.pendingSynthesis == pending {
-		entry.pendingSynthesis = nil
-	}
-	r.interactionMu.Unlock()
-}
-
-// armedSynthesisChair returns the chair id of the channel's armed synthesis
-// close, or "" if none is armed. The fanout withhold seam uses it to spare the
-// chair's in-flight "thinking" mark when it clears the withheld responders'
-// presence: while a synthesis is armed a directed turn IS genuinely in flight
-// on the chair, so clearing its mark would blank the console for the whole
-// armed window (PR #718 review finding 8). Cheap read under interactionMu, only
-// on the withhold path.
-func (r *ChannelRouter) armedSynthesisChair(channelID string) string {
-	r.interactionMu.Lock()
-	defer r.interactionMu.Unlock()
-	if entry := r.openInteractions[channelID]; entry != nil && entry.pendingSynthesis != nil {
-		return entry.pendingSynthesis.chairID
-	}
-	return ""
-}
-
-// disarmChannelSynthesis drops WHATEVER synthesis close is armed on the
-// channel's resolver entry (stopping its timer), independent of any particular
-// pending pointer — the RFC 0050 disable path ([ChannelRouter.SetAutonomous])
-// and the exported [ChannelRouter.DisarmChannelSynthesis] both use it so an
-// interaction abandoned mid-arm leaves no orphaned timeout net behind. Nil-
-// tolerant like [openInteraction.disarmPendingSynthesisLocked], which it wraps.
-func (r *ChannelRouter) disarmChannelSynthesis(channelID string) {
-	r.interactionMu.Lock()
-	entry := r.openInteractions[channelID]
-	var chairID string
-	if entry != nil && entry.pendingSynthesis != nil {
-		chairID = entry.pendingSynthesis.chairID
-	}
-	timerStopped := entry.disarmPendingSynthesisLocked() // nil-tolerant receiver.
-	r.interactionMu.Unlock()
-	// No reply/timeout will re-enter to clear the chair's "thinking" mark once
-	// abandoned here — same no-reply posture as [ChannelRouter.onSynthesisTimeout].
-	r.releaseSynthesisArm(channelID, chairID, timerStopped)
-}
-
-// releaseSynthesisArm is the disarm tail shared by every terminal path (PR #718
-// review): release synthesisWG if THIS call stopped the live timer (owning it —
-// see [openInteraction.disarmPendingSynthesisLocked]), and clear the chair's
-// stranded "thinking" mark. Both args no-op when empty/false. Runs OUTSIDE
-// interactionMu — clearActivity takes its own leaf mutex.
-func (r *ChannelRouter) releaseSynthesisArm(channelID, chairID string, timerStopped bool) {
-	if timerStopped {
-		r.synthesisWG.Done()
-	}
-	if chairID != "" {
-		r.clearActivity(channelID, chairID)
-	}
-}
-
-// disarmAllPendingSyntheses stops every channel's armed synthesis timeout net —
-// the shutdown-drain precondition ([ChannelRouter.DrainPendingFanout], PR #718
-// review finding 1). The timers run on detached runtime goroutines whose close
-// work Add(1)s to fanoutWG, so an undisarmed timer could fire into (and race)
-// the drain's fanoutWG.Wait. Abandoning an armed-but-unreplied close is the
-// deliberate shutdown trade — the §D artifact is best-effort across process
-// exit, and holding the drain budget open for a reply that may never come would
-// starve the real in-flight fanout deliveries. Each stopped timer releases its
-// synthesisWG count here; a timer already mid-fire (Stop()==false) is left to
-// its onSynthesisTimeout, which releases its own count and whose tracked close
-// work the subsequent fanoutWG.Wait still bounds.
-func (r *ChannelRouter) disarmAllPendingSyntheses() {
-	var stopped int
-	r.interactionMu.Lock()
-	for _, entry := range r.openInteractions {
-		if entry.disarmPendingSynthesisLocked() {
-			stopped++
-		}
-	}
-	r.interactionMu.Unlock()
-	for i := 0; i < stopped; i++ {
-		r.synthesisWG.Done()
-	}
-}
-
-// disarmPendingSynthesisLocked drops any armed synthesis close off this entry,
-// stopping its timer — the unconditional disarm the resolver's fresh-mint
-// reset and [ChannelRouter.markInteractionClosed] share (a fire after the
-// clear is an identity-CAS no-op regardless; stopping just saves the spin).
-// Nil-tolerant like [openInteraction.openCommitted]. Caller holds
-// interactionMu.
-//
-// Returns whether it STOPPED a live timer before it fired (Stop()==true): the
-// caller then owns that timer's synthesisWG Done() (PR #718 review finding 1). A
-// false return — no timer yet, or the timer already fired — means the caller
-// owes nothing: an already-fired onSynthesisTimeout releases the count itself.
-func (e *openInteraction) disarmPendingSynthesisLocked() (timerStopped bool) {
-	if e == nil || e.pendingSynthesis == nil {
-		return false
-	}
-	if e.pendingSynthesis.timer != nil {
-		timerStopped = e.pendingSynthesis.timer.Stop()
-	}
-	e.pendingSynthesis = nil
-	return timerStopped
 }
 
 // recordSynthesisTurn emits `channel.conversation.synthesis_turn{channel_type,

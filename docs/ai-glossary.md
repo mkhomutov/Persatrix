@@ -879,7 +879,11 @@ the goal-directed chair synthesis turn (close-on-reply).
   interaction does not close inline at the bound — it **arms**, withholds all
   further discussion traffic, and closes when the chair's synthesis reply lands
   (or a timeout net fires), so the reply is recognised as the closing artifact
-  instead of reopening the discussion.
+  instead of reopening the discussion. The reply is recognised by three
+  conjuncts (PR #718 review): sender == chair, the echoed interaction-id
+  claim, **and** the `synthesis_reply` publish-metadata marker the persona
+  stamps on a reply to the synthesis turn — sender+claim alone are shared
+  with every ordinary chair reply in the interaction.
 - **Example:** "Close-on-reply means the armed window withholds stragglers until
   the chair replies."
 

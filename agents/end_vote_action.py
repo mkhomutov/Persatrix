@@ -127,9 +127,13 @@ async def publish_end_interaction_vote(
         content = _END_VOTE_DEFAULT_CONTENT
     metadata: dict[str, Any] = {"end_interaction_vote": True}
     # The RFC 0052 no-reopen claim, via the shared rule (see the docstring).
+    # ``synthesis_reply`` (PR #718 review): a chair may legitimately answer
+    # the §D synthesis directive with a vote whose content IS the synthesis
+    # (the ISSUE-0099 outcome-(a) shape) — the echo makes that publish
+    # claimable as the closing artifact, same as the plain-reply path.
     claim = same_channel_claim(
         context.origin_channel_id, context.origin_interaction_id,
-        target_channel)
+        target_channel, synthesis_reply=context.origin_synthesis_turn)
     if claim:
         metadata.update(claim)
     try:

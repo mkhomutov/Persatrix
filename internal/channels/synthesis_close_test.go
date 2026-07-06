@@ -112,13 +112,19 @@ func synthesisCloseHarness(t *testing.T, maxRounds int) (*ChannelRouter, *dispat
 }
 
 // chairReply publishes the chair's synthesis reply: a same-channel publish
-// echoing the interaction id it was dispatched under as the wire claim — the
-// PR 4b-i origin-pair echo every agent reply now carries.
+// echoing the interaction id it was dispatched under as the wire claim (the
+// PR 4b-i origin-pair echo every agent reply carries) PLUS the
+// `synthesis_reply` marker the persona stamps on a publish authored in reply
+// to the synthesis directive (PR #718 review — the claim's third conjunct;
+// `same_channel_claim(..., synthesis_reply=True)` agent-side).
 func chairReply(t *testing.T, router *ChannelRouter, ch, chairID, interactionID, content string) {
 	t.Helper()
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
 		ID: uuid.NewString(), ChannelID: ch, SenderID: chairID, Content: content,
-		Metadata: map[string]any{"interaction_id": interactionID},
+		Metadata: map[string]any{
+			"interaction_id":          interactionID,
+			synthesisReplyMetadataKey: true,
+		},
 	}, ""))
 }
 
@@ -345,6 +351,52 @@ func TestSynthesisClose_StragglerWithheldWhileArmed(t *testing.T) {
 	router.WaitForPendingFanout()
 	assert.Equal(t, int64(1), closedCount(t, reader, structuralTrigger),
 		"the chair's reply still closes after the withheld window")
+}
+
+// TestSynthesisClose_UnmarkedChairReplyDoesNotClaimTheArm — PR #718 review:
+// the claim's sender+claim conjuncts alone cannot tell the synthesis reply
+// from an ORDINARY chair reply still in flight when the bound crossed — the
+// interaction id spans every round and every agent reply echoes it. Without
+// the `synthesis_reply` marker such a reply must NOT be consumed as the
+// closing artifact: it is armed-window traffic (withheld, committed history),
+// and the chair's real, marked reply still lands the close afterwards.
+func TestSynthesisClose_UnmarkedChairReplyDoesNotClaimTheArm(t *testing.T) {
+	router, disp, ch, reader := synthesisCloseHarness(t, 2)
+
+	tick(t, router, ch)
+	openID, _, _ := router.openInteractionEscalationState(ch)
+	tick(t, router, ch) // bound → synthesis turn dispatched, close armed
+	require.Len(t, disp.synthesisTurns(), 1)
+	before := len(disp.snapshot())
+
+	// The chair's stale ordinary reply: same sender, same echoed interaction
+	// id — exactly the shape a pre-arm in-flight turn re-enters Publish with —
+	// but no `synthesis_reply` marker (its DispatchContext derives from the
+	// earlier stimulus, not the synthesis directive).
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "iron-fox",
+		Content:  "a late mid-discussion thought…",
+		Metadata: map[string]any{"interaction_id": openID},
+	}, ""))
+	router.WaitForPendingFanout()
+
+	assert.Zero(t, closedCount(t, reader, structuralTrigger),
+		"an unmarked chair reply is armed-window traffic, never the closing artifact")
+	assert.Equal(t, before, len(disp.snapshot()),
+		"withheld: committed history, no close-notification fan")
+	require.Equal(t, "iron-fox", router.armedSynthesisChair(ch),
+		"the arm survives — it still waits on the marked reply (or the net)")
+
+	chairReply(t, router, ch, "iron-fox", openID, "Synthesis: the real artifact.")
+	router.WaitForPendingFanout()
+	assert.Equal(t, int64(1), closedCount(t, reader, structuralTrigger))
+	assert.Equal(t, int64(1), synthesisTurnCount(t, reader, "closed_on_reply"))
+	notifications := disp.closeNotifications()
+	require.NotEmpty(t, notifications)
+	for _, c := range notifications {
+		assert.Contains(t, c.msg.Content, "Synthesis: the real artifact.",
+			"the MARKED reply is the artifact the members ingest — not the stale turn")
+	}
 }
 
 // TestSynthesisClose_ConcurrentPathWithholdsBoundingStimulusAndCloses — the

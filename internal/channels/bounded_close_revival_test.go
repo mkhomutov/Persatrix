@@ -91,8 +91,13 @@ func TestBoundedClose_SuppressesResynthesizeOnBoundingRound(t *testing.T) {
 	assert.Equal(t, 1, synthTurns, "the bounding round dispatched the synthesis turn instead")
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
 		ID: uuid.NewString(), ChannelID: ch, SenderID: "nova-sparrow",
-		Content:  "Synthesis: no consensus reached.",
-		Metadata: map[string]any{"interaction_id": openID},
+		Content: "Synthesis: no consensus reached.",
+		// The persona reply-echo pair (PR #718 review): the id claim plus the
+		// synthesis_reply marker — the claim's discriminating conjunct.
+		Metadata: map[string]any{
+			"interaction_id":          openID,
+			synthesisReplyMetadataKey: true,
+		},
 	}, ""))
 	router.WaitForPendingFanout()
 	assert.Empty(t, resynthesizeEnvelopes(disp),
@@ -140,8 +145,13 @@ func TestBoundedClose_SuppressesEscalationOnBoundingRound(t *testing.T) {
 	}
 	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
 		ID: uuid.NewString(), ChannelID: ch, SenderID: "nova-sparrow",
-		Content:  "Synthesis: closing.",
-		Metadata: map[string]any{"interaction_id": openID},
+		Content: "Synthesis: closing.",
+		// The persona reply-echo pair (PR #718 review): the id claim plus the
+		// synthesis_reply marker — the claim's discriminating conjunct.
+		Metadata: map[string]any{
+			"interaction_id":          openID,
+			synthesisReplyMetadataKey: true,
+		},
 	}, ""))
 	router.WaitForPendingFanout()
 	_, _, tracked = router.openInteractionEscalationState(ch)

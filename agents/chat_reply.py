@@ -210,6 +210,10 @@ async def publish_chat_error_on_channel(
         return
     metadata: dict[str, Any] = {"reply_status": "error", "error_reason": reason}
     # The RFC 0052 no-reopen claim, via the shared rule (see the docstring).
+    # Deliberately NO ``synthesis_reply`` echo (PR #718 review): an apology
+    # must never be claimable as the §D closing artifact — and
+    # ``suppress_error_reply`` already makes this path unreachable for a
+    # synthesis turn, so the omission is belt-and-suspenders, not a gap.
     claim = same_channel_claim(channel_id, origin_interaction_id, channel_id)
     if claim:
         metadata.update(claim)
@@ -384,9 +388,10 @@ async def process_inbound_channel_event(
     # orchestrator (the fanout-head close-on-reply intercept), so its
     # budget/resource-exhausted failure must NOT publish an apology that would
     # be mistaken for the synthesis — the orchestrator's timeout net owns that
-    # branch. See dispatch_channel_event_with_chat_error_recovery.
-    is_synthesis_turn = (event.payload or {}).get("synthesis_turn") is True
-
+    # branch. See dispatch_channel_event_with_chat_error_recovery. Read off
+    # the context (the ONE structural derivation, DispatchContext.for_event)
+    # rather than re-reading the payload key here — a second inline read
+    # sat outside the cross-language drift pin and could drift alone.
     await dispatch_channel_event_with_chat_error_recovery(
         _decide_and_execute(),
         publisher=executor.channel_publisher,
@@ -394,5 +399,5 @@ async def process_inbound_channel_event(
         channel_id=event.channel_id,
         inbound_sender_id=event.sender_id,
         origin_interaction_id=context.origin_interaction_id,
-        suppress_error_reply=is_synthesis_turn,
+        suppress_error_reply=context.origin_synthesis_turn,
     )
