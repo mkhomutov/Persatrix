@@ -162,8 +162,11 @@ func (r *ChannelRouter) inFlightFanout() int64 {
 //     Wait returns.
 //  4. One fanoutWG.Wait: by (3) every timer-originated Add is already held
 //     when it starts, and every other Add came from a goroutine registered at
-//     spawn (PublishAsync) or holding a count (the notification fan) — no
-//     Add-from-zero can race it either.
+//     spawn (PublishAsync), holding a count (the notification fan), or holding
+//     the arm's TRANSFERRED synthesisWG count (the commit-path reply claim —
+//     [ChannelRouter.closeOnSynthesisReply] releases it only after its close's
+//     Adds, so (3)'s happens-before covers that path too) — no Add-from-zero
+//     can race it either.
 //
 // The flag clears on return (deferred), so a router reused after a bounded
 // (ctx-expired) drain resumes arming — at real shutdown the process exits
@@ -391,15 +394,11 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// which while armed always equals the armed id, so a bag re-read cannot
 	// reject a stale echo (PR #718 follow-up review; see claimSynthesisReply).
 	if pendingSynth := r.claimSynthesisReply(msg, inboundClaim, r.AutonomousFor(msg.ChannelID)); pendingSynth != nil {
-		synthCtx := context.WithoutCancel(ctx)
-		r.waiter.Notify(msg)
-		if r.boundedClose(synthCtx, msg, derivedType, pendingSynth.interactionID, pendingSynth.trigger, false, nil) {
-			r.recordSynthesisTurn(synthCtx, derivedType, synthesisTurnClosedOnReply)
-		} else {
-			r.logger.Debug("channels: synthesis reply lost the closing race; close stands by the winner",
-				zap.String("channel_id", msg.ChannelID),
-				zap.String("interaction_id", pendingSynth.interactionID))
-		}
+		// The claim transferred the arm's synthesisWG count to this branch;
+		// closeOnSynthesisReply notifies the reply waiter, runs the teardown,
+		// and releases the count only after the close's fanoutWG.Adds — the
+		// drain-ordering contract (see both functions' docs).
+		r.closeOnSynthesisReply(context.WithoutCancel(ctx), msg, derivedType, pendingSynth)
 		return nil, nil
 	}
 

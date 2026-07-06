@@ -57,7 +57,12 @@ package channels
 // trading the artifact for termination. On the concurrent path the WITHHELD
 // bounding stimulus is committed history that reaches no member's record when
 // the synthesis becomes the closing message (the 4b-i stale-sibling posture;
-// the synthesis supersedes it as the record's final turn).
+// the synthesis supersedes it as the record's final turn). A mid-arm ABANDON
+// (the RFC 0050 disable, or the timeout net's max_rounds-raise re-check)
+// strands that same withheld stimulus with NO superseding close at all — the
+// interaction stays open and no notification ever carries a final turn; the
+// same accepted loss, reached without a closing message (the operator's
+// deliberate intervention owns the trade).
 
 import (
 	"context"
@@ -96,8 +101,10 @@ const defaultSynthesisReplyTimeout = 120 * time.Second
 // deliberately unmetered: nothing was dispatched, and the close still counts
 // on interaction_closed{…}); exactly one of
 // `closed_on_reply`/`closed_on_timeout` follows a `dispatched` (a racing
-// end-vote close can orphan the arm, in which case neither fires — the close
-// is counted on interaction_closed{end_votes}).
+// end-vote close can orphan the arm — its close is counted on
+// interaction_closed{end_votes} — and a mid-arm abandon (the RFC 0050
+// disable, the timeout's max_rounds-raise re-check) leaves the interaction
+// open and counts nothing; in both shapes neither closed_on_* fires).
 const (
 	synthesisTurnDispatched      = "dispatched"
 	synthesisTurnChairMissing    = "chair_missing"
@@ -337,13 +344,19 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 		// A racing deliberate close (or an RFC 0050 disable) disarmed the arm
 		// while the dispatch above was in flight. Its releaseSynthesisArm ran
 		// BEFORE markActivity set the chair's "thinking" mark, so that clear
-		// was a no-op — and with no timer armed and the reply latch-suppressed,
-		// nothing else re-enters to clear it: the chair would strand as
+		// was a no-op — and with no timer armed and the reply not ours to
+		// claim, nothing else re-enters to clear it: the chair would strand as
 		// composing for the whole activity TTL (PR #718 review). Clear it here,
 		// the mirror of the failed-dispatch unwind above. The close itself is
-		// the racer's (or, for a disable, deliberately not owed), so this still
-		// reports armed: the turn IS on the wire and the orphaned reply
-		// latches — the caller's withhold is the correct posture either way.
+		// the racer's (or, for a disable, deliberately not owed), so this
+		// still reports armed — the turn IS on the wire and the caller's
+		// withhold is the correct posture for this cycle either way — but the
+		// orphaned reply's fate differs by variant (PR #718 follow-up review):
+		// after a racing DELIBERATE close it latches on the ledgered id (the
+		// no-reopen shape, pinned by the races test); after a DISABLE the id
+		// was never ledgered and the reply re-fans as an ordinary stimulus
+		// into the now-manual channel — SetAutonomous's documented posture,
+		// not a reopen (the operator holds the floor).
 		r.clearActivity(msg.ChannelID, chairID)
 	}
 	r.logger.Info("channels: bound crossed; synthesis turn dispatched to chair",
@@ -374,7 +387,7 @@ func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
 	// ordering DrainPendingFanout's synthesisWG-then-fanoutWG wait relies on).
 	defer r.synthesisWG.Done()
 	defer r.recoverFanout("synthesis_timeout", pending.stimulus.ChannelID, pending.stimulus.ID)
-	// Fresh enabled read BEFORE interactionMu (the resolver's one-governance-
+	// Fresh config read BEFORE interactionMu (the resolver's one-governance-
 	// mutex-at-a-time posture), consumed inside the CAS below (PR #718 review):
 	// SetAutonomous's disable disarms armed closes, but an arm CREATED after
 	// that disarm swept — the stale-snapshot window maybeBoundedClose's fresh
@@ -382,7 +395,7 @@ func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
 	// operator has taken manual control: closing now would terminate a live
 	// human-steered discussion, the exact failure the disable disarm exists to
 	// prevent.
-	enabled := r.AutonomousFor(pending.stimulus.ChannelID).Enabled
+	fresh := r.AutonomousFor(pending.stimulus.ChannelID)
 	r.interactionMu.Lock()
 	entry := r.openInteractions[pending.stimulus.ChannelID]
 	if entry == nil || entry.pendingSynthesis != pending || pending.consumed {
@@ -391,7 +404,7 @@ func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
 		r.interactionMu.Unlock()
 		return
 	}
-	if !enabled {
+	if !fresh.Enabled {
 		// Abandon the close outright (full disarm, not just consumed): the
 		// channel is manual now, so the withhold must not outlive this fire —
 		// SetAutonomous's own posture, "leaves the interaction open under the
@@ -402,6 +415,32 @@ func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
 		r.logger.Warn("channels: synthesis timeout fired on a disabled channel; leaving the interaction open under manual control",
 			zap.String("channel_id", pending.stimulus.ChannelID),
 			zap.String("interaction_id", pending.interactionID))
+		return
+	}
+	if pending.trigger == structuralTrigger && entry.roundCount < fresh.MaxRounds {
+		// Mid-arm `max_rounds` RAISE (PR #718 follow-up review): the
+		// fresh-config contract (maybeBoundedClose) promises the bound is only
+		// ever ACTED on against the CURRENT config — Enabled AND MaxRounds —
+		// and its tail re-check covers raises up to the arm; this fire is the
+		// other action point, and a raise does NOT disarm (only a disable
+		// does). The tally froze at the crossed round (the armed withhold
+		// blocks advances), so tally < fresh bound means the operator extended
+		// the discussion: abandon exactly like the disable branch above — the
+		// withhold lifts, the tally survives, and the next round's tail
+		// re-crosses against the raised bound. The COST half stays on its
+		// per-interaction snapshot (the documented wallet-consistent
+		// immutability), and the REPLY path deliberately keeps its close: the
+		// synthesis artifact is already in hand, closing with it is §D's whole
+		// point, and the raise governs the successor interaction.
+		crossedRound := entry.roundCount
+		entry.pendingSynthesis = nil
+		r.interactionMu.Unlock()
+		r.clearActivity(pending.stimulus.ChannelID, pending.chairID)
+		r.logger.Warn("channels: synthesis timeout fired after a max_rounds raise; leaving the discussion open under the raised bound",
+			zap.String("channel_id", pending.stimulus.ChannelID),
+			zap.String("interaction_id", pending.interactionID),
+			zap.Int("crossed_round", crossedRound),
+			zap.Int("raised_max_rounds", fresh.MaxRounds))
 		return
 	}
 	// Consume WITHOUT clearing (the claim path's posture, PR #718 review): the

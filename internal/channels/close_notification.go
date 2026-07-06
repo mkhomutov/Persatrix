@@ -77,7 +77,7 @@ func (r *ChannelRouter) finalizeInteractionClose(ctx context.Context, msg Channe
 	if trigger == structuralTrigger || trigger == costTrigger {
 		boundedTrigger = trigger
 	}
-	r.notifyInteractionClose(ctx, msg, ct, n.excludeSender, boundedTrigger, n.redelivery, n.undelivered)
+	r.notifyInteractionClose(ctx, msg, ct, boundedTrigger, n)
 }
 
 // closeNotify bundles the two per-cause choices [ChannelRouter.finalizeInteractionClose]
@@ -138,8 +138,12 @@ func (r *ChannelRouter) recordInteractionClosedMetric(ctx context.Context, ct Ch
 // ([ChannelRouter.processEndVote]) and the RFC 0052 bounded close
 // ([ChannelRouter.boundedClose]).
 //
-// `excludeSender` selects the recipient set the two causes need, and the
-// distinction is load-bearing (bounded-close deep review):
+// The per-cause choices ride in `n` ([closeNotify]) end to end — the fan
+// reads them off the same named fields [ChannelRouter.finalizeInteractionClose]
+// received, never re-exploded into positional bools a silent transposition
+// could swap (PR #718 follow-up review; the struct exists for exactly that
+// hazard). `n.excludeSender` selects the recipient set the two causes need,
+// and the distinction is load-bearing (bounded-close deep review):
 //   - END-VOTE (`excludeSender` true): `msg` is the closing vote and its
 //     sender's own vote action ALREADY closed its local tracker, so
 //     re-notifying it is redundant — skip it.
@@ -203,16 +207,17 @@ func (r *ChannelRouter) recordInteractionClosedMetric(ctx context.Context, ct Ch
 // interaction). `threadParentSenderID` is deliberately empty: it exists
 // to serve receiver-side directedness decisions, and a marked event
 // never reaches them — the gate refuses it pre-LLM (CP3).
-// `closeTrigger` / `redelivery` (PR 4b-ii) are the two typed wire fields the
+// `closeTrigger` / `n.redelivery` (PR 4b-ii) are the two typed wire fields the
 // fan stamps on every recipient's envelope: the truthful bounded-close cause
-// ("" on the end-vote path — see [ChannelRouter.finalizeInteractionClose]) and
-// the already-delivered-live marker that lets receivers skip the duplicate
+// ("" on the end-vote path — derived in [ChannelRouter.finalizeInteractionClose],
+// which is why it rides beside `n` rather than in it) and the
+// already-delivered-live marker that lets receivers skip the duplicate
 // final-turn ingest on a floor-path bounded close. The marker is resolved
-// PER RECIPIENT: a member in `undelivered` (its live dispatch of the closing
+// PER RECIPIENT: a member in `n.undelivered` (its live dispatch of the closing
 // message failed inside the round) gets redelivery=false — this notification
 // is its SOLE delivery, and the skip would drop its closing turn outright
 // (PR #718 review; see [closeNotify.undelivered]).
-func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType, excludeSender bool, closeTrigger string, redelivery bool, undelivered map[string]struct{}) {
+func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType, closeTrigger string, n closeNotify) {
 	notifyCtx := context.WithoutCancel(ctx)
 	r.fanoutWG.Add(1)
 	go func() {
@@ -235,7 +240,7 @@ func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelM
 			// `_DISPOSITION_ALIASES`): identity for store-canonical rows,
 			// but CP1 defines the recipient set as the set fanout serves,
 			// so the two predicates must not diverge (PR #613 review).
-			if (excludeSender && m.ParticipantID == msg.SenderID) || m.RespondPolicy.Normalize() == RespondNever {
+			if (n.excludeSender && m.ParticipantID == msg.SenderID) || m.RespondPolicy.Normalize() == RespondNever {
 				continue
 			}
 			notification := msg
@@ -255,8 +260,8 @@ func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelM
 			// Per-recipient redelivery resolve (PR #718 review): the round
 			// delivered live to everyone EXCEPT the undelivered set, whose
 			// notification is their sole delivery and must keep the ingest.
-			recipientRedelivery := redelivery
-			if _, missed := undelivered[recipient.ParticipantID]; missed {
+			recipientRedelivery := n.redelivery
+			if _, missed := n.undelivered[recipient.ParticipantID]; missed {
 				recipientRedelivery = false
 			}
 			sem <- struct{}{}

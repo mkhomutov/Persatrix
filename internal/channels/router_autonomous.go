@@ -78,9 +78,13 @@ func (r *ChannelRouter) SetAutonomous(channelID string, a AutonomousConfig) {
 func (r *ChannelRouter) PurgeChannelInteraction(channelID string) {
 	r.interactionMu.Lock()
 	entry := r.openInteractions[channelID]
-	var chairID string
-	if entry != nil && entry.pendingSynthesis != nil {
-		chairID = entry.pendingSynthesis.chairID
+	var chairID, openID, retiredID string
+	if entry != nil {
+		openID = entry.id
+		retiredID = entry.retired
+		if entry.pendingSynthesis != nil {
+			chairID = entry.pendingSynthesis.chairID
+		}
 	}
 	timerStopped := entry.disarmPendingSynthesisLocked() // nil-tolerant receiver.
 	delete(r.openInteractions, channelID)
@@ -88,6 +92,22 @@ func (r *ChannelRouter) PurgeChannelInteraction(channelID string) {
 	// No reply/timeout will re-enter to clear the chair's "thinking" mark once
 	// abandoned here — the [ChannelRouter.disarmChannelSynthesis] posture.
 	r.releaseSynthesisArm(channelID, chairID, timerStopped)
+	// Discharge BOTH generations' per-interaction governance state (PR #718
+	// follow-up review): the reply counters, end-vote tally + tombstone, and
+	// budget snapshot are otherwise pruned only by the one-generation-deferred
+	// seams — [ChannelRouter.markInteractionClosed] and the resolver's idle
+	// rotation — which key off the entry this purge just deleted, so neither
+	// could ever fire again for these ids and their rows stayed resident for
+	// the process lifetime (unbounded growth across create-discuss-delete
+	// cycles). Immediate discharge is safe ONLY on this path: the channel is
+	// already gone from the store, so no commit can race the close the
+	// tombstone deferral exists to suppress. Each discard takes its own leaf
+	// mutex and tolerates "" (a fresh entry with no retiree).
+	for _, id := range []string{openID, retiredID} {
+		r.DiscardInteractionReplyBudget(id)
+		r.DiscardInteractionEndVotes(id)
+		r.DiscardInteractionBudget(id)
+	}
 }
 
 // AutonomousFor returns the resolved RFC 0052 autonomous block for `channelID`. A

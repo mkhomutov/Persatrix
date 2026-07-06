@@ -5,8 +5,15 @@ package channels
 // follow-up review's consumed-arm machinery pushed it past the 500-line review
 // cap (the synthesis_disarm.go precedent). synthesis_close.go keeps the
 // arm/timeout LIFECYCLE; this file holds how the chair's closing reply is
-// recognised on the wire — the marker key, its tolerant reader, and the
-// commit-path claim that consumes the arm.
+// recognised on the wire — the marker key, its tolerant reader, the
+// commit-path claim that consumes the arm, and the close that runs on the
+// claimed reply.
+
+import (
+	"context"
+
+	"go.uber.org/zap"
+)
 
 // synthesisReplyMetadataKey is the wire-level publish-metadata flag the
 // persona runtime stamps on every same-channel publish authored IN REPLY TO
@@ -101,13 +108,29 @@ func (r *ChannelRouter) claimSynthesisReply(msg ChannelMessage, inboundClaim str
 		// traffic the still-standing withhold owns, never a second close.
 		return nil
 	}
-	// Stop the timeout net; when Stop()==true we PREVENTED its fire, so this
-	// path owns the timer's synthesisWG Done() (PR #718 review finding 1). A false
-	// return means onSynthesisTimeout already fired and will Done() itself —
-	// releasing here too would double-Done (its own consumed check under this
-	// mutex then makes it a close no-op, so the reply still owns the close).
-	if pending.timer != nil && pending.timer.Stop() {
-		r.synthesisWG.Done()
+	// Stop the timeout net — and TRANSFER the arm's synthesisWG count to the
+	// caller instead of releasing it here (PR #718 follow-up review). The
+	// caller's close (boundedClose → notifyInteractionClose) runs its
+	// fanoutWG.Add(1)s on the publishing goroutine, which holds no fanoutWG
+	// count of its own, and [ChannelRouter.DrainPendingFanout]'s ordering
+	// proof needs every arm-originated Add registered before synthesisWG.Wait
+	// returns; a Done() here — before the close — let those Adds race the
+	// drain's fanoutWG.Wait from zero, the documented WaitGroup misuse the
+	// timeout path avoids by deferring its Done past its close.
+	// [ChannelRouter.closeOnSynthesisReply] releases the count after the
+	// teardown. Two shapes, one count held on return:
+	//   - Stop()==true — we PREVENTED the fire, inheriting the timer's count
+	//     (the fire path never runs, so it never Done()s).
+	//   - Otherwise (already fired, or not yet armed) — Add(1) under this
+	//     mutex, which is never an Add-from-zero racing the drain's Wait: a
+	//     fired timer's onSynthesisTimeout cannot pass its consumed check
+	//     until this mutex releases, so its deferred Done still holds a
+	//     count; and a pre-timer claim serializes against the drain's disarm
+	//     sweep on this same mutex, so its Add happens-before the sweep
+	//     completes and the Wait begins (a claim serialized after the sweep
+	//     finds the arm gone above and never reaches here).
+	if pending.timer == nil || !pending.timer.Stop() {
+		r.synthesisWG.Add(1)
 	}
 	// Consume WITHOUT clearing the pointer (PR #718 review): see the field doc —
 	// the armed withhold and the arm CAS must hold through the claim→tombstone
@@ -116,4 +139,29 @@ func (r *ChannelRouter) claimSynthesisReply(msg ChannelMessage, inboundClaim str
 	// write, handing the withhold to the latch atomically.
 	pending.consumed = true
 	return pending
+}
+
+// closeOnSynthesisReply runs the commit-path close for a claimed synthesis
+// reply — the body of [ChannelRouter.publishCommit]'s claim branch: notify any
+// parked reply waiter (a closing reply must never starve a floor turn), run
+// the bounded teardown with the reply as the closing message (sole delivery —
+// redelivery=false, so no per-recipient miss ledger applies), and release the
+// arm's synthesisWG count LAST — after the teardown's notifyInteractionClose
+// fanoutWG.Add(1)s — so [ChannelRouter.DrainPendingFanout]'s
+// synthesisWG-then-fanoutWG ordering holds for this path exactly as it does
+// for the timeout fire, whose Done is deferred first for the same reason
+// ([ChannelRouter.onSynthesisTimeout]). The deferred release also covers a
+// panicking teardown: a leaked count would hang every later drain. A lost
+// tombstone CAS means a racing closer beat the reply — the synthesis stays
+// committed history, the 4b-i degraded artifact shape.
+func (r *ChannelRouter) closeOnSynthesisReply(ctx context.Context, msg ChannelMessage, ct ChannelType, pending *pendingSynthesisClose) {
+	defer r.synthesisWG.Done()
+	r.waiter.Notify(msg)
+	if r.boundedClose(ctx, msg, ct, pending.interactionID, pending.trigger, false, nil) {
+		r.recordSynthesisTurn(ctx, ct, synthesisTurnClosedOnReply)
+		return
+	}
+	r.logger.Debug("channels: synthesis reply lost the closing race; close stands by the winner",
+		zap.String("channel_id", msg.ChannelID),
+		zap.String("interaction_id", pending.interactionID))
 }

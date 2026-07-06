@@ -415,3 +415,48 @@ func TestResolverFreshMint_RoutesArmedDisarmThroughRelease(t *testing.T) {
 	assert.True(t, router.DrainPendingFanout(ctx),
 		"the stopped timer's synthesisWG count was released — the drain settles instead of hanging forever")
 }
+
+// TestSynthesisClose_ReplyClaimHoldsArmCountThroughClose — PR #718 review
+// follow-up: the commit-path claim released the arm's synthesisWG count the
+// moment it Stop()ped the timer — BEFORE the caller's close ran — so the
+// close's notifyInteractionClose fanoutWG.Add(1)s (on the publishing
+// goroutine, which holds no fanoutWG count) could race DrainPendingFanout's
+// fanoutWG.Wait from zero: the exact Add-vs-Wait misuse the drain's ordering
+// proof rules out for the timeout path, whose Done is deferred past its close.
+// The pin: the claim TRANSFERS the count to the caller (closeOnSynthesisReply
+// releases it after the close), so synthesisWG stays held across the
+// claim→close window.
+func TestSynthesisClose_ReplyClaimHoldsArmCountThroughClose(t *testing.T) {
+	router, _, ch, _ := synthesisCloseHarness(t, 2)
+
+	tick(t, router, ch)
+	openID, _, _ := router.openInteractionEscalationState(ch)
+	tick(t, router, ch) // bound → armed
+
+	// White-box claim (the publishCommit branch's first half): the arm's count
+	// must ride the returned pending until the caller's close completes.
+	msg := ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "iron-fox", Content: "synthesis",
+		Metadata: map[string]any{
+			interactionIDMetadataKey:  openID,
+			synthesisReplyMetadataKey: true,
+		},
+	}
+	pending := router.claimSynthesisReply(msg, openID, router.AutonomousFor(ch))
+	require.NotNil(t, pending, "precondition: the reply claims the arm")
+
+	waited := make(chan struct{})
+	go func() { router.synthesisWG.Wait(); close(waited) }()
+	select {
+	case <-waited:
+		t.Fatal("synthesisWG released at claim time — the close's fanoutWG.Adds can race the drain's Wait from zero")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	router.synthesisWG.Done() // the caller's post-close release
+	select {
+	case <-waited:
+	case <-time.After(time.Second):
+		t.Fatal("the transferred count was never releasable")
+	}
+}

@@ -290,8 +290,14 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	// had), and the BUDGET half stays on its per-interaction snapshot — its
 	// mid-interaction immutability is the documented wallet-consistent design
 	// (interaction_budget.go's snapshot-at-open). The residual
-	// read-then-disable sliver (microseconds, no floor round inside it) is
-	// backstopped by [ChannelRouter.onSynthesisTimeout]'s own enabled re-check.
+	// read-then-disable sliver (microseconds, no floor round inside it) AND
+	// the armed window behind this tail (up to the full reply timeout, which
+	// a raise does not disarm) are backstopped by
+	// [ChannelRouter.onSynthesisTimeout]'s own fresh re-check of both halves —
+	// enabled, and the structural bound against a mid-arm max_rounds raise
+	// (PR #718 follow-up review). The REPLY path deliberately re-checks
+	// neither: the synthesis artifact is in hand, closing with it is §D's
+	// point, and the raise governs the successor interaction.
 	fresh := r.AutonomousFor(msg.ChannelID)
 	if !fresh.Enabled {
 		return false, false

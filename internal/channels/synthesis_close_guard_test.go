@@ -135,6 +135,110 @@ func TestSynthesisClose_ChannelDeleteDisarmsAndForgetsPendingClose(t *testing.T)
 		"the stopped timer must not close an interaction whose channel is gone")
 }
 
+// TestSynthesisClose_PurgeDischargesGovernanceState — PR #718 review
+// follow-up: PurgeChannelInteraction dropped the openInteractions entry but
+// never fired the per-interaction discard trio, and those maps are pruned ONLY
+// by the one-generation-deferred seams (markInteractionClosed, the resolver's
+// idle rotation) that key off the very entry the purge deletes — so a channel
+// deleted mid-discussion stranded its open id's (and its pending retiree's)
+// reply counters, end-vote tally, tombstone, and budget snapshot for the
+// process lifetime: unbounded router growth across create-discuss-delete
+// cycles. The pin: after the purge, every governance map has dropped BOTH
+// generations.
+func TestSynthesisClose_PurgeDischargesGovernanceState(t *testing.T) {
+	router, _, ch, _ := synthesisCloseHarness(t, 2)
+
+	tick(t, router, ch)
+	openID, _, tracked := router.openInteractionEscalationState(ch)
+	require.True(t, tracked, "precondition: an open committed interaction")
+
+	// A retired predecessor whose deferred discharge is still pending, plus
+	// live governance rows for both generations — the state a mid-discussion
+	// delete strands.
+	retiredID := uuid.NewString()
+	router.interactionMu.Lock()
+	router.openInteractions[ch].retired = retiredID
+	router.interactionMu.Unlock()
+	router.replyBudgetMu.Lock()
+	router.replyCounts[openID] = map[string]int{"ember-owl": 1}
+	router.replyCounts[retiredID] = map[string]int{"ember-owl": 2}
+	router.replyBudgetMu.Unlock()
+	router.endVoteMu.Lock()
+	router.endVotes[openID] = &interactionEndVotes{}
+	router.closedInteractions[retiredID] = struct{}{}
+	router.endVoteMu.Unlock()
+	router.budgetMu.Lock()
+	router.interactionBudgetSnapshots[openID] = 1000
+	router.interactionBudgetSnapshots[retiredID] = 1000
+	router.budgetMu.Unlock()
+
+	router.PurgeChannelInteraction(ch)
+
+	router.replyBudgetMu.Lock()
+	_, openCounts := router.replyCounts[openID]
+	_, retiredCounts := router.replyCounts[retiredID]
+	router.replyBudgetMu.Unlock()
+	assert.False(t, openCounts, "the open id's reply counters are discharged with the entry")
+	assert.False(t, retiredCounts, "the retiree's deferred reply-counter discharge fires now — no later close can")
+	router.endVoteMu.Lock()
+	_, votes := router.endVotes[openID]
+	_, tomb := router.closedInteractions[retiredID]
+	router.endVoteMu.Unlock()
+	assert.False(t, votes, "the open id's end-vote tally is discharged")
+	assert.False(t, tomb, "the retiree's tombstone is discharged — no commit can race a deleted channel's close")
+	router.budgetMu.Lock()
+	_, openSnap := router.interactionBudgetSnapshots[openID]
+	_, retiredSnap := router.interactionBudgetSnapshots[retiredID]
+	router.budgetMu.Unlock()
+	assert.False(t, openSnap, "the open id's budget snapshot is discharged")
+	assert.False(t, retiredSnap, "the retiree's budget snapshot is discharged")
+}
+
+// TestSynthesisClose_TimeoutAbandonsCloseAfterMaxRoundsRaise — PR #718 review
+// follow-up: maybeBoundedClose's fresh-config contract says the bound is only
+// ever ACTED on against the CURRENT config — Enabled AND MaxRounds — and its
+// tail re-check covers raises up to the arm. The timeout net is the OTHER
+// action point, and it re-checked only Enabled: a `max_rounds` raise landing
+// inside the armed window (which the raise does NOT disarm — only a disable
+// does) was silently ignored, and a lost chair reply force-closed the
+// discussion against the old bound up to the full reply timeout after the
+// operator extended it. The pin: the fire abandons (the disable branch's
+// posture), the interaction stays open with the withhold lifted, and the
+// frozen tally survives to resume under the raised bound.
+func TestSynthesisClose_TimeoutAbandonsCloseAfterMaxRoundsRaise(t *testing.T) {
+	router, _, ch, reader := synthesisCloseHarness(t, 2)
+	router.synthesisTimeout = 20 * time.Millisecond
+
+	tick(t, router, ch)
+	openID, _, _ := router.openInteractionEscalationState(ch)
+	tick(t, router, ch) // bound → armed
+
+	router.interactionMu.Lock()
+	armed := router.openInteractions[ch].pendingSynthesis != nil
+	router.interactionMu.Unlock()
+	require.True(t, armed, "precondition: the close is armed")
+
+	// The operator raises the bound mid-arm; enabled stays true, so nothing
+	// disarms — only the fire-time re-check can honour the raise.
+	router.SetAutonomous(ch, AutonomousConfig{
+		Enabled: true, MaxRounds: 50, Convener: "ember-owl",
+		Topic: "Adopt a monorepo?", Goal: "A synthesized recommendation.",
+	})
+
+	require.Never(t, func() bool {
+		return closedCount(t, reader, structuralTrigger) > 0 || closedCount(t, reader, costTrigger) > 0
+	}, 150*time.Millisecond, 10*time.Millisecond,
+		"the raise extended the discussion — the net must not close it against the old bound")
+
+	router.interactionMu.Lock()
+	entry := router.openInteractions[ch]
+	stillArmed := entry != nil && entry.pendingSynthesis != nil
+	stillOpen := entry != nil && entry.id == openID
+	router.interactionMu.Unlock()
+	assert.False(t, stillArmed, "the fire abandons the arm — the withhold must not outlive it")
+	assert.True(t, stillOpen, "the interaction stays open and resumes under the raised bound")
+}
+
 // TestSynthesisClose_EntryMovedOnFallsThroughNotWithheld — PR #718 review
 // finding 4: when the resolver entry rotates or closes between the bound's
 // tally advance and the arm, maybeArmSynthesisClose must report

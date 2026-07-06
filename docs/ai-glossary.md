@@ -858,7 +858,7 @@ the goal-directed chair synthesis turn (close-on-reply).
   §D "always produce an artifact"). The chair proposes it; the **orchestrator**
   runs the close on the reply (CE4).
 - **Example:** "The bound fired, so the chair produced the closing synthesis and
-  the room closed on it."
+  the discussion closed on it."
 
 ### Synthesis Turn
 - **Aliases:** "chair synthesis turn".
