@@ -25,8 +25,11 @@ package channels
 //  3. The chair's claimed reply — the publish that echoes the armed id AND
 //     carries the `synthesis_reply` marker the persona stamps off the
 //     dispatched `synthesis_turn` marker (see [synthesisReplyMetadataKey]) —
-//     is intercepted at the fanout HEAD
-//     ([ChannelRouter.claimSynthesisReply]) and handed to the 4b-i teardown as
+//     is intercepted on the COMMIT path ([ChannelRouter.publishCommit], before
+//     the end-vote hook, so a reply cast AS a vote — the shape the directive
+//     invites — cannot be spam-suppressed or relabelled `end_votes` first;
+//     PR #718 review) via [ChannelRouter.claimSynthesisReply] and handed to
+//     the 4b-i teardown as
 //     the CLOSING MESSAGE: the close-notification fan delivers the synthesis
 //     to every member (sole delivery — redelivery=false) with the truthful
 //     structural/cost trigger, so it lands as each record's final turn and the
@@ -117,7 +120,24 @@ type pendingSynthesisClose struct {
 	// live (the floor path ran its round before the tail; the concurrent path
 	// withholds) — it becomes the fallback notification's redelivery marker.
 	stimulusDelivered bool
-	timer             *time.Timer
+	// stimulusUndelivered lists the member ids whose LIVE delivery of the
+	// bounding stimulus failed inside the floor round (see
+	// [liveDeliveryFailures]) — the timeout net's fallback notification must
+	// downgrade exactly those members to sole delivery, or their ingest-skip
+	// drops a closing turn they never received (PR #718 review).
+	stimulusUndelivered map[string]struct{}
+	// consumed flips when the arm's close is DECIDED — the reply claim or the
+	// timeout fire won the identity CAS — but the teardown has not yet reached
+	// [ChannelRouter.markInteractionClosed]. The pointer deliberately STAYS on
+	// the entry through that window: clearing it at claim time reopened the
+	// armed withhold and the arm CAS for the claim→tombstone gap, where a
+	// straggler stamped with the still-open id could advance the tally past
+	// the bound AGAIN and dispatch a duplicate synthesis directive (PR #718
+	// review). markInteractionClosed clears the pointer in the same critical
+	// section that writes the no-reopen ledger, so the withhold hands over to
+	// the latch atomically. Guarded by interactionMu.
+	consumed bool
+	timer    *time.Timer
 }
 
 // synthesisArmOutcome is [ChannelRouter.maybeArmSynthesisClose]'s verdict.
@@ -185,6 +205,7 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 	channelSize int,
 	interactionID, trigger string,
 	stimulusDelivered bool,
+	undelivered map[string]struct{},
 	a AutonomousConfig,
 ) synthesisArmOutcome {
 	chairID := r.escalationChairFor(msg.ChannelID)
@@ -210,12 +231,13 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 	}
 
 	pending := &pendingSynthesisClose{
-		interactionID:     interactionID,
-		trigger:           trigger,
-		chairID:           chairID,
-		ct:                ct,
-		stimulus:          msg,
-		stimulusDelivered: stimulusDelivered,
+		interactionID:       interactionID,
+		trigger:             trigger,
+		chairID:             chairID,
+		ct:                  ct,
+		stimulus:            msg,
+		stimulusDelivered:   stimulusDelivered,
+		stimulusUndelivered: undelivered,
 	}
 	// Arm under interactionMu — the CAS half: two sibling bound-crossing
 	// fanouts can both pass the tally advance before either arms; exactly one
@@ -268,6 +290,7 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 	// [ChannelRouter.markInteractionClosed], and a timer for a dead arm would
 	// fire into its identity check for nothing.
 	r.interactionMu.Lock()
+	armStands := false
 	if entry := r.openInteractions[msg.ChannelID]; entry != nil && entry.pendingSynthesis == pending {
 		// Register the timeout net on synthesisWG BEFORE arming the timer (PR #718
 		// review finding 1) so the shutdown drain can bound the otherwise-invisible
@@ -281,8 +304,22 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 		// time (Stop()==true) — mutually exclusive, so the count balances once.
 		r.synthesisWG.Add(1)
 		pending.timer = time.AfterFunc(r.synthesisTimeout, func() { r.onSynthesisTimeout(pending) })
+		armStands = true
 	}
 	r.interactionMu.Unlock()
+	if !armStands {
+		// A racing deliberate close (or an RFC 0050 disable) disarmed the arm
+		// while the dispatch above was in flight. Its releaseSynthesisArm ran
+		// BEFORE markActivity set the chair's "thinking" mark, so that clear
+		// was a no-op — and with no timer armed and the reply latch-suppressed,
+		// nothing else re-enters to clear it: the chair would strand as
+		// composing for the whole activity TTL (PR #718 review). Clear it here,
+		// the mirror of the failed-dispatch unwind above. The close itself is
+		// the racer's (or, for a disable, deliberately not owed), so this still
+		// reports armed: the turn IS on the wire and the orphaned reply
+		// latches — the caller's withhold is the correct posture either way.
+		r.clearActivity(msg.ChannelID, chairID)
+	}
 	r.logger.Info("channels: bound crossed; synthesis turn dispatched to chair",
 		zap.String("channel_id", msg.ChannelID),
 		zap.String("interaction_id", interactionID),
@@ -290,89 +327,6 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 		zap.String("escalation_chair_id", chairID))
 	r.recordSynthesisTurn(ctx, ct, synthesisTurnDispatched)
 	return synthesisArmed
-}
-
-// synthesisReplyMetadataKey is the wire-level publish-metadata flag the
-// persona runtime stamps on every same-channel publish authored IN REPLY TO
-// the synthesis directive: `DispatchContext.for_event` derives it from the
-// dispatched `synthesis_turn` marker and `same_channel_claim` stamps it
-// beside the interaction-id claim (agents/channel_wire_metadata.py; the key
-// literal is pinned by the cross-language drift test). Centralised like
-// [endVoteMetadataKey], its metadata-bag vehicle sibling.
-const synthesisReplyMetadataKey = "synthesis_reply"
-
-// readSynthesisReply reports whether a publish metadata bag flags the message
-// as a reply to the synthesis directive. Tolerant like the other wire readers
-// ([readEndInteractionVote] / [readInteractionID]): absent or non-bool reads
-// false — an unmarked publish is ordinary traffic, never a closing artifact.
-func readSynthesisReply(metadata map[string]any) bool {
-	if metadata == nil {
-		return false
-	}
-	v, ok := metadata[synthesisReplyMetadataKey].(bool)
-	return ok && v
-}
-
-// claimSynthesisReply is the fanout-HEAD intercept: when `msg` is the chair's
-// reply claiming the armed interaction, consume the arm (stop the timer) and
-// return it — the caller closes with `msg` as the closing artifact and skips
-// the entire fanout (no round, no concurrent dispatch, no revival tails: a
-// fanned synthesis would draw replies into the closed discussion, the reopen
-// §D forbids).
-//
-// The claim requires THREE conjuncts: sender == chair, claim == the armed id,
-// AND the [synthesisReplyMetadataKey] marker (PR #718 review). Sender+claim
-// alone cannot discriminate BY CONSTRUCTION: the interaction id spans every
-// round of the discussion and every agent reply echoes its dispatched-under
-// id (the 4b-i rail), so an ORDINARY chair reply from an earlier round still
-// in flight when the bound crossed (concurrent-path replies re-enter Publish
-// on detached goroutines) matches both — and would be fanned to every member
-// as the goal-directed synthesis while the REAL synthesis reply lands
-// post-close in the no-reopen latch, silently discarded. Only the persona
-// knows which of its publishes replies to the synthesis directive, so it says
-// so on the wire; the marker rides BESIDE the interaction-id claim rather than
-// replacing it with a synthesis nonce, because the id claim is load-bearing
-// for the orphan posture (a disarmed arm's late reply must latch on the
-// closed id — a nonce the ledger never held would mint fresh and REOPEN).
-// The marker is a correlation discriminator, not an auth token: sender
-// identity is the publish boundary's concern, and a forged marker without
-// sender == chair still fails the claim.
-//
-// Anything else — an unmarked chair reply from an earlier round, a straggler
-// responder claiming the armed id, an unstamped operator publish, a non-chair
-// sender — returns nil and the armed withhold in
-// [ChannelRouter.advanceBoundedCloseRound] /
-// [ChannelRouter.stimulusOutlivedClose] owns it. A producer that never stamps
-// the marker (a pre-4b-ii agent, gate drift) degrades to the timeout net —
-// the documented no-reply branch, sized for exactly this. Runs before the
-// head staleness check; nil for every publish on an unarmed channel.
-func (r *ChannelRouter) claimSynthesisReply(msg ChannelMessage, a AutonomousConfig) *pendingSynthesisClose {
-	if !a.Enabled {
-		return nil // OQ #2: human channels never arm; skip the mutex entirely.
-	}
-	claim := readInteractionID(msg.Metadata)
-	if claim == "" || !readSynthesisReply(msg.Metadata) {
-		return nil
-	}
-	r.interactionMu.Lock()
-	defer r.interactionMu.Unlock()
-	entry := r.openInteractions[msg.ChannelID]
-	if entry == nil || entry.pendingSynthesis == nil {
-		return nil
-	}
-	pending := entry.pendingSynthesis
-	if msg.SenderID != pending.chairID || claim != pending.interactionID {
-		return nil
-	}
-	// Stop the timeout net; when Stop()==true we PREVENTED its fire, so this
-	// path owns the timer's synthesisWG Done() (PR #718 review finding 1). A false
-	// return means onSynthesisTimeout already fired and will Done() itself —
-	// releasing here too would double-Done.
-	if pending.timer != nil && pending.timer.Stop() {
-		r.synthesisWG.Done()
-	}
-	entry.pendingSynthesis = nil
-	return pending
 }
 
 // onSynthesisTimeout is the timeout net: the chair's reply never arrived, so
@@ -394,13 +348,39 @@ func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
 	// ordering DrainPendingFanout's synthesisWG-then-fanoutWG wait relies on).
 	defer r.synthesisWG.Done()
 	defer r.recoverFanout("synthesis_timeout", pending.stimulus.ChannelID, pending.stimulus.ID)
+	// Fresh enabled read BEFORE interactionMu (the resolver's one-governance-
+	// mutex-at-a-time posture), consumed inside the CAS below (PR #718 review):
+	// SetAutonomous's disable disarms armed closes, but an arm CREATED after
+	// that disarm swept — the stale-snapshot window maybeBoundedClose's fresh
+	// re-check narrows to microseconds — still reaches this fire, and the
+	// operator has taken manual control: closing now would terminate a live
+	// human-steered discussion, the exact failure the disable disarm exists to
+	// prevent.
+	enabled := r.AutonomousFor(pending.stimulus.ChannelID).Enabled
 	r.interactionMu.Lock()
 	entry := r.openInteractions[pending.stimulus.ChannelID]
-	if entry == nil || entry.pendingSynthesis != pending {
+	if entry == nil || entry.pendingSynthesis != pending || pending.consumed {
+		// The reply claimed first (consumed), a racing close disarmed, or the
+		// entry rotated — the arm is not this fire's to close.
 		r.interactionMu.Unlock()
 		return
 	}
-	entry.pendingSynthesis = nil
+	if !enabled {
+		// Abandon the close outright (full disarm, not just consumed): the
+		// channel is manual now, so the withhold must not outlive this fire —
+		// SetAutonomous's own posture, "leaves the interaction open under the
+		// operator's manual control".
+		entry.pendingSynthesis = nil
+		r.interactionMu.Unlock()
+		r.clearActivity(pending.stimulus.ChannelID, pending.chairID)
+		r.logger.Warn("channels: synthesis timeout fired on a disabled channel; leaving the interaction open under manual control",
+			zap.String("channel_id", pending.stimulus.ChannelID),
+			zap.String("interaction_id", pending.interactionID))
+		return
+	}
+	// Consume WITHOUT clearing (the claim path's posture, PR #718 review): the
+	// withhold holds through this teardown too; markInteractionClosed clears.
+	pending.consumed = true
 	r.interactionMu.Unlock()
 
 	// This timeout won the identity CAS, so it owns the teardown — and the
@@ -420,7 +400,7 @@ func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
 		zap.String("interaction_id", pending.interactionID),
 		zap.String("trigger", pending.trigger),
 		zap.String("escalation_chair_id", pending.chairID))
-	if r.boundedClose(ctx, pending.stimulus, pending.ct, pending.interactionID, pending.trigger, pending.stimulusDelivered) {
+	if r.boundedClose(ctx, pending.stimulus, pending.ct, pending.interactionID, pending.trigger, pending.stimulusDelivered, pending.stimulusUndelivered) {
 		r.recordSynthesisTurn(ctx, pending.ct, synthesisTurnClosedOnTimeout)
 	}
 }

@@ -27,7 +27,9 @@ import pytest
 
 _TASK_PROTO = Path("proto/task.proto")
 _GRPC_DISPATCHER_GO = Path("internal/channels/grpc_dispatcher.go")
-_SYNTHESIS_CLOSE_GO = Path("internal/channels/synthesis_close.go")
+# The reply-recognition seam split out of synthesis_close.go at the size
+# cap (PR #718 follow-up review) — the marker constant lives with the claim.
+_SYNTHESIS_CLAIM_GO = Path("internal/channels/synthesis_claim.go")
 _CHANNEL_WIRE_METADATA_PY = Path("agents/channel_wire_metadata.py")
 _CLOSE_NOTIFICATION_PY = Path("agents/persona_runtime/close_notification.py")
 _PROMPT_ASSEMBLY_PY = Path("agents/persona_runtime/prompt_assembly.py")
@@ -130,7 +132,7 @@ def test_synthesis_reply_metadata_key_agrees() -> None:
     both suites stay green. Same metadata-bag vehicle and posture as
     ``end_interaction_vote``.
     """
-    go_value = _go_const(_SYNTHESIS_CLOSE_GO, "synthesisReplyMetadataKey")
+    go_value = _go_const(_SYNTHESIS_CLAIM_GO, "synthesisReplyMetadataKey")
     py_src = _CHANNEL_WIRE_METADATA_PY.read_text(encoding="utf-8")
     stamp = f'claim["{go_value}"] = True'
     if stamp not in py_src:

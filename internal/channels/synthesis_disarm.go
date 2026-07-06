@@ -76,10 +76,12 @@ func (r *ChannelRouter) releaseSynthesisArm(channelID, chairID string, timerStop
 }
 
 // disarmAllPendingSyntheses stops every channel's armed synthesis timeout net —
-// the shutdown-drain precondition ([ChannelRouter.DrainPendingFanout], PR #718
-// review finding 1). The timers run on detached runtime goroutines whose close
+// the shutdown-drain sweep ([ChannelRouter.DrainPendingFanout], PR #718
+// review finding 1), run AFTER the drain's first fanoutWG.Wait so no in-flight
+// fanout can arm a fresh timer behind it (the follow-up review's ordering fix).
+// The timers run on detached runtime goroutines whose close
 // work Add(1)s to fanoutWG, so an undisarmed timer could fire into (and race)
-// the drain's fanoutWG.Wait. Abandoning an armed-but-unreplied close is the
+// the drain's final fanoutWG.Wait. Abandoning an armed-but-unreplied close is the
 // deliberate shutdown trade — the §D artifact is best-effort across process
 // exit, and holding the drain budget open for a reply that may never come would
 // starve the real in-flight fanout deliveries. Each stopped timer releases its

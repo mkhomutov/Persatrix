@@ -97,9 +97,12 @@ func (e *openInteraction) latchedClaim(claim string) bool {
 // already spent, the exact cost the concurrent path's close-before-dispatch
 // ordering exists to avoid. Same scope and semantics as the tail read: gated on
 // `autonomous.enabled` (human channels never latch, byte-for-byte unchanged —
-// the cheap unstamped check runs first so human-typed traffic touches no
-// mutex), and DELIBERATE closes only — a divergence without a close (orphan
-// park, idle rotation) reads false and the round runs exactly as before.
+// the `!a.Enabled` early-out keeps human CHANNELS off the mutex; on an enabled
+// channel even UNSTAMPED traffic must take it, because the armed-synthesis
+// withhold below applies regardless of the stamp — PR #718 review retired the
+// old unstamped early-out for exactly that reason), and DELIBERATE closes only
+// — a divergence without a close (orphan park, idle rotation) reads false and
+// the round runs exactly as before.
 // `a` is the fanout's single per-publish [ChannelRouter.AutonomousFor]
 // snapshot (PR #716 review), shared with the tail trigger so the two reads
 // cannot be torn by a concurrent RFC 0050 apply; the scope gate itself stays

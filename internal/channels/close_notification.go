@@ -77,7 +77,7 @@ func (r *ChannelRouter) finalizeInteractionClose(ctx context.Context, msg Channe
 	if trigger == structuralTrigger || trigger == costTrigger {
 		boundedTrigger = trigger
 	}
-	r.notifyInteractionClose(ctx, msg, ct, n.excludeSender, boundedTrigger, n.redelivery)
+	r.notifyInteractionClose(ctx, msg, ct, n.excludeSender, boundedTrigger, n.redelivery, n.undelivered)
 }
 
 // closeNotify bundles the two per-cause choices [ChannelRouter.finalizeInteractionClose]
@@ -100,6 +100,15 @@ type closeNotify struct {
 	// skip the duplicate final-turn ingest. Always false on the end-vote path
 	// (the closing vote's own fanout is suppressed — sole delivery).
 	redelivery bool
+	// undelivered names the members whose LIVE delivery of the closing message
+	// failed inside the floor round (a per-recipient dispatch timeout/error —
+	// see [liveDeliveryFailures]): `redelivery` was per-close while delivery is
+	// per-recipient, so a member the round never reached skipped the
+	// notification ingest too and lost the closing turn from its record
+	// entirely (PR #718 review — pre-4b-ii, the notification re-ingest doubled
+	// as its delivery repair). The fan downgrades exactly these members to sole
+	// delivery. nil whenever `redelivery` is false.
+	undelivered map[string]struct{}
 }
 
 // recordInteractionClosedMetric bumps the `interaction_closed{channel_type,
@@ -198,8 +207,12 @@ func (r *ChannelRouter) recordInteractionClosedMetric(ctx context.Context, ct Ch
 // fan stamps on every recipient's envelope: the truthful bounded-close cause
 // ("" on the end-vote path — see [ChannelRouter.finalizeInteractionClose]) and
 // the already-delivered-live marker that lets receivers skip the duplicate
-// final-turn ingest on a floor-path bounded close.
-func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType, excludeSender bool, closeTrigger string, redelivery bool) {
+// final-turn ingest on a floor-path bounded close. The marker is resolved
+// PER RECIPIENT: a member in `undelivered` (its live dispatch of the closing
+// message failed inside the round) gets redelivery=false — this notification
+// is its SOLE delivery, and the skip would drop its closing turn outright
+// (PR #718 review; see [closeNotify.undelivered]).
+func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelMessage, ct ChannelType, excludeSender bool, closeTrigger string, redelivery bool, undelivered map[string]struct{}) {
 	notifyCtx := context.WithoutCancel(ctx)
 	r.fanoutWG.Add(1)
 	go func() {
@@ -239,6 +252,13 @@ func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelM
 			notification.Metadata = maps.Clone(msg.Metadata)
 			notification.Mentions = slices.Clone(msg.Mentions)
 			recipient := m
+			// Per-recipient redelivery resolve (PR #718 review): the round
+			// delivered live to everyone EXCEPT the undelivered set, whose
+			// notification is their sole delivery and must keep the ingest.
+			recipientRedelivery := redelivery
+			if _, missed := undelivered[recipient.ParticipantID]; missed {
+				recipientRedelivery = false
+			}
 			sem <- struct{}{}
 			r.fanoutWG.Add(1)
 			go func() {
@@ -249,7 +269,7 @@ func (r *ChannelRouter) notifyInteractionClose(ctx context.Context, msg ChannelM
 				if err := r.dispatchTo(notifyCtx, notification, ct, "", recipient, channelSize, nil, dispatchControl{
 					marker:          markerCloseNotification,
 					closeTrigger:    closeTrigger,
-					closeRedelivery: redelivery,
+					closeRedelivery: recipientRedelivery,
 				}); err != nil {
 					// dispatchTo already warned with the recipient + error; the
 					// outcome label is this path's own failure surface (CP5).

@@ -380,7 +380,7 @@ class DispatchContext:
     ``synthesis_turn`` payload marker, strict ``is True`` like the gate and
     framing reads). :func:`same_channel_claim` stamps it onto the publish as
     the ``synthesis_reply`` marker — the fanout-head claim's third conjunct
-    (``claimSynthesisReply``, internal/channels/synthesis_close.go): the
+    (``claimSynthesisReply``, internal/channels/synthesis_claim.go): the
     interaction id spans every round and every reply echoes it, so without
     this echo an ordinary chair reply from an earlier round still in flight
     at the bound is indistinguishable from the synthesis and would be fanned
@@ -434,7 +434,7 @@ def same_channel_claim(
     :attr:`DispatchContext.origin_synthesis_turn`): a publish authored in
     reply to the §D synthesis directive additionally carries the
     ``synthesis_reply`` marker — the discriminator ``claimSynthesisReply``
-    (internal/channels/synthesis_close.go) requires beside sender+claim to
+    (internal/channels/synthesis_claim.go) requires beside sender+claim to
     recognise the closing artifact, because the id claim alone is shared
     with every ordinary reply in the interaction. It rides BESIDE the id
     claim (never instead of it): the id claim is what lets an orphaned

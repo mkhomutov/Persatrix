@@ -114,41 +114,13 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// torn by a concurrent RFC 0050 apply landing between them) and the
 	// per-publish autonomousMu traffic stays one acquisition in this scope.
 	autonomous := r.AutonomousFor(msg.ChannelID)
-	// RFC 0052 §D close-on-reply (PR 4b-ii), the fanout-HEAD intercept: when
-	// this publish is the chair's synthesis reply claiming the armed
-	// interaction, it IS the closing artifact — run the bounded teardown with
-	// it as the closing message (sole delivery: redelivery=false) and skip the
-	// ENTIRE fanout: no floor round, no concurrent dispatch, no revival tails
-	// (a fanned synthesis would draw replies into the closed discussion — the
-	// reopen §D forbids). Runs before markActivity so a closing reply strands
-	// no "thinking" marks; the chair's own mark was cleared by publishCommit
-	// when this reply re-entered. A lost tombstone CAS means a racing closer
-	// (an end-vote quorum landing mid-arm) beat this reply to the close — the
-	// synthesis stays committed history, the 4b-i degraded artifact shape.
-	//
-	// Checked BEFORE the ISSUE-0099 resynthesize claim below (PR #718 review):
-	// the two claims are independent arms on the same chair (a stall escalation
-	// and an RFC 0052 bound can both be live on one interaction at once) and
-	// [ChannelRouter.claimResynthesizeMisfire] unconditionally consumes its
-	// stash the instant the chair publishes, with no way to un-consume it once
-	// this branch's early `return` below discards `pendingResynth`. Ordering
-	// the synthesis claim first means a message that closes the arm is never
-	// also fed to the escalation claim, so no half-claimed escalation state can
-	// be orphaned. [ChannelRouter.claimSynthesisReply] is side-effect-free on
-	// every non-matching message (a channel with nothing armed, or armed for a
-	// different chair/interaction) beyond its own short-held lock, so moving it
-	// ahead of the resynthesize claim costs nothing on the common path.
-	if pendingSynth := r.claimSynthesisReply(msg, autonomous); pendingSynth != nil {
-		synthCtx := context.WithoutCancel(ctx)
-		if r.boundedClose(synthCtx, msg, ct, pendingSynth.interactionID, pendingSynth.trigger, false) {
-			r.recordSynthesisTurn(synthCtx, ct, synthesisTurnClosedOnReply)
-		} else {
-			r.logger.Debug("channels: synthesis reply lost the closing race; close stands by the winner",
-				zap.String("channel_id", msg.ChannelID),
-				zap.String("interaction_id", pendingSynth.interactionID))
-		}
-		return
-	}
+	// RFC 0052 §D close-on-reply (PR 4b-ii): the chair's synthesis reply never
+	// reaches this fanout — [ChannelRouter.publishCommit] claims it on the
+	// COMMIT path, before the end-vote hook, and suppresses its fanout plan
+	// entirely (PR #718 review: the claim lived at this head, where a reply
+	// cast AS an end vote — the shape the directive invites — was consumed by
+	// processEndVote first: spam-suppressed into the timeout net, or closed as
+	// the unmetered `end_votes` shape).
 
 	// ISSUE-0099 resynthesize, CLAIM half — at the fanout HEAD, before any floor
 	// round can park it (PR 4b-i review round 5): the once-bound is "the chair's
@@ -161,8 +133,9 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// goroutine spawn jitter (PublishAsync fans on a detached goroutine, so
 	// strict commit order is not literally guaranteed) — the pre-4b-i posture,
 	// where the window was never observed to bite. Run for EVERY chair publish
-	// in an escalated interaction that the synthesis-reply claim above didn't
-	// already consume, not only the misfiring ones, so a clean hand-off disarms
+	// in an escalated interaction (a synthesis reply was already claimed at the
+	// commit path and never fans, so it cannot half-claim escalation state
+	// here), not only the misfiring ones, so a clean hand-off disarms
 	// the trigger (see [ChannelRouter.claimResynthesizeMisfire]); a no-op (nil)
 	// for every non-chair publish. Only the re-force DISPATCH waits for the
 	// tail, gated on the bounded-close outcome below.
@@ -199,8 +172,14 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// redelivery-marker vehicle.
 	staleAtHead := floorPath && r.stimulusOutlivedClose(msg, autonomous)
 	var outcome floorRoundOutcome
+	// undelivered collects the round's per-recipient live-delivery failures
+	// (live_delivery.go) — the bounded close below downgrades exactly those
+	// members' notifications to sole delivery (PR #718 review). Always nil on
+	// the concurrent path, whose close-before-dispatch ordering makes the
+	// notification the sole delivery for everyone.
+	var undelivered map[string]struct{}
 	if floorPath && !staleAtHead {
-		outcome = r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
+		outcome, undelivered = r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
 	}
 
 	// RFC 0052 §D bounded close, at the fanout tail on BOTH paths — one call
@@ -257,7 +236,7 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	if staleAtHead {
 		stale = true
 	} else {
-		closed, stale = r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, members, channelSize, !floorPath, autonomous)
+		closed, stale = r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, members, channelSize, !floorPath, undelivered, autonomous)
 	}
 	// The ONE withhold seam (PR #716 review — this clear had been duplicated
 	// verbatim across the close and stale branches): a dispatch withheld
@@ -327,7 +306,7 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	} else if floorPath {
 		r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
 	} else {
-		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions)
+		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions, nil)
 	}
 	// ISSUE-0099 resynthesize, DISPATCH half — the re-force the head claimed,
 	// dispatched only now that the bounded close has ruled the round sub-bound
@@ -351,7 +330,11 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 // `ctx` is expected to already be detached from the request lifetime by the
 // caller (so the floor path can reuse it for off-floor non-responder
 // delivery without re-detaching).
-func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, members []Member, channelSize int, floorMentions []string) {
+//
+// `failures` collects per-recipient dispatch errors for the floor path's
+// redelivery accounting (live_delivery.go); nil (a recording no-op) on the
+// concurrent fanout path, whose bounded close is sole-delivery by ordering.
+func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, members []Member, channelSize int, floorMentions []string, failures *liveDeliveryFailures) {
 	// Buffered channel as a semaphore: each goroutine acquires a slot
 	// before starting and releases it on exit, so peak in-flight
 	// dispatches never exceed `channelFanoutMaxConcurrency`. The
@@ -399,7 +382,9 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 			// paths, so a panicking dispatch is not caught by the server's
 			// recoveryMiddleware — recover here or it crashes the process.
 			defer r.recoverFanout("dispatch", msg.ChannelID, msg.ID)
-			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize, floorMentions, dispatchControl{})
+			if err := r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize, floorMentions, dispatchControl{}); err != nil {
+				failures.record(m.ParticipantID)
+			}
 		}()
 	}
 	wg.Wait()

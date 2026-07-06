@@ -199,7 +199,7 @@ class TestSynthesisFraming:
 
 class TestSynthesisReplyEcho:
     """PR #718 review — the reply-echo discriminator. The fanout-head claim
-    (``claimSynthesisReply``, internal/channels/synthesis_close.go) cannot
+    (``claimSynthesisReply``, internal/channels/synthesis_claim.go) cannot
     tell the synthesis reply from an ordinary chair reply by sender+claim
     alone (the interaction id spans every round and every reply echoes it),
     so a publish authored in reply to the synthesis directive additionally

@@ -301,11 +301,17 @@ func (r *ChannelRouter) floorRound(
 	turnTimeout time.Duration,
 	channelSize int,
 	floorMentions []string,
-) floorRoundOutcome {
+) (floorRoundOutcome, map[string]struct{}) {
 	detached := context.WithoutCancel(ctx)
 
+	// Per-recipient live-delivery failures, collected across BOTH delivery
+	// shapes of the round (the serial floor turns and the fire-and-forget
+	// non-responder ingestion) — the bounded close's redelivery marker must
+	// not claim a delivery that never landed (PR #718 review; live_delivery.go).
+	failures := &liveDeliveryFailures{}
+
 	if len(nonResponders) > 0 {
-		r.dispatchConcurrent(detached, msg, ct, threadParentSenderID, nonResponders, channelSize, floorMentions)
+		r.dispatchConcurrent(detached, msg, ct, threadParentSenderID, nonResponders, channelSize, floorMentions, failures)
 	}
 
 	r.floors.acquire(msg.ChannelID)
@@ -322,12 +328,12 @@ func (r *ChannelRouter) floorRound(
 	var outcome floorRoundOutcome
 	for _, speaker := range responders {
 		outcome.granted++
-		if r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout, channelSize, floorMentions) {
+		if r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout, channelSize, floorMentions, failures) {
 			outcome.replied++
 		}
 	}
 	r.recordFloorRound(detached, ct, time.Since(start))
-	return outcome
+	return outcome, failures.snapshot()
 }
 
 // recordFloorTurn / recordFloorRound emit the RFC 0030 Layer 2.5 floor-control
@@ -379,6 +385,7 @@ func (r *ChannelRouter) runFloorTurn(
 	turnTimeout time.Duration,
 	channelSize int,
 	floorMentions []string,
+	failures *liveDeliveryFailures,
 ) bool {
 	r.recordFloorSpeaker(msg.ChannelID, speaker.ParticipantID)
 
@@ -406,7 +413,12 @@ func (r *ChannelRouter) runFloorTurn(
 		defer cancel()
 	}
 
-	r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker, channelSize, floorMentions, dispatchControl{})
+	if err := r.dispatchTo(ctx, msg, ct, threadParentSenderID, speaker, channelSize, floorMentions, dispatchControl{}); err != nil {
+		// Fire-and-forget by contract (the warn lives in dispatchTo) — but the
+		// bounded close's redelivery marker must know this speaker never got
+		// the stimulus live (PR #718 review; live_delivery.go).
+		failures.record(speaker.ParticipantID)
+	}
 
 	timer := time.NewTimer(turnTimeout)
 	defer timer.Stop()

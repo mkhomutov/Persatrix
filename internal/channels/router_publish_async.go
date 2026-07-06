@@ -137,16 +137,23 @@ func (r *ChannelRouter) inFlightFanout() int64 {
 // until the fanout eventually finishes — benign at shutdown, where the process
 // exits immediately after.
 //
-// PR #718 review finding 1: it first DISARMS every armed RFC 0052 synthesis
-// timeout net (synthesis_close.go), so no detached timer fires into — or races —
-// the fanoutWG.Wait below, then waits synthesisWG BEFORE fanoutWG. That order is
-// load-bearing: a timer caught mid-fire completes its close work (a fanoutWG.Add
-// that precedes its synthesisWG.Done) before synthesisWG settles, so the
-// fanoutWG.Wait that follows captures it instead of racing its Add.
+// PR #718 review finding 1 (ordering revised by the follow-up review): the
+// in-flight fanouts are waited FIRST — they are the only producers of new
+// arms, and a disarm sweep that ran before they finished could be out-raced
+// by a bound-crossing tail arming a fresh 120s timer right after it, leaving
+// the drain blocked in synthesisWG.Wait on a timer no sweep will ever stop
+// (and its late synthesisWG.Add racing a Wait that may have started at zero,
+// the WaitGroup-contract misuse). Once fanoutWG settles nothing can arm
+// (shutdown stops the servers before draining, so no new publish starts a
+// fanout), making the sweep final. A timer the sweep catches mid-fire
+// (Stop()==false) completes its close work — a fanoutWG.Add that precedes its
+// synthesisWG.Done — so the SECOND fanoutWG.Wait captures its notification
+// deliveries instead of racing their Add.
 func (r *ChannelRouter) DrainPendingFanout(ctx context.Context) bool {
-	r.disarmAllPendingSyntheses()
 	done := make(chan struct{})
 	go func() {
+		r.fanoutWG.Wait()
+		r.disarmAllPendingSyntheses()
 		r.synthesisWG.Wait()
 		r.fanoutWG.Wait()
 		close(done)
@@ -317,6 +324,42 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	if latched {
 		r.waiter.Notify(msg)
 		r.dropPostCloseTraffic(ctx, derivedType, resolvedInteractionID)
+		return nil, nil
+	}
+
+	// RFC 0052 §D close-on-reply, the COMMIT-path claim (PR #718 review —
+	// moved here from the fanout head): when this publish is the chair's
+	// synthesis reply claiming the armed interaction, it IS the closing
+	// artifact — run the bounded teardown with it as the closing message
+	// (sole delivery: redelivery=false) and suppress fanout entirely (a fanned
+	// synthesis would draw replies into the closed discussion — the reopen §D
+	// forbids). It MUST run before the end-vote hook below: the directive
+	// explicitly invites the chair to answer with an END_INTERACTION_VOTE
+	// whose content is the synthesis (agents/end_vote_action.py stamps the
+	// reply echo on votes for exactly that shape), and processEndVote consumed
+	// such a reply first — an in-window duplicate was suppressed as spam (the
+	// claim never ran, the arm burned the full 120s timeout, and the close
+	// carried the bounding stimulus instead of the artifact), while a
+	// quorum-completing vote closed as `end_votes` (the unmetered wire shape:
+	// every RFC 0020 summary of a bound-crossed arc silently skipped its
+	// OQ #6 lease). A racing quorum completed by ANOTHER member's vote keeps
+	// its CE4 supremacy unchanged — it lands in processEndVote on its own
+	// publish and markInteractionClosed disarms the arm. The claim is
+	// side-effect-free for every non-matching publish beyond one short-held
+	// lock; the reply waiter is notified like the latch branch above, so a
+	// closing reply never starves a parked floor turn. A lost tombstone CAS
+	// means a racing closer beat this reply — the synthesis stays committed
+	// history, the 4b-i degraded artifact shape.
+	if pendingSynth := r.claimSynthesisReply(msg, r.AutonomousFor(msg.ChannelID)); pendingSynth != nil {
+		synthCtx := context.WithoutCancel(ctx)
+		r.waiter.Notify(msg)
+		if r.boundedClose(synthCtx, msg, derivedType, pendingSynth.interactionID, pendingSynth.trigger, false, nil) {
+			r.recordSynthesisTurn(synthCtx, derivedType, synthesisTurnClosedOnReply)
+		} else {
+			r.logger.Debug("channels: synthesis reply lost the closing race; close stands by the winner",
+				zap.String("channel_id", msg.ChannelID),
+				zap.String("interaction_id", pendingSynth.interactionID))
+		}
 		return nil, nil
 	}
 
