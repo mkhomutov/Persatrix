@@ -71,6 +71,16 @@ def register(inst: _Instruments, meter: Meter) -> None:
         name="agent.interactions.summary.failed", unit="{interaction}",
         description="Interactions whose close-time summary call failed (RFC 0020 §C).",
     )
+    inst.interactions_summary_unleased = meter.create_counter(
+        name="agent.interactions.summary.unleased", unit="{interaction}",
+        description=(
+            "Close summaries marked for RFC 0052 OQ #6 metering that ran "
+            "without a wallet lease because the wire interaction id was "
+            "empty (PR #718 review finding 2) — expected only from a "
+            "non-Go/compromised producer; any sustained rate needs "
+            "investigation."
+        ),
+    )
     inst.interactions_janitor_failed = meter.create_counter(
         name="agent.interactions.janitor.failed", unit="{sweep}",
         description="Closing-state janitor sweeps that raised before completing (RFC 0020 §C).",

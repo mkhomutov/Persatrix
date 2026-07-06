@@ -193,6 +193,7 @@ async def summarize_closed_interaction(
             "for agent %s (scope=%s); running the summary UNLEASED",
             agent_id, interaction.scope,
         )
+        _emit_summary_unleased()
     try:
         response = await asyncio.wait_for(
             llm_client.create_message(
@@ -346,3 +347,10 @@ def _emit_summary_failed(reason: str) -> None:
     inst.interactions_summary_failed.add(
         1, {"agent_id": current_agent_id(), "reason": reason},
     )
+
+
+def _emit_summary_unleased() -> None:
+    inst = try_get_instruments()
+    if inst is None:
+        return
+    inst.interactions_summary_unleased.add(1, {"agent_id": current_agent_id()})

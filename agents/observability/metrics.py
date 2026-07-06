@@ -109,6 +109,7 @@ class _Instruments:
     interactions_closed_by_shutdown: Counter
     interactions_closed_by_cost: Counter
     interactions_summary_failed: Counter
+    interactions_summary_unleased: Counter
     interactions_janitor_failed: Counter
     facts_stored: Counter
     facts_superseded: Counter
@@ -256,7 +257,6 @@ class _Instruments:
                 "(RFC 0031 Phase 1). Attrs: session_id, agent.id, surface."
             ),
         )
-
         # ─── Histograms ──────────────────────────────────────────────
         self.tool_duration: Histogram = meter.create_histogram(
             name="agent.tool.duration",

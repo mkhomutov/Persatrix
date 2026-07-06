@@ -35,11 +35,15 @@ func (s *Server) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 	// PR #718 review: deletion never touched the router's in-memory
 	// openInteractions state, so a synthesis close armed on this channel
 	// (RFC 0052 §D) had no disarm hook — its 120s timeout net would fire
-	// against a channel the store no longer has. Mirrors the disable-path
-	// disarm in ChannelRouter.SetAutonomous. Nil-tolerant / no-op if nothing
-	// was armed.
+	// against a channel the store no longer has. PurgeChannelInteraction
+	// disarms it (mirroring the disable-path disarm in
+	// ChannelRouter.SetAutonomous) AND drops the resolver entry itself —
+	// otherwise every deleted channel leaked its openInteraction
+	// (roundCount / chairEscalated / retired) forever, since nothing else
+	// prunes an entry outside the idle-rotation/fresh-mint path. Nil-tolerant
+	// / no-op if nothing was tracked.
 	if s.channelRouter != nil {
-		s.channelRouter.DisarmChannelSynthesis(id)
+		s.channelRouter.PurgeChannelInteraction(id)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

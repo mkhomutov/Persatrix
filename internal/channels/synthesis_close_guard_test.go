@@ -93,6 +93,47 @@ func TestSynthesisClose_DisableDisarmsPendingClose(t *testing.T) {
 		"the stopped timer must not close the re-livened interaction")
 }
 
+// TestSynthesisClose_ChannelDeleteDisarmsAndForgetsPendingClose — PR #718
+// review (findings audit): DisarmChannelSynthesis / PurgeChannelInteraction
+// are the exact calls the channel-DELETE HTTP handler
+// (internal/server/channel_delete_handlers.go) makes to stop an orphaned
+// timeout net and forget the resolver entry when a channel is deleted mid-arm.
+// No test previously exercised either call while a synthesis close was
+// actually armed — the sibling disable-path
+// (TestSynthesisClose_DisableDisarmsPendingClose) only covers SetAutonomous's
+// disarm — so a regression in disarmChannelSynthesis / PurgeChannelInteraction
+// itself (a reorder, a swallowed call, a dropped delete) would have gone
+// uncaught by every existing test. Pins: after PurgeChannelInteraction, the
+// pending synthesis is gone, the resolver entry itself is gone (the map-leak
+// half of the fix), and the stopped timer never fires a close.
+func TestSynthesisClose_ChannelDeleteDisarmsAndForgetsPendingClose(t *testing.T) {
+	router, _, ch, reader := synthesisCloseHarness(t, 2)
+	router.synthesisTimeout = 20 * time.Millisecond
+
+	tick(t, router, ch)
+	tick(t, router, ch) // bound → armed
+
+	router.interactionMu.Lock()
+	armed := router.openInteractions[ch].pendingSynthesis != nil
+	router.interactionMu.Unlock()
+	require.True(t, armed, "precondition: the close is armed")
+
+	// The channel-delete handler's exact call.
+	router.PurgeChannelInteraction(ch)
+
+	router.interactionMu.Lock()
+	entry, tracked := router.openInteractions[ch]
+	router.interactionMu.Unlock()
+	assert.Nil(t, entry, "the resolver entry itself is forgotten, not just disarmed")
+	assert.False(t, tracked, "the map entry is gone, closing the per-deleted-channel leak")
+
+	// The orphaned timeout net (20ms) must never fire a close on the deleted channel.
+	require.Never(t, func() bool {
+		return closedCount(t, reader, structuralTrigger) > 0 || closedCount(t, reader, costTrigger) > 0
+	}, 100*time.Millisecond, 10*time.Millisecond,
+		"the stopped timer must not close an interaction whose channel is gone")
+}
+
 // TestSynthesisClose_EntryMovedOnFallsThroughNotWithheld — PR #718 review
 // finding 4: when the resolver entry rotates or closes between the bound's
 // tally advance and the arm, maybeArmSynthesisClose must report

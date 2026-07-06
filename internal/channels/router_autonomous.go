@@ -62,6 +62,25 @@ func (r *ChannelRouter) DisarmChannelSynthesis(channelID string) {
 	r.disarmChannelSynthesis(channelID)
 }
 
+// PurgeChannelInteraction forgets channelID's resolver entry outright: the
+// disarm [DisarmChannelSynthesis] performs, plus dropping the
+// [openInteraction] itself from openInteractions (PR #718 review: the
+// disarm-on-delete fix stopped the orphaned timer but never touched the
+// entry it lived on, so every deleted channel's roundCount / chairEscalated /
+// retired state stayed resident in the map forever — the delete path is the
+// one caller where dropping the whole entry is safe, unlike
+// [SetAutonomous]'s disable branch, which must keep the no-reopen ledger
+// (`retired`) alive for a channel that is merely going manual, not gone).
+// Exported for the channel-delete HTTP handler; the channel is already gone
+// from the store by the time this runs, so there is no legitimate open
+// interaction left to race. Nil-tolerant / idempotent like its sibling.
+func (r *ChannelRouter) PurgeChannelInteraction(channelID string) {
+	r.disarmChannelSynthesis(channelID)
+	r.interactionMu.Lock()
+	delete(r.openInteractions, channelID)
+	r.interactionMu.Unlock()
+}
+
 // AutonomousFor returns the resolved RFC 0052 autonomous block for `channelID`. A
 // channel with no resolved entry falls back to [DefaultAutonomousConfig] — the
 // disabled default an un-configured channel ships with — so the read is always a
