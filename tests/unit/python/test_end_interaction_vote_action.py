@@ -372,7 +372,7 @@ class TestVotePublishOutcomeCallback:
         ], context=DispatchContext())
 
         agent.resolve_end_vote_publish.assert_awaited_once_with(
-            "group:planning", published=True, token="tok-1",
+            "group:planning", published=True, token="tok-1", synthesis_reply=False,
         )
 
     @pytest.mark.asyncio
@@ -390,7 +390,7 @@ class TestVotePublishOutcomeCallback:
         ], context=DispatchContext())
 
         agent.resolve_end_vote_publish.assert_awaited_once_with(
-            "group:planning", published=True, token="",
+            "group:planning", published=True, token="", synthesis_reply=False,
         )
 
     @pytest.mark.asyncio
@@ -405,7 +405,7 @@ class TestVotePublishOutcomeCallback:
         ], context=DispatchContext())
 
         agent.resolve_end_vote_publish.assert_awaited_once_with(
-            "group:planning", published=False, token="tok-1",
+            "group:planning", published=False, token="tok-1", synthesis_reply=False,
         )
 
     @pytest.mark.asyncio
@@ -422,7 +422,7 @@ class TestVotePublishOutcomeCallback:
 
         assert results[0]["status"] == "not_implemented"
         agent.resolve_end_vote_publish.assert_awaited_once_with(
-            "group:planning", published=False, token="tok-1",
+            "group:planning", published=False, token="tok-1", synthesis_reply=False,
         )
 
     @pytest.mark.asyncio

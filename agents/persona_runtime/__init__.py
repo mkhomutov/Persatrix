@@ -267,16 +267,16 @@ class _LLMPersonaAgent(
         self._state.recover_energy()
 
     async def resolve_end_vote_publish(
-        self, channel_id: str, *, published: bool, token: str,
+        self, channel_id: str, *, published: bool, token: str, synthesis_reply: bool = False,
     ) -> None:
-        """Discharge the parked vote close for ``channel_id`` (PR 607
-        finding 5): success closes the voter's local record, failure
-        drops the park.  ``token`` is the park's correlation handle
-        echoed off the vote action's payload; a mismatch is a no-op.
-        Acquires the agent lock; full contract in :mod:`.vote_close`.
+        """Discharge the parked vote close for ``channel_id`` (PR 607 finding
+        5): success closes the voter's local record, failure drops the park;
+        a ``token`` mismatch is a no-op.  ``synthesis_reply`` (PR #718
+        review) meters the OQ #6 vote-as-synthesis close summary.  Acquires
+        the agent lock; full contract in :mod:`.vote_close`.
         """
         await discharge_end_vote_publish(
-            self, channel_id, published=published, token=token,
+            self, channel_id, published=published, token=token, synthesis_reply=synthesis_reply,
         )
 
     def add_pending_tick_link(self, link: Link) -> None:

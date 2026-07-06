@@ -272,20 +272,35 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	if !roundExceeded && !budgetExceeded {
 		return false, false
 	}
-	// Fresh enabled re-check at the ACTION point (PR #718 review): `a` is the
-	// fanout-HEAD snapshot, and the floor round between that read and this tail
-	// can span minutes. An RFC 0050 disable landing inside it already ran its
-	// disarm — a no-op, nothing was armed yet — so acting on the stale snapshot
-	// would arm a synthesis close (or close inline) on a channel the operator
-	// just took manual control of, and the timeout net would force-close the
-	// live manual discussion ~2 minutes later. The bound is only ever ACTED on
-	// against the CURRENT config; the crossed tally survives on the entry, so a
-	// re-enable resumes exactly where the discussion stood. The residual
+	// Fresh config re-check at the ACTION point (PR #718 review + follow-up):
+	// `a` is the fanout-HEAD snapshot, and the floor round between that read
+	// and this tail can span minutes. An RFC 0050 disable landing inside it
+	// already ran its disarm — a no-op, nothing was armed yet — so acting on
+	// the stale snapshot would arm a synthesis close (or close inline) on a
+	// channel the operator just took manual control of, and the timeout net
+	// would force-close the live manual discussion ~2 minutes later. The bound
+	// is only ever ACTED on against the CURRENT config — Enabled AND
+	// MaxRounds: a mid-round `max_rounds` RAISE (config_apply → SetAutonomous)
+	// must extend the discussion, not close it against the old bound. The
+	// crossed tally survives on the entry, so a re-enable (or a later
+	// lowering) resumes exactly where the discussion stood. Two deliberate
+	// asymmetries: a mid-round LOWERING is still not caught before this tail
+	// (the head-snapshot early-out above already returned; the next round's
+	// tail closes against it — the one-round lag every knob write has always
+	// had), and the BUDGET half stays on its per-interaction snapshot — its
+	// mid-interaction immutability is the documented wallet-consistent design
+	// (interaction_budget.go's snapshot-at-open). The residual
 	// read-then-disable sliver (microseconds, no floor round inside it) is
 	// backstopped by [ChannelRouter.onSynthesisTimeout]'s own enabled re-check.
 	fresh := r.AutonomousFor(msg.ChannelID)
 	if !fresh.Enabled {
 		return false, false
+	}
+	if roundExceeded && round < fresh.MaxRounds {
+		roundExceeded = false
+		if !budgetExceeded {
+			return false, false
+		}
 	}
 	// Prefer the cost label when spend crossed the soft budget (the reserve
 	// earned its keep); otherwise it is the structural (max_rounds) bound.
@@ -364,9 +379,12 @@ func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct
 	// cause, not end_votes) → fan the RFC 0020 summary notification. excludeSender
 	// is FALSE — unlike the end-vote close (where the voter's own vote closed its
 	// tracker), `msg` here is only the round-triggering stimulus (or the chair's
-	// synthesis reply, whose publish closed nothing agent-side either), so its
-	// sender needs the notification too or it strands on "went idle" and
-	// authors no summary.
+	// synthesis reply: its PROSE shape closed nothing agent-side, while the
+	// vote-cast shape the directive invites DID close the chair's own record
+	// through its end-vote discharge (vote_close.py, where the Python side
+	// also meters it) — the self-echo notification then no-ops on the
+	// already-closed scope by design), so the sender needs the notification
+	// too or it strands on "went idle" and authors no summary.
 	r.finalizeInteractionClose(ctx, msg, ct, interactionID, trigger, closeNotify{redelivery: redelivery, undelivered: undelivered})
 	// NOTE: no wallet EvictInteraction here — deferred to PR 7 (file header).
 	return true

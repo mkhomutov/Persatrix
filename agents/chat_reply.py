@@ -35,7 +35,7 @@ import grpc
 import grpc.aio
 
 from .channel_publisher import ChannelPublisher
-from .channel_wire_metadata import DispatchContext, same_channel_claim
+from .channel_wire_metadata import DispatchContext
 from .generated import task_pb2
 from .persona_types import ActionType, AgentAction
 from .wallet_client import BudgetExceededError
@@ -209,12 +209,20 @@ async def publish_chat_error_on_channel(
         )
         return
     metadata: dict[str, Any] = {"reply_status": "error", "error_reason": reason}
-    # The RFC 0052 no-reopen claim, via the shared rule (see the docstring).
-    # Deliberately NO ``synthesis_reply`` echo (PR #718 review): an apology
-    # must never be claimable as the §D closing artifact — and
-    # ``suppress_error_reply`` already makes this path unreachable for a
-    # synthesis turn, so the omission is belt-and-suspenders, not a gap.
-    claim = same_channel_claim(channel_id, origin_interaction_id, channel_id)
+    # The RFC 0052 no-reopen claim, via the context's shared rule — the
+    # origin posture constructed explicitly, the event-less-caller idiom the
+    # DispatchContext docstring names (this helper receives the origin pair
+    # as plain strings, not a threaded context). Deliberately NO
+    # ``synthesis_reply`` echo (PR #718 review), spelled with the NAMED
+    # opt-out rather than implied by omission: an apology must never be
+    # claimable as the §D closing artifact — and ``suppress_error_reply``
+    # already makes this path unreachable for a synthesis turn, so the
+    # opt-out is belt-and-suspenders that also survives a future caller
+    # threading a synthesis-marked context here.
+    origin = DispatchContext(
+        origin_channel_id=channel_id, origin_interaction_id=origin_interaction_id,
+    )
+    claim = origin.same_channel_claim(channel_id, claim_synthesis_reply=False)
     if claim:
         metadata.update(claim)
     try:

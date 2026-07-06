@@ -17,7 +17,7 @@ from .channel_publisher import (
     ChannelPublisher,
     ChannelsDisabledError,
 )
-from .channel_wire_metadata import DispatchContext, same_channel_claim
+from .channel_wire_metadata import DispatchContext
 from .persona_types import VOTE_CLOSE_TOKEN_KEY, AgentAction
 
 logger = logging.getLogger(__name__)
@@ -126,16 +126,22 @@ async def publish_end_interaction_vote(
     if not content:
         content = _END_VOTE_DEFAULT_CONTENT
     metadata: dict[str, Any] = {"end_interaction_vote": True}
-    # The RFC 0052 no-reopen claim, via the shared rule (see the docstring).
-    # ``synthesis_reply`` (PR #718 review): a chair may legitimately answer
-    # the §D synthesis directive with a vote whose content IS the synthesis
-    # (the ISSUE-0099 outcome-(a) shape) — the echo makes that publish
-    # claimable as the closing artifact, same as the plain-reply path.
-    claim = same_channel_claim(
-        context.origin_channel_id, context.origin_interaction_id,
-        target_channel, synthesis_reply=context.origin_synthesis_turn)
+    # The RFC 0052 no-reopen claim, via the context's shared rule (see
+    # ``DispatchContext.same_channel_claim``). The ``synthesis_reply`` echo
+    # rides structurally off the context (PR #718 review): a chair may
+    # legitimately answer the §D synthesis directive with a vote whose
+    # content IS the synthesis (the ISSUE-0099 outcome-(a) shape) — the echo
+    # makes that publish claimable as the closing artifact, same as the
+    # plain-reply path.
+    claim = context.same_channel_claim(target_channel)
     if claim:
         metadata.update(claim)
+    # Whether the publish below rides claimable as the synthesis reply —
+    # derived from the claim actually stamped on the wire, not re-derived
+    # from the context, so the result flag can never disagree with what Go's
+    # fanout-head claim saw (PR #718 review, OQ #6: the discharge's metering
+    # input — see the "published" return).
+    synthesis_reply = claim is not None and "synthesis_reply" in claim
     try:
         await asyncio.wait_for(
             publisher.publish(
@@ -177,4 +183,14 @@ async def publish_end_interaction_vote(
         "status": "published",
         "channel_id": target_channel,
         "vote_close_token": close_token,
+        # PR #718 review (OQ #6): True iff the publish above carried the
+        # ``synthesis_reply`` echo — Go claims that vote as the §D closing
+        # artifact BEFORE processEndVote, so the voter's parked local close
+        # is that close's own record. The executor's outcome callback
+        # threads this to the discharge, which marks the record for the
+        # metered RFC 0020 close summary; without it the vote-as-synthesis
+        # close ran its summary unleased, silently evading the mandatory cap
+        # the PR 4a ``1 + N`` reserve was carved from. Only the "published"
+        # status carries the key: a failed publish rode no wire.
+        "synthesis_reply": synthesis_reply,
     }

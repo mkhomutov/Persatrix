@@ -26,7 +26,10 @@ from typing import NoReturn
 import pytest
 
 _TASK_PROTO = Path("proto/task.proto")
-_GRPC_DISPATCHER_GO = Path("internal/channels/grpc_dispatcher.go")
+# The in-process→wire translation split out of grpc_dispatcher.go at the
+# 500-line cap (PR #718 review — the delivery-miss returns pushed it over);
+# the envelope lifts this file pins all live in the proto-translation half.
+_GRPC_DISPATCHER_GO = Path("internal/channels/grpc_dispatcher_proto.go")
 # The reply-recognition seam split out of synthesis_close.go at the size
 # cap (PR #718 follow-up review) — the marker constant lives with the claim.
 _SYNTHESIS_CLAIM_GO = Path("internal/channels/synthesis_claim.go")

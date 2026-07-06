@@ -147,12 +147,15 @@ def test_lease_call_sites_thread_the_interaction() -> None:
 
 # The RFC 0052 no-reopen claim's shared seams (PR #716 review): the executor
 # entry points read the origin id through the ONE drift-pinned reader, and
-# both publish sites build the claim through the ONE shared rule. Exact
-# call-site literals, the _LEASE_THREADING_PINS posture: a site quietly
-# reverting to an inline read/build would sit outside the drift pin again —
-# and a coordinated key rename would then leave it echoing no claim, the
-# latch blind, and post-close stragglers minting fresh and reopening the
-# closed discussion (the exact regression the shared home closed).
+# every publish site builds the claim through the ONE shared rule — the
+# ``DispatchContext.same_channel_claim`` method (PR #718 second-pass review:
+# the synthesis reply-echo now rides the method structurally, so no call site
+# carries a per-publish kwarg it could forget). Exact call-site literals, the
+# _LEASE_THREADING_PINS posture: a site quietly reverting to an inline
+# read/build would sit outside the drift pin again — and a coordinated key
+# rename would then leave it echoing no claim, the latch blind, and
+# post-close stragglers minting fresh and reopening the closed discussion
+# (the exact regression the shared home closed).
 _NO_REOPEN_CLAIM_PINS = {
     Path("agents/dispatch.py"): [
         "context=DispatchContext.for_event(event",
@@ -162,14 +165,17 @@ _NO_REOPEN_CLAIM_PINS = {
         # The error-recovery publish is the THIRD same-channel path (PR #716
         # review: it was missed when the reply and end-vote publishes were
         # stamped, so a post-close budget-denial straggler minted fresh and
-        # reopened the closed discussion).
-        "claim = same_channel_claim(",
+        # reopened the closed discussion). The pin also holds the NAMED
+        # synthesis-echo opt-out (PR #718 review): an apology must never be
+        # claimable as the §D closing artifact, and the withhold must stay
+        # spelled at the seam — not implied by an omitted kwarg.
+        "claim = origin.same_channel_claim(channel_id, claim_synthesis_reply=False)",
     ],
     Path("agents/action_executor.py"): [
-        "publish_metadata = same_channel_claim(",
+        "publish_metadata = context.same_channel_claim(",
     ],
     _END_VOTE_ACTION_PY: [
-        "claim = same_channel_claim(",
+        "claim = context.same_channel_claim(",
     ],
 }
 
@@ -180,8 +186,9 @@ def test_no_reopen_claim_sites_share_reader_and_rule() -> None:
     drift-pinned ``wire_interaction_id`` reader, structurally — PR #716
     review applied: the pair was previously threaded as parallel kwargs a
     site could half-forget) and every same-channel publish site MUST build
-    its claim through ``same_channel_claim`` — the shared, drift-pinned
-    home (see ``test_interaction_id_metadata_key_agrees``)."""
+    its claim through the context's ``same_channel_claim`` method — the
+    shared, drift-pinned home (see
+    ``test_interaction_id_metadata_key_agrees``)."""
     for path, pins in _NO_REOPEN_CLAIM_PINS.items():
         src = path.read_text(encoding="utf-8")
         for pin in pins:
@@ -276,7 +283,10 @@ def test_close_trigger_values_agree() -> None:
     assert interaction_boundary.WIRE_CLOSE_TRIGGER_IDLE is WIRE_CLOSE_TRIGGER_IDLE
 
 
-_GRPC_DISPATCHER_GO = Path("internal/channels/grpc_dispatcher.go")
+# The in-process→wire translation split out of grpc_dispatcher.go at the
+# 500-line cap (PR #718 review — the delivery-miss returns pushed it over);
+# the envelope lifts this file pins all live in the proto-translation half.
+_GRPC_DISPATCHER_GO = Path("internal/channels/grpc_dispatcher_proto.go")
 _PROMPT_ASSEMBLY_PY = Path("agents/persona_runtime/prompt_assembly.py")
 _RESPONSE_GATE_PY = Path("agents/response_gate.py")
 _TASK_PROTO = Path("proto/task.proto")

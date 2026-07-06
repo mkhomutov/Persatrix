@@ -20,7 +20,7 @@ from .channel_publisher import (
     ChannelPublisher,
     ChannelsDisabledError,
 )
-from .channel_wire_metadata import DispatchContext, same_channel_claim
+from .channel_wire_metadata import DispatchContext
 from .end_vote_action import publish_end_interaction_vote
 from .observability.spans import SUBAGENT_SPAWN_SPAN
 from .persona_types import (
@@ -286,6 +286,13 @@ class ActionExecutor:
                 # payload — "" for a vote the park never stamped, which
                 # the discharge treats as not-mine.
                 token=str(result.get("vote_close_token", "") or ""),
+                # PR #718 review (OQ #6): a published vote that rode the
+                # ``synthesis_reply`` echo IS claimable as the §D closing
+                # artifact — the discharge marks the chair's record for the
+                # metered close summary. Strict ``is True``: only the
+                # "published" result carries the key, so a failure status
+                # reads unmarked.
+                synthesis_reply=result.get("synthesis_reply") is True,
             )
         except Exception:
             logger.warning(
@@ -342,13 +349,12 @@ class ActionExecutor:
 
         # ── REST publish branch (channel-routed) ──
         if target_channel and self._channel_publisher is not None:
-            # RFC 0052 no-reopen claim (docstring) via the shared rule; None keeps the clean body.
-            # ``synthesis_reply`` (PR #718 review): a reply to the §D synthesis
-            # directive says so on the wire — the fanout-head claim's third
-            # conjunct (see same_channel_claim's docstring).
-            publish_metadata = same_channel_claim(
-                context.origin_channel_id, context.origin_interaction_id,
-                target_channel, synthesis_reply=context.origin_synthesis_turn)
+            # RFC 0052 no-reopen claim (docstring) via the context's shared
+            # rule; None keeps the clean body. The §D synthesis reply-echo —
+            # the fanout-head claim's third conjunct — now rides structurally
+            # off the context too (PR #718 review), no per-site kwarg to
+            # forget (see DispatchContext.same_channel_claim).
+            publish_metadata = context.same_channel_claim(target_channel)
             try:
                 await asyncio.wait_for(
                     self._channel_publisher.publish(

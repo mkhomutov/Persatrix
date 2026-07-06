@@ -18,45 +18,12 @@ import (
 // [cascade_depth.go] — pulled out of this file so the router stays
 // focused on publish + fanout topology.
 
-// DispatchEnvelope — the per-recipient dispatcher contract — lives in
-// dispatch_envelope.go (split out so router.go stays focused on publish +
-// fanout topology and under the 500-line cap).
-
-// MessageDispatcher is the gRPC seam through which the [ChannelRouter]
-// fans a published message out to every subscriber other than the sender.
-//
-// PR 2 of RFC 0011 ships only the dispatcher *interface* and a no-op
-// implementation. The wire-side gRPC call to `ReceiveChannelMessage`
-// (proto regen + servicer) lands in PR 3 + PR 4 — splitting the seam from
-// its first concrete implementation keeps the PR diff under the 500-line
-// soft cap and lets the router unit tests exercise the fanout topology
-// without booting a fake gRPC server.
-//
-// Implementations MUST treat `Dispatch` as fire-and-forget: the publish
-// path's HTTP response has already been written by the time fanout runs.
-// Errors returned here are recorded via the
-// `channel.messages.delivered{status="error"}` counter and logged at warn,
-// but do not surface to the publisher.
-type MessageDispatcher interface {
-	// Dispatch delivers msg to env.Recipient. The router has already
-	// filtered the sender out of the recipient list, dropped any
-	// `RespondNever` members, and validated `channel_type` against the
-	// `channel_id` prefix. Returns an error if the dispatch could not
-	// be enqueued; the caller logs and counts.
-	Dispatch(ctx context.Context, env DispatchEnvelope, msg ChannelMessage) error
-}
-
-// NoopDispatcher is the v0.3.0-PR-2 placeholder: it counts the calls and
-// returns nil, so the router's fanout topology can be tested end-to-end
-// without a wired gRPC client. Replaced in PR 4 by the real gRPC-backed
-// dispatcher that resolves participantID → registry address and invokes
-// `AgentService.ReceiveChannelMessage`.
-type NoopDispatcher struct{}
-
-// Dispatch implements [MessageDispatcher] by no-op.
-func (NoopDispatcher) Dispatch(_ context.Context, _ DispatchEnvelope, _ ChannelMessage) error {
-	return nil
-}
+// DispatchEnvelope, [MessageDispatcher], and [NoopDispatcher] — the
+// per-recipient dispatcher contract — live in dispatch_envelope.go (split out
+// so router.go stays focused on publish + fanout topology and under the
+// 500-line cap; the interface + no-op joined the envelope there when the
+// PR #718 follow-up review's delivery-miss contract expansion pushed this
+// file past it).
 
 // RouterMetrics — the router's OTEL-handle struct — lives in router_metrics.go
 // (split out so this file stays under the 500-line review cap).
@@ -232,6 +199,14 @@ type ChannelRouter struct {
 	interactionIdleTimeouts       map[string]time.Duration
 	defaultInteractionIdleTimeout time.Duration
 	interactionNow                func() time.Time
+	// draining flags an in-progress [ChannelRouter.DrainPendingFanout]. Guarded
+	// by interactionMu — the SAME lock the synthesis arm CAS runs under
+	// ([ChannelRouter.maybeArmSynthesisClose]), which is what makes the drain's
+	// disarm sweep final: an arm serialized after the flag is set refuses and
+	// degrades to the immediate close, so no timer (and no synthesisWG.Add) can
+	// appear behind the sweep (PR #718 follow-up review; ordering story in
+	// router_publish_async.go).
+	draining bool
 
 	// escalationMu guards escalationChairs — the per-channel
 	// `escalation_chair_id` knob (the chair-stall-escalation amendment, CE2);

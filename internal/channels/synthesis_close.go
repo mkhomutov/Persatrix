@@ -92,9 +92,12 @@ const defaultSynthesisReplyTimeout = 120 * time.Second
 // Synthesis-turn lifecycle outcomes on `channel.conversation.synthesis_turn
 // {channel_type, outcome}`. `dispatched` fires once per armed close;
 // `chair_missing`/`dispatch_error` label the degraded-to-immediate-close
-// branches; exactly one of `closed_on_reply`/`closed_on_timeout` follows a
-// `dispatched` (a racing end-vote close can orphan the arm, in which case
-// neither fires — the close is counted on interaction_closed{end_votes}).
+// branches (the shutdown-drain refusal degrades the same way but is
+// deliberately unmetered: nothing was dispatched, and the close still counts
+// on interaction_closed{…}); exactly one of
+// `closed_on_reply`/`closed_on_timeout` follows a `dispatched` (a racing
+// end-vote close can orphan the arm, in which case neither fires — the close
+// is counted on interaction_closed{end_votes}).
 const (
 	synthesisTurnDispatched      = "dispatched"
 	synthesisTurnChairMissing    = "chair_missing"
@@ -244,6 +247,22 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 	// may dispatch the turn (the once-per-interaction contract), the loser
 	// just withholds.
 	r.interactionMu.Lock()
+	if r.draining {
+		// The shutdown drain's gate (PR #718 follow-up review; ordering story
+		// in router_publish_async.go): the drain's disarm sweep is final only
+		// because no arm can start behind it, and the flag shares this lock
+		// with the CAS. Refusing degrades to the caller's immediate close, so
+		// a bound crossed mid-drain still terminates deterministically — and
+		// its close-notification Adds run on this fanout goroutine, which
+		// holds its own fanoutWG count, so the drain's fanoutWG.Wait captures
+		// them legally. No synthesis_turn outcome is recorded: nothing was
+		// dispatched, and the close itself lands on interaction_closed{…}.
+		r.interactionMu.Unlock()
+		r.logger.Info("channels: bound crossed during shutdown drain; closing immediately without the synthesis turn",
+			zap.String("channel_id", msg.ChannelID),
+			zap.String("interaction_id", interactionID))
+		return synthesisUnavailable
+	}
 	entry := r.openInteractions[msg.ChannelID]
 	if entry == nil || entry.id != interactionID {
 		// The interaction moved on between the tally advance and this arm (a
@@ -276,6 +295,13 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 	}
 	r.markActivity(msg.ChannelID, []string{chairID})
 	if err := r.dispatchTo(ctx, directive, ct, "", *chair, channelSize, nil, dispatchControl{marker: markerSynthesisTurn}); err != nil {
+		// Since the PR #718 delivery-miss returns, a chair MISSING FROM THE
+		// REGISTRY lands here too (Dispatch no longer nil-swallows
+		// [registry.ErrAgentNotFound]) and takes the immediate close instead of
+		// burning the full timeout net on a turn that never reached anyone.
+		// Deliberately `dispatch_error`, not `chair_missing`: the roster said
+		// the chair exists (the resolve-time label above owns that drift), the
+		// WIRE could not deliver.
 		r.clearActivity(msg.ChannelID, chairID)
 		r.disarmSynthesis(msg.ChannelID, pending)
 		r.logger.Warn("channels: synthesis turn dispatch failed; closing without it",

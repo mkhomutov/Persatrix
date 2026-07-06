@@ -11,6 +11,7 @@ package channels
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/mkhomutov/persatrix/internal/registry"
 )
 
 // TestBoundedClose_DisableMidRoundLeavesInteractionOpen — the fanout-head
@@ -51,6 +54,49 @@ func TestBoundedClose_DisableMidRoundLeavesInteractionOpen(t *testing.T) {
 	assert.Zero(t, closedCount(t, reader, costTrigger))
 	_, _, tracked := router.openInteractionEscalationState(ch)
 	assert.True(t, tracked, "the interaction stays open under the operator's manual control")
+}
+
+// TestBoundedClose_MaxRoundsRaiseMidRoundDefersClose — the enabled re-check's
+// sibling (PR #718 follow-up review): the head snapshot can go stale on
+// MaxRounds too. An RFC 0050 `max_rounds` RAISE landing inside the round used
+// to be ignored — the tail's action-point re-check read only `fresh.Enabled`,
+// so the extended discussion was closed (or armed) against the OLD bound. The
+// bound decision is now re-derived from `fresh.MaxRounds` at the action
+// point: crossed-on-stale-only acts as sub-bound, the tally survives, and the
+// RAISED bound closes deterministically at its own round count.
+func TestBoundedClose_MaxRoundsRaiseMidRoundDefersClose(t *testing.T) {
+	router, disp, ch, reader := synthesisCloseHarness(t, 2)
+
+	tick(t, router, ch) // round 1 on the old bound
+	stale := router.AutonomousFor(ch)
+	require.True(t, stale.Enabled)
+	require.Equal(t, 2, stale.MaxRounds)
+	members, err := router.store.GetMembers(context.Background(), ch)
+	require.NoError(t, err)
+
+	// The raise lands mid-round; the tail then runs with the head snapshot.
+	router.SetAutonomous(ch, AutonomousConfig{
+		Enabled: true, MaxRounds: 5, Convener: "ember-owl",
+		Topic: "Adopt a monorepo?", Goal: "A synthesized recommendation.",
+	})
+	closed, staleVerdict := router.maybeBoundedClose(context.Background(),
+		ChannelMessage{ID: uuid.NewString(), ChannelID: ch, SenderID: "operator", Content: "continue"},
+		ChannelTypeGroup, members, len(members), false, nil, stale)
+
+	assert.False(t, closed, "round 2 crossed the OLD bound only — the raised config extends the discussion")
+	assert.False(t, staleVerdict, "…and withholds nothing: the message is live traffic of the extended round")
+	assert.Empty(t, disp.synthesisTurns(), "no synthesis close is armed off the stale round bound")
+	assert.Zero(t, closedCount(t, reader, structuralTrigger))
+	_, _, tracked := router.openInteractionEscalationState(ch)
+	assert.True(t, tracked, "the interaction stays open under the raised bound")
+
+	// The crossed tally survived the deferral: the RAISED bound still
+	// terminates deterministically at its own round count.
+	tick(t, router, ch) // round 3
+	tick(t, router, ch) // round 4
+	tick(t, router, ch) // round 5 == the raised bound
+	require.Len(t, disp.synthesisTurns(), 1,
+		"the raised bound arms the (chaired) close at its own round count — the tally was deferred, not reset")
 }
 
 // failOneLiveDispatcher records everything and fails the LIVE dispatches (and
@@ -112,4 +158,80 @@ func TestBoundedClose_RedeliveryResolvedPerRecipient(t *testing.T) {
 	}
 	assert.True(t, seen["ember-owl"] && seen["iron-fox"],
 		"both discussion members are notified either way")
+}
+
+// missShapesDispatcher fails the LIVE dispatches to two members with the two
+// delivery-miss error shapes [GRPCMessageDispatcher.Dispatch] used to
+// nil-swallow (PR #718 follow-up review): the wrapped
+// [registry.ErrAgentNotFound] of an unregistered target, and the
+// refused-ack error of a TaskAck with success=false (the agent servicer's
+// queue-full discard / validation failure). Close notifications pass so the
+// per-recipient marker can be asserted.
+type missShapesDispatcher struct {
+	dispatchRecorder
+	notRegistered string
+	ackRefused    string
+}
+
+func (d *missShapesDispatcher) Dispatch(ctx context.Context, env DispatchEnvelope, msg ChannelMessage) error {
+	_ = d.dispatchRecorder.Dispatch(ctx, env, msg)
+	if env.InteractionCloseNotification {
+		return nil
+	}
+	switch env.Recipient.ParticipantID {
+	case d.notRegistered:
+		return fmt.Errorf("dispatch target %s not registered: %w", env.Recipient.ParticipantID, registry.ErrAgentNotFound)
+	case d.ackRefused:
+		return fmt.Errorf("ReceiveChannelMessage to %s: receiver refused delivery: event queue full; message discarded", env.Recipient.ParticipantID)
+	}
+	return nil
+}
+
+// TestBoundedClose_DeliveryMissShapesDowngradeToSoleDelivery — the redelivery
+// ledger must see BOTH miss shapes the dispatcher used to report as nil: an
+// unregistered recipient and a recipient whose receiver refused the ack. Both
+// members land in the round's undelivered set and their close notifications
+// carry redelivery=false (sole delivery — the ingest skip must not drop a
+// closing turn that never arrived), while a member the round genuinely
+// reached keeps the redelivery skip.
+func TestBoundedClose_DeliveryMissShapesDowngradeToSoleDelivery(t *testing.T) {
+	disp := &missShapesDispatcher{notRegistered: "iron-fox", ackRefused: "pine-marten"}
+	store := newTestStore(t, SQLiteOptions{})
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	// Chairless on purpose, like the per-recipient sibling above: the
+	// immediate 4b-i close is the redelivery-marked path.
+	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
+		map[string]RespondPolicy{
+			"operator":    RespondNever,
+			"ember-owl":   RespondAlways,
+			"iron-fox":    RespondAlways,
+			"pine-marten": RespondAlways,
+		}, "operator", "ember-owl", "iron-fox", "pine-marten")
+	router.SetFloorControl(ch, true, time.Millisecond)
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, MaxRounds: 1, Convener: "ember-owl"})
+
+	// One publish = the bounding floor round: ember-owl's dispatch lands,
+	// iron-fox's misses as not-registered, pine-marten's as a refused ack.
+	tick(t, router, ch)
+	router.WaitForPendingFanout()
+
+	notifications := disp.closeNotifications()
+	require.NotEmpty(t, notifications, "the bounded close fans its notification")
+	seen := map[string]bool{}
+	for _, c := range notifications {
+		seen[c.env.Recipient.ParticipantID] = true
+		switch c.env.Recipient.ParticipantID {
+		case "iron-fox":
+			assert.False(t, c.env.InteractionCloseRedelivery,
+				"an unregistered member's miss must reach the undelivered ledger — sole delivery")
+		case "pine-marten":
+			assert.False(t, c.env.InteractionCloseRedelivery,
+				"a refused-ack member's miss must reach the undelivered ledger — sole delivery")
+		default:
+			assert.True(t, c.env.InteractionCloseRedelivery,
+				"a member the live round reached keeps the redelivery skip")
+		}
+	}
+	assert.True(t, seen["ember-owl"] && seen["iron-fox"] && seen["pine-marten"],
+		"every discussion member is notified either way")
 }

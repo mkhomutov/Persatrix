@@ -205,7 +205,10 @@ class TestSynthesisReplyEcho:
     so a publish authored in reply to the synthesis directive additionally
     carries the ``synthesis_reply`` marker: derived structurally by
     ``DispatchContext.for_event`` (strict ``is True``, the gate's read) and
-    stamped beside the id claim by ``same_channel_claim``."""
+    stamped beside the id claim by the context's ``same_channel_claim``
+    method — structural on BOTH halves (PR #718 second-pass review: the
+    stamping used to be a defaulted per-call-site kwarg, the exact silent
+    fallback the derivation half was built to remove)."""
 
     def test_for_event_derives_the_origin_marker(self) -> None:
         from agents.channel_wire_metadata import DispatchContext
@@ -239,29 +242,80 @@ class TestSynthesisReplyEcho:
         """The marker rides BESIDE the interaction-id claim, never instead
         of it: the id claim is what lets an orphaned reply latch instead of
         minting fresh and reopening."""
-        from agents.channel_wire_metadata import same_channel_claim
+        from agents.channel_wire_metadata import DispatchContext
 
-        claim = same_channel_claim(
-            "group:planning", "int-1", "group:planning", synthesis_reply=True,
+        context = DispatchContext(
+            origin_channel_id="group:planning",
+            origin_interaction_id="int-1",
+            origin_synthesis_turn=True,
         )
+        claim = context.same_channel_claim("group:planning")
         assert claim == {"interaction_id": "int-1", "synthesis_reply": True}
 
-    def test_same_channel_claim_omits_the_echo_by_default(self) -> None:
+    def test_same_channel_claim_omits_the_echo_on_ordinary_context(self) -> None:
         """Ordinary replies keep the pre-4b-ii claim shape byte-for-byte —
         an unmarked publish must never be claimable as the artifact."""
-        from agents.channel_wire_metadata import same_channel_claim
+        from agents.channel_wire_metadata import DispatchContext
 
-        claim = same_channel_claim("group:planning", "int-1", "group:planning")
-        assert claim == {"interaction_id": "int-1"}
+        context = DispatchContext(
+            origin_channel_id="group:planning", origin_interaction_id="int-1",
+        )
+        assert context.same_channel_claim("group:planning") == {
+            "interaction_id": "int-1",
+        }
+
+    def test_named_opt_out_withholds_the_echo(self) -> None:
+        """``claim_synthesis_reply=False`` — the error-reply seam's named
+        withhold — keeps the id claim (the latch's input) while dropping the
+        echo, even on a synthesis-marked context."""
+        from agents.channel_wire_metadata import DispatchContext
+
+        context = DispatchContext(
+            origin_channel_id="group:planning",
+            origin_interaction_id="int-1",
+            origin_synthesis_turn=True,
+        )
+        assert context.same_channel_claim(
+            "group:planning", claim_synthesis_reply=False,
+        ) == {"interaction_id": "int-1"}
 
     def test_cross_channel_publish_never_carries_the_echo(self) -> None:
         """A cross-channel (or origin-less) publish cannot be the closing
         artifact of an interaction it does not claim."""
-        from agents.channel_wire_metadata import same_channel_claim
+        from agents.channel_wire_metadata import DispatchContext
 
-        assert same_channel_claim(
-            "group:planning", "int-1", "group:other", synthesis_reply=True,
-        ) is None
-        assert same_channel_claim(
-            "group:planning", "", "group:planning", synthesis_reply=True,
-        ) is None
+        marked = DispatchContext(
+            origin_channel_id="group:planning",
+            origin_interaction_id="int-1",
+            origin_synthesis_turn=True,
+        )
+        assert marked.same_channel_claim("group:other") is None
+        originless = DispatchContext(
+            origin_channel_id="group:planning",
+            origin_interaction_id="",
+            origin_synthesis_turn=True,
+        )
+        assert originless.same_channel_claim("group:planning") is None
+
+    async def test_error_reply_seam_opts_out_explicitly(self) -> None:
+        """The chat-error apology carries the id claim (a post-close
+        budget-denial straggler must still latch, PR #716 review) but NEVER
+        the echo — the one publish that must not be claimable as the §D
+        closing artifact, so ``publish_chat_error_on_channel`` spells the
+        named ``claim_synthesis_reply=False`` opt-out at the seam."""
+        from unittest.mock import AsyncMock
+
+        from agents.chat_reply import publish_chat_error_on_channel
+
+        publisher = AsyncMock()
+        publisher.publish = AsyncMock(return_value=None)
+
+        await publish_chat_error_on_channel(
+            publisher, agent_id="quartz-heron", channel_id="group:planning",
+            inbound_sender_id="iron-fox", reply="over budget",
+            reason="budget_exceeded", origin_interaction_id="int-1",
+        )
+
+        metadata = publisher.publish.await_args.kwargs["metadata"]
+        assert metadata["interaction_id"] == "int-1"
+        assert "synthesis_reply" not in metadata

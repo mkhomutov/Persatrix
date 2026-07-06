@@ -44,9 +44,12 @@ func (r *ChannelRouter) armedSynthesisChair(channelID string) string {
 // disarmChannelSynthesis drops WHATEVER synthesis close is armed on the
 // channel's resolver entry (stopping its timer), independent of any particular
 // pending pointer — the RFC 0050 disable path ([ChannelRouter.SetAutonomous])
-// and the exported [ChannelRouter.DisarmChannelSynthesis] both use it so an
-// interaction abandoned mid-arm leaves no orphaned timeout net behind. Nil-
-// tolerant like [openInteraction.disarmPendingSynthesisLocked], which it wraps.
+// uses it so an interaction abandoned mid-arm leaves no orphaned timeout net
+// behind. The channel-delete path does NOT: [ChannelRouter.PurgeChannelInteraction]
+// inlines the same locked disarm so its entry delete shares the critical
+// section (a separate disarm-then-delete let a full arm sequence land a live
+// timer in the gap — PR #718 follow-up review). Nil-tolerant like
+// [openInteraction.disarmPendingSynthesisLocked], which it wraps.
 func (r *ChannelRouter) disarmChannelSynthesis(channelID string) {
 	r.interactionMu.Lock()
 	entry := r.openInteractions[channelID]
@@ -77,11 +80,15 @@ func (r *ChannelRouter) releaseSynthesisArm(channelID, chairID string, timerStop
 
 // disarmAllPendingSyntheses stops every channel's armed synthesis timeout net —
 // the shutdown-drain sweep ([ChannelRouter.DrainPendingFanout], PR #718
-// review finding 1), run AFTER the drain's first fanoutWG.Wait so no in-flight
-// fanout can arm a fresh timer behind it (the follow-up review's ordering fix).
-// The timers run on detached runtime goroutines whose close
-// work Add(1)s to fanoutWG, so an undisarmed timer could fire into (and race)
-// the drain's final fanoutWG.Wait. Abandoning an armed-but-unreplied close is the
+// review finding 1). The sweep runs FIRST in the drain and is made final by
+// the draining gate: the flag and this sweep share interactionMu with the arm
+// CAS, so an arm serialized after the flag refuses (degrading to the
+// immediate close) and no fresh timer can appear behind the sweep — the
+// second follow-up review's ordering fix; waiting the in-flight fanouts first
+// instead let a mid-wait timer's close work fanoutWG.Add from zero against
+// the drain's own Wait. The timers run on detached runtime goroutines whose
+// close work Add(1)s to fanoutWG, so an undisarmed timer could fire into (and
+// race) the drain's fanoutWG.Wait. Abandoning an armed-but-unreplied close is the
 // deliberate shutdown trade — the §D artifact is best-effort across process
 // exit, and holding the drain budget open for a reply that may never come would
 // starve the real in-flight fanout deliveries. Each stopped timer releases its

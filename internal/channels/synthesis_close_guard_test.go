@@ -94,15 +94,16 @@ func TestSynthesisClose_DisableDisarmsPendingClose(t *testing.T) {
 }
 
 // TestSynthesisClose_ChannelDeleteDisarmsAndForgetsPendingClose — PR #718
-// review (findings audit): DisarmChannelSynthesis / PurgeChannelInteraction
-// are the exact calls the channel-DELETE HTTP handler
-// (internal/server/channel_delete_handlers.go) makes to stop an orphaned
-// timeout net and forget the resolver entry when a channel is deleted mid-arm.
-// No test previously exercised either call while a synthesis close was
-// actually armed — the sibling disable-path
-// (TestSynthesisClose_DisableDisarmsPendingClose) only covers SetAutonomous's
-// disarm — so a regression in disarmChannelSynthesis / PurgeChannelInteraction
-// itself (a reorder, a swallowed call, a dropped delete) would have gone
+// review (findings audit): PurgeChannelInteraction is the exact call the
+// channel-DELETE HTTP handler (internal/server/channel_delete_handlers.go)
+// makes to stop an orphaned timeout net and forget the resolver entry when a
+// channel is deleted mid-arm — one call, one interactionMu critical section
+// (the follow-up review folded the disarm and the delete together so a full
+// arm sequence cannot land a live timer in a gap between them). No test
+// previously exercised it while a synthesis close was actually armed — the
+// sibling disable-path (TestSynthesisClose_DisableDisarmsPendingClose) only
+// covers SetAutonomous's disarm — so a regression in PurgeChannelInteraction
+// itself (a reorder, a swallowed disarm, a dropped delete) would have gone
 // uncaught by every existing test. Pins: after PurgeChannelInteraction, the
 // pending synthesis is gone, the resolver entry itself is gone (the map-leak
 // half of the fix), and the stopped timer never fires a close.

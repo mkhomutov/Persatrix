@@ -137,22 +137,49 @@ func (r *ChannelRouter) inFlightFanout() int64 {
 // until the fanout eventually finishes — benign at shutdown, where the process
 // exits immediately after.
 //
-// PR #718 review finding 1 (ordering revised by the follow-up review): the
-// in-flight fanouts are waited FIRST — they are the only producers of new
-// arms, and a disarm sweep that ran before they finished could be out-raced
-// by a bound-crossing tail arming a fresh 120s timer right after it, leaving
-// the drain blocked in synthesisWG.Wait on a timer no sweep will ever stop
-// (and its late synthesisWG.Add racing a Wait that may have started at zero,
-// the WaitGroup-contract misuse). Once fanoutWG settles nothing can arm
-// (shutdown stops the servers before draining, so no new publish starts a
-// fanout), making the sweep final. A timer the sweep catches mid-fire
-// (Stop()==false) completes its close work — a fanoutWG.Add that precedes its
-// synthesisWG.Done — so the SECOND fanoutWG.Wait captures its notification
-// deliveries instead of racing their Add.
+// PR #718 review finding 1, ordering settled by the second follow-up review's
+// DRAINING GATE. Waiting fanoutWG before the sweep (the first revision) closed
+// the sweep-outrun race but opened the symmetric one: a synthesis timer firing
+// during that first Wait ran fanoutWG.Add(1) (onSynthesisTimeout → boundedClose
+// → notifyInteractionClose) from a goroutine holding NO fanoutWG count — an
+// Add-from-zero concurrent with an in-progress Wait, the documented
+// sync.WaitGroup misuse. The gate closes BOTH races without a fanoutWG wait
+// before the sweep:
+//
+//  1. `draining` is set under interactionMu — the lock the arm CAS runs under
+//     — so [ChannelRouter.maybeArmSynthesisClose] refuses every arm serialized
+//     after it and degrades to the immediate close (deterministic termination
+//     preserved; the arming fanout goroutine holds its own fanoutWG count, so
+//     its close-notification Adds are legal).
+//  2. The sweep is therefore FINAL: every synthesisWG.Add is under the same
+//     lock and either preceded the sweep's critical section (its count is
+//     registered before the Wait below starts) or finds its arm already swept
+//     and never Adds. No Add-from-zero can race synthesisWG.Wait.
+//  3. synthesisWG.Wait: swept timers released their counts at the sweep;
+//     a timer caught mid-fire (Stop()==false) self-releases via its deferred
+//     Done — deferred FIRST in onSynthesisTimeout, so its close work's
+//     fanoutWG.Add(1)s happen-before that Done, which happens-before this
+//     Wait returns.
+//  4. One fanoutWG.Wait: by (3) every timer-originated Add is already held
+//     when it starts, and every other Add came from a goroutine registered at
+//     spawn (PublishAsync) or holding a count (the notification fan) — no
+//     Add-from-zero can race it either.
+//
+// The flag clears on return (deferred), so a router reused after a bounded
+// (ctx-expired) drain resumes arming — at real shutdown the process exits
+// right after, and a straggler arm past an ABANDONED drain is the same
+// accepted exposure as the outlived waiter goroutine above.
 func (r *ChannelRouter) DrainPendingFanout(ctx context.Context) bool {
+	r.interactionMu.Lock()
+	r.draining = true
+	r.interactionMu.Unlock()
+	defer func() {
+		r.interactionMu.Lock()
+		r.draining = false
+		r.interactionMu.Unlock()
+	}()
 	done := make(chan struct{})
 	go func() {
-		r.fanoutWG.Wait()
 		r.disarmAllPendingSyntheses()
 		r.synthesisWG.Wait()
 		r.fanoutWG.Wait()
@@ -167,10 +194,19 @@ func (r *ChannelRouter) DrainPendingFanout(ctx context.Context) bool {
 }
 
 // WaitForPendingFanout blocks until every fanout goroutine spawned by
-// [ChannelRouter.PublishAsync] has completed. Intended for graceful shutdown
-// (drain in-flight deliveries before exit) and for tests that need a
-// deterministic point to assert on dispatched recipients. A no-op when no
-// async fanout is in flight.
+// [ChannelRouter.PublishAsync] has completed. Intended for tests that need a
+// deterministic point to assert on dispatched recipients — several call it
+// MID-ARM and expect the pending synthesis close to survive
+// (synthesis_close.go), so it deliberately takes no draining gate and runs no
+// disarm sweep. A no-op when no async fanout is in flight.
+//
+// KNOWN EXPOSURE (accepted, test-facing): a synthesis timer that fires
+// CONCURRENTLY with this wait runs its close-notification fanoutWG.Add(1)s on
+// a goroutine holding no fanout count — the Add-from-zero WaitGroup misuse
+// the drain's gate exists to close. Graceful shutdown must use
+// [ChannelRouter.DrainPendingFanout]; a test that deliberately lets the
+// timeout net fire polls the dispatcher instead of calling this
+// (TestSynthesisClose_ReplyTimeoutFallsBackToImmediateClose).
 func (r *ChannelRouter) WaitForPendingFanout() {
 	r.fanoutWG.Wait()
 }
@@ -349,8 +385,12 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// lock; the reply waiter is notified like the latch branch above, so a
 	// closing reply never starves a parked floor turn. A lost tombstone CAS
 	// means a racing closer beat this reply — the synthesis stays committed
-	// history, the 4b-i degraded artifact shape.
-	if pendingSynth := r.claimSynthesisReply(msg, r.AutonomousFor(msg.ChannelID)); pendingSynth != nil {
+	// history, the 4b-i degraded artifact shape. The claim reads the
+	// PRE-RESOLVE `inboundClaim` captured above, never the bag — the stamp at
+	// the top of this function overwrote the bag with the resolver's verdict,
+	// which while armed always equals the armed id, so a bag re-read cannot
+	// reject a stale echo (PR #718 follow-up review; see claimSynthesisReply).
+	if pendingSynth := r.claimSynthesisReply(msg, inboundClaim, r.AutonomousFor(msg.ChannelID)); pendingSynth != nil {
 		synthCtx := context.WithoutCancel(ctx)
 		r.waiter.Notify(msg)
 		if r.boundedClose(synthCtx, msg, derivedType, pendingSynth.interactionID, pendingSynth.trigger, false, nil) {

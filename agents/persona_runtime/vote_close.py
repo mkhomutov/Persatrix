@@ -153,6 +153,7 @@ async def discharge_end_vote_publish(
     *,
     published: bool,
     token: str,
+    synthesis_reply: bool = False,
 ) -> None:
     """Discharge the parked vote close for ``channel_id`` (module doc).
 
@@ -164,6 +165,19 @@ async def discharge_end_vote_publish(
     this park never stamped: a threaded/exempted vote's ``""``, an
     earlier turn's stranded token under a newer park) leaves the park
     alone.
+
+    ``synthesis_reply`` (PR #718 review, OQ #6): ``True`` when the
+    published vote rode the wire claimable as the §D closing artifact —
+    a chair answering the synthesis directive with a vote whose content
+    IS the synthesis (the ISSUE-0099 outcome-(a) shape; the executor
+    threads it off ``end_vote_action``'s "published" result).  Go's
+    fanout-head claims that publish BEFORE ``processEndVote``, so the
+    close this discharge performs is the bounded close's own local
+    record and its RFC 0020 summary must draw the OQ #6 wallet lease —
+    without the mark it ran unleased, evading the mandatory cap, because
+    the later close notification (the only other marker) no-ops on the
+    scope this discharge already closed ("invent nothing locally").  The
+    default keeps every ordinary vote discharge on the unleased path.
     """
     async with agent._lock:
         pending = agent._pending_vote_closes.get(channel_id)
@@ -209,6 +223,18 @@ async def discharge_end_vote_publish(
             # N "ended" local records.  The record stays open, like the
             # wire's, and closes on the eventual rotation or idle gap.
             return
+        if synthesis_reply:
+            # OQ #6 metering (docstring): mark the still-open record BEFORE
+            # the close so ``summarize_close.py`` threads the wallet lease
+            # (``meter_close_summary`` + the record's own wire id — an empty
+            # wire id degrades to the observable UNLEASED warn, finding 2's
+            # posture). REASON_STRUCTURAL stays the close reason: the
+            # structural-vs-cost trigger rides only on the close
+            # notification, which no-ops on this already-closed scope, so
+            # the truthful cause is not knowable at discharge time — the
+            # metering is the invariant that must hold; the label stays
+            # best-effort.
+            open_record.meter_close_summary = True
         closed = agent._interaction_tracker.close(
             pending.scope, reason=REASON_STRUCTURAL,
         )

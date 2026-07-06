@@ -50,35 +50,44 @@ func (r *ChannelRouter) SetAutonomous(channelID string, a AutonomousConfig) {
 	}
 }
 
-// DisarmChannelSynthesis is the exported form of [ChannelRouter.disarmChannelSynthesis]
-// for callers outside the package whose action retires a channel out from under any
-// armed synthesis close — currently the channel-delete HTTP handler (PR #718 review:
-// deleting a channel mid-arm left the timeout net orphaned, firing ~120s later against
-// a channel the store no longer has). Same disarm [SetAutonomous]'s disable branch
-// above uses, exported rather than duplicated. Safe to call on a channel with no armed
-// close (nil-tolerant) and safe to call redundantly (each disarm is idempotent past the
-// first).
-func (r *ChannelRouter) DisarmChannelSynthesis(channelID string) {
-	r.disarmChannelSynthesis(channelID)
-}
-
 // PurgeChannelInteraction forgets channelID's resolver entry outright: the
-// disarm [DisarmChannelSynthesis] performs, plus dropping the
-// [openInteraction] itself from openInteractions (PR #718 review: the
-// disarm-on-delete fix stopped the orphaned timer but never touched the
-// entry it lived on, so every deleted channel's roundCount / chairEscalated /
-// retired state stayed resident in the map forever — the delete path is the
-// one caller where dropping the whole entry is safe, unlike
-// [SetAutonomous]'s disable branch, which must keep the no-reopen ledger
-// (`retired`) alive for a channel that is merely going manual, not gone).
-// Exported for the channel-delete HTTP handler; the channel is already gone
-// from the store by the time this runs, so there is no legitimate open
-// interaction left to race. Nil-tolerant / idempotent like its sibling.
+// disarm [ChannelRouter.disarmChannelSynthesis] performs (stopping any armed
+// synthesis timeout net — deleting a channel mid-arm otherwise left the net
+// orphaned, firing ~120s later against a channel the store no longer has),
+// plus dropping the [openInteraction] itself from openInteractions (PR #718
+// review: the disarm-on-delete fix stopped the orphaned timer but never
+// touched the entry it lived on, so every deleted channel's roundCount /
+// chairEscalated / retired state stayed resident in the map forever — the
+// delete path is the one caller where dropping the whole entry is safe,
+// unlike [SetAutonomous]'s disable branch, which must keep the no-reopen
+// ledger (`retired`) alive for a channel that is merely going manual, not
+// gone). Exported for the channel-delete HTTP handler; the channel is already
+// gone from the store by the time this runs, so there is no legitimate open
+// interaction left to race. Nil-tolerant / idempotent.
+//
+// Disarm and delete are ONE interactionMu critical section (PR #718 follow-up
+// review): as two — a disarmChannelSynthesis call, then a separate lock for
+// the delete — a fanout completing its entire arm sequence (arm CAS + chair
+// dispatch RPC + timer-arm, synthesis_close.go) inside the gap landed a live
+// timer on the entry an instant before the delete dropped it, and no disarm
+// could ever reach it again ([ChannelRouter.disarmAllPendingSyntheses]
+// iterates only openInteractions). With the delete inside the same critical
+// section, an arm CAS serialized after it finds no entry and reports
+// [synthesisEntryMovedOn] instead. The release tail runs OUTSIDE the lock,
+// exactly like the other disarm terminals (synthesis_disarm.go).
 func (r *ChannelRouter) PurgeChannelInteraction(channelID string) {
-	r.disarmChannelSynthesis(channelID)
 	r.interactionMu.Lock()
+	entry := r.openInteractions[channelID]
+	var chairID string
+	if entry != nil && entry.pendingSynthesis != nil {
+		chairID = entry.pendingSynthesis.chairID
+	}
+	timerStopped := entry.disarmPendingSynthesisLocked() // nil-tolerant receiver.
 	delete(r.openInteractions, channelID)
 	r.interactionMu.Unlock()
+	// No reply/timeout will re-enter to clear the chair's "thinking" mark once
+	// abandoned here — the [ChannelRouter.disarmChannelSynthesis] posture.
+	r.releaseSynthesisArm(channelID, chairID, timerStopped)
 }
 
 // AutonomousFor returns the resolved RFC 0052 autonomous block for `channelID`. A

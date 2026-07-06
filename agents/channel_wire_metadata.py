@@ -354,7 +354,7 @@ def wire_interaction_id(event: AgentEvent) -> str:
 class DispatchContext:
     """The originating dispatch's ambient context, threaded WHOLE through the
     executor entry points: ``cascade_depth`` plus the RFC 0052 no-reopen
-    claim's origin pair (the inputs :func:`same_channel_claim` builds the wire
+    claim's origin pair (the inputs :meth:`same_channel_claim` builds the wire
     claim from).
 
     One required parameter instead of three parallel defaulted kwargs
@@ -378,17 +378,20 @@ class DispatchContext:
     ``origin_synthesis_turn`` (PR #718 review) records whether the
     originating dispatch WAS the RFC 0052 §D synthesis directive (the
     ``synthesis_turn`` payload marker, strict ``is True`` like the gate and
-    framing reads). :func:`same_channel_claim` stamps it onto the publish as
+    framing reads). :meth:`same_channel_claim` stamps it onto the publish as
     the ``synthesis_reply`` marker — the fanout-head claim's third conjunct
     (``claimSynthesisReply``, internal/channels/synthesis_claim.go): the
     interaction id spans every round and every reply echoes it, so without
     this echo an ordinary chair reply from an earlier round still in flight
     at the bound is indistinguishable from the synthesis and would be fanned
-    to every member as the closing artifact. Derived here, structurally, for
-    the same reason as the origin pair: a per-call-site kwarg would make
-    "unmarked" the silent fallback of any site that forgot it — and an
-    unmarked synthesis reply is silently withheld orchestrator-side, the
-    close degrading to the timeout net on every close of that path.
+    to every member as the closing artifact. Both the derivation (here) and
+    the stamping (the method below) are structural, for the same reason as
+    the origin pair: a per-call-site kwarg would make "unmarked" the silent
+    fallback of any site that forgot it — and an unmarked synthesis reply is
+    silently withheld orchestrator-side, the close degrading to the timeout
+    net on every close of that path. The only per-site choice left is the
+    method's NAMED opt-out, for the one publish that must never be claimable
+    as the artifact (the error-reply apology).
     """
 
     cascade_depth: int = DEFAULT_MAX_CASCADE_DEPTH
@@ -412,43 +415,50 @@ class DispatchContext:
             origin_synthesis_turn=(event.payload or {}).get("synthesis_turn") is True,
         )
 
+    def same_channel_claim(
+        self, target_channel: str, *, claim_synthesis_reply: bool = True,
+    ) -> dict[str, object] | None:
+        """Build a publish's RFC 0052 no-reopen claim from THIS context: a
+        SAME-channel publish echoes its dispatched-under interaction id as
+        the wire ``interaction_id`` claim; a cross-channel publish — or an
+        origin-less context (IP8 re-convene) — claims nothing (``None``).
+        The claim is the no-reopen latch's sole production input on every
+        same-channel publish path (the reply, end-vote, and error-recovery
+        publishes), so the rule lives here, beside the origin fields it
+        reads, rather than once per publish site (PR #716 review): a rule
+        change applied to one site and not the others would leave that
+        path's post-close stragglers minting fresh and re-fanning into the
+        closed discussion. The resolver stays authoritative (IP2): the claim
+        never keys governance state, it only lets the latch recognise
+        post-close traffic.
 
-def same_channel_claim(
-    origin_channel_id: str, origin_interaction_id: str, target_channel: str,
-    *, synthesis_reply: bool = False,
-) -> dict[str, object] | None:
-    """Build a publish's RFC 0052 no-reopen claim: a SAME-channel publish
-    echoes its dispatched-under interaction id as the wire ``interaction_id``
-    claim; a cross-channel publish — or an origin-less caller (IP8
-    re-convene) — claims nothing (``None``). The claim is the no-reopen
-    latch's sole production input on BOTH publish paths (the reply publish
-    and the end-vote publish), so the rule lives here, beside the ingress
-    seeding that owns the key, rather than once per publish site (PR #716
-    review): a rule change applied to one site and not the other would leave
-    that path's post-close stragglers minting fresh and re-fanning into the
-    closed discussion. The resolver stays authoritative (IP2): the claim
-    never keys governance state, it only lets the latch recognise post-close
-    traffic.
-
-    ``synthesis_reply`` (PR #718 review, threaded from
-    :attr:`DispatchContext.origin_synthesis_turn`): a publish authored in
-    reply to the §D synthesis directive additionally carries the
-    ``synthesis_reply`` marker — the discriminator ``claimSynthesisReply``
-    (internal/channels/synthesis_claim.go) requires beside sender+claim to
-    recognise the closing artifact, because the id claim alone is shared
-    with every ordinary reply in the interaction. It rides BESIDE the id
-    claim (never instead of it): the id claim is what lets an orphaned
-    reply — the arm disarmed by a racing end-vote close — land in the
-    no-reopen latch instead of minting fresh and reopening. Stamped only on
-    a same-channel claim: a cross-channel or origin-less publish cannot be
-    the closing artifact of the interaction it does not claim.
-    """
-    if origin_interaction_id and target_channel == origin_channel_id:
-        claim: dict[str, object] = {"interaction_id": origin_interaction_id}
-        if synthesis_reply:
-            claim["synthesis_reply"] = True
-        return claim
-    return None
+        The ``synthesis_reply`` echo (PR #718 review) rides structurally off
+        :attr:`origin_synthesis_turn` — a context method rather than the
+        earlier per-call-site kwarg, for the class docstring's own reason: a
+        defaulted kwarg made "unmarked" the silent fallback of any publish
+        site that forgot to thread it. A publish authored in reply to the §D
+        synthesis directive additionally carries the marker — the
+        discriminator ``claimSynthesisReply``
+        (internal/channels/synthesis_claim.go) requires beside sender+claim
+        to recognise the closing artifact, because the id claim alone is
+        shared with every ordinary reply in the interaction. It rides BESIDE
+        the id claim (never instead of it): the id claim is what lets an
+        orphaned reply — the arm disarmed by a racing end-vote close — land
+        in the no-reopen latch instead of minting fresh and reopening.
+        Stamped only on a same-channel claim: a cross-channel or origin-less
+        publish cannot be the closing artifact of the interaction it does
+        not claim. ``claim_synthesis_reply=False`` is the NAMED opt-out for
+        the one publish that must never be claimable as the artifact — the
+        error-reply apology (``chat_reply.publish_chat_error_on_channel``) —
+        so the withhold is spelled at the seam instead of implied by an
+        omitted kwarg.
+        """
+        if self.origin_interaction_id and target_channel == self.origin_channel_id:
+            claim: dict[str, object] = {"interaction_id": self.origin_interaction_id}
+            if claim_synthesis_reply and self.origin_synthesis_turn:
+                claim["synthesis_reply"] = True
+            return claim
+        return None
 
 
 __all__ = [
@@ -459,7 +469,6 @@ __all__ = [
     "WIRE_CLOSE_TRIGGERS",
     "DispatchContext",
     "channel_event_payload",
-    "same_channel_claim",
     "seed_replay_metadata",
     "seed_wire_metadata",
     "wire_interaction_id",

@@ -142,7 +142,7 @@ func TestSynthesisClose_ClaimWindowWithholdsStragglers(t *testing.T) {
 		ID: uuid.NewString(), ChannelID: ch, SenderID: "iron-fox", Content: "Synthesis: done.",
 		Metadata: map[string]any{"interaction_id": openID, synthesisReplyMetadataKey: true},
 	}
-	pending := router.claimSynthesisReply(reply, router.AutonomousFor(ch))
+	pending := router.claimSynthesisReply(reply, openID, router.AutonomousFor(ch))
 	require.NotNil(t, pending, "the marked chair reply claims the arm")
 
 	// The claim→tombstone window, held open deliberately: every withhold and
@@ -153,7 +153,7 @@ func TestSynthesisClose_ClaimWindowWithholdsStragglers(t *testing.T) {
 	assert.True(t, router.stimulusOutlivedClose(
 		ChannelMessage{ID: uuid.NewString(), ChannelID: ch, SenderID: "ember-owl"},
 		router.AutonomousFor(ch)), "the head withhold holds through the window too")
-	assert.Nil(t, router.claimSynthesisReply(reply, router.AutonomousFor(ch)),
+	assert.Nil(t, router.claimSynthesisReply(reply, openID, router.AutonomousFor(ch)),
 		"a second marked reply claims nothing — one arm, one close")
 
 	// Finish the teardown as the commit path would; everything reconciles.
@@ -163,6 +163,56 @@ func TestSynthesisClose_ClaimWindowWithholdsStragglers(t *testing.T) {
 	assert.Equal(t, int64(1), closedCount(t, reader, structuralTrigger))
 	_, _, tracked := router.openInteractionEscalationState(ch)
 	assert.False(t, tracked)
+}
+
+// TestSynthesisClose_StaleInboundClaimDoesNotClaimTheArm — the id conjunct
+// must read the INBOUND wire claim, not the metadata bag (PR #718 follow-up
+// review): publishCommit stamps the resolver's verdict over the bag before
+// the claim runs, and while armed the resolver always resolves the armed id
+// for a non-latched publish — so a bag re-read made the conjunct a tautology
+// and a marked chair publish echoing a PREDECESSOR generation's id (or none
+// at all) was consumed as the closing artifact. Both shapes must fall through
+// to the armed-window withhold, and the genuinely-claimed reply still closes.
+func TestSynthesisClose_StaleInboundClaimDoesNotClaimTheArm(t *testing.T) {
+	router, disp, ch, reader := synthesisCloseHarness(t, 2)
+	router.synthesisTimeout = time.Hour // a timeout fallback would hang, not pass
+
+	tick(t, router, ch)
+	openID, _, _ := router.openInteractionEscalationState(ch)
+	tick(t, router, ch) // bound → armed
+	require.Len(t, disp.synthesisTurns(), 1)
+
+	// A marked chair publish whose INBOUND claim names an OLD generation —
+	// a stale echo of a rotated/disarmed predecessor the 8-generation ledger
+	// never held.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "iron-fox",
+		Content:  "Synthesis: a stale echo.",
+		Metadata: map[string]any{"interaction_id": "predecessor-generation", synthesisReplyMetadataKey: true},
+	}, ""))
+	// …and a marked chair publish carrying NO claim at all: a genuine
+	// synthesis reply always has the claim stamped beside the marker.
+	require.NoError(t, router.Publish(context.Background(), ChannelMessage{
+		ID: uuid.NewString(), ChannelID: ch, SenderID: "iron-fox",
+		Content:  "Synthesis: an unclaimed echo.",
+		Metadata: map[string]any{synthesisReplyMetadataKey: true},
+	}, ""))
+	router.WaitForPendingFanout()
+
+	assert.Zero(t, closedCount(t, reader, structuralTrigger),
+		"neither mis-claimed reply closes — the armed withhold owns both")
+	require.Equal(t, "iron-fox", router.armedSynthesisChair(ch),
+		"the arm survives, still waiting on the genuinely-claimed reply")
+
+	chairReply(t, router, ch, "iron-fox", openID, "Synthesis: the real artifact.")
+	router.WaitForPendingFanout()
+	assert.Equal(t, int64(1), closedCount(t, reader, structuralTrigger))
+	notifications := disp.closeNotifications()
+	require.NotEmpty(t, notifications)
+	for _, c := range notifications {
+		assert.Contains(t, c.msg.Content, "Synthesis: the real artifact.",
+			"the close carries the claimed reply, never a stale echo")
+	}
 }
 
 // TestSynthesisTimeout_DisabledChannelAbandonsClose — the arm-after-disarm
@@ -223,13 +273,18 @@ func (g *gatedSynthDispatcher) Dispatch(ctx context.Context, env DispatchEnvelop
 	return g.dispatchRecorder.Dispatch(ctx, env, msg)
 }
 
-// TestDrainPendingFanout_ArmDuringDrainSweptNotLeaked — the drain-vs-arm race:
-// a fanout still in flight when DrainPendingFanout starts can cross the bound
-// and arm AFTER a too-early disarm sweep, leaving the drain to block on (or
-// return past) a fresh timer no sweep will ever stop. The drain now waits the
-// in-flight fanouts BEFORE sweeping, so the late arm is swept, the WaitGroups
-// settle, and nothing is left armed behind a drain that reported success.
-func TestDrainPendingFanout_ArmDuringDrainSweptNotLeaked(t *testing.T) {
+// TestDrainPendingFanout_ArmDuringDrainRefusedNotLeaked — the drain-vs-arm
+// race: a fanout still in flight when DrainPendingFanout starts can cross the
+// bound AFTER the disarm sweep, leaving the drain to block on (or return
+// past) a fresh timer no sweep will ever stop. The draining gate closes it:
+// the flag is set under interactionMu before the sweep, the arm CAS checks it
+// under the same lock, so the late bound-crosser REFUSES to arm and degrades
+// to the immediate close — the WaitGroups settle, nothing is left armed, and
+// the interaction still terminated deterministically. (Waiting the in-flight
+// fanouts before sweeping instead traded this race for a firing timer's
+// fanoutWG.Add-from-zero against the drain's own first Wait — the second
+// follow-up review.)
+func TestDrainPendingFanout_ArmDuringDrainRefusedNotLeaked(t *testing.T) {
 	disp := &gatedSynthDispatcher{arrived: make(chan struct{})}
 	store := newTestStore(t, SQLiteOptions{})
 	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
@@ -267,12 +322,14 @@ func TestDrainPendingFanout_ArmDuringDrainSweptNotLeaked(t *testing.T) {
 
 	select {
 	case ok := <-drained:
-		assert.True(t, ok, "the drain settles: the late arm was swept, not waited on")
+		assert.True(t, ok, "the drain settles: the late arm was refused, not waited on")
 	case <-time.After(15 * time.Second):
 		t.Fatal("drain never settled — the in-drain arm leaked past the sweep")
 	}
 	assert.Empty(t, router.armedSynthesisChair(ch),
 		"nothing is left armed behind a drain that reported success")
+	assert.NotEmpty(t, disp.closeNotifications(),
+		"the refused arm degraded to the immediate close — termination stayed deterministic through the drain")
 }
 
 // closeThenRemarkDispatcher reproduces the arm/markActivity ordering race
