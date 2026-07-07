@@ -61,7 +61,7 @@ Arm a group channel from the CLI (the RFC 0050 surface; the web `AutonomousSetti
 persatrix channel config set group:planning \
   autonomous.enabled=true \
   autonomous.topic="Should we adopt a monorepo? Lay out the tradeoffs." \
-  autonomous.agenda='["Build tooling cost","Cross-team coupling","Migration effort"]' \
+  autonomous.agenda='Build tooling cost,Cross-team coupling,Migration effort' \
   autonomous.convener=nova-sparrow \
   autonomous.goal="A synthesized recommendation with the strongest argument on each side." \
   autonomous.max_rounds=8 \

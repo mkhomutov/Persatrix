@@ -139,7 +139,7 @@ sequenceDiagram
         Roster->>LLM: compose reply (RFC 0051 reasoning)
         Roster->>Router: Publish(reply, echoing interaction_id)
         Router->>Wallet: InteractionSpend(interaction_id)
-        Router->>Router: fanout tail: round tally vs max_rounds ·<br/>spend vs soft budget (cap − (1+N)·reserve)
+        Router->>Router: fanout tail: round tally vs max_rounds ·<br/>spend vs soft budget (cap − the `1 + N` reserve)
     end
 
     Note over Router: bound crossed (trigger = structural | cost)

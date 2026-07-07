@@ -32,70 +32,51 @@ from agents.channel_wire_metadata import (
     WIRE_CLOSE_TRIGGER_STRUCTURAL,
 )
 from agents.generated import wallet_pb2 as walletpb
-from agents.llm_client import LLMResponse, StopReason, Usage
 from agents.memory.boundary_detectors import REASON_COST, REASON_STRUCTURAL
-from agents.memory.interactions import (
-    SUMMARY_UNAVAILABLE_TEXT,
-    Interaction,
-    InteractionTracker,
-)
+from agents.memory.interactions import SUMMARY_UNAVAILABLE_TEXT, InteractionTracker
 from agents.persona_runtime.close_notification import (
     close_interaction_on_notification,
 )
 from agents.persona_runtime.summarize_close import summarize_closed_interaction
-from agents.persona_types import AgentAction, AgentEvent, EventType
+from agents.persona_types import AgentAction, AgentEvent
+
+from .test_close_notification_redelivery import _notification_event
+from .test_interaction_close_notification import _CloseNotificationAgent
+from .test_summarize_close_metering import _SpyClient
 
 _SCOPE = "group:brainstorm"
 _WIRE_ID = "wire-ix-accept"
 _SYNTHESIS = "Synthesis: adopt the monorepo; revisit tooling next quarter."
 
 
-class _SpyClient:
-    """Records every ``create_message`` kwargs dict and answers with a real
-    summary — the mock-provider posture of the acceptance suite."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    async def create_message(self, **kwargs: object) -> LLMResponse:
-        self.calls.append(kwargs)
-        return LLMResponse(
-            text="The roster converged on adopting the monorepo.",
-            stop_reason=StopReason.END_TURN,
-            usage=Usage(120, 30),
-        )
-
-
-class _PersonaAgent:
-    """The composed-agent surface the close dispatch walks (the
-    ``_CloseNotificationAgent`` harness shape), with a REAL final-turn
-    ingest: ``_store_event_episode`` appends the event's sender + content
-    as a turn, so §D artifact #1 — the synthesis landing in the persona's
-    record — is inspectable, not simulated."""
-
-    _MULTI_TURN_EVENT_TYPES: frozenset[EventType] = frozenset(
-        {EventType.CHANNEL_MESSAGE},
-    )
+class _PersonaAgent(_CloseNotificationAgent):
+    """The ``_CloseNotificationAgent`` harness with a REAL final-turn
+    ingest: ``_store_event_episode`` appends a PRODUCTION-SHAPED turn —
+    the deterministic action envelope under ``summary`` and the message
+    body under ``text``, exactly as ``episode_routing`` stashes it
+    (ISSUE-0054: ``text`` is the summariser's sole real-content input) —
+    so §D artifact #1, the synthesis landing in the persona's record, is
+    inspectable in the shape production would persist it."""
 
     def __init__(self, agent_id: str) -> None:
-        self.agent_id = agent_id
-        self._interaction_tracker = InteractionTracker(idle_timeout_sec=600.0)
-        self.persisted: list[Interaction] = []
-
-    def _scope_for_multi_turn_event(self, event: AgentEvent) -> str | None:
-        return event.channel_id
-
-    async def _persist_closed_interaction(self, interaction: Interaction) -> None:
-        self.persisted.append(interaction)
+        super().__init__(InteractionTracker(idle_timeout_sec=600.0), agent_id)
 
     async def _store_event_episode(
         self, event: AgentEvent, actions: list[AgentAction],
     ) -> None:
+        self.ingested.append(event)
         if event.channel_id is not None:
-            self._interaction_tracker.add_turn(
-                event.channel_id,
-                {"sender": event.sender_id, "summary": event.payload.get("content")},
-            )
+            payload: dict[str, object] = {
+                "summary": (
+                    f"Event: {event.event_type.value} → "
+                    f"Actions: {[a.action_type.value for a in actions]}"
+                ),
+                "sender": event.sender_id,
+            }
+            content = (event.payload or {}).get("content")
+            if isinstance(content, str) and content.strip():
+                payload["text"] = content
+            self._interaction_tracker.add_turn(event.channel_id, payload)
 
 
 def _persona_mid_discussion(agent_id: str) -> _PersonaAgent:
@@ -116,24 +97,16 @@ def _bounded_close_notification(
     *, trigger: str, sender: str = "iron-fox", redelivery: bool = False,
 ) -> AgentEvent:
     """The bounded close's notification as the runtime sees it post-lift:
-    marker + truthful trigger + redelivery on the payload port, the closed
-    interaction's wire id on the metadata port (CP2)."""
-    return AgentEvent(
-        event_type=EventType.CHANNEL_MESSAGE,
-        payload={
-            "content": _SYNTHESIS,
-            "channel_type": "group",
-            "mentions": [],
-            "respond_policy": "always",
-            "thread_parent_sender_id": "",
-            "interaction_close_notification": True,
-            "close_notification_close_trigger": trigger,
-            "close_notification_redelivery": redelivery,
-        },
-        channel_id=_SCOPE,
-        sender_id=sender,
-        metadata={"interaction_id": _WIRE_ID},
+    the redelivery suite's builder shape, carrying the synthesis as the
+    content and the closed interaction's wire id on the metadata port
+    (CP2)."""
+    event = _notification_event(
+        redelivery=redelivery, close_trigger=trigger,
+        sender_id=sender, channel_id=_SCOPE,
     )
+    event.payload["content"] = _SYNTHESIS
+    event.metadata["interaction_id"] = _WIRE_ID
+    return event
 
 
 async def _summarize(agent: _PersonaAgent) -> tuple[str, dict[str, object]]:
@@ -142,7 +115,8 @@ async def _summarize(agent: _PersonaAgent) -> tuple[str, dict[str, object]]:
     assert len(agent.persisted) == 1, "exactly one record persisted on close"
     client = _SpyClient()
     summary, failed, _facts = await summarize_closed_interaction(
-        client, agent.agent_id, agent.persisted[0],
+        client,  # type: ignore[arg-type]  # a duck-typed LLM double
+        agent.agent_id, agent.persisted[0],
     )
     assert failed is False
     assert len(client.calls) == 1
@@ -171,8 +145,9 @@ class TestPhase1CloseArtifactContract:
             assert closed.close_reason == REASON_COST, (
                 "the wallet soft-budget close IS a cost close"
             )
-            assert closed.turns[-1].payload.get("summary") == _SYNTHESIS, (
-                "§D artifact #1: the synthesis lands as the record's final turn"
+            assert closed.turns[-1].payload.get("text") == _SYNTHESIS, (
+                "§D artifact #1: the synthesis lands as the record's final "
+                "turn under the production body key (ISSUE-0054 ``text``)"
             )
             assert closed.meter_close_summary is True
 

@@ -202,8 +202,10 @@ func TestAutonomousAcceptance_FullCycle(t *testing.T) {
 	assert.Equal(t, openID, readInteractionID(turns[0].msg.Metadata))
 
 	// The chair's synthesis turn is itself a leased call — the first of the
-	// `1 + N` close-path calls the reserve exists for.
-	require.NotNil(t, acquireLease(t, w, "iron-fox", openID, 2_476, 1_024).GetGrant(),
+	// `1 + N` close-path calls the reserve exists for, sized to exactly one
+	// per-call reserve unit (in + out == the published per-call sizing).
+	require.NotNil(t, acquireLease(t, w, "iron-fox", openID,
+		wallet.DefaultSynthesisCallReserveTokens-1_024, 1_024).GetGrant(),
 		"the chair synthesis turn's lease must be honoured")
 	chairReply(t, router, ch, "iron-fox", openID,
 		"Synthesis: adopt the monorepo; the tooling consolidation outweighs the migration cost.")
@@ -347,6 +349,11 @@ func TestAutonomousAcceptance_NoRunawayUnderAdversarialRoster(t *testing.T) {
 	disp := &adversarialDispatcher{}
 	router := NewChannelRouter(store, disp, zap.NewNop(), &RouterMetrics{InteractionClosed: closed})
 	disp.router = router
+	// Join the async publishers even when an assertion fails first (FailNow
+	// skips the inline join below): registered after newTestStore's cleanup,
+	// so it runs BEFORE the store closes (LIFO) and no publisher goroutine
+	// leaks into later tests racing a closed store.
+	t.Cleanup(disp.wg.Wait)
 	ch := mustCreateGroupWithPolicies(t, store, "brainstorm",
 		map[string]RespondPolicy{
 			"nova-sparrow": RespondAlways,
@@ -385,14 +392,15 @@ func TestAutonomousAcceptance_NoRunawayUnderAdversarialRoster(t *testing.T) {
 			ordinary++
 		}
 	}
-	// Each live message fans to at most the two other personas, and only
-	// tally-live messages fan (the bounding stimulus and every straggler are
-	// withheld), so the dispatch count — the LLM-cost proxy — is bounded by
-	// the round bound, not the roster's appetite.
-	assert.LessOrEqual(t, ordinary, 2*maxRounds, "turns stay bounded under adversarial pressure")
+	// Each live message fans to at most the other personas (len(roster)−1),
+	// and only tally-live messages fan (the bounding stimulus and every
+	// straggler are withheld), so the dispatch count — the LLM-cost proxy —
+	// is bounded by the round bound, not the roster's appetite.
+	assert.LessOrEqual(t, ordinary, (len(acceptanceRoster)-1)*maxRounds, "turns stay bounded under adversarial pressure")
 	assert.GreaterOrEqual(t, ordinary, 2, "the discussion genuinely ran before terminating")
 	assert.Equal(t, 1, synthesisTurns, "exactly one synthesis turn")
-	assert.GreaterOrEqual(t, closeNotes, len(acceptanceRoster)-1, "the close notification fans to the roster")
+	assert.Equal(t, len(acceptanceRoster), closeNotes,
+		"the close notification fans to the FULL roster — the round-triggering sender included, so every persona authors its summary")
 	assert.Equal(t, int64(1), closedCount(t, reader, structuralTrigger), "exactly one close — no reopen loop")
 
 	_, _, tracked := router.openInteractionEscalationState(ch)
@@ -422,12 +430,14 @@ func TestAutonomousAcceptance_CloseByBudgetHonoursRosterScaledReserve(t *testing
 	openID, _, tracked := router.openInteractionEscalationState(ch)
 	require.True(t, tracked)
 
-	// The discussion spends exactly up to the soft threshold: two 13 000-token
-	// leased member turns. Both grant — the hard cap is 40 000.
-	require.NotNil(t, acquireLease(t, w, "ember-owl", openID, 12_000, 1_000).GetGrant())
+	// The discussion spends exactly up to the soft threshold: two leased
+	// member turns splitting the soft budget between them. Both grant — the
+	// hard cap is still a full reserve away.
+	first, second := soft/2, soft-soft/2
+	require.NotNil(t, acquireLease(t, w, "ember-owl", openID, first-1_000, 1_000).GetGrant())
 	publishAs(t, router, ch, "ember-owl", "A long, expensive contribution.", openID)
 	assert.Zero(t, closedCount(t, reader, costTrigger), "below the soft threshold the discussion runs")
-	require.NotNil(t, acquireLease(t, w, "nova-sparrow", openID, 12_000, 1_000).GetGrant())
+	require.NotNil(t, acquireLease(t, w, "nova-sparrow", openID, second-1_000, 1_000).GetGrant())
 	require.Equal(t, soft, w.InteractionSpend(openID), "running spend sits exactly at the soft threshold")
 	publishAs(t, router, ch, "nova-sparrow", "Another long contribution.", openID)
 
@@ -437,15 +447,18 @@ func TestAutonomousAcceptance_CloseByBudgetHonoursRosterScaledReserve(t *testing
 	require.Len(t, disp.synthesisTurns(), 1, "the soft threshold dispatched the chair synthesis turn")
 
 	// The contrast that makes the reserve load-bearing: at this very moment a
-	// further discussion-sized lease is fail-closed DENIED by the hard cap…
-	deniedResp := acquireLease(t, w, "ember-owl", openID, 14_000, 1_000)
+	// further discussion-sized lease — sized just over the reserve headroom
+	// the hard cap has left — is fail-closed DENIED…
+	reserve := cap - soft
+	deniedResp := acquireLease(t, w, "ember-owl", openID, reserve, 1_000)
 	denied := deniedResp.GetDenied()
 	require.NotNil(t, denied, "a discussion-sized lease is denied once the close has fired")
 	assert.Equal(t, walletpb.LeaseDeniedReason_LEASE_DENIED_REASON_INTERACTION_BUDGET_EXHAUSTED, denied.GetReason())
 
 	// …while EVERY close-path call still fits in the held-back reserve:
-	// the chair synthesis turn first…
-	require.NotNil(t, acquireLease(t, w, "iron-fox", openID, 2_476, 1_024).GetGrant(),
+	// the chair synthesis turn first, sized to exactly one per-call unit…
+	require.NotNil(t, acquireLease(t, w, "iron-fox", openID,
+		wallet.DefaultSynthesisCallReserveTokens-1_024, 1_024).GetGrant(),
 		"the reserve funds the chair synthesis turn on a budget-exhausted close")
 	chairReply(t, router, ch, "iron-fox", openID, "Synthesis: converged under budget pressure.")
 	router.WaitForPendingFanout()
