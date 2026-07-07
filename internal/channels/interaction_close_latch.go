@@ -165,8 +165,7 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger 
 		// synthesis reply never lands (the chair is now latch-suppressed), which
 		// would strand it as composing for the whole activity TTL.
 		if p := entry.pendingSynthesis; p != nil && p.interactionID == interactionID {
-			disarmedChair = p.chairID
-			disarmedTimer = entry.disarmPendingSynthesisLocked()
+			disarmedChair, disarmedTimer = entry.disarmPendingSynthesisChairLocked()
 		}
 		if entry.id == interactionID {
 			discard = entry.retired
@@ -184,11 +183,25 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger 
 	// no-op when the chair already re-published its reply (publishCommit
 	// cleared it) or nothing was armed.
 	r.releaseSynthesisArm(channelID, disarmedChair, disarmedTimer)
-	if discard != "" {
-		r.DiscardInteractionReplyBudget(discard)
-		r.DiscardInteractionEndVotes(discard)
-		r.DiscardInteractionBudget(discard)
-	}
+	r.discardInteractionGovernance(discard)
+}
+
+// discardInteractionGovernance drops every per-interaction governance ledger
+// for one retired interaction id: the RFC 0052 reply counters, the Layer 4
+// end-vote tally + tombstone, and the budget snapshot. THE canonical list —
+// the two one-generation-deferred discharge seams (the close above, the
+// resolver's idle rotation) and the channel-delete purge all route through
+// here, so a fourth per-interaction ledger added to one seam cannot silently
+// stay resident on the others and re-open the resident-forever leak the purge
+// was added to close (PR #718 review). Deliberately NOT the whole discharge
+// story: the two partial seams that drop only the reply budget (the end-vote
+// close and the close-notification tail) stay on the single call — their
+// tallies are consumed, not leaked. Tolerates "" (each discard no-ops before
+// taking its leaf mutex); runs outside interactionMu at every call site.
+func (r *ChannelRouter) discardInteractionGovernance(interactionID string) {
+	r.DiscardInteractionReplyBudget(interactionID)
+	r.DiscardInteractionEndVotes(interactionID)
+	r.DiscardInteractionBudget(interactionID)
 }
 
 // previousClose is the resolver's OQ 5 close-cause attribution for one

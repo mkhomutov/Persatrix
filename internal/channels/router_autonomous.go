@@ -78,15 +78,12 @@ func (r *ChannelRouter) SetAutonomous(channelID string, a AutonomousConfig) {
 func (r *ChannelRouter) PurgeChannelInteraction(channelID string) {
 	r.interactionMu.Lock()
 	entry := r.openInteractions[channelID]
-	var chairID, openID, retiredID string
+	var openID, retiredID string
 	if entry != nil {
 		openID = entry.id
 		retiredID = entry.retired
-		if entry.pendingSynthesis != nil {
-			chairID = entry.pendingSynthesis.chairID
-		}
 	}
-	timerStopped := entry.disarmPendingSynthesisLocked() // nil-tolerant receiver.
+	chairID, timerStopped := entry.disarmPendingSynthesisChairLocked() // nil-tolerant receiver.
 	delete(r.openInteractions, channelID)
 	r.interactionMu.Unlock()
 	// No reply/timeout will re-enter to clear the chair's "thinking" mark once
@@ -101,12 +98,9 @@ func (r *ChannelRouter) PurgeChannelInteraction(channelID string) {
 	// the process lifetime (unbounded growth across create-discuss-delete
 	// cycles). Immediate discharge is safe ONLY on this path: the channel is
 	// already gone from the store, so no commit can race the close the
-	// tombstone deferral exists to suppress. Each discard takes its own leaf
-	// mutex and tolerates "" (a fresh entry with no retiree).
+	// tombstone deferral exists to suppress.
 	for _, id := range []string{openID, retiredID} {
-		r.DiscardInteractionReplyBudget(id)
-		r.DiscardInteractionEndVotes(id)
-		r.DiscardInteractionBudget(id)
+		r.discardInteractionGovernance(id)
 	}
 }
 

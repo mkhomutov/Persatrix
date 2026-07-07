@@ -82,6 +82,7 @@ from typing import TYPE_CHECKING, Protocol
 from ..channel_wire_metadata import (
     WIRE_BOUNDED_CLOSE_TRIGGERS,
     WIRE_CLOSE_TRIGGER_COST,
+    wire_interaction_id,
 )
 from ..memory.boundary_detectors import REASON_COST, REASON_STRUCTURAL
 
@@ -160,6 +161,35 @@ async def close_interaction_on_notification(
     if open_interaction is None:
         # Already idled out (or never tracked): the close stands
         # recorded orchestrator-side; invent nothing locally.
+        return
+    # Wire-id conjunct (PR #718 review): the notification's metadata bag is
+    # cloned verbatim off the closing message, so it carries the CLOSED
+    # interaction's id; this handler is otherwise scope-keyed and would apply
+    # the close — and, below, the OQ #6 metering mark — to WHATEVER record is
+    # open in the scope. The identity guard inside the ingest branch only
+    # catches rotations the ingest itself causes; a rotation that landed
+    # BEFORE this notification (Go's fan is fire-and-forget with no
+    # cross-publish per-recipient ordering, so a successor interaction's
+    # first publish can overtake it) leaves a successor record here under a
+    # DIFFERENT wire id — closing it would mislabel a live discussion's
+    # record, and the metered summary would bill the successor's id against
+    # a reserve carved for the predecessor. When both ids are known and
+    # disagree, this is the no-open case one reorder later: the notified
+    # close stands recorded orchestrator-side; invent nothing locally. A
+    # blank on either side (an unstamped fresh record, an old producer)
+    # keeps the scope-keyed behaviour — the tolerant-wire-reader posture.
+    notified_wire_id = wire_interaction_id(event)
+    if (
+        notified_wire_id
+        and open_interaction.wire_interaction_id
+        and notified_wire_id != open_interaction.wire_interaction_id
+    ):
+        logger.info(
+            "Agent %s: close notification for interaction %s found %s open "
+            "on scope %s; stale straggler, closing nothing",
+            agent.agent_id, notified_wire_id,
+            open_interaction.wire_interaction_id, scope,
+        )
         return
     # The closing message lands as the closed record's final turn — ingest
     # BEFORE close (closing first would strand the message in a successor

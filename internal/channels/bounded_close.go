@@ -82,6 +82,47 @@ const (
 	costTrigger = "cost"
 )
 
+// boundVerdict is [boundStandsAgainst]'s answer at a bound action point.
+type boundVerdict int
+
+const (
+	// boundStands — the crossing survives the fresh config; act on it.
+	boundStands boundVerdict = iota
+	// boundDisabled — an RFC 0050 disable landed since the crossing: the
+	// operator took manual control, leave the interaction open.
+	boundDisabled
+	// boundExtended — a mid-flight `max_rounds` raise re-covers the structural
+	// crossing: the operator extended the discussion, the tally survives and
+	// re-crosses against the raised bound.
+	boundExtended
+)
+
+// boundStandsAgainst re-validates a crossed bound against the CURRENT config
+// at an ACTION point — THE one matrix of which config halves apply (PR #718
+// review, twice: the tail and the timeout net each originally hand-rolled a
+// subset and each shipped missing a half — the net's first shape re-checked
+// only Enabled and silently ignored a mid-arm raise). Every action point that
+// acts on a crossed bound (the tail's arm-or-close, the timeout net's fire,
+// any future close trigger) routes its `fresh` re-read through here and keeps
+// only its own verdict-to-action mapping; the deliberate asymmetries live
+// here once: the COST half is never re-checked (its per-interaction snapshot
+// immutability is the documented wallet-consistent design,
+// interaction_budget.go), so callers collapse their trigger label FIRST —
+// budget-crossed prefers `cost`, which a raise cannot extend. The REPLY path
+// deliberately consults nothing: the synthesis artifact is in hand, closing
+// with it is §D's point, and a raise governs the successor interaction.
+// `tally` is the caller's structural round count — live at the tail, frozen
+// on the armed entry at the fire.
+func boundStandsAgainst(fresh AutonomousConfig, trigger string, tally int) boundVerdict {
+	if !fresh.Enabled {
+		return boundDisabled
+	}
+	if trigger == structuralTrigger && tally < fresh.MaxRounds {
+		return boundExtended
+	}
+	return boundStands
+}
+
 // SetInteractionSpender wires the wallet's per-interaction spend read for the
 // RFC 0052 bounded-close soft-budget trigger. MUST run at startup before any
 // [ChannelRouter.Publish] — the field is unsynchronised, like maxCascadeDepth. A
@@ -272,47 +313,37 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	if !roundExceeded && !budgetExceeded {
 		return false, false
 	}
+	// Prefer the cost label when spend crossed the soft budget (the reserve
+	// earned its keep); otherwise it is the structural (max_rounds) bound.
+	// Collapsed BEFORE the fresh re-check — [boundStandsAgainst]'s contract:
+	// a raise extends only a structural crossing, never a cost one.
+	trigger := structuralTrigger
+	if budgetExceeded {
+		trigger = costTrigger
+	}
 	// Fresh config re-check at the ACTION point (PR #718 review + follow-up):
 	// `a` is the fanout-HEAD snapshot, and the floor round between that read
 	// and this tail can span minutes. An RFC 0050 disable landing inside it
 	// already ran its disarm — a no-op, nothing was armed yet — so acting on
 	// the stale snapshot would arm a synthesis close (or close inline) on a
 	// channel the operator just took manual control of, and the timeout net
-	// would force-close the live manual discussion ~2 minutes later. The bound
-	// is only ever ACTED on against the CURRENT config — Enabled AND
-	// MaxRounds: a mid-round `max_rounds` RAISE (config_apply → SetAutonomous)
-	// must extend the discussion, not close it against the old bound. The
-	// crossed tally survives on the entry, so a re-enable (or a later
-	// lowering) resumes exactly where the discussion stood. Two deliberate
-	// asymmetries: a mid-round LOWERING is still not caught before this tail
+	// would force-close the live manual discussion ~2 minutes later. A
+	// mid-round `max_rounds` RAISE (config_apply → SetAutonomous) must extend
+	// the discussion, not close it against the old bound; the crossed tally
+	// survives on the entry, so a re-enable (or a later lowering) resumes
+	// exactly where the discussion stood. One deliberate asymmetry stays
+	// per-site: a mid-round LOWERING is still not caught before this tail
 	// (the head-snapshot early-out above already returned; the next round's
 	// tail closes against it — the one-round lag every knob write has always
-	// had), and the BUDGET half stays on its per-interaction snapshot — its
-	// mid-interaction immutability is the documented wallet-consistent design
-	// (interaction_budget.go's snapshot-at-open). The residual
-	// read-then-disable sliver (microseconds, no floor round inside it) AND
-	// the armed window behind this tail (up to the full reply timeout, which
-	// a raise does not disarm) are backstopped by
-	// [ChannelRouter.onSynthesisTimeout]'s own fresh re-check of both halves —
-	// enabled, and the structural bound against a mid-arm max_rounds raise
-	// (PR #718 follow-up review). The REPLY path deliberately re-checks
-	// neither: the synthesis artifact is in hand, closing with it is §D's
-	// point, and the raise governs the successor interaction.
+	// had). The residual read-then-disable sliver (microseconds, no floor
+	// round inside it) AND the armed window behind this tail (up to the full
+	// reply timeout, which a raise does not disarm) are backstopped by
+	// [ChannelRouter.onSynthesisTimeout] consulting the same verdict.
 	fresh := r.AutonomousFor(msg.ChannelID)
-	if !fresh.Enabled {
+	switch boundStandsAgainst(fresh, trigger, round) {
+	case boundDisabled, boundExtended:
 		return false, false
-	}
-	if roundExceeded && round < fresh.MaxRounds {
-		roundExceeded = false
-		if !budgetExceeded {
-			return false, false
-		}
-	}
-	// Prefer the cost label when spend crossed the soft budget (the reserve
-	// earned its keep); otherwise it is the structural (max_rounds) bound.
-	trigger := structuralTrigger
-	if budgetExceeded {
-		trigger = costTrigger
+	case boundStands:
 	}
 	// PR 4b-ii close-on-reply (RFC 0052 §D artifact #1, synthesis_close.go):
 	// on a chaired channel the bound does not close YET — it dispatches the

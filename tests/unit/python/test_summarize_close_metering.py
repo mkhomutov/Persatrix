@@ -41,7 +41,6 @@ from agents.action_executor import ActionExecutor
 from agents.channel_wire_metadata import DispatchContext
 from agents.generated import wallet_pb2 as walletpb
 from agents.llm_client import LLMResponse, StopReason, Usage
-from agents.memory.boundary_detectors import REASON_STRUCTURAL
 from agents.memory.interactions import Interaction, InteractionTracker, Turn
 from agents.persona_runtime.summarize_close import summarize_closed_interaction
 from agents.persona_runtime.vote_close import (
@@ -218,13 +217,23 @@ def _synthesis_vote() -> AgentAction:
 
 
 class TestVoteAsSynthesisCloseIsMetered:
-    """PR #718 review — the vote-as-synthesis discharge (module docstring)."""
+    """PR #718 review, twice — the vote-as-synthesis discharge withholds the
+    local close (module docstring): the ``synthesis_reply`` echo says what
+    the wire CARRIED, never what Go ACCEPTED, so the metered close belongs
+    to the close-notification self-echo (pinned by the redelivery tests)."""
 
-    async def test_synthesis_vote_discharge_meters_the_close_summary(self):
+    async def test_synthesis_vote_discharge_defers_to_the_self_echo(self):
         """Chair answers the §D directive with a vote → publish reports
-        ``published`` carrying the reply echo → the discharge closes the
-        local record marked for metering → the summariser takes the LEASED
-        branch, billing the governance wire id."""
+        ``published`` carrying the reply echo → the discharge pops the park
+        but closes NOTHING: the record stays open and unmetered for the
+        close-notification self-echo (Go's acceptance signal) to close with
+        the truthful trigger and the OQ #6 mark. This is also the
+        raise-abandon regression pin: when Go refused the claim and left the
+        interaction open (a mid-arm ``max_rounds`` raise), the old
+        presumptive close buried the chair's live record and billed a lease
+        against the extended discussion — from the chair's side the two arcs
+        are indistinguishable, which is exactly why the discharge must not
+        presume."""
         agent, executor, publisher = _chair_with_open_record()
 
         results = await executor.execute(
@@ -245,21 +254,36 @@ class TestVoteAsSynthesisCloseIsMetered:
             "interaction_id": "wire-ix-1",
             "synthesis_reply": True,
         }
-        # The discharge closed the chair's record marked for OQ #6 metering,
-        # with the label staying REASON_STRUCTURAL (the truthful trigger
-        # rides only the close notification, which no-ops on this scope).
-        assert len(agent.persisted) == 1
-        closed = agent.persisted[0]
-        assert closed.meter_close_summary is True
-        assert closed.close_reason == REASON_STRUCTURAL
-        assert closed.wire_interaction_id == "wire-ix-1"
+        # The park is discharged (idempotence: a duplicate callback no-ops)…
+        assert agent._pending_vote_closes == {}
+        # …but the record is untouched: open, unmetered, nothing persisted —
+        # if Go abandoned the arm, the live discussion keeps ingesting here.
+        record = agent._interaction_tracker.get("group:planning")
+        assert record is not None and record.is_open
+        assert record.meter_close_summary is False
+        assert agent.persisted == []
 
-        client = _SpyClient()
-        await summarize_closed_interaction(client, "quartz-heron", closed)
-        call = client.calls[0]
-        assert call.get("cause") == walletpb.CAUSE_CHANNEL_MESSAGE
-        assert call.get("interaction_id") == "wire-ix-1"
-        assert call.get("agent_id") == "quartz-heron"
+    async def test_demoted_synthesis_vote_record_keeps_ingesting(self):
+        """The raise-abandon aftermath: with the discharge deferring, a
+        continued discussion's next turn lands on the SAME open record —
+        no fragmented "ended" local record, no phantom lease."""
+        agent, executor, publisher = _chair_with_open_record()
+
+        await executor.execute(
+            "quartz-heron", [_synthesis_vote()],
+            context=DispatchContext(
+                cascade_depth=1,
+                origin_channel_id="group:planning",
+                origin_interaction_id="wire-ix-1",
+                origin_synthesis_turn=True,
+            ),
+        )
+        record = agent._interaction_tracker.get("group:planning")
+        continued = agent._interaction_tracker.add_turn(
+            "group:planning", {"sender": "iron-fox", "summary": "one more"},
+        )
+        assert continued is record
+        assert record.is_open and record.meter_close_summary is False
 
     async def test_ordinary_end_vote_close_stays_unleased(self):
         """The negative pin: an end-vote publish with NO synthesis directive

@@ -280,10 +280,7 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 		// shared release tail like every other disarm terminal, and warn: the
 		// unreachability claim is now observable instead of load-bearing.
 		entry.roundCount = 0
-		if p := entry.pendingSynthesis; p != nil {
-			disarmedChair = p.chairID
-		}
-		disarmedTimer = entry.disarmPendingSynthesisLocked()
+		disarmedChair, disarmedTimer = entry.disarmPendingSynthesisChairLocked()
 	}
 	resolved := entry.id
 	prev := entry.prev
@@ -322,11 +319,7 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 			zap.Bool("rotated", rotated != ""),
 		)
 	}
-	if discard != "" {
-		r.DiscardInteractionReplyBudget(discard)
-		r.DiscardInteractionEndVotes(discard)
-		r.DiscardInteractionBudget(discard)
-	}
+	r.discardInteractionGovernance(discard)
 	if rotated != "" {
 		r.recordInteractionClosedIdle(ctx, channelID, ct, rotated)
 	}

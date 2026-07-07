@@ -356,6 +356,54 @@ class TestBoundedCloseMetersTheSummary:
 
         assert agent.persisted[0].meter_close_summary is False
 
+    async def test_wire_id_mismatch_closes_nothing(self):
+        """PR #718 review, the wire-id conjunct: the handler is scope-keyed,
+        and the ingest-branch identity guard only catches rotations the
+        ingest itself causes — a successor interaction's first publish
+        overtaking the fire-and-forget notification leaves a DIFFERENT
+        wire id open on the scope before the notification lands. Closing
+        it would bury a live discussion's record under the bounded label
+        and bill its metered summary to the successor's id against a
+        reserve carved for the predecessor. Both ids known and disagreeing
+        → the stale-straggler no-op: record untouched, nothing persisted."""
+        from agents.persona_runtime.close_notification import (
+            close_interaction_on_notification,
+        )
+
+        tracker = InteractionTracker()
+        record = tracker.add_turn("group:planning", now=time.time())
+        record.wire_interaction_id = "wire-successor"
+        agent = _CloseNotificationAgent(tracker)
+
+        event = _notification_event(close_trigger="cost", redelivery=True)
+        event.metadata["interaction_id"] = "wire-predecessor"
+        await close_interaction_on_notification(agent, event)
+
+        assert agent.persisted == []
+        still_open = tracker.get("group:planning")
+        assert still_open is record and still_open.is_open
+        assert still_open.meter_close_summary is False
+
+    async def test_matching_wire_id_keeps_the_metered_close(self):
+        """The conjunct's control arm: ids known and EQUAL — the ordinary
+        bounded close (and the finding-1 self-echo close it now carries)
+        is byte-for-byte unchanged: closed, truthful reason, metered."""
+        from agents.persona_runtime.close_notification import (
+            close_interaction_on_notification,
+        )
+
+        tracker = InteractionTracker()
+        record = tracker.add_turn("group:planning", now=time.time())
+        record.wire_interaction_id = "wire-ix-1"
+        agent = _CloseNotificationAgent(tracker)
+
+        event = _notification_event(close_trigger="cost")
+        event.metadata["interaction_id"] = "wire-ix-1"
+        await close_interaction_on_notification(agent, event)
+
+        assert [i.close_reason for i in agent.persisted] == [REASON_COST]
+        assert agent.persisted[0].meter_close_summary is True
+
     async def test_ingest_max_turns_inline_close_is_still_metered(self):
         """PR #718 review, the identity-guard metering gap: when the
         notification's own ingest is the max-turns cap-crossing turn,

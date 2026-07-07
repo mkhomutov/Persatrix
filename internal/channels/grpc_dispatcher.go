@@ -82,7 +82,10 @@ type dialFunc func(target string, opts ...grpc.DialOption) (*grpc.ClientConn, er
 //     dropped the closing turn from its record permanently (PR #718
 //     review). A caller that deliberately fires at possibly-absent
 //     participants can branch on `errors.Is(err,
-//     registry.ErrAgentNotFound)`; none does today.
+//     registry.ErrAgentNotFound)`; [ChannelRouter.dispatchTo] does exactly
+//     that for its delivered counter (status="unregistered", not "error",
+//     so a standing human member does not redden a healthy channel's
+//     dashboards message after message).
 //   - A receiver ack with `success=false` is returned as an error for the
 //     same reason: the agent servicer's queue-full discard-not-block
 //     backpressure and its pre-ingest validation both ack the RPC while

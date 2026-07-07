@@ -184,13 +184,15 @@ async def publish_end_interaction_vote(
         "channel_id": target_channel,
         "vote_close_token": close_token,
         # PR #718 review (OQ #6): True iff the publish above carried the
-        # ``synthesis_reply`` echo — Go claims that vote as the §D closing
-        # artifact BEFORE processEndVote, so the voter's parked local close
-        # is that close's own record. The executor's outcome callback
-        # threads this to the discharge, which marks the record for the
-        # metered RFC 0020 close summary; without it the vote-as-synthesis
-        # close ran its summary unleased, silently evading the mandatory cap
-        # the PR 4a ``1 + N`` reserve was carved from. Only the "published"
-        # status carries the key: a failed publish rode no wire.
+        # ``synthesis_reply`` echo — when the arm still stands, Go claims
+        # that vote as the §D closing artifact BEFORE processEndVote. The
+        # executor's outcome callback threads this to the discharge, which
+        # then WITHHOLDS its parked local close: the echo says only what
+        # the wire carried, never whether Go accepted the claim (a consumed
+        # or abandoned arm demotes the vote to an ordinary one, possibly on
+        # an interaction deliberately left open), so the close and its
+        # metered RFC 0020 summary belong to the close-notification
+        # self-echo Go fans iff it closed (``vote_close.py``). Only the
+        # "published" status carries the key: a failed publish rode no wire.
         "synthesis_reply": synthesis_reply,
     }

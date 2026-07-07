@@ -404,43 +404,37 @@ func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
 		r.interactionMu.Unlock()
 		return
 	}
-	if !fresh.Enabled {
-		// Abandon the close outright (full disarm, not just consumed): the
-		// channel is manual now, so the withhold must not outlive this fire —
-		// SetAutonomous's own posture, "leaves the interaction open under the
-		// operator's manual control".
-		entry.pendingSynthesis = nil
-		r.interactionMu.Unlock()
-		r.clearActivity(pending.stimulus.ChannelID, pending.chairID)
-		r.logger.Warn("channels: synthesis timeout fired on a disabled channel; leaving the interaction open under manual control",
-			zap.String("channel_id", pending.stimulus.ChannelID),
-			zap.String("interaction_id", pending.interactionID))
-		return
-	}
-	if pending.trigger == structuralTrigger && entry.roundCount < fresh.MaxRounds {
-		// Mid-arm `max_rounds` RAISE (PR #718 follow-up review): the
-		// fresh-config contract (maybeBoundedClose) promises the bound is only
-		// ever ACTED on against the CURRENT config — Enabled AND MaxRounds —
-		// and its tail re-check covers raises up to the arm; this fire is the
-		// other action point, and a raise does NOT disarm (only a disable
-		// does). The tally froze at the crossed round (the armed withhold
-		// blocks advances), so tally < fresh bound means the operator extended
-		// the discussion: abandon exactly like the disable branch above — the
-		// withhold lifts, the tally survives, and the next round's tail
-		// re-crosses against the raised bound. The COST half stays on its
-		// per-interaction snapshot (the documented wallet-consistent
-		// immutability), and the REPLY path deliberately keeps its close: the
-		// synthesis artifact is already in hand, closing with it is §D's whole
-		// point, and the raise governs the successor interaction.
+	// This fire is the OTHER action point on a crossed bound: consult the same
+	// [boundStandsAgainst] verdict as maybeBoundedClose's tail, against the
+	// tally frozen at the crossed round (the armed withhold blocks advances).
+	// A raise does NOT disarm (only a disable does), so `boundExtended` here
+	// means the operator extended the discussion mid-arm: abandon, the
+	// withhold lifts, the tally survives, and the next round's tail
+	// re-crosses against the raised bound (PR #718 follow-up review). Both
+	// abandons route through the shared disarm pair even though the timer has
+	// already fired (Stop()==false, so the release owes no synthesisWG
+	// Done() — the defer above owns this fire's count).
+	if verdict := boundStandsAgainst(fresh, pending.trigger, entry.roundCount); verdict != boundStands {
 		crossedRound := entry.roundCount
-		entry.pendingSynthesis = nil
+		chairID, timerStopped := entry.disarmPendingSynthesisChairLocked()
 		r.interactionMu.Unlock()
-		r.clearActivity(pending.stimulus.ChannelID, pending.chairID)
-		r.logger.Warn("channels: synthesis timeout fired after a max_rounds raise; leaving the discussion open under the raised bound",
-			zap.String("channel_id", pending.stimulus.ChannelID),
-			zap.String("interaction_id", pending.interactionID),
-			zap.Int("crossed_round", crossedRound),
-			zap.Int("raised_max_rounds", fresh.MaxRounds))
+		r.releaseSynthesisArm(pending.stimulus.ChannelID, chairID, timerStopped)
+		switch verdict {
+		case boundDisabled:
+			// Full disarm, not just consumed: the channel is manual now, so
+			// the withhold must not outlive this fire — SetAutonomous's own
+			// posture, "leaves the interaction open under the operator's
+			// manual control".
+			r.logger.Warn("channels: synthesis timeout fired on a disabled channel; leaving the interaction open under manual control",
+				zap.String("channel_id", pending.stimulus.ChannelID),
+				zap.String("interaction_id", pending.interactionID))
+		case boundExtended:
+			r.logger.Warn("channels: synthesis timeout fired after a max_rounds raise; leaving the discussion open under the raised bound",
+				zap.String("channel_id", pending.stimulus.ChannelID),
+				zap.String("interaction_id", pending.interactionID),
+				zap.Int("crossed_round", crossedRound),
+				zap.Int("raised_max_rounds", fresh.MaxRounds))
+		}
 		return
 	}
 	// Consume WITHOUT clearing (the claim path's posture, PR #718 review): the

@@ -52,12 +52,7 @@ func (r *ChannelRouter) armedSynthesisChair(channelID string) string {
 // [openInteraction.disarmPendingSynthesisLocked], which it wraps.
 func (r *ChannelRouter) disarmChannelSynthesis(channelID string) {
 	r.interactionMu.Lock()
-	entry := r.openInteractions[channelID]
-	var chairID string
-	if entry != nil && entry.pendingSynthesis != nil {
-		chairID = entry.pendingSynthesis.chairID
-	}
-	timerStopped := entry.disarmPendingSynthesisLocked() // nil-tolerant receiver.
+	chairID, timerStopped := r.openInteractions[channelID].disarmPendingSynthesisChairLocked() // nil-tolerant receiver.
 	r.interactionMu.Unlock()
 	// No reply/timeout will re-enter to clear the chair's "thinking" mark once
 	// abandoned here — same no-reply posture as [ChannelRouter.onSynthesisTimeout].
@@ -129,4 +124,23 @@ func (e *openInteraction) disarmPendingSynthesisLocked() (timerStopped bool) {
 	}
 	e.pendingSynthesis = nil
 	return timerStopped
+}
+
+// disarmPendingSynthesisChairLocked captures the armed chair id and disarms in
+// one locked step — the capture→disarm half of every disarm terminal, paired
+// with [ChannelRouter.releaseSynthesisArm] after the caller unlocks. One
+// primitive instead of a per-site chair capture beside a separate disarm call:
+// two of PR #718's review rounds each found a terminal that had copied the
+// disarm but dropped half the bookkeeping (a leaked synthesisWG count that
+// hung every later drain; a stranded chair "thinking" mark), so the pair the
+// release tail needs is now the disarm's OWN return shape — a new terminal
+// cannot forget what it never had to spell. The one deliberate non-customer is
+// [ChannelRouter.disarmAllPendingSyntheses]: the shutdown sweep batches its
+// Done()s and skips chair marks by design, so it stays on the raw primitive.
+// Nil-tolerant; caller holds interactionMu.
+func (e *openInteraction) disarmPendingSynthesisChairLocked() (chairID string, timerStopped bool) {
+	if e != nil && e.pendingSynthesis != nil {
+		chairID = e.pendingSynthesis.chairID
+	}
+	return chairID, e.disarmPendingSynthesisLocked()
 }

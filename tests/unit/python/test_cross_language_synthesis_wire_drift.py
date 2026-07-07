@@ -118,10 +118,32 @@ def test_synthesis_close_wire_fields_agree() -> None:
             'the `…get("close_notification_close_trigger")` read',
             _CLOSE_NOTIFICATION_PY,
         )
-    for path in (_RESPONSE_GATE_PY, _PROMPT_ASSEMBLY_PY):
-        src = path.read_text(encoding="utf-8")
-        if 'payload.get("synthesis_turn") is True' not in src:
-            _parse_miss('a strict `…get("synthesis_turn") is True` read', path)
+    # prompt_assembly keeps the per-marker strict read; the gate's read
+    # moved into the `_FORCED_TURN_MARKERS` registry loop (PR #718 review),
+    # so its pin parses the registry entry plus the loop's strict read —
+    # the sibling `test_cross_language_interaction_wire_drift.py` shape.
+    pa_src = _PROMPT_ASSEMBLY_PY.read_text(encoding="utf-8")
+    if 'payload.get("synthesis_turn") is True' not in pa_src:
+        _parse_miss(
+            'a strict `…get("synthesis_turn") is True` read',
+            _PROMPT_ASSEMBLY_PY,
+        )
+    gate_src = _RESPONSE_GATE_PY.read_text(encoding="utf-8")
+    registry = re.search(r"_FORCED_TURN_MARKERS\s*=\s*\(([^)]*)\)", gate_src)
+    if registry is None:
+        _parse_miss(
+            "the `_FORCED_TURN_MARKERS = (…)` registry", _RESPONSE_GATE_PY,
+        )
+    if '"synthesis_turn"' not in registry.group(1):
+        _parse_miss(
+            '"synthesis_turn" in the gate\'s `_FORCED_TURN_MARKERS` registry',
+            _RESPONSE_GATE_PY,
+        )
+    if "payload.get(marker) is True" not in gate_src:
+        _parse_miss(
+            "the strict `payload.get(marker) is True` registry read",
+            _RESPONSE_GATE_PY,
+        )
 
 
 def test_synthesis_reply_metadata_key_agrees() -> None:

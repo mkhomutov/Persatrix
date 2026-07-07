@@ -322,17 +322,47 @@ def test_chair_escalation_marker_agrees() -> None:
     # Both consumers honour the marker ONLY as the strict boolean — the
     # floor_mentions_resolved posture (a spoofed truthy non-bool on the
     # cleartext port must not widen admission or rewrite the prompt).
-    # One substring covers both shapes: the gate reads a local
-    # `payload.get(...)`, prompt_assembly reads `event.payload.get(...)`,
-    # and the latter contains the former — the PR 610 second-pass review
-    # dropped a second `event.`-prefixed clause that could therefore
-    # never be the deciding one.
-    for path in (_RESPONSE_GATE_PY, _PROMPT_ASSEMBLY_PY):
-        src = path.read_text(encoding="utf-8")
-        if 'payload.get("chair_escalation") is True' not in src:
-            _parse_miss(
-                'a strict `…get("chair_escalation") is True` read', path,
-            )
+    # prompt_assembly keeps the per-marker strict read; the gate's read
+    # moved into the `_FORCED_TURN_MARKERS` registry loop (PR #718 review),
+    # so its pin parses the registry entry plus the loop's strict read.
+    pa_src = _PROMPT_ASSEMBLY_PY.read_text(encoding="utf-8")
+    if 'payload.get("chair_escalation") is True' not in pa_src:
+        _parse_miss(
+            'a strict `…get("chair_escalation") is True` read',
+            _PROMPT_ASSEMBLY_PY,
+        )
+    _gate_forced_turn_registry_pin("chair_escalation")
+
+
+def _gate_forced_turn_registry_pin(marker: str) -> None:
+    """The gate admits forced-turn markers via one registry-driven loop
+    (PR #718 review — the three byte-identical admit blocks collapsed into
+    ``for marker in _FORCED_TURN_MARKERS``): the per-marker literal lives
+    in the tuple and the strict read is the loop's shared clause, so this
+    pin parses both — a marker dropped from the registry, or a loosened
+    read, fails exactly like the old per-block substring pin did."""
+    src = _RESPONSE_GATE_PY.read_text(encoding="utf-8")
+    m = re.search(r"_FORCED_TURN_MARKERS\s*=\s*\(([^)]*)\)", src)
+    if m is None:
+        _parse_miss(
+            "the `_FORCED_TURN_MARKERS = (…)` registry", _RESPONSE_GATE_PY,
+        )
+    if f'"{marker}"' not in m.group(1):
+        _parse_miss(
+            f'"{marker}" in the gate\'s `_FORCED_TURN_MARKERS` registry',
+            _RESPONSE_GATE_PY,
+        )
+    if "payload.get(marker) is True" not in src:
+        _parse_miss(
+            "the strict `payload.get(marker) is True` registry read",
+            _RESPONSE_GATE_PY,
+        )
+
+
+# The convene marker's pin lives in its own per-topic split
+# (test_cross_language_convene_wire_drift.py, the file-size-cap routing this
+# family already uses) and imports `_parse_miss` /
+# `_gate_forced_turn_registry_pin` from here.
 
 
 _CLOSE_NOTIFICATION_PY = Path("agents/persona_runtime/close_notification.py")

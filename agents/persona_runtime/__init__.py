@@ -271,9 +271,9 @@ class _LLMPersonaAgent(
     ) -> None:
         """Discharge the parked vote close for ``channel_id`` (PR 607 finding
         5): success closes the voter's local record, failure drops the park;
-        a ``token`` mismatch is a no-op.  ``synthesis_reply`` (PR #718
-        review) meters the OQ #6 vote-as-synthesis close summary.  Acquires
-        the agent lock; full contract in :mod:`.vote_close`.
+        a ``token`` mismatch no-ops.  ``synthesis_reply`` (PR #718 review,
+        twice) defers the close to the notification self-echo — Go's only
+        acceptance signal.  Lock held; contract in :mod:`.vote_close`.
         """
         await discharge_end_vote_publish(
             self, channel_id, published=published, token=token, synthesis_reply=synthesis_reply,

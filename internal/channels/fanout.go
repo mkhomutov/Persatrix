@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
+
+	"github.com/mkhomutov/persatrix/internal/registry"
 )
 
 // channelFanoutMaxConcurrency caps the number of in-flight per-recipient
@@ -450,7 +453,20 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		InteractionCloseRedelivery: closeRedelivery,
 	}, msg)
 	status := "ok"
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.Is(err, registry.ErrAgentNotFound):
+		// A never-registered member (a human peer on a chat-surface DM, a
+		// mistyped channels.yaml membership) is the documented best-effort
+		// miss, not a delivery failure: the error return must stand — the
+		// undelivered ledger keys the close-notification redelivery marker
+		// on it — but a standing member misses on EVERY message, so
+		// counting it as status="error" (plus a second warn on top of the
+		// dispatcher's) turns a healthy channel into a permanent error
+		// signal. Distinct status, and the dispatcher's single warn (with
+		// the read-via-history context) is the whole log surface.
+		status = "unregistered"
+	default:
 		status = "error"
 		r.logger.Warn("channels: dispatch failed",
 			zap.String("channel_id", msg.ChannelID),

@@ -164,8 +164,18 @@ func (r *ChannelRouter) recordInteractionClosedMetric(ctx context.Context, ct Ch
 //
 // Posture (CP5): fire-and-forget, off the publish path — called from
 // [ChannelRouter.processEndVote]'s close branch and [ChannelRouter.boundedClose],
-// never awaited, every degraded branch nets to the status quo (the member's
-// tracker idles out with the legacy label). The WHOLE fan is off-path (PR #613 review):
+// never awaited. A degraded branch (queue-full refused ack, a member briefly
+// mid-re-register) nets to the member's tracker idling out with the legacy
+// "went idle" label — which, on a BOUNDED close, is no longer the pre-4b-ii
+// status quo: the idle bury authors that member's RFC 0020 summary a window
+// late, idle-labeled, and UNLEASED, silently degrading the OQ #6 guarantee
+// that every per-persona close summary bills the interaction's `1 + N`
+// reserve (PR #718 review). Accepted for now — the miss is one member's
+// metering, never the close itself — and nothing re-attempts a close
+// notification today (the 4b-ii redelivery marker only downgrades within
+// one fan); a retry would be new machinery, weighed with the PR 7
+// distributed-close settle work (0052-pr-plan.md). The WHOLE fan is
+// off-path (PR #613 review):
 // the member lookup and the spawning loop run on a detached, tracked
 // wrapper goroutine, so the closing publish pays one goroutine spawn,
 // never a store read — and the per-recipient loop applies the same
