@@ -64,9 +64,10 @@ const (
 )
 
 // MaxAutonomousAgendaItems caps the agenda length. It bounds the per-agenda-item
-// escalation ration the convener gets in PR 6 (one escalation per item → total
-// convener turns are agenda-length-bounded), so a pathological agenda cannot
-// become an unbounded turn budget. Generous; only a typo-scale list trips it.
+// escalation ration the convener gets in PR 6 (≤ one advance + one re-invite per
+// item → total convener turns stay linear in agenda length), so a pathological
+// agenda cannot become an unbounded turn budget. Generous; only a typo-scale list
+// trips it.
 const MaxAutonomousAgendaItems = 64
 
 // Autonomous validation sentinels — defined here rather than in the channels.go

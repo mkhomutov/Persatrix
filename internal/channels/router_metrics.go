@@ -71,6 +71,19 @@ type RouterMetrics struct {
 	// dispatch_error precisely so summing the stall dispositions stays a stall
 	// count.
 	ChairEscalation metric.Int64Counter
+	// ConvenerAdvance counts RFC 0052 §C anti-collapse cadence events (v0.3.11
+	// PR 6), labelled by `channel_type` and `outcome ∈ {advance, reinvite,
+	// dispatch_error}`. One increment per convener forced turn the fanout tail
+	// dispatches on a stalled AUTONOMOUS floor round: `reinvite` re-poses an
+	// under-discussed current agenda item (the best-effort liveness target),
+	// `advance` moves to the next item (the per-item ration), `dispatch_error`
+	// the drifted-convener/send failure that leaves the stall standing. An
+	// agenda-exhausted stall dispatches NO convener turn (it falls through to the
+	// chair escalation, counted on ChairEscalation instead), so the sum of these
+	// is the convener's total keep-alive turns, linear in agenda length per the loop
+	// guard (≤ one advance per item transition + one re-invite per item). Scoped to
+	// `autonomous.enabled` — a human channel never increments it.
+	ConvenerAdvance metric.Int64Counter
 	// SynthesisTurn counts RFC 0052 §D synthesis-turn lifecycle events
 	// (PR 4b-ii), labelled by `channel_type` and `outcome`. `dispatched` fires
 	// once per armed close-on-reply; `chair_missing` / `dispatch_error` label
