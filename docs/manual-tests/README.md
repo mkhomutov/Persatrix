@@ -55,6 +55,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | ID | Title | Status |
 |----|-------|--------|
 | [MT-AUTONOMOUS-001](MT-AUTONOMOUS-001.md) | One-shot autonomous brainstorm — convene, converge, terminate, synthesize with zero human turns; both close artifacts; spend ≤ the mandatory cap (RFC 0052 Phase 1) | Active (live execution = v0.3.11 release-prep) |
+| [MT-AUTONOMOUS-002](MT-AUTONOMOUS-002.md) | Anti-collapse cadence — a collapse-prone roster is worked through a multi-item agenda by the convener (≤1 escalation per item, monotonic cursor); the human path is unchanged (RFC 0052 Phase 2) | Active (live execution = v0.3.11 release-prep) |
 
 ## Channel Configuration (RFC 0050)
 

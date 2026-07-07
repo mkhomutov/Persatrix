@@ -171,5 +171,5 @@ Set every member except the convener to `respond: when_mentioned` (or observer) 
 - **If the run collapses to silence before the bound** (every persona passes on round one), that is the Phase-2 anti-collapse territory — [MT-AUTONOMOUS-002]'s roster is built to provoke it. For this MT, re-run with a sharper `topic`; the Phase-1 contract under test is *bounded termination with artifacts*, not liveness pressure.
 - A chair that never replies to the synthesis directive (provider error, gate suppression) falls back to an **immediate artifact-bearing close after the synthesis timeout** — termination never waits on a model. The summaries still produce; only the goal-directed synthesis message is missing, which the run should note as a degraded pass.
 
-[MT-AUTONOMOUS-002]: ../rfcs/0052-pr-plan.md#pr-6-featurev0311-rfc0052-anti-collapse--phase-2-anti-collapse-cadence-convener-autonomous-scoped
+[MT-AUTONOMOUS-002]: MT-AUTONOMOUS-002.md
 [MT-AUTONOMOUS-003]: ../rfcs/0052-pr-plan.md#pr-7-featurev0311-rfc0052-standing--phase-3-standing--scheduled-convening--aggregate-bound

@@ -138,6 +138,28 @@ type openInteraction struct {
 	// zeroes it, so the tally dies with the interaction and needs no lifetime map.
 	// Guarded by interactionMu.
 	roundCount int
+	// agendaCursor is the RFC 0052 §C anti-collapse cursor (v0.3.11 PR 6): the
+	// index of the agenda item the discussion is currently on, 0 = the first item
+	// the convener's opening turn posed. Advanced at most one item per stall,
+	// MONOTONICALLY, by [ChannelRouter.claimConvenerCadence] — the per-agenda-item
+	// generalization of the CE5 one-escalation ration AND its loop guard (an item
+	// is never re-posed once advanced past, so the convener never speaks twice into
+	// silence on one item). Rides the entry like chairEscalated (dies with the
+	// generation; the fresh mint below zeroes it); guarded by interactionMu.
+	agendaCursor int
+	// agendaItemDiscussed records whether the CURRENT agenda item has drawn at
+	// least one substantive (replied) round — the best-effort liveness target's
+	// input ([ChannelRouter.recordAgendaProgress] sets it on a working round). An
+	// item that reaches its stall UNdiscussed earns one re-invite before the cursor
+	// advances (the RFC §C "re-invite an item rather than skip it on the first quiet
+	// round" target, shipped at its default of one substantive turn per item); reset
+	// on each advance. Guarded by interactionMu.
+	agendaItemDiscussed bool
+	// agendaItemReinvited is the current item's re-invite ration: true once its one
+	// liveness re-invite has been spent, so a second stall on the same item advances
+	// instead of re-inviting forever — "the chair never speaks twice into silence on
+	// the same item" (RFC §C 2). Reset on advance; guarded by interactionMu.
+	agendaItemReinvited bool
 	// recentlyClosed is the RFC 0052 no-reopen ledger: this channel's
 	// deliberately closed interaction ids, newest last, bounded to
 	// [postCloseLatchGenerations]. Written by the close notification, read by
@@ -280,6 +302,12 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 		// shared release tail like every other disarm terminal, and warn: the
 		// unreachability claim is now observable instead of load-bearing.
 		entry.roundCount = 0
+		// RFC 0052 §C (PR 6): a re-convened discussion works its agenda from the
+		// top with fresh per-item rations — the cursor/liveness state belonged to
+		// the retired generation, the chairEscalated sibling.
+		entry.agendaCursor = 0
+		entry.agendaItemDiscussed = false
+		entry.agendaItemReinvited = false
 		disarmedChair, disarmedTimer = entry.disarmPendingSynthesisChairLocked()
 	}
 	resolved := entry.id

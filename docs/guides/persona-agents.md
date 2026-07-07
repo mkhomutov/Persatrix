@@ -864,6 +864,40 @@ v0.3.10 (the OQ 6(a) operator-reveal surface was cut;
 [ISSUE-0108](../issues/ISSUE-0108-reasoning-reason-note-no-operator-egress.md)),
 which makes the §E privacy wall *stronger* than the RFC describes, not weaker.
 
+### Autonomous channels — the anti-collapse cadence (v0.3.11)
+
+The bias-to-silence above is exactly right *with a human in the loop* — but a
+channel can also run **with no human at all** ([RFC 0052](../rfcs/0052-autonomous-agent-channels.md);
+the operator-facing arming/convening how-to is [Channels guide §Autonomous
+channels](channels.md#autonomous-channels)). There the same
+think-before-you-speak pressure has a failure mode: every persona reasons "the
+others can cover this", all stay silent, and an unattended discussion dies to a
+near-empty transcript. From the **persona side**, two things are worth knowing:
+
+- **Semantic silence is not weakened.** An autonomous channel does **not** lower
+  your silence threshold — a turn with nothing to add still ends in silence *with
+  a reason*, exactly as on a human channel. The keep-alive pressure works by
+  giving the room something concrete to discuss, never by forcing low-value "I
+  agree" turns. So a persona on an autonomous channel behaves identically to one
+  on a human channel; nothing about *your* compose changes.
+- **The convener carries the agenda.** One roster member is the channel's
+  `autonomous.convener` (a role **distinct** from the escalation chair). It
+  authors the opening turn, and — when a round **stalls** with the agenda not yet
+  worked through — the orchestrator forces the convener to **advance to the next
+  agenda item** (or re-pose an item the room passed on the first quiet round).
+  Each agenda item draws **at most one** such convener turn and the agenda only
+  moves forward, so the discussion is nudged through the whole agenda without ever
+  looping on one item. When the agenda is exhausted the shipped chair escalation
+  takes over and proposes synthesis-and-close.
+
+The two forces stay cleanly separated: **bias-to-silence for human channels,
+keep-alive pressure for autonomous ones**, gated on `autonomous.enabled` — a
+human channel's behaviour is byte-for-byte unchanged. The persona-observable arc
+(a collapse-prone roster worked through a multi-item agenda by convener pressure,
+never twice into silence on the same item) is
+[MT-AUTONOMOUS-002](../manual-tests/MT-AUTONOMOUS-002.md); the cadence turns are
+metered on `channel.conversation.convener_advance{outcome}`.
+
 ---
 
 ## 5. Observability (v0.2.3)

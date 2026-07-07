@@ -129,7 +129,6 @@ type Instruments struct {
 	AuditEventsTotal         metric.Int64Counter
 	AuditChainRecoveredTotal metric.Int64Counter
 	AuditEmitLatencySeconds  metric.Float64Histogram
-
 	// ChannelMessagesDelivered — per-subscriber channel-router dispatch attempts, labelled by `channel_type` + `status` (RFC 0011 §C / RFC 0019 §F); see channel_instruments.go.
 	ChannelMessagesDelivered metric.Int64Counter
 	// ChannelMessagesPublished pairs with ChannelMessagesDelivered for the delivered/published ratio (ISSUE-0013).
@@ -146,6 +145,7 @@ type Instruments struct {
 	ChannelConversationChairEscalation      metric.Int64Counter
 	ChannelConversationCloseNotification    metric.Int64Counter
 	ChannelConversationSynthesisTurn        metric.Int64Counter
+	ChannelConversationConvenerAdvance      metric.Int64Counter
 	// SessionsWrites — RFC 0031 Phase 1; see channel_instruments.go.
 	SessionsWrites metric.Int64Counter
 }

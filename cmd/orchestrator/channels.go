@@ -151,6 +151,8 @@ func initChannels(
 			CloseNotification: orchMetrics.ChannelConversationCloseNotification,
 			// RFC 0052 §D chair synthesis-turn lifecycle (v0.3.11 PR 4b-ii).
 			SynthesisTurn: orchMetrics.ChannelConversationSynthesisTurn,
+			// RFC 0052 §C convener anti-collapse cadence (v0.3.11 PR 6).
+			ConvenerAdvance: orchMetrics.ChannelConversationConvenerAdvance,
 		}
 	}
 	// ISSUE-0082 PR 2: build the per-request session resolver over the

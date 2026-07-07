@@ -318,7 +318,13 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 			zap.Bool("floor_path", floorPath),
 			zap.String("stamped_interaction_id", readInteractionID(msg.Metadata)))
 	} else if floorPath {
-		r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
+		// RFC 0052 §C anti-collapse (convener_cadence.go): the convener advances the
+		// agenda on a stall, TAKING PRECEDENCE over the shipped chair escalation while
+		// the agenda has items; a non-autonomous, non-stall, or agenda-exhausted round
+		// falls through to the chair, which then proposes synthesis-and-close (§D).
+		if !r.maybeAdvanceAgenda(context.WithoutCancel(ctx), msg, ct, outcome, members, channelSize, autonomous) {
+			r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
+		}
 	} else {
 		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions, nil)
 	}

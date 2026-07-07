@@ -153,6 +153,21 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	); err != nil {
 		return fmt.Errorf("create channel.conversation.synthesis_turn: %w", err)
 	}
+	// RFC 0052 §C (v0.3.11 PR 6) anti-collapse cadence counter. One increment per
+	// convener forced turn dispatched on a stalled autonomous floor round, labelled
+	// by `channel_type` and `outcome` (advance / reinvite / dispatch_error) — the
+	// per-agenda-item ration made observable. An agenda-exhausted stall dispatches
+	// none (it falls through to chair_escalation), so the sum is the convener's
+	// keep-alive turn volume; a human channel never increments it (OQ #2 scope).
+	if i.ChannelConversationConvenerAdvance, err = m.Int64Counter(
+		"channel.conversation.convener_advance",
+		metric.WithUnit("{turn}"),
+		metric.WithDescription(
+			"RFC 0052 convener anti-collapse cadence turns, labelled by channel_type and outcome.",
+		),
+	); err != nil {
+		return fmt.Errorf("create channel.conversation.convener_advance: %w", err)
+	}
 	// RFC 0030 Layer 4 (v0.3.8) vote-volume counter. One increment per
 	// end-of-interaction vote action, labelled by `channel_type`. Paired with
 	// interaction_closed it shows how many votes were cast versus how many
