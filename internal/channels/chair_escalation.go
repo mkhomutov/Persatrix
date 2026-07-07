@@ -212,13 +212,7 @@ func (r *ChannelRouter) maybeEscalateStall(
 		return
 	}
 
-	var chair *Member
-	for i := range members {
-		if members[i].ParticipantID == chairID {
-			chair = &members[i]
-			break
-		}
-	}
+	chair := memberByID(members, chairID)
 	if chair == nil {
 		// Config load validates membership, so this is runtime drift (the
 		// chair left the channel after startup). The ration is spent — CE5
@@ -256,7 +250,7 @@ func (r *ChannelRouter) maybeEscalateStall(
 	forced.ID = uuid.NewString()
 	forced.Metadata = maps.Clone(msg.Metadata)
 	r.markActivity(msg.ChannelID, []string{chairID})
-	if err := r.dispatchTo(ctx, forced, ct, threadParentSenderID, *chair, channelSize, floorMentions, markerChairEscalation); err != nil {
+	if err := r.dispatchTo(ctx, forced, ct, threadParentSenderID, *chair, channelSize, floorMentions, dispatchControl{marker: markerChairEscalation}); err != nil {
 		r.clearActivity(msg.ChannelID, chairID)
 		r.logger.Warn("channels: chair escalation dispatch failed; stall stands",
 			zap.String("channel_id", msg.ChannelID),
@@ -412,13 +406,7 @@ func (r *ChannelRouter) dispatchResynthesizeMisfire(
 		return
 	}
 	chairID := pending.chairID
-	var chair *Member
-	for i := range members {
-		if members[i].ParticipantID == chairID {
-			chair = &members[i]
-			break
-		}
-	}
+	chair := memberByID(members, chairID)
 	if chair == nil {
 		// Runtime drift (the chair left after the first escalation). The
 		// re-dispatch is spent — like the stall tail's chair-gone branch, the
@@ -442,7 +430,7 @@ func (r *ChannelRouter) dispatchResynthesizeMisfire(
 	forced := pending.stimulus
 	forced.ID = uuid.NewString()
 	r.markActivity(msg.ChannelID, []string{chairID})
-	if err := r.dispatchTo(ctx, forced, ct, pending.threadParentSenderID, *chair, channelSize, nil, markerChairEscalationResynthesize); err != nil {
+	if err := r.dispatchTo(ctx, forced, ct, pending.threadParentSenderID, *chair, channelSize, nil, dispatchControl{marker: markerChairEscalationResynthesize}); err != nil {
 		r.clearActivity(msg.ChannelID, chairID)
 		r.logger.Warn("channels: chair resynthesize dispatch failed; misfire stands",
 			zap.String("channel_id", msg.ChannelID),

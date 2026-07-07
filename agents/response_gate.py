@@ -99,6 +99,19 @@ from .response_policies import (  # noqa: F401  (re-exports)
 
 logger = logging.getLogger(__name__)
 
+# The orchestrator-authored FORCED-TURN markers the gate admits down the one
+# shared directed lane (the loop in :func:`evaluate_response_gate`), in
+# arrival order: `chair_escalation` (the chair-stall-escalation amendment),
+# `convene` (RFC 0052 §B), `synthesis_turn` (RFC 0052 §D, PR 4b-ii). One
+# registry instead of a pasted admit block per marker (PR #718 review): the
+# blocks were byte-identical modulo the key, so a policy added to one paste
+# and not the others would have silently given the markers divergent
+# admission rules no per-marker test distinguishes. Entries stay string
+# literals HERE — the cross-language drift pins parse this tuple's contents
+# by name (the greppability the per-block reads used to provide), and each
+# marker's payload key doubles as its bounded gate reason.
+_FORCED_TURN_MARKERS = ("chair_escalation", "convene", "synthesis_turn")
+
 __all__ = [
     "MENTION_EVERYONE",
     "POLICY_ADDRESSED",
@@ -322,40 +335,30 @@ def evaluate_response_gate(event: AgentEvent, *, agent_id: str) -> GateDecision:
         )
         return GateDecision(respond=False, policy=POLICY_NEVER, reason="policy_never")
 
-    # Chair-stall-escalation amendment (§C item 2): the orchestrator's forced
-    # turn after a stalled floor round admits down the directed lane for
-    # either canonical non-`never` policy (CE2 allows an `addressed` chair,
-    # whose unmarked gate would suppress an unmentioned stimulus). The
-    # dedicated reason keeps it out of :func:`is_open_floor_admit` — which is
-    # what skips the Tier B bid (TB1: re-running it would re-produce the very
-    # silence being escalated). Defence-in-depth mirrors
-    # `floor_mentions_resolved`: strict `is True`, the fail-closed branches
-    # above (DM self-sender / self-sender / `never`) already won, and an
+    # The orchestrator-authored FORCED-TURN markers, one shared directed lane
+    # driven off :data:`_FORCED_TURN_MARKERS` (registry rationale + per-marker
+    # stories on the tuple; `synthesis_turn`'s sender is the synthetic
+    # `orchestrator:synthesis`, never a legal participant id — the convene
+    # sentinel rule — so the self-sender defence above cannot mis-fire on
+    # it). Each admits for either canonical non-`never` policy (CE2 allows an
+    # `addressed` recipient, whose unmarked gate would suppress an
+    # unmentioned directive) with the marker itself as the dedicated bounded
+    # reason, which keeps every one out of :func:`is_open_floor_admit` — the
+    # Tier B bias-to-silence bid must never run on (and silence) the very
+    # turn the marker forces (TB1 and its human-free analogues).
+    # Defence-in-depth mirrors `floor_mentions_resolved`: strict `is True` (a
+    # spoofed truthy non-bool on the cleartext port must not widen
+    # admission), and the fail-closed branches above (DM self-sender /
+    # self-sender / close-notification / `never`) already won — a marked
+    # self-echo, a marked `never`, and a close NOTIFICATION carrying a
+    # spoofed marker all stay suppressed (control beats stimulus), while an
     # unknown wire policy still falls through to the fail-closed
     # `unknown_policy` suppress (bounded-label discipline preserved).
-    if payload.get("chair_escalation") is True and policy in (
-        POLICY_ALWAYS, POLICY_WHEN_MENTIONED,
-    ):
-        return GateDecision(respond=True, policy=policy, reason="chair_escalation")
-
-    # RFC 0052 §B: the orchestrator's convene forced turn — the directed
-    # dispatch that opens an autonomous channel — admits the configured
-    # convener down the same directed lane as the chair escalation, for
-    # either canonical non-`never` policy (the convener may be `addressed`,
-    # whose unmarked gate would suppress an unmentioned opener). The
-    # dedicated `convene` reason keeps it out of :func:`is_open_floor_admit`,
-    # so the Tier B salience bid never runs on (and silences) the opening
-    # turn — the human-free analogue of TB1: re-running the bias-to-silence
-    # bid would defeat the convene. Defence-in-depth mirrors
-    # `chair_escalation`: strict `is True` (a spoofed truthy non-bool on the
-    # cleartext port must not widen admission), and the fail-closed branches
-    # above (DM self-sender / self-sender / close-notification / `never`)
-    # already won, so a marked self-echo or a marked `never` stays
-    # suppressed.
-    if payload.get("convene") is True and policy in (
-        POLICY_ALWAYS, POLICY_WHEN_MENTIONED,
-    ):
-        return GateDecision(respond=True, policy=policy, reason="convene")
+    for marker in _FORCED_TURN_MARKERS:
+        if payload.get(marker) is True and policy in (
+            POLICY_ALWAYS, POLICY_WHEN_MENTIONED,
+        ):
+            return GateDecision(respond=True, policy=policy, reason=marker)
 
     if policy == POLICY_ALWAYS:
         # RFC 0030 relevance amendment Tier A (v0.3.7): the directed-elsewhere

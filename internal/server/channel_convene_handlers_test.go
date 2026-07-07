@@ -6,7 +6,9 @@ package server
 // unarmed one, 403 when the toggle is off.
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mkhomutov/persatrix/internal/channels"
+	"github.com/mkhomutov/persatrix/internal/registry"
 )
 
 // armConvene marks the seeded channel autonomous with `convener` as the opener.
@@ -84,6 +87,41 @@ func TestConveneHandler_MissingChannel_NotFound(t *testing.T) {
 
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/group%3Aabsent/convene", nil)
 	assert.Equal(t, http.StatusNotFound, rec.Code, "body=%s", rec.Body.String())
+}
+
+// refusingDispatcher fails every Dispatch with a fixed error — the
+// delivery-miss shapes the real dispatcher returns (grpc_dispatcher.go).
+type refusingDispatcher struct{ err error }
+
+func (d refusingDispatcher) Dispatch(context.Context, channels.DispatchEnvelope, channels.ChannelMessage) error {
+	return d.err
+}
+
+// TestConveneHandler_ConvenerUnreachable_ServiceUnavailable — PR #718 review:
+// the dispatcher's delivery-miss returns (a convener not yet re-registered
+// after a restart, reported unhealthy, or refusing delivery on queue-full
+// backpressure) are routine, retryable conditions the dispatcher documents as
+// best-effort — the one synchronous dispatch-returning endpoint must map them
+// to 503 UNAVAILABLE, not fall through writeChannelError's default arm as a
+// 500 "channel store error" plus an Error-level "unexpected error" log.
+func TestConveneHandler_ConvenerUnreachable_ServiceUnavailable(t *testing.T) {
+	for name, dispatchErr := range map[string]error{
+		"unregistered": fmt.Errorf("dispatch target alice not registered: %w", registry.ErrAgentNotFound),
+		"not_ready":    fmt.Errorf("%w: alice status=starting", channels.ErrAgentNotReady),
+		"refused_ack":  fmt.Errorf("ReceiveChannelMessage to alice: %w: queue full", channels.ErrDeliveryRefused),
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv, id := channelConfigTestServerWithDispatcher(t, true, []channels.Member{
+				{ParticipantID: "alice", RespondPolicy: channels.RespondAlways},
+				{ParticipantID: "bob", RespondPolicy: channels.RespondAlways},
+			}, refusingDispatcher{err: dispatchErr})
+			armConvene(t, srv, id, "alice")
+
+			rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/"+id+"/convene", nil)
+			assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "body=%s", rec.Body.String())
+			assert.Contains(t, rec.Body.String(), "UNAVAILABLE")
+		})
+	}
 }
 
 // TestConveneHandler_NoTopic_Conflict — an armed channel with a real audience but

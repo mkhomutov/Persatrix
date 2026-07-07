@@ -66,11 +66,12 @@ func (r *recordingAgentServer) ReceiveChannelMessage(ctx context.Context, ev *ta
 }
 
 // startBufconnServer spins up an in-process gRPC server bound to a
-// bufconn listener and registers a recordingAgentServer. The returned
-// dialFunc routes any grpc.NewClient call through the bufconn — the
-// `target` argument is ignored, mirroring the production path's
+// bufconn listener and registers the given agent servicer (usually a
+// recordingAgentServer; the delivery-miss tests pass a refusing-ack stub).
+// The returned dialFunc routes any grpc.NewClient call through the bufconn —
+// the `target` argument is ignored, mirroring the production path's
 // "registry → address → dial" indirection without requiring a real port.
-func startBufconnServer(t *testing.T, srv *recordingAgentServer) (dialFunc, func()) {
+func startBufconnServer(t *testing.T, srv taskpb.AgentServiceServer) (dialFunc, func()) {
 	t.Helper()
 	lis := bufconn.Listen(1 << 20)
 	gsrv := grpc.NewServer()
@@ -160,20 +161,10 @@ func TestGRPCMessageDispatcher_ThreadParentSenderIDPropagated(t *testing.T) {
 		"thread_parent_sender_id MUST flow through so the receiver gate can fire thread-reply-to-self")
 }
 
-func TestGRPCMessageDispatcher_UnknownParticipantIsNoop(t *testing.T) {
-	// A participant present in a channel but not yet registered MUST NOT
-	// surface as an error — the channel contract is at-most-once
-	// best-effort, with reconnect-via-history covering the gap.
-	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{}}
-	d := NewGRPCMessageDispatcher(resolver, zap.NewNop())
-
-	err := d.Dispatch(context.Background(), DispatchEnvelope{
-		Recipient: Member{ParticipantID: "ghost", RespondPolicy: RespondWhenMentioned},
-	}, ChannelMessage{
-		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
-	})
-	assert.NoError(t, err, "unknown participant must be silently dropped")
-}
+// (The unknown-participant contract flipped in the PR #718 review — a
+// registry miss now RETURNS a wrapped [registry.ErrAgentNotFound] instead of
+// a tolerant nil, so the undelivered ledger sees it. Its coverage lives in
+// grpc_dispatcher_delivery_miss_test.go beside the refused-ack shape.)
 
 func TestGRPCMessageDispatcher_DegradedAgentReturnsError(t *testing.T) {
 	resolver := &stubResolver{agents: map[string]*registry.AgentInfo{

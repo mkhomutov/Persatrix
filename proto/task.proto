@@ -451,6 +451,73 @@ message ChannelMessageEvent {
   // ignoring it sees an ordinary open-floor message (no opener authored —
   // the channel simply never convenes, the inert pre-v0.3.11 posture).
   bool convene = 27;
+  // RFC 0052 §D (v0.3.11 PR 4b-ii): true iff this close NOTIFICATION's
+  // closing message was ALREADY delivered live via ordinary fanout — the
+  // FLOOR-path bounded close, whose bounding stimulus reached every member
+  // inside its floor round before the tail trigger fired (unlike the
+  // end-vote close, whose vote's own fanout is suppressed, and the
+  // concurrent-path bounded close, which withholds the bounding dispatch —
+  // both sole-delivery). Set only together with
+  // `interaction_close_notification = 23`. The receiver skips the
+  // final-turn ingest and closes its scope directly, so the closed record
+  // no longer carries one duplicate final turn + a `turn_count` inflated by
+  // one per non-sender member per close (the PR 4b-i documented limit —
+  // `close_notification.py`; the fresh wire id defeats any id-based dedup
+  // by design, which is why this must be a typed field). proto3 implicit
+  // presence: false (the zero value) is every sole-delivery notification
+  // and every old producer, whose receivers keep the ingest-then-close
+  // behaviour — degraded to the pre-4b-ii duplicate, never a lost turn —
+  // so the field is additive across a mixed-version deployment.
+  bool close_notification_redelivery = 28;
+  // RFC 0052 §D (v0.3.11 PR 4b-ii): the truthful close cause of THIS close
+  // notification — "structural" (`autonomous.max_rounds`) | "cost" (the
+  // wallet soft-budget threshold), the same §L instrument vocabulary as
+  // `previous_interaction_close_trigger = 21`. Stamped ONLY by the RFC 0052
+  // bounded close ([ChannelRouter.boundedClose]'s notification fan), so its
+  // presence doubles as the OQ #6 metering key: a non-empty value tells the
+  // receiver the closing interaction is an AUTONOMOUS bounded close, whose
+  // RFC 0020 close summary must draw a wallet lease stamped with the
+  // interaction's id (`summarize_close.py`) so the summary counts toward
+  // the mandatory cap — the `1 + N` reserve PR 4a sized exists for exactly
+  // those calls. The receiver also maps "cost" to its truthful local
+  // `cost` close reason instead of the 4b-i `REASON_STRUCTURAL` fallback
+  // (`wire_rotation_close_reason` documents the deferral). Set iff
+  // `interaction_close_notification = 23` is set AND the close was the
+  // bounded close; empty (proto3 implicit presence) is every end-vote/idle
+  // notification, every human channel, and every old producer — the
+  // receiver keeps the structural label and the summary stays unleased,
+  // byte-for-byte the pre-4b-ii close, so the field is additive across a
+  // mixed-version deployment. Unrecognised values degrade to absent at the
+  // seed point (the tolerant-wire-reader posture of the field-21
+  // allowlist).
+  string close_notification_close_trigger = 29;
+  // RFC 0052 §D (v0.3.11 PR 4b-ii): true iff this dispatch is the
+  // orchestrator's SYNTHESIS forced turn — the directed dispatch sent to
+  // the channel's `escalation_chair_id` when the deterministic bounded
+  // close trips, asking the chair to author the goal-directed closing
+  // synthesis (`internal/channels/synthesis_close.go`). The dispatch's
+  // `content` carries the operator goal/topic directive (assembled from the
+  // channel's `autonomous` config); the receiver wraps it in the RFC 0009
+  // `<external_data>` envelope before injection (operator config is a
+  // distinct trust class — the convene precedent) and renders the synthesis
+  // framing (`prompts/runtime/safety/synthesis-turn.md`). The receiver
+  // admits a marked event down the same directed lane as
+  // `chair_escalation = 22` (gate admit for any non-`never` policy, Tier B
+  // bid skipped — re-running the bias-to-silence bid would silence the one
+  // mandatory turn §D exists to guarantee). The chair's reply echoes its
+  // dispatched-under interaction id as the publish claim (the PR 4b-i
+  // origin pair), which is how the orchestrator recognises it as the
+  // CLOSING ARTIFACT — the close-on-reply ordering — instead of a fresh
+  // stimulus that would re-fan and reopen the discussion. Orchestrator-
+  // authored, the same trust class as `convene = 27`; never set by ordinary
+  // fanout, honoured only from this typed field and strictly boolean
+  // receiver-side. proto3 implicit presence: false (the zero value) is
+  // every non-synthesis dispatch, so the field is additive — an old
+  // producer never sets it and an old consumer ignoring it sees an ordinary
+  // open-floor message whose reply still claims the retired id and lands in
+  // the no-reopen latch (degraded to the 4b-i artifact-less close, never a
+  // reopen).
+  bool synthesis_turn = 30;
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)

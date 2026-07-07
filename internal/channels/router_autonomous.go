@@ -29,8 +29,79 @@ import (
 func (r *ChannelRouter) SetAutonomous(channelID string, a AutonomousConfig) {
 	a = a.normalized()
 	r.autonomousMu.Lock()
-	defer r.autonomousMu.Unlock()
 	r.autonomous[channelID] = a
+	r.autonomousMu.Unlock()
+	if !a.Enabled {
+		// RFC 0052 PR 4b-ii (PR #718 review): a block disabled mid-arm MUST
+		// also drop any armed synthesis close. Every arm seam — the reply claim,
+		// the traffic withhold, the timeout net's own re-check — gates on
+		// `autonomous.enabled`, so once disabled the chair's synthesis reply
+		// re-fans as an ordinary stimulus and reopens the discussion, while the
+		// orphaned timeout net (whose identity CAS still matches) closes that
+		// now-live conversation ~2 minutes later, racing the replies it just
+		// permitted. Disarming here abandons the pending close and leaves the
+		// interaction open under the operator's manual control — the point of
+		// disabling. Done OUTSIDE autonomousMu so the resolve's
+		// autonomousMu→interactionMu lock order is never inverted (this is the
+		// single chokepoint both startup ResolveAutonomous and the RFC 0050
+		// applyOverridesToRouter path flow through). A no-op at startup (nothing
+		// is armed yet) and on any still-enabled apply.
+		r.disarmChannelSynthesis(channelID)
+	}
+}
+
+// PurgeChannelInteraction forgets channelID's resolver entry outright: the
+// disarm [ChannelRouter.disarmChannelSynthesis] performs (stopping any armed
+// synthesis timeout net — deleting a channel mid-arm otherwise left the net
+// orphaned, firing ~120s later against a channel the store no longer has),
+// plus dropping the [openInteraction] itself from openInteractions (PR #718
+// review: the disarm-on-delete fix stopped the orphaned timer but never
+// touched the entry it lived on, so every deleted channel's roundCount /
+// chairEscalated / retired state stayed resident in the map forever — the
+// delete path is the one caller where dropping the whole entry is safe,
+// unlike [SetAutonomous]'s disable branch, which must keep the no-reopen
+// ledger (`retired`) alive for a channel that is merely going manual, not
+// gone). Exported for the channel-delete HTTP handler; the channel is already
+// gone from the store by the time this runs, so there is no legitimate open
+// interaction left to race. Nil-tolerant / idempotent.
+//
+// Disarm and delete are ONE interactionMu critical section (PR #718 follow-up
+// review): as two — a disarmChannelSynthesis call, then a separate lock for
+// the delete — a fanout completing its entire arm sequence (arm CAS + chair
+// dispatch RPC + timer-arm, synthesis_close.go) inside the gap landed a live
+// timer on the entry an instant before the delete dropped it, and no disarm
+// could ever reach it again ([ChannelRouter.disarmAllPendingSyntheses]
+// iterates only openInteractions). With the delete inside the same critical
+// section, an arm CAS serialized after it finds no entry and reports
+// [synthesisEntryMovedOn] instead. The release tail runs OUTSIDE the lock,
+// exactly like the other disarm terminals (synthesis_disarm.go).
+func (r *ChannelRouter) PurgeChannelInteraction(channelID string) {
+	r.interactionMu.Lock()
+	entry := r.openInteractions[channelID]
+	var openID, retiredID string
+	if entry != nil {
+		openID = entry.id
+		retiredID = entry.retired
+	}
+	chairID, timerStopped := entry.disarmPendingSynthesisChairLocked() // nil-tolerant receiver.
+	delete(r.openInteractions, channelID)
+	r.interactionMu.Unlock()
+	// No reply/timeout will re-enter to clear the chair's "thinking" mark once
+	// abandoned here — the [ChannelRouter.disarmChannelSynthesis] posture.
+	r.releaseSynthesisArm(channelID, chairID, timerStopped)
+	// Discharge BOTH generations' per-interaction governance state (PR #718
+	// follow-up review): the reply counters, end-vote tally + tombstone, and
+	// budget snapshot are otherwise pruned only by the one-generation-deferred
+	// seams — [ChannelRouter.markInteractionClosed] and the resolver's idle
+	// rotation — which key off the entry this purge just deleted, so neither
+	// could ever fire again for these ids and their rows stayed resident for
+	// the process lifetime (unbounded growth across create-discuss-delete
+	// cycles). Immediate discharge is safe ONLY on this path: the channel is
+	// already gone from the store, so no commit can race the close the
+	// tombstone deferral exists to suppress.
+	for _, id := range []string{openID, retiredID} {
+		r.discardInteractionGovernance(id)
+	}
 }
 
 // AutonomousFor returns the resolved RFC 0052 autonomous block for `channelID`. A
@@ -151,6 +222,21 @@ func (r *ChannelRouter) validateAutonomousConvener(ctx context.Context, channelI
 	return nil
 }
 
+// memberByID returns a pointer to the member with ParticipantID `id`, or nil
+// when `id` names no member of `members`. The result aliases the slice element
+// (callers pass it to [ChannelRouter.dispatchTo] by value), so it is valid only
+// while `members` is — every caller uses it within the same resolve. This
+// single-sources the by-id lookup the chair-escalation, config-apply,
+// convene-classify, and §D synthesis-close paths otherwise repeated inline.
+func memberByID(members []Member, id string) *Member {
+	for i := range members {
+		if members[i].ParticipantID == id {
+			return &members[i]
+		}
+	}
+	return nil
+}
+
 // classifyConvenerMember locates `convener` in the channel's live roster and
 // reports why it cannot author the opening turn, or returns the resolved
 // *Member (a pointer into `members`) when it can. The error wraps
@@ -165,17 +251,16 @@ func (r *ChannelRouter) validateAutonomousConvener(ctx context.Context, channelI
 // [validateConvenerMembership], reads the distinct config-level member slice and
 // stays separate by type.)
 func classifyConvenerMember(members []Member, convener string) (*Member, error) {
-	for i := range members {
-		if members[i].ParticipantID == convener {
-			// An observer (legacy `never`) convener can never author the opening turn
-			// — its receiver gate suppresses it — so reject it, mirroring the chair.
-			if members[i].RespondPolicy.Normalize() == RespondNever {
-				return nil, fmt.Errorf("%w: %q is an observer (respond: never) and can never author the opening turn",
-					ErrInvalidAutonomousConvener, convener)
-			}
-			return &members[i], nil
-		}
+	convenerMember := memberByID(members, convener)
+	if convenerMember == nil {
+		return nil, fmt.Errorf("%w: %q is not a declared member; the convener authors the opening turn",
+			ErrInvalidAutonomousConvener, convener)
 	}
-	return nil, fmt.Errorf("%w: %q is not a declared member; the convener authors the opening turn",
-		ErrInvalidAutonomousConvener, convener)
+	// An observer (legacy `never`) convener can never author the opening turn
+	// — its receiver gate suppresses it — so reject it, mirroring the chair.
+	if convenerMember.RespondPolicy.Normalize() == RespondNever {
+		return nil, fmt.Errorf("%w: %q is an observer (respond: never) and can never author the opening turn",
+			ErrInvalidAutonomousConvener, convener)
+	}
+	return convenerMember, nil
 }

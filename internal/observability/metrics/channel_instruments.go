@@ -138,6 +138,21 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	); err != nil {
 		return fmt.Errorf("create channel.conversation.close_notification: %w", err)
 	}
+	// RFC 0052 §D (v0.3.11 PR 4b-ii) synthesis-turn lifecycle counter.
+	// `dispatched` fires once per armed close-on-reply; `chair_missing` /
+	// `dispatch_error` label the degraded-to-immediate-close branches; exactly
+	// one of `closed_on_reply` / `closed_on_timeout` follows a `dispatched`
+	// (a racing end-vote close counts on interaction_closed{end_votes}
+	// instead). The reply-vs-timeout ratio is the §D artifact health signal.
+	if i.ChannelConversationSynthesisTurn, err = m.Int64Counter(
+		"channel.conversation.synthesis_turn",
+		metric.WithUnit("{turn}"),
+		metric.WithDescription(
+			"RFC 0052 chair synthesis-turn lifecycle events, labelled by channel_type and outcome.",
+		),
+	); err != nil {
+		return fmt.Errorf("create channel.conversation.synthesis_turn: %w", err)
+	}
 	// RFC 0030 Layer 4 (v0.3.8) vote-volume counter. One increment per
 	// end-of-interaction vote action, labelled by `channel_type`. Paired with
 	// interaction_closed it shows how many votes were cast versus how many

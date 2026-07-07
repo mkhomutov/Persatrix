@@ -35,8 +35,14 @@ invent. Sequence:
    either fabricate the record above or leave a 1-turn successor
    dangling toward its own "went idle" burial;
 4. otherwise ingest (the closing message lands as the record's final
-   turn) and close with :data:`REASON_STRUCTURAL` — but SKIP the ingest
-   for a self-echo (the RFC 0052 bounded close fans to the round-
+   turn) and close — with :data:`REASON_STRUCTURAL`, or the truthful
+   :data:`REASON_COST` when the notification carries the RFC 0052
+   bounded close's ``cost`` trigger (PR 4b-ii; the same typed field's
+   presence marks the record for the OQ #6 metered summary). SKIP the
+   ingest for a marked RE-delivery (PR 4b-ii — the floor-path bounded
+   close's closing message already reached every member live inside its
+   round; re-ingesting it duplicated the final turn) and for
+   a self-echo (the RFC 0052 bounded close fans to the round-
    triggering sender, so the convener/chair receives its own message;
    ingesting it would write a ``sender == agent_id`` turn and inflate
    ``turn_count``, the self-echo the gate keeps out of memory), closing
@@ -73,7 +79,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol
 
-from ..memory.boundary_detectors import REASON_STRUCTURAL
+from ..channel_wire_metadata import (
+    WIRE_BOUNDED_CLOSE_TRIGGERS,
+    WIRE_CLOSE_TRIGGER_COST,
+    wire_interaction_id,
+)
+from ..memory.boundary_detectors import REASON_COST, REASON_STRUCTURAL
 
 if TYPE_CHECKING:
     from ..memory.interactions import Interaction, InteractionTracker
@@ -151,6 +162,35 @@ async def close_interaction_on_notification(
         # Already idled out (or never tracked): the close stands
         # recorded orchestrator-side; invent nothing locally.
         return
+    # Wire-id conjunct (PR #718 review): the notification's metadata bag is
+    # cloned verbatim off the closing message, so it carries the CLOSED
+    # interaction's id; this handler is otherwise scope-keyed and would apply
+    # the close — and, below, the OQ #6 metering mark — to WHATEVER record is
+    # open in the scope. The identity guard inside the ingest branch only
+    # catches rotations the ingest itself causes; a rotation that landed
+    # BEFORE this notification (Go's fan is fire-and-forget with no
+    # cross-publish per-recipient ordering, so a successor interaction's
+    # first publish can overtake it) leaves a successor record here under a
+    # DIFFERENT wire id — closing it would mislabel a live discussion's
+    # record, and the metered summary would bill the successor's id against
+    # a reserve carved for the predecessor. When both ids are known and
+    # disagree, this is the no-open case one reorder later: the notified
+    # close stands recorded orchestrator-side; invent nothing locally. A
+    # blank on either side (an unstamped fresh record, an old producer)
+    # keeps the scope-keyed behaviour — the tolerant-wire-reader posture.
+    notified_wire_id = wire_interaction_id(event)
+    if (
+        notified_wire_id
+        and open_interaction.wire_interaction_id
+        and notified_wire_id != open_interaction.wire_interaction_id
+    ):
+        logger.info(
+            "Agent %s: close notification for interaction %s found %s open "
+            "on scope %s; stale straggler, closing nothing",
+            agent.agent_id, notified_wire_id,
+            open_interaction.wire_interaction_id, scope,
+        )
+        return
     # The closing message lands as the closed record's final turn — ingest
     # BEFORE close (closing first would strand the message in a successor
     # interaction).
@@ -172,20 +212,59 @@ async def close_interaction_on_notification(
     # other sender — every end-vote recipient, and every non-triggering member
     # on a bounded close) ingests as before.
     #
-    # KNOWN LIMIT (PR 4b-i review round 5, deferred to 4b-ii): on a
-    # FLOOR-CONTROLLED bounded close the inbound ingest below is a
-    # RE-delivery — the bounding stimulus already reached every member live
-    # inside its floor round (unlike the end-vote close, whose vote's own
-    # fanout is suppressed, and the concurrent-path bounded close, which
-    # withholds the bounding dispatch), so this appends a duplicate final
-    # turn and inflates ``turn_count`` by one on the closed record.
-    # Distinguishing "re-delivery, close only" from "sole delivery, ingest
-    # then close" is not decidable here (the fresh wire id defeats any
-    # id-based check by design, and ``ChannelMessageEvent`` has no metadata
-    # map to smuggle a hint through) — it needs a typed redelivery marker on
-    # the wire, which lands with PR 4b-ii's proto work
-    # (docs/rfcs/0052-pr-plan.md).
-    if event.sender_id != agent.agent_id:
+    # ... and skip it for a marked RE-delivery (PR 4b-ii, resolving the
+    # 4b-i round-5 KNOWN LIMIT): on a FLOOR-CONTROLLED bounded close the
+    # bounding stimulus already reached every member live inside its floor
+    # round (unlike the end-vote close, whose vote's own fanout is
+    # suppressed, and the concurrent-path bounded close, which withholds
+    # the bounding dispatch — both sole-delivery), so ingesting it again
+    # appended a duplicate final turn and inflated ``turn_count`` by one
+    # per non-sender member per close. "Re-delivery, close only" vs "sole
+    # delivery, ingest then close" is not decidable locally (the fresh
+    # wire id defeats any id-based check by design), so the producer says
+    # which it is via the typed ``close_notification_redelivery`` field —
+    # strict ``is True``, because a spoofed truthy non-bool suppressing
+    # the ingest would LOSE a sole-delivered closing turn.
+    # RFC 0052 PR 4b-ii: the truthful bounded-close cause. The wire lift
+    # (``channel_wire_metadata.channel_event_payload``) allowlists the field
+    # to the two causes the bounded close stamps, and this consumer
+    # re-checks (defence-in-depth, the strict-marker posture): ``cost``
+    # closes with the truthful :data:`REASON_COST` — the wallet soft-budget
+    # close IS a cost close, not the "ended" the structural label claims —
+    # while ``structural`` (max_rounds) and every unmarked/unrecognised
+    # notification keep the established :data:`REASON_STRUCTURAL` mapping.
+    # Resolved BEFORE the ingest so the OQ #6 metering mark can ride the
+    # record whichever path closes it (see below).
+    trigger = payload.get("close_notification_close_trigger")
+    bounded = trigger in WIRE_BOUNDED_CLOSE_TRIGGERS
+    reason = REASON_COST if trigger == WIRE_CLOSE_TRIGGER_COST else REASON_STRUCTURAL
+    if bounded:
+        # OQ #6 (PR 4b-ii; PR #718 review): a bounded close is autonomous by
+        # construction (the trigger field is stamped by nothing else), so its
+        # per-persona RFC 0020 summary must draw a lease against the mandatory
+        # cap the PR 4a ``1 + N`` reserve was carved from — ``summarize_close.py``
+        # threads that lease off ``meter_close_summary``. Mark the record HERE,
+        # on the still-open interaction the notification found, BEFORE the
+        # ingest: when the ingest's own final turn is the max-turns cap-crossing
+        # turn (or a wire-id rotation), ``_store_event_episode`` inline-closes
+        # AND persists THIS interaction and the identity guard below returns
+        # past the post-close mark — so a mark set only after ``close()`` would
+        # miss it and the summary would run UNLEASED, silently evading the cap.
+        # Setting it on the live record covers both paths; the post-close mark
+        # below is then idempotent on the ordinary path (same object).
+        open_interaction.meter_close_summary = True
+    redelivery = payload.get("close_notification_redelivery") is True
+    # Co-gate the redelivery ingest-skip on ``bounded`` (PR #718 review): the
+    # skip is safe ONLY for a recognized bounded close, whose closing message
+    # genuinely already reached every member live inside the floor round. A
+    # ``redelivery`` marker on a notification that is NOT a bounded close — an
+    # ``idle``/``end_votes``/garbage trigger from a non-Go (or compromised)
+    # producer, so ``bounded`` is False — is a SOLE delivery, and skipping its
+    # ingest would LOSE the closing turn. The Go orchestrator only ever stamps
+    # ``redelivery`` alongside a bounded trigger, so this is producer-hardening
+    # in the same tolerant-wire-reader posture as the trigger allowlist above,
+    # never a change to the live path.
+    if event.sender_id != agent.agent_id and not (redelivery and bounded):
         await agent._store_event_episode(event, [])
         if agent._interaction_tracker.get(scope) is not open_interaction:
             # The ingest itself closed or replaced the interaction (the
@@ -194,8 +273,15 @@ async def close_interaction_on_notification(
             # interaction than the one the notification found open. A
             # rotation's 1-turn successor stays open for its own boundaries
             # — closing it here would be the fabrication the no-open branch
-            # above refuses (module docstring, step 4).
+            # above refuses (module docstring, step 4). The metered-summary
+            # mark already rode the closed record (set above), so its summary
+            # still draws its lease.
             return
-    closed = agent._interaction_tracker.close(scope, reason=REASON_STRUCTURAL)
+    closed = agent._interaction_tracker.close(scope, reason=reason)
     if closed is not None:
+        # The ordinary path: the notification's ingest did not close the
+        # interaction, so close it now with the truthful cause. The metering
+        # mark is idempotent with the pre-ingest set above (same record).
+        if bounded:
+            closed.meter_close_summary = True
         await agent._persist_closed_interaction(closed)

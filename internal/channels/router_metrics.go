@@ -71,6 +71,17 @@ type RouterMetrics struct {
 	// dispatch_error precisely so summing the stall dispositions stays a stall
 	// count.
 	ChairEscalation metric.Int64Counter
+	// SynthesisTurn counts RFC 0052 §D synthesis-turn lifecycle events
+	// (PR 4b-ii), labelled by `channel_type` and `outcome`. `dispatched` fires
+	// once per armed close-on-reply; `chair_missing` / `dispatch_error` label
+	// the branches that degrade to the immediate artifact-less close; exactly
+	// one of `closed_on_reply` / `closed_on_timeout` follows a `dispatched`
+	// (unless a racing end-vote close orphans the arm, which counts on
+	// InteractionClosed{end_votes} instead). The reply-vs-timeout ratio is the
+	// §D health signal: a rising timeout share means chairs are losing their
+	// synthesis to the net (lease denial, gate drift) and the OQ #5
+	// calibration needs a look.
+	SynthesisTurn metric.Int64Counter
 	// CloseNotification counts each per-recipient close-notification dispatch
 	// (the end-vote-close-propagation amendment, CP5), labelled by
 	// `channel_type` and `outcome ∈ {dispatched, dispatch_error}`. A member

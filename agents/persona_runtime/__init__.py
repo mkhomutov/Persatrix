@@ -70,10 +70,10 @@ from .conversation_seed import _ConversationWindowMixin
 from .conversation_window import ConversationWindowConfig, build_conversation_messages
 from .episode_routing import _EpisodeRoutingMixin
 from .event_timeout import _coerce_event_timeout  # noqa: F401 — re-exported (ISSUE-0053 extraction)
+from .finalize_close import JANITOR_INTERVAL_SEC, maybe_run_janitor
 from .memory_context import _MemoryContextMixin, _truncate_with_ellipsis  # noqa: F401
 from .prompt_assembly import _PromptAssemblyMixin
 from .state_persistence import _StatePersistenceMixin
-from .summarize_close import JANITOR_INTERVAL_SEC, maybe_run_janitor
 from .vote_close import PendingVoteClose, discharge_end_vote_publish
 
 logger = logging.getLogger(__name__)
@@ -267,16 +267,16 @@ class _LLMPersonaAgent(
         self._state.recover_energy()
 
     async def resolve_end_vote_publish(
-        self, channel_id: str, *, published: bool, token: str,
+        self, channel_id: str, *, published: bool, token: str, synthesis_reply: bool = False,
     ) -> None:
-        """Discharge the parked vote close for ``channel_id`` (PR 607
-        finding 5): success closes the voter's local record, failure
-        drops the park.  ``token`` is the park's correlation handle
-        echoed off the vote action's payload; a mismatch is a no-op.
-        Acquires the agent lock; full contract in :mod:`.vote_close`.
+        """Discharge the parked vote close for ``channel_id`` (PR 607 finding
+        5): success closes the voter's local record, failure drops the park;
+        a ``token`` mismatch no-ops.  ``synthesis_reply`` (PR #718 review,
+        twice) defers the close to the notification self-echo — Go's only
+        acceptance signal.  Lock held; contract in :mod:`.vote_close`.
         """
         await discharge_end_vote_publish(
-            self, channel_id, published=published, token=token,
+            self, channel_id, published=published, token=token, synthesis_reply=synthesis_reply,
         )
 
     def add_pending_tick_link(self, link: Link) -> None:

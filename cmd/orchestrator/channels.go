@@ -149,6 +149,8 @@ func initChannels(
 			ChairEscalation: orchMetrics.ChannelConversationChairEscalation,
 			// End-vote-close-propagation amendment (CP5).
 			CloseNotification: orchMetrics.ChannelConversationCloseNotification,
+			// RFC 0052 §D chair synthesis-turn lifecycle (v0.3.11 PR 4b-ii).
+			SynthesisTurn: orchMetrics.ChannelConversationSynthesisTurn,
 		}
 	}
 	// ISSUE-0082 PR 2: build the per-request session resolver over the

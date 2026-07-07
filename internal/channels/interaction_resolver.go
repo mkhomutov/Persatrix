@@ -144,6 +144,11 @@ type openInteraction struct {
 	// the resolve's latch — story, scope, and lifetime in
 	// interaction_close_latch.go. Guarded by interactionMu.
 	recentlyClosed []string
+	// pendingSynthesis is the RFC 0052 §D armed close-on-reply (PR 4b-ii):
+	// non-nil while the chair's synthesis turn is outstanding — story, claim,
+	// and timeout in synthesis_close.go. Rides the entry like chairEscalated
+	// (dies with the generation); guarded by interactionMu.
+	pendingSynthesis *pendingSynthesisClose
 }
 
 // openCommitted reports whether this entry holds an open COMMITTED
@@ -153,17 +158,6 @@ type openInteraction struct {
 // Nil-tolerant so map-miss callers need no guard. Caller holds interactionMu.
 func (e *openInteraction) openCommitted() bool {
 	return e != nil && e.id != "" && e.idCommitted
-}
-
-// previousClose is the resolver's OQ 5 close-cause attribution for one
-// channel, returned by [ChannelRouter.resolveInteractionID] from the same
-// critical section that resolved the open id — reading it later would race a
-// concurrent rotation into stamping a cause from a different generation than
-// the resolved id's. A zero value means no retiree is known (fresh channel
-// or post-restart re-mint).
-type previousClose struct {
-	id      string
-	trigger string
 }
 
 // resolveInteractionID returns the open interaction id for `channelID`,
@@ -239,7 +233,11 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 	// is exactly that precondition; when it holds the gap is a rotation
 	// DECISION (fired or not), logged below for ISSUE-0095 — the no-fire path
 	// was otherwise traceless.
-	eligible := entry.openCommitted() && ct != ChannelTypeThread && window > 0
+	// RFC 0052 PR 4b-ii (PR #718 review): an armed synthesis close is
+	// terminating — never idle-rotate it, or the fresh-mint reset below disarms
+	// the pending close without running it and silently drops the §D artifact.
+	eligible := entry.openCommitted() && ct != ChannelTypeThread && window > 0 &&
+		entry.pendingSynthesis == nil
 	var gap time.Duration
 	var lastActivity time.Time
 	if eligible {
@@ -256,6 +254,8 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 			entry.prev = previousClose{id: rotated, trigger: idleTrigger}
 		}
 	}
+	var disarmedChair string
+	var disarmedTimer bool
 	if entry.id == "" {
 		entry.id = uuid.NewString()
 		entry.idCommitted = false
@@ -268,12 +268,30 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 		entry.escalatedStimulus = nil
 		entry.escalatedThreadParent = ""
 		// RFC 0052: a fresh interaction bounds independently — a re-convened
-		// autonomous discussion gets its own max_rounds tally, not the retiree's.
+		// autonomous discussion gets its own max_rounds tally, not the retiree's
+		// — and never inherits an armed synthesis close (PR 4b-ii): the arm
+		// belonged to the retired generation, so its reply/timer must not close
+		// (or withhold traffic on) the successor. A live arm here should be
+		// unreachable (idle rotation is arm-gated above; deliberate closes
+		// disarm before emptying the id) — but the previous shape silently
+		// DROPPED the disarm's timerStopped return, so if the branch were ever
+		// reached the stopped timer's synthesisWG count leaked and every later
+		// shutdown drain hung forever (PR #718 review). Route it through the
+		// shared release tail like every other disarm terminal, and warn: the
+		// unreachability claim is now observable instead of load-bearing.
 		entry.roundCount = 0
+		disarmedChair, disarmedTimer = entry.disarmPendingSynthesisChairLocked()
 	}
 	resolved := entry.id
 	prev := entry.prev
 	r.interactionMu.Unlock()
+
+	if disarmedChair != "" {
+		r.logger.Warn("channels: fresh interaction mint found a live armed synthesis; disarmed defensively",
+			zap.String("channel_id", channelID),
+			zap.String("escalation_chair_id", disarmedChair))
+	}
+	r.releaseSynthesisArm(channelID, disarmedChair, disarmedTimer)
 
 	if eligible {
 		// ISSUE-0095: one line per eligible resolve (committed, non-thread,
@@ -301,11 +319,7 @@ func (r *ChannelRouter) resolveInteractionID(ctx context.Context, channelID stri
 			zap.Bool("rotated", rotated != ""),
 		)
 	}
-	if discard != "" {
-		r.DiscardInteractionReplyBudget(discard)
-		r.DiscardInteractionEndVotes(discard)
-		r.DiscardInteractionBudget(discard)
-	}
+	r.discardInteractionGovernance(discard)
 	if rotated != "" {
 		r.recordInteractionClosedIdle(ctx, channelID, ct, rotated)
 	}
@@ -389,110 +403,4 @@ func (r *ChannelRouter) settleInteraction(channelID, resolved string, now time.T
 	if firstCommit {
 		r.snapshotInteractionBudget(resolved, channelID)
 	}
-}
-
-// SetInteractionIdleTimeout resolves the per-channel idle window (seconds) for
-// `channelID`. Zero disables idle rotation for the channel (the documented
-// thread posture, usable anywhere); negative falls back to the fleet default
-// at read time (the config validator rejects negatives upstream, so this is
-// belt-and-braces, mirroring SetFloorControl's normalization).
-func (r *ChannelRouter) SetInteractionIdleTimeout(channelID string, seconds int) {
-	r.interactionMu.Lock()
-	defer r.interactionMu.Unlock()
-	if seconds < 0 {
-		delete(r.interactionIdleTimeouts, channelID)
-		return
-	}
-	r.interactionIdleTimeouts[channelID] = time.Duration(seconds) * time.Second
-}
-
-// InteractionIdleTimeoutFor reports the channel's resolved idle window in whole
-// seconds and whether an explicit per-channel entry exists (`set` false → the
-// fleet default applies). Exposed for ops introspection and the RFC 0050
-// `GET …/config` effective-value read, mirroring [ChannelRouter.FloorControlFor];
-// the hot path reads [ChannelRouter.idleWindowLocked]. An explicit per-channel 0
-// (idle rotation off) reads back as seconds 0 / set true — distinct from an
-// absent entry that resolves to the same 0 only if the fleet default is 0.
-func (r *ChannelRouter) InteractionIdleTimeoutFor(channelID string) (seconds int, set bool) {
-	r.interactionMu.Lock()
-	defer r.interactionMu.Unlock()
-	w, ok := r.interactionIdleTimeouts[channelID]
-	if !ok {
-		return int(r.defaultInteractionIdleTimeout / time.Second), false
-	}
-	return int(w / time.Second), true
-}
-
-// idleWindowLocked returns the channel's resolved idle window. Caller holds
-// interactionMu. An absent entry falls back to the router's fleet default —
-// store-resident channels not declared in config need no startup enumeration
-// (the EndVoteParamsFor read-time-fallback pattern).
-func (r *ChannelRouter) idleWindowLocked(channelID string) time.Duration {
-	if w, ok := r.interactionIdleTimeouts[channelID]; ok {
-		return w
-	}
-	return r.defaultInteractionIdleTimeout
-}
-
-// recordInteractionClosedIdle fires the structured close log + the
-// `interaction_closed{trigger=idle}` counter for a lazy idle rotation — the
-// sibling of [ChannelRouter.recordInteractionClosed] (trigger=end_votes).
-// Lazy means the emission lags the semantic close by up to the gap to the
-// channel's next publish (plan OQ 3); the timestamp of record is the emission.
-func (r *ChannelRouter) recordInteractionClosedIdle(ctx context.Context, channelID string, ct ChannelType, interactionID string) {
-	r.logger.Info("channels: interaction closed by idle rotation",
-		zap.String("channel_id", channelID),
-		zap.String("interaction_id", interactionID),
-		zap.String("trigger", idleTrigger),
-	)
-	r.recordInteractionClosedMetric(ctx, ct, idleTrigger)
-}
-
-// ResolveInteractionIdleTimeouts applies the per-channel idle windows for
-// every config-declared channel at startup, the sibling of
-// [ChannelRouter.ResolveEndVotes]. Store-resident channels not in config fall
-// back to the fleet default at read time ([ChannelRouter.idleWindowLocked]),
-// so there is no store enumeration. Config-declared channels are always
-// groups (`CanonicalID` prefixes `group:`), so the IP3 thread-warning case is
-// unreachable from this path today — the type rule in
-// [ChannelRouter.resolveInteractionID] is what actually protects threads.
-// Idempotent; call once after ReconcileConfig.
-func (r *ChannelRouter) ResolveInteractionIdleTimeouts(_ context.Context, cfg *Config) error {
-	if cfg == nil {
-		return nil
-	}
-	if cfg.DefaultInteractionIdleTimeoutSeconds != nil {
-		// The fleet default also covers store-resident channels not declared
-		// in config, via the idleWindowLocked read-time fallback.
-		r.interactionMu.Lock()
-		r.defaultInteractionIdleTimeout = time.Duration(*cfg.DefaultInteractionIdleTimeoutSeconds) * time.Second
-		r.interactionMu.Unlock()
-	}
-	for _, decl := range cfg.Channels {
-		secs := decl.ResolveInteractionIdleTimeoutSeconds(cfg.DefaultInteractionIdleTimeoutSeconds)
-		r.SetInteractionIdleTimeout(decl.CanonicalID(), secs)
-	}
-	// ISSUE-0095: surface the resolved window map once at startup so a wrong
-	// resolved window (a 0/rotation-off where one wasn't intended, or the
-	// fleet default landing where a per-channel override was expected) is
-	// visible without a repro. Store-resident channels not declared here fall
-	// back to default_window at read time ([ChannelRouter.idleWindowLocked]).
-	//
-	// The map is read BACK from the router, not re-derived from `secs`: a
-	// re-derivation would drift from [ChannelRouter.SetInteractionIdleTimeout]'s
-	// semantics — notably its `seconds < 0` delete sentinel, which resolves the
-	// channel to default_window while a raw stringify would misreport "-1s".
-	// The diagnostic must show the window the resolver will actually use.
-	r.interactionMu.Lock()
-	def := r.defaultInteractionIdleTimeout
-	windows := make(map[string]string, len(cfg.Channels))
-	for _, decl := range cfg.Channels {
-		windows[decl.CanonicalID()] = r.idleWindowLocked(decl.CanonicalID()).String()
-	}
-	r.interactionMu.Unlock()
-	r.logger.Info("channels: interaction idle windows resolved",
-		zap.Duration("default_window", def),
-		zap.Any("windows", windows),
-	)
-	return nil
 }

@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
+
+	"github.com/mkhomutov/persatrix/internal/registry"
 )
 
 // channelFanoutMaxConcurrency caps the number of in-flight per-recipient
@@ -106,6 +109,22 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// vote disarms the trigger (it still consumes the stash below) without
 	// re-forcing.
 	misfired := namedNoFloorCapable && !readEndInteractionVote(msg.Metadata)
+
+	// The RFC 0052 autonomous block, resolved ONCE per fanout and threaded to
+	// every consumer below — the synthesis-reply claim, the head staleness
+	// check, and the tail trigger — so they read a single snapshot (the
+	// [ChannelRouter.dispatchTo] ReasoningFor posture: separate reads could be
+	// torn by a concurrent RFC 0050 apply landing between them) and the
+	// per-publish autonomousMu traffic stays one acquisition in this scope.
+	autonomous := r.AutonomousFor(msg.ChannelID)
+	// RFC 0052 §D close-on-reply (PR 4b-ii): the chair's synthesis reply never
+	// reaches this fanout — [ChannelRouter.publishCommit] claims it on the
+	// COMMIT path, before the end-vote hook, and suppresses its fanout plan
+	// entirely (PR #718 review: the claim lived at this head, where a reply
+	// cast AS an end vote — the shape the directive invites — was consumed by
+	// processEndVote first: spam-suppressed into the timeout net, or closed as
+	// the unmetered `end_votes` shape).
+
 	// ISSUE-0099 resynthesize, CLAIM half — at the fanout HEAD, before any floor
 	// round can park it (PR 4b-i review round 5): the once-bound is "the chair's
 	// FIRST publish after the forced turn consumes the arm". Claiming at the tail
@@ -117,10 +136,12 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// goroutine spawn jitter (PublishAsync fans on a detached goroutine, so
 	// strict commit order is not literally guaranteed) — the pre-4b-i posture,
 	// where the window was never observed to bite. Run for EVERY chair publish
-	// in an escalated interaction, not only the misfiring ones, so a clean
-	// hand-off disarms the trigger (see [ChannelRouter.claimResynthesizeMisfire]);
-	// a no-op (nil) for every non-chair publish. Only the re-force DISPATCH
-	// waits for the tail, gated on the bounded-close outcome below.
+	// in an escalated interaction (a synthesis reply was already claimed at the
+	// commit path and never fans, so it cannot half-claim escalation state
+	// here), not only the misfiring ones, so a clean hand-off disarms
+	// the trigger (see [ChannelRouter.claimResynthesizeMisfire]); a no-op (nil)
+	// for every non-chair publish. Only the re-force DISPATCH waits for the
+	// tail, gated on the bounded-close outcome below.
 	pendingResynth := r.claimResynthesizeMisfire(msg, misfired)
 
 	// Mark the responders as having an in-flight turn for the console presence
@@ -139,13 +160,6 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// RFC 0052 §D bounded close below has ONE call site serving both.
 	settings, floorOn := r.floorSettingsFor(msg.ChannelID)
 	floorPath := floorOn && settings.enabled && len(responders) >= 2
-	// The RFC 0052 autonomous block, resolved ONCE per fanout and threaded to
-	// both consumers below — the head staleness check and the tail trigger —
-	// so they read a single snapshot (the [ChannelRouter.dispatchTo]
-	// ReasoningFor posture: two separate reads could be torn by a concurrent
-	// RFC 0050 apply landing between them) and the per-publish autonomousMu
-	// traffic drops to one acquisition in this scope (PR #716 review).
-	autonomous := r.AutonomousFor(msg.ChannelID)
 	// The floor path's HEAD staleness check (PR #716 review): the concurrent
 	// path's close-before-dispatch ordering runs its ledger read at the tail,
 	// BEFORE its dispatch — but the floor round runs before that tail, so a
@@ -161,8 +175,14 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// redelivery-marker vehicle.
 	staleAtHead := floorPath && r.stimulusOutlivedClose(msg, autonomous)
 	var outcome floorRoundOutcome
+	// undelivered collects the round's per-recipient live-delivery failures
+	// (live_delivery.go) — the bounded close below downgrades exactly those
+	// members' notifications to sole delivery (PR #718 review). Always nil on
+	// the concurrent path, whose close-before-dispatch ordering makes the
+	// notification the sole delivery for everyone.
+	var undelivered map[string]struct{}
 	if floorPath && !staleAtHead {
-		outcome = r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
+		outcome, undelivered = r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
 	}
 
 	// RFC 0052 §D bounded close, at the fanout tail on BOTH paths — one call
@@ -171,16 +191,11 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	//
 	//   - FLOOR path: the close runs AFTER the round (floorRound above), so the
 	//     `max_rounds`-th round's discussion happens and then the interaction is
-	//     at its terminal bound and must CLOSE, not be revived. KNOWN COST
-	//     (review finding, complete fix deferred): the bounding stimulus was
-	//     already delivered live inside the round, and the close notification
-	//     re-delivers it under a fresh wire id, which every non-sender recipient
-	//     ingests again (close_notification.py) — one duplicated final turn on
-	//     each closed record. Distinguishing "re-delivery, close only" from
-	//     "sole delivery, ingest then close" needs a redelivery marker on the
-	//     wire, and ChannelMessageEvent has no metadata map — a typed proto
-	//     field, which this Go-only slice deliberately does not touch; it lands
-	//     with PR 4b-ii's wire work (docs/rfcs/0052-pr-plan.md).
+	//     at its terminal bound and must CLOSE, not be revived. The 4b-i
+	//     duplicate-final-turn cost is gone (PR 4b-ii): when this path's close
+	//     notification carries a stimulus the round already delivered live, it
+	//     is stamped with the typed `close_notification_redelivery` wire field
+	//     and receivers close without re-ingesting it (close_notification.py).
 	//   - CONCURRENT path: the close runs BEFORE the dispatch — unlike the floor
 	//     path, whose round replies are suppressed as floor speakers, a
 	//     concurrent dispatch's replies re-enter Publish, so dispatching the
@@ -224,7 +239,7 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	if staleAtHead {
 		stale = true
 	} else {
-		closed, stale = r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, channelSize, !floorPath, autonomous)
+		closed, stale = r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, members, channelSize, !floorPath, undelivered, autonomous)
 	}
 	// The ONE withhold seam (PR #716 review — this clear had been duplicated
 	// verbatim across the close and stale branches): a dispatch withheld
@@ -239,7 +254,20 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// TTL decay. Any future branch that decides not to dispatch belongs
 	// behind this same seam, or it re-strands the marks.
 	if staleAtHead || (!floorPath && (closed || stale)) {
+		// PR #718 review finding 8: while a synthesis close is armed, the chair
+		// has a directed synthesis turn genuinely in flight — its "thinking"
+		// mark (set by maybeArmSynthesisClose) must survive this clear, or the
+		// console shows nobody thinking for the whole up-to-120s armed window on
+		// the concurrent path (the arm reports stale, so the withhold runs in
+		// the same fanout that just marked the chair). Spare exactly that mark;
+		// every other withheld responder still clears (no reply will re-enter to
+		// clear it). "" when nothing is armed, so ordinary stale/closed
+		// withholds are unchanged.
+		armedChair := r.armedSynthesisChair(msg.ChannelID)
 		for _, id := range respIDs {
+			if id == armedChair {
+				continue
+			}
 			r.clearActivity(msg.ChannelID, id)
 		}
 	}
@@ -266,11 +294,13 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 		// KNOWN COST (accepted, PR #716 review): a withheld message is
 		// committed history but reaches no member's agent-side record — the
 		// winner's close notification carries only the winner's message.
-		// Bounded to close-racing siblings; true losslessness needs the 4b-ii
-		// redelivery marker (docs/rfcs/0052-pr-plan.md), the same vehicle as
-		// the floor path's duplicate-final-turn limit. A divergence WITHOUT a
-		// deliberate close (orphan-park artefact, idle rotation) is NOT stale
-		// and dispatches normally below.
+		// Bounded to close-racing siblings and the armed-synthesis window's
+		// stragglers (synthesis_close.go); STILL an accepted loss after
+		// PR 4b-ii — its redelivery marker distinguishes duplicate deliveries,
+		// it does not re-deliver a withheld one. True losslessness would need
+		// a multi-message close fan, an OQ #5-class trade not yet owed. A
+		// divergence WITHOUT a deliberate close (orphan-park artefact, idle
+		// rotation) is NOT stale and dispatches normally below.
 		r.logger.Debug("channels: stimulus outlived its closed interaction; dispatch and revival tails withheld",
 			zap.String("channel_id", msg.ChannelID),
 			zap.String("message_id", msg.ID),
@@ -279,7 +309,7 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	} else if floorPath {
 		r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
 	} else {
-		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions)
+		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions, nil)
 	}
 	// ISSUE-0099 resynthesize, DISPATCH half — the re-force the head claimed,
 	// dispatched only now that the bounded close has ruled the round sub-bound
@@ -303,7 +333,11 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 // `ctx` is expected to already be detached from the request lifetime by the
 // caller (so the floor path can reuse it for off-floor non-responder
 // delivery without re-detaching).
-func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, members []Member, channelSize int, floorMentions []string) {
+//
+// `failures` collects per-recipient dispatch errors for the floor path's
+// redelivery accounting (live_delivery.go); nil (a recording no-op) on the
+// concurrent fanout path, whose bounded close is sole-delivery by ordering.
+func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, members []Member, channelSize int, floorMentions []string, failures *liveDeliveryFailures) {
 	// Buffered channel as a semaphore: each goroutine acquires a slot
 	// before starting and releases it on exit, so peak in-flight
 	// dispatches never exceed `channelFanoutMaxConcurrency`. The
@@ -351,50 +385,13 @@ func (r *ChannelRouter) dispatchConcurrent(ctx context.Context, msg ChannelMessa
 			// paths, so a panicking dispatch is not caught by the server's
 			// recoveryMiddleware — recover here or it crashes the process.
 			defer r.recoverFanout("dispatch", msg.ChannelID, msg.ID)
-			r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize, floorMentions, markerNone)
+			if err := r.dispatchTo(ctx, msg, ct, threadParentSenderID, m, channelSize, floorMentions, dispatchControl{}); err != nil {
+				failures.record(m.ParticipantID)
+			}
 		}()
 	}
 	wg.Wait()
 }
-
-// dispatchMarker selects which orchestrator-authored control marker, if
-// any, a dispatch stamps on its envelope. The markers' never-alias
-// invariant ([DispatchEnvelope.ChairEscalation] vs
-// [DispatchEnvelope.InteractionCloseNotification]) was previously held by
-// call-site discipline over two adjacent positional bools — `..., true,
-// false)` against `..., false, true)`, which a silent transposition
-// defeats with no compile error (PR #613 review). One enum value cannot
-// set two envelope bools, so the aliased state is unrepresentable at this
-// seam, and the next amendment adds a constant instead of widening every
-// call site.
-type dispatchMarker uint8
-
-const (
-	// markerNone is every ordinary dispatch: fanout, floor turns.
-	markerNone dispatchMarker = iota
-	// markerChairEscalation is the CE3 forced turn, stamped only by
-	// [ChannelRouter.maybeEscalateStall]'s dispatch.
-	markerChairEscalation
-	// markerCloseNotification is the CP2 end-vote close notification,
-	// stamped only by [ChannelRouter.notifyInteractionClose]'s dispatches.
-	markerCloseNotification
-	// markerChairEscalationResynthesize is the ISSUE-0099 second forced turn,
-	// stamped only by [ChannelRouter.dispatchResynthesizeMisfire]. It
-	// is a REFINEMENT of markerChairEscalation, not a peer: dispatchTo stamps
-	// BOTH `ChairEscalation` and `ChairEscalationResynthesize` for it, so the
-	// admission lift (which keys on ChairEscalation) is unchanged and only the
-	// framing flips. The never-alias invariant the enum protects is between
-	// {ChairEscalation, CloseNotification}; a resynthesize marker still never
-	// sets CloseNotification, so that invariant holds.
-	markerChairEscalationResynthesize
-	// markerConvene is the RFC 0052 §B convene forced turn, stamped only by
-	// [ChannelRouter.ConveneChannel]'s dispatch. It is its OWN directed lane,
-	// not a refinement of any other marker: dispatchTo stamps only `Convene`
-	// for it, so the never-alias invariant between {ChairEscalation,
-	// CloseNotification, Convene} holds — a convene dispatch never sets a
-	// chair-escalation or close-notification flag, and vice versa.
-	markerConvene
-)
 
 // dispatchTo delivers `msg` to a single recipient with the per-recipient
 // timeout and emits the `channel.messages.delivered` counter. Shared by the
@@ -411,14 +408,19 @@ const (
 // `close_notification{outcome}`; the fanout and floor-turn callers are
 // fire-and-forget by contract and ignore it (the warn + the delivered
 // counter's status=error emitted here are their entire failure surface).
-func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member, channelSize int, floorMentions []string, marker dispatchMarker) error {
+func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct ChannelType, threadParentSenderID string, m Member, channelSize int, floorMentions []string, control dispatchControl) error {
 	dispatchCtx, cancel := context.WithTimeout(ctx, channelFanoutPerRecipientTimeout)
 	defer cancel()
+	marker := control.marker
 	// Resolve the channel's reasoning rung ONCE so Mode and Revise come from a
 	// single locked snapshot: two separate ReasoningFor reads could be torn by a
 	// concurrent SetReasoning (a runtime config apply) landing between them, and a
 	// single read also drops the redundant mutex acquisition per recipient.
 	reasoning := r.ReasoningFor(msg.ChannelID)
+	// Both close-notification extras are gated once, on the whole payload, so
+	// the envelope cannot honour one without the other or leak either off the
+	// marker (the dispatchControl contract).
+	closeTrigger, closeRedelivery := control.closeNotificationWireFields()
 	err := r.dispatcher.Dispatch(dispatchCtx, DispatchEnvelope{
 		Recipient:            m,
 		ThreadParentSenderID: threadParentSenderID,
@@ -442,9 +444,29 @@ func (r *ChannelRouter) dispatchTo(ctx context.Context, msg ChannelMessage, ct C
 		ChairEscalationResynthesize:  marker == markerChairEscalationResynthesize,
 		InteractionCloseNotification: marker == markerCloseNotification,
 		Convene:                      marker == markerConvene,
+		SynthesisTurn:                marker == markerSynthesisTurn,
+		// The close-notification extras ride ONLY under their marker, gated as
+		// one payload by closeNotificationWireFields (the dispatchControl
+		// contract): a stray value on any other dispatch is structurally
+		// unrepresentable on the wire.
+		InteractionCloseTrigger:    closeTrigger,
+		InteractionCloseRedelivery: closeRedelivery,
 	}, msg)
 	status := "ok"
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.Is(err, registry.ErrAgentNotFound):
+		// A never-registered member (a human peer on a chat-surface DM, a
+		// mistyped channels.yaml membership) is the documented best-effort
+		// miss, not a delivery failure: the error return must stand — the
+		// undelivered ledger keys the close-notification redelivery marker
+		// on it — but a standing member misses on EVERY message, so
+		// counting it as status="error" (plus a second warn on top of the
+		// dispatcher's) turns a healthy channel into a permanent error
+		// signal. Distinct status, and the dispatcher's single warn (with
+		// the read-via-history context) is the whole log surface.
+		status = "unregistered"
+	default:
 		status = "error"
 		r.logger.Warn("channels: dispatch failed",
 			zap.String("channel_id", msg.ChannelID),

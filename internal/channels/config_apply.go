@@ -259,13 +259,7 @@ func (r *ChannelRouter) validateEscalationChair(ctx context.Context, channelID s
 	if err != nil {
 		return fmt.Errorf("channels: apply config %s: load members: %w", channelID, err)
 	}
-	var chair *Member
-	for i := range members {
-		if members[i].ParticipantID == chairID {
-			chair = &members[i]
-			break
-		}
-	}
+	chair := memberByID(members, chairID)
 	if chair == nil {
 		return fmt.Errorf("channels: apply config %s: %w: %q is not a declared member",
 			channelID, ErrInvalidEscalationChair, chairID)

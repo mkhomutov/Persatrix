@@ -36,54 +36,25 @@ from __future__ import annotations
 
 import logging
 
-from agents.prompt_loader import load_snippet
-from agents.security import CONTEXT_SOURCE_EXTERNAL, wrap_external
+from .operator_directive import (
+    OPERATOR_DIRECTIVE_MAX_CHARS,
+    format_operator_directive,
+)
 
 logger = logging.getLogger(__name__)
 
-# Defensive upper bound (UTF-8-agnostic character count) on the operator
-# convene directive at the injection seam. Generous over a realistic
-# topic + multi-item agenda + goal (a 64-item agenda at ~120 chars/item is
-# well under this), so it never clips a well-formed directive — it exists to
-# bound prompt bloat and abuse from an unattended channel, not to validate
-# shape (that is the Go config-validate gate's job, PR 1).
-_CONVENE_DIRECTIVE_MAX_CHARS = 8_000
-
-_TRUNCATION_MARKER = "\n[... convene directive truncated ...]"
-
-
-def _bound_directive(directive: str) -> str:
-    """Cap the operator free-text at :data:`_CONVENE_DIRECTIVE_MAX_CHARS`.
-
-    Truncation is preferable to rejection here: the orchestrator already
-    validated the ``autonomous`` block at config time, so an over-length
-    directive is a pathological-but-armed channel, and an opening turn on a
-    truncated-but-bounded topic still convenes — strictly better than a
-    silent dispatch failure on an unattended channel.
-
-    The drop is logged at WARNING so it is not *silent*. The operator surface
-    only sees the convene ``202`` (the opener is authored async), and the Go
-    wire ceiling (``maxConveneDirectiveBytes`` = 64 KiB in
-    ``internal/channels/convene.go``) sits far above this prompt bound, so a
-    directive between the two limits clears dispatch intact yet loses its tail
-    here — the WARN is the same interim operator signal the inbound sanitizer
-    relies on (see :func:`format_convener_opening`).
-    """
-    if len(directive) <= _CONVENE_DIRECTIVE_MAX_CHARS:
-        return directive
-    logger.warning(
-        "convene directive truncated to %d chars (was %d); the operator "
-        "topic/agenda/goal exceeds the prompt bound, so its tail is dropped "
-        "from the opening turn",
-        _CONVENE_DIRECTIVE_MAX_CHARS,
-        len(directive),
-    )
-    return directive[:_CONVENE_DIRECTIVE_MAX_CHARS] + _TRUNCATION_MARKER
+# The shared operator-directive prompt bound (see
+# :data:`~agents.persona_runtime.operator_directive.OPERATOR_DIRECTIVE_MAX_CHARS`);
+# kept as a module-local name so this seam's ``caplog``-scoped tests still import
+# it by its convene-specific spelling.
+_CONVENE_DIRECTIVE_MAX_CHARS = OPERATOR_DIRECTIVE_MAX_CHARS
 
 
 def format_convener_opening(directive: str) -> str:
     """Wrap the operator convene directive in the RFC 0009 envelope and
-    prepend the convener framing.
+    prepend the convener framing — the shared operator-directive framing
+    (:func:`agents.persona_runtime.operator_directive.format_operator_directive`)
+    bound to this seam's snippet, char cap, and logger.
 
     ``directive`` is the operator ``topic``/``agenda``/``goal`` assembled
     orchestrator-side and carried in the convene event's ``content``. It has
@@ -97,13 +68,13 @@ def format_convener_opening(directive: str) -> str:
     breakout escaping (``wrap_external``) still defends the structural
     separation regardless.
     """
-    envelope = wrap_external(
-        _bound_directive(directive),
-        source=CONTEXT_SOURCE_EXTERNAL,
-        flagged=False,
-        sanitized=True,
+    return format_operator_directive(
+        directive,
+        snippet="convener-opening",
+        max_chars=_CONVENE_DIRECTIVE_MAX_CHARS,
+        kind="convene",
+        logger=logger,
     )
-    return f"{load_snippet('convener-opening')}\n\n{envelope}"
 
 
 __all__ = ["format_convener_opening"]

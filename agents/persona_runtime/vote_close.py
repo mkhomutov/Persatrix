@@ -25,7 +25,10 @@ The seam is two-phase:
   decide-time close did; failure statuses drop the park once every
   in-flight vote has reported — the record stays open and closes later
   through the ordinary boundaries (the wire id rotation once a real
-  quorum forms, or the idle gap).
+  quorum forms, or the idle gap).  The one carve-out: a published vote
+  carrying the ``synthesis_reply`` echo closes nothing here — the
+  close-notification self-echo owns that close (see the discharge's
+  docstring; PR #718 review, twice).
 
 Park/discharge identity (PR 607 second-pass review): the park is
 correlated to the votes it covers, not merely to the channel.  The park
@@ -153,6 +156,7 @@ async def discharge_end_vote_publish(
     *,
     published: bool,
     token: str,
+    synthesis_reply: bool = False,
 ) -> None:
     """Discharge the parked vote close for ``channel_id`` (module doc).
 
@@ -164,6 +168,36 @@ async def discharge_end_vote_publish(
     this park never stamped: a threaded/exempted vote's ``""``, an
     earlier turn's stranded token under a newer park) leaves the park
     alone.
+
+    ``synthesis_reply`` (PR #718 review, OQ #6; revised by the follow-up
+    review): ``True`` when the published vote rode the wire claimable as
+    the §D closing artifact — a chair answering the synthesis directive
+    with a vote whose content IS the synthesis (the ISSUE-0099
+    outcome-(a) shape; the executor threads it off ``end_vote_action``'s
+    "published" result).  The echo says what the wire claim CARRIED,
+    never what Go ACCEPTED — the commit is async, so no acceptance
+    signal exists at discharge time — and the claim is refused whenever
+    the arm is already gone: consumed by the timeout fire, or abandoned
+    by a mid-arm disable / ``max_rounds`` raise, either of which demotes
+    the same marked vote to an ordinary quorum vote.  In the raise case
+    the interaction is deliberately left OPEN, so the presumptive close
+    this discharge used to run buried the chair's live record and billed
+    an OQ #6 lease against a discussion the operator just extended,
+    accelerating the very cost close the raise deferred.  So a synthesis
+    reply closes NOTHING here: the discharge pops the park and defers to
+    the close-notification self-echo — the fan Go runs iff it actually
+    closed on this reply, and BOTH closing shapes include the vote's
+    sender: the armed bounded close by default, and the end-vote quorum
+    a DEMOTED synthesis vote completes via its synthesis-echo carve-out
+    (``end_vote.go`` keys ``excludeSender`` off the wire marker — the
+    ordinary quorum fan excludes its voter precisely because that
+    voter's discharge closed locally, which this deferral does not;
+    PR #718 review).  The self-echo closes the chair's record with the
+    truthful trigger and, on a bounded close, the metering mark
+    (``close_notification.py``).  A lost self-echo degrades to the idle
+    bury (late, unleased — the close fan's documented fire-and-forget
+    residual), never to a wrong close.  The default keeps every
+    ordinary vote discharge on the pre-4b-ii close path.
     """
     async with agent._lock:
         pending = agent._pending_vote_closes.get(channel_id)
@@ -189,6 +223,19 @@ async def discharge_end_vote_publish(
             )
             return
         agent._pending_vote_closes.pop(channel_id, None)
+        if synthesis_reply:
+            # Docstring: the echo is not an acceptance signal, so the close
+            # and its OQ #6 metering belong to the close-notification
+            # self-echo, which arrives iff Go closed on this reply. Leave
+            # the record open: if the arm was consumed or abandoned the
+            # discussion is still live and Go demoted this vote to an
+            # ordinary one — the record keeps ingesting its turns.
+            logger.info(
+                "Agent %s: synthesis-reply vote to %s published; the local "
+                "close defers to the close-notification self-echo (scope=%s)",
+                agent.agent_id, channel_id, pending.scope,
+            )
+            return
         open_record = agent._interaction_tracker.get(pending.scope)
         if (
             open_record is None

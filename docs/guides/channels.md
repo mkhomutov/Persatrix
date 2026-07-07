@@ -1073,10 +1073,19 @@ treat convene as an operator-initiated, not a scripted-loop, action until then.
   persisted block, so save first). See the
   [web-console guide § Channel settings](web-console.md#channel-settings--edit-governance-from-the-browser).
 
-> **Scope in v0.3.11.** PR 3 ships convening + the opening turn. The mechanisms
-> that make a human-free discussion *productive and bounded* — the anti-collapse
-> cadence, the deterministic bounded close, the roster-scaled synthesis reserve,
-> and standing/scheduled convening — land in the subsequent RFC 0052 PRs (see the
+> **Scope in v0.3.11.** PR 3 ships convening + the opening turn. PR 4 adds the
+> mechanisms that make the discussion *bounded and artifact-bearing*: a
+> deterministic **bounded close** terminates the interaction when it crosses
+> `autonomous.max_rounds` or the wallet's soft budget (the cap minus a
+> roster-scaled synthesis reserve), and — on a chaired channel — first asks the
+> `escalation_chair_id` for a goal-directed **closing synthesis** against
+> `autonomous.goal`: the chair's reply is delivered to every member as the
+> discussion's final message, each member's RFC 0020 interaction summary is
+> produced (and, on the autonomous close, metered against the cost cap), and
+> the channel is left re-convenable. A chair that never replies falls back to
+> an immediate close after a timeout, so termination never waits on a model.
+> The remaining mechanisms — the anti-collapse cadence and standing/scheduled
+> convening — land in the subsequent RFC 0052 PRs (see the
 > [PR plan](../rfcs/0052-pr-plan.md)).
 
 ---

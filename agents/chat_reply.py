@@ -35,7 +35,7 @@ import grpc
 import grpc.aio
 
 from .channel_publisher import ChannelPublisher
-from .channel_wire_metadata import DispatchContext, same_channel_claim
+from .channel_wire_metadata import DispatchContext
 from .generated import task_pb2
 from .persona_types import ActionType, AgentAction
 from .wallet_client import BudgetExceededError
@@ -209,8 +209,20 @@ async def publish_chat_error_on_channel(
         )
         return
     metadata: dict[str, Any] = {"reply_status": "error", "error_reason": reason}
-    # The RFC 0052 no-reopen claim, via the shared rule (see the docstring).
-    claim = same_channel_claim(channel_id, origin_interaction_id, channel_id)
+    # The RFC 0052 no-reopen claim, via the context's shared rule — the
+    # origin posture constructed explicitly, the event-less-caller idiom the
+    # DispatchContext docstring names (this helper receives the origin pair
+    # as plain strings, not a threaded context). Deliberately NO
+    # ``synthesis_reply`` echo (PR #718 review), spelled with the NAMED
+    # opt-out rather than implied by omission: an apology must never be
+    # claimable as the §D closing artifact — and ``suppress_error_reply``
+    # already makes this path unreachable for a synthesis turn, so the
+    # opt-out is belt-and-suspenders that also survives a future caller
+    # threading a synthesis-marked context here.
+    origin = DispatchContext(
+        origin_channel_id=channel_id, origin_interaction_id=origin_interaction_id,
+    )
+    claim = origin.same_channel_claim(channel_id, claim_synthesis_reply=False)
     if claim:
         metadata.update(claim)
     try:
@@ -237,6 +249,7 @@ async def dispatch_channel_event_with_chat_error_recovery(
     channel_id: str | None,
     inbound_sender_id: str | None,
     origin_interaction_id: str = "",
+    suppress_error_reply: bool = False,
 ) -> None:
     """ISSUE-0065 / ISSUE-0066 — chat-error recovery wrapper for the
     persona action-loop dispatch fired from
@@ -266,6 +279,19 @@ async def dispatch_channel_event_with_chat_error_recovery(
     recovery publish carries the RFC 0052 no-reopen claim of the dispatch
     it recovers (PR #716 review; see
     :func:`publish_chat_error_on_channel`).
+
+    ``suppress_error_reply`` (PR #718 review) drops BOTH error-reply
+    publishes for a dispatch whose reply is claim-correlated by the
+    orchestrator — the RFC 0052 §D synthesis turn. That turn's reply is
+    the closing artifact the fanout head claims by (sender == chair, the
+    armed interaction id); a budget/resource-exhausted apology published
+    under the chair's id with the same ``origin_interaction_id`` claim
+    would be indistinguishable from the real synthesis and get fanned to
+    every member as the goal-directed close — precisely under the spend
+    pressure that fired the cost close. Suppressing it lets the
+    orchestrator's timeout net own the no-reply branch (the documented
+    CE6-lease-denial path), which is what the net was sized for. The
+    warning still logs — only the publish is skipped.
     """
     try:
         try:
@@ -277,12 +303,13 @@ async def dispatch_channel_event_with_chat_error_recovery(
                 agent_id, channel_id,
                 exc.scope or "<none>", exc.reason, exc.message,
             )
-            await publish_chat_error_on_channel(
-                publisher, agent_id=agent_id, channel_id=channel_id,
-                inbound_sender_id=inbound_sender_id,
-                reply=exc.message, reason=exc.reason,
-                origin_interaction_id=origin_interaction_id,
-            )
+            if not suppress_error_reply:
+                await publish_chat_error_on_channel(
+                    publisher, agent_id=agent_id, channel_id=channel_id,
+                    inbound_sender_id=inbound_sender_id,
+                    reply=exc.message, reason=exc.reason,
+                    origin_interaction_id=origin_interaction_id,
+                )
         except grpc.aio.AioRpcError as exc:
             if exc.code() != grpc.StatusCode.RESOURCE_EXHAUSTED:
                 raise
@@ -291,15 +318,16 @@ async def dispatch_channel_event_with_chat_error_recovery(
                 "(channel %s): %s",
                 agent_id, channel_id, exc.details(),
             )
-            # Fixed reply — ``exc.details()`` leaks internal jargon
-            # ("agent already holds the maximum 3 active leases").
-            await publish_chat_error_on_channel(
-                publisher, agent_id=agent_id, channel_id=channel_id,
-                inbound_sender_id=inbound_sender_id,
-                reply="Agent is at capacity — please retry in a moment.",
-                reason="resource_exhausted",
-                origin_interaction_id=origin_interaction_id,
-            )
+            if not suppress_error_reply:
+                # Fixed reply — ``exc.details()`` leaks internal jargon
+                # ("agent already holds the maximum 3 active leases").
+                await publish_chat_error_on_channel(
+                    publisher, agent_id=agent_id, channel_id=channel_id,
+                    inbound_sender_id=inbound_sender_id,
+                    reply="Agent is at capacity — please retry in a moment.",
+                    reason="resource_exhausted",
+                    origin_interaction_id=origin_interaction_id,
+                )
     except Exception as exc:  # noqa: BLE001 — final boundary
         logger.exception(
             "ReceiveChannelMessage dispatch failed for agent %s "
@@ -364,6 +392,14 @@ async def process_inbound_channel_event(
         actions = await agent.on_event(event)
         await executor.execute(agent.agent_id, actions, context=context)
 
+    # PR #718 review: a §D synthesis turn's reply is claim-correlated by the
+    # orchestrator (the fanout-head close-on-reply intercept), so its
+    # budget/resource-exhausted failure must NOT publish an apology that would
+    # be mistaken for the synthesis — the orchestrator's timeout net owns that
+    # branch. See dispatch_channel_event_with_chat_error_recovery. Read off
+    # the context (the ONE structural derivation, DispatchContext.for_event)
+    # rather than re-reading the payload key here — a second inline read
+    # sat outside the cross-language drift pin and could drift alone.
     await dispatch_channel_event_with_chat_error_recovery(
         _decide_and_execute(),
         publisher=executor.channel_publisher,
@@ -371,4 +407,5 @@ async def process_inbound_channel_event(
         channel_id=event.channel_id,
         inbound_sender_id=event.sender_id,
         origin_interaction_id=context.origin_interaction_id,
+        suppress_error_reply=context.origin_synthesis_turn,
     )

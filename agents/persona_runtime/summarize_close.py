@@ -1,23 +1,21 @@
-"""Summarisation-on-close helpers for the persona runtime.
+"""Summarisation-on-close helper for the persona runtime.
 
 RFC 0020 PR 4 — extracted from
 :mod:`agents.persona_runtime.state_persistence` to keep that module
 under the 500-line code-file size cap (``scripts/checks/file_size.py``).
 
-The helpers form the close-path summarisation pipeline:
+:func:`summarize_closed_interaction` runs the combined summarise + extract
+LLM call (bounded by timeout + ``MemoryStore.compress`` token budget).  A
+single-turn interaction with no inbound message body keeps a cheap
+deterministic placeholder; a single-turn interaction that carries message
+text is routed through the LLM path so RFC 0026 facts still extract (F-6).
 
-1. :func:`summarize_closed_interaction` — runs the combined
-   summarise + extract LLM call (bounded by timeout +
-   ``MemoryStore.compress`` token budget).  A single-turn interaction
-   with no inbound message body keeps a cheap deterministic
-   placeholder; a single-turn interaction that carries message text is
-   routed through the LLM path so RFC 0026 facts still extract (F-6).
-2. :func:`finalize_closed_interaction` — the two-phase close-path tail:
-   runs the summariser, updates the pending episode row, dispatches the
-   extracted facts, and bumps the relationship row.
-
-The relationship-recording half (``record_closed_interaction`` /
-``extract_peer_from_interaction``) lives in
+The two-phase close-path TAIL that drives this call —
+:func:`~agents.persona_runtime.finalize_close.finalize_closed_interaction`
+plus the ``drain_pending_summary_tasks`` / ``maybe_run_janitor`` helpers —
+lives in :mod:`agents.persona_runtime.finalize_close` (PR #718 review: split
+back out under the size cap).  The relationship-recording half
+(``record_closed_interaction`` / ``extract_peer_from_interaction``) lives in
 :mod:`agents.persona_runtime.record_close`.
 
 All functions are module-level and ``self``-free so the per-call site in
@@ -28,29 +26,26 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from ..generated import wallet_pb2 as walletpb
 from ..memory.interactions import SUMMARY_UNAVAILABLE_TEXT
 from ..memory.store import CompressedView, MemoryEntry, MemoryStore
 from ..model_aliases import resolve as resolve_model
 from ..observability.metrics import current_agent_id, try_get_instruments
 from ..optimization import summarization_model
 from ..prompt_loader import load_snippet
+from ..wallet_client import BudgetExceededError
 from .fact_extractor import (
     FactsParseError,
     build_combined_prompt_suffix,
-    dispatch_facts_from_response,
     emit_envelope_parse_failed,
     split_combined_response,
 )
-from .record_close import record_closed_interaction
 
 if TYPE_CHECKING:
     from ..llm_client import LLMClient
-    from ..memory.episodic import EpisodicMemory
     from ..memory.interactions import Interaction
-    from . import MemoryNamespace
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +75,6 @@ SUMMARIZATION_TARGET_TOKENS: int = 2000
 # interactions stop (``end_turn``) well below it, so the raise carries
 # no steady-state cost; it only buys tail robustness against truncation.
 SUMMARIZATION_MAX_OUTPUT_TOKENS: int = 1024
-
-# RFC 0020 PR 4 (PR #229 Should-Fix #2): on-tick janitor cooldown.
-JANITOR_INTERVAL_SEC: float = 300.0
 
 
 async def summarize_closed_interaction(
@@ -168,6 +160,41 @@ async def summarize_closed_interaction(
         )
         _emit_summary_failed("model_unresolvable")
         return (SUMMARY_UNAVAILABLE_TEXT, True, None)
+    # RFC 0052 PR 4b-ii (OQ #6): on the AUTONOMOUS bounded close — the
+    # interaction ``close_notification.py`` marked ``meter_close_summary`` off
+    # the typed wire trigger — the summariser call draws an RFC 0023 wallet
+    # lease billed to the GOVERNANCE interaction id, so the summary's spend
+    # counts toward the mandatory cap: this is the ``N`` of the PR 4a
+    # ``1 + N`` reserve (one summary per persona; the soft-budget close fires
+    # early precisely so these leases keep hard-cap headroom). CONDITIONAL — an
+    # unmarked (human / end-vote / idle) close keeps the pre-4b-ii unleased
+    # call signature byte-for-byte (test_summarize_close_metering.py), and an
+    # empty wire id (unreachable by CP2 construction) defensively stays
+    # unleased rather than lease against no cap with a fail-closed mode.
+    lease_kwargs: dict[str, Any] = {}
+    if interaction.meter_close_summary and interaction.wire_interaction_id:
+        lease_kwargs = {
+            "cause": walletpb.CAUSE_CHANNEL_MESSAGE,
+            "agent_id": agent_id,
+            "interaction_id": interaction.wire_interaction_id,
+        }
+    elif interaction.meter_close_summary:
+        # PR #718 review finding 2: the record is marked for metering but carries
+        # no wire interaction id, so the summary below runs UNLEASED and its spend
+        # never counts against the mandatory cap the PR 4a ``1 + N`` reserve was
+        # carved for. The direction is safe (under-lease, and the reserve is still
+        # dark), and CP2 construction makes an empty id unreachable in a
+        # homogeneous fleet — but the over-length-id → untracked degradation at
+        # ``channel_wire_metadata._INTERACTION_ID_MAX_BYTES`` makes it reachable
+        # from a non-Go/compromised producer. Warn rather than fail closed (a
+        # lease-less summary beats a dropped one) so the "unreachable" assumption
+        # is not a silent hole once the reserve is enforced.
+        logger.warning(
+            "Close summary marked for metering but has no wire interaction id "
+            "for agent %s (scope=%s); running the summary UNLEASED",
+            agent_id, interaction.scope,
+        )
+        _emit_summary_unleased()
     try:
         response = await asyncio.wait_for(
             llm_client.create_message(
@@ -181,6 +208,7 @@ async def summarize_closed_interaction(
                 tools=[],
                 max_tokens=SUMMARIZATION_MAX_OUTPUT_TOKENS,
                 temperature=0.2,
+                **lease_kwargs,
             ),
             timeout=SUMMARIZATION_TIMEOUT_SEC,
         )
@@ -190,6 +218,26 @@ async def summarize_closed_interaction(
             agent_id, interaction.scope,
         )
         _emit_summary_failed("timeout")
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
+    except BudgetExceededError as exc:
+        # OQ #6 residual (PR #718 review): a METERED close summary's lease can
+        # be denied at the wallet hard cap — the reserve is trigger-side only
+        # while lease-side enforcement stays dark (``synthesis_reserve.go``
+        # KNOWN GAPs), so on a cost close the ``1 + N`` close-path calls share
+        # the residual headroom and a late persona's lease loses.  The generic
+        # arm below labelled this ``llm_error``, making the tracked
+        # calibration gap indistinguishable from a provider outage on the
+        # failure counter; the denial's own reason (``exc.reason``, e.g.
+        # ``interaction_budget_exhausted``) rides the log, and the counter
+        # gets the established ``budget_denied`` label (the
+        # ``llm_call_errors`` tick-idle vocabulary).  Same fallback contract
+        # as every arm: the janitor never retries a committed unavailable row.
+        logger.warning(
+            "Close-summary lease denied by wallet for agent %s (scope=%s, "
+            "reason=%s): %s; using fallback",
+            agent_id, interaction.scope, exc.reason, exc,
+        )
+        _emit_summary_failed("budget_denied")
         return (SUMMARY_UNAVAILABLE_TEXT, True, None)
     except Exception as exc:
         logger.warning(
@@ -322,159 +370,8 @@ def _emit_summary_failed(reason: str) -> None:
     )
 
 
-# ─── Two-phase close-path tail (PR #229 review Must-Fix #1) ─────────
-#
-# Extracted from ``_StatePersistenceMixin`` so the mixin module stays
-# under the 500-line code-file size cap (``scripts/checks/file_size.py``).
-# These helpers run **outside** the agent ``_lock`` so a second inbound
-# event for the same agent does not queue head-of-line behind the LLM
-# round-trip.  They are best-effort: the ``[summary pending]`` row is
-# already persisted by Phase 1, so a failure here just leaves the
-# janitor a row to upgrade rather than losing the interaction.
-
-
-async def finalize_closed_interaction(
-    *,
-    llm_client: LLMClient,
-    memory_ns: MemoryNamespace,
-    episodic: EpisodicMemory,
-    agent_id: str,
-    interaction: Interaction,
-    on_finalized: Callable[[], Awaitable[None]],
-    session_id: str = "legacy",
-) -> None:
-    """Background tail of the two-phase close path (RFC 0020 PR 4).
-
-    Runs the LLM summariser, ``UPDATE``s the pending row, bumps the
-    relationship row, and invokes ``on_finalized`` (used by the mixin
-    to tick the auto-reflect counter).  Top-level guarded so a failure
-    does not surface as ``Task exception was never retrieved`` at GC.
-
-    PR 6 review #20: when ``update_episode_summary`` returns ``False``
-    the janitor has already finalised the row to
-    :data:`SUMMARY_UNAVAILABLE_TEXT` — skip the relationship bump and
-    the auto-reflect tick so the janitor's verdict is the single
-    source of truth and the failure counter cannot double-increment.
-    """
-    # PR 6 review #21: explicit guard rather than ``assert`` so a future
-    # Phase-1 reorder cannot let ``None`` through silently under
-    # ``python -O`` (where ``assert`` is stripped).
-    if interaction.interaction_id is None:
-        logger.warning(
-            "Closed interaction for agent %s has no interaction_id "
-            "(scope=%s); skipping background finalisation",
-            agent_id, interaction.scope,
-        )
+def _emit_summary_unleased() -> None:
+    inst = try_get_instruments()
+    if inst is None:
         return
-    try:
-        summary, summary_failed, facts_raw = await summarize_closed_interaction(
-            llm_client, agent_id, interaction,
-        )
-        try:
-            updated = await episodic.update_episode_summary(
-                interaction.interaction_id, summary,
-            )
-        except Exception:
-            logger.warning(
-                "Failed to update summary for agent %s (interaction_id=%s); "
-                "row will be backfilled by the janitor",
-                agent_id, interaction.interaction_id, exc_info=True,
-            )
-            return
-        if not updated:
-            # Janitor already wrote SUMMARY_UNAVAILABLE_TEXT (or the row
-            # vanished); its decision is final.  No relationship bump,
-            # no auto-reflect tick — both already accounted for in the
-            # janitor sweep that owned the row.
-            logger.info(
-                "Phase 2 superseded by janitor for agent %s "
-                "(interaction_id=%s); skipping relationship + auto-reflect",
-                agent_id, interaction.interaction_id,
-            )
-            return
-        # RFC 0026 PR 2 — facts write follows the summary commit so
-        # the audit ordering matches the data ordering: summary
-        # always exists before any facts.store row pointing back at
-        # this ``interaction_id``.  Per-tuple failures (allowlist
-        # miss, missing field, certainty range) increment
-        # ``agent.facts.extraction_failed`` inside
-        # :func:`store_extracted_facts` — one bad tuple does not drop
-        # the rest of the batch.  Inner facts-list parse failure
-        # bumps the same counter once inside
-        # :func:`dispatch_facts_from_response`.  Outer-envelope parse
-        # failures are a distinct signal (``envelope_parse_failed``,
-        # RFC 0026 PR 5b) emitted at the split catch above.
-        if (
-            not summary_failed
-            and facts_raw is not None
-            and memory_ns.facts is not None
-        ):
-            await dispatch_facts_from_response(
-                fact_store=memory_ns.facts,
-                facts_raw=facts_raw,
-                interaction=interaction,
-                agent_id=agent_id,
-                session_id=session_id,
-            )
-        await record_closed_interaction(
-            memory_ns, agent_id, interaction, summary, summary_failed,
-            session_id=session_id,
-        )
-        await on_finalized()
-    except Exception:
-        logger.warning(
-            "Background summary finalisation failed for agent %s "
-            "(scope=%s)",
-            agent_id, interaction.scope, exc_info=True,
-        )
-
-
-async def drain_pending_summary_tasks(
-    pending: set[asyncio.Task[None]],
-) -> None:
-    """Await every in-flight background summary task.
-
-    Snapshot semantics: a task spawned during the await is picked up
-    by the next call rather than this one, which is what callers want
-    on shutdown (``close_memory``) and in tests.
-    """
-    snapshot = list(pending)
-    if snapshot:
-        await asyncio.gather(*snapshot, return_exceptions=True)
-
-
-async def maybe_run_janitor(
-    cleanup: Callable[[], Awaitable[int]],
-    last_monotonic: float | None,
-    now_monotonic: float,
-    interval_sec: float,
-    agent_id: str,
-) -> float | None:
-    """Run the closing-state janitor if the cooldown has elapsed.
-
-    Returns the new ``last_monotonic`` (caller stores it on the agent).
-    Best-effort: any failure is logged and swallowed so a janitor
-    hiccup never breaks the tick path.  See PR #229 review Should-Fix
-    #2.
-
-    PR 6 review #24 — sweep failures increment
-    ``agent.interactions.janitor.failed`` so a persistent outage
-    (under which stuck rows accumulate at one cooldown window per
-    failure) raises an operator SLO signal instead of silently
-    advancing the cooldown.
-    """
-    if last_monotonic is not None and now_monotonic - last_monotonic < interval_sec:
-        return last_monotonic
-    try:
-        await cleanup()
-    except Exception:
-        logger.warning(
-            "Janitor sweep failed for agent %s",
-            agent_id, exc_info=True,
-        )
-        inst = try_get_instruments()
-        if inst is not None:
-            inst.interactions_janitor_failed.add(
-                1, {"agent_id": current_agent_id()},
-            )
-    return now_monotonic
+    inst.interactions_summary_unleased.add(1, {"agent_id": current_agent_id()})

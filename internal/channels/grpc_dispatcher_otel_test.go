@@ -244,13 +244,14 @@ func TestGRPCMessageDispatcher_RPCStatusErrorRecordedOnSpan(t *testing.T) {
 }
 
 // TestGRPCMessageDispatcher_UnknownParticipantSpanIsBenign pins the
-// observability contract for the at-most-once silent-drop path. An
-// unregistered participant returns nil from Dispatch (best-effort
-// delivery — RFC 0011 §C "Delivery guarantees"). The span MUST still be
-// emitted (operators need to see the drop in traces) but its status MUST
-// remain Unset and no exception event must fire — flagging the drop as an
-// error would inflate the orchestrator's error-rate dashboards on every
-// channels.yaml typo.
+// observability contract for the at-most-once dropped-delivery path. An
+// unregistered participant returns a WRAPPED error from Dispatch since the
+// PR #718 review (the undelivered ledger must see the miss), but the SPAN
+// posture is unchanged: it MUST still be emitted (operators need to see the
+// drop in traces) with its status Unset and no exception event — the drop is
+// best-effort contract behaviour (RFC 0011 §C "Delivery guarantees"), not an
+// orchestrator fault, and flagging it as Error would inflate the
+// orchestrator's error-rate dashboards on every channels.yaml typo.
 //
 // The recipient.address attribute is intentionally absent on this branch:
 // the registry lookup returned ErrAgentNotFound before any address was
@@ -268,7 +269,8 @@ func TestGRPCMessageDispatcher_UnknownParticipantSpanIsBenign(t *testing.T) {
 	}, ChannelMessage{
 		ID: "m-1", ChannelID: "group:planning", SenderID: "agent-a",
 	})
-	require.NoError(t, err, "unknown participant must remain a silent drop")
+	require.ErrorIs(t, err, registry.ErrAgentNotFound,
+		"the miss surfaces to the caller (PR #718 review) — only the SPAN stays benign")
 
 	dispatchSpans := filterSpansByName(exporter.GetSpans(), "channel.dispatch")
 	require.Len(t, dispatchSpans, 1, "drop must still produce a trace so operators can see it")

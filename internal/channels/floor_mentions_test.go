@@ -225,7 +225,7 @@ func TestDispatchConcurrent_NormalizesNeverCheck(t *testing.T) {
 	}
 	msg := ChannelMessage{ID: uuid.NewString(), ChannelID: "group:planning", SenderID: "user"}
 
-	router.dispatchConcurrent(context.Background(), msg, ChannelTypeGroup, "", members, len(members), nil)
+	router.dispatchConcurrent(context.Background(), msg, ChannelTypeGroup, "", members, len(members), nil, nil)
 
 	calls := disp.snapshot()
 	require.Len(t, calls, 1, "only the floor-capable member is dispatched")

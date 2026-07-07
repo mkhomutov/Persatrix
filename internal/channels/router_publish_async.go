@@ -136,9 +136,55 @@ func (r *ChannelRouter) inFlightFanout() int64 {
 // barrier. When `ctx` expires, the internal waiter goroutine outlives this call
 // until the fanout eventually finishes — benign at shutdown, where the process
 // exits immediately after.
+//
+// PR #718 review finding 1, ordering settled by the second follow-up review's
+// DRAINING GATE. Waiting fanoutWG before the sweep (the first revision) closed
+// the sweep-outrun race but opened the symmetric one: a synthesis timer firing
+// during that first Wait ran fanoutWG.Add(1) (onSynthesisTimeout → boundedClose
+// → notifyInteractionClose) from a goroutine holding NO fanoutWG count — an
+// Add-from-zero concurrent with an in-progress Wait, the documented
+// sync.WaitGroup misuse. The gate closes BOTH races without a fanoutWG wait
+// before the sweep:
+//
+//  1. `draining` is set under interactionMu — the lock the arm CAS runs under
+//     — so [ChannelRouter.maybeArmSynthesisClose] refuses every arm serialized
+//     after it and degrades to the immediate close (deterministic termination
+//     preserved; the arming fanout goroutine holds its own fanoutWG count, so
+//     its close-notification Adds are legal).
+//  2. The sweep is therefore FINAL: every synthesisWG.Add is under the same
+//     lock and either preceded the sweep's critical section (its count is
+//     registered before the Wait below starts) or finds its arm already swept
+//     and never Adds. No Add-from-zero can race synthesisWG.Wait.
+//  3. synthesisWG.Wait: swept timers released their counts at the sweep;
+//     a timer caught mid-fire (Stop()==false) self-releases via its deferred
+//     Done — deferred FIRST in onSynthesisTimeout, so its close work's
+//     fanoutWG.Add(1)s happen-before that Done, which happens-before this
+//     Wait returns.
+//  4. One fanoutWG.Wait: by (3) every timer-originated Add is already held
+//     when it starts, and every other Add came from a goroutine registered at
+//     spawn (PublishAsync), holding a count (the notification fan), or holding
+//     the arm's TRANSFERRED synthesisWG count (the commit-path reply claim —
+//     [ChannelRouter.closeOnSynthesisReply] releases it only after its close's
+//     Adds, so (3)'s happens-before covers that path too) — no Add-from-zero
+//     can race it either.
+//
+// The flag clears on return (deferred), so a router reused after a bounded
+// (ctx-expired) drain resumes arming — at real shutdown the process exits
+// right after, and a straggler arm past an ABANDONED drain is the same
+// accepted exposure as the outlived waiter goroutine above.
 func (r *ChannelRouter) DrainPendingFanout(ctx context.Context) bool {
+	r.interactionMu.Lock()
+	r.draining = true
+	r.interactionMu.Unlock()
+	defer func() {
+		r.interactionMu.Lock()
+		r.draining = false
+		r.interactionMu.Unlock()
+	}()
 	done := make(chan struct{})
 	go func() {
+		r.disarmAllPendingSyntheses()
+		r.synthesisWG.Wait()
 		r.fanoutWG.Wait()
 		close(done)
 	}()
@@ -151,10 +197,19 @@ func (r *ChannelRouter) DrainPendingFanout(ctx context.Context) bool {
 }
 
 // WaitForPendingFanout blocks until every fanout goroutine spawned by
-// [ChannelRouter.PublishAsync] has completed. Intended for graceful shutdown
-// (drain in-flight deliveries before exit) and for tests that need a
-// deterministic point to assert on dispatched recipients. A no-op when no
-// async fanout is in flight.
+// [ChannelRouter.PublishAsync] has completed. Intended for tests that need a
+// deterministic point to assert on dispatched recipients — several call it
+// MID-ARM and expect the pending synthesis close to survive
+// (synthesis_close.go), so it deliberately takes no draining gate and runs no
+// disarm sweep. A no-op when no async fanout is in flight.
+//
+// KNOWN EXPOSURE (accepted, test-facing): a synthesis timer that fires
+// CONCURRENTLY with this wait runs its close-notification fanoutWG.Add(1)s on
+// a goroutine holding no fanout count — the Add-from-zero WaitGroup misuse
+// the drain's gate exists to close. Graceful shutdown must use
+// [ChannelRouter.DrainPendingFanout]; a test that deliberately lets the
+// timeout net fire polls the dispatcher instead of calling this
+// (TestSynthesisClose_ReplyTimeoutFallsBackToImmediateClose).
 func (r *ChannelRouter) WaitForPendingFanout() {
 	r.fanoutWG.Wait()
 }
@@ -308,6 +363,42 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	if latched {
 		r.waiter.Notify(msg)
 		r.dropPostCloseTraffic(ctx, derivedType, resolvedInteractionID)
+		return nil, nil
+	}
+
+	// RFC 0052 §D close-on-reply, the COMMIT-path claim (PR #718 review —
+	// moved here from the fanout head): when this publish is the chair's
+	// synthesis reply claiming the armed interaction, it IS the closing
+	// artifact — run the bounded teardown with it as the closing message
+	// (sole delivery: redelivery=false) and suppress fanout entirely (a fanned
+	// synthesis would draw replies into the closed discussion — the reopen §D
+	// forbids). It MUST run before the end-vote hook below: the directive
+	// explicitly invites the chair to answer with an END_INTERACTION_VOTE
+	// whose content is the synthesis (agents/end_vote_action.py stamps the
+	// reply echo on votes for exactly that shape), and processEndVote consumed
+	// such a reply first — an in-window duplicate was suppressed as spam (the
+	// claim never ran, the arm burned the full 120s timeout, and the close
+	// carried the bounding stimulus instead of the artifact), while a
+	// quorum-completing vote closed as `end_votes` (the unmetered wire shape:
+	// every RFC 0020 summary of a bound-crossed arc silently skipped its
+	// OQ #6 lease). A racing quorum completed by ANOTHER member's vote keeps
+	// its CE4 supremacy unchanged — it lands in processEndVote on its own
+	// publish and markInteractionClosed disarms the arm. The claim is
+	// side-effect-free for every non-matching publish beyond one short-held
+	// lock; the reply waiter is notified like the latch branch above, so a
+	// closing reply never starves a parked floor turn. A lost tombstone CAS
+	// means a racing closer beat this reply — the synthesis stays committed
+	// history, the 4b-i degraded artifact shape. The claim reads the
+	// PRE-RESOLVE `inboundClaim` captured above, never the bag — the stamp at
+	// the top of this function overwrote the bag with the resolver's verdict,
+	// which while armed always equals the armed id, so a bag re-read cannot
+	// reject a stale echo (PR #718 follow-up review; see claimSynthesisReply).
+	if pendingSynth := r.claimSynthesisReply(msg, inboundClaim); pendingSynth != nil {
+		// The claim transferred the arm's synthesisWG count to this branch;
+		// closeOnSynthesisReply notifies the reply waiter, runs the teardown,
+		// and releases the count only after the close's fanoutWG.Adds — the
+		// drain-ordering contract (see both functions' docs).
+		r.closeOnSynthesisReply(context.WithoutCancel(ctx), msg, derivedType, pendingSynth)
 		return nil, nil
 	}
 

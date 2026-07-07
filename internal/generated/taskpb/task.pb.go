@@ -1032,7 +1032,74 @@ type ChannelMessageEvent struct {
 	// field is additive — an old producer never sets it and an old consumer
 	// ignoring it sees an ordinary open-floor message (no opener authored —
 	// the channel simply never convenes, the inert pre-v0.3.11 posture).
-	Convene       bool `protobuf:"varint,27,opt,name=convene,proto3" json:"convene,omitempty"`
+	Convene bool `protobuf:"varint,27,opt,name=convene,proto3" json:"convene,omitempty"`
+	// RFC 0052 §D (v0.3.11 PR 4b-ii): true iff this close NOTIFICATION's
+	// closing message was ALREADY delivered live via ordinary fanout — the
+	// FLOOR-path bounded close, whose bounding stimulus reached every member
+	// inside its floor round before the tail trigger fired (unlike the
+	// end-vote close, whose vote's own fanout is suppressed, and the
+	// concurrent-path bounded close, which withholds the bounding dispatch —
+	// both sole-delivery). Set only together with
+	// `interaction_close_notification = 23`. The receiver skips the
+	// final-turn ingest and closes its scope directly, so the closed record
+	// no longer carries one duplicate final turn + a `turn_count` inflated by
+	// one per non-sender member per close (the PR 4b-i documented limit —
+	// `close_notification.py`; the fresh wire id defeats any id-based dedup
+	// by design, which is why this must be a typed field). proto3 implicit
+	// presence: false (the zero value) is every sole-delivery notification
+	// and every old producer, whose receivers keep the ingest-then-close
+	// behaviour — degraded to the pre-4b-ii duplicate, never a lost turn —
+	// so the field is additive across a mixed-version deployment.
+	CloseNotificationRedelivery bool `protobuf:"varint,28,opt,name=close_notification_redelivery,json=closeNotificationRedelivery,proto3" json:"close_notification_redelivery,omitempty"`
+	// RFC 0052 §D (v0.3.11 PR 4b-ii): the truthful close cause of THIS close
+	// notification — "structural" (`autonomous.max_rounds`) | "cost" (the
+	// wallet soft-budget threshold), the same §L instrument vocabulary as
+	// `previous_interaction_close_trigger = 21`. Stamped ONLY by the RFC 0052
+	// bounded close ([ChannelRouter.boundedClose]'s notification fan), so its
+	// presence doubles as the OQ #6 metering key: a non-empty value tells the
+	// receiver the closing interaction is an AUTONOMOUS bounded close, whose
+	// RFC 0020 close summary must draw a wallet lease stamped with the
+	// interaction's id (`summarize_close.py`) so the summary counts toward
+	// the mandatory cap — the `1 + N` reserve PR 4a sized exists for exactly
+	// those calls. The receiver also maps "cost" to its truthful local
+	// `cost` close reason instead of the 4b-i `REASON_STRUCTURAL` fallback
+	// (`wire_rotation_close_reason` documents the deferral). Set iff
+	// `interaction_close_notification = 23` is set AND the close was the
+	// bounded close; empty (proto3 implicit presence) is every end-vote/idle
+	// notification, every human channel, and every old producer — the
+	// receiver keeps the structural label and the summary stays unleased,
+	// byte-for-byte the pre-4b-ii close, so the field is additive across a
+	// mixed-version deployment. Unrecognised values degrade to absent at the
+	// seed point (the tolerant-wire-reader posture of the field-21
+	// allowlist).
+	CloseNotificationCloseTrigger string `protobuf:"bytes,29,opt,name=close_notification_close_trigger,json=closeNotificationCloseTrigger,proto3" json:"close_notification_close_trigger,omitempty"`
+	// RFC 0052 §D (v0.3.11 PR 4b-ii): true iff this dispatch is the
+	// orchestrator's SYNTHESIS forced turn — the directed dispatch sent to
+	// the channel's `escalation_chair_id` when the deterministic bounded
+	// close trips, asking the chair to author the goal-directed closing
+	// synthesis (`internal/channels/synthesis_close.go`). The dispatch's
+	// `content` carries the operator goal/topic directive (assembled from the
+	// channel's `autonomous` config); the receiver wraps it in the RFC 0009
+	// `<external_data>` envelope before injection (operator config is a
+	// distinct trust class — the convene precedent) and renders the synthesis
+	// framing (`prompts/runtime/safety/synthesis-turn.md`). The receiver
+	// admits a marked event down the same directed lane as
+	// `chair_escalation = 22` (gate admit for any non-`never` policy, Tier B
+	// bid skipped — re-running the bias-to-silence bid would silence the one
+	// mandatory turn §D exists to guarantee). The chair's reply echoes its
+	// dispatched-under interaction id as the publish claim (the PR 4b-i
+	// origin pair), which is how the orchestrator recognises it as the
+	// CLOSING ARTIFACT — the close-on-reply ordering — instead of a fresh
+	// stimulus that would re-fan and reopen the discussion. Orchestrator-
+	// authored, the same trust class as `convene = 27`; never set by ordinary
+	// fanout, honoured only from this typed field and strictly boolean
+	// receiver-side. proto3 implicit presence: false (the zero value) is
+	// every non-synthesis dispatch, so the field is additive — an old
+	// producer never sets it and an old consumer ignoring it sees an ordinary
+	// open-floor message whose reply still claims the retired id and lands in
+	// the no-reopen latch (degraded to the 4b-i artifact-less close, never a
+	// reopen).
+	SynthesisTurn bool `protobuf:"varint,30,opt,name=synthesis_turn,json=synthesisTurn,proto3" json:"synthesis_turn,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1252,6 +1319,27 @@ func (x *ChannelMessageEvent) GetReasoningRevise() int32 {
 func (x *ChannelMessageEvent) GetConvene() bool {
 	if x != nil {
 		return x.Convene
+	}
+	return false
+}
+
+func (x *ChannelMessageEvent) GetCloseNotificationRedelivery() bool {
+	if x != nil {
+		return x.CloseNotificationRedelivery
+	}
+	return false
+}
+
+func (x *ChannelMessageEvent) GetCloseNotificationCloseTrigger() string {
+	if x != nil {
+		return x.CloseNotificationCloseTrigger
+	}
+	return ""
+}
+
+func (x *ChannelMessageEvent) GetSynthesisTurn() bool {
+	if x != nil {
+		return x.SynthesisTurn
 	}
 	return false
 }
@@ -1651,7 +1739,8 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xa7\t\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xdb\n" +
+	"\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -1682,7 +1771,10 @@ const file_task_proto_rawDesc = "" +
 	"\x1dchair_escalation_resynthesize\x18\x18 \x01(\bR\x1bchairEscalationResynthesize\x12%\n" +
 	"\x0ereasoning_mode\x18\x19 \x01(\tR\rreasoningMode\x12)\n" +
 	"\x10reasoning_revise\x18\x1a \x01(\x05R\x0freasoningRevise\x12\x18\n" +
-	"\aconvene\x18\x1b \x01(\bR\aconveneB\f\n" +
+	"\aconvene\x18\x1b \x01(\bR\aconvene\x12B\n" +
+	"\x1dclose_notification_redelivery\x18\x1c \x01(\bR\x1bcloseNotificationRedelivery\x12G\n" +
+	" close_notification_close_trigger\x18\x1d \x01(\tR\x1dcloseNotificationCloseTrigger\x12%\n" +
+	"\x0esynthesis_turn\x18\x1e \x01(\bR\rsynthesisTurnB\f\n" +
 	"\n" +
 	"_threshold\"H\n" +
 	"\aTaskAck\x12\x18\n" +

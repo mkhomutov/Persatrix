@@ -86,6 +86,32 @@ func (e *openInteraction) latchedClaim(claim string) bool {
 	return slices.Contains(e.recentlyClosed, claim)
 }
 
+// withholdsStimulusLocked reports whether a stimulus stamped `stamped` must be
+// withheld from dispatch because the discussion it belongs to is TERMINATING:
+// its id is in the no-reopen ledger (a deliberate close landed between its
+// commit and its fanout), or a synthesis close is armed on the entry (PR 4b-ii
+// — the bound has fired, only the closing artifact is outstanding, and a
+// dispatched round would fan LLM turns into the terminated discussion; the
+// armed half applies regardless of the stamp). THE one definition of the
+// terminating-state verdict, shared by the fanout head
+// ([ChannelRouter.stimulusOutlivedClose]) and the fanout tail
+// ([ChannelRouter.advanceBoundedCloseRound]) — the two sites must stay
+// semantically identical, and a future terminating condition landing in one
+// hand-spelled copy but not the other would give the head and tail divergent
+// verdicts on the same stimulus (PR #718 review; the
+// disarmPendingSynthesisChairLocked precedent, one drift class over).
+// Nil-tolerant like [openInteraction.openCommitted]; caller holds
+// interactionMu.
+func (e *openInteraction) withholdsStimulusLocked(stamped string) bool {
+	if e == nil {
+		return false
+	}
+	if stamped != "" && e.latchedClaim(stamped) {
+		return true
+	}
+	return e.pendingSynthesis != nil
+}
+
 // stimulusOutlivedClose reports whether `msg` is stamped with an interaction id
 // the no-reopen ledger holds — the floor path's fanout-HEAD staleness check
 // (PR #716 review). [ChannelRouter.advanceBoundedCloseRound] reads the same
@@ -97,23 +123,34 @@ func (e *openInteraction) latchedClaim(claim string) bool {
 // already spent, the exact cost the concurrent path's close-before-dispatch
 // ordering exists to avoid. Same scope and semantics as the tail read: gated on
 // `autonomous.enabled` (human channels never latch, byte-for-byte unchanged —
-// the cheap unstamped check runs first so human-typed traffic touches no
-// mutex), and DELIBERATE closes only — a divergence without a close (orphan
-// park, idle rotation) reads false and the round runs exactly as before.
+// the `!a.Enabled` early-out keeps human CHANNELS off the mutex; on an enabled
+// channel even UNSTAMPED traffic must take it, because the armed-synthesis
+// withhold below applies regardless of the stamp — PR #718 review retired the
+// old unstamped early-out for exactly that reason), and DELIBERATE closes only
+// — a divergence without a close (orphan park, idle rotation) reads false and
+// the round runs exactly as before.
 // `a` is the fanout's single per-publish [ChannelRouter.AutonomousFor]
 // snapshot (PR #716 review), shared with the tail trigger so the two reads
 // cannot be torn by a concurrent RFC 0050 apply; the scope gate itself stays
 // HERE, not at the call site, so a caller cannot silently opt out of it (the
 // resolver's latch-gate posture).
+// Since PR 4b-ii the head verdict also covers the ARMED synthesis window
+// (synthesis_close.go): once a bound-crossing round dispatched the chair
+// synthesis turn, the discussion has terminated and only the closing artifact
+// is outstanding — running a floor round on any further stimulus would fan
+// LLM turns into it exactly like the post-close case, so an armed channel
+// withholds at the head regardless of the stamp (the chair's reply itself
+// never reaches this check — [ChannelRouter.claimSynthesisReply] runs first).
 func (r *ChannelRouter) stimulusOutlivedClose(msg ChannelMessage, a AutonomousConfig) bool {
-	stamped := readInteractionID(msg.Metadata)
-	if stamped == "" || !a.Enabled {
+	if !a.Enabled {
 		return false
 	}
 	r.interactionMu.Lock()
 	defer r.interactionMu.Unlock()
-	entry := r.openInteractions[msg.ChannelID]
-	return entry != nil && entry.latchedClaim(stamped)
+	// ONE shared predicate with the tail read (see
+	// [openInteraction.withholdsStimulusLocked]) so the two stimulus action
+	// points cannot drift (PR #718 review).
+	return r.openInteractions[msg.ChannelID].withholdsStimulusLocked(readInteractionID(msg.Metadata))
 }
 
 // markInteractionClosed is the resolver close notification (IP8): a close site
@@ -132,9 +169,25 @@ func (r *ChannelRouter) stimulusOutlivedClose(msg ChannelMessage, a AutonomousCo
 func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger string) {
 	r.interactionMu.Lock()
 	entry := r.openInteractions[channelID]
-	var discard string
+	var discard, disarmedChair string
+	var disarmedTimer bool
 	if entry != nil {
 		entry.rememberClosed(interactionID)
+		// PR 4b-ii: a deliberate close disarms any pending synthesis for the
+		// SAME interaction — the racing end-vote quorum keeps its supremacy
+		// (CE4), and the orphaned arm's reply then lands in the ledger above
+		// as post-close traffic instead of double-closing. Capture the chair id
+		// so its in-flight "thinking" mark is cleared below (PR #718 review):
+		// this disarm kills the timeout net, so — exactly like
+		// [ChannelRouter.onSynthesisTimeout] and
+		// [ChannelRouter.disarmChannelSynthesis], the other two no-reply abandon
+		// terminals — nothing else re-enters to clear the mark
+		// [ChannelRouter.maybeArmSynthesisClose] set on the chair if its
+		// synthesis reply never lands (the chair is now latch-suppressed), which
+		// would strand it as composing for the whole activity TTL.
+		if p := entry.pendingSynthesis; p != nil && p.interactionID == interactionID {
+			disarmedChair, disarmedTimer = entry.disarmPendingSynthesisChairLocked()
+		}
 		if entry.id == interactionID {
 			discard = entry.retired
 			entry.retired = interactionID
@@ -144,9 +197,43 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger 
 	}
 	r.interactionMu.Unlock()
 
-	if discard != "" {
-		r.DiscardInteractionReplyBudget(discard)
-		r.DiscardInteractionEndVotes(discard)
-		r.DiscardInteractionBudget(discard)
-	}
+	// This close disarmed the timeout net before it fired, so it owns the arm's
+	// synthesisWG Done() (PR #718 review finding 1) — the racing end-vote quorum
+	// (or any other deliberate closer) that beat the chair's reply must release
+	// the count the arm registered, or the shutdown drain never settles. A
+	// no-op when the chair already re-published its reply (publishCommit
+	// cleared it) or nothing was armed.
+	r.releaseSynthesisArm(channelID, disarmedChair, disarmedTimer)
+	r.discardInteractionGovernance(discard)
+}
+
+// discardInteractionGovernance drops every per-interaction governance ledger
+// for one retired interaction id: the RFC 0052 reply counters, the Layer 4
+// end-vote tally + tombstone, and the budget snapshot. THE canonical list —
+// the two one-generation-deferred discharge seams (the close above, the
+// resolver's idle rotation) and the channel-delete purge all route through
+// here, so a fourth per-interaction ledger added to one seam cannot silently
+// stay resident on the others and re-open the resident-forever leak the purge
+// was added to close (PR #718 review). Deliberately NOT the whole discharge
+// story: the two partial seams that drop only the reply budget (the end-vote
+// close and the close-notification tail) stay on the single call — their
+// tallies are consumed, not leaked. Tolerates "" (each discard no-ops before
+// taking its leaf mutex); runs outside interactionMu at every call site.
+func (r *ChannelRouter) discardInteractionGovernance(interactionID string) {
+	r.DiscardInteractionReplyBudget(interactionID)
+	r.DiscardInteractionEndVotes(interactionID)
+	r.DiscardInteractionBudget(interactionID)
+}
+
+// previousClose is the resolver's OQ 5 close-cause attribution for one
+// channel, returned by [ChannelRouter.resolveInteractionID] from the same
+// critical section that resolved the open id — reading it later would race a
+// concurrent rotation into stamping a cause from a different generation than
+// the resolved id's. A zero value means no retiree is known (fresh channel
+// or post-restart re-mint). (Moved here from interaction_resolver.go when
+// PR 4b-ii pushed that file past the 500-line cap — this file already owns
+// the close-side resolver state the record belongs to.)
+type previousClose struct {
+	id      string
+	trigger string
 }

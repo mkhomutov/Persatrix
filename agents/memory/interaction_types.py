@@ -1,0 +1,119 @@
+"""``Turn`` / ``Interaction`` — the RFC 0020 §C/D lifecycle records.
+
+Split out of :mod:`agents.memory.interactions` when the RFC 0052 PR 4b-ii
+``meter_close_summary`` field pushed that module past the 500-line cap
+(``scripts/checks/file_size.py --strict``) — the same module-split
+precedent as :mod:`agents.memory.scopes` and
+:mod:`agents.memory.interaction_janitor`; the tracker module re-exports
+both names so existing imports keep working.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from ..session_id import LEGACY_SESSION_ID
+
+
+@dataclass
+class Turn:
+    """A single turn aggregated into an open interaction.
+
+    The payload is opaque to the tracker and is consumed by the
+    close-path summariser.  It carries the structural envelope plus —
+    since ISSUE-0054 — the inbound message ``text`` the RFC 0026 facts
+    extractor needs.  RFC 0020 §D still holds for the *persisted*
+    episode: ``_persist_closed_interaction`` strips ``text`` before the
+    turn lands in ``context_json``, so the body is carried only
+    transiently on the in-memory turn and the episodic store never
+    doubles as a message log.  The live buffer for working-memory
+    injection lives in working memory, not here.
+    """
+
+    at: float
+    payload: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass
+class Interaction:
+    """An open interaction in a single scope.
+
+    Lifecycle states (RFC 0020 §C) are encoded by ``closed_at``:
+
+    * ``closed_at is None`` → ``open``
+    * ``closed_at is not None`` → ``closing`` (the tracker hands the
+      interaction off to the persistence layer; the row's lifecycle
+      after that is encoded by ``(closed_at, summary)`` per §D).
+
+    The ``structural_close_reason`` field is the marker that
+    :class:`~agents.memory.boundary_detectors.StructuralCloseDetector`
+    consumes — an out-of-band call site that observes a structural
+    event sets it before the next :meth:`InteractionTracker.idle_check`
+    sweep.  The *channel-side* structural closes that landed with the
+    RFC 0030 interaction-id producer (end-of-interaction vote, wire
+    interaction-id rotation — ``persona_runtime/episode_routing.py``)
+    run inline on the event path and call
+    :meth:`InteractionTracker.close` directly instead, so the marker
+    remains the seam for detectors that cannot close synchronously.
+
+    ``wire_interaction_id`` (RFC 0030 interaction-id producer) is the
+    orchestrator-minted channel interaction id this local interaction
+    was opened under, seeded from the first turn's event metadata by
+    episode routing.  In-memory on the live interaction; at close it is
+    copied into the persisted episode context as
+    ``governance_interaction_id`` (ISSUE-0102 — ``close_path.py``).  The
+    agent's own ``interaction_id`` stays the memory key (OQ 1 defers
+    unification); the live field also drives rotation-boundary detection.
+    Its sibling ``predecessor_wire_id`` (PR 607 second pass; in-memory
+    only, not persisted) is the retired wire id the opening turn attributed
+    (``previous_interaction_id``) — the rotation seam's late-delivery
+    defence, see :func:`~agents.persona_runtime.interaction_boundary
+    .wire_rotation_closes`.
+    """
+
+    interaction_id: str
+    scope: str
+    started_at: float
+    turns: list[Turn] = field(default_factory=list)
+    closed_at: float | None = None
+    close_reason: str = ""
+    structural_close_reason: str = ""
+    wire_interaction_id: str = ""
+    predecessor_wire_id: str = ""
+    # ISSUE-0081 PR 2: the RFC 0031 session captured when the interaction
+    # *opened*, frozen for its lifetime.  Load-bearing for the
+    # sibling-mislabel guard: ``idle_check`` can flush conversation B's
+    # stale interaction while conversation A's event holds the active
+    # scope, so the close-path persistence must tag the row with the
+    # session the interaction was born under — not whatever scope is bound
+    # at flush time.  Defaults to the ``legacy`` carve-out so a pre-PR-2
+    # construction site (or a turn opened with no scope) stays visible.
+    session_id: str = LEGACY_SESSION_ID
+    # RFC 0052 PR 4b-ii (OQ #6): true iff this interaction was closed by the
+    # AUTONOMOUS bounded close (the close notification carried the truthful
+    # ``structural``/``cost`` trigger — ``close_notification.py`` sets it
+    # between the tracker close and persistence), so the RFC 0020 close
+    # summary must draw a wallet lease billed to ``wire_interaction_id``
+    # (``summarize_close.py``) and count toward the mandatory cap the PR 4a
+    # ``1 + N`` reserve was carved from. In-memory only, like
+    # ``predecessor_wire_id`` — never persisted. The default keeps every
+    # other close path (human channels, end-vote, idle, cost ceiling)
+    # byte-for-byte on the unleased pre-4b-ii summariser call.
+    meter_close_summary: bool = False
+
+    @property
+    def turn_count(self) -> int:
+        return len(self.turns)
+
+    @property
+    def last_turn_at(self) -> float | None:
+        if not self.turns:
+            return None
+        return self.turns[-1].at
+
+    @property
+    def is_open(self) -> bool:
+        return self.closed_at is None
+
+
+__all__ = ["Interaction", "Turn"]

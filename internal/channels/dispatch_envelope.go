@@ -1,5 +1,7 @@
 package channels
 
+import "context"
+
 // DispatchEnvelope bundles the per-recipient inputs the dispatcher needs
 // to render a [taskpb.ChannelMessageEvent] without the router exposing the
 // raw proto type to the channels package boundary. The envelope is built
@@ -109,6 +111,44 @@ type DispatchEnvelope struct {
 	// directed lane, the same never-alias discipline [dispatchMarker] keeps).
 	Convene bool
 
+	// InteractionCloseRedelivery (RFC 0052 PR 4b-ii) marks a close
+	// notification whose closing message was ALREADY delivered live via
+	// ordinary fanout — the FLOOR-path bounded close, whose bounding stimulus
+	// reached every member inside its round (the end-vote and concurrent-path
+	// closes are sole-delivery). Carried on
+	// `ChannelMessageEvent.close_notification_redelivery`; the receiver skips
+	// the duplicate final-turn ingest and closes its scope directly. Set only
+	// with InteractionCloseNotification, by
+	// [ChannelRouter.notifyInteractionClose] — the zero value is every
+	// sole-delivery notification and every ordinary dispatch.
+	InteractionCloseRedelivery bool
+
+	// InteractionCloseTrigger (RFC 0052 PR 4b-ii) is the truthful bounded-
+	// close cause riding a close notification — "structural"
+	// (`autonomous.max_rounds`) | "cost" (the wallet soft budget), the same §L
+	// vocabulary as the OQ 5 retiree pair. Stamped ONLY for the RFC 0052
+	// bounded close ([ChannelRouter.finalizeInteractionClose] maps every other
+	// trigger to empty), so its presence doubles as the receiver's OQ #6
+	// metering key: a non-empty value marks the closed interaction's RFC 0020
+	// summary for a wallet lease against the mandatory cap. Carried on
+	// `ChannelMessageEvent.close_notification_close_trigger`; empty is every
+	// end-vote/idle notification and every ordinary dispatch.
+	InteractionCloseTrigger string
+
+	// SynthesisTurn (RFC 0052 §D, PR 4b-ii) marks this dispatch as the
+	// orchestrator's synthesis forced turn to the channel's escalation chair —
+	// the directed dispatch, sent when the bounded close trips, asking the
+	// chair to author the goal-directed closing synthesis. Carried on
+	// `ChannelMessageEvent.synthesis_turn`; the receiver admits a marked event
+	// down the same directed lane as Convene (gate admit + Tier B bypass),
+	// wraps the operator goal in the RFC 0009 envelope, and renders the
+	// synthesis framing. The reply's echoed interaction-id claim is how the
+	// orchestrator recognises the closing artifact (close-on-reply). Set only
+	// by [ChannelRouter.maybeArmSynthesisClose]'s dispatch — never together
+	// with the other control markers (the [dispatchMarker] never-alias
+	// discipline).
+	SynthesisTurn bool
+
 	// FloorMentions (RFC 0030 floor-capable-directedness amendment) is the
 	// subset of the message's mentions naming floor-capable members —
 	// resolved once per publish by [resolveFloorMentions] in
@@ -121,4 +161,48 @@ type DispatchEnvelope struct {
 	// `floor_mentions_resolved` wire flag rather than letting receivers
 	// infer producer support from emptiness.
 	FloorMentions []string
+}
+
+// MessageDispatcher is the gRPC seam through which the [ChannelRouter]
+// fans a published message out to every subscriber other than the sender.
+// (Moved here from router.go beside the envelope it consumes when the PR #718
+// follow-up review's delivery-miss contract expansion pushed that file past
+// the 500-line cap.)
+//
+// PR 2 of RFC 0011 ships only the dispatcher *interface* and a no-op
+// implementation. The wire-side gRPC call to `ReceiveChannelMessage`
+// (proto regen + servicer) lands in PR 3 + PR 4 — splitting the seam from
+// its first concrete implementation keeps the PR diff under the 500-line
+// soft cap and lets the router unit tests exercise the fanout topology
+// without booting a fake gRPC server.
+//
+// Implementations MUST treat `Dispatch` as fire-and-forget: the publish
+// path's HTTP response has already been written by the time fanout runs.
+// Errors returned here are recorded via the
+// `channel.messages.delivered{status="error"}` counter and logged at warn,
+// but do not surface to the publisher.
+type MessageDispatcher interface {
+	// Dispatch delivers msg to env.Recipient. The router has already
+	// filtered the sender out of the recipient list, dropped any
+	// `RespondNever` members, and validated `channel_type` against the
+	// `channel_id` prefix. Returns an error whenever the message did NOT
+	// reach the recipient — an unknown/unhealthy target, a wire failure,
+	// or a receiver ack that refused the event; the caller logs, counts,
+	// and (on the floor path) records the miss in the bounded-close
+	// undelivered ledger. A nil return MUST mean the recipient actually
+	// received the event (PR #718 review — a tolerant nil corrupted the
+	// close-notification redelivery accounting).
+	Dispatch(ctx context.Context, env DispatchEnvelope, msg ChannelMessage) error
+}
+
+// NoopDispatcher is the v0.3.0-PR-2 placeholder: it counts the calls and
+// returns nil, so the router's fanout topology can be tested end-to-end
+// without a wired gRPC client. Replaced in PR 4 by the real gRPC-backed
+// dispatcher that resolves participantID → registry address and invokes
+// `AgentService.ReceiveChannelMessage`.
+type NoopDispatcher struct{}
+
+// Dispatch implements [MessageDispatcher] by no-op.
+func (NoopDispatcher) Dispatch(_ context.Context, _ DispatchEnvelope, _ ChannelMessage) error {
+	return nil
 }

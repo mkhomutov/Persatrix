@@ -227,8 +227,19 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 		// amendment (CP1/CP5): the closing vote's own fanout is suppressed (the
 		// caller's early return this `true` buys), so the close must be DELIVERED,
 		// not inferred. excludeSender is TRUE — the voter's own vote action already
-		// closed its local tracker, so re-notifying it is redundant.
-		r.finalizeInteractionClose(ctx, msg, ct, interactionID, endVotesTrigger, true)
+		// closed its local tracker, so re-notifying it is redundant — EXCEPT when
+		// the vote carries the synthesis-reply echo (PR #718 review): that vote's
+		// discharge DEFERS its local close to the close-notification self-echo
+		// (vote_close.py — the echo says what the wire carried, never what Go
+		// accepted, so it defers even when the arm was already abandoned and this
+		// hook counted the vote as an ordinary one). A demoted synthesis vote
+		// completing the quorum HERE was the one close whose fan excluded its
+		// sender: the chair's record stranded open until the idle bury, late and
+		// mislabeled. Unmarked votes keep the exclusion, so the pre-4b-ii fan is
+		// byte-for-byte unchanged on human channels. redelivery stays FALSE (the
+		// struct default) for the same suppression: the notification is the vote's
+		// SOLE delivery, so receivers keep the ingest.
+		r.finalizeInteractionClose(ctx, msg, ct, interactionID, endVotesTrigger, closeNotify{excludeSender: !readSynthesisReply(msg.Metadata)})
 		return true
 	}
 	// Suppress fanout of a redundant in-window duplicate vote. An end-vote is

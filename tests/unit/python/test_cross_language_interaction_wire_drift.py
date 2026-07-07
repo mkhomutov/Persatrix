@@ -21,6 +21,11 @@ across files that share no code:
 
 Same posture as the sibling files: sources pinned as text so the test
 runs anywhere the Python unit suite runs — no Go toolchain dependency.
+
+The RFC 0052 PR 4b-ii synthesis wire pins (fields 28/29/30 and the
+``synthesis_reply`` reply-echo key) live in
+``test_cross_language_synthesis_wire_drift.py`` — split out when the
+PR #718 review pin pushed this file past the 500-line review cap.
 """
 
 from __future__ import annotations
@@ -142,12 +147,15 @@ def test_lease_call_sites_thread_the_interaction() -> None:
 
 # The RFC 0052 no-reopen claim's shared seams (PR #716 review): the executor
 # entry points read the origin id through the ONE drift-pinned reader, and
-# both publish sites build the claim through the ONE shared rule. Exact
-# call-site literals, the _LEASE_THREADING_PINS posture: a site quietly
-# reverting to an inline read/build would sit outside the drift pin again —
-# and a coordinated key rename would then leave it echoing no claim, the
-# latch blind, and post-close stragglers minting fresh and reopening the
-# closed discussion (the exact regression the shared home closed).
+# every publish site builds the claim through the ONE shared rule — the
+# ``DispatchContext.same_channel_claim`` method (PR #718 second-pass review:
+# the synthesis reply-echo now rides the method structurally, so no call site
+# carries a per-publish kwarg it could forget). Exact call-site literals, the
+# _LEASE_THREADING_PINS posture: a site quietly reverting to an inline
+# read/build would sit outside the drift pin again — and a coordinated key
+# rename would then leave it echoing no claim, the latch blind, and
+# post-close stragglers minting fresh and reopening the closed discussion
+# (the exact regression the shared home closed).
 _NO_REOPEN_CLAIM_PINS = {
     Path("agents/dispatch.py"): [
         "context=DispatchContext.for_event(event",
@@ -157,14 +165,17 @@ _NO_REOPEN_CLAIM_PINS = {
         # The error-recovery publish is the THIRD same-channel path (PR #716
         # review: it was missed when the reply and end-vote publishes were
         # stamped, so a post-close budget-denial straggler minted fresh and
-        # reopened the closed discussion).
-        "claim = same_channel_claim(",
+        # reopened the closed discussion). The pin also holds the NAMED
+        # synthesis-echo opt-out (PR #718 review): an apology must never be
+        # claimable as the §D closing artifact, and the withhold must stay
+        # spelled at the seam — not implied by an omitted kwarg.
+        "claim = origin.same_channel_claim(channel_id, claim_synthesis_reply=False)",
     ],
     Path("agents/action_executor.py"): [
-        "publish_metadata = same_channel_claim(",
+        "publish_metadata = context.same_channel_claim(",
     ],
     _END_VOTE_ACTION_PY: [
-        "claim = same_channel_claim(",
+        "claim = context.same_channel_claim(",
     ],
 }
 
@@ -175,8 +186,9 @@ def test_no_reopen_claim_sites_share_reader_and_rule() -> None:
     drift-pinned ``wire_interaction_id`` reader, structurally — PR #716
     review applied: the pair was previously threaded as parallel kwargs a
     site could half-forget) and every same-channel publish site MUST build
-    its claim through ``same_channel_claim`` — the shared, drift-pinned
-    home (see ``test_interaction_id_metadata_key_agrees``)."""
+    its claim through the context's ``same_channel_claim`` method — the
+    shared, drift-pinned home (see
+    ``test_interaction_id_metadata_key_agrees``)."""
     for path, pins in _NO_REOPEN_CLAIM_PINS.items():
         src = path.read_text(encoding="utf-8")
         for pin in pins:
@@ -242,6 +254,7 @@ def test_close_trigger_values_agree() -> None:
     silently disabling the ``predecessor_wire_id`` straggler defence on
     every bounded-close boundary."""
     from agents.channel_wire_metadata import (
+        WIRE_BOUNDED_CLOSE_TRIGGERS,
         WIRE_CLOSE_TRIGGER_COST,
         WIRE_CLOSE_TRIGGER_END_VOTES,
         WIRE_CLOSE_TRIGGER_IDLE,
@@ -260,11 +273,20 @@ def test_close_trigger_values_agree() -> None:
     assert WIRE_CLOSE_TRIGGER_STRUCTURAL == structural
     assert WIRE_CLOSE_TRIGGER_COST == cost
     assert WIRE_CLOSE_TRIGGERS == {idle, end_votes, structural, cost}
+    # PR #718 review: the bounded-close subset (the OQ #6 metering key) must
+    # equal exactly the pair Go stamps — pinned here so a future third bounded
+    # cause has to extend the one shared constant both Python allowlist sites
+    # consume, not silently diverge across the three enumeration points.
+    assert WIRE_BOUNDED_CLOSE_TRIGGERS == {structural, cost}
+    assert WIRE_BOUNDED_CLOSE_TRIGGERS <= WIRE_CLOSE_TRIGGERS
     # The boundary seam consumes the import, not a re-declaration.
     assert interaction_boundary.WIRE_CLOSE_TRIGGER_IDLE is WIRE_CLOSE_TRIGGER_IDLE
 
 
-_GRPC_DISPATCHER_GO = Path("internal/channels/grpc_dispatcher.go")
+# The in-process→wire translation split out of grpc_dispatcher.go at the
+# 500-line cap (PR #718 review — the delivery-miss returns pushed it over);
+# the envelope lifts this file pins all live in the proto-translation half.
+_GRPC_DISPATCHER_GO = Path("internal/channels/grpc_dispatcher_proto.go")
 _PROMPT_ASSEMBLY_PY = Path("agents/persona_runtime/prompt_assembly.py")
 _RESPONSE_GATE_PY = Path("agents/response_gate.py")
 _TASK_PROTO = Path("proto/task.proto")
@@ -300,17 +322,47 @@ def test_chair_escalation_marker_agrees() -> None:
     # Both consumers honour the marker ONLY as the strict boolean — the
     # floor_mentions_resolved posture (a spoofed truthy non-bool on the
     # cleartext port must not widen admission or rewrite the prompt).
-    # One substring covers both shapes: the gate reads a local
-    # `payload.get(...)`, prompt_assembly reads `event.payload.get(...)`,
-    # and the latter contains the former — the PR 610 second-pass review
-    # dropped a second `event.`-prefixed clause that could therefore
-    # never be the deciding one.
-    for path in (_RESPONSE_GATE_PY, _PROMPT_ASSEMBLY_PY):
-        src = path.read_text(encoding="utf-8")
-        if 'payload.get("chair_escalation") is True' not in src:
-            _parse_miss(
-                'a strict `…get("chair_escalation") is True` read', path,
-            )
+    # prompt_assembly keeps the per-marker strict read; the gate's read
+    # moved into the `_FORCED_TURN_MARKERS` registry loop (PR #718 review),
+    # so its pin parses the registry entry plus the loop's strict read.
+    pa_src = _PROMPT_ASSEMBLY_PY.read_text(encoding="utf-8")
+    if 'payload.get("chair_escalation") is True' not in pa_src:
+        _parse_miss(
+            'a strict `…get("chair_escalation") is True` read',
+            _PROMPT_ASSEMBLY_PY,
+        )
+    _gate_forced_turn_registry_pin("chair_escalation")
+
+
+def _gate_forced_turn_registry_pin(marker: str) -> None:
+    """The gate admits forced-turn markers via one registry-driven loop
+    (PR #718 review — the three byte-identical admit blocks collapsed into
+    ``for marker in _FORCED_TURN_MARKERS``): the per-marker literal lives
+    in the tuple and the strict read is the loop's shared clause, so this
+    pin parses both — a marker dropped from the registry, or a loosened
+    read, fails exactly like the old per-block substring pin did."""
+    src = _RESPONSE_GATE_PY.read_text(encoding="utf-8")
+    m = re.search(r"_FORCED_TURN_MARKERS\s*=\s*\(([^)]*)\)", src)
+    if m is None:
+        _parse_miss(
+            "the `_FORCED_TURN_MARKERS = (…)` registry", _RESPONSE_GATE_PY,
+        )
+    if f'"{marker}"' not in m.group(1):
+        _parse_miss(
+            f'"{marker}" in the gate\'s `_FORCED_TURN_MARKERS` registry',
+            _RESPONSE_GATE_PY,
+        )
+    if "payload.get(marker) is True" not in src:
+        _parse_miss(
+            "the strict `payload.get(marker) is True` registry read",
+            _RESPONSE_GATE_PY,
+        )
+
+
+# The convene marker's pin lives in its own per-topic split
+# (test_cross_language_convene_wire_drift.py, the file-size-cap routing this
+# family already uses) and imports `_parse_miss` /
+# `_gate_forced_turn_registry_pin` from here.
 
 
 _CLOSE_NOTIFICATION_PY = Path("agents/persona_runtime/close_notification.py")
