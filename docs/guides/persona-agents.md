@@ -894,7 +894,7 @@ The two forces stay cleanly separated: **bias-to-silence for human channels,
 keep-alive pressure for autonomous ones**, gated on `autonomous.enabled` — a
 human channel's behaviour is byte-for-byte unchanged. The persona-observable arc
 (a collapse-prone roster worked through a multi-item agenda by convener pressure,
-never twice into silence on the same item) is
+never re-inviting one item more than once) is
 [MT-AUTONOMOUS-002](../manual-tests/MT-AUTONOMOUS-002.md); the cadence turns are
 metered on `channel.conversation.convener_advance{outcome}`.
 

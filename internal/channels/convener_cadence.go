@@ -18,9 +18,10 @@ package channels
 // (chair_escalation.go keeps its own untouched one-shot ration — the two
 // mechanisms are separate), while PRESERVING the CE5 loop guard: the agenda cursor
 // is monotonic, so an item is never re-posed once advanced past and the convener
-// never speaks twice into silence on the same item. Total convener turns are
-// therefore agenda-length-bounded — a hard ceiling, not an open loop — and the
-// deterministic bounded close (bounded_close.go) backstops termination regardless.
+// re-invites any one item at most once. Total convener turns are therefore LINEAR
+// in agenda length — one introduction plus at most one re-invite per item, so at
+// most ~2×len (a hard ceiling, not an open loop) — and the deterministic bounded
+// close (bounded_close.go) backstops termination regardless.
 //
 // PRECEDENCE (fanout.go): on a stalled autonomous floor round the convener cadence
 // runs BEFORE the chair escalation and, while the agenda has items, SUPPRESSES it
@@ -165,7 +166,8 @@ func (r *ChannelRouter) claimConvenerCadence(channelID, stampedID string, agenda
 	}
 	// Advance: pose the next item with its own fresh ration. The cursor is
 	// MONOTONIC — the loop guard — so an item is never re-posed once advanced past,
-	// bounding total convener turns by agenda length.
+	// keeping total convener turns linear in agenda length (one advance per item
+	// transition + at most one re-invite per item).
 	if cur+1 < agendaLen {
 		entry.agendaCursor = cur + 1
 		entry.agendaItemDiscussed = false

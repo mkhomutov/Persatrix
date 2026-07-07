@@ -80,8 +80,9 @@ type RouterMetrics struct {
 	// the drifted-convener/send failure that leaves the stall standing. An
 	// agenda-exhausted stall dispatches NO convener turn (it falls through to the
 	// chair escalation, counted on ChairEscalation instead), so the sum of these
-	// is the convener's total keep-alive turns, agenda-length-bounded per the loop
-	// guard. Scoped to `autonomous.enabled` — a human channel never increments it.
+	// is the convener's total keep-alive turns, linear in agenda length per the loop
+	// guard (≤ one advance per item transition + one re-invite per item). Scoped to
+	// `autonomous.enabled` — a human channel never increments it.
 	ConvenerAdvance metric.Int64Counter
 	// SynthesisTurn counts RFC 0052 §D synthesis-turn lifecycle events
 	// (PR 4b-ii), labelled by `channel_type` and `outcome`. `dispatched` fires

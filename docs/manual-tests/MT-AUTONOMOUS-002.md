@@ -16,7 +16,7 @@
 The three invariants under test:
 
 1. **Advance, don't die.** On a stalled round with the agenda not exhausted, the **convener** (the `autonomous.convener` role — distinct from the chair, [OQ #1](../rfcs/0052-autonomous-agent-channels.md#open-questions)) authors a forced turn that **advances to the next agenda item** (or re-poses an under-discussed one), rather than the discussion converging to an empty transcript.
-2. **Never twice into silence on the same item** — the CE5 loop guard, generalized per agenda item. Each item draws **at most one** convener escalation and the agenda cursor is **monotonic**: an item is never re-posed once advanced past, so total convener turns are agenda-length-bounded (no open loop).
+2. **Never twice into silence on the same item** — the CE5 loop guard, generalized per agenda item. Each item earns **at most one re-invite** and the agenda cursor is **monotonic**: an item is never re-posed once advanced past, so total convener turns are **linear in agenda length** — one introduction plus at most one re-invite per item (no open loop).
 3. **Silence stays semantic; the human path is untouched.** The convener cadence does **not** lower the RFC 0051 silence threshold globally — it gives the convener something concrete to ask. It is scoped to `autonomous.enabled`; an ordinary channel keeps the shipped CE5 one-shot ration and bias-to-silence **byte-for-byte**.
 
 **Scope**: a group channel armed exactly as in MT-AUTONOMOUS-001 (mandatory cap + convener + chair) but with a **multi-item agenda** and a roster/topic chosen to *provoke* early quiet (a broad, low-controversy topic where personas readily pass); the convener forced turns on the timeline; the `channel.conversation.convener_advance{outcome ∈ advance|reinvite|dispatch_error}` telemetry; and the deterministic bounded close that still fires at the end.
@@ -88,10 +88,10 @@ Watch the timeline (web console, or `GET /api/v1/channels/group:planning/message
 
 From the same log (`grep convener_advance`, or the `channel.conversation.convener_advance` metric):
 
-- For any single agenda item, **at most one** convener escalation fired against it (a `reinvite` **or** the `advance` that moved off it — never a second escalation re-posing the *same* item).
-- The total count of convener turns is **≤ the agenda length** (here ≤ 3); the cadence never produced an unbounded stream of convener messages.
+- For any single agenda item, **at most one `reinvite`** fired against it, and the agenda cursor is **monotonic** — once the convener advances off an item it is never re-posed. (The `advance` turn poses the *next* item, not a second turn on the current one.)
+- The total `convener_advance` count is **linear in the agenda length** — at most one `advance` per item transition (`len − 1`) plus at most one `reinvite` per item (`len`), i.e. **≤ `2·len − 1`** (here, 3 items ⇒ ≤ 5); the cadence never produced an unbounded stream of convener messages.
 
-**Pass**: the per-item ceiling held; total convener turns are agenda-length-bounded.
+**Pass**: the per-item re-invite ceiling held; total cadence turns are linear in agenda length (bounded, no open loop).
 
 ### Step 4: The discussion still terminates with the §D artifacts
 
@@ -113,7 +113,7 @@ On a **separate, non-autonomous** group channel (`autonomous.enabled` unset), ru
 |---|-------|----------|
 | 1 | Arm with agenda | multi-item agenda + collapse-prone topic round-trips |
 | 2 | Convener advances | ≥1 `convener advanced the agenda` log / `convener_advance` increment; the transcript moves through the agenda; zero human turns |
-| 3 | Loop guard | ≤1 convener escalation per item; total convener turns ≤ agenda length; no item re-posed twice into silence |
+| 3 | Loop guard | ≤1 `reinvite` per item (monotonic cursor); total `convener_advance` ≤ `2·len − 1`; no item re-posed twice into silence |
 | 4 | Terminate + artifacts | bounded close fires; chair synthesis is the final message; every persona's summary is real |
 | 5 | Human path (control) | a stalled human channel dispatches **no** convener turn; the shipped chair escalation is unchanged |
 
