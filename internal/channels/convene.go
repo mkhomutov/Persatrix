@@ -192,6 +192,20 @@ func (r *ChannelRouter) ConveneChannel(ctx context.Context, channelID string) (s
 			channelID, ErrAutonomousNoAudience, convener)
 	}
 
+	// The escalation chair authors the §D goal-directed synthesis turn on close.
+	// PR 4a's mandatory-chair gate validated that an armed channel DECLARES a
+	// chair, but a member can leave (or the chair be cleared) between arming and
+	// convening without touching the resolved block — so re-validate it here as
+	// defence-in-depth, the chair mirror of the drifted-convener guard above
+	// ([classifyEscalationChairMember] shares the close-time dispatchable-chair
+	// rule). A drifted/observer chair would run the discussion to its bound and
+	// close with NO synthesis artifact ([ChannelRouter.maybeArmSynthesisClose] →
+	// `synthesisUnavailable`) — the "close with an artifact missing" §D declares a
+	// failure — so refuse the convene loudly rather than dispatch into it.
+	if _, err := classifyEscalationChairMember(members, r.escalationChairFor(channelID)); err != nil {
+		return "", fmt.Errorf("channels: convene %s: %w", channelID, err)
+	}
+
 	// The seed directive: operator topic/agenda/goal assembled from the
 	// resolved block. The convener wraps it in the RFC 0009 `<external_data>`
 	// envelope before injection (agents/persona_runtime/convener.py) — it is

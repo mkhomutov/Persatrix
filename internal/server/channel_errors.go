@@ -41,8 +41,9 @@ func (s *Server) writeChannelError(w http.ResponseWriter, err error) {
 		errors.Is(err, channels.ErrInvalidReasoningModel),
 		errors.Is(err, channels.ErrInvalidReasoningDepth),
 		errors.Is(err, channels.ErrInvalidReasoningRevise),
-		errors.Is(err, channels.ErrAutonomousCapRequired),   // RFC 0052 PR 1 autonomous validation
-		errors.Is(err, channels.ErrAutonomousChairRequired), // RFC 0052 PR 4 — armed channel needs a synthesizing chair
+		errors.Is(err, channels.ErrAutonomousCapRequired),      // RFC 0052 PR 1 autonomous validation
+		errors.Is(err, channels.ErrAutonomousChairRequired),    // RFC 0052 PR 4 — armed channel needs a synthesizing chair
+		errors.Is(err, channels.ErrAutonomousChairUnavailable), // RFC 0052 review follow-up — convene against a drifted/observer chair
 		errors.Is(err, channels.ErrInvalidAutonomousConvener),
 		errors.Is(err, channels.ErrInvalidAutonomousMaxRounds),
 		errors.Is(err, channels.ErrInvalidAutonomousAgenda),

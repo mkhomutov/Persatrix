@@ -76,4 +76,21 @@ async def close_interaction_on_cost(
         return
     closed = agent._interaction_tracker.close(scope, reason=REASON_COST)
     if closed is not None:
+        # OQ #6 metering interaction (deep-review follow-up): this LOCAL Layer-1
+        # cost close does NOT set ``meter_close_summary``, so the summary it
+        # triggers runs UNLEASED — unlike the orchestrator's bounded cost close,
+        # whose close notification marks the record (close_notification.py). The
+        # two race: a member whose own compose lease is denied
+        # (``interaction_budget_exhausted``) self-closes here before the
+        # orchestrator notification lands, and its summary escapes the cap, so the
+        # RFC 0052 ``1 + N`` accounting can undercount by one on the very
+        # close-by-budget path OQ #6 targets. This is DELIBERATELY not metered
+        # here yet: the wallet reserve is still dark (AcquireLease enforces only
+        # the hard cap — synthesis_reserve.go), so metering this summary against
+        # the already-exhausted cap would DENY it and degrade a real artifact to
+        # the ``[interaction summary unavailable]`` placeholder — strictly worse
+        # than an unleased-but-real summary while spend-counting gates nothing.
+        # The under-count is only load-bearing once reserve enforcement lands; the
+        # RFC 0052 PR-plan "Deep-review follow-ups" tracks metering this path
+        # together with that enforcement.
         await agent._persist_closed_interaction(closed)

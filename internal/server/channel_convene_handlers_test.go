@@ -19,7 +19,10 @@ import (
 	"github.com/mkhomutov/persatrix/internal/registry"
 )
 
-// armConvene marks the seeded channel autonomous with `convener` as the opener.
+// armConvene marks the seeded channel autonomous with `convener` as the opener
+// and `bob` as the escalation chair (the §D synthesis author) — an armed channel
+// carries a mandatory chair (PR 4a), which the convene pre-flight now re-validates
+// (deep-review follow-up), so every convenable-channel test must declare one.
 func armConvene(t *testing.T, srv *Server, id, convener string) {
 	t.Helper()
 	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{
@@ -28,6 +31,7 @@ func armConvene(t *testing.T, srv *Server, id, convener string) {
 		Topic:    "Should we adopt a monorepo?",
 		Goal:     "A synthesized recommendation.",
 	})
+	srv.channelRouter.SetEscalationChair(id, "bob")
 }
 
 func TestConveneHandler_ArmedChannel_Accepted(t *testing.T) {
@@ -131,9 +135,32 @@ func TestConveneHandler_NoTopic_Conflict(t *testing.T) {
 		{ParticipantID: "alice", RespondPolicy: channels.RespondAlways},
 		{ParticipantID: "bob", RespondPolicy: channels.RespondAlways},
 	})
-	// Armed with a valid convener + audience, but deliberately no topic/agenda/goal.
+	// Armed with a valid convener + audience + chair, but deliberately no
+	// topic/agenda/goal.
 	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{Enabled: true, Convener: "alice"})
+	srv.channelRouter.SetEscalationChair(id, "bob")
 
 	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/"+id+"/convene", nil)
 	assert.Equal(t, http.StatusConflict, rec.Code, "body=%s", rec.Body.String())
+}
+
+// TestConveneHandler_DriftedChair_BadRequest — the deep-review fix at the REST
+// seam: an armed channel with a valid convener + audience + subject but a chair
+// that drifted out of the roster (the mandatory chair cleared/removed after
+// arming) 400s rather than convening into a discussion whose close cannot produce
+// the §D synthesis artifact. Mirrors the drifted-convener 400.
+func TestConveneHandler_DriftedChair_BadRequest(t *testing.T) {
+	srv, id := channelConfigTestServerWithMembers(t, true, []channels.Member{
+		{ParticipantID: "alice", RespondPolicy: channels.RespondAlways},
+		{ParticipantID: "bob", RespondPolicy: channels.RespondAlways},
+	})
+	// A full, otherwise-convenable config — but the chair names a non-member.
+	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{
+		Enabled: true, Convener: "alice", Topic: "Should we adopt a monorepo?",
+	})
+	srv.channelRouter.SetEscalationChair(id, "ghost-chair")
+
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/"+id+"/convene", nil)
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "synthesis turn")
 }

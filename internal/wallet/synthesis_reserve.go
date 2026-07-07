@@ -17,9 +17,16 @@ package wallet
 //   - a RESERVE ([SynthesisReserveTokens]) held back for the close path.
 //
 // When running spend ([WalletService.InteractionSpend]) reaches the soft
-// threshold, the bounded close (PR 4b) synthesizes-and-closes — drawing the close
-// path's leases from the reserve — BEFORE the hard cap (interaction_budget_tokens)
-// would deny them. The reserve is sized for `1 + N` close-path calls: the chair
+// threshold, the bounded close (PR 4b) synthesizes-and-closes so the close path's
+// leases have hard-cap headroom. NOTE the headroom is only as large as the spend
+// NOT YET made when the trigger samples: the soft threshold is checked once per
+// fanout tail, and [AcquireLease] enforces one undifferentiated hard cap, so
+// leases that land between the last sample and the close (a crossing floor round;
+// an armed-window straggler) can consume the reserve first-come-first-served. The
+// reserve GUARANTEES the trigger fires early, not that the held-back tokens
+// survive to the close — that stronger property needs a discussion-cause soft-cap
+// check in the wallet (the reserve-preservation gap noted in the package doc).
+// The reserve is sized for `1 + N` close-path calls: the chair
 // synthesis turn PLUS one RFC 0020 summary per participating persona. OQ #6 meters
 // that summary so it counts toward the cap, and the close summary is authored
 // per-agent (close_path.py spawns one finalize_closed_interaction per agent_id),
@@ -55,10 +62,19 @@ package wallet
 // chair turn — a FRACTION of the soft budget, not a flat unit — is the same PR
 // 4b/OQ #5 calibration decision (see the PR-plan "Deep-review follow-ups").
 //
-// PR 4a ships these DARK: AcquireLease still enforces only the hard cap, and no
-// bounded-close path consults the soft threshold or the eviction yet. PR 4b wires
-// the bounded close to [WalletService.InteractionSpend] / [SynthesisSoftBudgetTokens]
-// and emits the [WalletService.EvictInteraction] on close.
+// PR 4a shipped these DARK. Since then PR 4b-i wired the bounded close to
+// [WalletService.InteractionSpend] / [SynthesisSoftBudgetTokens] as its
+// soft-budget trigger — but note that remains a ROUTER-SIDE trigger POINT, not
+// wallet-enforced funding: [AcquireLease] still enforces only the single hard cap
+// and does not know a close-path lease from a discussion lease, so a crossing
+// floor round or an armed-window straggler can spend into the reserve before the
+// chair turn / summaries lease it (a reserve-PRESERVATION gap distinct from the
+// two sizing gaps below; tracked on the same PR 4b/OQ #5 calibration list — a
+// real reservation needs a discussion-cause soft-cap check in [AcquireLease]).
+// [WalletService.EvictInteraction] is still UNCALLED by any production path:
+// RFC 0052 PR 7 (standing channels) owns wiring it into the close, where the
+// residue leak bites and the schedule timer supplies the settle point its
+// cross-process precondition needs (see [WalletService.EvictInteraction]).
 
 // DefaultSynthesisCallReserveTokens is the conservative worst-case token cost of
 // ONE close-path LLM call, used to size the reserve. It tracks the RFC 0020 close
@@ -120,9 +136,12 @@ func SynthesisReserveTokens(budgetTokens int64, rosterSize int) int64 {
 
 // SynthesisSoftBudgetTokens returns the working budget the DISCUSSION is bounded by
 // — the per-interaction cap minus the synthesis reserve. When running spend reaches
-// this soft threshold the bounded close (PR 4b) synthesizes-and-closes BEFORE the
-// hard cap (`budgetTokens`) would deny the close-path leases. An uncapped
-// interaction (`budgetTokens <= 0`) has no soft threshold (returns 0).
+// this soft threshold the bounded close (PR 4b-i) synthesizes-and-closes so the
+// close-path leases have hard-cap headroom (the reserve holds it back). See the
+// package doc's reserve-PRESERVATION note: because [AcquireLease] enforces one
+// undifferentiated hard cap, this trigger bounds when the close STARTS, not that
+// the reserve survives to fund it. An uncapped interaction (`budgetTokens <= 0`)
+// has no soft threshold (returns 0).
 func SynthesisSoftBudgetTokens(budgetTokens int64, rosterSize int) int64 {
 	if budgetTokens <= 0 {
 		return 0
@@ -152,9 +171,11 @@ func (w *WalletService) InteractionSpend(interactionID string) int64 {
 // documents that a capped interaction that settled non-zero spend "keeps its entry
 // for the orchestrator's process lifetime — nothing currently evicts it", so a
 // standing autonomous channel would leak one map entry per convening (RFC 0052
-// PR 7). The bounded close (PR 4b) calls this on interaction close — AFTER the
-// close path's leases have settled — so the entry is released once the interaction
-// is done. Returns whether an entry was removed (idempotent: a second call, an
+// PR 7). NOTE it is not yet called by any production path: RFC 0052 PR 7 will call
+// this on interaction close — AFTER the close path's leases have settled — so the
+// entry is released once the interaction is done. The PR 4b-i bounded close
+// deliberately does NOT evict (see bounded_close.go), so the residue accumulates
+// until PR 7 lands. Returns whether an entry was removed (idempotent: a second call, an
 // untracked id, or the empty id is a no-op returning false). Takes w.mu, the same
 // (non-reentrant) lock the grant/finalize helpers hold — must never be called while
 // the caller already holds w.mu.
@@ -171,7 +192,7 @@ func (w *WalletService) InteractionSpend(interactionID string) int64 {
 // upheld: the close-path per-persona summaries are fire-and-forget background tasks
 // (agents/persona_runtime/close_path.py) spawned by N independent, CROSS-PROCESS
 // persona runtimes that close their views at independent times, so nothing here can
-// observe that all their (OQ #6-metered) leases have settled. PR 4b must supply the
+// observe that all their (OQ #6-metered) leases have settled. PR 7 must supply the
 // settle ordering — an all-agents-finalized signal, or a settle/refcount barrier —
 // before calling this, rather than treating the precondition as a checkable caller
 // contract. See the RFC 0052 PR-plan "Deep-review follow-ups" [tracked].

@@ -250,8 +250,9 @@ type reasoningConfigResponse struct {
 // view in the config payload — the second NESTED knob on the RFC 0050 surface
 // (after reasoning). Each sub-knob carries its own effective value + provenance, so
 // an operator sees which fields are inherited vs explicitly set. `agenda` is always
-// an array (never null). The block ships dark: reported and editable, but no
-// convene path consults it until PR 3.
+// an array (never null). The block is LIVE as of PR 3 — the convene path consults
+// it (an armed channel is convenable via POST …/convene); this response layer just
+// reports/edits it.
 type autonomousConfigResponse struct {
 	Enabled   configFieldResponse `json:"enabled"`
 	Topic     configFieldResponse `json:"topic"`

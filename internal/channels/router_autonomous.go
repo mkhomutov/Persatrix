@@ -264,3 +264,33 @@ func classifyConvenerMember(members []Member, convener string) (*Member, error) 
 	}
 	return convenerMember, nil
 }
+
+// classifyEscalationChairMember locates the escalation `chairID` in the channel's
+// live roster and reports why it cannot author the §D synthesis turn, or nil when
+// it can — the chair mirror of [classifyConvenerMember], single-sourcing the
+// "dispatchable chair" rule the convene pre-flight ([ChannelRouter.ConveneChannel])
+// shares with the close-time arm. The dispositional test is EXACTLY
+// [ChannelRouter.maybeArmSynthesisClose]'s (`chair == nil || RespondNever` →
+// `synthesisUnavailable`), so the pre-flight refuses precisely the chairs the close
+// would degrade — no more (a `when_mentioned` chair IS dispatchable: the synthesis
+// forced-turn marker lifts its receiver gate, exactly as the chair-stall escalation
+// does) and no less. Wraps [ErrAutonomousChairUnavailable] with NO op-prefix — the
+// caller adds its "channels: convene %s:" context via %w. An empty `chairID` is the
+// drift case where the chair knob was cleared after arming; the PR 4a load/apply
+// gate keeps a well-formed armed channel from reaching convene chairless.
+func classifyEscalationChairMember(members []Member, chairID string) (*Member, error) {
+	if chairID == "" {
+		return nil, fmt.Errorf("%w: no escalation_chair_id is configured; the chair authors the goal-directed synthesis turn on close",
+			ErrAutonomousChairUnavailable)
+	}
+	chairMember := memberByID(members, chairID)
+	if chairMember == nil {
+		return nil, fmt.Errorf("%w: %q is not a declared member; the chair authors the synthesis turn on close",
+			ErrAutonomousChairUnavailable, chairID)
+	}
+	if chairMember.RespondPolicy.Normalize() == RespondNever {
+		return nil, fmt.Errorf("%w: %q is an observer (respond: never) and can never author the synthesis turn",
+			ErrAutonomousChairUnavailable, chairID)
+	}
+	return chairMember, nil
+}

@@ -301,7 +301,8 @@ func (r *ChannelRouter) floorRound(
 	turnTimeout time.Duration,
 	channelSize int,
 	floorMentions []string,
-) (floorRoundOutcome, map[string]struct{}) {
+	a AutonomousConfig,
+) (floorRoundOutcome, map[string]struct{}, bool) {
 	detached := context.WithoutCancel(ctx)
 
 	// Per-recipient live-delivery failures, collected across BOTH delivery
@@ -318,6 +319,16 @@ func (r *ChannelRouter) floorRound(
 	defer r.floors.release(msg.ChannelID)
 	defer r.clearFloorSpeakers(msg.ChannelID)
 
+	// Re-check the terminating verdict AFTER the floor wait (deep-review follow-up):
+	// the head check ([stimulusOutlivedClose]) ran BEFORE [floorRegistry.acquire],
+	// which can park for minutes behind a prior round — long enough for a sibling
+	// bounded close or armed synthesis turn to land, after which dispatching would
+	// pour a full LLM round into a terminated/armed discussion. `!a.Enabled` makes
+	// it a human no-op; a `true` return abandons pre-speaker, handled like head-stale.
+	if r.stimulusOutlivedClose(msg, a) {
+		return floorRoundOutcome{}, failures.snapshot(), true
+	}
+
 	// Time the round from floor acquisition (after non-responder fanout and
 	// the inter-round wait) so the histogram measures the serialization cost
 	// the responders actually impose, not queueing behind a prior round.
@@ -333,7 +344,7 @@ func (r *ChannelRouter) floorRound(
 		}
 	}
 	r.recordFloorRound(detached, ct, time.Since(start))
-	return outcome, failures.snapshot()
+	return outcome, failures.snapshot(), false
 }
 
 // recordFloorTurn / recordFloorRound emit the RFC 0030 Layer 2.5 floor-control
