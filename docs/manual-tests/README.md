@@ -50,6 +50,12 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 |----|-------|--------|
 | [MT-REASON-001](MT-REASON-001.md) | Reasoning before posting — semantic silence with a reason, a plan-threaded considered post, the walled private trace, and the reflexion opt-in (RFC 0051) | Active (live execution = v0.3.10 release-prep) |
 
+## Autonomous Channels (RFC 0052)
+
+| ID | Title | Status |
+|----|-------|--------|
+| [MT-AUTONOMOUS-001](MT-AUTONOMOUS-001.md) | One-shot autonomous brainstorm — convene, converge, terminate, synthesize with zero human turns; both close artifacts; spend ≤ the mandatory cap (RFC 0052 Phase 1) | Active (live execution = v0.3.11 release-prep) |
+
 ## Channel Configuration (RFC 0050)
 
 | ID | Title | Status |
