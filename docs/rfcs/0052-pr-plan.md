@@ -271,7 +271,7 @@ Items surfaced by the PR 1 deep review (commit `700fa72`) that are **deliberatel
 
 | File | Change |
 |------|--------|
-| `internal/channels/` + `agents/tests/` integration | Full convene→converge→terminate→synthesis cycle on the mock provider, **zero human turns**, spend ≤ cap; the **no-runaway leg** (turns + tokens bounded under an adversarial roster); the **close-by-budget leg** (on a **≥2-persona** roster) asserting **both** artifacts are still produced (chair synthesis turn + a real RFC 0020 summary **for each persona**, not the `[interaction summary unavailable]` placeholder — exercising the `1 + N` reserve). |
+| `internal/channels/` + `agents/tests/` integration | Full convene→converge→terminate→synthesis cycle on the mock provider, **zero human turns**, spend ≤ cap; the **no-runaway leg** (turns + tokens bounded under an adversarial roster); the **close-by-budget leg** (**≥2-persona** roster) asserting **both** artifacts are still produced (chair synthesis turn + a real RFC 0020 summary **for each persona**, not the `[interaction summary unavailable]` placeholder — exercising the `1 + N` reserve). |
 | `docs/manual-tests/MT-AUTONOMOUS-001.md` | One-shot brainstorm, live provider — converges + synthesizes, no human; convened from the CLI and (smoke) the web button. |
 
 #### PR checklist
@@ -414,8 +414,8 @@ A new channel *mode* + CLI/web surfaces needs real doc + diagram **edits**, not 
 | 3 | 1c — self-convening + convene action (CLI/REST/web) | `feature/v0311-rfc0052-convene` | ✅ Merged |
 | 4a | 1d — close-path backend: roster-scaled (1+N) reserve + interaction-closed eviction + mandatory-chair gate (dark) | `feature/v0311-rfc0052-close-backend` | ✅ Merged |
 | 4b-i | 1d — deterministic bounded-close trigger (max_rounds + soft-budget) + router→wallet spend read + artifact-bearing close teardown | `feature/v0311-rfc0052-bounded-close` | ✅ Merged |
-| 4b-ii | 1d — goal-directed chair synthesis turn (close-on-reply ordering) + OQ #6 close-summary metering + redelivery marker | `feature/v0311-rfc0052-synthesis-turn` | 🔀 PR open |
-| 5 | 1e — acceptance suite + MT-AUTONOMOUS-001 | `feature/v0311-rfc0052-phase1-mt` | ⬜ |
+| 4b-ii | 1d — goal-directed chair synthesis turn (close-on-reply ordering) + OQ #6 close-summary metering + redelivery marker | `feature/v0311-rfc0052-synthesis-turn` | ✅ Merged |
+| 5 | 1e — acceptance suite + MT-AUTONOMOUS-001 | `feature/v0311-rfc0052-phase1-mt` | 🔀 PR open |
 | 6 | 2 — anti-collapse cadence (convener, scoped) | `feature/v0311-rfc0052-anti-collapse` | ⬜ |
 | 7 | 3 — standing/scheduled + aggregate bound + web readout | `feature/v0311-rfc0052-standing` | ⬜ |
 | 8 | 4a — `make demo-autonomous` (offline) | `feature/v0311-rfc0052-demo-offline` | ⬜ |
