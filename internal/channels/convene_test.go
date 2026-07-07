@@ -37,6 +37,12 @@ func conveneHarness(t *testing.T, a AutonomousConfig) (*ChannelRouter, *messageR
 			"iron-fox":     RespondAlways,
 		}, "nova-sparrow", "ember-owl", "iron-fox")
 	router.SetAutonomous(ch, a)
+	// An armed channel carries a mandatory escalation chair (PR 4a) — the role
+	// that authors the §D synthesis turn on close; the convene pre-flight now
+	// re-validates it (deep-review follow-up), so the harness must declare one or
+	// every happy-path convene would fail the new chair guard. iron-fox is a
+	// RespondAlways member distinct from the nova-sparrow convener.
+	router.SetEscalationChair(ch, "iron-fox")
 	return router, disp, ch
 }
 
@@ -262,6 +268,92 @@ func TestConvene_RejectsEmptyDirective(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrAutonomousNoTopic)
 	assert.Empty(t, conveneEnvelopes(disp), "a subject-less channel dispatches no opener")
+}
+
+// TestConvene_RejectsMissingChair — the deep-review fix: an armed channel with a
+// valid convener, a real audience, and a subject is STILL refused if it declares
+// no dispatchable escalation chair, because the chair authors the mandatory §D
+// goal-directed synthesis turn on close. Convening it would run a discussion that
+// provably cannot produce the synthesis artifact (maybeArmSynthesisClose degrades
+// a chairless close to synthesisUnavailable). The PR 4a mandatory-chair gate makes
+// this unreachable via config, but a chair cleared after arming (SetEscalationChair
+// does not touch the resolved block) drifts an armed channel into exactly this
+// state — the convene-time mirror of the drifted-convener guard.
+func TestConvene_RejectsMissingChair(t *testing.T) {
+	router, disp, ch := conveneHarness(t, AutonomousConfig{
+		Enabled: true, Convener: "nova-sparrow", Topic: "A real subject",
+	})
+	router.SetEscalationChair(ch, "") // drift: the chair cleared after arming
+
+	_, err := router.ConveneChannel(context.Background(), ch)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAutonomousChairUnavailable)
+	assert.Empty(t, conveneEnvelopes(disp),
+		"a chairless armed channel dispatches no opener — its close could not synthesize")
+}
+
+// TestConvene_RejectsDriftedChair — an escalation chair that left the roster
+// between arming and convening fails the convene loudly rather than dispatching
+// into a discussion whose close silently drops the §D synthesis artifact
+// (RemoveMember touches neither the roster-resolved chair knob nor the block).
+func TestConvene_RejectsDriftedChair(t *testing.T) {
+	router, disp, ch := conveneHarness(t, AutonomousConfig{
+		Enabled: true, Convener: "nova-sparrow", Topic: "A real subject",
+	})
+	router.SetEscalationChair(ch, "ghost-chair") // armed for a non-member chair
+
+	_, err := router.ConveneChannel(context.Background(), ch)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAutonomousChairUnavailable)
+	assert.Empty(t, conveneEnvelopes(disp))
+}
+
+// TestConvene_RejectsObserverChair — an observer (respond: never) chair can never
+// author the synthesis turn (its receiver gate suppresses it), the same
+// dead-on-close state maybeArmSynthesisClose already treats as unavailable, so the
+// convene pre-flight refuses it — mirroring the observer-convener rejection.
+func TestConvene_RejectsObserverChair(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &messageRecordingDispatcher{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	ch := mustCreateGroupWithPolicies(t, store, "planning",
+		map[string]RespondPolicy{
+			"nova-sparrow": RespondAlways, // the convener
+			"ember-owl":    RespondAlways, // the audience
+			"watcher":      RespondNever,  // an observer, unfit to synthesize
+		}, "nova-sparrow", "ember-owl", "watcher")
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, Convener: "nova-sparrow", Topic: "x"})
+	router.SetEscalationChair(ch, "watcher")
+
+	_, err := router.ConveneChannel(context.Background(), ch)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrAutonomousChairUnavailable)
+	assert.Empty(t, conveneEnvelopes(disp))
+}
+
+// TestConvene_WhenMentionedChairIsDispatchable — a `when_mentioned` chair is NOT
+// rejected: the synthesis forced-turn marker lifts the receiver gate exactly as
+// the chair-stall escalation's does, so a `when_mentioned` chair can author the
+// synthesis turn. The pre-flight must reject ONLY a drifted or observer chair
+// (mirroring maybeArmSynthesisClose's `chair == nil || RespondNever` test), never
+// a floor-conditional one, or it would spuriously block a legal roster.
+func TestConvene_WhenMentionedChairIsDispatchable(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	disp := &messageRecordingDispatcher{}
+	router := NewChannelRouter(store, disp, zap.NewNop(), nil)
+	ch := mustCreateGroupWithPolicies(t, store, "planning",
+		map[string]RespondPolicy{
+			"nova-sparrow": RespondAlways,        // the convener + the audience
+			"ember-owl":    RespondAlways,        // a second audience member
+			"quiet-chair":  RespondWhenMentioned, // a floor-conditional but dispatchable chair
+		}, "nova-sparrow", "ember-owl", "quiet-chair")
+	router.SetAutonomous(ch, AutonomousConfig{Enabled: true, Convener: "nova-sparrow", Topic: "x"})
+	router.SetEscalationChair(ch, "quiet-chair")
+
+	convener, err := router.ConveneChannel(context.Background(), ch)
+	require.NoError(t, err, "a when_mentioned chair is dispatchable for the synthesis turn")
+	assert.Equal(t, "nova-sparrow", convener)
+	require.Len(t, conveneEnvelopes(disp), 1)
 }
 
 // TestComposeConveneDirective_EmptyWhenAllSectionsBlank — the empty-directive

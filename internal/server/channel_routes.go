@@ -35,8 +35,10 @@ func (s *Server) registerChannelRoutes() {
 	// RFC 0052 §B PR 3 — convene an autonomous channel: the operator action that
 	// opens a human-free discussion by dispatching the convene forced turn to the
 	// configured convener. Gated server-side on the same config_edit_enabled
-	// toggle as the config pair above (the whole RFC 0050/0052 operator surface
-	// ships dark behind one opt-in).
+	// toggle as the config pair above — one opt-in for the whole RFC 0050/0052
+	// operator surface. (NB "opt-in" is the toggle, not "ships dark": config/ui.yaml
+	// bundles config_edit_enabled: true, so this endpoint is reachable on a default
+	// deployment — see handleConveneChannel's header.)
 	s.mux.HandleFunc("POST /api/v1/channels/{id}/convene", s.handleConveneChannel)
 	// RFC 0036 PR 3 — membership-scoped, epoch-filtered verbatim message recall.
 	// Channel-store-backed (RecallMessages joins messages × membership_intervals),

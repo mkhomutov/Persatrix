@@ -181,8 +181,14 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// the concurrent path, whose close-before-dispatch ordering makes the
 	// notification the sole delivery for everyone.
 	var undelivered map[string]struct{}
+	// abandonedStale — the floor round parked on the channel's floor queue and,
+	// on acquiring it, found the discussion had terminated/armed while it waited
+	// (deep-review follow-up; floor_control.go re-checks [stimulusOutlivedClose]
+	// after the wait). It dispatched no speaker and is treated exactly like a
+	// head-stale round below: withhold, skip the revival tails, clear head marks.
+	var abandonedStale bool
 	if floorPath && !staleAtHead {
-		outcome, undelivered = r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions)
+		outcome, undelivered, abandonedStale = r.floorRound(ctx, msg, ct, threadParentSenderID, responders, nonResponders, settings.turnTimeout, channelSize, floorMentions, autonomous)
 	}
 
 	// RFC 0052 §D bounded close, at the fanout tail on BOTH paths — one call
@@ -236,7 +242,12 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// the bounded ledger between head and tail) — a head-withheld round still
 	// never feeds a zero-value `outcome` into the escalation tail below.
 	var closed, stale bool
-	if staleAtHead {
+	if staleAtHead || abandonedStale {
+		// A floor round abandoned after the floor wait is stale for the same
+		// reason a head-stale round is — the discussion terminated/armed — so it
+		// takes the identical withhold path, and its tail bounded-close trigger is
+		// skipped (its ledger read would only re-derive the same verdict, exactly
+		// as for staleAtHead).
 		stale = true
 	} else {
 		closed, stale = r.maybeBoundedClose(context.WithoutCancel(ctx), msg, ct, members, channelSize, !floorPath, undelivered, autonomous)
@@ -253,7 +264,7 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// publishCommit and silent speakers keep the pre-existing stalled-round
 	// TTL decay. Any future branch that decides not to dispatch belongs
 	// behind this same seam, or it re-strands the marks.
-	if staleAtHead || (!floorPath && (closed || stale)) {
+	if staleAtHead || abandonedStale || (!floorPath && (closed || stale)) {
 		// PR #718 review finding 8: while a synthesis close is armed, the chair
 		// has a directed synthesis turn genuinely in flight — its "thinking"
 		// mark (set by maybeArmSynthesisClose) must survive this clear, or the

@@ -95,6 +95,18 @@ var (
 	// is vacuous when no chair exists; PR 4 closes that gap — an armed channel must
 	// declare the role that synthesizes on close. The REST layer maps it to 400.
 	ErrAutonomousChairRequired = errors.New("channels: autonomous.enabled requires an escalation_chair_id to author the synthesis turn on close")
+	// ErrAutonomousChairUnavailable — a convene-time deep-review guard, the chair
+	// mirror of [ErrInvalidAutonomousConvener]. The PR 4a mandatory-chair gate
+	// validates that an armed channel DECLARES a chair, but a member can leave (or
+	// the chair knob be cleared) between arming and convening without touching the
+	// resolved block, so [ChannelRouter.ConveneChannel] re-checks that the declared
+	// chair is a dispatchable roster member (present and not an observer). A drifted
+	// or observer chair would make [ChannelRouter.maybeArmSynthesisClose] degrade the
+	// close to `synthesisUnavailable` — the discussion runs to its bound and closes
+	// with NO goal-directed synthesis, the exact "close with an artifact missing"
+	// RFC 0052 §D declares a failure — so the convene fails loudly instead. The REST
+	// layer maps it to 400, symmetric with the convener drift guard.
+	ErrAutonomousChairUnavailable = errors.New("channels: autonomous escalation chair cannot author the synthesis turn")
 	// ErrInvalidAutonomousAgenda — the agenda is longer than [MaxAutonomousAgendaItems]
 	// or carries a blank item.
 	ErrInvalidAutonomousAgenda = errors.New("channels: invalid autonomous.agenda")
