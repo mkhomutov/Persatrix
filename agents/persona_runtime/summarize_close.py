@@ -35,6 +35,7 @@ from ..model_aliases import resolve as resolve_model
 from ..observability.metrics import current_agent_id, try_get_instruments
 from ..optimization import summarization_model
 from ..prompt_loader import load_snippet
+from ..wallet_client import BudgetExceededError
 from .fact_extractor import (
     FactsParseError,
     build_combined_prompt_suffix,
@@ -217,6 +218,26 @@ async def summarize_closed_interaction(
             agent_id, interaction.scope,
         )
         _emit_summary_failed("timeout")
+        return (SUMMARY_UNAVAILABLE_TEXT, True, None)
+    except BudgetExceededError as exc:
+        # OQ #6 residual (PR #718 review): a METERED close summary's lease can
+        # be denied at the wallet hard cap — the reserve is trigger-side only
+        # while lease-side enforcement stays dark (``synthesis_reserve.go``
+        # KNOWN GAPs), so on a cost close the ``1 + N`` close-path calls share
+        # the residual headroom and a late persona's lease loses.  The generic
+        # arm below labelled this ``llm_error``, making the tracked
+        # calibration gap indistinguishable from a provider outage on the
+        # failure counter; the denial's own reason (``exc.reason``, e.g.
+        # ``interaction_budget_exhausted``) rides the log, and the counter
+        # gets the established ``budget_denied`` label (the
+        # ``llm_call_errors`` tick-idle vocabulary).  Same fallback contract
+        # as every arm: the janitor never retries a committed unavailable row.
+        logger.warning(
+            "Close-summary lease denied by wallet for agent %s (scope=%s, "
+            "reason=%s): %s; using fallback",
+            agent_id, interaction.scope, exc.reason, exc,
+        )
+        _emit_summary_failed("budget_denied")
         return (SUMMARY_UNAVAILABLE_TEXT, True, None)
     except Exception as exc:
         logger.warning(

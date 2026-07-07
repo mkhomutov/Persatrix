@@ -33,6 +33,15 @@ func channelConfigTestServer(t *testing.T, enabled bool) (*Server, string) {
 // cannot express.
 func channelConfigTestServerWithMembers(t *testing.T, enabled bool, members []channels.Member) (*Server, string) {
 	t.Helper()
+	return channelConfigTestServerWithDispatcher(t, enabled, members, channels.NoopDispatcher{})
+}
+
+// channelConfigTestServerWithDispatcher is …WithMembers with the router's
+// dispatcher injected — used by the convene delivery-miss tests (PR #718
+// review), which need Dispatch to FAIL; every other caller keeps the
+// always-succeeding NoopDispatcher.
+func channelConfigTestServerWithDispatcher(t *testing.T, enabled bool, members []channels.Member, disp channels.MessageDispatcher) (*Server, string) {
+	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "channels.db")
 	store, err := channels.NewSQLiteStore(dbPath, channels.SQLiteOptions{
 		MaxChannels: 50,
@@ -40,7 +49,7 @@ func channelConfigTestServerWithMembers(t *testing.T, enabled bool, members []ch
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
-	router := channels.NewChannelRouter(store, channels.NoopDispatcher{}, zap.NewNop(), nil)
+	router := channels.NewChannelRouter(store, disp, zap.NewNop(), nil)
 
 	logger := zap.NewNop()
 	cfg := DefaultUIConfig()

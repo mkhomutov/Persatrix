@@ -21,9 +21,13 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import NoReturn
 
-import pytest
+# The shared parse helpers are imported from the family's parent file (the
+# test_cross_language_convene_wire_drift.py posture) — the re-declared copies
+# this file shipped with had already drifted their docstrings, and the
+# parent's ``-> NoReturn`` mypy fix history shows why per-copy helpers rot
+# (PR #718 review).
+from .test_cross_language_interaction_wire_drift import _go_const, _parse_miss
 
 _TASK_PROTO = Path("proto/task.proto")
 # The in-process→wire translation split out of grpc_dispatcher.go at the
@@ -37,27 +41,8 @@ _CHANNEL_WIRE_METADATA_PY = Path("agents/channel_wire_metadata.py")
 _CLOSE_NOTIFICATION_PY = Path("agents/persona_runtime/close_notification.py")
 _PROMPT_ASSEMBLY_PY = Path("agents/persona_runtime/prompt_assembly.py")
 _RESPONSE_GATE_PY = Path("agents/response_gate.py")
-
-
-def _parse_miss(what: str, where: Path) -> NoReturn:
-    """Fail with an actionable message on a parse miss (vs a silent
-    ``None``-vs-value ``AssertionError``) — the sibling files' contract:
-    a refactor that hides the declaration must land as a deliberate
-    update to this test's parse rules."""
-    pytest.fail(
-        f"could not find {what} in {where}. If it was renamed or "
-        f"restructured, update the parse rule in this test to match the "
-        f"new shape — the cross-language drift pin is part of the "
-        f"contract.",
-    )
-
-
-def _go_const(path: Path, name: str) -> str:
-    src = path.read_text(encoding="utf-8")
-    m = re.search(rf'^\s*const\s+{name}\s*=\s*"([^"]+)"\s*$', src, re.MULTILINE)
-    if m is None:
-        _parse_miss(f"`const {name} = \"<value>\"`", path)
-    return m.group(1)
+_CLOSE_NOTIFICATION_GO = Path("internal/channels/close_notification.go")
+_BOUNDED_CLOSE_GO = Path("internal/channels/bounded_close.go")
 
 
 def test_synthesis_close_wire_fields_agree() -> None:
@@ -174,4 +159,34 @@ def test_synthesis_reply_metadata_key_agrees() -> None:
             'the strict `…get("synthesis_turn") is True` derivation '
             "(DispatchContext.for_event)",
             _CHANNEL_WIRE_METADATA_PY,
+        )
+
+
+def test_bounded_trigger_stamp_site_uses_named_predicate() -> None:
+    """The Go wire-stamp site that gates the OQ #6 metering key MUST route
+    through the NAMED ``isBoundedCloseTrigger`` predicate, and the predicate
+    MUST enumerate exactly the two pinned trigger consts (PR #718 review).
+    ``test_close_trigger_values_agree`` (the parent drift file) pins the
+    const VALUES equal to Python's ``WIRE_BOUNDED_CLOSE_TRIGGERS`` — but it
+    parses only the const declarations, so the stamp site itself was the one
+    Go enumeration point a third bounded cause could silently miss: the new
+    cause would close interactions without ever riding the wire, receivers
+    keeping the legacy label and every summary of that cause skipping its
+    lease, all suites green.
+    """
+    close_src = _CLOSE_NOTIFICATION_GO.read_text(encoding="utf-8")
+    if "if isBoundedCloseTrigger(trigger) {" not in close_src:
+        _parse_miss(
+            "the named-predicate stamp gate `if isBoundedCloseTrigger(trigger) {`",
+            _CLOSE_NOTIFICATION_GO,
+        )
+    bounded_src = _BOUNDED_CLOSE_GO.read_text(encoding="utf-8")
+    if (
+        "return trigger == structuralTrigger || trigger == costTrigger"
+        not in bounded_src
+    ):
+        _parse_miss(
+            "the `isBoundedCloseTrigger` body enumerating exactly "
+            "`structuralTrigger || costTrigger`",
+            _BOUNDED_CLOSE_GO,
         )

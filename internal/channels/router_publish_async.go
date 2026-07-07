@@ -393,7 +393,7 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// the top of this function overwrote the bag with the resolver's verdict,
 	// which while armed always equals the armed id, so a bag re-read cannot
 	// reject a stale echo (PR #718 follow-up review; see claimSynthesisReply).
-	if pendingSynth := r.claimSynthesisReply(msg, inboundClaim, r.AutonomousFor(msg.ChannelID)); pendingSynth != nil {
+	if pendingSynth := r.claimSynthesisReply(msg, inboundClaim); pendingSynth != nil {
 		// The claim transferred the arm's synthesisWG count to this branch;
 		// closeOnSynthesisReply notifies the reply waiter, runs the teardown,
 		// and releases the count only after the close's fanoutWG.Adds — the

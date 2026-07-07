@@ -86,6 +86,32 @@ func (e *openInteraction) latchedClaim(claim string) bool {
 	return slices.Contains(e.recentlyClosed, claim)
 }
 
+// withholdsStimulusLocked reports whether a stimulus stamped `stamped` must be
+// withheld from dispatch because the discussion it belongs to is TERMINATING:
+// its id is in the no-reopen ledger (a deliberate close landed between its
+// commit and its fanout), or a synthesis close is armed on the entry (PR 4b-ii
+// — the bound has fired, only the closing artifact is outstanding, and a
+// dispatched round would fan LLM turns into the terminated discussion; the
+// armed half applies regardless of the stamp). THE one definition of the
+// terminating-state verdict, shared by the fanout head
+// ([ChannelRouter.stimulusOutlivedClose]) and the fanout tail
+// ([ChannelRouter.advanceBoundedCloseRound]) — the two sites must stay
+// semantically identical, and a future terminating condition landing in one
+// hand-spelled copy but not the other would give the head and tail divergent
+// verdicts on the same stimulus (PR #718 review; the
+// disarmPendingSynthesisChairLocked precedent, one drift class over).
+// Nil-tolerant like [openInteraction.openCommitted]; caller holds
+// interactionMu.
+func (e *openInteraction) withholdsStimulusLocked(stamped string) bool {
+	if e == nil {
+		return false
+	}
+	if stamped != "" && e.latchedClaim(stamped) {
+		return true
+	}
+	return e.pendingSynthesis != nil
+}
+
 // stimulusOutlivedClose reports whether `msg` is stamped with an interaction id
 // the no-reopen ledger holds — the floor path's fanout-HEAD staleness check
 // (PR #716 review). [ChannelRouter.advanceBoundedCloseRound] reads the same
@@ -121,15 +147,10 @@ func (r *ChannelRouter) stimulusOutlivedClose(msg ChannelMessage, a AutonomousCo
 	}
 	r.interactionMu.Lock()
 	defer r.interactionMu.Unlock()
-	entry := r.openInteractions[msg.ChannelID]
-	if entry == nil {
-		return false
-	}
-	if entry.pendingSynthesis != nil {
-		return true
-	}
-	stamped := readInteractionID(msg.Metadata)
-	return stamped != "" && entry.latchedClaim(stamped)
+	// ONE shared predicate with the tail read (see
+	// [openInteraction.withholdsStimulusLocked]) so the two stimulus action
+	// points cannot drift (PR #718 review).
+	return r.openInteractions[msg.ChannelID].withholdsStimulusLocked(readInteractionID(msg.Metadata))
 }
 
 // markInteractionClosed is the resolver close notification (IP8): a close site

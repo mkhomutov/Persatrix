@@ -126,16 +126,17 @@ type pendingSynthesisClose struct {
 	// stimulus is the bounding message, stashed for the timeout net's 4b-i
 	// teardown (the reply path closes with the reply instead).
 	stimulus ChannelMessage
-	// stimulusDelivered records whether the bounding stimulus reached members
-	// live (the floor path ran its round before the tail; the concurrent path
-	// withholds) — it becomes the fallback notification's redelivery marker.
-	stimulusDelivered bool
-	// stimulusUndelivered lists the member ids whose LIVE delivery of the
-	// bounding stimulus failed inside the floor round (see
-	// [liveDeliveryFailures]) — the timeout net's fallback notification must
-	// downgrade exactly those members to sole delivery, or their ingest-skip
-	// drops a closing turn they never received (PR #718 review).
-	stimulusUndelivered map[string]struct{}
+	// stimulusNotify carries the bounding stimulus's close-notification
+	// choices as the NAMED [closeNotify] fields, stashed verbatim from the
+	// arming tail so the timeout net's fallback close fans exactly what the
+	// immediate close would have (PR #718 review — the redelivery bool and
+	// the undelivered-member set used to ride here as a bare field pair that
+	// restated closeNotify's `redelivery=false ⇒ undelivered=nil` invariant):
+	// `redelivery` records whether the stimulus reached members live (the
+	// floor path ran its round before the tail; the concurrent path
+	// withholds), `undelivered` the members that round MISSED (see
+	// [liveDeliveryFailures]), downgraded to sole delivery by the fan.
+	stimulusNotify closeNotify
 	// consumed flips when the arm's close is DECIDED — the reply claim or the
 	// timeout fire won the identity CAS — but the teardown has not yet reached
 	// [ChannelRouter.markInteractionClosed]. The pointer deliberately STAYS on
@@ -214,8 +215,7 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 	members []Member,
 	channelSize int,
 	interactionID, trigger string,
-	stimulusDelivered bool,
-	undelivered map[string]struct{},
+	stimulusNotify closeNotify,
 	a AutonomousConfig,
 ) synthesisArmOutcome {
 	chairID := r.escalationChairFor(msg.ChannelID)
@@ -241,13 +241,12 @@ func (r *ChannelRouter) maybeArmSynthesisClose(
 	}
 
 	pending := &pendingSynthesisClose{
-		interactionID:       interactionID,
-		trigger:             trigger,
-		chairID:             chairID,
-		ct:                  ct,
-		stimulus:            msg,
-		stimulusDelivered:   stimulusDelivered,
-		stimulusUndelivered: undelivered,
+		interactionID:  interactionID,
+		trigger:        trigger,
+		chairID:        chairID,
+		ct:             ct,
+		stimulus:       msg,
+		stimulusNotify: stimulusNotify,
 	}
 	// Arm under interactionMu — the CAS half: two sibling bound-crossing
 	// fanouts can both pass the tally advance before either arms; exactly one
@@ -459,7 +458,7 @@ func (r *ChannelRouter) onSynthesisTimeout(pending *pendingSynthesisClose) {
 		zap.String("interaction_id", pending.interactionID),
 		zap.String("trigger", pending.trigger),
 		zap.String("escalation_chair_id", pending.chairID))
-	if r.boundedClose(ctx, pending.stimulus, pending.ct, pending.interactionID, pending.trigger, pending.stimulusDelivered, pending.stimulusUndelivered) {
+	if r.boundedClose(ctx, pending.stimulus, pending.ct, pending.interactionID, pending.trigger, pending.stimulusNotify) {
 		r.recordSynthesisTurn(ctx, pending.ct, synthesisTurnClosedOnTimeout)
 	}
 }

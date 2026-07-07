@@ -88,12 +88,19 @@ func readSynthesisReply(metadata map[string]any) bool {
 // the marker (a pre-4b-ii agent, gate drift) degrades to the timeout net —
 // the documented no-reply branch, sized for exactly this. nil for every
 // publish on an unarmed channel.
-func (r *ChannelRouter) claimSynthesisReply(msg ChannelMessage, inboundClaim string, a AutonomousConfig) *pendingSynthesisClose {
-	if !a.Enabled {
-		return nil // OQ #2: human channels never arm; skip the mutex entirely.
-	}
+func (r *ChannelRouter) claimSynthesisReply(msg ChannelMessage, inboundClaim string) *pendingSynthesisClose {
+	// Marker/claim first — two pure map reads that reject virtually every
+	// publish before ANY lock or config copy is paid (PR #718 review: the
+	// caller used to evaluate AutonomousFor eagerly per commit — an
+	// autonomousMu read + config struct copy on the hottest path, the third
+	// per-publish config read beside the fanout's and the resolver's — to
+	// guard a branch only the chair's one closing reply per interaction ever
+	// takes). Only a marked, claiming publish reads the config below.
 	if inboundClaim == "" || !readSynthesisReply(msg.Metadata) {
 		return nil
+	}
+	if !r.AutonomousFor(msg.ChannelID).Enabled {
+		return nil // OQ #2: human channels never arm; skip interactionMu entirely.
 	}
 	r.interactionMu.Lock()
 	defer r.interactionMu.Unlock()
@@ -157,7 +164,10 @@ func (r *ChannelRouter) claimSynthesisReply(msg ChannelMessage, inboundClaim str
 func (r *ChannelRouter) closeOnSynthesisReply(ctx context.Context, msg ChannelMessage, ct ChannelType, pending *pendingSynthesisClose) {
 	defer r.synthesisWG.Done()
 	r.waiter.Notify(msg)
-	if r.boundedClose(ctx, msg, ct, pending.interactionID, pending.trigger, false, nil) {
+	// The zero-value closeNotify IS this path's contract: notify the sender
+	// too, sole delivery (redelivery=false — no per-recipient miss ledger
+	// applies to a reply nobody was dispatched).
+	if r.boundedClose(ctx, msg, ct, pending.interactionID, pending.trigger, closeNotify{}) {
 		r.recordSynthesisTurn(ctx, ct, synthesisTurnClosedOnReply)
 		return
 	}

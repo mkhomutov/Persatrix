@@ -160,6 +160,16 @@ func WithEpoch(epoch string) DispatcherOption {
 // `status="error"` and do not retry.
 var ErrAgentNotReady = errors.New("channels: agent not ready")
 
+// ErrDeliveryRefused is returned (wrapped) when the receiver ACKED the RPC but
+// REFUSED the event — the agent servicer's queue-full discard-not-block
+// backpressure and its pre-ingest validation both take this shape (see the
+// struct doc). A sentinel, not a bare fmt.Errorf, so the one synchronous
+// dispatch-returning endpoint (POST /convene) can map this routine,
+// retryable miss to a truthful 503 instead of the default 500 "channel store
+// error" + Error-level "unexpected error" log (PR #718 review) — the fanout
+// paths never surface it to HTTP, so they are unaffected.
+var ErrDeliveryRefused = errors.New("receiver refused delivery")
+
 // NewGRPCMessageDispatcher wires a dispatcher around the orchestrator's
 // agent registry. `logger` may be nil — replaced with `zap.NewNop()` to
 // keep the no-OTEL test paths quiet.
@@ -361,7 +371,7 @@ func (d *GRPCMessageDispatcher) Dispatch(ctx context.Context, env DispatchEnvelo
 		// unregistered branch above — PR #718 review). GetSuccess is
 		// nil-tolerant, so a degenerate nil-ack/nil-err reply also lands
 		// here rather than passing as delivered.
-		ackErr := fmt.Errorf("ReceiveChannelMessage to %s: receiver refused delivery: %s", participantID, ack.GetErrorMessage())
+		ackErr := fmt.Errorf("ReceiveChannelMessage to %s: %w: %s", participantID, ErrDeliveryRefused, ack.GetErrorMessage())
 		span.RecordError(ackErr)
 		span.SetStatus(otelcodes.Error, ackErr.Error())
 		return ackErr

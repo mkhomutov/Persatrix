@@ -186,13 +186,18 @@ async def discharge_end_vote_publish(
     accelerating the very cost close the raise deferred.  So a synthesis
     reply closes NOTHING here: the discharge pops the park and defers to
     the close-notification self-echo — the fan Go runs iff it actually
-    closed on this reply (the bounded close includes the vote's sender),
-    which closes the chair's record with the truthful trigger and the
-    metering mark (``close_notification.py``).  A lost self-echo
-    degrades to the idle bury (late, unleased — the close fan's
-    documented fire-and-forget residual), never to a wrong close.  The
-    default keeps every ordinary vote discharge on the pre-4b-ii close
-    path.
+    closed on this reply, and BOTH closing shapes include the vote's
+    sender: the armed bounded close by default, and the end-vote quorum
+    a DEMOTED synthesis vote completes via its synthesis-echo carve-out
+    (``end_vote.go`` keys ``excludeSender`` off the wire marker — the
+    ordinary quorum fan excludes its voter precisely because that
+    voter's discharge closed locally, which this deferral does not;
+    PR #718 review).  The self-echo closes the chair's record with the
+    truthful trigger and, on a bounded close, the metering mark
+    (``close_notification.py``).  A lost self-echo degrades to the idle
+    bury (late, unleased — the close fan's documented fire-and-forget
+    residual), never to a wrong close.  The default keeps every
+    ordinary vote discharge on the pre-4b-ii close path.
     """
     async with agent._lock:
         pending = agent._pending_vote_closes.get(channel_id)

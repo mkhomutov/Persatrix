@@ -41,13 +41,19 @@ from agents.action_executor import ActionExecutor
 from agents.channel_wire_metadata import DispatchContext
 from agents.generated import wallet_pb2 as walletpb
 from agents.llm_client import LLMResponse, StopReason, Usage
-from agents.memory.interactions import Interaction, InteractionTracker, Turn
+from agents.memory.interactions import (
+    SUMMARY_UNAVAILABLE_TEXT,
+    Interaction,
+    InteractionTracker,
+    Turn,
+)
 from agents.persona_runtime.summarize_close import summarize_closed_interaction
 from agents.persona_runtime.vote_close import (
     PendingVoteClose,
     discharge_end_vote_publish,
 )
 from agents.persona_types import ActionType, AgentAction
+from agents.wallet_client import BudgetExceededError
 
 
 class _SpyClient:
@@ -156,6 +162,46 @@ class TestAutonomousCloseSummaryIsLeased:
         """The dataclass default: nothing marks, nothing meters — every
         pre-4b-ii construction site keeps the unleased summary."""
         assert _interaction().meter_close_summary is False
+
+    async def test_lease_denied_is_classified_budget_denied(
+        self, caplog, monkeypatch,
+    ):
+        """PR #718 review: a metered summary's wallet denial — the tracked
+        lease-side reserve gap (``synthesis_reserve.go`` KNOWN GAPs) biting
+        under exactly the cost pressure that fired the close — must land on
+        the failure counter as ``budget_denied`` (the established
+        ``llm_call_errors`` tick-idle vocabulary), not the generic
+        ``llm_error`` that made cap pressure indistinguishable from a
+        provider outage. The fallback contract itself is unchanged: the
+        unavailable placeholder commits, and the log carries the denial's
+        own reason."""
+
+        class _DenyingClient:
+            async def create_message(self, **kwargs: object) -> LLMResponse:
+                raise BudgetExceededError(
+                    "lease denied — interaction cost ceiling exceeded",
+                    reason="interaction_budget_exhausted",
+                )
+
+        reasons: list[str] = []
+        monkeypatch.setattr(
+            "agents.persona_runtime.summarize_close._emit_summary_failed",
+            reasons.append,
+        )
+        with caplog.at_level(
+            logging.WARNING, logger="agents.persona_runtime.summarize_close",
+        ):
+            summary, failed, facts = await summarize_closed_interaction(
+                _DenyingClient(), "ember-owl", _interaction(metered=True),
+            )
+
+        assert (summary, failed, facts) == (SUMMARY_UNAVAILABLE_TEXT, True, None)
+        assert reasons == ["budget_denied"]
+        assert any(
+            "lease denied" in r.getMessage()
+            and "interaction_budget_exhausted" in r.getMessage()
+            for r in caplog.records
+        ), "the log carries the wallet's own denial reason"
 
 
 class _VoterAgent:

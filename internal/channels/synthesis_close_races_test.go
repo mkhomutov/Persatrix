@@ -142,7 +142,7 @@ func TestSynthesisClose_ClaimWindowWithholdsStragglers(t *testing.T) {
 		ID: uuid.NewString(), ChannelID: ch, SenderID: "iron-fox", Content: "Synthesis: done.",
 		Metadata: map[string]any{"interaction_id": openID, synthesisReplyMetadataKey: true},
 	}
-	pending := router.claimSynthesisReply(reply, openID, router.AutonomousFor(ch))
+	pending := router.claimSynthesisReply(reply, openID)
 	require.NotNil(t, pending, "the marked chair reply claims the arm")
 
 	// The claim→tombstone window, held open deliberately: every withhold and
@@ -153,12 +153,12 @@ func TestSynthesisClose_ClaimWindowWithholdsStragglers(t *testing.T) {
 	assert.True(t, router.stimulusOutlivedClose(
 		ChannelMessage{ID: uuid.NewString(), ChannelID: ch, SenderID: "ember-owl"},
 		router.AutonomousFor(ch)), "the head withhold holds through the window too")
-	assert.Nil(t, router.claimSynthesisReply(reply, openID, router.AutonomousFor(ch)),
+	assert.Nil(t, router.claimSynthesisReply(reply, openID),
 		"a second marked reply claims nothing — one arm, one close")
 
 	// Finish the teardown as the commit path would; everything reconciles.
 	require.True(t, router.boundedClose(context.Background(), reply, ChannelTypeGroup,
-		pending.interactionID, pending.trigger, false, nil))
+		pending.interactionID, pending.trigger, closeNotify{}))
 	router.WaitForPendingFanout()
 	assert.Equal(t, int64(1), closedCount(t, reader, structuralTrigger))
 	_, _, tracked := router.openInteractionEscalationState(ch)
@@ -442,7 +442,7 @@ func TestSynthesisClose_ReplyClaimHoldsArmCountThroughClose(t *testing.T) {
 			synthesisReplyMetadataKey: true,
 		},
 	}
-	pending := router.claimSynthesisReply(msg, openID, router.AutonomousFor(ch))
+	pending := router.claimSynthesisReply(msg, openID)
 	require.NotNil(t, pending, "precondition: the reply claims the arm")
 
 	waited := make(chan struct{})

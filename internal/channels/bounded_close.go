@@ -82,6 +82,19 @@ const (
 	costTrigger = "cost"
 )
 
+// isBoundedCloseTrigger reports whether `trigger` is one of the RFC 0052
+// bounded-close causes — THE Go-side enumeration of the pair, the twin of the
+// Python consumer's `WIRE_BOUNDED_CLOSE_TRIGGERS` set (channel_wire_metadata.py,
+// which exists because an anonymous per-site enumeration of this pair already
+// shipped a miss once — PR #716 review). The wire stamp keys the receivers'
+// OQ #6 metering on it (close_notification.go), so a third bounded cause must
+// extend this predicate (and the Python set, and the cross-language drift pin
+// in test_cross_language_synthesis_wire_drift.py), never a call site's inline
+// disjunction (PR #718 review).
+func isBoundedCloseTrigger(trigger string) bool {
+	return trigger == structuralTrigger || trigger == costTrigger
+}
+
 // boundVerdict is [boundStandsAgainst]'s answer at a bound action point.
 type boundVerdict int
 
@@ -173,18 +186,18 @@ func (r *ChannelRouter) advanceBoundedCloseRound(channelID, stampedID string) (i
 	r.interactionMu.Lock()
 	defer r.interactionMu.Unlock()
 	entry := r.openInteractions[channelID]
-	// Deliberate-close staleness first: it holds whether the successor is
-	// already open (divergence) or not yet minted (entry.id == "" until the
-	// next resolve), and in both shapes the withhold is the same.
-	if entry != nil && stampedID != "" && entry.latchedClaim(stampedID) {
-		return "", 0, false, true
-	}
-	// Armed synthesis window (PR 4b-ii, synthesis_close.go): the bound has
-	// fired and the chair's synthesis turn is outstanding — the discussion is
-	// TERMINATING, so no further stimulus advances the tally, dispatches, or
-	// races a second close; the withhold is the deliberate-close shape (the
-	// chair's reply never reaches this tail — the fanout head claims it).
-	if entry != nil && entry.pendingSynthesis != nil {
+	// The terminating-discussion withhold — deliberate-close staleness (the
+	// no-reopen ledger) plus the armed synthesis window (PR 4b-ii,
+	// synthesis_close.go: the bound has fired and only the closing artifact
+	// is outstanding, so no further stimulus advances the tally, dispatches,
+	// or races a second close; the chair's reply never reaches this tail —
+	// the fanout head claims it). ONE shared predicate with the floor path's
+	// head check ([ChannelRouter.stimulusOutlivedClose]) so the two stimulus
+	// action points cannot drift a future terminating condition apart
+	// (PR #718 review); it holds whether the successor is already open
+	// (divergence) or not yet minted (entry.id == "" until the next resolve),
+	// and in both shapes the withhold is the same.
+	if entry.withholdsStimulusLocked(stampedID) {
 		return "", 0, false, true
 	}
 	if !entry.openCommitted() {
@@ -345,6 +358,18 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 		return false, false
 	case boundStands:
 	}
+	// The close notification's per-cause choices, computed ONCE and carried as
+	// NAMED fields end to end — closeNotify's own discipline, applied one seam
+	// deeper (PR #718 review: boundedClose and the armed entry each re-carried
+	// the pair as a bare bool+map a transposed or negated call site would
+	// compile past): the floor path's bounding stimulus was already delivered
+	// live inside its round (`dispatchPending` false), so the notification
+	// carrying it is a RE-delivery — the typed marker receivers key the ingest
+	// skip on (PR 4b-ii) — except for the members its live dispatch missed;
+	// the concurrent path withholds the dispatch, so its notification is the
+	// sole delivery. The timeout net's fallback close reuses this same value
+	// off the armed entry ([pendingSynthesisClose.stimulusNotify]).
+	notify := closeNotify{redelivery: !dispatchPending, undelivered: undelivered}
 	// PR 4b-ii close-on-reply (RFC 0052 §D artifact #1, synthesis_close.go):
 	// on a chaired channel the bound does not close YET — it dispatches the
 	// goal-directed chair synthesis turn and arms the close, which then lands
@@ -354,7 +379,7 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 	// unavailable verdict (no viable chair / dispatch failure) falls through
 	// to the 4b-i immediate artifact-bearing close, keeping termination
 	// deterministic.
-	switch r.maybeArmSynthesisClose(ctx, msg, ct, members, channelSize, interactionID, trigger, !dispatchPending, undelivered, fresh) {
+	switch r.maybeArmSynthesisClose(ctx, msg, ct, members, channelSize, interactionID, trigger, notify, fresh) {
 	case synthesisArmed, synthesisAlreadyArmed:
 		return false, true
 	case synthesisEntryMovedOn, synthesisUnavailable:
@@ -365,12 +390,7 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 		// wins and delivers `msg` as the close, a racing deliberate close loses
 		// and is reported stale below (never withhold-swallowed, PR #718 review).
 	}
-	// The floor path's bounding stimulus was already delivered live inside
-	// its round (`dispatchPending` false), so the close notification carrying
-	// it is a RE-delivery — the typed marker receivers key the ingest skip on
-	// (PR 4b-ii). The concurrent path withholds the dispatch, so its
-	// notification is the sole delivery.
-	if !r.boundedClose(ctx, msg, ct, interactionID, trigger, !dispatchPending, undelivered) {
+	if !r.boundedClose(ctx, msg, ct, interactionID, trigger, notify) {
 		// The tombstone CAS lost to a racing closer (a sibling bound-crossing
 		// fanout, or an end-vote quorum): the interaction IS closing, but not
 		// by this fanout's hand, and this fanout's message is not the one the
@@ -393,16 +413,18 @@ func (r *ChannelRouter) maybeBoundedClose(ctx context.Context, msg ChannelMessag
 // standing and returns false — the caller reports that fanout's stimulus as a
 // stale sibling, not as the close (PR #716 review). Returns true when THIS
 // call won the tombstone and ran the teardown.
-// `redelivery` says the closing message `msg` was already delivered live via
-// ordinary fanout (the floor path's bounding stimulus; false for the withheld
-// concurrent-path stimulus and for the sole-delivery synthesis reply), and is
-// stamped onto the close-notification fan so receivers skip the duplicate
-// final-turn ingest (PR 4b-ii, `close_notification.py`). `undelivered` names
-// the members that live delivery MISSED (a per-recipient dispatch error inside
-// the round — see [liveDeliveryFailures]); the fan downgrades exactly those to
-// sole delivery so the ingest-skip never drops a turn that never landed
-// (PR #718 review). nil whenever `redelivery` is false.
-func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, interactionID, trigger string, redelivery bool, undelivered map[string]struct{}) bool {
+// `n` carries the notification's per-cause choices as NAMED fields end to end
+// (the [closeNotify] discipline — PR #718 review folded the bare
+// redelivery-bool + undelivered-map pair this signature used to take back
+// into the struct): `redelivery` says the closing message `msg` was already
+// delivered live via ordinary fanout (the floor path's bounding stimulus;
+// false for the withheld concurrent-path stimulus and for the sole-delivery
+// synthesis reply — the zero value), `undelivered` names the members that
+// live delivery MISSED (see [liveDeliveryFailures]), downgraded to sole
+// delivery by the fan. CONTRACT: callers leave `n.excludeSender` zero — the
+// bounded close always notifies the sender (see
+// [ChannelRouter.notifyInteractionClose]'s per-cause story).
+func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct ChannelType, interactionID, trigger string, n closeNotify) bool {
 	r.endVoteMu.Lock()
 	won := r.tombstoneInteractionLocked(interactionID)
 	r.endVoteMu.Unlock()
@@ -414,15 +436,15 @@ func (r *ChannelRouter) boundedClose(ctx context.Context, msg ChannelMessage, ct
 	// The shared close-teardown tail ([ChannelRouter.finalizeInteractionClose]):
 	// reply-budget snapshot → discard → retire the id (truthful bounded-close
 	// cause, not end_votes) → fan the RFC 0020 summary notification. excludeSender
-	// is FALSE — unlike the end-vote close (where the voter's own vote closed its
-	// tracker), `msg` here is only the round-triggering stimulus (or the chair's
-	// synthesis reply: its PROSE shape closed nothing agent-side, while the
-	// vote-cast shape the directive invites DID close the chair's own record
-	// through its end-vote discharge (vote_close.py, where the Python side
-	// also meters it) — the self-echo notification then no-ops on the
-	// already-closed scope by design), so the sender needs the notification
-	// too or it strands on "went idle" and authors no summary.
-	r.finalizeInteractionClose(ctx, msg, ct, interactionID, trigger, closeNotify{redelivery: redelivery, undelivered: undelivered})
+	// is FALSE — unlike the ordinary end-vote close (where the voter's own vote
+	// closed its tracker), `msg` here is only the round-triggering stimulus (or
+	// the chair's synthesis reply, whose discharge — prose or vote-cast alike —
+	// closes NOTHING agent-side: vote_close.py's synthesis_reply carve-out
+	// defers the local close to this very fan's self-echo, which
+	// close_notification.py answers with a no-ingest structural close), so the
+	// sender needs the notification too or it strands on "went idle" and
+	// authors no summary.
+	r.finalizeInteractionClose(ctx, msg, ct, interactionID, trigger, n)
 	// NOTE: no wallet EvictInteraction here — deferred to PR 7 (file header).
 	return true
 }

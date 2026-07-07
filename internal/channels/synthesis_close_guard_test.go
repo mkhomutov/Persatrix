@@ -257,7 +257,7 @@ func TestSynthesisClose_EntryMovedOnFallsThroughNotWithheld(t *testing.T) {
 
 	// No entry at all (the interaction closed and its entry was dropped).
 	got := router.maybeArmSynthesisClose(context.Background(), msg, ChannelTypeGroup,
-		members, len(members), "gone", structuralTrigger, false, nil, a)
+		members, len(members), "gone", structuralTrigger, closeNotify{}, a)
 	assert.Equal(t, synthesisEntryMovedOn, got, "a missing entry falls through to the immediate close")
 
 	// An entry that moved on to a DIFFERENT id (rotation / fresh mint under the arm).
@@ -265,7 +265,7 @@ func TestSynthesisClose_EntryMovedOnFallsThroughNotWithheld(t *testing.T) {
 	router.openInteractions[ch] = &openInteraction{id: "successor", idCommitted: true}
 	router.interactionMu.Unlock()
 	got = router.maybeArmSynthesisClose(context.Background(), msg, ChannelTypeGroup,
-		members, len(members), "retired", structuralTrigger, false, nil, a)
+		members, len(members), "retired", structuralTrigger, closeNotify{}, a)
 	assert.Equal(t, synthesisEntryMovedOn, got, "a moved-on id falls through, never the deliberate-close withhold")
 
 	assert.Empty(t, disp.synthesisTurns(), "a moved-on arm dispatches no synthesis turn")

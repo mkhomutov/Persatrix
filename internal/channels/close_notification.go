@@ -68,13 +68,18 @@ func (r *ChannelRouter) finalizeInteractionClose(ctx context.Context, msg Channe
 	r.DiscardInteractionReplyBudget(interactionID)
 	r.markInteractionClosed(msg.ChannelID, interactionID, trigger)
 	// The wire-stamped close cause (PR 4b-ii): ONLY the RFC 0052 bounded
-	// close's structural/cost triggers ride the notification — the field's
-	// presence doubles as the receiver's OQ #6 metering key ("this close is
-	// an autonomous bounded close"), so the end-vote trigger must map to the
-	// empty pre-4b-ii wire shape or every human end-vote close would start
-	// leasing its summaries.
+	// close's triggers ride the notification — the field's presence doubles
+	// as the receiver's OQ #6 metering key ("this close is an autonomous
+	// bounded close"), so the end-vote trigger must map to the empty
+	// pre-4b-ii wire shape or every human end-vote close would start leasing
+	// its summaries. The pair is the NAMED predicate, never an inline
+	// disjunction (PR #718 review): this stamp is the one Go enumeration
+	// point the cross-language drift pin could not see, so a third bounded
+	// cause added to the consts alone would close interactions that never
+	// rode the wire — receivers keeping the legacy label and every summary
+	// of that cause silently skipping its lease.
 	boundedTrigger := ""
-	if trigger == structuralTrigger || trigger == costTrigger {
+	if isBoundedCloseTrigger(trigger) {
 		boundedTrigger = trigger
 	}
 	r.notifyInteractionClose(ctx, msg, ct, boundedTrigger, n)
