@@ -20,6 +20,7 @@ package channels
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -63,6 +64,16 @@ func convenerAdvanceCount(t *testing.T, rm metricdata.ResourceMetrics, channelTy
 // mechanism fired. `agenda` sets the RFC 0052 agenda the cadence advances through.
 func cadenceHarness(t *testing.T, agenda []string) (*ChannelRouter, *dispatchRecorder, string, *sdkmetric.ManualReader) {
 	t.Helper()
+	disp := &dispatchRecorder{}
+	router, ch, reader := cadenceHarnessWith(t, agenda, disp)
+	return router, disp, ch, reader
+}
+
+// cadenceHarnessWith is cadenceHarness with the dispatcher injected, so a test
+// can supply one that FAILS the convene-lane send (the dispatch_error branch) in
+// place of the recorder. Every other test reaches it through cadenceHarness.
+func cadenceHarnessWith(t *testing.T, agenda []string, disp MessageDispatcher) (*ChannelRouter, string, *sdkmetric.ManualReader) {
+	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
@@ -73,7 +84,6 @@ func cadenceHarness(t *testing.T, agenda []string) (*ChannelRouter, *dispatchRec
 	delivered, err := mp.Meter("test").Int64Counter("channel.messages.delivered")
 	require.NoError(t, err)
 	store := newTestStore(t, SQLiteOptions{})
-	disp := &dispatchRecorder{}
 	router := NewChannelRouter(store, disp, zap.NewNop(), &RouterMetrics{
 		ConvenerAdvance: advance, ChairEscalation: chair, MessagesDelivered: delivered,
 	})
@@ -91,7 +101,22 @@ func cadenceHarness(t *testing.T, agenda []string) (*ChannelRouter, *dispatchRec
 		Goal: "A synthesized recommendation.",
 	})
 	router.SetEscalationChair(ch, "iron-fox")
-	return router, disp, ch, reader
+	return router, ch, reader
+}
+
+// convenerFailingDispatcher records like dispatchRecorder but FAILS every
+// convene-lane send, exercising the maybeAdvanceAgenda dispatch_error branch (the
+// convener's endpoint is unreachable); non-convene traffic still succeeds.
+type convenerFailingDispatcher struct {
+	*dispatchRecorder
+}
+
+func (d *convenerFailingDispatcher) Dispatch(ctx context.Context, env DispatchEnvelope, msg ChannelMessage) error {
+	_ = d.dispatchRecorder.Dispatch(ctx, env, msg)
+	if env.Convene {
+		return errors.New("convener endpoint unreachable")
+	}
+	return nil
 }
 
 // stallOnce publishes one open-floor stimulus from the human author; with the
@@ -372,4 +397,89 @@ func TestConvenerCadence_WorkingRoundNoTurn(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, 1, item)
 	assert.Equal(t, cadenceAdvance, action)
+}
+
+// TestConvenerCadence_BrokenConvenerFallsThroughWithoutSpending — the guard the
+// PR documents ("a broken convener neither spends a ration nor moves the
+// cursor", checked BEFORE the claim): a convener that has drifted out of the
+// roster, or is an observer (respond: never), cannot author the forced turn — a
+// receiver-gate self-suppress the convene path also refuses — so maybeAdvanceAgenda
+// falls through to the chair WITHOUT dispatching or spending the per-item ration.
+func TestConvenerCadence_BrokenConvenerFallsThroughWithoutSpending(t *testing.T) {
+	stalled := floorRoundOutcome{granted: 2, replied: 0}
+	cases := []struct {
+		name  string
+		munge func([]Member) []Member // the roster the fanout would hand the hook
+	}{
+		{"drifted (non-member)", func(m []Member) []Member {
+			var out []Member
+			for _, mem := range m {
+				if mem.ParticipantID != "nova-sparrow" {
+					out = append(out, mem)
+				}
+			}
+			return out
+		}},
+		{"observer (respond: never)", func(m []Member) []Member {
+			for i := range m {
+				if m[i].ParticipantID == "nova-sparrow" {
+					m[i].RespondPolicy = RespondNever
+				}
+			}
+			return m
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			router, disp, ch, _ := cadenceHarness(t, []string{"A", "B"})
+			setCommittedEntry(router, ch, "int-1", nil)
+			members, err := router.store.GetMembers(context.Background(), ch)
+			require.NoError(t, err)
+			roster := tc.munge(members)
+
+			handled := router.maybeAdvanceAgenda(context.Background(),
+				ChannelMessage{ChannelID: ch, Metadata: map[string]any{"interaction_id": "int-1"}},
+				ChannelTypeGroup, stalled, roster, len(roster), router.AutonomousFor(ch))
+
+			assert.False(t, handled, "a broken convener falls through to the chair")
+			assert.Empty(t, convenerAdvances(disp), "no convener turn dispatched")
+
+			// the ration is pristine: a real claim still RE-INVITES item 0 (cursor
+			// unmoved, un-reinvited) — nothing was spent on the broken convener.
+			_, item, action, ok := router.claimConvenerCadence(ch, "int-1", 2)
+			require.True(t, ok)
+			assert.Equal(t, 0, item, "the cursor did not move")
+			assert.Equal(t, cadenceReinvite, action, "the per-item ration was not spent")
+		})
+	}
+}
+
+// TestConvenerCadence_DispatchErrorSpendsRationSuppressesChair — a FAILED
+// convene-lane send (the convener's endpoint is unreachable) is metered
+// `dispatch_error` and STILL reports handled: the ration is spent (claimed before
+// the send) and the chair must NOT also fire into the same silence while the
+// agenda has items. Mirrors the chair's own chair-gone branch — one attempt per
+// item, no refund — so the next stall ADVANCES rather than re-inviting forever.
+func TestConvenerCadence_DispatchErrorSpendsRationSuppressesChair(t *testing.T) {
+	rec := &dispatchRecorder{}
+	router, ch, reader := cadenceHarnessWith(t, []string{"A", "B"},
+		&convenerFailingDispatcher{dispatchRecorder: rec})
+
+	stallOnce(t, router, ch) // stall 1 → re-invite item 0, send FAILS
+
+	assert.Empty(t, chairEscalations(rec), "a failed convener dispatch still suppresses the chair")
+	var rm metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &rm))
+	assert.Equal(t, int64(1), convenerAdvanceCount(t, rm, "group", "dispatch_error"))
+	assert.Equal(t, int64(0), convenerAdvanceCount(t, rm, "group", "reinvite"),
+		"a failed send is metered dispatch_error, not reinvite")
+
+	stallOnce(t, router, ch) // stall 2 → item 0's ration was spent, so this ADVANCES
+
+	turns := convenerAdvances(rec)
+	require.Len(t, turns, 2)
+	assert.Contains(t, turns[0].msg.Content, "A", "stall 1 re-invited item 0")
+	assert.Contains(t, turns[1].msg.Content, "B",
+		"stall 2 advanced to item 1 — item 0's failed re-invite was not refunded")
+	assert.Empty(t, chairEscalations(rec), "still no chair escalation while the agenda has items")
 }

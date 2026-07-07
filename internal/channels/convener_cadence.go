@@ -113,12 +113,18 @@ func (r *ChannelRouter) recordAgendaProgress(channelID, stampedID string) {
 }
 
 // claimConvenerCadence is the per-agenda-item ration's compare-and-set half,
-// deciding — atomically under interactionMu, so two concurrently-stalled rounds
-// resolve to exactly one spend — what the convener does on a stall, and mutating
-// the cursor/liveness state to record it. `agendaLen` is the resolved agenda's
-// length (the caller's config snapshot); `stampedID` is the id stamped on the
-// stalling stimulus ([readInteractionID]), "" (unstamped) tolerantly falling
-// through like [ChannelRouter.maybeEscalateStall].
+// deciding — atomically under interactionMu — what the convener does on a stall,
+// and mutating the cursor/liveness state to record it. Unlike the chair's
+// markChairEscalated CAS (exactly one escalation per interaction), the per-item
+// ration is NOT collective exactly-once: two concurrently-stalled rounds can each
+// spend a ration (e.g. one re-invites the current item, the next advances). The
+// lock only guarantees each claim is a clean read-modify-write; the MONOTONIC
+// cursor + one-re-invite-per-item state is what keeps the lifetime total bounded
+// (≤ 2·len−1) no matter how many rounds stall concurrently.
+//
+// `agendaLen` is the resolved agenda's length (the caller's config snapshot);
+// `stampedID` is the id stamped on the stalling stimulus ([readInteractionID]),
+// "" (unstamped) tolerantly falling through like [ChannelRouter.maybeEscalateStall].
 //
 // Returns `ok == false` — the caller falls through to the shipped chair escalation
 // — for every non-cadence stall: no open committed interaction (a resolver bypass),
@@ -273,11 +279,16 @@ func (r *ChannelRouter) maybeAdvanceAgenda(ctx context.Context, msg ChannelMessa
 // composeAgendaAdvanceDirective assembles the operator topic + the single agenda
 // item to (re-)pose + goal into the directive the convener turn carries. Reuses the
 // §B convene framing (format_convener_opening receiver-side), so the item rides a
-// single-item "Next agenda item" block the shared "pose the item below" instruction
-// binds to; the item is renumbered `1.` so that binding holds regardless of its
-// position in the full agenda. Plain assembly, no escaping — the trust boundary is
-// the RFC 0009 envelope the receiver wraps it in, not this string
-// ([composeConveneDirective]'s posture). Hard-trimmed to the shared wire ceiling
+// single-item "Next agenda item" block the shared snippet's "pose the first agenda
+// item (if an agenda is given)" instruction binds to; the item is renumbered `1.`
+// so the persona poses the one item present regardless of its position in the full
+// agenda. NOTE the shared snippet still frames this as an OPENING turn ("open the
+// discussion"), so a mid-run advance/re-invite reads as a re-opening rather than a
+// "move on to the next item" — a dedicated advance framing (its own wire marker +
+// snippet) is the deferred refinement tracked in the PR plan. Plain assembly, no
+// escaping — the trust boundary is the RFC 0009 envelope the receiver wraps it in,
+// not this string ([composeConveneDirective]'s posture). Hard-trimmed to the
+// shared wire ceiling
 // ([clampDirectiveBytes]) so an unbounded operator agenda item cannot dispatch a
 // multi-MB directive.
 func composeAgendaAdvanceDirective(a AutonomousConfig, item int) string {
