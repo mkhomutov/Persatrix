@@ -232,6 +232,12 @@ type channelConfigResponse struct {
 	InteractionBudgetTokens                configFieldResponse      `json:"interaction_budget_tokens"`
 	Reasoning                              reasoningConfigResponse  `json:"reasoning"`
 	Autonomous                             autonomousConfigResponse `json:"autonomous"`
+	// AutonomousRuntime is the LIVE convening-count / aggregate-bound readout
+	// (RFC 0052 §E) — runtime counters, not config provenance; see
+	// [autonomousRuntimeResponse]. Always present (zero-valued for a
+	// non-autonomous or never-convened channel); the clients decide whether to
+	// render it.
+	AutonomousRuntime autonomousRuntimeResponse `json:"autonomous_runtime"`
 }
 
 // reasoningConfigResponse is the RFC 0051 (v0.3.10) `reasoning` block's nested
@@ -263,6 +269,28 @@ type autonomousConfigResponse struct {
 	ScheduleIntervalSeconds configFieldResponse `json:"schedule_interval_seconds"`
 	MaxConvenings           configFieldResponse `json:"max_convenings"`
 	StandingBudgetTokens    configFieldResponse `json:"standing_budget_tokens"`
+}
+
+// autonomousRuntimeResponse is the LIVE (non-config) readout of an autonomous
+// channel's aggregate convening state — RFC 0052 §E, the convening-count /
+// aggregate-bound view the web AutonomousSettings panel + CLI `channel config
+// get` render (v0.3.11 PR 7b). Unlike the config block ([autonomousConfigResponse],
+// value + provenance), these are RUNTIME counters
+// ([channels.ChannelRouter.ConveningCount]): they report what has HAPPENED, not
+// what is CONFIGURED, so they carry no `source`. Process-lifetime state — a
+// restart resets `convening_count` to zero (convening_counter.go's documented
+// scope limit), so the readout is "this process", not "since the channel was
+// created".
+//
+//   - ConveningCount — how many openers this channel has dispatched this process
+//     lifetime (0 for a never-convened channel).
+//   - ConveningsRemaining — the `max_convenings` allowance left (clamped at zero
+//     if a lowered bound sits below the spent count), or nil ⇒ JSON `null` when
+//     the channel carries no positive `max_convenings` (unbounded). Computed
+//     server-side so the unbounded + clamp rules live in one place.
+type autonomousRuntimeResponse struct {
+	ConveningCount      int  `json:"convening_count"`
+	ConveningsRemaining *int `json:"convenings_remaining"`
 }
 
 // recallRequest is the JSON body for POST /api/v1/personas/{participant_id}/recall

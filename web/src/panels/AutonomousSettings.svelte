@@ -37,6 +37,22 @@
   // the block the server actually reads.
   const armed = $derived(Boolean(config?.autonomous?.enabled?.value));
 
+  // RFC 0052 §E convening readout — the LIVE count of openers this channel has
+  // dispatched (this process lifetime) and, for a standing channel with a
+  // max_convenings bound, how much of that aggregate allowance remains. Sourced
+  // from the persisted `autonomous_runtime` block (runtime counters, no
+  // provenance), so it tracks the SAVED channel, not the draft. A null
+  // `convenings_remaining` is the server's unbounded signal (no positive
+  // max_convenings). Composed into ONE string so it renders as a single text
+  // node, shown only when armed.
+  const conveningReadout = $derived.by(() => {
+    const count = config?.autonomous_runtime?.convening_count ?? 0;
+    const remaining = config?.autonomous_runtime?.convenings_remaining;
+    return remaining != null
+      ? `${count} used, ${remaining} remaining`
+      : `${count} used (no aggregate bound)`;
+  });
+
   // RFC 0052 §B Convene action state — independent of the parent's save flow
   // (this is an action, not a config edit), so it owns its own pending flag and
   // result messages.
@@ -44,11 +60,13 @@
   let conveneError = $state(""); // a hard failure (the server's wording)
   let conveneNotice = $state(""); // a success confirmation
   // Latches true after a successful convene so the button cannot fire a second
-  // opener. Re-convening an idle channel is not yet aggregate-bounded
-  // server-side (the §E count bound is a later PR), and in the window before the
-  // convener's first reply commits an interaction a second POST is NOT caught by
-  // the already-convening 409 — so a stray double-click would dispatch a second
-  // uncapped opener. Reload (or switch channels) to convene again.
+  // opener. The §E count bound (`max_convenings`) is now enforced server-side,
+  // but it does not close the idle race: in the window before the convener's
+  // first reply commits an interaction, a second POST is NOT caught by the
+  // already-convening 409 — it dispatches (and burns a second convening slot) a
+  // second opener that folds into the same discussion (the force-fresh slice,
+  // still deferred). So we latch after one convene; reload (or switch channels)
+  // to convene again.
   let convened = $state(false);
 
   // Reset the action state when the operator switches to a different channel — a
@@ -184,6 +202,17 @@
     {/each}
   </ul>
 
+  <!-- RFC 0052 §E PR 7b: the convening-count / aggregate-bound readout — the
+       live count of openers dispatched (this process lifetime) and, for a
+       standing channel, how much of the max_convenings allowance remains. Shown
+       only when armed (a non-autonomous channel has no convening story). -->
+  {#if armed}
+    <p class="convening-readout">
+      <span class="readout-label">Convenings:</span>
+      {conveningReadout}
+    </p>
+  {/if}
+
   <!-- RFC 0052 §B PR 3: the Convene action — the panel's first per-channel
        action button. Shown only when the channel is armed per the SAVED config;
        disabled while a convene is in flight or the operator has unsaved edits
@@ -288,5 +317,13 @@
   .convene-hint {
     font-size: 0.8rem;
     opacity: 0.7;
+  }
+  .convening-readout {
+    margin: 0.75rem 0 0;
+    font-size: 0.8rem;
+    opacity: 0.8;
+  }
+  .readout-label {
+    font-weight: 600;
   }
 </style>

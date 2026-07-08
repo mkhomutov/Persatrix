@@ -367,6 +367,15 @@ func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (cha
 	chair, _ := s.channelRouter.EscalationChairFor(id)
 	idleSeconds, _ := s.channelRouter.InteractionIdleTimeoutFor(id)
 	budget := s.channelRouter.InteractionBudgetTokensFor(id)
+	// One resolved autonomous snapshot backs BOTH the config block (value +
+	// provenance) and the runtime readout's bound — read once so the config's
+	// max_convenings and the readout's max_convenings cannot tear across a
+	// concurrent RFC 0050 apply. The convening COUNT is still read separately
+	// (ConveningCount takes its own conveningMu, distinct from AutonomousFor's
+	// autonomousMu), so count and max_convenings can come from slightly different
+	// instants; that skew is harmless because autonomousRuntime clamps a
+	// count-above-bound remaining to zero rather than reporting a negative.
+	autonomous := s.channelRouter.AutonomousFor(id)
 
 	resp := channelConfigResponse{
 		Revision:                               revision,
@@ -379,7 +388,8 @@ func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (cha
 		EscalationChairID:                      configField(chair, overrides.EscalationChairID != nil),
 		InteractionIdleTimeoutSeconds:          configField(idleSeconds, overrides.InteractionIdleTimeoutSeconds != nil),
 		Reasoning:                              reasoningResponse(s.channelRouter.ReasoningFor(id), overrides.Reasoning),
-		Autonomous:                             autonomousResponse(s.channelRouter.AutonomousFor(id), overrides.Autonomous),
+		Autonomous:                             autonomousResponse(autonomous, overrides.Autonomous),
+		AutonomousRuntime:                      autonomousRuntime(s.channelRouter.ConveningCount(id), autonomous),
 	}
 	return resp, nil
 }

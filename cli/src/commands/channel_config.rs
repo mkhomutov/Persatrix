@@ -22,7 +22,9 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::commands::channel::canonicalize_channel_id;
-use crate::commands::channel_config_autonomous::{self as autonomous, AutonomousConfigView};
+use crate::commands::channel_config_autonomous::{
+    self as autonomous, AutonomousConfigView, AutonomousRuntimeView,
+};
 use crate::commands::channel_config_reasoning::{self as reasoning, ReasoningConfigView};
 use crate::commands::channel_config_render::render_config_view;
 use crate::types::{api_error_message, validate_path_param};
@@ -72,6 +74,12 @@ pub(crate) struct ChannelConfigView {
     /// sub-knobs, dotted `autonomous.<sub>` rows) carrying the first LIST-valued
     /// sub-knob (`agenda`). Type + accessor in [`channel_config_autonomous`](autonomous).
     pub(crate) autonomous: AutonomousConfigView,
+    /// RFC 0052 §E (v0.3.11 PR 7b): the LIVE convening-count / aggregate-bound
+    /// readout — runtime counters (not config `{value, source}` cells), rendered
+    /// after the knob rows for an armed channel. `#[serde(default)]` so a payload
+    /// without the block (older server, stub fixture) still decodes.
+    #[serde(default)]
+    pub(crate) autonomous_runtime: AutonomousRuntimeView,
 }
 
 // ─── Knob registry ──────────────────────────────────────────────────────

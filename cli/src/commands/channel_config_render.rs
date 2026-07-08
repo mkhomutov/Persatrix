@@ -35,9 +35,30 @@ pub(crate) fn render_value(value: &Value) -> String {
     }
 }
 
+/// The one-line RFC 0052 §E convening-count / aggregate-bound readout for the
+/// human `get` render, or `None` when the channel is not armed (a non-autonomous
+/// channel has no convening story — suppress it rather than print a misleading
+/// "0 used"). Drives off the runtime block's `convenings_remaining`: `Some` ⇒ a
+/// positive `max_convenings` bound (report the count and what remains against it),
+/// `None` ⇒ unbounded (report the count alone). The server owns the
+/// null/clamp derivation; this only renders it.
+pub(crate) fn autonomous_runtime_summary(view: &ChannelConfigView) -> Option<String> {
+    if view.autonomous.enabled.value != Value::Bool(true) {
+        return None;
+    }
+    let count = view.autonomous_runtime.convening_count;
+    Some(match view.autonomous_runtime.convenings_remaining {
+        Some(remaining) => format!("{count} used, {remaining} remaining"),
+        None => format!("{count} used (no aggregate bound)"),
+    })
+}
+
 /// Render the effective-config block: a header carrying the channel id and
 /// current revision, then one aligned row per knob with its value and a
-/// `[channel]` / `[default]` provenance tag.
+/// `[channel]` / `[default]` provenance tag. For an armed autonomous channel a
+/// trailing `convenings` row carries the RFC 0052 §E runtime readout — tagged
+/// `(runtime)` rather than `[channel]`/`[default]` so it never reads as a config
+/// knob missing its provenance.
 pub(crate) fn render_config_view(id: &str, view: &ChannelConfigView) {
     println!(
         "{}  {}",
@@ -51,6 +72,13 @@ pub(crate) fn render_config_view(id: &str, view: &ChannelConfigView) {
             "  {key:<width$}  {}  {}",
             render_value(&field.value),
             format!("[{}]", field.source).dimmed(),
+        );
+    }
+    if let Some(summary) = autonomous_runtime_summary(view) {
+        println!(
+            "  {:<width$}  {summary}  {}",
+            "convenings",
+            "(runtime)".dimmed(),
         );
     }
 }
