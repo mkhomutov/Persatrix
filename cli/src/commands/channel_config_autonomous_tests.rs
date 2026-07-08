@@ -42,6 +42,9 @@ fn autonomous_view_field_resolves_each_sub_knob_and_rejects_others() {
         "convener":   {"value": "nova-sparrow",             "source": "channel"},
         "goal":       {"value": "A recommendation",         "source": "channel"},
         "max_rounds": {"value": 12,                          "source": "default"},
+        "schedule_interval_seconds": {"value": 3600, "source": "channel"},
+        "max_convenings":            {"value": 10,   "source": "channel"},
+        "standing_budget_tokens":    {"value": 0,    "source": "default"},
     }))
     .unwrap();
     assert_eq!(
@@ -55,6 +58,21 @@ fn autonomous_view_field_resolves_each_sub_knob_and_rejects_others() {
     assert_eq!(
         v.field("autonomous.max_rounds").unwrap().value,
         serde_json::json!(12)
+    );
+    // RFC 0052 §E / PR 7 standing sub-knobs resolve through their own arms.
+    assert_eq!(
+        v.field("autonomous.schedule_interval_seconds")
+            .unwrap()
+            .value,
+        serde_json::json!(3600)
+    );
+    assert_eq!(
+        v.field("autonomous.max_convenings").unwrap().value,
+        serde_json::json!(10)
+    );
+    assert_eq!(
+        v.field("autonomous.standing_budget_tokens").unwrap().value,
+        serde_json::json!(0)
     );
     // A flat knob and an unknown autonomous sub-knob both miss — the render
     // delegation falls through to its `unreachable!` only for a real registry knob.
@@ -74,6 +92,22 @@ fn parse_set_assignment_coerces_autonomous_sub_knobs_per_type() {
     assert_eq!(
         parse_set_assignment("autonomous.max_rounds=20").unwrap(),
         ("autonomous.max_rounds".to_string(), serde_json::json!(20))
+    );
+    // RFC 0052 §E / PR 7 standing sub-knobs are ints (schedule_interval_seconds +
+    // max_convenings a Go int, standing_budget_tokens a Go int64 — all int-class).
+    assert_eq!(
+        parse_set_assignment("autonomous.schedule_interval_seconds=3600").unwrap(),
+        (
+            "autonomous.schedule_interval_seconds".to_string(),
+            serde_json::json!(3600)
+        )
+    );
+    assert_eq!(
+        parse_set_assignment("autonomous.standing_budget_tokens=5000000").unwrap(),
+        (
+            "autonomous.standing_budget_tokens".to_string(),
+            serde_json::json!(5000000)
+        )
     );
     assert_eq!(
         parse_set_assignment("autonomous.convener=nova-sparrow").unwrap(),

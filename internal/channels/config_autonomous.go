@@ -120,6 +120,12 @@ var (
 	ErrAutonomousNotGroup = errors.New("channels: autonomous.enabled requires a group channel")
 )
 
+// The STANDING/scheduled sentinels ([ErrInvalidAutonomousSchedule],
+// [ErrInvalidAutonomousMaxConvenings], [ErrInvalidAutonomousStandingBudget],
+// [ErrAutonomousStandingBoundRequired]), the override accessors the aggregate-bound
+// gate reads, and the shared [standingBoundMissing] predicate live in the RFC 0052
+// §E sibling config_autonomous_standing.go (this file is at the review cap).
+
 // validateConvenerMembership enforces the load-path OQ #1 convener rules for an
 // ARMED channel: the convener is non-empty, distinct from the escalation chair
 // (the convener owns the agenda lifecycle, a separate role from the chair's
@@ -183,6 +189,16 @@ type AutonomousConfig struct {
 	// floor control, one message without it — see [DefaultAutonomousMaxRounds]).
 	// Zero/absent fills [DefaultAutonomousMaxRounds] at load; negative is rejected.
 	MaxRounds int `yaml:"max_rounds"`
+	// RFC 0052 §E / PR 7 standing sub-knobs (rationale in config_autonomous_standing.go).
+	// ScheduleIntervalSeconds is the RFC 0024 timer interval that makes the channel
+	// STANDING (the convener re-woken every interval_seconds); 0 is a one-shot
+	// channel, a positive value (>= 1s) arms the schedule. MaxConvenings /
+	// StandingBudgetTokens are the aggregate bound a standing channel MUST carry (0 =
+	// unset), since the per-interaction cap does not bound a recurring schedule. DARK
+	// in PR 7a apart from the aggregate-bound validate gate.
+	ScheduleIntervalSeconds int   `yaml:"schedule_interval_seconds"`
+	MaxConvenings           int   `yaml:"max_convenings"`
+	StandingBudgetTokens    int64 `yaml:"standing_budget_tokens"`
 }
 
 // DefaultAutonomousConfig is the shipped default rung — the value an un-configured
@@ -214,6 +230,15 @@ func (a AutonomousConfig) normalized() AutonomousConfig {
 func (a AutonomousConfig) validateFields() error {
 	if a.MaxRounds < 0 {
 		return fmt.Errorf("%w: %d (must be >= 0)", ErrInvalidAutonomousMaxRounds, a.MaxRounds)
+	}
+	if a.ScheduleIntervalSeconds < 0 {
+		return fmt.Errorf("%w: %d (must be >= 0)", ErrInvalidAutonomousSchedule, a.ScheduleIntervalSeconds)
+	}
+	if a.MaxConvenings < 0 {
+		return fmt.Errorf("%w: %d (must be >= 0)", ErrInvalidAutonomousMaxConvenings, a.MaxConvenings)
+	}
+	if a.StandingBudgetTokens < 0 {
+		return fmt.Errorf("%w: %d (must be >= 0)", ErrInvalidAutonomousStandingBudget, a.StandingBudgetTokens)
 	}
 	if len(a.Agenda) > MaxAutonomousAgendaItems {
 		return fmt.Errorf("%w: %d items (max %d)", ErrInvalidAutonomousAgenda, len(a.Agenda), MaxAutonomousAgendaItems)
@@ -265,6 +290,18 @@ func (a AutonomousConfig) FreezeOverrides() *AutonomousOverrides {
 		rounds := a.MaxRounds
 		ov.MaxRounds = &rounds
 	}
+	if a.ScheduleIntervalSeconds != 0 {
+		interval := a.ScheduleIntervalSeconds
+		ov.ScheduleIntervalSeconds = &interval
+	}
+	if a.MaxConvenings != 0 {
+		convenings := a.MaxConvenings
+		ov.MaxConvenings = &convenings
+	}
+	if a.StandingBudgetTokens != 0 {
+		budget := a.StandingBudgetTokens
+		ov.StandingBudgetTokens = &budget
+	}
 	if ov.IsEmpty() {
 		return nil
 	}
@@ -284,6 +321,11 @@ type AutonomousOverrides struct {
 	Convener  *string   `json:"convener,omitempty"`
 	Goal      *string   `json:"goal,omitempty"`
 	MaxRounds *int      `json:"max_rounds,omitempty"`
+	// RFC 0052 §E / PR 7 standing sub-knobs — the second nested block's newest
+	// members, each a flat per-field tri-state like MaxRounds.
+	ScheduleIntervalSeconds *int   `json:"schedule_interval_seconds,omitempty"`
+	MaxConvenings           *int   `json:"max_convenings,omitempty"`
+	StandingBudgetTokens    *int64 `json:"standing_budget_tokens,omitempty"`
 }
 
 // IsEmpty reports whether no autonomous sub-knob is set — the inherit-all state.
@@ -292,7 +334,8 @@ type AutonomousOverrides struct {
 // pointer makes the struct non-comparable), so it is checked field by field.
 func (o AutonomousOverrides) IsEmpty() bool {
 	return o.Enabled == nil && o.Topic == nil && o.Agenda == nil &&
-		o.Convener == nil && o.Goal == nil && o.MaxRounds == nil
+		o.Convener == nil && o.Goal == nil && o.MaxRounds == nil &&
+		o.ScheduleIntervalSeconds == nil && o.MaxConvenings == nil && o.StandingBudgetTokens == nil
 }
 
 // validateFields runs the per-field range invariants against the set sub-knobs —
@@ -306,6 +349,15 @@ func (o *AutonomousOverrides) validateFields() error {
 	}
 	if o.MaxRounds != nil && *o.MaxRounds < 0 {
 		return fmt.Errorf("%w: %d (must be >= 0)", ErrInvalidAutonomousMaxRounds, *o.MaxRounds)
+	}
+	if o.ScheduleIntervalSeconds != nil && *o.ScheduleIntervalSeconds < 0 {
+		return fmt.Errorf("%w: %d (must be >= 0)", ErrInvalidAutonomousSchedule, *o.ScheduleIntervalSeconds)
+	}
+	if o.MaxConvenings != nil && *o.MaxConvenings < 0 {
+		return fmt.Errorf("%w: %d (must be >= 0)", ErrInvalidAutonomousMaxConvenings, *o.MaxConvenings)
+	}
+	if o.StandingBudgetTokens != nil && *o.StandingBudgetTokens < 0 {
+		return fmt.Errorf("%w: %d (must be >= 0)", ErrInvalidAutonomousStandingBudget, *o.StandingBudgetTokens)
 	}
 	if o.Agenda != nil {
 		if len(*o.Agenda) > MaxAutonomousAgendaItems {
@@ -346,6 +398,15 @@ func (o *AutonomousOverrides) resolve(base AutonomousConfig) AutonomousConfig {
 	}
 	if o.MaxRounds != nil {
 		base.MaxRounds = *o.MaxRounds
+	}
+	if o.ScheduleIntervalSeconds != nil {
+		base.ScheduleIntervalSeconds = *o.ScheduleIntervalSeconds
+	}
+	if o.MaxConvenings != nil {
+		base.MaxConvenings = *o.MaxConvenings
+	}
+	if o.StandingBudgetTokens != nil {
+		base.StandingBudgetTokens = *o.StandingBudgetTokens
 	}
 	return base
 }
@@ -418,6 +479,21 @@ func (o ChannelConfigOverrides) validateAutonomous() error {
 	if *o.EscalationChairID == convener {
 		return fmt.Errorf("%w: %q is also the escalation_chair_id; the convener owns the agenda lifecycle and is a distinct role from the chair (RFC 0052 OQ #1)",
 			ErrInvalidAutonomousConvener, convener)
+	}
+	// Standing aggregate-bound (RFC 0052 §E / PR 7): a channel with a positive
+	// schedule interval is STANDING — it re-convenes on a timer, opening a fresh
+	// SEPARATELY-capped interaction each fire, so the per-interaction cost cap leaves
+	// the recurring total unbounded. It must declare an aggregate bound. The merge
+	// base freezes the resolved schedule + bound into the override set
+	// ([AutonomousConfig.FreezeOverrides]), so a `{autonomous}` PATCH onto a
+	// store-canonical standing channel carries them here — this is the apply-time
+	// mirror of the load-path [Config.Validate] check, never a lockout on an
+	// unrelated edit (the first-edit baseline froze the pre-edit rung, so adding a
+	// schedule without a bound is caught on the same edit that adds it). The
+	// predicate is shared with the load path so the two cannot drift.
+	if standingBoundMissing(o.Autonomous.effectiveScheduleInterval(),
+		o.Autonomous.effectiveMaxConvenings(), o.Autonomous.effectiveStandingBudgetTokens()) {
+		return ErrAutonomousStandingBoundRequired
 	}
 	return nil
 }

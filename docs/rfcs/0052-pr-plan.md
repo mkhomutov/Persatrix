@@ -314,10 +314,10 @@ Items surfaced by the deep reviews that are **deliberately deferred** to the PR 
 
 | File | Change |
 |------|--------|
-| `internal/channels/` + `agents/` timer wiring | `autonomous.schedule` (an RFC 0024 timer spec + a topic source) reaches the convener via the **config-round-trip** seam — write into the convener's `agents.yaml` timer set ([OQ #4](0052-autonomous-agent-channels.md#open-questions); the runtime `RegisterTimer` API stays deferred). Phase 3 ships **fixed/rotating** topic; an operator-supplied queue is a follow-up. |
+| `internal/channels/` + `agents/` timer wiring | `autonomous.schedule` (an RFC 0024 timer spec + a topic source) reaches the convener via the **config-round-trip** seam — write into the convener's `agents.yaml` timer set ([OQ #4](0052-autonomous-agent-channels.md#open-questions); the runtime `RegisterTimer` API stays deferred). |
 | [`internal/channels/config_validate.go`](../../internal/channels/config_validate.go) | The **standing aggregate-bound gate** — `validate` rejects a standing (`autonomous.schedule`-bearing) channel without `max_convenings` and/or a standing-window cost budget. |
-| CLI + web config surfaces | `autonomous.schedule` + `max_convenings` join the `channel_config_autonomous.rs` / `AutonomousSettings.svelte` surfaces (PR 2); the web panel shows a **convening-count / aggregate-bound readout** so an operator sees how close a standing channel is to its bound. |
-| Tests | `MT-AUTONOMOUS-003` — a standing channel convenes a fresh interaction on schedule across a window, unattended, **and stops at the aggregate bound**; **and the wallet footprint stays bounded** — each convening's `interactionTokens` residue is evicted on close (PR 4), so the map does not grow one entry per convening across the window. |
+| CLI + web config surfaces | `autonomous.schedule` + `max_convenings` join the `channel_config_autonomous.rs` / `AutonomousSettings.svelte` surfaces (PR 2); the web panel shows a **convening-count / aggregate-bound readout**. |
+| Tests | `MT-AUTONOMOUS-003` — a standing channel convenes a fresh interaction on schedule across a window, unattended, **and stops at the aggregate bound**; **and the wallet footprint stays bounded** — each convening's `interactionTokens` residue is evicted on close (PR 4), so the map does not grow one entry per convening. |
 
 #### PR checklist
 
@@ -417,8 +417,9 @@ A new channel *mode* + CLI/web surfaces needs real doc + diagram **edits**, not 
 | 4b-i | 1d — deterministic bounded-close trigger (max_rounds + soft-budget) + router→wallet spend read + artifact-bearing close teardown | `feature/v0311-rfc0052-bounded-close` | ✅ Merged |
 | 4b-ii | 1d — goal-directed chair synthesis turn (close-on-reply ordering) + OQ #6 close-summary metering + redelivery marker | `feature/v0311-rfc0052-synthesis-turn` | ✅ Merged |
 | 5 | 1e — acceptance suite + MT-AUTONOMOUS-001 | `feature/v0311-rfc0052-phase1-mt` | ✅ Merged |
-| 6 | 2 — anti-collapse cadence (convener, scoped) | `feature/v0311-rfc0052-anti-collapse` | ⬜ |
-| 7 | 3 — standing/scheduled + aggregate bound + web readout | `feature/v0311-rfc0052-standing` | ⬜ |
+| 6 | 2 — anti-collapse cadence (convener, scoped) | `feature/v0311-rfc0052-anti-collapse` | ✅ Merged |
+| 7a | 3 — standing config backend + aggregate-bound gate + REST (dark) | `feature/v0311-rfc0052-standing-backend` | 🔀 PR open |
+| 7b+ | 3 — timer-wiring seam + convening counter + CLI/web readout + MT | `feature/v0311-rfc0052-standing` | ⬜ |
 | 8 | 4a — `make demo-autonomous` (offline) | `feature/v0311-rfc0052-demo-offline` | ⬜ |
 | 9 | 4b — four-vendor headline + closeout (cuttable) | `feature/v0311-rfc0052-demo-multivendor` | ⬜ |
 

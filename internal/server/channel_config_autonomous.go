@@ -100,6 +100,36 @@ func mergeAutonomousPatch(base *channels.AutonomousOverrides, raw json.RawMessag
 				return nil, err
 			}
 			out.MaxRounds = &v
+		case "schedule_interval_seconds":
+			if isNull {
+				out.ScheduleIntervalSeconds = nil
+				continue
+			}
+			v, err := decodeKnob[int]("autonomous.schedule_interval_seconds", rawVal)
+			if err != nil {
+				return nil, err
+			}
+			out.ScheduleIntervalSeconds = &v
+		case "max_convenings":
+			if isNull {
+				out.MaxConvenings = nil
+				continue
+			}
+			v, err := decodeKnob[int]("autonomous.max_convenings", rawVal)
+			if err != nil {
+				return nil, err
+			}
+			out.MaxConvenings = &v
+		case "standing_budget_tokens":
+			if isNull {
+				out.StandingBudgetTokens = nil
+				continue
+			}
+			v, err := decodeKnob[int64]("autonomous.standing_budget_tokens", rawVal)
+			if err != nil {
+				return nil, err
+			}
+			out.StandingBudgetTokens = &v
 		default:
 			return nil, errors.New("unknown autonomous knob: " + key)
 		}
@@ -116,12 +146,15 @@ func mergeAutonomousPatch(base *channels.AutonomousOverrides, raw json.RawMessag
 // autonomous analogue of [reasoningResponse].
 func autonomousResponse(a channels.AutonomousConfig, ov *channels.AutonomousOverrides) autonomousConfigResponse {
 	return autonomousConfigResponse{
-		Enabled:   configField(a.Enabled, ov != nil && ov.Enabled != nil),
-		Topic:     configField(a.Topic, ov != nil && ov.Topic != nil),
-		Agenda:    configField(agendaValue(a.Agenda), ov != nil && ov.Agenda != nil),
-		Convener:  configField(a.Convener, ov != nil && ov.Convener != nil),
-		Goal:      configField(a.Goal, ov != nil && ov.Goal != nil),
-		MaxRounds: configField(a.MaxRounds, ov != nil && ov.MaxRounds != nil),
+		Enabled:                 configField(a.Enabled, ov != nil && ov.Enabled != nil),
+		Topic:                   configField(a.Topic, ov != nil && ov.Topic != nil),
+		Agenda:                  configField(agendaValue(a.Agenda), ov != nil && ov.Agenda != nil),
+		Convener:                configField(a.Convener, ov != nil && ov.Convener != nil),
+		Goal:                    configField(a.Goal, ov != nil && ov.Goal != nil),
+		MaxRounds:               configField(a.MaxRounds, ov != nil && ov.MaxRounds != nil),
+		ScheduleIntervalSeconds: configField(a.ScheduleIntervalSeconds, ov != nil && ov.ScheduleIntervalSeconds != nil),
+		MaxConvenings:           configField(a.MaxConvenings, ov != nil && ov.MaxConvenings != nil),
+		StandingBudgetTokens:    configField(a.StandingBudgetTokens, ov != nil && ov.StandingBudgetTokens != nil),
 	}
 }
 
