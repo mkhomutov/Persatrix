@@ -67,6 +67,8 @@ func (s *Server) writeChannelError(w http.ResponseWriter, err error) {
 		writeError(w, "PAYLOAD_TOO_LARGE", err.Error(), http.StatusRequestEntityTooLarge)
 	case errors.Is(err, channels.ErrParticipantBudgetExhausted): // RFC 0030 Layer 2
 		writeError(w, "TOO_MANY_REQUESTS", err.Error(), http.StatusTooManyRequests)
+	case errors.Is(err, channels.ErrAutonomousConveningBoundReached): // RFC 0052 §E PR 7b — aggregate convening ceiling
+		writeError(w, "TOO_MANY_REQUESTS", err.Error(), http.StatusTooManyRequests)
 	case errors.Is(err, registry.ErrAgentNotFound), // PR #718 review — the convene dispatch's
 		errors.Is(err, channels.ErrAgentNotReady),   // delivery-miss returns: a restarting /
 		errors.Is(err, channels.ErrDeliveryRefused): // queue-full convener is a routine,

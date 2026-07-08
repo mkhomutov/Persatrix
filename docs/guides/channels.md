@@ -1063,9 +1063,14 @@ Convening targets an **idle** channel: a channel that already has a live
 interaction is refused (`409`) rather than silently joined — the convener opens
 one discussion, not a second one over a running one (forcing-fresh on a standing
 re-convene is a later RFC 0052 PR). Note the convene ack is `202 Accepted` —
-"the convener was woken", not "the discussion ran" — and repeated convening of an
-*idle* channel is not yet aggregate-bounded (the §E count bound is a later PR), so
-treat convene as an operator-initiated, not a scripted-loop, action until then.
+"the convener was woken", not "the discussion ran". Repeated convening is bounded
+by the §E aggregate ceiling: once a channel has been convened `autonomous.max_convenings`
+times, a further convene is refused with `429 Too Many Requests` (the count is
+process-lifetime — a restart resets it — and cleared when the channel is deleted).
+A channel with `max_convenings` unset (`0`) is not count-bounded; the
+`standing_budget_tokens` cost ceiling and the timer that fires the schedule
+automatically are later RFC 0052 PRs, so treat convene as an operator-initiated,
+not a scripted-loop, action until the schedule lands.
 
 - **Web console** — a **Convene** button in the Channel-settings panel's
   *Autonomous channel* section, shown only when the channel is armed per the
