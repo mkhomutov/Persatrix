@@ -368,9 +368,13 @@ func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (cha
 	idleSeconds, _ := s.channelRouter.InteractionIdleTimeoutFor(id)
 	budget := s.channelRouter.InteractionBudgetTokensFor(id)
 	// One resolved autonomous snapshot backs BOTH the config block (value +
-	// provenance) and the runtime readout (the live convening count against this
-	// same resolved max_convenings) — read once so the two cannot tear across a
-	// concurrent RFC 0050 apply.
+	// provenance) and the runtime readout's bound — read once so the config's
+	// max_convenings and the readout's max_convenings cannot tear across a
+	// concurrent RFC 0050 apply. The convening COUNT is still read separately
+	// (ConveningCount takes its own conveningMu, distinct from AutonomousFor's
+	// autonomousMu), so count and max_convenings can come from slightly different
+	// instants; that skew is harmless because autonomousRuntime clamps a
+	// count-above-bound remaining to zero rather than reporting a negative.
 	autonomous := s.channelRouter.AutonomousFor(id)
 
 	resp := channelConfigResponse{
