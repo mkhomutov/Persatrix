@@ -272,6 +272,21 @@ func TestAutonomousOverridesValidate_StandingBound(t *testing.T) {
 	}
 	assert.NoError(t, oneShot.Validate())
 
+	// An EXPLICIT zero bound (a `&0` pointer, distinct from an absent nil) does NOT
+	// satisfy the gate: `standingBoundMissing` keys on `<= 0`, so a standing channel
+	// whose only declared bound is `max_convenings: 0` is still un-creatable. Guards
+	// the predicate boundary against a future set-vs-unset (`!= nil`) refactor that
+	// would wrongly treat an explicit zero as a bound.
+	zero := 0
+	zeroBound := ChannelConfigOverrides{
+		Autonomous: &AutonomousOverrides{
+			Enabled: &enabled, Convener: &convener, ScheduleIntervalSeconds: &interval, MaxConvenings: &zero,
+		},
+		InteractionBudgetTokens: &budget,
+		EscalationChairID:       &chair,
+	}
+	assert.ErrorIs(t, zeroBound.Validate(), ErrAutonomousStandingBoundRequired)
+
 	// Per-field negatives are rejected regardless of enabled.
 	neg := -1
 	negBudget := int64(-1)

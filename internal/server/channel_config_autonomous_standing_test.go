@@ -89,6 +89,37 @@ func TestChannelConfig_AutonomousStandingBoundViaBudgetAccepted(t *testing.T) {
 	assert.True(t, srv.channelRouter.AutonomousFor(id).Enabled)
 }
 
+// TestChannelConfig_AutonomousStandingCannotUnsetOnlyBound: once a standing
+// channel is armed with its sole aggregate bound, a follow-up PATCH that nulls
+// that bound (leaving the schedule) is rejected — `mergeAutonomousPatch` folds the
+// null onto the frozen base, the schedule survives, and the gate fires. Exercises
+// the merge-base retention + gate together: the safety bound on a LIVE standing
+// channel cannot be silently removed by a later edit.
+func TestChannelConfig_AutonomousStandingCannotUnsetOnlyBound(t *testing.T) {
+	srv, id := autonomousTestServer(t)
+
+	// Arm standing with max_convenings as the only bound (revision 0 → 1).
+	rec := doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		standingArmBody(3600, map[string]any{"max_convenings": 10}),
+		map[string]string{"If-Match": "0"})
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	// Null the sole bound while the schedule stays → standing-bound-required 400.
+	rec = doRequestWithHeaders(srv.Handler(), http.MethodPatch, "/api/v1/channels/"+id+"/config",
+		standingArmBody(3600, map[string]any{"max_convenings": nil}),
+		map[string]string{"If-Match": "1"})
+	assert.Equal(t, http.StatusBadRequest, rec.Code,
+		"unsetting a standing channel's only aggregate bound must be rejected; body=%s", rec.Body.String())
+
+	// The rejected edit never wrote — the bound survives intact and the channel
+	// stays armed at its post-arm revision.
+	rec = doRequest(srv.Handler(), http.MethodGet, "/api/v1/channels/"+id+"/config", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	a := decodeAutonomous(t, rec.Body.Bytes())
+	assert.EqualValues(t, 10, a["max_convenings"].Value, "the sole bound survives the rejected unset")
+	assert.Equal(t, true, a["enabled"].Value, "the standing channel stays armed")
+}
+
 // TestChannelConfig_AutonomousStandingDefaultsUnset: a never-edited channel
 // reports the schedule/aggregate-bound sub-knobs as unset (0), default-sourced —
 // never a spurious standing channel.
