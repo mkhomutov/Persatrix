@@ -164,3 +164,29 @@ func TestConveneHandler_DriftedChair_BadRequest(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code, "body=%s", rec.Body.String())
 	assert.Contains(t, rec.Body.String(), "synthesis turn")
 }
+
+// TestConveneHandler_ConveningBoundReached_TooManyRequests — RFC 0052 §E PR 7b:
+// once a channel has been convened its `autonomous.max_convenings` times, a
+// further convene is refused with 429 Too Many Requests (the aggregate quota is
+// exhausted — the sibling of the RFC 0030 Layer-2 participant-budget 429), not a
+// 400/409. The recording test dispatcher never replies, so no interaction commits
+// between the two convenes — the second is refused on the bound, not the
+// orthogonal already-convening guard.
+func TestConveneHandler_ConveningBoundReached_TooManyRequests(t *testing.T) {
+	srv, id := channelConfigTestServerWithMembers(t, true, []channels.Member{
+		{ParticipantID: "alice", RespondPolicy: channels.RespondAlways},
+		{ParticipantID: "bob", RespondPolicy: channels.RespondAlways},
+	})
+	srv.channelRouter.SetAutonomous(id, channels.AutonomousConfig{
+		Enabled: true, Convener: "alice", Topic: "Weekly review",
+		Goal: "A recommendation.", ScheduleIntervalSeconds: 3600, MaxConvenings: 1,
+	})
+	srv.channelRouter.SetEscalationChair(id, "bob")
+
+	rec := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/"+id+"/convene", nil)
+	require.Equal(t, http.StatusAccepted, rec.Code, "1st convening under the bound; body=%s", rec.Body.String())
+
+	rec = doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/"+id+"/convene", nil)
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code, "2nd convening exceeds max_convenings; body=%s", rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "TOO_MANY_REQUESTS")
+}

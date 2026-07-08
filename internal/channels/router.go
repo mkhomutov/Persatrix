@@ -229,6 +229,20 @@ type ChannelRouter struct {
 	autonomousMu sync.RWMutex
 	autonomous   map[string]AutonomousConfig
 
+	// conveningMu guards convenings — the RFC 0052 §E (v0.3.11 PR 7b) per-channel
+	// aggregate convening count, keyed by channel id. Incremented on each
+	// SUCCESSFUL [ChannelRouter.ConveneChannel] and consulted against the resolved
+	// `autonomous.max_convenings`; the count bound the config gate (PR 7a) only
+	// required be DECLARED becomes a live ceiling here. Per-process state — a
+	// restart resets it to zero, so the bound holds per-process, NOT across the
+	// standing window (convening_counter.go's scope limits); cleared on channel
+	// delete ([ChannelRouter.PurgeChannelInteraction]). Its own mutex —
+	// never held across the dispatch RPC — so a convening reservation on one
+	// channel never blocks traffic on another. Methods live in
+	// convening_counter.go.
+	conveningMu sync.Mutex
+	convenings  map[string]int
+
 	// applyMu serializes the RFC 0050 Phase 1 PR 2 store-config apply path
 	// ([ChannelRouter.ApplyChannelConfig]). It is NOT a per-knob lock — each knob
 	// already has its own setter mutex above. It exists to make the persist →
@@ -284,6 +298,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		escalationChairs:              make(map[string]string),
 		reasoning:                     make(map[string]ReasoningConfig),
 		autonomous:                    make(map[string]AutonomousConfig),
+		convenings:                    make(map[string]int),
 		synthesisTimeout:              defaultSynthesisReplyTimeout,
 	}
 }

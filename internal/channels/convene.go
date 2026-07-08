@@ -29,7 +29,10 @@ package channels
 // refusal is the safe interim posture until PR 7's force-fresh + aggregate
 // bound land. (This guards the standing/already-live case; the narrow
 // idle-race where two convenes both land before the convener's first reply
-// commits an interaction is not yet bounded — also PR 7.)
+// commits an interaction is still not fully bounded: PR 7b's convening counter
+// caps the COUNT fail-closed — two racing convenes cannot exceed max_convenings
+// — but does NOT stop both openers dispatching into one folded interaction; that
+// two-openers race is the force-fresh slice's, still deferred.)
 //
 // `channel.go` (at the 500-line review cap) is untouched: the convene publish
 // logic lives here, mirroring how `router_autonomous.go` carved off the RFC
@@ -226,12 +229,32 @@ func (r *ChannelRouter) ConveneChannel(ctx context.Context, channelID string) (s
 		Content:   directive,
 	}
 
+	// The RFC 0052 §E aggregate convening ceiling — the LAST precondition, checked
+	// after every validation passes and reserved atomically right before the
+	// dispatch, so only a convening whose opener actually DISPATCHES consumes a
+	// slot ([reserveConvening]/[releaseConvening], convening_counter.go). The count
+	// tracks opener-dispatches, fail-closed — it may refuse early (the idle race
+	// can burn a slot per opener while they fold into one interaction) but never
+	// exceeds max_convenings; see convening_counter.go's scope-limits note.
+	// A standing channel re-opens a fresh, separately-capped interaction each fire,
+	// so `autonomous.max_convenings` is what bounds the recurring total the
+	// per-interaction cap cannot; PR 7a required it be declared, this enforces it.
+	// A non-standing / no-count-bound channel resolves `MaxConvenings == 0` →
+	// unbounded (the count is still tracked for the readout).
+	if !r.reserveConvening(channelID, a.MaxConvenings) {
+		return "", fmt.Errorf("channels: convene %s: %w: reached max_convenings=%d",
+			channelID, ErrAutonomousConveningBoundReached, a.MaxConvenings)
+	}
+
 	// Mark the convener active so the RFC 0048 console (and the web "Convene"
 	// affordance's convening indicator) shows the opener being composed; the
 	// failed-dispatch branch clears it, mirroring the chair escalation — no
 	// reply can ever clear a mark whose dispatch never landed.
 	r.markActivity(channelID, []string{convener})
 	if err := r.dispatchTo(ctx, msg, ChannelTypeGroup, "", *convenerMember, len(members), nil, dispatchControl{marker: markerConvene}); err != nil {
+		// The opener never landed — return the reserved slot so a flapping
+		// convener endpoint cannot silently exhaust the aggregate budget.
+		r.releaseConvening(channelID)
 		r.clearActivity(channelID, convener)
 		return "", fmt.Errorf("channels: convene %s: dispatch to convener %q: %w", channelID, convener, err)
 	}
