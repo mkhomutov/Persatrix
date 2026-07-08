@@ -152,6 +152,54 @@ func TestConvene_FailedDispatchDoesNotConsumeAConvening(t *testing.T) {
 		"a missed opener releases its reserved slot")
 }
 
+// toggleableConveneDispatcher fails its convene-lane sends only while `fail` is
+// set, so a single-goroutine test can drive a MISS then a LAND on the same
+// router (a plain bool suffices — the reusable-slot test is sequential).
+type toggleableConveneDispatcher struct {
+	messageRecordingDispatcher
+	fail bool
+}
+
+func (d *toggleableConveneDispatcher) Dispatch(ctx context.Context, env DispatchEnvelope, msg ChannelMessage) error {
+	_ = d.messageRecordingDispatcher.Dispatch(ctx, env, msg)
+	if env.Convene && d.fail {
+		return errors.New("convener endpoint unreachable")
+	}
+	return nil
+}
+
+// TestConvene_ReleasedSlotIsReusable — release-on-miss must return the slot to
+// the pool, not merely leave the count at 0: after a missed opener releases its
+// reservation, a LATER convening that lands must be able to reclaim it. With a
+// bound of exactly one, this is provable end-to-end — the miss frees the only
+// slot, the recovering convener claims it, and a third convening then hits the
+// aggregate bound, so the one reclaimed slot is genuinely consumed (deep-review
+// follow-up: TestConvene_FailedDispatchDoesNotConsumeAConvening only proved the
+// count stays 0 across misses, never that a freed slot is reusable).
+func TestConvene_ReleasedSlotIsReusable(t *testing.T) {
+	disp := &toggleableConveneDispatcher{fail: true}
+	router, ch := conveningHarness(t, disp, standingArmed(1))
+
+	// The opener MISSES on dispatch — its reserved slot must be released.
+	_, err := router.ConveneChannel(context.Background(), ch)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrAutonomousConveningBoundReached)
+	require.Equal(t, 0, router.ConveningCount(ch), "a missed opener releases its slot")
+
+	// The convener endpoint recovers; the next convening lands and reclaims the
+	// one slot the bound allows — proving the release returned it to the pool.
+	disp.fail = false
+	_, err = router.ConveneChannel(context.Background(), ch)
+	require.NoError(t, err, "the released slot is reusable by a landing convening")
+	assert.Equal(t, 1, router.ConveningCount(ch))
+
+	// And the reclaimed slot still counts: with the bound now genuinely spent, a
+	// further convening is refused on the aggregate bound (not silently admitted).
+	_, err = router.ConveneChannel(context.Background(), ch)
+	assert.ErrorIs(t, err, ErrAutonomousConveningBoundReached,
+		"the reclaimed slot counts against max_convenings")
+}
+
 // TestConveningCount_ZeroForUnconvenedChannel — the accessor reports 0 for a
 // channel that has never been convened (the web readout's baseline).
 func TestConveningCount_ZeroForUnconvenedChannel(t *testing.T) {

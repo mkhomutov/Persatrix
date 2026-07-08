@@ -233,9 +233,10 @@ type ChannelRouter struct {
 	// aggregate convening count, keyed by channel id. Incremented on each
 	// SUCCESSFUL [ChannelRouter.ConveneChannel] and consulted against the resolved
 	// `autonomous.max_convenings`; the count bound the config gate (PR 7a) only
-	// required be DECLARED becomes a live ceiling here. Process-lifetime state (a
-	// restart resets it, like the wallet's per-interaction accounting); cleared on
-	// channel delete ([ChannelRouter.PurgeChannelInteraction]). Its own mutex —
+	// required be DECLARED becomes a live ceiling here. Per-process state — a
+	// restart resets it to zero, so the bound holds per-process, NOT across the
+	// standing window (convening_counter.go's scope limits); cleared on channel
+	// delete ([ChannelRouter.PurgeChannelInteraction]). Its own mutex —
 	// never held across the dispatch RPC — so a convening reservation on one
 	// channel never blocks traffic on another. Methods live in
 	// convening_counter.go.

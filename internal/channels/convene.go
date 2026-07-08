@@ -29,7 +29,10 @@ package channels
 // refusal is the safe interim posture until PR 7's force-fresh + aggregate
 // bound land. (This guards the standing/already-live case; the narrow
 // idle-race where two convenes both land before the convener's first reply
-// commits an interaction is not yet bounded — also PR 7.)
+// commits an interaction is still not fully bounded: PR 7b's convening counter
+// caps the COUNT fail-closed — two racing convenes cannot exceed max_convenings
+// — but does NOT stop both openers dispatching into one folded interaction; that
+// two-openers race is the force-fresh slice's, still deferred.)
 //
 // `channel.go` (at the 500-line review cap) is untouched: the convene publish
 // logic lives here, mirroring how `router_autonomous.go` carved off the RFC
@@ -228,8 +231,11 @@ func (r *ChannelRouter) ConveneChannel(ctx context.Context, channelID string) (s
 
 	// The RFC 0052 §E aggregate convening ceiling — the LAST precondition, checked
 	// after every validation passes and reserved atomically right before the
-	// dispatch, so a convening that is about to actually open is the only one that
-	// consumes a slot ([reserveConvening]/[releaseConvening], convening_counter.go).
+	// dispatch, so only a convening whose opener actually DISPATCHES consumes a
+	// slot ([reserveConvening]/[releaseConvening], convening_counter.go). The count
+	// tracks opener-dispatches, fail-closed — it may refuse early (the idle race
+	// can burn a slot per opener while they fold into one interaction) but never
+	// exceeds max_convenings; see convening_counter.go's scope-limits note.
 	// A standing channel re-opens a fresh, separately-capped interaction each fire,
 	// so `autonomous.max_convenings` is what bounds the recurring total the
 	// per-interaction cap cannot; PR 7a required it be declared, this enforces it.
