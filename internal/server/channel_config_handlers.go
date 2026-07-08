@@ -367,6 +367,11 @@ func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (cha
 	chair, _ := s.channelRouter.EscalationChairFor(id)
 	idleSeconds, _ := s.channelRouter.InteractionIdleTimeoutFor(id)
 	budget := s.channelRouter.InteractionBudgetTokensFor(id)
+	// One resolved autonomous snapshot backs BOTH the config block (value +
+	// provenance) and the runtime readout (the live convening count against this
+	// same resolved max_convenings) — read once so the two cannot tear across a
+	// concurrent RFC 0050 apply.
+	autonomous := s.channelRouter.AutonomousFor(id)
 
 	resp := channelConfigResponse{
 		Revision:                               revision,
@@ -379,7 +384,8 @@ func (s *Server) buildChannelConfigResponse(ctx context.Context, id string) (cha
 		EscalationChairID:                      configField(chair, overrides.EscalationChairID != nil),
 		InteractionIdleTimeoutSeconds:          configField(idleSeconds, overrides.InteractionIdleTimeoutSeconds != nil),
 		Reasoning:                              reasoningResponse(s.channelRouter.ReasoningFor(id), overrides.Reasoning),
-		Autonomous:                             autonomousResponse(s.channelRouter.AutonomousFor(id), overrides.Autonomous),
+		Autonomous:                             autonomousResponse(autonomous, overrides.Autonomous),
+		AutonomousRuntime:                      autonomousRuntime(s.channelRouter.ConveningCount(id), autonomous),
 	}
 	return resp, nil
 }

@@ -421,8 +421,8 @@ A new channel *mode* + CLI/web surfaces needs real doc + diagram **edits**, not 
 | 5 | 1e — acceptance suite + MT-AUTONOMOUS-001 | `feature/v0311-rfc0052-phase1-mt` | ✅ Merged |
 | 6 | 2 — anti-collapse cadence (convener, scoped) | `feature/v0311-rfc0052-anti-collapse` | ✅ Merged |
 | 7a | 3 — standing config backend + aggregate-bound gate + REST (dark) | `feature/v0311-rfc0052-standing-backend` | ✅ Merged |
-| 7b-i | 3 — convening counter + aggregate `max_convenings` enforcement (429) | `feature/v0311-rfc0052-convening-counter` | 🔀 PR open |
-| 7b-ii+ | 3 — timer-wiring seam + `standing_budget_tokens` + CLI/web readout + MT | `feature/v0311-rfc0052-standing` | ⬜ |
+| 7b-i | 3 — convening counter + `max_convenings` (429) | `feature/v0311-rfc0052-convening-counter` | ✅ Merged |
+| 7b-ii+ | 3 — `autonomous_runtime` readout; then `standing_budget_tokens` + timer + MT | `feature/v0311-rfc0052-convening-readout` | 🔀 PR open |
 | 8 | 4a — `make demo-autonomous` (offline) | `feature/v0311-rfc0052-demo-offline` | ⬜ |
 | 9 | 4b — four-vendor headline + closeout (cuttable) | `feature/v0311-rfc0052-demo-multivendor` | ⬜ |
 

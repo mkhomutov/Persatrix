@@ -158,6 +158,28 @@ func autonomousResponse(a channels.AutonomousConfig, ov *channels.AutonomousOver
 	}
 }
 
+// autonomousRuntime builds the LIVE convening-count / aggregate-bound readout
+// (RFC 0052 §E, [autonomousRuntimeResponse]) from the router's process-lifetime
+// convening `count` and the channel's resolved autonomous config. It owns the two
+// derivation rules so the clients (web panel, CLI) only render:
+//
+//   - unbounded (`max_convenings <= 0`) ⇒ nil remaining (JSON `null`): there is
+//     no aggregate count bound to remain against, only the always-tracked count;
+//   - bounded ⇒ `max_convenings - count`, clamped at zero: a `max_convenings`
+//     LOWERED below the already-spent count (a legal RFC 0050 edit) must report an
+//     exhausted allowance (0), never a negative one.
+func autonomousRuntime(count int, a channels.AutonomousConfig) autonomousRuntimeResponse {
+	resp := autonomousRuntimeResponse{ConveningCount: count}
+	if a.MaxConvenings > 0 {
+		remaining := a.MaxConvenings - count
+		if remaining < 0 {
+			remaining = 0
+		}
+		resp.ConveningsRemaining = &remaining
+	}
+	return resp
+}
+
 // agendaValue normalizes a nil agenda to an empty slice so the JSON cell reads
 // `[]` rather than `null` — an operator reads "no agenda items", not "unset".
 func agendaValue(agenda []string) []string {

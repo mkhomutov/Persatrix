@@ -68,6 +68,22 @@ pub(crate) struct AutonomousConfigView {
     pub(crate) standing_budget_tokens: ConfigField,
 }
 
+/// The LIVE (non-config) convening readout the server carries under
+/// `autonomous_runtime` — RFC 0052 §E, mirroring the Go `autonomousRuntimeResponse`.
+/// Unlike [`AutonomousConfigView`]'s `{value, source}` cells, these are runtime
+/// counters with no provenance: `convening_count` is how many openers the channel
+/// has dispatched this process lifetime, `convenings_remaining` the `max_convenings`
+/// allowance left (`None` ⇒ JSON `null` ⇒ unbounded). `#[serde(default)]` on the
+/// parent field means an older/stub payload without the block still decodes (count
+/// 0 / unbounded), so a missing readout never fails the whole GET.
+#[derive(Deserialize, Default)]
+pub(crate) struct AutonomousRuntimeView {
+    #[serde(default)]
+    pub(crate) convening_count: i64,
+    #[serde(default)]
+    pub(crate) convenings_remaining: Option<i64>,
+}
+
 impl AutonomousConfigView {
     /// The cell for a dotted `autonomous.<sub>` key, or `None` if `key` is not an
     /// autonomous sub-knob — the render delegation point for `config_rows` (tried

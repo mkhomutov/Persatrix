@@ -1072,6 +1072,16 @@ A channel with `max_convenings` unset (`0`) is not count-bounded; the
 automatically are later RFC 0052 PRs, so treat convene as an operator-initiated,
 not a scripted-loop, action until the schedule lands.
 
+How much of the aggregate allowance is spent is visible on the config **read**
+surface: `GET …/config` carries an `autonomous_runtime` block —
+`convening_count` (openers dispatched this process lifetime) and
+`convenings_remaining` (the `max_convenings` allowance left, or `null` when
+unbounded; clamped at zero if a lowered bound sits below the spent count). The web
+*Autonomous channel* panel renders it as a **Convenings: _N_ used, _M_ remaining**
+line, and `persatrix channel config get` prints a trailing `convenings … (runtime)`
+row. It is read-only observability — the count itself is enforced by the `429`
+ceiling above.
+
 - **Web console** — a **Convene** button in the Channel-settings panel's
   *Autonomous channel* section, shown only when the channel is armed per the
   *saved* config and disabled while there are unsaved edits (convening reads the

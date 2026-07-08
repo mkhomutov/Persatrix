@@ -367,3 +367,70 @@ describe("ChannelSettings — convene action", () => {
     );
   });
 });
+
+// RFC 0052 §E (v0.3.11 PR 7b): the convening-count / aggregate-bound readout —
+// the live count of openers this channel has dispatched (this process lifetime)
+// and, for a standing channel with a max_convenings bound, how much of that
+// aggregate allowance remains. Sourced from the GET …/config `autonomous_runtime`
+// block (runtime counters, no provenance), rendered only for an armed channel.
+describe("ChannelSettings — convening readout", () => {
+  it("shows the convening count and remaining allowance when armed and bounded", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        okJSON(
+          configBody({
+            autonomous: overriddenAutonomous,
+            autonomous_runtime: { convening_count: 1, convenings_remaining: 2 },
+          }),
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    expect(await screen.findByText(/1 used, 2 remaining/i)).toBeTruthy();
+  });
+
+  it("names the unbounded case when there is no aggregate bound", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        okJSON(
+          configBody({
+            autonomous: overriddenAutonomous,
+            autonomous_runtime: {
+              convening_count: 4,
+              convenings_remaining: null,
+            },
+          }),
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    expect(
+      await screen.findByText(/4 used \(no aggregate bound\)/i),
+    ).toBeTruthy();
+  });
+
+  it("omits the readout when the channel is not armed", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        okJSON(
+          configBody({
+            autonomous_runtime: {
+              convening_count: 0,
+              convenings_remaining: null,
+            },
+          }),
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+
+    // Wait for load (the topic field renders), then assert no convening readout.
+    await screen.findByLabelText("Topic");
+    expect(screen.queryByText(/used/i)).toBeNull();
+  });
+});
