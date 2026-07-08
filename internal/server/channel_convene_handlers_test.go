@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -188,5 +189,22 @@ func TestConveneHandler_ConveningBoundReached_TooManyRequests(t *testing.T) {
 
 	rec = doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/"+id+"/convene", nil)
 	assert.Equal(t, http.StatusTooManyRequests, rec.Code, "2nd convening exceeds max_convenings; body=%s", rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "TOO_MANY_REQUESTS")
+}
+
+// TestWriteChannelError_StandingBudgetExhausted_TooManyRequests — RFC 0052 §E
+// PR 7b: the aggregate SPEND ceiling (`standing_budget_tokens`) maps to 429 Too
+// Many Requests, the sibling of the convening-COUNT ceiling's 429 above.
+// Exercised directly on the error mapper because reaching budget exhaustion needs
+// folded wallet spend the handler harness cannot drive (convening does not spend;
+// folding rides the interaction close). The convene handler routes ConveneChannel
+// errors through this mapper — proven by the convening-bound test above — and
+// ConveneChannel returns this sentinel once folded spend >= standing_budget_tokens
+// (proven in the channels package), so the two together cover the production path.
+func TestWriteChannelError_StandingBudgetExhausted_TooManyRequests(t *testing.T) {
+	srv, _ := channelConfigTestServer(t, true)
+	rec := httptest.NewRecorder()
+	srv.writeChannelError(rec, fmt.Errorf("channels: convene c1: %w", channels.ErrAutonomousStandingBudgetExhausted))
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
 	assert.Contains(t, rec.Body.String(), "TOO_MANY_REQUESTS")
 }

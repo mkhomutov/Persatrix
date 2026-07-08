@@ -54,11 +54,12 @@ package channels
 //     promised.
 //
 // The `standing_budget_tokens` half of the aggregate bound (an aggregate SPEND
-// ceiling across the standing window) is a separate PR 7b slice — it needs the
-// per-interaction wallet residue accumulated across closes rather than a simple
-// count, and rides the interaction-closed eviction seam. A standing channel that
-// declares ONLY a token budget (no `max_convenings`) is therefore not yet
-// count-gated here; the config gate still requires it declare one of the two.
+// ceiling across the standing window) is its own slice, now landed in
+// standing_budget.go — it folds each interaction's settled discussion spend into a
+// per-channel running total at close rather than tracking a simple count. A
+// standing channel that declares ONLY a token budget (no `max_convenings`) is
+// therefore spend-gated there, not count-gated here; the config gate requires it
+// declare one of the two.
 
 import "errors"
 

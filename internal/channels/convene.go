@@ -229,6 +229,18 @@ func (r *ChannelRouter) ConveneChannel(ctx context.Context, channelID string) (s
 		Content:   directive,
 	}
 
+	// The RFC 0052 §E aggregate SPEND ceiling — the twin of the max_convenings COUNT
+	// ceiling reserved just below. A standing channel MAY bound the recurring total
+	// by token spend (`standing_budget_tokens`) instead of / alongside the count;
+	// each close folds its settled discussion spend into the channel's running total
+	// (standing_budget.go), and this refuses a fresh convening once that total has
+	// reached the budget. Read-only (no reservation), so it precedes the atomic
+	// reserveConvening; a zero budget is unbounded (the count-only / one-shot case).
+	if r.standingBudgetReached(channelID, a.StandingBudgetTokens) {
+		return "", fmt.Errorf("channels: convene %s: %w: spent %d of standing_budget_tokens=%d",
+			channelID, ErrAutonomousStandingBudgetExhausted, r.StandingSpend(channelID), a.StandingBudgetTokens)
+	}
+
 	// The RFC 0052 §E aggregate convening ceiling — the LAST precondition, checked
 	// after every validation passes and reserved atomically right before the
 	// dispatch, so only a convening whose opener actually DISPATCHES consumes a
