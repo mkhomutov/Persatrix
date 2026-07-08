@@ -243,6 +243,15 @@ type ChannelRouter struct {
 	conveningMu sync.Mutex
 	convenings  map[string]int
 
+	// standingMu guards standingSpend — the RFC 0052 §E (v0.3.11 PR 7b) per-channel
+	// aggregate SPEND total (the token twin of convenings), keyed by channel id.
+	// Each interaction close folds its settled discussion spend in and
+	// [ChannelRouter.ConveneChannel] consults it against `autonomous.standing_budget_tokens`.
+	// Per-process, cleared on channel delete; its own mutex like conveningMu. Full
+	// rationale + scope limits in standing_budget.go.
+	standingMu    sync.Mutex
+	standingSpend map[string]int64
+
 	// applyMu serializes the RFC 0050 Phase 1 PR 2 store-config apply path
 	// ([ChannelRouter.ApplyChannelConfig]). It is NOT a per-knob lock — each knob
 	// already has its own setter mutex above. It exists to make the persist →
@@ -299,6 +308,7 @@ func NewChannelRouter(store ChannelStore, dispatcher MessageDispatcher, logger *
 		reasoning:                     make(map[string]ReasoningConfig),
 		autonomous:                    make(map[string]AutonomousConfig),
 		convenings:                    make(map[string]int),
+		standingSpend:                 make(map[string]int64),
 		synthesisTimeout:              defaultSynthesisReplyTimeout,
 	}
 }

@@ -102,11 +102,13 @@ func (r *ChannelRouter) PurgeChannelInteraction(channelID string) {
 	for _, id := range []string{openID, retiredID} {
 		r.discardInteractionGovernance(id)
 	}
-	// Drop the RFC 0052 §E aggregate convening count too (PR 7b) — the channel is
-	// gone, so its process-lifetime count would otherwise leak one map entry per
-	// deleted standing channel (the sibling of the governance-state discharge
-	// above). Its own lock; taken outside the interactionMu section.
+	// Drop the RFC 0052 §E aggregate convening count AND standing spend too (PR 7b)
+	// — the channel is gone, so their process-lifetime entries would otherwise leak
+	// one map entry each per deleted standing channel (the sibling of the
+	// governance-state discharge above). Each has its own lock; taken outside the
+	// interactionMu section.
 	r.clearConvening(channelID)
+	r.clearStandingSpend(channelID)
 }
 
 // AutonomousFor returns the resolved RFC 0052 autonomous block for `channelID`. A

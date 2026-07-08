@@ -1067,10 +1067,16 @@ re-convene is a later RFC 0052 PR). Note the convene ack is `202 Accepted` —
 by the §E aggregate ceiling: once a channel has been convened `autonomous.max_convenings`
 times, a further convene is refused with `429 Too Many Requests` (the count is
 process-lifetime — a restart resets it — and cleared when the channel is deleted).
-A channel with `max_convenings` unset (`0`) is not count-bounded; the
-`standing_budget_tokens` cost ceiling and the timer that fires the schedule
-automatically are later RFC 0052 PRs, so treat convene as an operator-initiated,
-not a scripted-loop, action until the schedule lands.
+A channel with `max_convenings` unset (`0`) is not count-bounded, but a positive
+`standing_budget_tokens` bounds it by *cost* instead: each interaction close folds
+its settled discussion spend into a per-channel running total, and once that total
+reaches `standing_budget_tokens` a further convene is likewise refused with `429`
+— the aggregate-*spend* twin of the count ceiling, process-lifetime and
+delete-cleared in the same way (the async per-persona close summaries settle after
+the close, so the folded total tracks the discussion spend; the co-declared count
+bound caps how far it can overrun). Only the timer that fires the schedule
+automatically remains a later RFC 0052 PR, so treat convene as an
+operator-initiated, not a scripted-loop, action until the schedule lands.
 
 How much of the aggregate allowance is spent is visible on the config **read**
 surface: `GET …/config` carries an `autonomous_runtime` block —

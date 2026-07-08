@@ -170,7 +170,7 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger 
 	r.interactionMu.Lock()
 	entry := r.openInteractions[channelID]
 	var discard, disarmedChair string
-	var disarmedTimer bool
+	var disarmedTimer, foldSpend bool
 	if entry != nil {
 		entry.rememberClosed(interactionID)
 		// PR 4b-ii: a deliberate close disarms any pending synthesis for the
@@ -193,6 +193,11 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger 
 			entry.retired = interactionID
 			entry.id = ""
 			entry.prev = previousClose{id: interactionID, trigger: trigger}
+			// The open→retired transition fires exactly once per closed id, so it
+			// is the fold point for the RFC 0052 §E standing SPEND total below: a
+			// stale re-close (the losing side of a two-closers race) leaves
+			// entry.id == "" and never re-folds.
+			foldSpend = true
 		}
 	}
 	r.interactionMu.Unlock()
@@ -205,6 +210,15 @@ func (r *ChannelRouter) markInteractionClosed(channelID, interactionID, trigger 
 	// cleared it) or nothing was armed.
 	r.releaseSynthesisArm(channelID, disarmedChair, disarmedTimer)
 	r.discardInteractionGovernance(discard)
+	// RFC 0052 §E: fold the just-closed interaction's settled discussion spend into
+	// the channel's aggregate standing total (standing_budget.go) — the SPEND twin
+	// of the convening COUNT. On the open→retired transition only (exactly once per
+	// closed id), OUTSIDE interactionMu so the wallet InteractionSpend read never
+	// inverts the router→wallet lock order. A stale close folds nothing — its spend
+	// was folded on the winning close that first retired the id.
+	if foldSpend {
+		r.foldStandingSpendOnClose(channelID, interactionID)
+	}
 }
 
 // discardInteractionGovernance drops every per-interaction governance ledger
