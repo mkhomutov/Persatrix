@@ -188,6 +188,24 @@
               "minimum": 0,
               "default": 12,
               "description": "Hard floor-round bound — a second independent terminator alongside the cost cap. Absent/0 uses the 12 default; negative is rejected at load."
+            },
+            "schedule_interval_seconds": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "description": "RFC 0052 §E (v0.3.11) standing/scheduled convening — the RFC 0024 timer interval that re-convenes this channel. 0 (the default) is a one-shot channel (convened on demand); a positive value (>= 1s, the RFC 0024 busy-loop floor) makes the channel STANDING — the convener is re-woken every interval_seconds to open a fresh discussion. SAFETY: a standing channel re-opens a fresh, separately-capped interaction on every fire, so the per-interaction `interaction_budget_tokens` cap does NOT bound its recurring total — the Go loader rejects an armed standing channel that declares no aggregate bound (`max_convenings` and/or `standing_budget_tokens`), the §E mirror of the mandatory per-interaction cap. Ships DARK in PR 7a (parsed, validated, persisted, surfaced) — nothing fires the timer yet (the config-round-trip into the convener's agents.yaml timer set is a later PR)."
+            },
+            "max_convenings": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "description": "RFC 0052 §E aggregate convening-count bound for a STANDING channel — the schedule stops re-convening after this many convenings. 0 (the default) is unset. A standing channel (positive `schedule_interval_seconds`) must declare this and/or `standing_budget_tokens`. Runtime enforcement is a later PR."
+            },
+            "standing_budget_tokens": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "description": "RFC 0052 §E aggregate standing-window cost budget for a STANDING channel — a ceiling on total spend across the recurring schedule, above the per-interaction `interaction_budget_tokens` cap that bounds each convening in isolation. 0 (the default) is unset. A standing channel (positive `schedule_interval_seconds`) must declare this and/or `max_convenings`. Runtime enforcement is a later PR."
             }
           }
         },

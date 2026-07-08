@@ -36,6 +36,9 @@ fn channel_config_view_deserializes_full_payload() {
             "convener":   {"value": "nova-sparrow",   "source": "channel"},
             "goal":       {"value": "",               "source": "default"},
             "max_rounds": {"value": 12,               "source": "default"},
+            "schedule_interval_seconds": {"value": 0, "source": "default"},
+            "max_convenings":            {"value": 0, "source": "default"},
+            "standing_budget_tokens":    {"value": 0, "source": "default"},
         },
     });
     let view: ChannelConfigView = serde_json::from_value(json).unwrap();
@@ -296,6 +299,9 @@ fn config_rows_covers_every_knob_in_registry_order() {
             "convener":   {"value": "",    "source": "default"},
             "goal":       {"value": "",    "source": "default"},
             "max_rounds": {"value": 12,    "source": "default"},
+            "schedule_interval_seconds": {"value": 0, "source": "default"},
+            "max_convenings":            {"value": 0, "source": "default"},
+            "standing_budget_tokens":    {"value": 0, "source": "default"},
         },
     }))
     .unwrap();

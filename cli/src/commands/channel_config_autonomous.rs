@@ -41,6 +41,14 @@ pub(crate) const KNOBS: &[(&str, KnobType)] = &[
     ("autonomous.convener", KnobType::Str),
     ("autonomous.goal", KnobType::Str),
     ("autonomous.max_rounds", KnobType::Int),
+    // RFC 0052 §E / PR 7 standing sub-knobs. `schedule_interval_seconds` +
+    // `max_convenings` are a Go `int`, `standing_budget_tokens` a Go `int64` — both
+    // map to the CLI's single integer class (see the knob-type lockstep guard). The
+    // "a standing channel needs an aggregate bound" cross-field rule is server-side
+    // `validate` (a 400), so the CLI only type-checks the wire shape here.
+    ("autonomous.schedule_interval_seconds", KnobType::Int),
+    ("autonomous.max_convenings", KnobType::Int),
+    ("autonomous.standing_budget_tokens", KnobType::Int),
 ];
 
 /// The nested `autonomous` block of `ChannelConfigView`, mirroring the Go
@@ -55,6 +63,9 @@ pub(crate) struct AutonomousConfigView {
     pub(crate) convener: ConfigField,
     pub(crate) goal: ConfigField,
     pub(crate) max_rounds: ConfigField,
+    pub(crate) schedule_interval_seconds: ConfigField,
+    pub(crate) max_convenings: ConfigField,
+    pub(crate) standing_budget_tokens: ConfigField,
 }
 
 impl AutonomousConfigView {
@@ -69,6 +80,9 @@ impl AutonomousConfigView {
             "autonomous.convener" => Some(&self.convener),
             "autonomous.goal" => Some(&self.goal),
             "autonomous.max_rounds" => Some(&self.max_rounds),
+            "autonomous.schedule_interval_seconds" => Some(&self.schedule_interval_seconds),
+            "autonomous.max_convenings" => Some(&self.max_convenings),
+            "autonomous.standing_budget_tokens" => Some(&self.standing_budget_tokens),
             _ => None,
         }
     }

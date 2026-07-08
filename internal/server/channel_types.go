@@ -254,12 +254,15 @@ type reasoningConfigResponse struct {
 // it (an armed channel is convenable via POST …/convene); this response layer just
 // reports/edits it.
 type autonomousConfigResponse struct {
-	Enabled   configFieldResponse `json:"enabled"`
-	Topic     configFieldResponse `json:"topic"`
-	Agenda    configFieldResponse `json:"agenda"`
-	Convener  configFieldResponse `json:"convener"`
-	Goal      configFieldResponse `json:"goal"`
-	MaxRounds configFieldResponse `json:"max_rounds"`
+	Enabled                 configFieldResponse `json:"enabled"`
+	Topic                   configFieldResponse `json:"topic"`
+	Agenda                  configFieldResponse `json:"agenda"`
+	Convener                configFieldResponse `json:"convener"`
+	Goal                    configFieldResponse `json:"goal"`
+	MaxRounds               configFieldResponse `json:"max_rounds"`
+	ScheduleIntervalSeconds configFieldResponse `json:"schedule_interval_seconds"`
+	MaxConvenings           configFieldResponse `json:"max_convenings"`
+	StandingBudgetTokens    configFieldResponse `json:"standing_budget_tokens"`
 }
 
 // recallRequest is the JSON body for POST /api/v1/personas/{participant_id}/recall

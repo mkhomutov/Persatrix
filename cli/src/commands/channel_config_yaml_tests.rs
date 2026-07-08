@@ -65,6 +65,9 @@ fn view(revision: i64, over: &[(&str, Value)]) -> ChannelConfigView {
             "convener":   {"value": "",    "source": "default"},
             "goal":       {"value": "",    "source": "default"},
             "max_rounds": {"value": 12,    "source": "default"},
+            "schedule_interval_seconds": {"value": 0, "source": "default"},
+            "max_convenings":            {"value": 0, "source": "default"},
+            "standing_budget_tokens":    {"value": 0, "source": "default"},
         }),
     );
     serde_json::from_value(Value::Object(payload)).expect("view payload deserializes")
@@ -361,6 +364,9 @@ fn view_with_reasoning_override() -> ChannelConfigView {
             "convener":   {"value": "",    "source": "default"},
             "goal":       {"value": "",    "source": "default"},
             "max_rounds": {"value": 12,    "source": "default"},
+            "schedule_interval_seconds": {"value": 0, "source": "default"},
+            "max_convenings":            {"value": 0, "source": "default"},
+            "standing_budget_tokens":    {"value": 0, "source": "default"},
         },
     }))
     .expect("view payload deserializes")

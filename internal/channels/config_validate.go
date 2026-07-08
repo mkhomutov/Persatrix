@@ -240,6 +240,18 @@ func (c *Config) Validate() error {
 			if ch.EscalationChairID == "" {
 				return fmt.Errorf("channels[%d=%s]: %w", i, ch.Name, ErrAutonomousChairRequired)
 			}
+			// Standing aggregate-bound (RFC 0052 §E / PR 7): an armed channel with a
+			// positive `schedule_interval_seconds` is STANDING — it re-convenes on an
+			// RFC 0024 timer, opening a fresh SEPARATELY-capped interaction each fire, so
+			// the per-interaction cost cap leaves the recurring total unbounded. It must
+			// declare an aggregate bound (`max_convenings` and/or `standing_budget_tokens`),
+			// the §E mirror of the per-interaction cap-required gate above. A one-shot
+			// armed channel (no schedule) is bounded by the cap alone and needs none. The
+			// predicate is shared with the apply path so the two cannot drift.
+			if standingBoundMissing(ch.Autonomous.ScheduleIntervalSeconds,
+				ch.Autonomous.MaxConvenings, ch.Autonomous.StandingBudgetTokens) {
+				return fmt.Errorf("channels[%d=%s]: %w", i, ch.Name, ErrAutonomousStandingBoundRequired)
+			}
 		}
 
 		if len(ch.Members) == 0 {
