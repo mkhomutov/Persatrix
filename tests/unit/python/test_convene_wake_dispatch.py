@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import types
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
@@ -27,7 +28,7 @@ from agents.tick import TickScheduler
 
 
 def _make_scheduler(
-    *, convene_client: object | None, executor: object | None = None
+    *, convene_client: Any, executor: Any = None
 ) -> tuple[TickScheduler, MagicMock]:
     """A TickScheduler over a mock agent, so we can drive ``_handle_scheduled_wake``
     directly and assert which path it took. Returns (scheduler, agent)."""
@@ -127,7 +128,7 @@ async def test_declined_convene_is_logged_and_dropped(
     client = MagicMock()
     client.convene = AsyncMock(
         side_effect=aiohttp.ClientResponseError(
-            request_info=types.SimpleNamespace(
+            request_info=types.SimpleNamespace(  # type: ignore[arg-type]
                 real_url="u", url="u", method="POST", headers={},
             ),
             history=(),

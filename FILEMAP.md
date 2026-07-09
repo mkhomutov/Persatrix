@@ -9,8 +9,8 @@
 |---------------------|-------|
 | `internal/` | 440 |
 | `docs/` | 384 |
-| `tests/` | 355 |
-| `agents/` | 253 |
+| `tests/` | 358 |
+| `agents/` | 250 |
 | `web/` | 66 |
 | `prompts/` | 47 |
 | `cli/` | 38 |
@@ -305,9 +305,6 @@
 │   │   ├── test_action_loop_tick_lease.py
 │   │   ├── test_chat_path_budget_denial.py
 │   │   ├── test_chat_path_resource_exhausted.py
-│   │   ├── test_convene_client.py
-│   │   ├── test_convene_timer.py
-│   │   ├── test_convene_wake_dispatch.py
 │   │   ├── test_event_loop.py
 │   │   ├── test_event_loop_compat.py
 │   │   ├── test_event_loop_inbound.py
@@ -1547,6 +1544,9 @@
 │           ├── test_closed_interactions_read.py
 │           ├── test_contact_note_room_scoped.py
 │           ├── test_context_package_wire_shape.py
+│           ├── test_convene_client.py
+│           ├── test_convene_timer.py
+│           ├── test_convene_wake_dispatch.py
 │           ├── test_convener.py
 │           ├── test_conversation_window.py
 │           ├── test_conversation_window_awareness.py

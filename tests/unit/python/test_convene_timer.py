@@ -23,7 +23,10 @@ from agents.convene_timer import (
     parse_standing_convene_timer_id,
 )
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+# CWD-relative repo paths (CI runs pytest from the repo root), mirroring the
+# sibling test_cross_language_convene_wire_drift.py.
+_CHANNELS_GO = Path("internal/channels/channels.go")
+_STANDING_SCHEDULE_GO = Path("internal/channels/standing_schedule.go")
 
 
 # ─── Round-trip / recovery contract ────────────────────────────────────────────
@@ -88,7 +91,7 @@ class TestGoDriftGuards:
     Go<->Python drift pin."""
 
     def test_channel_name_pattern_matches_go(self) -> None:
-        src = (_REPO_ROOT / "internal" / "channels" / "channels.go").read_text()
+        src = _CHANNELS_GO.read_text(encoding="utf-8")
         m = re.search(
             r"channelNamePattern\s*=\s*regexp\.MustCompile\(`([^`]+)`\)", src
         )
@@ -104,9 +107,7 @@ class TestGoDriftGuards:
         )
 
     def test_prefix_and_kind_match_go(self) -> None:
-        src = (
-            _REPO_ROOT / "internal" / "channels" / "standing_schedule.go"
-        ).read_text()
+        src = _STANDING_SCHEDULE_GO.read_text(encoding="utf-8")
         prefix_m = re.search(
             r'standingConveneTimerPrefix\s*=\s*"([^"]+)"', src
         )

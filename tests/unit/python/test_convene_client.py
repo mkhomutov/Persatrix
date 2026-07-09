@@ -40,7 +40,7 @@ class _FakeResponse:
     def raise_for_status(self) -> None:
         if self.status >= 400:
             raise aiohttp.ClientResponseError(
-                request_info=types.SimpleNamespace(
+                request_info=types.SimpleNamespace(  # type: ignore[arg-type]
                     real_url=self._url, url=self._url, method="POST", headers={},
                 ),
                 history=(),
@@ -67,7 +67,8 @@ class _FakeSession:
 async def test_convene_posts_to_the_convene_endpoint() -> None:
     session = _FakeSession(status=202)
     client = HTTPConveneClient(
-        orchestrator_url="http://orch:8080/", session=session,
+        orchestrator_url="http://orch:8080/",
+        session=session,  # type: ignore[arg-type]  # structural fake
     )
 
     await client.convene("group:planning")
@@ -86,7 +87,10 @@ async def test_convene_raises_on_non_2xx() -> None:
     # convener-unreachable — surfaces as ClientResponseError so the caller (the
     # wake handler) can log-and-drop it rather than crash the event loop.
     session = _FakeSession(status=429, body='{"error":"standing bound reached"}')
-    client = HTTPConveneClient(orchestrator_url="http://orch:8080", session=session)
+    client = HTTPConveneClient(
+        orchestrator_url="http://orch:8080",
+        session=session,  # type: ignore[arg-type]  # structural fake
+    )
 
     with pytest.raises(aiohttp.ClientResponseError):
         await client.convene("group:planning")
@@ -95,7 +99,10 @@ async def test_convene_raises_on_non_2xx() -> None:
 @pytest.mark.asyncio
 async def test_convene_rejects_empty_channel_id() -> None:
     session = _FakeSession()
-    client = HTTPConveneClient(orchestrator_url="http://orch:8080", session=session)
+    client = HTTPConveneClient(
+        orchestrator_url="http://orch:8080",
+        session=session,  # type: ignore[arg-type]  # structural fake
+    )
 
     with pytest.raises(ValueError):
         await client.convene("")
