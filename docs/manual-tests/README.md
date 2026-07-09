@@ -56,6 +56,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 |----|-------|--------|
 | [MT-AUTONOMOUS-001](MT-AUTONOMOUS-001.md) | One-shot autonomous brainstorm — convene, converge, terminate, synthesize with zero human turns; both close artifacts; spend ≤ the mandatory cap (RFC 0052 Phase 1) | Active (live execution = v0.3.11 release-prep) |
 | [MT-AUTONOMOUS-002](MT-AUTONOMOUS-002.md) | Anti-collapse cadence — a collapse-prone roster is worked through a multi-item agenda by the convener (≤1 escalation per item, monotonic cursor); the human path is unchanged (RFC 0052 Phase 2) | Active (live execution = v0.3.11 release-prep) |
+| [MT-AUTONOMOUS-003](MT-AUTONOMOUS-003.md) | Standing / scheduled convening — a channel re-convenes itself on a timer (config-round-trip seam, no runtime API) with zero human turns, and stops at the aggregate bound (`max_convenings`/`standing_budget_tokens`, 429); wallet footprint stays bounded across the window (RFC 0052 Phase 3) | Active (live execution = v0.3.11 release-prep) |
 
 ## Channel Configuration (RFC 0050)
 

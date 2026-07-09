@@ -66,6 +66,36 @@ _GROUP_PREFIX = "group:"
 _CHANNEL_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
 
 
+def standing_convene_timer_id(channel_id: str) -> str | None:
+    """Encode a group channel id into the convene ``autonomy.timers[].id`` — the
+    Python mirror of the Go ``standingConveneTimerID`` and the exact inverse of
+    :func:`parse_standing_convene_timer_id`.
+
+    The FORWARD half of the id contract, needed by the PR 7c-ii-b
+    ``agents.yaml`` writer (:mod:`agents.convene_timer_writer`) to author a
+    convener's timer entry from a channel id. Returns ``None`` for anything not a
+    group channel this producer would arm: no ``group:`` prefix (a DM/thread id
+    carries a ``:`` the timer-id pattern forbids and is never a standing channel),
+    or a name outside the group channel-name charset.
+
+    Stricter than the Go encoder, deliberately: Go's ``standingConveneTimerID``
+    only strips the ``group:`` prefix (it is called on an already-validated group
+    address), whereas this reused-in-config helper re-checks the name against
+    :data:`_CHANNEL_NAME_PATTERN` so encode/parse are clean inverses over the same
+    range — a real group channel always matches, so the extra check only rejects
+    malformed input the writer must never emit an entry for.
+    """
+    if not channel_id.startswith(_GROUP_PREFIX):
+        return None
+    name = channel_id[len(_GROUP_PREFIX):]
+    # fullmatch (not match): the pattern's ``$`` matches before a trailing newline
+    # in Python but not in Go's RE2, so match would over-accept relative to the
+    # channel-name charset — see the _CHANNEL_NAME_PATTERN note above.
+    if not _CHANNEL_NAME_PATTERN.fullmatch(name):
+        return None
+    return _STANDING_CONVENE_TIMER_PREFIX + name
+
+
 def parse_standing_convene_timer_id(timer_id: str) -> str | None:
     """Recover the canonical ``group:<name>`` channel a convene timer id encodes.
 
