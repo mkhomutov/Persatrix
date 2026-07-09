@@ -41,16 +41,25 @@ package channels
 //     [ParseStandingConveneTimerID] reverses exactly.
 //
 //   - Only an armed STANDING channel yields a timer. A one-shot (interval 0),
-//     disarmed, or convener-less block derives nothing, so the round-trip never
-//     registers a schedule the operator did not declare.
+//     disarmed, convener-less, or aggregate-unbounded block derives nothing, so
+//     the round-trip never registers a schedule the operator did not declare — and
+//     never one looser than the §E bounds (an unbounded standing schedule is the
+//     runaway those bounds exist to stop; see [deriveConveneTimer]).
 //
 // DEFERRED to the PR 7c-ii consumer (NOT this producer's concern): the convener
 // persona must run at `autonomy.level` semi-autonomous/autonomous for its
 // EventLoop scheduler to exist and pick the timer up (agents/server_persona.py
 // gates the scheduler on level; a `reactive` convener silently ignores a `timers`
 // entry) — the `agents.yaml` writer bumps the level alongside writing the timer.
-// Re-arm jitter is omitted (a single convener per channel needs no fan-out
-// spread); the entry ships at the schema default `jitter_max_seconds: 0.0`.
+// The same writer must ALSO carry any existing legacy tick forward: writing a
+// `timers` block flips `register_legacy_timer` to false (server_persona.py passes
+// `register_legacy_timer=timers is None`), so injecting the convene entry into a
+// convener that today ticks on `tick_interval_seconds` with NO `timers` block
+// SILENTLY drops its ordinary autonomy tick — the writer must translate that tick
+// into an explicit `{kind: "tick"}` timers entry, or a convener loses its
+// heartbeat the moment it gains a schedule. Re-arm jitter is omitted (a single
+// convener per channel needs no fan-out spread); the entry ships at the schema
+// default `jitter_max_seconds: 0.0`.
 
 import (
 	"sort"
@@ -64,6 +73,13 @@ import (
 // recovers the channel from the wake's `timer_id` via [ParseStandingConveneTimerID].
 // A distinct kind — not the `tick` the legacy timer carries — so a convene wake
 // is attributable per-timer on dashboards and never folded into the idle path.
+//
+// The bareword "convene" is reused across unrelated namespaces (the RFC 0009
+// forced-turn marker in `response_gate._FORCED_TURN_MARKERS`, the wire flag
+// `payload["convene"]`, the convener-opening directive `kind` in
+// `persona_runtime/convener.py`); this constant is the `ScheduledWake.callback_kind`
+// namespace ALONE — the PR 7c-ii handler branches on THIS value, distinct from
+// those, so a future reader must not conflate them.
 const StandingConveneKind = "convene"
 
 // standingConveneTimerPrefix is the fixed marker a convene timer id begins with,
@@ -120,9 +136,19 @@ func standingConveneTimerID(channelID string) (string, bool) {
 // convener-side wake handler that maps a fired `ScheduledWake.timer_id` back to
 // the channel to convene — is the load-bearing caller (a fired wake carries no
 // channel_id; the id is the only channel reference).
+//
+// The recovered name must match `channelNamePattern`, not merely survive the
+// prefix strip: the `autonomy.timers[].id` charset admits `_` (see the schema
+// pattern), which a group channel name never contains, so an id like
+// `convene-foo_bar` is a schema-valid timer id this producer NEVER emits. Rejecting
+// it — rather than decoding it to the un-addressable `group:foo_bar` — makes parse a
+// strict inverse over the encoder's range and a safe classifier: even if the 7c-ii
+// handler recovered the channel off the id prefix instead of the authoritative
+// `callback_kind`, an operator-named `convene-*` non-convene timer could not decode
+// to a bogus convene target.
 func ParseStandingConveneTimerID(timerID string) (string, bool) {
 	name, ok := strings.CutPrefix(timerID, standingConveneTimerPrefix)
-	if !ok || name == "" {
+	if !ok || !channelNamePattern.MatchString(name) {
 		return "", false
 	}
 	return string(ChannelTypeGroup) + ":" + name, true
@@ -131,11 +157,28 @@ func ParseStandingConveneTimerID(timerID string) (string, bool) {
 // deriveConveneTimer derives the convener timer spec a channel's resolved
 // autonomous block implies, returning ok=false when the channel is not an armed
 // STANDING channel — it must be enabled, carry a positive schedule interval, name
-// a convener, and be a group address. A one-shot channel (interval 0) is convened
-// manually and gets no timer; a disarmed or convener-less block gets none either,
-// so the round-trip only ever registers a schedule the operator armed.
+// a convener, carry an aggregate bound, and be a group address. A one-shot channel
+// (interval 0) is convened manually and gets no timer; a disarmed or convener-less
+// block gets none either, so the round-trip only ever registers a schedule the
+// operator armed.
+//
+// The aggregate-bound gate (`max_convenings` / `standing_budget_tokens`) is
+// defence-in-depth, NOT redundant belt. RFC 0052 §E requires a standing channel to
+// declare an aggregate bound (the config validate gate rejects one without —
+// [ErrAutonomousStandingBoundRequired]), and PR 7b enforces those bounds at convene
+// time. But [ChannelRouter.SetAutonomous] stamps the registry WITHOUT re-running
+// that validate gate, and [ChannelRouter.ConveneChannel] enforces only the bounds
+// that exist — so an unbounded standing block reaching the registry by any
+// non-validated path (a forced setter, a future caller, config drift) would arm an
+// UNBOUNDED recurring schedule, the exact runaway §E exists to prevent. Refusing to
+// derive its timer is fail-closed: no timer, no auto-convene, so this producer never
+// arms a schedule looser than its own §E bounds. (`<= 0`, not `== 0`: a negative is
+// already rejected upstream, but the floor keeps the guard honest on its own.)
 func deriveConveneTimer(channelID string, a AutonomousConfig) (ConveneTimerSpec, bool) {
 	if !a.Enabled || a.ScheduleIntervalSeconds <= 0 || a.Convener == "" {
+		return ConveneTimerSpec{}, false
+	}
+	if a.MaxConvenings <= 0 && a.StandingBudgetTokens <= 0 {
 		return ConveneTimerSpec{}, false
 	}
 	timerID, ok := standingConveneTimerID(channelID)

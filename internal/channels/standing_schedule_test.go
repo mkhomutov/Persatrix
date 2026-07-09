@@ -21,6 +21,7 @@ package channels
 //     the operator did not declare.
 
 import (
+	"encoding/json"
 	"os"
 	"regexp"
 	"testing"
@@ -34,8 +35,8 @@ import (
 // channel with a positive schedule interval + a convener derives the full timer
 // spec, keyed on the convener and reversibly encoding the channel id.
 func TestDeriveConveneTimer_ArmedStandingChannel(t *testing.T) {
-	spec, ok := deriveConveneTimer("group:planning", standingArmed(0))
-	require.True(t, ok, "an armed standing channel yields a timer")
+	spec, ok := deriveConveneTimer("group:planning", standingArmed(3))
+	require.True(t, ok, "an armed, aggregate-bounded standing channel yields a timer")
 	assert.Equal(t, "group:planning", spec.ChannelID)
 	assert.Equal(t, "nova-sparrow", spec.ConvenerID, "the timer rides the convener's timer set")
 	assert.Equal(t, "convene-planning", spec.TimerID, "the id reversibly encodes the group name")
@@ -49,14 +50,21 @@ func TestDeriveConveneTimer_ArmedStandingChannel(t *testing.T) {
 // a disarmed channel, a convener-less block, and a non-group address each derive
 // nothing, so the round-trip never registers a schedule the config did not arm.
 func TestDeriveConveneTimer_SkipsNonStanding(t *testing.T) {
-	oneShot := standingArmed(0)
+	// Each skip case starts from a fully-valid armed+bounded block and breaks ONE
+	// invariant, so the assertion proves that invariant's own check fires — not some
+	// other missing field (e.g. the no-bound gate) masking it.
+	oneShot := standingArmed(3)
 	oneShot.ScheduleIntervalSeconds = 0 // a one-shot channel, convened manually only.
 
-	disarmed := standingArmed(0)
+	disarmed := standingArmed(3)
 	disarmed.Enabled = false
 
-	noConvener := standingArmed(0)
+	noConvener := standingArmed(3)
 	noConvener.Convener = "" // a drifted/forced block that never passed validation.
+
+	noBound := standingArmed(0) // neither max_convenings nor standing_budget_tokens set:
+	// an invalid standing block §E's validate gate rejects, so the producer must not arm
+	// an unbounded recurring schedule off a non-validated SetAutonomous.
 
 	cases := []struct {
 		name      string
@@ -66,7 +74,8 @@ func TestDeriveConveneTimer_SkipsNonStanding(t *testing.T) {
 		{"one-shot interval", "group:planning", oneShot},
 		{"disarmed", "group:planning", disarmed},
 		{"no convener", "group:planning", noConvener},
-		{"non-group address", "dm:nova-sparrow:iron-fox", standingArmed(0)},
+		{"no aggregate bound", "group:planning", noBound},
+		{"non-group address", "dm:nova-sparrow:iron-fox", standingArmed(3)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,9 +98,21 @@ const timerIDSchemaPattern = `^[a-z0-9][a-z0-9_-]*[a-z0-9]$`
 // actually ships (a cross-artifact drift guard, the sibling of the Python
 // wire-drift tests).
 func TestStandingConveneTimerID_SatisfiesSchemaPattern(t *testing.T) {
-	schema, err := os.ReadFile("../../schemas/agent.schema.json")
+	raw, err := os.ReadFile("../../schemas/agent.schema.json")
 	require.NoError(t, err)
-	assert.Contains(t, string(schema), timerIDSchemaPattern,
+
+	// Assert against the ACTUAL autonomy.timers[].id pattern, not a whole-file
+	// substring: a bare Contains passes as long as the string appears ANYWHERE, so a
+	// schema refactor that re-patterned timers[].id while leaving the old pattern on
+	// some other field would stay green while the producer's encoding silently
+	// drifted out of the real constraint. Navigating to the field makes the drift
+	// guard break loudly, which is its whole job.
+	var schema map[string]any
+	require.NoError(t, json.Unmarshal(raw, &schema))
+	idPattern, ok := digSchemaString(schema,
+		"definitions", "autonomy", "properties", "timers", "items", "properties", "id", "pattern")
+	require.True(t, ok, "agent.schema autonomy.timers[].id.pattern not found — schema shape drifted")
+	require.Equal(t, timerIDSchemaPattern, idPattern,
 		"agent.schema timer-id pattern drifted from the producer's assumption — re-check the convene-timer encoding")
 
 	re := regexp.MustCompile(timerIDSchemaPattern)
@@ -100,6 +121,25 @@ func TestStandingConveneTimerID_SatisfiesSchemaPattern(t *testing.T) {
 		require.Truef(t, ok, "group:%s is a group address", name)
 		assert.Truef(t, re.MatchString(id), "derived timer id %q must satisfy the schema pattern", id)
 	}
+}
+
+// digSchemaString walks a decoded-JSON object tree by successive string keys,
+// returning the leaf string and true only when every key resolves through an object
+// and the leaf is itself a string.
+func digSchemaString(m map[string]any, keys ...string) (string, bool) {
+	var cur any = m
+	for _, k := range keys {
+		obj, ok := cur.(map[string]any)
+		if !ok {
+			return "", false
+		}
+		cur, ok = obj[k]
+		if !ok {
+			return "", false
+		}
+	}
+	s, ok := cur.(string)
+	return s, ok
 }
 
 // TestStandingConveneTimerID_RoundTrips — encode then parse is the identity on
@@ -115,7 +155,14 @@ func TestStandingConveneTimerID_RoundTrips(t *testing.T) {
 		assert.Equalf(t, id, dec, "encode∘parse is the identity for %s", id)
 	}
 
-	for _, notConvene := range []string{"legacy_tick", "reflection", "convene-", "convene", "planning"} {
+	// The last two are schema-valid `autonomy.timers[].id`s (the charset admits `_`
+	// and interior `-`) that decode to a name no group channel could carry, so parse
+	// must reject them rather than hand back an un-addressable `group:...`.
+	for _, notConvene := range []string{
+		"legacy_tick", "reflection", "convene-", "convene", "planning",
+		"convene-foo_bar", // `_` is a valid timer-id char but never a channel name
+		"convene--x",      // leading hyphen after the prefix — channelNamePattern rejects
+	} {
 		_, ok := ParseStandingConveneTimerID(notConvene)
 		assert.Falsef(t, ok, "%q is not a convene timer id", notConvene)
 	}
@@ -129,28 +176,36 @@ func TestStandingConveneTimers_EnumeratesArmedStandingOnly(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
 	router := NewChannelRouter(store, &messageRecordingDispatcher{}, zap.NewNop(), nil)
 
-	standingB := standingArmed(0) // ScheduleIntervalSeconds=3600, convener nova-sparrow.
-	standingA := standingArmed(0)
+	standingA := standingArmed(3) // ScheduleIntervalSeconds=3600, convener nova-sparrow.
+	standingB := standingArmed(3)
+	standingB.Convener = "iron-fox" // a DISTINCT convener, so the enumerator's per-channel
+	// convener stamping is actually exercised — not masked by a shared default.
 
-	oneShot := standingArmed(0)
+	oneShot := standingArmed(3)
 	oneShot.ScheduleIntervalSeconds = 0
 
-	disarmed := standingArmed(0)
+	disarmed := standingArmed(3)
 	disarmed.Enabled = false
+
+	unbounded := standingArmed(0) // armed + scheduled but no aggregate bound: skipped.
 
 	// Stamped out of timer-id order to prove the enumerator sorts.
 	router.SetAutonomous("group:zeta", standingB)
 	router.SetAutonomous("group:alpha", standingA)
 	router.SetAutonomous("group:oneshot", oneShot)
 	router.SetAutonomous("group:disarmed", disarmed)
+	router.SetAutonomous("group:unbounded", unbounded)
 	// group:unconfigured is never stamped — it resolves to the disabled default.
 
 	specs := router.StandingConveneTimers()
 
-	require.Len(t, specs, 2, "only the two armed standing channels yield timers")
+	require.Len(t, specs, 2, "only the two armed, aggregate-bounded standing channels yield timers")
 	assert.Equal(t, "convene-alpha", specs[0].TimerID, "sorted by timer id")
 	assert.Equal(t, "convene-zeta", specs[1].TimerID)
 	assert.Equal(t, "group:alpha", specs[0].ChannelID)
+	assert.Equal(t, "nova-sparrow", specs[0].ConvenerID, "each spec rides its OWN channel's convener")
+	assert.Equal(t, "iron-fox", specs[1].ConvenerID)
+	assert.Equal(t, StandingConveneKind, specs[0].Kind, "the callback_kind the 7c-ii handler branches on")
 	assert.Equal(t, 3600, specs[0].IntervalSeconds)
 }
 
