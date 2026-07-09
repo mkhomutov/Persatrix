@@ -332,17 +332,35 @@ class TickScheduler:
                 "Agent %s: convened standing channel %s on schedule",
                 agent_id, channel_id,
             )
-        except Exception:
-            # Expected on an unattended channel: HTTP 429 (a §E aggregate bound
-            # reached), 409 (a prior convening still live), 503 (convener
-            # unreachable). Swallow so the loop reaches the next fire; the
-            # client already logged the orchestrator's structured reason.
-            logger.warning(
-                "Agent %s: scheduled convening of %s was declined or failed "
-                "(expected at a §E aggregate bound, an in-flight convening, or "
-                "an unreachable convener) — dropping this cycle",
-                agent_id, channel_id, exc_info=True,
-            )
+        except Exception as exc:
+            # Swallow so the loop reaches the next scheduled fire. Two shapes:
+            #
+            # A convening the orchestrator *answered* with a non-2xx carries a
+            # ``.status`` (``aiohttp.ClientResponseError``) — an EXPECTED §E
+            # outcome on an unattended channel: 429 (an aggregate bound reached),
+            # 409 (a prior convening still live), 503 (convener). The client
+            # already logged the status + the orchestrator's structured reason,
+            # so keep this concise and skip the redundant traceback. Duck-typed
+            # on ``.status`` rather than an ``aiohttp`` isinstance so ``tick.py``
+            # stays free of the aiohttp import ``convene_client.py`` is split out
+            # to contain (see that module's header).
+            status = getattr(exc, "status", None)
+            if status is not None:
+                logger.warning(
+                    "Agent %s: scheduled convening of %s declined with HTTP %s "
+                    "— dropping this cycle (expected at a §E aggregate bound, an "
+                    "in-flight convening, or an unreachable convener)",
+                    agent_id, channel_id, status,
+                )
+            else:
+                # No response came back — a transport failure (connection
+                # refused, timeout) the client could NOT log, or an unexpected
+                # bug. Keep the traceback: this is the only record of it.
+                logger.warning(
+                    "Agent %s: scheduled convening of %s failed to reach the "
+                    "convener — dropping this cycle",
+                    agent_id, channel_id, exc_info=True,
+                )
 
     async def _handle_event_wake(self, event: AgentEvent) -> list[AgentAction]:
         """Synchronous-reply inbound path — wired as the loop's ``on_event``.

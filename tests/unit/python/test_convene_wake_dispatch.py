@@ -143,9 +143,40 @@ async def test_declined_convene_is_logged_and_dropped(
 
     client.convene.assert_awaited_once_with("group:planning")
     agent.on_tick.assert_not_called()
-    assert any(
-        "group:planning" in r.getMessage() for r in caplog.records
-    ), "the declined convening is logged for the operator"
+    # An orchestrator-answered decline carries a ``.status`` — logged concisely
+    # with the status surfaced (the client already logged the structured body),
+    # not with a redundant traceback.
+    decline = next(
+        (r for r in caplog.records if "group:planning" in r.getMessage()), None,
+    )
+    assert decline is not None, "the declined convening is logged for the operator"
+    assert "429" in decline.getMessage()
+    assert decline.exc_info is None, "an answered §E decline needs no traceback"
+
+
+@pytest.mark.asyncio
+async def test_transport_failure_is_logged_with_traceback_and_dropped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A transport failure (connection refused / timeout) carries NO ``.status``
+    # and the client could not log it (no response came back), so the handler is
+    # the only record — it keeps the traceback. Still swallowed: the loop must
+    # survive to the next fire exactly as for an answered decline.
+    client = MagicMock()
+    client.convene = AsyncMock(side_effect=ConnectionError("connection refused"))
+    scheduler, agent = _make_scheduler(convene_client=client)
+
+    with caplog.at_level(logging.WARNING, logger="agents.tick"):
+        # Must NOT raise.
+        await scheduler._handle_scheduled_wake(_convene_wake("planning"))
+
+    client.convene.assert_awaited_once_with("group:planning")
+    agent.on_tick.assert_not_called()
+    failure = next(
+        (r for r in caplog.records if "group:planning" in r.getMessage()), None,
+    )
+    assert failure is not None, "the transport failure is logged for the operator"
+    assert failure.exc_info is not None, "a transport failure keeps its traceback"
 
 
 def test_wire_convene_clients_injects_into_every_scheduler() -> None:

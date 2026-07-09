@@ -54,6 +54,15 @@ _GROUP_PREFIX = "group:"
 # alnum with interior hyphens, anchored, minimum length two (must start AND end
 # on an alnum). A subset of the timer-id charset (which also admits ``_``), so
 # the reverser rejects a schema-valid id whose name this pattern refuses.
+#
+# The pattern string is copied VERBATIM from the Go source (``^``/``$`` anchors
+# included) because the drift guard pins ``.pattern`` byte-for-byte against
+# ``channelNamePattern`` — but it is applied below with
+# :meth:`re.Pattern.fullmatch`, NOT :meth:`~re.Pattern.match`. Go's RE2 ``$`` is
+# end-of-text, whereas Python's ``re`` ``$`` also matches just *before* a trailing
+# newline, so ``match`` would accept a ``name`` like ``"foo\n"`` that the Go
+# encoder's range excludes. ``fullmatch`` (whole-string) closes that
+# one-character cross-language gap while leaving ``.pattern`` unchanged.
 _CHANNEL_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
 
 
@@ -69,6 +78,9 @@ def parse_standing_convene_timer_id(timer_id: str) -> str | None:
     if not timer_id.startswith(_STANDING_CONVENE_TIMER_PREFIX):
         return None
     name = timer_id[len(_STANDING_CONVENE_TIMER_PREFIX):]
-    if not _CHANNEL_NAME_PATTERN.match(name):
+    # fullmatch (not match): the pattern's ``$`` matches before a trailing
+    # newline in Python but not in Go's RE2, so match would over-accept relative
+    # to the encoder — see the _CHANNEL_NAME_PATTERN note above.
+    if not _CHANNEL_NAME_PATTERN.fullmatch(name):
         return None
     return _GROUP_PREFIX + name

@@ -73,6 +73,10 @@ class TestParseStandingConveneTimerID:
             "convene-a",  # single char — the channel-name charset needs >= 2
             "convene-foo-",  # trailing hyphen — channel name rejects
             "convene-Planning",  # uppercase — channel names are lowercase
+            # Trailing newline: Python ``$`` matches before it but Go's RE2 does
+            # not, so a plain ``re.match`` would over-accept relative to the Go
+            # encoder. fullmatch (the reverser uses it) rejects, staying byte-exact.
+            "convene-foo\n",
         ]:
             assert parse_standing_convene_timer_id(not_convene) is None, not_convene
 
