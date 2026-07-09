@@ -23,14 +23,48 @@ from __future__ import annotations
 import logging
 import time
 
+import aiohttp
+
 from .base import BaseAgent
+from .convene_client import HTTPConveneClient
 from .event_loop import EventLoop
 from .memory.scheduled_wakes import ScheduledWakeRow, ScheduledWakesCache
 from .tick import TickScheduler
 
 logger = logging.getLogger("Persatrix.agent.server_persona")
 
-__all__ = ["init_persona_timers", "summarize_autonomy_cadence"]
+__all__ = [
+    "init_persona_timers",
+    "summarize_autonomy_cadence",
+    "wire_convene_clients",
+]
+
+
+def wire_convene_clients(
+    tick_schedulers: dict[str, TickScheduler],
+    session: aiohttp.ClientSession,
+    orchestrator_url: str,
+) -> None:
+    """Inject the RFC 0052 §E convene client into every started tick scheduler.
+
+    A post-session injection: schedulers are built in
+    :func:`agents.server_persona.initialize_persona_agents` before the shared
+    ``aiohttp`` session exists, so — like :func:`wire_history_fetchers` and the
+    executor's channel-publisher — the client is wired in once the session
+    opens (``agents.server.AgentServer.start``).
+
+    Shared + stateless across schedulers. Wiring it into *every* scheduler (not
+    only conveners) is harmless and keeps the call site config-free: a
+    ``ScheduledWake(callback_kind="convene")`` only ever reaches a convener,
+    because only a standing channel's config-round-trip writer (PR 7c-ii-b)
+    registers a convene timer — so on a non-convener the client is never called.
+    DARK until that writer lands: nothing registers a convene timer yet.
+    """
+    client = HTTPConveneClient(
+        orchestrator_url=orchestrator_url, session=session,
+    )
+    for scheduler in tick_schedulers.values():
+        scheduler.set_convene_client(client)
 
 
 def summarize_autonomy_cadence(timers: list[dict] | None, interval: int) -> str:
