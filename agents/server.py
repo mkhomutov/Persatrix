@@ -34,6 +34,7 @@ from .server_persona import (
     wire_history_fetchers,
     wire_wallet_client,
 )
+from .server_persona_timers import wire_convene_clients
 from .server_servicers import (  # noqa: F401
     AgentServiceServicer,
     _extract_chat_reply,
@@ -186,6 +187,12 @@ class AgentServer:
         ))
         # RFC 0034 Phase 1 — wire the conversation-window history fetcher.
         wire_history_fetchers(self.agents, self._session, self.orchestrator_url)
+        # RFC 0052 §E (PR 7c-ii-a) — wire the convene client onto the started
+        # tick schedulers (post-session, like the channel publisher above). Dark
+        # until the standing-timer writer (PR 7c-ii-b) registers a convene timer.
+        wire_convene_clients(
+            self._tick_schedulers, self._session, self.orchestrator_url,
+        )
         # RFC 0036 Phase 2 — wire the verbatim recall tool onto personas
         # (needs the shared session, so post-construction like the fetcher).
         wire_recall_tools(self.agents, self._session, self.orchestrator_url)

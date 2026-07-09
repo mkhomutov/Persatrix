@@ -41,10 +41,12 @@ from typing import TYPE_CHECKING
 
 from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
 from .channel_wire_metadata import DispatchContext
+from .convene_timer import STANDING_CONVENE_KIND, parse_standing_convene_timer_id
 from .event_loop import EventLoop, ScheduledWake
 from .persona_types import ActionType
 
 if TYPE_CHECKING:
+    from .convene_client import ConveneClient
     from .dispatch import ActionExecutor
     from .event_loop import InboundEventWake  # noqa: F401 — typing context only
     from .persona_runtime import _LLMPersonaAgent
@@ -56,6 +58,29 @@ __all__ = ["TickScheduler"]
 
 
 _LEGACY_TIMER_ID = "legacy_tick"
+
+# RFC 0052 §E (PR 7c-ii-a): the HTTP statuses the convene endpoint returns when
+# a scheduled convening is *correctly* declined on an unattended channel — the §E
+# machinery working as designed, or a transient the next fire may clear. Only
+# these three read as EXPECTED in the wake handler's log:
+#
+#   * 429 — an aggregate ceiling reached (``max_convenings`` /
+#     ``standing_budget_tokens``); the bound is doing its job.
+#   * 409 — a state conflict (``ChannelRouter.ConveneChannel`` returns it for a
+#     live prior convening, an unarmed / no-audience / no-topic channel); a later
+#     fire may clear it.
+#   * 503 — a convener miss (restarting / not-yet-ready / refusing delivery); the
+#     dispatcher documents all three as retryable.
+#
+# Every OTHER answered status (see ``internal/server/channel_errors.go``) is a
+# misconfiguration or bug that will NOT self-resolve — 400 (a drifted/observer
+# chair, an invalid convener), 403 (the convene surface gated off via
+# ``config_edit_enabled``), 404 (the channel deleted out from under the timer),
+# 500 (a store error) — so the handler logs it DISTINCTLY as actionable rather
+# than burying it in the expected-decline line. A standing schedule stuck on one
+# of those fails silently every fire otherwise; the split is what gives an
+# operator a signal to act (the deep-review #1 finding).
+_EXPECTED_CONVENE_DECLINE_STATUSES = frozenset({409, 429, 503})
 
 
 class TickScheduler:
@@ -85,6 +110,7 @@ class TickScheduler:
         register_legacy_timer: bool = True,
         salience_threshold: float | None = None,
         salience_rate_max_per_sec: int | None = None,
+        convene_client: ConveneClient | None = None,
     ) -> None:
         self._agent = agent
         if interval < self._MIN_INTERVAL:
@@ -98,6 +124,14 @@ class TickScheduler:
         self._max_actions_per_tick = max_actions_per_tick
         self._idle_after_ticks = idle_after_ticks
         self._executor = executor
+        # RFC 0052 §E (PR 7c-ii-a): the convener-side trigger a
+        # ``ScheduledWake(callback_kind="convene")`` calls back into. ``None``
+        # until the post-session ``wire_convene_clients`` injection runs
+        # (mirrors ``executor``'s channel-publisher, set after the session
+        # opens), and always ``None`` on a non-convener scheduler — a convene
+        # wake never arrives on one because nothing registers a convene timer
+        # in its config. See :meth:`set_convene_client`.
+        self._convene_client = convene_client
         self._idle_count = 0
         # RFC 0024 PR 2: when ``autonomy.timers`` is configured the
         # caller registers timers directly on the EventLoop and the
@@ -129,6 +163,15 @@ class TickScheduler:
         :class:`EventDispatcher` so it can enqueue
         :class:`InboundEventWake` with a :class:`SyncDispatchHandle`."""
         return self._event_loop
+
+    def set_convene_client(self, client: ConveneClient | None) -> None:
+        """Inject the RFC 0052 §E convene trigger post-construction.
+
+        Called by ``agents.server_persona_timers.wire_convene_clients`` once the shared
+        ``aiohttp`` session is open (schedulers are built in
+        ``initialize_persona_agents`` before it exists — the same ordering that
+        makes the executor's channel-publisher a post-session injection)."""
+        self._convene_client = client
 
     @property
     def idle_count(self) -> int:
@@ -207,12 +250,24 @@ class TickScheduler:
     async def _handle_scheduled_wake(self, wake: ScheduledWake) -> None:
         """Handle one ``ScheduledWake`` — preserves the v0.3.2 tick semantics.
 
+        RFC 0052 §E (PR 7c-ii-a): a ``convene``-kind wake is a re-open signal,
+        not a heartbeat — it branches to :meth:`_handle_convene_wake` and returns
+        BEFORE any tick logic. Running the idle/LLM tick on it would be both a
+        misfire (the convener would deliberate instead of convening) and
+        unbudgeted spend on an unattended channel. Every other kind (the legacy
+        ``tick``, RFC 0027 ``memory_consolidation``, ``reflection``, …) keeps
+        the shipped path byte-for-byte.
+
         Idle branch acquires ``agent.exclusive()`` explicitly because
         ``recover_idle_energy()`` does NOT acquire the lock internally.
         Non-idle branch calls ``on_tick()`` which acquires the per-agent
         lock internally — wrapping here would deadlock (asyncio.Lock is
         not reentrant).
         """
+        if wake.callback_kind == STANDING_CONVENE_KIND:
+            await self._handle_convene_wake(wake)
+            return
+
         if self.is_idle:
             logger.debug(
                 "Agent %s idle (%d ticks), skipping LLM tick",
@@ -260,6 +315,94 @@ class TickScheduler:
                 self._agent.agent_id,
                 len(actions),
             )
+
+    async def _handle_convene_wake(self, wake: ScheduledWake) -> None:
+        """Fire a standing-schedule convening (RFC 0052 §E, PR 7c-ii-a).
+
+        Recovers the group channel from the timer id
+        (:func:`agents.convene_timer.parse_standing_convene_timer_id` — the fired
+        wake carries no ``channel_id``) and calls the injected convene client,
+        which POSTs the orchestrator's ``/convene`` endpoint so the fired
+        schedule passes the SAME §E aggregate ceilings (``max_convenings`` /
+        ``standing_budget_tokens``) the manual convene path does.
+
+        Every failure mode is log-and-drop, because the event loop must survive
+        to the next scheduled fire — but the log distinguishes three cases so an
+        operator is not misled: an EXPECTED decline (a §E bound / state conflict /
+        retryable convener miss — 429/409/503) is logged as routine; any other
+        answered status (400/403/404/500 — a drifted chair, a gated-off surface,
+        a deleted channel, a server error) is logged DISTINCTLY as actionable
+        because it recurs every fire until fixed; a transport failure keeps its
+        traceback. An unrecoverable id or a missing client drops earlier. It
+        NEVER runs a tick as a fallback: a convene wake that cannot convene does
+        nothing this cycle, rather than silently spending on an idle LLM turn.
+        """
+        agent_id = self._agent.agent_id
+        channel_id = parse_standing_convene_timer_id(wake.timer_id)
+        if channel_id is None:
+            logger.warning(
+                "Agent %s: convene wake with unrecoverable timer_id %r — "
+                "dropping (not a standing-convene id)",
+                agent_id, wake.timer_id,
+            )
+            return
+        if self._convene_client is None:
+            logger.warning(
+                "Agent %s: convene wake for %s but no convene client is "
+                "configured — dropping",
+                agent_id, channel_id,
+            )
+            return
+        try:
+            await self._convene_client.convene(channel_id)
+            logger.info(
+                "Agent %s: convened standing channel %s on schedule",
+                agent_id, channel_id,
+            )
+        except Exception as exc:
+            # Swallow so the loop reaches the next scheduled fire. Three shapes,
+            # all duck-typed on ``.status`` rather than an ``aiohttp`` isinstance
+            # so ``tick.py`` stays free of the aiohttp import ``convene_client.py``
+            # is split out to contain (see that module's header). The client has
+            # already logged the status + the orchestrator's structured reason for
+            # ANY answered non-2xx, so both answered branches skip the redundant
+            # traceback; only the un-answered transport branch keeps it.
+            status = getattr(exc, "status", None)
+            if status in _EXPECTED_CONVENE_DECLINE_STATUSES:
+                # The §E machinery correctly declined, or a retryable transient:
+                # drop the cycle and wait for the next fire. See the constant.
+                logger.warning(
+                    "Agent %s: scheduled convening of %s declined with HTTP %s "
+                    "— dropping this cycle (expected on an unattended channel: a "
+                    "§E aggregate bound (429), a state conflict (409), or a "
+                    "retryable convener miss (503))",
+                    agent_id, channel_id, status,
+                )
+            elif status is not None:
+                # An answered non-2xx OUTSIDE the expected set — a drifted/observer
+                # chair or invalid convener (400), the convene surface gated off
+                # (403), the channel deleted since the timer was armed (404), or a
+                # store error (500). None self-resolves, so this recurs every fire
+                # until an operator acts: surface it distinctly at WARNING rather
+                # than mislabel it an expected §E decline. NOT a crash — the loop
+                # still survives to the next fire, exactly as for an expected one.
+                logger.warning(
+                    "Agent %s: scheduled convening of %s FAILED with HTTP %s "
+                    "— dropping this cycle; this is NOT an expected §E decline and "
+                    "will recur every fire until fixed (a drifted chair / invalid "
+                    "convener, a disabled convene surface, a deleted channel, or a "
+                    "server error — see the orchestrator log for the reason)",
+                    agent_id, channel_id, status,
+                )
+            else:
+                # No response came back — a transport failure (connection
+                # refused, timeout) the client could NOT log, or an unexpected
+                # bug. Keep the traceback: this is the only record of it.
+                logger.warning(
+                    "Agent %s: scheduled convening of %s failed to reach the "
+                    "convener — dropping this cycle",
+                    agent_id, channel_id, exc_info=True,
+                )
 
     async def _handle_event_wake(self, event: AgentEvent) -> list[AgentAction]:
         """Synchronous-reply inbound path — wired as the loop's ``on_event``.

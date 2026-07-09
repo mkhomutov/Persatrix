@@ -23,14 +23,61 @@ from __future__ import annotations
 import logging
 import time
 
+import aiohttp
+
 from .base import BaseAgent
+from .convene_client import HTTPConveneClient
 from .event_loop import EventLoop
 from .memory.scheduled_wakes import ScheduledWakeRow, ScheduledWakesCache
 from .tick import TickScheduler
 
 logger = logging.getLogger("Persatrix.agent.server_persona")
 
-__all__ = ["init_persona_timers", "summarize_autonomy_cadence"]
+__all__ = [
+    "init_persona_timers",
+    "summarize_autonomy_cadence",
+    "wire_convene_clients",
+]
+
+
+def wire_convene_clients(
+    tick_schedulers: dict[str, TickScheduler],
+    session: aiohttp.ClientSession,
+    orchestrator_url: str,
+) -> None:
+    """Inject the RFC 0052 §E convene client into every started tick scheduler.
+
+    A post-session injection: schedulers are built in
+    :func:`agents.server_persona.initialize_persona_agents` before the shared
+    ``aiohttp`` session exists, so — like :func:`wire_history_fetchers` and the
+    executor's channel-publisher — the client is wired in once the session
+    opens (``agents.server.AgentServer.start``).
+
+    Shared + stateless across schedulers. Wiring it into *every* scheduler (not
+    only conveners) is harmless and keeps the call site config-free: a
+    ``ScheduledWake(callback_kind="convene")`` only ever reaches a convener,
+    because only a standing channel's config-round-trip writer (PR 7c-ii-b)
+    registers a convene timer — so on a non-convener the client is never called.
+    DARK until that writer lands: nothing registers a convene timer yet.
+
+    Ordering caveat for PR 7c-ii-b: this injection runs in
+    ``AgentServer.start`` *after* ``initialize_persona_agents`` has already
+    started the schedulers and registered their configured timers. Once 7c-ii-b
+    adds the ``convene`` timer to that config, the timer is armed before this
+    client is wired — so a first fire landing in the init→wire window would hit a
+    client-less scheduler and log-and-drop (``_handle_convene_wake``'s
+    "no convene client is configured" path), silently skipping that convening
+    with no retry until the next interval. The window is normally sub-first-fire
+    (first fire is ``>= _MIN_INTERVAL`` out), but a saved cache anchor clamped to
+    ``_MIN_INTERVAL`` plus slow multi-agent init could close it. 7c-ii-b should
+    wire the client before arming convene timers (or make the client-less drop a
+    re-arm), not rely on this ordering staying benign.
+    """
+    client = HTTPConveneClient(
+        orchestrator_url=orchestrator_url, session=session,
+    )
+    for scheduler in tick_schedulers.values():
+        scheduler.set_convene_client(client)
 
 
 def summarize_autonomy_cadence(timers: list[dict] | None, interval: int) -> str:
