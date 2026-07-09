@@ -59,6 +59,29 @@ __all__ = ["TickScheduler"]
 
 _LEGACY_TIMER_ID = "legacy_tick"
 
+# RFC 0052 §E (PR 7c-ii-a): the HTTP statuses the convene endpoint returns when
+# a scheduled convening is *correctly* declined on an unattended channel — the §E
+# machinery working as designed, or a transient the next fire may clear. Only
+# these three read as EXPECTED in the wake handler's log:
+#
+#   * 429 — an aggregate ceiling reached (``max_convenings`` /
+#     ``standing_budget_tokens``); the bound is doing its job.
+#   * 409 — a state conflict (``ChannelRouter.ConveneChannel`` returns it for a
+#     live prior convening, an unarmed / no-audience / no-topic channel); a later
+#     fire may clear it.
+#   * 503 — a convener miss (restarting / not-yet-ready / refusing delivery); the
+#     dispatcher documents all three as retryable.
+#
+# Every OTHER answered status (see ``internal/server/channel_errors.go``) is a
+# misconfiguration or bug that will NOT self-resolve — 400 (a drifted/observer
+# chair, an invalid convener), 403 (the convene surface gated off via
+# ``config_edit_enabled``), 404 (the channel deleted out from under the timer),
+# 500 (a store error) — so the handler logs it DISTINCTLY as actionable rather
+# than burying it in the expected-decline line. A standing schedule stuck on one
+# of those fails silently every fire otherwise; the split is what gives an
+# operator a signal to act (the deep-review #1 finding).
+_EXPECTED_CONVENE_DECLINE_STATUSES = frozenset({409, 429, 503})
+
 
 class TickScheduler:
     """Thin adapter over :class:`EventLoop` for autonomous persona agents.
@@ -303,12 +326,16 @@ class TickScheduler:
         schedule passes the SAME §E aggregate ceilings (``max_convenings`` /
         ``standing_budget_tokens``) the manual convene path does.
 
-        Every failure mode is log-and-drop — an unrecoverable id, a missing
-        client, or a declined convening (a §E bound reached, a prior convening
-        still live, an unreachable convener) — because the event loop must
-        survive to the next scheduled fire. It NEVER runs a tick as a fallback:
-        a convene wake that cannot convene does nothing this cycle, rather than
-        silently spending on an idle LLM turn.
+        Every failure mode is log-and-drop, because the event loop must survive
+        to the next scheduled fire — but the log distinguishes three cases so an
+        operator is not misled: an EXPECTED decline (a §E bound / state conflict /
+        retryable convener miss — 429/409/503) is logged as routine; any other
+        answered status (400/403/404/500 — a drifted chair, a gated-off surface,
+        a deleted channel, a server error) is logged DISTINCTLY as actionable
+        because it recurs every fire until fixed; a transport failure keeps its
+        traceback. An unrecoverable id or a missing client drops earlier. It
+        NEVER runs a tick as a fallback: a convene wake that cannot convene does
+        nothing this cycle, rather than silently spending on an idle LLM turn.
         """
         agent_id = self._agent.agent_id
         channel_id = parse_standing_convene_timer_id(wake.timer_id)
@@ -333,23 +360,38 @@ class TickScheduler:
                 agent_id, channel_id,
             )
         except Exception as exc:
-            # Swallow so the loop reaches the next scheduled fire. Two shapes:
-            #
-            # A convening the orchestrator *answered* with a non-2xx carries a
-            # ``.status`` (``aiohttp.ClientResponseError``) — an EXPECTED §E
-            # outcome on an unattended channel: 429 (an aggregate bound reached),
-            # 409 (a prior convening still live), 503 (convener). The client
-            # already logged the status + the orchestrator's structured reason,
-            # so keep this concise and skip the redundant traceback. Duck-typed
-            # on ``.status`` rather than an ``aiohttp`` isinstance so ``tick.py``
-            # stays free of the aiohttp import ``convene_client.py`` is split out
-            # to contain (see that module's header).
+            # Swallow so the loop reaches the next scheduled fire. Three shapes,
+            # all duck-typed on ``.status`` rather than an ``aiohttp`` isinstance
+            # so ``tick.py`` stays free of the aiohttp import ``convene_client.py``
+            # is split out to contain (see that module's header). The client has
+            # already logged the status + the orchestrator's structured reason for
+            # ANY answered non-2xx, so both answered branches skip the redundant
+            # traceback; only the un-answered transport branch keeps it.
             status = getattr(exc, "status", None)
-            if status is not None:
+            if status in _EXPECTED_CONVENE_DECLINE_STATUSES:
+                # The §E machinery correctly declined, or a retryable transient:
+                # drop the cycle and wait for the next fire. See the constant.
                 logger.warning(
                     "Agent %s: scheduled convening of %s declined with HTTP %s "
-                    "— dropping this cycle (expected at a §E aggregate bound, an "
-                    "in-flight convening, or an unreachable convener)",
+                    "— dropping this cycle (expected on an unattended channel: a "
+                    "§E aggregate bound (429), a state conflict (409), or a "
+                    "retryable convener miss (503))",
+                    agent_id, channel_id, status,
+                )
+            elif status is not None:
+                # An answered non-2xx OUTSIDE the expected set — a drifted/observer
+                # chair or invalid convener (400), the convene surface gated off
+                # (403), the channel deleted since the timer was armed (404), or a
+                # store error (500). None self-resolves, so this recurs every fire
+                # until an operator acts: surface it distinctly at WARNING rather
+                # than mislabel it an expected §E decline. NOT a crash — the loop
+                # still survives to the next fire, exactly as for an expected one.
+                logger.warning(
+                    "Agent %s: scheduled convening of %s FAILED with HTTP %s "
+                    "— dropping this cycle; this is NOT an expected §E decline and "
+                    "will recur every fire until fixed (a drifted chair / invalid "
+                    "convener, a disabled convene surface, a deleted channel, or a "
+                    "server error — see the orchestrator log for the reason)",
                     agent_id, channel_id, status,
                 )
             else:

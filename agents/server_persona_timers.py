@@ -59,6 +59,19 @@ def wire_convene_clients(
     because only a standing channel's config-round-trip writer (PR 7c-ii-b)
     registers a convene timer — so on a non-convener the client is never called.
     DARK until that writer lands: nothing registers a convene timer yet.
+
+    Ordering caveat for PR 7c-ii-b: this injection runs in
+    ``AgentServer.start`` *after* ``initialize_persona_agents`` has already
+    started the schedulers and registered their configured timers. Once 7c-ii-b
+    adds the ``convene`` timer to that config, the timer is armed before this
+    client is wired — so a first fire landing in the init→wire window would hit a
+    client-less scheduler and log-and-drop (``_handle_convene_wake``'s
+    "no convene client is configured" path), silently skipping that convening
+    with no retry until the next interval. The window is normally sub-first-fire
+    (first fire is ``>= _MIN_INTERVAL`` out), but a saved cache anchor clamped to
+    ``_MIN_INTERVAL`` plus slow multi-agent init could close it. 7c-ii-b should
+    wire the client before arming convene timers (or make the client-less drop a
+    re-arm), not rely on this ordering staying benign.
     """
     client = HTTPConveneClient(
         orchestrator_url=orchestrator_url, session=session,

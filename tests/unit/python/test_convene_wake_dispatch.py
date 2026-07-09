@@ -150,8 +150,61 @@ async def test_declined_convene_is_logged_and_dropped(
         (r for r in caplog.records if "group:planning" in r.getMessage()), None,
     )
     assert decline is not None, "the declined convening is logged for the operator"
-    assert "429" in decline.getMessage()
+    msg = decline.getMessage()
+    assert "429" in msg
+    # 429/409/503 are the EXPECTED-decline set — the log carries the benign
+    # signature phrase so the actionable-status line (below) stays distinguishable.
+    assert "expected on an unattended channel" in msg.lower(), (
+        "a §E-bound 429 is an expected decline"
+    )
     assert decline.exc_info is None, "an answered §E decline needs no traceback"
+
+
+@pytest.mark.asyncio
+async def test_unexpected_status_decline_is_logged_as_actionable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # An answered non-2xx OUTSIDE the expected 429/409/503 set — here a 500 store
+    # error, but equally a 400 drifted-chair / 404 deleted-channel / 403
+    # gated-off-surface — is a misconfiguration or bug that recurs every fire. It
+    # must be logged DISTINCTLY, NOT folded into the benign "expected §E decline"
+    # wording (the deep-review #1 finding: a 500/400/404 mislabelled as expected
+    # hides the exact runaway-class condition §E's observability exists to surface).
+    client = MagicMock()
+    client.convene = AsyncMock(
+        side_effect=aiohttp.ClientResponseError(
+            request_info=types.SimpleNamespace(  # type: ignore[arg-type]
+                real_url="u", url="u", method="POST", headers={},
+            ),
+            history=(),
+            status=500,
+        ),
+    )
+    scheduler, agent = _make_scheduler(convene_client=client)
+
+    with caplog.at_level(logging.WARNING, logger="agents.tick"):
+        # Must NOT raise — an unexpected status is still log-and-drop, the loop
+        # survives to the next fire exactly as for an expected decline.
+        await scheduler._handle_scheduled_wake(_convene_wake("planning"))
+
+    client.convene.assert_awaited_once_with("group:planning")
+    agent.on_tick.assert_not_called()
+    actionable = next(
+        (r for r in caplog.records if "group:planning" in r.getMessage()), None,
+    )
+    assert actionable is not None, "the failed convening is logged for the operator"
+    msg = actionable.getMessage()
+    assert "500" in msg
+    # The load-bearing assertion: a 500 must NOT carry the benign signature
+    # phrase the 429/409/503 line uses — it must not read as an expected decline.
+    assert "expected on an unattended channel" not in msg.lower(), (
+        "an unexpected status must not be mislabelled as an expected §E decline"
+    )
+    # ...and it must positively flag that it recurs until an operator acts.
+    assert "recur" in msg.lower(), "an actionable failure signals it will recur"
+    # The client already logged the orchestrator's structured body for an answered
+    # non-2xx, so this stays concise (no redundant traceback) — as for the 429.
+    assert actionable.exc_info is None, "an answered status needs no traceback"
 
 
 @pytest.mark.asyncio
