@@ -11,7 +11,7 @@
 
 ## Overview
 
-**Purpose**: Verify the RFC 0052 [§E](../rfcs/0052-autonomous-agent-channels.md#e-standing-and-scheduled-discussions) contract — a **standing** channel convenes a **fresh interaction on a schedule**, with **no human turn and no manual convene**, and the recurrence is **bounded**: it **stops at the aggregate bound** (`max_convenings` count and/or the `standing_budget_tokens` spend ceiling), because the per-interaction cap alone does not bound a recurring schedule. Two further §E safety properties are asserted: the timer reaches the convener **only through a config round-trip** into its `agents.yaml` (no new runtime `RegisterTimer` API — [OQ #4](../rfcs/0052-autonomous-agent-channels.md#open-questions)), and the **wallet footprint stays bounded across the window** — each convening's per-interaction ledger residue is evicted on the bounded close (Phase 1 / PR 4), so the `interactionTokens` map does **not** grow one entry per convening.
+**Purpose**: Verify the RFC 0052 [§E](../rfcs/0052-autonomous-agent-channels.md#e-standing-and-scheduled-discussions) contract — a **standing** channel convenes a **fresh interaction on a schedule**, with **no human turn and no manual convene**, and the recurrence is **bounded**: it **stops at the aggregate bound** (`max_convenings` count and/or the `standing_budget_tokens` spend ceiling), because the per-interaction cap alone does not bound a recurring schedule. A further §E safety property is asserted: the timer reaches the convener **only through a config round-trip** into its `agents.yaml` (no new runtime `RegisterTimer` API — [OQ #4](../rfcs/0052-autonomous-agent-channels.md#open-questions)). The wallet `interactionTokens` footprint is checked too, but as a **known limitation, not a bound**: per-convening eviction is **not wired** ([`EvictInteraction`](../../internal/wallet/synthesis_reserve.go) has no production caller), so the map grows one entry per convening — bounded only *within a process* by the aggregate bound, and cleared by a restart. See [§Wallet footprint](#wallet-footprint-a-bounded-leak-not-a-flat-footprint).
 
 MT-AUTONOMOUS-001 proved one convening runs and terminates with artifacts; this MT proves the **recurring** case is both **alive** (fires unattended on schedule) and **safe** (the aggregate bound is a hard stop, not a suggestion).
 
@@ -119,13 +119,13 @@ Keep watching past the third convening:
 
 **Pass**: exactly `max_convenings` interactions ran; every convening after the bound is refused with `429` and dispatches nothing; the schedule never re-opens past the bound.
 
-### Step 5: The wallet footprint stayed bounded across the window
+### Step 5: The wallet footprint is a *bounded leak* across the window (known limitation)
 
-The wallet's per-interaction ledger is a process-lifetime map with no natural "interaction closed" signal; the Phase-1 bounded close emits the eviction so a standing schedule does not leak one residual entry per convening ([§E](../rfcs/0052-autonomous-agent-channels.md#e-standing-and-scheduled-discussions)).
+Per-convening eviction ([`EvictInteraction`](../../internal/wallet/synthesis_reserve.go)) exists but is **not wired into the close path** — [`bounded_close.go`](../../internal/channels/bounded_close.go) defers it pending the settle barrier its precondition needs. So the map **does** grow one settled entry per convening. A **tracked residual**, not a bound this MT proves ([§Wallet footprint](#wallet-footprint-a-bounded-leak-not-a-flat-footprint)).
 
-- Across the three convenings, confirm (via the wallet/cost telemetry or the orchestrator log's eviction records) that the `interactionTokens` map does **not** carry one settled entry per convening — each closed convening's entry is evicted on its bounded close, so the map size is bounded by the live-convenings count (here 1 at a time), not the cumulative count.
+- Across the three convenings, confirm the `interactionTokens` map grows to **at most `max_convenings` entries** and then stops: the count bound (Step 4) caps the number of convenings, so the leak is bounded *by that bound*, not by eviction. (Bounding on spend instead, the entry count is capped by `standing_budget_tokens ÷ min-per-convening-spend` — the looser leg.)
 
-**Pass**: the wallet footprint is flat across the window (bounded by concurrent, not cumulative, convenings); no per-convening residue accumulates.
+**Pass**: the map grows one entry per convening and stops at the aggregate bound; a restart clears it. **Fail** (a real regression): entries exceed the convening count, or keep growing after the bound halts recurrence.
 
 ---
 
@@ -137,7 +137,7 @@ The wallet's per-interaction ledger is a process-lifetime map with no natural "i
 | 2 | Config-round-trip writer | the convene timer lands in the convener's `agents.yaml` with the level bumped (+ legacy tick carried when present); the scheduler arms it on restart |
 | 3 | Unattended recurrence | ≥2 fresh interactions open on the ~120 s schedule with **zero** human turns and **zero** manual convenes |
 | 4 | Aggregate bound is a hard stop | exactly `max_convenings` run; the next scheduled fire is declined `429` and opens nothing |
-| 5 | Wallet footprint bounded | no per-convening `interactionTokens` residue accumulates (evicted on each bounded close) |
+| 5 | Wallet footprint (known limitation) | `interactionTokens` grows one entry per convening (eviction **not yet wired**) but is bounded *within the process* by the aggregate bound (≈`max_convenings` entries), not flat; a restart clears it |
 
 ---
 
@@ -158,10 +158,15 @@ Take a convener that was `semi-autonomous` ticking on `tick_interval_seconds` wi
 A DM/thread cannot be armed autonomous (group-only), so the writer refuses to encode a timer id for a non-`group:` address.
 **Expect**: no timer is produced for a non-group id; the standing path is group-only end-to-end (the producer and the writer both reject it).
 
-### Edge Case 4: a restart refills the per-process aggregate count
+### Edge Case 4: a restart silently *resumes* an unattended channel that had hit its bound
 
 After the bound halts recurrence (Step 4), restart the orchestrator and let the schedule fire again.
-**Expect**: the count refills and convening resumes — the aggregate bound is **per-process**, not durable (PR-plan §7c-ii-b residual). A durable count needs persistence RFC 0052 defers; this edge documents the known limit so an operator is not surprised.
+**Expect**: the count refills and convening **resumes**. This is more than "the count refills": the bound **never disarms the timer** (see Notes), so a restart actively re-opens a channel the operator watched stop — on an *unattended* channel, exactly where the bound is meant to protect. The aggregate bound therefore gives **no cross-restart protection**; it bounds spend within one process only. A durable count needs persistence RFC 0052 defers ("no new store migration"). Mitigation until then: disarm the channel (`autonomous.enabled=false`) rather than relying on the count, and re-run the writer so its convene timer is dropped (Edge Case 5).
+
+### Edge Case 5: disarming a channel drops its convene timer on the next writer run
+
+Arm two standing channels the same convener drives, disarm one, and re-run the writer with the producer's now-smaller `StandingConveneTimers` set.
+**Expect**: the disarmed channel's `convene-<name>` entry is **removed** (the writer reconciles convene timers to the producer's current set), while the surviving channel's entry and any non-convene timers (`legacy_tick`, `reflection`) are kept. Otherwise a stale timer keeps firing a wake every interval into a channel that only `409`-declines it. Pinned by `test_convene_timer_writer.py::TestReconciliation`.
 
 ---
 
@@ -173,6 +178,18 @@ The Phase-3 timer seam is a **config round-trip**, not a runtime API ([OQ #4](..
 - **Tick carry-forward.** `register_legacy_timer = timers is None`, so introducing a `timers` block drops a convener's implicit legacy heartbeat. The writer materializes that tick as an explicit `{id: legacy_tick, kind: tick}` entry — but **only** when the convener was already scheduling with no `timers` block; a just-bumped `reactive` convener had no tick to carry, so it does not gain unbudgeted idle spend (Edge Case 2 is the failure it prevents).
 
 Because the seam is config-canonical, the round-trip takes effect on the convener's next **restart** — Step 2's restart is intrinsic to the mechanism, not a workaround.
+
+**First-fire timing caveat (init→wire window).** `wire_convene_clients` injects the convene client *after* `initialize_persona_agents` has started the schedulers and armed their configured timers. A convene timer's **first** fire landing in that window hits a client-less scheduler and is **log-and-dropped with no re-arm** until the next interval — on a daily schedule, a lost day. Normally the window is sub-first-fire, but a saved cache anchor clamped to `_MIN_INTERVAL` plus slow init can close it. A **tracked runtime residual**; when running this MT, treat a *first* missed fire right after restart as this known window, not a Step-3 failure.
+
+---
+
+## Wallet footprint: a bounded leak, not a flat footprint
+
+Step 5's check is a **known limitation**, not a clean bound — the honest state of the code at PR 7c-ii-b:
+
+- **Eviction is not wired.** [`EvictInteraction`](../../internal/wallet/synthesis_reserve.go) exists and is unit-tested but has **no production caller**: [`bounded_close.go`](../../internal/channels/bounded_close.go) closes *without* evicting (`// NOTE: no wallet EvictInteraction here — deferred to PR 7`), so each convening leaves one settled entry. Earlier RFC 0052 docs said this landed in Phase 1/PR 4; it did not — PR 4 deferred it.
+- **Why it cannot simply be called.** Its precondition is that *every* lease — including the close path's own per-persona RFC 0020 summaries — settled first; a lease granting *after* the evict re-creates the entry from zero and lets that spend **evade the cost ceiling for the rest of the interaction's life**. Those summaries are fire-and-forget tasks in N cross-process runtimes, so nothing at the close signals "all settled." A settle/refcount barrier is needed and does not exist — [PR-plan residual](../rfcs/0052-pr-plan.md).
+- **What bounds it today.** The aggregate bound caps the *number* of convenings per process, so the leak is bounded to ≈`max_convenings` entries and cleared by restart. Full eviction and a durable bound are the remaining §E hardening.
 
 ---
 

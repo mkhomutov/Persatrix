@@ -37,12 +37,19 @@ flagged in ``standing_schedule.go`` (its lines 49-62) as deferred to this writer
     path (any ``timers`` value, including ``[]``) keeps its explicit set verbatim —
     its ``register_legacy_timer`` is already ``False``, so no heartbeat is at risk.
 
-Pure and idempotent: the input block is never mutated; a convene entry refreshes in
-place rather than duplicating (a duplicate id would doubly-arm the same channel);
-and the result is timer-id sorted, so a config-round-trip diff is stable across
-applications (matching the producer's ``StandingConveneTimers`` ordering). The
-carry-forward is gated on "no ``timers`` block", which the first application always
-establishes, so re-deriving from the writer's own output is a no-op.
+Reconciling, not appending: the convene-kind timers in the output match ``specs``
+exactly — a channel absent from ``specs`` (its standing config disarmed/deleted) has
+its convene timer DROPPED, so a stale timer never keeps firing a wake into a channel
+that can only decline it. This makes the seam a true round-trip: the writer's output
+tracks the producer's current ``StandingConveneTimers`` set, additions AND removals.
+Non-convene timers are left untouched — the writer owns the convene kind alone.
+
+Pure and idempotent: the input block is never mutated; a surviving channel's convene
+entry refreshes in place rather than duplicating (a duplicate id would doubly-arm the
+same channel); and the result is timer-id sorted, so a config-round-trip diff is
+stable across applications. The carry-forward is gated on "no ``timers`` block", which
+the first application always establishes, so re-deriving from the writer's own output
+is a no-op.
 
 ``tick_interval_seconds`` is left in place after carry-forward (``timers`` wins, so
 it is dead but harmless — ``server_persona`` logs an INFO breadcrumb and ignores
@@ -117,23 +124,49 @@ def merge_convene_timers(
     autonomy: Mapping[str, Any] | None,
     specs: Iterable[ConveneSpec],
 ) -> dict[str, Any]:
-    """Return ``autonomy`` merged with a convene timer for each spec.
+    """Return ``autonomy`` reconciled to exactly the convene timers ``specs`` imply.
 
     Applies the level bump and tick carry-forward contracts (see the module
-    docstring). Pure: ``autonomy`` and its ``timers`` entries are copied, never
-    mutated. Raises :class:`ValueError` for a non-group ``channel_id`` — a standing
-    channel is group-only, so a non-group spec is a caller bug the writer refuses
-    to encode into a malformed entry.
+    docstring). ``specs`` must be the convener's COMPLETE standing-channel set (the
+    producer hands the writer that set, grouped by ``ConvenerID``): the convene-kind
+    timers in the result are made to match ``specs`` exactly — a channel dropped from
+    ``specs`` (disarmed/deleted) has its convene timer removed, not left armed. Any
+    non-convene timer (legacy tick, reflection, …) is preserved untouched. Pure:
+    ``autonomy`` and its ``timers`` entries are copied, never mutated. Raises
+    :class:`ValueError` for a non-group ``channel_id`` — a standing channel is
+    group-only, so a non-group spec is a caller bug the writer refuses to encode
+    into a malformed entry.
     """
     src = dict(autonomy) if autonomy else {}
     level = src.get("level", "reactive")
     was_scheduling = level in _SCHEDULER_LEVELS
-    # ``"timers" in src`` — present-but-``None`` and present-``[]`` are both the
-    # timers path (``register_legacy_timer`` already ``False``); only a wholly
-    # absent key leaves the legacy tick live.
+    # ``timers`` present-but-``None`` (``timers:`` with no value) is the LEGACY
+    # path, NOT the timers path: ``server_persona`` does ``timers = autonomy.get(
+    # "timers")`` then ``register_legacy_timer = timers is None``, so a ``None``
+    # value leaves ``register_legacy_timer`` TRUE (legacy tick live) and skips
+    # ``init_persona_timers`` entirely — behaving exactly like a wholly absent key.
+    # Only a present LIST (``[]`` or populated) is the timers path
+    # (``register_legacy_timer`` already ``False``). ``is not None`` — deliberately
+    # NOT ``"timers" in src`` — is what draws that line: a membership test would
+    # fold present-``None`` into the timers path and so DROP the very heartbeat the
+    # carry-forward below exists to preserve.
     had_timers_block = src.get("timers") is not None
 
-    timers: list[dict[str, Any]] = [dict(t) for t in (src.get("timers") or [])]
+    # Reconcile, not merely append: this writer is authoritative over the
+    # convener's convene-kind timers — its caller passes the FULL set of standing
+    # channels this convener drives (the producer's ``StandingConveneTimers``
+    # grouped by ``ConvenerID``). So a pre-existing convene timer whose channel is
+    # no longer standing (disarmed/deleted → absent from ``specs``) is DROPPED here
+    # rather than left firing a wake every interval into a channel that can only
+    # 409-decline it. Non-convene entries (the legacy tick, reflection,
+    # memory_consolidation, …) are preserved verbatim — the writer owns the convene
+    # kind alone. Each channel still in ``specs`` is re-derived below, so a surviving
+    # channel's interval refreshes rather than duplicating.
+    timers: list[dict[str, Any]] = [
+        dict(t)
+        for t in (src.get("timers") or [])
+        if t.get("kind") != STANDING_CONVENE_KIND
+    ]
 
     # Tick carry-forward: only a convener that was already scheduling with no
     # timers block has a live legacy heartbeat to preserve. A just-bumped reactive
@@ -165,9 +198,12 @@ def merge_convene_timers(
             },
         )
 
-    # Deterministic timer-id order — a stable round-trip diff, matching the Go
-    # producer's ``StandingConveneTimers`` sort.
-    timers.sort(key=lambda t: t["id"])
+    # Deterministic timer-id order — a stable round-trip diff. The Go producer's
+    # ``StandingConveneTimers`` id-sorts its (convene-only) set; here the convene
+    # entries interleave with any preserved non-convene timers under the same key.
+    # ``.get("id", "")`` rather than ``t["id"]`` so a malformed pre-existing entry
+    # missing its (schema-required) id sorts stably instead of raising.
+    timers.sort(key=lambda t: t.get("id", ""))
 
     merged = dict(src)
     merged["timers"] = timers

@@ -139,6 +139,21 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # this entry once the remaining PR 4–7 sequence closes out and the plan
     # is sealed at the v0.3.4 release tag.
     "docs/rfcs/0033-pr-plan.md",
+    # Same per-PR review residual accumulator pattern as 0008-pr-plan.md,
+    # 0019-pr-plan.md, 0024-pr-plan.md, 0026-pr-plan.md, and 0033-pr-plan.md
+    # above. The plan sat at ~7 989 words through PR 7c-ii-a; the PR 7c-ii-b
+    # deep-review residuals pushed it to ~8 314 — the unwired
+    # ``WalletService.EvictInteraction`` call site plus its missing
+    # cross-process settle barrier (the standing leg's wallet footprint is a
+    # tracked bounded leak, NOT the flat footprint the plan previously
+    # asserted), and the convene-client init->wire window that silently drops a
+    # first convene fire. Each residual co-locates the symptom, the
+    # ground-truth code citation, and the fix sketch with the PR row it blocks,
+    # so the next reader sees why the standing leg's bound is a leak rather
+    # than a proof; trimming would erase exactly that context. Remove this
+    # entry once the remaining PR 8–9 demo sequence closes out and the plan is
+    # sealed at the v0.3.11 release tag.
+    "docs/rfcs/0052-pr-plan.md",
     # Long-form architecture RFC (cf. docs/rfcs/0005-persona-agent-memory.md
     # above) that accumulates implementation amendments inline so each spec
     # section carries its as-built reconciliation: the ISSUE-0081 PR 2/3/4

@@ -130,6 +130,25 @@ class TestTickCarryForward:
         )
         assert out["timers"] == [_convene_entry("convene-planning", 86400)]
 
+    def test_present_but_none_timers_is_the_legacy_path_not_the_timers_path(
+        self,
+    ) -> None:
+        # ``timers:`` with no value (present-but-``None``) is NOT the timers path:
+        # server_persona does ``register_legacy_timer = autonomy.get("timers") is
+        # None``, so a ``None`` value keeps the legacy tick LIVE (identical to a
+        # wholly absent key) and skips ``init_persona_timers`` entirely. A
+        # scheduling convener with ``timers: None`` therefore still has a heartbeat
+        # to carry — the writer must materialize it, or the tick silently dies the
+        # instant a real ``timers`` block is written. Guards the ``is not None``
+        # distinction against a ``"timers" in src`` regression, which would wrongly
+        # treat this as the timers path and drop the tick.
+        out = merge_convene_timers(
+            {"level": "semi-autonomous", "tick_interval_seconds": 30, "timers": None},
+            [_PLANNING],
+        )
+        tick = [t for t in out["timers"] if t["kind"] == "tick"]
+        assert tick == [{"id": "legacy_tick", "interval_seconds": 30, "kind": "tick"}]
+
 
 class TestConveneEntry:
     """The convene entry itself — schema-valid id, kind, interval — and multiples."""
@@ -207,6 +226,56 @@ class TestPurityAndIdempotency:
         assert out["max_actions_per_tick"] == 5
         assert out["idle_after_ticks"] == 20
         assert out["salience_threshold"] == 0.8
+
+
+class TestReconciliation:
+    """The writer is authoritative over the convener's convene-kind timers: its
+    caller passes the FULL standing-channel set, so a convene timer whose channel is
+    no longer standing (absent from ``specs``) is DROPPED — a stale timer must not
+    keep firing a wake into a channel that can only decline it. Non-convene timers
+    (the writer does not own their kind) are always preserved."""
+
+    def test_stale_convene_timer_for_a_dropped_channel_is_removed(self) -> None:
+        # Two channels armed, then one disarmed: re-running the writer with only the
+        # surviving channel drops the other's convene timer rather than leaving it
+        # armed (firing a wake every interval into a now-declining channel) forever.
+        armed_both = merge_convene_timers(
+            {"level": "autonomous", "timers": []},
+            [
+                ConveneSpec("group:planning", 86400),
+                ConveneSpec("group:arch-review", 604800),
+            ],
+        )
+        assert {t["id"] for t in armed_both["timers"]} == {
+            "convene-planning",
+            "convene-arch-review",
+        }
+        reconciled = merge_convene_timers(
+            armed_both, [ConveneSpec("group:planning", 86400)]
+        )
+        assert reconciled["timers"] == [_convene_entry("convene-planning", 86400)]
+
+    def test_empty_specs_removes_every_convene_timer(self) -> None:
+        # Every standing channel disarmed: no convene timer survives.
+        armed = merge_convene_timers({"level": "autonomous", "timers": []}, [_PLANNING])
+        reconciled = merge_convene_timers(armed, [])
+        assert all(t["kind"] != STANDING_CONVENE_KIND for t in reconciled["timers"])
+
+    def test_reconcile_preserves_non_convene_timers(self) -> None:
+        # A stale convene timer is dropped, but a co-resident reflection timer (a
+        # kind the writer does not own) is kept verbatim.
+        existing = {
+            "level": "autonomous",
+            "timers": [
+                {"id": "reflection", "interval_seconds": 3600, "kind": "reflection"},
+                _convene_entry("convene-oldchan", 120),
+            ],
+        }
+        reconciled = merge_convene_timers(existing, [_PLANNING])
+        ids = {t["id"] for t in reconciled["timers"]}
+        assert "reflection" in ids  # non-convene kept
+        assert "convene-oldchan" not in ids  # stale convene dropped
+        assert "convene-planning" in ids  # current convene added
 
 
 class TestLegacyTickConstantsMatchTickModule:
