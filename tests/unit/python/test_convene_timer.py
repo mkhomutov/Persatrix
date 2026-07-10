@@ -111,10 +111,14 @@ class TestStandingConveneTimerID:
             timer_id = standing_convene_timer_id(channel_id)
             assert timer_id is not None
             assert parse_standing_convene_timer_id(timer_id) == channel_id
-        for timer_id in ["convene-planning", "convene-ab", "convene-convene-foo"]:
-            channel_id = parse_standing_convene_timer_id(timer_id)
-            assert channel_id is not None
-            assert standing_convene_timer_id(channel_id) == timer_id
+        # Distinct names from the encode-first loop above: reusing ``channel_id``
+        # here would rebind a ``str`` loop target to the ``str | None`` the parser
+        # returns, which ``mypy tests/`` rejects. The decode-first direction reads
+        # better as encoded → decoded anyway.
+        for encoded in ["convene-planning", "convene-ab", "convene-convene-foo"]:
+            decoded = parse_standing_convene_timer_id(encoded)
+            assert decoded is not None
+            assert standing_convene_timer_id(decoded) == encoded
 
     def test_rejects_non_group_or_invalid_names(self) -> None:
         # Standing channels are group-only; a DM/thread id carries a ``:`` the
