@@ -22,7 +22,30 @@
 
 responses:
   # ─── Ember Owl — VP of Engineering (direct, big-picture) ───────────
+  # RFC 0052 `roundtable` demo (chair): the `synthes*` entry is the §D
+  # closing synthesis the chair authors at the bounded close; the `monorepo`
+  # entry is its ordinary discussion contribution. `synthes*` is listed
+  # first so a synthesis directive never matches the discussion entry.
   ember-owl:
+    - match: ["synthes"]
+      reply: |
+        Synthesis: adopt the monorepo, but stage it. The strongest case FOR is
+        that our most valuable changes are cross-cutting, and today they cost
+        us days of cross-repo coordination — one repo collapses that to a single
+        review. The strongest case AGAINST is Iron Fox's: a shared pipeline
+        turns any flaky build into a company-wide stall, and a big-bang cutover
+        is unbounded risk. So the recommendation is a PHASED adoption — start
+        with the two services that change together most, land per-package CI
+        selection before anything else, and keep every step reversible. Adopt
+        the destination; refuse the big-bang path.
+    - match: ["monorepo"]
+      reply: |
+        Big-picture on the monorepo: the decision I need is whether the coupling
+        we'd gain is the coupling we WANT — shared tooling and atomic cross-team
+        changes — or the coupling we're trying to escape. Give me the blast
+        radius if the migration stalls halfway, and which teams are blocked while
+        it does. "Everyone, indefinitely" is a no; "two teams for two sprints" is
+        a plan.
     - match: ["flaky"]
       reply: |
         First question: is it actually flaky, or is the underlying system
@@ -50,6 +73,15 @@ responses:
 
   # ─── Iron Fox — Staff Engineer / Reliability (cautious, detailed) ──
   iron-fox:
+    - match: ["monorepo"]
+      reply: |
+        On a monorepo I care about two failure modes before any upside. First,
+        CI: one repo means one pipeline everyone waits on, so a flaky build
+        blocks every team, not one — we'd need per-package test selection from
+        day one. Second, the migration itself: a big-bang cutover is exactly the
+        3am-Saturday scenario I won't sign off on. If we do this, it's
+        incremental — move one service, prove the tooling, keep a rollback path
+        — not a weekend rewrite.
     - match: ["q3"]
       reply: |
         Agreed on the auth migration being the long pole — and the staging env
@@ -72,7 +104,18 @@ responses:
         those three, it's not ready — it's just not broken yet.
 
   # ─── Nova Sparrow — Senior Product Manager (customer-first) ────────
+  # RFC 0052 `roundtable` demo (convener): opens the human-free brainstorm by
+  # posing the topic + agenda to the room.
   nova-sparrow:
+    - match: ["monorepo"]
+      reply: |
+        Let me put the monorepo question on the table plainly: does one repo help
+        us ship faster to customers, or does it just move the coupling around? I
+        want us to weigh three things — the build and CI cost, the cross-team
+        coupling risk, and the migration effort — against what our accounts
+        actually feel. Faster cross-cutting changes are worth real money to R.K.
+        and the Meridian team; a six-month migration they never see is not.
+        Ember Owl, Iron Fox — where do you each land?
     - match: ["q3"]
       reply: |
         Before we sequence this purely around the migration: two of our top

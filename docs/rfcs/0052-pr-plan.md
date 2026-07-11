@@ -427,8 +427,8 @@ A new channel *mode* + CLI/web surfaces needs real doc + diagram **edits**, not 
 | 7b-ii+ | 3 — readout + `standing_budget_tokens` SPEND ceiling (429) | `…-standing-budget` | ✅ Merged |
 | 7c-i | 3 — config-round-trip timer producer: `StandingConveneTimers` (dark) | `…-standing-timer` | ✅ Merged |
 | 7c-ii-a | 3 — convener-side `ScheduledWake(convene)` → `/convene` wake handler (dark; consumer-first) | `…-convene-wake` | ✅ Merged |
-| 7c-ii-b | 3 — `agents.yaml` timer writer (level bump + tick carry-forward) + `MT-AUTONOMOUS-003` | `…-standing-timer-fire` | 🔀 PR open |
-| 8 | 4a — `make demo-autonomous` (offline) | `feature/v0311-rfc0052-demo-offline` | ⬜ |
+| 7c-ii-b | 3 — `agents.yaml` timer writer (level bump + tick carry-forward) + `MT-AUTONOMOUS-003` | `…-standing-timer-fire` | ✅ Merged |
+| 8 | 4a — `make demo-autonomous` (offline) | `feature/v0311-rfc0052-demo-offline` | 🔀 PR open |
 | 9 | 4b — four-vendor headline + closeout (cuttable) | `feature/v0311-rfc0052-demo-multivendor` | ⬜ |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged

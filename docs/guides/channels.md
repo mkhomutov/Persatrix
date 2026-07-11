@@ -1094,6 +1094,36 @@ ceiling above.
   persisted block, so save first). See the
   [web-console guide § Channel settings](web-console.md#channel-settings--edit-governance-from-the-browser).
 
+### Try it offline — `make demo-autonomous`
+
+To watch the whole arc with **no API key and zero spend**, run the offline demo:
+
+```bash
+make demo-autonomous
+```
+
+It boots the society on the `mock` provider (the RFC 0033 offline alias →
+`provider: mock`, priced at $0), **arms** the bundled `roundtable` channel
+(which ships *disarmed* for safety — see the `config/channels.yaml` template),
+and **convenes** it: `nova-sparrow` opens the "Should we adopt a monorepo?"
+topic, `ember-owl` and `iron-fox` discuss it through the governed wake chain,
+and the chair `ember-owl` closes with a synthesized recommendation — **no human
+types anything**. Watch it live in the web console (`http://localhost:8080/ui`
+→ *Channels → roundtable*), or read the closing synthesis + each persona's
+RFC 0020 summary with `persatrix agent interactions ember-owl` once it closes;
+the channel is left re-convenable, so the web **Convene** button re-runs it.
+Stop with `make docker-down`.
+
+The convener/chair/participant turns come from the curated
+`config/offline_responses.yaml` fixtures, so the offline discussion is
+deterministic — it demonstrates the *shape* of a human-free brainstorm, not a
+live model's reasoning. Swap `provider: mock` for a keyed vendor (`make
+demo-anthropic` / `demo-openai`, or the four-vendor headline once RFC 0053
+lands) and convene the same channel for a real run. The deterministic pin that
+the offline face yields a non-empty, on-topic synthesis at $0 is
+[`tests/integration/test_autonomous_offline_smoke.py`](../../tests/integration/test_autonomous_offline_smoke.py);
+the live acceptance is [MT-AUTONOMOUS-001](../manual-tests/MT-AUTONOMOUS-001.md).
+
 > **Scope in v0.3.11.** PR 3 ships convening + the opening turn. PR 4 adds the
 > mechanisms that make the discussion *bounded and artifact-bearing*: a
 > deterministic **bounded close** terminates the interaction when it crosses
