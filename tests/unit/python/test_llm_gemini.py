@@ -318,6 +318,35 @@ async def test_no_usage_metadata() -> None:
     assert resp.usage.output_tokens == 0
 
 
+async def test_thoughts_tokens_count_as_output() -> None:
+    """Gemini 2.5 reasoning ("thoughts") tokens are billed at the output rate
+    and reported in a *separate* ``thoughts_token_count`` field, so output
+    tokens = candidates + thoughts (counting candidates alone under-charges
+    every 2.5 call — the cost/RFC-0023-budget accuracy fix)."""
+    provider = _make_gemini_provider()
+    resp_obj = SimpleNamespace(
+        candidates=[
+            SimpleNamespace(
+                content=SimpleNamespace(parts=[_gemini_part(text="hi")]),
+                finish_reason=SimpleNamespace(name="STOP"),
+            )
+        ],
+        usage_metadata=SimpleNamespace(
+            prompt_token_count=100,
+            candidates_token_count=50,
+            thoughts_token_count=200,
+        ),
+    )
+    provider._client.aio.models.generate_content = AsyncMock(return_value=resp_obj)
+    resp = await provider.create_message(
+        model="gemini-2.5-pro", messages=[], system="", tools=[],
+        max_tokens=64, temperature=0.0,
+    )
+    assert resp.usage.input_tokens == 100
+    # 50 visible + 200 thinking, not 50.
+    assert resp.usage.output_tokens == 250
+
+
 # ─── create_message request wiring ──────────────────────────
 
 
