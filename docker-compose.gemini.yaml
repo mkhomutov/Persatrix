@@ -1,0 +1,80 @@
+# Cloud-peer overlay for docker-compose.yaml — runs the whole society on
+# Google Gemini, another cloud alternative to Anthropic / OpenAI ("Any
+# Provider"). RFC 0053.
+#
+#   make demo-gemini          # needs GEMINI_API_KEY (or GOOGLE_API_KEY) in your environment / .env
+#       — or —
+#   docker compose -f docker-compose.yaml -f docker-compose.gemini.yaml up -d --build
+#
+# Provider selection is config-driven (RFC 0033 — there is no force-knob): this
+# overlay mounts config/demo/gemini/optimization.yaml over the stack's
+# optimization.yaml, which points the quality / fast / summarizer aliases at
+# `provider: gemini` (gemini-2.5-pro / gemini-2.5-flash). It is the release's
+# one-line provider swap applied as a demo — the same agents, unchanged, route
+# to a different provider, and cost re-keys to the new physical models because
+# the cost table is derived from the aliases.
+#
+# Two differences from the openai overlay:
+#   1. The native google-genai SDK is an optional pyproject EXTRA (RFC 0053
+#      OQ #4), so it is NOT in the base agent image. This overlay sets the
+#      `AGENT_EXTRAS: gemini` build arg (Dockerfile.agent) to install it —
+#      hence `--build` is required, as `make demo-gemini` passes.
+#   2. The base compose plumbs only ANTHROPIC_API_KEY / OPENAI_API_KEY, so this
+#      overlay adds GEMINI_API_KEY / GOOGLE_API_KEY (secret key only) to every
+#      agent. The non-secret Vertex knobs (project/location), if any, live in
+#      the mounted alias `provider_config`, not compose env.
+#
+# Unlike demo-offline / demo-ollama this is a REAL cloud provider: it spends
+# real money and needs a key. Set a hard spending cap in Google AI Studio /
+# Google Cloud before running — see the README § Cost Warning.
+
+# The alias config is mounted into the orchestrator (cost table) and every
+# agent (alias resolution).
+x-gemini-config: &gemini-config
+  - ./config/demo/gemini/optimization.yaml:/app/config/optimization.yaml:ro
+
+# The secret key, plumbed into every agent (the base compose plumbs only
+# ANTHROPIC/OPENAI). GEMINI_API_KEY with GOOGLE_API_KEY as the documented
+# fallback — the factory reads GEMINI_API_KEY first (agents/llm_factory.py).
+x-gemini-env: &gemini-env
+  - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+  - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+
+# Install the google-genai extra into the agent image (see the header note 1).
+x-gemini-build: &gemini-build
+  args:
+    AGENT_EXTRAS: gemini
+
+services:
+  orchestrator:
+    volumes: *gemini-config
+
+  agent-planner:
+    build: *gemini-build
+    volumes: *gemini-config
+    environment: *gemini-env
+
+  agent-coder:
+    build: *gemini-build
+    volumes: *gemini-config
+    environment: *gemini-env
+
+  agent-reviewer:
+    build: *gemini-build
+    volumes: *gemini-config
+    environment: *gemini-env
+
+  agent-ember-owl:
+    build: *gemini-build
+    volumes: *gemini-config
+    environment: *gemini-env
+
+  agent-iron-fox:
+    build: *gemini-build
+    volumes: *gemini-config
+    environment: *gemini-env
+
+  agent-nova-sparrow:
+    build: *gemini-build
+    volumes: *gemini-config
+    environment: *gemini-env

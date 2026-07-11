@@ -22,7 +22,15 @@ ENV PERSATRIX_OPTIMIZATION_CONFIG=/app/config/optimization.yaml
 # Layer ordering: pip install is intentionally placed before COPY prompts/ so
 # that editing prompt files does not bust the pip cache and force a full
 # package re-download on every CI rebuild.
-RUN pip install --no-cache-dir agents/
+#
+# RFC 0053 — optional provider SDKs ship as pyproject extras (OQ #4) so a
+# single-provider deployment stays lean. AGENT_EXTRAS lets a provider demo
+# overlay install its extra at build time (e.g. docker-compose.gemini.yaml sets
+# `AGENT_EXTRAS: gemini` → `pip install "./agents[gemini]"`, pulling in
+# google-genai). Default empty → `pip install "./agents"`, byte-for-byte the
+# same closure every non-extra image ships today.
+ARG AGENT_EXTRAS=""
+RUN pip install --no-cache-dir "./agents${AGENT_EXTRAS:+[$AGENT_EXTRAS]}"
 
 # RFC 0009 PR 1b: copy prompts into site-packages where the installed package
 # looks for them. The package resolves prompts relative to

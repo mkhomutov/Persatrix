@@ -180,7 +180,7 @@ Authored in the feature PRs, verified at release-prep:
 
 | PR | Phase | Branch | Status |
 |----|-------|--------|--------|
-| 1 | 1 — Gemini (native) | `feature/v0311-rfc0053-gemini` | ⬜ |
+| 1 | 1 — Gemini (native) | `feature/v0311-rfc0053-gemini` | 🔀 PR open |
 | 2 | 2 — watsonx.ai (native) | `feature/v0311-rfc0053-watsonx` | ⬜ |
 | 3 | 3 — extras + handoff + closeout | `feature/v0311-rfc0053-closeout` | ⬜ |
 

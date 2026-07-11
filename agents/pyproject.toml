@@ -77,6 +77,15 @@ dev = [
     # (`<root>.*`) semantics the contract relies on.
     "import-linter>=2.0,<3",
 ]
+# RFC 0053 (Gemini + watsonx.ai providers) OQ #4 — the provider SDKs ship as
+# extras (`pip install persatrix[gemini]`), not base requirements, so a
+# single-provider deployment carries no new runtime dependency. The
+# `create_provider` gemini branch surfaces an actionable `ImportError →
+# SystemExit` install hint when the extra is not present. The native
+# `google-genai` SDK (RFC 0053 OQ #1 — not the OpenAI-compat endpoint).
+gemini = [
+    "google-genai>=1.0.0,<2",
+]
 
 [project.scripts]
 Persatrix-agent = "persatrix_agents.server_cli:main"

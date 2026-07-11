@@ -1,0 +1,97 @@
+# Demo optimization overlay — GEMINI (Google Cloud peer).
+#
+# Mounted over /app/config/optimization.yaml by docker-compose.gemini.yaml
+# (`make demo-gemini`). It points the three aliases the society references
+# (quality / fast / summarizer) at Gemini, so the whole society runs on
+# Google's cloud models — another "Any Provider" peer alongside Anthropic and
+# OpenAI. Needs GEMINI_API_KEY (or GOOGLE_API_KEY); the gemini overlay plumbs
+# it into every agent (the base compose plumbs only ANTHROPIC/OPENAI).
+#
+# This is the one-line provider swap the release headlines, applied as a demo
+# config: the same agents, unchanged, route to a different provider, and cost
+# re-keys to the new physical models because the cost table is derived from
+# these aliases.
+#
+# Provider: gemini uses the native google-genai SDK (RFC 0053 OQ #1 — a clean
+# `provider: gemini` identity for cost/telemetry, not the OpenAI-compat
+# endpoint). The SDK is an optional extra (`pip install persatrix[gemini]`);
+# the demo image installs it.
+#
+# Derived from config/optimization.yaml — keep the non-alias blocks in step.
+schema_version: "0.3"
+active_profile: "default"
+
+models:
+  aliases:
+    # gemini-2.5-pro for the quality role; gemini-2.5-flash for the cheaper
+    # fast / summarizer roles. Google list pricing (USD per 1M tokens); the
+    # RFC 0033 §F missing-price guard fails closed on an unpriced non-local
+    # alias, so every entry carries explicit pricing. Prices are an operator-
+    # maintained config value — keep them current with Google's published
+    # rates (RFC 0053 §D: the guard checks presence, not accuracy).
+    quality:
+      provider: gemini
+      model: gemini-2.5-pro
+      input_per_1m_tokens: 1.25
+      output_per_1m_tokens: 10.00
+    fast:
+      provider: gemini
+      model: gemini-2.5-flash
+      input_per_1m_tokens: 0.30
+      output_per_1m_tokens: 2.50
+    summarizer:
+      provider: gemini
+      model: gemini-2.5-flash
+      input_per_1m_tokens: 0.30
+      output_per_1m_tokens: 2.50
+
+default:
+  model_routing:
+    # ISSUE-0069: only `sub_agents` is consumed (RFC 0033 §J sub-agent default);
+    # `task_agents` / `evaluators` are reserved — see config/optimization.yaml.
+    defaults:
+      task_agents: "quality"  # reserved (not consumed)
+      sub_agents: "quality"   # live: RFC 0033 §J sub-agent default
+      evaluators: "fast"      # reserved (not consumed)
+  caching:
+    exact:
+      enabled: true
+      max_entries: 10000
+      ttl_seconds: 3600
+  context_management:
+    max_context_tokens: 80000
+    summarization:
+      enabled: true
+      model: "summarizer"
+
+cost:
+  pricing:
+    # Derived from the aliases above — these priced cloud models keep the
+    # RFC 0023 budget/lease gate live (a real per-token cost accrues), so the
+    # wallet-cap demo trips here, unlike the $0-local offline / ollama demos.
+    models:
+      "gemini-2.5-pro":
+        input_per_1m_tokens: 1.25
+        output_per_1m_tokens: 10.00
+      "gemini-2.5-flash":
+        input_per_1m_tokens: 0.30
+        output_per_1m_tokens: 2.50
+  budgets:
+    global:
+      max_daily_usd: 100.00
+      alert_at_percent: [50, 80, 95]
+      on_exceed: "pause_and_alert"
+    per_workflow:
+      default_max_usd: 10.00
+    per_agent:
+      default_max_usd: 5.00
+
+wallet:
+  ttl_seconds: 60
+  reaper_interval_seconds: 5
+  max_active_leases: 16
+
+conversation_window:
+  enabled: true
+  max_turns: 20
+  max_tokens: 2048

@@ -18,6 +18,7 @@ from opentelemetry.trace import Status, StatusCode
 
 from .generated import wallet_pb2 as walletpb
 from .llm_factory import create_provider
+from .llm_gemini import GeminiProvider
 from .llm_offline import MockProvider
 from .llm_ollama import OllamaProvider
 from .llm_providers import AnthropicProvider, OpenAIProvider
@@ -60,6 +61,7 @@ _tracer = trace.get_tracer(__name__)
 __all__ = [
     "AnthropicProvider",
     "BudgetExceededError",
+    "GeminiProvider",
     "LLMClient",
     "LLMProvider",
     "LLMResponse",
