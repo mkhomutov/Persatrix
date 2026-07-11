@@ -10,9 +10,13 @@ replies producing a *readable, on-topic* synthesis at zero cost.
 
 This suite is the **deterministic CI backbone** of the PR 8 checklist —
 "``make demo-autonomous`` runs offline (mock) and produces a non-empty
-synthesis; no keys; spend = 0". It feeds the curated replies through the
-**real** mock provider for the SHIPPED ``roundtable`` topic/goal and pins
-that:
+synthesis; no keys; spend = 0". Docker (hence a live boot) is out of scope
+for CI, so this stands in for it by composing the **exact orchestrator-side
+directives** the booted demo dispatches — the Go ``composeConveneDirective`` /
+``composeSynthesisDirective`` shapes rendered through the real receiver-side
+envelope wrap (``convener.py`` / ``synthesis_turn.py``) — and feeding them
+through the **real** mock provider for the SHIPPED ``roundtable`` topic/goal,
+pinning that:
 
 * the convener opens on the roundtable topic (monorepo adoption),
 * the participants engage on that topic, and
@@ -40,6 +44,8 @@ import yaml
 
 from agents.llm_offline import MockProvider, reset_cache
 from agents.llm_types import StopReason
+from agents.persona_runtime.convener import format_convener_opening
+from agents.persona_runtime.synthesis_turn import format_synthesis_turn
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CHANNELS_YAML = _REPO_ROOT / "config" / "channels.yaml"
@@ -81,20 +87,42 @@ def _roundtable() -> dict[str, Any]:
     raise AssertionError("the `roundtable` demo channel is missing from config/channels.yaml")
 
 
-def _opener_directive(rt: dict[str, Any]) -> str:
-    """The convene opener the convener sees — topic + agenda, the shape
-    ``convener.py`` wraps in ``<external_data>``. The mock keyword-matches
-    the latest user message, so the topic text is what drives the fixture."""
+def _convene_directive(rt: dict[str, Any]) -> str:
+    """The EXACT convene stimulus the convener's mock sees on a convene forced
+    turn — not a hand-written approximation. Mirrors the orchestrator-side
+    ``internal/channels/convene.go`` ``composeConveneDirective`` (topic → agenda
+    → goal) and renders it through the real receiver-side path
+    (``prompt_assembly`` → ``convener.py`` ``format_convener_opening``, the RFC
+    0009 ``<external_data>`` envelope). Composing the real stimulus makes this a
+    faithful offline-face proof and a drift guard on the shipped topic wording."""
     auto = rt["autonomous"]
-    agenda = "\n".join(f"- {item}" for item in auto.get("agenda", []))
-    return f"{auto['topic']}\n\nAgenda:\n{agenda}"
+    parts = [f"Topic: {auto['topic']}\n"]
+    agenda = auto.get("agenda", [])
+    if agenda:
+        parts.append("\nAgenda:\n")
+        parts.extend(f"{i}. {item}\n" for i, item in enumerate(agenda, 1))
+    if auto.get("goal"):
+        parts.append(f"\nGoal: {auto['goal']}\n")
+    return format_convener_opening("".join(parts).strip())
 
 
 def _synthesis_directive(rt: dict[str, Any]) -> str:
-    """The goal-directed synthesis turn the chair sees at the bounded close
-    (§D). Carries the ``autonomous.goal`` — whose "synthesized recommendation"
-    wording is the fixture key that distinguishes it from a discussion turn."""
-    return f"Synthesize the discussion and close it. Goal: {rt['autonomous']['goal']}"
+    """The EXACT synthesis stimulus the chair's mock sees at the §D bounded
+    close — the load-bearing offline-face claim. Mirrors ``internal/channels/
+    synthesis_close.go`` ``composeSynthesisDirective`` (goal leads, topic
+    follows) and renders it through the real receiver-side path
+    (``prompt_assembly`` → ``synthesis_turn.py`` ``format_synthesis_turn``,
+    which prepends the ``synthesis-turn`` framing snippet before the envelope).
+    Because this is the true stimulus, the assertions below pin that the chair
+    fires its ``synthes`` §D synthesis fixture — not the ``monorepo`` discussion
+    fixture — exactly as the booted ``make demo-autonomous`` would."""
+    auto = rt["autonomous"]
+    parts: list[str] = []
+    if auto.get("goal"):
+        parts.append(f"Goal: {auto['goal']}\n")
+    if auto.get("topic"):
+        parts.append(f"\nTopic: {auto['topic']}\n")
+    return format_synthesis_turn("".join(parts).strip())
 
 
 async def _reply(provider: MockProvider, user_text: str) -> Any:
@@ -125,7 +153,7 @@ class TestOfflineAutonomousDemoSynthesis:
         rt = _roundtable()
         convener = MockProvider(agent_id=rt["autonomous"]["convener"])
 
-        opener = await _reply(convener, _opener_directive(rt))
+        opener = await _reply(convener, _convene_directive(rt))
 
         text = opener.text.strip()
         assert text, "the convener must open the discussion with a non-empty turn"
