@@ -24,6 +24,17 @@ Plus purity (the input block is never mutated), idempotency (a second applicatio
 is a no-op — the convene entry refreshes in place, never duplicates), and
 deterministic timer-id ordering (a stable config-round-trip diff, matching
 ``StandingConveneTimers``).
+
+Both contracts above are *conditional*, and the condition is the sharp edge: the
+bump and the ``timers`` block are written ONLY when a convene timer is actually
+armed. The natural driver walks every persona and passes
+``specs_by_convener.get(persona_id, [])``, so an unguarded writer would bump the
+whole fleet to ``semi-autonomous`` and hand each persona an empty ``timers`` block —
+:class:`TestNothingToArmIsANoOp` pins the guard.
+
+Behaviour only. The writer's agreement with the sources it mirrors — the agent
+schema, ``server_persona``'s gate and defaults, ``tick``'s legacy-timer constants —
+is pinned next door in ``test_convene_timer_writer_pins.py``.
 """
 
 from __future__ import annotations
@@ -58,6 +69,15 @@ class TestLevelBump:
 
     def test_passive_convener_is_bumped_to_semi_autonomous(self) -> None:
         out = merge_convene_timers({"level": "passive"}, [_PLANNING])
+        assert out["level"] == "semi-autonomous"
+
+    def test_supervisor_convener_is_bumped_to_semi_autonomous(self) -> None:
+        # ``supervisor`` is a schema-legal level that READS as more autonomous than
+        # semi-autonomous but is NOT in server_persona's scheduler gate — so it runs
+        # no scheduler and swallows a timers entry exactly as reactive does. The
+        # writer's rule is membership in the gate, not a ladder position, so this is
+        # a bump, not a downgrade. Named in the module docstring; pinned here.
+        out = merge_convene_timers({"level": "supervisor"}, [_PLANNING])
         assert out["level"] == "semi-autonomous"
 
     def test_missing_level_defaults_reactive_and_is_bumped(self) -> None:
@@ -180,6 +200,46 @@ class TestConveneEntry:
                 [ConveneSpec(channel_id="dm:alice", interval_seconds=3600)],
             )
 
+    @pytest.mark.parametrize("interval", [0, -1])
+    def test_sub_floor_interval_is_rejected(self, interval: int) -> None:
+        # The schema's ``interval_seconds`` minimum is 1.0 and
+        # ``EventLoop.register_timer`` RAISES below ``_MIN_INTERVAL`` — which
+        # ``init_persona_timers`` re-raises, aborting the convener's init. Writing
+        # such an entry defers a caller bug to the convener's next boot, where it
+        # reads as a persona that will not start. Symmetric with the non-group
+        # rejection above: the writer refuses to emit an entry that cannot arm.
+        with pytest.raises(ValueError, match="busy-loop floor"):
+            merge_convene_timers(
+                {"level": "reactive"},
+                [ConveneSpec(channel_id="group:planning", interval_seconds=interval)],
+            )
+
+    def test_id_collision_with_a_non_convene_timer_is_rejected(self) -> None:
+        # ``parse_standing_convene_timer_id``'s docstring explicitly contemplates an
+        # operator-named ``convene-*`` timer of another kind (it is why parse is a
+        # strict inverse rather than a prefix strip). Such a timer survives the
+        # reconcile filter, and an upsert would replace it — kind and all — with the
+        # convene entry, silently destroying operator config. Refuse: an id holds one
+        # timer, and the writer does not get to decide it is theirs.
+        existing = {
+            "level": "autonomous",
+            "timers": [
+                {"id": "convene-planning", "interval_seconds": 3600, "kind": "reflection"}
+            ],
+        }
+        with pytest.raises(ValueError, match="collides"):
+            merge_convene_timers(existing, [_PLANNING])
+
+    def test_a_repeated_spec_refreshes_rather_than_colliding(self) -> None:
+        # The collision guard reads the PRE-EXISTING (non-convene) ids only, so a
+        # ``specs`` iterable naming the same channel twice still upserts to a single
+        # entry at the last interval — it must not trip the collision rejection.
+        out = merge_convene_timers(
+            {"level": "autonomous", "timers": []},
+            [ConveneSpec("group:planning", 86400), ConveneSpec("group:planning", 3600)],
+        )
+        assert out["timers"] == [_convene_entry("convene-planning", 3600)]
+
 
 class TestPurityAndIdempotency:
     def test_input_block_is_not_mutated(self) -> None:
@@ -278,15 +338,57 @@ class TestReconciliation:
         assert "convene-planning" in ids  # current convene added
 
 
-class TestLegacyTickConstantsMatchTickModule:
-    """Cross-module drift pin: the carried-forward tick reuses the id/kind the
-    shipped ``TickScheduler`` registers, so the materialized entry is identical to
-    the wake the persona would otherwise have fired (and shares its cache row)."""
+class TestNothingToArmIsANoOp:
+    """A persona that convenes nothing must come back untouched.
 
-    def test_legacy_tick_id_and_kind_mirror_tick_module(self) -> None:
-        from agents.convene_timer_writer import _LEGACY_TICK_ID, _LEGACY_TICK_KIND
-        from agents.tick import _LEGACY_TIMER_ID
+    The writer's caller walks personas and passes
+    ``specs_by_convener.get(persona_id, [])``, so the EMPTY-specs call is the common
+    one — it lands on every non-convener in the fleet. Both of the writer's side
+    effects are capability grants and neither may fire on it: the level bump is what
+    BUILDS the scheduler (``server_persona`` gates on it), and a ``timers`` block —
+    even ``[]`` — is what turns ``register_legacy_timer`` off."""
 
-        assert _LEGACY_TICK_ID == _LEGACY_TIMER_ID
-        # The kind the shipped scheduler stamps on the legacy wake.
-        assert _LEGACY_TICK_KIND == "tick"
+    def test_reactive_persona_with_no_specs_is_returned_unchanged(self) -> None:
+        # The fleet-wide regression: an unconditional bump makes every persona
+        # semi-autonomous, so each builds an EventLoop and logs the three
+        # ``COST: … will consume LLM tokens continuously`` warnings for a schedule
+        # it does not have.
+        block = {"level": "reactive", "tick_interval_seconds": 30}
+        assert merge_convene_timers(block, []) == block
+
+    def test_missing_autonomy_block_with_no_specs_gains_nothing(self) -> None:
+        assert merge_convene_timers(None, []) == {}
+
+    def test_no_specs_does_not_introduce_an_empty_timers_block(self) -> None:
+        # ``timers: []`` is not inert: it flips ``register_legacy_timer`` to False.
+        # Writing one here is latent (the persona had no tick to lose while below the
+        # scheduler gate), but an operator who later prunes the pointless empty block
+        # from a persona this writer ALSO bumped would hand it a tick_interval_seconds
+        # LLM heartbeat it never had.
+        out = merge_convene_timers({"level": "reactive", "tick_interval_seconds": 30}, [])
+        assert "timers" not in out
+
+    def test_scheduling_persona_with_no_specs_keeps_its_implicit_tick(self) -> None:
+        # No timers block is introduced, so ``register_legacy_timer`` stays True and
+        # the implicit heartbeat survives — there is nothing to carry forward BECAUSE
+        # nothing is being written. Materializing an explicit legacy_tick here would
+        # be a gratuitous diff that also hands the entry a scheduled_wakes cache row.
+        block = {"level": "semi-autonomous", "tick_interval_seconds": 30}
+        assert merge_convene_timers(block, []) == block
+
+    def test_no_specs_still_drops_a_stale_convene_timer(self) -> None:
+        # The one case where empty specs MUST write: reconciling a convener whose
+        # last standing channel was disarmed. The timers block already exists, so
+        # dropping the stale entry introduces no new capability.
+        armed = merge_convene_timers({"level": "autonomous", "timers": []}, [_PLANNING])
+        reconciled = merge_convene_timers(armed, [])
+        assert reconciled["timers"] == []
+        # The bump is one-way: reconciling to zero channels does not lower the level
+        # (the writer cannot know whether an operator raised it for another reason).
+        assert reconciled["level"] == "autonomous"
+
+    def test_a_bumped_convener_is_not_lowered_when_its_channel_disarms(self) -> None:
+        bumped = merge_convene_timers({"level": "reactive"}, [_PLANNING])
+        assert bumped["level"] == "semi-autonomous"
+        assert merge_convene_timers(bumped, [])["level"] == "semi-autonomous"
+
