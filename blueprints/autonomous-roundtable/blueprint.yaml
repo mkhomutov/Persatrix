@@ -1,0 +1,53 @@
+# Blueprint: Autonomous Roundtable (RFC 0052)
+# Usage: the curated roster behind `make demo-autonomous` — a group that
+# convenes ITSELF on a topic and runs a human-free brainstorm to a synthesis,
+# with no human turn, no API key, and zero spend.
+#
+# This is a DESIGN blueprint (like blueprints/software-team): the CLI's
+# `persatrix init --blueprint` is not yet wired (cli/src/main.rs `Init` is a
+# stub), so the offline demo is driven by the shipped `roundtable` channel in
+# config/channels.yaml + the three personas in config/agents.yaml, routed to
+# the mock provider by the offline overlay (config/demo/offline/optimization.yaml).
+# The blueprint documents the roster that demo assembles and the convener/chair
+# split (RFC 0052 OQ #1).
+
+blueprint:
+  id: "autonomous-roundtable"
+  description: "RFC 0052 — a human-free brainstorm: a convener opens a topic, the roster discusses through the governed wake chain, and a chair synthesizes a recommendation. Zero human turns."
+
+  # The OFFLINE face maps every seat to the zero-cost `mock` provider
+  # (config/demo/offline/optimization.yaml → `provider: mock`, priced at $0), so
+  # the whole arc runs with no keys and no spend. Swap this alias to
+  # anthropic / openai / gemini / watsonx for the live and four-vendor headline
+  # runs (RFC 0052 PR 9 + RFC 0053).
+  provider: "mock"
+
+  agents:
+    - { extends: "templates/personas.yaml#product_manager", id: "nova-sparrow", role: "convener" }
+    - { extends: "templates/personas.yaml#engineering_lead", id: "ember-owl", role: "chair" }
+    - { extends: "templates/personas.yaml#reliability_engineer", id: "iron-fox", role: "participant" }
+
+  channels:
+    # The autonomous group. Convener (nova-sparrow) owns the agenda lifecycle;
+    # the chair (ember-owl, escalation_chair_id) authors the §D closing
+    # synthesis — DISTINCT roles (OQ #1). A positive interaction_budget_tokens
+    # is MANDATORY: an unattended channel has no human circuit-breaker, so
+    # uncapped autonomy is un-creatable (RFC 0052 Goal #4 / PR 1 safety gate).
+    - id: "roundtable"
+      type: "group"
+      interaction_budget_tokens: 200000
+      escalation_chair_id: "ember-owl"
+      autonomous:
+        enabled: true
+        topic: "Should we adopt a monorepo? Lay out the tradeoffs."
+        agenda:
+          - "Build tooling and CI cost"
+          - "Cross-team coupling risk"
+          - "Migration effort"
+        convener: "nova-sparrow"
+        goal: "A synthesized recommendation with the strongest argument on each side."
+        max_rounds: 12
+      members:
+        - { id: "nova-sparrow", respond: "participant" }
+        - { id: "ember-owl", respond: "chair" }
+        - { id: "iron-fox", respond: "participant" }

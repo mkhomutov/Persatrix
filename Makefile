@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -292,6 +292,42 @@ demo-anthropic: ## Run the demo society on Anthropic (Claude) — needs ANTHROPI
 	docker compose -f docker-compose.yaml -f docker-compose.anthropic.yaml up -d --build
 	@echo "✓ Anthropic society up. Try:  ./bin/persatrix chat ember-owl"
 	@echo "  Stop with: make docker-down"
+
+demo-autonomous: build-cli ## Run the RFC 0052 offline autonomous brainstorm — the `roundtable` roster convenes ITSELF on the mock provider (zero keys, zero spend, no human turn)
+	@echo "→ Starting the offline autonomous brainstorm (RFC 0052) — mock provider, no API key, no spend."
+	@# Reuses the offline overlay: config/demo/offline/optimization.yaml points
+	@# every alias at `provider: mock`, and PERSATRIX_OFFLINE_RESPONSES feeds the
+	@# curated replies (config/offline_responses.yaml — incl. the monorepo
+	@# roundtable scenario). The `roundtable` channel ships DISARMED in
+	@# config/channels.yaml (a default-deploy safety posture — an armed channel is
+	@# convenable, and would spend, on any default boot); this target arms it at
+	@# RUNTIME and convenes it, so the bundled config stays safe at rest. This is
+	@# the exact MT-AUTONOMOUS-001 operator flow (arm via CLI → convene via CLI),
+	@# just on the mock provider. --build matches the other demos.
+	docker compose -f docker-compose.yaml -f docker-compose.offline.yaml up -d --build
+	@echo "→ Waiting for the orchestrator to become healthy..."
+	@t=120; while ! curl -sf http://localhost:8080/healthz >/dev/null 2>&1; do \
+		t=$$((t-2)); \
+		if [ $$t -le 0 ]; then echo "✗ orchestrator did not become healthy in time — is Docker running?"; exit 1; fi; \
+		sleep 2; \
+	done
+	@echo "→ Arming group:roundtable (nova-sparrow convenes; ember-owl chairs the synthesis)..."
+	$(GO_BIN)/persatrix channel config set group:roundtable autonomous.enabled=true
+	@echo "→ Convening — retrying while the persona agents finish registering..."
+	@for i in $$(seq 1 20); do \
+		if $(GO_BIN)/persatrix channel convene group:roundtable --json 2>/dev/null; then \
+			echo ""; \
+			echo "✓ Convened with ZERO human turns. The roundtable is brainstorming 'Should we adopt a monorepo?'"; \
+			echo "  Watch it:  open http://localhost:8080/ui  (Channels → roundtable), or"; \
+			echo "             $(GO_BIN)/persatrix agent interactions ember-owl  (once it closes — the synthesis + summaries)"; \
+			echo "  Stop:      make docker-down"; \
+			exit 0; \
+		fi; \
+		sleep 3; \
+	done; \
+	echo ""; \
+	echo "⚠ Auto-convene did not land yet — the agents may still be registering, or it is already convening."; \
+	echo "  Convene it yourself once the agents are up:  $(GO_BIN)/persatrix channel convene group:roundtable"
 
 demo-offline: ## Run the demo society with ZERO cost — no API key, no network (mock provider)
 	@echo "→ Starting Persatrix in offline mode (mock provider — no API calls, no spend)..."
