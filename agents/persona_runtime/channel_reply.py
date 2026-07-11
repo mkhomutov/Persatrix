@@ -154,7 +154,22 @@ def synthesize_channel_reply(
             return actions
         reply_text = _DM_EMPTY_REPLY_FALLBACK
 
-    mentions = [event.sender_id] if event.sender_id else []
+    # RFC 0052 §B/§D — a convene (opening) or synthesis (closing) forced turn is a
+    # directed CONTROL directive, not a peer message, so its reply addresses the
+    # OPEN FLOOR and must NOT @-mention the synthetic dispatch sender
+    # (``orchestrator:convene`` / ``orchestrator:synthesis``): that sentinel is not
+    # a real participant, so the orchestrator's publish-path validation rejects it
+    # (``mentions[0]: invalid participant id``) and the convener's opener 400s and
+    # never posts — the whole discussion stalls before it starts (surfaced by
+    # booting ``make demo-autonomous``). The opener "names no one" (RFC §B); the
+    # room answers it as an open-floor message. Keyed on the forced-turn MARKER,
+    # not the sender string, so it stays correct if the sentinel id ever changes.
+    is_forced_control_turn = bool(event.payload.get("convene")) or bool(
+        event.payload.get("synthesis_turn")
+    )
+    mentions = (
+        [] if is_forced_control_turn or not event.sender_id else [event.sender_id]
+    )
     synthesized = AgentAction(
         action_type=ActionType.SEND_CHANNEL_MESSAGE,
         payload={
