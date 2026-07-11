@@ -21,6 +21,7 @@ from pathlib import Path
 from agents.convene_timer import (
     STANDING_CONVENE_KIND,
     parse_standing_convene_timer_id,
+    standing_convene_timer_id,
 )
 
 # CWD-relative repo paths (CI runs pytest from the repo root), mirroring the
@@ -83,6 +84,60 @@ class TestParseStandingConveneTimerID:
     def test_kind_constant_matches_wire_value(self) -> None:
         # The one bareword the dispatch branch (tick.py) compares against.
         assert STANDING_CONVENE_KIND == "convene"
+
+
+class TestStandingConveneTimerID:
+    """The FORWARD encoder (PR 7c-ii-b): the Python mirror of the Go
+    ``standingConveneTimerID`` the writer needs to author an ``autonomy.timers``
+    entry from a channel id — and a true inverse of the reverser above."""
+
+    def test_encodes_group_channel_to_convene_timer_id(self) -> None:
+        assert standing_convene_timer_id("group:planning") == "convene-planning"
+        assert standing_convene_timer_id("group:weekly-arch-review") == (
+            "convene-weekly-arch-review"
+        )
+        # A channel literally named ``convene-foo`` encodes to
+        # ``convene-convene-foo`` (the mirror of the greedy-strip reverser case).
+        assert standing_convene_timer_id("group:convene-foo") == "convene-convene-foo"
+
+    def test_round_trips_with_the_reverser_both_directions(self) -> None:
+        for channel_id in [
+            "group:planning",
+            "group:ab",
+            "group:x9",
+            "group:a-b-c-2",
+            "group:convene-foo",
+        ]:
+            timer_id = standing_convene_timer_id(channel_id)
+            assert timer_id is not None
+            assert parse_standing_convene_timer_id(timer_id) == channel_id
+        # Distinct names from the encode-first loop above: reusing ``channel_id``
+        # here would rebind a ``str`` loop target to the ``str | None`` the parser
+        # returns, which ``mypy tests/`` rejects. The decode-first direction reads
+        # better as encoded → decoded anyway.
+        for encoded in ["convene-planning", "convene-ab", "convene-convene-foo"]:
+            decoded = parse_standing_convene_timer_id(encoded)
+            assert decoded is not None
+            assert standing_convene_timer_id(decoded) == encoded
+
+    def test_rejects_non_group_or_invalid_names(self) -> None:
+        # Standing channels are group-only; a DM/thread id carries a ``:`` the
+        # timer-id pattern forbids and is never armed. An out-of-charset name
+        # (uppercase, single char, edge hyphen) is not a channel a group could
+        # carry — the encoder must reject rather than emit an id that would not
+        # reverse.
+        for bad in [
+            "dm:alice",
+            "thread:planning:42",
+            "planning",  # no ``group:`` prefix
+            "group:",  # empty name
+            "group:Planning",  # uppercase
+            "group:a",  # single char — needs >= 2
+            "group:-x",  # leading hyphen
+            "group:x-",  # trailing hyphen
+            "group:foo_bar",  # underscore is not a channel-name char
+        ]:
+            assert standing_convene_timer_id(bad) is None, bad
 
 
 # ─── Cross-language drift guards ────────────────────────────────────────────────
