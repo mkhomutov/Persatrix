@@ -372,6 +372,20 @@ demo-openai: ## Run the demo society on OpenAI (cloud peer) — needs OPENAI_API
 	@echo "✓ OpenAI society up. Try:  ./bin/persatrix chat ember-owl"
 	@echo "  Stop with: make docker-down"
 
+demo-gemini: ## Run the demo society on Google Gemini (cloud peer) — needs GEMINI_API_KEY (or GOOGLE_API_KEY); spends real money
+	@echo "→ Starting Persatrix on Gemini (gemini-2.5-pro / gemini-2.5-flash) — REAL cloud calls, REAL spend."
+	@echo "  Needs GEMINI_API_KEY (or GOOGLE_API_KEY) in your environment or .env. Set a hard cap in Google AI Studio first."
+	@# Provider selection is config-driven (RFC 0033 — no force-knob): the
+	@# gemini overlay mounts an alias config pointing every agent at
+	@# `provider: gemini` (native google-genai SDK — RFC 0053 OQ #1). Unlike the
+	@# openai overlay it (1) installs the google-genai EXTRA via the
+	@# AGENT_EXTRAS build arg — so `--build` is REQUIRED, not just conventional —
+	@# and (2) plumbs GEMINI_API_KEY / GOOGLE_API_KEY (the base compose plumbs
+	@# only ANTHROPIC/OPENAI).
+	docker compose -f docker-compose.yaml -f docker-compose.gemini.yaml up -d --build
+	@echo "✓ Gemini society up. Try:  ./bin/persatrix chat ember-owl"
+	@echo "  Stop with: make docker-down"
+
 reset: ## Stop the stack and purge ALL named volumes (channels DB / orchestrator-data, persona memory / ember-owl-data + iron-fox-data + nova-sparrow-data, agent scratch / workspace) — operator workaround for F-3 cross-run state bleed; see docs/issues/ISSUE-0051
 	@echo "→ Stopping stack and removing named volumes..."
 	@# `docker compose down -v` is idempotent: it tears down whatever is up

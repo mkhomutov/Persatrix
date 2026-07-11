@@ -14,6 +14,7 @@ no real API calls.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -24,7 +25,12 @@ import pytest
 import yaml
 
 from agents import optimization
-from agents.llm_client import AnthropicProvider, OpenAIProvider, create_provider
+from agents.llm_client import (
+    AnthropicProvider,
+    GeminiProvider,
+    OpenAIProvider,
+    create_provider,
+)
 from agents.model_aliases import resolve, use_alias_map
 
 # A seeded alias map exercised through the resolver's ``use_alias_map`` test
@@ -56,6 +62,20 @@ def _mock_openai_module() -> MagicMock:
     mod = MagicMock()
     mod.AsyncOpenAI.return_value = AsyncMock()
     return mod
+
+
+def _mock_genai_modules() -> tuple[MagicMock, MagicMock]:
+    """Return stand-in ``google`` / ``google.genai`` modules for GeminiProvider.
+
+    ``from google import genai`` resolves ``genai`` as an attribute of the
+    ``google`` package, so the fake ``google`` module carries a ``genai``
+    attribute whose ``Client`` returns a client double.
+    """
+    genai_mod = MagicMock()
+    genai_mod.Client.return_value = MagicMock()
+    google_mod = MagicMock()
+    google_mod.genai = genai_mod
+    return google_mod, genai_mod
 
 
 class TestCreateProviderAliasResolution:
@@ -262,3 +282,98 @@ class TestStockConfigMigration:
         finally:
             os.environ.pop("PERSATRIX_OPTIMIZATION_CONFIG", None)
             optimization.reset_cache()
+
+
+class TestCreateProviderGemini:
+    """RFC 0053 — the ``provider: gemini`` factory branch.
+
+    The GeminiProvider translation logic is tested in
+    ``test_llm_gemini.py``; these pin the ``create_provider`` routing: alias
+    resolution, the GEMINI_API_KEY→GOOGLE_API_KEY key fallback, the S-09
+    warn-not-crash on a missing key, the ImportError→SystemExit install hint on
+    a missing SDK, and the §D disagreeing-provider conflict.
+    """
+
+    _ALIAS = {
+        "quality-gemini": {
+            "provider": "gemini",
+            "model": "gemini-2.5-pro",
+            "input_per_1m_tokens": 1.25,
+            "output_per_1m_tokens": 10.00,
+        },
+    }
+
+    @pytest.fixture(autouse=True)
+    def _clear_gemini_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_alias_routes_to_gemini_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "key-123")
+        google_mod, genai_mod = _mock_genai_modules()
+        with use_alias_map(self._ALIAS), patch.dict(
+            sys.modules, {"google": google_mod, "google.genai": genai_mod}
+        ):
+            provider, model = create_provider({"id": "g", "model": "quality-gemini"})
+        assert isinstance(provider, GeminiProvider)
+        # The physical vendor id reaches create_message — never the alias name.
+        assert model == "gemini-2.5-pro"
+
+    def test_google_api_key_is_the_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GOOGLE_API_KEY is the documented fallback when GEMINI_API_KEY is unset."""
+        monkeypatch.setenv("GOOGLE_API_KEY", "goog-key")
+        google_mod, genai_mod = _mock_genai_modules()
+        with use_alias_map(self._ALIAS), patch.dict(
+            sys.modules, {"google": google_mod, "google.genai": genai_mod}
+        ):
+            provider, _model = create_provider({"id": "g", "model": "quality-gemini"})
+            assert isinstance(provider, GeminiProvider)
+            provider._get_client()  # force the lazy client build
+        genai_mod.Client.assert_called_once_with(api_key="goog-key")
+
+    def test_missing_key_warns_not_crashes(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A missing key WARNS at startup (S-09) and still returns a provider —
+        it must not crash (the client is built lazily, failing on first request)."""
+        google_mod, genai_mod = _mock_genai_modules()
+        with use_alias_map(self._ALIAS), patch.dict(
+            sys.modules, {"google": google_mod, "google.genai": genai_mod}
+        ):
+            with caplog.at_level(logging.WARNING):
+                provider, _model = create_provider(
+                    {"id": "g", "model": "quality-gemini"}
+                )
+        assert isinstance(provider, GeminiProvider)
+        assert any(
+            "GEMINI_API_KEY" in r.message or "GOOGLE_API_KEY" in r.message
+            for r in caplog.records
+        )
+
+    def test_missing_sdk_is_systemexit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A missing google-genai SDK is a loud, actionable SystemExit at factory
+        time (the shared ImportError→SystemExit install-hint pattern)."""
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
+        # ``google`` mapped to None makes ``from google import genai`` raise
+        # ImportError deterministically, regardless of what is installed.
+        with use_alias_map(self._ALIAS), patch.dict(sys.modules, {"google": None}):
+            with pytest.raises(SystemExit) as exc:
+                create_provider({"id": "g", "model": "quality-gemini"})
+        assert "google-genai" in str(exc.value)
+
+    def test_disagreeing_provider_field_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A disagreeing explicit provider: field is a SystemExit (§D rule 1)."""
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
+        with use_alias_map(self._ALIAS):
+            with pytest.raises(SystemExit) as exc:
+                create_provider(
+                    {"id": "bad", "model": "quality-gemini", "provider": "openai"}
+                )
+        msg = str(exc.value)
+        assert "gemini" in msg and "openai" in msg

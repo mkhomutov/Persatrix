@@ -148,6 +148,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-ALIAS-002](MT-ALIAS-002.md) | One-line provider swap re-routes the same agent (headline claim) | Active |
 | [MT-OFFLINE-001](MT-OFFLINE-001.md) | Offline mode (`MockProvider`) — full round-trip at $0, zero network | Active |
 | [MT-OLLAMA-001](MT-OLLAMA-001.md) | Ollama local model — real tokens, $0 cloud spend | Active |
+| [MT-PROVIDER-GEMINI-001](MT-PROVIDER-GEMINI-001.md) | Google Gemini (native `google-genai`) — cloud provider smoke, real tokens + cost | Active |
 
 ## Integration
 

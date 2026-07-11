@@ -10,8 +10,8 @@ This is the RFC 0033 §D integration point: the configured ``model`` field
 is run through :func:`agents.model_aliases.resolve`, so an agent can name a
 logical alias (``quality`` / ``fast`` / ``summarizer``) or a raw vendor ID.
 Provider selection is **purely config/alias-driven** — every provider
-(``anthropic`` / ``openai`` / ``ollama`` / ``mock``) is chosen the same
-standard way, by the resolved ``provider`` field. There is no global
+(``anthropic`` / ``openai`` / ``gemini`` / ``ollama`` / ``mock``) is chosen
+the same standard way, by the resolved ``provider`` field. There is no global
 force-knob: the keyless ``make demo-offline`` / ``make demo-ollama`` /
 ``make demo-openai`` paths select their provider by mounting an alias config
 that points the agents' aliases at ``mock`` / ``ollama`` / ``openai`` (the
@@ -25,6 +25,7 @@ import logging
 import os
 from typing import Any
 
+from .llm_gemini import GeminiProvider
 from .llm_offline import MockProvider
 from .llm_ollama import OllamaProvider, resolve_ollama_base_url
 from .llm_providers import AnthropicProvider, OpenAIProvider
@@ -51,7 +52,8 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
 
     The ``model`` field is run through the RFC 0033 resolver and the resolved
     ``provider`` selects the concrete class — the **same standard path for
-    every provider** (``anthropic`` / ``openai`` / ``ollama`` / ``mock``). The
+    every provider** (``anthropic`` / ``openai`` / ``gemini`` / ``ollama`` /
+    ``mock``). The
     ``model`` field must be a declared ``models.aliases`` entry: the alias is
     authoritative for the provider (an explicit, *disagreeing* ``provider:``
     field is a ``SystemExit`` — §D rule 1) and for ``provider_config``
@@ -132,6 +134,33 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
             raise SystemExit(
                 "Provider 'openai' requires package 'openai'. "
                 "Install with: pip install 'openai>=1.50.0'"
+            )
+    elif provider == "gemini":
+        # Native google-genai provider (RFC 0053 §B; OQ #1 → native, not the
+        # OpenAI-compat endpoint). The secret key comes from GEMINI_API_KEY,
+        # falling back to GOOGLE_API_KEY (the SDK's own env name). The
+        # non-secret Vertex knobs (project/location) ride provider_config, the
+        # same channel OpenAI's base_url uses.
+        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get(
+            "GOOGLE_API_KEY"
+        )
+        # S-09: warn (do not crash) at startup on a missing key — the provider
+        # builds its client lazily, so this fails on the first request, not here.
+        if not api_key:
+            logger.warning(
+                "GEMINI_API_KEY (or GOOGLE_API_KEY) not set — Gemini provider "
+                "will fail on first request"
+            )
+        try:
+            return GeminiProvider(
+                api_key=api_key,
+                provider_config=provider_config,
+            ), physical_model
+        except ImportError:
+            raise SystemExit(
+                "Provider 'gemini' requires package 'google-genai'. "
+                "Install with: pip install 'google-genai>=1.0.0' "
+                "(or the extra: pip install 'persatrix-agents[gemini]')"
             )
     elif provider == "ollama":
         # Local model over Ollama's OpenAI-compatible API. No API key needed

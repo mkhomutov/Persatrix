@@ -51,16 +51,17 @@ defaults, the pricing table, and the docs.
 
 ---
 
-## The four providers are peers
+## The five providers are peers
 
 Provider selection is **pure data**: the alias entry's `provider` field
-chooses the concrete provider, and all four are selected the exact same way.
+chooses the concrete provider, and all five are selected the exact same way.
 There are no per-provider force-knobs.
 
 | Provider | `provider:` | Needs | Cost | Notes |
 |----------|-------------|-------|------|-------|
 | **Anthropic** | `anthropic` | `ANTHROPIC_API_KEY` | per-token | Claude. A peer, not a default — no provider is configured out of the box. |
 | **OpenAI** | `openai` | `OPENAI_API_KEY` | per-token | Also any OpenAI-compatible API (vLLM, Together, Groq, LM Studio) via `provider_config.base_url`. |
+| **Gemini** | `gemini` | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) + the `google-genai` extra | per-token | Google Gemini on the native `google-genai` SDK ([`agents/llm_gemini.py`](../../agents/llm_gemini.py)) — a first-class `gemini` identity for cost/telemetry, not the OpenAI-compat endpoint (RFC 0053). Optional Vertex routing via `provider_config.project`/`location`. Install the SDK: `pip install 'google-genai>=1.0.0'` (or the extra: `pip install 'persatrix-agents[gemini]'`). |
 | **Ollama** | `ollama` | a local `ollama serve` | **$0** (local) | A real model on your machine; a thin OpenAI-compatible subclass ([`agents/llm_ollama.py`](../../agents/llm_ollama.py)). `provider_config.base_url` defaults to `http://localhost:11434/v1`. |
 | **Mock (offline)** | `mock` | nothing | **$0** | Scripted persona replies, no network, no key ([`agents/llm_offline.py`](../../agents/llm_offline.py)). For demos, CI smoke, and risk-free exploration. |
 
@@ -69,7 +70,7 @@ Each entry needs `provider`, `model`, and pricing (see
 provider is the recipe in [RFC 0033 §H](../rfcs/0033-model-alias-layer.md):
 a class implementing the `LLMProvider` protocol plus one branch in
 [`agents/llm_factory.py`](../../agents/llm_factory.py) — Ollama is that RFC's
-own worked example.
+first worked example, **Gemini the second** ([RFC 0053](../rfcs/0053-gemini-watsonx-providers.md)).
 
 ---
 
@@ -126,6 +127,7 @@ make demo-offline   # mock provider: scripted replies, $0, no key, no network
 make demo-ollama    # a REAL local model via Ollama: no key, no cloud spend
 make demo-anthropic # the Anthropic (Claude) cloud peer (needs ANTHROPIC_API_KEY; spends real money)
 make demo-openai    # the OpenAI cloud peer (needs OPENAI_API_KEY; spends real money)
+make demo-gemini    # the Google Gemini cloud peer (needs GEMINI_API_KEY / GOOGLE_API_KEY; spends real money)
 ```
 
 `make demo-ollama` bundles an `ollama` container and pulls the model (default
@@ -133,7 +135,10 @@ make demo-openai    # the OpenAI cloud peer (needs OPENAI_API_KEY; spends real m
 which swaps the pull and every ollama-routed agent in lock-step). The base
 Compose file plumbs every provider key into each agent optionally, so
 `make demo-openai` authenticates with just `OPENAI_API_KEY` in your `.env` —
-no per-deployment override.
+no per-deployment override. `make demo-gemini` additionally installs the
+optional `google-genai` SDK into the agent image (via the `AGENT_EXTRAS` build
+arg, so `--build` is required) and plumbs `GEMINI_API_KEY` / `GOOGLE_API_KEY`,
+which the base compose does not carry.
 
 To opt a **single** agent onto a different provider instead of the whole
 society, give it its own alias: add an entry to `models.aliases` that declares

@@ -112,6 +112,13 @@ func defaultPatterns() []patternSpec {
 		// PEM header (with literal or `\n` body separator) so the
 		// minimum forensic signature is scrubbed.
 		{name: "gcp-private-key", expr: `-----BEGIN PRIVATE KEY-----[\s\S]*?(-----END PRIVATE KEY-----|$)`},
+		// RFC 0053 — Google API keys (GEMINI_API_KEY / GOOGLE_API_KEY, and
+		// GCP browser/server keys) carry the fixed `AIza` prefix followed by a
+		// 35-char body over `[A-Za-z0-9_-]` (39 chars total). Run before
+		// `generic-secret` so `GEMINI_API_KEY=AIza…` is captured by this
+		// specific pattern rather than the generic fallback (the same ordering
+		// the openai-api-key pattern relies on for `OPENAI_API_KEY=sk-…`).
+		{name: "google-api-key", expr: `AIza[A-Za-z0-9_\-]{35}`},
 		// PR #233 review MF-2: the previous `\S+` value class was greedy and
 		// unbounded — on a JSON payload like
 		// `{"password":"hunter2","next":"x"}` the match swallowed the closing

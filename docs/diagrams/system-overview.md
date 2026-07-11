@@ -11,7 +11,7 @@ graph LR
     subgraph External["External actors & services"]
         Operator["Operator"]
         HumanUser["Human user"]
-        LLM["LLM providers<br/>Anthropic · OpenAI"]
+        LLM["LLM providers<br/>Anthropic · OpenAI · Gemini"]
         MCP["MCP servers<br/>stdio / HTTP"]
         OTEL["OTEL collector<br/>Jaeger / Tempo"]
     end
