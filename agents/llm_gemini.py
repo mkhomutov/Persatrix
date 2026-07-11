@@ -34,8 +34,10 @@ instead of degrading like ``AnthropicProvider`` does.
 
 **provider_config.** Optional. ``project`` + ``location`` route through Vertex
 AI (``genai.Client(vertexai=True, …)``); otherwise the default Gemini Developer
-API path uses the API key. These mirror OpenAI's ``base_url`` — provider
-*configuration* the factory threads from the alias/agent entry.
+API path uses the API key. An optional ``thinking_budget`` caps (or, at ``0`` on
+Flash, disables) the Gemini-2.5 reasoning reserve — see ``create_message``.
+These mirror OpenAI's ``base_url`` — provider *configuration* the factory
+threads from the alias/agent entry.
 """
 
 from __future__ import annotations
@@ -132,6 +134,21 @@ class GeminiProvider:
         if tools:
             config["tools"] = tools
 
+        # Gemini 2.5 models think by default, and thinking tokens are drawn
+        # from the *same* ``max_output_tokens`` budget as the visible reply
+        # (see ``_map_usage``). So a low ``max_tokens`` — e.g. the 64–256 token
+        # working-memory / summarisation calls that route to the ``summarizer``
+        # / ``fast`` (Flash) aliases — can be consumed entirely by thinking and
+        # truncate the reply to *empty* (finish_reason MAX_TOKENS, no candidate
+        # text). An optional ``thinking_budget`` on ``provider_config`` caps
+        # that reserve, or disables it at ``0`` (Flash only — Pro cannot turn
+        # thinking off, so ``0`` there is a request error); unset leaves the
+        # model default. Threaded as a plain dict — the SDK coerces it to
+        # ``ThinkingConfig`` the same way it coerces the rest of the request.
+        thinking_budget = self._provider_config.get("thinking_budget")
+        if thinking_budget is not None:
+            config["thinking_config"] = {"thinking_budget": thinking_budget}
+
         response = await self._get_client().aio.models.generate_content(
             model=model,
             contents=self._to_contents(messages),
@@ -169,6 +186,20 @@ class GeminiProvider:
         candidates = getattr(response, "candidates", None)
         if candidates:
             candidate = candidates[0]
+        else:
+            # No candidates at all: Gemini blocked the *prompt* (safety /
+            # recitation), returning ``prompt_feedback.block_reason`` with an
+            # empty candidate list instead of a SAFETY *finish_reason* on a
+            # present candidate (which ``_map_finish_reason`` handles). Surface
+            # it — otherwise the turn degrades to a silent empty END_TURN and
+            # an operator has no signal the prompt was rejected.
+            feedback = getattr(response, "prompt_feedback", None)
+            block_reason = getattr(feedback, "block_reason", None) if feedback else None
+            logger.warning(
+                "Gemini returned no candidates (prompt blocked?); block_reason=%r"
+                " — defaulting to END_TURN with empty text",
+                block_reason,
+            )
 
         content = getattr(candidate, "content", None) if candidate else None
         for part in (getattr(content, "parts", None) or []):
@@ -246,6 +277,15 @@ class GeminiProvider:
         tools become one ``{"function_declarations": [...]}`` entry. The
         ``parameters`` JSON schema is passed through verbatim, exactly as the
         Anthropic/OpenAI providers pass theirs.
+
+        Caveat: Gemini's ``function_declarations`` schema is a *stricter*
+        OpenAPI subset than Anthropic/OpenAI accept. The built-in registry
+        tools emit only trivial ``{type, properties, required}`` schemas
+        (:mod:`agents.tools.registry`), which are within that subset — the
+        demo path is safe. An MCP-bridged tool whose upstream JSON Schema uses
+        ``additionalProperties`` / ``$ref`` / ``enum`` / nested objects may be
+        rejected with a 400 and would need sanitising first; that is not done
+        here (tracked as an RFC 0053 follow-up).
         """
         if not tools:
             return []

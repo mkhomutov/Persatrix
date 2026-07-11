@@ -61,8 +61,8 @@ brainstorm (`MT-AUTONOMOUS-MULTIPROVIDER-001`, RFC 0052 PR 9); Vertex AI routing
 - Python: `tests/unit/python/test_llm_gemini.py` (GeminiProvider tool-round mapping,
   response normalisation, factory routing / key fallback / missing-key warning /
   missing-SDK SystemExit).
-- Go: `internal/security/redactor_test.go` (`google-api-key` — `AIza…` keys scrubbed
-  from logs).
+- Go: `internal/security/redactor_google_test.go` (`google-api-key` — `AIza…` keys
+  scrubbed from logs).
 
 **Related Manual Tests**:
 - [MT-OLLAMA-001](MT-OLLAMA-001.md) — the keyless local-provider sibling.
@@ -194,8 +194,8 @@ request** (an auth error), not at construction. The society does not crash on bo
 image without `AGENT_EXTRAS: gemini`).
 
 **Expected Behavior**: `create_provider()` raises a loud, actionable `SystemExit`
-naming the install (`pip install 'persatrix[gemini]'`), not a raw `ImportError`
-traceback.
+naming the install (`pip install 'google-genai>=1.0.0'`, or the extra
+`pip install 'persatrix-agents[gemini]'`), not a raw `ImportError` traceback.
 
 ### Edge Case 3: Unpriced Alias
 
@@ -221,4 +221,4 @@ disabling the budget gate. Every shipped demo alias is priced.
   (`project`/`location`) belong in the alias `provider_config`, not env — the same
   split OpenAI's `base_url` uses.
 - Keys are scrubbed from logs by the `google-api-key` redactor pattern (`AIza…`),
-  pinned by `internal/security/redactor_test.go`.
+  pinned by `internal/security/redactor_google_test.go`.

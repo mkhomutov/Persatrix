@@ -159,8 +159,8 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
         except ImportError:
             raise SystemExit(
                 "Provider 'gemini' requires package 'google-genai'. "
-                "Install with: pip install 'persatrix[gemini]' "
-                "(or: pip install 'google-genai>=1.0.0')"
+                "Install with: pip install 'google-genai>=1.0.0' "
+                "(or the extra: pip install 'persatrix-agents[gemini]')"
             )
     elif provider == "ollama":
         # Local model over Ollama's OpenAI-compatible API. No API key needed

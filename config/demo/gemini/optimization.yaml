@@ -29,21 +29,40 @@ models:
     # alias, so every entry carries explicit pricing. Prices are an operator-
     # maintained config value — keep them current with Google's published
     # rates (RFC 0053 §D: the guard checks presence, not accuracy).
+    # gemini-2.5-pro cannot disable thinking (min budget applies), so the
+    # persona path keeps the model default and relies on its `max_tokens`
+    # (agents.yaml, 4096) leaving headroom over the thinking reserve. A
+    # thinking-heavy prompt can still truncate (MAX_TOKENS) — the action loop
+    # degrades to a "Response truncated" turn rather than crashing. Cap with a
+    # `provider_config.thinking_budget` here if truncation shows up live.
     quality:
       provider: gemini
       model: gemini-2.5-pro
       input_per_1m_tokens: 1.25
       output_per_1m_tokens: 10.00
+    # Gemini 2.5 thinks by default, and thinking tokens spend the same
+    # `max_output_tokens` budget as the reply. The fast / summarizer roles run
+    # low output budgets — the working-memory compressor asks for as few as 64
+    # tokens, episodic retention 256 — so default thinking would consume the
+    # whole budget and truncate the reply to empty (MAX_TOKENS, no text).
+    # `thinking_budget: 0` disables thinking on these Flash roles (valid on
+    # Flash; NOT on Pro, which cannot disable it — so `quality` above keeps the
+    # model default). Matches the latency/cost intent of the fast/summarizer
+    # tier. Threaded via provider_config → agents/llm_gemini.py.
     fast:
       provider: gemini
       model: gemini-2.5-flash
       input_per_1m_tokens: 0.30
       output_per_1m_tokens: 2.50
+      provider_config:
+        thinking_budget: 0
     summarizer:
       provider: gemini
       model: gemini-2.5-flash
       input_per_1m_tokens: 0.30
       output_per_1m_tokens: 2.50
+      provider_config:
+        thinking_budget: 0
 
 default:
   model_routing:

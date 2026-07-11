@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -32,63 +32,19 @@ from agents.llm_client import (
 )
 from agents.llm_gemini import GeminiProvider
 
+from ._gemini_test_helpers import (
+    _gemini_part,
+    _gemini_response,
+    _make_gemini_provider,
+    _mock_genai_modules,
+)
+
 # The ``create_provider`` gemini-branch routing tests (key fallback, missing-key
 # warning, missing-SDK SystemExit, provider-conflict) live in
-# ``test_llm_factory.py`` alongside the other providers' factory tests — this
-# file covers the GeminiProvider translation logic itself.
-
-# ─── helpers ────────────────────────────────────────────────
-
-
-def _mock_genai_modules() -> tuple[MagicMock, MagicMock, MagicMock]:
-    """Return stand-in ``google`` / ``google.genai`` modules + the client double.
-
-    ``from google import genai`` resolves ``genai`` as an attribute of the
-    ``google`` package, so the fake ``google`` module carries a ``genai``
-    attribute pointing at the fake ``genai`` module whose ``Client`` returns
-    the client double.
-    """
-    genai_mod = MagicMock()
-    client = MagicMock()
-    genai_mod.Client.return_value = client
-    google_mod = MagicMock()
-    google_mod.genai = genai_mod
-    return google_mod, genai_mod, client
-
-
-def _make_gemini_provider() -> GeminiProvider:
-    """Create a GeminiProvider with a mocked SDK client adopted as ``_client``."""
-    google_mod, _genai_mod, client = _mock_genai_modules()
-    with patch.dict(
-        sys.modules, {"google": google_mod, "google.genai": _genai_mod}
-    ):
-        p = GeminiProvider(api_key="test-key")
-    p._client = client
-    return p
-
-
-def _gemini_part(
-    *, text: str | None = None, function_call: SimpleNamespace | None = None
-) -> SimpleNamespace:
-    return SimpleNamespace(text=text, function_call=function_call)
-
-
-def _gemini_response(
-    parts: list | None = None,
-    finish_reason: str | None = "STOP",
-    prompt_tokens: int = 100,
-    output_tokens: int = 50,
-) -> SimpleNamespace:
-    """Build a mock ``google-genai`` generate_content response."""
-    if parts is None:
-        parts = [_gemini_part(text="Hello from Gemini")]
-    content = SimpleNamespace(role="model", parts=parts)
-    fr = SimpleNamespace(name=finish_reason) if finish_reason is not None else None
-    candidate = SimpleNamespace(content=content, finish_reason=fr)
-    usage = SimpleNamespace(
-        prompt_token_count=prompt_tokens, candidates_token_count=output_tokens
-    )
-    return SimpleNamespace(candidates=[candidate], usage_metadata=usage)
+# ``test_llm_factory.py`` alongside the other providers' factory tests; the
+# thinking-budget lever + prompt-block / truncation edge cases live in
+# ``test_llm_gemini_edge.py`` — this file covers the core translation logic. The
+# ``google-genai`` doubles are shared via ``_gemini_test_helpers``.
 
 
 # ─── GeminiProvider — identity ──────────────────────────────

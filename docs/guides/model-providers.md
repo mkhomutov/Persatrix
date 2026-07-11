@@ -61,7 +61,7 @@ There are no per-provider force-knobs.
 |----------|-------------|-------|------|-------|
 | **Anthropic** | `anthropic` | `ANTHROPIC_API_KEY` | per-token | Claude. A peer, not a default — no provider is configured out of the box. |
 | **OpenAI** | `openai` | `OPENAI_API_KEY` | per-token | Also any OpenAI-compatible API (vLLM, Together, Groq, LM Studio) via `provider_config.base_url`. |
-| **Gemini** | `gemini` | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) + the `google-genai` extra | per-token | Google Gemini on the native `google-genai` SDK ([`agents/llm_gemini.py`](../../agents/llm_gemini.py)) — a first-class `gemini` identity for cost/telemetry, not the OpenAI-compat endpoint (RFC 0053). Optional Vertex routing via `provider_config.project`/`location`. Install the SDK: `pip install 'persatrix[gemini]'`. |
+| **Gemini** | `gemini` | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) + the `google-genai` extra | per-token | Google Gemini on the native `google-genai` SDK ([`agents/llm_gemini.py`](../../agents/llm_gemini.py)) — a first-class `gemini` identity for cost/telemetry, not the OpenAI-compat endpoint (RFC 0053). Optional Vertex routing via `provider_config.project`/`location`. Install the SDK: `pip install 'google-genai>=1.0.0'` (or the extra: `pip install 'persatrix-agents[gemini]'`). |
 | **Ollama** | `ollama` | a local `ollama serve` | **$0** (local) | A real model on your machine; a thin OpenAI-compatible subclass ([`agents/llm_ollama.py`](../../agents/llm_ollama.py)). `provider_config.base_url` defaults to `http://localhost:11434/v1`. |
 | **Mock (offline)** | `mock` | nothing | **$0** | Scripted persona replies, no network, no key ([`agents/llm_offline.py`](../../agents/llm_offline.py)). For demos, CI smoke, and risk-free exploration. |
 

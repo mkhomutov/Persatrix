@@ -78,7 +78,7 @@ dev = [
     "import-linter>=2.0,<3",
 ]
 # RFC 0053 (Gemini + watsonx.ai providers) OQ #4 — the provider SDKs ship as
-# extras (`pip install persatrix[gemini]`), not base requirements, so a
+# extras (`pip install 'persatrix-agents[gemini]'`), not base requirements, so a
 # single-provider deployment carries no new runtime dependency. The
 # `create_provider` gemini branch surfaces an actionable `ImportError →
 # SystemExit` install hint when the extra is not present. The native
