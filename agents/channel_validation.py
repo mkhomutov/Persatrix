@@ -93,6 +93,32 @@ _CHANNEL_PARTICIPANT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
 # is scoped to ``mentions`` only: ``sender_id`` carries a stronger trust claim
 # and still rejects the sentinel.
 _MENTION_EVERYONE = "@everyone"
+
+# RFC 0052 §B/§D — the orchestrator dispatches the convene (opening) and
+# synthesis (closing) FORCED TURNS under SYNTHETIC sender ids that deliberately
+# contain a reserved ``:`` so they can never collide with a real participant id
+# (Go ``internal/channels/convene.go``'s ``ConveneDispatchSenderID`` and
+# ``synthesis_close.go``'s ``SynthesisDispatchSenderID``; the ``:`` is reserved
+# by the canonical-address grammar and forbidden by ``_CHANNEL_PARTICIPANT_ID_RE``
+# — ``convene_test.go`` pins that the sentinel is deliberately NOT a valid
+# participant id, so it can never equal an agent id and trip the receiver's
+# self-sender defence). They are reserved ORCHESTRATOR CONTROL senders, not
+# participant ids, so — exactly as ``@everyone`` is carved out of mention
+# validation — they must be carved out of ``sender_id`` validation, or the
+# receiver refuses the directive at this envelope boundary BEFORE the
+# forced-turn admit (``agents.response_gate``, which keys on the convene /
+# synthesis MARKERS, not this string) ever runs, and a convened channel
+# 202s-then-does-nothing on an unattended channel — the silent-runaway class the
+# RFC's safety contract exists to catch. The carve-out is a BOUNDED, enumerated
+# set (like ``@everyone``): a spoofed sender on the cleartext gRPC port (PR #248)
+# gains nothing a normal message would not — the self-sender defence still keys
+# on real agent ids — and the set is pinned against the Go source of truth by
+# ``test_channel_validation_dispatch_senders.py``. Scoped to ``sender_id`` only.
+_CONVENE_DISPATCH_SENDER_ID = "orchestrator:convene"
+_SYNTHESIS_DISPATCH_SENDER_ID = "orchestrator:synthesis"
+_RESERVED_DISPATCH_SENDER_IDS = frozenset(
+    {_CONVENE_DISPATCH_SENDER_ID, _SYNTHESIS_DISPATCH_SENDER_ID}
+)
 # Channel-id prefix ↔ channel_type agreement table (RFC 0011 §B). Receivers
 # MUST reject mismatches as malformed (PR #246 deep review security finding).
 _CHANNEL_TYPE_PREFIXES = {
@@ -124,8 +150,7 @@ def validate_channel_message_event(
     """
     if len(request.content) > _CHANNEL_CONTENT_MAX_CHARS:
         return (
-            f"content exceeds {_CHANNEL_CONTENT_MAX_CHARS} characters "
-            f"(got {len(request.content)})"
+            f"content exceeds {_CHANNEL_CONTENT_MAX_CHARS} characters (got {len(request.content)})"
         ), None
     if len(request.thread_id) > _CHANNEL_THREAD_ID_MAX_CHARS:
         return (
@@ -134,8 +159,7 @@ def validate_channel_message_event(
         ), None
     if len(request.mentions) > _CHANNEL_MAX_MENTIONS:
         return (
-            f"mentions list exceeds {_CHANNEL_MAX_MENTIONS} entries "
-            f"(got {len(request.mentions)})"
+            f"mentions list exceeds {_CHANNEL_MAX_MENTIONS} entries (got {len(request.mentions)})"
         ), None
     for i, m in enumerate(request.mentions):
         if m == _MENTION_EVERYONE:
@@ -169,9 +193,7 @@ def validate_channel_message_event(
     raw_mentions = set(request.mentions)
     for i, m in enumerate(request.floor_mentions):
         if not _CHANNEL_PARTICIPANT_ID_RE.match(m):
-            return (
-                f"floor_mentions[{i}] is not a valid participant id: {_safe_repr(m)}"
-            ), None
+            return (f"floor_mentions[{i}] is not a valid participant id: {_safe_repr(m)}"), None
         if m not in raw_mentions:
             return f"floor_mentions[{i}] not in mentions: {_safe_repr(m)}", None
 
@@ -179,18 +201,18 @@ def validate_channel_message_event(
     # identifies the alleged author) yet rides the same cleartext gRPC
     # transport — apply the participant-id pattern symmetrically. PR #248
     # deep review trust-boundary asymmetry finding.
-    if not _CHANNEL_PARTICIPANT_ID_RE.match(request.sender_id):
-        return (
-            f"sender_id is not a valid participant id: {_safe_repr(request.sender_id)}"
-        ), None
+    if (
+        request.sender_id not in _RESERVED_DISPATCH_SENDER_IDS
+        and not _CHANNEL_PARTICIPANT_ID_RE.match(request.sender_id)
+    ):
+        return (f"sender_id is not a valid participant id: {_safe_repr(request.sender_id)}"), None
 
     # Bound attacker-controlled id lengths. Both fields flow into log lines
     # and the cascade re-wrap; unbounded strings are a slow-burn DoS surface
     # on the cleartext port. PR #248 deep review L finding.
     if len(request.channel_id) > _CHANNEL_ID_MAX_CHARS:
         return (
-            f"channel_id exceeds {_CHANNEL_ID_MAX_CHARS} characters "
-            f"(got {len(request.channel_id)})"
+            f"channel_id exceeds {_CHANNEL_ID_MAX_CHARS} characters (got {len(request.channel_id)})"
         ), None
     if len(request.message_id) > _CHANNEL_MESSAGE_ID_MAX_CHARS:
         return (
@@ -219,9 +241,7 @@ def validate_channel_message_event(
     # site does not re-parse / cannot diverge.
     publish_ts = parse_channel_timestamp(request.timestamp)
     if publish_ts is None:
-        return (
-            f"timestamp is not a valid RFC 3339 string: {_safe_repr(request.timestamp)}"
-        ), None
+        return (f"timestamp is not a valid RFC 3339 string: {_safe_repr(request.timestamp)}"), None
 
     # RFC 0011 PR 4b: per-recipient ``respond_policy`` MUST be one of the
     # closed vocabulary that the response gate understands. ``never`` is
@@ -295,8 +315,7 @@ def validate_channel_message_dict(
         return "content is not a string", None
     if len(content) > _CHANNEL_CONTENT_MAX_CHARS:
         return (
-            f"content exceeds {_CHANNEL_CONTENT_MAX_CHARS} characters "
-            f"(got {len(content)})"
+            f"content exceeds {_CHANNEL_CONTENT_MAX_CHARS} characters (got {len(content)})"
         ), None
 
     thread_id = msg.get("thread_id") or ""
@@ -304,8 +323,7 @@ def validate_channel_message_dict(
         return "thread_id is not a string", None
     if len(thread_id) > _CHANNEL_THREAD_ID_MAX_CHARS:
         return (
-            f"thread_id exceeds {_CHANNEL_THREAD_ID_MAX_CHARS} characters "
-            f"(got {len(thread_id)})"
+            f"thread_id exceeds {_CHANNEL_THREAD_ID_MAX_CHARS} characters (got {len(thread_id)})"
         ), None
 
     mentions_raw = msg.get("mentions") or []
@@ -313,8 +331,7 @@ def validate_channel_message_dict(
         return "mentions is not a list", None
     if len(mentions_raw) > _CHANNEL_MAX_MENTIONS:
         return (
-            f"mentions list exceeds {_CHANNEL_MAX_MENTIONS} entries "
-            f"(got {len(mentions_raw)})"
+            f"mentions list exceeds {_CHANNEL_MAX_MENTIONS} entries (got {len(mentions_raw)})"
         ), None
     for i, m in enumerate(mentions_raw):
         if m == _MENTION_EVERYONE:
@@ -323,18 +340,17 @@ def validate_channel_message_dict(
             rendered = _safe_repr(m if isinstance(m, str) else str(m))
             return f"mentions[{i}] is not a valid participant id: {rendered}", None
 
-    if not _CHANNEL_PARTICIPANT_ID_RE.match(sender_id):
-        return (
-            f"sender_id is not a valid participant id: {_safe_repr(sender_id)}"
-        ), None
+    if sender_id not in _RESERVED_DISPATCH_SENDER_IDS and not _CHANNEL_PARTICIPANT_ID_RE.match(
+        sender_id
+    ):
+        return (f"sender_id is not a valid participant id: {_safe_repr(sender_id)}"), None
 
     channel_id = msg.get("channel_id")
     if not isinstance(channel_id, str):
         return "channel_id is not a string", None
     if len(channel_id) > _CHANNEL_ID_MAX_CHARS:
         return (
-            f"channel_id exceeds {_CHANNEL_ID_MAX_CHARS} characters "
-            f"(got {len(channel_id)})"
+            f"channel_id exceeds {_CHANNEL_ID_MAX_CHARS} characters (got {len(channel_id)})"
         ), None
 
     message_id = msg.get("id", "")
@@ -342,8 +358,7 @@ def validate_channel_message_dict(
         return "message_id is not a string", None
     if len(message_id) > _CHANNEL_MESSAGE_ID_MAX_CHARS:
         return (
-            f"message_id exceeds {_CHANNEL_MESSAGE_ID_MAX_CHARS} characters "
-            f"(got {len(message_id)})"
+            f"message_id exceeds {_CHANNEL_MESSAGE_ID_MAX_CHARS} characters (got {len(message_id)})"
         ), None
 
     expected_prefix = _CHANNEL_TYPE_PREFIXES.get(channel_type)
@@ -363,9 +378,7 @@ def validate_channel_message_dict(
         return "timestamp is not a string", None
     publish_ts = parse_channel_timestamp(raw_ts)
     if publish_ts is None:
-        return (
-            f"timestamp is not a valid RFC 3339 string: {_safe_repr(raw_ts)}"
-        ), None
+        return (f"timestamp is not a valid RFC 3339 string: {_safe_repr(raw_ts)}"), None
 
     return None, publish_ts
 
