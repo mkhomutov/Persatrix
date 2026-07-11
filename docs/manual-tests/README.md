@@ -149,6 +149,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-OFFLINE-001](MT-OFFLINE-001.md) | Offline mode (`MockProvider`) — full round-trip at $0, zero network | Active |
 | [MT-OLLAMA-001](MT-OLLAMA-001.md) | Ollama local model — real tokens, $0 cloud spend | Active |
 | [MT-PROVIDER-GEMINI-001](MT-PROVIDER-GEMINI-001.md) | Google Gemini (native `google-genai`) — cloud provider smoke, real tokens + cost | Active |
+| [MT-PROVIDER-WATSONX-001](MT-PROVIDER-WATSONX-001.md) | IBM watsonx.ai (native `ibm-watsonx-ai`) — cloud provider smoke; required `project_id`/`url` fail-closed | Active |
 
 ## Integration
 

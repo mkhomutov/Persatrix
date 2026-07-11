@@ -119,6 +119,17 @@ func defaultPatterns() []patternSpec {
 		// specific pattern rather than the generic fallback (the same ordering
 		// the openai-api-key pattern relies on for `OPENAI_API_KEY=sk-…`).
 		{name: "google-api-key", expr: `AIza[A-Za-z0-9_\-]{35}`},
+		// RFC 0053 — the watsonx.ai IAM key (WATSONX_API_KEY). Unlike Google's
+		// `AIza…`, IBM Cloud IAM keys have NO distinctive standalone prefix
+		// (a ~44-char `[A-Za-z0-9_-]` body), so a bare key cannot be
+		// shape-matched without over-redacting ordinary tokens. Instead pin the
+		// specific `WATSONX_API_KEY=<value>` assignment surface this RFC
+		// introduces so the watsonx secret is attributed to a NAMED marker, not
+		// the generic fallback — the same specific-before-generic ordering the
+		// openai/google patterns use. (`generic-secret` also covers the
+		// assignment form via `api[_-]?key`; this fires first for attribution
+		// and a regression guard — redactor_ibm_test.go.)
+		{name: "watsonx-api-key", expr: `(?i)watsonx[_-]?api[_-]?key["']?\s*[:=]\s*["']?[A-Za-z0-9_\-]{20,}`},
 		// PR #233 review MF-2: the previous `\S+` value class was greedy and
 		// unbounded — on a JSON payload like
 		// `{"password":"hunter2","next":"x"}` the match swallowed the closing

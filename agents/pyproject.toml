@@ -86,6 +86,13 @@ dev = [
 gemini = [
     "google-genai>=1.0.0,<2",
 ]
+# watsonx.ai native SDK — the `create_provider` watsonx branch surfaces the
+# actionable `ImportError → SystemExit` install hint when this extra is absent.
+# watsonx has no broad OpenAI-compatible endpoint, so a native class over
+# `ModelInference` is required (RFC 0053 §C), not a `base_url` reuse.
+watsonx = [
+    "ibm-watsonx-ai>=1.1.0,<2",
+]
 
 [project.scripts]
 Persatrix-agent = "persatrix_agents.server_cli:main"

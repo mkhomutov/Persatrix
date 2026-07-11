@@ -10,8 +10,8 @@ This is the RFC 0033 §D integration point: the configured ``model`` field
 is run through :func:`agents.model_aliases.resolve`, so an agent can name a
 logical alias (``quality`` / ``fast`` / ``summarizer``) or a raw vendor ID.
 Provider selection is **purely config/alias-driven** — every provider
-(``anthropic`` / ``openai`` / ``gemini`` / ``ollama`` / ``mock``) is chosen
-the same standard way, by the resolved ``provider`` field. There is no global
+(``anthropic`` / ``openai`` / ``gemini`` / ``watsonx`` / ``ollama`` / ``mock``)
+is chosen the same standard way, by the resolved ``provider`` field. There is no global
 force-knob: the keyless ``make demo-offline`` / ``make demo-ollama`` /
 ``make demo-openai`` paths select their provider by mounting an alias config
 that points the agents' aliases at ``mock`` / ``ollama`` / ``openai`` (the
@@ -30,6 +30,7 @@ from .llm_offline import MockProvider
 from .llm_ollama import OllamaProvider, resolve_ollama_base_url
 from .llm_providers import AnthropicProvider, OpenAIProvider
 from .llm_types import LLMProvider
+from .llm_watsonx import WatsonxProvider
 from .model_aliases import resolve as resolve_model
 
 logger = logging.getLogger(__name__)
@@ -52,8 +53,8 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
 
     The ``model`` field is run through the RFC 0033 resolver and the resolved
     ``provider`` selects the concrete class — the **same standard path for
-    every provider** (``anthropic`` / ``openai`` / ``gemini`` / ``ollama`` /
-    ``mock``). The
+    every provider** (``anthropic`` / ``openai`` / ``gemini`` / ``watsonx`` /
+    ``ollama`` / ``mock``). The
     ``model`` field must be a declared ``models.aliases`` entry: the alias is
     authoritative for the provider (an explicit, *disagreeing* ``provider:``
     field is a ``SystemExit`` — §D rule 1) and for ``provider_config``
@@ -161,6 +162,51 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
                 "Provider 'gemini' requires package 'google-genai'. "
                 "Install with: pip install 'google-genai>=1.0.0' "
                 "(or the extra: pip install 'persatrix-agents[gemini]')"
+            )
+    elif provider == "watsonx":
+        # Native ibm-watsonx-ai provider (RFC 0053 §C). The secret IAM key comes
+        # from WATSONX_API_KEY (env). The regional `url` + `project_id` (or
+        # `space_id`) are REQUIRED config, not secrets, so they ride the alias
+        # `provider_config` (the same channel OpenAI's base_url uses) — never env.
+        api_key = os.environ.get("WATSONX_API_KEY")
+        url = provider_config.get("url")
+        project_id = provider_config.get("project_id")
+        space_id = provider_config.get("space_id")
+        # Fail CLOSED on absent required config — deliberately the loud
+        # missing-*SDK* posture, not the softer missing-*key* warning below: the
+        # client literally cannot be constructed without them, so this must
+        # surface at startup, not defer to the first request. (RFC 0053 §C.)
+        # The combined guard also narrows `url` to non-None for the construct.
+        if not url or (not project_id and not space_id):
+            missing = [
+                *(["url"] if not url else []),
+                *(["project_id (or space_id)"] if not project_id and not space_id else []),
+            ]
+            raise SystemExit(
+                f"Provider 'watsonx' requires {', '.join(missing)} in the alias "
+                f"provider_config for {resolved.alias!r} (RFC 0053 §C — these are "
+                "config, not secrets, so they live in provider_config, not env). "
+                "Example: provider_config: {project_id: <id>, url: "
+                "https://us-south.ml.cloud.ibm.com}"
+            )
+        # S-09: warn (do not crash) on a missing secret key — it is recoverable
+        # per-request (an auth error on the first call), unlike required config.
+        if not api_key:
+            logger.warning(
+                "WATSONX_API_KEY not set — watsonx provider will fail on first request"
+            )
+        try:
+            return WatsonxProvider(
+                api_key=api_key,
+                url=url,
+                project_id=project_id,
+                space_id=space_id,
+            ), physical_model
+        except ImportError:
+            raise SystemExit(
+                "Provider 'watsonx' requires package 'ibm-watsonx-ai'. "
+                "Install with: pip install 'ibm-watsonx-ai>=1.1.0' "
+                "(or the extra: pip install 'persatrix-agents[watsonx]')"
             )
     elif provider == "ollama":
         # Local model over Ollama's OpenAI-compatible API. No API key needed

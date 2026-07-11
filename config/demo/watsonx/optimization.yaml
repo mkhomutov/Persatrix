@@ -1,0 +1,120 @@
+# Demo optimization overlay — IBM watsonx.ai (cloud peer).
+#
+# Mounted over /app/config/optimization.yaml by docker-compose.watsonx.yaml
+# (`make demo-watsonx`). It points the three aliases the society references
+# (quality / fast / summarizer) at watsonx, so the whole society runs on IBM's
+# cloud-hosted foundation models (Llama / Granite) — another "Any Provider"
+# peer alongside Anthropic, OpenAI, and Gemini.
+#
+# ─── REQUIRED: fill in your watsonx project + region ───────────────────────
+# watsonx needs TWO pieces of NON-SECRET config the client cannot be built
+# without — they live HERE in `provider_config` (RFC 0053 §C — the same channel
+# OpenAI's `base_url` uses), NOT in env/compose (only the secret WATSONX_API_KEY
+# takes the env path):
+#   • project_id — your watsonx.ai project id (or use `space_id` instead)
+#   • url        — your regional ML endpoint (default below is us-south)
+# The factory FAILS CLOSED at startup (a loud SystemExit) if either is absent —
+# so this demo does not boot until you replace the empty `project_id` below.
+# That fail-loud posture is deliberate: required config the client literally
+# cannot construct without should fail at startup, not defer to first request
+# like a missing key does.
+#
+# Provider: watsonx uses the native ibm-watsonx-ai SDK (RFC 0053 §C — watsonx
+# has no broad OpenAI-compatible endpoint, so a native class is required). The
+# SDK is an optional extra (`pip install persatrix-agents[watsonx]`); the demo
+# image installs it via the AGENT_EXTRAS build arg.
+#
+# Model ids/pricing are calibrated to the current watsonx catalog (RFC 0053
+# OQ #2) and are an OPERATOR-MAINTAINED config value — keep them current with
+# IBM's published rates (RFC 0053 §D: the missing-price guard checks presence,
+# not accuracy).
+#
+# Derived from config/optimization.yaml — keep the non-alias blocks in step.
+schema_version: "0.3"
+active_profile: "default"
+
+models:
+  aliases:
+    # Llama-3.3-70B for the quality role; Granite-3-8B for the cheaper
+    # fast / summarizer roles. watsonx list pricing (USD per 1M tokens); the
+    # RFC 0033 §F missing-price guard fails closed on an unpriced non-local
+    # alias, so every entry carries explicit pricing.
+    quality:
+      provider: watsonx
+      model: meta-llama/llama-3-3-70b-instruct
+      input_per_1m_tokens: 1.80
+      output_per_1m_tokens: 1.80
+      provider_config:
+        # REQUIRED — your watsonx project id (or set `space_id` instead).
+        # Empty ships fail-closed: replace it before `make demo-watsonx`.
+        project_id: ""
+        # Your regional ML endpoint. us-south is the default example; change to
+        # your region (e.g. https://eu-de.ml.cloud.ibm.com).
+        url: "https://us-south.ml.cloud.ibm.com"
+    fast:
+      provider: watsonx
+      model: ibm/granite-3-8b-instruct
+      input_per_1m_tokens: 0.20
+      output_per_1m_tokens: 0.20
+      provider_config:
+        project_id: ""
+        url: "https://us-south.ml.cloud.ibm.com"
+    summarizer:
+      provider: watsonx
+      model: ibm/granite-3-8b-instruct
+      input_per_1m_tokens: 0.20
+      output_per_1m_tokens: 0.20
+      provider_config:
+        project_id: ""
+        url: "https://us-south.ml.cloud.ibm.com"
+
+default:
+  model_routing:
+    # ISSUE-0069: only `sub_agents` is consumed (RFC 0033 §J sub-agent default);
+    # `task_agents` / `evaluators` are reserved — see config/optimization.yaml.
+    defaults:
+      task_agents: "quality"  # reserved (not consumed)
+      sub_agents: "quality"   # live: RFC 0033 §J sub-agent default
+      evaluators: "fast"      # reserved (not consumed)
+  caching:
+    exact:
+      enabled: true
+      max_entries: 10000
+      ttl_seconds: 3600
+  context_management:
+    max_context_tokens: 80000
+    summarization:
+      enabled: true
+      model: "summarizer"
+
+cost:
+  pricing:
+    # Derived from the aliases above — these priced cloud models keep the
+    # RFC 0023 budget/lease gate live (a real per-token cost accrues), so the
+    # wallet-cap demo trips here, unlike the $0-local offline / ollama demos.
+    models:
+      "meta-llama/llama-3-3-70b-instruct":
+        input_per_1m_tokens: 1.80
+        output_per_1m_tokens: 1.80
+      "ibm/granite-3-8b-instruct":
+        input_per_1m_tokens: 0.20
+        output_per_1m_tokens: 0.20
+  budgets:
+    global:
+      max_daily_usd: 100.00
+      alert_at_percent: [50, 80, 95]
+      on_exceed: "pause_and_alert"
+    per_workflow:
+      default_max_usd: 10.00
+    per_agent:
+      default_max_usd: 5.00
+
+wallet:
+  ttl_seconds: 60
+  reaper_interval_seconds: 5
+  max_active_leases: 16
+
+conversation_window:
+  enabled: true
+  max_turns: 20
+  max_tokens: 2048

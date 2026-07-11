@@ -386,6 +386,21 @@ demo-gemini: ## Run the demo society on Google Gemini (cloud peer) — needs GEM
 	@echo "✓ Gemini society up. Try:  ./bin/persatrix chat ember-owl"
 	@echo "  Stop with: make docker-down"
 
+demo-watsonx: ## Run the demo society on IBM watsonx.ai (cloud peer) — needs WATSONX_API_KEY + project_id/url in the mounted config; spends real money
+	@echo "→ Starting Persatrix on watsonx.ai (llama-3-3-70b / granite-3-8b) — REAL cloud calls, REAL spend."
+	@echo "  Needs WATSONX_API_KEY in your environment or .env, AND project_id/url filled into"
+	@echo "  config/demo/watsonx/optimization.yaml (it ships empty → fail-closed). Set a cap in IBM Cloud first."
+	@# Provider selection is config-driven (RFC 0033 — no force-knob): the
+	@# watsonx overlay mounts an alias config pointing every agent at
+	@# `provider: watsonx` (native ibm-watsonx-ai SDK — RFC 0053 §C). Unlike the
+	@# openai overlay it (1) installs the ibm-watsonx-ai EXTRA via the
+	@# AGENT_EXTRAS build arg — so `--build` is REQUIRED, not just conventional —
+	@# and (2) plumbs WATSONX_API_KEY (the SECRET only; the non-secret
+	@# project_id/url live in the mounted provider_config, RFC 0053 §C).
+	docker compose -f docker-compose.yaml -f docker-compose.watsonx.yaml up -d --build
+	@echo "✓ watsonx society up. Try:  ./bin/persatrix chat ember-owl"
+	@echo "  Stop with: make docker-down"
+
 reset: ## Stop the stack and purge ALL named volumes (channels DB / orchestrator-data, persona memory / ember-owl-data + iron-fox-data + nova-sparrow-data, agent scratch / workspace) — operator workaround for F-3 cross-run state bleed; see docs/issues/ISSUE-0051
 	@echo "→ Stopping stack and removing named volumes..."
 	@# `docker compose down -v` is idempotent: it tears down whatever is up
