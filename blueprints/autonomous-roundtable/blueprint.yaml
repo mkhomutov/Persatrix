@@ -23,9 +23,15 @@ blueprint:
   provider: "mock"
 
   agents:
+    # `extends` names an existing anchor in templates/personas.yaml
+    # (product_manager / senior_engineer / qa_engineer / creative_writer). The
+    # functional split lives in `role:` below; the persona archetype is the base
+    # voice, so the two engineers share `senior_engineer` (as software-team's
+    # architect/backend/frontend do). The demo's real persona bodies are the
+    # inline entries in config/agents.yaml, not these template refs.
     - { extends: "templates/personas.yaml#product_manager", id: "nova-sparrow", role: "convener" }
-    - { extends: "templates/personas.yaml#engineering_lead", id: "ember-owl", role: "chair" }
-    - { extends: "templates/personas.yaml#reliability_engineer", id: "iron-fox", role: "participant" }
+    - { extends: "templates/personas.yaml#senior_engineer", id: "ember-owl", role: "chair" }
+    - { extends: "templates/personas.yaml#senior_engineer", id: "iron-fox", role: "participant" }
 
   channels:
     # The autonomous group. Convener (nova-sparrow) owns the agenda lifecycle;
@@ -33,6 +39,9 @@ blueprint:
     # synthesis — DISTINCT roles (OQ #1). A positive interaction_budget_tokens
     # is MANDATORY: an unattended channel has no human circuit-breaker, so
     # uncapped autonomy is un-creatable (RFC 0052 Goal #4 / PR 1 safety gate).
+    # NOTE: this blueprint shows the ARMED design shape (`enabled: true`). The
+    # SHIPPED template in config/channels.yaml deliberately ships DISARMED
+    # (`enabled: false`, safe at rest); `make demo-autonomous` arms it at RUNTIME.
     - id: "roundtable"
       type: "group"
       interaction_budget_tokens: 200000

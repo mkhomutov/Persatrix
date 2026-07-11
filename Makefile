@@ -312,7 +312,14 @@ demo-autonomous: build-cli ## Run the RFC 0052 offline autonomous brainstorm —
 		sleep 2; \
 	done
 	@echo "→ Arming group:roundtable (nova-sparrow convenes; ember-owl chairs the synthesis)..."
-	$(GO_BIN)/persatrix channel config set group:roundtable autonomous.enabled=true
+	@# /healthz can go green a beat before the config-edit REST surface is ready,
+	@# so retry the arm a few times rather than aborting the whole demo on a
+	@# transient miss (the convene step below retries for the same reason).
+	@for i in $$(seq 1 10); do \
+		if $(GO_BIN)/persatrix channel config set group:roundtable autonomous.enabled=true; then break; fi; \
+		if [ $$i -eq 10 ]; then echo "✗ could not arm group:roundtable — is config editing enabled on the orchestrator?"; exit 1; fi; \
+		sleep 2; \
+	done
 	@echo "→ Convening — retrying while the persona agents finish registering..."
 	@for i in $$(seq 1 20); do \
 		if $(GO_BIN)/persatrix channel convene group:roundtable --json 2>/dev/null; then \

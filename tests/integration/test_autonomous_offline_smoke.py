@@ -167,6 +167,14 @@ class TestOfflineAutonomousDemoSynthesis:
 
     async def test_participants_engage_on_topic(self) -> None:
         rt = _roundtable()
+        # In the real arc the room reacts to the convener's PUBLISHED opener,
+        # not to the raw config topic — so drive the participants off that
+        # opener (the same curated convener turn asserted above), a closer
+        # proxy than the bare topic string. This also pins that the opener the
+        # convener actually emits still carries the topic the room engages on.
+        convener = MockProvider(agent_id=rt["autonomous"]["convener"])
+        opener_text = (await _reply(convener, _convene_directive(rt))).text
+
         # Every open-floor member other than the convener answers the opener.
         responders = [
             m["id"]
@@ -175,9 +183,8 @@ class TestOfflineAutonomousDemoSynthesis:
         ]
         assert len(responders) >= 2, "the opener needs an open-floor audience to discuss"
 
-        topic = rt["autonomous"]["topic"]
         for agent_id in responders:
-            reply = await _reply(MockProvider(agent_id=agent_id), topic)
+            reply = await _reply(MockProvider(agent_id=agent_id), opener_text)
             text = reply.text.strip()
             assert text, f"{agent_id} must contribute a non-empty turn"
             assert _FALLBACK_SENTINEL not in text.lower(), (
