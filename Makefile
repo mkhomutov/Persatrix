@@ -373,7 +373,7 @@ demo-openai: ## Run the demo society on OpenAI (cloud peer) — needs OPENAI_API
 	@echo "  Stop with: make docker-down"
 
 demo-gemini: ## Run the demo society on Google Gemini (cloud peer) — needs GEMINI_API_KEY (or GOOGLE_API_KEY); spends real money
-	@echo "→ Starting Persatrix on Gemini (gemini-2.5-pro / gemini-2.5-flash) — REAL cloud calls, REAL spend."
+	@echo "→ Starting Persatrix on Gemini (gemini-3.5-flash) — REAL cloud calls, REAL spend."
 	@echo "  Needs GEMINI_API_KEY (or GOOGLE_API_KEY) in your environment or .env. Set a hard cap in Google AI Studio first."
 	@# Provider selection is config-driven (RFC 0033 — no force-knob): the
 	@# gemini overlay mounts an alias config pointing every agent at
@@ -384,6 +384,48 @@ demo-gemini: ## Run the demo society on Google Gemini (cloud peer) — needs GEM
 	@# only ANTHROPIC/OPENAI).
 	docker compose -f docker-compose.yaml -f docker-compose.gemini.yaml up -d --build
 	@echo "✓ Gemini society up. Try:  ./bin/persatrix chat ember-owl"
+	@echo "  Stop with: make docker-down"
+
+demo-watsonx: ## Run the demo society on IBM watsonx.ai (cloud peer) — needs WATSONX_API_KEY + WATSONX_PROJECT_ID (non-secret); spends real money
+	@echo "→ Starting Persatrix on watsonx.ai (llama-3-3-70b / granite-3-8b) — REAL cloud calls, REAL spend."
+	@echo "  Needs, in your environment or .env: WATSONX_API_KEY (secret) AND WATSONX_PROJECT_ID"
+	@echo "  (non-secret; or WATSONX_SPACE_ID). WATSONX_URL is optional (defaults to us-south)."
+	@echo "  Set a cap in IBM Cloud first."
+	@# Provider selection is config-driven (RFC 0033 — no force-knob): the
+	@# watsonx overlay mounts an alias config pointing every agent at
+	@# `provider: watsonx` (native ibm-watsonx-ai SDK — RFC 0053 §C). Unlike the
+	@# openai overlay it (1) installs the ibm-watsonx-ai EXTRA via the
+	@# AGENT_EXTRAS build arg — so `--build` is REQUIRED, not just conventional —
+	@# and (2) plumbs the SECRET WATSONX_API_KEY plus the non-secret
+	@# WATSONX_PROJECT_ID/URL env fallbacks (provider_config wins, RFC 0053 §C).
+	@# Preflight: the factory fails CLOSED at agent startup on an absent
+	@# project_id/space_id (llm_factory.py — RFC 0053 §C). That is correct, but
+	@# it surfaces only as crash-looping agents + an EMPTY web-console persona
+	@# picker (the orchestrator still boots and serves the UI), which reads as a
+	@# broken build rather than an unfinished config. Catch it HERE — before
+	@# compose builds/boots anything — with an actionable message. The id is
+	@# NON-secret config resolvable from EITHER channel (resolve_watsonx_config),
+	@# so this passes when a non-empty project_id OR space_id is set in ANY of:
+	@# the mounted config, the live env, or .env (docker compose reads .env; this
+	@# recipe's shell does not, so grep it directly). space_id counts too. All
+	@# three empty → this blocks. The value pattern rejects "" (empty quotes).
+	@if ! { \
+		grep -Eq '^[[:space:]]*(project_id|space_id):[[:space:]]*("[^"]+"|[^[:space:]"])' config/demo/watsonx/optimization.yaml \
+		|| [ -n "$$WATSONX_PROJECT_ID$$WATSONX_SPACE_ID" ] \
+		|| { [ -f .env ] && grep -Eq '^[[:space:]]*(export[[:space:]]+)?WATSONX_(PROJECT_ID|SPACE_ID)=[[:space:]]*("[^"]+"|[^[:space:]"#])' .env; }; \
+	}; then \
+		echo "✗ No watsonx project_id found (config, env, or .env all empty → fail-closed at startup)."; \
+		echo "  watsonx needs a project_id (or space_id) — NON-secret config the client cannot be"; \
+		echo "  built without (RFC 0053 §C). Without it every agent fails closed at startup and the"; \
+		echo "  web-console persona picker comes up empty. Set it in EITHER channel:"; \
+		echo "    • .env (recommended — keeps your id out of VCS):  WATSONX_PROJECT_ID=<your-project-id>"; \
+		echo "      (and, for a non-us-south region, WATSONX_URL=https://<region>.ml.cloud.ibm.com); or"; \
+		echo "    • config/demo/watsonx/optimization.yaml: set project_id in all three alias blocks."; \
+		echo "  Then re-run:  make demo-watsonx"; \
+		exit 1; \
+	fi
+	docker compose -f docker-compose.yaml -f docker-compose.watsonx.yaml up -d --build
+	@echo "✓ watsonx society up. Try:  ./bin/persatrix chat ember-owl"
 	@echo "  Stop with: make docker-down"
 
 reset: ## Stop the stack and purge ALL named volumes (channels DB / orchestrator-data, persona memory / ember-owl-data + iron-fox-data + nova-sparrow-data, agent scratch / workspace) — operator workaround for F-3 cross-run state bleed; see docs/issues/ISSUE-0051

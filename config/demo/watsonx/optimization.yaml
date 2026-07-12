@@ -1,0 +1,134 @@
+# Demo optimization overlay — IBM watsonx.ai (cloud peer).
+#
+# Mounted over /app/config/optimization.yaml by docker-compose.watsonx.yaml
+# (`make demo-watsonx`). It points the three aliases the society references
+# (quality / fast / summarizer) at watsonx, so the whole society runs on IBM's
+# cloud-hosted foundation models (Llama / Granite) — another "Any Provider"
+# peer alongside Anthropic, OpenAI, and Gemini.
+#
+# ─── REQUIRED: your watsonx project (region optional) ──────────────────────
+# watsonx needs ONE piece of NON-SECRET config the client cannot be built
+# without — a project id — plus an optional region:
+#   • project_id — your watsonx.ai project id (or use `space_id` instead) — REQUIRED
+#   • url        — your regional ML endpoint — OPTIONAL (defaults to us-south)
+# Because they are NON-SECRET, you set them in EITHER of two places (RFC 0053 §C):
+#   1. This `provider_config` (the source of truth, the channel OpenAI's
+#      `base_url` uses) — fill the empty `project_id` in each alias below; OR
+#   2. `.env` / compose env — WATSONX_PROJECT_ID (or WATSONX_SPACE_ID) and, for
+#      a non-us-south region, WATSONX_URL. The `make demo-watsonx` overlay plumbs
+#      these into every agent, and the factory falls back to them when this file
+#      leaves the field empty (resolve_watsonx_config, the Ollama base_url
+#      precedent). This is the recommended path: it keeps YOUR project id out of
+#      this tracked file. Only the SECRET WATSONX_API_KEY is env-only.
+# The two channels compose per field (provider_config wins when both are set), so
+# the fields below ship EMPTY → resolved from .env. A missing project_id AND
+# space_id (neither channel) FAILS CLOSED at startup (a loud SystemExit; url
+# defaults, so it never blocks) — `make demo-watsonx` preflights for it. That
+# fail-loud posture is deliberate: config the client cannot construct without
+# should fail at startup, not defer to first request like a missing key does.
+#
+# Provider: watsonx uses the native ibm-watsonx-ai SDK (RFC 0053 §C — watsonx
+# has no broad OpenAI-compatible endpoint, so a native class is required). The
+# SDK is an optional extra (`pip install persatrix-agents[watsonx]`); the demo
+# image installs it via the AGENT_EXTRAS build arg.
+#
+# Model ids/pricing are calibrated to the current watsonx catalog (RFC 0053
+# OQ #2) and are an OPERATOR-MAINTAINED config value — keep them current with
+# IBM's published rates (RFC 0053 §D: the missing-price guard checks presence,
+# not accuracy).
+#
+# Derived from config/optimization.yaml — keep the non-alias blocks in step.
+schema_version: "0.3"
+active_profile: "default"
+
+models:
+  aliases:
+    # Llama-3.3-70B for the quality role; Granite-3-8B for the cheaper
+    # fast / summarizer roles. watsonx list pricing (USD per 1M tokens); the
+    # RFC 0033 §F missing-price guard fails closed on an unpriced non-local
+    # alias, so every entry carries explicit pricing.
+    quality:
+      provider: watsonx
+      model: meta-llama/llama-3-3-70b-instruct
+      input_per_1m_tokens: 1.80
+      output_per_1m_tokens: 1.80
+      provider_config:
+        # Your watsonx project id (or set `space_id` instead). Ships EMPTY →
+        # resolved from WATSONX_PROJECT_ID in .env (the recommended path, keeps
+        # your id out of this tracked file). Fill it here only if you prefer the
+        # config channel. Empty in BOTH channels fails closed at startup.
+        project_id: ""
+        # Regional ML endpoint. Ships EMPTY → WATSONX_URL in .env, else the
+        # us-south default (resolve_watsonx_config). Set it here only to pin a
+        # region in-config (e.g. https://jp-tok.ml.cloud.ibm.com); a non-empty
+        # value here WINS over the env, so leave it empty to stay env-driven.
+        url: ""
+    fast:
+      provider: watsonx
+      model: ibm/granite-3-8b-instruct
+      input_per_1m_tokens: 0.20
+      output_per_1m_tokens: 0.20
+      provider_config:
+        # Env-driven by default (WATSONX_PROJECT_ID / WATSONX_URL) — see `quality`.
+        project_id: ""
+        url: ""
+    summarizer:
+      provider: watsonx
+      model: ibm/granite-3-8b-instruct
+      input_per_1m_tokens: 0.20
+      output_per_1m_tokens: 0.20
+      provider_config:
+        # Env-driven by default (WATSONX_PROJECT_ID / WATSONX_URL) — see `quality`.
+        project_id: ""
+        url: ""
+
+default:
+  model_routing:
+    # ISSUE-0069: only `sub_agents` is consumed (RFC 0033 §J sub-agent default);
+    # `task_agents` / `evaluators` are reserved — see config/optimization.yaml.
+    defaults:
+      task_agents: "quality"  # reserved (not consumed)
+      sub_agents: "quality"   # live: RFC 0033 §J sub-agent default
+      evaluators: "fast"      # reserved (not consumed)
+  caching:
+    exact:
+      enabled: true
+      max_entries: 10000
+      ttl_seconds: 3600
+  context_management:
+    max_context_tokens: 80000
+    summarization:
+      enabled: true
+      model: "summarizer"
+
+cost:
+  pricing:
+    # Derived from the aliases above — these priced cloud models keep the
+    # RFC 0023 budget/lease gate live (a real per-token cost accrues), so the
+    # wallet-cap demo trips here, unlike the $0-local offline / ollama demos.
+    models:
+      "meta-llama/llama-3-3-70b-instruct":
+        input_per_1m_tokens: 1.80
+        output_per_1m_tokens: 1.80
+      "ibm/granite-3-8b-instruct":
+        input_per_1m_tokens: 0.20
+        output_per_1m_tokens: 0.20
+  budgets:
+    global:
+      max_daily_usd: 100.00
+      alert_at_percent: [50, 80, 95]
+      on_exceed: "pause_and_alert"
+    per_workflow:
+      default_max_usd: 10.00
+    per_agent:
+      default_max_usd: 5.00
+
+wallet:
+  ttl_seconds: 60
+  reaper_interval_seconds: 5
+  max_active_leases: 16
+
+conversation_window:
+  enabled: true
+  max_turns: 20
+  max_tokens: 2048

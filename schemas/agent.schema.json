@@ -42,15 +42,43 @@
         "model": { "type": "string" },
         "provider": {
           "type": "string",
-          "enum": ["anthropic", "openai", "ollama", "mock"],
-          "description": "Explicit LLM provider override. When omitted, the provider is resolved from the 'model' field by the RFC 0033 resolver (agents.model_aliases.resolve): the 'model' must name a declared models.aliases entry, which is authoritative for the provider. As of RFC 0033 Phase 3 there is no raw-vendor-ID fall-through and no prefix inference — a 'model' that is not a declared alias is rejected with a loud SystemExit (provider is data, not inferred — RFC 0033 §H/§I). 'ollama' selects the first-class local-model provider (agents.llm_ollama.OllamaProvider, a thin OpenAI-compatible subclass) — the agent's 'model' is a real Ollama tag (e.g. 'llama3.2') and 'provider_config.base_url' defaults to http://localhost:11434/v1; no API key. 'mock' selects the zero-cost offline provider (agents.llm_offline.MockProvider) — no API key, no network, no spend. Provider selection is purely config/alias-driven; there is no global env force-knob (routing the whole society to one provider is a one-line edit to the referenced alias, e.g. via a config/demo/<provider>/optimization.yaml overlay)."
+          "enum": ["anthropic", "openai", "gemini", "watsonx", "ollama", "mock"],
+          "description": "Explicit LLM provider override. When omitted, the provider is resolved from the 'model' field by the RFC 0033 resolver (agents.model_aliases.resolve): the 'model' must name a declared models.aliases entry, which is authoritative for the provider. As of RFC 0033 Phase 3 there is no raw-vendor-ID fall-through and no prefix inference — a 'model' that is not a declared alias is rejected with a loud SystemExit (provider is data, not inferred — RFC 0033 §H/§I). 'gemini' selects the native google-genai provider (agents.llm_gemini.GeminiProvider) — the secret key comes from GEMINI_API_KEY (or GOOGLE_API_KEY), with optional Vertex routing via provider_config.project/location; needs the 'gemini' extra (RFC 0053). 'watsonx' selects the native ibm-watsonx-ai provider (agents.llm_watsonx.WatsonxProvider) — the secret key comes from WATSONX_API_KEY, while the non-secret provider_config.project_id (or space_id) is REQUIRED and provider_config.url is optional (defaulting to us-south); both are read from provider_config or a WATSONX_* env fallback, and the factory fails closed at startup only when project_id AND space_id are both absent; needs the 'watsonx' extra (RFC 0053). 'ollama' selects the first-class local-model provider (agents.llm_ollama.OllamaProvider, a thin OpenAI-compatible subclass) — the agent's 'model' is a real Ollama tag (e.g. 'llama3.2') and 'provider_config.base_url' defaults to http://localhost:11434/v1; no API key. 'mock' selects the zero-cost offline provider (agents.llm_offline.MockProvider) — no API key, no network, no spend. Provider selection is purely config/alias-driven; there is no global env force-knob (routing the whole society to one provider is a one-line edit to the referenced alias, e.g. via a config/demo/<provider>/optimization.yaml overlay)."
         },
         "provider_config": {
           "type": "object",
-          "description": "Provider-specific options. For the OpenAI-compatible and 'ollama' providers, 'base_url' targets a local or compatible endpoint (Ollama, vLLM, LM Studio, etc.). The 'ollama' provider defaults base_url to http://localhost:11434/v1 when this is omitted.",
+          "description": "Provider-specific options, merged with the resolved alias's provider_config (which is authoritative per-field — RFC 0033 §D rule 2). 'base_url' targets an OpenAI-compatible or 'ollama' endpoint (Ollama, vLLM, LM Studio, etc.); the 'ollama' provider defaults it to http://localhost:11434/v1. Gemini uses optional 'project'/'location' (Vertex routing) and 'thinking_budget'. watsonx REQUIRES 'project_id' (or 'space_id') and optionally takes 'url' (defaults to us-south) — config, not secrets (RFC 0053 §C).",
           "additionalProperties": false,
           "properties": {
-            "base_url": { "type": "string" }
+            "base_url": {
+              "type": "string",
+              "description": "OpenAI-compatible / Ollama endpoint URL (openai, ollama)."
+            },
+            "project": {
+              "type": "string",
+              "description": "Gemini Vertex AI project id; with 'location' routes traffic through Vertex instead of the Gemini Developer API."
+            },
+            "location": {
+              "type": "string",
+              "description": "Gemini Vertex AI location (e.g. 'us-central1'); paired with 'project' for Vertex routing."
+            },
+            "thinking_budget": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Gemini-2.5 reasoning-token reserve cap (drawn from max_output_tokens); 0 disables thinking on Flash. Omit to leave the model default."
+            },
+            "url": {
+              "type": "string",
+              "description": "watsonx regional ML endpoint (e.g. https://us-south.ml.cloud.ibm.com) — OPTIONAL for provider 'watsonx'; defaults to us-south when unset (config, not a secret)."
+            },
+            "project_id": {
+              "type": "string",
+              "description": "watsonx.ai project id — REQUIRED for provider 'watsonx' unless 'space_id' is set (config, not a secret)."
+            },
+            "space_id": {
+              "type": "string",
+              "description": "watsonx.ai deployment space id — the documented alternative to 'project_id'."
+            }
           }
         },
         "instructions": {

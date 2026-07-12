@@ -27,6 +27,7 @@
   import ChannelPicker from "./ChannelPicker.svelte";
   import ConversationFeed from "./ConversationFeed.svelte";
   import PersonaPicker from "./PersonaPicker.svelte";
+  import NoPersonasHint from "./NoPersonasHint.svelte";
   import PersonaHeader from "./PersonaHeader.svelte";
 
   // canCreate / canConfigEdit: the create (amendment §A) + RFC 0050 config-edit
@@ -413,6 +414,9 @@
         onChange={onPersonaPick}
         onExit={exitDM}
       />
+    {:else}
+      <!-- No personas + channels exist: the DM entry point (why + cloud-demo cause) is in NoPersonasHint. -->
+      <NoPersonasHint onRefresh={loadAgents} />
     {/if}
 
     <ChannelPicker

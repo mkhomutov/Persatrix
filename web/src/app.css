@@ -288,6 +288,20 @@ body {
   opacity: 0.7;
 }
 
+/* No-persona hint (§D companion): shown where the DM persona picker would be
+   when NO personas are registered but channels exist — so the entry point does
+   not vanish silently. Muted like .empty; the inline Refresh keeps its .retry
+   sizing but sits on the same line as the sentence. */
+.no-personas {
+  opacity: 0.85;
+  max-width: 40rem;
+}
+
+.no-personas .retry {
+  margin-top: 0;
+  margin-left: 0.5rem;
+}
+
 /* Onboarding empty state (§F): a guided on-ramp, not a bare dead-end line. */
 .onboarding {
   opacity: 0.85;

@@ -11,9 +11,10 @@ import (
 // before they are written to any sink (audit log, agent task results,
 // structured log records).
 //
-// The default constructor [NewSecretRedactor] installs the five patterns
-// from RFC 0009 §I. Callers may compose additional patterns via
-// [Redactor.AddPattern].
+// The default constructor [NewSecretRedactor] installs the default
+// patterns (the RFC 0009 §I set plus the vendor-specific additions —
+// see [NewSecretRedactor] for the full, ordered list). Callers may
+// compose additional patterns via [Redactor.AddPattern].
 //
 // Implementations must be safe for concurrent use by multiple goroutines.
 type Redactor interface {
@@ -43,14 +44,24 @@ type redactPattern struct {
 // typed [depthMarker] sentinel, [isDepthMarker], and [newDepthMarker])
 // live in redactor_depth.go to keep this file under the 500-line cap.
 
-// NewSecretRedactor returns a [SecretRedactor] preloaded with the five
-// default patterns from RFC 0009 §I:
+// NewSecretRedactor returns a [SecretRedactor] preloaded with the default
+// patterns. The original RFC 0009 §I set was five (anthropic-api-key,
+// openai-api-key, bearer-token, aws-access-key, generic-secret); later review
+// rounds and RFC 0053 added vendor-specific patterns. The current set, in
+// registration order (specific patterns before the generic fallback, so a
+// secret is attributed to its named marker — see [defaultPatterns]):
 //
-//   - anthropic-api-key
-//   - openai-api-key
-//   - bearer-token
-//   - aws-access-key
-//   - generic-secret
+//   - anthropic-api-key   (sk-ant-…)
+//   - stripe-key          (sk_live_… / pk_live_…)
+//   - openai-api-key      (sk-… / sk-proj-…)
+//   - github-token        (ghp_… / github_pat_…)
+//   - slack-token         (xoxb-… / xoxp-… / …)
+//   - bearer-token        (Authorization: Bearer …)
+//   - aws-access-key      (AKIA…)
+//   - gcp-private-key     (PEM private-key header)
+//   - google-api-key      (AIza…) — RFC 0053
+//   - watsonx-api-key     (WATSONX_API_KEY / labelled watsonx key) — RFC 0053
+//   - generic-secret      (password/secret/token/api_key = … fallback)
 //
 // Pattern compilation happens once at construction; a malformed default
 // pattern would be a programmer error and panics here rather than failing
@@ -119,6 +130,27 @@ func defaultPatterns() []patternSpec {
 		// specific pattern rather than the generic fallback (the same ordering
 		// the openai-api-key pattern relies on for `OPENAI_API_KEY=sk-…`).
 		{name: "google-api-key", expr: `AIza[A-Za-z0-9_\-]{35}`},
+		// RFC 0053 — the watsonx.ai IAM key (WATSONX_API_KEY). Unlike Google's
+		// `AIza…`, IBM Cloud IAM keys have NO distinctive standalone prefix
+		// (a ~44-char `[A-Za-z0-9_-]` body), so a *context-free* bare key cannot
+		// be shape-matched without over-redacting ordinary tokens (git SHAs,
+		// base64url blobs). Rather than that unsafe global match, this pins the
+		// watsonx key to its LABEL — `watsonx…api…key` — in every form it
+		// actually leaks in: the `WATSONX_API_KEY=<value>` env assignment, the
+		// `"watsonx_api_key": "<value>"` JSON/YAML form, AND the space- or
+		// column-separated `WATSONX API KEY <value>` shape an env dump / the
+		// `ibmcloud` CLI emits (separator broadened to `[:=\s]+`, label to
+		// `[ _-]?`). The `watsonx` anchor is specific enough that a whitespace
+		// separator is safe HERE (it would over-redact in the generic pattern,
+		// which keeps its strict `[:=]`), so a watsonx key printed under its
+		// label — not only `key=value` — is scrubbed. A key that leaks with a
+		// bare `apikey`/`api_key` label (IBM service credentials, the IAM
+		// token-request body) is still caught by `generic-secret`; only a truly
+		// label-less bare key stays out of scope, by design. Registered before
+		// `generic-secret` so the watsonx secret is attributed to a NAMED marker
+		// (the openai/google specific-before-generic ordering). Regression
+		// guard: redactor_ibm_test.go.
+		{name: "watsonx-api-key", expr: `(?i)watsonx[ _-]?api[ _-]?key["']?[:=\s]+["']?[A-Za-z0-9_\-]{20,}`},
 		// PR #233 review MF-2: the previous `\S+` value class was greedy and
 		// unbounded — on a JSON payload like
 		// `{"password":"hunter2","next":"x"}` the match swallowed the closing

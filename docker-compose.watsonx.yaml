@@ -1,0 +1,101 @@
+# Cloud-peer overlay for docker-compose.yaml — runs the whole society on
+# IBM watsonx.ai, another cloud alternative to Anthropic / OpenAI / Gemini
+# ("Any Provider"). RFC 0053.
+#
+#   make demo-watsonx         # needs WATSONX_API_KEY in your environment / .env
+#                             # AND a project_id/space_id (config or WATSONX_* env)
+#       — or —
+#   docker compose -f docker-compose.yaml -f docker-compose.watsonx.yaml up -d --build
+#
+# Provider selection is config-driven (RFC 0033 — there is no force-knob): this
+# overlay mounts config/demo/watsonx/optimization.yaml over the stack's
+# optimization.yaml, which points the quality / fast / summarizer aliases at
+# `provider: watsonx` (meta-llama/llama-3-3-70b-instruct / ibm/granite-3-8b-instruct).
+#
+# THE SECRET/CONFIG SPLIT (RFC 0053 §C/§E) — read before running:
+#   • SECRET  → WATSONX_API_KEY rides compose ENV (below), the same channel the
+#               other cloud keys use.
+#   • CONFIG  → project_id (or space_id) — a NON-secret the client cannot be
+#               built without — plus the OPTIONAL regional url (a NON-secret too;
+#               defaults to us-south). Their source of truth is the
+#               MOUNTED alias `provider_config` (config/demo/watsonx/
+#               optimization.yaml — the same place OpenAI's base_url lives), but
+#               because they are NON-secret each also accepts a WATSONX_* env
+#               fallback (resolve_watsonx_config, the Ollama base_url precedent).
+#               So the shipped config stays generic (empty) and you set your
+#               values in .env instead — WATSONX_PROJECT_ID (or WATSONX_SPACE_ID)
+#               and, for a non-us-south region, WATSONX_URL. This overlay plumbs
+#               all three below. A missing project_id/space_id fails closed at
+#               startup (`make demo-watsonx` preflights for it); url defaults to
+#               us-south.
+#
+# Two differences from the openai overlay:
+#   1. The native ibm-watsonx-ai SDK is an optional pyproject EXTRA (RFC 0053
+#      OQ #4), so it is NOT in the base agent image. This overlay sets the
+#      `AGENT_EXTRAS: watsonx` build arg (Dockerfile.agent) to install it —
+#      hence `--build` is required, as `make demo-watsonx` passes.
+#   2. The base compose plumbs only ANTHROPIC_API_KEY / OPENAI_API_KEY, so this
+#      overlay adds WATSONX_API_KEY (the SECRET key only) to every agent.
+#
+# Unlike demo-offline / demo-ollama this is a REAL cloud provider: it spends
+# real money and needs a key. Set a hard spending cap in IBM Cloud before
+# running — see the README § Cost Warning.
+
+# The alias config is mounted into the orchestrator (cost table) and every
+# agent (alias resolution + the required project_id/space_id, plus the optional
+# url, in provider_config).
+x-watsonx-config: &watsonx-config
+  - ./config/demo/watsonx/optimization.yaml:/app/config/optimization.yaml:ro
+
+# Plumbed into every agent (the base compose plumbs only ANTHROPIC/OPENAI):
+#   • WATSONX_API_KEY   — the SECRET IAM key.
+#   • WATSONX_PROJECT_ID / WATSONX_SPACE_ID — NON-secret required config; the env
+#     fallback for the alias provider_config (resolve_watsonx_config). Set ONE.
+#   • WATSONX_URL       — NON-secret regional endpoint; env fallback, optional
+#     (defaults to us-south). Set it for another region, e.g.
+#     https://jp-tok.ml.cloud.ibm.com. All default empty so an unset var simply
+#     falls through to the provider_config / the code default.
+x-watsonx-env: &watsonx-env
+  - WATSONX_API_KEY=${WATSONX_API_KEY:-}
+  - WATSONX_PROJECT_ID=${WATSONX_PROJECT_ID:-}
+  - WATSONX_SPACE_ID=${WATSONX_SPACE_ID:-}
+  - WATSONX_URL=${WATSONX_URL:-}
+
+# Install the ibm-watsonx-ai extra into the agent image (see the header note 1).
+x-watsonx-build: &watsonx-build
+  args:
+    AGENT_EXTRAS: watsonx
+
+services:
+  orchestrator:
+    volumes: *watsonx-config
+
+  agent-planner:
+    build: *watsonx-build
+    volumes: *watsonx-config
+    environment: *watsonx-env
+
+  agent-coder:
+    build: *watsonx-build
+    volumes: *watsonx-config
+    environment: *watsonx-env
+
+  agent-reviewer:
+    build: *watsonx-build
+    volumes: *watsonx-config
+    environment: *watsonx-env
+
+  agent-ember-owl:
+    build: *watsonx-build
+    volumes: *watsonx-config
+    environment: *watsonx-env
+
+  agent-iron-fox:
+    build: *watsonx-build
+    volumes: *watsonx-config
+    environment: *watsonx-env
+
+  agent-nova-sparrow:
+    build: *watsonx-build
+    volumes: *watsonx-config
+    environment: *watsonx-env

@@ -1,9 +1,9 @@
 # Model Providers & Aliases
 
-Persatrix is provider-agnostic: the same agents run on Anthropic, OpenAI, a
-local model via Ollama, or a zero-cost mock — and switching between them is a
-one-line config edit, not a code change. This guide explains how that works
-and how to pick (or swap) a provider.
+Persatrix is provider-agnostic: the same agents run on Anthropic, OpenAI,
+Gemini, watsonx.ai, a local model via Ollama, or a zero-cost mock — and
+switching between them is a one-line config edit, not a code change. This guide
+explains how that works and how to pick (or swap) a provider.
 
 It implements [RFC 0033 — Provider-Agnostic Model Alias Layer](../rfcs/0033-model-alias-layer.md).
 For per-agent config in general, see the [persona agents guide](persona-agents.md).
@@ -51,10 +51,10 @@ defaults, the pricing table, and the docs.
 
 ---
 
-## The five providers are peers
+## The six providers are peers
 
 Provider selection is **pure data**: the alias entry's `provider` field
-chooses the concrete provider, and all five are selected the exact same way.
+chooses the concrete provider, and all six are selected the exact same way.
 There are no per-provider force-knobs.
 
 | Provider | `provider:` | Needs | Cost | Notes |
@@ -62,6 +62,7 @@ There are no per-provider force-knobs.
 | **Anthropic** | `anthropic` | `ANTHROPIC_API_KEY` | per-token | Claude. A peer, not a default — no provider is configured out of the box. |
 | **OpenAI** | `openai` | `OPENAI_API_KEY` | per-token | Also any OpenAI-compatible API (vLLM, Together, Groq, LM Studio) via `provider_config.base_url`. |
 | **Gemini** | `gemini` | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) + the `google-genai` extra | per-token | Google Gemini on the native `google-genai` SDK ([`agents/llm_gemini.py`](../../agents/llm_gemini.py)) — a first-class `gemini` identity for cost/telemetry, not the OpenAI-compat endpoint (RFC 0053). Optional Vertex routing via `provider_config.project`/`location`. Install the SDK: `pip install 'google-genai>=1.0.0'` (or the extra: `pip install 'persatrix-agents[gemini]'`). |
+| **watsonx.ai** | `watsonx` | `WATSONX_API_KEY` (secret) **+** a `project_id`/`space_id` (non-secret — `provider_config` **or** `WATSONX_PROJECT_ID`/`WATSONX_SPACE_ID` env) **+** optional `url` (`provider_config.url` or `WATSONX_URL`; defaults us-south) + the `ibm-watsonx-ai` extra | per-token | IBM watsonx.ai (Llama / Granite / Mistral hosts) on the native `ibm-watsonx-ai` SDK ([`agents/llm_watsonx.py`](../../agents/llm_watsonx.py)) — no broad OpenAI-compatible endpoint exists, so a native class is required (RFC 0053 §C). The **secret** key rides env; the non-secret `project_id`/`url` resolve from `provider_config` **or** a `WATSONX_*` env fallback, and the factory **fails closed at startup** if no id is set in either (see below). Install: `pip install 'ibm-watsonx-ai>=1.1.0'` (or the extra: `pip install 'persatrix-agents[watsonx]'`). |
 | **Ollama** | `ollama` | a local `ollama serve` | **$0** (local) | A real model on your machine; a thin OpenAI-compatible subclass ([`agents/llm_ollama.py`](../../agents/llm_ollama.py)). `provider_config.base_url` defaults to `http://localhost:11434/v1`. |
 | **Mock (offline)** | `mock` | nothing | **$0** | Scripted persona replies, no network, no key ([`agents/llm_offline.py`](../../agents/llm_offline.py)). For demos, CI smoke, and risk-free exploration. |
 
@@ -70,7 +71,26 @@ Each entry needs `provider`, `model`, and pricing (see
 provider is the recipe in [RFC 0033 §H](../rfcs/0033-model-alias-layer.md):
 a class implementing the `LLMProvider` protocol plus one branch in
 [`agents/llm_factory.py`](../../agents/llm_factory.py) — Ollama is that RFC's
-first worked example, **Gemini the second** ([RFC 0053](../rfcs/0053-gemini-watsonx-providers.md)).
+first worked example, **Gemini the second and watsonx.ai the third**
+([RFC 0053](../rfcs/0053-gemini-watsonx-providers.md)).
+
+> **watsonx: the secret-vs-config split.** watsonx is the one provider that
+> needs a non-secret setting the client cannot be built without — a `project_id`
+> (or `space_id`); plus a regional `url` (defaults to us-south). These are
+> **config, not credentials**. Their source of truth is the alias
+> `provider_config` (the same channel OpenAI's `base_url` uses), but — because
+> they are non-secret — each also accepts a `WATSONX_*` env fallback
+> (`WATSONX_PROJECT_ID` / `WATSONX_SPACE_ID` / `WATSONX_URL`), resolved by
+> [`resolve_watsonx_config`](../../agents/llm_watsonx.py) with the same
+> precedence as Ollama's `base_url` (provider_config → env → default). That env
+> channel lets the shipped demo config stay generic and keeps your project id out
+> of VCS — it is *not* a second secret path (only `WATSONX_API_KEY` is a secret).
+> If a `project_id` **and** `space_id` are absent from *both* channels, the
+> factory **fails closed with a loud `SystemExit` at startup** — deliberately
+> louder than the soft missing-*key* warning the other cloud providers use,
+> because config the client literally cannot construct without should fail at
+> boot, not defer to the first request (`url` defaults, so it never blocks). See
+> [MT-PROVIDER-WATSONX-001](../manual-tests/MT-PROVIDER-WATSONX-001.md).
 
 ---
 
@@ -128,6 +148,7 @@ make demo-ollama    # a REAL local model via Ollama: no key, no cloud spend
 make demo-anthropic # the Anthropic (Claude) cloud peer (needs ANTHROPIC_API_KEY; spends real money)
 make demo-openai    # the OpenAI cloud peer (needs OPENAI_API_KEY; spends real money)
 make demo-gemini    # the Google Gemini cloud peer (needs GEMINI_API_KEY / GOOGLE_API_KEY; spends real money)
+make demo-watsonx   # the IBM watsonx.ai cloud peer (needs WATSONX_API_KEY + WATSONX_PROJECT_ID in .env; spends real money)
 ```
 
 `make demo-ollama` bundles an `ollama` container and pulls the model (default
@@ -138,7 +159,14 @@ Compose file plumbs every provider key into each agent optionally, so
 no per-deployment override. `make demo-gemini` additionally installs the
 optional `google-genai` SDK into the agent image (via the `AGENT_EXTRAS` build
 arg, so `--build` is required) and plumbs `GEMINI_API_KEY` / `GOOGLE_API_KEY`,
-which the base compose does not carry.
+which the base compose does not carry. `make demo-watsonx` likewise installs the
+`ibm-watsonx-ai` extra and plumbs the secret `WATSONX_API_KEY` plus the
+non-secret `WATSONX_PROJECT_ID` / `WATSONX_SPACE_ID` / `WATSONX_URL` env
+fallbacks — so you set your (non-secret) project id in `.env`, and the shipped
+alias config stays generic. Set one of `WATSONX_PROJECT_ID` / `WATSONX_SPACE_ID`
+before the demo boots or the factory fails closed (`WATSONX_URL` is optional —
+it defaults to us-south); `make demo-watsonx` preflights for the id and refuses
+to start with a clear message if it is missing.
 
 To opt a **single** agent onto a different provider instead of the whole
 society, give it its own alias: add an entry to `models.aliases` that declares
@@ -208,4 +236,4 @@ counter that authorised this cutover are retired.
 - [RFC 0033 — Provider-Agnostic Model Alias Layer](../rfcs/0033-model-alias-layer.md) — the design.
 - [Persona agents guide](persona-agents.md) — `model:` and USD budgets in context.
 - [observability.md](../observability.md) — the `persatrix.llm.model_alias` span attribute.
-- Manual tests: [MT-ALIAS-001](../manual-tests/MT-ALIAS-001.md) (alias-routed cost), [MT-ALIAS-002](../manual-tests/MT-ALIAS-002.md) (one-line swap), [MT-OFFLINE-001](../manual-tests/MT-OFFLINE-001.md), [MT-OLLAMA-001](../manual-tests/MT-OLLAMA-001.md).
+- Manual tests: [MT-ALIAS-001](../manual-tests/MT-ALIAS-001.md) (alias-routed cost), [MT-ALIAS-002](../manual-tests/MT-ALIAS-002.md) (one-line swap), [MT-OFFLINE-001](../manual-tests/MT-OFFLINE-001.md), [MT-OLLAMA-001](../manual-tests/MT-OLLAMA-001.md), [MT-PROVIDER-GEMINI-001](../manual-tests/MT-PROVIDER-GEMINI-001.md), [MT-PROVIDER-WATSONX-001](../manual-tests/MT-PROVIDER-WATSONX-001.md).

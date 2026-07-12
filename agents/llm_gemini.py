@@ -213,6 +213,12 @@ class GeminiProvider:
                         id=getattr(fc, "id", None) or fc.name,
                         name=fc.name,
                         input=dict(getattr(fc, "args", None) or {}),
+                        # Gemini 3.x emits a ``thought_signature`` on the part
+                        # carrying the function call and 400s if it is not
+                        # replayed on that part next turn — carry it so
+                        # append_tool_round can echo it back. Absent (None) on
+                        # 2.x and when thinking did not fire.
+                        signature=getattr(part, "thought_signature", None),
                     )
                 )
                 continue
@@ -255,14 +261,15 @@ class GeminiProvider:
         if meta is None:
             return Usage(0, 0)
         # Output tokens = visible candidate tokens + reasoning ("thoughts")
-        # tokens. On Gemini 2.5 models (gemini-2.5-pro / -flash, this demo's
-        # aliases) thinking is on by default and its tokens are reported in a
-        # *separate* ``thoughts_token_count`` field — ``candidates_token_count``
-        # covers only the visible reply. Google bills thoughts at the output
-        # rate, so folding them in keeps the derived cost / RFC 0023 budget gate
-        # accurate; counting candidates alone silently under-charges every 2.5
-        # call. (Unlike OpenAI, whose ``completion_tokens`` already rolls in
-        # reasoning tokens.) The field is absent when no thinking occurred.
+        # tokens. On Gemini thinking models (this demo's gemini-3.5-flash
+        # aliases included) thinking is on by default and its tokens are
+        # reported in a *separate* ``thoughts_token_count`` field —
+        # ``candidates_token_count`` covers only the visible reply. Google bills
+        # thoughts at the output rate, so folding them in keeps the derived cost
+        # / RFC 0023 budget gate accurate; counting candidates alone silently
+        # under-charges every thinking call. (Unlike OpenAI, whose
+        # ``completion_tokens`` already rolls in reasoning tokens.) The field is
+        # absent when no thinking occurred.
         candidate_tokens = getattr(meta, "candidates_token_count", 0) or 0
         thought_tokens = getattr(meta, "thoughts_token_count", 0) or 0
         return Usage(
@@ -311,10 +318,13 @@ class GeminiProvider:
         """Append the model's tool-call turn + the tool results as Gemini turns.
 
         The model turn carries any text plus one ``function_call`` part per
-        call; the user turn carries one ``function_response`` part per result,
-        keyed by the tool **name** (Gemini correlates results by name, so the
-        result's ``tool_call_id`` is mapped back to its name via the response's
-        tool calls).
+        call — each replaying the Gemini 3.x ``thought_signature`` the model
+        emitted on that part (``ToolCall.signature``), which the API *requires*
+        verbatim next turn or 400s the multi-turn tool loop. The user turn
+        carries one ``function_response`` part per result, keyed by the tool
+        **name** (Gemini correlates results by name, so the result's
+        ``tool_call_id`` is mapped back to its name via the response's tool
+        calls).
         """
         name_by_id = {tc.id: tc.name for tc in response.tool_calls}
 
@@ -325,7 +335,14 @@ class GeminiProvider:
             fc: dict[str, Any] = {"name": tc.name, "args": tc.input}
             if tc.id:
                 fc["id"] = tc.id
-            model_parts.append({"function_call": fc})
+            model_part: dict[str, Any] = {"function_call": fc}
+            # Replay the Gemini 3.x thought_signature on the SAME part the
+            # function call rides — the API requires it verbatim or 400s the
+            # multi-turn tool loop (``_to_contents`` passes ``parts`` through, so
+            # the SDK coerces this dict to a Part with the signature set).
+            if tc.signature is not None:
+                model_part["thought_signature"] = tc.signature
+            model_parts.append(model_part)
 
         user_parts: list[dict[str, Any]] = []
         for tr in tool_results:

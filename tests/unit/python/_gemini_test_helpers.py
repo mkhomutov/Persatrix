@@ -50,9 +50,17 @@ def _make_gemini_provider(
 
 
 def _gemini_part(
-    *, text: str | None = None, function_call: SimpleNamespace | None = None
+    *,
+    text: str | None = None,
+    function_call: SimpleNamespace | None = None,
+    thought_signature: bytes | None = None,
 ) -> SimpleNamespace:
-    return SimpleNamespace(text=text, function_call=function_call)
+    # ``thought_signature`` is a Part-level field (sibling of ``function_call``)
+    # the Gemini 3.x API emits on the tool-call part and requires echoed back;
+    # left ``None`` it mirrors 2.x / non-thinking parts.
+    return SimpleNamespace(
+        text=text, function_call=function_call, thought_signature=thought_signature
+    )
 
 
 def _gemini_response(

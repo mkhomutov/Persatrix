@@ -30,6 +30,7 @@ from .llm_types import (
     ToolCall,
     Usage,
 )
+from .llm_watsonx import WatsonxProvider
 from .observability.metrics import (
     current_agent_id,
     llm_call_attrs,
@@ -73,6 +74,7 @@ __all__ = [
     "ToolCall",
     "Usage",
     "WalletClient",
+    "WatsonxProvider",
     "create_provider",
 ]
 
