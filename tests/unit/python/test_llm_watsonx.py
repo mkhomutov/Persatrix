@@ -14,8 +14,8 @@ exactly the way :mod:`tests.unit.python.test_llm_client` mocks ``anthropic`` /
 ``openai`` — so these tests run whether or not the optional ``ibm-watsonx-ai``
 extra is installed. The factory-branch routing tests (required ``project_id`` /
 ``url`` fail-closed, missing-key warning, missing-SDK SystemExit,
-provider-conflict) live in ``test_llm_factory.py``; this file covers the core
-translation logic. The ``ibm-watsonx-ai`` doubles are shared via
+provider-conflict) live in ``test_llm_factory_watsonx.py``; this file covers the
+core translation logic. The ``ibm-watsonx-ai`` doubles are shared via
 ``_watsonx_test_helpers``.
 """
 
@@ -262,6 +262,20 @@ async def test_eos_token_maps_to_end_turn() -> None:
         tools=[], max_tokens=64, temperature=0.0,
     )
     assert resp.stop_reason == StopReason.END_TURN
+
+
+async def test_time_limit_maps_to_max_tokens() -> None:
+    """watsonx chat reports 'time_limit' when the reply is truncated by the
+    per-request time cap — a cut-short turn, so it maps to MAX_TOKENS (not the
+    warn-defaulted END_TURN, which would tell the agent loop the turn is
+    naturally complete)."""
+    provider, model = _make_watsonx_provider()
+    model.chat.return_value = _watsonx_response(finish_reason="time_limit")
+    resp = await provider.create_message(
+        model="meta-llama/llama-3-3-70b-instruct", messages=[], system="",
+        tools=[], max_tokens=64, temperature=0.0,
+    )
+    assert resp.stop_reason == StopReason.MAX_TOKENS
 
 
 async def test_unmapped_finish_reason_defaults_to_end_turn(

@@ -66,14 +66,19 @@ __all__ = ["WatsonxProvider"]
 
 
 # watsonx chat reports OpenAI-style finish reasons; ``eos_token`` is a
-# foundation-model natural-completion signal folded into END_TURN. TOOL_USE is
-# also derived from the *presence* of a tool_calls part (see ``_normalize``), so
-# a model that reports ``stop`` alongside a tool call still routes correctly.
+# foundation-model natural-completion signal folded into END_TURN. ``length``
+# and ``time_limit`` both mean the reply was cut short by a server-side cap (the
+# token budget / the per-request time limit), so both map to MAX_TOKENS — the
+# agent loop must see a truncated turn as truncated, not as a natural END_TURN.
+# TOOL_USE is also derived from the *presence* of a tool_calls part (see
+# ``_normalize``), so a model that reports ``stop`` alongside a tool call still
+# routes correctly.
 _WATSONX_STOP_MAP: dict[str, StopReason] = {
     "stop": StopReason.END_TURN,
     "eos_token": StopReason.END_TURN,
     "tool_calls": StopReason.TOOL_USE,
     "length": StopReason.MAX_TOKENS,
+    "time_limit": StopReason.MAX_TOKENS,
 }
 
 

@@ -19,26 +19,14 @@ from __future__ import annotations
 
 import logging
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from agents.llm_client import WatsonxProvider, create_provider
 from agents.model_aliases import use_alias_map
 
-
-def _mock_watsonx_modules() -> tuple[MagicMock, MagicMock]:
-    """Return stand-in ``ibm_watsonx_ai`` / ``…foundation_models`` modules.
-
-    ``WatsonxProvider.__init__`` does ``from ibm_watsonx_ai import Credentials``
-    and ``from ibm_watsonx_ai.foundation_models import ModelInference``, so both
-    names go into ``sys.modules`` for the successful-construction branches.
-    """
-    fm_mod = MagicMock()
-    fm_mod.ModelInference.return_value = MagicMock()
-    ibm_mod = MagicMock()
-    ibm_mod.foundation_models = fm_mod
-    return ibm_mod, fm_mod
+from ._watsonx_test_helpers import _mock_watsonx_modules
 
 
 class TestCreateProviderWatsonx:
@@ -84,7 +72,7 @@ class TestCreateProviderWatsonx:
         monkeypatch.setenv("WATSONX_API_KEY", "wx-key")
 
     def test_alias_routes_to_watsonx_provider(self) -> None:
-        ibm_mod, fm_mod = _mock_watsonx_modules()
+        ibm_mod, fm_mod, _model = _mock_watsonx_modules()
         with use_alias_map(self._ALIAS), patch.dict(
             sys.modules,
             {"ibm_watsonx_ai": ibm_mod, "ibm_watsonx_ai.foundation_models": fm_mod},
@@ -95,7 +83,7 @@ class TestCreateProviderWatsonx:
         assert model == "meta-llama/llama-3-3-70b-instruct"
 
     def test_space_id_alternative_is_accepted(self) -> None:
-        ibm_mod, fm_mod = _mock_watsonx_modules()
+        ibm_mod, fm_mod, _model = _mock_watsonx_modules()
         with use_alias_map(self._ALIAS), patch.dict(
             sys.modules,
             {"ibm_watsonx_ai": ibm_mod, "ibm_watsonx_ai.foundation_models": fm_mod},
@@ -139,7 +127,7 @@ class TestCreateProviderWatsonx:
         """A missing *secret key* (config present) WARNS (S-09) and still returns
         a provider — the key is recoverable per-request, unlike required config."""
         monkeypatch.delenv("WATSONX_API_KEY", raising=False)
-        ibm_mod, fm_mod = _mock_watsonx_modules()
+        ibm_mod, fm_mod, _model = _mock_watsonx_modules()
         with use_alias_map(self._ALIAS), patch.dict(
             sys.modules,
             {"ibm_watsonx_ai": ibm_mod, "ibm_watsonx_ai.foundation_models": fm_mod},

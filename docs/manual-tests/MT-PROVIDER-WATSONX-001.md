@@ -63,7 +63,7 @@ is conversation, not tool use); reply *quality*.
 
 **Related Automated Tests**:
 - Python: `tests/unit/python/test_llm_watsonx.py` (WatsonxProvider tool-round
-  mapping, response normalisation) + `test_llm_factory.py::TestCreateProviderWatsonx`
+  mapping, response normalisation) + `test_llm_factory_watsonx.py::TestCreateProviderWatsonx`
   (factory routing, **required `project_id`/`url` fail-closed**, missing-key warning,
   missing-SDK SystemExit).
 - Go: `internal/security/redactor_ibm_test.go` (`watsonx-api-key` — `WATSONX_API_KEY=…`

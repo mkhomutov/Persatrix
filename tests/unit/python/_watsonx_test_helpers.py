@@ -1,9 +1,9 @@
 """Shared mock builders for the watsonx.ai provider tests.
 
 Extracted so ``test_llm_watsonx.py`` (translation logic) and the
-``create_provider`` watsonx-branch tests in ``test_llm_factory.py`` share one
-set of ``ibm-watsonx-ai`` doubles (the ``_gemini_test_helpers`` precedent). The
-``_`` prefix keeps pytest from collecting this module as tests.
+``create_provider`` watsonx-branch tests in ``test_llm_factory_watsonx.py``
+share one set of ``ibm-watsonx-ai`` doubles (the ``_gemini_test_helpers``
+precedent). The ``_`` prefix keeps pytest from collecting this module as tests.
 
 No network is touched: the SDK is mocked via ``sys.modules`` exactly the way
 :mod:`tests.unit.python.test_llm_client` mocks ``anthropic`` / ``openai`` and
