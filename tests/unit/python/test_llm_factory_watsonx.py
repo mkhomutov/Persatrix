@@ -53,7 +53,7 @@ class TestCreateProviderWatsonx:
             "output_per_1m_tokens": 0.20,
             "provider_config": {"url": _URL},
         },
-        # No url — the regional endpoint is required.
+        # No url in provider_config — url is optional (defaults to us-south).
         "no-url": {
             "provider": "watsonx",
             "model": "ibm/granite-3-8b-instruct",

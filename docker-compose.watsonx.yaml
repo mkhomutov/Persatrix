@@ -3,7 +3,7 @@
 # ("Any Provider"). RFC 0053.
 #
 #   make demo-watsonx         # needs WATSONX_API_KEY in your environment / .env
-#                             # AND project_id/url filled into the mounted config
+#                             # AND a project_id/space_id (config or WATSONX_* env)
 #       — or —
 #   docker compose -f docker-compose.yaml -f docker-compose.watsonx.yaml up -d --build
 #
@@ -15,8 +15,9 @@
 # THE SECRET/CONFIG SPLIT (RFC 0053 §C/§E) — read before running:
 #   • SECRET  → WATSONX_API_KEY rides compose ENV (below), the same channel the
 #               other cloud keys use.
-#   • CONFIG  → project_id (or space_id) + the regional url are NON-secrets the
-#               client cannot be built without. Their source of truth is the
+#   • CONFIG  → project_id (or space_id) — a NON-secret the client cannot be
+#               built without — plus the OPTIONAL regional url (a NON-secret too;
+#               defaults to us-south). Their source of truth is the
 #               MOUNTED alias `provider_config` (config/demo/watsonx/
 #               optimization.yaml — the same place OpenAI's base_url lives), but
 #               because they are NON-secret each also accepts a WATSONX_* env
@@ -41,7 +42,8 @@
 # running — see the README § Cost Warning.
 
 # The alias config is mounted into the orchestrator (cost table) and every
-# agent (alias resolution + the required project_id/url provider_config).
+# agent (alias resolution + the required project_id/space_id, plus the optional
+# url, in provider_config).
 x-watsonx-config: &watsonx-config
   - ./config/demo/watsonx/optimization.yaml:/app/config/optimization.yaml:ro
 

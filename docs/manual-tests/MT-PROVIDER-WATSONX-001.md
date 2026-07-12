@@ -29,8 +29,9 @@ telemetry files the traffic under `gen_ai.system = watsonx` (not `openai`).
 **Scope**: The `provider: watsonx` path through
 [`agents/llm_factory.py`](../../agents/llm_factory.py) `create_provider()` — the
 resolved alias's `provider` field selects the concrete class (RFC 0033 §D), the
-**secret** key comes from `WATSONX_API_KEY` (env) while the **required non-secret**
-`project_id` (or `space_id`) + regional `url` come from the alias `provider_config`
+**secret** key comes from `WATSONX_API_KEY` (env) while the non-secret **required**
+`project_id` (or `space_id`) and the optional regional `url` (defaults to us-south) come
+from the alias `provider_config` (or a `WATSONX_*` env fallback)
 → [`agents/llm_watsonx.py`](../../agents/llm_watsonx.py) `WatsonxProvider` (native
 `ibm-watsonx-ai`, a per-model `ModelInference` built lazily, OpenAI-shaped chat
 request/response, `tools` mapping, sync `chat` offloaded via `asyncio.to_thread`).
@@ -51,7 +52,8 @@ is conversation, not tool use); reply *quality*.
 **Feature Documentation**:
 - [docker-compose.watsonx.yaml](../../docker-compose.watsonx.yaml) — the overlay
   (mounts `config/demo/watsonx/optimization.yaml`; sets `AGENT_EXTRAS: watsonx`;
-  plumbs the secret `WATSONX_API_KEY` only — `project_id`/`url` live in the config).
+  plumbs the secret `WATSONX_API_KEY` plus the non-secret `WATSONX_*` env fallbacks;
+  `project_id`/`url`'s source of truth is the mounted config).
 - [config/demo/watsonx/optimization.yaml](../../config/demo/watsonx/optimization.yaml)
   — the watsonx alias config (`quality` → `meta-llama/llama-3-3-70b-instruct`,
   `fast`/`summarizer` → `ibm/granite-3-8b-instruct`, priced; `project_id`/`url` in
@@ -59,12 +61,12 @@ is conversation, not tool use); reply *quality*.
 - [Makefile](../../Makefile) `demo-watsonx` target.
 - [agents/llm_watsonx.py](../../agents/llm_watsonx.py) — `WatsonxProvider`.
 - [agents/llm_factory.py](../../agents/llm_factory.py) — the `provider: watsonx`
-  branch (required `project_id`/`url` fail-closed).
+  branch (required `project_id`/`space_id` fail-closed; `url` defaults to us-south).
 
 **Related Automated Tests**:
 - Python: `tests/unit/python/test_llm_watsonx.py` (WatsonxProvider tool-round
   mapping, response normalisation) + `test_llm_factory_watsonx.py::TestCreateProviderWatsonx`
-  (factory routing, **required `project_id`/`url` fail-closed**, missing-key warning,
+  (factory routing, **required `project_id`/`space_id` fail-closed** with `url` defaulting, missing-key warning,
   missing-SDK SystemExit).
 - Go: `internal/security/redactor_ibm_test.go` (`watsonx-api-key` — `WATSONX_API_KEY=…`
   scrubbed from logs).
@@ -83,10 +85,12 @@ is conversation, not tool use); reply *quality*.
 - ☐ **A watsonx.ai API key** in your environment or `.env` as `WATSONX_API_KEY`
   (an IBM Cloud IAM key). **This is a real billed provider** — set a spending cap
   in IBM Cloud first.
-- ☐ **A watsonx project id and regional URL** filled into
-  `config/demo/watsonx/optimization.yaml` `provider_config` (they ship empty — the
-  factory **fails closed at startup** until you set `project_id`; the `url` defaults
-  to us-south). These are **config, not secrets** — they do **not** go in env.
+- ☐ **A watsonx project id** (and, for a non-us-south region, a `url`) set in
+  `config/demo/watsonx/optimization.yaml` `provider_config` **or** the `WATSONX_*` env
+  (they ship empty — the factory **fails closed at startup** until a
+  `project_id`/`space_id` is set; the `url` defaults to us-south). These are **config,
+  not secrets** — `provider_config` is their source of truth, but a `WATSONX_*` env
+  fallback works too; only the secret `WATSONX_API_KEY` is env-only.
 - ☐ `curl` + `jq` in PATH.
 
 ### Application State
@@ -117,7 +121,7 @@ docker compose logs agent-ember-owl | grep -iE "watsonx|ibm-watsonx|API_KEY|proj
 
 **Expected Result**: The stack builds and starts. Agents come up with **no**
 `WATSONX_API_KEY … not set` warning (the key is plumbed) and **no** watsonx
-`requires … project_id`/`url` `SystemExit` (you filled the config) and **no**
+`requires … project_id` `SystemExit` (you set the id) and **no**
 `ibm-watsonx-ai` `ImportError` (the extra installed at build). No raw-ID
 deprecation warning (aliases route to `provider: watsonx`).
 
@@ -195,10 +199,12 @@ cloud provider, and the priced aliases keep the RFC 0023 budget/lease gate live
 
 ## Edge Cases & Error Scenarios
 
-### Edge Case 1: Missing project_id / url (Fail Closed)
+### Edge Case 1: Missing project_id (and space_id) — Fail Closed
 
-**Scenario**: `provider_config.project_id` (and `space_id`) or `url` is absent —
-e.g. the shipped config's empty `project_id` left unedited.
+**Scenario**: `project_id` **and** `space_id` are both absent — from `provider_config`
+*and* the `WATSONX_*` env (e.g. the shipped config's empty `project_id` left unedited
+with no `WATSONX_PROJECT_ID` set). A missing `url` does **not** fail closed — it
+defaults to us-south.
 
 **Expected Behavior**: `create_provider()` **fails closed** with a loud, actionable
 `SystemExit` naming the missing field — deliberately louder than the missing-*key*
@@ -244,9 +250,15 @@ disabling the budget gate. Every shipped demo alias is priced.
 
 ## Notes
 
-- The **secret** key rides compose env; the **non-secret** `project_id`/`url` belong
-  in the alias `provider_config`, not env — the same split OpenAI's `base_url` uses,
-  and the single source of truth the factory validates (fail-closed on absence).
+- The **secret** key rides compose env; the **non-secret** `project_id`/`url` have their
+  source of truth in the alias `provider_config` (the same split OpenAI's `base_url`
+  uses), with a `WATSONX_*` env fallback for both. The factory fails closed only when a
+  `project_id`/`space_id` is absent from **both** channels; `url` defaults to us-south.
+- **Concurrency (live-gate watch):** the cached per-model `ModelInference` is shared
+  across concurrent `asyncio.to_thread` calls, so parallel turns on the same model hit
+  one SDK client from multiple worker threads. The mocked unit suite cannot exercise
+  this; watch for client-level thread-safety errors under multi-agent load here, and
+  add a per-model lock around `chat` if any appear.
 - The `WATSONX_API_KEY=…` assignment is scrubbed from logs by the `watsonx-api-key`
   redactor pattern, pinned by `internal/security/redactor_ibm_test.go`. (IBM Cloud
   IAM keys have no distinctive standalone prefix, so — unlike Google's `AIza…` — the

@@ -118,7 +118,7 @@ make demo-offline     # free: scripted mock, no key, no network  ← start here
 #   make demo-anthropic # Claude  (needs ANTHROPIC_API_KEY; spends real money)
 #   make demo-openai    # GPT-4o  (needs OPENAI_API_KEY; spends real money)
 #   make demo-gemini    # Gemini  (needs GEMINI_API_KEY / GOOGLE_API_KEY; spends real money)
-#   make demo-watsonx   # watsonx (needs WATSONX_API_KEY + project_id/url in the config; spends real money)
+#   make demo-watsonx   # watsonx (needs WATSONX_API_KEY + a project_id; spends real money)
 
 # Chat with the example "VP of Engineering" persona
 ./bin/persatrix chat ember-owl
@@ -243,7 +243,7 @@ change, and each provider has a one-command demo that configures all three:
 make demo-anthropic               # Claude  (needs ANTHROPIC_API_KEY)
 make demo-openai                  # GPT-4o / gpt-4o-mini (needs OPENAI_API_KEY)
 make demo-gemini                  # gemini-3.5-flash (needs GEMINI_API_KEY / GOOGLE_API_KEY)
-make demo-watsonx                 # llama-3-3-70b / granite-3-8b (needs WATSONX_API_KEY + project_id/url)
+make demo-watsonx                 # llama-3-3-70b / granite-3-8b (needs WATSONX_API_KEY + a project_id)
 ```
 
 The cloud demos spend real money — set a cap first. See the

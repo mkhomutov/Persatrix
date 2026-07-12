@@ -6,11 +6,11 @@
 # cloud-hosted foundation models (Llama / Granite) — another "Any Provider"
 # peer alongside Anthropic, OpenAI, and Gemini.
 #
-# ─── REQUIRED: your watsonx project + region ───────────────────────────────
-# watsonx needs TWO pieces of NON-SECRET config the client cannot be built
-# without:
-#   • project_id — your watsonx.ai project id (or use `space_id` instead)
-#   • url        — your regional ML endpoint (defaults to us-south)
+# ─── REQUIRED: your watsonx project (region optional) ──────────────────────
+# watsonx needs ONE piece of NON-SECRET config the client cannot be built
+# without — a project id — plus an optional region:
+#   • project_id — your watsonx.ai project id (or use `space_id` instead) — REQUIRED
+#   • url        — your regional ML endpoint — OPTIONAL (defaults to us-south)
 # Because they are NON-SECRET, you set them in EITHER of two places (RFC 0053 §C):
 #   1. This `provider_config` (the source of truth, the channel OpenAI's
 #      `base_url` uses) — fill the empty `project_id` in each alias below; OR

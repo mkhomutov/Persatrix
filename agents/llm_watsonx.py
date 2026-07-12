@@ -29,7 +29,11 @@ built lazily.
 the SDK's async surface has varied across releases, so this provider offloads
 the stable, always-present ``chat`` to :func:`asyncio.to_thread` rather than
 depend on a version-specific ``achat`` — the event loop is never blocked, and
-the provider works against any SDK version that has ``chat``.
+the provider works against any SDK version that has ``chat``. The cached
+per-model client is shared across concurrent ``to_thread`` calls (parallel turns
+on one ``model_id`` run ``chat`` in different worker threads), so it is treated
+as thread-safe; if a live run under load shows otherwise, guard ``chat`` with a
+per-model lock (tracked for the ``MT-PROVIDER-WATSONX-001`` live gate).
 
 **Auth vs. config.** The secret IBM Cloud IAM key rides ``WATSONX_API_KEY``
 (env, threaded in by the factory). The ``url`` (regional endpoint) and the
@@ -279,7 +283,9 @@ class WatsonxProvider:
         ``OpenAIProvider`` M2 fix).
         """
         if isinstance(raw, dict):
-            return raw
+            # Copy so the tool input never aliases the SDK response object (the
+            # JSON-string branch below likewise yields a fresh dict).
+            return dict(raw)
         if isinstance(raw, str) and raw:
             try:
                 parsed = json.loads(raw)

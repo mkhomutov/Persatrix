@@ -396,8 +396,8 @@ demo-watsonx: ## Run the demo society on IBM watsonx.ai (cloud peer) — needs W
 	@# `provider: watsonx` (native ibm-watsonx-ai SDK — RFC 0053 §C). Unlike the
 	@# openai overlay it (1) installs the ibm-watsonx-ai EXTRA via the
 	@# AGENT_EXTRAS build arg — so `--build` is REQUIRED, not just conventional —
-	@# and (2) plumbs WATSONX_API_KEY (the SECRET only; the non-secret
-	@# project_id/url live in the mounted provider_config, RFC 0053 §C).
+	@# and (2) plumbs the SECRET WATSONX_API_KEY plus the non-secret
+	@# WATSONX_PROJECT_ID/URL env fallbacks (provider_config wins, RFC 0053 §C).
 	@# Preflight: the factory fails CLOSED at agent startup on an absent
 	@# project_id/space_id (llm_factory.py — RFC 0053 §C). That is correct, but
 	@# it surfaces only as crash-looping agents + an EMPTY web-console persona
