@@ -170,6 +170,7 @@ class TestCreateProviderWatsonx:
         ):
             # `quality-watsonx` sets project_id=proj-1 + url=_URL in provider_config.
             provider, _physical = create_provider({"id": "w", "model": "quality-watsonx"})
+        assert isinstance(provider, WatsonxProvider)  # narrow off the LLMProvider protocol
         assert provider._project_id == "proj-1"
         assert provider._url == self._URL
 
@@ -186,6 +187,7 @@ class TestCreateProviderWatsonx:
             {"ibm_watsonx_ai": ibm_mod, "ibm_watsonx_ai.foundation_models": fm_mod},
         ):
             provider, _physical = create_provider({"id": "w", "model": "no-url"})
+        assert isinstance(provider, WatsonxProvider)  # narrow off the LLMProvider protocol
         assert provider._url == "https://jp-tok.ml.cloud.ibm.com"
 
     def test_missing_config_fails_closed_before_sdk_import(self) -> None:
