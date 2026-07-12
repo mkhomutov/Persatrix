@@ -16,12 +16,17 @@
 #   • SECRET  → WATSONX_API_KEY rides compose ENV (below), the same channel the
 #               other cloud keys use.
 #   • CONFIG  → project_id (or space_id) + the regional url are NON-secrets the
-#               client cannot be built without. They live in the MOUNTED alias
-#               `provider_config` (config/demo/watsonx/optimization.yaml), NOT
-#               compose env — the same place OpenAI's base_url lives and the
-#               single source of truth the factory validates. YOU MUST EDIT that
-#               file to fill in your project_id (it ships empty → fail-closed at
-#               startup) before this demo will boot.
+#               client cannot be built without. Their source of truth is the
+#               MOUNTED alias `provider_config` (config/demo/watsonx/
+#               optimization.yaml — the same place OpenAI's base_url lives), but
+#               because they are NON-secret each also accepts a WATSONX_* env
+#               fallback (resolve_watsonx_config, the Ollama base_url precedent).
+#               So the shipped config stays generic (empty) and you set your
+#               values in .env instead — WATSONX_PROJECT_ID (or WATSONX_SPACE_ID)
+#               and, for a non-us-south region, WATSONX_URL. This overlay plumbs
+#               all three below. A missing project_id/space_id fails closed at
+#               startup (`make demo-watsonx` preflights for it); url defaults to
+#               us-south.
 #
 # Two differences from the openai overlay:
 #   1. The native ibm-watsonx-ai SDK is an optional pyproject EXTRA (RFC 0053
@@ -40,11 +45,19 @@
 x-watsonx-config: &watsonx-config
   - ./config/demo/watsonx/optimization.yaml:/app/config/optimization.yaml:ro
 
-# The SECRET key only, plumbed into every agent (the base compose plumbs only
-# ANTHROPIC/OPENAI). The non-secret project_id/url live in the mounted alias
-# provider_config, NOT here (RFC 0053 §C).
+# Plumbed into every agent (the base compose plumbs only ANTHROPIC/OPENAI):
+#   • WATSONX_API_KEY   — the SECRET IAM key.
+#   • WATSONX_PROJECT_ID / WATSONX_SPACE_ID — NON-secret required config; the env
+#     fallback for the alias provider_config (resolve_watsonx_config). Set ONE.
+#   • WATSONX_URL       — NON-secret regional endpoint; env fallback, optional
+#     (defaults to us-south). Set it for another region, e.g.
+#     https://jp-tok.ml.cloud.ibm.com. All default empty so an unset var simply
+#     falls through to the provider_config / the code default.
 x-watsonx-env: &watsonx-env
   - WATSONX_API_KEY=${WATSONX_API_KEY:-}
+  - WATSONX_PROJECT_ID=${WATSONX_PROJECT_ID:-}
+  - WATSONX_SPACE_ID=${WATSONX_SPACE_ID:-}
+  - WATSONX_URL=${WATSONX_URL:-}
 
 # Install the ibm-watsonx-ai extra into the agent image (see the header note 1).
 x-watsonx-build: &watsonx-build

@@ -30,7 +30,7 @@ from .llm_offline import MockProvider
 from .llm_ollama import OllamaProvider, resolve_ollama_base_url
 from .llm_providers import AnthropicProvider, OpenAIProvider
 from .llm_types import LLMProvider
-from .llm_watsonx import WatsonxProvider
+from .llm_watsonx import WatsonxProvider, resolve_watsonx_config
 from .model_aliases import resolve as resolve_model
 
 logger = logging.getLogger(__name__)
@@ -166,28 +166,27 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
     elif provider == "watsonx":
         # Native ibm-watsonx-ai provider (RFC 0053 §C). The secret IAM key comes
         # from WATSONX_API_KEY (env). The regional `url` + `project_id` (or
-        # `space_id`) are REQUIRED config, not secrets, so they ride the alias
-        # `provider_config` (the same channel OpenAI's base_url uses) — never env.
+        # `space_id`) are non-secret config: their source of truth is the alias
+        # `provider_config` (the same channel OpenAI's base_url uses), but each
+        # also accepts a WATSONX_* env fallback (resolve_watsonx_config, the
+        # Ollama base_url precedent) so the demo config can ship generic and an
+        # operator's project_id/region need not be committed. `url` carries a
+        # us-south default; only a missing id can fail closed.
         api_key = os.environ.get("WATSONX_API_KEY")
-        url = provider_config.get("url")
-        project_id = provider_config.get("project_id")
-        space_id = provider_config.get("space_id")
-        # Fail CLOSED on absent required config — deliberately the loud
+        url, project_id, space_id = resolve_watsonx_config(provider_config)
+        # Fail CLOSED on an absent project_id AND space_id — deliberately the loud
         # missing-*SDK* posture, not the softer missing-*key* warning below: the
-        # client literally cannot be constructed without them, so this must
-        # surface at startup, not defer to the first request. (RFC 0053 §C.)
-        # The combined guard also narrows `url` to non-None for the construct.
-        if not url or (not project_id and not space_id):
-            missing = [
-                *(["url"] if not url else []),
-                *(["project_id (or space_id)"] if not project_id and not space_id else []),
-            ]
+        # client literally cannot be constructed without one, so this must surface
+        # at startup, not defer to the first request. (RFC 0053 §C.) `url` always
+        # resolves (default), so it is no longer part of the guard.
+        if not project_id and not space_id:
             raise SystemExit(
-                f"Provider 'watsonx' requires {', '.join(missing)} in the alias "
-                f"provider_config for {resolved.alias!r} (RFC 0053 §C — these are "
-                "config, not secrets, so they live in provider_config, not env). "
-                "Example: provider_config: {project_id: <id>, url: "
-                "https://us-south.ml.cloud.ibm.com}"
+                f"Provider 'watsonx' requires a project_id (or space_id) for "
+                f"{resolved.alias!r} — set it in the alias provider_config OR the "
+                "WATSONX_PROJECT_ID (or WATSONX_SPACE_ID) env (RFC 0053 §C: these "
+                "are non-secret config, so either channel works — only "
+                "WATSONX_API_KEY is a secret). Example: provider_config: "
+                "{project_id: <id>}  — or  export WATSONX_PROJECT_ID=<id>"
             )
         # S-09: warn (do not crash) on a missing secret key — it is recoverable
         # per-request (an auth error on the first call), unlike required config.

@@ -12,9 +12,10 @@ offloaded via ``asyncio.to_thread`` so it never blocks the event loop.
 No network is touched: the ``ibm-watsonx-ai`` SDK is mocked via ``sys.modules``
 exactly the way :mod:`tests.unit.python.test_llm_client` mocks ``anthropic`` /
 ``openai`` — so these tests run whether or not the optional ``ibm-watsonx-ai``
-extra is installed. The factory-branch routing tests (required ``project_id`` /
-``url`` fail-closed, missing-key warning, missing-SDK SystemExit,
-provider-conflict) live in ``test_llm_factory_watsonx.py``; this file covers the
+extra is installed. The factory-branch routing tests (required ``project_id``
+fail-closed, missing-key warning, missing-SDK SystemExit, provider-conflict, env
+fallback) live in ``test_llm_factory_watsonx.py``, and the ``resolve_watsonx_config``
+precedence/default rules in ``test_llm_watsonx_resolve.py``; this file covers the
 core translation logic. The ``ibm-watsonx-ai`` doubles are shared via
 ``_watsonx_test_helpers``.
 """

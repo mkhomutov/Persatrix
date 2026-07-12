@@ -6,18 +6,26 @@
 # cloud-hosted foundation models (Llama / Granite) — another "Any Provider"
 # peer alongside Anthropic, OpenAI, and Gemini.
 #
-# ─── REQUIRED: fill in your watsonx project + region ───────────────────────
+# ─── REQUIRED: your watsonx project + region ───────────────────────────────
 # watsonx needs TWO pieces of NON-SECRET config the client cannot be built
-# without — they live HERE in `provider_config` (RFC 0053 §C — the same channel
-# OpenAI's `base_url` uses), NOT in env/compose (only the secret WATSONX_API_KEY
-# takes the env path):
+# without:
 #   • project_id — your watsonx.ai project id (or use `space_id` instead)
-#   • url        — your regional ML endpoint (default below is us-south)
-# The factory FAILS CLOSED at startup (a loud SystemExit) if either is absent —
-# so this demo does not boot until you replace the empty `project_id` below.
-# That fail-loud posture is deliberate: required config the client literally
-# cannot construct without should fail at startup, not defer to first request
-# like a missing key does.
+#   • url        — your regional ML endpoint (defaults to us-south)
+# Because they are NON-SECRET, you set them in EITHER of two places (RFC 0053 §C):
+#   1. This `provider_config` (the source of truth, the channel OpenAI's
+#      `base_url` uses) — fill the empty `project_id` in each alias below; OR
+#   2. `.env` / compose env — WATSONX_PROJECT_ID (or WATSONX_SPACE_ID) and, for
+#      a non-us-south region, WATSONX_URL. The `make demo-watsonx` overlay plumbs
+#      these into every agent, and the factory falls back to them when this file
+#      leaves the field empty (resolve_watsonx_config, the Ollama base_url
+#      precedent). This is the recommended path: it keeps YOUR project id out of
+#      this tracked file. Only the SECRET WATSONX_API_KEY is env-only.
+# The two channels compose per field (provider_config wins when both are set), so
+# the fields below ship EMPTY → resolved from .env. A missing project_id AND
+# space_id (neither channel) FAILS CLOSED at startup (a loud SystemExit; url
+# defaults, so it never blocks) — `make demo-watsonx` preflights for it. That
+# fail-loud posture is deliberate: config the client cannot construct without
+# should fail at startup, not defer to first request like a missing key does.
 #
 # Provider: watsonx uses the native ibm-watsonx-ai SDK (RFC 0053 §C — watsonx
 # has no broad OpenAI-compatible endpoint, so a native class is required). The
@@ -45,28 +53,34 @@ models:
       input_per_1m_tokens: 1.80
       output_per_1m_tokens: 1.80
       provider_config:
-        # REQUIRED — your watsonx project id (or set `space_id` instead).
-        # Empty ships fail-closed: replace it before `make demo-watsonx`.
+        # Your watsonx project id (or set `space_id` instead). Ships EMPTY →
+        # resolved from WATSONX_PROJECT_ID in .env (the recommended path, keeps
+        # your id out of this tracked file). Fill it here only if you prefer the
+        # config channel. Empty in BOTH channels fails closed at startup.
         project_id: ""
-        # Your regional ML endpoint. us-south is the default example; change to
-        # your region (e.g. https://eu-de.ml.cloud.ibm.com).
-        url: "https://us-south.ml.cloud.ibm.com"
+        # Regional ML endpoint. Ships EMPTY → WATSONX_URL in .env, else the
+        # us-south default (resolve_watsonx_config). Set it here only to pin a
+        # region in-config (e.g. https://jp-tok.ml.cloud.ibm.com); a non-empty
+        # value here WINS over the env, so leave it empty to stay env-driven.
+        url: ""
     fast:
       provider: watsonx
       model: ibm/granite-3-8b-instruct
       input_per_1m_tokens: 0.20
       output_per_1m_tokens: 0.20
       provider_config:
+        # Env-driven by default (WATSONX_PROJECT_ID / WATSONX_URL) — see `quality`.
         project_id: ""
-        url: "https://us-south.ml.cloud.ibm.com"
+        url: ""
     summarizer:
       provider: watsonx
       model: ibm/granite-3-8b-instruct
       input_per_1m_tokens: 0.20
       output_per_1m_tokens: 0.20
       provider_config:
+        # Env-driven by default (WATSONX_PROJECT_ID / WATSONX_URL) — see `quality`.
         project_id: ""
-        url: "https://us-south.ml.cloud.ibm.com"
+        url: ""
 
 default:
   model_routing:

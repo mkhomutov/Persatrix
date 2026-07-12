@@ -32,12 +32,18 @@ depend on a version-specific ``achat`` — the event loop is never blocked, and
 the provider works against any SDK version that has ``chat``.
 
 **Auth vs. config.** The secret IBM Cloud IAM key rides ``WATSONX_API_KEY``
-(env, threaded in by the factory). The **required** ``url`` (regional endpoint)
-and ``project_id`` (or ``space_id``) are **config, not secrets** — the factory
-reads them from the alias ``provider_config`` (the same channel OpenAI's
-``base_url`` uses) and **fails closed** if either is absent (they are required to
-construct the client at all, so the failure is loud at startup, not the softer
-missing-key warning). See :func:`agents.llm_factory.create_provider`.
+(env, threaded in by the factory). The ``url`` (regional endpoint) and the
+required ``project_id`` (or ``space_id``) are **config, not secrets** — their
+source of truth is the alias ``provider_config`` (the same channel OpenAI's
+``base_url`` uses), but each also accepts a ``WATSONX_*`` env fallback via
+:func:`resolve_watsonx_config`, mirroring Ollama's ``base_url`` precedence
+(``resolve_ollama_base_url``). That env channel is a *convenience for non-secret
+config* — it lets the shipped demo config stay generic (unfilled) and keeps an
+operator's own project id / region out of VCS — NOT a second secret path. ``url``
+carries a us-south default so it never blocks; a missing ``project_id`` AND
+``space_id`` still **fails closed** at the factory (the client cannot be built
+without one, so the failure is loud at startup, not the softer missing-key
+warning). See :func:`agents.llm_factory.create_provider`.
 
 **Tool calls.** watsonx's chat API supports ``tools`` for tool-capable models
 (Llama 3.x, Granite, Mistral Large, …). A model without native tool support
@@ -50,6 +56,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Any
 
 from .llm_types import (
@@ -62,7 +69,58 @@ from .llm_types import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["WatsonxProvider"]
+__all__ = ["DEFAULT_WATSONX_URL", "WatsonxProvider", "resolve_watsonx_config"]
+
+
+# Env fallbacks for watsonx's NON-secret config (RFC 0053 §C). The alias
+# provider_config is the source of truth; these env names are the deployment-wide
+# override, mirroring PERSATRIX_OLLAMA_BASE_URL. They are NOT secrets (only
+# WATSONX_API_KEY is) — the env channel exists so the tracked demo config can
+# ship generic and an operator's project id / region need never be committed.
+_URL_ENV = "WATSONX_URL"
+_PROJECT_ID_ENV = "WATSONX_PROJECT_ID"
+_SPACE_ID_ENV = "WATSONX_SPACE_ID"
+
+# The most common IBM Cloud region and the prior demo-config example value.
+# Unlike project_id/space_id, ``url`` carries a default: a wrong region surfaces
+# as a loud request-time endpoint/auth error, not a construct-time one, so it is
+# never a fail-closed trigger — only the id (which has no sensible default) is.
+DEFAULT_WATSONX_URL = "https://us-south.ml.cloud.ibm.com"
+
+
+def _config_or_env(
+    provider_config: dict[str, Any] | None, key: str, env: str
+) -> str | None:
+    """``provider_config[key]`` (most specific) → ``env`` → ``None``.
+
+    Empty/whitespace is treated as unset at BOTH layers (so a demo config that
+    ships ``project_id: ""`` falls through to the env), matching
+    ``resolve_ollama_base_url``'s ``.strip()`` handling.
+    """
+    if provider_config:
+        configured = provider_config.get(key)
+        if isinstance(configured, str) and configured.strip():
+            return configured.strip()
+    value = os.environ.get(env, "").strip()
+    return value or None
+
+
+def resolve_watsonx_config(
+    provider_config: dict[str, Any] | None = None,
+) -> tuple[str, str | None, str | None]:
+    """Resolve ``(url, project_id, space_id)``, most-specific source first.
+
+    Precedence per field: the alias/agent ``provider_config`` → the matching
+    ``WATSONX_*`` env → (``url`` only) the us-south default. These are non-secret
+    config, so the env channel is a convenience that keeps the tracked demo
+    config generic and an operator's project id out of VCS — NOT the secret path
+    (only ``WATSONX_API_KEY`` is a secret). ``url`` always resolves; the caller
+    still fails closed when BOTH ids are absent.
+    """
+    url = _config_or_env(provider_config, "url", _URL_ENV) or DEFAULT_WATSONX_URL
+    project_id = _config_or_env(provider_config, "project_id", _PROJECT_ID_ENV)
+    space_id = _config_or_env(provider_config, "space_id", _SPACE_ID_ENV)
+    return url, project_id, space_id
 
 
 # watsonx chat reports OpenAI-style finish reasons; ``eos_token`` is a

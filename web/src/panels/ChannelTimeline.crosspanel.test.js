@@ -94,4 +94,46 @@ describe("Channels panel — merged onboarding (§D)", () => {
     ).toBeTruthy();
     expect(screen.queryByText(/no personas or channels/i)).toBeNull();
   });
+
+  it("explains the empty persona picker (instead of vanishing it) when channels exist but no personas do", async () => {
+    // The DM entry point must not disappear SILENTLY when no personas registered
+    // (the common cloud-demo fail-closed case: agents crash at startup on missing
+    // provider config). The picker is replaced by a hint that names the state,
+    // points at `docker compose logs`, and offers a no-reload re-check.
+    listChannels.mockResolvedValue({ channels: CHANNELS });
+
+    render(ChannelTimeline, { props: { userId: "local" } });
+
+    expect(
+      await screen.findByText(/no personas are registered/i),
+    ).toBeTruthy();
+    expect(screen.getByText(/docker compose logs/i)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /refresh personas/i }),
+    ).toBeTruthy();
+    // Not the merged dead end, and no persona picker to mislead the operator.
+    expect(screen.queryByText(/no personas or channels/i)).toBeNull();
+    expect(screen.queryByRole("combobox", { name: /persona/i })).toBeNull();
+  });
+
+  it("Refresh re-checks agents so a late-registering persona becomes pickable", async () => {
+    // A cloud-demo agent that recovers (or an operator who fixes config and
+    // restarts it) should appear WITHOUT a full page reload — the hint's Refresh
+    // re-invokes listAgents, matching the OnboardingEmpty on-ramp affordance.
+    listChannels.mockResolvedValue({ channels: CHANNELS });
+    listAgents.mockResolvedValueOnce([]).mockResolvedValueOnce(AGENTS);
+
+    render(ChannelTimeline, { props: { userId: "local" } });
+
+    const refresh = await screen.findByRole("button", {
+      name: /refresh personas/i,
+    });
+    refresh.click();
+
+    // The picker now renders (persona registered) and the hint is gone.
+    expect(
+      await screen.findByRole("combobox", { name: /persona/i }),
+    ).toBeTruthy();
+    expect(screen.queryByText(/no personas are registered/i)).toBeNull();
+  });
 });
