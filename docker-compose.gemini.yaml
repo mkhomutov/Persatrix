@@ -9,7 +9,7 @@
 # Provider selection is config-driven (RFC 0033 — there is no force-knob): this
 # overlay mounts config/demo/gemini/optimization.yaml over the stack's
 # optimization.yaml, which points the quality / fast / summarizer aliases at
-# `provider: gemini` (gemini-2.5-pro / gemini-2.5-flash). It is the release's
+# `provider: gemini` (gemini-3.5-flash). It is the release's
 # one-line provider swap applied as a demo — the same agents, unchanged, route
 # to a different provider, and cost re-keys to the new physical models because
 # the cost table is derived from the aliases.

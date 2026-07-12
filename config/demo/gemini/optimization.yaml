@@ -23,42 +23,48 @@ active_profile: "default"
 
 models:
   aliases:
-    # gemini-2.5-pro for the quality role; gemini-2.5-flash for the cheaper
-    # fast / summarizer roles. Google list pricing (USD per 1M tokens); the
+    # gemini-3.5-flash for all three roles (quality / fast / summarizer).
+    # Google list pricing (USD per 1M tokens); the
     # RFC 0033 §F missing-price guard fails closed on an unpriced non-local
     # alias, so every entry carries explicit pricing. Prices are an operator-
     # maintained config value — keep them current with Google's published
     # rates (RFC 0053 §D: the guard checks presence, not accuracy).
-    # gemini-2.5-pro cannot disable thinking (min budget applies), so the
-    # persona path keeps the model default and relies on its `max_tokens`
-    # (agents.yaml, 4096) leaving headroom over the thinking reserve. A
-    # thinking-heavy prompt can still truncate (MAX_TOKENS) — the action loop
-    # degrades to a "Response truncated" turn rather than crashing. Cap with a
-    # `provider_config.thinking_budget` here if truncation shows up live.
+    # NOTE (2026-07-12): gemini-2.5-pro / gemini-2.5-flash were retired by
+    # Google ("no longer available to new users", 404) — repointed to
+    # gemini-3.5-flash, which is available and verified against the demo key.
+    # All three roles share the one current model; keep prices in step with
+    # Google's published gemini-3.5-flash rates (the RFC 0033 §F guard checks
+    # presence, not accuracy — the values below are flash-tier placeholders).
+    #
+    # The quality role keeps the model's default thinking ON (flash CAN disable
+    # it, but quality is the role we WANT to reason) and relies on its
+    # `max_tokens` (agents.yaml, 4096) leaving headroom over the thinking
+    # reserve. A thinking-heavy prompt can still truncate (MAX_TOKENS) — the
+    # action loop degrades to a "Response truncated" turn rather than crashing.
+    # Cap with a `provider_config.thinking_budget` here if truncation shows up.
     quality:
       provider: gemini
-      model: gemini-2.5-pro
-      input_per_1m_tokens: 1.25
-      output_per_1m_tokens: 10.00
-    # Gemini 2.5 thinks by default, and thinking tokens spend the same
+      model: gemini-3.5-flash
+      input_per_1m_tokens: 0.30
+      output_per_1m_tokens: 2.50
+    # Gemini thinks by default, and thinking tokens spend the same
     # `max_output_tokens` budget as the reply. The fast / summarizer roles run
     # low output budgets — the working-memory compressor asks for as few as 64
     # tokens, episodic retention 256 — so default thinking would consume the
     # whole budget and truncate the reply to empty (MAX_TOKENS, no text).
-    # `thinking_budget: 0` disables thinking on these Flash roles (valid on
-    # Flash; NOT on Pro, which cannot disable it — so `quality` above keeps the
-    # model default). Matches the latency/cost intent of the fast/summarizer
+    # `thinking_budget: 0` disables thinking on these roles (verified valid on
+    # gemini-3.5-flash). Matches the latency/cost intent of the fast/summarizer
     # tier. Threaded via provider_config → agents/llm_gemini.py.
     fast:
       provider: gemini
-      model: gemini-2.5-flash
+      model: gemini-3.5-flash
       input_per_1m_tokens: 0.30
       output_per_1m_tokens: 2.50
       provider_config:
         thinking_budget: 0
     summarizer:
       provider: gemini
-      model: gemini-2.5-flash
+      model: gemini-3.5-flash
       input_per_1m_tokens: 0.30
       output_per_1m_tokens: 2.50
       provider_config:
@@ -89,10 +95,10 @@ cost:
     # RFC 0023 budget/lease gate live (a real per-token cost accrues), so the
     # wallet-cap demo trips here, unlike the $0-local offline / ollama demos.
     models:
-      "gemini-2.5-pro":
-        input_per_1m_tokens: 1.25
-        output_per_1m_tokens: 10.00
-      "gemini-2.5-flash":
+      # All three aliases resolve to gemini-3.5-flash (the 2.5 models were
+      # retired by Google — see the alias block above), so the cost table
+      # carries the one physical model. Keep in step with published rates.
+      "gemini-3.5-flash":
         input_per_1m_tokens: 0.30
         output_per_1m_tokens: 2.50
   budgets:

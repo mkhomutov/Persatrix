@@ -242,7 +242,7 @@ change, and each provider has a one-command demo that configures all three:
 ```bash
 make demo-anthropic               # Claude  (needs ANTHROPIC_API_KEY)
 make demo-openai                  # GPT-4o / gpt-4o-mini (needs OPENAI_API_KEY)
-make demo-gemini                  # gemini-2.5-pro / -flash (needs GEMINI_API_KEY / GOOGLE_API_KEY)
+make demo-gemini                  # gemini-3.5-flash (needs GEMINI_API_KEY / GOOGLE_API_KEY)
 make demo-watsonx                 # llama-3-3-70b / granite-3-8b (needs WATSONX_API_KEY + project_id/url)
 ```
 

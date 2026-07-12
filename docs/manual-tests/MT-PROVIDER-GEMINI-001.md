@@ -4,7 +4,7 @@
 **Feature Area**: Provider / Gemini (Google, native `google-genai`)
 **Version**: 1.0
 **Created**: 2026-07-11
-**Last Updated**: 2026-07-11
+**Last Updated**: 2026-07-12
 **Status**: Active
 
 > **RFC 0053 — config-driven (no force-knob).** Provider selection is purely
@@ -23,7 +23,7 @@
 
 **Purpose**: Verify the native Gemini path end to end — *the whole society runs on
 Google's Gemini models*, a chat turn completes with **real** token counts, cost
-attributes to the priced `gemini-2.5-*` aliases, and the telemetry files the traffic
+attributes to the priced `gemini-3.5-flash` aliases, and the telemetry files the traffic
 under `gen_ai.system = gemini` (not `openai`).
 
 **Scope**: The `provider: gemini` path through
@@ -51,8 +51,8 @@ brainstorm (`MT-AUTONOMOUS-MULTIPROVIDER-001`, RFC 0052 PR 9); Vertex AI routing
   (mounts `config/demo/gemini/optimization.yaml`; sets `AGENT_EXTRAS: gemini`;
   plumbs `GEMINI_API_KEY` / `GOOGLE_API_KEY`).
 - [config/demo/gemini/optimization.yaml](../../config/demo/gemini/optimization.yaml)
-  — the Gemini alias config (`quality` → `gemini-2.5-pro`, `fast`/`summarizer` →
-  `gemini-2.5-flash`, priced).
+  — the Gemini alias config (`quality` / `fast` / `summarizer` → `gemini-3.5-flash`,
+  priced).
 - [Makefile](../../Makefile) `demo-gemini` target.
 - [agents/llm_gemini.py](../../agents/llm_gemini.py) — `GeminiProvider`.
 - [agents/llm_factory.py](../../agents/llm_factory.py) — the `provider: gemini` branch.
@@ -157,12 +157,12 @@ curl -s http://127.0.0.1:8080/api/v1/cost/summary | python3 -m json.tool
 
 **Expected Result**: The span reports **non-zero** `gen_ai.usage.input_tokens` /
 `output_tokens`, `gen_ai.system = gemini`, and `gen_ai.request.model` a physical
-`gemini-2.5-*` id (never an alias name). `daily_estimated_usd` **increased** from
+`gemini-3.5-flash` id (never an alias name). `daily_estimated_usd` **increased** from
 the baseline — Gemini is a real per-token cloud provider, and the priced aliases
 keep the RFC 0023 budget/lease gate live (unlike the $0 offline / Ollama demos).
 
 **Verification**:
-- [ ] `gen_ai.system=gemini`; `gen_ai.request.model` is a physical `gemini-2.5-*` id.
+- [ ] `gen_ai.system=gemini`; `gen_ai.request.model` is a physical `gemini-3.5-flash` id.
 - [ ] `gen_ai.usage.*_tokens` non-zero; `daily_estimated_usd` increased.
 
 ---
@@ -211,7 +211,7 @@ disabling the budget gate. Every shipped demo alias is priced.
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| _pending_ | — | — | — | Live run scheduled for v0.3.11 release-prep (master-plan Phase 3). |
+| 2026-07-12 | Claude Code (automated) | macOS / Docker | **PASS** | Steps 1–4 driven via curl. First run failed: `gemini-2.5-pro` / `gemini-2.5-flash` returned `404 … no longer available to new users` → chat `DEADLINE_EXCEEDED`. Repointed the demo aliases to `gemini-3.5-flash` (config); re-ran: `reply_status="ok"`, `gen_ai.system=gemini`, `gen_ai.request.model=gemini-3.5-flash`, real tokens, cost accrued. |
 
 ---
 
@@ -222,3 +222,9 @@ disabling the budget gate. Every shipped demo alias is priced.
   split OpenAI's `base_url` uses.
 - Keys are scrubbed from logs by the `google-api-key` redactor pattern (`AIza…`),
   pinned by `internal/security/redactor_google_test.go`.
+- **Model lifecycle (2026-07-12):** Google retired `gemini-2.5-pro` / `gemini-2.5-flash`
+  for new API users (`generateContent` → `404 … no longer available to new users`,
+  even though `models.list()` still advertises them). The demo config was repointed
+  to `gemini-3.5-flash` for all three aliases. If this smoke ever regresses to
+  `DEADLINE_EXCEEDED` with a 404 in the agent logs, re-check the alias models against
+  Google's currently-available list and repoint `config/demo/gemini/optimization.yaml`.

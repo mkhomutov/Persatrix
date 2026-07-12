@@ -96,7 +96,7 @@ No `_infer_provider` extension exists to touch — it was retired in RFC 0033 Ph
 
 - **SDK / wire.** Default to the native **`google-genai`** SDK (`GeminiProvider`), so pricing, telemetry (`persatrix.llm.model_alias`), and native function-calling are clean and attributed to a distinct `gemini` provider rather than masquerading as `openai`. (Gemini also exposes an OpenAI-compatible endpoint, which would let `OpenAIProvider` + `base_url` cover it with zero new code — see [OQ #1](#open-questions); the default is the first-class class.)
 - **Auth.** `GEMINI_API_KEY` (fallback `GOOGLE_API_KEY`), read in the factory branch; startup warning when unset (the existing S-09 pattern for non-local providers).
-- **Models / aliases.** Demo aliases `quality → gemini-2.5-pro`, `fast → gemini-2.5-flash`, `summarizer → gemini-2.5-flash`.
+- **Models / aliases.** Demo aliases `quality` / `fast` / `summarizer` → `gemini-3.5-flash`. (Originally `quality → gemini-2.5-pro`, `fast`/`summarizer → gemini-2.5-flash`; Google retired both for new API users on 2026-07-12, so the demo config was repointed to `gemini-3.5-flash`.)
 - **Tool calls.** Map the protocol's tool definitions to Gemini `function_declarations` and tool results back into the `append_tool_round` shape.
 - **`provider_config`.** Optional (e.g. a Vertex `project`/`location` if an operator routes through Vertex); empty for the default Gemini-API path.
 

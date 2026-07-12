@@ -255,14 +255,15 @@ class GeminiProvider:
         if meta is None:
             return Usage(0, 0)
         # Output tokens = visible candidate tokens + reasoning ("thoughts")
-        # tokens. On Gemini 2.5 models (gemini-2.5-pro / -flash, this demo's
-        # aliases) thinking is on by default and its tokens are reported in a
-        # *separate* ``thoughts_token_count`` field — ``candidates_token_count``
-        # covers only the visible reply. Google bills thoughts at the output
-        # rate, so folding them in keeps the derived cost / RFC 0023 budget gate
-        # accurate; counting candidates alone silently under-charges every 2.5
-        # call. (Unlike OpenAI, whose ``completion_tokens`` already rolls in
-        # reasoning tokens.) The field is absent when no thinking occurred.
+        # tokens. On Gemini thinking models (this demo's gemini-3.5-flash
+        # aliases included) thinking is on by default and its tokens are
+        # reported in a *separate* ``thoughts_token_count`` field —
+        # ``candidates_token_count`` covers only the visible reply. Google bills
+        # thoughts at the output rate, so folding them in keeps the derived cost
+        # / RFC 0023 budget gate accurate; counting candidates alone silently
+        # under-charges every thinking call. (Unlike OpenAI, whose
+        # ``completion_tokens`` already rolls in reasoning tokens.) The field is
+        # absent when no thinking occurred.
         candidate_tokens = getattr(meta, "candidates_token_count", 0) or 0
         thought_tokens = getattr(meta, "thoughts_token_count", 0) or 0
         return Usage(
