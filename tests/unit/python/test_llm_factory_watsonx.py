@@ -88,7 +88,7 @@ class TestCreateProviderWatsonx:
             sys.modules,
             {"ibm_watsonx_ai": ibm_mod, "ibm_watsonx_ai.foundation_models": fm_mod},
         ):
-            provider, _model = create_provider({"id": "w", "model": "with-space"})
+            provider, _physical = create_provider({"id": "w", "model": "with-space"})
         assert isinstance(provider, WatsonxProvider)
 
     def test_missing_project_id_and_space_id_fails_closed(self) -> None:
@@ -133,7 +133,7 @@ class TestCreateProviderWatsonx:
             {"ibm_watsonx_ai": ibm_mod, "ibm_watsonx_ai.foundation_models": fm_mod},
         ):
             with caplog.at_level(logging.WARNING):
-                provider, _model = create_provider({"id": "w", "model": "quality-watsonx"})
+                provider, _physical = create_provider({"id": "w", "model": "quality-watsonx"})
         assert isinstance(provider, WatsonxProvider)
         assert any("WATSONX_API_KEY" in r.message for r in caplog.records)
 
