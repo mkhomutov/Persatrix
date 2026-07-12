@@ -37,6 +37,13 @@ class ToolCall:
     id: str
     name: str
     input: dict[str, Any]
+    # Opaque provider round-trip token for the model's tool-call turn. Gemini
+    # 3.x returns a ``thought_signature`` on each function-call part and
+    # *requires* it echoed back verbatim on that part in subsequent turns (a
+    # ``400 … missing a thought_signature`` otherwise); other providers leave
+    # this ``None``. Stored on the ToolCall so it survives ``create_message`` →
+    # ``append_tool_round`` on the same object, with no provider-instance state.
+    signature: bytes | None = None
 
 
 @dataclass

@@ -373,7 +373,7 @@ demo-openai: ## Run the demo society on OpenAI (cloud peer) — needs OPENAI_API
 	@echo "  Stop with: make docker-down"
 
 demo-gemini: ## Run the demo society on Google Gemini (cloud peer) — needs GEMINI_API_KEY (or GOOGLE_API_KEY); spends real money
-	@echo "→ Starting Persatrix on Gemini (gemini-2.5-pro / gemini-2.5-flash) — REAL cloud calls, REAL spend."
+	@echo "→ Starting Persatrix on Gemini (gemini-3.5-flash) — REAL cloud calls, REAL spend."
 	@echo "  Needs GEMINI_API_KEY (or GOOGLE_API_KEY) in your environment or .env. Set a hard cap in Google AI Studio first."
 	@# Provider selection is config-driven (RFC 0033 — no force-knob): the
 	@# gemini overlay mounts an alias config pointing every agent at

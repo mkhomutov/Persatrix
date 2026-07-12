@@ -9,7 +9,10 @@ split precedent. Covers the RFC 0053 PR 1 review follow-ups:
 * a prompt-blocked response (empty ``candidates`` + ``prompt_feedback``) warns
   instead of degrading to a silent empty turn;
 * thoughts tokens are still billed on a ``MAX_TOKENS``-truncated turn;
-* parallel calls to the *same* tool round-trip with positional correlation.
+* parallel calls to the *same* tool round-trip with positional correlation;
+* the Gemini 3.x ``thought_signature`` (a thinking-model artifact) is captured
+  off the tool-call part and replayed verbatim next turn — the API 400s the
+  multi-round tool loop otherwise (RFC 0053 gemini-3.5-flash follow-up).
 
 The ``google-genai`` doubles are shared via ``_gemini_test_helpers`` (no
 network; runs with or without the optional extra installed).
@@ -25,7 +28,11 @@ import pytest
 
 from agents.llm_client import LLMResponse, LLMToolResult, StopReason, ToolCall
 
-from ._gemini_test_helpers import _gemini_response, _make_gemini_provider
+from ._gemini_test_helpers import (
+    _gemini_part,
+    _gemini_response,
+    _make_gemini_provider,
+)
 
 # ─── thinking_budget lever (provider_config → config.thinking_config) ──
 
@@ -148,3 +155,76 @@ def test_append_tool_round_parallel_same_tool_keeps_order() -> None:
     assert [r["name"] for r in responses] == ["file_read", "file_read"]
     # Positional correlation preserved: 1st response is AAA, 2nd is BBB.
     assert [r["response"]["output"] for r in responses] == ["AAA", "BBB"]
+
+
+# ─── thought_signature round-trip (Gemini 3.x multi-turn tools) ────
+
+
+async def test_tool_call_captures_thought_signature() -> None:
+    """Gemini 3.x emits a Part-level ``thought_signature`` on the tool-call part;
+    _normalize carries it onto the ToolCall so append_tool_round can replay it
+    (the API 400s the next turn if it is dropped)."""
+    provider = _make_gemini_provider()
+    fc = SimpleNamespace(id="fc_1", name="recall_notes", args={"q": "x"})
+    part = _gemini_part(function_call=fc, thought_signature=b"sig-abc")
+    provider._client.aio.models.generate_content = AsyncMock(
+        return_value=_gemini_response(parts=[part])
+    )
+    resp = await provider.create_message(
+        model="gemini-3.5-flash", messages=[], system="", tools=[],
+        max_tokens=64, temperature=0.0,
+    )
+    assert resp.tool_calls[0].signature == b"sig-abc"
+
+
+async def test_tool_call_signature_none_when_absent() -> None:
+    """No thought_signature (2.x / non-thinking) leaves ToolCall.signature None."""
+    provider = _make_gemini_provider()
+    fc = SimpleNamespace(id="fc_1", name="file_read", args={"path": "x.py"})
+    provider._client.aio.models.generate_content = AsyncMock(
+        return_value=_gemini_response(parts=[_gemini_part(function_call=fc)])
+    )
+    resp = await provider.create_message(
+        model="gemini-2.5-pro", messages=[], system="", tools=[],
+        max_tokens=64, temperature=0.0,
+    )
+    assert resp.tool_calls[0].signature is None
+
+
+def test_append_tool_round_replays_thought_signature() -> None:
+    """A ToolCall carrying a Gemini 3.x signature replays it on the SAME model
+    part the function call rides — the API requires it verbatim or 400s."""
+    provider = _make_gemini_provider()
+    response = LLMResponse(
+        text=None,
+        tool_calls=[
+            ToolCall(id="t1", name="recall_notes", input={"q": "x"}, signature=b"sig-1")
+        ],
+        stop_reason=StopReason.TOOL_USE,
+    )
+    results = [LLMToolResult(tool_call_id="t1", content="notes", is_error=False)]
+    new_msgs = provider.append_tool_round([], response, results)
+
+    fc_parts = [p for p in new_msgs[0]["parts"] if "function_call" in p]
+    assert fc_parts == [
+        {
+            "function_call": {"name": "recall_notes", "args": {"q": "x"}, "id": "t1"},
+            "thought_signature": b"sig-1",
+        }
+    ]
+
+
+def test_append_tool_round_omits_signature_when_none() -> None:
+    """No signature (2.x / non-thinking) → no ``thought_signature`` key, so the
+    2.x wire shape is unchanged."""
+    provider = _make_gemini_provider()
+    response = LLMResponse(
+        text=None,
+        tool_calls=[ToolCall(id="t1", name="file_read", input={"path": "x.py"})],
+        stop_reason=StopReason.TOOL_USE,
+    )
+    results = [LLMToolResult(tool_call_id="t1", content="data", is_error=False)]
+    new_msgs = provider.append_tool_round([], response, results)
+
+    fc_part = next(p for p in new_msgs[0]["parts"] if "function_call" in p)
+    assert "thought_signature" not in fc_part
