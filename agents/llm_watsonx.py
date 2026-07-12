@@ -217,7 +217,8 @@ class WatsonxProvider:
         model_inference = self._get_model(model)
         # ``chat`` is synchronous/blocking; offload it so the event loop keeps
         # servicing other agents (see the module docstring on the async choice).
-        response = await asyncio.to_thread(lambda: model_inference.chat(**chat_kwargs))
+        # ``to_thread`` forwards **kwargs to the target, so no wrapping closure.
+        response = await asyncio.to_thread(model_inference.chat, **chat_kwargs)
         return self._normalize(response)
 
     def _normalize(self, response: dict) -> LLMResponse:
