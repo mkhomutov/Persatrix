@@ -293,7 +293,7 @@ class TestShippedCostPricingDerivedFromAliases:
             assert aliases.get(role, {}).get("provider") == "unconfigured", role
 
     @pytest.mark.parametrize(
-        "provider", ["anthropic", "offline", "ollama", "openai", "watsonx"]
+        "provider", ["anthropic", "gemini", "offline", "ollama", "openai", "watsonx"]
     )
     def test_demo_committed_block_matches_derived(self, provider: str) -> None:
         # Each per-provider demo config (the configured artifacts) keeps the
