@@ -345,6 +345,43 @@ def test_state_only_recipe_accepted(tmp_path: Path) -> None:
     assert evaluate(es, run).passed is True
 
 
+def test_final_transcript_without_assistant_turn_rejected(tmp_path: Path) -> None:
+    # `final_transcript` asserts over the joined assistant transcript, which is
+    # definitionally empty when the recipe has no assistant turn — so a
+    # `must_not_reference` there passes unconditionally (a vacuous pass, the
+    # positive operators fail unconditionally). Either way it is meaningless, so
+    # the loader rejects it: the whole-recipe no-vacuous-pass guard must cover
+    # the one-assertion-that-can-never-fail shape, not just the zero-assertion
+    # shape. (Surfaced by the PR-1 adversarial review's guard-logic verifier.)
+    body = textwrap.dedent(
+        """
+        id: EVAL-MEMORY-004
+        title: final_transcript with no assistant turn
+        setup:
+          persona: ember-owl
+        interactions:
+          - id: i1
+            turns:
+              - user: "hi"
+        assertions:
+          final_transcript:
+            must_not_reference: ["[error]"]
+        """
+    ).strip()
+    with pytest.raises(ValueError, match="final_transcript"):
+        load_eval_set(_write(tmp_path, body))
+
+
+def test_final_transcript_with_assistant_turn_allowed(tmp_path: Path) -> None:
+    # Boundary: the same `final_transcript` block is legitimate once an assistant
+    # turn exists to produce a non-empty transcript — the guard rejects only the
+    # transcript-less shape, not `final_transcript` in general.
+    block = 'final_transcript:\n  must_not_reference: ["[error]"]'
+    es = load_eval_set(_write(tmp_path, _minimal(block)))
+    assert es.assertions.final_transcript
+    assert evaluate(es, EvalRun(turn_outputs=["ok"])).passed is True
+
+
 # ─── evaluate() coverage for the assertion branches ─────────────────────────
 
 

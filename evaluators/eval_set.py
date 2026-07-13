@@ -178,30 +178,46 @@ def load_eval_set(path: str | Path) -> EvalSet:
 
 
 def _reject_assertionless(interactions: list[Interaction], assertions: Assertions) -> None:
-    """Reject a recipe that asserts nothing (RFC 0044 §D — no vacuous passes).
+    """Reject a recipe whose every assertion can *never fail* (RFC 0044 §D — no
+    vacuous passes).
 
     Per-*assertion* vacuity is already closed at load time (content-operand
     presence, the mandatory state ``value``, the empty-``event_sequence`` ban);
-    this closes the whole-*recipe* hole those guards leave open. A recipe with no
-    assistant expectation and an empty ``assertions`` block produces zero
-    :class:`AssertionResult` rows, so :meth:`EvalReport.passed` is ``all([]) ==
-    True`` — a regression check that can *never* fail, which is exactly what this
-    harness exists to prevent.
+    this closes the whole-*recipe* holes those guards leave open. Two shapes
+    qualify, both of which this harness exists to prevent:
 
-    An assistant turn always carries a content expectation (the schema requires
-    ``match`` and the operand guards make it non-empty), so a single assistant
-    turn is sufficient; otherwise at least one top-level assertion is required.
-    A state-only recipe (all user turns + a ``terminal_state`` gate) is
-    legitimate and passes this guard.
+    * **Nothing asserted.** No assistant turn and an empty ``assertions`` block
+      produces zero :class:`AssertionResult` rows, so :meth:`EvalReport.passed`
+      is ``all([]) == True``.
+    * **``final_transcript`` with no assistant turn.** ``final_transcript``
+      asserts over the joined assistant transcript, which is *definitionally*
+      empty when the recipe has no assistant turn — a faithful runner emits one
+      output per assistant turn, so zero assistant turns → ``transcript == ""``.
+      Against an always-empty string ``must_not_reference`` passes
+      unconditionally (a vacuous pass) and the positive operators fail
+      unconditionally; either way the assertion is meaningless, so it is rejected
+      rather than allowed to masquerade as a real regression check.
+
+    A ``terminal_state`` / ``event_count`` / ``event_sequence`` assertion does
+    not depend on assistant output, so a legitimate state-only or event-only
+    recipe (all user turns, no ``final_transcript``) still loads. An assistant
+    turn always carries a content expectation (the schema requires ``match`` and
+    the operand guards make it non-empty), so a single assistant turn suffices.
     """
-    has_assistant_expect = any(t.expect is not None for i in interactions for t in i.turns)
+    has_assistant_turn = any(t.role == "assistant" for i in interactions for t in i.turns)
+    if assertions.final_transcript and not has_assistant_turn:
+        raise ValueError(
+            "final_transcript asserts over the assistant transcript, which is "
+            "empty without an assistant turn — add an assistant turn or drop the "
+            "final_transcript block (RFC 0044 §D no-vacuous-pass)"
+        )
     has_top_level = bool(
         assertions.terminal_state
         or assertions.event_count
         or assertions.event_sequence
         or assertions.final_transcript
     )
-    if not (has_assistant_expect or has_top_level):
+    if not (has_assistant_turn or has_top_level):
         raise ValueError(
             "eval-set asserts nothing: add an assistant-turn expectation or a "
             "top-level assertion (terminal_state / event_count / event_sequence / "
