@@ -168,6 +168,23 @@ before the demo boots or the factory fails closed (`WATSONX_URL` is optional —
 it defaults to us-south); `make demo-watsonx` preflights for the id and refuses
 to start with a clear message if it is missing.
 
+> **Installing the optional provider SDKs (extras).** Only Gemini and watsonx.ai
+> ship their SDK as an optional [pyproject extra](../../agents/pyproject.toml):
+> `anthropic` / `openai` are always-installed base dependencies, Ollama reuses
+> the base `openai` SDK, and the mock needs nothing — so those four carry no
+> extra. Install one cloud SDK with `pip install 'persatrix-agents[gemini]'` (or
+> `[watsonx]`), or pull **both optional SDKs at once** with the combined bundle
+> `pip install 'persatrix-agents[providers]'`. The `make demo-gemini` /
+> `demo-watsonx` targets already install the matching extra into the agent image
+> for you (via the `AGENT_EXTRAS` build arg); reach for `[providers]` when you
+> want every optional cloud SDK in one step — e.g. standing up the **four-vendor
+> human-free brainstorm** (Anthropic + OpenAI + Gemini + watsonx.ai discussing
+> one topic in one channel, no human), the flagship
+> [RFC 0052](../rfcs/0052-autonomous-agent-channels.md) autonomous-channel demo
+> this four-cloud-vendor roster exists to enable. That cross-vendor blueprint and
+> its live manual test land in
+> [RFC 0052 PR 9](../rfcs/0052-pr-plan.md#pr-9-featurev0311-rfc0052-demo-multivendor--phase-4b-four-vendor-headline--closeout-cuttable).
+
 To opt a **single** agent onto a different provider instead of the whole
 society, give it its own alias: add an entry to `models.aliases` that declares
 the provider, model, and price (e.g. `local-fast: {provider: ollama, model:
