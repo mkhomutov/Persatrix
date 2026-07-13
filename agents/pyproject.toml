@@ -96,15 +96,17 @@ watsonx = [
 # RFC 0053 PR 3 (closeout) — a combined bundle of every optional provider SDK,
 # so an operator standing up the four-vendor human-free brainstorm (RFC 0052
 # PR 9) pulls them all in one step: `pip install 'persatrix-agents[providers]'`
-# instead of naming each (`[gemini,watsonx]`). Keep this the exact union of the
-# individual provider extras above — the drift guard
-# `tests/unit/python/test_pyproject_provider_extras.py` fails if it falls out of
-# sync (a bumped pin or a new provider extra not folded in here). `anthropic` /
-# `openai` are always-on base dependencies and Ollama reuses the base `openai`
-# SDK, so they contribute nothing to this bundle.
+# instead of naming each (`[gemini,watsonx]`). This is a **self-referencing
+# extra**: it re-exports the individual provider extras by name rather than
+# copying their pins, so a bumped SDK pin is inherited automatically and can
+# never drift out of sync. Keep the bracket in step with the individual provider
+# extras above — the drift guard
+# `tests/unit/python/test_pyproject_provider_extras.py` fails if a new provider
+# extra is added without folding its name in here. `anthropic` / `openai` are
+# always-on base dependencies and Ollama reuses the base `openai` SDK, so they
+# contribute nothing to this bundle.
 providers = [
-    "google-genai>=1.0.0,<2",
-    "ibm-watsonx-ai>=1.1.0,<2",
+    "Persatrix-agents[gemini,watsonx]",
 ]
 
 [project.scripts]
