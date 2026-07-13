@@ -181,9 +181,12 @@ to start with a clear message if it is missing.
 > human-free brainstorm** (Anthropic + OpenAI + Gemini + watsonx.ai discussing
 > one topic in one channel, no human), the flagship
 > [RFC 0052](../rfcs/0052-autonomous-agent-channels.md) autonomous-channel demo
-> this four-cloud-vendor roster exists to enable. That cross-vendor blueprint and
-> its live manual test land in
-> [RFC 0052 PR 9](../rfcs/0052-pr-plan.md#pr-9-featurev0311-rfc0052-demo-multivendor--phase-4b-four-vendor-headline--closeout-cuttable).
+> this four-cloud-vendor roster exists to enable. The cross-vendor roster is
+> [`blueprints/autonomous-multivendor/blueprint.yaml`](../../blueprints/autonomous-multivendor/blueprint.yaml)
+> (four seats, each pinned by an RFC 0033 alias to a different cloud vendor), and
+> its live headline manual test is
+> [MT-AUTONOMOUS-MULTIPROVIDER-001](../manual-tests/MT-AUTONOMOUS-MULTIPROVIDER-001.md)
+> (RFC 0052 [PR 9](../rfcs/0052-pr-plan.md#pr-9-featurev0311-rfc0052-demo-multivendor--phase-4b-four-vendor-headline--closeout-cuttable)).
 
 To opt a **single** agent onto a different provider instead of the whole
 society, give it its own alias: add an entry to `models.aliases` that declares

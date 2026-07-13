@@ -1,0 +1,119 @@
+# Blueprint: Autonomous Multi-Vendor Roundtable (RFC 0052 Phase 4 — the headline)
+# Usage: the curated roster behind the v0.3.11 FLAGSHIP demo — four personas,
+# each pinned by an RFC 0033 model alias to a DIFFERENT cloud vendor
+# (Anthropic + OpenAI + Gemini + watsonx.ai), running a human-free brainstorm to
+# a synthesis in ONE channel, with no human turn. The most vivid possible proof
+# that the conversation layer is provider-agnostic (RFC 0033 §H): the same
+# governed wake chain carries a discussion whose four voices are four vendors'
+# models, and nothing in the channel/governance layer knows or cares.
+#
+# This is a DESIGN blueprint (like blueprints/autonomous-roundtable and
+# blueprints/software-team): the CLI's `persatrix init --blueprint` is not yet
+# wired (cli/src/main.rs `Init` is a stub), and blueprints/ is not schema-
+# validated by `make validate` (that walks config/ only). Its job is to document
+# the four-vendor roster + the per-seat vendor pinning so an operator can
+# assemble the live run (MT-AUTONOMOUS-MULTIPROVIDER-001) — and to be the source
+# of truth the CI backbone (tests/unit/python/test_autonomous_multivendor_blueprint.py)
+# validates: four distinct cloud vendors, priced fail-closed, agent-only, capped.
+#
+# Two faces of the RFC 0052 Phase-4 demo (RFC 0052 §Phase 4):
+#   • OFFLINE (no keys, $0, CI):  blueprints/autonomous-roundtable — every seat
+#     mapped to the `mock` provider; `make demo-autonomous` (PR 8).
+#   • CROSS-VENDOR (this file):   four seats, four cloud vendors; the live
+#     headline MT (all four keyed) — MT-AUTONOMOUS-MULTIPROVIDER-001 (PR 9).
+
+blueprint:
+  id: "autonomous-multivendor"
+  description: "RFC 0052 four-vendor headline — a human-free brainstorm whose four seats each run on a DIFFERENT cloud vendor (Anthropic + OpenAI + Gemini + watsonx.ai): a convener opens the topic, the roster discusses through the governed wake chain, and a chair synthesizes a recommendation. Zero human turns; one shared per-interaction cost cap."
+
+  # ─── The four-vendor pinning (RFC 0033 §H, RFC 0053 Phase-3 handoff) ────────
+  # Each seat's `model:` below names one of these aliases; each alias resolves to
+  # a DIFFERENT cloud vendor, so the four personas run on four vendors in one
+  # channel. This is the `config/optimization.yaml` `models.aliases` shape
+  # (provider / model / priced) carried inline so the whole four-vendor mapping
+  # is legible in one file and resolvable through the real RFC 0033 resolver.
+  #
+  # For the LIVE run, an operator lifts this block into their mounted
+  # optimization.yaml (the four `config/demo/<vendor>/optimization.yaml` priced
+  # rows combined — RFC 0053's "references all four cloud alias configs at once")
+  # and points each of the four demo personas' `model:` at its seat alias, then
+  # keys all four vendors. See MT-AUTONOMOUS-MULTIPROVIDER-001.
+  #
+  # Prices are the current published per-1M-token rates the four `demo/<vendor>`
+  # overlays ship (an operator-maintained config value — the RFC 0033 §F guard
+  # checks price PRESENCE, not accuracy; the mandatory per-interaction cap below
+  # is the genuine SECOND bound that holds even if a rate drifts — RFC 0053 §D).
+  model_aliases:
+    anthropic_seat:
+      provider: anthropic
+      model: claude-sonnet-4-6
+      input_per_1m_tokens: 3.00
+      output_per_1m_tokens: 15.00
+    openai_seat:
+      provider: openai
+      model: gpt-4o
+      input_per_1m_tokens: 2.50
+      output_per_1m_tokens: 10.00
+    gemini_seat:
+      provider: gemini
+      model: gemini-3.5-flash
+      input_per_1m_tokens: 0.30
+      output_per_1m_tokens: 2.50
+    watsonx_seat:
+      provider: watsonx
+      model: meta-llama/llama-3-3-70b-instruct
+      input_per_1m_tokens: 1.80
+      output_per_1m_tokens: 1.80
+    # The RFC 0020 per-persona close summary (every persona's readable artifact)
+    # resolves the `summarizer` alias (context_management.summarization.model) —
+    # a single shared alias, not per-seat — so the four-vendor close path is
+    # complete. Pinned to a cheap Anthropic model; any keyed cloud vendor works.
+    summarizer:
+      provider: anthropic
+      model: claude-haiku-4-5-20251001
+      input_per_1m_tokens: 0.80
+      output_per_1m_tokens: 4.00
+
+  agents:
+    # `extends` names an existing anchor in templates/personas.yaml
+    # (product_manager / senior_engineer / qa_engineer / creative_writer). The
+    # functional split lives in `role:`; the vendor pinning lives in `model:`
+    # (an alias above). The two engineers share the `senior_engineer` archetype
+    # (as software-team's architect/backend/frontend do) — the personas differ
+    # by seat + vendor, not archetype.
+    - { extends: "templates/personas.yaml#product_manager", id: "nova-sparrow", role: "convener", model: "anthropic_seat" }
+    - { extends: "templates/personas.yaml#senior_engineer", id: "ember-owl", role: "chair", model: "openai_seat" }
+    - { extends: "templates/personas.yaml#senior_engineer", id: "iron-fox", role: "participant", model: "gemini_seat" }
+    - { extends: "templates/personas.yaml#qa_engineer", id: "slate-heron", role: "participant", model: "watsonx_seat" }
+
+  channels:
+    # The autonomous group. Convener (nova-sparrow, on Anthropic) owns the agenda
+    # lifecycle; the chair (ember-owl, on OpenAI, escalation_chair_id) authors the
+    # §D closing synthesis — DISTINCT roles (OQ #1). A positive
+    # interaction_budget_tokens is MANDATORY: an unattended channel has no human
+    # circuit-breaker, so uncapped autonomy is un-creatable (RFC 0052 Goal #4 /
+    # PR 1 safety gate). It is a SINGLE shared per-interaction ceiling — NOT a
+    # per-seat cap — so the whole four-vendor discussion (every seat's turns +
+    # the chair synthesis + the metered per-persona summaries) settles under one
+    # bound regardless of which vendor a turn ran on.
+    - id: "multivendor-roundtable"
+      type: "group"
+      interaction_budget_tokens: 200000
+      escalation_chair_id: "ember-owl"
+      autonomous:
+        enabled: true
+        # A topic that is itself provider-neutral and reads well as a four-way
+        # debate — fitting for a roundtable whose four voices are four clouds.
+        topic: "Should an early-stage startup commit to a single cloud provider or design for multi-cloud from day one?"
+        agenda:
+          - "Cost and vendor lock-in"
+          - "Operational complexity and team expertise"
+          - "Reliability and failover"
+        convener: "nova-sparrow"
+        goal: "A synthesized recommendation with the strongest argument on each side."
+        max_rounds: 12
+      members:
+        - { id: "nova-sparrow", respond: "participant" }
+        - { id: "ember-owl", respond: "chair" }
+        - { id: "iron-fox", respond: "participant" }
+        - { id: "slate-heron", respond: "participant" }

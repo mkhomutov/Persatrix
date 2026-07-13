@@ -366,9 +366,9 @@ Items surfaced by the deep reviews that are **deliberately deferred** to the PR 
 
 #### PR checklist
 
-- [ ] Four-vendor blueprint validates; `MT-AUTONOMOUS-MULTIPROVIDER-001` documented (live run is master-plan Phase 3).
-- [ ] **If RFC 0053 slipped**: four-vendor leg deferred to v0.3.12 with a slip note; closeout still lands.
-- [ ] RFC 0052 → ✅ Implemented; ROADMAP + CHANGELOG updated; `make rfcs` regenerates [INDEX.md](INDEX.md).
+- [x] Four-vendor blueprint validates (`tests/unit/python/test_autonomous_multivendor_blueprint.py` — four distinct cloud vendors through the real RFC 0033 resolver, priced fail-closed, agent-only, anchors resolve); `MT-AUTONOMOUS-MULTIPROVIDER-001` documented (live run is master-plan Phase 3).
+- [x] RFC 0053 **landed** (not slipped), so the four-vendor leg ships here — no v0.3.12 slip.
+- [x] RFC 0052 → ✅ Implemented (front-matter + bold header + Decision status); ROADMAP + CHANGELOG updated; OQ #5 calibration filed as [ISSUE-0109](../issues/ISSUE-0109-rfc0052-autonomous-defaults-calibration.md); `make rfcs` regenerates [INDEX.md](INDEX.md).
 
 ---
 
@@ -398,7 +398,7 @@ A new channel *mode* + CLI/web surfaces needs real doc + diagram **edits**, not 
 | The convener's **opening turn is uncapped** — the wallet snapshots the cap at first commit, so the lease producing the opening message predates it ([`interaction_budget.go`](../../internal/wallet/interaction_budget.go)); one uncapped turn per convening on a standing channel. | PR 3 settles this explicitly (documented-uncapped, with the Layer-0 depth cap + the §E aggregate bound as the nets, **or** the opening lease carries the resolved cap). |
 | Anti-collapse re-introduces pile-on on human channels. | Scoped to `autonomous.enabled` (OQ #2); PR 6 human-channel regression. |
 | The four-vendor demo gates the release on two new SDKs. | PR 9 is cuttable; the offline demo (PR 8) carries the headline if RFC 0053 slips. |
-| `max_rounds` / cap / reserve defaults are uncalibrated. | Conservative defaults + an OQ #5 calibration tracked-issue (tune after a soak). |
+| `max_rounds` / cap / reserve defaults are uncalibrated. | Conservative defaults + an OQ #5 calibration tracked-issue (filed at PR 9 closeout as [ISSUE-0109](../issues/ISSUE-0109-rfc0052-autonomous-defaults-calibration.md) — tune after a soak). |
 
 ---
 
@@ -428,8 +428,8 @@ A new channel *mode* + CLI/web surfaces needs real doc + diagram **edits**, not 
 | 7c-i | 3 — config-round-trip timer producer: `StandingConveneTimers` (dark) | `…-standing-timer` | ✅ Merged |
 | 7c-ii-a | 3 — convener-side `ScheduledWake(convene)` → `/convene` wake handler (dark; consumer-first) | `…-convene-wake` | ✅ Merged |
 | 7c-ii-b | 3 — `agents.yaml` timer writer (level bump + tick carry-forward) + `MT-AUTONOMOUS-003` | `…-standing-timer-fire` | ✅ Merged |
-| 8 | 4a — `make demo-autonomous` (offline) | `feature/v0311-rfc0052-demo-offline` | 🔀 PR open |
-| 9 | 4b — four-vendor headline + closeout (cuttable) | `feature/v0311-rfc0052-demo-multivendor` | ⬜ |
+| 8 | 4a — `make demo-autonomous` (offline) | `feature/v0311-rfc0052-demo-offline` | ✅ Merged |
+| 9 | 4b — four-vendor headline + closeout (cuttable; **not** cut — RFC 0053 landed) | `feature/v0311-rfc0052-demo-multivendor` | ✅ Merged |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged
 
