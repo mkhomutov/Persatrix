@@ -31,13 +31,32 @@ Mirrors the ``EXCLUDE_DIRS`` waiver pattern in
 ``test_pyproject_packages.py``: an extra that is *not* an optional
 provider-SDK bundle is an explicit entry in ``_NON_PROVIDER_EXTRAS``,
 not an oversight.
+
+Those two invariants are *static* string guards on the TOML. The final
+test (``test_providers_extra_resolves_to_every_provider_sdk``) is a live
+end-to-end smoke: it shells out to ``pip install --dry-run --report``
+(pip's real resolver — ``--dry-run`` installs nothing, ``--report`` writes
+a JSON plan) to confirm ``Persatrix-agents[providers]`` actually *expands*
+into the native SDKs — the whole point of the self-reference, which no
+string check can prove. It is **opt-in** (network + ~30s, non-hermetic):
+set ``PERSATRIX_PROVIDERS_RESOLUTION_SMOKE=1`` to run it. This mirrors the
+repo's other live-external tests (e.g. ``requires_anthropic``) — the
+hermetic static guards run in the default suite, this one runs only when
+explicitly enabled, so a PyPI hiccup can never redden an unrelated push.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import subprocess
+import sys
 import tomllib
+import urllib.request
 from pathlib import Path
+
+import pytest
 
 # The combined extra an operator installs to get every optional provider SDK.
 _COMBINED_EXTRA = "providers"
@@ -183,4 +202,171 @@ def test_combined_providers_extra_self_references_every_provider_extra() -> None
         f"'{_COMBINED_EXTRA}': {sorted(referenced - expected)}. Fold new "
         f"provider extras into the '{_COMBINED_EXTRA}' self-reference (or waive "
         "a non-provider extra in _NON_PROVIDER_EXTRAS)."
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Live resolution smoke (opt-in) — RFC 0053 PR 3 (closeout).
+#
+# The guards above are static: they assert the ``providers`` extra is a
+# well-formed self-reference *string*. They cannot prove a real resolver
+# actually expands ``Persatrix-agents[providers]`` → ``[gemini,watsonx]`` → the
+# two native SDKs — the whole point of the self-reference. This smoke does, by
+# shelling out to ``pip install --dry-run --report`` (pip's resolution planner;
+# ``--dry-run`` installs nothing, ``--report`` writes a JSON plan we parse).
+#
+# It is OPT-IN because it needs live PyPI (network, ~30s) and its result depends
+# on PyPI state, so — like the repo's other non-hermetic live-external tests
+# (``requires_anthropic``) — it must stay out of the default ``make test-python``
+# suite (which is exactly the CI Python-unit job, .github/workflows/ci.yml).
+# Enable it with ``PERSATRIX_PROVIDERS_RESOLUTION_SMOKE=1``. When enabled it
+# genuinely runs: a broken self-reference (pip cannot expand it → resolution
+# error) or a missing SDK FAILS; it is *skipped* only for environmental reasons
+# (offline / pip too old / timeout), never to paper over a real defect.
+#
+#   PERSATRIX_PROVIDERS_RESOLUTION_SMOKE=1 \
+#       python -m pytest tests/unit/python/test_pyproject_provider_extras.py -v
+
+_RESOLUTION_SMOKE_ENV = "PERSATRIX_PROVIDERS_RESOLUTION_SMOKE"
+
+# A cold resolution of the full provider closure over the network is ~30s here;
+# 300s leaves ample headroom on a slow runner. Unlike the repo's other
+# subprocess-backed tests (which set no timeout), a network call MUST cap itself
+# so a stalled PyPI can never wedge the suite.
+_RESOLUTION_TIMEOUT_S = 300
+
+_requires_resolution_smoke = pytest.mark.skipif(
+    not os.environ.get(_RESOLUTION_SMOKE_ENV),
+    reason=(
+        "live PyPI resolution smoke is opt-in (network, ~30s, non-hermetic) — "
+        f"set {_RESOLUTION_SMOKE_ENV}=1 to run it"
+    ),
+)
+
+
+def _expected_provider_sdk_names() -> set[str]:
+    """The PEP 503-normalized SDK distribution names ``providers`` must pull.
+
+    Derived from the individual provider extras — the same source of truth the
+    drift guard above uses — so a newly added provider extra is automatically
+    expected here too, with no hand-maintained list to fall out of sync.
+    ``{"google-genai", "ibm-watsonx-ai"}`` today.
+    """
+    extras = _optional_dependencies()
+    return {
+        _normalize(_requirement_name(req))
+        for reqs in _provider_extras(extras).values()
+        for req in reqs
+    }
+
+
+def _pip_supports_dry_run_report() -> bool:
+    """``pip install --dry-run --report`` requires pip >= 22.2."""
+    try:
+        from importlib.metadata import version
+
+        raw = version("pip")
+    except Exception:  # noqa: BLE001 — unknown pip; let the run surface it
+        return True
+    nums = re.findall(r"\d+", raw)
+    if len(nums) < 2:
+        return True
+    return (int(nums[0]), int(nums[1])) >= (22, 2)
+
+
+def _pypi_reachable(dist_names: set[str], timeout: float = 8.0) -> bool:
+    """Fast reachability precheck for the given distributions on PyPI.
+
+    Lets a genuine outage *skip* (environmental) rather than fail, and cleanly
+    separates "network down" from "resolution broken": only when PyPI is
+    reachable do we treat a non-zero ``pip`` exit as a real defect.
+    """
+    for name in dist_names:
+        try:
+            request = urllib.request.Request(
+                f"https://pypi.org/pypi/{name}/json", method="HEAD"
+            )
+            with urllib.request.urlopen(request, timeout=timeout):
+                pass
+        except Exception:  # noqa: BLE001 — any network/HTTP error → unreachable
+            return False
+    return True
+
+
+@_requires_resolution_smoke
+def test_providers_extra_resolves_to_every_provider_sdk(tmp_path: Path) -> None:
+    """``pip`` dry-run of ``[providers]`` resolves to every provider SDK.
+
+    The live counterpart to the static drift guard: proof that the
+    self-referencing ``providers`` extra expands, through pip's real resolver,
+    into the native SDKs the individual extras pin. Nothing is installed.
+    """
+    if not _pip_supports_dry_run_report():
+        pytest.skip("pip too old for `--dry-run --report` (needs >= 22.2)")
+
+    expected = _expected_provider_sdk_names()
+    assert expected, (
+        "no individual provider extras found — the resolution smoke would be "
+        "vacuous; the static guards above should have caught this first"
+    )
+
+    if not _pypi_reachable(expected):
+        pytest.skip("PyPI unreachable — skipping live resolution smoke (offline)")
+
+    agents_dir = _pyproject_path().parent
+    report_path = tmp_path / "resolution-report.json"
+    target = f"{agents_dir}[{_COMBINED_EXTRA}]"
+    # --ignore-installed forces a full plan, so the report lists the entire
+    # closure regardless of what the runner's venv already holds (an already
+    # -satisfied SDK would otherwise be absent from ``install`` and falsely read
+    # as "missing"). --dry-run installs nothing; --report writes the plan.
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--dry-run",
+        "--ignore-installed",
+        "--quiet",
+        "--report",
+        str(report_path),
+        target,
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=_RESOLUTION_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.skip(
+            f"pip resolution exceeded {_RESOLUTION_TIMEOUT_S}s — skipping (slow network)"
+        )
+
+    # PyPI was reachable moments ago, so a non-zero exit is a real resolution
+    # failure — most likely a self-reference pip cannot expand — not an outage.
+    assert result.returncode == 0, (
+        "`pip install --dry-run` of the combined `providers` extra failed to "
+        "resolve; the self-referencing extra may be broken.\n"
+        f"command: {' '.join(cmd)}\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
+    )
+    assert report_path.exists(), (
+        "pip reported success but wrote no --report file:\n"
+        f"stdout:\n{result.stdout}"
+    )
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    resolved = {
+        _normalize((entry.get("metadata") or {}).get("name", ""))
+        for entry in report.get("install", [])
+    }
+    missing = expected - resolved
+    assert not missing, (
+        f"`pip install '{target}'` resolved to {sorted(resolved)}, but the "
+        f"combined `{_COMBINED_EXTRA}` extra must pull every provider SDK — "
+        f"missing {sorted(missing)}. The self-reference did not expand into the "
+        "individual provider extras."
     )
