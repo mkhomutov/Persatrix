@@ -130,7 +130,9 @@
         },
         "event_sequence": {
           "type": "array",
-          "items": { "type": "string" }
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "A contiguous run of event-type names expected in the flat event stream. Omit the key to not assert a sequence; an empty list asserts nothing and is rejected."
         },
         "final_transcript": {
           "type": "object",
@@ -148,10 +150,12 @@
     "state_match": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["match"],
+      "required": ["match", "value"],
       "properties": {
         "match": { "enum": ["exact", "gt", "lt", "gte", "lte", "eq"] },
-        "value": {}
+        "value": {
+          "description": "The operand every state operator compares against. Mandatory: an omitted operand would degrade to a vacuously-passing assertion when the state key is also absent (`exact` → `None == None`), the no-vacuous-pass rule the content operators enforce (RFC 0044 §D). `required` checks key *presence*, not non-null — assert against a null/absent state value with an explicit `value: null`."
+        }
       }
     }
   }

@@ -14,6 +14,7 @@ from evaluators.assertions import (
     match_content,
     match_event_count,
     match_event_sequence,
+    match_exact,
     match_numeric,
 )
 
@@ -117,11 +118,52 @@ def test_numeric_boolean_actual_is_not_numeric() -> None:
     assert "bool" in detail.lower()
 
 
+def test_numeric_boolean_expected_is_not_numeric() -> None:
+    # The bool guard is symmetric: a boolean *expected* operand must not coerce
+    # either, so `eq: true` can't match a numeric state value of 1
+    # (float(True) == 1.0). Use `exact` for booleans.
+    assert match_numeric(MatchOp.EQ, 1, True)[0] is False
+    assert match_numeric(MatchOp.GT, 5, True)[0] is False
+    ok, detail = match_numeric(MatchOp.GTE, 5, False)
+    assert ok is False
+    assert "bool" in detail.lower()
+
+
+def test_numeric_non_numeric_expected_operand_named_in_detail() -> None:
+    # A fat-fingered expected operand (`gt: high`) fails, and the detail names
+    # the *operand* — not the observed value — so the author sees their mistake.
+    ok, detail = match_numeric(MatchOp.GT, 5.0, "high")
+    assert ok is False
+    assert "high" in detail
+    assert "operand" in detail.lower()
+
+
 def test_regex_invalid_pattern_fails_without_raising() -> None:
     # match_content promises never to raise — a bad regex is a graceful failure.
     ok, detail = match_content(MatchOp.REGEX, "anything", value="([unclosed")
     assert ok is False
     assert "regex" in detail.lower()
+
+
+# ─── Exact (state) matcher (RFC 0044 §B, §D) ─────────────────────────────────
+
+
+def test_exact_state_bool_number_firewall() -> None:
+    # `exact` is the operator the numeric guard steers booleans toward, so it
+    # must firewall the same bool↔number conflation: a boolean is never
+    # exactly-equal to a non-boolean (Python's `1 == True` / `0 == False` would
+    # otherwise mask an int↔bool state-type regression).
+    assert match_exact(1, True)[0] is False
+    assert match_exact(True, 1)[0] is False
+    assert match_exact(0, False)[0] is False
+    assert match_exact(1.0, True)[0] is False
+    # genuine matches (same type on both sides) still pass.
+    assert match_exact(True, True)[0] is True
+    assert match_exact(1, 1)[0] is True
+    assert match_exact("active", "active")[0] is True
+    ok, detail = match_exact("active", "idle")
+    assert ok is False
+    assert "idle" in detail and "active" in detail  # detail names both operands
 
 
 # ─── Event matchers (RFC 0044 §B) ───────────────────────────────────────────

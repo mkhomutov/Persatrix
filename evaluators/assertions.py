@@ -147,14 +147,21 @@ def match_content(
 
 def match_numeric(op: MatchOp, actual: Any, expected: Any) -> tuple[bool, str]:
     """Evaluate a numeric operator. All operators coerce to ``float`` where they
-    can and fail gracefully on a missing / non-numeric ``actual`` (e.g. a state
-    key that was never written)."""
+    can and fail gracefully on a missing / non-numeric operand — an ``actual``
+    that is a state key never written, or an ``expected`` the recipe author
+    fat-fingered (``gt: high``)."""
     # ``bool`` is a subclass of ``int``, so an unguarded numeric op would let a
-    # boolean state flag spuriously satisfy a count/threshold (``True == 1``,
-    # ``float(True) > 0.5``). A boolean is not a number here — fail it as such
-    # (use ``match: exact`` for boolean state values).
+    # boolean spuriously satisfy a count/threshold (``True == 1``,
+    # ``float(True) > 0.5``). A boolean is not a number here — fail it on either
+    # side (use ``match: exact`` for boolean state values). Guarding ``expected``
+    # too keeps the rule symmetric: ``eq: true`` must not match a numeric state
+    # value of ``1`` just because ``float(True) == 1.0``.
     if isinstance(actual, bool):
         return False, f"value not numeric (boolean): got {actual!r}"
+    if isinstance(expected, bool):
+        return False, (
+            f"operand not numeric (boolean): expected {expected!r} — use `exact` for booleans"
+        )
 
     if op is MatchOp.EQ:
         # Numeric equality with the same float coercion the ordering operators
@@ -171,9 +178,14 @@ def match_numeric(op: MatchOp, actual: Any, expected: Any) -> tuple[bool, str]:
 
     try:
         a = float(actual)  # type: ignore[arg-type]
-        e = float(expected)
     except (TypeError, ValueError):
         return False, f"value not numeric: got {actual!r}"
+    try:
+        e = float(expected)
+    except (TypeError, ValueError):
+        # Name the *operand* (not the observed value) so a fat-fingered recipe
+        # threshold — ``gt: high`` — points the author at their own mistake.
+        return False, f"operand not numeric: expected {expected!r}"
 
     if op is MatchOp.GT:
         ok = a > e
@@ -186,6 +198,28 @@ def match_numeric(op: MatchOp, actual: Any, expected: Any) -> tuple[bool, str]:
     else:  # pragma: no cover - guarded by the caller / schema enum
         return False, f"{op.value!r} is not a numeric operator"
     return ok, "" if ok else f"expected {op.value} {expected!r}, got {actual!r}"
+
+
+# ─── Exact (state) matcher ──────────────────────────────────────────────────
+
+
+def match_exact(actual: Any, expected: Any) -> tuple[bool, str]:
+    """Evaluate the ``exact`` state operator: strict equality with a bool↔number
+    firewall.
+
+    ``bool`` is an ``int`` subclass, so a bare ``==`` treats ``1 == True`` and
+    ``0 == False`` as equal — which would let a state value silently change type
+    (persona writes ``int 1`` where a recipe asserts ``exact: true``, or vice
+    versa) without failing the eval. That is the same conflation
+    :func:`match_numeric` guards against, and this is the operator that guard
+    steers booleans toward, so ``exact`` must firewall it too: a boolean is never
+    exactly-equal to a non-boolean. Every other pair uses ordinary equality.
+    """
+    if isinstance(actual, bool) != isinstance(expected, bool):
+        ok = False
+    else:
+        ok = actual == expected
+    return ok, "" if ok else f"expected {expected!r}, got {actual!r}"
 
 
 # ─── Event matchers ─────────────────────────────────────────────────────────

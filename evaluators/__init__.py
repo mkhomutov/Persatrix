@@ -18,6 +18,7 @@ from evaluators.assertions import (
     match_content,
     match_event_count,
     match_event_sequence,
+    match_exact,
     match_numeric,
 )
 from evaluators.eval_set import (
@@ -52,5 +53,6 @@ __all__ = [
     "match_content",
     "match_event_count",
     "match_event_sequence",
+    "match_exact",
     "match_numeric",
 ]

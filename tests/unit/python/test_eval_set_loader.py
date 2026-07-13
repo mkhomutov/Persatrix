@@ -272,6 +272,30 @@ def test_invalid_regex_operand_rejected_at_load(tmp_path: Path) -> None:
         load_eval_set(_write(tmp_path, body))
 
 
+def test_state_matcher_without_value_rejected(tmp_path: Path) -> None:
+    # A state matcher with no `value` operand degrades to a vacuously-passing
+    # assertion when the state key is also absent (`exact` → `None == None`) —
+    # the same no-vacuous-pass rule the content operators enforce. `value` is
+    # mandatory in the schema for state matchers.
+    body = _VALID_RECIPE.replace(
+        "persona:ember-owl:trust.scores.alice: {match: gt, value: 0.0}",
+        "persona:ember-owl:trust.scores.alice: {match: exact}",
+    )
+    with pytest.raises(ValueError, match="required"):
+        load_eval_set(_write(tmp_path, body))
+
+
+def test_state_matcher_explicit_null_value_allowed(tmp_path: Path) -> None:
+    # `value` must be *present*, not non-null: an author may still assert a key
+    # is explicitly null with `value: null` (`required` checks key presence).
+    body = _VALID_RECIPE.replace(
+        "persona:ember-owl:trust.scores.alice: {match: gt, value: 0.0}",
+        "persona:ember-owl:cleared: {match: exact, value: null}",
+    )
+    es = load_eval_set(_write(tmp_path, body))
+    assert es.assertions.terminal_state["persona:ember-owl:cleared"].value is None
+
+
 # ─── evaluate() coverage for the assertion branches ─────────────────────────
 
 
@@ -298,6 +322,29 @@ def test_evaluate_exact_terminal_state_pass_and_fail(tmp_path: Path) -> None:
     report = evaluate(es, bad)
     assert report.passed is False
     assert any("terminal_state" in f.name for f in report.failures())
+
+
+def test_evaluate_exact_state_bool_number_firewall(tmp_path: Path) -> None:
+    # End-to-end: `exact` must not let a numeric state value satisfy a boolean
+    # expectation (1 == True) — that would mask an int↔bool state-type regression
+    # on the very operator the numeric guard recommends for booleans.
+    es = load_eval_set(
+        _write(
+            tmp_path,
+            _minimal("terminal_state:\n  persona:ember-owl:flag: {match: exact, value: true}"),
+        )
+    )
+    bad = EvalRun(turn_outputs=["ok"], terminal_state={"persona:ember-owl:flag": 1})
+    assert evaluate(es, bad).passed is False
+    good = EvalRun(turn_outputs=["ok"], terminal_state={"persona:ember-owl:flag": True})
+    assert evaluate(es, good).passed is True
+
+
+def test_empty_event_sequence_rejected(tmp_path: Path) -> None:
+    # `event_sequence: []` asserts nothing; the schema `minItems: 1` rejects it
+    # rather than let it load as a silently-skipped (vacuous) assertion.
+    with pytest.raises(ValueError):
+        load_eval_set(_write(tmp_path, _minimal("event_sequence: []")))
 
 
 def test_evaluate_final_transcript_scalar_contains_and_regex(tmp_path: Path) -> None:

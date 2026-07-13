@@ -31,6 +31,7 @@ from evaluators.assertions import (
     match_content,
     match_event_count,
     match_event_sequence,
+    match_exact,
     match_numeric,
 )
 
@@ -322,10 +323,8 @@ def evaluate(eval_set: EvalSet, run: EvalRun) -> EvalReport:
         actual = run.terminal_state.get(key)
         if matcher.op in NUMERIC_OPS:
             ok, detail = match_numeric(matcher.op, actual, matcher.value)
-        else:  # exact
-            ok, detail = (actual == matcher.value), (
-                "" if actual == matcher.value else f"expected {matcher.value!r}, got {actual!r}"
-            )
+        else:  # exact — strict equality with the bool↔number firewall.
+            ok, detail = match_exact(actual, matcher.value)
         results.append(AssertionResult(f"terminal_state.{key}", ok, detail))
 
     # event assertions.
