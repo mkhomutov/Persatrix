@@ -7,7 +7,7 @@ id: RFC-0053
 title: "Gemini and watsonx.ai LLM Providers"
 summary: "Add Google Gemini and IBM watsonx.ai as first-class LLM providers — the second concrete dogfood of the RFC 0033 §H multi-provider extensibility seam (one provider class + one factory branch + priced alias entries each). Brings the configurable provider roster to four cloud vendors (Anthropic, OpenAI, Gemini, watsonx.ai) plus local Ollama and the offline mock, which is what makes the RFC 0052 four-vendor human-free brainstorm demo possible."
 type: feature
-status: implementing
+status: implemented
 author: Maksim Khomutov
 created: 2026-06-28
 target: "v0.3.11"
@@ -20,7 +20,7 @@ depends_on:
 # RFC 0053 — Gemini and watsonx.ai LLM Providers
 
 **Type**: feature
-**Status**: 🚧 Implementing (v0.3.11 — bundled with [RFC 0052](0052-autonomous-agent-channels.md); [plan](../v0.3.11-plan.md), [PR plan](0053-pr-plan.md))
+**Status**: ✅ **Implemented** — v0.3.11 (all three PRs: [#731](https://github.com/mkhomutov/Persatrix/pull/731) Gemini · [#732](https://github.com/mkhomutov/Persatrix/pull/732) watsonx.ai · closeout — extras packaging + provider-guide + this flip). Bundled with [RFC 0052](0052-autonomous-agent-channels.md); the four-vendor human-free brainstorm it enables lands in [RFC 0052 PR 9](0052-pr-plan.md#pr-9-featurev0311-rfc0052-demo-multivendor--phase-4b-four-vendor-headline--closeout-cuttable). [plan](../v0.3.11-plan.md), [PR plan](0053-pr-plan.md).
 **Author**: Maksim Khomutov
 **Date**: 2026-06-28
 **Target**: v0.3.11 (bundled with [RFC 0052](0052-autonomous-agent-channels.md), independently shippable/cuttable; sequenced by [v0.3.x-sequencing Amendment 2026-06-28](../v0.3.x-sequencing.md#amendment-2026-06-28--add-the-autonomous-agent-only-channel-as-the-v03x-realism-capstone), pinned at [plan opening](../v0.3.11-plan.md#scope-decisions-locked-at-plan-authoring-time-2026-06-28))
