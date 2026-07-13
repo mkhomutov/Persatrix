@@ -23,7 +23,7 @@ Per [RFC 0044 §Decision](0044-eval-set-golden-traces.md#decision--next-steps), 
 |------|-------------|----------|---------|
 | [`evaluators/assertions.py`](../../evaluators/assertions.py) | ~210 | ample | The pure matcher vocabulary — no loader / runner coupling. |
 | [`evaluators/eval_set.py`](../../evaluators/eval_set.py) | ~290 | ample | Recipe dataclasses + loader + `evaluate`. If the runner PR grows this, split the loader from `evaluate`. |
-| [`schemas/eval_set.json`](../../schemas/eval_set.json) | ~156 | — | JSON, not code-gated; the recipe file shape. |
+| [`schemas/eval_set.schema.json`](../../schemas/eval_set.schema.json) | ~156 | — | JSON, not code-gated; the recipe file shape. |
 
 ## Dependency Graph
 
@@ -58,7 +58,7 @@ The deterministic, dependency-free core, built test-first.
 | New [`evaluators/assertions.py`](../../evaluators/assertions.py) | The closed assertion vocabulary ([§B](0044-eval-set-golden-traces.md#b-assertion-vocabulary)): `contains` / `must_reference` / `must_not_reference` / `regex` / `exact` content matchers, `gt`/`lt`/`gte`/`lte`/`eq` numeric matchers, `event_count`, `event_sequence` (contiguous slice). Plus `EvalRun` (the observed-outcome type the runner produces) and `AssertionResult`. Events are opaque `{"type": …}` maps — **no dependency on the unlanded RFC 0041 taxonomy**. |
 | New [`evaluators/eval_set.py`](../../evaluators/eval_set.py) | Recipe dataclasses (`EvalSet`/`Setup`/`Interaction`/`Turn`/`Assertions`/…), `load_eval_set` (schema-validated, raising `ValueError` on any malformed recipe), and `evaluate(eval_set, run) → EvalReport`. Load-time guards: the [§D](0044-eval-set-golden-traces.md#d-stochasticity-tolerance) `match: exact`-on-content ban, **operand presence** (a content operator missing/mis-keying its `value`/`values` would otherwise coalesce to a vacuously-passing assertion), and **regex compilability** (a bad pattern fails loudly at load, not mid-`evaluate`). |
 | New [`evaluators/__init__.py`](../../evaluators/__init__.py) | Public API re-export. |
-| New [`schemas/eval_set.json`](../../schemas/eval_set.json) | Draft-07 recipe file shape (`additionalProperties: false`, `EVAL-<DOMAIN>-<NNN>` id pattern, `tier` enum). |
+| New [`schemas/eval_set.schema.json`](../../schemas/eval_set.schema.json) | Draft-07 recipe file shape (`additionalProperties: false`, `EVAL-<DOMAIN>-<NNN>` id pattern, `tier` enum). |
 | [`Makefile`](../../Makefile) | `lint-python` runs root ruff + mypy over the new `evaluators/` tree (a repo-root package, like `tests/`). |
 | RFC 0044 front-matter + bold header | `status: draft → implementing`; Phase 1 target → v0.3.11; §A `target_branch → tier`. |
 | [`ROADMAP.md`](../../ROADMAP.md) + [`v0.3.11-plan.md`](../v0.3.11-plan.md) | RFC 0044 Master-Index row → 🚧 Implementing (target v0.3.11); Master-Progress row 3 → 🔄 In progress; `Last updated` refresh (kept concise). |

@@ -1,7 +1,7 @@
 """Unit tests for the RFC 0044 Phase 1 eval-set loader + ``evaluate``.
 
 Covers: the eval-set recipe round-trips through ``load_eval_set`` into typed
-dataclasses; the JSON schema (``schemas/eval_set.json``) rejects malformed
+dataclasses; the JSON schema (``schemas/eval_set.schema.json``) rejects malformed
 recipes at load time; the RFC 0044 §D structural rule (``match: exact`` is
 never used for stochastic ``assistant:`` / transcript content); and the
 ``evaluate`` engine reports per-assertion pass/fail over an ``EvalRun``,
@@ -294,6 +294,55 @@ def test_state_matcher_explicit_null_value_allowed(tmp_path: Path) -> None:
     )
     es = load_eval_set(_write(tmp_path, body))
     assert es.assertions.terminal_state["persona:ember-owl:cleared"].value is None
+
+
+def test_assertionless_recipe_rejected(tmp_path: Path) -> None:
+    # Whole-recipe no-vacuous-pass guard (RFC 0044 §D): a recipe with no
+    # assistant expectation and no top-level assertions asserts nothing, so it
+    # would `evaluate` to a vacuous pass (`all([]) is True`). The loader rejects
+    # it — the recipe-level analogue of the per-assertion operand guards. (The
+    # recipe is otherwise schema-valid: it is the guard, not the schema, that
+    # rejects it.)
+    body = textwrap.dedent(
+        """
+        id: EVAL-MEMORY-002
+        title: asserts nothing
+        setup:
+          persona: ember-owl
+        interactions:
+          - id: i1
+            turns:
+              - user: "hi"
+        """
+    ).strip()
+    with pytest.raises(ValueError, match="asserts nothing"):
+        load_eval_set(_write(tmp_path, body))
+
+
+def test_state_only_recipe_accepted(tmp_path: Path) -> None:
+    # Boundary for the guard above: a recipe with *no* assistant turns is still
+    # non-vacuous when it carries a top-level assertion (here a terminal_state
+    # gate), so it must load and evaluate — the guard rejects only the truly
+    # assertion-free recipe, not the legitimate state-focused one.
+    body = textwrap.dedent(
+        """
+        id: EVAL-MEMORY-003
+        title: state-only eval
+        setup:
+          persona: ember-owl
+        interactions:
+          - id: i1
+            turns:
+              - user: "hi"
+        assertions:
+          terminal_state:
+            persona:ember-owl:trust.scores.alice: {match: gt, value: 0.0}
+        """
+    ).strip()
+    es = load_eval_set(_write(tmp_path, body))
+    assert not any(t.role == "assistant" for i in es.interactions for t in i.turns)
+    run = EvalRun(terminal_state={"persona:ember-owl:trust.scores.alice": 0.5})
+    assert evaluate(es, run).passed is True
 
 
 # ─── evaluate() coverage for the assertion branches ─────────────────────────

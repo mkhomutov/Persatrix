@@ -224,7 +224,7 @@ Drift reports become actionable: a CI job opens an issue when drift exceeds thre
 |-----------|-------|--------|
 | Evaluators | `evaluators/runner.py` (new), `evaluators/replay_llm_client.py` (new), `evaluators/assertions.py` (new) | Runner, mock LLM, assertion engine |
 | Evaluators | `evaluators/eval_sets/*.yaml`, `evaluators/eval_sets/*.golden.yaml` (new) | Seed evals + their goldens |
-| Schemas | `schemas/eval_set.json`, `schemas/eval_golden.json` (new) | File shape validation |
+| Schemas | `schemas/eval_set.schema.json`, `schemas/eval_golden.schema.json` (new) | File shape validation |
 | CI | `.github/workflows/eval.yml` (new) | CI gate (Phase 2) |
 | Makefile | `Makefile` | `eval-record`, `eval-replay`, `eval-drift` targets |
 | Docs | `docs/evaluators-guide.md` (new) | Author guide |
@@ -250,7 +250,7 @@ Drift reports become actionable: a CI job opens an issue when drift exceeds thre
 
 🚧 Implementing (Phase 1). Sequenced by the [RFC 0044 PR plan](0044-pr-plan.md) as the cuttable [v0.3.11 fold-in](../v0.3.11-plan.md#scope-decisions-locked-at-plan-authoring-time-2026-06-28). Phase 1 is the prerequisite for [RFC 0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) Phase 1 — the event-stream goldens RFC 0041 promises to verify "no silent behavior change" against do not exist until this RFC's format does.
 
-The blocking open questions are resolved in the PR plan: **OQ #1** (goldens) → sidecar `<id>.golden.yaml`; **OQ #2** (replay cassette) → the replay-client PR; **OQ #5** (`elapsed`) → the runner PR (the schema already types the field). PR 1 landed the deterministic core — the eval-set format (`schemas/eval_set.json`), the [§B](#b-assertion-vocabulary) assertion engine, and `load_eval_set` / `evaluate` — built test-first, with no dependency on the unlanded RFC 0041 taxonomy. The replay client, runner, and seed goldens follow in PRs 2–4.
+The blocking open questions are resolved in the PR plan: **OQ #1** (goldens) → sidecar `<id>.golden.yaml`; **OQ #2** (replay cassette) → the replay-client PR; **OQ #5** (`elapsed`) → the runner PR (the schema already types the field). PR 1 landed the deterministic core — the eval-set format (`schemas/eval_set.schema.json`), the [§B](#b-assertion-vocabulary) assertion engine, and `load_eval_set` / `evaluate` — built test-first, with no dependency on the unlanded RFC 0041 taxonomy. The replay client, runner, and seed goldens follow in PRs 2–4.
 
 ## Related Documentation
 

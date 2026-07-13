@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://persatrix.dev/schemas/eval_set.json",
+  "$id": "https://persatrix.dev/schemas/eval_set.schema.json",
   "title": "Persatrix Eval-Set Recipe (RFC 0044 Phase 1)",
   "description": "The golden-trace eval-set *recipe* file shape (RFC 0044 §A). A recipe is the reproducible scenario; the expected outputs live in a sidecar `<id>.golden.yaml` (RFC 0044 §C, OQ #1). Internal-only until v1.0; `$id` may break across v0.x bumps without notice. The `tier` field selects the eval tier (RFC 0044 §F: stable | experimental | nightly), replacing the draft RFC's `target_branch` label which read misleadingly as a git branch.",
   "type": "object",

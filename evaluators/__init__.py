@@ -5,7 +5,7 @@ Phase 1 ships the eval-set *format* + the deterministic *assertion engine*:
 - :mod:`evaluators.assertions` — the closed assertion vocabulary (RFC 0044 §B)
   and the observed-run type ``EvalRun``.
 - :mod:`evaluators.eval_set` — the recipe loader (``load_eval_set``, validated
-  against ``schemas/eval_set.json``) and ``evaluate`` (recipe × run → report).
+  against ``schemas/eval_set.schema.json``) and ``evaluate`` (recipe × run → report).
 
 The replay LLM client, the runner, the seed recipes, and the Makefile / CI
 wiring land in subsequent PRs (see ``docs/rfcs/0044-pr-plan.md``).

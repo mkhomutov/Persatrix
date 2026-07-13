@@ -1,7 +1,7 @@
 """RFC 0044 Phase 1 — eval-set recipe loader + assertion evaluation.
 
 ``load_eval_set`` parses a recipe YAML (validated against
-``schemas/eval_set.json``) into typed dataclasses and enforces the RFC 0044 §D
+``schemas/eval_set.schema.json``) into typed dataclasses and enforces the RFC 0044 §D
 structural rule (``match: exact`` is never used for stochastic ``assistant:``
 content). ``evaluate`` runs a recipe's assertions against an observed
 :class:`~evaluators.assertions.EvalRun` and returns a per-assertion report.
@@ -35,7 +35,7 @@ from evaluators.assertions import (
     match_numeric,
 )
 
-_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "eval_set.json"
+_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "eval_set.schema.json"
 
 
 # ─── Recipe model ───────────────────────────────────────────────────────────
@@ -163,6 +163,7 @@ def load_eval_set(path: str | Path) -> EvalSet:
     setup = _parse_setup(data["setup"])
     interactions = [_parse_interaction(i) for i in data["interactions"]]
     assertions = _parse_assertions(data.get("assertions", {}))
+    _reject_assertionless(interactions, assertions)
 
     return EvalSet(
         id=data["id"],
@@ -174,6 +175,39 @@ def load_eval_set(path: str | Path) -> EvalSet:
         description=data.get("description"),
         spawned_from=data.get("spawned_from"),
     )
+
+
+def _reject_assertionless(interactions: list[Interaction], assertions: Assertions) -> None:
+    """Reject a recipe that asserts nothing (RFC 0044 §D — no vacuous passes).
+
+    Per-*assertion* vacuity is already closed at load time (content-operand
+    presence, the mandatory state ``value``, the empty-``event_sequence`` ban);
+    this closes the whole-*recipe* hole those guards leave open. A recipe with no
+    assistant expectation and an empty ``assertions`` block produces zero
+    :class:`AssertionResult` rows, so :meth:`EvalReport.passed` is ``all([]) ==
+    True`` — a regression check that can *never* fail, which is exactly what this
+    harness exists to prevent.
+
+    An assistant turn always carries a content expectation (the schema requires
+    ``match`` and the operand guards make it non-empty), so a single assistant
+    turn is sufficient; otherwise at least one top-level assertion is required.
+    A state-only recipe (all user turns + a ``terminal_state`` gate) is
+    legitimate and passes this guard.
+    """
+    has_assistant_expect = any(t.expect is not None for i in interactions for t in i.turns)
+    has_top_level = bool(
+        assertions.terminal_state
+        or assertions.event_count
+        or assertions.event_sequence
+        or assertions.final_transcript
+    )
+    if not (has_assistant_expect or has_top_level):
+        raise ValueError(
+            "eval-set asserts nothing: add an assistant-turn expectation or a "
+            "top-level assertion (terminal_state / event_count / event_sequence / "
+            "final_transcript) — an assertion-free recipe can never fail "
+            "(RFC 0044 §D no-vacuous-pass)"
+        )
 
 
 def _parse_setup(raw: dict[str, Any]) -> Setup:
