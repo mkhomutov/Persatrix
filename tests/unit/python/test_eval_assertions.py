@@ -87,6 +87,18 @@ def test_numeric_eq() -> None:
     assert match_numeric(MatchOp.EQ, 2, 3)[0] is False
 
 
+def test_numeric_eq_coerces_like_the_ordering_ops() -> None:
+    # `eq` shares the ordering ops' float coercion: a state value serialized as
+    # a numeric string must satisfy `eq: 2` (parity with `gte`, which coerces).
+    assert match_numeric(MatchOp.EQ, "2", 2)[0] is True
+    assert match_numeric(MatchOp.EQ, "2.0", 2)[0] is True
+    assert match_numeric(MatchOp.EQ, "3", 2)[0] is False
+    # …but a non-numeric operand falls back to plain equality, so `eq` still
+    # works on a string state value that reads more naturally than `exact`.
+    assert match_numeric(MatchOp.EQ, "active", "active")[0] is True
+    assert match_numeric(MatchOp.EQ, "active", "idle")[0] is False
+
+
 def test_numeric_non_numeric_actual_fails_gracefully() -> None:
     ok, detail = match_numeric(MatchOp.GT, None, 0.0)
     assert ok is False

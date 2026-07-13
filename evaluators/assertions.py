@@ -146,9 +146,9 @@ def match_content(
 
 
 def match_numeric(op: MatchOp, actual: Any, expected: Any) -> tuple[bool, str]:
-    """Evaluate a numeric operator. ``EQ`` compares equality; the ordering
-    operators coerce to ``float`` and fail gracefully on a missing / non-numeric
-    ``actual`` (e.g. a state key that was never written)."""
+    """Evaluate a numeric operator. All operators coerce to ``float`` where they
+    can and fail gracefully on a missing / non-numeric ``actual`` (e.g. a state
+    key that was never written)."""
     # ``bool`` is a subclass of ``int``, so an unguarded numeric op would let a
     # boolean state flag spuriously satisfy a count/threshold (``True == 1``,
     # ``float(True) > 0.5``). A boolean is not a number here — fail it as such
@@ -157,7 +157,16 @@ def match_numeric(op: MatchOp, actual: Any, expected: Any) -> tuple[bool, str]:
         return False, f"value not numeric (boolean): got {actual!r}"
 
     if op is MatchOp.EQ:
-        ok = actual == expected
+        # Numeric equality with the same float coercion the ordering operators
+        # use, so a state value serialized as ``"2"`` still satisfies ``eq: 2``
+        # (the ordering ops already coerce — ``eq`` was the odd one out). Fall
+        # back to plain equality when either operand is non-numeric, so ``eq``
+        # still works on the occasional string state value where it reads more
+        # naturally than ``exact``.
+        try:
+            ok = float(actual) == float(expected)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            ok = actual == expected
         return ok, "" if ok else f"expected == {expected!r}, got {actual!r}"
 
     try:

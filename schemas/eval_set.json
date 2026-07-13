@@ -85,6 +85,7 @@
             "assistant": { "$ref": "#/definitions/content_match" },
             "events": {
               "type": "array",
+              "description": "Per-turn event expectations (RFC 0041 typed events). Phase 1 parses and stores these but `evaluate` does NOT check them — the per-turn event stream is a runner-PR concern (PR 3, gated on RFC 0041). For event checks that run today, use top-level `assertions.event_count` / `assertions.event_sequence` against the flat run stream.",
               "items": { "$ref": "#/definitions/event_assertion" }
             }
           }
@@ -134,6 +135,7 @@
         "final_transcript": {
           "type": "object",
           "additionalProperties": false,
+          "description": "Assertions over the joined assistant transcript. Keyed by operator, so at most one `contains` and one `regex` per recipe; to require several substrings use `must_reference` (a list), not repeated `contains`.",
           "properties": {
             "must_reference": { "type": "array", "items": { "type": "string" } },
             "must_not_reference": { "type": "array", "items": { "type": "string" } },

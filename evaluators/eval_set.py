@@ -61,7 +61,13 @@ class StateMatcher:
 class EventAssertion:
     """A per-turn event expectation. ``type`` is the event-type name; any extra
     keys (``scope``, ``kind``, ``key_pattern``, …) ride in ``fields`` for the
-    runner PR that consumes the typed-event stream (RFC 0041)."""
+    runner PR that consumes the typed-event stream (RFC 0041).
+
+    Phase 1 note: these are parsed and stored so recipes can be authored ahead
+    of the runner, but :func:`evaluate` does **not** check them — a recipe with
+    per-turn ``events`` is asserting nothing that runs today. Event checks that
+    run now live in the top-level ``event_count`` / ``event_sequence`` block,
+    evaluated against the flat :attr:`EvalRun.events` stream."""
 
     type: str
     fields: dict[str, Any] = field(default_factory=dict)
@@ -279,6 +285,11 @@ def evaluate(eval_set: EvalSet, run: EvalRun) -> EvalReport:
     Per-turn ``assistant`` expectations are aligned positionally with
     ``run.turn_outputs`` (the runner emits one output per assistant turn, in
     order). The top-level ``assertions`` block runs against the whole run.
+
+    Phase 1 scope: per-turn ``Turn.events`` are *not* evaluated here — the flat
+    event stream is covered only by the top-level ``event_count`` /
+    ``event_sequence`` assertions. Per-turn typed-event checking lands with the
+    runner (RFC 0041); until then a per-turn ``events`` block asserts nothing.
     """
     results: list[AssertionResult] = []
 
