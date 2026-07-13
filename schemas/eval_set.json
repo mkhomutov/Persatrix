@@ -1,0 +1,156 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://persatrix.dev/schemas/eval_set.json",
+  "title": "Persatrix Eval-Set Recipe (RFC 0044 Phase 1)",
+  "description": "The golden-trace eval-set *recipe* file shape (RFC 0044 §A). A recipe is the reproducible scenario; the expected outputs live in a sidecar `<id>.golden.yaml` (RFC 0044 §C, OQ #1). Internal-only until v1.0; `$id` may break across v0.x bumps without notice. The `tier` field selects the eval tier (RFC 0044 §F: stable | experimental | nightly), replacing the draft RFC's `target_branch` label which read misleadingly as a git branch.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "setup", "interactions"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^EVAL-(MEMORY|RECALL|ERROR|WORKING|FACTS)-[0-9]{3}$",
+      "description": "EVAL-<DOMAIN>-<NNN> (RFC 0044 §E). <DOMAIN> is enforced against the flat closed list (MEMORY, RECALL, ERROR, WORKING, FACTS) — adding a domain is an RFC amendment that extends this enum. Source references live in the eval-set table, not the id."
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "spawned_from": {
+      "type": "string",
+      "description": "Relative path to the manual test / RFC the recipe derives from."
+    },
+    "tier": {
+      "enum": ["stable", "experimental", "nightly"],
+      "default": "experimental",
+      "description": "Eval tier (RFC 0044 §F). `stable` runs on every PR once its golden is recorded and verified; a fresh recipe defaults to `experimental` until it earns promotion."
+    },
+    "setup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["persona"],
+      "properties": {
+        "persona": { "type": "string" },
+        "user": { "type": "string" },
+        "channel": { "type": "string" },
+        "session_id": { "type": "string" },
+        "seed_state": {
+          "type": "object",
+          "description": "Scope-prefixed state keys seeded before the scenario runs (e.g. `persona:ember-owl:trust.scores.alice`)."
+        },
+        "llm_mode": {
+          "enum": ["replay", "live"],
+          "default": "replay",
+          "description": "`replay` (CI default) plays recorded responses from the golden; `live` calls a real provider (drift detection)."
+        }
+      }
+    },
+    "interactions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/interaction" }
+    },
+    "assertions": { "$ref": "#/definitions/assertions" }
+  },
+  "definitions": {
+    "interaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "turns"],
+      "properties": {
+        "id": { "type": "string" },
+        "elapsed": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|m|h|d)$",
+          "description": "Simulated time elapsed since the previous interaction (RFC 0044 §B). Injected into the persona temporal-awareness layer by the runner; never real wall-clock."
+        },
+        "turns": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/turn" }
+        }
+      }
+    },
+    "turn": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["user"],
+          "properties": { "user": { "type": "string" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["assistant"],
+          "properties": {
+            "assistant": { "$ref": "#/definitions/content_match" },
+            "events": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/event_assertion" }
+            }
+          }
+        }
+      ]
+    },
+    "content_match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match"],
+      "properties": {
+        "match": {
+          "enum": ["exact", "contains", "must_reference", "must_not_reference", "regex"],
+          "description": "`exact` is rejected at load time for assistant/transcript content (RFC 0044 §D — LLM output is not byte-stable)."
+        },
+        "value": { "type": "string" },
+        "values": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "event_assertion": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string" },
+        "scope": { "type": "string" },
+        "kind": { "type": "string" },
+        "key_pattern": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "assertions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "terminal_state": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/state_match" }
+        },
+        "event_count": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "event_sequence": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "final_transcript": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "must_reference": { "type": "array", "items": { "type": "string" } },
+            "must_not_reference": { "type": "array", "items": { "type": "string" } },
+            "contains": { "type": "string" },
+            "regex": { "type": "string" }
+          }
+        }
+      }
+    },
+    "state_match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match"],
+      "properties": {
+        "match": { "enum": ["exact", "gt", "lt", "gte", "lte", "eq"] },
+        "value": {}
+      }
+    }
+  }
+}
