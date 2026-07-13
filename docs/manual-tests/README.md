@@ -57,6 +57,7 @@ Tests are organised by **feature area**. IDs follow the pattern `MT-<AREA>-<NNN>
 | [MT-AUTONOMOUS-001](MT-AUTONOMOUS-001.md) | One-shot autonomous brainstorm — convene, converge, terminate, synthesize with zero human turns; both close artifacts; spend ≤ the mandatory cap (RFC 0052 Phase 1) | Active (live execution = v0.3.11 release-prep) |
 | [MT-AUTONOMOUS-002](MT-AUTONOMOUS-002.md) | Anti-collapse cadence — a collapse-prone roster is worked through a multi-item agenda by the convener (≤1 escalation per item, monotonic cursor); the human path is unchanged (RFC 0052 Phase 2) | Active (live execution = v0.3.11 release-prep) |
 | [MT-AUTONOMOUS-003](MT-AUTONOMOUS-003.md) | Standing / scheduled convening — a channel re-convenes itself on a timer (config-round-trip seam, no runtime API) with zero human turns, and stops at the aggregate bound (`max_convenings`/`standing_budget_tokens`, 429); wallet footprint stays bounded across the window (RFC 0052 Phase 3) | Active (live execution = v0.3.11 release-prep) |
+| [MT-AUTONOMOUS-MULTIPROVIDER-001](MT-AUTONOMOUS-MULTIPROVIDER-001.md) | **The four-vendor headline** — four personas, each pinned by RFC 0033 alias to a *different* cloud vendor (Anthropic + OpenAI + Gemini + watsonx.ai), brainstorm one topic in one channel with no human, converge + synthesize; per-seat vendor routing on the telemetry; spend ≤ the single shared cap (RFC 0052 Phase 4 × RFC 0053) | Active (live execution = v0.3.11 release-prep, all four vendors keyed) |
 
 ## Channel Configuration (RFC 0050)
 
