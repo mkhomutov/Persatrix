@@ -187,9 +187,11 @@ lint-python: imports-check
 	cd agents && $(PYTHON) -m ruff check . && $(PYTHON) -m mypy .
 	@# ISSUE-0056 + ISSUE-0062: the line above runs `cd agents`, leaving the
 	@# repo-root tests/ tree unchecked. Lint and type-check it from the repo
-	@# root via the root ruff.toml / mypy.ini.
-	$(PYTHON) -m ruff check tests/
-	$(PYTHON) -m mypy tests/
+	@# root via the root ruff.toml / mypy.ini. RFC 0044 adds the sibling
+	@# evaluators/ tree (the golden-trace eval harness) — a repo-root package,
+	@# not under agents/ — so it rides the same root invocation.
+	$(PYTHON) -m ruff check tests/ evaluators/
+	$(PYTHON) -m mypy tests/ evaluators/
 
 imports-check: ## Fail if an MIT-candidate primitive imports orchestrator-coupled (BUSL) code (RFC 0045 §B dependency-direction gate)
 	@# RFC 0045 §B — the MIT↛BUSL dependency-direction gate. Runs the

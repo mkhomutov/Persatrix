@@ -3,10 +3,10 @@ id: RFC-0044
 title: Eval-Set Shape with Golden Traces
 summary: Specify a multi-turn golden-trace eval-set format that asserts a sequence of typed events, terminal state per scope, and final transcript per scenario; seed it with the dementia test and the F-3 recall scenario; gate persona/memory regressions on it.
 type: process
-status: draft
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-20
-target: v0.3.x (Phase 1 format + replay) + v0.4.0+ (typed-event goldens)
+target: v0.3.11 (Phase 1 format + replay) + v0.4.0+ (typed-event goldens)
 depends_on:
   - RFC-0008
   - RFC-0020
@@ -15,10 +15,10 @@ depends_on:
 # RFC 0044 — Eval-Set Shape with Golden Traces
 
 **Type**: process
-**Status**: 🔨 Draft
+**Status**: 🚧 Implementing (Phase 1 — [PR plan](0044-pr-plan.md); rides v0.3.11 as a cuttable fold-in)
 **Author**: Maksim Khomutov
 **Date**: 2026-05-20
-**Target**: v0.3.x (Phase 1 format + replay) + v0.4.0+ (typed-event goldens, gated on [RFC 0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) Phase 1)
+**Target**: v0.3.11 (Phase 1 format + replay) + v0.4.0+ (typed-event goldens, gated on [RFC 0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) Phase 1)
 **Depends on**: RFC 0008 (Memory & Context Optimization — the recall/scoring layer goldens are recorded against), RFC 0020 (Interaction Lifecycle — episode/turn boundaries the goldens use)
 **Relates to**: RFC 0041 (Typed Event Taxonomy — the events goldens assert sequences of; once 0041 lands, this RFC's surface becomes richer), RFC 0042 (State Namespacing — terminal state-per-scope assertions ride on this scope vocabulary), RFC 0043 (Inbound Agent-Interop Endpoint — external-agent scenarios become a new eval-set category)
 **Spawned from**: [agent-runtime-vocabulary-roadmap.md §Eval-set shape as the regression gate](../agent-runtime-vocabulary-roadmap.md#eval-set-shape-as-the-regression-gate); [memory-quality-roadmap.md §Quality bar — the dementia test](../memory-quality-roadmap.md#quality-bar--the-dementia-test)
@@ -103,7 +103,7 @@ description: |
   one named entity, one stated preference, and one explicit commitment,
   the persona must reference each when an appropriate trigger appears.
 spawned_from: ../manual-tests/MT-MEMORY-005-dementia-test.md
-target_branch: stable          # stable | experimental | nightly
+tier: stable                   # stable | experimental | nightly  (Phase 1: named `tier`, not `target_branch`)
 
 setup:
   persona: ember-owl
@@ -224,7 +224,7 @@ Drift reports become actionable: a CI job opens an issue when drift exceeds thre
 |-----------|-------|--------|
 | Evaluators | `evaluators/runner.py` (new), `evaluators/replay_llm_client.py` (new), `evaluators/assertions.py` (new) | Runner, mock LLM, assertion engine |
 | Evaluators | `evaluators/eval_sets/*.yaml`, `evaluators/eval_sets/*.golden.yaml` (new) | Seed evals + their goldens |
-| Schemas | `schemas/eval_set.json`, `schemas/eval_golden.json` (new) | File shape validation |
+| Schemas | `schemas/eval_set.schema.json`, `schemas/eval_golden.schema.json` (new) | File shape validation |
 | CI | `.github/workflows/eval.yml` (new) | CI gate (Phase 2) |
 | Makefile | `Makefile` | `eval-record`, `eval-replay`, `eval-drift` targets |
 | Docs | `docs/evaluators-guide.md` (new) | Author guide |
@@ -248,10 +248,13 @@ Drift reports become actionable: a CI job opens an issue when drift exceeds thre
 
 ## Decision / Next Steps
 
-Draft. Phase 1 is the prerequisite for [RFC 0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) Phase 1 — the event-stream goldens RFC 0041 promises to verify "no silent behavior change" against do not exist until this RFC's format does. Open questions 1, 2, and 5 must be resolved before Phase 1 begins.
+🚧 Implementing (Phase 1). Sequenced by the [RFC 0044 PR plan](0044-pr-plan.md) as the cuttable [v0.3.11 fold-in](../v0.3.11-plan.md#scope-decisions-locked-at-plan-authoring-time-2026-06-28). Phase 1 is the prerequisite for [RFC 0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) Phase 1 — the event-stream goldens RFC 0041 promises to verify "no silent behavior change" against do not exist until this RFC's format does.
+
+The blocking open questions are resolved in the PR plan: **OQ #1** (goldens) → sidecar `<id>.golden.yaml`; **OQ #2** (replay cassette) → the replay-client PR; **OQ #5** (`elapsed`) → the runner PR (the schema already types the field). PR 1 landed the deterministic core — the eval-set format (`schemas/eval_set.schema.json`), the [§B](#b-assertion-vocabulary) assertion engine, and `load_eval_set` / `evaluate` — built test-first, with no dependency on the unlanded RFC 0041 taxonomy. The replay client, runner, and seed goldens follow in PRs 2–4.
 
 ## Related Documentation
 
+- [RFC 0044 PR Implementation Plan](0044-pr-plan.md) — the Phase 1 PR sequence (format → replay client → runner → seed goldens)
 - [Agent Runtime Vocabulary — Discussion Notes](../agent-runtime-vocabulary-roadmap.md) — the umbrella memo
 - [Memory Quality Roadmap](../memory-quality-roadmap.md) — defines the dementia-test quality bar this RFC operationalizes
 - [RFC 0041 — Typed Event Taxonomy and Lifecycle Callbacks](0041-typed-event-taxonomy-lifecycle-callbacks.md)

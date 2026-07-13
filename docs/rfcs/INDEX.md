@@ -8,6 +8,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | ID | Status | Type | Target | Created | Title |
 |----|--------|------|--------|---------|-------|
 | [RFC-0030](0030-multi-agent-conversation-governance.md) | 🚧 Implementing | architecture | v0.3.6 (Layer 2.5 — shipped); v0.3.7–v0.3.9 (Phase 1 — relevance gate + deterministic layers); v0.4.0 (Phase 2 — moderator); v0.5.0+ (Phase 3) | 2026-05-11 | Multi-Agent Conversation Governance |
+| [RFC-0044](0044-eval-set-golden-traces.md) | 🚧 Implementing | process | v0.3.11 (Phase 1 format + replay) + v0.4.0+ (typed-event goldens) | 2026-05-20 | Eval-Set Shape with Golden Traces |
 | [RFC-0045](0045-open-core-extraction-policy.md) | 🚧 Implementing | process | v0.3.10 (policy + dependency-direction CI gate) + v0.4.0+ (per-extraction RFCs) | 2026-05-24 | Open-Core Library Extraction Policy |
 | [RFC-0007](0007-conditional-looped-workflow-control-flow.md) | 📋 Proposed | feature | v0.4.0 | 2026-04-15 | Conditional and Looped Workflow Control Flow |
 | [RFC-0012](0012-protocols-organizations.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3 — organizations & authority); v0.5.0 (Phases 4–5 — meeting/negotiation protocols, inter-org federation) | 2026-05-16 | Protocols & Organizations |
@@ -27,7 +28,6 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-20 | Typed Event Taxonomy and Lifecycle Callbacks |
 | [RFC-0042](0042-state-namespacing-by-scope.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-20 | State Namespacing by Scope Prefix |
 | [RFC-0043](0043-inbound-agent-interop-endpoint.md) | 🔨 Draft | protocol | v0.4.0+ | 2026-05-20 | Inbound Agent-Interop Endpoint |
-| [RFC-0044](0044-eval-set-golden-traces.md) | 🔨 Draft | process | v0.3.x (Phase 1 format + replay) + v0.4.0+ (typed-event goldens) | 2026-05-20 | Eval-Set Shape with Golden Traces |
 | [RFC-0009](0009-security-sandboxing.md) | ⚠️ Partially Implemented | architecture | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | 2026-04-15 | Agent Identity, Security & Sandboxing |
 | [RFC-0011](0011-channels-bridges.md) | ⚠️ Partially Implemented | feature | v0.3.0 (internal channels) + v0.5.0 (external bridges) | 2026-04-25 | Channels & Internal Agent Messaging |
 | [RFC-0021](0021-persona-temporal-awareness.md) | ⚠️ Partially Implemented | architecture | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | 2026-04-25 | Persona Temporal Awareness |
