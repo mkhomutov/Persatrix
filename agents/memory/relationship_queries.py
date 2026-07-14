@@ -274,7 +274,18 @@ async def get_relationship_summary(
         "WHERE participant_id = ? AND participant_type = ? "
         "AND other_participant_id = ? AND other_participant_type = ? "
         f"{int_sess_clause}{princ_clause}{epoch_clause} "
-        "ORDER BY created_at DESC LIMIT ?",
+        # Deterministic tiebreak (issue #740; follows #739). `created_at` can
+        # tie — e.g. several interactions recorded in one instant under the eval
+        # driver's FrozenClock — and with `LIMIT` a tie at the cutoff changes
+        # *which* rows are returned, not just their order, so a bare `created_at
+        # DESC` is non-portable for RFC 0044 goldens. `rowid` (insertion order)
+        # is the tiebreak: `interactions.id` is a random uuid4 (see
+        # `record_interaction`), so it is NOT a portable tiebreak; `rowid` is
+        # identical across record and replay, which INSERT the same interactions
+        # in the same order, and the table is not WITHOUT ROWID. Unlike the
+        # GROUP BY summary query below, this is a plain row SELECT, so `rowid`
+        # is unambiguous (one per row), not an arbitrary per-group pick.
+        "ORDER BY created_at DESC, rowid DESC LIMIT ?",
         (agent_id, participant_type, other_id,
          other_participant_type, *int_sess_params, *princ_params,
          *epoch_params, _MAX_RECENT_INTERACTIONS),
