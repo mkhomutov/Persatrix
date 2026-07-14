@@ -137,6 +137,38 @@ class TestGetRelationshipSummary:
         types = [i.interaction_type for i in summary.recent_interactions]
         assert types == ["third", "second", "first"]
 
+    async def test_recent_interactions_equal_created_at_deterministic(
+        self, memory, monkeypatch,
+    ):
+        """Interactions sharing a ``created_at`` recall in a stable, defined
+        order — the ``rowid`` (insertion-order) tiebreak on ``created_at DESC``
+        (issue #740; follows #739).
+
+        The eval driver's FrozenClock can stamp several interactions in one
+        instant, and ``interactions.id`` is a random uuid4 — so without the
+        tiebreak SQLite's order among equal ``created_at`` is implementation-
+        defined. Because the recall is ``LIMIT``-ed, a tie at the cutoff would
+        also change *which* interactions surface, not just their order, making a
+        recorded RFC 0044 golden non-portable. The clock is frozen here so both
+        rows share ``created_at``; distinct-timestamp order is covered above."""
+        from types import SimpleNamespace
+
+        import agents.memory.relationship_mutations as rm
+        monkeypatch.setattr(rm, "time", SimpleNamespace(time=lambda: 1000.0))
+
+        first = await memory.record_interaction("bob", "first")
+        second = await memory.record_interaction("bob", "second")  # same instant
+
+        summary = await memory.get_relationship_summary("bob")
+        ids = [i.id for i in summary.recent_interactions]
+        assert ids == [second, first], (
+            "equal-created_at interactions must recall most-recently-inserted "
+            "first (rowid DESC tiebreak), not SQLite's implementation-defined order"
+        )
+        # Stable across repeated calls — the property a golden's hash needs.
+        again = await memory.get_relationship_summary("bob")
+        assert [i.id for i in again.recent_interactions] == ids
+
     async def test_limits_to_max_recent_interactions(self, memory):
         """Only the most recent _MAX_RECENT_INTERACTIONS are returned."""
         total = _MAX_RECENT_INTERACTIONS + 5
