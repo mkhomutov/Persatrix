@@ -68,6 +68,32 @@ def default_config_resolver(config_path: str | Path) -> ConfigResolver:
     return resolve
 
 
+def _force_in_memory_db(config: dict[str, Any]) -> None:
+    """Pin the persona's memory to an isolated ``:memory:`` SQLite DB.
+
+    Overrides whatever ``memory.db_path`` the resolved config carries (a
+    production persona points at a real file, e.g. ``data/memory.db``). Two
+    invariants ride on this — the module docstring's determinism contract:
+
+    * **Golden portability.** A recorded golden must replay byte-stably on a
+      *fresh* clone. A persona's file DB carries ambient rows from prior runs
+      that would shift the recalled prompt at record vs. replay time → a
+      cassette miss. ``:memory:`` starts empty every run, so record and replay
+      populate identical memory from the recipe's turns alone.
+    * **No production pollution.** An eval must never write into a persona's
+      real memory DB.
+
+    Only ``db_path`` is overridden; the rest of the ``memory`` block (notes /
+    facts / working budgets) is preserved because it shapes prompt assembly and
+    so is part of what the golden pins.
+    """
+    memory_cfg = config.get("memory")
+    if not isinstance(memory_cfg, dict):
+        memory_cfg = {}
+        config["memory"] = memory_cfg
+    memory_cfg["db_path"] = ":memory:"
+
+
 def _trust_peer(key: str, persona: str) -> str | None:
     """Return the peer id iff ``key`` is ``persona:<persona>:trust.scores.<peer>``.
 
@@ -155,6 +181,7 @@ class PersonaRuntimeDriver:
 
         setup = eval_set.setup
         config = copy.deepcopy(self._resolve(setup.persona))
+        _force_in_memory_db(config)
         _apply_seed_state(config, setup.seed_state, persona=setup.persona)
         clock = self._clock if self._clock is not None else FrozenClock(self._epoch, tz="UTC")
 

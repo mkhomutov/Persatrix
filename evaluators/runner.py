@@ -260,6 +260,18 @@ def _print_summary(suite: dict[str, Any]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for ``python -m evaluators.runner`` and the make targets."""
+    # Harden the summary print against a non-UTF-8 stdout: `_print_summary` emits a
+    # `✗` (U+2717) on a failed-assertion line, which raises UnicodeEncodeError under
+    # a non-UTF-8 encoding (Windows cp1252, or an explicit PYTHONIOENCODING=ascii /
+    # latin-1) — turning a legitimate red into a crash + truncated output on the
+    # `make eval-replay` path Phase 2 gates CI on. `errors="replace"` degrades the
+    # glyph rather than aborting; the ASCII `[FAIL]` / assertion text is unaffected.
+    # (A bare C/POSIX locale on Python ≥3.11 is already safe — PEP 540 UTF-8 mode
+    # covers it — so this is the belt for the cases it does not.)
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    except (AttributeError, ValueError):  # non-reconfigurable stream (e.g. redirected)
+        pass
     args = _parse_args(argv)
     mode = EvalMode(args.mode)
     recipes = discover_recipes(args.eval_sets_dir, args.target)

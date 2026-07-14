@@ -1,0 +1,65 @@
+id: EVAL-MEMORY-001
+title: Dementia test — five-interaction recall
+description: |
+  The dementia test (MT-MEMORY-005) as a golden-trace recipe. Across five
+  interactions over a simulated ~36-minute window, the human (sam) establishes a
+  named entity (his daughter Mira, age seven), a stated preference (concise
+  written threads over long meetings), and an explicit commitment (ship the
+  migration guide by Friday). Two later interactions trigger recall — the first
+  WITHOUT keyword overlap ("a kid that age", never "Mira"/"daughter") — and the
+  persona must reference the earlier facts rather than say it does not recall.
+
+  RFC 0044 Phase 1 / pre-0041 subset: this recipe asserts only over
+  `final_transcript` and `terminal_state`. The typed-event assertions the §A
+  example also carries (per-turn `events`, `event_count`) need RFC 0041 and land
+  in a 4b slice. The golden is recorded offline against the mock provider
+  (`make eval-record-offline`), so it replays deterministically at $0 with no API
+  key; a live re-record against the `quality` model rides release-prep.
+spawned_from: ../../docs/manual-tests/MT-MEMORY-005-dementia-test.md
+tier: experimental
+
+setup:
+  persona: ember-owl
+  user: sam
+  session_id: EVAL-MEMORY-001-S
+  seed_state:
+    persona:ember-owl:trust.scores.sam: 0.3
+  llm_mode: replay
+
+interactions:
+  # ── establish ──────────────────────────────────────────────────────────────
+  - id: i1-named-entity
+    turns:
+      - user: "I'm picking up my daughter Mira from school later — she's seven."
+      - assistant: {match: contains, value: "Mira"}
+  - id: i2-preference
+    elapsed: 6m
+    turns:
+      - user: "By the way, I can't stand long meetings — I'd rather hash things out in a quick written thread."
+  - id: i3-commitment
+    elapsed: 8m
+    turns:
+      - user: "Oh, and I promised the team I'd ship the migration guide by Friday."
+  # ── recall ─────────────────────────────────────────────────────────────────
+  - id: i4-recall-entity-no-overlap
+    elapsed: 11m
+    turns:
+      # Trigger with NO keyword overlap — never "Mira" or "daughter".
+      - user: "What's a good weekend activity for a kid that age?"
+      - assistant: {match: contains, value: "Mira"}
+  - id: i5-recall-commitment
+    elapsed: 11m
+    turns:
+      - user: "Before I head out — remind me what I committed to, and how I prefer to work?"
+      - assistant: {match: must_reference, values: ["migration", "Friday"]}
+
+assertions:
+  terminal_state:
+    # The seeded relationship persists through the arc (a positive trust the
+    # snapshot round-trips). The trust-INCREASE form of this assertion needs live
+    # relationship dynamics that do not fire under a replayed cassette; the
+    # release-prep live re-record exercises that.
+    persona:ember-owl:trust.scores.sam: {match: gt, value: 0.0}
+  final_transcript:
+    must_reference: ["Mira", "migration", "Friday"]
+    must_not_reference: ["I don't recall", "I don't remember", "[error]"]

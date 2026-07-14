@@ -200,6 +200,35 @@ async def test_record_then_replay_through_runtime_hits(tmp_path: Path) -> None:
     assert replayed.terminal_state == recorded.terminal_state
 
 
+# ─── isolated in-memory DB (golden portability + no production pollution) ─────
+
+
+async def test_driver_forces_isolated_in_memory_db(tmp_path: Path) -> None:
+    """The driver MUST run against an isolated ``:memory:`` DB — never the
+    persona's configured file ``db_path``.
+
+    Two properties depend on this (the module docstring's determinism contract):
+    a golden recorded once must replay byte-stably on a *fresh* clone (a persona's
+    file DB carries ambient rows that would shift the recalled prompt → a cassette
+    miss), and an eval must never pollute production memory. So a resolver that
+    hands the driver a real file ``db_path`` must not cause that file to appear."""
+    sentinel = tmp_path / "production_memory.db"
+    assert not sentinel.exists()
+
+    def resolver(name: str) -> dict[str, Any]:
+        cfg = dict(_CONFIG, id=name)
+        cfg["memory"] = {"db_path": str(sentinel)}  # a file DB the eval must ignore
+        return cfg
+
+    driver = PersonaRuntimeDriver(config_resolver=resolver)
+    run = await driver.run(_recipe(tmp_path), _ScriptFake(list(_REPLIES)))
+
+    assert run.turn_outputs == _REPLIES  # the run still works, on :memory:
+    assert not sentinel.exists(), (
+        "the eval driver must force :memory: and never touch the persona's file db_path"
+    )
+
+
 # ─── config resolver ─────────────────────────────────────────────────────────
 
 
