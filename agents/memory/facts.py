@@ -342,12 +342,23 @@ class FactStore:
         )
 
         db = self._ensure_db()
+        # Deterministic order (RFC 0044 golden-trace portability): `asserted_at
+        # DESC` alone leaves ties SQLite-implementation-defined, so two facts
+        # asserted in the same instant — e.g. within one interaction under the eval
+        # driver's FrozenClock — could recall in a host-dependent order and shift
+        # the assembled prompt (and its request hash / length-derived token count)
+        # between the record host and CI. `rowid` (insertion order) is the tiebreak:
+        # it is identical across record and replay, which INSERT the same facts in
+        # the same order, and stays monotonic under the store's ops (inserts append,
+        # supersede/delete never renumber survivors, nothing VACUUMs). It is not
+        # selected, only sorted on. `fact_id` is a random uuid4 (see `store`), so it
+        # is NOT a portable tiebreak.
         if include_superseded:
             sql = (
                 f"SELECT {_FACT_SELECT} FROM facts "
                 "WHERE agent_id = ? AND subject = ?"
                 f"{sess_clause}{princ_clause}{epoch_clause} "
-                "ORDER BY asserted_at DESC LIMIT ?"
+                "ORDER BY asserted_at DESC, rowid DESC LIMIT ?"
             )
         else:
             sql = (
@@ -355,7 +366,7 @@ class FactStore:
                 "WHERE agent_id = ? AND subject = ? "
                 "AND superseded_by IS NULL"
                 f"{sess_clause}{princ_clause}{epoch_clause} "
-                "ORDER BY asserted_at DESC LIMIT ?"
+                "ORDER BY asserted_at DESC, rowid DESC LIMIT ?"
             )
         async with db.execute(
             sql, (
