@@ -7,8 +7,15 @@ Phase 1 ships the eval-set *format* + the deterministic *assertion engine*:
 - :mod:`evaluators.eval_set` — the recipe loader (``load_eval_set``, validated
   against ``schemas/eval_set.schema.json``) and ``evaluate`` (recipe × run → report).
 
-The replay LLM client, the runner, the seed recipes, and the Makefile / CI
-wiring land in subsequent PRs (see ``docs/rfcs/0044-pr-plan.md``).
+PR 2 adds :mod:`evaluators.replay_llm_client` — the recorded-response provider
+that makes replay CI-safe (OQ #2). It is imported from its submodule rather than
+re-exported here on purpose: it depends on :mod:`agents.llm_types` (and so on the
+``agents`` runtime), while the two modules above are pure and import nothing
+project-internal — keeping ``import evaluators`` light for callers that only need
+the assertion engine.
+
+The runner, the seed recipes, and the Makefile / CI wiring land in subsequent
+PRs (see ``docs/rfcs/0044-pr-plan.md``).
 """
 
 from evaluators.assertions import (
