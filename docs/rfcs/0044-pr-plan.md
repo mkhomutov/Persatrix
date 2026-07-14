@@ -37,13 +37,19 @@ RFC 0052 + 0053 Implemented (v0.3.11 headline)
          │     └── PR 3: eval runner (recipe → EvalRun) + `make eval-replay`/`eval-record`/`eval-drift`
          │                + evaluators-guide + `elapsed` temporal seam (OQ #5)
          │
-         └── PR 4 (gated on RFC 0041 P1): seed recipes + recorded `.golden.yaml` sidecars
-                  (EVAL-MEMORY-001, EVAL-RECALL-001, EVAL-ERROR-001/002, EVAL-WORKING-001, EVAL-FACTS-001)
+         ├── PR 4a: first pre-0041 seed — EVAL-MEMORY-001 recipe + offline golden
+         │         (final_transcript / terminal_state only) ← no RFC 0041 dep
+         │
+         └── PR 4b (gated on RFC 0041 P1): event-asserting seeds + remaining recipes
+                  (EVAL-ERROR-001/002 typed chat-error events, EVAL-RECALL/WORKING/FACTS)
 
    Phase 2 (separate): CI gate (`stable` tier blocks merge) — deferred past v0.3.11.
 ```
 
-Only PR 4 has a hard cross-RFC edge (RFC 0041 typed events). PRs 1–3 build the harness against the pre-0041 surface using the assertion subset that does not require typed events (`final_transcript`, `terminal_state`).
+PR 4 splits at the RFC 0041 edge: **4a** lands the seed recipes whose assertions
+the pre-0041 surface already supports (`final_transcript` / `terminal_state`);
+**4b** lands the event-asserting seeds once RFC 0041 emits the typed events they
+reference. PRs 1–3 build the harness against the pre-0041 surface.
 
 ## PR Sequence
 
@@ -135,9 +141,43 @@ The orchestration half of Phase 1, built test-first: load a recipe → build the
 - [x] `import evaluators` stays runtime-free (driver + runner are submodule-only).
 - [x] ROADMAP + RFC/plan + FILEMAP status hygiene.
 
-### PR 4 (gated on RFC 0041 Phase 1): seed recipes + goldens
+### PR 4a: `feature/v0311-rfc0044-seed-memory` — the first pre-0041 seed ✅
 
-The six seed recipes ([§E](0044-eval-set-golden-traces.md#e-seed-eval-sets)) with recorded `.golden.yaml` sidecars, once RFC 0041 emits the typed events they assert on. Until then, recipes carrying only `final_transcript`/`terminal_state` assertions can land and replay against the pre-0041 surface.
+The dementia test ([MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md))
+as [`EVAL-MEMORY-001`](../../evaluators/eval_sets/EVAL-MEMORY-001.yaml): a
+five-interaction recall recipe with an offline-recorded `.golden.yaml` sidecar
+that replays green against the pre-0041 surface. Assertions are restricted to the
+subset that does not need typed events (`final_transcript` / `terminal_state`).
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| New [`evaluators/eval_sets/EVAL-MEMORY-001.yaml`](../../evaluators/eval_sets/EVAL-MEMORY-001.yaml) + `.golden.yaml` | The recipe + its committed golden (recorded offline against the mock). |
+| New [`evaluators/eval_sets/offline_responses.eval.yaml`](../../evaluators/eval_sets/offline_responses.eval.yaml) | Curated mock replies the offline record feeds — kept separate from the demo's `config/offline_responses.yaml`. |
+| [`evaluators/persona_driver.py`](../../evaluators/persona_driver.py) | **Fix:** the driver now forces an isolated `:memory:` DB (it claimed this in its docstring but used the config's file `db_path`) — required so the golden is portable (a persona's file DB carries ambient rows that shift the recalled prompt → a cassette miss) and so an eval never pollutes production memory. |
+| [`Makefile`](../../Makefile) | `eval-record-offline` (deterministic mock record, $0); `eval-replay` pins the offline optimization overlay so the alias resolution matches the record (the close-summary / critic paths hash the resolved physical model). |
+| [`docs/evaluators-guide.md`](../evaluators-guide.md), [`evaluators/eval_sets/README.md`](../../evaluators/eval_sets/README.md) | Seed section + the offline record/replay workflow + the offline-overlay-pins-replay caveat. |
+| RFC 0044 §Decision + this plan | PR 4 split into 4a (this PR) / 4b; first seed noted landed. |
+
+#### Tests
+
+- [`tests/integration/test_eval_seed_replay.py`](../../tests/integration/test_eval_seed_replay.py) — the committed recipe + golden replays all-pass through the real runtime (no key/network); the golden is load-bearing (blanking a reply fails `must_reference`); a missing golden fails loud; the recipe is confirmed pre-0041 (no event assertions).
+- [`tests/unit/python/test_eval_persona_driver.py`](../../tests/unit/python/test_eval_persona_driver.py) — the driver forces `:memory:` and never touches the config's file `db_path`.
+
+#### PR checklist
+
+- [x] Test-first (red → green): the seed-replay + driver-isolation tests fail before the seed/fix, pass after.
+- [x] Golden recorded via `make eval-record-offline` (deterministic, $0, no key); replays green ×N.
+- [x] `ruff` + `mypy` + `file_size.py --strict` clean; no cross-suite fixture leakage (seed test runs alongside the close-path suites).
+- [x] ROADMAP + RFC/plan status hygiene.
+
+### PR 4b (gated on RFC 0041 Phase 1): event-asserting seeds + remaining recipes
+
+The event-asserting seeds ([§E](0044-eval-set-golden-traces.md#e-seed-eval-sets)) —
+`EVAL-ERROR-001`/`002` (typed chat-error events) — plus the remaining recall
+recipes (`EVAL-RECALL-001`, `EVAL-WORKING-001`, `EVAL-FACTS-001`), with recorded
+`.golden.yaml` sidecars, once RFC 0041 emits the typed events they assert on.
 
 ## Notes
 

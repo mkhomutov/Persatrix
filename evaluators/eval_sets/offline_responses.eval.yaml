@@ -1,0 +1,25 @@
+# Curated offline replies for the RFC 0044 seed evals — the mock-provider
+# fixtures `make eval-record-offline` feeds so a golden can be recorded
+# deterministically at $0 with no API key (agents/llm_offline.py MockProvider,
+# read via PERSATRIX_OFFLINE_RESPONSES).
+#
+# Kept SEPARATE from the demo's config/offline_responses.yaml so eval fixtures
+# and demo fixtures don't collide. Entries are keyed by agent id, matched by
+# case-insensitive substring on every `match` keyword, tried in file order
+# (first all-match wins). These stand in for a live model at record time; the
+# golden they produce is what replay checks — a live re-record swaps in real
+# model text at release-prep. NOT read at replay time (replay plays the golden).
+responses:
+  ember-owl:
+    # EVAL-MEMORY-001 — dementia test. One entry per user turn, keyed on
+    # keywords unique to that turn so exactly one matches.
+    - match: ["daughter", "mira"]           # i1 — establish the named entity
+      reply: "That's lovely — Mira must be glad you're picking her up. Seven is a wonderful age."
+    - match: ["meetings", "written"]        # i2 — establish the preference
+      reply: "Understood — I'll keep things to concise written threads rather than long meetings."
+    - match: ["migration", "friday"]        # i3 — establish the commitment
+      reply: "Got it: the migration guide is committed for Friday. I'll keep that in view."
+    - match: ["weekend", "kid"]             # i4 — recall the entity (no keyword overlap in the prompt)
+      reply: "For a seven-year-old like Mira, a hands-on children's museum or a short nature walk tends to land well."
+    - match: ["committed", "prefer"]        # i5 — recall the commitment + preference
+      reply: "You committed to shipping the migration guide by Friday, and you prefer concise written threads over long meetings."

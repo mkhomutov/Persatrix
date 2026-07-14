@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-drift
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-record-offline eval-drift
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -182,10 +182,28 @@ test-persona: ## Run persona consistency tests (AGENT=ember-owl)
 # sidecars land in PR 4 (gated on RFC 0041 typed events), so an empty
 # `evaluators/eval_sets/` makes these a clean no-op today. Pass TARGET=<id>
 # to scope to one recipe, REPORT=<path> to write the structured JSON artifact.
+# Replay pins the offline optimization overlay: Phase-1 goldens are recorded
+# against the mock (`make eval-record-offline`), and a replay must resolve the
+# same model aliases the record did. The action loop hashes the raw alias
+# (`quality`, env-independent), but the RFC 0020 close-summary and RFC 0051
+# critic paths hash the *resolved physical* model, so replaying under a different
+# optimization config would shift those requests and miss the cassette. Replay
+# does not need the offline responses file (it plays the golden, not the mock).
 eval-replay: ## Replay golden-trace evals deterministically (RFC 0044). TARGET / REPORT optional.
+	PERSATRIX_OPTIMIZATION_CONFIG=config/demo/offline/optimization.yaml \
 	$(PYTHON) -m evaluators.runner --mode replay $(if $(TARGET),--target $(TARGET),) $(if $(REPORT),--report $(REPORT),)
 
 eval-record: ## Record a golden from a live run (author-only; overwrites the sidecar). TARGET=<id>.
+	$(PYTHON) -m evaluators.runner --mode record $(if $(TARGET),--target $(TARGET),)
+
+# Record a golden deterministically against the offline mock ($0, no API key) —
+# the pre-0041 seed path (RFC 0044 Phase 1). The offline optimization overlay
+# points the `quality` alias at the mock (config/demo/offline/optimization.yaml)
+# and the eval fixtures feed the curated replies; the resulting golden replays
+# with `make eval-replay` (which needs neither, since replay plays the cassette).
+eval-record-offline: ## Re-record a seed golden against the mock, deterministically ($0). TARGET=<id>.
+	PERSATRIX_OPTIMIZATION_CONFIG=config/demo/offline/optimization.yaml \
+	PERSATRIX_OFFLINE_RESPONSES=evaluators/eval_sets/offline_responses.eval.yaml \
 	$(PYTHON) -m evaluators.runner --mode record $(if $(TARGET),--target $(TARGET),)
 
 eval-drift: ## Live drift check against recorded goldens (reports, never gates). TARGET optional.

@@ -139,6 +139,12 @@ enough to replay byte-for-byte.
 - **`make eval-record TARGET=<id>`** — runs the scenario against a live model and
   writes/overwrites the `<id>.golden.yaml` sidecar. Authors run this deliberately;
   **CI never overwrites a golden.**
+- **`make eval-record-offline TARGET=<id>`** — the Phase-1 seed path: records the
+  golden against the **mock** provider deterministically, at $0 with no API key
+  (the offline optimization overlay points `quality` at the mock, and the curated
+  [`offline_responses.eval.yaml`](../evaluators/eval_sets/offline_responses.eval.yaml)
+  feeds the replies). This is how the landed seed goldens are produced; a live
+  re-record (`eval-record`) against the real model rides release-prep.
 - **`make eval-replay`** — the CI-safe path: replays the golden and reports each
   assertion pass/fail. A request with no recorded response is a hard failure
   (`ReplayCassetteMissError`), never a silent pass — it means the recipe drifted
@@ -146,6 +152,13 @@ enough to replay byte-for-byte.
 - **`make eval-drift`** — runs live and surfaces where the new run diverges from
   the golden. Drift is informational: it tells you "the model or the prompt
   changed", it does not gate merge or auto-update the golden.
+
+> **Offline goldens replay under the offline overlay.** `make eval-replay` pins
+> `PERSATRIX_OPTIMIZATION_CONFIG` to the offline overlay. The action loop hashes
+> the raw model *alias* (`quality`), but the RFC 0020 close-summary and RFC 0051
+> critic paths hash the *resolved physical* model — so a golden recorded offline
+> must resolve the same aliases at replay, or those requests miss the cassette. A
+> future live-recorded golden replays under whatever overlay recorded it.
 
 ## The report artifact
 
@@ -182,8 +195,27 @@ shape Phase 2 will attach to the CI run and gate the `stable` tier on:
   [RFC 0041](rfcs/0041-typed-event-taxonomy-lifecycle-callbacks.md) lands, so the
   event stream is empty and those assertions run against nothing. Phase 1 recipes
   assert on `final_transcript` and `terminal_state` only.
-- **No CI gate.** A failed eval does not block merge until Phase 2.
-- **No seed recipes.** The six seed evals land in RFC 0044 PR 4.
+- **No harness merge gate.** The eval harness's `passed_all` / tier gate does not
+  block merge until Phase 2. (A committed seed's own integration test still fails
+  CI on a replay regression — that is an ordinary test, not the harness gate.)
+
+## Seed recipes
+
+The first pre-0041 seed has landed:
+[`EVAL-MEMORY-001`](../evaluators/eval_sets/EVAL-MEMORY-001.yaml) — the dementia
+test ([MT-MEMORY-005](manual-tests/MT-MEMORY-005-dementia-test.md)) as a
+five-interaction recall recipe, asserting only over `final_transcript` /
+`terminal_state`. Its offline golden replays green on every PR via
+[`test_eval_seed_replay.py`](../tests/integration/test_eval_seed_replay.py).
+
+Because its golden is mock-recorded, the recorded replies are curated stand-ins,
+not a live model's — so the assertions on reply *content* verify the golden is
+well-formed, while the load-bearing regression signal is the **request hashes**:
+a change in the memory-recall → prompt-assembly path shifts a request, misses the
+cassette, and fails replay. The genuine-recall (live-model) bar rides the
+release-prep re-record. The remaining seeds — the typed-event `EVAL-ERROR-*` and
+the rest of [§E](rfcs/0044-eval-set-golden-traces.md#e-seed-eval-sets) — land in a
+**4b** slice gated on RFC 0041.
 
 ## Related
 
