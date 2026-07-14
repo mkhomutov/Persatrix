@@ -71,6 +71,14 @@ async def _recall_notes_fts5(
         )
     effective_min_score = resolve_min_score(min_score)
     try:
+        # Deterministic tiebreak (issue #740; follows #745). BM25 `fts.rank` can
+        # tie — notes with identical indexed content (topic/content/tags) score
+        # equally for a query — and with `LIMIT` a tie at the cutoff changes
+        # *which* notes surface, not just their order, a non-portable RFC 0044
+        # gap on this query-driven recall. `n.rowid` (insertion order) is the
+        # tiebreak: `notes.id` is a random uuid4, so NOT portable; the query
+        # already JOINs `n.rowid = fts.rowid`, and `notes` (external-content
+        # FTS5) always carries a stable rowid identical across record and replay.
         async with db.execute(
             f"""
             SELECT {", ".join(f"n.{c}" for c in note_cols)}
@@ -82,7 +90,7 @@ async def _recall_notes_fts5(
               {sess_clause}
               {princ_clause}
               {epoch_clause}
-            ORDER BY fts.rank * -1 DESC
+            ORDER BY fts.rank * -1 DESC, n.rowid DESC
             LIMIT ?
             """,
             (
