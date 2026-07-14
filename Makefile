@@ -1,4 +1,4 @@
-.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check
+.PHONY: all build build-orchestrator build-orchestrator-ui ui ui-test build-cli build-agents proto proto-go proto-python proto-python-check proto-orphans-check proto-check clean reset test lint run run-ui validate dockerignore-check help demo-autonomous demo-offline demo-ollama generate-persona-nickname generate-sanitizer-patterns generate-sanitizer-patterns-check check-licenses check-licenses-go check-licenses-python check-licenses-rust notices notices-check bump-version issues issues-check rfcs rfcs-check imports-check eval-replay eval-record eval-drift
 
 # ─── Config ─────────────────────────────────────────────
 GO_MODULE     := github.com/mkhomutov/persatrix
@@ -176,6 +176,20 @@ test-integration: ## Run integration tests
 
 test-persona: ## Run persona consistency tests (AGENT=ember-owl)
 	cd agents && $(PYTHON) -m pytest tests/ -v -k "persona" --agent $(AGENT)
+
+# ─── Eval (RFC 0044 golden-trace harness) ───────────────
+# Phase 1 (v0.3.11) ships the runner; the seed recipes + `.golden.yaml`
+# sidecars land in PR 4 (gated on RFC 0041 typed events), so an empty
+# `evaluators/eval_sets/` makes these a clean no-op today. Pass TARGET=<id>
+# to scope to one recipe, REPORT=<path> to write the structured JSON artifact.
+eval-replay: ## Replay golden-trace evals deterministically (RFC 0044). TARGET / REPORT optional.
+	$(PYTHON) -m evaluators.runner --mode replay $(if $(TARGET),--target $(TARGET),) $(if $(REPORT),--report $(REPORT),)
+
+eval-record: ## Record a golden from a live run (author-only; overwrites the sidecar). TARGET=<id>.
+	$(PYTHON) -m evaluators.runner --mode record $(if $(TARGET),--target $(TARGET),)
+
+eval-drift: ## Live drift check against recorded goldens (reports, never gates). TARGET optional.
+	$(PYTHON) -m evaluators.runner --mode drift $(if $(TARGET),--target $(TARGET),)
 
 # ─── Lint ───────────────────────────────────────────────
 lint: lint-go lint-python lint-rust ## Lint all code
