@@ -415,7 +415,18 @@ async def get_all_relationships(
         "GROUP BY r.participant_id, r.participant_type, "
         "  r.other_participant_id, r.other_participant_type, "
         "  r.trust_score, r.notes "
-        "ORDER BY r.trust_score DESC",
+        # Deterministic tiebreak (issue #740; follows #739). `trust_score` is a
+        # coarse REAL that ties frequently, and `trust_score DESC` alone leaves
+        # tied rows in SQLite-implementation-defined order. The `facts.recall`
+        # `rowid` idiom does NOT fit here: this is a GROUP BY aggregate (a bare
+        # `r.rowid` would be an arbitrary per-group pick) over a table the
+        # migrations rebuild via `relationships_new` (which renumbers rowids).
+        # Break ties on the group identity instead: participant, principal, and
+        # epoch are all pinned above, so the `relationships` PK makes
+        # `(other_participant_id, other_participant_type)` unique per output row
+        # — a value-based, portable, provably-total order.
+        "ORDER BY r.trust_score DESC, "
+        "  r.other_participant_id, r.other_participant_type",
         (
             *int_sess_params, *int_princ_params, *int_epoch_params,
             agent_id, participant_type,
