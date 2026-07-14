@@ -38,6 +38,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +52,8 @@ from agents.llm_types import (
     ToolCall,
     Usage,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_VOLATILE_KEYS",
@@ -64,18 +68,11 @@ __all__ = [
     "response_to_payload",
 ]
 
-#: Request keys stripped at any nesting depth before hashing (RFC 0044 §H OQ #2:
-#: "a stable canonicalization that ignores volatile fields"). Each names a field
-#: that can differ between two otherwise-identical requests without changing what
-#: the model is being asked:
-#:
-#: - ``cache_control`` — Anthropic prompt-cache markers (``{"type": "ephemeral"}``
-#:   on a content/system block); a caching optimisation, not semantic content.
-#: - ``signature`` — the opaque provider round-trip token (e.g. Gemini's
-#:   ``thought_signature``) carried on a :class:`~agents.llm_types.ToolCall` and
-#:   echoed back on later turns; provider-specific and non-semantic.
-#: - ``timestamp`` / ``idempotency_key`` / ``request_id`` — the transport-level
-#:   volatiles OQ #2 names explicitly.
+#: Request keys stripped at any nesting depth before hashing (RFC 0044 §H OQ #2) —
+#: non-semantic fields that can differ between two identical requests: ``cache_control``
+#: (Anthropic prompt-cache markers), ``signature`` (the opaque provider round-trip
+#: token, e.g. Gemini's ``thought_signature``, echoed back on later turns), and the
+#: transport volatiles ``timestamp`` / ``idempotency_key`` / ``request_id``.
 DEFAULT_VOLATILE_KEYS: frozenset[str] = frozenset(
     {"cache_control", "signature", "timestamp", "idempotency_key", "request_id"}
 )
@@ -111,17 +108,21 @@ def _strip_volatile(obj: Any, drop_keys: frozenset[str]) -> Any:
 
 
 def _json_default(obj: Any) -> Any:
-    """Serialize the non-JSON values that can appear in a request.
+    """Serialize non-JSON request values: ``bytes`` → base64, ``Enum`` → ``value``.
 
-    ``bytes`` → base64 str (a stray signature not caught by key-stripping);
-    ``Enum`` → its value. Anything else falls back to ``repr`` so an exotic
-    value degrades to a stable string rather than raising mid-hash.
+    Anything else raises: a ``repr`` fallback would embed a per-process ``id()``,
+    yielding a hash that differs across processes — defeating the very portability
+    this canonicalization exists for (``hashlib`` over the salted builtin ``hash``
+    for the same reason). Fail loud at record time, not later as a CI replay miss.
     """
     if isinstance(obj, bytes):
         return base64.b64encode(obj).decode("ascii")
-    if isinstance(obj, StopReason):
+    if isinstance(obj, Enum):
         return obj.value
-    return repr(obj)
+    raise TypeError(
+        f"cannot canonicalize {type(obj).__name__} into a stable request hash; "
+        f"request values must be JSON-native, bytes, or an Enum"
+    )
 
 
 def canonicalize_request(
@@ -261,6 +262,14 @@ def load_cassette(path: str | Path) -> dict[str, dict[str, Any]]:
         return {}
     if not isinstance(data, dict):
         raise ValueError(f"cassette at {path} is not a mapping: got {type(data).__name__}")
+    for key, payload in data.items():
+        # Validate values at load time so a malformed cassette fails here with a
+        # legible error, not a bare AttributeError deep inside payload_to_response.
+        if not isinstance(payload, dict):
+            raise ValueError(
+                f"cassette at {path} has a non-mapping payload for key "
+                f"{str(key)[:12]}…: got {type(payload).__name__}"
+            )
     return data
 
 
@@ -386,7 +395,9 @@ class RecordingProvider:
     recording is guaranteed replayable. This is the record half of ``make
     eval-record`` (RFC 0044 §C); the Makefile target and runner wiring land in
     PR 3. ``name`` mirrors the wrapped provider so OTEL ``gen_ai.system``
-    attribution stays correct during a record run.
+    attribution stays correct during a record run. The cassette is single-slot
+    per request; a second *differing* response (non-determinism or a retry) is
+    lossy — the later wins and a warning is logged.
     """
 
     def __init__(
@@ -437,7 +448,18 @@ class RecordingProvider:
             max_tokens=max_tokens,
             temperature=temperature,
         )
-        self.cassette[key] = response_to_payload(response)
+        payload = response_to_payload(response)
+        prior = self.cassette.get(key)
+        # Single-slot cassette (OQ #2 {hash: response}): a *differing* response for
+        # a request already seen this run — non-determinism or a retry — is lossy;
+        # warn rather than silently collapse it (RFC 0044 §D). The later one wins.
+        if prior is not None and prior != payload:
+            logger.warning(
+                "recording overwrote a differing response for request %s… — the "
+                "single-slot cassette is now lossy (non-determinism or a retry?)",
+                key[:12],
+            )
+        self.cassette[key] = payload
         return response
 
     def format_tool_definitions(self, tools: list[dict]) -> list[dict]:

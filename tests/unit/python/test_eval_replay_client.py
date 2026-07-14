@@ -21,6 +21,7 @@ pins the four properties the harness relies on:
 """
 
 import json
+import logging
 
 import pytest
 
@@ -131,6 +132,27 @@ def test_canonicalize_request_is_compact_sorted_json():
     )
 
 
+def test_canonicalize_serializes_enum_values_by_value():
+    """An ``Enum`` in a request serializes to its ``.value`` (not ``repr``), so it
+    stays stable and JSON-native rather than tripping the non-canonicalizable guard."""
+    canon = canonicalize_request(
+        **_req(messages=[{"role": "user", "content": StopReason.TOOL_USE}])
+    )
+    assert "tool_use" in canon  # the enum's value…
+    assert "StopReason" not in canon  # …not its repr
+
+
+def test_hash_rejects_non_canonicalizable_value():
+    """A value that cannot be canonicalized to a *stable* string is a hard error at
+    hash time — not a silently process-unstable ``repr`` (which embeds ``id()``).
+
+    Failing loud here surfaces a mis-built request at record time instead of as a
+    confusing ReplayCassetteMissError on CI.
+    """
+    with pytest.raises(TypeError):
+        hash_request(**_req(messages=[{"role": "user", "content": object()}]))
+
+
 # ─── Payload (de)serialization round-trip ────────────────────────────────────
 
 
@@ -195,7 +217,7 @@ async def test_replay_miss_raises_cassette_miss_with_actionable_detail():
         await provider.create_message(**_BASE_REQUEST)
     msg = str(exc.value)
     assert hash_request(**_BASE_REQUEST)[:12] in msg  # names the missing hash
-    assert "0" in msg  # reports how many responses are recorded (zero here)
+    assert "0 response(s)" in msg  # reports how many responses are recorded (zero here)
 
 
 # ─── Cassette file load / dump ───────────────────────────────────────────────
@@ -262,6 +284,7 @@ class _FakeLiveProvider:
 async def test_record_then_replay_reproduces_responses():
     fake = _FakeLiveProvider()
     recorder = RecordingProvider(fake)
+    assert isinstance(recorder, LLMProvider)  # the record half is a provider too
     assert recorder.name == fake.name  # traces stay attributed during record
 
     requests = [
@@ -275,6 +298,55 @@ async def test_record_then_replay_reproduces_responses():
     replay = ReplayProvider(recorder.cassette)
     for req, original in zip(requests, recorded):
         assert (await replay.create_message(**req)) == original
+
+
+class _DriftingFake:
+    """A live-provider stand-in that returns a *different* response each call for
+    the same request — the non-deterministic (temperature > 0) case a single-slot
+    ``{hash: response}`` cassette cannot represent."""
+
+    name = "drifting-fake"
+
+    def __init__(self):
+        self._n = 0
+
+    async def create_message(self, *, model, messages, system, tools, max_tokens, temperature):
+        self._n += 1
+        return LLMResponse(
+            text=f"resp-{self._n}", stop_reason=StopReason.END_TURN, usage=Usage(1, 1)
+        )
+
+    def format_tool_definitions(self, tools):
+        return list(tools)
+
+    def append_tool_round(self, messages, response, tool_results):
+        return list(messages)
+
+
+async def test_recording_warns_on_lossy_overwrite(caplog):
+    """Two *differing* responses for one canonical request cannot both fit the
+    single-slot cassette; the recorder warns (the later response wins) so the loss
+    is visible rather than silently collapsed."""
+    recorder = RecordingProvider(_DriftingFake())
+    await recorder.create_message(**_BASE_REQUEST)
+    with caplog.at_level(logging.WARNING):
+        await recorder.create_message(**_BASE_REQUEST)  # same request, new response
+    assert len(recorder.cassette) == 1
+    assert "lossy" in caplog.text
+    assert hash_request(**_BASE_REQUEST)[:12] in caplog.text  # names which request was lost
+    replay = ReplayProvider(recorder.cassette)
+    assert (await replay.create_message(**_BASE_REQUEST)).text == "resp-2"  # later wins
+
+
+async def test_recording_identical_response_does_not_warn(caplog):
+    """Re-recording the *same* response for a request is idempotent, not lossy —
+    no warning (the deterministic recording case)."""
+    recorder = RecordingProvider(_FakeLiveProvider())
+    with caplog.at_level(logging.WARNING):
+        await recorder.create_message(**_BASE_REQUEST)
+        await recorder.create_message(**_BASE_REQUEST)  # deterministic → identical
+    assert len(recorder.cassette) == 1
+    assert "lossy" not in caplog.text
 
 
 async def test_record_then_replay_multi_round_tool_loop():
@@ -357,5 +429,14 @@ def test_load_cassette_empty_file_returns_empty(tmp_path):
 def test_load_cassette_rejects_non_mapping(tmp_path):
     path = tmp_path / "bad.golden.yaml"
     path.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_cassette(path)
+
+
+def test_load_cassette_rejects_non_mapping_payload(tmp_path):
+    """A per-entry non-mapping payload is caught at load time with a legible error,
+    not a deep ``AttributeError`` inside ``payload_to_response`` during replay."""
+    path = tmp_path / "badval.golden.yaml"
+    path.write_text("abc123def456: not-a-mapping\n", encoding="utf-8")
     with pytest.raises(ValueError):
         load_cassette(path)
