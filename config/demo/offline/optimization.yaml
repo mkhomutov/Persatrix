@@ -19,6 +19,16 @@ models:
     # model id the mock reports in telemetry (gen_ai.request.model=offline,
     # gen_ai.system=mock) and the lease/cost key — priced 0 below ($0-real
     # local model; the missing-price guard exempts `mock`).
+    #
+    # `summarizer` / `fast` ARE PINNED BY THE RFC 0044 REPLAY GOLDENS. The RFC
+    # 0020 close-summary (`summarizer`) and RFC 0051 critic (`fast`) paths hash
+    # the *resolved physical* `model`, so the recorded seed goldens (e.g.
+    # evaluators/eval_sets/EVAL-MEMORY-001.golden.yaml) bake in `offline` for
+    # those two. Changing their physical `model` breaks `make eval-replay`
+    # (which pins this overlay) until the goldens are re-recorded with
+    # `make eval-record-offline` — edit those aliases in lockstep with the
+    # goldens. `quality` is NOT pinned: the action loop hashes the raw alias,
+    # not the resolved model, so its request is env-independent.
     quality:
       provider: mock
       model: offline

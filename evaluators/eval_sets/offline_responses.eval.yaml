@@ -6,9 +6,12 @@
 # Kept SEPARATE from the demo's config/offline_responses.yaml so eval fixtures
 # and demo fixtures don't collide. Entries are keyed by agent id, matched by
 # case-insensitive substring on every `match` keyword, tried in file order
-# (first all-match wins). These stand in for a live model at record time; the
-# golden they produce is what replay checks — a live re-record swaps in real
-# model text at release-prep. NOT read at replay time (replay plays the golden).
+# (first all-match wins) — so give each new turn `match` keywords specific
+# enough that no EARLIER entry also all-matches its prompt, or the earlier entry
+# shadows it and bakes the wrong reply into the golden at record time. These
+# stand in for a live model at record time; the golden they produce is what
+# replay checks — a live re-record swaps in real model text at release-prep.
+# NOT read at replay time (replay plays the golden).
 responses:
   ember-owl:
     # EVAL-MEMORY-001 — dementia test. One entry per user turn, keyed on

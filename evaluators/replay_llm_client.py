@@ -81,9 +81,9 @@ DEFAULT_VOLATILE_KEYS: frozenset[str] = frozenset(
 class ReplayCassetteMissError(RuntimeError):
     """Raised when a replayed request is absent from the cassette.
 
-    A miss is fatal by design: it means the recipe drifted from the recording
-    (or the golden was never recorded for this request), which must be visible
-    rather than silently passing the eval (RFC 0044 §D).
+    A miss is fatal by design: the replayed request matched no recorded one —
+    a replay overlay differing from the record's, or a genuine recipe/prompt
+    drift — which must be visible, not silently pass the eval (RFC 0044 §D).
     """
 
 
@@ -368,9 +368,9 @@ class ReplayProvider:
         if payload is None:
             raise ReplayCassetteMissError(
                 f"no recorded response for request {key[:12]}… "
-                f"({len(self._cassette)} response(s) in cassette). The recipe "
-                f"drifted from the golden or the response was never recorded — "
-                f"re-record with `make eval-record`."
+                f"({len(self._cassette)} response(s) in cassette). Check the replay "
+                f"overlay matches the record's (`make eval-replay` pins it) before "
+                f"assuming drift and re-recording the golden."
             )
         return payload_to_response(payload)
 
