@@ -75,9 +75,34 @@ The deterministic, dependency-free core, built test-first.
 - [x] No new runtime dependency (`jsonschema` + `pyyaml` already in the closure).
 - [x] ROADMAP + RFC status hygiene.
 
-### PR 2: `feature/v0311-rfc0044-replay-client` — replay LLM client
+### PR 2: `feature/v0311-rfc0044-replay-client` — replay LLM client ✅
 
 A recorded-response `LLMProvider` (the [`llm_types.LLMProvider`](../../agents/llm_types.py) Protocol) that returns cassette responses keyed by a canonicalized request hash (OQ #2). Deterministic, byte-stable — the mock-as-LLM that makes replay CI-safe ([§D](0044-eval-set-golden-traces.md#d-stochasticity-tolerance)).
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| New [`evaluators/replay_llm_client.py`](../../evaluators/replay_llm_client.py) | The **canonicalize → hash → look-up** core (OQ #2): `canonicalize_request` (sorted, compact, UTF-8 JSON) + `hash_request` (`hashlib.sha256`, so the digest is stable across processes — a cassette recorded once is portable to CI). Volatile keys (`DEFAULT_VOLATILE_KEYS`: `cache_control` prompt-cache markers, the opaque provider `signature`, `timestamp`/`idempotency_key`/`request_id`) are stripped at any depth before hashing, overridable via `drop_keys`. `ReplayProvider` (fail-loud `ReplayCassetteMissError` on a miss) and a `RecordingProvider` wrapper that captures the cassette with the *same* hash — so a recording is guaranteed replayable. `response_to_payload`/`payload_to_response` (YAML/JSON-safe: `stop_reason`→str, `signature`→base64) and `dump_cassette`/`load_cassette` (`.golden.yaml`, OQ #1). |
+| [`evaluators/__init__.py`](../../evaluators/__init__.py) | Docstring only — the replay client is imported from its submodule, *not* re-exported here, so `import evaluators` (the pure assertion core) does not drag in the `agents` runtime that `agents.llm_types` transitively loads. |
+| RFC 0044 §H OQ #2 + this plan | OQ #2 → resolved (canonicalization spelled out). |
+| [`ROADMAP.md`](../../ROADMAP.md) + [`v0.3.11-plan.md`](../v0.3.11-plan.md) | RFC 0044 rows note PR 2 landed; `Last updated` refresh (concise). |
+
+#### Tests
+
+- [`tests/unit/python/test_eval_replay_client.py`](../../tests/unit/python/test_eval_replay_client.py) — hash stability across dict-key order; every semantic field perturbs the hash; each default volatile key does *not*; `drop_keys` override *replaces* the default set; payload round-trip incl. `signature` bytes + `stop_reason`; `ReplayProvider` hit (byte-stable across calls) / miss (`ReplayCassetteMissError` with actionable detail); Protocol conformance; cassette file dump/load + `from_file`; and the two symmetry tests — record→replay reproduces responses, incl. a multi-round tool loop whose follow-up request (built by `append_tool_round`) must re-hash identically.
+
+#### Review fold-in
+
+- **Provider-agnostic tool hash (symmetry fix).** The runtime pipes `format_tool_definitions()` output into `create_message(tools=…)`, and `tools` is one of the six hashed inputs. The vendor formatters rewrite the shape structurally (`parameters`→`input_schema` for Anthropic, a `{type: function}` wrapper for OpenAI), so keying the cassette on the vendor-native shape at record time while [`ReplayProvider`](../../evaluators/replay_llm_client.py) (no wrapped provider) keys on the raw shape would miss for *every tool-bearing eval* — i.e. every real persona recording, since personas always carry memory tools. Fix: both providers' `format_tool_definitions` pass tools through raw (the cassette key is provider-agnostic); `RecordingProvider.create_message` applies the inner provider's native formatting for the live call only. A regression test (transforming-fake inner) pins it red→green. `append_tool_round` stays on the shared canonical (Anthropic-block) shape for the same symmetry reason — documented, with non-Anthropic multi-round record noted out of Phase-1 scope.
+
+#### PR checklist
+
+- [x] Test-first (red → green); the new suite green under `make test-python`.
+- [x] `ruff` + `mypy` clean over `evaluators/` and the new test.
+- [x] No new runtime dependency (`pyyaml` already in the closure).
+- [x] ROADMAP + RFC/plan status hygiene.
+- [x] Adversarial multi-agent review; confirmed findings folded in (tool-hash symmetry + `load_cassette` edge tests).
 
 ### PR 3: `feature/v0311-rfc0044-runner` — the runner + Makefile targets + guide
 
