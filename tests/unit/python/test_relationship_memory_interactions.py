@@ -196,6 +196,33 @@ class TestGetAllRelationships:
         rels = await memory.get_all_relationships()
         assert rels[0].recent_interactions == []
 
+    async def test_equal_trust_ordered_deterministically(self, memory):
+        """Relationships tied on ``trust_score`` recall in a stable, defined
+        order — the ``other_participant_id, other_participant_type`` tiebreak on
+        ``trust_score DESC`` (issue #740; follows #739).
+
+        ``trust_score`` is a coarse REAL that ties frequently. Contract guard,
+        not a currently-failing discriminator: today's SQLite planner satisfies
+        this query via the ``relationships`` PK index (keyed by the participant
+        tuple), so equal-score rows *already* fall in ``other_participant_id``
+        order — but that is incidental to the current plan. A future index, a
+        planner change, or a different engine version could reorder ties, which
+        would make an RFC 0044 golden's assembled prompt non-portable. This pins
+        the required order so the explicit ``ORDER BY`` cannot silently regress.
+        Seeded out of id order (``zoe`` before ``amy``) so the assertion tracks
+        the value-based order, not the insertion sequence."""
+        await memory.update_trust("zoe", delta=0.1, reason="tie")
+        await memory.update_trust("amy", delta=0.1, reason="tie")  # equal score
+        rels = await memory.get_all_relationships()
+        assert [r.trust_score for r in rels] == [pytest.approx(0.6)] * 2
+        assert [r.other_participant_id for r in rels] == ["amy", "zoe"], (
+            "equal-trust relationships must order by other_participant_id "
+            "(value-based tiebreak), not an engine/plan-dependent order"
+        )
+        # Stable across repeated calls — the property a golden's hash needs.
+        again = await memory.get_all_relationships()
+        assert [r.other_participant_id for r in again] == ["amy", "zoe"]
+
 
 # ─── Trust bootstrapping from config ────────────────────────
 
