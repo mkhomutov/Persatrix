@@ -104,9 +104,36 @@ A recorded-response `LLMProvider` (the [`llm_types.LLMProvider`](../../agents/ll
 - [x] ROADMAP + RFC/plan status hygiene.
 - [x] Adversarial multi-agent review; confirmed findings folded in (tool-hash symmetry + `load_cassette` edge tests).
 
-### PR 3: `feature/v0311-rfc0044-runner` — the runner + Makefile targets + guide
+### PR 3: `feature/v0311-rfc0044-runner` — the runner + Makefile targets + guide ✅
 
-`evaluators/runner.py` drives a recipe's interactions/turns against the replay client to produce an `EvalRun`, then calls `evaluate`. `make eval-replay` / `eval-record` / `eval-drift` ([§C](0044-eval-set-golden-traces.md#c-recording-vs-replay)); `docs/evaluators-guide.md`; the `elapsed` → RFC 0021 temporal seam (OQ #5). A structured per-assertion report artifact.
+The orchestration half of Phase 1, built test-first: load a recipe → build the mode's provider → drive the **real** persona runtime through the replay client → `evaluate` → a structured artifact. Resolves OQ #5 (`elapsed`).
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| New [`evaluators/runner.py`](../../evaluators/runner.py) | The orchestrator: `parse_elapsed` (OQ #5 — no codebase helper parses `5m`/`2h`/`1d`; the reverse `format_duration` is seconds→prose), the `PersonaDriver` Protocol seam, `run_eval` (recipe × provider × driver → `EvalReport`), `build_provider` (replay from golden / record wrapping a live provider / live drift), recipe discovery (`discover_recipes` / `golden_path_for` sidecar, OQ #1), `run_suite`, and the `python -m evaluators.runner` CLI behind the three make targets. Kept free of a module-level `agents` import (the driver + live-provider factory are lazy) so `import evaluators.runner` and the orchestration stay light and fake-driver-testable. |
+| New [`evaluators/persona_driver.py`](../../evaluators/persona_driver.py) | `PersonaRuntimeDriver` — the real-runtime adapter that produces an `EvalRun`. Builds a persona agent around the injected `LLMProvider` + a `FrozenClock` (RFC 0021 seam), drives each user turn through `agent.on_event` → `extract_chat_reply`, injects each interaction's `elapsed` via `clock.advance` (OQ #5), and snapshots terminal state into the `persona:<id>:trust.scores.<peer>` key space `evaluate` compares against (seed via the config `relationships` tier). Imports the `agents` runtime, so — like the replay client — it is **not** re-exported from `evaluators/__init__`. `default_config_resolver` maps `setup.persona` → a `config/agents.yaml` entry. Events are empty pre-0041 (documented seam). |
+| New [`evaluators/report.py`](../../evaluators/report.py) | Pure per-assertion → JSON artifact: `report_to_dict` (eval_id / tier / mode / per-assertion rows / roll-up), `suite_report` (`passed_all` = the Phase-2 merge-gate signal), `write_report`. |
+| New [`evaluators/eval_sets/`](../../evaluators/eval_sets/) | The recipe scan home (a `README.md` documenting the empty-until-PR-4 gate). The runner treats an empty/absent dir as a clean no-op. |
+| New [`docs/evaluators-guide.md`](../../docs/evaluators-guide.md) | Author guide: recipe anatomy, assertion vocabulary, `seed_state`/`terminal_state`, `elapsed`, the record/replay/drift workflow, the report-artifact shape. |
+| [`Makefile`](../../Makefile) | `eval-replay` / `eval-record` / `eval-drift` targets (+ `.PHONY`), `TARGET=<id>` / `REPORT=<path>` knobs. |
+| [`evaluators/__init__.py`](../../evaluators/__init__.py) | Docstring only — PR 3 modules noted as submodule-imported, not re-exported. |
+| RFC 0044 §H OQ #5 + this plan | OQ #5 → resolved (the runner wires the `elapsed` delta into the `FrozenClock`). |
+| [`ROADMAP.md`](../../ROADMAP.md) + [`v0.3.11-plan.md`](../v0.3.11-plan.md) + [`FILEMAP.md`](../../FILEMAP.md) | RFC 0044 rows note PR 3 landed; `Last updated` refresh (concise); FILEMAP tree + counts. |
+
+#### Tests
+
+- [`tests/unit/python/test_eval_runner.py`](../../tests/unit/python/test_eval_runner.py) — `parse_elapsed` units + malformed rejection; `run_eval` orchestration via a deterministic fake `PersonaDriver` (pass + fail propagation); the report artifact shape + failure counts + suite aggregation + JSON write; recipe discovery (golden-sidecar + non-yaml exclusion, `target` filter, missing-dir → `[]`); provider building (replay from a golden / missing-golden → `FileNotFoundError`); the CLI no-recipes no-op (exit 0).
+- [`tests/unit/python/test_eval_persona_driver.py`](../../tests/unit/python/test_eval_persona_driver.py) — the **real** runtime end-to-end against an in-memory persona config (no disk / network / API key): ordered `turn_outputs`, seeded-trust snapshot round-trip, the `elapsed`→clock advance observed directly, events empty pre-0041, and **record → replay symmetry through the runtime** (a clean replay with no `ReplayCassetteMissError` is the proof that record and replay canonicalize the same requests through the full prompt-assembly path). Plus the config resolver (by-name + unknown → `KeyError`).
+
+#### PR checklist
+
+- [x] Test-first (red → green); both new suites green under `make test-python` (full python suite 4016 green).
+- [x] `ruff` + `mypy` clean over `evaluators/` and the new tests; `file_size.py --strict` clean.
+- [x] No new runtime dependency (`pyyaml` already in the closure; the driver rides the existing `agents` runtime).
+- [x] `import evaluators` stays runtime-free (driver + runner are submodule-only).
+- [x] ROADMAP + RFC/plan + FILEMAP status hygiene.
 
 ### PR 4 (gated on RFC 0041 Phase 1): seed recipes + goldens
 
