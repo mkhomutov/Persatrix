@@ -134,6 +134,14 @@ async def _recall_notes_like(
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{escaped}%"
     note_select = ", ".join(note_cols)
+    # Deterministic tiebreak (issue #740; follows #739 / #742–#744). `updated_at`
+    # can tie — notes written in one instant under the eval driver's FrozenClock —
+    # and with `LIMIT` a tie at the cutoff changes *which* rows are returned, not
+    # just their order, a non-portable RFC 0044 golden-trace gap. `rowid`
+    # (insertion order) is the tiebreak: `notes.id` is a random uuid4, so it is
+    # NOT portable; `notes` is an external-content FTS5 source
+    # (`content_rowid=rowid`), so it always carries a stable rowid (never WITHOUT
+    # ROWID) that is identical across record and replay. Plain row SELECT.
     async with db.execute(
         f"""
         SELECT {note_select}
@@ -145,7 +153,7 @@ async def _recall_notes_like(
           {sess_clause}
           {princ_clause}
           {epoch_clause}
-        ORDER BY updated_at DESC
+        ORDER BY updated_at DESC, rowid DESC
         LIMIT ?
         """,
         (
@@ -180,6 +188,9 @@ async def _recall_notes_recency(
         epoch_id, column="epoch_id",
     )
     note_select = ", ".join(note_cols)
+    # Deterministic `rowid` tiebreak — same rationale as `_recall_notes_like`
+    # above (issue #740): `notes.id` is a uuid4, `notes` carries a stable FTS
+    # rowid, and the `LIMIT` makes equal-`updated_at` ties consequential.
     async with db.execute(
         f"""
         SELECT {note_select}
@@ -188,7 +199,7 @@ async def _recall_notes_recency(
           {sess_clause}
           {princ_clause}
           {epoch_clause}
-        ORDER BY updated_at DESC
+        ORDER BY updated_at DESC, rowid DESC
         LIMIT ?
         """,
         (agent_id, *sess_params, *princ_params, *epoch_params, limit),
