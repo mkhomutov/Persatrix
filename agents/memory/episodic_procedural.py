@@ -244,17 +244,27 @@ async def recall_procedures(
             " AND (? - COALESCE(last_validated_at, created_at)) <= ?"
         )
         params.extend([timestamp, sql_cutoff_seconds])
+    # Deterministic tiebreak (issue #740; follows #739 / #742) on BOTH
+    # branches below. `created_at` can tie — several procedures stored in one
+    # instant under the eval driver's FrozenClock — and this recall over-fetches
+    # `limit*2` then decay-filters in Python, so a tie at the SQL `LIMIT` cutoff
+    # changes *which* rows reach the filter, not just their order — a
+    # non-portable RFC 0044 golden-trace gap. `rowid` (insertion order) is the
+    # tiebreak: `episodes.id` is a random uuid4 (`insert_episode`), so it is NOT
+    # a portable tiebreak; `rowid` is identical across record and replay, which
+    # INSERT the same episodes in the same order, and the table is not WITHOUT
+    # ROWID. This is a plain row SELECT, so `rowid` is unambiguous (one per row).
     if query:
         # PR #225 review S1: escape LIKE meta-chars in ``query`` so a
         # ``%`` / ``_`` in caller-supplied search text does not widen
         # the match.  Pair with ``ESCAPE '\\'``.
         sql = (
             sql_base + " AND summary LIKE ? ESCAPE '\\'"
-            " ORDER BY created_at DESC LIMIT ?"
+            " ORDER BY created_at DESC, rowid DESC LIMIT ?"
         )
         params.extend([f"%{_escape_like(query)}%", max(limit * 2, limit)])
     else:
-        sql = sql_base + " ORDER BY created_at DESC LIMIT ?"
+        sql = sql_base + " ORDER BY created_at DESC, rowid DESC LIMIT ?"
         params.append(max(limit * 2, limit))
     async with db.execute(sql, tuple(params)) as cursor:
         rows = list(await cursor.fetchall())

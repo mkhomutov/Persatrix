@@ -158,6 +158,42 @@ async def test_recall_procedures_query_filter(facade: MemoryStore) -> None:
     assert results[0].key == "a"
 
 
+async def test_recall_procedures_equal_created_at_deterministic(
+    facade: MemoryStore,
+) -> None:
+    """Procedures sharing a ``created_at`` recall in a stable, defined order —
+    the ``rowid`` (insertion-order) tiebreak on ``created_at DESC`` (issue #740;
+    follows #739 / #742).
+
+    ``episodes.id`` is a random uuid4, so without the tiebreak SQLite's order
+    among equal ``created_at`` is implementation-defined — and because the recall
+    over-fetches ``2 * limit`` then decay-filters in Python, a tie at the ``LIMIT``
+    cutoff could change *which* rows survive, not just their order, making a
+    recorded RFC 0044 golden non-portable. Both procedures are stored, then their
+    ``created_at`` is forged to a single instant (mirrors the eval driver's
+    FrozenClock); insertion order is preserved by ``rowid``, so the
+    newest-inserted must recall first."""
+    await facade.store_procedure("first", "alpha", confidence=0.9)
+    await facade.store_procedure("second", "beta", confidence=0.9)
+    db = facade.episodic._ensure_db()  # noqa: SLF001 — forge a created_at tie
+    await db.execute(
+        "UPDATE episodes SET created_at = 1000.0 "
+        "WHERE agent_id = ? AND tags_json LIKE '%\"procedure:%'",
+        ("proc-test",),
+    )
+    await db.commit()
+
+    results = await recall_procedures(db, "proc-test", c_min=0.0)
+    keys = [e.key for e in results]
+    assert keys == ["second", "first"], (
+        "equal-created_at procedures must recall most-recently-inserted first "
+        "(rowid DESC tiebreak), not SQLite's implementation-defined order"
+    )
+    # Stable across repeated calls — the property a golden's request hash needs.
+    again = await recall_procedures(db, "proc-test", c_min=0.0)
+    assert [e.key for e in again] == keys
+
+
 # ─── refresh_confidence ───────────────────────────────────────
 
 
