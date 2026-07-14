@@ -342,11 +342,11 @@ class SharedMemoryPool:
     async def _enforce_fifo_cap(self) -> None:
         """Drop oldest rows when the pool exceeds ``max_entries`` (FIFO).
 
-        Single atomic ``DELETE ... WHERE id NOT IN (SELECT ... LIMIT
-        max_entries)`` per PR #223 review N2 — eliminates the count→
-        delete race a concurrent writer could open.  Reaches into
-        ``EpisodicMemory._ensure_db()`` (review S5 / PR-2 M3); the
-        canonical ``connection`` property is deferred to PR 5+.
+        Single atomic ``DELETE ... id NOT IN (SELECT ... ORDER BY created_at
+        DESC, rowid DESC LIMIT max_entries)`` — PR #223 N2 (race-free),
+        ``_ensure_db`` per S5. The ``rowid`` tiebreak is load-bearing (issue
+        #740): ``created_at`` ties would else leave the kept set impl-defined
+        and, via ``idx_episodes_created``, invert FIFO. ``episodes.id`` uuid4.
         """
         db = self._episodic._ensure_db()  # noqa: SLF001 — RFC 0008 PR 5
         pool_agent = _pool_agent_id(self._config.name)
@@ -357,7 +357,7 @@ class SharedMemoryPool:
               AND id NOT IN (
                 SELECT id FROM episodes
                 WHERE agent_id = ?
-                ORDER BY created_at DESC
+                ORDER BY created_at DESC, rowid DESC
                 LIMIT ?
               )
             """,
