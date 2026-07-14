@@ -86,6 +86,16 @@ async def recall_closed_interactions(
         params.append(interaction_id)
         params.append(interaction_id)
     params.append(clamped)
+    # Deterministic tiebreak (issue #740; follows #739 / #742 / #743). `closed_at`
+    # ties readily — a single governance interaction maps to several episodes
+    # closed together (ISSUE-0102), and the eval driver's FrozenClock closes in
+    # one instant — and with `LIMIT` a tie at the cutoff changes *which* rows are
+    # returned, not just their order, a non-portable RFC 0044 golden-trace gap.
+    # `rowid` (insertion order) is the tiebreak: `episodes.id` is a random uuid4
+    # (`insert_episode`), so it is NOT a portable tiebreak; `rowid` is identical
+    # across record and replay, which INSERT the same episodes in the same order,
+    # and the table is not WITHOUT ROWID. Plain row SELECT, so `rowid` is
+    # unambiguous (one per row).
     async with db.execute(
         f"""
         SELECT {EPISODE_SELECT}
@@ -97,7 +107,7 @@ async def recall_closed_interactions(
           AND summary != ''
           AND turn_count >= ?
           {filters}
-        ORDER BY closed_at DESC
+        ORDER BY closed_at DESC, rowid DESC
         LIMIT ?
         """,
         tuple(params),
