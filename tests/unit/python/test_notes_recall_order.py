@@ -68,3 +68,32 @@ async def test_notes_recall_equal_updated_at_deterministic(note_store, query):
     # Stable across repeated calls — the property a golden's request hash needs.
     again = await note_store.recall_notes(query, limit=10)
     assert [n.id for n in again] == ids
+
+
+async def test_notes_recall_equal_fts_rank_deterministic():
+    """FTS5 search — notes with identical BM25 rank recall most-recently-inserted
+    first, the ``n.rowid`` tiebreak on ``ORDER BY fts.rank * -1 DESC``.
+
+    Two notes with identical indexed content (topic/content/tags) score equally
+    for a query, and the recall is ``LIMIT``-ed, so without the tiebreak *which*
+    note surfaces is implementation-defined — non-portable for RFC 0044 goldens.
+    ``notes.id`` is a random uuid4, so ``n.rowid`` (the FTS join key, always
+    stable for an external-content FTS5 source) is the portable tiebreak. Uses a
+    dedicated ``fts5=True`` store since the module fixture is ``fts5=False``."""
+    mem = EpisodicMemory(agent_id="fts-agent", db_path=":memory:")
+    await mem.initialize()
+    store = NoteStore("fts-agent", mem._ensure_db(), fts5=True)  # noqa: SLF001
+    try:
+        # Identical indexed content → identical BM25 rank for "alpha".
+        first = await store.store_note("dup", "shared alpha term")
+        second = await store.store_note("dup", "shared alpha term")
+        results = await store.recall_notes("alpha", limit=10)
+        ids = [n.id for n in results]
+        assert ids == [second, first], (
+            "equal-BM25-rank notes must recall most-recently-inserted first "
+            "(n.rowid DESC tiebreak), not SQLite's implementation-defined order"
+        )
+        again = await store.recall_notes("alpha", limit=10)
+        assert [n.id for n in again] == ids
+    finally:
+        await mem.close()
