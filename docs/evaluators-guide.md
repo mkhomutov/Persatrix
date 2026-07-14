@@ -157,8 +157,13 @@ enough to replay byte-for-byte.
 > `PERSATRIX_OPTIMIZATION_CONFIG` to the offline overlay. The action loop hashes
 > the raw model *alias* (`quality`), but the RFC 0020 close-summary and RFC 0051
 > critic paths hash the *resolved physical* model — so a golden recorded offline
-> must resolve the same aliases at replay, or those requests miss the cassette. A
-> future live-recorded golden replays under whatever overlay recorded it.
+> must resolve the same aliases at replay, or those requests miss the cassette.
+>
+> Because the target pins the offline overlay for *every* recipe, it replays only
+> goldens recorded under that overlay. The release-prep live re-record bakes in the
+> real physical models and would miss the cassette here until `make eval-replay`
+> resolves the overlay per recipe — a follow-up parked in the
+> [PR plan](rfcs/0044-pr-plan.md) (§Notes).
 
 ## The report artifact
 

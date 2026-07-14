@@ -189,6 +189,12 @@ test-persona: ## Run persona consistency tests (AGENT=ember-owl)
 # critic paths hash the *resolved physical* model, so replaying under a different
 # optimization config would shift those requests and miss the cassette. Replay
 # does not need the offline responses file (it plays the golden, not the mock).
+#
+# LIMITATION: this pins the offline overlay for EVERY target, so it replays only
+# goldens recorded under that overlay. The release-prep live re-record of
+# EVAL-MEMORY-001 bakes in the real physical models and would miss the cassette
+# here until this target resolves the overlay per recipe — a follow-up parked in
+# docs/rfcs/0044-pr-plan.md (§Notes).
 eval-replay: ## Replay golden-trace evals deterministically (RFC 0044). TARGET / REPORT optional.
 	PERSATRIX_OPTIMIZATION_CONFIG=config/demo/offline/optimization.yaml \
 	$(PYTHON) -m evaluators.runner --mode replay $(if $(TARGET),--target $(TARGET),) $(if $(REPORT),--report $(REPORT),)
