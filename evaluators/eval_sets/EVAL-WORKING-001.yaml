@@ -1,0 +1,61 @@
+id: EVAL-WORKING-001
+title: Working memory — persona references its own prior question in-interaction
+description: |
+  RFC 0034 conversational working memory as a golden-trace recipe — the
+  ISSUE-0052 defect ("the persona forgets its own previous question"). Within a
+  single interaction the human (sam) asks the persona to kick off a deploy; the
+  persona asks a clarifying question ("staging or production?"); the human's next
+  message adds urgency but does NOT answer it. The persona must reference its OWN
+  earlier question rather than re-ask from scratch or act blind.
+
+  This is orthogonal to the EVAL-MEMORY-001 dementia seed: that exercises
+  cross-interaction long-term recall; this exercises within-interaction working
+  memory — a different runtime path (the RFC 0034 conversation window, not the
+  memory-recall tiers).
+
+  The recipe declares `setup.channel`, which the eval driver uses to wire the RFC
+  0034 conversation-window history fetcher: turn 2's prompt carries the
+  reconstructed in-channel transcript — turn 1's user message AND the persona's own
+  reply. A regression that drops the persona's prior turn from that window shifts
+  turn 2's request, misses the cassette, and fails the replay — the automated bar
+  the working-memory path has been missing.
+
+  RFC 0044 Phase 1 / pre-0041 subset: asserts only over `final_transcript` and
+  `terminal_state`. The golden is recorded offline against the mock provider
+  (`make eval-record-offline`), so it replays deterministically at $0 with no API
+  key; a live re-record against the `quality` model rides release-prep.
+spawned_from: ../../docs/rfcs/0034-persona-conversational-working-memory.md
+tier: experimental
+
+setup:
+  persona: ember-owl
+  user: sam
+  # A declared channel opts this recipe into the RFC 0034 conversation window: the
+  # driver wires an in-process history fetcher for it so the persona sees its own
+  # prior turn. Omit it (as EVAL-MEMORY-001 does) for the current-event-only path.
+  channel: dm:sam:ember-owl
+  session_id: EVAL-WORKING-001-S
+  seed_state:
+    persona:ember-owl:trust.scores.sam: 0.3
+  llm_mode: replay
+
+interactions:
+  - id: i1-working-memory
+    turns:
+      # The persona asks a clarifying question in its first reply …
+      - user: "Can you kick off the deploy for me?"
+      - assistant: {match: contains, value: "staging"}
+      # … the human does not answer it — the persona must remember it was asked.
+      - user: "As soon as possible please — the team is waiting."
+      - assistant: {match: must_reference, values: ["staging", "production"]}
+
+assertions:
+  terminal_state:
+    # The seeded relationship persists through the interaction (a positive trust
+    # the snapshot round-trips). The trust-INCREASE form needs live relationship
+    # dynamics that do not fire under a replayed cassette; the release-prep live
+    # re-record exercises that.
+    persona:ember-owl:trust.scores.sam: {match: gt, value: 0.0}
+  final_transcript:
+    must_reference: ["staging", "production"]
+    must_not_reference: ["I don't recall", "what did you ask", "[error]"]
