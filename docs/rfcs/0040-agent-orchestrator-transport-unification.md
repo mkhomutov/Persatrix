@@ -3,7 +3,7 @@ id: RFC-0040
 title: Agent–Orchestrator Transport Unification
 summary: Migrates the agent→orchestrator control-plane calls (channel publish, channel history, agent registration) from REST to gRPC, leaving REST as the dedicated client edge — so the orchestrator's inbound surface splits into two audience-specific APIs (gRPC for agents, REST for CLI / future Web UI) sharing one business-logic core, and the agent→orchestrator path gains the typed protobuf contract the orchestrator→agent path already has.
 type: protocol
-status: draft
+status: proposed
 author: Maksim Khomutov
 created: 2026-05-17
 target: v0.3.x (Phase 1) + v0.4.0 (Phases 2–4)
@@ -16,7 +16,7 @@ depends_on:
 # RFC 0040 — Agent–Orchestrator Transport Unification
 
 **Type**: protocol
-**Status**: 🔨 Draft
+**Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-17
 **Target**: v0.3.x (Phase 1) + v0.4.0 (Phases 2–4)
@@ -305,7 +305,7 @@ The migration is structured so the codebase is shippable after every phase and n
 
 ## Decision / Next Steps
 
-**Status: 🔨 Draft.** This RFC is opened for review. Before it can advance to Proposed → Accepted:
+**Status: 📋 Proposed.** This RFC is open for review. Before it can advance to Accepted:
 
 1. Resolve Open Questions 1 and 2 (service shape, transport selection) in the review thread — both are non-additive once the proto ships.
 2. Decide the §D `sender_id` scope question — authentic-sender enforcement in scope, or hard-deferred to RFC 0029 Phase 2 (recommended). Membership and the cascade clamp already sit below both transports (§D), so **no relocation audit is required**.
