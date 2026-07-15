@@ -11,7 +11,8 @@ Checks executed:
   3. ``cargo fmt --check`` (Rust CLI)
   4. Doc links check
   5. Doc status markers check
-  6. File size check (code: ≤500 lines, docs: ≤3000 words)
+  6. RFC index freshness (docs/rfcs/INDEX.md up to date with front-matter)
+  7. File size check (code: ≤500 lines, docs: ≤3000 words)
 
 Usage::
 
@@ -107,6 +108,7 @@ _CHECKS: list[tuple[str, list[str]]] = [
     ("doc links", ["{python}", "scripts/checks/doc_links.py"]),
     ("doc markup", ["{python}", "scripts/checks/doc_leaked_markup.py"]),
     ("doc status", ["{python}", "scripts/checks/doc_status_markers.py"]),
+    ("rfcs index", ["{python}", "scripts/rfcs.py", "--check"]),
     ("file size", ["{python}", "scripts/checks/file_size.py", "--strict"]),
 ]
 
