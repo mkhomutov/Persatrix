@@ -94,6 +94,16 @@ your expectation for the reply. The runner drives each user turn through the rea
 persona runtime and lines the assistant expectations up with the replies, in
 order.
 
+**`setup.channel` — RFC 0034 working memory.** Declaring a `channel` opts the
+recipe into the [conversation window](rfcs/0034-persona-conversational-working-memory.md):
+the driver wires an in-process history fetcher for that channel and logs each
+delivered turn, so the persona's prompt reconstructs the in-channel transcript and
+it sees **its own prior turns**. Use it for within-interaction working-memory
+recipes (the persona references something it said earlier). Omit it — as the
+dementia seed does — for the current-event-only path, which is byte-identical to
+before the seam, so adding a channel-bearing recipe never disturbs a channel-less
+golden.
+
 ## Assertion vocabulary
 
 The vocabulary is **closed** — adding an operator is an RFC amendment, not a
@@ -206,21 +216,31 @@ shape Phase 2 will attach to the CI run and gate the `stable` tier on:
 
 ## Seed recipes
 
-The first pre-0041 seed has landed:
-[`EVAL-MEMORY-001`](../evaluators/eval_sets/EVAL-MEMORY-001.yaml) — the dementia
-test ([MT-MEMORY-005](manual-tests/MT-MEMORY-005-dementia-test.md)) as a
-five-interaction recall recipe, asserting only over `final_transcript` /
-`terminal_state`. Its offline golden replays green on every PR via
-[`test_eval_seed_replay.py`](../tests/integration/test_eval_seed_replay.py).
+Two pre-0041 seeds have landed:
 
-Because its golden is mock-recorded, the recorded replies are curated stand-ins,
+- [`EVAL-MEMORY-001`](../evaluators/eval_sets/EVAL-MEMORY-001.yaml) — the dementia
+  test ([MT-MEMORY-005](manual-tests/MT-MEMORY-005-dementia-test.md)) as a
+  five-interaction **cross-interaction long-term recall** recipe.
+- [`EVAL-WORKING-001`](../evaluators/eval_sets/EVAL-WORKING-001.yaml) — RFC 0034
+  **within-interaction working memory**: the persona references its own prior
+  clarifying question. It declares `setup.channel` (above) to engage the
+  conversation window, so its golden is load-bearing on working memory — strip the
+  channel and replay goes red.
+
+Both assert only over `final_transcript` / `terminal_state`, and both replay green
+on every PR via their integration tests
+([memory](../tests/integration/test_eval_seed_replay.py),
+[working](../tests/integration/test_eval_working_seed_replay.py)).
+
+Because the goldens are mock-recorded, the recorded replies are curated stand-ins,
 not a live model's — so the assertions on reply *content* verify the golden is
 well-formed, while the load-bearing regression signal is the **request hashes**:
-a change in the memory-recall → prompt-assembly path shifts a request, misses the
-cassette, and fails replay. The genuine-recall (live-model) bar rides the
-release-prep re-record. The remaining seeds — the typed-event `EVAL-ERROR-*` and
-the rest of [§E](rfcs/0044-eval-set-golden-traces.md#e-seed-eval-sets) — land in a
-**4b** slice gated on RFC 0041.
+a change in the memory-recall / working-memory → prompt-assembly path shifts a
+request, misses the cassette, and fails replay. The genuine-recall (live-model) bar
+rides the release-prep re-record. The remaining seeds — the typed-event
+`EVAL-ERROR-*` and the cross-*session* `EVAL-RECALL-001` — land in a **4b** slice
+(the former gated on RFC 0041, the latter on a per-interaction-session recipe
+extension the single-session format does not yet express).
 
 ## Related
 

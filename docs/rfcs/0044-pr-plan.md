@@ -40,8 +40,13 @@ RFC 0052 + 0053 Implemented (v0.3.11 headline)
          ├── PR 4a: first pre-0041 seed — EVAL-MEMORY-001 recipe + offline golden
          │         (final_transcript / terminal_state only) ← no RFC 0041 dep
          │
-         └── PR 4b (gated on RFC 0041 P1): event-asserting seeds + remaining recipes
-                  (EVAL-ERROR-001/002 typed chat-error events, EVAL-RECALL/WORKING/FACTS)
+         ├── PR 4c: driver conversation-window fetcher + EVAL-WORKING-001
+         │         (RFC 0034 within-interaction working-memory seed, pre-0041) ← no RFC 0041 dep
+         │
+         └── PR 4b (gated on RFC 0041 P1): event-asserting seeds
+                  (EVAL-ERROR-001/002 typed chat-error events);
+                  + EVAL-RECALL-001 (cross-session, needs a per-interaction-session
+                  recipe extension) + EVAL-FACTS-001
 
    Phase 2 (separate): CI gate (`stable` tier blocks merge) — deferred past v0.3.11.
 ```
@@ -49,7 +54,14 @@ RFC 0052 + 0053 Implemented (v0.3.11 headline)
 PR 4 splits at the RFC 0041 edge: **4a** lands the seed recipes whose assertions
 the pre-0041 surface already supports (`final_transcript` / `terminal_state`);
 **4b** lands the event-asserting seeds once RFC 0041 emits the typed events they
-reference. PRs 1–3 build the harness against the pre-0041 surface.
+reference. PRs 1–3 build the harness against the pre-0041 surface. A pre-0041 seed
+whose *runtime path* the eval driver does not yet exercise lands when that seam is
+built — **4c** adds the driver conversation-window fetcher so the RFC 0034
+working-memory seed (`EVAL-WORKING-001`) becomes a genuine bar without RFC 0041
+(the plan first grouped `WORKING` under 4b, but its assertions are transcript-only;
+what it actually needed was the driver seam, not the typed-event stream). What
+remains truly 4b-gated is the typed-event `EVAL-ERROR-*`; `EVAL-RECALL-001`
+(cross-*session* no-leak) is deferred separately on a recipe-format extension.
 
 ## PR Sequence
 
@@ -172,12 +184,54 @@ subset that does not need typed events (`final_transcript` / `terminal_state`).
 - [x] `ruff` + `mypy` + `file_size.py --strict` clean; no cross-suite fixture leakage (seed test runs alongside the close-path suites).
 - [x] ROADMAP + RFC/plan status hygiene.
 
+### PR 4c: `feature/v0311-rfc0044-seed-working` — driver conversation-window fetcher + EVAL-WORKING-001 ✅
+
+The second pre-0041 seed, and the driver seam it needed. `EVAL-WORKING-001` asserts
+RFC 0034 **within-interaction working memory** (the ISSUE-0052 defect: the persona
+references its own prior clarifying question) — orthogonal to the dementia seed's
+cross-interaction recall. Empirically, the PR-3 driver drove channel-less events
+with no history fetcher, so the RFC 0034 conversation window degraded to
+current-event-only: a `WORKING` seed would have been a **vacuous** bar (a regression
+in working memory would shift no request hash). So this PR builds the missing seam
+first, then lands the seed against it — a genuine bar, all pre-0041 (working memory
+is RFC 0034, already shipped; no typed events involved).
+
+#### Scope
+
+| File | Change |
+|------|--------|
+| New [`evaluators/eval_channel_history.py`](../../evaluators/eval_channel_history.py) | `InProcessChannelHistory` — a pure (no-`agents`) in-memory `ChannelHistoryFetcher`: the driver appends each delivered turn, the persona runtime fetches the window during prompt assembly (newest-first rows in the `id`/`sender_id`/`content` shape the window reads). |
+| [`evaluators/persona_driver.py`](../../evaluators/persona_driver.py) | Working memory **opt-in per recipe via `setup.channel`**: with a channel the driver wires the fetcher (`set_history_fetcher`), sets `channel_id`/a deterministic `message_id` on each event, and logs the inbound turn (before dispatch, as the ordering anchor) + the persona's reply (after). No channel → the pre-window current-event-only path, **byte-identical** to before — so `EVAL-MEMORY-001`'s committed golden is untouched (verified). |
+| New [`evaluators/eval_sets/EVAL-WORKING-001.yaml`](../../evaluators/eval_sets/EVAL-WORKING-001.yaml) + `.golden.yaml` | The recipe (declares `setup.channel`) + its offline-recorded golden. |
+| [`evaluators/eval_sets/offline_responses.eval.yaml`](../../evaluators/eval_sets/offline_responses.eval.yaml) | Curated `ember-owl` replies for the two turns — keywords disjoint from the `EVAL-MEMORY-001` entries so neither seed shadows the other (the mock keys on the latest user message only). |
+| [`docs/evaluators-guide.md`](../evaluators-guide.md), [`evaluators/eval_sets/README.md`](../../evaluators/eval_sets/README.md) | The `setup.channel` working-memory seam + the second seed. |
+| RFC 0044 pr-plan (this file) | PR 4 re-split: `WORKING` was never event-gated — it needed the driver seam, not RFC 0041 (4c); 4b narrows to `EVAL-ERROR-*`; `EVAL-RECALL-001` deferred on a recipe-format extension. |
+
+#### Tests
+
+- [`tests/unit/python/test_eval_channel_history.py`](../../tests/unit/python/test_eval_channel_history.py) — the fetcher contract: newest-first, `limit` cap, channel isolation, `[]` (never `None`) on empty, `as_participant` accepted-and-ignored, Protocol conformance.
+- [`tests/unit/python/test_eval_persona_driver.py`](../../tests/unit/python/test_eval_persona_driver.py) — with `setup.channel`, turn 2's `messages` carries turn 1's user message **and the persona's own reply** (working memory engaged); without a channel, every turn is current-event-only (the gate that keeps `EVAL-MEMORY-001` unchanged).
+- [`tests/integration/test_eval_working_seed_replay.py`](../../tests/integration/test_eval_working_seed_replay.py) — the committed recipe + golden replays all-pass; pre-0041 subset; assertion load-bearing; and **working-memory load-bearing** — replaying the committed golden against a channel-stripped recipe goes red (turn 2 loses the window → cassette miss).
+
+#### PR checklist
+
+- [x] Test-first (red → green); the fetcher / driver-engagement / seed-replay suites fail before the seam + seed, pass after.
+- [x] `EVAL-MEMORY-001` golden verified byte-identical (channel-less path unchanged); offline re-record of the new seed byte-deterministic.
+- [x] Golden recorded via `make eval-record-offline` (deterministic, $0, no key); replays green ×N.
+- [x] `ruff` + `mypy` + `file_size.py --strict` clean over `evaluators/` + the new tests.
+- [x] `import evaluators` stays runtime-free (the fetcher is pure; the driver is submodule-only).
+- [x] ROADMAP + RFC/plan + FILEMAP status hygiene (RFC 0044 rides as infrastructure — no CHANGELOG entry, per PRs 1–4a).
+
 ### PR 4b (gated on RFC 0041 Phase 1): event-asserting seeds + remaining recipes
 
 The event-asserting seeds ([§E](0044-eval-set-golden-traces.md#e-seed-eval-sets)) —
-`EVAL-ERROR-001`/`002` (typed chat-error events) — plus the remaining recall
-recipes (`EVAL-RECALL-001`, `EVAL-WORKING-001`, `EVAL-FACTS-001`), with recorded
-`.golden.yaml` sidecars, once RFC 0041 emits the typed events they assert on.
+`EVAL-ERROR-001`/`002` (typed chat-error events) — with recorded `.golden.yaml`
+sidecars, once RFC 0041 emits the typed events they assert on. `EVAL-FACTS-001`
+(declarative-facts recall) rides here too. `EVAL-RECALL-001` (cross-*session*
+no-leak) is a separate deferral: its assertions are transcript-only (not
+event-gated), but the single-session recipe format cannot yet express two sessions
+— it lands once a per-interaction-session extension does. (`EVAL-WORKING-001`
+landed pre-0041 in PR 4c — see above.)
 
 ## Notes
 

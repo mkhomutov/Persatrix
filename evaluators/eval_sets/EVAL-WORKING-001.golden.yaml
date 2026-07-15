@@ -1,0 +1,13 @@
+11ff551d09a3c0d9921de49a81f61124dcb9d73044d8633fd66cced2e26669e1:
+  stop_reason: end_turn
+  text: Happy to help with the deploy — should I ship to staging or production?
+  usage:
+    input_tokens: 2045
+    output_tokens: 17
+e870dff5219721d8e93912cf771d7b31799784b861b8f978251b3cb8a6884cc4:
+  stop_reason: end_turn
+  text: 'I still need one thing before I run it: staging or production? Say the word
+    and it''s out.'
+  usage:
+    input_tokens: 2089
+    output_tokens: 22

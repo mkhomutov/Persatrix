@@ -10,6 +10,14 @@ temporal seam (OQ #5) via ``clock.advance``, and snapshots the terminal state in
 the ``persona:<id>:...`` key space that :func:`~evaluators.eval_set.evaluate`
 compares against.
 
+RFC 0034 working memory is opt-in per recipe. A recipe that declares
+``setup.channel`` gets an :class:`~evaluators.eval_channel_history.InProcessChannelHistory`
+wired as its conversation-window history fetcher, and each delivered turn is logged
+to it — so the persona's window reconstructs the in-channel transcript and it sees
+its own prior turns. A recipe with no channel drives the pre-window
+current-event-only path, byte-identical to before, so enabling this never perturbs
+a landed channel-less golden (e.g. EVAL-MEMORY-001).
+
 Determinism — the property that lets a golden recorded once replay byte-stably in
 CI (RFC 0044 §D) — comes from the ``FrozenClock`` (the only wall-clock the prompt
 reads, ``agents/persona_runtime/prompt_assembly.py``) and an in-memory (``:memory:``)
@@ -30,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from evaluators.assertions import EvalRun
+from evaluators.eval_channel_history import InProcessChannelHistory
 from evaluators.eval_set import EvalSet
 from evaluators.runner import parse_elapsed
 
@@ -194,6 +203,22 @@ class PersonaRuntimeDriver:
 
         user = setup.user or "user"
         session = setup.session_id or eval_set.id
+        # RFC 0034 working memory (opt-in per recipe via ``setup.channel``). With a
+        # channel declared, an in-process history fetcher is wired and every
+        # delivered turn is logged, so the persona's conversation window
+        # reconstructs the in-channel transcript — the persona sees its own prior
+        # turns (``agents/persona_runtime/conversation_window.py``). Without a
+        # channel the driver stays on the pre-window current-event-only path,
+        # byte-identical to a channel-less recipe (e.g. EVAL-MEMORY-001), so this
+        # is purely additive and never perturbs a landed golden. Message ids are a
+        # deterministic monotonic sequence so the window content — and thus every
+        # request hash — is stable across a record and its replays (RFC 0044 §D).
+        channel = setup.channel
+        history: InProcessChannelHistory | None = None
+        if channel:
+            history = InProcessChannelHistory()
+            agent.set_history_fetcher(history)
+        msg_seq = 0
         turn_outputs: list[str] = []
         # The persona's reply to the most recent user turn. An `assistant` turn is
         # the *expectation* on that reply, so outputs are appended per assistant
@@ -209,6 +234,20 @@ class PersonaRuntimeDriver:
                     clock.advance(parse_elapsed(interaction.elapsed))
                 for turn in interaction.turns:
                     if turn.role == "user":
+                        # Log the inbound turn *before* dispatch (as the
+                        # orchestrator persists an inbound message before the
+                        # persona acts) so it is the ordering anchor the window
+                        # dedups the current event against.
+                        message_id: str | None = None
+                        if history is not None and channel:
+                            message_id = f"m{msg_seq}"
+                            msg_seq += 1
+                            history.append(
+                                channel_id=channel,
+                                message_id=message_id,
+                                sender_id=user,
+                                content=turn.user_text or "",
+                            )
                         event = AgentEvent(
                             event_type=EventType.CHANNEL_MESSAGE,
                             payload={
@@ -217,6 +256,8 @@ class PersonaRuntimeDriver:
                                 "participant_type": "user",
                             },
                             sender_id=user,
+                            channel_id=channel,
+                            message_id=message_id,
                             metadata={
                                 "chat_session_id": session,
                                 "sender_participant_type": "user",
@@ -224,6 +265,16 @@ class PersonaRuntimeDriver:
                         )
                         actions = await agent.on_event(event)
                         last_reply, _status = extract_chat_reply(actions, user)
+                        # Log the persona's reply *after* — so the window replays
+                        # it as the persona's own prior ``assistant`` turn next time.
+                        if history is not None and channel:
+                            history.append(
+                                channel_id=channel,
+                                message_id=f"m{msg_seq}",
+                                sender_id=setup.persona,
+                                content=last_reply,
+                            )
+                            msg_seq += 1
                     elif turn.role == "assistant":
                         turn_outputs.append(last_reply)
             terminal_state = await _snapshot_state(agent, setup.persona)

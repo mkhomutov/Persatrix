@@ -58,15 +58,18 @@ class _ScriptFake:
     """Call-index-scripted live provider: the nth ``create_message`` returns
     ``replies[n]`` as plain text (the runtime synthesizes it into a channel
     reply). Keyed by call index, not content, so it is robust to memory context
-    leaking tokens into the request messages."""
+    leaking tokens into the request messages. Records each call's ``messages``
+    array so a test can inspect what the runtime assembled per turn."""
 
     name = "fake-live"
 
     def __init__(self, replies: list[str]) -> None:
         self.replies = replies
         self.calls = 0
+        self.seen_messages: list[list[Any]] = []
 
     async def create_message(self, *, model, messages, system, tools, max_tokens, temperature):
+        self.seen_messages.append(messages)
         reply = self.replies[min(self.calls, len(self.replies) - 1)]
         self.calls += 1
         return LLMResponse(text=reply, stop_reason=StopReason.END_TURN, usage=Usage(5, 5))
@@ -175,6 +178,81 @@ async def test_driver_events_empty_pre_rfc0041(tmp_path: Path) -> None:
     driver = PersonaRuntimeDriver(config_resolver=_resolver())
     run = await driver.run(es, _ScriptFake(list(_REPLIES)))
     assert run.events == []
+
+
+# ─── RFC 0034 working memory (channel-gated) ─────────────────────────────────
+
+_WORKING_MEMORY = textwrap.dedent(
+    """
+    id: EVAL-WORKING-001
+    title: working-memory drive
+    setup:
+      persona: ember-owl
+      user: sam
+      channel: dm:sam:ember-owl
+    interactions:
+      - id: i1
+        turns:
+          - user: "Can you kick off the deploy for me?"
+          - assistant: {match: contains, value: "staging"}
+          - user: "As soon as possible please — the team is waiting."
+          - assistant: {match: must_reference, values: ["staging"]}
+    """
+).strip()
+
+# The persona's clarifying question, then a reply that leans on it — the second
+# only makes sense if the model saw the first, which is exactly what the window
+# must feed back.
+_WM_REPLIES = [
+    "Happy to — should I deploy to staging or production?",
+    "I still need to know: staging or production?",
+]
+
+
+async def test_driver_engages_working_memory_when_channel_set(tmp_path: Path) -> None:
+    """With ``setup.channel`` declared, the driver wires the in-process history
+    fetcher so the RFC 0034 window reconstructs the in-channel transcript: turn 2's
+    ``messages`` array carries turn 1's user message *and the persona's own prior
+    reply*. This is the seam that makes a working-memory seed a real regression bar
+    — drop it and turn 2's request (hence its golden hash) changes."""
+    es = _recipe(tmp_path, _WORKING_MEMORY)
+    fake = _ScriptFake(list(_WM_REPLIES))
+    driver = PersonaRuntimeDriver(config_resolver=_resolver())
+
+    await driver.run(es, fake)
+
+    assert len(fake.seen_messages) == 2  # one create_message per user turn
+    assert len(fake.seen_messages[0]) == 1  # turn 1: no history yet → current only
+    # Turn 2: the reconstructed window — prior user turn, the persona's own reply,
+    # then the current turn.
+    turn2 = fake.seen_messages[1]
+    assert len(turn2) == 3
+    assert turn2[-1]["role"] == "user"  # current event is always last (and a user turn)
+    assistant_turns = [m for m in turn2 if m["role"] == "assistant"]
+    assert assistant_turns, "the persona's own prior reply must be replayed as an assistant turn"
+    assert assistant_turns[0]["content"] == _WM_REPLIES[0]  # its verbatim first reply
+    # The prior user turn is replayed too (peer-labelled per RFC 0034 §C/§G).
+    assert any("kick off the deploy" in str(m.get("content")) for m in turn2 if m["role"] == "user")
+
+
+async def test_driver_no_working_memory_without_channel(tmp_path: Path) -> None:
+    """The gate: a recipe with no ``setup.channel`` stays on the pre-window
+    current-event-only path — every turn's ``messages`` array holds only the
+    current turn, byte-identical to before this seam. This is what keeps a landed
+    channel-less golden (EVAL-MEMORY-001) unchanged when working memory is added."""
+    body = "\n".join(
+        line for line in _WORKING_MEMORY.splitlines() if "channel:" not in line
+    )
+    es = _recipe(tmp_path, body)
+    fake = _ScriptFake(list(_WM_REPLIES))
+    driver = PersonaRuntimeDriver(config_resolver=_resolver())
+
+    await driver.run(es, fake)
+
+    assert len(fake.seen_messages) == 2
+    assert all(len(msgs) == 1 for msgs in fake.seen_messages), (
+        "no channel → no conversation window → current-event-only on every turn"
+    )
 
 
 # ─── record → replay symmetry through the runtime ────────────────────────────

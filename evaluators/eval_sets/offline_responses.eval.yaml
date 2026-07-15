@@ -26,3 +26,12 @@ responses:
       reply: "For a seven-year-old like Mira, a hands-on children's museum or a short nature walk tends to land well."
     - match: ["committed", "prefer"]        # i5 — recall the commitment + preference
       reply: "You committed to shipping the migration guide by Friday, and you prefer concise written threads over long meetings."
+    # EVAL-WORKING-001 — working memory. Keywords are unique per turn AND disjoint
+    # from the EVAL-MEMORY-001 entries above (no earlier entry all-matches these
+    # prompts), so the mock returns the right reply for each and neither seed
+    # shadows the other. The mock keys on the latest user message only, so the
+    # conversation window never perturbs which reply is chosen.
+    - match: ["kick", "deploy"]             # i1 t1 — persona asks the clarifying question
+      reply: "Happy to help with the deploy — should I ship to staging or production?"
+    - match: ["soon", "waiting"]            # i1 t2 — persona references its own prior question
+      reply: "I still need one thing before I run it: staging or production? Say the word and it's out."
