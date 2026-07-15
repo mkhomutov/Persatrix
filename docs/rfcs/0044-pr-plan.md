@@ -184,7 +184,7 @@ subset that does not need typed events (`final_transcript` / `terminal_state`).
 - [x] `ruff` + `mypy` + `file_size.py --strict` clean; no cross-suite fixture leakage (seed test runs alongside the close-path suites).
 - [x] ROADMAP + RFC/plan status hygiene.
 
-### PR 4c: `feature/v0311-rfc0044-seed-working` — driver conversation-window fetcher + EVAL-WORKING-001 ✅
+### PR 4c: `feature/v0311-rfc0044-seed-working` — driver conversation-window fetcher + EVAL-WORKING-001 🔀 (this PR — [#748](https://github.com/mkhomutov/Persatrix/pull/748), open)
 
 The second pre-0041 seed, and the driver seam it needed. `EVAL-WORKING-001` asserts
 RFC 0034 **within-interaction working memory** (the ISSUE-0052 defect: the persona
