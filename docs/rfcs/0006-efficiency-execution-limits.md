@@ -44,7 +44,7 @@ depends_on:
 - [Phased Implementation Plan](#phased-implementation-plan)
 - [Files Touched (Estimated)](#files-touched-estimated)
 - [Test Strategy](#test-strategy)
-- [Open Questions](#open-questions)
+- [Open Questions](#open-questions-resolved)
 - [Decision / Next Steps](#decision--next-steps)
 - [Related Documentation](#related-documentation)
 

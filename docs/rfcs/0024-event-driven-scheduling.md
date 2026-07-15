@@ -58,7 +58,7 @@ Today the persona autonomy loop is a fixed-interval polling timer ([`agents/tick
 
 ## Motivation
 
-Polling created the leak. The README's [Cost Warning](../../README.md#%EF%B8%8F-cost-warning--read-before-running) documents a $35 v0.2.1 incident where a fixed-interval tick spun on empty context overnight; v0.2.2 shipped the empty-context TICK short-circuit ([RFC 0017 §F](0017-persona-memory-injection-budget.md#f-empty-context-tick-short-circuit)) to close *that* specific leak. Fixed-interval polling is the substrate that makes "agent left running over a weekend" expensive — the structural fix is to stop polling.
+Polling created the leak. The README's [Cost Warning](../../README.md#-cost-warning) documents a $35 v0.2.1 incident where a fixed-interval tick spun on empty context overnight; v0.2.2 shipped the empty-context TICK short-circuit ([RFC 0017 §F](0017-persona-memory-injection-budget.md#f-empty-context-tick-short-circuit)) to close *that* specific leak. Fixed-interval polling is the substrate that makes "agent left running over a weekend" expensive — the structural fix is to stop polling.
 
 Concretely, four problems compound:
 
@@ -366,4 +366,4 @@ Phases 1–4 shipped under the v0.3.3 umbrella per [`0024-pr-plan.md`](0024-pr-p
 - [RFC 0019 — OpenTelemetry Completion](0019-opentelemetry-completion.md) — `wake.kind` attribute conventions
 - [`agents/tick.py`](../../agents/tick.py) — current polling implementation
 - [`agents/dispatch.py`](../../agents/dispatch.py) — current `EventDispatcher.dispatch()` and `scheduler.wake()` callsite
-- [README — Cost Warning](../../README.md#%EF%B8%8F-cost-warning--read-before-running) — the $35 incident motivating this work
+- [README — Cost Warning](../../README.md#-cost-warning) — the $35 incident motivating this work

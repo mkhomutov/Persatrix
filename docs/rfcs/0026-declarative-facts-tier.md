@@ -59,7 +59,7 @@ Three signals drive this RFC:
 
 1. **The dementia complaint** ([memory-quality-roadmap.md](../memory-quality-roadmap.md)): persona references to earlier-stated facts feel "only sometimes," even at high `recall@k`.
 2. **Root cause #1** in the roadmap: wall-of-prose summaries hide specific facts.
-3. **The user-facing v0.3.0 promise** ([ROADMAP.md §v0.3.0](../../ROADMAP.md#v030--agent-conversations)): "form opinions about each other over time." Opinions need stable, retrievable facts to anchor them.
+3. **The user-facing v0.3.0 promise** ([ROADMAP.md §v0.3.0](../../ROADMAP.md#v030--agent-conversations--complete)): "form opinions about each other over time." Opinions need stable, retrievable facts to anchor them.
 
 Three RFCs were drafted in response — 0023 (structured summary + auto-notes), 0024 (vector recall), 0025 (thematic clustering). The roadmap-doc assessment narrows the prize: structured **facts**, not structured summaries, are the load-bearing change. This RFC is that carve-out.
 

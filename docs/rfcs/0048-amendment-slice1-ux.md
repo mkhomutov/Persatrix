@@ -105,7 +105,7 @@ Listed so the amendment's PR scope is complete; none change the API:
 - The override is **inert and hidden once `/ui/context` reports `authenticated: true`** (i.e. once RFC 0039 lands). An authenticated principal can never be silently overridden from the browser; at that point the field disappears (or, if a future design wants user-impersonation for admins, it becomes a separate permission-gated feature — out of scope here). This is what keeps §E a *local-mode carve-out* rather than a hole in the future auth model.
 - **No endpoint changes**, no new privileged surface; the override only selects which `user_id` the existing read/write calls carry — exactly what a CLI caller already does by passing `--user`.
 
-This is the one genuine product decision in the amendment (see [Open Questions](#open-questions) #5) and must be signed off before PR D, precisely because it documents a carve-out to a forward-compat rule.
+This is the one genuine product decision in the amendment (see [Open Questions](#decisions-locked-2026-06-03) #5) and must be signed off before PR D, precisely because it documents a carve-out to a forward-compat rule.
 
 ### §F. First-contact onboarding & cross-panel continuity (closes Context #6, #7)
 

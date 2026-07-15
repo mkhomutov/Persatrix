@@ -31,7 +31,7 @@ the other four are backed by a shared SQLite database.
 > [persona-agents guide §2](../guides/persona-agents.md#2-the-three-memory-tiers).
 
 In v0.3.0 the **`MemoryFacade`** ([agents/memory/facade.py](../../agents/memory/facade.py),
-[RFC 0008 §B](../rfcs/0008-agent-memory-context-optimization.md#b-memory-facade-shape))
+[RFC 0008 §B](../rfcs/0008-agent-memory-context-optimization.md#b-memory-for-all-agent-types))
 is the read/write contract for **task agents** —
 `store_observation` / `retrieve_relevant` / `compress`. Task-agent callers
 must not depend on the tier-specific schemas; the facade is the boundary.

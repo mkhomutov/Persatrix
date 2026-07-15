@@ -53,7 +53,7 @@ Today the budget enforcer (`internal/cost/BudgetEnforcer`) lives in the Go orche
 
 ## Motivation
 
-Cost is the recurring failure class on this project. The README's [Cost Warning](../../README.md#%EF%B8%8F-cost-warning--read-before-running) documents a real $35 incident from v0.2.1 testing; v0.2.2's [empty-context TICK short-circuit](0017-persona-memory-injection-budget.md#f-empty-context-tick-short-circuit) closed one specific leak; v0.2.3 still lists "chat traffic bypasses `BudgetEnforcer`" as a [known limitation](../../README.md#known-limitations-in-v023). Each fix targets a symptom; the structural cause is unchanged.
+Cost is the recurring failure class on this project. The README's [Cost Warning](../../README.md#-cost-warning) documents a real $35 incident from v0.2.1 testing; v0.2.2's [empty-context TICK short-circuit](0017-persona-memory-injection-budget.md#f-empty-context-tick-short-circuit) closed one specific leak; v0.2.3 still lists "chat traffic bypasses `BudgetEnforcer`" as a [known limitation](../../README.md#roadmap). Each fix targets a symptom; the structural cause is unchanged.
 
 The structural cause is that the wallet sits downstream of the spender. Concretely:
 
@@ -448,6 +448,6 @@ When RFC 0011 channels deliver a message and the recipient agent generates an LL
 - [RFC 0006 — Efficiency & Execution Limits](0006-efficiency-execution-limits.md) — defines `max_llm_calls`, the per-task budget shape this RFC complements.
 - [RFC 0017 — Persona Memory Injection Token Budget](0017-persona-memory-injection-budget.md) — closes one specific cost leak; this RFC removes the class.
 - [RFC 0011 — Channels & Bridges](0011-channels-bridges.md) — introduces a new LLM-call origin (channel messages) that this RFC's `Cause` enum reserves space for.
-- [README — Cost Warning](../../README.md#%EF%B8%8F-cost-warning--read-before-running) — operational context and the v0.2.1 incident this RFC addresses structurally.
+- [README — Cost Warning](../../README.md#-cost-warning) — operational context and the v0.2.1 incident this RFC addresses structurally.
 - [`internal/cost/cost.go`](../../internal/cost/cost.go) — `BudgetEnforcer` and `TokenCounter`, composed by the new `WalletService`.
 - [`agents/llm_client.py`](../../agents/llm_client.py) — the call site that gains lease wrapping.

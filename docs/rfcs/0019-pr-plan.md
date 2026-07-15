@@ -466,7 +466,7 @@ Three forces converge to make a dedicated polish PR the lowest-friction option f
 
 1. **Single-surface cohesion.** All captured items touch [`agents/observability/tracing.py`](../../agents/observability/tracing.py), [`agents/persona_runtime/`](../../agents/persona_runtime), and [`agents/llm_client.py`](../../agents/llm_client.py) / [`agents/llm_providers.py`](../../agents/llm_providers.py) — one reviewer with the OTEL spans context loaded handles them in a single pass.
 2. **One non-trivial extraction (`agents/llm_types.py`).** The `llm_client` ↔ `llm_providers` import-cycle Should-Fix (round-2 finding from [PR 2 review](#from-pr-2-review)) requires extracting `LLMRequest` / `LLMResponse` / `StopReason` / `STOP_REASON_TO_GEN_AI` into a leaf module. That is structurally meaningful enough to deserve its own commit and review pass; bundling into PR 5 buries the diff under status-flip noise.
-3. **PR 5 size budget.** [PR 5](#pr-5-feature-v023-rfc0019-followups-close---review-follow-ups--rfc-close) targets 150–300 lines under the [BRANCHING.md](../BRANCHING.md) 500-line soft cap. Folding `_pending_tick_links` cap + Linkable Protocol + `llm_types.py` extraction + `_env.py` consolidation would push past that cap.
+3. **PR 5 size budget.** [PR 5](#pr-5-featurev023-rfc0019-followups-close--review-follow-ups--rfc-close) targets 150–300 lines under the [BRANCHING.md](../BRANCHING.md) 500-line soft cap. Folding `_pending_tick_links` cap + Linkable Protocol + `llm_types.py` extraction + `_env.py` consolidation would push past that cap.
 
 #### Scope
 

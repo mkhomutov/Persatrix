@@ -869,7 +869,7 @@ which makes the §E privacy wall *stronger* than the RFC describes, not weaker.
 The bias-to-silence above is exactly right *with a human in the loop* — but a
 channel can also run **with no human at all** ([RFC 0052](../rfcs/0052-autonomous-agent-channels.md);
 the operator-facing arming/convening how-to is [Channels guide §Autonomous
-channels](channels.md#autonomous-channels)). There the same
+channels](channels.md#13-autonomous-channels-rfc-0052)). There the same
 think-before-you-speak pressure has a failure mode: every persona reasons "the
 others can cover this", all stay silent, and an unattended discussion dies to a
 near-empty transcript. From the **persona side**, two things are worth knowing:
