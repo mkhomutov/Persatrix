@@ -323,7 +323,7 @@ PR 1 lands the structural foundation with no behaviour change — `TickScheduler
 - [x] `docs/manual-tests/MT-IDLE-001.md` authored; execution deferred to [v0.3.3-plan Phase 4 PR 1](../v0.3.3-plan.md#phase-4--v033-release-prep-execution).
 - [x] `MT-COST-004` (RFC 0023) automated surface passes unchanged under the event-driven model — the legacy-adapter TICK path is untouched, so `idle_reason=budget_denied` is still emitted (`test_action_loop_resource_exhausted`, `test_tick_budget_denied_idle`).
 - [x] Channel-message dispatch goes through `event_loop.enqueue(InboundEventWake(event))` directly (fire-and-forget, no handle), not through `scheduler.wake()` ([v0.3.3-plan Acceptance row 2](../v0.3.3-plan.md#acceptance-for-v033)).
-- [x] [README Cost Warning](../../README.md#%EF%B8%8F-cost-warning--read-before-running) forward-pointer added.
+- [x] [README Cost Warning](../../README.md#-cost-warning) forward-pointer added.
 - [x] [Progress Overview](#progress-overview) row 4 filled.
 
 ---
@@ -804,5 +804,5 @@ Per [.github/copilot-instructions.md §Status Hygiene](../../.github/copilot-ins
 - [RFC 0019 — OpenTelemetry Completion](0019-opentelemetry-completion.md) — `wake.kind` attribute conventions; `source_span_id` propagation through PR 3a's write path.
 - [`agents/tick.py`](../../agents/tick.py) — current polling implementation, becomes a thin adapter in PR 1.
 - [`agents/dispatch.py`](../../agents/dispatch.py) — current `EventDispatcher.dispatch()` callsite, rewritten around `SyncDispatchHandle` in PR 1.
-- [README — Cost Warning](../../README.md#%EF%B8%8F-cost-warning--read-before-running) — the $35 v0.2.1 incident motivating this RFC; v0.3.3 closes the polling-loop class structurally.
+- [README — Cost Warning](../../README.md#-cost-warning) — the $35 v0.2.1 incident motivating this RFC; v0.3.3 closes the polling-loop class structurally.
 - `docs/manual-tests/MT-IDLE-001.md` — authored in PR 4, executed in [v0.3.3-plan Phase 4 PR 1](../v0.3.3-plan.md#phase-4--v033-release-prep-execution).

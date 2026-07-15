@@ -301,7 +301,7 @@ Integration:
 - [x] `source_agent` is framework-injected; caller-set values are rejected with `source_agent_set` reason
 - [x] Importance downscaling to `trust_ceiling` (default `0.8`) is enforced on every admitted `MemoryWriteEntry`
 - [x] `max_memory_writes` cap (default `20`, security item #7) is enforced
-- [x] [RFC 0008 PR 4](#pr-4-feature-v030-rfc0008-shared-pools-acl---phase-4a-shared-pool-acl--provenance) reviewer pinged: `MemoryWriteEntry` schema is now stable; shared-pool ACL can rely on the same provenance shape
+- [x] [RFC 0008 PR 4](#pr-4-featurev030-rfc0008-shared-pools-acl--phase-4a-shared-pool-acl--provenance) reviewer pinged: `MemoryWriteEntry` schema is now stable; shared-pool ACL can rely on the same provenance shape
 
 #### Follow-up findings (from PR #222 deep review)
 
@@ -525,7 +525,7 @@ Integration:
 - [x] Sensitive-pool isolation ([RFC §H](0008-agent-memory-context-optimization.md#h-shared-vs-isolated-memory) safety constraint #3): `publish_to_pool` rejects writes to `sensitive: true` pools regardless of writer ACL, with reason `sensitive_pool_isolation`
 - [x] `min_confidence` filter on `read_from_pool` works without a default (explicit operator opt-in); over-fetch factor 3 ensures `limit` is honoured (PR #223 review S3)
 - [x] RFC 0009 upgrade path documented in code comments (capability tokens augment, not replace, the config ACL)
-- [x] [RFC 0008 PR 5](#pr-5-feature-v030-rfc0008-procedural-revalidation---phase-4b-confidence-decay--revalidation) reviewer pinged: shared pools land before procedural decay so PR 5's stale-entry handling can rely on the provenance shape
+- [x] [RFC 0008 PR 5](#pr-5-featurev030-rfc0008-procedural-revalidation--phase-4b-confidence-decay--revalidation) reviewer pinged: shared pools land before procedural decay so PR 5's stale-entry handling can rely on the provenance shape
 
 #### Follow-up findings (from PR #223 deep review)
 

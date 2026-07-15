@@ -11,7 +11,7 @@
 
 ## Overview
 
-This plan ships RFC 0030 **Phase 1 — the deterministic layers** ([RFC 0030 §Phased Implementation Plan](0030-multi-agent-conversation-governance.md#phase-1--deterministic-layers-v03x)): the three cheap, fail-safe-by-construction layers that make a conversation *end* with bounded cost — no LLM judgement, **opt-in via config**, additive by default:
+This plan ships RFC 0030 **Phase 1 — the deterministic layers** ([RFC 0030 §Phased Implementation Plan](0030-multi-agent-conversation-governance.md#phase-1--deterministic-layers-v03x---landed-v038)): the three cheap, fail-safe-by-construction layers that make a conversation *end* with bounded cost — no LLM judgement, **opt-in via config**, additive by default:
 
 1. **Layer 1 — per-interaction cost ceiling** ([§E](0030-multi-agent-conversation-governance.md#e-layer-1--per-conversation-cost-ceiling)). Extend [RFC 0023 leasing](0023-llm-call-leasing.md) `AcquireLease` with an optional `interaction_id` attribution field and an `interaction_budget_tokens` ceiling. The wallet tracks a per-`interaction_id` running total; once it crosses the ceiling, leases are denied with `INTERACTION_BUDGET_EXHAUSTED`, fail-closed (no LLM call happens). Default `0` (uncapped).
 2. **Layer 2 — per-participant reply budget** ([§F](0030-multi-agent-conversation-governance.md#f-layer-2--per-participant-reply-budget)). A new in-memory `interactionReplyBudget` tracker on the orchestrator keyed by the RFC 0020 `interaction_id`. A participant's `(K+1)`th publish in one interaction is rejected **pre-persistence** (HTTP 429 + `ErrParticipantBudgetExhausted`). Default `0` (uncapped); human principals are exempt.

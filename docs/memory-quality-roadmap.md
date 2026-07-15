@@ -4,7 +4,7 @@
 **Author**: Maksim Khomutov
 **Date**: 2026-05-01
 **Target**: scope-shaping for draft RFCs 0023/0024/0025; seeds for v0.3.x and v0.4.0
-**Companion to**: [v0.3.0 plan](v0.3.0-plan.md), [ROADMAP.md §v0.3.0](../ROADMAP.md#v030--agent-conversations)
+**Companion to**: [v0.3.0 plan](v0.3.0-plan.md), [ROADMAP.md §v0.3.0](../ROADMAP.md#v030--agent-conversations--complete)
 
 ---
 
@@ -52,7 +52,7 @@ The acceptance bar is **qualitative**, not just metric-driven. A persona that sc
 
 > Across a five-interaction scenario over 30 minutes covering one named entity, one stated preference, and one explicit commitment, does the persona reference each of those when an appropriate trigger appears later, **without keyword overlap to seed the retrieval**?
 
-If the answer is "only sometimes" — even with high `recall@k` numbers — the memory layer has failed the dementia test. This bar is the v0.3.0 user-facing promise ([ROADMAP.md §v0.3.0](../ROADMAP.md#v030--agent-conversations) — "form opinions about each other over time") translated into something a reviewer can fail an RFC against.
+If the answer is "only sometimes" — even with high `recall@k` numbers — the memory layer has failed the dementia test. This bar is the v0.3.0 user-facing promise ([ROADMAP.md §v0.3.0](../ROADMAP.md#v030--agent-conversations--complete) — "form opinions about each other over time") translated into something a reviewer can fail an RFC against.
 
 ---
 
@@ -259,5 +259,5 @@ Next step: §D outcome tags. MQ-11 precedes first MQ-4 V2 run.
 - [RFC 0020 — Interaction Lifecycle](rfcs/0020-interaction-lifecycle.md) — interaction-bounded episodes; OQ #6 (outcome tags) resolved by [§D](#d-outcome-tagged-importance-not-turn-count-importance).
 - [RFC 0021 — Persona Temporal Awareness](rfcs/0021-persona-temporal-awareness.md) — temporal data feeding [§F](#f-structured-since-we-last-spoke-prompt-header).
 - [v0.3.0 plan](v0.3.0-plan.md) — the milestone this doc shapes.
-- [ROADMAP.md §v0.3.0](../ROADMAP.md#v030--agent-conversations) and [§v0.4.0](../ROADMAP.md) — version targets.
+- [ROADMAP.md §v0.3.0](../ROADMAP.md#v030--agent-conversations--complete) and [§v0.4.0](../ROADMAP.md) — version targets.
 - [docs/rfcs/README.md](rfcs/README.md) — RFC process and lifecycle.

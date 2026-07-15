@@ -2,7 +2,12 @@
 """Check for broken internal documentation links.
 
 Validates that markdown links in docs/ and root-level .md files point to
-existing files.
+existing files, and that any ``#anchor`` fragment resolves to a real
+heading (or explicit ``<a id=…>``) in the target document.  Anchors are
+matched against GitHub's slug algorithm (``github-slugger``), covering both
+cross-file (``file.md#anchor``) and in-page (``#anchor``) links.  GitHub
+line anchors (``#L42``) and ``#fragment`` on non-markdown targets are left
+to the file-existence check.
 
 Usage::
 
@@ -34,6 +39,104 @@ _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)#]*)(#[^)]+)?\)")
 # can contain bracket/paren sequences that look like markdown links).
 _CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"``[^`]+``|`[^`]+`")
+
+# --- anchor (#fragment) validation -----------------------------------------
+# GitHub renders line-number anchors (``#L45``, ``#L45-L67``) on any file,
+# including markdown blobs; they are not heading slugs, so they are exempt
+# from heading validation.
+_LINE_ANCHOR_RE = re.compile(r"^L\d+(-L\d+)?$")
+
+# ATX heading, e.g. ``## Section title`` (setext ``===``/``---`` underlines
+# are intentionally ignored — no anchor link in the doc set targets one, and
+# a setext detector would misfire on YAML front-matter / thematic breaks).
+_ATX_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.*?)[ \t]*$")
+
+# Fenced code-block delimiter (``` or ~~~), possibly indented.
+_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+
+# Explicit HTML anchors GitHub honours as link targets: <a id="…"> / <a name="…">.
+_HTML_ANCHOR_RE = re.compile(r"""<a\s+(?:id|name)\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+
+
+def _github_slug(text: str) -> str:
+    """Slugify heading text the way GitHub does (``github-slugger``).
+
+    Lowercase; strip every character that is not a word character
+    (letters, digits, underscore), whitespace, or hyphen; then convert
+    spaces to hyphens.  Consecutive hyphens are **not** collapsed and
+    leading/trailing hyphens are **not** trimmed — both faithfully match
+    GitHub (e.g. ``## ⚠️ Cost Warning`` → ``-cost-warning``; a ``·—·``
+    em-dash separator yields a doubled ``--``).
+    """
+    slug = text.lower()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = slug.replace(" ", "-")
+    return slug
+
+
+def _render_heading_text(raw: str) -> str:
+    """Reduce a raw markdown heading to the visible text GitHub slugs.
+
+    GitHub derives the anchor from the *rendered* heading, so inline
+    markdown contributes only its visible text: links/images collapse to
+    their text/alt, and code-span backticks drop while their content
+    stays.  Emphasis markers (``*``) need no special handling —
+    :func:`_github_slug` strips ``*`` as punctuation, and the doc set has
+    no underscore-emphasis headings (underscores are load-bearing in
+    identifiers, so they are preserved).
+    """
+    raw = re.sub(r"[ \t]+#+[ \t]*$", "", raw)             # ATX closing ###
+    raw = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", raw)   # image  -> alt text
+    raw = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", raw)     # inline link -> text
+    raw = re.sub(r"\[([^\]]+)\]\[[^\]]*\]", r"\1", raw)    # reference link -> text
+    raw = re.sub(r"\[([^\]]+)\]", r"\1", raw)              # shortcut link -> text
+    raw = raw.replace("`", "")                             # code-span backticks
+    return raw
+
+
+def _extract_anchors(content: str) -> set[str]:
+    """Return every anchor a markdown document exposes to GitHub.
+
+    That is the slug of each ATX heading (outside fenced code blocks, with
+    ``github-slugger``'s duplicate ``-1``/``-2`` disambiguation) plus any
+    explicit ``<a id=…>`` / ``<a name=…>`` HTML anchors.
+    """
+    anchors: set[str] = set()
+    # Mirrors github-slugger's occurrence table: every returned slug is a
+    # key; the counter lives under the *base* slug and increments until a
+    # free ``base-N`` is found.
+    occurrences: dict[str, int] = {}
+
+    def _add_heading(text: str) -> None:
+        base = _github_slug(_render_heading_text(text))
+        slug = base
+        while slug in occurrences:
+            occurrences[base] += 1
+            slug = f"{base}-{occurrences[base]}"
+        occurrences[slug] = 0
+        anchors.add(slug)
+
+    in_fence = False
+    fence_marker = ""
+    for line in content.splitlines():
+        fence = _FENCE_RE.match(line)
+        if fence:
+            marker = fence.group(1)
+            if not in_fence:
+                in_fence, fence_marker = True, marker
+            elif line.strip().startswith(fence_marker):
+                in_fence, fence_marker = False, ""
+            continue
+        if in_fence:
+            continue
+        heading = _ATX_HEADING_RE.match(line)
+        if heading:
+            _add_heading(heading.group(2))
+
+    for match in _HTML_ANCHOR_RE.finditer(content):
+        anchors.add(match.group(1))
+
+    return anchors
 
 
 def _strip_inline_code_outside_links(text: str) -> str:
@@ -166,11 +269,62 @@ def _glob_md_files_fallback(repo_root: Path) -> list[Path]:
     return files
 
 
+def _check_anchor(
+    source_rel: str,
+    full_link: str,
+    fragment: str,
+    target_path: Path,
+    target_content: str | None,
+    repo_root: Path,
+    cache: dict[Path, set[str]],
+) -> BrokenLink | None:
+    """Return a ``BrokenLink`` when ``#fragment`` is absent from ``target_path``.
+
+    ``target_content`` lets the caller skip a file read when it already has
+    the text (in-page links).  GitHub line anchors (``#L42``) are accepted
+    without a heading lookup.  ``None`` means the anchor is valid or exempt.
+    """
+    if _LINE_ANCHOR_RE.match(fragment):
+        return None
+
+    resolved = target_path.resolve()
+    anchors = cache.get(resolved)
+    if anchors is None:
+        if target_content is None:
+            try:
+                target_content = target_path.read_text(
+                    encoding="utf-8", errors="replace",
+                )
+            except OSError:
+                # Unreadable target — the file-existence check owns that
+                # failure; don't also report a phantom broken anchor.
+                return None
+        anchors = _extract_anchors(target_content)
+        cache[resolved] = anchors
+
+    if fragment in anchors:
+        return None
+
+    try:
+        target_display = resolved.relative_to(repo_root).as_posix()
+    except ValueError:
+        target_display = target_path.name
+    return BrokenLink(
+        file=source_rel,
+        link=full_link,
+        target=target_display,
+        reason=f"Anchor not found in {target_display}: #{fragment}",
+    )
+
+
 def check_doc_links(repo_root: Path, verbose: bool = False) -> list[BrokenLink]:
     """Scan markdown files and return a list of broken internal links."""
     md_files = _collect_md_files(repo_root)
     failures: list[BrokenLink] = []
     checked = 0
+    # Cache each target document's anchor set (resolved path -> slugs) so a
+    # file linked from many places is parsed once.
+    anchor_cache: dict[Path, set[str]] = {}
 
     print("[SCAN] Checking documentation links...")
 
@@ -200,6 +354,7 @@ def check_doc_links(repo_root: Path, verbose: bool = False) -> list[BrokenLink]:
             link_path = match.group(2)
             anchor = match.group(3) or ""
             full_link = link_path + anchor
+            fragment = anchor[1:] if anchor else ""
 
             if re.match(r"^https?://", link_path) or link_path.startswith("mailto:"):
                 continue
@@ -208,9 +363,20 @@ def check_doc_links(repo_root: Path, verbose: bool = False) -> list[BrokenLink]:
             # Skip regex-like targets that leaked through backtick stripping.
             if re.search(r"[*+?^$|\\]", link_path):
                 continue
-            if not link_path.strip() and anchor:
-                continue
+
+            # Pure in-page link: [text](#anchor). There is no file target to
+            # resolve — validate the fragment against this document's own
+            # headings.  An empty [text]() has nothing to check.
             if not link_path.strip():
+                if not anchor:
+                    continue
+                checked += 1
+                broken = _check_anchor(
+                    rel_path, full_link, fragment, md_file, content,
+                    repo_root, anchor_cache,
+                )
+                if broken is not None:
+                    failures.append(broken)
                 continue
 
             checked += 1
@@ -238,6 +404,19 @@ def check_doc_links(repo_root: Path, verbose: bool = False) -> list[BrokenLink]:
                     target=link_path,
                     reason=f"Target not found: {target}",
                 ))
+                continue
+
+            # Cross-file #anchor: validate against the target document's
+            # headings, but only for markdown files — a #fragment on a
+            # non-markdown target (source line anchors, images) is not a
+            # heading slug.
+            if anchor and target.is_file() and target.suffix.lower() == ".md":
+                broken = _check_anchor(
+                    rel_path, full_link, fragment, target, None,
+                    repo_root, anchor_cache,
+                )
+                if broken is not None:
+                    failures.append(broken)
 
     _n = len(md_files)
     print(f"[OK] Checked {checked} links in {_n} markdown file{'s' if _n != 1 else ''}")

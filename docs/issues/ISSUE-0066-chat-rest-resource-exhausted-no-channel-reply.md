@@ -161,7 +161,7 @@ so a separate, explicit follow-up is required for `RESOURCE_EXHAUSTED`.
 
 ## Context
 
-Observed live during the [MT-COST-003 PASS run on 2026-05-20](../manual-tests/MT-COST-003.md#execution-log)
+Observed live during the [MT-COST-003 PASS run on 2026-05-20](../manual-tests/MT-COST-003.md#test-results)
 against PR #395 commit `6d17d7c`:
 
 > One intermediate turn returned HTTP 504 from an unrelated

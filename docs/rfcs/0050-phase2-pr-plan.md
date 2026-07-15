@@ -34,7 +34,7 @@ which ships dark because it is structurally **unavailable** — `panelAvailable`
 returns `false` for it regardless of any toggle.) Two
 RFC Phase-2 bullets that *do* need backend work — editable member threshold and
 the effective-policy preview — are explicitly **deferred** (see
-[Deferred](#deferred-requires-backend-work)), keeping this workstream pure-web.
+[Deferred](#deferred-requires-backend-work--out-of-phase-2-scope)), keeping this workstream pure-web.
 
 ### Prerequisite + cross-phase dependencies (reconciling with the RFC)
 
@@ -57,7 +57,7 @@ be tracked so the plan does not read as "Phase 2 ships → RFC done":
    pretend away.
 2. **Scope reconciliation — editable member threshold.** The RFC's Phase 2
    summary lists editable member thresholds *inside* Phase 2; this plan defers
-   them ([Deferred](#deferred-requires-backend-work) item 1) because no
+   them ([Deferred](#deferred-requires-backend-work--out-of-phase-2-scope) item 1) because no
    member-config mutation endpoint exists. That is a deliberate **narrowing** of
    the RFC's Phase 2, not a silent drop — closing RFC 0050 still requires either
    building that backend+web slice or amending the RFC to move member-threshold

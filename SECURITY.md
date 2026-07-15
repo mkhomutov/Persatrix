@@ -43,7 +43,7 @@ monetary cost. Users running Persatrix are responsible for:
   (`max_llm_calls` per agent, `max_daily_usd` in
   [config/optimization.yaml](config/optimization.yaml), per-workflow token
   budgets, response cache) are best-effort and have known limitations —
-  see the cost warning in [README.md](README.md#-cost-warning--read-before-running).
+  see the cost warning in [README.md](README.md#-cost-warning).
 - **Not running Persatrix in production environments** without significant
   additional safeguards beyond what the project provides. The roadmap
   through v0.3 explicitly treats current releases as experimental.
