@@ -7,7 +7,7 @@
 **Merge strategy**: Squash merge per [BRANCHING.md](../BRANCHING.md)
 **Master plan**: TBD — Phase 1 rides an open v0.3.x patch (v0.3.12 the last open slot); Phases 2–4 belong to the not-yet-opened v0.4.0 plan
 
-> ⚠️ **SKELETON — not yet actionable.** This plan is drafted ahead of RFC acceptance so the shape is visible. RFC 0040 is still **🔨 Draft**; per its [Decision / Next Steps](0040-agent-orchestrator-transport-unification.md#decision--next-steps) it must reach **Accepted** before PR 1 opens, and the [Phase 0 Hard Gate](#phase-0-hard-gate) below lists the scope decisions that must resolve first. Sizes are calibrated estimates; PR numbers, merge dates, and checklists are placeholders.
+> ⚠️ **SKELETON — not yet actionable.** This plan is drafted ahead of RFC acceptance so the shape is visible. RFC 0040 is **📋 Proposed**; per its [Decision / Next Steps](0040-agent-orchestrator-transport-unification.md#decision--next-steps) **the RFC must reach Accepted before PR 2 (the proto) opens** — PR 1 (v0.3.x hygiene) may proceed now, since it carries no proto change or scope dependency. The [Phase 0 Hard Gate](#phase-0-hard-gate) below lists the scope decisions that must resolve before PR 2. Sizes are calibrated estimates; PR numbers, merge dates, and checklists are placeholders.
 
 ---
 
@@ -27,11 +27,11 @@ The RFC ships in **4 phases** ([RFC §Phased Implementation Plan](0040-agent-orc
 
 ## Phase 0 Hard Gate
 
-RFC 0040 is **Draft** with unresolved scope decisions that are **non-additive once the proto ships**. PR 2 (the proto) does **not** open until these resolve in the RFC review thread and the RFC advances to Accepted. (PR 1 carries no proto change and no scope dependency — it may proceed as soon as the RFC is Proposed.)
+RFC 0040 is **📋 Proposed** with unresolved scope decisions that are **non-additive once the proto ships**. PR 2 (the proto) does **not** open until these resolve in the RFC review thread and the RFC advances to Accepted. (PR 1 carries no proto change and no scope dependency — it may proceed as soon as the RFC is Proposed.)
 
 | # | Blocker (RFC ref) | Why it gates | Recommended resolution |
 |---|-------------------|--------------|------------------------|
-| G1 | **`sender_id` scope** — [RFC §D TODO](0040-agent-orchestrator-transport-unification.md#d-shared-core-invariant-enforcement) | Determines whether the proto/handlers carry any authentic-sender machinery, or only the transport. `sender_id` is client-supplied and trusted today; there is nothing to relocate. | **Out of scope** — RFC 0040 ships the typed gRPC carrier; authentic-sender enforcement is RFC 0029 Phase 2 (capability tokens as call metadata). Confirm at review. |
+| G1 | **`sender_id` scope** — [RFC §D TODO](0040-agent-orchestrator-transport-unification.md#d-shared-core-invariant-enforcement) | Determines whether the proto/handlers carry any authentic-sender machinery, or only the transport. `sender_id` is client-supplied and trusted today; there is nothing to relocate. | **Out of scope** — RFC 0040 ships the typed gRPC carrier; authentic-sender enforcement needs the RFC 0009 Phase 4 agent-identity token (co-sequenced onto this path via RFC 0029 Phase 2 as call metadata). Confirm at review. |
 | G2 | **History migration** — [RFC OQ 3 / Goal 1](0040-agent-orchestrator-transport-unification.md#open-questions) | Sets whether **PR 5** exists at all. Goal 1 marks history optional pending this. | Migrate it for a uniform agent path, but treat PR 5 as the droppable scope if the train needs trimming. |
 | G3 | **Service shape** — [RFC OQ 1](0040-agent-orchestrator-transport-unification.md#open-questions) | Pins the proto in PR 2 (new `OrchestratorService` vs. folding into an existing service). Non-additive once stubs generate. | New dedicated `OrchestratorService` (keeps each service single-direction, single-concern). Confirm at review. |
 | G4 | **Transport selection** — [RFC OQ 2](0040-agent-orchestrator-transport-unification.md#open-questions) | Shapes the agent config surface + fallback logic in **PR 4**. | (a) explicit agent config flag (recommended — observable, no per-call probe) vs. (b) capability detection on `UNIMPLEMENTED`. Decide before PR 4. |
@@ -340,7 +340,7 @@ Populated as PRs are reviewed.
 
 These are tracked here so the plan and the RFC stay in sync until the gate clears:
 
-1. **G1 — `sender_id` scope** ([RFC §D TODO](0040-agent-orchestrator-transport-unification.md#d-shared-core-invariant-enforcement)): confirm out-of-scope (defer to RFC 0029 Phase 2). Blocks PR 2.
+1. **G1 — `sender_id` scope** ([RFC §D TODO](0040-agent-orchestrator-transport-unification.md#d-shared-core-invariant-enforcement)): confirm out-of-scope (the enforcement primitive is RFC 0009 Phase 4, co-sequenced onto this path via RFC 0029 Phase 2). Blocks PR 2.
 2. **G2 — history migration** ([RFC OQ 3 / Goal 1](0040-agent-orchestrator-transport-unification.md#open-questions)): decides whether PR 5 exists. Resolve before the v0.4.0 train opens.
 3. **G3 — service shape** ([RFC OQ 1](0040-agent-orchestrator-transport-unification.md#open-questions)): pins the PR 2 proto. Blocks PR 2.
 4. **G4 — transport selection** ([RFC OQ 2](0040-agent-orchestrator-transport-unification.md#open-questions)): shapes PR 4 config. Blocks PR 4.

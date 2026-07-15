@@ -21,7 +21,7 @@ depends_on:
 **Date**: 2026-05-17
 **Target**: v0.3.x (Phase 1) + v0.4.0 (Phases 2–4)
 **Depends on**: RFC 0002 (REST API Server — the surface this RFC re-scopes to clients-only), RFC 0004 (Python Agent gRPC Server — the existing `AgentService` this RFC mirrors in the reverse direction), RFC 0011 (Channels & Internal Agent Messaging — the channel publish/history endpoints being migrated)
-**Relates to**: RFC 0023 (LLM Call Leasing — shipped v0.3.2; already runs a gRPC `WalletService` round-trip on the agent→orchestrator path, so the wallet proto and this RFC's `OrchestratorService` share a transport story), RFC 0029 (Personal/Society Storage Split — Phase 2 capability tokens are wire-auth on the agent→orchestrator path; co-sequencing target — see §Open Questions 4), RFC 0039 (User Accounts & Authentication — the REST surface's auth story, which this RFC narrows to the client edge), RFC 0032 (Wire-Level Channel Interaction Layer — an *orthogonal* channel-wire change: it adds a conversation `interaction_id` to the message payload, this RFC changes the *transport* the payload travels over; the two compose without conflict), the v0.6.0 Distributed Mesh milestone (multi-node message routing via `internal/mesh/`, explicitly out of scope here — this is *not* RFC 0006, which is the already-shipped Efficiency & Execution Limits work)
+**Relates to**: RFC 0023 (LLM Call Leasing — shipped v0.3.2; already runs a gRPC `WalletService` round-trip on the agent→orchestrator path, so the wallet proto and this RFC's `OrchestratorService` share a transport story), RFC 0009 (Agent Identity, Security & Sandboxing — Phase 4 agent-identity tokens are the primitive that authentic-`sender_id` enforcement needs, deferred to v0.4.0 — see §D), RFC 0029 (Personal/Society Storage Split — Phase 2 is the co-sequenced first consumer that carries the RFC 0009 Phase 4 capability token onto this path as wire-auth; co-sequencing target — see §Open Questions 4), RFC 0039 (User Accounts & Authentication — the REST surface's auth story, which this RFC narrows to the client edge), RFC 0032 (Wire-Level Channel Interaction Layer — an *orthogonal* channel-wire change: it adds a conversation `interaction_id` to the message payload, this RFC changes the *transport* the payload travels over; the two compose without conflict), the v0.6.0 Distributed Mesh milestone (multi-node message routing via `internal/mesh/`, explicitly out of scope here — this is *not* RFC 0006, which is the already-shipped Efficiency & Execution Limits work)
 
 ---
 
@@ -77,7 +77,7 @@ Note that [RFC 0023](0023-llm-call-leasing.md) (shipped v0.3.2) already committe
 2. REST remains the **dedicated client edge** (CLI and a future Web UI) and becomes the *only* audience the REST surface is designed for.
 3. The channel publish/history endpoints **remain available over REST for clients** — they become *dual-surface* (REST for clients + gRPC for agents), not REST-removed.
 4. For any dual-surface operation, both transports are **thin adapters over one shared business-logic core** — no duplicated validation, fan-out, or persistence logic.
-5. Security-critical invariants that exist today — channel membership and the cascade-depth clamp — are enforced **in the shared core, below both transports**, so neither transport can bypass them. (Authoritative `sender_id` is *not* enforced today on either transport; it is new work owned by RFC 0029 Phase 2 — see §D.)
+5. Security-critical invariants that exist today — channel membership and the cascade-depth clamp — are enforced **in the shared core, below both transports**, so neither transport can bypass them. (Authoritative `sender_id` is *not* enforced today on either transport; enforcing it needs the agent-identity token that [RFC 0009](0009-security-sandboxing.md) Phase 4 owns — not this RFC — see §D.)
 6. The migration is **incremental and backwards-compatible** — no flag day; the REST agent path keeps working until each call is migrated and verified.
 
 ## Non-Goals
@@ -87,7 +87,7 @@ Note that [RFC 0023](0023-llm-call-leasing.md) (shipped v0.3.2) already committe
 - **Changing the orchestrator→agent gRPC contract.** `AgentService` ([`proto/task.proto`](../../proto/task.proto)) is unchanged.
 - **Changing log shipping.** `LogService` ([`proto/log_service.proto`](../../proto/log_service.proto)) is already gRPC and is untouched.
 - **Introducing a message broker or any multi-node message routing.** The horizontal-scale rework of the in-process reply-correlation table ([`internal/channels/waiter.go`](../../internal/channels/waiter.go)) belongs to the v0.6.0 Distributed Mesh milestone (`internal/mesh/`) and is tracked separately.
-- **Capability-token authentication itself.** That is [RFC 0029](0029-personal-society-storage-split.md) Phase 2. This RFC provides the typed gRPC transport that capability tokens will ride on (as call metadata); it does not define the tokens.
+- **Capability-token authentication itself.** The agent-identity token and its validation middleware are [RFC 0009](0009-security-sandboxing.md) Phase 4; [RFC 0029](0029-personal-society-storage-split.md) Phase 2 is the co-sequenced consumer that first carries that token onto this path. This RFC provides the typed gRPC transport the token will ride on (as call metadata); it neither defines nor enforces the tokens.
 - **Authenticating the REST client edge.** That is [RFC 0039](0039-user-accounts-authentication.md). This RFC only narrows *who* the REST surface serves.
 
 ## Design / Implementation
@@ -148,9 +148,10 @@ A new proto file `proto/orchestrator.proto` defines a single service hosted by t
 ```proto
 service OrchestratorService {
   // Publish a channel message. NOTE: sender_id is client-supplied and
-  // trusted today on both transports; authoritative sender stamping is
-  // deferred to RFC 0029 Phase 2 capability tokens (carried as call
-  // metadata) — see RFC 0040 §D scope decision. Not enforced here yet.
+  // trusted today on both transports; authoritative sender stamping needs
+  // the RFC 0009 Phase 4 agent-identity token (validation middleware),
+  // first carried onto this path by RFC 0029 Phase 2 as call metadata —
+  // see RFC 0040 §D scope decision. Not enforced here yet.
   rpc PublishChannelMessage(PublishChannelMessageRequest) returns (PublishChannelMessageResponse);
 
   // Fetch the last N messages of a channel (catch-up / conversation window).
@@ -180,9 +181,9 @@ The invariants, and where they live today:
 
 - **Cascade-depth clamp — already below both transports.** `publishCommit` clamps inbound `cascade_depth` to `[0, maxCascadeDepth]` before the store commit (`clampCascadeDepth` in [`internal/channels/cascade_depth.go`](../../internal/channels/cascade_depth.go), applied on the shared publish path). The gRPC adapter inherits it for free.
 - **Channel membership — already below both transports.** Membership is enforced in the store, one layer *below* `ChannelRouter`: `ChannelStore.PublishMessage` rejects a non-member with `ErrNotMember` ([`internal/channels/sqlite_messages.go`](../../internal/channels/sqlite_messages.go); documented in [`internal/channels/store.go`](../../internal/channels/store.go)). There is **nothing REST-handler-resident to relocate** for membership — the gRPC adapter inherits it too.
-- **`sender_id` trust — ⚠️ does not exist yet; SCOPE DECISION REQUIRED.** The intended guarantee is that the orchestrator, not the agent's LLM, is authoritative for `sender_id`. **That guarantee is not implemented today:** the publish handler accepts the client-supplied `sender_id` verbatim after only an empty-check ([`internal/server/channel_handlers.go`](../../internal/server/channel_handlers.go); [`internal/server/channel_types.go`](../../internal/server/channel_types.go) states the orchestrator "does not infer sender identity in v0.3.0"). There is no authenticated identity to stamp from and no existing REST-resident check to relocate. Authentic-sender enforcement is therefore **new capability work that hard-depends on [RFC 0029](0029-personal-society-storage-split.md) Phase 2 capability tokens** — not a mechanical relocation this RFC can perform on its own.
+- **`sender_id` trust — ⚠️ does not exist yet; SCOPE DECISION REQUIRED.** The intended guarantee is that the orchestrator, not the agent's LLM, is authoritative for `sender_id`. **That guarantee is not implemented today:** the publish handler accepts the client-supplied `sender_id` verbatim after only an empty-check ([`internal/server/channel_handlers.go`](../../internal/server/channel_handlers.go); [`internal/server/channel_types.go`](../../internal/server/channel_types.go) states the orchestrator "does not infer sender identity in v0.3.0 — auth tokens land in RFC 0009 Phase 4"). There is no authenticated identity to stamp from and no existing REST-resident check to relocate. Authentic-sender enforcement is therefore **new capability work, not a mechanical relocation this RFC can perform on its own.** The primitive it needs — cryptographically verifying *which agent is calling* — is the agent-identity token that [RFC 0009](0009-security-sandboxing.md) Phase 4 (Agent Identity Tokens & HITL Gates) owns: token issuance at `RegisterAgent` time plus validation middleware on the inbound gRPC path (`internal/security/token.go`, new in RFC 0009 Phase 4, deferred to v0.4.0). [RFC 0029](0029-personal-society-storage-split.md) Phase 2 is a *consumer* of that same token (for storage-scope checks) and the workstream that first carries it onto this path as call metadata — the co-sequencing target (§Open Questions 4), not the owner of the enforcement.
 
-> **⚠️ TODO — blocks Proposed → Accepted.** Decide whether authentic-sender enforcement is in scope for RFC 0040 at all. **Recommended: out of scope.** RFC 0040 delivers the typed gRPC transport a capability token rides on (as call metadata); [RFC 0029](0029-personal-society-storage-split.md) Phase 2 introduces the token and the enforcement. Until this decision lands, §D's only transport-parity requirement is confirming the gRPC adapter routes through `publishCommit` (above) so it inherits the cascade clamp and store-level membership check.
+> **⚠️ TODO — blocks Proposed → Accepted.** Decide whether authentic-sender enforcement is in scope for RFC 0040 at all. **Recommended: out of scope.** RFC 0040 delivers the typed gRPC transport a capability token rides on (as call metadata); the agent-identity token and its validation middleware are [RFC 0009](0009-security-sandboxing.md) Phase 4, and [RFC 0029](0029-personal-society-storage-split.md) Phase 2 is the co-sequenced consumer that first attaches it to this path (§Open Questions 4). Until this decision lands, §D's only transport-parity requirement is confirming the gRPC adapter routes through `publishCommit` (above) so it inherits the cascade clamp and store-level membership check.
 
 ### E. Agent-Side Client Migration
 
@@ -206,7 +207,7 @@ The agent already runs *outbound* gRPC clients to the orchestrator — the `LogS
 
 ## Security Considerations
 
-- **No weakening of the `sender_id` trust boundary — because there is none to weaken yet.** `sender_id` is client-supplied and trusted on both transports today (§D); this RFC neither adds nor removes that. Authentic-sender enforcement is new work owned by [RFC 0029](0029-personal-society-storage-split.md) Phase 2, for which this RFC provides the typed gRPC carrier (call metadata). See the §D scope TODO.
+- **No weakening of the `sender_id` trust boundary — because there is none to weaken yet.** `sender_id` is client-supplied and trusted on both transports today (§D); this RFC neither adds nor removes that. Authentic-sender enforcement is new work owned by [RFC 0009](0009-security-sandboxing.md) Phase 4 (agent-identity token issuance + validation middleware), for which this RFC provides the typed gRPC carrier (call metadata) and [RFC 0029](0029-personal-society-storage-split.md) Phase 2 is the co-sequenced first consumer. See the §D scope TODO.
 - **New inbound gRPC surface, same trust zone.** `OrchestratorService` is internal-only — its only intended callers are agents, on the same gRPC listener that already hosts `LogService` *and* the RFC 0023 `WalletService` (itself a unary agent→orchestrator control-plane service). It introduces no client-facing surface and no new network trust boundary beyond what those two services already established.
 - **Auth posture is inherited, not invented.** The agent→orchestrator path is unauthenticated today (both REST and gRPC). This RFC does not change that; it makes the path *uniform* so that [RFC 0029](0029-personal-society-storage-split.md) Phase 2 (capability tokens) and [RFC 0039](0039-user-accounts-authentication.md) (REST client auth) each have a single, typed surface to attach to. gRPC call metadata is the natural carrier for a capability token — a cleaner attachment point than a REST header.
 - **Reduced attack surface at the client edge.** Narrowing the REST surface to clients-only means agent-specific endpoints (registration) leave the public HTTP API entirely (Phase 4), shrinking what an unauthenticated REST caller can reach.
@@ -244,7 +245,7 @@ The migration is structured so the codebase is shippable after every phase and n
 **Deliverables.**
 1. `proto/orchestrator.proto` (new) with `OrchestratorService`; regenerate Go + Python stubs.
 2. Orchestrator-side gRPC handlers — thin adapters over `ChannelRouter` and the registry — registered on the existing `:9090` listener.
-3. Confirm the gRPC adapter routes through the shared `publishCommit` core so it inherits the cascade clamp and store-level membership enforcement — both already below both transports (§D). No `sender_id`/membership relocation is required; `sender_id` authenticity is deferred to RFC 0029 Phase 2 pending the §D scope decision.
+3. Confirm the gRPC adapter routes through the shared `publishCommit` core so it inherits the cascade clamp and store-level membership enforcement — both already below both transports (§D). No `sender_id`/membership relocation is required; `sender_id` authenticity depends on the RFC 0009 Phase 4 agent-identity token (co-sequenced onto this path via RFC 0029 Phase 2) and is out of scope pending the §D decision.
 4. REST endpoints unchanged and fully functional.
 
 **Dependencies.** Phase 1 (verified contract to mirror into proto).
@@ -308,7 +309,7 @@ The migration is structured so the codebase is shippable after every phase and n
 **Status: 📋 Proposed.** This RFC is open for review. Before it can advance to Accepted:
 
 1. Resolve Open Questions 1 and 2 (service shape, transport selection) in the review thread — both are non-additive once the proto ships.
-2. Decide the §D `sender_id` scope question — authentic-sender enforcement in scope, or hard-deferred to RFC 0029 Phase 2 (recommended). Membership and the cascade clamp already sit below both transports (§D), so **no relocation audit is required**.
+2. Decide the §D `sender_id` scope question — authentic-sender enforcement in scope, or deferred to its owner [RFC 0009](0009-security-sandboxing.md) Phase 4 (co-sequenced via RFC 0029 Phase 2) (recommended). Membership and the cascade clamp already sit below both transports (§D), so **no relocation audit is required**.
 3. Resolve Open Question 3 / Goal 1 — whether `GetChannelHistory` migrates — which fixes Phase 3 scope.
 4. Decide the co-sequencing with RFC 0029 Phase 2 (Open Question 4) when the v0.4.0 plan opens.
 
