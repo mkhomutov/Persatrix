@@ -10,7 +10,7 @@ target: v0.4.0+
 depends_on:
   - RFC-0031
   - RFC-0034
-  - RFC-0041
+  - RFC-0041  # Phase 1b only — Phase 1a (enum/API/wrappers) carries no RFC-0041 dependency
 ---
 
 # RFC 0042 — State Namespacing by Scope Prefix
@@ -20,7 +20,7 @@ depends_on:
 **Author**: Maksim Khomutov
 **Date**: 2026-05-20
 **Target**: v0.4.0+
-**Depends on**: RFC 0031 (Per-Session Namespacing — provides the `session_id` room-continuity axis this RFC's `session:` scope aligns with, plus the `epoch` run-isolation axis and `principal` tenant axis this RFC treats as an envelope), RFC 0034 (Persona Conversational Working Memory — the per-*channel* conversation window; referenced for how live-turn transcript state is reconstructed, **not** as the `interaction:` backing store), RFC 0041 (Typed Event Taxonomy — **Phase-1 build gate**: `ScopedState` mutations emit `StateDelta` events, so this RFC's Phase 1b cannot land until RFC 0041 Phase 1 ships the event shape)
+**Depends on**: RFC 0031 (Per-Session Namespacing — provides the `session_id` room-continuity axis this RFC's `session:` scope aligns with, plus the `epoch` run-isolation axis and `principal` tenant axis this RFC treats as an envelope), RFC 0034 (Persona Conversational Working Memory — the per-*channel* conversation window; referenced for how live-turn transcript state is reconstructed, **not** as the `interaction:` backing store), RFC 0041 (Typed Event Taxonomy — **Phase-1b-only build gate**: `ScopedState` mutations emit `StateDelta` events, so this RFC's Phase 1b cannot land until RFC 0041 Phase 1 ships the event shape; **Phase 1a carries no RFC 0041 dependency** and can be scheduled independently — the front-matter `depends_on` entry is deliberately coarse)
 **Relates to**: RFC 0020 (Interaction Lifecycle — the in-memory `InteractionTracker` turn buffer and the interaction-close boundary that back the `interaction:` scope), RFC 0029 (Personal/Society Storage Split — the `MemoryStore` facade this RFC layers a naming convention on top of, without changing the split; owns the Scratchpad working-memory tier), RFC 0037 (Memory Confidentiality & Channel Classification — the channel-classification layer composes with the scope layer), RFC 0039 (User Accounts & Authentication — supplies the verified `principal`/tenant envelope axis), RFC 0023 (LLM Call Leasing — the wallet, whose server-side budget granularities are discussed in §F)
 **Spawned from**: [agent-runtime-vocabulary-roadmap.md §Seam 3](../agent-runtime-vocabulary-roadmap.md#seam-3--scoped-state-namespaces)
 **Reconciles with**: [memory-scope-axes.md](../memory-scope-axes.md) — the four-axis (session / relationship / epoch / principal) discussion model that "touches RFC 0042 vocabulary"; see [§G](#g-reconciliation-with-the-shipped-scope-model).
