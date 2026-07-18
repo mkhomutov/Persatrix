@@ -13,15 +13,15 @@ The design premise is that this RFC **rides the already-shipped scope-axis model
 
 This plan slices Phase 1 into small, independently-reviewable, test-first PRs. Each PR is green on `make test-python` (or `make test-go` for the Go slice), `make lint-python` (root ruff + mypy), and `python scripts/checks/file_size.py --strict` before merge, and keeps ROADMAP/RFC status hygiene.
 
-### Open-question resolutions locked at plan-authoring time
+### Open-question dispositions at plan-authoring time
 
-Per [RFC 0042 §Open Questions](0042-state-namespacing-by-scope.md#open-questions), the six carry a DECIDED/DEFERRED disposition. The five **DECIDED** land in Phase 1 as noted; OQ #5 is **DEFERRED** to Phase 3.
+Per [RFC 0042 §Open Questions](0042-state-namespacing-by-scope.md#open-questions): OQ #1–#4 are **DECIDED** and land in Phase 1 as noted; OQ #5 is **DEFERRED** to Phase 3; OQ #6 is **still open in the RFC** (lean: envelope-only). This plan adopts the OQ #6 lean and freezes it at PR 1, but that disposition is not ratified until the RFC leaves Draft — see the [RFC 0042 leave-Draft checklist](0042-state-namespacing-by-scope.md#decision--next-steps) item 2.
 
 - **OQ #1 (`channel:` storage layout) → PR 3.** Sidecar `channel_state(channel_id, key, value)` table — the next `channelStoreSchemaVersion` after v10, a **pure-additive** migration with no data movement (precedent: v6 `epoch_id`, v8 operator config, v9 membership intervals). The single carve-out from the "no schema changes" guarantee.
 - **OQ #2 (`interaction:` backing store) → PR 4.** Re-attributed away from RFC 0034 (which is the per-*channel* conversation window, not an interaction-keyed store): `interaction:` is backed by RFC 0020's in-memory `InteractionTracker` plus the RFC 0029 Scratchpad tier, exposed as a new interaction-close-bounded KV surface.
 - **OQ #3 (wallet scope) → no wallet work in Phase 1.** The wallet is server-side (`internal/wallet/`), keyed `global`/`per_workflow`/`per_agent` with no session dimension, so it is **not** migrated to `session:` and is not the multi-owner example. A `session:`-scoped read-through *view* of wallet spend, if wanted, is a Phase-2 client-side convenience proposed separately.
 - **OQ #4 (`app:` write boundary) → PR 4.** The Go init writer is `cmd/orchestrator/main.go`; the Python seed is the `agents/optimization.py` / `agents/model_aliases.py` config load. Agent workers get a **read-only** `app:` view whose `set(scope=app, …)` raises.
-- **OQ #6 (`(principal, epoch)` envelope wiring) → PR 1 (locked: envelope-only).** No scope carries `principal`/`epoch` in the composed key; both are inherited from the ambient ContextVars and preserved by the facade's existing partitioning. This is locked **before** PR 1 freezes the parser.
+- **OQ #6 (`(principal, epoch)` envelope wiring) → PR 1 (envelope-only, assumed pending ratification).** No scope carries `principal`/`epoch` in the composed key; both are inherited from the ambient ContextVars and preserved by the facade's existing partitioning. The RFC still lists this as open (lean: envelope-only); this plan adopts that lean and freezes it **before** PR 1 fixes the parser, so PR 1 must not merge until the RFC ratifies the disposition (its leave-Draft checklist item 2).
 - **DEFERRED — Phase 3:** OQ #5 (event-subscriber scope-visibility filter). RFC 0041's stream redactor scrubs content uniformly and is explicitly "not a callback"; a per-subscriber scope filter is a **new mechanism** (possibly an RFC 0041 amendment), out of this plan.
 
 ### File-size constraints (cap = 500 per [`scripts/checks/file_size.py --strict`](../../scripts/checks/file_size.py))
@@ -29,7 +29,7 @@ Per [RFC 0042 §Open Questions](0042-state-namespacing-by-scope.md#open-question
 | File | Lines now | Headroom | Routing |
 |------|-----------|----------|---------|
 | New `agents/scoped_state.py` | — | — | Enum + parser + `ScopedState` Protocol + wrappers. **Split into `scoped_state.py` + `scoped_state_backends.py`** if it nears the cap — the per-scope backends are the bulk. |
-| [`internal/channels/sqlite_migrations.go`](../../internal/channels/sqlite_migrations.go) | 467 | 33 | Add **one** `case 10:` arm in `applyMigration`. Following the established pattern (v8→v9 in `sqlite_membership_intervals_migration.go`, v9→v10 in `sqlite_messages_fts_migration.go`), the migration body lands in a **new sibling** `sqlite_channel_state_migration.go`, keeping this file near-neutral. |
+| [`internal/channels/sqlite_migrations.go`](../../internal/channels/sqlite_migrations.go) | 467 | 33 | Add **one** `case 11:` arm in `applyMigration` (the switch dispatches on the *target* version; `case 10:` already routes v9→v10). Following the established pattern (v8→v9 in `sqlite_membership_intervals_migration.go`, v9→v10 in `sqlite_messages_fts_migration.go`), the migration body lands in a **new sibling** `sqlite_channel_state_migration.go`, keeping this file near-neutral. |
 | [`internal/channels/sqlite_schema.go`](../../internal/channels/sqlite_schema.go) | 223 | ample | Bump `channelStoreSchemaVersion` to 11; add the `channel_state` DDL. |
 | [`internal/security/redactor.go`](../../internal/security/redactor.go) | 488 | 12 | Secret-name pattern **source** for PR 5. PR 5 **reads** it (generates a Python parity module); do not add logic here — if a new exported pattern slice is needed, keep it to a few lines or generate from the existing export. |
 | [`agents/memory/store.py`](../../agents/memory/store.py) | 468 | 32 | Home of the `MemoryStore` class the `persona:` adapter binds onto — `agents/memory/facade.py` is only an 83-line re-export shim (re-exports `MemoryStore` + `budget_to_limit`), not the store surface. The adapter itself is **new code in `scoped_state.py`** (PR 4); touch `store.py` only if the typed surface must grow — headroom is tight. |
@@ -45,10 +45,11 @@ RFC 0031 axes (session/principal/epoch, shipped)   RFC 0029 MemoryStore facade (
         │
    PR 2: ScopedState Protocol + temp: backend + JSON serialization + increment + ambient owner-resolution
         │
-   PR 3: channel_state additive migration + opaque KV store (Go, internal/channels)  [OQ #1]   ← parallels PR 2
-        │
+        │   ┌╌╌ PR 3 (Go, internal/channels): channel_state additive migration + opaque KV store  [OQ #1]
+        │   ╎   parallel track — no dependency on PR 1 / PR 2; can land any time before PR 4
+        ▼   ╎
    PR 4: per-scope wrapper routing (persona/channel/session/interaction/app) + cross-owner denial  [OQ #2, #3, #4]
-        │
+        │   └╌ the channel: route reads/writes PR 3's channel_state store
    PR 5: secret-name lint (genpatterns parity from internal/security/redactor.go)
         │  ── Phase 1a complete: unblocked, no RFC 0041 dependency ──
         │
@@ -62,7 +63,7 @@ RFC 0031 axes (session/principal/epoch, shipped)   RFC 0029 MemoryStore facade (
 
 ### PR 1: `feature/v040-rfc0042-scope-enum` — `Scope` enum + key parser
 
-The dependency-free leaf: the closed six-scope enum and the `<scope>:<owner_id>:<dotted.key.path>` parser/composer, built test-first, Python-only. Locks OQ #6 (envelope-only: `principal`/`epoch` never appear in the composed key).
+The dependency-free leaf: the closed six-scope enum and the `<scope>:<owner_id>:<dotted.key.path>` parser/composer, built test-first, Python-only. Adopts the OQ #6 lean (envelope-only: `principal`/`epoch` never appear in the composed key), which the RFC must ratify before this PR merges (see the PR checklist precondition).
 
 #### Scope
 
@@ -77,6 +78,7 @@ The dependency-free leaf: the closed six-scope enum and the `<scope>:<owner_id>:
 
 #### PR checklist
 
+- [ ] **Precondition:** RFC 0042 has ratified OQ #6 as envelope-only (leave-Draft checklist item 2) — this PR fixes the key grammar, so the disposition must be settled before the parser freezes.
 - [ ] Test-first (red → green); `make test-python` green for the new suite.
 - [ ] `make lint-python` + `file_size.py --strict` clean.
 - [ ] No new runtime dependency; `agents.scoped_state` imports no `agents` runtime (leaf).
@@ -113,7 +115,7 @@ The one storage change in the whole RFC: a pure-additive `channel_state` sidecar
 | File | Change |
 |------|--------|
 | New `internal/channels/sqlite_channel_state_migration.go` | `migrateV10ToV11` — `CREATE TABLE channel_state(channel_id TEXT, key TEXT, value TEXT, PRIMARY KEY(channel_id, key))`, forward-only, purely additive (a pre-v11 DB reads back byte-identical). Matches the sibling-file pattern (`sqlite_membership_intervals_migration.go`, `sqlite_messages_fts_migration.go`). |
-| [`internal/channels/sqlite_migrations.go`](../../internal/channels/sqlite_migrations.go) | One `case 10: return migrateV10ToV11(db)` arm in `applyMigration`. |
+| [`internal/channels/sqlite_migrations.go`](../../internal/channels/sqlite_migrations.go) | One `case 11: return migrateV10ToV11(db)` arm in `applyMigration` — the switch keys on the *target* version, and `case 10:` already exists (routes v9→v10). |
 | [`internal/channels/sqlite_schema.go`](../../internal/channels/sqlite_schema.go) | Bump `channelStoreSchemaVersion` → 11; register the `channel_state` DDL in the fresh-schema path. |
 | `internal/channels/channel_state_store.go` (new) | `Get`/`Set`/`Delete`/`ListKeys(channelID, prefix)` over `channel_state` — opaque `string` values, no interpretation. |
 
