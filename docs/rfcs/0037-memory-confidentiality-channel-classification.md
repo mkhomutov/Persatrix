@@ -6,7 +6,7 @@ type: feature
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-16
-target: v0.4.0 (on-ramp — confidentiality substrate for organizations; deferred from v0.3.x)
+target: v0.3.12 (cross-channel persona experience; pulled forward from the v0.4.0 on-ramp per 2026-07-15)
 depends_on:
   - RFC-0011
   - RFC-0036
@@ -18,9 +18,9 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
-**Target**: v0.4.0 (on-ramp — confidentiality substrate for organizations; deferred from v0.3.x per the [2026-06-04 sequencing amendment](../v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040))
+**Target**: v0.3.12 (cross-channel persona experience). **Pulled forward** from the v0.4.0 on-ramp per the 2026-07-15 planning decision — this restores the RFC's own original intent (its Motivation §"Why this is a v0.3.x RFC" argues confidentiality is local and v0.3.x-shippable; the [2026-06-04 amendment](../v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040) had deferred it to make room for conversation-realism work, now shipped).
 **Depends on**: RFC 0011 (Channels — the `channels` table and the `channels.yaml` config surface a classification is added to), RFC 0036 (Persona Verbatim Message Recall — §F retrofits its server-side scoped-search query with the acting-channel classification filter)
-**Relates to**: RFC 0034 (Persona Conversational Working Memory — the conversation window, shown in §H to be classification-safe by construction), RFC 0017 (Persona Memory Injection Token Budget — the injection layer the §D hard gate extends), RFC 0005 / RFC 0008 / RFC 0026 (the episodic, notes, and facts memory tiers that gain a protection level), RFC 0020 / RFC 0027 (Interaction Lifecycle / Reflection-Driven Consolidation — where protection levels are stamped and §E projections are generated), RFC 0009 (Agent Identity, Security & Sandboxing — the audit subsystem), RFC 0029 (Personal/Society Storage Split — protection levels must survive the migration to the society store), RFC 0012 (Protocols & Organizations — the *authority* axis and the enforced egress gate that this RFC's logging-only tripwire becomes), RFC 0038 (Persona Concurrent-Context Awareness & Cross-Channel Relay — enforces the single-channel-turn property §D and §H rely on, and gives cross-channel flow a §D-gated path)
+**Relates to**: RFC 0034 (Persona Conversational Working Memory — the conversation window, shown in §H to be classification-safe by construction), RFC 0017 (Persona Memory Injection Token Budget — the injection layer the §D hard gate extends), RFC 0005 / RFC 0008 / RFC 0026 (the episodic, notes, and facts memory tiers that gain a protection level), RFC 0020 / RFC 0027 (Interaction Lifecycle / Reflection-Driven Consolidation — where protection levels are stamped and §E projections are generated), RFC 0009 (Agent Identity, Security & Sandboxing — the audit subsystem), RFC 0029 (Personal/Society Storage Split — protection levels must survive the migration to the society store), RFC 0012 (Protocols & Organizations — the *authority* axis and the enforced egress gate that this RFC's logging-only tripwire becomes), RFC 0038 (Persona Concurrent-Context Awareness & Cross-Channel Relay — its §B single-channel-turn guard, which §D and §H rely on, is carved into this RFC's Phase 1 step 6 per Decision #3; its v0.4.0 relay gives cross-channel flow a §D-gated path)
 
 ---
 
@@ -210,9 +210,12 @@ without organizations*.
 - **Encryption or at-rest cryptography.** A classification is an
   access-control *label*, not a cryptographic boundary. The channel
   store and `memory.db` are unencrypted as today.
-- **Classifying relationship trust *scores*.** A bond's numeric trust
+- **Classifying relationship trust *scores*.** A bond's *numeric* trust
   score is not classified; the episodic detail *behind* a bond inherits
-  the protection level of its source episode like any other episode.
+  the protection level of its source episode like any other episode. The
+  tier's *textual* identity fields are **not** exempt — they follow the
+  §C write-through rule (≤ `internal` only), since they cross rooms by
+  design.
 - **Operator-defined custom lattice levels.** The lattice is the fixed
   four levels of §A in v0.3.x. Extensibility is Open Question #1.
 - **Retroactive reclassification.** Changing a channel's classification
@@ -239,9 +242,20 @@ The only operations the system needs are the total order (`a ≤ b`) and
 single source of the ordering: a Go helper and a Python helper, plus the
 SQL-side form §F needs (a registered SQLite function or an inline
 `CASE`). All three encode this one ordering and every comparison goes
-through one of them; no code compares level strings directly. An unknown
-or absent level resolves to the default `internal`, never to `public`,
-so a mis-configuration fails **closed** (more restrictive), not open.
+through one of them; no code compares level strings directly. *(Revised 2026-07-19 — v0.3.12 review items 5/8: "restrictive" flips
+direction across the rank helper's uses, so one blanket rule is unsafe.)*
+The default splits into **three explicit rules**:
+
+- **(a) Stamping/labeling** — a channel or entry with an *absent* (by
+  policy) classification is labeled `internal`, never `public`: a channel
+  the operator forgot to classify is confidential-by-default.
+- **(b) Acting level at gate/recall time** — an *unknown or absent*
+  acting classification resolves to the **`public` floor** (inject/return
+  less). This also closes the version-skew window where an older
+  orchestrator omits the proto field (proto3 `""`).
+- **(c) Entry protection level unknown/unparseable** — the entry is
+  **withheld and logged** (treated as above-`secret`): never injectable on
+  a corrupted label.
 
 ### B. Channel classification
 
@@ -268,23 +282,33 @@ channels:
 `channels` table ([`internal/channels/sqlite_schema.go`](../../internal/channels/sqlite_schema.go)):
 a new `case` arm in `applyMigration` with its own `migrateV(N-1)ToVN`
 function, `channelStoreSchemaVersion` bumped, and `user_version` stamped
-inside the migration transaction. The store is at **v3** today; RFC 0035
-and RFC 0036 each land a migration ahead of this one (projected **v4**
-and **v5** respectively — see Decision / Next Steps for the sequencing),
-so this RFC's migration is projected **v6**. If the ordering shifts, the
-version number follows; the migration discipline does not. The migration
+inside the migration transaction. RFC 0035 and RFC 0036 have both landed, so the store is at **v10**
+today; this RFC's migration is the **next** version (**v11** as of
+v0.3.11 — re-verify `channelStoreSchemaVersion` at PR time). If the
+ordering shifts, the version number follows; the migration discipline
+does not. The migration
 backfills every existing channel to `internal`.
 
 - **Group channels** load their declared classification into the
   `channels` row when config is applied.
 - **DM channels** (`dm:<a>:<b>`, created on demand by `GetOrCreateDM`)
-  are stamped `internal` at creation. A DM is not declared in config, so
-  there is nowhere to set it otherwise; Open Question #2 covers whether a
-  DM should instead take `min` of its participants' clearances once
-  RFC 0012 introduces clearance.
-- **Thread channels** (`thread:<message_id>`) copy the classification of
-  their parent channel at creation. A thread is never more or less
-  confidential than the conversation it forks from.
+  are stamped from a new operator knob **`dm_default_classification`**
+  in `config/channels.yaml` (default `internal`), and an existing DM may
+  be **reclassified** through the same audited reclassification machinery
+  as any channel (§Security). *(Added 2026-07-19 — v0.3.12 review item 8:
+  with an unconditional `internal` default, the RFC's own leadership-DM
+  scenario is protected only against `public` channels and flows freely
+  into every `internal` group — the realistic leak. Operators running
+  sensitive DMs should raise the default or reclassify per-DM;
+  clearance-derived DM levels remain Open Question #2 / RFC 0012.)*
+- **Thread replies** (`thread:<message_id>` in the address grammar) need
+  no stamping mechanism today: no production path creates a separate
+  thread-channel row — replies are rows in the *parent* channel (the
+  `thread_id` FK) and carry its classification by construction. The
+  store's `CreateChannel` contract does admit a `thread:` row; if one is
+  ever created, it copies the parent's classification at creation.
+  Either way a thread is never more or less confidential than the
+  conversation it forks from.
 
 **On the wire.** The persona runtime needs the acting channel's
 classification to run the §D gate. Rather than have the runtime fetch
@@ -292,8 +316,15 @@ channel metadata per turn, the orchestrator stamps it onto the channel
 event: `ChannelMessageEvent` (`proto/task.proto`) gains a
 `classification` string field, populated from the `channels` row when
 the event is dispatched. The runtime reads it straight off the event.
-A persona's own *autonomous tick* event carries no channel — see §D for
-how the gate handles that.
+**Both delivery paths carry the field** *(added 2026-07-19 — item 8)*: the
+proto dispatch path above **and** the REST history responses that feed
+on-startup catch-up replay (`agents/channel_catchup.py` builds
+`CHANNEL_MESSAGE` events from history JSON and stores episodes directly)
+— the message/history response gains the same `classification`, threaded
+through catch-up event construction. An event arriving with no
+classification on either path takes the §D floor (rule (b) of §A), never
+`internal`. A persona's own *autonomous tick* event carries no channel —
+covered by the same §D floor rule.
 
 ### C. Memory provenance and protection level
 
@@ -327,20 +358,70 @@ Where each tier gets its protection level:
   ever has memory with protection level `≤ L` in its context, plus that
   channel's own content (`= L`). A note authored in that turn therefore
   cannot contain anything above `L`, and is stamped `protection_level =
-  L`. This is a clean consequence of the gate: notes need no separate
-  provenance analysis.
-- **Relationship bonds.** Out of scope (see Non-Goals). The trust score
-  is unclassified; the episodic detail behind it is an episode and is
-  protected as one.
+  L`. This is a clean consequence of the gate — **and it presumes the
+  gate covers the tool path too** (§D read surfaces; an ungated
+  `recall_notes` would let an above-`L` note enter the turn's context and
+  break this argument). **`update_note` re-stamps** to
+  `max(existing protection_level, acting L)` — an edit never lowers a
+  note's level *(added 2026-07-19 — item 6)*.
+- **Relationship identity fields** (name/role/prefs and `rel.notes`
+  prose, written by the F-7 identity write-through and rendered into
+  *every* room's prompt). *(Added 2026-07-19 — item 8: this tier is
+  deliberately cross-room and previously carried no protection level —
+  an ungated egress surface: a role learned in a `secret` channel would
+  surface everywhere.)* Rule: the **write-through proceeds only when the
+  acting classification is ≤ `internal`**; in a `restricted`/`secret`
+  turn it falls back to a room-scoped note (which *is* stamped and
+  gated). The smallest rule that preserves the structural guarantee
+  without stamping the relationship schema; revisit under RFC 0012.
+- **Relationship bonds (trust scores).** Out of scope (see Non-Goals).
+  The numeric trust score is unclassified; the episodic detail behind it
+  is an episode and is protected as one.
 
 **Migration backfill.** Pre-existing memory has no protection level. The
 migration backfills each entry from its recorded source channel's
-classification where one is recorded (episodes and facts carry channel
-context today), and to the `internal` default otherwise. Because every
+classification where resolvable (episodes carry the RFC 0020 scope
+column; **facts carry only `source_interaction_id`**, so the facts
+backfill joins through the episode's interaction where possible and
+otherwise takes the `internal` default), and to the `internal` default
+otherwise. Because every
 channel also backfills to `internal` (§B), the common pre-existing case
 resolves consistently to `internal` — neither silently `public` (a
 disclosure) nor silently `secret` (which would withhold a persona's
-entire history from itself).
+entire history from itself). **Notes are the honest exception** *(item
+8)*: notes carry no channel provenance at all today, so *every*
+pre-existing note backfills to `internal` — including notes authored in
+`restricted`/`secret` turns. That residual under-protection is an
+**accepted, documented risk** (superseded as notes are rewritten under
+the gate); operators with sensitive histories may use a one-time flag to
+backfill all pre-migration notes at a chosen level instead.
+
+**Synthesized (multi-source) entries.** *(Added 2026-07-19 — v0.3.12
+review decision item 3.)* The mechanics above are single-interaction; the
+[RFC 0049](0049-memory-consolidation-gradient.md) §F cross-scope pump
+(v0.4.0, Phase 2 of that RFC) synthesizes one L2 entry from **many**
+interactions across rooms. **This section owns the stamping rule for both
+arities**; RFC 0049 §F and the [RFC 0027 amendment](0027-amendment-cross-scope-consolidation.md)
+cite it rather than restating it:
+
+1. **Single-source** (unchanged): the source interaction's captured
+   classification; scalar `source_channel_id`.
+2. **Consolidation-derived**: `protection_level = max` over *all*
+   contributing sources' levels, **enforced at the memory write API** —
+   never left to the pump's LLM call. `source_channel_id` is `NULL`;
+   provenance is recorded in a nullable **`provenance_json`** column
+   (list of contributing channel ids) added by this same §C migration so
+   the v0.4.0 pump needs no second schema pass.
+3. **Supersession restamps.** The implemented facts tier is
+   latest-asserted-wins (`_facts_supersede.py`); that extends to
+   classification — a superseding assertion restamps the row from *its
+   own* source, up or down. **Reinforcement** (`_facts_reinforce.py`)
+   never lowers a level.
+4. **Independent corroboration does not ratchet.** `max` applies to what
+   a synthesis *derived from its inputs*. A proposition independently
+   asserted in a lower-classified channel may be captured as a distinct
+   entry stamped at that lower level — one `restricted` corroboration
+   must not permanently ratchet public knowledge upward.
 
 ### D. The hard gate at memory injection
 
@@ -379,6 +460,17 @@ call. The model never sees withheld content and cannot request it — there
 is no tool or argument that overrides the acting classification, exactly
 as RFC 0036 binds the recall scope server-side and not from LLM input.
 
+**The gate covers every persona-side read surface** *(added 2026-07-19 —
+v0.3.12 review item 6: the always-dispatchable `recall_notes` tool
+searched all notes unfiltered, returning protected notes verbatim into a
+public turn's tool result — straight past this gate)*: (1) the
+prompt-assembly tiers (`memory_context.py`, this section); (2)
+**`recall_notes`** — the notes query gains a non-optional
+`protection_level ≤ rank(L)` predicate reading the
+`classification_scope`; (3) `recall_channel_messages` (§F). A read
+surface added later joins this list or it is a gate bypass by
+construction.
+
 **The structural guarantee.** Combine the gate with the single-channel-
 turn property (§H): a turn acting in channel `C` assembles exactly one
 prompt, gated to `C`'s classification, and can publish only to `C`.
@@ -398,21 +490,42 @@ load-bearing guarantee of the RFC.
 > persona belongs to, and this gate — which keys on the *inbound*
 > channel — would not catch a leak on that path.
 > [RFC 0038](0038-concurrent-context-awareness-relay.md) §B promotes
-> single-channel-turn to a code-enforced invariant and routes deliberate
-> cross-channel flow through the §D-gated relay; until its Phase 1 lands,
-> this guarantee is contingent on that enforcement, with the §G tripwire
-> (which *is* destination-aware) as the interim backstop.
+> single-channel-turn to a code-enforced invariant. **Per the 2026-07-19
+> decision, that §B guard is carved into this RFC's own v0.3.12 plan**
+> (Phase 1 step 6; Decision #3) — so the guarantee is delivered by this
+> RFC's Phase 1, not deferred to RFC 0038. The §G tripwire remains the
+> destination-aware backstop for the residual paraphrase path.
 
-**Autonomous ticks.** A tick event (`EventType.TICK`) carries no channel
-([RFC 0005](0005-persona-agent-memory.md) autonomy loop). A tick can
-still emit a `SEND_CHANNEL_MESSAGE` to any channel the persona belongs
-to. There is no single acting classification, so the gate uses a
-**floor**: tick injection is gated to `public` by default — the most
-conservative level — so a tick cannot pull verbatim `internal`-or-above
-memory into a context that might publish to a public channel. This is
-deliberately strict; Open Question #3 covers softening it to the `min`
-classification across the persona's channels, which is tighter but
-needs the persona→channels mapping a tick does not currently carry.
+**The acting-classification scope — total coverage.** *(Restated
+2026-07-19 — v0.3.12 review item 5: the original text defined an acting
+level for only 2 of the 9 `EventType` members, while
+`_inject_memory_context` runs for every one.)* The rule is by
+acting-context **class**, not event name:
+
+- **(a)** the event carries a `channel_id` and a §B classification → `L`
+  is read off the event;
+- **(b)** *any* turn without a classified acting channel — `TICK`,
+  `TASK_ASSIGNED` (workflow tasks), `SUB_AGENT_COMPLETED`, `APPROVAL_*`,
+  `AGENT_JOINED`/`AGENT_LEFT`, chat-façade events with
+  `channel_id=None`, and replayed events missing classification — takes
+  the **`public` floor**. These are exactly the tick-shaped turns that
+  can emit a `SEND_CHANNEL_MESSAGE` anywhere, so the tick rationale
+  applies to the whole class.
+
+**Mechanism.** `on_event` enters a **`classification_scope(L)`** —
+a turn-scoped contextvar, the same shape as the shipped ISSUE-0081
+`session_scope` — set from the trusted event/floor resolution and
+**never from LLM input**. Every consumer reads it: the §D injection
+filter, the §F recall binding, `recall_notes` gating, `store_note` /
+`update_note` stamping (§C), and the §G manifest. (The RFC 0036
+per-process closure cannot carry a per-turn value — `wire_recall_tools`
+binds `agent_id` once at startup; the contextvar is the seam that
+preserves the not-LLM-controllable property per turn.)
+
+A positive-list unit test asserts **every `EventType` member resolves to
+a defined acting level** (the `episode_routing` frozenset precedent), so
+a future event type forces a conscious choice. Open Question #3's
+floor-softening now applies to this whole channel-less class.
 
 ### E. Declassification projections
 
@@ -486,12 +599,25 @@ ordering as the Go and Python `classification_rank` helpers — the order
 is defined once conceptually (§A) and no code path, SQL included,
 compares level strings directly.
 
+**The retrofit point** *(specified 2026-07-19 — item 8)*: the clause is
+appended in `RecallMessages` (alongside the existing `narrow` filter, on
+**both** the FTS and LIKE paths) — **not** inside the shared
+`membershipEpochScope` fragment, which the scoped history-window query
+deliberately shares "so the two cannot drift". The window consumer is
+exempt by §H (it reads only the turn's own channel, always `= L`), so
+gating it would be wrong; the shared-fragment comment in
+`sqlite_search.go` is updated to say the *membership+epoch* predicate
+stays provably identical while recall alone adds classification.
+
 The acting channel's classification is bound server-side from a new
 required parameter on the recall endpoint
-(`POST /api/v1/personas/{id}/recall`), and the `recall_channel_messages`
-tool passes the **current event's** `classification` (§B) into it —
-closure-bound alongside `agent_id`, never LLM-supplied, the same trust
-pattern RFC 0036 already uses for the scope participant. A recall result
+(`POST /api/v1/personas/{participant_id}/recall`), and the
+`recall_channel_messages` tool reads the **turn's
+`classification_scope`** (§D) when binding it — the RFC 0036 closure
+binds `agent_id` once per process and cannot carry a per-turn value, so
+the contextvar is the binding seam; it is set from the trusted
+event/floor resolution and never LLM-supplied, preserving RFC 0036's
+trust property *(mechanism corrected 2026-07-19 — item 8)*. A recall result
 can never be more confidential than the channel the persona is acting in.
 
 Recall while acting on an autonomous **tick** uses the §D `public` floor.
@@ -505,13 +631,25 @@ deterministically (it is the model's output, in novel wording) and a
 *blocking* response to it is an organizational-policy decision deferred
 to RFC 0012. v0.3.x ships **observability**:
 
-When a persona emits a `SEND_CHANNEL_MESSAGE`, the publish path
-([`channel_publisher.py`](../../agents/channel_publisher.py)) runs a
-tripwire **before** the message leaves: for each protected memory entry
-that was in the turn's context with protection level above the target
-channel's classification, check the outgoing text for a verbatim span of
-that entry's content (a normalized substring match over spans above a
-length threshold — lexical, not semantic). On a hit, emit an RFC 0009
+**The plumbing** *(specified 2026-07-19 — item 8: the injected-entry set
+was previously discarded at injection time and the transport publisher
+has no turn context)*: `MemoryInjectionResult` widens into a per-turn
+**injection manifest** — `(tier, entry_id, protection_level,
+normalized-span hashes)` — populated by `_inject_memory_context`,
+carried on the turn's `classification_scope`, and threaded via
+`DispatchContext` to **`ActionExecutor`**, where the tripwire runs
+(the shared `channel_publisher.py` HTTP transport stays context-free by
+design). Target-classification resolution is simple **because of the §B
+single-channel-turn guard** (Phase 1 step 6): a non-tick turn publishes
+only to its acting channel (target `L` = acting `L`, already known), and
+a tick/channel-less turn's context is `public`-floor-gated so its
+manifest can contain nothing above any target — the cross-channel case
+is vacuous by construction.
+
+For each manifest entry with protection level above the target
+channel's classification, the tripwire checks the outgoing text for a
+verbatim span of that entry's content (a normalized substring match over
+spans above a length threshold — lexical, not semantic). On a hit, emit an RFC 0009
 audit event (`channel.confidentiality_tripwire`) recording the persona,
 the target channel and its classification, and the implicated entry's
 protection level — **not** the leaked text itself. The message is **not
@@ -560,10 +698,12 @@ required by this RFC.
   LLM-generated and **best-effort** — a projection may abstract
   imperfectly. Reviewers must not conflate the two: *verbatim text is
   gated; abstractions are best-effort and observed by the §G tripwire.*
-- **Fail-closed on misconfiguration.** An absent or unrecognized
-  classification resolves to `internal`, never `public` (§A). A channel
-  the operator forgot to classify is treated as confidential-by-default,
-  not public-by-default.
+- **Fail-closed on misconfiguration — in the right direction.** The §A
+  three-way rule: absent-by-policy labels → `internal`
+  (confidential-by-default); unknown *acting* level → the `public` floor
+  (inject less); unknown *entry* level → withhold and log. "Restrictive"
+  means less disclosure on the labeling side and less injection on the
+  gate side.
 - **The gate is not LLM-controllable.** The acting classification comes
   from the channel event (§B), bound in the runtime; the recall filter's
   acting classification is bound server-side (§F). There is no tool, no
@@ -580,10 +720,12 @@ required by this RFC.
   v0.3.x and is the reason RFC 0012 exists.
 - **Correctness depends on the protection level being stamped right.**
   The gate is only as good as the `protection_level` on each entry. §C
-  routes every channel-derived tier through a single choke point — the
-  interaction record's captured classification — so there is one place
-  to audit, not three. The tripwire (§G) is the backstop that surfaces a
-  mis-stamp in operation.
+  routes channel-derived memory through **two stamped write choke
+  points** — the interaction record's captured classification
+  (single-source entries) and the consolidation write API's enforced
+  `max` (synthesized entries, §C "Synthesized (multi-source) entries") —
+  so there are two places to audit, not one per tier. The tripwire (§G)
+  is the backstop that surfaces a mis-stamp in operation.
 - **Prompt injection is unchanged.** Classified content that *is*
   injected (at or below the acting level, or as a projection) still
   passes the RFC 0034 / RFC 0036 `_format_event` delimiter-escape
@@ -610,15 +752,18 @@ on its own; §E projections only make it less blunt.
    source each side; fail-closed on unknown input.
 2. **Channel classification** — `classification` field in
    `config/channels.yaml` + `schemas/channel.schema.json`; the channel-store
-   classification migration (projected **v6** — §B) adding
-   `channels.classification`; DM-creation and
-   thread-creation stamping (§B); `classification` on `ChannelMessageEvent`
+   classification migration (next version, v11 — §B) adding
+   `channels.classification`; DM-creation stamping from
+   `dm_default_classification` + the thread inheritance rule (§B);
+   `classification` on `ChannelMessageEvent`
    (`proto/task.proto`) and the dispatch path.
 3. **Protection level** — `agents/memory/migrations.py` migration adding
-   `protection_level` / `source_channel_id` to the episodic, facts, and
-   notes tiers, plus the `memory_projections` table (created here, used in
-   Phase 2); interaction-open classification capture (§C); episodic and
-   facts consolidation stamping; migration backfill.
+   `protection_level` / `source_channel_id` / nullable `provenance_json`
+   (the §C multi-source shape, created now so the v0.4.0 pump needs no
+   second migration) to the episodic, facts, and notes tiers, plus the
+   `memory_projections` table (created here, used in Phase 2);
+   interaction-open classification capture (§C); episodic and facts
+   consolidation stamping; migration backfill.
 4. **The hard gate** — the §D filter in `memory_context.py`, with
    withhold-only behaviour (no projections yet); the autonomous-tick
    `public` floor.
@@ -626,11 +771,28 @@ on its own; §E projections only make it less blunt.
    `internal/channels/sqlite_search.go`, the new required acting-channel
    parameter on the recall endpoint, and the `recall_channel_messages`
    tool passing the event classification.
-6. Unit, migration, and integration tests per the Test Strategy.
+6. **Single-channel-turn guard (carved from RFC 0038 §B — Decision #3)**
+   — an event-aware post-parse check in `_on_event_inner` (sibling of
+   `synthesize_channel_reply`; the pure `validate_action_payload` cannot
+   see the event): a non-tick `SEND_CHANNEL_MESSAGE` whose `channel_id`
+   differs from the acting channel is replaced with `DO_NOTHING` +
+   WARNING log (audit event wire-up is a tracked follow-up). Tick turns
+   may publish anywhere — their injection is already gated to the §D
+   `public` floor. Lands with/after step 4, which its tick exception
+   presumes.
+7. Unit, migration, and integration tests per the Test Strategy.
 
-Dependencies: **RFC 0011** (the `channels` table). Step 5 depends on
-**RFC 0036** Phase 1 — if RFC 0036 has not yet landed, step 5 lands
-together with it; steps 1–4 are independent of RFC 0036.
+**PR-ordering rule** *(item 8)*: note-stamping (step 3's notes leg) lands
+in the same PR as — or after — the §D gate **and** the `recall_notes`
+gating (§D read surfaces), because the §C note-stamp soundness argument
+presumes both. No channel may be operator-classified above `internal`
+before the full Phase-1 set ships (all steps land dark within one
+release, so the window is development-only).
+
+Dependencies: **RFC 0011** (the `channels` table). **RFC 0036 is
+Implemented (v0.3.9)**, so step 5 retrofits the existing scoped-search
+query (`internal/channels/sqlite_search.go`) and the existing recall
+endpoint directly; steps 1–4 are independent of RFC 0036.
 
 ### Phase 2: Declassification projections
 
@@ -659,24 +821,30 @@ Dependencies: Phase 1. Independent of Phase 2 and separately reviewable.
 
 | Component | Files | Change |
 |-----------|-------|--------|
-| Go orchestrator | `internal/channels/sqlite_schema.go` | classification migration (projected v6 — §B): `channels.classification` column + backfill; bump `channelStoreSchemaVersion` |
-| Go orchestrator | `internal/channels/sqlite.go` (DM/thread creation) | Stamp classification on `GetOrCreateDM` and thread creation (§B) |
+| Go orchestrator | `internal/channels/sqlite_schema.go` (version const + history) + `internal/channels/sqlite_migrations.go` (the `migrateV10ToV11` arm) | classification migration (next version, v11 — §B): `channels.classification` column + backfill; bump `channelStoreSchemaVersion` |
+| Go orchestrator | `internal/channels/sqlite_dm.go` (`GetOrCreateDM`) | Stamp the §B `dm_default_classification` knob (default `internal`) on DM creation; thread replies are rows in the parent channel — no production path creates a separate thread-channel row — so they inherit the parent classification by construction (§B) |
 | Go orchestrator | `internal/channels/sqlite_search.go` | §F acting-channel classification clause on the RFC 0036 scoped query |
-| Go orchestrator | `internal/server/channel_handlers.go`, `channel_types.go` | Required acting-channel parameter on the recall endpoint |
+| Go orchestrator | `internal/server/persona_recall_handlers.go`, `channel_types.go` | Required acting-channel parameter on the recall endpoint (`channel_handlers.go` is at the size cap — the recall handler was carved into `persona_recall_handlers.go`) |
 | Go orchestrator | `internal/channels/` (event dispatch), `internal/security/audit_event.go` | `classification` on dispatched channel events; reclassification + `channel.confidentiality_tripwire` audit events |
 | Go orchestrator | `internal/channels/classification.go` (new) | `classification_rank` helper, fail-closed |
 | Protos | `proto/task.proto` | `classification` field on `ChannelMessageEvent` |
 | Python agents | `agents/memory/migrations.py` | `protection_level` / `source_channel_id` on episodic/facts/notes; `memory_projections` table |
-| Python agents | `agents/memory/interactions.py` | Capture channel classification at interaction-open |
+| Python agents | `agents/memory/interactions.py` + `agents/memory/interaction_types.py` | Capture channel classification at interaction-open (frozen-at-open, in-memory until close — mirrors the `session_id` precedent) |
 | Python agents | `agents/memory/episodic.py`, `agents/memory/facts.py`, `agents/memory/notes.py` | Stamp / read `protection_level` |
-| Python agents | `agents/persona_runtime/memory_context.py` | The §D hard gate + projection selection |
+| Python agents | `agents/persona_runtime/memory_context.py` | The §D hard gate + projection selection; `MemoryInjectionResult` → injection manifest (§G) |
+| Python agents | `agents/persona_runtime/action_loop.py` | Enter `classification_scope(L)` per turn (§D); thread the injection manifest |
+| Python agents | `agents/tools/builtin.py`, `agents/memory/_notes_recall.py` | Gated `recall_notes` (§D read surfaces); `update_note` re-stamp (§C) |
+| Python agents | `agents/tools/identity_write_through.py` | §C ≤-`internal` write-through rule (room-scoped-note fallback) |
+| Python agents | `agents/action_executor.py`, `agents/channel_wire_metadata.py` | §G tripwire re-sited in `ActionExecutor`; manifest on `DispatchContext` |
+| Python agents | `agents/server_servicers.py`, `agents/channel_catchup.py` | Classification lifted off both delivery paths (§B); catch-up replay stamping |
+| Go orchestrator | REST message/history response builder (`internal/server/`) | `classification` on history responses for catch-up replay (§B) |
 | Python agents | `agents/persona_runtime/classification.py` (new) | Python `classification_rank` helper |
 | Python agents | `agents/channel_publisher.py` | §G leak tripwire |
 | Python agents | `agents/tools/recall.py` | Pass acting-channel classification to the recall endpoint |
-| Python agents | consolidation path (`agents/memory/`, RFC 0027 reflection) | Emit §E projections during interaction consolidation |
-| Config / schema | `config/channels.yaml`, `schemas/channel.schema.json` | `classification` field + `enum` |
+| Python agents | `agents/persona_runtime/summarize_close.py` (+ `fact_envelope.py` / `fact_extractor.py`) | Emit §E projections during the RFC 0020 close-consolidation LLM call (RFC 0027 reflection is a future second producer — proposed, not shipped) |
+| Config / schema | `config/channels.yaml`, `schemas/channel.schema.json` | `classification` field + `enum`; the `dm_default_classification` knob (§B) |
 | Docs | `docs/guides/persona-agents.md`, `docs/diagrams/memory-architecture.md` | Document classification, protection levels, the two-axis model |
-| Tests | `internal/channels/*_test.go`, `tests/unit/python/`, `tests/integration/persona/` | Per Test Strategy |
+| Tests | `internal/channels/*_test.go`, `tests/unit/python/`, `tests/integration/` | Per Test Strategy (+ an RFC 0044 golden-trace recipe for MT-PERSONA-CONFIDENTIALITY-001) |
 
 ## Test Strategy
 
@@ -696,8 +864,14 @@ Dependencies: Phase 1. Independent of Phase 2 and separately reviewable.
     join.
   - The §G tripwire fires on a verbatim span and not on a benign
     message; the audit event carries metadata and not the text.
-- **Migration tests**: the classification migration (projected v5 → v6 —
-  §B) adds `channels.classification` and
+  - *(v0.3.12 review items 5/6/8)*: a positive-list test that every
+    `EventType` member resolves to a defined acting level; tool-path
+    gating (`recall_notes` withholds an above-`L` note; `update_note`
+    re-stamps upward); the §A three-way fail directions (unknown acting
+    → `public` floor; unknown entry level → withheld+logged); catch-up
+    replay stamps replayed `secret`-channel episodes correctly.
+- **Migration tests**: the classification migration (next version,
+  vN → vN+1 — §B) adds `channels.classification` and
   backfills to `internal`; the memory migration adds the columns and
   `memory_projections` table and backfills `protection_level` from
   recorded source channels where present, `internal` otherwise; both
@@ -728,12 +902,13 @@ Dependencies: Phase 1. Independent of Phase 2 and separately reviewable.
    Once RFC 0012 introduces per-persona clearance, a DM could instead
    take `min` of its two participants' clearances. Proposed resolution:
    `internal` in v0.3.x; revisit in RFC 0012 when clearance exists.
-3. **Autonomous-tick gate floor.** §D gates tick injection to `public`.
-   A softer rule — the `min` classification across the persona's
-   channels — is less amnesiac on ticks but needs a persona→channels
-   mapping the tick event does not carry today. Proposed resolution:
-   ship the `public` floor; reconsider if tick-time over-withholding is
-   observed to matter.
+3. **Channel-less-turn gate floor.** §D gates every channel-less turn
+   (the whole class — ticks, workflow tasks, approvals, chat-façade
+   events; item 5) to `public`. A softer rule — the `min` classification
+   across the persona's channels — is less amnesiac but needs a
+   persona→channels mapping those events do not carry today. Proposed
+   resolution: ship the `public` floor; reconsider if over-withholding
+   is observed to matter.
 4. **Projection generation cost.** §E adds structured output to the
    consolidation LLM call. If a future consolidation path is made
    non-LLM, projections would need another source. Proposed resolution:
@@ -749,17 +924,22 @@ Dependencies: Phase 1. Independent of Phase 2 and separately reviewable.
 1. Review this RFC alongside [RFC 0012](0012-protocols-organizations.md):
    the two are the confidentiality and authority halves of one model and
    should be read together, even though they ship in different versions.
-2. Sequence after [RFC 0036](0036-persona-message-recall.md) so the §F
-   recall filter has a query to retrofit; Phase 1 steps 1–4 may proceed
-   in parallel with RFC 0036.
-3. **Land [RFC 0038](0038-concurrent-context-awareness-relay.md) §B's
-   single-channel-turn enforcement together with or ahead of this RFC's
-   Phase 1.** §D's structural guarantee is contingent on it (see the §D
-   implementation note): until single-channel-turn is code-enforced, a
-   turn can publish cross-channel ungated, and the §G tripwire is the
-   only — destination-aware but logging-only — backstop. This is a
-   sequencing dependency on RFC 0038 §B specifically, not on all of
-   RFC 0038.
+2. ✅ **Satisfied** — [RFC 0036](0036-persona-message-recall.md) is
+   Implemented (v0.3.9); the §F recall filter retrofits its existing
+   query and endpoint. Phase 1 steps 1–4 have no RFC 0036 dependency.
+3. ✅ **Resolved 2026-07-19 — the [RFC 0038](0038-concurrent-context-awareness-relay.md)
+   §B single-channel-turn guard is carved INTO this RFC's v0.3.12 plan**
+   (Phase 1 step 6 below), since RFC 0038 as a whole stays out of
+   v0.3.12. §D's structural guarantee is contingent on the guard, so it
+   lands with/after the §D-gate PR. The guard follows the 0038 §B spec
+   exactly (reject a non-tick `SEND_CHANNEL_MESSAGE` whose `channel_id`
+   differs from the acting channel; tick exception per the §D `public`
+   floor) so the eventual RFC 0038 relay (§E, v0.4.0+) extends rather
+   than amends it. The `channel.cross_channel_publish_rejected` audit
+   event ships **WARNING-log-first** — the agent-side RFC 0009 audit
+   emission path is not yet wired (`action_loop.py` notes it as the
+   orchestrator's responsibility); the audit wire-up is a tracked
+   follow-up, not silent PR growth.
 4. Implement Phase 1 (the deterministic boundary), then Phase 2
    (projections — the "learn from it" affordance), then Phase 3 (the
    tripwire). Phase 1 is safe and shippable without Phases 2–3.
