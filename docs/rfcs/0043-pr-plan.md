@@ -10,8 +10,8 @@
 > visible. RFC 0043 is **🔨 Draft**; the dedicated security review is the Phase-1b/1c gate and
 > the leave-Draft checklist ([RFC §Decision](0043-inbound-agent-interop-endpoint.md#decision--next-steps))
 > must resolve first. **Phase 1a carries no unshipped-RFC dependency** and may proceed once the RFC
-> reaches Proposed. **Phase 1b hard-depends on RFC 0039 Phases 1–3** (0039 is 📋 Proposed with zero
-> implementation and no PR plan). **Phase 1c additionally depends on OQ 1 (listener topology) and the
+> reaches Proposed. **Phase 1b hard-depends on RFC 0039 Phases 1–2** (0039 is 📋 Proposed with zero
+> implementation and no PR plan; its Phase 3 — account administration — is not on this path). **Phase 1c additionally depends on OQ 1 (listener topology) and the
 > RFC 0012 §G admission gate.** Sizes are calibrated estimates; PR numbers, merge dates, and checklists
 > are placeholders.
 
@@ -21,11 +21,11 @@
 
 RFC 0043 adds a bounded HTTP/JSON inbound endpoint and a third participant-type value (`external_agent`) that let a non-Persatrix agent join a channel — post, be addressed, and observe authorized traffic — over a surface disjoint from the internal gRPC contract ([RFC 0040](0040-agent-orchestrator-transport-unification.md), untouched). An external participant is a **real channel member** (a `RespondNever` `memberships` row, reusing the chat-as-DM precedent), so it inherits membership, history-scoping, and audit machinery rather than duplicating it.
 
-The RFC ships in **phases split by dependency readiness** (the [RFC 0042](0042-pr-plan.md) 1a/1b precedent): **Phase 1a** is additive work on shipped subsystems and is buildable today; **Phase 1b** waits on the credential substrate ([RFC 0039](0039-user-accounts-authentication.md) Phases 1–3 + the [RFC 0009](0009-security-sandboxing.md) Phase 4 token model); **Phase 1c** (outbound) additionally waits on the listener-topology decision and the [RFC 0012](0012-protocols-organizations.md) admission gate. This plan splits the work into **15 PRs**, mirroring the [RFC 0040](0040-pr-plan.md) PR-plan structure (Style A: skeleton + Phase 0 Hard Gate). Each PR leaves the repo passing-tests, lint-clean, and within the [BRANCHING.md](../BRANCHING.md) < 500-line size guidance.
+The RFC ships in **phases split by dependency readiness** (the [RFC 0042](0042-pr-plan.md) 1a/1b precedent): **Phase 1a** is additive work on shipped subsystems and is buildable today; **Phase 1b** waits on the credential substrate ([RFC 0039](0039-user-accounts-authentication.md) Phases 1–2 + the [RFC 0009](0009-security-sandboxing.md) Phase 4 token model); **Phase 1c** (outbound) additionally waits on the listener-topology decision and the [RFC 0012](0012-protocols-organizations.md) admission gate. This plan splits the work into **15 PRs**, mirroring the [RFC 0040](0040-pr-plan.md) PR-plan structure (Style A: skeleton + Phase 0 Hard Gate). Each PR leaves the repo passing-tests, lint-clean, and within the [BRANCHING.md](../BRANCHING.md) < 500-line size guidance.
 
 > **Estimate calibration**: prior umbrella RFCs (0040/0041/0042) landed near their estimates within a ~1.7× factor. This plan applies the same factor. Sizes below are calibrated estimates.
 
-**Prerequisites**: RFC 0002 (REST API Server — Implemented, the host), RFC 0011 (Channels — Implemented), RFC 0016 (Participant model — Implemented), RFC 0030 (Governance — Implemented), RFC 0035 (Membership Interval Ledger — Implemented). **Shipping gates** (not yet met): RFC 0039 Phases 1–3, RFC 0009 Phase 4 (credential model), RFC 0012 §G (admission gate).
+**Prerequisites**: RFC 0002 (REST API Server — Implemented, the host), RFC 0011 (Channels — Implemented), RFC 0016 (Participant model — Implemented), RFC 0030 (Governance — Implemented), RFC 0035 (Membership Interval Ledger — Implemented). **Shipping gates** (not yet met): RFC 0039 Phases 1–2, RFC 0009 Phase 4 (credential model), RFC 0012 §G (admission gate).
 
 **Recommended merge order**: **PR 1 → 2 → 3 → 4 → 5** (Phase 1a, unblocked) → *[credential substrate ships]* → **PR 6 → 7 → 8 → 9** (Phase 1b) → *[OQ 1 + admission gate resolve]* → **PR 10 → 11 → 12** (Phase 1c) → **PR 13 → 14 → 15** (close-out). The only hard intra-plan ordering constraints are the store (PR 2/4/5) before the handlers that use it (PR 8+), and the dispatcher multiplexer (PR 10) before long-poll drain (PR 11).
 
@@ -43,8 +43,8 @@ RFC 0043 is **🔨 Draft** with decisions that are **non-additive once code ship
 | G4 | **Outbound seam** — [§F](0043-inbound-agent-interop-endpoint.md#f-message-inbound--outbound-flow) | No subscriber registry exists; the router holds a single `dispatcher` field; the cited RFC 0041 subscriber is Python-side and never lands on the Go path | **Resolved in RFC**: dispatcher multiplexer + `queueDispatcher` in `internal/channels`. New machinery. Blocks PR 10. |
 | G5 | **Listener topology + channel-surface auth** — [OQ 1](0043-inbound-agent-interop-endpoint.md#open-questions) | Non-additive (ports, certs, ops). Same-listener is unsound while `/api/v1/channels/*` is unauthenticated *by design* today | **Open**: requires RFC 0039 Phase 2 to cover the channel surface, or a dedicated listener that does not route into the internal mux. Blocks all of 1c. |
 | G6 | **External-admission owner** — [§Security](0043-inbound-agent-interop-endpoint.md#security-considerations), NEW-2 | RFC 0037's total-order lattice cannot express it and disclaims both gates | **Resolved in RFC**: `external_participants_allowed` (default false), enforced by the RFC 0012 §G membership-time gate. Sequencing cost: 0012 is v0.4.0. Blocks the security review. |
-| G7 | **Storage home + RFC 0029 tier** — [§E](0043-inbound-agent-interop-endpoint.md#e-storage-and-provisioning), NEW-4 | No store exists; a `channels.db` addition becomes RFC 0029 Phase 3 `migrate` input | **Open**: `channels.db` v11 vs. a dedicated DB; pick the migration number and the RFC 0029 tier. Blocks PR 2/4/5. |
-| G8 | **RFC 0039 Phases 1–3 shipped** *(shipping dependency, not an OQ)* | No account/session/role/enforcement substrate exists today | Ship 0039 first. Blocks all of 1b. |
+| G7 | **Storage home + RFC 0029 tier** — [§E](0043-inbound-agent-interop-endpoint.md#e-storage-and-provisioning), NEW-4 | No store exists; a `channels.db` addition becomes RFC 0029 Phase 3 `migrate` input | **Open**: `channels.db` vs. a dedicated DB; pick the migration number (next at PR time — RFC 0037's v0.3.12 migration is projected to take v11 first) and the RFC 0029 tier. Blocks PR 2/4/5. |
+| G8 | **RFC 0039 Phases 1–2 shipped** *(shipping dependency, not an OQ)* | No account/session/role/enforcement substrate exists today (Phase 3 — account administration — is not on this path: the credential is an RFC 0009-track token, not an 0039 account) | Ship 0039 Phases 1–2 first. Blocks all of 1b. |
 
 **Not blocking**: OQ 2 (→ Phase 3), OQ 3 (resolved — at-least-once folded into the cursor), OQ 4 (answerable now — `ModelOutput` only + externally-meaningful `Error`), OQ 5 (behaviour choice; extend to operator surfaces).
 
@@ -57,7 +57,7 @@ RFC 0043 is **🔨 Draft** with decisions that are **non-additive once code ship
 | 1 | Participant-type vocabulary + `ext-` ID grammar | 1a | v0.4.x | G3 | ~150–250 | ⬜ Not started |
 | 2 | `internal/extagents/` participant + `CapabilityScope` models (ID-keyed) | 1a | v0.4.x | G7 | ~250–350 | ⬜ Not started |
 | 3 | Config loader + `external_agent.schema.json` + `_SCHEMA_MAP` | 1a | v0.4.x | PR 2 | ~300–400 | ⬜ Not started |
-| 4 | Scope/grant store + membership reconciliation + `channels.db` v11 | 1a | v0.4.x | PR 2, G2, G7 | ~350–450 | ⬜ Not started |
+| 4 | Scope/grant store + membership reconciliation + `channels.db` migration | 1a | v0.4.x | PR 2, G2, G7 | ~350–450 | ⬜ Not started |
 | 5 | Idempotency store (scope, caps, sweep, replay) | 1a | v0.4.x | PR 2 | ~300–400 | ⬜ Not started |
 | 6 | HTTP bearer-validation middleware + principal resolution + denylist | 1b | v0.4.x | G1, G8, PR 4 | ~300–450 | ⬜ Blocked (Phase 0) |
 | 7 | Per-participant tiered rate limiter (new subsystem) | 1b | v0.4.x | PR 6 | ~300–450 | ⬜ Blocked |
@@ -80,7 +80,7 @@ PR 1 (participant vocab + ext- grammar)
   ↓
 PR 2 (extagents models, ID-keyed) ──→ PR 3 (config + schema + _SCHEMA_MAP)
   ↓                               └──→ PR 5 (idempotency store)
-PR 4 (scope/grant store + membership reconcile + channels.db v11)
+PR 4 (scope/grant store + membership reconcile + channels.db migration)
 · · · · · [Phase 0 Hard Gate: G1/G8 credential substrate ships; G5 listener + G6 admission resolve] · · · · ·
 Phase 1b — credential + inbound
 PR 6 (bearer middleware + denylist) → PR 7 (tiered limiter) → PR 8 (POST + capability + audit)
@@ -135,7 +135,7 @@ Phase 1a (PRs 1–5) is fully unblocked and reviewable in isolation with no auth
 
 ### PR 4: `feature/v04x-rfc0043-store-membership` — Scope/Grant Store + Membership Reconciliation
 
-**Depends on**: PR 2, G2, G7. **Purpose**: `channels.db` v11 migration (or dedicated DB); invitation writes a `RespondNever` `memberships` row; revocation closes the RFC 0035 interval. Tests assert a `membership_intervals` stint opens, publish succeeds, fanout does not dispatch (the chat-as-DM precedent). ~350–450 lines.
+**Depends on**: PR 2, G2, G7. **Purpose**: `channels.db` migration at the next version at PR time (or dedicated DB — G7); invitation writes a `RespondNever` `memberships` row; revocation closes the RFC 0035 interval. Tests assert a `membership_intervals` stint opens, publish succeeds, fanout does not dispatch (the chat-as-DM precedent). ~350–450 lines.
 
 ### PR 5: `feature/v04x-rfc0043-idempotency` — Idempotency Store
 
@@ -143,7 +143,7 @@ Phase 1a (PRs 1–5) is fully unblocked and reviewable in isolation with no auth
 
 ### PR 6: `feature/v04x-rfc0043-bearer-middleware` — HTTP Bearer Validation + Denylist
 
-**Depends on**: G1, G8 (RFC 0039 Phases 1–3 + credential track), PR 4. **Purpose**: HTTP variant of the RFC 0009 Phase 4 `AgentCapabilityToken` (HMAC, short-TTL, capability-scoped), the validation middleware on `/external/*` (resolves principal into request context), and the denylist revocation (RFC 0009 OQ 4). Live-stream re-check hook. ~300–450 lines.
+**Depends on**: G1, G8 (RFC 0039 Phases 1–2 + credential track), PR 4. **Purpose**: HTTP variant of the RFC 0009 Phase 4 `AgentCapabilityToken` (HMAC, short-TTL, capability-scoped), the validation middleware on `/external/*` (resolves principal into request context), and the denylist revocation (RFC 0009 OQ 4). Live-stream re-check hook. ~300–450 lines.
 
 ### PR 7: `feature/v04x-rfc0043-tiered-ratelimit` — Per-Participant Tiered Rate Limiter
 
@@ -163,7 +163,7 @@ Phase 1a (PRs 1–5) is fully unblocked and reviewable in isolation with no auth
 
 ### PR 11: `feature/v04x-rfc0043-longpoll-cursor` — Long-Poll Drain + Cursor
 
-**Depends on**: PR 10. **Purpose**: `GET .../messages?since=` drain; monotonic per-channel `event_id` cursor (new sequence column in the v11 migration); empty-timeout → `200` + unchanged cursor; over-cap → `503` with existing connections intact; history-on-join via `GetHistoryScoped` (invite-time-forward). ~350–500 lines.
+**Depends on**: PR 10. **Purpose**: `GET .../messages?since=` drain; monotonic per-channel `event_id` cursor (new sequence column in the PR 4 migration); empty-timeout → `200` + unchanged cursor; over-cap → `503` with existing connections intact; history-on-join via `GetHistoryScoped` (invite-time-forward). ~350–500 lines.
 
 ### PR 12: `feature/v04x-rfc0043-audit-admission` — Audit Kinds + IP Capture + Admission
 

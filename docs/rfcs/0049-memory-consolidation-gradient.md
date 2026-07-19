@@ -210,7 +210,7 @@ The scenarios from the v0.3.7 review, traced through the model:
 
 Phases 0–1 target **v0.3.12**; Phases 2–4 stay **v0.4.0** (Phase 2 needs the unimplemented RFC 0027 reflection engine; Phase 3 needs the unimplemented RFC 0028 decision engine). The order is forced by §E.
 
-- **Phase 0 — RFC 0037 confidentiality gate (keystone).** Classification on channels; protection level stamped on memory rows (fail-closed `internal`); the deterministic egress gate at injection + recall. Nothing below may ship first. *(This matches the roadmap, which already places 0037 at the v0.4.0 on-ramp.)*
+- **Phase 0 — RFC 0037 confidentiality gate (keystone).** Classification on channels; protection level stamped on memory rows (fail-closed `internal`); the deterministic egress gate at injection + recall. Nothing below may ship first. *(The roadmap now places 0037 in v0.3.12 alongside this RFC's Phases 0–1 — both pulled forward per the 2026-07-15 decision.)*
 - **Phase 1 — Name the gradient + re-root ISSUE-0084 + capture topic facts.** Promote this RFC's law; reframe ISSUE-0084 from subject-classification to "L2 = cross-room, visibility = 0037 level." Widen topic-fact recall to cross-room *behind the Phase-0 gate* — **and land the capture path** ([RFC 0026 topic-predicate amendment](0026-amendment-topic-subject-predicates.md): `topic.*` predicate namespace + extractor-prompt + recall-seeding, behind the allowlist blast-radius re-review), without which the widening reads an empty tier.
 - **Phase 2 — Cross-scope consolidation (RFC 0027 amendment).** Add the bounded cross-room reflection pass (L1→L2 pump). This is where the relevance-budget risk is measured (see Risks) before it is trusted.
 - **Phase 3 — Decisions as memory (RFC 0028 amendment).** Readable L4 tier at `pre-act`; heuristic consolidation; society storage via RFC 0029.
@@ -220,14 +220,14 @@ Phases 0–1 target **v0.3.12**; Phases 2–4 stay **v0.4.0** (Phase 2 needs the
 
 ## Amendments this RFC implies
 
-Stub amendment files (created; to be expanded into full implementation amendments when their v0.4.0 PR plans open):
+Amendment files (created; the stubs expand into full implementation amendments when the corresponding release's PR plan opens — the first two ride v0.3.12 with Phases 0–1, the RFC 0027/0028 amendments ride v0.4.0 with Phases 2–3):
 
-0. [**RFC 0049 amendment — L1 cross-room availability**](0049-amendment-l1-cross-room-availability.md) — raw episodic recall becomes cross-room available behind the 0037 gate, room-first-ranked (reverses Non-Goal #1 per the 2026-07-15 v0.3.12 lock). ✍️ Authored 2026-07-19.
-0b. [**RFC 0026 amendment — topic-subject predicate vocabulary**](0026-amendment-topic-subject-predicates.md) — the scenario-2 *capture* path: `topic.*` predicates + extractor/recall widening, gated on the allowlist blast-radius re-review (v0.3.12, with Phase 1). ✍️ Stub authored 2026-07-19.
-1. [**RFC 0031 amendment — fact scope by consolidation level**](0031-amendment-fact-scope-by-consolidation-level.md) — fact scope is consolidation-level, not subject; L2 facts cross rooms, gated by 0037. Re-roots [ISSUE-0084](../issues/ISSUE-0084-fact-scope-by-subject-not-uniform-session.md); supersedes memory-scope-axes.md decision 4.
-2. [**RFC 0027 amendment — cross-scope consolidation**](0027-amendment-cross-scope-consolidation.md) — the bounded agent-wide reflection pass that distils L1→L2 across rooms; ties the declassification projection to it.
-3. [**RFC 0028 amendment — decisions as readable memory**](0028-amendment-decisions-as-readable-memory.md) — the `pre-act` retrieval of past decision→outcome records and their heuristic consolidation; storage in the RFC 0029 society tier.
-4. **(doc) memory-scope-axes.md** — decision 4 annotated as superseded by this RFC; decisions 1–3, 5–6 unchanged. ✅ Done (PR [#559](https://github.com/mkhomutov/Persatrix/pull/559)).
+- [**RFC 0049 amendment — L1 cross-room availability**](0049-amendment-l1-cross-room-availability.md) — raw episodic recall becomes cross-room available behind the 0037 gate, room-first-ranked (reverses Non-Goal #1 per the 2026-07-15 v0.3.12 lock). ✍️ Authored 2026-07-19.
+- [**RFC 0026 amendment — topic-subject predicate vocabulary**](0026-amendment-topic-subject-predicates.md) — the scenario-2 *capture* path: `topic.*` predicates + extractor/recall widening, gated on the allowlist blast-radius re-review (v0.3.12, with Phase 1). ✍️ Stub authored 2026-07-19.
+- [**RFC 0031 amendment — fact scope by consolidation level**](0031-amendment-fact-scope-by-consolidation-level.md) — fact scope is consolidation-level, not subject; L2 facts cross rooms, gated by 0037. Re-roots [ISSUE-0084](../issues/ISSUE-0084-fact-scope-by-subject-not-uniform-session.md); supersedes memory-scope-axes.md decision 4.
+- [**RFC 0027 amendment — cross-scope consolidation**](0027-amendment-cross-scope-consolidation.md) — the bounded agent-wide reflection pass that distils L1→L2 across rooms; ties the declassification projection to it.
+- [**RFC 0028 amendment — decisions as readable memory**](0028-amendment-decisions-as-readable-memory.md) — the `pre-act` retrieval of past decision→outcome records and their heuristic consolidation; storage in the RFC 0029 society tier.
+- **(doc) memory-scope-axes.md** — decision 4 annotated as superseded by this RFC; decisions 1–3, 5–6 unchanged. ✅ Done (PR [#559](https://github.com/mkhomutov/Persatrix/pull/559)).
 
 ## Risks
 

@@ -252,7 +252,7 @@ The original draft named a dataclass and a scope struct but never said where eit
 
 | Store | Contents | Recommended home |
 |-------|----------|------------------|
-| External-agent registry | `ExternalAgentParticipant` records + credential refs (never the token) | `channels.db` at **schema v11** (one additive migration; [`sqlite_schema.go`](../../internal/channels/sqlite_schema.go) `channelStoreSchemaVersion` is 10 today) **or** a dedicated `external_agents.db` |
+| External-agent registry | `ExternalAgentParticipant` records + credential refs (never the token) | `channels.db` at the **next schema version at PR time** (one additive migration; [`sqlite_schema.go`](../../internal/channels/sqlite_schema.go) `channelStoreSchemaVersion` is 10 today, and [RFC 0037](0037-memory-confidentiality-channel-classification.md)'s v0.3.12 classification migration is projected to take v11 first — this RFC lands v0.4.x, so re-verify the number when the PR opens) **or** a dedicated `external_agents.db` |
 | Capability grants | one row per `(participant_id, channel_id, mode)` | same DB as the registry |
 | Idempotency ledger | `(account_id, key, request_hash, message_id, created_at)`, `UNIQUE(account_id, key)` | same DB; 24h sweep |
 
@@ -295,7 +295,7 @@ The original draft attributed this outbound hook to an "[RFC 0041](0041-typed-ev
 **Delivery queue and cursor.** The delivery mechanics the original draft named in one sentence ("message queues receive the event") are specified here, mirroring the shipped [`logbuffer`](../../internal/observability/logbuffer/buffer.go) Config precedent (which pins exactly these knobs):
 
 - **Queue.** Bounded per-participant, in-memory, **drop-oldest with a counter — never block**. This is load-bearing: `fanout` runs on a detached goroutine off `PublishAsync`, so a blocking write to a slow external consumer would stall fanout for *every other member of that channel*. Capacity, drop counter, and restart behaviour follow the logbuffer defaults shape (`PerExecution`/`MaxSubscribers`/drop-counter analogues).
-- **Cursor.** Opaque to the client; encodes a **monotonic per-channel `event_id`**. The substrate is a monotonic per-channel sequence column (added with the v11 migration) — *not* a timestamp (the store orders `ORDER BY timestamp DESC` with no tiebreaker and ms resolution can repeat, which is why the CLI watch loop dedupes by id) and *not* the current UUIDv4 `message_id` (random, unsortable). The cursor is authoritative; the queue is only a wakeup. This makes at-least-once delivery fall out for free and folds [OQ 3](#open-questions) in: retention stops mattering because a reconnecting agent reads forward from its cursor through the scoped history path.
+- **Cursor.** Opaque to the client; encodes a **monotonic per-channel `event_id`**. The substrate is a monotonic per-channel sequence column (added with the [§E](#e-storage-and-provisioning) migration) — *not* a timestamp (the store orders `ORDER BY timestamp DESC` with no tiebreaker and ms resolution can repeat, which is why the CLI watch loop dedupes by id) and *not* the current UUIDv4 `message_id` (random, unsortable). The cursor is authoritative; the queue is only a wakeup. This makes at-least-once delivery fall out for free and folds [OQ 3](#open-questions) in: retention stops mattering because a reconnecting agent reads forward from its cursor through the scoped history path.
 - **History on join.** An external agent sees history **from its invitation forward, by default** (confidentiality-defensible: pre-invitation traffic was written when no external principal was in the room). This is exactly what [RFC 0035](0035-channel-membership-interval-ledger.md)'s `GetHistoryScoped` already implements — it trims results to the participant's `membership_intervals` stints — so it is reused, not built. An operator-set backfill window at invitation is a possible refinement, deferred.
 - **Mentionability.** `Mentionable` today has no mechanism: mention-lifting resolves a token only against channel members and pulls display names from the **agent registry** ([`mention_lift.go`](../../internal/channels/mention_lift.go)), which an external agent has no row in. For Phase 1, **addressability follows from membership** (the external participant is a member, so it can be named), and `Mentionable: false` is honored by a filter at the lift site. The display-name source for an external agent is its `ExternalAgentParticipant.DisplayName`, surfaced via a small lift-path adapter (not the registry). If this proves fiddly, dropping `Mentionable` from Phase 1 and relying on plain membership addressing is the fallback.
 
@@ -331,7 +331,7 @@ The original draft attributed this outbound hook to an "[RFC 0041](0041-typed-ev
 The endpoint is additive to *existing* channels, participants, and integrations — none are disrupted. But "nothing to migrate" was wrong: there are three real migrations plus one deliberately-free part.
 
 - **Participant-type vocabulary change** across the four sites in [§A](#a-the-externalagentparticipant-participant-type), with the cross-language conformance tests (`internal/channels/participant_type_test.go`, `internal/server/chat_handler_participant_type_test.go`, `tests/unit/python/test_participant.py` — which pins the 2-value frozenset and *will fail until updated*) and the `record_close.py` clamp handled deliberately.
-- **New stores** for the external-agent registry + capability grants ([§E](#e-storage-and-provisioning)), one additive `channels.db` v11 migration (or a dedicated DB).
+- **New stores** for the external-agent registry + capability grants ([§E](#e-storage-and-provisioning)), one additive `channels.db` migration at the next version at PR time (or a dedicated DB).
 - **New store** for the 24h idempotency ledger.
 - **Free:** no proto change — `sender_participant_type` is a bare string, not an enum ([§A](#a-the-externalagentparticipant-participant-type)).
 
@@ -345,7 +345,7 @@ Split to separate what is buildable now from what waits on unshipped dependencie
 
 Participant-type vocabulary + `ext-` ID grammar; the `ExternalAgentParticipant` / `CapabilityScope` model keyed by canonical channel ID; the external-agent registry + capability-grant store + one `channels.db` migration; membership reconciliation (invitation writes a `RespondNever` `memberships` row, opening an RFC 0035 stint); the idempotency store; the config loader + `schemas/external_agent.schema.json` + `_SCHEMA_MAP` registration. All additive, all testable in isolation.
 
-### Phase 1b — gated on the credential track + RFC 0039 Phases 1–3
+### Phase 1b — gated on the credential track + RFC 0039 Phases 1–2
 
 Principal resolution and the HTTP bearer-validation middleware (the [RFC 0009](0009-security-sandboxing.md) Phase 4 token model, HTTP variant, + denylist revocation); the per-participant tiered rate limiter (new subsystem); `POST .../messages` + capability check + audit emission; `GET /identity` + `GET /channels`. Gated because the credential and its validation are new, and the adjacent channel surface must be authenticated first ([§Security](#security-considerations)).
 
@@ -368,7 +368,7 @@ If real use cases demand it: more granular capability scopes (per-message-type, 
 | Go — participant vocab | [`internal/channels/participant_type.go`](../../internal/channels/participant_type.go), [`agents/participant.py`](../../agents/participant.py), [`agents/persona_runtime/record_close.py`](../../agents/persona_runtime/record_close.py), [`agents/memory/relationship_queries.py`](../../agents/memory/relationship_queries.py) | Add `external_agent` to the four allowlists; handle the clamp. **No proto change.** |
 | Go — new package | `internal/extagents/` (new) | `ExternalAgentParticipant`, `CapabilityScope`, registry/grant/idempotency stores |
 | Go — REST | `internal/server/external_agent_routes.go` (new), [`internal/server/server.go`](../../internal/server/server.go) (mount `/external/*` + operator admin routes), bearer-validation middleware | Endpoint + auth middleware |
-| Go — channels | [`internal/channels/router.go`](../../internal/channels/router.go) (dispatcher multiplexer), [`internal/channels/fanout.go`](../../internal/channels/fanout.go), `internal/channels/queue_dispatcher.go` (new), [`internal/channels/sqlite_schema.go`](../../internal/channels/sqlite_schema.go) (v11) | Outbound queue + membership + migration |
+| Go — channels | [`internal/channels/router.go`](../../internal/channels/router.go) (dispatcher multiplexer), [`internal/channels/fanout.go`](../../internal/channels/fanout.go), `internal/channels/queue_dispatcher.go` (new), [`internal/channels/sqlite_schema.go`](../../internal/channels/sqlite_schema.go) (next version — [§E](#e-storage-and-provisioning)) | Outbound queue + membership + migration |
 | Go — auth/rate/audit | credential (modeled on `internal/security/token.go` from [RFC 0009](0009-security-sandboxing.md) Phase 4), [`internal/security/ratelimit.go`](../../internal/security/ratelimit.go) (tiered per-participant), [`internal/security/audit_event.go`](../../internal/security/audit_event.go) (new event kinds + IP/UA) | New credential + tiered limiter + audit kinds |
 | Observability | [`internal/observability/metrics/`](../../internal/observability/metrics/) | Counters: requests by outcome, capability denials, rate-limit rejections, long-poll connections/cap-rejections, queue depth/drops, egress volume |
 | Schemas | `schemas/external_agent.schema.json` (new), [`agents/validate.py`](../../agents/validate.py) `_SCHEMA_MAP` | Wire payload schema + registration |
@@ -399,7 +399,7 @@ If real use cases demand it: more granular capability scopes (per-message-type, 
 - **NEW-1 — Credential shape confirmation.** The credential track is decided (RFC 0009 Phase 4 model, HTTP variant, denylist revocation — [§C](#c-auth-identity-and-credentials)). Confirm at the security review that the HTTP HMAC variant + denylist is preferred over waiting for a full RFC 0039 machine-principal amendment.
 - **NEW-2 — Admission gate sequencing.** `external_participants_allowed` is owned by RFC 0012 §G (v0.4.0). Confirm no external credential is issued before that gate exists, and that Phase 1a provisioning stays operator-only until then. **Blocks the security review.**
 - **NEW-3 — Governance disposition.** External participants are `RespondNever` members ([§D](#d-capability-scope-and-membership)); confirm they are governance-*subject* for budget accounting but consume no reply budget, and add `external_agent` (or a generic `external`) to the `exempt_principals` reasoning if needed ([§G](#g-governance-and-delivery-mechanics)).
-- **NEW-4 — Storage home + RFC 0029 tier.** `channels.db` v11 vs. a dedicated DB, and the migration number; every new store is society-scoped ([§E](#e-storage-and-provisioning)). **Blocks the store PRs.**
+- **NEW-4 — Storage home + RFC 0029 tier.** `channels.db` vs. a dedicated DB, and the migration number (RFC 0037's v0.3.12 migration is projected to take v11 first); every new store is society-scoped ([§E](#e-storage-and-provisioning)). **Blocks the store PRs.**
 - **NEW-5 — Memory-poisoning policy.** Provenance-tag external-derived memory / exclude from fact extraction in Phase 1 / operator forget-path ([§Security](#security-considerations)).
 - **NEW-6 — Egress budget + delivery auditing.** A per-participant egress volume ceiling distinct from request rate, and mandatory auditing of delivered message ids ([§Security](#security-considerations)).
 - **NEW-7 — Client-IP capture + trusted-proxy policy.** Required by the audit story; exists nowhere today ([§Security](#security-considerations)).
@@ -422,10 +422,10 @@ Draft. This RFC stays 🔨 **Draft** until the leave-Draft checklist below is di
 **Hard shipping gates** (dependencies that must land before the corresponding phase):
 
 - **Phase 1a**: none — buildable today.
-- **Phase 1b**: RFC 0039 Phases 1–3 (session/role/enforcement substrate + the credential-validation surface) and the credential-track confirmation.
+- **Phase 1b**: RFC 0039 Phases 1–2 (the account/session substrate + the Phase 2 REST enforcement that authenticates the adjacent channel surface) and the credential-track confirmation. (0039 Phase 3 — account administration & hardening — is *not* on this path: the credential is an RFC 0009-track token, not an 0039 account.)
 - **Phase 1c**: OQ 1 resolved + `/api/v1/channels/*` authenticated (RFC 0039 Phase 2) + the RFC 0012 §G admission gate.
 
-This RFC remains sequenced after the other three umbrella RFCs, but is otherwise **independent of RFC 0040 and RFC 0041** (neither is a build dependency — see [Related Documentation](#related-documentation)). Realistic landing zone: **v0.4.x**, because its critical path runs through RFC 0039 Phase 3 and RFC 0012, both v0.4.0.
+This RFC remains sequenced after the other three umbrella RFCs, but is otherwise **independent of RFC 0040 and RFC 0041** (neither is a build dependency — see [Related Documentation](#related-documentation)). Realistic landing zone: **v0.4.x** — its critical path runs through RFC 0039 Phase 2 (targeted v0.3.x but 📋 Proposed with zero implementation today) and the RFC 0012 §G admission gate (v0.4.0).
 
 ## Related Documentation
 

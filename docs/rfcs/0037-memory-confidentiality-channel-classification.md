@@ -20,7 +20,7 @@ depends_on:
 **Date**: 2026-05-16
 **Target**: v0.3.12 (cross-channel persona experience). **Pulled forward** from the v0.4.0 on-ramp per the 2026-07-15 planning decision — this restores the RFC's own original intent (its Motivation §"Why this is a v0.3.x RFC" argues confidentiality is local and v0.3.x-shippable; the [2026-06-04 amendment](../v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040) had deferred it to make room for conversation-realism work, now shipped).
 **Depends on**: RFC 0011 (Channels — the `channels` table and the `channels.yaml` config surface a classification is added to), RFC 0036 (Persona Verbatim Message Recall — §F retrofits its server-side scoped-search query with the acting-channel classification filter)
-**Relates to**: RFC 0034 (Persona Conversational Working Memory — the conversation window, shown in §H to be classification-safe by construction), RFC 0017 (Persona Memory Injection Token Budget — the injection layer the §D hard gate extends), RFC 0005 / RFC 0008 / RFC 0026 (the episodic, notes, and facts memory tiers that gain a protection level), RFC 0020 / RFC 0027 (Interaction Lifecycle / Reflection-Driven Consolidation — where protection levels are stamped and §E projections are generated), RFC 0009 (Agent Identity, Security & Sandboxing — the audit subsystem), RFC 0029 (Personal/Society Storage Split — protection levels must survive the migration to the society store), RFC 0012 (Protocols & Organizations — the *authority* axis and the enforced egress gate that this RFC's logging-only tripwire becomes), RFC 0038 (Persona Concurrent-Context Awareness & Cross-Channel Relay — enforces the single-channel-turn property §D and §H rely on, and gives cross-channel flow a §D-gated path)
+**Relates to**: RFC 0034 (Persona Conversational Working Memory — the conversation window, shown in §H to be classification-safe by construction), RFC 0017 (Persona Memory Injection Token Budget — the injection layer the §D hard gate extends), RFC 0005 / RFC 0008 / RFC 0026 (the episodic, notes, and facts memory tiers that gain a protection level), RFC 0020 / RFC 0027 (Interaction Lifecycle / Reflection-Driven Consolidation — where protection levels are stamped and §E projections are generated), RFC 0009 (Agent Identity, Security & Sandboxing — the audit subsystem), RFC 0029 (Personal/Society Storage Split — protection levels must survive the migration to the society store), RFC 0012 (Protocols & Organizations — the *authority* axis and the enforced egress gate that this RFC's logging-only tripwire becomes), RFC 0038 (Persona Concurrent-Context Awareness & Cross-Channel Relay — its §B single-channel-turn guard, which §D and §H rely on, is carved into this RFC's Phase 1 step 6 per Decision #3; its v0.4.0 relay gives cross-channel flow a §D-gated path)
 
 ---
 
@@ -301,9 +301,14 @@ backfills every existing channel to `internal`.
   into every `internal` group — the realistic leak. Operators running
   sensitive DMs should raise the default or reclassify per-DM;
   clearance-derived DM levels remain Open Question #2 / RFC 0012.)*
-- **Thread channels** (`thread:<message_id>`) copy the classification of
-  their parent channel at creation. A thread is never more or less
-  confidential than the conversation it forks from.
+- **Thread replies** (`thread:<message_id>` in the address grammar) need
+  no stamping mechanism today: no production path creates a separate
+  thread-channel row — replies are rows in the *parent* channel (the
+  `thread_id` FK) and carry its classification by construction. The
+  store's `CreateChannel` contract does admit a `thread:` row; if one is
+  ever created, it copies the parent's classification at creation.
+  Either way a thread is never more or less confidential than the
+  conversation it forks from.
 
 **On the wire.** The persona runtime needs the acting channel's
 classification to run the §D gate. Rather than have the runtime fetch
@@ -748,8 +753,9 @@ on its own; §E projections only make it less blunt.
 2. **Channel classification** — `classification` field in
    `config/channels.yaml` + `schemas/channel.schema.json`; the channel-store
    classification migration (next version, v11 — §B) adding
-   `channels.classification`; DM-creation and
-   thread-creation stamping (§B); `classification` on `ChannelMessageEvent`
+   `channels.classification`; DM-creation stamping from
+   `dm_default_classification` + the thread inheritance rule (§B);
+   `classification` on `ChannelMessageEvent`
    (`proto/task.proto`) and the dispatch path.
 3. **Protection level** — `agents/memory/migrations.py` migration adding
    `protection_level` / `source_channel_id` / nullable `provenance_json`
@@ -816,7 +822,7 @@ Dependencies: Phase 1. Independent of Phase 2 and separately reviewable.
 | Component | Files | Change |
 |-----------|-------|--------|
 | Go orchestrator | `internal/channels/sqlite_schema.go` (version const + history) + `internal/channels/sqlite_migrations.go` (the `migrateV10ToV11` arm) | classification migration (next version, v11 — §B): `channels.classification` column + backfill; bump `channelStoreSchemaVersion` |
-| Go orchestrator | `internal/channels/sqlite_dm.go` (`GetOrCreateDM`) | Stamp `internal` on DM creation (§B); thread replies are rows in the parent channel — no separate thread-channel row exists, so they inherit the parent classification by construction |
+| Go orchestrator | `internal/channels/sqlite_dm.go` (`GetOrCreateDM`) | Stamp the §B `dm_default_classification` knob (default `internal`) on DM creation; thread replies are rows in the parent channel — no production path creates a separate thread-channel row — so they inherit the parent classification by construction (§B) |
 | Go orchestrator | `internal/channels/sqlite_search.go` | §F acting-channel classification clause on the RFC 0036 scoped query |
 | Go orchestrator | `internal/server/persona_recall_handlers.go`, `channel_types.go` | Required acting-channel parameter on the recall endpoint (`channel_handlers.go` is at the size cap — the recall handler was carved into `persona_recall_handlers.go`) |
 | Go orchestrator | `internal/channels/` (event dispatch), `internal/security/audit_event.go` | `classification` on dispatched channel events; reclassification + `channel.confidentiality_tripwire` audit events |
@@ -836,7 +842,7 @@ Dependencies: Phase 1. Independent of Phase 2 and separately reviewable.
 | Python agents | `agents/channel_publisher.py` | §G leak tripwire |
 | Python agents | `agents/tools/recall.py` | Pass acting-channel classification to the recall endpoint |
 | Python agents | `agents/persona_runtime/summarize_close.py` (+ `fact_envelope.py` / `fact_extractor.py`) | Emit §E projections during the RFC 0020 close-consolidation LLM call (RFC 0027 reflection is a future second producer — proposed, not shipped) |
-| Config / schema | `config/channels.yaml`, `schemas/channel.schema.json` | `classification` field + `enum` |
+| Config / schema | `config/channels.yaml`, `schemas/channel.schema.json` | `classification` field + `enum`; the `dm_default_classification` knob (§B) |
 | Docs | `docs/guides/persona-agents.md`, `docs/diagrams/memory-architecture.md` | Document classification, protection levels, the two-axis model |
 | Tests | `internal/channels/*_test.go`, `tests/unit/python/`, `tests/integration/` | Per Test Strategy (+ an RFC 0044 golden-trace recipe for MT-PERSONA-CONFIDENTIALITY-001) |
 
