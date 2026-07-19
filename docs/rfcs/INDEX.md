@@ -27,7 +27,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0049](0049-memory-consolidation-gradient.md) | 📋 Proposed | architecture | v0.3.12 (Phases 0–1) + v0.4.0 (Phases 2–4); design ratified v0.3.7 | 2026-06-06 | Memory Consolidation Gradient & Scope Reconciliation |
 | [RFC-0032](0032-channel-interaction-layer.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-12 | Wire-Level Channel Interaction Layer and Chat-Façade Unification |
 | [RFC-0042](0042-state-namespacing-by-scope.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-20 | State Namespacing by Scope Prefix |
-| [RFC-0043](0043-inbound-agent-interop-endpoint.md) | 🔨 Draft | protocol | v0.4.0+ | 2026-05-20 | Inbound Agent-Interop Endpoint |
+| [RFC-0043](0043-inbound-agent-interop-endpoint.md) | 🔨 Draft | protocol | v0.4.x | 2026-05-20 | Inbound Agent-Interop Endpoint |
 | [RFC-0009](0009-security-sandboxing.md) | ⚠️ Partially Implemented | architecture | v0.3.0 (Phases 1–2) + v0.4.0 (Phases 3–4) | 2026-04-15 | Agent Identity, Security & Sandboxing |
 | [RFC-0011](0011-channels-bridges.md) | ⚠️ Partially Implemented | feature | v0.3.0 (internal channels) + v0.5.0 (external bridges) | 2026-04-25 | Channels & Internal Agent Messaging |
 | [RFC-0021](0021-persona-temporal-awareness.md) | ⚠️ Partially Implemented | architecture | v0.3.0 (Phase 1) + v0.4.0 (Phases 2–4) | 2026-04-25 | Persona Temporal Awareness |
