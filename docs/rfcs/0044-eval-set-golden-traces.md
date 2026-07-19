@@ -185,7 +185,7 @@ The initial set, all under [`evaluators/eval_sets/`](../../evaluators). IDs foll
 | ID | Source | Asserts |
 |----|--------|---------|
 | `EVAL-MEMORY-001` | [MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md) | Dementia-test recall across five interactions |
-| `EVAL-RECALL-001` | [RFC 0031](0031-per-session-namespacing-channels.md) Phase 2 (F-3) | Cross-session memory does not leak into recall |
+| `EVAL-RECALL-001` | [ISSUE-0085](../issues/ISSUE-0085-epoch-axis-run-isolation.md) / RFC 0031 epoch axis *(re-anchored 2026-07-19 — v0.3.12 review item 7)* | Cross-**epoch** and cross-**principal** memory never leaks into recall — the absolute Plane-2 walls. The room axis is deliberately NOT asserted here: post-[RFC 0049 L1 amendment](0049-amendment-l1-cross-room-availability.md), gated cross-room recall is correct behaviour; the room posture (room-first ranking + classification gating) gets its own RFC 0037 integration eval |
 | `EVAL-ERROR-001` | [ISSUE-0065](../issues/ISSUE-0065-chat-rest-budget-denied-no-channel-reply.md) | Wallet denial publishes a typed chat-error on the channel |
 | `EVAL-ERROR-002` | [ISSUE-0066](../issues/ISSUE-0066-chat-rest-resource-exhausted-no-channel-reply.md) | Lease-cap / rate-limit / `RESOURCE_EXHAUSTED` publish typed chat-errors |
 | `EVAL-WORKING-001` | [RFC 0034](0034-persona-conversational-working-memory.md) | Persona references its own prior question in the same interaction |
@@ -235,7 +235,7 @@ Drift reports become actionable: a CI job opens an issue when drift exceeds thre
 - **Integration tests**: each seed eval runs in replay mode and passes; flipping one assertion to a wrong value fails as expected.
 - **E2E**: the eval runner under CI produces a structured artifact that matches the documented schema.
 - **Manual tests**: the seed evals' source manual tests ([MT-MEMORY-005](../manual-tests/MT-MEMORY-005-dementia-test.md) and others) remain runnable by hand; the goldens are *additive*, not a replacement.
-- **Self-test**: an "intentional regression" PR (e.g., disabling the F-3 recall filter) must fail `EVAL-RECALL-001` and be caught at CI before merge.
+- **Self-test**: an "intentional regression" PR (e.g., disabling the epoch-isolation filter) must fail `EVAL-RECALL-001` and be caught at CI before merge.
 
 ## Open Questions
 

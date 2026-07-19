@@ -1,10 +1,10 @@
 # RFC 0031 Amendment — Fact Scope Follows Consolidation Level, Not Subject
 
 **Type**: amendment to [RFC 0031](0031-per-session-namespacing-channels.md) §C (Storage Model) + §D (Recall Semantics), and to [RFC 0026](0026-declarative-facts-tier.md) (facts-tier scope boundary)
-**Status**: 📋 Proposed — **stub**. Decision ratified ([RFC 0049 §D](0049-memory-consolidation-gradient.md#d-reconciliation-with-memory-scope-axesmd-and-the-one-decision-reopened), 2026-06-06); this file records the binding change and is to be expanded into a full implementation amendment when its v0.4.0 PR plan opens.
+**Status**: 📋 Proposed — **stub**. Decision ratified ([RFC 0049 §D](0049-memory-consolidation-gradient.md#d-reconciliation-with-memory-scope-axesmd-and-the-one-decision-reopened), 2026-06-06); this file records the binding change and is to be expanded into a full implementation amendment when the v0.3.12 PR plan opens.
 **Author**: Maksim Khomutov
 **Date**: 2026-06-06
-**Target**: v0.4.0 — **behind the RFC 0037 keystone** (see [Sequencing](#sequencing--dependencies)); no v0.3.7 code.
+**Target**: v0.3.12 — lands with [RFC 0049](0049-memory-consolidation-gradient.md) Phase 1 (this amendment *is* the Phase-1 L2 widening), **behind the RFC 0037 keystone** (see [Sequencing](#sequencing--dependencies)). *(Retargeted from v0.4.0 2026-07-20, following the 2026-07-15 pull-forward of RFC 0049 Phases 0–1; its capture-half companion is the [RFC 0026 topic-predicate amendment](0026-amendment-topic-subject-predicates.md).)*
 **Authoritative model**: [RFC 0049 — Memory Consolidation Gradient & Scope Reconciliation](0049-memory-consolidation-gradient.md)
 **Supersedes**: [memory-scope-axes.md](../memory-scope-axes.md) decision 4 ("fact scope follows subject"). Re-roots [ISSUE-0084](../issues/ISSUE-0084-fact-scope-by-subject-not-uniform-session.md).
 
@@ -27,19 +27,19 @@ This is what makes a persona carry project knowledge like a colleague: "Atlas sh
 
 ## What changes
 
-- **RFC 0031 §D (Recall Semantics)** — the blanket room-scoping default no longer applies to the L2 facts tier. Episodes (L1) keep room-scoped default recall unchanged; the explicit `sessions=[…]/"*"` cross-room *episodic* path is untouched.
+- **RFC 0031 §D (Recall Semantics)** — the blanket room-scoping default no longer applies to the L2 facts tier. Episodes (L1) are out of this amendment's scope; their room posture is owned by the [RFC 0049 L1 amendment](0049-amendment-l1-cross-room-availability.md) (cross-room *available* behind the 0037 gate, room-first-ranked — *updated 2026-07-20; originally "room-scoped default recall unchanged"*).
 - **RFC 0031 §C (Storage Model) / RFC 0026** — facts carry provenance (source session(s)) as a tag, not a filter, plus an RFC 0037 protection level.
 - **memory-scope-axes.md** — decision 4 already annotated superseded (PR #559).
 
 ## Sequencing / dependencies
 
-- **Hard dependency: RFC 0037 lands first.** Widening fact recall to cross-room without the egress gate is a confidentiality regression. RFC 0037 is v0.4.0 Phase 0.
+- **Hard dependency: RFC 0037 lands first.** Widening fact recall to cross-room without the egress gate is a confidentiality regression. RFC 0037 is RFC 0049's Phase 0, v0.3.12.
 - **Measurement gate.** Ship cross-room L2 recall in *shadow* (evaluated against [RFC 0044](0044-eval-set-golden-traces.md) golden traces) and promote to the live prompt only when it does not degrade quality under the [RFC 0017](0017-persona-memory-injection-budget.md) injection budget.
 - Pairs with the [RFC 0027 cross-scope consolidation amendment](0027-amendment-cross-scope-consolidation.md) (the pump that *produces* cross-room L2 facts).
 
-## Non-goals (stub — to expand in the v0.4.0 amendment)
+## Non-goals (stub — to expand in the implementation amendment)
 
-- Unifying **episodic** (L1) recall — episodes stay room-scoped.
+- Unifying **episodic** (L1) recall *here* — the L1 axis is owned by the [RFC 0049 L1 amendment](0049-amendment-l1-cross-room-availability.md); this amendment touches only the L2 facts tier. *(Reworded 2026-07-20 — originally "episodes stay room-scoped", which the L1 amendment reverses.)*
 - Removing the capture-time "is this worth consolidating?" judgment.
 - The exact provenance/classification column shape and migration — deferred to the implementation amendment.
 
