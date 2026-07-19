@@ -345,6 +345,33 @@ resolves consistently to `internal` — neither silently `public` (a
 disclosure) nor silently `secret` (which would withhold a persona's
 entire history from itself).
 
+**Synthesized (multi-source) entries.** *(Added 2026-07-19 — v0.3.12
+review decision item 3.)* The mechanics above are single-interaction; the
+[RFC 0049](0049-memory-consolidation-gradient.md) §F cross-scope pump
+(v0.4.0, Phase 2 of that RFC) synthesizes one L2 entry from **many**
+interactions across rooms. **This section owns the stamping rule for both
+arities**; RFC 0049 §F and the [RFC 0027 amendment](0027-amendment-cross-scope-consolidation.md)
+cite it rather than restating it:
+
+1. **Single-source** (unchanged): the source interaction's captured
+   classification; scalar `source_channel_id`.
+2. **Consolidation-derived**: `protection_level = max` over *all*
+   contributing sources' levels, **enforced at the memory write API** —
+   never left to the pump's LLM call. `source_channel_id` is `NULL`;
+   provenance is recorded in a nullable **`provenance_json`** column
+   (list of contributing channel ids) added by this same §C migration so
+   the v0.4.0 pump needs no second schema pass.
+3. **Supersession restamps.** The implemented facts tier is
+   latest-asserted-wins (`_facts_supersede.py`); that extends to
+   classification — a superseding assertion restamps the row from *its
+   own* source, up or down. **Reinforcement** (`_facts_reinforce.py`)
+   never lowers a level.
+4. **Independent corroboration does not ratchet.** `max` applies to what
+   a synthesis *derived from its inputs*. A proposition independently
+   asserted in a lower-classified channel may be captured as a distinct
+   entry stamped at that lower level — one `restricted` corroboration
+   must not permanently ratchet public knowledge upward.
+
 ### D. The hard gate at memory injection
 
 The memory-injection layer ([`memory_context.py`](../../agents/persona_runtime/memory_context.py),
@@ -584,10 +611,12 @@ required by this RFC.
   v0.3.x and is the reason RFC 0012 exists.
 - **Correctness depends on the protection level being stamped right.**
   The gate is only as good as the `protection_level` on each entry. §C
-  routes every channel-derived tier through a single choke point — the
-  interaction record's captured classification — so there is one place
-  to audit, not three. The tripwire (§G) is the backstop that surfaces a
-  mis-stamp in operation.
+  routes channel-derived memory through **two stamped write choke
+  points** — the interaction record's captured classification
+  (single-source entries) and the consolidation write API's enforced
+  `max` (synthesized entries, §C "Synthesized (multi-source) entries") —
+  so there are two places to audit, not one per tier. The tripwire (§G)
+  is the backstop that surfaces a mis-stamp in operation.
 - **Prompt injection is unchanged.** Classified content that *is*
   injected (at or below the acting level, or as a projection) still
   passes the RFC 0034 / RFC 0036 `_format_event` delimiter-escape
@@ -619,10 +648,12 @@ on its own; §E projections only make it less blunt.
    thread-creation stamping (§B); `classification` on `ChannelMessageEvent`
    (`proto/task.proto`) and the dispatch path.
 3. **Protection level** — `agents/memory/migrations.py` migration adding
-   `protection_level` / `source_channel_id` to the episodic, facts, and
-   notes tiers, plus the `memory_projections` table (created here, used in
-   Phase 2); interaction-open classification capture (§C); episodic and
-   facts consolidation stamping; migration backfill.
+   `protection_level` / `source_channel_id` / nullable `provenance_json`
+   (the §C multi-source shape, created now so the v0.4.0 pump needs no
+   second migration) to the episodic, facts, and notes tiers, plus the
+   `memory_projections` table (created here, used in Phase 2);
+   interaction-open classification capture (§C); episodic and facts
+   consolidation stamping; migration backfill.
 4. **The hard gate** — the §D filter in `memory_context.py`, with
    withhold-only behaviour (no projections yet); the autonomous-tick
    `public` floor.
