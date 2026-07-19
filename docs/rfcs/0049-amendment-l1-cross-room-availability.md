@@ -61,14 +61,14 @@ knowledge is — made safe by classification, not by walls.
   superseded* — its grounding principle ("continuity is the default,
   isolation the named exception") is what this amendment extends to L1;
   room-continuity survives as the ranking default.
-- **EVAL-RECALL-001** ([RFC 0044](0044-eval-set-golden-traces.md)): must be
-  re-specified before recording — as drafted it asserts the room wall this
-  amendment removes. Its real invariant (epoch/principal no-leak +
-  classification gating) is a follow-up re-spec, tracked in the v0.3.12
-  decision list.
-- **Open intersection**: multi-source protection stamping (a pump-produced
-  entry consolidated from many rooms) remains an open design item of the
-  v0.3.12 review — this amendment inherits, and does not resolve, it.
+- **EVAL-RECALL-001** ([RFC 0044](0044-eval-set-golden-traces.md)):
+  ✅ re-specified 2026-07-19 (decision item 7) — re-anchored to the
+  absolute epoch/principal walls; the room axis (room-first ranking +
+  classification gating) gets its own RFC 0037 integration eval.
+- **Multi-source stamping intersection**: ✅ resolved 2026-07-19
+  (decision item 3) — [RFC 0037 §C "Synthesized (multi-source)
+  entries"](0037-memory-confidentiality-channel-classification.md#c-memory-provenance-and-protection-level)
+  owns the rule; this amendment inherits it.
 
 ## Sequencing & dependencies
 
