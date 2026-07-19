@@ -220,7 +220,7 @@ Phases 0–1 target **v0.3.12**; Phases 2–4 stay **v0.4.0** (Phase 2 needs the
 
 ## Amendments this RFC implies
 
-Amendment files (created; the stubs expand into full implementation amendments when the corresponding release's PR plan opens — the first two ride v0.3.12 with Phases 0–1, the RFC 0027/0028 amendments ride v0.4.0 with Phases 2–3):
+Amendment files (created; the stubs expand into full implementation amendments when the corresponding release's PR plan opens — the first three ride v0.3.12 with Phases 0–1, the RFC 0027/0028 amendments ride v0.4.0 with Phases 2–3):
 
 - [**RFC 0049 amendment — L1 cross-room availability**](0049-amendment-l1-cross-room-availability.md) — raw episodic recall becomes cross-room available behind the 0037 gate, room-first-ranked (reverses Non-Goal #1 per the 2026-07-15 v0.3.12 lock). ✍️ Authored 2026-07-19.
 - [**RFC 0026 amendment — topic-subject predicate vocabulary**](0026-amendment-topic-subject-predicates.md) — the scenario-2 *capture* path: `topic.*` predicates + extractor/recall widening, gated on the allowlist blast-radius re-review (v0.3.12, with Phase 1). ✍️ Stub authored 2026-07-19.
