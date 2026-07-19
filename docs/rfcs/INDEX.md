@@ -18,7 +18,7 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0027](0027-reflection-driven-consolidation.md) | 📋 Proposed | feature | v0.4.0 | 2026-05-01 | Reflection-Driven Consolidation |
 | [RFC-0028](0028-agent-decision-policy-engine.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension) | 2026-05-02 | Agent Decision Policy Engine |
 | [RFC-0037](0037-memory-confidentiality-channel-classification.md) | 📋 Proposed | feature | v0.3.12 (cross-channel persona experience; pulled forward from the v0.4.0 on-ramp per 2026-07-15) | 2026-05-16 | Memory Confidentiality & Channel Classification |
-| [RFC-0038](0038-concurrent-context-awareness-relay.md) | 📋 Proposed | architecture | v0.4.0 (on-ramp — cross-channel substrate for organizations; deferred from v0.3.x) | 2026-05-16 | Persona Concurrent-Context Awareness & Cross-Channel Relay |
+| [RFC-0038](0038-concurrent-context-awareness-relay.md) | 📋 Proposed | architecture | v0.3.12 (§B single-channel-turn enforcement only, carved forward per RFC 0037 Decision | 2026-05-16 | Persona Concurrent-Context Awareness & Cross-Channel Relay |
 | [RFC-0039](0039-user-accounts-authentication.md) | 📋 Proposed | architecture | v0.3.x (Phases 1–2) + v0.4.0 (Phase 3) | 2026-05-16 | User Accounts & Authentication |
 | [RFC-0040](0040-agent-orchestrator-transport-unification.md) | 📋 Proposed | protocol | v0.3.x (Phase 1) + v0.4.0 (Phases 2–4) | 2026-05-17 | Agent–Orchestrator Transport Unification |
 | [RFC-0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) | 📋 Proposed | architecture | v0.4.0+ | 2026-05-20 | Typed Event Taxonomy and Lifecycle Callbacks |

@@ -18,7 +18,7 @@ depends_on:
 # RFC 0049 — Memory Consolidation Gradient & Scope Reconciliation
 
 **Type**: architecture (memory model — meta-RFC over the memory tier RFCs)
-**Status**: 📋 Proposed — the gradient, the one law, and the §D re-rooting (cross-room topic knowledge) are **ratified** (2026-06-06). **Pulled forward to v0.3.12** (cross-channel persona experience) per the 2026-07-15 planning decision; Phases 0–1 target v0.3.12, Phases 2–4 stay v0.4.0. **The 2026-07-15 lock also reverses ratified Non-Goal #1 (raw episodic recall now crosses rooms, gated) — that reversal is a pending amendment, NOT applied in this doc yet (see the v0.3.12 review-prep decision list).**
+**Status**: 📋 Proposed — the gradient, the one law, and the §D re-rooting (cross-room topic knowledge) are **ratified** (2026-06-06). **Pulled forward to v0.3.12** (cross-channel persona experience) per the 2026-07-15 planning decision; Phases 0–1 target v0.3.12, Phases 2–4 stay v0.4.0. **The 2026-07-15 lock also reverses ratified Non-Goal #1 — applied 2026-07-19 via the [L1 amendment](0049-amendment-l1-cross-room-availability.md) (raw episodic recall becomes cross-room *available* behind the RFC 0037 gate, room-first-ranked).**
 **Author**: Maksim Khomutov
 **Date**: 2026-06-06
 **Target**: v0.3.12 (Phases 0–1) + v0.4.0 (Phases 2–4); **design ratified in v0.3.7** (docs-only, no code before v0.3.12 opens)
@@ -58,7 +58,7 @@ depends_on:
 
 What it does not have is a **vertical** axis: *how consolidated a memory is*. A raw turn, a conversation summary, a decontextualised fact, a learned skill, and a decision-with-outcome are not the same kind of thing, and they do not want the same scope. This RFC adds that axis — the **consolidation gradient** — and states one law:
 
-> **A memory's recall scope is a function of its consolidation level, not of which tier happens to store it.** Raw, context-rich memory (episodic) is room-scoped; consolidated, decontextualised memory (semantic facts, learned procedure, distilled experience) crosses rooms. Cross-room safety is enforced at *egress* by the RFC 0037 confidentiality gate — not by walling recall.
+> **A memory's recall scope is a function of its consolidation level, not of which tier happens to store it.** Raw, context-rich memory (episodic) is room-*ranked*; consolidated, decontextualised memory (semantic facts, learned procedure, distilled experience) crosses rooms. Cross-room safety is enforced at *egress* by the RFC 0037 confidentiality gate — not by walling recall. *(Amended 2026-07-19: L1 was originally room-****scoped****; the [L1 amendment](0049-amendment-l1-cross-room-availability.md) makes raw episodic recall cross-room available behind the gate, with room-first ranking as the continuity default.)*
 
 This is the model both of the project's stated goals need:
 
@@ -104,7 +104,7 @@ RFC 0027 (consolidation) *as designed* reflects **per active scope** only — it
 
 ## Non-Goals
 
-- **Unifying episodic recall.** Episodes stay room-scoped by default. The dementia-test continuity memory-scope-axes.md protects is preserved exactly. Cross-room *episodic* lookup remains the explicit `sessions=[…]/"*"` path.
+- ~~**Unifying episodic recall.**~~ **Superseded 2026-07-19 by the [L1 amendment](0049-amendment-l1-cross-room-availability.md):** episodes become cross-room *available* behind the RFC 0037 gate. The dementia-test continuity memory-scope-axes.md protects is preserved by **room-first ranking** (the boost, not the wall); the old `sessions=[…]/"*"` path was CLI/debug-only and is not the mechanism.
 - **A new store or backend.** The gradient is a property of *existing* tiers (RFC 0005/0026/0027). Physical storage (personal vs society, SQLite vs Postgres) is RFC 0029's orthogonal axis and is untouched.
 - **Removing the capture-time classification judgment.** Something still decides "is this worth consolidating?" — that stays a persona judgment, as the identity amendment already accepted.
 - **Shipping code before v0.3.12 opens.** v0.3.11 is in release-prep; this RFC is docs-only until v0.3.12 opens. Phases 0–1 land in v0.3.12; Phases 2–4 (which need the unimplemented RFC 0027/0028 engines) stay v0.4.0, behind the sequencing in [§ Sequencing](#sequencing--phased-plan).
@@ -126,7 +126,7 @@ Room is a **tag on Plane 1 and a ranking cue**, never a hard wall on Plane 2. Is
 | Level | Tier | What it holds | Context retained | Default scope | RFC |
 |------|------|---------------|------------------|---------------|-----|
 | **L0 Working** | working memory | this turn's assembled context | full, transient | the turn | 0005 / 0034 |
-| **L1 Episodic** | episodes, raw notes | what happened, verbatim-ish | room + time (a *source tag*) | **room** (`session`) | 0005 / 0031 |
+| **L1 Episodic** | episodes, raw notes | what happened, verbatim-ish | room + time (a *source tag*) | **room-ranked**; cross-room *available* behind the 0037 gate (*amended 2026-07-19 — [L1 amendment](0049-amendment-l1-cross-room-availability.md)*) | 0005 / 0031 |
 | **L2 Semantic** | facts, identity, relationship | what is *true* — decontextualised | provenance only | **cross-room** (`persona`) | 0026 / 0031-id |
 | **L3 Procedural** | skills, learned patterns | how to *do* things | none | **cross-agent** *(aspirational — 0014/0015 unimplemented; today's RFC 0008 procedural rows are room-scoped)* | 0008 (today) / 0014–0015 (planned) |
 | **L4 Experiential** | decision records → heuristics | what *worked* — choices + outcomes | provenance + outcome | **cross-room → society** | 0028 / 0029 |
@@ -138,7 +138,7 @@ The gradient is monotonic in two things at once: as memory rises, it **loses roo
 > A tier's default recall scope is determined by its rung on the gradient, not by which subsystem owns it and not by a string the model picked at write time.
 
 Corollaries:
-- **L1 → room.** Raw experience is room-scoped because its meaning *is* its context. (Unchanged.)
+- **L1 → room-first.** Raw experience is room-*ranked* because its meaning *is* its context — but per the [L1 amendment](0049-amendment-l1-cross-room-availability.md) (2026-07-19) it is cross-room *available* behind the 0037 gate, not walled. *(Originally "room-scoped, unchanged".)*
 - **L2+ → cross-room.** Consolidated knowledge is cross-room because consolidation is precisely the act of stripping the context that bound it to a room. Identity (L2) already proves this; topic facts (L2) should follow.
 - **Scope is intrinsic to the rung, never a query carve-out.** This is the identity amendment's principle, generalised: the F-7 seam recurred because scope was decided at the *query* layer; the cure is to decide it at the *tier/rung* layer. Same cure, applied to the whole gradient.
 
@@ -148,7 +148,7 @@ memory-scope-axes.md's six "decisions taken" are **kept** by this RFC, with one 
 
 | memory-scope-axes.md decision | This RFC |
 |---|---|
-| 1. Session = room-continuity, `(agent, channel)` | **Kept.** It is L1's default scope. |
+| 1. Session = room-continuity, `(agent, channel)` | **Kept as the ranking default.** It is L1's continuity unit; since the [L1 amendment](0049-amendment-l1-cross-room-availability.md) (2026-07-19) it ranks rather than walls. |
 | 2. Drop sender axis | **Kept** (already shipped, ISSUE-0083). |
 | 3. Relationship cross-room | **Kept.** It is L2. |
 | 4. **Fact scope follows *subject*** (person→cross, topic→room) | **Re-rooted.** Scope follows *consolidation level*, not subject. See below. |
@@ -222,6 +222,7 @@ Phases 0–1 target **v0.3.12**; Phases 2–4 stay **v0.4.0** (Phase 2 needs the
 
 Stub amendment files (created; to be expanded into full implementation amendments when their v0.4.0 PR plans open):
 
+0. [**RFC 0049 amendment — L1 cross-room availability**](0049-amendment-l1-cross-room-availability.md) — raw episodic recall becomes cross-room available behind the 0037 gate, room-first-ranked (reverses Non-Goal #1 per the 2026-07-15 v0.3.12 lock). ✍️ Authored 2026-07-19.
 1. [**RFC 0031 amendment — fact scope by consolidation level**](0031-amendment-fact-scope-by-consolidation-level.md) — fact scope is consolidation-level, not subject; L2 facts cross rooms, gated by 0037. Re-roots [ISSUE-0084](../issues/ISSUE-0084-fact-scope-by-subject-not-uniform-session.md); supersedes memory-scope-axes.md decision 4.
 2. [**RFC 0027 amendment — cross-scope consolidation**](0027-amendment-cross-scope-consolidation.md) — the bounded agent-wide reflection pass that distils L1→L2 across rooms; ties the declassification projection to it.
 3. [**RFC 0028 amendment — decisions as readable memory**](0028-amendment-decisions-as-readable-memory.md) — the `pre-act` retrieval of past decision→outcome records and their heuristic consolidation; storage in the RFC 0029 society tier.

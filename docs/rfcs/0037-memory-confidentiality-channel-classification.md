@@ -401,10 +401,11 @@ load-bearing guarantee of the RFC.
 > persona belongs to, and this gate — which keys on the *inbound*
 > channel — would not catch a leak on that path.
 > [RFC 0038](0038-concurrent-context-awareness-relay.md) §B promotes
-> single-channel-turn to a code-enforced invariant and routes deliberate
-> cross-channel flow through the §D-gated relay; until its Phase 1 lands,
-> this guarantee is contingent on that enforcement, with the §G tripwire
-> (which *is* destination-aware) as the interim backstop.
+> single-channel-turn to a code-enforced invariant. **Per the 2026-07-19
+> decision, that §B guard is carved into this RFC's own v0.3.12 plan**
+> (Phase 1 step 6; Decision #3) — so the guarantee is delivered by this
+> RFC's Phase 1, not deferred to RFC 0038. The §G tripwire remains the
+> destination-aware backstop for the residual paraphrase path.
 
 **Autonomous ticks.** A tick event (`EventType.TICK`) carries no channel
 ([RFC 0005](0005-persona-agent-memory.md) autonomy loop). A tick can
@@ -629,7 +630,16 @@ on its own; §E projections only make it less blunt.
    `internal/channels/sqlite_search.go`, the new required acting-channel
    parameter on the recall endpoint, and the `recall_channel_messages`
    tool passing the event classification.
-6. Unit, migration, and integration tests per the Test Strategy.
+6. **Single-channel-turn guard (carved from RFC 0038 §B — Decision #3)**
+   — an event-aware post-parse check in `_on_event_inner` (sibling of
+   `synthesize_channel_reply`; the pure `validate_action_payload` cannot
+   see the event): a non-tick `SEND_CHANNEL_MESSAGE` whose `channel_id`
+   differs from the acting channel is replaced with `DO_NOTHING` +
+   WARNING log (audit event wire-up is a tracked follow-up). Tick turns
+   may publish anywhere — their injection is already gated to the §D
+   `public` floor. Lands with/after step 4, which its tick exception
+   presumes.
+7. Unit, migration, and integration tests per the Test Strategy.
 
 Dependencies: **RFC 0011** (the `channels` table). **RFC 0036 is
 Implemented (v0.3.9)**, so step 5 retrofits the existing scoped-search
@@ -756,14 +766,19 @@ Dependencies: Phase 1. Independent of Phase 2 and separately reviewable.
 2. ✅ **Satisfied** — [RFC 0036](0036-persona-message-recall.md) is
    Implemented (v0.3.9); the §F recall filter retrofits its existing
    query and endpoint. Phase 1 steps 1–4 have no RFC 0036 dependency.
-3. **Land [RFC 0038](0038-concurrent-context-awareness-relay.md) §B's
-   single-channel-turn enforcement together with or ahead of this RFC's
-   Phase 1.** §D's structural guarantee is contingent on it (see the §D
-   implementation note): until single-channel-turn is code-enforced, a
-   turn can publish cross-channel ungated, and the §G tripwire is the
-   only — destination-aware but logging-only — backstop. This is a
-   sequencing dependency on RFC 0038 §B specifically, not on all of
-   RFC 0038.
+3. ✅ **Resolved 2026-07-19 — the [RFC 0038](0038-concurrent-context-awareness-relay.md)
+   §B single-channel-turn guard is carved INTO this RFC's v0.3.12 plan**
+   (Phase 1 step 6 below), since RFC 0038 as a whole stays out of
+   v0.3.12. §D's structural guarantee is contingent on the guard, so it
+   lands with/after the §D-gate PR. The guard follows the 0038 §B spec
+   exactly (reject a non-tick `SEND_CHANNEL_MESSAGE` whose `channel_id`
+   differs from the acting channel; tick exception per the §D `public`
+   floor) so the eventual RFC 0038 relay (§E, v0.4.0+) extends rather
+   than amends it. The `channel.cross_channel_publish_rejected` audit
+   event ships **WARNING-log-first** — the agent-side RFC 0009 audit
+   emission path is not yet wired (`action_loop.py` notes it as the
+   orchestrator's responsibility); the audit wire-up is a tracked
+   follow-up, not silent PR growth.
 4. Implement Phase 1 (the deterministic boundary), then Phase 2
    (projections — the "learn from it" affordance), then Phase 3 (the
    tripwire). Phase 1 is safe and shippable without Phases 2–3.
