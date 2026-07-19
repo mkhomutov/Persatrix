@@ -6,7 +6,7 @@ type: feature
 status: proposed
 author: Maksim Khomutov
 created: 2026-05-16
-target: v0.4.0 (on-ramp — confidentiality substrate for organizations; deferred from v0.3.x)
+target: v0.3.12 (cross-channel persona experience; pulled forward from the v0.4.0 on-ramp per 2026-07-15)
 depends_on:
   - RFC-0011
   - RFC-0036
@@ -18,7 +18,7 @@ depends_on:
 **Status**: 📋 Proposed
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
-**Target**: v0.4.0 (on-ramp — confidentiality substrate for organizations; deferred from v0.3.x per the [2026-06-04 sequencing amendment](../v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040))
+**Target**: v0.3.12 (cross-channel persona experience). **Pulled forward** from the v0.4.0 on-ramp per the 2026-07-15 planning decision — this restores the RFC's own original intent (its Motivation §"Why this is a v0.3.x RFC" argues confidentiality is local and v0.3.x-shippable; the [2026-06-04 amendment](../v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040) had deferred it to make room for conversation-realism work, now shipped).
 **Depends on**: RFC 0011 (Channels — the `channels` table and the `channels.yaml` config surface a classification is added to), RFC 0036 (Persona Verbatim Message Recall — §F retrofits its server-side scoped-search query with the acting-channel classification filter)
 **Relates to**: RFC 0034 (Persona Conversational Working Memory — the conversation window, shown in §H to be classification-safe by construction), RFC 0017 (Persona Memory Injection Token Budget — the injection layer the §D hard gate extends), RFC 0005 / RFC 0008 / RFC 0026 (the episodic, notes, and facts memory tiers that gain a protection level), RFC 0020 / RFC 0027 (Interaction Lifecycle / Reflection-Driven Consolidation — where protection levels are stamped and §E projections are generated), RFC 0009 (Agent Identity, Security & Sandboxing — the audit subsystem), RFC 0029 (Personal/Society Storage Split — protection levels must survive the migration to the society store), RFC 0012 (Protocols & Organizations — the *authority* axis and the enforced egress gate that this RFC's logging-only tripwire becomes), RFC 0038 (Persona Concurrent-Context Awareness & Cross-Channel Relay — enforces the single-channel-turn property §D and §H rely on, and gives cross-channel flow a §D-gated path)
 
@@ -268,11 +268,11 @@ channels:
 `channels` table ([`internal/channels/sqlite_schema.go`](../../internal/channels/sqlite_schema.go)):
 a new `case` arm in `applyMigration` with its own `migrateV(N-1)ToVN`
 function, `channelStoreSchemaVersion` bumped, and `user_version` stamped
-inside the migration transaction. The store is at **v3** today; RFC 0035
-and RFC 0036 each land a migration ahead of this one (projected **v4**
-and **v5** respectively — see Decision / Next Steps for the sequencing),
-so this RFC's migration is projected **v6**. If the ordering shifts, the
-version number follows; the migration discipline does not. The migration
+inside the migration transaction. RFC 0035 and RFC 0036 have both landed, so the store is at **v10**
+today; this RFC's migration is the **next** version (**v11** as of
+v0.3.11 — re-verify `channelStoreSchemaVersion` at PR time). If the
+ordering shifts, the version number follows; the migration discipline
+does not. The migration
 backfills every existing channel to `internal`.
 
 - **Group channels** load their declared classification into the
@@ -335,8 +335,11 @@ Where each tier gets its protection level:
 
 **Migration backfill.** Pre-existing memory has no protection level. The
 migration backfills each entry from its recorded source channel's
-classification where one is recorded (episodes and facts carry channel
-context today), and to the `internal` default otherwise. Because every
+classification where resolvable (episodes carry the RFC 0020 scope
+column; **facts carry only `source_interaction_id`**, so the facts
+backfill joins through the episode's interaction where possible and
+otherwise takes the `internal` default), and to the `internal` default
+otherwise. Because every
 channel also backfills to `internal` (§B), the common pre-existing case
 resolves consistently to `internal` — neither silently `public` (a
 disclosure) nor silently `secret` (which would withhold a persona's
@@ -610,7 +613,7 @@ on its own; §E projections only make it less blunt.
    source each side; fail-closed on unknown input.
 2. **Channel classification** — `classification` field in
    `config/channels.yaml` + `schemas/channel.schema.json`; the channel-store
-   classification migration (projected **v6** — §B) adding
+   classification migration (next version, v11 — §B) adding
    `channels.classification`; DM-creation and
    thread-creation stamping (§B); `classification` on `ChannelMessageEvent`
    (`proto/task.proto`) and the dispatch path.
@@ -628,9 +631,10 @@ on its own; §E projections only make it less blunt.
    tool passing the event classification.
 6. Unit, migration, and integration tests per the Test Strategy.
 
-Dependencies: **RFC 0011** (the `channels` table). Step 5 depends on
-**RFC 0036** Phase 1 — if RFC 0036 has not yet landed, step 5 lands
-together with it; steps 1–4 are independent of RFC 0036.
+Dependencies: **RFC 0011** (the `channels` table). **RFC 0036 is
+Implemented (v0.3.9)**, so step 5 retrofits the existing scoped-search
+query (`internal/channels/sqlite_search.go`) and the existing recall
+endpoint directly; steps 1–4 are independent of RFC 0036.
 
 ### Phase 2: Declassification projections
 
@@ -659,24 +663,24 @@ Dependencies: Phase 1. Independent of Phase 2 and separately reviewable.
 
 | Component | Files | Change |
 |-----------|-------|--------|
-| Go orchestrator | `internal/channels/sqlite_schema.go` | classification migration (projected v6 — §B): `channels.classification` column + backfill; bump `channelStoreSchemaVersion` |
-| Go orchestrator | `internal/channels/sqlite.go` (DM/thread creation) | Stamp classification on `GetOrCreateDM` and thread creation (§B) |
+| Go orchestrator | `internal/channels/sqlite_schema.go` (version const + history) + `internal/channels/sqlite_migrations.go` (the `migrateV10ToV11` arm) | classification migration (next version, v11 — §B): `channels.classification` column + backfill; bump `channelStoreSchemaVersion` |
+| Go orchestrator | `internal/channels/sqlite_dm.go` (`GetOrCreateDM`) | Stamp `internal` on DM creation (§B); thread replies are rows in the parent channel — no separate thread-channel row exists, so they inherit the parent classification by construction |
 | Go orchestrator | `internal/channels/sqlite_search.go` | §F acting-channel classification clause on the RFC 0036 scoped query |
-| Go orchestrator | `internal/server/channel_handlers.go`, `channel_types.go` | Required acting-channel parameter on the recall endpoint |
+| Go orchestrator | `internal/server/persona_recall_handlers.go`, `channel_types.go` | Required acting-channel parameter on the recall endpoint (`channel_handlers.go` is at the size cap — the recall handler was carved into `persona_recall_handlers.go`) |
 | Go orchestrator | `internal/channels/` (event dispatch), `internal/security/audit_event.go` | `classification` on dispatched channel events; reclassification + `channel.confidentiality_tripwire` audit events |
 | Go orchestrator | `internal/channels/classification.go` (new) | `classification_rank` helper, fail-closed |
 | Protos | `proto/task.proto` | `classification` field on `ChannelMessageEvent` |
 | Python agents | `agents/memory/migrations.py` | `protection_level` / `source_channel_id` on episodic/facts/notes; `memory_projections` table |
-| Python agents | `agents/memory/interactions.py` | Capture channel classification at interaction-open |
+| Python agents | `agents/memory/interactions.py` + `agents/memory/interaction_types.py` | Capture channel classification at interaction-open (frozen-at-open, in-memory until close — mirrors the `session_id` precedent) |
 | Python agents | `agents/memory/episodic.py`, `agents/memory/facts.py`, `agents/memory/notes.py` | Stamp / read `protection_level` |
 | Python agents | `agents/persona_runtime/memory_context.py` | The §D hard gate + projection selection |
 | Python agents | `agents/persona_runtime/classification.py` (new) | Python `classification_rank` helper |
 | Python agents | `agents/channel_publisher.py` | §G leak tripwire |
 | Python agents | `agents/tools/recall.py` | Pass acting-channel classification to the recall endpoint |
-| Python agents | consolidation path (`agents/memory/`, RFC 0027 reflection) | Emit §E projections during interaction consolidation |
+| Python agents | `agents/persona_runtime/summarize_close.py` (+ `fact_envelope.py` / `fact_extractor.py`) | Emit §E projections during the RFC 0020 close-consolidation LLM call (RFC 0027 reflection is a future second producer — proposed, not shipped) |
 | Config / schema | `config/channels.yaml`, `schemas/channel.schema.json` | `classification` field + `enum` |
 | Docs | `docs/guides/persona-agents.md`, `docs/diagrams/memory-architecture.md` | Document classification, protection levels, the two-axis model |
-| Tests | `internal/channels/*_test.go`, `tests/unit/python/`, `tests/integration/persona/` | Per Test Strategy |
+| Tests | `internal/channels/*_test.go`, `tests/unit/python/`, `tests/integration/` | Per Test Strategy (+ an RFC 0044 golden-trace recipe for MT-PERSONA-CONFIDENTIALITY-001) |
 
 ## Test Strategy
 
@@ -696,8 +700,8 @@ Dependencies: Phase 1. Independent of Phase 2 and separately reviewable.
     join.
   - The §G tripwire fires on a verbatim span and not on a benign
     message; the audit event carries metadata and not the text.
-- **Migration tests**: the classification migration (projected v5 → v6 —
-  §B) adds `channels.classification` and
+- **Migration tests**: the classification migration (next version,
+  vN → vN+1 — §B) adds `channels.classification` and
   backfills to `internal`; the memory migration adds the columns and
   `memory_projections` table and backfills `protection_level` from
   recorded source channels where present, `internal` otherwise; both
@@ -749,9 +753,9 @@ Dependencies: Phase 1. Independent of Phase 2 and separately reviewable.
 1. Review this RFC alongside [RFC 0012](0012-protocols-organizations.md):
    the two are the confidentiality and authority halves of one model and
    should be read together, even though they ship in different versions.
-2. Sequence after [RFC 0036](0036-persona-message-recall.md) so the §F
-   recall filter has a query to retrofit; Phase 1 steps 1–4 may proceed
-   in parallel with RFC 0036.
+2. ✅ **Satisfied** — [RFC 0036](0036-persona-message-recall.md) is
+   Implemented (v0.3.9); the §F recall filter retrofits its existing
+   query and endpoint. Phase 1 steps 1–4 have no RFC 0036 dependency.
 3. **Land [RFC 0038](0038-concurrent-context-awareness-relay.md) §B's
    single-channel-turn enforcement together with or ahead of this RFC's
    Phase 1.** §D's structural guarantee is contingent on it (see the §D

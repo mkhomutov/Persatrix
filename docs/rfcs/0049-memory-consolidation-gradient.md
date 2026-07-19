@@ -6,7 +6,7 @@ type: architecture
 status: proposed
 author: Maksim Khomutov
 created: 2026-06-06
-target: v0.4.0 (design lands v0.3.7)
+target: v0.3.12 (Phases 0–1) + v0.4.0 (Phases 2–4); design ratified v0.3.7
 depends_on:
   - RFC-0031
   - RFC-0037
@@ -18,10 +18,10 @@ depends_on:
 # RFC 0049 — Memory Consolidation Gradient & Scope Reconciliation
 
 **Type**: architecture (memory model — meta-RFC over the memory tier RFCs)
-**Status**: 📋 Proposed — the gradient, the one law, and the §D re-rooting (cross-room topic knowledge) are **ratified** (2026-06-06); implementation is v0.4.0 behind the [§ Sequencing](#sequencing--phased-plan) gate
+**Status**: 📋 Proposed — the gradient, the one law, and the §D re-rooting (cross-room topic knowledge) are **ratified** (2026-06-06). **Pulled forward to v0.3.12** (cross-channel persona experience) per the 2026-07-15 planning decision; Phases 0–1 target v0.3.12, Phases 2–4 stay v0.4.0. **The 2026-07-15 lock also reverses ratified Non-Goal #1 (raw episodic recall now crosses rooms, gated) — that reversal is a pending amendment, NOT applied in this doc yet (see the v0.3.12 review-prep decision list).**
 **Author**: Maksim Khomutov
 **Date**: 2026-06-06
-**Target**: v0.4.0 implementation; **design ratified in v0.3.7** (docs-only, no code in the in-prep release)
+**Target**: v0.3.12 (Phases 0–1) + v0.4.0 (Phases 2–4); **design ratified in v0.3.7** (docs-only, no code before v0.3.12 opens)
 **Depends on**: RFC 0031 (Per-Session Namespacing — the `session = room` axis this RFC keeps and reframes), RFC 0037 (Memory Confidentiality — the egress gate that is this RFC's keystone), RFC 0027 (Reflection-Driven Consolidation — the pump that moves memory up the gradient), RFC 0028 (Agent Decision Policy Engine — the source of the experiential tier), RFC 0029 (Personal/Society Storage Split — the physical-storage axis this RFC is orthogonal to)
 **Relates to**: RFC 0026 (Declarative Facts Tier — the tier whose scope this RFC re-decides), RFC 0038 (Concurrent-Context Awareness & Cross-Channel Relay — the runtime surface of cross-room knowledge), RFC 0042 (State Namespacing by Scope — the runtime-state vocabulary this RFC's memory vocabulary must agree with), RFC 0014/0015 (Skill Registry / Pattern Extraction — the procedural tier, already cross-scope)
 **Spawned from**: [memory-scope-axes.md](../memory-scope-axes.md) (which settled the *horizontal* axes and asked to be promoted to an RFC) + the v0.3.7 cross-room behaviour review (the "personas should behave like real people" finding)
@@ -77,9 +77,9 @@ Look at what already crosses rooms and what does not, today:
 |------|----------------------|-----|
 | Episodic (narrative) | no | room-scoped by RFC 0031 §D |
 | Person **identity** (name/role/prefs) | **yes** | RFC 0031 identity amendment — "scope is a property of the tier, not a topic prefix" |
-| Relationship (trust/opinion) | **yes** | `relationships` PK omits `session_id` |
+| Relationship (trust/opinion) | **hybrid** | one cross-room row at storage (`relationships` PK omits `session_id`), but the §D session filter walls *recall* — only the identity field reads cross-room today |
 | Topic/project facts | no | memory-scope-axes.md: "belongs to the room" |
-| Skills / learned patterns | **yes** (cross-*agent*) | RFC 0014/0015 — procedural memory is not room-scoped |
+| Skills / learned patterns | **no (today)** | RFC 0014/0015 (cross-agent skills) are *proposed, unimplemented*; the shipped procedural tier (RFC 0008) reuses the episodes table and is per-agent + room-scoped by the RFC 0031 session filter |
 
 The system is *already* sorting memory by how consolidated it is — raw episodes stay put; a distilled fact about a person travels; a learned skill travels furthest. It just made that decision one tier at a time, with no stated axis. The result is the drift the RFC 0031 identity amendment had to retrofit: scope kept getting decided locally (by a topic prefix, by a PK, by a tier) instead of by a principle. **Naming the axis is what stops the next drift.**
 
@@ -91,7 +91,7 @@ That decision was made for a good reason — *leakage*: a fact from a private ro
 
 ### M-3. Experience cannot be built on walled episodes
 
-RFC 0027 (consolidation) today reflects **per active scope** only — it reads the top-N episodes of the *current room*. RFC 0028 (decisions) writes `DecisionRecord`s to an audit log read **offline**, never back to the agent at decision time. So an agent can never notice "I keep hitting this same failure across projects" or "last time I made this call it went badly" — the cross-context signal is severed at both ends. Genuine experience and judgment require lifting episodic memory *across* rooms into a consolidated tier and feeding decisions *back* as memory. Neither is possible while the gradient's lower rungs are permanently room-walled and its top rung (decisions) is write-only.
+RFC 0027 (consolidation) *as designed* reflects **per active scope** only — it reads the top-N episodes of the *current room* (RFC 0027 is proposed, not yet implemented). RFC 0028 (decisions) writes `DecisionRecord`s to an audit log read **offline**, never back to the agent at decision time. So an agent can never notice "I keep hitting this same failure across projects" or "last time I made this call it went badly" — the cross-context signal is severed at both ends. Genuine experience and judgment require lifting episodic memory *across* rooms into a consolidated tier and feeding decisions *back* as memory. Neither is possible while the gradient's lower rungs are permanently room-walled and its top rung (decisions) is write-only.
 
 ## Goals
 
@@ -107,7 +107,7 @@ RFC 0027 (consolidation) today reflects **per active scope** only — it reads t
 - **Unifying episodic recall.** Episodes stay room-scoped by default. The dementia-test continuity memory-scope-axes.md protects is preserved exactly. Cross-room *episodic* lookup remains the explicit `sessions=[…]/"*"` path.
 - **A new store or backend.** The gradient is a property of *existing* tiers (RFC 0005/0026/0027). Physical storage (personal vs society, SQLite vs Postgres) is RFC 0029's orthogonal axis and is untouched.
 - **Removing the capture-time classification judgment.** Something still decides "is this worth consolidating?" — that stays a persona judgment, as the identity amendment already accepted.
-- **Shipping code in v0.3.7.** v0.3.7 is in release-prep; this RFC is docs-only there. All code is v0.4.0, behind the sequencing in [§ Sequencing](#sequencing--phased-plan).
+- **Shipping code before v0.3.12 opens.** v0.3.11 is in release-prep; this RFC is docs-only until v0.3.12 opens. Phases 0–1 land in v0.3.12; Phases 2–4 (which need the unimplemented RFC 0027/0028 engines) stay v0.4.0, behind the sequencing in [§ Sequencing](#sequencing--phased-plan).
 
 ## Design
 
@@ -128,7 +128,7 @@ Room is a **tag on Plane 1 and a ranking cue**, never a hard wall on Plane 2. Is
 | **L0 Working** | working memory | this turn's assembled context | full, transient | the turn | 0005 / 0034 |
 | **L1 Episodic** | episodes, raw notes | what happened, verbatim-ish | room + time (a *source tag*) | **room** (`session`) | 0005 / 0031 |
 | **L2 Semantic** | facts, identity, relationship | what is *true* — decontextualised | provenance only | **cross-room** (`persona`) | 0026 / 0031-id |
-| **L3 Procedural** | skills, learned patterns | how to *do* things | none | **cross-agent** | 0014 / 0015 |
+| **L3 Procedural** | skills, learned patterns | how to *do* things | none | **cross-agent** *(aspirational — 0014/0015 unimplemented; today's RFC 0008 procedural rows are room-scoped)* | 0008 (today) / 0014–0015 (planned) |
 | **L4 Experiential** | decision records → heuristics | what *worked* — choices + outcomes | provenance + outcome | **cross-room → society** | 0028 / 0029 |
 
 The gradient is monotonic in two things at once: as memory rises, it **loses room-context** and **widens scope**. L1 is where "where/when" lives; by L2 it is metadata; by L3 it is gone. This is exactly human memory — you forget *where* you learned to ride a bike (L3) long before you forget *how* (the skill survives, the episode fades).
@@ -180,11 +180,11 @@ That projection mechanism is also a **consolidation primitive** (it produces a l
 
 ### F. The consolidation pump
 
-Memory rises the gradient via **consolidation** — the act that strips context and widens scope. Today only one half-pump exists (the identity write-through, L1→L2 for names). This RFC names the general mechanism and points it at RFC 0027:
+Memory rises the gradient via **consolidation** — the act that strips context and widens scope. No consolidation *pump* exists today. The nearest precedent is the identity write-through — a synchronous *capture-time router* (`store_note` → identity tier) that proves the cross-room L2 destination tier works, but is not itself an L1→L2 *lift* of accumulated episodes. This RFC names the general lifting mechanism and points it at RFC 0027:
 
 - **L1 → L2 (episodic → semantic).** RFC 0027 reflection, extended with a **cross-scope mode**: in addition to per-room reflection, a bounded periodic pass reads across the agent's rooms and distils recurring, decontextualised knowledge into L2 facts (carrying provenance + the max source classification for the 0037 gate). This is the pump that makes "I learned this across several conversations" possible — and it is where experience genuinely forms.
 - **L2 → L4 (semantic → experiential).** Decisions + outcomes (RFC 0028) consolidate into reusable heuristics (see §G).
-- **L1/telemetry → L3 (episodic → procedural).** Already exists: RFC 0015 pattern extraction → RFC 0014 skills. No change; it is the proof that the top of the pump works.
+- **L1/telemetry → L3 (episodic → procedural).** *Planned*, not shipped: RFC 0015 pattern extraction → RFC 0014 skills (both proposed). Today's procedural rows (RFC 0008) live in the episodes table and are room-scoped — so the top of the pump is a design target, not yet a working proof.
 
 Consolidation is **append-only and non-destructive** (RFC 0027's rule): raw L1 episodes are never rewritten; a consolidation note points back at its sources and demotes them in ranking. Rising the gradient adds a higher-level memory; it never erases the lower one.
 
@@ -208,7 +208,7 @@ The scenarios from the v0.3.7 review, traced through the model:
 
 ## Sequencing & Phased Plan
 
-All code is **v0.4.0**. The order is forced by §E.
+Phases 0–1 target **v0.3.12**; Phases 2–4 stay **v0.4.0** (Phase 2 needs the unimplemented RFC 0027 reflection engine; Phase 3 needs the unimplemented RFC 0028 decision engine). The order is forced by §E.
 
 - **Phase 0 — RFC 0037 confidentiality gate (keystone).** Classification on channels; protection level stamped on memory rows (fail-closed `internal`); the deterministic egress gate at injection + recall. Nothing below may ship first. *(This matches the roadmap, which already places 0037 at the v0.4.0 on-ramp.)*
 - **Phase 1 — Name the gradient + re-root ISSUE-0084.** Promote this RFC's law; reframe ISSUE-0084 from subject-classification to "L2 = cross-room, visibility = 0037 level." Widen topic-fact recall to cross-room *behind the Phase-0 gate*.

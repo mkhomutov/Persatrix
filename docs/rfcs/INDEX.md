@@ -17,14 +17,14 @@ See [README.md](README.md) for RFC process, format, and lifecycle. Reserved RFC 
 | [RFC-0015](0015-process-automation-pattern-extraction.md) | 📋 Proposed | feature | v0.5.0 | 2026-04-19 | Process Automation & Pattern Extraction |
 | [RFC-0027](0027-reflection-driven-consolidation.md) | 📋 Proposed | feature | v0.4.0 | 2026-05-01 | Reflection-Driven Consolidation |
 | [RFC-0028](0028-agent-decision-policy-engine.md) | 📋 Proposed | architecture | v0.4.0 (Phases 1–3); v0.5.0+ (Phase 4 collective extension) | 2026-05-02 | Agent Decision Policy Engine |
-| [RFC-0037](0037-memory-confidentiality-channel-classification.md) | 📋 Proposed | feature | v0.4.0 (on-ramp — confidentiality substrate for organizations; deferred from v0.3.x) | 2026-05-16 | Memory Confidentiality & Channel Classification |
+| [RFC-0037](0037-memory-confidentiality-channel-classification.md) | 📋 Proposed | feature | v0.3.12 (cross-channel persona experience; pulled forward from the v0.4.0 on-ramp per 2026-07-15) | 2026-05-16 | Memory Confidentiality & Channel Classification |
 | [RFC-0038](0038-concurrent-context-awareness-relay.md) | 📋 Proposed | architecture | v0.4.0 (on-ramp — cross-channel substrate for organizations; deferred from v0.3.x) | 2026-05-16 | Persona Concurrent-Context Awareness & Cross-Channel Relay |
 | [RFC-0039](0039-user-accounts-authentication.md) | 📋 Proposed | architecture | v0.3.x (Phases 1–2) + v0.4.0 (Phase 3) | 2026-05-16 | User Accounts & Authentication |
 | [RFC-0040](0040-agent-orchestrator-transport-unification.md) | 📋 Proposed | protocol | v0.3.x (Phase 1) + v0.4.0 (Phases 2–4) | 2026-05-17 | Agent–Orchestrator Transport Unification |
 | [RFC-0041](0041-typed-event-taxonomy-lifecycle-callbacks.md) | 📋 Proposed | architecture | v0.4.0+ | 2026-05-20 | Typed Event Taxonomy and Lifecycle Callbacks |
 | [RFC-0046](0046-budget-lease-extraction.md) | 📋 Proposed | architecture | v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate) | 2026-05-25 | Budget-Lease Library Extraction (persatrix-budget) |
 | [RFC-0047](0047-low-coupling-batch-extraction.md) | 📋 Proposed | architecture | v0.4.0+ (gated on RFC-0045 acceptance + the MIT↛BUSL boundary CI gate) | 2026-05-25 | Low-Coupling Batch Library Extraction (prompt kit, mock LLM, schemas) |
-| [RFC-0049](0049-memory-consolidation-gradient.md) | 📋 Proposed | architecture | v0.4.0 (design lands v0.3.7) | 2026-06-06 | Memory Consolidation Gradient & Scope Reconciliation |
+| [RFC-0049](0049-memory-consolidation-gradient.md) | 📋 Proposed | architecture | v0.3.12 (Phases 0–1) + v0.4.0 (Phases 2–4); design ratified v0.3.7 | 2026-06-06 | Memory Consolidation Gradient & Scope Reconciliation |
 | [RFC-0032](0032-channel-interaction-layer.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-12 | Wire-Level Channel Interaction Layer and Chat-Façade Unification |
 | [RFC-0042](0042-state-namespacing-by-scope.md) | 🔨 Draft | architecture | v0.4.0+ | 2026-05-20 | State Namespacing by Scope Prefix |
 | [RFC-0043](0043-inbound-agent-interop-endpoint.md) | 🔨 Draft | protocol | v0.4.0+ | 2026-05-20 | Inbound Agent-Interop Endpoint |
