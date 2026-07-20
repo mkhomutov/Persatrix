@@ -120,7 +120,10 @@
         authenticated = context?.authenticated === true;
         actingAs = id; // the override defaults to the real principal
         actingAsDraft = id; // and the box shows that default
-        version = config?.build?.version ?? "";
+        // Normalize away a leading "v": the chip renders "v{version}", and a
+        // binary built from a git checkout reports an already-v-prefixed Go
+        // pseudo-version ("v0.3.11-0.2026…") — un-stripped it displayed "vv…".
+        version = (config?.build?.version ?? "").replace(/^v/, "");
         panels = selectPanels(config);
         activeName = hashPanelName();
         canonicalizeHash(activeName);

@@ -89,6 +89,30 @@ describe("App shell boot", () => {
     });
   });
 
+  it("does not double the v prefix when build.version already carries one", async () => {
+    // A binary built from a git checkout reports a Go pseudo-version, which is
+    // already v-prefixed ("v0.3.11-0.20260720…"); the chip prepends its own
+    // "v", so an un-normalized value rendered as "vv0.3.11-…". The shell strips
+    // one leading "v" before display, keeping bare versions ("0.3.6" → "v0.3.6")
+    // and prefixed ones ("v0.3.11-…" → "v0.3.11-…") uniform.
+    loadBootstrap.mockResolvedValue({
+      config: {
+        build: { version: "v0.3.11-0.20260720113407-d9cb5fba7e70" },
+        panels: { channel_timeline: { enabled: true, available: true } },
+      },
+      context: { principal: "local", tenant: "local", authenticated: false },
+    });
+
+    render(App);
+
+    await waitFor(() => {
+      const chip = screen.getByTitle("Orchestrator build");
+      expect(chip.textContent.trim()).toBe(
+        "v0.3.11-0.20260720113407-d9cb5fba7e70",
+      );
+    });
+  });
+
   it("omits the version chip when the config carries no build version", async () => {
     // build.version is optional; a payload without it shows no chip rather than a
     // bare "v" placeholder.
