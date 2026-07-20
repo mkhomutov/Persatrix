@@ -17,14 +17,15 @@ Go-only contributors are never required to install Node (see *Go-only contributo
 web/
   src/
     main.js                 # mounts the app
-    App.svelte              # shell: boot, tabs, active panel, error states
-    app.css                 # minimal styling
+    App.svelte              # shell: boot, topbar (brand + tabs + identity), active panel
+    app.css                 # design tokens (light/dark) + app-shell layout
     lib/
       bootstrap.js          # pure panel-selection + identity logic (RFC §C/§F)
-      api.js                # same-origin fetch client (config/context today)
+      api.js                # same-origin fetch client
+      …                     # formatting, mentions, presence, interactions helpers
     panels/
-      Chat.svelte           # slot — real panel lands in PR 4
-      ChannelTimeline.svelte# slot — real panel lands in PR 5
+      ChannelTimeline.svelte# the conversation panel: sidebar rail | conversation | management rail
+      …                     # its extracted children (feed, pickers, composers, settings, members)
   *.test.js                 # Vitest unit/component tests, co-located
 ```
 

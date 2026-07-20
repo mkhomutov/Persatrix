@@ -28,20 +28,15 @@
 
 <form class="composer" onsubmit={onSubmit}>
   <label>
-    Message
+    <span class="sr-only">Message</span>
     <textarea
       bind:value={message}
-      rows="3"
-      placeholder="Say something to the persona… (Enter to send, Shift+Enter for a new line)"
+      rows="1"
+      placeholder="Say something to the persona…"
       disabled={sending}
       onkeydown={onKeydown}
     ></textarea>
   </label>
-
-  <!-- Optional isolation overrides (RFC 0031 session / ISSUE-0085 epoch). The §F
-       identity rule constrains user_id only (never typed); session and epoch are
-       operator-namespace ids the panel reads back via the bindings. -->
-  <ScopeSelector bind:sessionId bind:epochId {sending} />
 
   {#if hasPersona && !chattable}
     <!-- Only reachable when the deployment has no persona to fall back to:
@@ -52,7 +47,16 @@
     </p>
   {/if}
 
-  <button type="submit" disabled={!canSend || !chattable}>
-    {sending ? "Sending…" : "Send"}
-  </button>
+  <div class="composer-actions">
+    <!-- Optional isolation overrides (RFC 0031 session / ISSUE-0085 epoch). The
+         §F identity rule constrains user_id only (never typed); session and
+         epoch are operator-namespace ids the panel reads back via the bindings. -->
+    <ScopeSelector bind:sessionId bind:epochId {sending} />
+    <span class="composer-hint" aria-hidden="true"
+      >Enter to send · Shift+Enter for a new line</span
+    >
+    <button type="submit" disabled={!canSend || !chattable}>
+      {sending ? "Sending…" : "Send"}
+    </button>
+  </div>
 </form>

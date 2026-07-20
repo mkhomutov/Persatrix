@@ -293,6 +293,21 @@
   // stay newest-first).
   const displayMessages = $derived(messages.slice().reverse());
 
+  // A consecutive same-sender message inside this window renders compact (no
+  // avatar/head) so a run of turns reads as one visual block. Unparseable
+  // timestamps disable grouping for that pair rather than guessing.
+  const COMPACT_WINDOW_MS = 5 * 60 * 1000;
+  function isCompact(list, i) {
+    if (i === 0) return false;
+    const prev = list[i - 1];
+    const cur = list[i];
+    if (prev.sender_id !== cur.sender_id) return false;
+    const a = new Date(prev.timestamp).getTime();
+    const b = new Date(cur.timestamp).getTime();
+    if (Number.isNaN(a) || Number.isNaN(b)) return false;
+    return b - a < COMPACT_WINDOW_MS;
+  }
+
   // Pinned-scroll autoscroll: a new message scrolls to the bottom ONLY when the
   // operator is already there, so reading history isn't yanked away.
   let timelineEl = $state(null);
@@ -333,8 +348,8 @@
     bind:this={timelineEl}
     onscroll={onTimelineScroll}
   >
-    {#each displayMessages as message (message.id)}
-      <ChannelMessage {message} {userId} {agentsById} />
+    {#each displayMessages as message, i (message.id)}
+      <ChannelMessage {message} {userId} {agentsById} compact={isCompact(displayMessages, i)} />
     {/each}
   </ol>
 {/if}

@@ -26,26 +26,32 @@
 {#if groupChannels.length > 0}
   <div class="channel-picker">
     <label>
-      Channel
+      <!-- The rail section already titles this "Channels"; the label text stays
+           for the select's accessible name without a second visible line. -->
+      <span class="sr-only">Channel</span>
       <select bind:value={selectedChannel} onchange={onChannelChange}>
         {#each groupChannels as channel (channel.id)}
           <option value={channel.id}>{channelLabel(channel)}</option>
         {/each}
       </select>
     </label>
-    <button type="button" class="refresh" onclick={onRefresh}>Refresh</button>
-    {#if canCreate}
-      <button type="button" class="new-channel" onclick={onNewChannel}>
-        New channel
-      </button>
-    {/if}
+    <div class="picker-actions">
+      <button type="button" class="refresh" onclick={onRefresh}>Refresh</button>
+      {#if canCreate}
+        <button type="button" class="new-channel" onclick={onNewChannel}>
+          New channel
+        </button>
+      {/if}
+    </div>
   </div>
 {:else if canCreate}
   <!-- No group channels yet, but the operator can make one. -->
   <div class="channel-picker">
-    <button type="button" class="new-channel" onclick={onNewChannel}>
-      New channel
-    </button>
-    <button type="button" class="refresh" onclick={onRefresh}>Refresh</button>
+    <div class="picker-actions">
+      <button type="button" class="new-channel" onclick={onNewChannel}>
+        New channel
+      </button>
+      <button type="button" class="refresh" onclick={onRefresh}>Refresh</button>
+    </div>
   </div>
 {/if}

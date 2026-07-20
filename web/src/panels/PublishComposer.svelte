@@ -148,12 +148,12 @@
 
 <form class="publish" onsubmit={onSubmit}>
   <label>
-    Message
+    <span class="sr-only">Message</span>
     <textarea
       bind:this={textareaEl}
       bind:value={content}
-      rows="2"
-      placeholder="Post a message to this channel… (@ to mention, Enter to post, Shift+Enter for a new line)"
+      rows="1"
+      placeholder="Post to this channel… (@ to mention)"
       disabled={publishing}
       oninput={onInput}
       onkeydown={onComposerKeydown}
@@ -193,29 +193,37 @@
     </ul>
   {/if}
 
-  <button type="submit" disabled={!canPublish}>
-    {publishing ? "Posting…" : "Post"}
-  </button>
+  <div class="composer-actions">
+    <span class="composer-hint" aria-hidden="true"
+      >@ to mention · Enter to post · Shift+Enter for a new line</span
+    >
+    <button type="submit" disabled={!canPublish}>
+      {publishing ? "Posting…" : "Post"}
+    </button>
+  </div>
 </form>
 
 <style>
   .publish {
     position: relative;
   }
+  /* The typeahead pops ABOVE the composer — it is docked at the bottom of the
+     conversation column, so opening upward keeps the menu on-screen. */
   .mention-menu {
     list-style: none;
     margin: 0;
     padding: 0.25rem 0;
     position: absolute;
     z-index: 10;
-    left: 0;
-    right: 0;
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: calc(100% + 0.4rem);
     max-height: 12rem;
     overflow-y: auto;
-    background: var(--surface, #fff);
+    background: var(--surface-raised, #fff);
     border: 1px solid var(--border, #d4d4d8);
-    border-radius: 0.375rem;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    border-radius: var(--radius, 10px);
+    box-shadow: var(--shadow-pop, 0 4px 12px rgba(0, 0, 0, 0.12));
   }
   .mention-menu li {
     display: flex;

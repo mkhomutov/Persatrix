@@ -23,7 +23,9 @@
 
 <div class="persona-picker">
   <label>
-    Persona
+    <!-- The rail section already titles this "Direct message"; the label text
+         stays for the select's accessible name without a second visible line. -->
+    <span class="sr-only">Persona</span>
     <select bind:value={selectedAgent} onchange={onChange} disabled={sending}>
       {#if !selectedAgent}
         <!-- Lobby placeholder: no conversation is open (a fresh start or after
@@ -43,7 +45,7 @@
          quitting the CLI chat REPL. Locked during a turn so it can't strand an
          in-flight reply. -->
     <button type="button" class="exit-chat" onclick={onExit} disabled={sending}
-      >Exit</button
+      >Exit conversation</button
     >
   {/if}
 </div>
