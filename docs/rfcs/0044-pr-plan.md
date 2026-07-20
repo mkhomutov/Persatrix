@@ -184,7 +184,7 @@ subset that does not need typed events (`final_transcript` / `terminal_state`).
 - [x] `ruff` + `mypy` + `file_size.py --strict` clean; no cross-suite fixture leakage (seed test runs alongside the close-path suites).
 - [x] ROADMAP + RFC/plan status hygiene.
 
-### PR 4c: `feature/v0311-rfc0044-seed-working` — driver conversation-window fetcher + EVAL-WORKING-001 🔀 (this PR — [#748](https://github.com/mkhomutov/Persatrix/pull/748), open)
+### PR 4c: `feature/v0311-rfc0044-seed-working` — driver conversation-window fetcher + EVAL-WORKING-001 ✅ ([#748](https://github.com/mkhomutov/Persatrix/pull/748))
 
 The second pre-0041 seed, and the driver seam it needed. `EVAL-WORKING-001` asserts
 RFC 0034 **within-interaction working memory** (the ISSUE-0052 defect: the persona
@@ -220,7 +220,7 @@ is RFC 0034, already shipped; no typed events involved).
 - [x] Golden recorded via `make eval-record-offline` (deterministic, $0, no key); replays green ×N.
 - [x] `ruff` + `mypy` + `file_size.py --strict` clean over `evaluators/` + the new tests.
 - [x] `import evaluators` stays runtime-free (the fetcher is pure; the driver is submodule-only).
-- [x] ROADMAP + RFC/plan + FILEMAP status hygiene (RFC 0044 rides as infrastructure — no CHANGELOG entry, per PRs 1–4a).
+- [x] ROADMAP + RFC/plan + FILEMAP status hygiene (RFC 0044 rides as infrastructure — no per-PR CHANGELOG entry, per PRs 1–4a; the release CHANGELOG carries one consolidated fold-in entry, added at v0.3.11 curation the way RFC 0045's was in v0.3.10).
 
 ### PR 4b (gated on RFC 0041 Phase 1): event-asserting seeds + remaining recipes
 
