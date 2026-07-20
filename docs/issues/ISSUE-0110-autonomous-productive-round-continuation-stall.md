@@ -6,6 +6,7 @@ severity: high
 area: channels
 created: 2026-07-20
 closed: 2026-07-20
+closed_pr: 759
 refs:
   - docs/rfcs/0052-autonomous-agent-channels.md
   - docs/rfcs/0052-pr-plan.md
