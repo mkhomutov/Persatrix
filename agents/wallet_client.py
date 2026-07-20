@@ -172,11 +172,20 @@ class WalletClient:
         self,
         stub: wallet_grpc.WalletServiceStub,
         *,
+        agent_id: str = "",
         acquire_max_attempts: int = 3,
         settle_max_attempts: int = 3,
         backoff_base: float = 0.1,
     ) -> None:
         self._stub = stub
+        # ISSUE-0111: the RFC 0009 rate limiter keys per-agent budgets on
+        # the ``x-agent-id`` gRPC metadata; without it every wallet RPC
+        # shares one anonymous bucket and the RFC 0052 close-summary fan
+        # starves late callers into the placeholder summary. Empty id →
+        # no metadata (the pre-fix wire shape).
+        self._metadata: tuple[tuple[str, str], ...] | None = (
+            (("x-agent-id", agent_id),) if agent_id else None
+        )
         self._acquire_max_attempts = max(1, acquire_max_attempts)
         self._settle_max_attempts = max(1, settle_max_attempts)
         self._backoff_base = max(0.0, backoff_base)
@@ -186,6 +195,7 @@ class WalletClient:
         cls,
         channel: grpc.aio.Channel,
         *,
+        agent_id: str = "",
         acquire_max_attempts: int = 3,
         settle_max_attempts: int = 3,
         backoff_base: float = 0.1,
@@ -198,6 +208,7 @@ class WalletClient:
         """
         return cls(
             wallet_grpc.WalletServiceStub(channel),
+            agent_id=agent_id,
             acquire_max_attempts=acquire_max_attempts,
             settle_max_attempts=settle_max_attempts,
             backoff_base=backoff_base,
@@ -329,7 +340,9 @@ class WalletClient:
         """Acquire a lease, applying the RFC 0023 § F status branching."""
         for attempt in range(1, self._acquire_max_attempts + 1):
             try:
-                response = await self._stub.AcquireLease(request)
+                response = await self._stub.AcquireLease(
+                    request, metadata=self._metadata,
+                )
             except grpc.aio.AioRpcError as exc:
                 code = exc.code()
                 if code in _UNREACHABLE_CODES:
@@ -340,11 +353,15 @@ class WalletClient:
                         reason="wallet_unreachable",
                     ) from exc
                 if code == grpc.StatusCode.RESOURCE_EXHAUSTED:
-                    # Per-agent active-lease cap — transient; a slot frees
-                    # as sibling leases settle. Retry, then surface raw.
+                    # Transient contention: the per-agent active-lease cap
+                    # (a slot frees as sibling leases settle) or the RFC
+                    # 0009 rate limiter (the window rolls). Retry, then
+                    # surface raw. Log the server detail — the two causes
+                    # read identically at the status level (ISSUE-0111).
                     logger.warning(
-                        "wallet: AcquireLease hit the active-lease cap "
-                        "(attempt %d/%d)", attempt, self._acquire_max_attempts,
+                        "wallet: AcquireLease RESOURCE_EXHAUSTED (%s) "
+                        "(attempt %d/%d)", exc.details(),
+                        attempt, self._acquire_max_attempts,
                     )
                     if attempt < self._acquire_max_attempts:
                         await asyncio.sleep(self._backoff(attempt))
@@ -439,7 +456,7 @@ class WalletClient:
         )
         for attempt in range(1, self._settle_max_attempts + 1):
             try:
-                ack = await self._stub.SettleLease(request)
+                ack = await self._stub.SettleLease(request, metadata=self._metadata)
             except grpc.aio.AioRpcError as exc:
                 if attempt < self._settle_max_attempts:
                     await asyncio.sleep(self._backoff(attempt))
@@ -465,7 +482,7 @@ class WalletClient:
         the reaper to reconcile at the granted amount on TTL expiry."""
         request = walletpb.ReleaseRequest(lease_id=lease_id, reason=reason)
         try:
-            ack = await self._stub.ReleaseLease(request)
+            ack = await self._stub.ReleaseLease(request, metadata=self._metadata)
         except grpc.aio.AioRpcError as exc:
             logger.warning(
                 "wallet: ReleaseLease for %s failed (%s) — the reaper "

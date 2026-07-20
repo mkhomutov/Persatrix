@@ -199,6 +199,18 @@ def test_discover_recipes_excludes_goldens(tmp_path: Path) -> None:
     assert names == ["EVAL-MEMORY-001.yaml"]  # golden sidecar + non-yaml excluded
 
 
+def test_discover_recipes_excludes_non_recipe_yaml(tmp_path: Path) -> None:
+    """Only ``EVAL-*.yaml`` recipes are discovered (ISSUE — the PR 4c
+    ``offline_responses.eval.yaml`` fixture lives beside the recipes, and the
+    no-target ``make eval-replay`` sweep must not try to load it as one)."""
+    (tmp_path / "EVAL-MEMORY-001.yaml").write_text(_RECIPE, encoding="utf-8")
+    (tmp_path / "offline_responses.eval.yaml").write_text(
+        "responses: []\n", encoding="utf-8"
+    )
+    found = discover_recipes(tmp_path)
+    assert [p.name for p in found] == ["EVAL-MEMORY-001.yaml"]
+
+
 def test_discover_recipes_target_filter(tmp_path: Path) -> None:
     (tmp_path / "EVAL-MEMORY-001.yaml").write_text(_RECIPE, encoding="utf-8")
     (tmp_path / "EVAL-RECALL-001.yaml").write_text(
