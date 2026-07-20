@@ -10,12 +10,21 @@
   //
   // info — the persona record behind the picker selection; nothing renders until
   //        it resolves.
+  import { hueForId, initialsFor } from "../lib/format.js";
+
   let { info } = $props();
+
+  const displayName = $derived(info ? info.name || info.id : "");
 </script>
 
 {#if info}
   <header class="persona">
-    <span class="persona-name">{info.name || info.id}</span>
+    <span
+      class="persona-avatar"
+      style="--h: {hueForId(info.id)}"
+      aria-hidden="true">{initialsFor(displayName)}</span
+    >
+    <span class="persona-name">{displayName}</span>
     {#if info.role}
       <span class="persona-role">{info.role}</span>
     {/if}

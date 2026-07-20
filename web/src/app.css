@@ -1,456 +1,300 @@
-/* Minimal console styling (RFC 0048 Phase 1 / Slice 1). Deliberately small —
-   the slice's value is the wiring, not a design system; panels (PRs 4–5) bring
-   their own structure. */
+/* Web-console design system (RFC 0048) — tokens + shell chrome. Light and
+   dark ride the same rules via light-dark(); components consume the custom
+   properties below (several scoped component styles reference them with
+   fallbacks). The workspace layout lives in styles/conversation.css and
+   styles/management.css (one system, three sheets — split to hold the
+   pre-commit file-size cap); main.js imports all three in order. */
+
 :root {
-  font-family:
+  color-scheme: light dark;
+
+  /* Surfaces & lines */
+  --bg: light-dark(#f4f5f8, #0e1014);
+  --surface: light-dark(#ffffff, #171a21);
+  --surface-muted: light-dark(#f4f4f6, #1e222b);
+  --surface-raised: light-dark(#ffffff, #1c2028);
+  --border: light-dark(#e2e4ea, #2a2f3a);
+  --border-strong: light-dark(#c9cdd6, #3a4150);
+
+  /* Text */
+  --text: light-dark(#171921, #e7e9f0);
+  --text-muted: light-dark(#666e7e, #9aa3b4);
+  --muted: var(--text-muted);
+
+  /* Accent (indigo) + statuses */
+  --accent: light-dark(#4f46e5, #8b93f8);
+  --accent-strong: light-dark(#4338ca, #a5abfa);
+  --accent-soft: light-dark(#eef0fe, #262a44);
+  --accent-contrast: light-dark(#ffffff, #10122b);
+  --danger: light-dark(#b3261e, #ff8a80);
+  --danger-soft: light-dark(#fdecea, #3a2426);
+  --warn: light-dark(#8a5a00, #e8b662);
+  --ok: light-dark(#1a7f37, #6fcf8e);
+
+  /* Type & shape */
+  --font-ui:
     system-ui,
     -apple-system,
-    Segoe UI,
+    "Segoe UI",
     Roboto,
     sans-serif;
-  color-scheme: light dark;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius: 10px;
+  --radius-sm: 7px;
+  --shadow-pop:
+    0 8px 24px light-dark(rgba(23, 25, 33, 0.14), rgba(0, 0, 0, 0.5));
+
+  font-family: var(--font-ui);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
 }
 
 body {
   margin: 0;
+  background: var(--bg);
+  color: var(--text);
   line-height: 1.5;
+  font-size: 0.9375rem;
 }
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ---------- Shared controls ---------- */
+
+button {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+button:hover:not(:disabled) {
+  background: var(--surface-muted);
+  border-color: var(--border-strong);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Primary actions: form submits (Send / Post / Create / Save). */
+button[type="submit"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+
+button[type="submit"]:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+select,
+input:not([type="checkbox"]),
+textarea {
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.55rem;
+}
+
+textarea {
+  resize: vertical;
+}
+
+:is(button, select, input, textarea, summary, a, [role="tab"]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Visually hidden but accessible — labels the design carries as structure
+   elsewhere (rail section titles, composer) still need accessible names. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* ---------- Topbar ---------- */
 
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  gap: 1rem;
+  padding: 0 1rem;
+  height: 52px;
+  flex: none;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 
 .brand {
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
-.principal {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
-  opacity: 0.8;
+.logo {
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+  flex: none;
+}
+
+.brand .console-word {
+  font-weight: 400;
+  color: var(--text-muted);
 }
 
 .version {
-  margin-left: 0.5rem;
-  font-weight: 400;
-  font-size: 0.8rem;
-  opacity: 0.6;
+  font-weight: 500;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
 }
 
-/* Identity block: the real principal plus the §E local-testing override.
-   Named distinctly from the Chat panel's global `.identity` rule so that
-   single-class rule can't cascade into this topbar group. */
-.topbar .identity-block {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  opacity: 1;
-  font-size: inherit;
-}
-
-/* The "acting as" override is deliberately understated — a testing control, not
-   a prominent identity field. Monospace input to match the principal display. */
-.acting-as {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.75rem;
-  opacity: 0.75;
-}
-
-.acting-as input {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8rem;
-  padding: 0.1rem 0.3rem;
-  width: 8rem;
-}
-
+/* Panel tabs live in the topbar as a segmented nav. */
 .tabs {
   display: flex;
   gap: 0.25rem;
-  padding: 0.5rem 1rem 0;
+  padding: 0.25rem;
+  background: var(--surface-muted);
+  border-radius: 999px;
 }
 
 .tabs button {
   border: none;
   background: transparent;
-  padding: 0.4rem 0.8rem;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  font: inherit;
+  padding: 0.25rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.tabs button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
 }
 
 .tabs button[aria-selected="true"] {
-  border-bottom-color: currentColor;
+  background: var(--surface);
+  color: var(--text);
   font-weight: 600;
+  box-shadow: 0 1px 2px light-dark(rgba(23, 25, 33, 0.1), rgba(0, 0, 0, 0.4));
 }
+
+.topbar .identity-block {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: auto;
+}
+
+.principal {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+}
+
+.acting-as {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.acting-as input {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  padding: 0.15rem 0.45rem;
+  width: 7.5rem;
+}
+
+/* ---------- Shell content / boot states ---------- */
 
 .content {
-  padding: 1rem;
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 
-.panel h2 {
-  margin-top: 0;
-}
-
-.placeholder {
-  opacity: 0.7;
-}
-
-.identity {
-  font-size: 0.85rem;
-  opacity: 0.7;
+.content > [role="tabpanel"] {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
 }
 
 .boot {
-  padding: 1.5rem;
+  margin: auto;
+  padding: 2rem;
+  color: var(--text-muted);
+  text-align: center;
+  max-width: 34rem;
 }
 
-/* Persona header (RFC 0048 amendment §A) — gives the conversation a face:
-   name + role + capability chips, all from fields the agent DTO already serves. */
-.persona {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+.boot.error {
+  color: var(--danger);
 }
 
-.persona-name {
-  font-weight: 600;
-}
-
-.persona-role {
-  opacity: 0.8;
-  font-size: 0.9rem;
-}
-
-.persona-caps {
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  margin: 0;
-  padding: 0;
-}
-
-.persona-caps li {
-  font-size: 0.75rem;
-  padding: 0.05rem 0.4rem;
-  border-radius: 0.75rem;
-  background: color-mix(in srgb, currentColor 12%, transparent);
-}
-
-/* Chat panel (RFC 0048 Phase 1 PR 4). Still deliberately minimal — enough
-   structure to read a conversation and reach the composer, no design system. */
-/* Persona switcher row — pinned at the top of the chat panel, mirroring the
-   channel timeline's .channel-picker, so it stays reachable above a growing
-   transcript rather than being buried at the bottom of the composer. The
-   selector and its Exit control sit on one row. */
-.persona-picker {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.5rem;
-  max-width: 40rem;
-  margin-bottom: 1rem;
-}
-
-.persona-picker label {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.9rem;
-}
-
-.persona-picker select {
-  font: inherit;
-  padding: 0.3rem;
-}
-
-.persona-picker button {
-  font: inherit;
-  padding: 0.4rem 0.8rem;
-  cursor: pointer;
-}
-
-.persona-picker button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.transcript {
-  list-style: none;
-  margin: 0 0 1rem;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  /* An independent scroll region (like the channel timeline's .timeline) so a
-     long conversation scrolls within the transcript instead of pushing the
-     composer and the top persona switcher out of reach. */
-  max-height: 60vh;
-  overflow-y: auto;
-}
-
-.msg p {
-  margin: 0.15rem 0;
-}
-
-/* msg-meta is the per-message footnote (timestamp + optional isolation scope) —
-   muted and small, like the channel timeline's timestamp. */
-.msg-meta {
-  opacity: 0.6;
-  font-size: 0.8rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-.from-agent.reply-error {
-  /* A reply_status:"error" turn (e.g. a budget denial surfaced as HTTP 200 with
-     reply_status="error" and the denial text in `reply`, chat_handler.go
-     ISSUE-0065) is still a rendered reply, just flagged so it doesn't read as a
-     normal answer. Paired for the dark scheme for the same reason .boot.error
-     is. */
-  color: #b00020;
-  color: light-dark(#b00020, #ff8a80);
-}
-
-.empty-reply {
-  /* A reply_status:"empty" turn — the agent had nothing to say. Muted so the
-     placeholder reads as an annotation, not as the agent's actual words. */
-  opacity: 0.7;
-}
-
-/* The chat composer and the channel-timeline publish form are the same kind of
-   write surface (labelled controls stacked over a submit button), so they share
-   one rule set rather than each re-deriving the layout. */
-.composer,
-.publish {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  max-width: 40rem;
-}
-
-.composer label,
-.publish label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.9rem;
-}
-
-.composer textarea,
-.composer select,
-.composer input,
-.publish textarea {
-  font: inherit;
-  padding: 0.3rem;
-}
-
-.composer button,
-.publish button {
-  align-self: flex-start;
-  font: inherit;
-  padding: 0.4rem 1rem;
-  cursor: pointer;
-}
-
-.composer button:disabled,
-.publish button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.overrides {
-  font-size: 0.85rem;
-}
-
-.overrides label {
-  margin-top: 0.4rem;
-}
-
-.thinking,
-.loading {
-  opacity: 0.7;
+.loading,
+.thinking {
+  color: var(--text-muted);
   font-style: italic;
 }
 
 .empty {
-  opacity: 0.7;
-}
-
-/* No-persona hint (§D companion): shown where the DM persona picker would be
-   when NO personas are registered but channels exist — so the entry point does
-   not vanish silently. Muted like .empty; the inline Refresh keeps its .retry
-   sizing but sits on the same line as the sentence. */
-.no-personas {
-  opacity: 0.85;
-  max-width: 40rem;
-}
-
-.no-personas .retry {
-  margin-top: 0;
-  margin-left: 0.5rem;
-}
-
-/* Onboarding empty state (§F): a guided on-ramp, not a bare dead-end line. */
-.onboarding {
-  opacity: 0.85;
-  max-width: 40rem;
-}
-
-.onboarding p {
-  margin: 0.4rem 0;
-}
-
-.onboarding .retry {
-  margin-top: 0;
-  margin-right: 0.75rem;
+  color: var(--text-muted);
 }
 
 .retry {
   margin-top: 0.5rem;
-  font: inherit;
-  padding: 0.4rem 1rem;
-  cursor: pointer;
-}
-
-.boot.error {
-  /* The boot-error state is exactly when legibility matters most, and :root
-     opts into `color-scheme: light dark`, so the page may render dark. A fixed
-     dark red fails contrast on a dark background — light-dark() pairs it with a
-     lighter red for the dark scheme.
-     The plain `color` first is a progressive-enhancement fallback: a browser
-     without light-dark() drops the second declaration and still renders a red
-     error rather than inheriting the body text colour. */
-  color: #b00020;
-  color: light-dark(#b00020, #ff8a80);
-}
-
-/* Channel timeline panel (RFC 0048 Phase 1 PR 5). Same minimalism as the chat
-   panel — enough structure to scan a channel and reach the publish form. */
-.channels > label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.9rem;
-  max-width: 40rem;
-  margin-bottom: 1rem;
-}
-
-.channels > label select {
-  font: inherit;
-  padding: 0.3rem;
-}
-
-.timeline {
-  list-style: none;
-  margin: 0 0 1rem;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  /* An independent scroll region so the conversational order (oldest-top) can
-     autoscroll to the newest at the bottom without scrolling the whole page,
-     and the pinned-scroll guard has a container to measure (§D). */
-  max-height: 60vh;
-  overflow-y: auto;
-}
-
-/* Channel picker row: the selector and its Refresh control side by side. */
-.channel-picker {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.5rem;
-  max-width: 40rem;
-  margin-bottom: 1rem;
-}
-
-.channel-picker label,
-.new-session label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.9rem;
-}
-
-.channel-picker label {
-  flex: 1;
-  margin-bottom: 0;
-}
-
-.channel-picker select,
-.new-session input {
-  font: inherit;
-  padding: 0.3rem;
-}
-
-.refresh,
-.cancel {
-  font: inherit;
-  font-size: 0.85rem;
-  padding: 0.3rem 0.7rem;
-  cursor: pointer;
-}
-
-.cancel {
-  margin-left: 0.5rem;
-}
-
-/* Inline "new session" create (§C): a label input beside its Create button. */
-.new-session {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.4rem;
-}
-
-.new-session label {
-  flex: 1;
-}
-
-.new-session button {
-  font: inherit;
-  padding: 0.3rem 0.7rem;
-  cursor: pointer;
-}
-
-.message {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-}
-
-.message .sender {
-  font-weight: 600;
-}
-
-.message.from-self .sender {
-  /* The operator's own posts, distinguished from agents' (RFC 0048 §D) the same
-     way the chat panel bolds "You:" — a subtle accent, not a loud highlight. */
-  color: light-dark(#1565c0, #82b1ff);
-}
-
-.message .ts {
-  /* Metadata about the message, not its content — muted and small, like the
-     per-turn scope annotation in the chat panel. */
-  opacity: 0.6;
-  font-size: 0.8rem;
 }
 
 .poll-error {
-  /* Non-fatal "live updates paused" notice: muted, not alarming — the loaded
-     history is still on screen while the poll backs off. */
-  opacity: 0.7;
+  color: var(--text-muted);
   font-size: 0.85rem;
+  margin: 0.25rem 0;
 }
+
