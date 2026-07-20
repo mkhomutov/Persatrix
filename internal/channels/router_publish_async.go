@@ -339,6 +339,15 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// activity.go.
 	r.clearActivity(msg.ChannelID, msg.SenderID)
 
+	// Resolve the D1 floor-speaker verdict BEFORE any Notify below: for the
+	// round's LAST speaker, Notify lets floorRound return and run its deferred
+	// clearFloorSpeakers, so a post-Notify read races the teardown — the last
+	// in-round reply could escape suppression and fan out in parallel with the
+	// RFC 0052 continuation re-fan of the same message, a duplicate competing
+	// round (ISSUE-0110). At commit time the set still holds every granted
+	// speaker: the loop cannot advance past a waiter not yet notified.
+	inRoundReply := r.isFloorSpeakerReply(msg.ChannelID, msg.SenderID)
+
 	// RFC 0052 no-reopen latch, suppression half: the latched publish is the
 	// closed record's late final word — persisted above, barred from fanout
 	// like any post-close traffic. Deliberately NOT delegated to
@@ -419,6 +428,22 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// (agents/dispatch.py:108-114) remains as defense-in-depth.
 	if clampedDepth >= r.maxCascadeDepth {
 		r.recordCascadeCap(ctx, msg, derivedType, clampedDepth)
+		// Notify-then-suppress — the latch branch's posture, same starvation
+		// (ISSUE-0110): an at-cap reply from the current floor speaker IS the
+		// persisted reply the round's waiter is parked on; skipping Notify
+		// here burned the full turn timeout for that speaker and every
+		// remaining one, each mislabeled floor_turn{timeout}.
+		r.waiter.Notify(msg)
+		// RFC 0052: on an armed channel a capped chain is a TERMINAL bound —
+		// no human can continue past it, and the suppressed fanout means no
+		// further stimulus ever arrives, so an open interaction would wedge
+		// immortal-but-inert. A floor-speaker reply defers the verdict to its
+		// round's tail ([ChannelRouter.maybeContinueDiscussion] reads the same
+		// depth — one owner per path); any other capped publish closes here.
+		// `inRoundReply` is the pre-Notify capture (see above).
+		if !inRoundReply {
+			r.closeOnCascadeBound(ctx, msg, derivedType)
+		}
 		return nil, nil
 	}
 
@@ -460,8 +485,9 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// and replies late while a later speaker holds the floor: still a
 	// participant of this round, so suppressed rather than spawning a competing
 	// round. Cross-*round* cascade stays bounded by `cascade_depth` (Layer 0,
-	// enforced above).
-	if r.isFloorSpeakerReply(msg.ChannelID, msg.SenderID) {
+	// enforced above). `inRoundReply` is the pre-Notify capture: a read here,
+	// after Notify, races the loop's deferred clearFloorSpeakers (see above).
+	if inRoundReply {
 		return nil, nil
 	}
 
