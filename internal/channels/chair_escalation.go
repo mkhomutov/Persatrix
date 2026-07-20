@@ -70,6 +70,14 @@ const (
 type floorRoundOutcome struct {
 	granted int
 	replied int
+	// lastReply is the round's chronologically last on-time reply (turns are
+	// serialized, so waiter order is publish order) — the stimulus the RFC
+	// 0052 continuation seam re-fans on an armed channel
+	// ([ChannelRouter.maybeContinueDiscussion]): in-round replies are
+	// floor-speaker-suppressed at publish, so with no human to answer them a
+	// productive round would otherwise end the discussion (ISSUE-0110). nil
+	// when no speaker replied.
+	lastReply *ChannelMessage
 }
 
 // SetEscalationChair resolves the per-channel `escalation_chair_id` knob
