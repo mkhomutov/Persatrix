@@ -22,13 +22,10 @@
   import PublishComposer from "./PublishComposer.svelte";
   import DmComposer from "./DmComposer.svelte";
   import CreateChannelForm from "./CreateChannelForm.svelte";
-  import ChannelMembers from "./ChannelMembers.svelte";
-  import ChannelSettings from "./ChannelSettings.svelte";
-  import ChannelPicker from "./ChannelPicker.svelte";
   import ConversationFeed from "./ConversationFeed.svelte";
-  import PersonaPicker from "./PersonaPicker.svelte";
-  import NoPersonasHint from "./NoPersonasHint.svelte";
-  import PersonaHeader from "./PersonaHeader.svelte";
+  import ConversationRail from "./ConversationRail.svelte";
+  import ConversationHeader from "./ConversationHeader.svelte";
+  import ManagementRail from "./ManagementRail.svelte";
 
   // canCreate / canConfigEdit: the create (amendment §A) + RFC 0050 config-edit
   // capabilities, each reduced to enabled && available by the shell. config-edit
@@ -83,9 +80,17 @@
   // DMs are filtered OUT of the channel picker — reached via the persona entry
   // point, never as a raw `dm:` row (amendment §B).
   const groupChannels = $derived(channels.filter((c) => !isDMChannel(c)));
+  // The watched group channel's record — drives the conversation header.
+  const selectedChannelInfo = $derived(
+    groupChannels.find((c) => c.id === selectedChannel) ?? null,
+  );
   // Members of the watched channel — `@`-mention source + resolve set (RFC 0011).
-  const selectedChannelMembers = $derived(
-    groupChannels.find((c) => c.id === selectedChannel)?.members ?? []);
+  const selectedChannelMembers = $derived(selectedChannelInfo?.members ?? []);
+  // The management rail (members + settings) renders only for a watched group
+  // channel with at least one management capability (see ManagementRail).
+  const showDetailsRail = $derived(
+    Boolean(selectedChannel) && !isDM && (canCreate || canConfigEdit),
+  );
 
   const selectedAgentInfo = $derived(
     agents.find((agent) => agent.id === selectedAgent) ?? null,
@@ -380,14 +385,13 @@
 </script>
 
 <section class="panel channels" aria-label="Channels">
-  <h2>Channels</h2>
-  <p class="identity">Acting as <code>{userId}</code></p>
-
   {#if channelsError}
-    <p class="boot error" role="alert">{channelsError}</p>
-    <button type="button" class="retry" onclick={loadChannels}>Retry</button>
+    <div class="boot-wrap">
+      <p class="boot error" role="alert">{channelsError}</p>
+      <button type="button" class="retry" onclick={loadChannels}>Retry</button>
+    </div>
   {:else if !channelsLoaded || !agentsLoaded}
-    <p class="loading" role="status">Loading…</p>
+    <p class="loading boot" role="status">Loading…</p>
   {:else if bothEmpty}
     <!-- Merged onboarding (§D): only a stack with neither personas nor channels
          is a dead end. One first-contact surface for both entry points. -->
@@ -403,96 +407,94 @@
       re-check.
     </OnboardingEmpty>
   {:else}
-    {#if agents.length > 0}
-      <!-- DM entry point (§B): pick a persona to start/open a direct message.
-           No lobby prompt over the picker — the channel timeline fills the body
-           when no DM is open. -->
-      <PersonaPicker
+    <div class="workspace" class:with-details={showDetailsRail}>
+      <ConversationRail
         bind:selectedAgent
+        bind:selectedChannel
         {agents}
+        {groupChannels}
         {sending}
-        onChange={onPersonaPick}
+        {canCreate}
+        {userId}
+        {onPersonaPick}
         onExit={exitDM}
+        {onChannelChange}
+        onRefreshAgents={loadAgents}
+        onRefreshChannels={loadChannels}
+        onNewChannel={() => (showCreateForm = true)}
       />
-    {:else}
-      <!-- No personas + channels exist: the DM entry point (why + cloud-demo cause) is in NoPersonasHint. -->
-      <NoPersonasHint onRefresh={loadAgents} />
-    {/if}
 
-    <ChannelPicker
-      {groupChannels}
-      bind:selectedChannel
-      {canCreate}
-      {onChannelChange}
-      onRefresh={loadChannels}
-      onNewChannel={() => (showCreateForm = true)}
-    />
+      <!-- Conversation column: header, scrolling feed, docked composer. -->
+      <div class="conversation">
+        <ConversationHeader
+          {isDM}
+          personaInfo={selectedAgentInfo}
+          {dmResolving}
+          {dmResolveError}
+          channelInfo={selectedChannelInfo}
+          memberCount={selectedChannelMembers.length}
+        />
+
+        {#if !activeChannel && !isDM}
+          <!-- Neutral default: name both ways in (only reachable when at least
+               one entry point exists — bothEmpty is handled above). -->
+          <p class="empty lobby">
+            Select a persona to direct-message, or a channel to watch.
+          </p>
+        {:else}
+          <div class="feed-area">
+            <ConversationFeed bind:this={feed} channelId={activeChannel} {userId} {agentsById} {isDM} peerId={selectedAgent} members={selectedChannelMembers} onCancelTurn={isDM && sending ? cancelSend : null} />
+          </div>
+        {/if}
+
+        <div class="composer-dock">
+          {#if isDM}
+            {#if sendError}
+              <p class="boot error" role="alert">{sendError}</p>
+            {/if}
+            <DmComposer
+              bind:message
+              bind:sessionId
+              bind:epochId
+              {sending}
+              {canSend}
+              chattable={selectedAgentChattable}
+              hasPersona={Boolean(selectedAgentInfo)}
+              onSubmit={onDmSubmit}
+              onKeydown={onDmKeydown}
+            />
+          {:else if selectedChannel}
+            {#if publishError}
+              <p class="boot error" role="alert">{publishError}</p>
+            {/if}
+            <PublishComposer
+              bind:content={publishContent}
+              {publishing}
+              {canPublish}
+              {userId}
+              {agentsById}
+              members={selectedChannelMembers}
+              onSubmit={onPublishSubmit}
+              onKeydown={onPublishKeydown}
+            />
+          {/if}
+        </div>
+      </div>
+
+      {#if showDetailsRail}
+        <ManagementRail channelId={selectedChannel} members={selectedChannelMembers} {agents} {agentsById} {userId} {canCreate} {canConfigEdit} onChanged={loadChannels} />
+      {/if}
+    </div>
 
     {#if canCreate && showCreateForm}
       <CreateChannelForm {agents} {userId} onCreated={onChannelCreated} onCancel={() => (showCreateForm = false)} />
     {/if}
+  {/if}
 
-    {#if canCreate && selectedChannel && !isDM}
-      <!-- Manage the watched group channel's roster (add/remove members, set
-           dispositions). Same capability as create; hidden for DMs. -->
-      <ChannelMembers channelId={selectedChannel} members={selectedChannelMembers} {agents} {agentsById} {userId} onChanged={loadChannels} />
-    {/if}
-
-    {#if canConfigEdit && selectedChannel && !isDM}
-      <!-- Governance settings for the watched group channel (RFC 0050 P2);
-           config-edit capability only (independent of create), hidden for DMs. -->
-      <ChannelSettings channelId={selectedChannel} members={selectedChannelMembers} {agentsById} onChanged={loadChannels} />
-    {/if}
-
-    {#if isDM}
-      <PersonaHeader info={selectedAgentInfo} />
-      {#if dmResolving}
-        <p class="loading" role="status">Opening conversation…</p>
-      {/if}
-      {#if dmResolveError}
-        <p class="poll-error" role="status">{dmResolveError}</p>
-      {/if}
-    {/if}
-
-    {#if !activeChannel && !isDM}
-      <!-- Neutral default: name both ways in (only reachable when at least one
-           entry point exists — bothEmpty is handled above). -->
-      <p class="empty">
-        Select a persona to direct-message, or a channel to watch.
-      </p>
-    {:else}
-      <ConversationFeed bind:this={feed} channelId={activeChannel} {userId} {agentsById} {isDM} peerId={selectedAgent} members={selectedChannelMembers} onCancelTurn={isDM && sending ? cancelSend : null} />
-    {/if}
-
-    {#if isDM}
-      {#if sendError}
-        <p class="boot error" role="alert">{sendError}</p>
-      {/if}
-      <DmComposer
-        bind:message
-        bind:sessionId
-        bind:epochId
-        {sending}
-        {canSend}
-        chattable={selectedAgentChattable}
-        hasPersona={Boolean(selectedAgentInfo)}
-        onSubmit={onDmSubmit}
-        onKeydown={onDmKeydown}
-      />
-    {:else if selectedChannel}
-      {#if publishError}
-        <p class="boot error" role="alert">{publishError}</p>
-      {/if}
-      <PublishComposer
-        bind:content={publishContent}
-        {publishing}
-        {canPublish}
-        {userId}
-        {agentsById}
-        members={selectedChannelMembers}
-        onSubmit={onPublishSubmit}
-        onKeydown={onPublishKeydown}
-      />
-    {/if}
+  {#if channelsError || !channelsLoaded || !agentsLoaded || bothEmpty}
+    <!-- Outside workspace mode the rail (which carries the identity) isn't
+         rendered, but the effective identity must stay visible in every state
+         (§E/§F — the panel always echoes who it acts as). -->
+    <p class="identity boot-identity">Acting as <code>{userId}</code></p>
   {/if}
 </section>

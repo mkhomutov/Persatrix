@@ -76,7 +76,14 @@
 </script>
 
 <details class="overrides">
-  <summary>Scope (optional)</summary>
+  <!-- The summary reads "Scope · active" when an override is set, so a
+       non-default session/epoch is visible even with the popover closed. -->
+  <summary
+    >Scope{#if sessionId.trim() || epochId.trim()}<span class="scope-active">
+        · active</span
+      >{/if}</summary
+  >
+  <div class="overrides-body">
   {#if sessionsAvailable}
     <label>
       Session
@@ -133,4 +140,12 @@
       disabled={sending}
     />
   </label>
+  </div>
 </details>
+
+<style>
+  .scope-active {
+    color: var(--accent, #4f46e5);
+    font-weight: 600;
+  }
+</style>
