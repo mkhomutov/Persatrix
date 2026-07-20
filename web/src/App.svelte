@@ -201,9 +201,44 @@
 
 <header class="topbar">
   <span class="brand">
-    Persatrix console
+    <!-- Three-node mark: a nod to the multi-persona orchestration the console
+         fronts. Decorative only (aria-hidden); the brand text carries the name. -->
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="5.5" r="2.6" fill="currentColor" />
+      <circle cx="5.5" cy="17.5" r="2.6" fill="currentColor" />
+      <circle cx="18.5" cy="17.5" r="2.6" fill="currentColor" />
+      <path
+        d="M12 8.1 6.7 15.3M12 8.1l5.3 7.2M8.1 17.5h7.8"
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linecap="round"
+      />
+    </svg>
+    Persatrix <span class="console-word">console</span>
     {#if version}<span class="version" title="Orchestrator build">v{version}</span>{/if}
   </span>
+  {#if status === "ready" && panels.length > 0}
+    <!-- The panel tabs live in the topbar as a segmented nav — same ARIA tabs
+         contract as before (roving tabindex, arrow-key movement), restyled. -->
+    <div class="tabs" role="tablist" aria-label="Console panels">
+      {#each panels as panel (panel.name)}
+        <button
+          type="button"
+          role="tab"
+          id="tab-{panel.name}"
+          aria-controls={panel.name === activeName
+            ? `panel-${panel.name}`
+            : undefined}
+          aria-selected={panel.name === activeName}
+          tabindex={panel.name === activeName ? 0 : -1}
+          onclick={() => selectTab(panel)}
+          onkeydown={onTabKeydown}
+        >
+          {panel.title}
+        </button>
+      {/each}
+    </div>
+  {/if}
   {#if principal}
     <!-- `identity-block` (not `identity`): the bare `.identity` class is the
          conversation panel's identity line, a global rule that would otherwise
@@ -264,25 +299,6 @@
     <p class="boot">No panels are enabled for this deployment.</p>
   </main>
 {:else}
-  <div class="tabs" role="tablist" aria-label="Console panels">
-    {#each panels as panel (panel.name)}
-      <button
-        type="button"
-        role="tab"
-        id="tab-{panel.name}"
-        aria-controls={panel.name === activeName
-          ? `panel-${panel.name}`
-          : undefined}
-        aria-selected={panel.name === activeName}
-        tabindex={panel.name === activeName ? 0 : -1}
-        onclick={() => selectTab(panel)}
-        onkeydown={onTabKeydown}
-      >
-        {panel.title}
-      </button>
-    {/each}
-  </div>
-
   <!-- The content region is the tabpanel for whichever tab is active;
        id/aria-labelledby track activeName so the tab↔panel relationship is
        complete for assistive tech. Only the active panel is mounted (its panel

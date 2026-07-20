@@ -54,6 +54,14 @@
     name.trim().length > 0 && selectedMembers.length > 0 && !creating,
   );
 
+  // Escape closes the dialog (standard modal behaviour). Not wired to a
+  // backdrop click — a stray click must not discard a half-filled form.
+  function onWindowKeydown(event) {
+    if (event.key === "Escape" && !creating) {
+      onCancel?.();
+    }
+  }
+
   async function submit(event) {
     event.preventDefault();
     if (!canSubmit || creating) {
@@ -82,7 +90,15 @@
   }
 </script>
 
-<form class="create-channel" aria-label="Create channel" onsubmit={submit}>
+<svelte:window onkeydown={onWindowKeydown} />
+
+<!-- Rendered as a modal over the workspace: creating a channel is a deliberate,
+     multi-field act, and the overlay keeps the conversation context intact
+     underneath instead of pushing it down. -->
+<div class="modal-backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="New channel">
+    <h2 class="modal-title">New channel</h2>
+    <form class="create-channel" aria-label="Create channel" onsubmit={submit}>
   {#if error}
     <p class="boot error" role="alert">{error}</p>
   {/if}
@@ -152,4 +168,6 @@
     </button>
     <button type="button" class="cancel" onclick={onCancel}>Cancel</button>
   </div>
-</form>
+    </form>
+  </div>
+</div>

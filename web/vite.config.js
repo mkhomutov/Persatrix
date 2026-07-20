@@ -19,6 +19,16 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 export default defineConfig(({ mode }) => ({
   plugins: [svelte()],
   base: "/ui/",
+  // Dev-only API proxy: the SPA's fetch paths are root-relative (/api/v1/…)
+  // because the deployed bundle is same-origin under the orchestrator. Under
+  // `npm run dev` there is no orchestrator on the Vite origin, so proxy /api to
+  // one running locally (default :8080; override with VITE_API_TARGET, e.g. a
+  // mock server). Ignored entirely by `vite build`.
+  server: {
+    proxy: {
+      "/api": process.env.VITE_API_TARGET ?? "http://localhost:8080",
+    },
+  },
   build: {
     outDir: "../internal/ui/assets",
     emptyOutDir: true,

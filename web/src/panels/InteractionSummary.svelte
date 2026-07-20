@@ -215,12 +215,17 @@
 
 <style>
   .interaction-summary {
+    flex: none;
     margin: 0.5rem 0 0;
     padding: 0.6rem 0.8rem;
     border: 1px solid var(--border, #d4d4d8);
     border-left: 3px solid var(--accent, #2563eb);
-    border-radius: 6px;
+    border-radius: var(--radius, 6px);
     background: var(--surface-muted, #f4f4f5);
+    /* Docked between the timeline and the composer — cap it so a long
+       synthesis can't squeeze the live feed out; it scrolls internally. */
+    max-height: 12rem;
+    overflow-y: auto;
   }
   .meta {
     display: flex;

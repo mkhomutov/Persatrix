@@ -30,6 +30,33 @@ export function isDMChannel(channel) {
   return channel?.channel_type === "dm" || (channel?.id ?? "").startsWith("dm:");
 }
 
+// hueForId hashes an id (djb2) onto a stable 0–359 hue, so a participant keeps
+// one avatar colour across messages, conversations, and reloads. Pure display
+// decoration — no meaning is attached to the colour.
+export function hueForId(id) {
+  let h = 5381;
+  const s = id ?? "";
+  for (let i = 0; i < s.length; i++) {
+    h = (h * 33 + s.charCodeAt(i)) >>> 0;
+  }
+  return h % 360;
+}
+
+// initialsFor reduces a display label to at most two avatar initials, using
+// the name part before any " — role" suffix ("Grace — Systems engineer" → "G",
+// "Ember Owl" → "EO"). Falls back to "?" for an empty label.
+export function initialsFor(label) {
+  const name = (label ?? "").split("—")[0].trim();
+  const words = name.split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return "?";
+  }
+  return words
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("");
+}
+
 // senderLabel turns a raw sender_id into a readable name. The operator's own
 // posts read as "You" (the human/agent distinction §D asks for); an agent
 // resolves to "name — role" via the best-effort agent map; anything unknown

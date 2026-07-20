@@ -125,8 +125,8 @@ retired — [RFC 0048 chat-panel-retirement amendment](../rfcs/0048-amendment-ch
 
 The hero moment — talk to a persona over the synchronous chat API:
 
-1. Pick a persona from the **persona picker** at the top of the panel
-   (`GET /api/v1/agents`). The conversation opens with a persona header
+1. Pick a persona from the **persona picker** in the sidebar's **Direct
+   message** section (`GET /api/v1/agents`). The conversation opens with a persona header
    (name — role — capabilities); a reload resumes the persisted history.
 2. Type a message and send it (`POST /api/v1/agents/{id}/chat` with
    `participant_type:"user"` and the `user_id` derived from `/ui/context`). A
@@ -212,8 +212,8 @@ panels:
    even with the toggle on. (`create.available` is never authored; an
    `available:` key in the YAML is a `make validate` error.)
 
-**Using it.** In the **Channels** tab, click **New channel** (beside Refresh),
-enter a name (the server derives the canonical `group:<name>` id, shown
+**Using it.** In the sidebar's **Channels** section, click **New channel**
+(beside Refresh; a modal form opens). Enter a name (the server derives the canonical `group:<name>` id, shown
 read-only — do not type the `group:` prefix yourself), an optional description,
 and pick members — **only persona agents** are listed, each with a per-member
 respond policy (`when_mentioned` (default) / `always` / `never`). Task agents run
@@ -227,7 +227,7 @@ success the picker reloads and selects the channel you made.
    you can immediately publish into the channel you just created.
 
 > **Group channels only.** This form creates `group:` channels. To start a **DM**
-> with a persona, use the **persona picker** at the top of the panel
+> with a persona, use the **persona picker** in the sidebar
 > ([Direct-message a persona](#direct-message-a-persona)) — that is the single DM
 > entry point. DMs and threads are created implicitly on first message
 > ([RFC 0011](../rfcs/0011-channels-bridges.md)), so there is nothing to "create"
@@ -258,9 +258,9 @@ the console — the browser counterpart to the CLI
 verb group (RFC 0050 Phase 2). Both surfaces ride the **same**
 `GET`/`PATCH /api/v1/channels/{id}/config` endpoint and the **same** per-channel
 revision, so a value set in one is what the other reads back — one source of
-truth, the store. It is a **Channel settings** disclosure nested in the
-**Channels** tab beside the member roster, shown only for a watched **group**
-channel (not DMs).
+truth, the store. It is a **Channel settings** card in the management rail,
+beside the **Members** card, shown only for a watched **group** channel
+(not DMs).
 
 **It ships on.** The schema default is `false`, but the delivered
 [`config/ui.yaml`](../../config/ui.yaml) sets `config_edit_enabled: true` (RFC
