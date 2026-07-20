@@ -419,6 +419,21 @@ func (r *ChannelRouter) publishCommit(ctx context.Context, msg ChannelMessage, d
 	// (agents/dispatch.py:108-114) remains as defense-in-depth.
 	if clampedDepth >= r.maxCascadeDepth {
 		r.recordCascadeCap(ctx, msg, derivedType, clampedDepth)
+		// Notify-then-suppress — the latch branch's posture, same starvation
+		// (ISSUE-0110): an at-cap reply from the current floor speaker IS the
+		// persisted reply the round's waiter is parked on; skipping Notify
+		// here burned the full turn timeout for that speaker and every
+		// remaining one, each mislabeled floor_turn{timeout}.
+		r.waiter.Notify(msg)
+		// RFC 0052: on an armed channel a capped chain is a TERMINAL bound —
+		// no human can continue past it, and the suppressed fanout means no
+		// further stimulus ever arrives, so an open interaction would wedge
+		// immortal-but-inert. A floor-speaker reply defers the verdict to its
+		// round's tail ([ChannelRouter.maybeContinueDiscussion] reads the same
+		// depth — one owner per path); any other capped publish closes here.
+		if !r.isFloorSpeakerReply(msg.ChannelID, msg.SenderID) {
+			r.closeOnCascadeBound(ctx, msg, derivedType)
+		}
 		return nil, nil
 	}
 

@@ -19,12 +19,10 @@ const (
 )
 
 // floor_control.go — RFC 0030 Layer 2.5 (floor control / speaker
-// serialization). This file ships the *inert* primitives in PR 1: the
-// per-channel floor registry and the responder-ordering helper, both with
-// full unit coverage and no call site yet. PR 2 rewires
-// [ChannelRouter.fanout] to drive a serialized speaker round through these;
-// PR 3 flips the per-channel `floor_control` flag default on for group
-// channels. See `docs/rfcs/0030-amendment-floor-control-pr-plan.md`.
+// serialization): the per-channel floor registry, the responder-ordering
+// helper, and the serialized round [ChannelRouter.fanout] drives through
+// them (flag default on for group channels since amendment PR 3). See
+// `docs/rfcs/0030-amendment-floor-control-pr-plan.md`.
 //
 // Why serialize at all: today a channel message is fanned out to every
 // responder concurrently and fire-and-forget ([fanout.go]), so each persona
@@ -339,8 +337,9 @@ func (r *ChannelRouter) floorRound(
 	var outcome floorRoundOutcome
 	for _, speaker := range responders {
 		outcome.granted++
-		if r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout, channelSize, floorMentions, failures) {
+		if reply, ok := r.runFloorTurn(detached, msg, ct, threadParentSenderID, speaker, turnTimeout, channelSize, floorMentions, failures); ok {
 			outcome.replied++
+			outcome.lastReply = &reply
 		}
 	}
 	r.recordFloorRound(detached, ct, time.Since(start))
@@ -397,7 +396,7 @@ func (r *ChannelRouter) runFloorTurn(
 	channelSize int,
 	floorMentions []string,
 	failures *liveDeliveryFailures,
-) bool {
+) (ChannelMessage, bool) {
 	r.recordFloorSpeaker(msg.ChannelID, speaker.ParticipantID)
 
 	// Presence Tier 1 (RFC 0048): re-stamp the speaker as thinking at the moment
@@ -434,11 +433,11 @@ func (r *ChannelRouter) runFloorTurn(
 	timer := time.NewTimer(turnTimeout)
 	defer timer.Stop()
 	select {
-	case <-replyCh:
-		// Speaker's reply landed and was persisted; the next speaker will
-		// read it from history. Advance.
+	case reply := <-replyCh:
+		// Speaker's reply landed and was persisted; the next speaker reads it
+		// from history. Returned so the round outcome carries the last reply.
 		r.recordFloorTurn(ctx, ct, floorOutcomeReplied)
-		return true
+		return reply, true
 	case <-timer.C:
 		// Speaker stayed silent past its turn budget; advance rather than
 		// stall the round (D2). A candidate the response gate ultimately
@@ -447,7 +446,7 @@ func (r *ChannelRouter) runFloorTurn(
 		// here: the loop never saw this speaker's reply, so it is a timeout
 		// for telemetry purposes.
 		r.recordFloorTurn(ctx, ct, floorOutcomeTimeout)
-		return false
+		return ChannelMessage{}, false
 	}
 }
 

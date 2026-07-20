@@ -86,10 +86,6 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 	// a reclassification — logging it would mislabel every broadcast and
 	// bury the signal this line exists to surface.
 	floorMentions := resolveFloorMentions(members, msg.Mentions, msg.SenderID)
-	// The previously-silent resolution: mentions were present but named no
-	// floor-capable member (the operator, an observer, a non-member, the sender
-	// itself), the case the gate flip reclassifies to open floor. An explicit
-	// `@everyone` is open floor by contract (D3), not a reclassification.
 	namedNoFloorCapable := len(msg.Mentions) > 0 && len(floorMentions) == 0 && !slices.Contains(msg.Mentions, MentionEveryone)
 	if namedNoFloorCapable {
 		r.logger.Debug("channels: mentions name no floor-capable member",
@@ -325,6 +321,10 @@ func (r *ChannelRouter) fanout(ctx context.Context, msg ChannelMessage, ct Chann
 		if !r.maybeAdvanceAgenda(context.WithoutCancel(ctx), msg, ct, outcome, members, channelSize, autonomous) {
 			r.maybeEscalateStall(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, outcome, members, channelSize, floorMentions)
 		}
+		// RFC 0052 §B continuation (ISSUE-0110): a PRODUCTIVE round's replies
+		// were floor-speaker-suppressed — with no human to answer them, re-fan
+		// the last one or the discussion dies here (human/stalled rounds no-op).
+		r.maybeContinueDiscussion(context.WithoutCancel(ctx), ct, outcome, autonomous)
 	} else {
 		r.dispatchConcurrent(context.WithoutCancel(ctx), msg, ct, threadParentSenderID, members, channelSize, floorMentions, nil)
 	}
