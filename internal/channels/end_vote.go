@@ -255,7 +255,26 @@ func (r *ChannelRouter) processEndVote(ctx context.Context, msg ChannelMessage, 
 	// fans out as a fresh signal; only the redundant live duplicate is dropped
 	// from fanout. (It is still persisted as a real message — history growth is
 	// bounded by the per-channel message cap, not the reply budget.)
-	return spam
+	if !spam {
+		return false
+	}
+	// RFC 0052 (ISSUE-0112): on an `autonomous.enabled` channel a bare fanout
+	// suppression is a WEDGE — with no human to continue, a duplicate vote that
+	// is the last publish in flight means no round ever mints again, so neither
+	// the stall tail nor the `max_rounds` tally can run and the interaction
+	// strands open forever (a sub-quorum roster voting "we're done" is the
+	// natural convergence shape, not an edge case). An armed channel re-fans
+	// the duplicate instead: still a quorum no-op, and the re-fanned round is
+	// bounded by the §D machinery (each round advances the round tally; the
+	// Layer-0 cascade cap bounds the chain) — the flood the suppression exists
+	// to prevent is impossible under those bounds. No governance drop is
+	// recorded here: nothing was dropped. Human channels keep the suppression
+	// byte-for-byte.
+	if r.AutonomousFor(msg.ChannelID).Enabled {
+		return false
+	}
+	r.recordGovernanceDropEndVote(ctx, ct)
+	return true
 }
 
 // recordInteractionClosed fires the structured close log + the
@@ -287,11 +306,10 @@ func (r *ChannelRouter) recordEndVoteSpam(ctx context.Context, msg ChannelMessag
 		zap.String("participant_id", msg.SenderID),
 		zap.String("layer", governanceLayerEndVote),
 	)
-	// A redundant in-window duplicate vote has its fanout suppressed
-	// (processEndVote returns true), so it IS a Layer 4 governance drop:
-	// attribute it on the shared counter + trace span so vote-spam is visible on
-	// the same governance-drop dashboard as the other layers (§B/§L).
-	r.recordGovernanceDropEndVote(ctx, ct)
+	// The Layer 4 governance-drop counter is recorded at the SUPPRESSION site
+	// in processEndVote, not here: on an `autonomous.enabled` channel the
+	// duplicate is logged as spam but re-fanned (ISSUE-0112 — a bare
+	// suppression wedges an unattended discussion open), so nothing is dropped.
 }
 
 // recordGovernanceDropEndVote attributes a single Layer 4 fanout suppression on

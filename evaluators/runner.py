@@ -110,16 +110,22 @@ def golden_path_for(recipe_path: str | Path) -> Path:
 
 
 def discover_recipes(eval_sets_dir: str | Path, target: str | None = None) -> list[Path]:
-    """Return recipe files under ``eval_sets_dir`` (``.golden.yaml`` excluded).
+    """Return recipe files under ``eval_sets_dir``.
 
-    A missing directory yields ``[]`` — Phase 1's ``eval_sets/`` is empty until
-    PR 4 — so ``make eval-replay`` is a clean no-op rather than an error.
-    ``target`` filters to a single recipe by stem (``EVAL-MEMORY-001``).
+    Only ``EVAL-*.yaml`` files are recipes (the schema's closed id domain);
+    golden sidecars (``*.golden.yaml``) and support fixtures living beside
+    the recipes (``offline_responses.eval.yaml``) are excluded — the
+    no-target ``make eval-replay`` sweep must not load a fixture as a
+    recipe. A missing directory yields ``[]`` — so an empty ``eval_sets/``
+    is a clean no-op rather than an error. ``target`` filters to a single
+    recipe by stem (``EVAL-MEMORY-001``).
     """
     d = Path(eval_sets_dir)
     if not d.is_dir():
         return []
-    recipes = sorted(p for p in d.glob("*.yaml") if not p.name.endswith(".golden.yaml"))
+    recipes = sorted(
+        p for p in d.glob("EVAL-*.yaml") if not p.name.endswith(".golden.yaml")
+    )
     if target is not None:
         recipes = [p for p in recipes if p.stem == target]
     return recipes

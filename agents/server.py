@@ -223,7 +223,12 @@ class AgentServer:
         # lease before issuing. A wallet RPC the agent cannot deliver fails
         # the LLM call closed (RFC 0023 § F): enforcement does not lapse
         # silently when the orchestrator is unreachable.
-        self._wallet_client = WalletClient.from_channel(self._orchestrator_channel)
+        # ISSUE-0111: stamp the hosted agent's identity on every wallet RPC
+        # (x-agent-id metadata) so the RFC 0009 rate limiter meters this
+        # agent's own budget instead of the shared anonymous bucket.
+        self._wallet_client = WalletClient.from_channel(
+            self._orchestrator_channel, agent_id=first_agent_id,
+        )
         wire_wallet_client(self.agents, self._wallet_client)
 
         # Self-register with orchestrator after gRPC server is listening.
