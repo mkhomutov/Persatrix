@@ -1,0 +1,111 @@
+# Four-vendor overlay for docker-compose.yaml — the RFC 0052 Phase 4 headline
+# (MT-AUTONOMOUS-MULTIPROVIDER-001): four personas, each pinned by an RFC 0033
+# alias to a DIFFERENT cloud vendor (Anthropic + OpenAI + Gemini + watsonx.ai),
+# brainstorm one topic in one autonomous channel with no human turn.
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.multivendor.yaml up -d --build
+#
+# Needs ALL FOUR vendors keyed in your environment / .env (ANTHROPIC_API_KEY +
+# OPENAI_API_KEY + GEMINI_API_KEY + WATSONX_API_KEY, plus the non-secret
+# WATSONX_PROJECT_ID; WATSONX_URL optional). This is a LIVE, BILLED run on four
+# clouds — set a hard spend cap at every vendor console first.
+#
+# The overlay mounts config/demo/multivendor/optimization.yaml (the blueprint's
+# model_aliases block as a runnable alias map) and builds the agent image with
+# BOTH optional provider SDKs (`AGENT_EXTRAS: providers` → google-genai +
+# ibm-watsonx-ai — hence `--build` is required). It also adds the blueprint's
+# fourth seat, `slate-heron` (watsonx). Per-seat pinning of the persona
+# `model:` fields (nova-sparrow→anthropic_seat, ember-owl→openai_seat,
+# iron-fox→gemini_seat, slate-heron→watsonx_seat) lives in config/agents.yaml
+# per the MT precondition.
+
+x-multivendor-config: &multivendor-config
+  - ./config/demo/multivendor/optimization.yaml:/app/config/optimization.yaml:ro
+
+# All four vendors' secrets (the base compose plumbs only ANTHROPIC/OPENAI).
+x-multivendor-env: &multivendor-env
+  - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+  - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+  - WATSONX_API_KEY=${WATSONX_API_KEY:-}
+  - WATSONX_PROJECT_ID=${WATSONX_PROJECT_ID:-}
+  - WATSONX_SPACE_ID=${WATSONX_SPACE_ID:-}
+  - WATSONX_URL=${WATSONX_URL:-}
+
+# Install BOTH optional provider SDKs (the combined `providers` extra).
+x-multivendor-build: &multivendor-build
+  args:
+    AGENT_EXTRAS: providers
+
+services:
+  orchestrator:
+    volumes: *multivendor-config
+
+  agent-planner:
+    build: *multivendor-build
+    volumes: *multivendor-config
+    environment: *multivendor-env
+
+  agent-coder:
+    build: *multivendor-build
+    volumes: *multivendor-config
+    environment: *multivendor-env
+
+  agent-reviewer:
+    build: *multivendor-build
+    volumes: *multivendor-config
+    environment: *multivendor-env
+
+  agent-ember-owl:
+    build: *multivendor-build
+    volumes: *multivendor-config
+    environment: *multivendor-env
+
+  agent-iron-fox:
+    build: *multivendor-build
+    volumes: *multivendor-config
+    environment: *multivendor-env
+
+  agent-nova-sparrow:
+    build: *multivendor-build
+    volumes: *multivendor-config
+    environment: *multivendor-env
+
+  # ─── Persona Agent: Slate Heron (the blueprint's fourth seat — watsonx) ───
+  agent-slate-heron:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+      args:
+        AGENT_EXTRAS: providers
+    restart: unless-stopped
+    command: ["--agent", "slate-heron", "--port", "50057", "--host", "0.0.0.0", "--orchestrator-url", "http://orchestrator:8080", "--advertise-address", "agent-slate-heron:50057"]
+    ports:
+      - "50057:50057"
+    volumes:
+      - ./config:/app/config:ro
+      - ./config/demo/multivendor/optimization.yaml:/app/config/optimization.yaml:ro
+      - workspace:/workspace:ro
+      # Per-persona memory volume — mirrors the other persona agents.
+      - slate-heron-data:/app/data
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - WATSONX_API_KEY=${WATSONX_API_KEY:-}
+      - WATSONX_PROJECT_ID=${WATSONX_PROJECT_ID:-}
+      - WATSONX_SPACE_ID=${WATSONX_SPACE_ID:-}
+      - WATSONX_URL=${WATSONX_URL:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.create_connection(('localhost', 50057), timeout=5); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  slate-heron-data:
+    driver: local

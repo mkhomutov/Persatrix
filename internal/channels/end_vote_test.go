@@ -312,6 +312,38 @@ func TestEndVote_DuplicateLiveVoteSuppressesFanout(t *testing.T) {
 		"a duplicate in-window end-vote is suppressed from fanout (no Layer 2 bypass)")
 }
 
+// TestEndVote_DuplicateLiveVoteFansOutOnAutonomousChannel pins the RFC 0052
+// disposition of the duplicate-vote suppression (the ISSUE-0112 wedge): on an
+// `autonomous.enabled` channel there is no human to continue past a bare
+// fanout suppression, so a duplicate live vote that happens to be the last
+// publish in flight would strand the interaction open forever — no round ever
+// mints again, so neither the stall tail nor the `max_rounds` tally can run
+// (first reproduced live: a 3-persona roster at 2-of-3 votes, the third never
+// voting, the final "we're done" deduped → wedged open until operator action).
+// On an armed channel the duplicate therefore FANS OUT — still deduped to a
+// no-op for the quorum, and the re-fanned round is bounded by the §D machinery
+// (every round advances the round tally toward `max_rounds`; the Layer-0
+// cascade cap bounds the chain) — while the human-channel suppression stays
+// byte-for-byte (TestEndVote_DuplicateLiveVoteSuppressesFanout above).
+func TestEndVote_DuplicateLiveVoteFansOutOnAutonomousChannel(t *testing.T) {
+	router, store, _ := routerWithInteractionClosedMetric(t)
+	disp := router.dispatcher.(*recordingDispatcher)
+	id := mustCreateGroup(t, store, "planning", "alice", "bob", "carol")
+	router.SetEndVoteParams(id, 5, 10) // high K so nothing closes; wide W so the re-vote stays live
+	router.SetAutonomous(id, AutonomousConfig{
+		Enabled: true, MaxRounds: 10, Convener: "alice",
+		Topic: "monorepo?", Goal: "a recommendation",
+	})
+
+	require.NoError(t, endVote(t, router, id, "alice", "int-1"))
+	afterFirst := len(disp.snapshot())
+	require.Positive(t, afterFirst, "the first end-vote fans out to the other members")
+
+	require.NoError(t, endVote(t, router, id, "alice", "int-1")) // in-window duplicate
+	assert.Greater(t, len(disp.snapshot()), afterFirst,
+		"an armed channel must re-fan a duplicate live vote — bare suppression wedges the discussion open (ISSUE-0112)")
+}
+
 // TestEndVote_StaleRevoteStillFansOut pins the other side of the suppression: a
 // re-vote cast AFTER the prior one fell out of the recency window is legitimate
 // re-engagement (not spam — see TestEndVote_StaleRevoteNotSpam), so it is a fresh
