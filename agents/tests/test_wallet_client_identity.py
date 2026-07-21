@@ -48,8 +48,10 @@ def _stub() -> AsyncMock:
     return stub
 
 
-def _metadata_kwarg(mock: AsyncMock) -> object:
-    return mock.await_args.kwargs.get("metadata")
+def _metadata_kwarg(mock: AsyncMock) -> tuple[tuple[str, str], ...]:
+    assert mock.await_args is not None
+    metadata = mock.await_args.kwargs.get("metadata")
+    return tuple(metadata) if metadata is not None else ()
 
 
 async def test_acquire_and_settle_carry_x_agent_id() -> None:
@@ -102,8 +104,8 @@ async def test_no_agent_id_sends_no_metadata() -> None:
         lease.mark_call_started()
         await lease.settle(input_tokens=1, output_tokens=1)
 
-    assert _metadata_kwarg(stub.AcquireLease) is None
-    assert _metadata_kwarg(stub.SettleLease) is None
+    assert stub.AcquireLease.await_args.kwargs.get("metadata") is None
+    assert stub.SettleLease.await_args.kwargs.get("metadata") is None
 
 
 async def test_from_channel_forwards_agent_id() -> None:
