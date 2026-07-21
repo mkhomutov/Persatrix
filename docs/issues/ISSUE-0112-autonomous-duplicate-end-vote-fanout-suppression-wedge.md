@@ -31,13 +31,18 @@ personas voting "we're done" below quorum.
 ## Live reproduction (2026-07-21, v0.3.11 release-prep MT-AUTONOMOUS-002)
 
 3-persona roster (`nova-sparrow` convener, `iron-fox` chair, `ember-owl`),
-`end_vote_threshold=3`, live Anthropic. The convener cadence walked the agenda
-(two clean `advance` events), the roster converged, `ember-owl` and `iron-fox`
-each voted; `nova-sparrow` (busy issuing follow-ups) never did — 2 of 3, no
-quorum. The final message was ember's follow-up vote: deduped
-(`duplicate end-of-interaction vote` WARN), fanout suppressed, and the channel
-went silent with the interaction **stuck open 40+ minutes** (re-convene 409
-"already has an open interaction") until operator action.
+`end_vote_threshold=2` with the 3-turn recency window, live Anthropic. The
+convener cadence walked the agenda (two clean `advance` events), the roster
+converged, and `ember-owl` and `iron-fox` both voted — but their votes never
+co-existed **inside the window** (each went stale before the other's landed,
+interleaved with `nova-sparrow`'s follow-ups), so the quorum never formed.
+Ember's later re-votes were in-window duplicates of her own live vote: deduped
+(`duplicate end-of-interaction vote` WARN ×4), fanout suppressed, and the
+final one was the last publish in flight — the channel went silent with the
+interaction **stuck open 40+ minutes** (re-convene 409 "already has an open
+interaction") until operator action. A sub-quorum voting tail is thus not an
+edge case: the window makes it reachable even when every member eventually
+votes.
 
 ## Fix
 

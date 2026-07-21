@@ -1,0 +1,128 @@
+# Demo optimization overlay — FOUR-VENDOR (the RFC 0052 Phase 4 headline).
+#
+# Mounted over /app/config/optimization.yaml by docker-compose.multivendor.yaml.
+# The blueprints/autonomous-multivendor/blueprint.yaml `model_aliases` block
+# lifted into a runnable alias map (the MT-AUTONOMOUS-MULTIPROVIDER-001
+# precondition): four SEAT aliases, each resolving to a DIFFERENT cloud vendor,
+# so four personas brainstorm in one channel on four clouds — plus the shared
+# role aliases (quality / fast / summarizer) the runtime resolves for
+# sub-agent defaults, RFC 0051 deliberation bids, and RFC 0020 close
+# summaries. Needs ALL FOUR vendors keyed (ANTHROPIC/OPENAI/GEMINI/WATSONX;
+# watsonx also needs the non-secret WATSONX_PROJECT_ID — env fallback, RFC
+# 0053 §C). This is a live, billed, four-cloud run — set hard spend caps at
+# every vendor console first.
+#
+# Prices are the vendors' published per-1M rates (operator-maintained; the
+# RFC 0033 §F guard checks presence, not accuracy — the mandatory
+# per-interaction cap is the genuine second bound, RFC 0053 §D).
+schema_version: "0.3"
+active_profile: "default"
+
+models:
+  aliases:
+    # ─── The four seats (blueprint model_aliases) ───
+    anthropic_seat:
+      provider: anthropic
+      model: claude-sonnet-4-6
+      input_per_1m_tokens: 3.00
+      output_per_1m_tokens: 15.00
+    openai_seat:
+      provider: openai
+      model: gpt-4o
+      input_per_1m_tokens: 2.50
+      output_per_1m_tokens: 10.00
+    # gemini-3.5-flash (the blueprint's 2.5 models were retired by Google —
+    # see config/demo/gemini/optimization.yaml). Seat keeps default thinking
+    # ON (the persona max_tokens 4096 leaves headroom, the quality-role
+    # posture there).
+    gemini_seat:
+      provider: gemini
+      model: gemini-3.5-flash
+      input_per_1m_tokens: 0.30
+      output_per_1m_tokens: 2.50
+    watsonx_seat:
+      provider: watsonx
+      model: meta-llama/llama-3-3-70b-instruct
+      input_per_1m_tokens: 1.80
+      output_per_1m_tokens: 1.80
+      provider_config:
+        # Non-secret watsonx config — ships EMPTY, resolved from
+        # WATSONX_PROJECT_ID / WATSONX_URL env (the recommended RFC 0053 §C
+        # path; keeps your project id out of this tracked file).
+        project_id: ""
+    # ─── Shared role aliases ───
+    # quality: anything routing through the sub-agent/task default
+    # (model_routing below) — same physical model as the anthropic seat.
+    quality:
+      provider: anthropic
+      model: claude-sonnet-4-6
+      input_per_1m_tokens: 3.00
+      output_per_1m_tokens: 15.00
+    # fast: the RFC 0051 deliberation-bid lane — cheap and shared.
+    fast:
+      provider: anthropic
+      model: claude-haiku-4-5-20251001
+      input_per_1m_tokens: 0.80
+      output_per_1m_tokens: 4.00
+    # summarizer: one shared alias for every persona's RFC 0020 close summary
+    # (the blueprint's fifth alias) — the four-vendor close path bills here.
+    summarizer:
+      provider: anthropic
+      model: claude-haiku-4-5-20251001
+      input_per_1m_tokens: 0.80
+      output_per_1m_tokens: 4.00
+
+default:
+  model_routing:
+    defaults:
+      task_agents: "quality"  # reserved (not consumed)
+      sub_agents: "quality"   # live: RFC 0033 §J sub-agent default
+      evaluators: "fast"      # reserved (not consumed)
+  caching:
+    exact:
+      enabled: true
+      max_entries: 10000
+      ttl_seconds: 3600
+  context_management:
+    max_context_tokens: 80000
+    summarization:
+      enabled: true
+      model: "summarizer"
+
+cost:
+  pricing:
+    # Derived from the aliases above (RFC 0033 §F) — every physical model the
+    # five aliases resolve to, so the Go cost table prices all four vendors.
+    models:
+      "claude-sonnet-4-6":
+        input_per_1m_tokens: 3.00
+        output_per_1m_tokens: 15.00
+      "gpt-4o":
+        input_per_1m_tokens: 2.50
+        output_per_1m_tokens: 10.00
+      "gemini-3.5-flash":
+        input_per_1m_tokens: 0.30
+        output_per_1m_tokens: 2.50
+      "meta-llama/llama-3-3-70b-instruct":
+        input_per_1m_tokens: 1.80
+        output_per_1m_tokens: 1.80
+      "claude-haiku-4-5-20251001":
+        input_per_1m_tokens: 0.80
+        output_per_1m_tokens: 4.00
+  budgets:
+    global:
+      max_daily_usd: 100.00
+      alert_at_percent: [50, 80, 95]
+      on_exceed: "pause_and_alert"
+    per_workflow:
+      default_max_usd: 10.00
+    per_agent:
+      default_max_usd: 5.00
+
+wallet:
+  ttl_seconds: 60
+  reaper_interval_seconds: 5
+  max_active_leases: 16
+
+conversation_window:
+  enabled: true
