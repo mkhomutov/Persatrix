@@ -1,6 +1,6 @@
 [package]
 name = "persatrix"
-version = "0.3.10"
+version = "0.3.11"
 edition = "2021"
 description = "Persatrix CLI — manage agents, workflows, and the mesh"
 license = "BUSL-1.1"
