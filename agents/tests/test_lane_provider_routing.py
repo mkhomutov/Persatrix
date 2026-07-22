@@ -13,10 +13,13 @@ These tests pin the routing contract in
 :meth:`agents.llm_client.LLMClient._provider_for_alias` and the cached
 builder :func:`agents.llm_factory.provider_for_resolved`:
 
-* no alias / test-double primary / unresolvable alias / same-vendor alias
-  → the primary provider, byte-for-byte (single-vendor overlays unchanged);
-* a cross-vendor alias → a provider built from the RESOLVED alias record
-  (RFC 0033 §D as stated), cached process-wide per resolved record;
+* no alias / non-factory primary (test doubles, the RFC 0044 eval
+  replay/recording wrappers) / unresolvable alias / same-vendor alias
+  → the primary provider, byte-for-byte (single-vendor overlays and the
+  eval cassette contract unchanged);
+* a cross-vendor alias on a factory-built primary → a provider built from
+  the RESOLVED alias record (RFC 0033 §D as stated), cached process-wide
+  per resolved record;
 * a lane provider that cannot be built raises
   :class:`~agents.llm_factory.LaneProviderError` — a plain ``Exception``,
   never ``SystemExit`` — so lane callers fail closed per their own
@@ -40,6 +43,7 @@ from agents.llm_factory import (
     provider_for_resolved,
 )
 from agents.llm_offline import MockProvider
+from agents.llm_providers import AnthropicProvider
 from agents.llm_types import LLMResponse, StopReason, Usage
 from agents.model_aliases import resolve, use_alias_map
 from agents.salience_bid import evaluate_salience
@@ -56,7 +60,10 @@ def _response(text: str) -> LLMResponse:
 
 
 class _FakeProvider:
-    """Minimal Protocol-satisfying provider that records its calls."""
+    """Minimal Protocol-satisfying provider that records its calls.
+
+    NOT a factory class — routing must never engage for it (the same
+    posture the RFC 0044 eval Replay/Recording wrappers rely on)."""
 
     def __init__(self, name: str, text: str = "primary-reply") -> None:
         self.name = name
@@ -74,13 +81,18 @@ class _FakeProvider:
         return messages
 
 
-class _NamelessProvider(_FakeProvider):
-    """A test-double-shaped provider with no usable ``name`` (routing must
-    stay on the legacy single-provider path for these)."""
+class _StubAnthropic(AnthropicProvider):
+    """A factory-class primary (isinstance passes; ``name = "anthropic"``)
+    whose ``create_message`` records instead of contacting the vendor."""
 
-    def __init__(self) -> None:
-        super().__init__(name="placeholder")
-        del self.name  # instance attr gone; no class attr either
+    def __init__(self, text: str = "primary-reply") -> None:
+        super().__init__(api_key="test-key")
+        self.calls: list[dict[str, Any]] = []
+        self._text = text
+
+    async def create_message(self, **kwargs: Any) -> LLMResponse:  # type: ignore[override]
+        self.calls.append(kwargs)
+        return _response(self._text)
 
 
 # Alias maps for the seam. ``mock`` is a local provider, so entries need no
@@ -126,7 +138,7 @@ async def test_no_alias_uses_primary() -> None:
 
 
 async def test_same_vendor_alias_stays_on_primary() -> None:
-    primary = _FakeProvider("anthropic")
+    primary = _StubAnthropic()
     with use_alias_map(_SAME_VENDOR_MAP):
         await _call(LLMClient(primary), model_alias="fast")
     assert len(primary.calls) == 1
@@ -136,14 +148,18 @@ async def test_same_vendor_alias_stays_on_primary() -> None:
 async def test_unresolvable_alias_falls_back_to_primary() -> None:
     # Every lane bails on its own resolve failure before calling; this arm
     # is defensive — and must swallow the resolver's SystemExit.
-    primary = _FakeProvider("anthropic")
+    primary = _StubAnthropic()
     with use_alias_map(_SAME_VENDOR_MAP):
         await _call(LLMClient(primary), model_alias="no-such-alias")
     assert len(primary.calls) == 1
 
 
-async def test_test_double_primary_skips_routing() -> None:
-    primary = _NamelessProvider()
+async def test_non_factory_primary_skips_routing() -> None:
+    # The RFC 0044 eval Replay/Recording wrappers (and any test double) are
+    # not factory classes — routing must NOT engage even on a cross-vendor
+    # alias, so the wrapper observes every call (the cassette contract:
+    # routing a lane call around the recorder breaks replay).
+    primary = _FakeProvider("replay")
     with use_alias_map(_CROSS_VENDOR_MAP):
         await _call(LLMClient(primary), model_alias="fast")
     assert len(primary.calls) == 1
@@ -154,7 +170,7 @@ async def test_test_double_primary_skips_routing() -> None:
 
 
 async def test_cross_vendor_alias_routes_to_lane_provider() -> None:
-    primary = _FakeProvider("openai")
+    primary = _StubAnthropic()
     with use_alias_map(_CROSS_VENDOR_MAP):
         response = await _call(LLMClient(primary), model_alias="fast")
     # The persona's own client is never contacted; the reply came from the
@@ -213,7 +229,7 @@ async def test_construction_failure_raises_regular_exception(
         assert not isinstance(excinfo.value, SystemExit)
         # And through the client: the same regular exception propagates so
         # lane callers' ``except Exception`` arms degrade fail-closed.
-        primary = _FakeProvider("openai")
+        primary = _StubAnthropic()
         with pytest.raises(LaneProviderError):
             await _call(LLMClient(primary), model_alias="fast")
         assert primary.calls == []
@@ -226,7 +242,7 @@ async def test_salience_bid_runs_on_lane_provider_cross_vendor() -> None:
     # The persona's own client is a wrong-vendor seat: pre-fix the bid rode
     # it and 404'd to silence. Pre-seed the lane cache with a scripted
     # provider so the full gate → route → parse path is deterministic.
-    primary = _FakeProvider("openai")
+    primary = _StubAnthropic()
     with use_alias_map(_CROSS_VENDOR_MAP):
         record = resolve("fast")
         lane = _FakeProvider("mock", text="speak: yes\nscore: 0.95")

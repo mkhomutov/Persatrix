@@ -157,6 +157,20 @@ def _estimate_input_tokens(kwargs: dict[str, Any]) -> int:
 # ─── LLM Client Facade ──────────────────────────────────────
 
 
+# The provider classes ``create_provider`` itself constructs (OllamaProvider is
+# an OpenAIProvider subclass — covered). ISSUE-0113 lane routing is defined
+# ONLY between these: a primary provider outside this set (a test double, or
+# the RFC 0044 eval Replay/Recording wrappers) keeps the legacy single-provider
+# contract, so wrappers observe every call — including the lanes'.
+_FACTORY_PROVIDER_CLASSES: tuple[type, ...] = (
+    AnthropicProvider,
+    GeminiProvider,
+    MockProvider,
+    OpenAIProvider,
+    WatsonxProvider,
+)
+
+
 class LLMClient:
     """Provider-agnostic LLM client. Delegates to a concrete LLMProvider."""
 
@@ -261,7 +275,12 @@ class LLMClient:
         Everything else keeps the primary provider byte-for-byte:
 
         * no ``model_alias`` (raw/test paths);
-        * a primary provider without a real ``name`` string (test doubles);
+        * a primary provider that is not a **factory-built vendor client**
+          (:data:`_FACTORY_PROVIDER_CLASSES`) — test doubles, and the RFC
+          0044 eval replay/recording wrappers, whose contract is that
+          EVERY call stays visible to the wrapper (routing a lane call
+          around the cassette breaks replay — caught by
+          ``test_seed_recipe_replays_green`` in CI);
         * an alias that fails to resolve — every lane already bails on its
           own resolve failure *before* calling, so this arm is defensive;
         * an alias resolving to the **same** vendor name (the persona's own
@@ -281,14 +300,13 @@ class LLMClient:
         """
         if not model_alias:
             return self._provider
-        primary_name = getattr(self._provider, "name", None)
-        if not isinstance(primary_name, str) or not primary_name:
+        if not isinstance(self._provider, _FACTORY_PROVIDER_CLASSES):
             return self._provider
         try:
             resolved = resolve_model(model_alias)
         except SystemExit:
             return self._provider
-        if resolved.provider == primary_name:
+        if resolved.provider == self._provider.name:
             return self._provider
         return provider_for_resolved(resolved)
 
