@@ -53,9 +53,9 @@ Collected via `go-licenses report ./cmd/... ./internal/...` (38 packages).
 | `go.opentelemetry.io/proto/otlp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-proto-go/blob/otlp/v1.10.0/otlp/LICENSE) |
 | `go.uber.org/multierr` | MIT | [link](https://github.com/uber-go/multierr/blob/v1.10.0/LICENSE.txt) |
 | `go.uber.org/zap` | MIT | [link](https://github.com/uber-go/zap/blob/v1.27.0/LICENSE) |
-| `golang.org/x/net` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/net/+/v0.52.0:LICENSE) |
-| `golang.org/x/sys/windows` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/sys/+/v0.42.0:LICENSE) |
-| `golang.org/x/text` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/text/+/v0.35.0:LICENSE) |
+| `golang.org/x/net` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/net/+/v0.55.0:LICENSE) |
+| `golang.org/x/sys/unix` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/sys/+/v0.45.0:LICENSE) |
+| `golang.org/x/text` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/text/+/v0.37.0:LICENSE) |
 | `google.golang.org/genproto/googleapis/api/httpbody` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/9d38bb4040a9/googleapis/api/LICENSE) |
 | `google.golang.org/genproto/googleapis/rpc/status` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/6f92a3bedf2d/googleapis/rpc/LICENSE) |
 | `google.golang.org/grpc` | Apache-2.0 | [link](https://github.com/grpc/grpc-go/blob/v1.80.0/LICENSE) |
@@ -68,92 +68,90 @@ Collected via `go-licenses report ./cmd/... ./internal/...` (38 packages).
 
 ## Python dependencies
 
-Collected via `pip-licenses --from=mixed` against the `agents` extras (78 packages).
+Collected via `pip-licenses --from=mixed` against the `agents` extras (76 packages).
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
-| `aiohappyeyeballs` | 2.6.1 | Python Software Foundation License | [link](https://github.com/aio-libs/aiohappyeyeballs) |
+| `aiohappyeyeballs` | 2.6.2 | Python Software Foundation License | [link](https://github.com/aio-libs/aiohappyeyeballs) |
 | `aiohttp` | 3.13.5 | Apache-2.0 AND MIT | [link](https://github.com/aio-libs/aiohttp) |
 | `aiosignal` | 1.4.0 | Apache Software License | [link](https://github.com/aio-libs/aiosignal) |
 | `aiosqlite` | 0.22.1 | MIT License | [link](https://aiosqlite.omnilib.dev) |
 | `annotated-types` | 0.7.0 | MIT License | [link](https://github.com/annotated-types/annotated-types) |
-| `anthropic` | 0.96.0 | MIT License | [link](https://github.com/anthropics/anthropic-sdk-python) |
+| `anthropic` | 0.105.2 | MIT License | [link](https://github.com/anthropics/anthropic-sdk-python) |
 | `anyio` | 4.13.0 | MIT | [link](https://anyio.readthedocs.io/en/stable/versionhistory.html) |
+| `ast_serialize` | 0.5.0 | MIT | [link](https://github.com/mypyc/ast_serialize) |
 | `attrs` | 26.1.0 | MIT | [link](https://www.attrs.org/en/stable/changelog.html) |
-| `certifi` | 2026.2.25 | Mozilla Public License 2.0 (MPL 2.0) | [link](https://github.com/certifi/python-certifi) |
+| `certifi` | 2026.5.20 | Mozilla Public License 2.0 (MPL 2.0) | [link](https://github.com/certifi/python-certifi) |
 | `charset-normalizer` | 3.4.7 | MIT | [link](https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md) |
 | `click` | 8.4.2 | BSD-3-Clause | [link](https://github.com/pallets/click/) |
-| `colorama` | 0.4.6 | BSD License | [link](https://github.com/tartley/colorama) |
+| `coverage` | 7.15.1 | Apache-2.0 | [link](https://github.com/coveragepy/coveragepy) |
 | `distro` | 1.9.0 | Apache Software License | [link](https://github.com/python-distro/distro) |
 | `docstring_parser` | 0.18.0 | MIT License | [link](https://github.com/rr-/docstring_parser) |
 | `frozenlist` | 1.8.0 | Apache-2.0 | [link](https://github.com/aio-libs/frozenlist) |
-| `googleapis-common-protos` | 1.74.0 | Apache Software License | [link](https://github.com/googleapis/google-cloud-python/tree/main/packages/googleapis-common-protos) |
+| `googleapis-common-protos` | 1.75.0 | Apache Software License | [link](https://github.com/googleapis/google-cloud-python/tree/main/packages/googleapis-common-protos) |
 | `grimp` | 3.14 | BSD License | [link](https://grimp.readthedocs.io/) |
 | `grpcio` | 1.80.0 | Apache-2.0 | [link](https://grpc.io) |
 | `grpcio-tools` | 1.71.2 | Apache Software License | [link](https://grpc.io) |
 | `h11` | 0.16.0 | MIT License | [link](https://github.com/python-hyper/h11) |
 | `httpcore` | 1.0.9 | BSD-3-Clause | [link](https://www.encode.io/httpcore/) |
 | `httpx` | 0.28.1 | BSD License | [link](https://github.com/encode/httpx) |
-| `idna` | 3.11 | BSD-3-Clause | [link](https://github.com/kjd/idna) |
+| `idna` | 3.17 | BSD-3-Clause | [link](https://github.com/kjd/idna) |
 | `import-linter` | 2.12 | BSD License | [link](https://import-linter.readthedocs.io/) |
-| `importlib_metadata` | 8.7.1 | Apache-2.0 | [link](https://github.com/python/importlib_metadata) |
 | `iniconfig` | 2.3.0 | MIT | [link](https://github.com/pytest-dev/iniconfig) |
-| `jiter` | 0.14.0 | MIT | [link](https://github.com/pydantic/jiter/) |
+| `jiter` | 0.15.0 | MIT | [link](https://github.com/pydantic/jiter/) |
 | `jsonschema` | 4.26.0 | MIT | [link](https://github.com/python-jsonschema/jsonschema) |
 | `jsonschema-specifications` | 2025.9.1 | MIT | [link](https://github.com/python-jsonschema/jsonschema-specifications) |
-| `librt` | 0.9.0 | MIT | [link](https://github.com/mypyc/librt) |
+| `librt` | 0.11.0 | MIT | [link](https://github.com/mypyc/librt) |
 | `markdown-it-py` | 4.2.0 | MIT License | [link](https://github.com/executablebooks/markdown-it-py) |
 | `mdurl` | 0.1.2 | MIT License | [link](https://github.com/executablebooks/mdurl) |
 | `multidict` | 6.7.1 | Apache License 2.0 | [link](https://github.com/aio-libs/multidict) |
-| `mypy` | 1.20.1 | MIT | [link](https://www.mypy-lang.org/) |
+| `mypy` | 2.1.0 | MIT | [link](https://www.mypy-lang.org/) |
 | `mypy-protobuf` | 3.6.0 | Apache License 2.0 | [link](https://github.com/nipunn1313/mypy-protobuf) |
 | `mypy_extensions` | 1.1.0 | MIT | [link](https://github.com/python/mypy_extensions) |
 | `openai` | 1.109.1 | Apache Software License | [link](https://github.com/openai/openai-python) |
-| `opentelemetry-api` | 1.41.0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-api) |
-| `opentelemetry-exporter-otlp-proto-common` | 1.41.0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-common) |
-| `opentelemetry-exporter-otlp-proto-grpc` | 1.41.0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-grpc) |
-| `opentelemetry-exporter-otlp-proto-http` | 1.41.0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-http) |
-| `opentelemetry-instrumentation` | 0.62b0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/opentelemetry-instrumentation) |
-| `opentelemetry-instrumentation-grpc` | 0.62b0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/instrumentation/opentelemetry-instrumentation-grpc) |
-| `opentelemetry-proto` | 1.41.0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-proto) |
-| `opentelemetry-sdk` | 1.41.0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-sdk) |
-| `opentelemetry-semantic-conventions` | 0.62b0 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-semantic-conventions) |
-| `packaging` | 26.1 | Apache-2.0 OR BSD-2-Clause | [link](https://github.com/pypa/packaging) |
-| `pathspec` | 1.0.4 | Mozilla Public License 2.0 (MPL 2.0) | [link](https://python-path-specification.readthedocs.io/en/latest/index.html) |
+| `opentelemetry-api` | 1.42.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-api) |
+| `opentelemetry-exporter-otlp-proto-common` | 1.42.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-common) |
+| `opentelemetry-exporter-otlp-proto-http` | 1.42.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/exporter/opentelemetry-exporter-otlp-proto-http) |
+| `opentelemetry-instrumentation` | 0.63b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/opentelemetry-instrumentation) |
+| `opentelemetry-instrumentation-grpc` | 0.63b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/instrumentation/opentelemetry-instrumentation-grpc) |
+| `opentelemetry-proto` | 1.42.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-proto) |
+| `opentelemetry-sdk` | 1.42.1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-sdk) |
+| `opentelemetry-semantic-conventions` | 0.63b1 | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-python/tree/main/opentelemetry-semantic-conventions) |
+| `packaging` | 26.2 | Apache-2.0 OR BSD-2-Clause | [link](https://github.com/pypa/packaging) |
+| `pathspec` | 1.1.1 | Mozilla Public License 2.0 (MPL 2.0) | [link](https://python-path-specification.readthedocs.io/en/latest/index.html) |
 | `pluggy` | 1.6.0 | MIT License | UNKNOWN |
-| `propcache` | 0.4.1 | Apache Software License | [link](https://github.com/aio-libs/propcache) |
+| `propcache` | 0.5.2 | Apache Software License | [link](https://github.com/aio-libs/propcache) |
 | `protobuf` | 5.29.6 | 3-Clause BSD License | [link](https://developers.google.com/protocol-buffers/) |
-| `pydantic` | 2.13.2 | MIT | [link](https://github.com/pydantic/pydantic) |
-| `pydantic_core` | 2.46.2 | MIT | [link](https://github.com/pydantic) |
+| `pydantic` | 2.13.4 | MIT | [link](https://github.com/pydantic/pydantic) |
+| `pydantic_core` | 2.46.4 | MIT | [link](https://github.com/pydantic) |
 | `Pygments` | 2.20.0 | BSD-2-Clause | [link](https://pygments.org) |
 | `pytest` | 9.0.3 | MIT | [link](https://docs.pytest.org/en/latest/) |
-| `pytest-asyncio` | 1.3.0 | Apache-2.0 | [link](https://github.com/pytest-dev/pytest-asyncio) |
+| `pytest-asyncio` | 1.4.0 | Apache-2.0 | [link](https://github.com/pytest-dev/pytest-asyncio) |
 | `pytest-timeout` | 2.4.0 | !DFSG approved; MIT License | [link](https://github.com/pytest-dev/pytest-timeout) |
 | `PyYAML` | 6.0.3 | MIT License | [link](https://pyyaml.org/) |
 | `referencing` | 0.37.0 | MIT | [link](https://github.com/python-jsonschema/referencing) |
-| `regex` | 2026.4.4 | Apache-2.0 AND CNRI-Python | [link](https://github.com/mrabarnett/mrab-regex) |
-| `requests` | 2.33.1 | Apache Software License | [link](https://github.com/psf/requests) |
+| `regex` | 2026.5.9 | Apache-2.0 AND CNRI-Python | [link](https://github.com/mrabarnett/mrab-regex) |
+| `requests` | 2.34.2 | Apache Software License | [link](https://github.com/psf/requests) |
 | `rich` | 15.0.0 | MIT License | [link](https://github.com/Textualize/rich) |
-| `rpds-py` | 0.30.0 | MIT | [link](https://github.com/crate-py/rpds) |
-| `ruff` | 0.15.11 | MIT | [link](https://docs.astral.sh/ruff) |
+| `rpds-py` | 2026.5.1 | MIT | [link](https://github.com/crate-py/rpds) |
+| `ruff` | 0.15.15 | MIT | [link](https://docs.astral.sh/ruff) |
 | `sniffio` | 1.3.1 | Apache Software License; MIT License | [link](https://github.com/python-trio/sniffio) |
 | `structlog` | 25.5.0 | MIT OR Apache-2.0 | [link](https://github.com/hynek/structlog/blob/main/CHANGELOG.md) |
-| `tiktoken` | 0.12.0 | MIT License | [link](https://github.com/openai/tiktoken) |
+| `tiktoken` | 0.13.0 | MIT License | [link](https://github.com/openai/tiktoken) |
 | `tqdm` | 4.67.3 | MPL-2.0 AND MIT | [link](https://tqdm.github.io) |
-| `types-grpcio` | 1.0.0.20260408 | Apache-2.0 | [link](https://github.com/python/typeshed) |
-| `types-protobuf` | 7.34.1.20260408 | Apache-2.0 | [link](https://github.com/python/typeshed) |
-| `types-PyYAML` | 6.0.12.20260408 | Apache-2.0 | [link](https://github.com/python/typeshed) |
+| `types-grpcio` | 1.0.0.20260518 | Apache-2.0 | [link](https://github.com/python/typeshed) |
+| `types-protobuf` | 7.34.1.20260518 | Apache-2.0 | [link](https://github.com/python/typeshed) |
+| `types-PyYAML` | 6.0.12.20260518 | Apache-2.0 | [link](https://github.com/python/typeshed) |
 | `typing-inspection` | 0.4.2 | MIT | [link](https://github.com/pydantic/typing-inspection) |
 | `typing_extensions` | 4.15.0 | PSF-2.0 | [link](https://github.com/python/typing_extensions) |
 | `tzdata` | 2026.2 | Apache-2.0 | [link](https://github.com/python/tzdata) |
-| `urllib3` | 2.6.3 | MIT | [link](https://github.com/urllib3/urllib3/blob/main/CHANGES.rst) |
-| `wrapt` | 2.1.2 | BSD-2-Clause | [link](https://github.com/GrahamDumpleton/wrapt) |
-| `yarl` | 1.23.0 | Apache-2.0 | [link](https://github.com/aio-libs/yarl) |
-| `zipp` | 3.23.1 | MIT | [link](https://github.com/jaraco/zipp) |
+| `urllib3` | 2.7.0 | MIT | [link](https://github.com/urllib3/urllib3/blob/main/CHANGES.rst) |
+| `wrapt` | 2.2.1 | BSD-2-Clause | [link](https://github.com/GrahamDumpleton/wrapt) |
+| `yarl` | 1.24.2 | Apache-2.0 | [link](https://github.com/aio-libs/yarl) |
 
 ## Rust dependencies
 
-Collected via `cargo license --json` inside `cli/` (222 crates).
+Collected via `cargo license --json` inside `cli/` (224 crates).
 
 | Package | Version | License | Source |
 | --- | --- | --- | --- |
@@ -284,6 +282,7 @@ Collected via `cargo license --json` inside `cli/` (222 crates).
 | `serde_derive` | 1.0.228 | Apache-2.0 OR MIT | [link](https://github.com/serde-rs/serde) |
 | `serde_json` | 1.0.149 | Apache-2.0 OR MIT | [link](https://github.com/serde-rs/json) |
 | `serde_urlencoded` | 0.7.1 | Apache-2.0 OR MIT | [link](https://github.com/nox/serde_urlencoded) |
+| `serde_yaml_ng` | 0.10.0 | MIT | [link](https://github.com/acatton/serde-yaml-ng) |
 | `shlex` | 1.3.0 | Apache-2.0 OR MIT | [link](https://github.com/comex/rust-shlex) |
 | `signal-hook-registry` | 1.4.8 | Apache-2.0 OR MIT | [link](https://github.com/vorner/signal-hook) |
 | `slab` | 0.4.12 | MIT | [link](https://github.com/tokio-rs/slab) |
@@ -319,6 +318,7 @@ Collected via `cargo license --json` inside `cli/` (222 crates).
 | `unicode-ident` | 1.0.24 | (Apache-2.0 OR MIT) AND Unicode-3.0 | [link](https://github.com/dtolnay/unicode-ident) |
 | `unicode-width` | 0.2.2 | Apache-2.0 OR MIT | [link](https://github.com/unicode-rs/unicode-width) |
 | `unicode-xid` | 0.2.6 | Apache-2.0 OR MIT | [link](https://github.com/unicode-rs/unicode-xid) |
+| `unsafe-libyaml` | 0.2.11 | MIT | [link](https://github.com/dtolnay/unsafe-libyaml) |
 | `untrusted` | 0.9.0 | ISC | [link](https://github.com/briansmith/untrusted) |
 | `url` | 2.5.8 | Apache-2.0 OR MIT | [link](https://github.com/servo/rust-url) |
 | `utf8_iter` | 1.0.4 | Apache-2.0 OR MIT | [link](https://github.com/hsivonen/utf8_iter) |
