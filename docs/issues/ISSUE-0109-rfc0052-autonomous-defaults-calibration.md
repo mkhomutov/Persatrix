@@ -83,3 +83,17 @@ soak reads off telemetry rather than log-scraping.
 > 2026-07-13 — filed at the RFC 0052 PR 9 closeout (OQ #5 "conservative defaults
 > + a calibration tracked-issue, filed at closeout"). Blocked on the live soak;
 > no code change until real autonomous-run telemetry exists.
+> 2026-07-22 — the v0.3.11 release-prep live soak is DONE and the calibration
+> data is recorded in the
+> [execution report §ISSUE-0109 calibration capture](../manual-tests/v0.3.11-execution-report.md#issue-0109-calibration-capture)
+> (7 live arcs across single-vendor + four-vendor rosters). Headline findings
+> for the tuning PR: (1) the global `max_cascade_depth` (5) binds before every
+> `max_rounds` tried (6/8/12) on a productive roster — it is the de-facto
+> discussion-length knob and `max_rounds` never fired live; (2) `end_votes`
+> dominates converged rosters (4 of 7 arcs) — the bounded close is the net,
+> not the norm; (3) re-convening an unchanged topic yields push-back /
+> redundant syntheses — standing channels need per-convening topic freshness;
+> (4) the `1+N` reserve was never approached (largest arc spent 24 % of cap);
+> (5) collapse-proneness inversely tracks accumulated channel memory — naming
+> personas in the topic is the fresh-store lever. Tuning remains a follow-up
+> code PR; the safety gates stay unchanged.
