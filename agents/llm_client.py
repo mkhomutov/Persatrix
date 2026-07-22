@@ -17,7 +17,7 @@ from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
 from .generated import wallet_pb2 as walletpb
-from .llm_factory import create_provider
+from .llm_factory import LaneProviderError, create_provider, provider_for_resolved
 from .llm_gemini import GeminiProvider
 from .llm_offline import MockProvider
 from .llm_ollama import OllamaProvider
@@ -31,6 +31,7 @@ from .llm_types import (
     Usage,
 )
 from .llm_watsonx import WatsonxProvider
+from .model_aliases import resolve as resolve_model
 from .observability.metrics import (
     current_agent_id,
     llm_call_attrs,
@@ -64,6 +65,7 @@ __all__ = [
     "BudgetExceededError",
     "GeminiProvider",
     "LLMClient",
+    "LaneProviderError",
     "LLMProvider",
     "LLMResponse",
     "LLMToolResult",
@@ -210,11 +212,19 @@ class LLMClient:
         *model_alias* (RFC 0033 §G) is the logical alias the caller resolved
         ``model`` from, when it came in via one. It is emitted as the
         ``persatrix.llm.model_alias`` span attribute (alongside the physical
-        ``model``) and is a telemetry-only concern — it is **never** forwarded
-        to the provider, so the vendor API receives the physical id only.
+        ``model``) and is **never** forwarded to the provider, so the vendor
+        API receives the physical id only. Since ISSUE-0113 it is also the
+        cross-provider routing key: an alias whose record declares a
+        *different* vendor than this client's own provider routes the call
+        through a provider built from that record (see
+        :meth:`_provider_for_alias`), so shared role lanes work on
+        mixed-vendor rosters.
         """
+        provider = self._provider_for_alias(model_alias)
         if self._wallet is None or cause == walletpb.CAUSE_UNSPECIFIED:
-            return await self._invoke_provider(kwargs, model_alias=model_alias)
+            return await self._invoke_provider(
+                kwargs, provider=provider, model_alias=model_alias,
+            )
         async with self._wallet.lease(
             agent_id=agent_id,
             model=str(kwargs.get("model", "")),
@@ -226,7 +236,7 @@ class LLMClient:
             interaction_id=interaction_id,
         ) as lease:
             response = await self._invoke_provider(
-                kwargs, lease=lease, model_alias=model_alias,
+                kwargs, provider=provider, lease=lease, model_alias=model_alias,
             )
             await lease.settle(
                 input_tokens=response.usage.input_tokens,
@@ -234,10 +244,59 @@ class LLMClient:
             )
             return response
 
+    def _provider_for_alias(self, model_alias: str | None) -> LLMProvider:
+        """The provider a call arriving via *model_alias* must ride (ISSUE-0113).
+
+        A persona holds ONE client, built from its own seat alias — but the
+        shared role lanes (``fast`` bid / ``summarizer`` close / critic /
+        memory compression) resolve *their* alias per-call and pass it here.
+        When that alias's record declares a **different vendor** than this
+        client's own provider, the call routes through a provider built from
+        the resolved record (cached process-wide in
+        :func:`agents.llm_factory.provider_for_resolved`) — RFC 0033 §D as
+        stated: the alias entry is the joint declaration of provider + model.
+        Pre-fix, a non-matching seat sent the lane's model ID to its own
+        vendor and 404'd, muting governed bidding on mixed-vendor rosters.
+
+        Everything else keeps the primary provider byte-for-byte:
+
+        * no ``model_alias`` (raw/test paths);
+        * a primary provider without a real ``name`` string (test doubles);
+        * an alias that fails to resolve — every lane already bails on its
+          own resolve failure *before* calling, so this arm is defensive;
+        * an alias resolving to the **same** vendor name (the persona's own
+          turns, and every single-vendor overlay — demos/MTs unchanged).
+
+        The vendor-name comparison deliberately keys on the resolved
+        ``provider`` field only: two ``openai``-named endpoints with
+        different ``base_url``\\ s still share the primary client, the
+        pre-fix behaviour — ISSUE-0113 is scoped to cross-vendor lanes.
+        Tool-definition formatting / tool rounds stay on the primary client;
+        lanes pass ``tools=[]`` and never run tool rounds.
+
+        A lane provider that cannot be *built* (missing SDK / key posture)
+        raises :class:`LaneProviderError` — a plain ``Exception`` — so lane
+        callers degrade fail-closed instead of falling back to the primary
+        provider's guaranteed 404.
+        """
+        if not model_alias:
+            return self._provider
+        primary_name = getattr(self._provider, "name", None)
+        if not isinstance(primary_name, str) or not primary_name:
+            return self._provider
+        try:
+            resolved = resolve_model(model_alias)
+        except SystemExit:
+            return self._provider
+        if resolved.provider == primary_name:
+            return self._provider
+        return provider_for_resolved(resolved)
+
     async def _invoke_provider(
         self,
         kwargs: dict[str, Any],
         *,
+        provider: LLMProvider | None = None,
         lease: Lease | None = None,
         model_alias: str | None = None,
     ) -> LLMResponse:
@@ -258,19 +317,26 @@ class LLMClient:
         not substituted for it, and omitted entirely on the raw-ID path.
         ``model_alias`` is not part of *kwargs*, so it never reaches the
         provider call below.
+
+        *provider* (ISSUE-0113) is the effective provider for THIS call —
+        the primary one, or a cross-vendor lane client picked by
+        :meth:`_provider_for_alias` — so the span's ``gen_ai.system``
+        reports the vendor actually contacted. ``None`` means the primary.
         """
+        if provider is None:
+            provider = self._provider
         model = str(kwargs.get("model", ""))
         # Prefer the provider's declared ``name`` attribute (Protocol
         # contract).  Fall back to a lower-cased class-name derivation only
         # when the attribute is missing or not a string — this keeps test
         # doubles (``AsyncMock``) working without surfacing them as the
         # ``gen_ai.system`` value in production traces.
-        provider_name = getattr(self._provider, "name", None)
+        provider_name = getattr(provider, "name", None)
         if isinstance(provider_name, str) and provider_name:
             system_name = provider_name
         else:
             system_name = (
-                type(self._provider).__name__.replace("Provider", "").lower()
+                type(provider).__name__.replace("Provider", "").lower()
             )
         with _tracer.start_as_current_span(
             LLM_CALL_SPAN,
@@ -301,7 +367,7 @@ class LLMClient:
                     # from here on closes the lease at the granted amount
                     # (settle-at-granted), not via release (RFC 0023 § F).
                     lease.mark_call_started()
-                response = await self._provider.create_message(**kwargs)
+                response = await provider.create_message(**kwargs)
             except Exception as exc:
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, str(exc)))
