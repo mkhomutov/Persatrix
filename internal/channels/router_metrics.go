@@ -116,4 +116,15 @@ type RouterMetrics struct {
 	// fat tail near K says it is slack. Recorded on the close path before the
 	// per-interaction counters are discarded, so it observes the final state.
 	ReplyBudgetRemaining metric.Float64Histogram
+	// InteractionCapUtilization records, at interaction close, the running
+	// interaction spend as a FRACTION of the channel's per-interaction cost cap
+	// (`interaction_budget_tokens`), labelled by `channel_type` and `trigger` —
+	// the ISSUE-0109 calibration series read off telemetry instead of
+	// log-scraping wallet ledgers. Capped interactions only (an uncapped close
+	// has no denominator and records nothing). The sample is taken AT the close
+	// record — before the close-path chair turn/summaries lease — so it measures
+	// what the DISCUSSION used; a value near `1 - reserve/cap` on
+	// `trigger=cost` closes says the soft budget bound the arc, a low value on
+	// `trigger=end_votes`/`structural` says the cap is slack for that roster.
+	InteractionCapUtilization metric.Float64Histogram
 }

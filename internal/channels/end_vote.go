@@ -290,7 +290,7 @@ func (r *ChannelRouter) recordInteractionClosed(ctx context.Context, msg Channel
 		zap.Int("votes", votes),
 		zap.String("trigger", endVotesTrigger),
 	)
-	r.recordInteractionClosedMetric(ctx, ct, endVotesTrigger)
+	r.recordInteractionClosedMetric(ctx, ct, endVotesTrigger, interactionID)
 }
 
 // recordEndVoteSpam logs a duplicate end-vote so an adversarial vote-spam

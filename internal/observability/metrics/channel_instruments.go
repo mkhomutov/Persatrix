@@ -197,6 +197,23 @@ func registerChannelInstruments(m metric.Meter, i *Instruments) error {
 	); err != nil {
 		return fmt.Errorf("create channel.conversation.reply_budget_remaining: %w", err)
 	}
+	// ISSUE-0109 (RFC 0052 OQ #5) calibration series: at interaction close, the
+	// running interaction spend as a fraction of the channel's per-interaction
+	// cost cap, labelled by `channel_type` and `trigger` — so cap sizing reads
+	// off telemetry instead of log-scraping wallet ledgers. Capped interactions
+	// only. Buckets: fine below ~0.5 (the v0.3.11 soak observed 0.24–0.59),
+	// with 0.9/1.0 marking the soft-budget/hard-cap approach; >1.0 is a
+	// crossing-lease overshoot past the sample point.
+	if i.ChannelConversationInteractionCapUtilization, err = m.Float64Histogram(
+		"channel.conversation.interaction_cap_utilization",
+		metric.WithUnit("1"),
+		metric.WithDescription(
+			"Interaction spend at close as a fraction of interaction_budget_tokens, labelled by channel_type and trigger.",
+		),
+		metric.WithExplicitBucketBoundaries(0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 0.9, 1.0),
+	); err != nil {
+		return fmt.Errorf("create channel.conversation.interaction_cap_utilization: %w", err)
+	}
 	// RFC 0031 Phase 1: per-session write counter. Increments once per
 	// CreateChannel / CreateChannelWithMembers / GetOrCreateDM /
 	// PublishMessage on the channels store. Labelled by `session_id`.

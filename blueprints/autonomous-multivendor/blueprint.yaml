@@ -100,6 +100,11 @@ blueprint:
       type: "group"
       interaction_budget_tokens: 200000
       escalation_chair_id: "ember-owl"
+      # Full-roster end-vote bar (ISSUE-0109 calibration): at the K=2 default a
+      # 2-of-4 vote closes the interaction early WITHOUT the chair synthesis (an
+      # end-vote close arms none). Requiring all 4 seats routes convergence to
+      # the artifact-bearing bounded close unless the roster unanimously ends.
+      end_vote_threshold: 4
       autonomous:
         enabled: true
         # A topic that is itself provider-neutral and reads well as a four-way
@@ -111,7 +116,10 @@ blueprint:
           - "Reliability and failover"
         convener: "nova-sparrow"
         goal: "A synthesized recommendation with the strongest argument on each side."
-        max_rounds: 12
+        # 8, down from 12 (ISSUE-0109): the cascade-depth cap (5) is the binding
+        # length knob on a productive roster (each continued round advances depth
+        # too); max_rounds is the stall-arc net, and 8 clears every soak arc.
+        max_rounds: 8
       members:
         - { id: "nova-sparrow", respond: "participant" }
         - { id: "ember-owl", respond: "chair" }

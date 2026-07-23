@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0109
-summary: "RFC 0052 OQ #5 — the autonomous-channel defaults (max_rounds, the interaction cost cap, the roster-scaled 1+N synthesis-reserve fraction, and the standing aggregate bound max_convenings/standing_budget_tokens) shipped as CONSERVATIVE, UNCALIBRATED values: calibration needs a soak on real rosters. Tune after observed autonomous runs (the live MT-AUTONOMOUS-* runs + the four-vendor MT-AUTONOMOUS-MULTIPROVIDER-001)."
-status: open
+summary: "RFC 0052 OQ #5 — the autonomous-channel defaults (max_rounds, the interaction cost cap, the roster-scaled 1+N synthesis-reserve fraction, and the standing aggregate bound max_convenings/standing_budget_tokens) shipped as CONSERVATIVE, UNCALIBRATED values: calibration needs a soak on real rosters. Tune after observed autonomous runs (the live MT-AUTONOMOUS-* runs + the four-vendor MT-AUTONOMOUS-MULTIPROVIDER-001). RESOLVED: tuned from the 7-arc v0.3.11 live soak — max_rounds default 12→8 (the cascade-depth cap is the de facto productive-chain length knob; max_rounds is the stall-arc net), full-roster end_vote_threshold on the shipped autonomous templates (K=2 closed 4/7 arcs early without the chair synthesis), the reserve unit soak-validated unchanged (zero close-path denials; peak cap utilization 0.59), and the interaction_cap_utilization close histogram lands so the next pass reads off telemetry."
+status: resolved
 severity: low
 area: channels
 created: 2026-07-13
+closed: 2026-07-24
 refs:
   - docs/rfcs/0052-autonomous-agent-channels.md
   - docs/rfcs/0052-pr-plan.md

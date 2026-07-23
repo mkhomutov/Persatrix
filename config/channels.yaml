@@ -205,6 +205,14 @@ channels:
     description: "RFC 0052 example — a ready-to-arm autonomous brainstorm (ships disarmed; set enabled: true to convene)"
     interaction_budget_tokens: 200000
     escalation_chair_id: ember-owl
+    # end_vote_threshold = the FULL roster (3), not the K=2 default — an
+    # ISSUE-0109 soak calibration: 2-of-3 closed 4 of 7 live arcs early (some as
+    # ~20 s confirmation stubs), and an end-vote close arms NO chair synthesis,
+    # so the artifact a brainstorm exists for is skipped. A full-roster bar keeps
+    # exploration alive until everyone agrees — or the bounded close (which DOES
+    # synthesize) catches convergence instead. Autonomous demo channels only; the
+    # global K=2 default and every human channel are untouched.
+    end_vote_threshold: 3
     autonomous:
       enabled: false
       topic: "Should we adopt a monorepo? Lay out the tradeoffs."
@@ -214,7 +222,11 @@ channels:
         - "Migration effort"
       convener: nova-sparrow
       goal: "A synthesized recommendation with the strongest argument on each side."
-      max_rounds: 12
+      # 8, down from 12 (ISSUE-0109): on a productive roster the cascade-depth
+      # cap (5) is the binding length knob — each continued round advances depth
+      # too, so a larger max_rounds never fires there; this bound is the net for
+      # stall-driven arcs, and 8 sits above every arc the v0.3.11 soak observed.
+      max_rounds: 8
     members:
       - id: nova-sparrow
         respond: participant
