@@ -21,6 +21,7 @@ v0.3.4 provider-parity refactor removed ``PERSATRIX_OFFLINE`` /
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any
@@ -31,6 +32,7 @@ from .llm_ollama import OllamaProvider, resolve_ollama_base_url
 from .llm_providers import AnthropicProvider, OpenAIProvider
 from .llm_types import LLMProvider
 from .llm_watsonx import WatsonxProvider, resolve_watsonx_config
+from .model_aliases import ResolvedModel
 from .model_aliases import resolve as resolve_model
 
 logger = logging.getLogger(__name__)
@@ -242,4 +244,81 @@ def create_provider(agent_config: dict[str, Any]) -> tuple[LLMProvider, str]:
     raise SystemExit(f"Unknown LLM provider: {provider!r}")
 
 
-__all__ = ["create_provider"]
+# ─── Cross-provider lane clients (ISSUE-0113) ────────────────
+
+
+class LaneProviderError(RuntimeError):
+    """A cross-provider lane client could not be built (ISSUE-0113).
+
+    Deliberately a plain :class:`RuntimeError` — ``create_provider``'s
+    startup posture is :class:`SystemExit` (a ``BaseException``), which
+    would sail past the lanes' ``except Exception`` fail-closed arms and
+    crash the hot path instead of degrading to silence / the placeholder
+    summary. Wrapping restores the lanes' established error contract.
+    """
+
+
+# Process-wide cache of lane providers, keyed by the *resolved record*
+# (not just the alias name) so a test-seam repoint of an alias misses the
+# stale entry. Construction is cheap-but-not-free (SDK client objects) and
+# every persona in the process shares the same alias map, so one client
+# per distinct lane record serves the whole fleet — the watsonx in-provider
+# per-model cache is the precedent. The agents runtime is single-threaded
+# asyncio; a benign build race would only waste one construction.
+_lane_provider_cache: dict[tuple[str, str, str, str], LLMProvider] = {}
+
+
+def _lane_cache_key(resolved: ResolvedModel) -> tuple[str, str, str, str]:
+    return (
+        resolved.alias or "",
+        resolved.provider,
+        resolved.model,
+        json.dumps(resolved.provider_config, sort_keys=True, default=str),
+    )
+
+
+def provider_for_resolved(resolved: ResolvedModel) -> LLMProvider:
+    """Get-or-build the provider for a resolved *lane* alias (ISSUE-0113).
+
+    The shared role lanes (``fast`` bid / ``summarizer`` close / critic /
+    memory compression) resolve their alias per-call but historically rode
+    the persona's single client — on a mixed-vendor roster a non-matching
+    seat sent the lane's model ID to *its own* vendor and got a 404. This
+    builds the client the alias record actually declares (RFC 0033 §D:
+    the alias entry is the joint declaration of provider + model +
+    pricing), via the same ``create_provider`` path personas use, so the
+    S-09 key postures and missing-SDK messages are identical.
+
+    Raises :class:`LaneProviderError` when the provider cannot be built
+    (missing SDK, watsonx without a project id, …) — never
+    :class:`SystemExit` — so lane callers fail closed per their own
+    contracts rather than crashing.
+    """
+    key = _lane_cache_key(resolved)
+    cached = _lane_provider_cache.get(key)
+    if cached is not None:
+        return cached
+    try:
+        provider, _ = create_provider(
+            {"id": f"lane:{resolved.alias}", "model": resolved.alias},
+        )
+    except SystemExit as exc:
+        raise LaneProviderError(
+            f"lane provider for alias {resolved.alias!r} "
+            f"(provider {resolved.provider!r}) could not be built: {exc}",
+        ) from exc
+    _lane_provider_cache[key] = provider
+    return provider
+
+
+def clear_lane_provider_cache() -> None:
+    """Drop every cached lane provider (test seam)."""
+    _lane_provider_cache.clear()
+
+
+__all__ = [
+    "LaneProviderError",
+    "clear_lane_provider_cache",
+    "create_provider",
+    "provider_for_resolved",
+]
