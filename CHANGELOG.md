@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### 🐛 Fixes
+
+- **Shared role lanes now run cross-vendor** (ISSUE-0113): `LLMClient` routes any call whose `model_alias` resolves to a **different vendor** than the persona's own provider through a client built from the resolved alias record (cached process-wide) — so the `fast` salience bid, the `summarizer` close summary, the RFC 0051 critic, and memory compression work on mixed-vendor rosters instead of 404ing through the persona's single client and failing closed to silence. Same-vendor aliases and every single-vendor overlay keep the primary client byte-for-byte. Live-verified: the four-vendor governed arc that previously sat all-silent now converges with all four seats bidding and **all four** close summaries real (66,900 tok ≤ the 200k shared cap, $0.13).
+
 ## [0.3.11] - 2026-07-21
 
 > **Codename:** Conversations that run themselves

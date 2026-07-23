@@ -152,7 +152,8 @@ If a seat alias is edited to drop its pricing, `resolve()` fails closed (`System
 
 | Date | Tester | OS | Result | Notes |
 |------|--------|----|--------|-------|
-| — | — | — | ⬜ Pending | Live execution scheduled for v0.3.11 release-prep (master-plan Phase 3, all four vendors keyed). The blueprint's four-distinct-vendor + priced-fail-closed + agent-only invariants are CI-pinned now (`test_autonomous_multivendor_blueprint.py`); the single-provider autonomous contract is CI-pinned on the mock provider (see §Related Automated Tests). |
+| 2026-07-21 | maintainer | macOS 15 / arm64 Docker | ⚠️ Accepted-with-known-gap | v0.3.11 release-prep live run ([execution report](v0.3.11-execution-report.md)): per-seat routing, zero human, chair synthesis, and the single shared cap proven live (117,757 tok ≤ 200k, $0.25, four vendors on one ledger) — but under the bid-lane bypass (`respond: always` + `reasoning.mode: off`); governed bidding + all-N summaries slipped to the [ISSUE-0113](../issues/ISSUE-0113-four-vendor-shared-role-lanes-single-client-mismatch.md) fix. |
+| 2026-07-22 | maintainer | macOS 15 / arm64 Docker | ✅ Pass | Governed re-run on the ISSUE-0113 lane-routing fix, **no bypass** (blueprint dispositions `participant`/`chair`): all four seats bid and authored turns (the pre-fix run sat all-silent), zero anti-collapse ladder events, cascade bound → chair synthesis → structural close in ~99 s; **all four** close summaries real; ledger shows each seat's own-vendor turns **plus** `claude-haiku` lane leases from the three non-Anthropic seats; 66,900 tok ≤ 200k, ~$0.13. |
 
 ---
 
