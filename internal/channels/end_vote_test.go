@@ -274,7 +274,12 @@ func TestEndVote_StaleRevoteNotSpam(t *testing.T) {
 	store := newTestStore(t, SQLiteOptions{})
 	router := NewChannelRouter(store, &recordingDispatcher{}, zap.New(core), nil)
 	id := mustCreateGroup(t, store, "planning", "alice", "bob")
-	router.SetEndVoteParams(id, 5, 3) // high K so nothing closes; W=3
+	// K=3 over a two-member roster: nothing can close (only two distinct voters
+	// exist) while W stays 3, which is what makes the turn-4 re-vote stale. K is
+	// deliberately kept <= W — an unreachable k>w quorum now warns (ISSUE-0109
+	// follow-up, [ChannelRouter.SetEndVoteParams]), and that warn would pollute
+	// the "vote"-snippet log assertions these stale-revote tests rely on.
+	router.SetEndVoteParams(id, 3, 3)
 
 	require.NoError(t, endVote(t, router, id, "alice", "int-1")) // turn 1
 	require.NoError(t, plainTurn(t, router, id, "bob", "int-1")) // turn 2
@@ -352,7 +357,12 @@ func TestEndVote_StaleRevoteStillFansOut(t *testing.T) {
 	router, store, _ := routerWithInteractionClosedMetric(t)
 	disp := router.dispatcher.(*recordingDispatcher)
 	id := mustCreateGroup(t, store, "planning", "alice", "bob")
-	router.SetEndVoteParams(id, 5, 3) // high K so nothing closes; W=3
+	// K=3 over a two-member roster: nothing can close (only two distinct voters
+	// exist) while W stays 3, which is what makes the turn-4 re-vote stale. K is
+	// deliberately kept <= W — an unreachable k>w quorum now warns (ISSUE-0109
+	// follow-up, [ChannelRouter.SetEndVoteParams]), and that warn would pollute
+	// the "vote"-snippet log assertions these stale-revote tests rely on.
+	router.SetEndVoteParams(id, 3, 3)
 
 	require.NoError(t, endVote(t, router, id, "alice", "int-1")) // turn 1, fans out
 	require.NoError(t, plainTurn(t, router, id, "bob", "int-1")) // turn 2

@@ -1094,6 +1094,40 @@ ceiling above.
   persisted block, so save first). See the
   [web-console guide § Channel settings](web-console.md#channel-settings--edit-governance-from-the-browser).
 
+### Tuning an autonomous roster — the ISSUE-0109 calibration
+
+What the v0.3.11 live soak (7 arcs, single- and four-vendor rosters —
+[ISSUE-0109](../issues/ISSUE-0109-rfc0052-autonomous-defaults-calibration.md))
+taught about the knobs:
+
+- **The cascade-depth cap is the de facto length knob** on a productive
+  roster: the productive-round continuation advances the round tally and the
+  reply's cascade depth *together*, so a `max_rounds` above the depth cap (5)
+  can never fire on that chain — every productive soak arc closed on the depth
+  bound. `max_rounds` (default now **8**, down from 12) is the net for
+  *stall-driven* arcs, where convener cadence turns reset depth. To lengthen
+  discussions, raise the top-level `max_cascade_depth` — keeping it aligned
+  with the Python dispatcher's equal pin (`agents/dispatch.py`).
+- **Co-tune `end_vote_threshold` with discussion length**: at the K=2 default,
+  2 votes closed a 3-seat roster in 4 of 7 arcs — sometimes as ~20 s
+  confirmation stubs — and an end-vote close arms **no** chair synthesis. The
+  shipped autonomous templates now pin K = the full roster, so convergence
+  routes to the artifact-bearing bounded close unless the roster unanimously
+  ends.
+- **Standing channels need per-convening topic freshness**: re-convening an
+  unchanged topic yields push-back ("we already worked through this") and a
+  redundant synthesis, or record-confirmation stubs. Vary the topic/agenda per
+  fire (a date, a delta, the previous synthesis as input).
+- **Naming the personas in the topic is the fresh-store engagement lever** —
+  collapse-proneness inversely tracks accumulated channel memory, so a fresh
+  store needs the pointed opener a warmed store does not.
+- **Size caps from telemetry, not logs**: live arcs spent 0.24–0.59 of the
+  200k cap and never approached the `1 + N` reserve. The
+  `channel.conversation.interaction_cap_utilization{channel_type,trigger}`
+  histogram records spend-at-close ÷ cap on every capped close — read it to
+  right-size `interaction_budget_tokens`, and multiply a typical utilization
+  by the cap to size `standing_budget_tokens` per expected convening.
+
 ### Try it offline — `make demo-autonomous`
 
 To watch the whole arc with **no API key and zero spend**, run the offline demo:
