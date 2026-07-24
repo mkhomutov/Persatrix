@@ -50,7 +50,11 @@ blueprint:
       # 2-of-3 votes closed live arcs early WITHOUT the chair synthesis (an
       # end-vote close arms none). Requiring all 3 routes convergence to the
       # artifact-bearing bounded close unless the roster truly unanimously ends.
+      # W must scale with K: the window counts every tracked publish and a vote
+      # is live only while `turn - voteTurn < W`, so at most W votes are live at
+      # once (K > W can never close; K == W needs K back-to-back votes). W = 2K.
       end_vote_threshold: 3
+      end_vote_window: 6
       autonomous:
         enabled: true
         topic: "Should we adopt a monorepo? Lay out the tradeoffs."

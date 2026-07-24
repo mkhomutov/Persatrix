@@ -212,7 +212,18 @@ channels:
     # exploration alive until everyone agrees — or the bounded close (which DOES
     # synthesize) catches convergence instead. Autonomous demo channels only; the
     # global K=2 default and every human channel are untouched.
+    #
+    # `end_vote_window` MUST be raised alongside K. W counts *tracked publishes*
+    # (every message, not only votes) and a vote counts only while
+    # `turn - voteTurn < W`, so at most W votes are ever live at once — a quorum
+    # with K > W can never close, and K == W closes only on K strictly
+    # back-to-back votes (one ordinary message between them drops the count).
+    # W = 2K gives a unanimous roster two full rounds of publishes to register
+    # its votes, so the full-roster bar is a high bar rather than an impossible
+    # one. (ISSUE-0109 follow-up: the K raise above shipped against the default
+    # W=3, which made 3-of-3 knife-edge.)
     end_vote_threshold: 3
+    end_vote_window: 6
     autonomous:
       enabled: false
       topic: "Should we adopt a monorepo? Lay out the tradeoffs."

@@ -135,7 +135,8 @@ autonomous:
                                  # (plain agent id, as RFC 0050 escalation_chair_id uses; a DISTINCT role from the
                                  # chair per the resolved OQ #1 — validate rejects convener == escalation_chair_id)
   goal: "A synthesized recommendation with the strongest argument on each side."
-  max_rounds: 12                 # hard bound (also see budget cap, Goal #4)
+  max_rounds: 8                  # hard bound (also see budget cap, Goal #4); default 8 since the
+                                 # ISSUE-0109 calibration (was 12 — see OQ #5)
 ```
 
 **Convening** = the convener persona authors the **opening turn** (topic + first agenda item) as a normal channel publish, stamped with a fresh `interaction_id` (RFC 0030 producer). From that publish onward the existing `InboundEventWake` chain carries the discussion with no further human input. Convening is triggered three ways, all reusing existing surfaces:

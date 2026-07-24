@@ -104,7 +104,11 @@ blueprint:
       # 2-of-4 vote closes the interaction early WITHOUT the chair synthesis (an
       # end-vote close arms none). Requiring all 4 seats routes convergence to
       # the artifact-bearing bounded close unless the roster unanimously ends.
+      # W must scale with K: the window counts every tracked publish and a vote
+      # is live only while `turn - voteTurn < W`, so at most W votes are live at
+      # once — K=4 against the default W=3 could NEVER close. W = 2K.
       end_vote_threshold: 4
+      end_vote_window: 8
       autonomous:
         enabled: true
         # A topic that is itself provider-neutral and reads well as a four-way
