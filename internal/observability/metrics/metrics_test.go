@@ -80,6 +80,8 @@ func TestInstrumentInventory(t *testing.T) {
 	inst.ChannelConversationInteractionClosed.Add(ctx, 0)
 	inst.ChannelConversationEndVoteEmitted.Add(ctx, 0)
 	inst.ChannelConversationReplyBudgetRemaining.Record(ctx, 0)
+	// ISSUE-0109 (RFC 0052 OQ #5) — cap-utilization calibration series.
+	inst.ChannelConversationInteractionCapUtilization.Record(ctx, 0)
 	// RFC 0031 Phase 1 — sessions subsystem instrument inventory.
 	inst.SessionsWrites.Add(ctx, 0)
 
@@ -115,6 +117,8 @@ func TestInstrumentInventory(t *testing.T) {
 		"channel.conversation.interaction_closed":     "{interaction}",
 		"channel.conversation.end_vote_emitted":       "{vote}",
 		"channel.conversation.reply_budget_remaining": "{reply}",
+		// ISSUE-0109 (RFC 0052 OQ #5) — cap-utilization calibration series.
+		"channel.conversation.interaction_cap_utilization": "1",
 		// RFC 0031 Phase 1 — sessions subsystem instrument inventory.
 		"sessions.writes": "{write}",
 	}

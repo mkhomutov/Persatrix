@@ -127,12 +127,31 @@ type closeNotify struct {
 // silently drift between them — the same anti-drift rationale
 // [ChannelRouter.finalizeInteractionClose] centralizes the teardown for. Nil-safe
 // like every other channel instrument.
-func (r *ChannelRouter) recordInteractionClosedMetric(ctx context.Context, ct ChannelType, trigger string) {
-	if r.metrics != nil && r.metrics.InteractionClosed != nil {
-		r.metrics.InteractionClosed.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("channel_type", string(ct)),
-			attribute.String("trigger", trigger),
-		))
+//
+// The same funnel records the ISSUE-0109 calibration sample
+// ([RouterMetrics.InteractionCapUtilization]): spend-at-close over the cap, for
+// capped interactions with a wired wallet. Every caller fires BEFORE its
+// interaction's budget snapshot is discarded — the deterministic closes record
+// ahead of [ChannelRouter.finalizeInteractionClose], and the lazy idle rotation
+// defers its own discard seams one generation (IP4) — so the
+// [ChannelRouter.ResolveInteractionBudgetForInteraction] read hits; a miss
+// (uncapped channel, no wallet) skips the sample rather than fabricating one.
+func (r *ChannelRouter) recordInteractionClosedMetric(ctx context.Context, ct ChannelType, trigger, interactionID string) {
+	if r.metrics == nil {
+		return
+	}
+	attrs := metric.WithAttributes(
+		attribute.String("channel_type", string(ct)),
+		attribute.String("trigger", trigger),
+	)
+	if r.metrics.InteractionClosed != nil {
+		r.metrics.InteractionClosed.Add(ctx, 1, attrs)
+	}
+	if r.metrics.InteractionCapUtilization != nil && r.spend != nil {
+		if budget, capped := r.ResolveInteractionBudgetForInteraction(interactionID); capped && budget > 0 {
+			utilization := float64(r.spend.InteractionSpend(interactionID)) / float64(budget)
+			r.metrics.InteractionCapUtilization.Record(ctx, utilization, attrs)
+		}
 	}
 }
 

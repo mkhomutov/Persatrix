@@ -28,47 +28,10 @@ import (
 // gate is on the RESOLVED budget (per-channel value, else the fleet default), so
 // an operator who caps the fleet may arm autonomy without a per-channel value.
 
-// Autonomous block defaults (conservative — RFC 0052 OQ #5; a calibration
-// tracked-issue tunes these after a soak on real rosters).
-const (
-	// DefaultAutonomousEnabled is the package default: autonomy is OPT-IN, so an
-	// absent block (and every existing channel) is disabled and byte-for-byte
-	// unchanged.
-	DefaultAutonomousEnabled = false
-	// DefaultAutonomousMaxRounds is the hard round bound an absent/zero
-	// `max_rounds` fills to — a second independent terminator alongside the cost
-	// cap ([RFC 0052 §D](../../docs/rfcs/0052-autonomous-agent-channels.md)).
-	//
-	// UNIT (deep review): the tally advances once per fanout cycle at the fanout
-	// tail (bounded_close.go). Under floor control — the group default and the
-	// expected autonomous posture, since autonomous convening is an open-floor
-	// group concept — one cycle is one FLOOR ROUND (every responder speaking once
-	// inside the serialized round), so the bound reads as floor rounds. With floor
-	// control explicitly OFF, or on a degenerate <2-responder round, a cycle is a
-	// single message, so the same number bounds far fewer conversational rounds.
-	// Keep floor control on (the default) for the round reading to hold.
-	//
-	// The two paths also differ by one at the boundary, a consequence of the
-	// no-reopen ordering (bounded_close.go / fanout.go): the FLOOR path counts and
-	// closes AFTER the round runs, so the `max_rounds`-th round's discussion
-	// happens and then the interaction closes; the CONCURRENT path counts and
-	// closes BEFORE the dispatch, so the `max_rounds`-th message is NOT dispatched
-	// live — it reaches members only as the close-notification artifact. So on a
-	// concurrent (e.g. two-persona) roster `max_rounds` bounds `max_rounds - 1`
-	// live exchanges. Immaterial at the default; at the tiny-bound extreme the
-	// §D artifact guarantee takes over — the close never fires before the
-	// interaction's first live dispatch (maybeBoundedClose's round-1 guard,
-	// PR #716 review), so `max_rounds = 1` means one live exchange on either
-	// path, never a zero-delivery close.
-	DefaultAutonomousMaxRounds = 12
-)
-
-// MaxAutonomousAgendaItems caps the agenda length. It bounds the per-agenda-item
-// escalation ration the convener gets in PR 6 (≤ one advance + one re-invite per
-// item → total convener turns stay linear in agenda length), so a pathological
-// agenda cannot become an unbounded turn budget. Generous; only a typo-scale list
-// trips it.
-const MaxAutonomousAgendaItems = 64
+// The autonomous block defaults ([DefaultAutonomousEnabled],
+// [DefaultAutonomousMaxRounds] — the ISSUE-0109-calibrated values) and
+// [MaxAutonomousAgendaItems] live in config_autonomous_defaults.go (split at
+// the 500-line review cap, the config_autonomous_standing.go precedent).
 
 // Autonomous validation sentinels — defined here rather than in the channels.go
 // central block (itself at the 500-line cap). Matched by [errors.Is]; the REST

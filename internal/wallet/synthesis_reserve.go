@@ -90,8 +90,16 @@ package wallet
 // Reusing the summary-derived unit for the chair turn is a placeholder, not a
 // verified bound: a real per-call reserve for the chair turn is one of the OQ #5
 // calibration inputs (see the package doc's KNOWN GAP note), not settled by this
-// constant. A conservative default; the calibration tracked-issue tunes it after a
-// soak on real rosters.
+// constant.
+//
+// SOAK-VALIDATED (ISSUE-0109, v0.3.11 live calibration): unchanged at 3500.
+// Across 7 live arcs (3–4-seat rosters, 200k caps, single- and four-vendor)
+// every close path — chair synthesis turn + all per-persona summaries — fit
+// inside the `1 + N` reserve with zero close-path lease denials (post-F-1/
+// ISSUE-0111), and no arc's discussion spend even reached the soft threshold
+// (peak utilization 0.59 of cap). Neither KNOWN GAP bit live. The
+// `interaction_cap_utilization` close histogram (ISSUE-0109) now feeds the
+// next calibration pass off telemetry.
 const DefaultSynthesisCallReserveTokens int64 = 3500
 
 // maxSynthesisReserveNumerator / maxSynthesisReserveDenominator cap the reserve at
