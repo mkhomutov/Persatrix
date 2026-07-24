@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0109
-summary: "RFC 0052 OQ #5 — the autonomous-channel defaults (max_rounds, the interaction cost cap, the roster-scaled 1+N synthesis-reserve fraction, and the standing aggregate bound max_convenings/standing_budget_tokens) shipped as CONSERVATIVE, UNCALIBRATED values: calibration needs a soak on real rosters. Tune after observed autonomous runs (the live MT-AUTONOMOUS-* runs + the four-vendor MT-AUTONOMOUS-MULTIPROVIDER-001)."
-status: open
+summary: "RFC 0052 OQ #5 — the autonomous-channel defaults (max_rounds, the interaction cost cap, the roster-scaled 1+N synthesis-reserve fraction, and the standing aggregate bound max_convenings/standing_budget_tokens) shipped as CONSERVATIVE, UNCALIBRATED values: calibration needs a soak on real rosters. Tune after observed autonomous runs (the live MT-AUTONOMOUS-* runs + the four-vendor MT-AUTONOMOUS-MULTIPROVIDER-001). RESOLVED: tuned from the 7-arc v0.3.11 live soak — max_rounds default 12→8 (the cascade-depth cap is the de facto productive-chain length knob; max_rounds is the stall-arc net), full-roster end_vote_threshold on the shipped autonomous templates (K=2 closed 4/7 arcs early without the chair synthesis), the reserve unit soak-validated unchanged (zero close-path denials; peak cap utilization 0.59), and the interaction_cap_utilization close histogram lands so the next pass reads off telemetry."
+status: resolved
 severity: low
 area: channels
 created: 2026-07-13
+closed: 2026-07-24
 refs:
   - docs/rfcs/0052-autonomous-agent-channels.md
   - docs/rfcs/0052-pr-plan.md
@@ -77,6 +78,55 @@ close trigger (`structural` vs. `cost`), the reserve headroom actually used
 defaults + the reserve fraction from those observations; keep the safety gates
 unchanged. Consider surfacing the reserve headroom as an OTEL metric so the
 soak reads off telemetry rather than log-scraping.
+
+## Resolution
+
+**Tuned 2026-07-24** from the 7-arc v0.3.11 live soak (the
+[execution report capture](../manual-tests/v0.3.11-execution-report.md#issue-0109-calibration-capture)),
+mapping the five findings to four changes — every safety gate (mandatory cap,
+aggregate bound, fail-closed reserve, arming validation) byte-for-byte
+unchanged:
+
+- **`max_rounds` default 12 → 8** (`DefaultAutonomousMaxRounds` +
+  `config/channels.yaml` roundtable + both blueprints). Finding 1 made the
+  bound's real role legible: the ISSUE-0110 productive-round continuation
+  advances the round tally and the reply's cascade depth *together*, so any
+  `max_rounds` above the cascade-depth cap (5) is structurally unreachable on
+  a productive chain — all five productive soak arcs closed on the depth
+  bound, and `max_rounds` never fired at 6/8/12. It is the net for
+  STALL-driven arcs (convener cadence turns reset depth); 8 keeps that net
+  above every observed arc (MT-AUTONOMOUS-001 ran 8 end to end) while
+  tightening worst-case stall-loop spend. The cascade-depth cap is documented
+  as the de facto length knob (guide §13), with its Go/Python alignment
+  constraint stated.
+- **Full-roster `end_vote_threshold` on the shipped autonomous templates**
+  (roundtable 3, multivendor blueprint 4; the global K=2 default and every
+  human channel untouched). Finding 4: 2-of-3 votes closed 4 of 7 arcs early
+  — some as ~20 s confirmation stubs — and an end-vote close arms NO chair
+  synthesis, skipping the artifact a brainstorm exists for. A full-roster bar
+  routes convergence to the artifact-bearing bounded close unless the roster
+  unanimously ends.
+- **`channel.conversation.interaction_cap_utilization`** (the issue's
+  telemetry ask): a close-funnel histogram — spend-at-close ÷ cap, labelled
+  `channel_type` + `trigger`, capped interactions only, recorded once in
+  `recordInteractionClosedMetric` for every close cause — so cap and
+  standing-bound sizing reads off telemetry instead of wallet-ledger
+  scraping. Pinned by `interaction_cap_utilization_test.go` (cost +
+  structural fractions; uncapped and wallet-less closes record nothing).
+- **Reserve unit soak-validated unchanged** (`DefaultSynthesisCallReserveTokens`
+  3500): every close path fit inside the `1 + N` reserve with zero close-path
+  lease denials (post-ISSUE-0111), no arc reached the soft threshold (peak
+  utilization 0.59 of cap), and neither synthesis_reserve.go KNOWN GAP bit
+  live. Findings 2/3/5 (persona-naming as the fresh-store lever; standing
+  per-convening topic freshness) ship as operator guidance — guide §13
+  "Tuning an autonomous roster" — since no shipped standing default exists to
+  tune.
+
+Residuals deliberately NOT taken here: a per-channel cascade-depth override
+(a real feature crossing the Go/Python depth-cap alignment, not a default);
+close-path-cost telemetry (a second sample at the wallet eviction settle
+point, coupled to the RFC 0052 PR 7 `EvictInteraction` wiring); automated
+standing topic freshness (a convener-prompt feature).
 
 ## Notes
 

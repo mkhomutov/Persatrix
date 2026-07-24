@@ -73,7 +73,7 @@ func (r *ChannelRouter) recordInteractionClosedIdle(ctx context.Context, channel
 		zap.String("interaction_id", interactionID),
 		zap.String("trigger", idleTrigger),
 	)
-	r.recordInteractionClosedMetric(ctx, ct, idleTrigger)
+	r.recordInteractionClosedMetric(ctx, ct, idleTrigger, interactionID)
 }
 
 // ResolveInteractionIdleTimeouts applies the per-channel idle windows for

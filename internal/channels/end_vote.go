@@ -74,12 +74,33 @@ func readEndInteractionVote(metadata map[string]any) bool {
 // reads a populated K/W (a zero threshold or window is meaningless, unlike a
 // zero reply budget). Driven at startup by [ChannelRouter.ResolveEndVotes]; the
 // mutex makes a runtime call safe concurrently with traffic.
+//
+// Unreachable-quorum guard (ISSUE-0109 follow-up): W bounds how many votes can
+// be live at once — [ChannelRouter.processEndVote] counts a vote only while
+// `state.turn - voteTurn < w`, and `state.turn` advances on every tracked
+// publish, so at most W votes are ever simultaneously in-window. A `k > w`
+// quorum therefore can NEVER close and silently disables Layer 4 for the
+// channel. That is always a misconfiguration, but it is not fatal (the cost
+// cap, depth cap, bounded close, and idle rotation all still terminate the
+// interaction), and K/W are runtime-editable per RFC 0050 — so this warns
+// loudly rather than rejecting a live PATCH. Both callers funnel here
+// ([ChannelRouter.ResolveEndVotes] at startup and the config-apply path), so
+// the warning covers config-as-code and operator edits alike.
 func (r *ChannelRouter) SetEndVoteParams(channelID string, k, w int) {
 	if k <= 0 {
 		k = DefaultEndVoteThreshold
 	}
 	if w <= 0 {
 		w = DefaultEndVoteWindow
+	}
+	if k > w && r.logger != nil {
+		r.logger.Warn(
+			"channels: end-vote quorum is unreachable (k > w); Layer 4 can never close this channel",
+			zap.String("channel_id", channelID),
+			zap.Int("end_vote_threshold", k),
+			zap.Int("end_vote_window", w),
+			zap.String("remedy", "raise end_vote_window to at least end_vote_threshold (2x is recommended)"),
+		)
 	}
 	r.endVoteMu.Lock()
 	defer r.endVoteMu.Unlock()
@@ -290,7 +311,7 @@ func (r *ChannelRouter) recordInteractionClosed(ctx context.Context, msg Channel
 		zap.Int("votes", votes),
 		zap.String("trigger", endVotesTrigger),
 	)
-	r.recordInteractionClosedMetric(ctx, ct, endVotesTrigger)
+	r.recordInteractionClosedMetric(ctx, ct, endVotesTrigger, interactionID)
 }
 
 // recordEndVoteSpam logs a duplicate end-vote so an adversarial vote-spam

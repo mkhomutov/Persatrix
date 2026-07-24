@@ -460,5 +460,5 @@ func (r *ChannelRouter) recordInteractionClosedBounded(ctx context.Context, msg 
 		zap.String("interaction_id", interactionID),
 		zap.String("trigger", trigger),
 	)
-	r.recordInteractionClosedMetric(ctx, ct, trigger)
+	r.recordInteractionClosedMetric(ctx, ct, trigger, interactionID)
 }

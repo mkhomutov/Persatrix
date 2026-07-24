@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### 🔧 Changed
+
+- **Autonomous-channel defaults tuned from the v0.3.11 live soak** (ISSUE-0109, the RFC 0052 OQ #5 calibration; safety gates unchanged): `max_rounds` default **12 → 8** — the soak showed the cascade-depth cap (5) is the de facto length knob on a productive roster (the continuation chain advances rounds and depth together, so a larger `max_rounds` can never fire there; it is the net for stall-driven arcs) — and the shipped autonomous templates now pin a **full-roster `end_vote_threshold`** (2-of-3 votes closed 4 of 7 live arcs early, without the chair synthesis an end-vote close never arms). New `channel.conversation.interaction_cap_utilization{channel_type,trigger}` histogram records spend-at-close ÷ cap on every capped close, so the next calibration pass reads cap sizing off telemetry instead of wallet-ledger scraping. The `1 + N` synthesis-reserve unit is soak-validated unchanged (zero close-path denials; peak cap utilization 0.59). Standing-channel topic freshness and the persona-naming engagement lever land as operator guidance (channels guide §13).
+
 ### 🐛 Fixes
 
 - **Shared role lanes now run cross-vendor** (ISSUE-0113): `LLMClient` routes any call whose `model_alias` resolves to a **different vendor** than the persona's own provider through a client built from the resolved alias record (cached process-wide) — so the `fast` salience bid, the `summarizer` close summary, the RFC 0051 critic, and memory compression work on mixed-vendor rosters instead of 404ing through the persona's single client and failing closed to silence. Same-vendor aliases and every single-vendor overlay keep the primary client byte-for-byte. Live-verified: the four-vendor governed arc that previously sat all-silent now converges with all four seats bidding and **all four** close summaries real (66,900 tok ≤ the 200k shared cap, $0.13).

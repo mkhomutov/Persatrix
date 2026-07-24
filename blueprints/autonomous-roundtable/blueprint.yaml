@@ -46,6 +46,15 @@ blueprint:
       type: "group"
       interaction_budget_tokens: 200000
       escalation_chair_id: "ember-owl"
+      # Full-roster end-vote bar (ISSUE-0109 calibration): at the K=2 default,
+      # 2-of-3 votes closed live arcs early WITHOUT the chair synthesis (an
+      # end-vote close arms none). Requiring all 3 routes convergence to the
+      # artifact-bearing bounded close unless the roster truly unanimously ends.
+      # W must scale with K: the window counts every tracked publish and a vote
+      # is live only while `turn - voteTurn < W`, so at most W votes are live at
+      # once (K > W can never close; K == W needs K back-to-back votes). W = 2K.
+      end_vote_threshold: 3
+      end_vote_window: 6
       autonomous:
         enabled: true
         topic: "Should we adopt a monorepo? Lay out the tradeoffs."
@@ -55,7 +64,10 @@ blueprint:
           - "Migration effort"
         convener: "nova-sparrow"
         goal: "A synthesized recommendation with the strongest argument on each side."
-        max_rounds: 12
+        # 8, down from 12 (ISSUE-0109): the cascade-depth cap (5) is the binding
+        # length knob on a productive roster (each continued round advances depth
+        # too); max_rounds is the stall-arc net, and 8 clears every soak arc.
+        max_rounds: 8
       members:
         - { id: "nova-sparrow", respond: "participant" }
         - { id: "ember-owl", respond: "chair" }

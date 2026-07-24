@@ -145,6 +145,8 @@ func initChannels(
 			// Layer 4 vote volume + Layer 2 reply-budget headroom at close.
 			EndVoteEmitted:       orchMetrics.ChannelConversationEndVoteEmitted,
 			ReplyBudgetRemaining: orchMetrics.ChannelConversationReplyBudgetRemaining,
+			// ISSUE-0109 calibration: spend-at-close / cap, per close trigger.
+			InteractionCapUtilization: orchMetrics.ChannelConversationInteractionCapUtilization,
 			// Chair-stall-escalation amendment (minimal Layer 5 slice).
 			ChairEscalation: orchMetrics.ChannelConversationChairEscalation,
 			// End-vote-close-propagation amendment (CP5).
