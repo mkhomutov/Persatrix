@@ -123,7 +123,8 @@ unchanged:
   tune.
 
 Residuals deliberately NOT taken here: a per-channel cascade-depth override
-(a real feature crossing the Go/Python depth-cap alignment, not a default);
+(a real feature crossing the Go/Python depth-cap alignment, not a default —
+filed as [ISSUE-0114](ISSUE-0114-per-channel-cascade-depth-override.md));
 close-path-cost telemetry (a second sample at the wallet eviction settle
 point, coupled to the RFC 0052 PR 7 `EvictInteraction` wiring); automated
 standing topic freshness (a convener-prompt feature).
