@@ -70,6 +70,20 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     "docs/v0.3.7-plan.md",  # v0.3.7 master plan — same accumulator pattern as v0.3.5/v0.3.6 above (3-workstream realism cut); remove once shipped/archived.
     "docs/v0.3.8-plan.md",  # v0.3.8 master plan — same accumulator pattern as v0.3.5/v0.3.6/v0.3.7 above (3-workstream convergence cut); remove once shipped/archived.
     "docs/v0.3.9-plan.md",  # v0.3.9 master plan — same accumulator pattern as v0.3.5–v0.3.8 above (2-RFC verbatim-recall cut: ledger substrate + recall consumer, with the §OQ-6 scope lock folded in); remove once shipped/archived.
+    # docs/v0.3.12-plan.md — v0.3.12 master plan; same release-cycle accumulator
+    # pattern as the v0.3.0–v0.3.9 plans above, but it crossed the 3 000-word
+    # prose cap already at *plan opening* rather than mid-cycle. Two causes,
+    # both structural: (1) v0.3.12 is a deliberate two-story release (the
+    # RFC 0037/0049 memory cluster headlines, RFC 0039 accounts/auth rides
+    # bundled), so the acceptance list, the cuttability contract, and the risk
+    # table each cover two workstreams instead of one; (2) the release turns on
+    # a cross-plan merge gate and a shadow→live promotion gate, both of which
+    # are release-level contract this doc exists to own. It is still scheduled
+    # to accumulate status flips across Phases 0–4 (the Master Progress
+    # Overview, the ROADMAP-hygiene checkpoints). Successive trims during the
+    # planning review had already reached the point of deleting contract rather
+    # than prose. Remove once v0.3.12 ships and the plan is archived.
+    "docs/v0.3.12-plan.md",
     # docs/v0.3.x-sequencing.md orchestrates the v0.3.1 / v0.3.2 / v0.3.3
     # patch sequence and accumulates amendments as new v0.3.x-targeted
     # RFCs file (the 2026-05-12 amendment captured the RFC 0030 + RFC
