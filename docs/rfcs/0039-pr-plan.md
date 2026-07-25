@@ -15,6 +15,8 @@ RFC 0039 Phases 1–2 give Persatrix **human accounts with password login, opaqu
 
 This is the **bundled second workstream** of v0.3.12 ([scope lock 2026-07-25](../v0.3.12-plan.md#scope-decisions-locked-at-plan-authoring-time-2026-07-25)): fully parallel to the memory cluster (zero shared files), **independently shippable and cuttable whole** — if it slips, it becomes the v0.3.13 headline and v0.3.12 reverts to a one-story release.
 
+**The browser surface is in scope, and it is amended in.** RFC 0039 as written excluded a web login and derived two Security Considerations (*CSRF / XSS*, *Brute force*) from that exclusion. v0.3.12 ships the console login anyway, so the [enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md) re-opens both: §A defines the cookie transport / CSRF assertion / XSS posture, §B moves login throttling into Phase 1 with the endpoint. Its deliverables are folded into PRs 3, 5, and 6 below — no new PRs.
+
 **The Phase-1 inertness contract.** Phase 1 ships the complete mechanism **inert**: `auth.mode` defaults to `disabled`, every request resolves to the anonymous `local` identity, no route is enforced. The Phase-1 closeout gate is the *unchanged* full test suite under the default — the same "byte-for-byte untouched" posture v0.3.11 applied to human channels. Enforcement arrives only in Phase 2 and only for deployments that opt in.
 
 This plan covers Phases 1–2 across **6 PRs**, mirroring the RFC's [phasing](0039-user-accounts-authentication.md#phased-implementation-plan):
@@ -64,7 +66,8 @@ RFC 0002 REST server (shipped) — the only prerequisite
 - `internal/server/auth_handlers.go` (new): `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/whoami`.
 - `authMiddleware`: identity resolution + the per-route policy map, present but non-enforcing under the default `auth.mode: disabled` (every request → anonymous `local`, policy check skipped).
 - `config/security.yaml` + `schemas/security.schema.json` `auth:` block; `cmd/orchestrator/main.go` wiring; the non-loopback-bind + `disabled` startup `WARN`.
-- Tests: login/logout/whoami round-trip; the disabled-mode no-op; schema validation.
+- **Per the [enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md)** — the `session_transport: "bearer" | "cookie"` login field + the `__Host-` `HttpOnly`/`Secure`/`SameSite=Strict` cookie and its clearing on logout (§A1); the same-origin assertion on cookie-authenticated writes (§A2); the CSP + `nosniff` + `Referrer-Policy` headers on `internal/server/ui.go`, which sets none today, and the `{@html}` CI gate (§A3); the **per-source and per-username login limiters** + `auth.trusted_proxies` + `429`/`Retry-After` (§B — throttling ships with the endpoint, in this phase, not Phase 3).
+- Tests: login/logout/whoami round-trip; the disabled-mode no-op; schema validation; the amendment's [test strategy](0039-amendment-enabled-mode-exposure.md#test-strategy) (transport matrix, CSRF matrix, the bearer/CLI no-`Origin` regression, throttle trips + the identical `429`).
 
 ## PR 4 — `feature/v0312-rfc0039-cli-bootstrap` (Phase 1 steps 8–10 — Phase 1 completes)
 
@@ -78,14 +81,14 @@ RFC 0002 REST server (shipped) — the only prerequisite
 - `authMiddleware` enforcement under `auth.mode: enabled` — the §E `401`/`403` matrix; per-route policy on every existing human-facing route, **deny-by-default (`operator`) for any unmapped route** (the route-by-route assignment folds the design review's OQ #6 into this PR).
 - Chat handler: the verified `participant_id` claim replaces the body `user_id` under `enabled` (§F).
 - Unquarantine endpoint → `operator` role; `SECURITY_UNQUARANTINE_TOKEN` retained as the `disabled`-mode gate, documented as superseded (§H).
-- CLI: every command attaches the stored bearer token; `401` prints the `persatrix login` hint. Web console: same-origin `fetch` carries the session; the login surface is the console's existing panel chrome (no new SPA slice — a minimal login form on 401).
+- CLI: every command attaches the stored bearer token; `401` prints the `persatrix login` hint. Web console: the login surface is the console's existing panel chrome (no new SPA slice — a minimal login form on 401), logging in with `session_transport: "cookie"` so the session rides the `HttpOnly` cookie from PR 3 and **the token never enters JS** ([amendment §A](0039-amendment-enabled-mode-exposure.md#decision-a--the-browser-session-surface)).
 - Audit: `authz.denied`.
 - Tests: the enforcement matrix per route class; claim substitution; disabled-mode regression re-run.
 
 ## PR 6 — `feature/v0312-rfc0039-closeout`
 
-- Docs: `docs/guides/web-console.md` (the "beyond localhost requires a reverse proxy" limitation flips to "set `auth.mode: enabled`"), README security-posture line, `docs/guides/sessions.md` cross-link (account ≠ session ≠ participant), SECURITY.md note.
-- `MT-AUTH-001` (bootstrap on empty `accounts.db` → login → gated route 403/200 matrix → logout → disabled-mode no-delta) run live.
+- Docs: `docs/guides/web-console.md` (the "beyond localhost requires a reverse proxy" limitation flips to "set `auth.mode: enabled`" — carrying the amendment's browser posture and its [residual risk](0039-amendment-enabled-mode-exposure.md#residual-risk), notably session-riding-under-XSS and the `SameSite=Strict` UX note), README security-posture line, `docs/guides/sessions.md` cross-link (account ≠ session ≠ participant), SECURITY.md note.
+- `MT-AUTH-001` (bootstrap on empty `accounts.db` → login → gated route 403/200 matrix → logout → disabled-mode no-delta) run live, **plus a browser leg**: cookie login, the token unreadable from JS, a cross-site write rejected, logout clearing the cookie.
 - RFC 0039 front-matter → ⚠️ Partially Implemented (P1–2 v0.3.12 ✅; P3 v0.4.0); ROADMAP row flip.
 
 ---
@@ -97,4 +100,8 @@ RFC 0002 REST server (shipped) — the only prerequisite
 | Enforcement breaks existing deployments. | `disabled` is the shipped default; Phase 1 is provably inert (the PR 4 no-delta gate); enforcement is opt-in and lands after the CLI/web bearer plumbing in the same PR. |
 | A new crypto dependency (x/crypto/argon2). | Stdlib-adjacent, vendored via `go.mod` like existing x/ deps; license sweep in PR 1. |
 | The per-route policy map misses a route (open hole under `enabled`). | Deny-by-default `operator` for unmapped routes — a missed route fails closed, not open. |
+| The console holds a session token in JS, so any XSS is session theft. | `session_transport: "cookie"` — `HttpOnly`, so the token never enters JS ([amendment §A1](0039-amendment-enabled-mode-exposure.md#a1-transport-is-chosen-by-the-caller-not-sniffed)); CSP + the `{@html}` CI gate reduce XSS probability. Residual (session riding while the page is open) is recorded, not hand-waved. |
+| The cookie transport re-opens CSRF. | `SameSite=Strict` **plus** a server-side same-origin assertion on cookie-authenticated writes — the second does not depend on the client honouring the first; bearer callers (the CLI) skip it. |
+| The login endpoint ships unthrottled under `enabled`. | Per-source **and** per-username limiters land in PR 3, with the endpoint. Note the amplification framing: every failed login is a full Argon2id verification, so this is a DoS vector, not only a guessing one. |
+| Behind a reverse proxy the per-source limiter degrades to a global one. | `auth.trusted_proxies` + `X-Forwarded-For` depth is a precondition; unconfigured on a non-loopback `enabled` bind → startup `WARN`, and the per-username limiter still applies. |
 | Workstream drags the release. | Cuttable whole at any PR boundary (each is inert or opt-in); slips to v0.3.13 as its own headline. |

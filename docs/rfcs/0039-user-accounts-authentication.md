@@ -246,7 +246,11 @@ order; they need not all ship in one shared version.
 - **MFA / TOTP / WebAuthn.** A hook point is noted (§I); no second
   factor is built.
 - **A web or GUI login.** CLI and REST only. No browser surface, so no
-  cookies, no CSRF, no session-management UI.
+  cookies, no CSRF, no session-management UI. *(**Superseded for the
+  login/session surface** by the [enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md),
+  2026-07-25 — v0.3.12 ships the web-console login this excluded, so the
+  amendment carries the cookie transport, the CSRF assertion, and the XSS
+  posture. Session-**management** UI remains a Non-Goal until Phase 3.)*
 - **Encrypting `accounts.db` at rest.** Credentials are *hashed*
   (passwords) and *hash-only* (session tokens); the database file itself
   is unencrypted, the same posture as `channels.db` and `memory.db`
@@ -722,7 +726,15 @@ workflow / agent / channel routes is assigned route-by-route in Phase 2
 - **Brute force.** Login attempts route through the existing
   `internal/security.RateLimiter` ([RFC 0009 §E](0009-security-sandboxing.md#e-tool-access-control--output-validation)),
   keyed by username + client IP. Sustained failures trip per-account
-  lockout in Phase 3.
+  lockout in Phase 3. ***Corrected 2026-07-25*** — no phase step owned
+  this wiring (Phases 1–2 never listed it; only Phase 3's *lockout* did),
+  so the endpoint would have shipped unthrottled. The
+  [enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md)
+  §B moves **throttling to Phase 1**, with the endpoint, and splits it
+  into per-source and per-username limiters — because §C's fixed-dummy-hash
+  non-disclosure makes every failed login a full Argon2id verification,
+  i.e. an unauthenticated CPU/memory amplification vector that per-account
+  lockout does not address. Lockout stays Phase 3.
 - **Session fixation / replay.** A fresh token is minted per login;
   logout, operator-disable, and a password change or operator-driven
   reset all revoke server-side; the configurable TTL bounds the value of
@@ -738,6 +750,13 @@ workflow / agent / channel routes is assigned route-by-route in Phase 2
 - **CSRF / XSS.** Authentication is bearer-token only — no cookies —
   so CSRF does not apply; there is no browser surface, so XSS does not
   apply. Stated explicitly so a future web UI re-opens both.
+  ***Re-opened 2026-07-25*** — v0.3.12 ships that web UI, so this bullet no
+  longer holds on its own premise. The
+  [enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md)
+  §A supersedes it: an `HttpOnly`/`SameSite=Strict` cookie transport
+  (the token never enters JS), a same-origin assertion on
+  cookie-authenticated writes, a console CSP, and a `{@html}` CI gate —
+  with session-riding-under-XSS recorded as an accepted residual.
 - **No new prompt-injection surface.** Credentials never enter an LLM
   context. The verified `participant_id` (§F) *strengthens* the RFC 0034
   / RFC 0037 prompt-assembly story rather than adding to it.
@@ -957,6 +976,10 @@ blocks on it.
 
 ## Related Documentation
 
+- [Amendment — Enabled-Mode Exposure: the Browser Session Surface & Login
+  Throttling](0039-amendment-enabled-mode-exposure.md) (2026-07-25) — supersedes
+  the *"A web or GUI login"* Non-Goal and the *CSRF / XSS* and *Brute force*
+  Security Considerations for the v0.3.12 shipping scope.
 - [RFC 0002 — REST API Server](0002-rest-api-server.md) — the
   unauthenticated surface this RFC secures; the JSON error envelope,
   middleware composition, and `contextKey` pattern reused here.
