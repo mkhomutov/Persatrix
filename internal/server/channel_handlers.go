@@ -352,7 +352,8 @@ func (s *Server) handleGetChannelHistory(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	id := r.PathValue("id")
-	if _, err := s.channelStore.GetChannel(r.Context(), id); err != nil {
+	ch, err := s.channelStore.GetChannel(r.Context(), id)
+	if err != nil {
 		s.writeChannelError(w, err)
 		return
 	}
@@ -373,7 +374,13 @@ func (s *Server) handleGetChannelHistory(w http.ResponseWriter, r *http.Request)
 		writeError(w, "INTERNAL", "failed to load channel history", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, historyResponse{Messages: messagesToResponse(msgs)}, http.StatusOK)
+	// RFC 0037 §B (v0.3.12 PR 2): the envelope carries the channel's §A
+	// level off the row this handler already fetched — the REST leg of the
+	// two-path wire contract that feeds catch-up replay.
+	writeJSON(w, historyResponse{
+		Messages:       messagesToResponse(msgs),
+		Classification: string(ch.Classification),
+	}, http.StatusOK)
 }
 
 // handleGetThread handles GET /api/v1/channels/{id}/messages/{msg_id}/thread.
@@ -384,7 +391,8 @@ func (s *Server) handleGetThread(w http.ResponseWriter, r *http.Request) {
 	}
 	chID := r.PathValue("id")
 	msgID := r.PathValue("msg_id")
-	if _, err := s.channelStore.GetChannel(r.Context(), chID); err != nil {
+	ch, err := s.channelStore.GetChannel(r.Context(), chID)
+	if err != nil {
 		s.writeChannelError(w, err)
 		return
 	}
@@ -406,7 +414,12 @@ func (s *Server) handleGetThread(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "INTERNAL", "failed to load thread", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, historyResponse{Messages: messagesToResponse(msgs)}, http.StatusOK)
+	// RFC 0037 §B/§H: a thread is never more or less confidential than the
+	// channel it forks from — the parent channel's level, like history.
+	writeJSON(w, historyResponse{
+		Messages:       messagesToResponse(msgs),
+		Classification: string(ch.Classification),
+	}, http.StatusOK)
 }
 
 // handleAddChannelMember handles POST /api/v1/channels/{id}/members.
@@ -434,63 +447,9 @@ func (s *Server) handleAddChannelMember(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// channelToResponse converts a [channels.Channel] (and an optional
-// member slice) to the wire shape.
-//
-// `ch.SessionID` is intentionally not surfaced. Phase 1 of RFC 0031
-// (PR #335) ships no operator-visible session surface — the Phase 3 CLI
-// (`persatrix session list / use / archive`) owns that contract. Adding
-// `session_id` to this struct would bake an unversioned wire field that
-// a future operator-facing API has to either rename or replicate. Leave
-// it off until Phase 3 lands.
-func channelToResponse(ch channels.Channel, members []channels.Member) channelResponse {
-	out := channelResponse{
-		ID:          ch.ID,
-		Name:        ch.Name,
-		Type:        string(ch.Type),
-		Description: ch.Description,
-		CreatedAt:   ch.CreatedAt,
-	}
-	if members != nil {
-		out.Members = make([]memberResponse, 0, len(members))
-		for _, m := range members {
-			out.Members = append(out.Members, memberResponse{
-				ID:            m.ParticipantID,
-				RespondPolicy: string(m.RespondPolicy),
-				JoinedAt:      m.JoinedAt,
-				SalienceGated: m.SalienceGated,
-				Threshold:     m.Threshold,
-			})
-		}
-	}
-	return out
-}
-
-func messageToResponse(m channels.ChannelMessage) channelMessageResponse {
-	out := channelMessageResponse{
-		ID:        m.ID,
-		ChannelID: m.ChannelID,
-		SenderID:  m.SenderID,
-		Content:   m.Content,
-		Timestamp: m.Timestamp,
-		ThreadID:  m.ThreadID,
-		Mentions:  m.Mentions,
-		Metadata:  m.Metadata,
-	}
-	if out.Mentions == nil {
-		out.Mentions = []string{}
-	}
-	return out
-}
-
-func messagesToResponse(in []channels.ChannelMessage) []channelMessageResponse {
-	out := make([]channelMessageResponse, 0, len(in))
-	for _, m := range in {
-		out = append(out, messageToResponse(m))
-	}
-	return out
-}
-
+// channelToResponse / messageToResponse / messagesToResponse live in
+// channel_response_builders.go (moved when RFC 0037 PR 2's classification
+// threading pushed this file past the 500-line review cap).
 // writeChannelError lives in channel_errors.go.
 // parseLimit + parseBefore live in channel_query_params.go.
 // validateRequestCascadeDepth lives in channel_cascade_depth.go.
