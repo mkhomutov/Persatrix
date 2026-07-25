@@ -103,3 +103,11 @@ ISSUE-0109 defaults PR):
 > maintainer's request, after the post-merge verification of PR #769.
 > Candidate for the v0.3.12 scope lock (alongside RFC 0039 and the proposed
 > ISSUE-0106 slot); not slated to any train yet.
+
+> 2026-07-25 (later) — **Slotted into v0.3.12 as a cuttable fold-in** at the
+> [v0.3.12 plan opening](../v0.3.12-plan.md#scope-decisions-locked-at-plan-authoring-time-2026-07-25).
+> Plan-opening default for step 4 (Go/Python alignment): **option (c)** — the
+> Python dispatcher cap stays a per-process global backstop and per-channel
+> caps must be ≤ it (raising one channel above the fleet default means raising
+> the backstop too) — revisitable in the fold-in PR with the alternatives
+> above. Droppable to v0.3.13 without touching either v0.3.12 workstream.
