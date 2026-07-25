@@ -169,5 +169,12 @@ func (d *GRPCMessageDispatcher) channelMessageToProto(msg ChannelMessage, env Di
 		CloseNotificationRedelivery:   env.InteractionCloseRedelivery,
 		CloseNotificationCloseTrigger: env.InteractionCloseTrigger,
 		SynthesisTurn:                 env.SynthesisTurn,
+		// RFC 0037 §B (v0.3.12 PR 2): the dispatching channel's §A
+		// confidentiality level, resolved from the `channels` row by
+		// [ChannelRouter.classificationFor] at dispatch. Channel-level,
+		// like ChannelSize. Empty (a failed row read) rides the wire
+		// verbatim — the receiver resolves it to the `public` acting
+		// floor (§A rule (b)), never `internal`.
+		Classification: env.Classification,
 	}
 }

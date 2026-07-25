@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,6 +52,11 @@ type ChannelRouter struct {
 	dispatcher MessageDispatcher
 	logger     *zap.Logger
 	metrics    *RouterMetrics
+
+	// classifications is the RFC 0037 §B dispatch-time classification cache
+	// (v0.3.12 PR 2) — see [classificationCache] for the read-through +
+	// coherence contract. Zero value ready.
+	classifications classificationCache
 
 	// waiter is the chat-as-DM publish-and-await correlation table
 	// (RFC 0011 PR 4a-ii-β-2). Always non-nil — initialised in
@@ -484,17 +488,4 @@ func (r *ChannelRouter) PublishAndAwait(
 	}
 }
 
-// channelTypeFromID derives the canonical channel type from a channel id's
-// prefix. Returns [ErrInvalidChannelType] if the prefix is unknown.
-func channelTypeFromID(id string) (ChannelType, error) {
-	switch {
-	case strings.HasPrefix(id, "group:"):
-		return ChannelTypeGroup, nil
-	case strings.HasPrefix(id, "dm:"):
-		return ChannelTypeDM, nil
-	case strings.HasPrefix(id, "thread:"):
-		return ChannelTypeThread, nil
-	default:
-		return "", fmt.Errorf("%w: unknown channel_id prefix in %q", ErrInvalidChannelType, id)
-	}
-}
+// channelTypeFromID lives in identifiers.go.

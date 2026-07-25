@@ -1100,8 +1100,26 @@ type ChannelMessageEvent struct {
 	// the no-reopen latch (degraded to the 4b-i artifact-less close, never a
 	// reopen).
 	SynthesisTurn bool `protobuf:"varint,30,opt,name=synthesis_turn,json=synthesisTurn,proto3" json:"synthesis_turn,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// RFC 0037 §B (v0.3.12, PR 2): the dispatching channel's confidentiality
+	// classification — "public" | "internal" | "restricted" | "secret", the §A
+	// lattice — populated from the `channels` row at dispatch
+	// (`channelMessageToProto` via the router's per-dispatch resolve) so the
+	// persona runtime can run the §D injection gate per turn without a
+	// channel-metadata roundtrip. Carried as a first-class field for the same
+	// reason as `cascade_depth = 11`: `ChannelMessageEvent` has no metadata
+	// map. Receiver contract (§A rule (b)): empty (a pre-v0.3.12 producer, or
+	// a dispatch whose channel-row read failed) and any out-of-lattice value
+	// resolve to the `public` acting floor at the read site
+	// (`agents/persona_runtime/classification.py::acting_rank`) — never
+	// `internal` — so an unclassified or garbled event can only UNDER-inject,
+	// the fail-closed direction. The value is seeded verbatim at the receive
+	// boundary (`agents/channel_event_classification.py`); no receiver-side
+	// default is applied (RFC 0037 PR 1's one-resolver-per-rule discipline).
+	// Dark in PR 2: delivered on both paths (this field + the REST
+	// message/history `classification`), read by nothing until the PR 4 gate.
+	Classification string `protobuf:"bytes,31,opt,name=classification,proto3" json:"classification,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ChannelMessageEvent) Reset() {
@@ -1342,6 +1360,13 @@ func (x *ChannelMessageEvent) GetSynthesisTurn() bool {
 		return x.SynthesisTurn
 	}
 	return false
+}
+
+func (x *ChannelMessageEvent) GetClassification() string {
+	if x != nil {
+		return x.Classification
+	}
+	return ""
 }
 
 // Generic ack returned by fire-and-acknowledge RPCs (e.g. ReceiveChannelMessage)
@@ -1739,8 +1764,7 @@ const file_task_proto_rawDesc = "" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12,\n" +
 	"\x12agent_display_name\x18\x05 \x01(\tR\x10agentDisplayName\x12!\n" +
-	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\xdb\n" +
-	"\n" +
+	"\freply_status\x18\x06 \x01(\tR\vreplyStatus\"\x83\v\n" +
 	"\x13ChannelMessageEvent\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -1774,7 +1798,8 @@ const file_task_proto_rawDesc = "" +
 	"\aconvene\x18\x1b \x01(\bR\aconvene\x12B\n" +
 	"\x1dclose_notification_redelivery\x18\x1c \x01(\bR\x1bcloseNotificationRedelivery\x12G\n" +
 	" close_notification_close_trigger\x18\x1d \x01(\tR\x1dcloseNotificationCloseTrigger\x12%\n" +
-	"\x0esynthesis_turn\x18\x1e \x01(\bR\rsynthesisTurnB\f\n" +
+	"\x0esynthesis_turn\x18\x1e \x01(\bR\rsynthesisTurn\x12&\n" +
+	"\x0eclassification\x18\x1f \x01(\tR\x0eclassificationB\f\n" +
 	"\n" +
 	"_threshold\"H\n" +
 	"\aTaskAck\x12\x18\n" +

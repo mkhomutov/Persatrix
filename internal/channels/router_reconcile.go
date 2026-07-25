@@ -38,7 +38,7 @@ func (r *ChannelRouter) ReconcileConfig(ctx context.Context, cfg *Config) error 
 	}
 	for _, decl := range cfg.Channels {
 		canonicalID := decl.CanonicalID()
-		_, err := r.store.GetChannel(ctx, canonicalID)
+		stored, err := r.store.GetChannel(ctx, canonicalID)
 		switch {
 		case err == nil:
 			// Channel already in store — verify membership parity.
@@ -49,6 +49,36 @@ func (r *ChannelRouter) ReconcileConfig(ctx context.Context, cfg *Config) error 
 			if div := membershipDivergence(decl, storeMembers); len(div) > 0 {
 				return fmt.Errorf("%w: channel=%s divergent_participants=%v",
 					ErrConfigStoreMembershipDivergence, canonicalID, div)
+			}
+			// RFC 0037 §B adoption (v0.3.12 PR 2 — the 0037 plan's "PR 2
+			// note — existing rows"): a store created before the operator
+			// declared a classification holds the migration's `internal`
+			// backfill; without this step the declared level never reaches
+			// the row and every read silently under-classifies while the
+			// YAML reads as classified. Config is authoritative for
+			// DECLARED group channels (the §B "loaded when config is
+			// applied" contract — the same direction as the membership
+			// parity check above): the declared level, load-filled to
+			// `internal` when the field is absent (§A rule (a)), is adopted
+			// whenever the row disagrees. Unlike membership divergence this
+			// is not a loud failure — the declaration is unambiguous about
+			// the desired end state, so reconcile converges instead of
+			// halting. A runtime reclassification of a config-declared
+			// channel must be reflected in YAML to survive restart.
+			if stored.Classification != decl.Classification {
+				if cErr := r.store.SetChannelClassification(ctx, canonicalID, decl.Classification); cErr != nil {
+					return fmt.Errorf("channels: reconcile classification %s: %w", canonicalID, cErr)
+				}
+				// Keep the dispatch cache coherent with the write — the
+				// [classificationCache] contract for every router-side
+				// classification write path (a no-op at boot, where the
+				// cache is still empty; load-bearing if reconcile ever
+				// runs after dispatches).
+				r.classifications.refresh(canonicalID, string(decl.Classification))
+				r.logger.Info("channels: adopted declared classification",
+					zap.String("channel_id", canonicalID),
+					zap.String("from", string(stored.Classification)),
+					zap.String("to", string(decl.Classification)))
 			}
 			r.logger.Debug("channels: config channel present in store",
 				zap.String("channel_id", canonicalID))
@@ -86,6 +116,11 @@ func (r *ChannelRouter) ReconcileConfig(ctx context.Context, cfg *Config) error 
 				// RFC 0031 Phase 1: tag config-declared channels with
 				// the boot session_id. Empty falls through to legacy.
 				SessionID: r.defaultSessionID,
+				// RFC 0037 §B (v0.3.12 PR 2): thread the PR 1 declaration
+				// into the row — load-filled to `internal` when absent
+				// (§A rule (a)), validated + dark-window-capped by
+				// Config.Validate before reconcile runs.
+				Classification: decl.Classification,
 			}, members); err != nil {
 				return fmt.Errorf("channels: reconcile create %s: %w", canonicalID, err)
 			}

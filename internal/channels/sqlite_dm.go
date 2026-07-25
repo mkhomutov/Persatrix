@@ -105,5 +105,8 @@ func (s *sqliteStore) GetOrCreateDM(ctx context.Context, a, b string) (Channel, 
 		Type:      ChannelTypeDM,
 		CreatedAt: now,
 		SessionID: DefaultSessionID,
+		// RFC 0037 v0.3.12 PR 2: the struct agrees with the row just
+		// inserted — the same normalized stamp the INSERT above wrote.
+		Classification: s.dmDefaultClassification,
 	}, nil
 }

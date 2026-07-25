@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .cascade_depth_defaults import DEFAULT_MAX_CASCADE_DEPTH
+from .channel_event_classification import seed_channel_classification
 from .generated import task_pb2
 from .persona_types import AgentEvent
 
@@ -251,6 +252,12 @@ def seed_wire_metadata(
         prev_id=request.previous_interaction_id,
         prev_trigger=request.previous_interaction_close_trigger,
     )
+
+    # RFC 0037 §B (v0.3.12 PR 2): the acting channel's §A classification,
+    # seeded VERBATIM (empty seeds nothing → the read-side `public` floor;
+    # see agents/channel_event_classification.py for the one-resolver
+    # rationale). Dark until the PR 3 interaction-open capture reads it.
+    seed_channel_classification(event.metadata, request.classification)
 
 
 def _seed_validated_interaction_keys(

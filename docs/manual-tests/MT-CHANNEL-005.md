@@ -58,9 +58,9 @@ to confirm history aggregates.
 
 - [docs/rfcs/0011-channels-bridges.md](../rfcs/0011-channels-bridges.md) §A
   ("DM canonicalization"), §C (REST endpoints)
-- [internal/channels/channels.go](../../internal/channels/channels.go)
-  — `validateParticipantID` ([line 167](../../internal/channels/channels.go#L167))
-  + `CanonicalDMID` ([line 185](../../internal/channels/channels.go#L185))
+- [internal/channels/identifiers.go](../../internal/channels/identifiers.go)
+  — `validateParticipantID` ([line 167](../../internal/channels/identifiers.go#L167))
+  + `CanonicalDMID` ([line 185](../../internal/channels/identifiers.go#L185))
 - [internal/server/chat_handler.go:199](../../internal/server/chat_handler.go#L199)
   — only REST entry point that calls `GetOrCreateDM` in v0.3.0
 
@@ -262,7 +262,7 @@ $dmZ.id
 ### Step 7: Same-participant DM is rejected at the chat boundary
 
 `CanonicalDMID` enforces "two distinct participants"
-([channels.go:192-194](../../internal/channels/channels.go#L192-L194)).
+([identifiers.go](../../internal/channels/identifiers.go#L192-L194)).
 The chat handler maps `ErrInvalidParticipantID` to 400
 ([chat_handler.go:245-249](../../internal/server/chat_handler.go#L245-L249)).
 Send a chat where `user_id` equals the agent id to exercise this path.
@@ -318,18 +318,18 @@ try {
 
 The participant-id pattern is permissive on case:
 `participantIDPattern = ^[A-Za-z0-9][A-Za-z0-9_-]*$`
-([channels.go:150](../../internal/channels/channels.go#L150)). Both `Alice`
+([identifiers.go](../../internal/channels/identifiers.go#L150)). Both `Alice`
 and `alice` pass `validateParticipantID`, so a chat from `user_id: "Alice"`
 materialises a **separate** DM row at `dm:Alice:alice` — capital letters
 sort before lowercase in ASCII (`A` = 0x41 < `a` = 0x61), so `Alice` is
 the canonical `min`.
 
 This is by design: there is no case-folding logic in `CanonicalDMID`
-([channels.go:185-199](../../internal/channels/channels.go#L185-L199)), and
+([identifiers.go](../../internal/channels/identifiers.go#L185-L199)), and
 `participantIDPattern` is the single source of truth across schema, loader,
-and runtime ([channels.go:137-150](../../internal/channels/channels.go#L137-L150)).
+and runtime ([identifiers.go](../../internal/channels/identifiers.go#L137-L150)).
 The `^[a-z0-9][a-z0-9-]*[a-z0-9]$` pattern that *is* lowercase-only is
-`channelNamePattern` ([channels.go:162](../../internal/channels/channels.go#L162))
+`channelNamePattern` ([identifiers.go](../../internal/channels/identifiers.go#L162))
 — that one applies to group-channel **names** (`group:<name>`), not to
 participant ids.
 
