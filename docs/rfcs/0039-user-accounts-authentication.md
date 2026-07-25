@@ -3,10 +3,10 @@ id: RFC-0039
 title: User Accounts & Authentication
 summary: Human user accounts with password login, opaque revocable sessions, and a coarse operator/user role gate on the REST surface — so the caller's participant_id becomes a verified claim instead of an unverified request parameter, and the unauthenticated REST API (RFC 0002) gains a foundation that IdP federation, MFA, and RFC 0012 organizational clearance extend cleanly.
 type: architecture
-status: proposed
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-16
-target: v0.3.x (Phases 1–2) + v0.4.0 (Phase 3)
+target: v0.3.12 (Phases 1–2) + v0.4.0 (Phase 3)
 depends_on:
   - RFC-0002
   - RFC-0016
@@ -15,10 +15,10 @@ depends_on:
 # RFC 0039 — User Accounts & Authentication
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: 🚧 Implementing — Phases 1–2 slotted into v0.3.12 as the bundled second workstream (plan opened 2026-07-25; [PR plan](0039-pr-plan.md), [v0.3.12 plan](../v0.3.12-plan.md)); independently shippable and cuttable whole
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
-**Target**: v0.3.x (Phases 1–2) + v0.4.0 (Phase 3)
+**Target**: v0.3.12 (Phases 1–2) + v0.4.0 (Phase 3)
 **Depends on**: RFC 0002 (REST API Server — the surface this RFC authenticates), RFC 0016 (Human Participant & Chat Interface — the `UserParticipant` an account binds to)
 **Relates to**: RFC 0009 (Agent Identity, Security & Sandboxing — the *agent* identity axis this RFC is the human counterpart of; the `AuditLogger` and `RateLimiter` it reuses), RFC 0012 (Protocols & Organizations — organizational clearance attaches to an account; the §I extension seam), RFC 0037 (Memory Confidentiality & Channel Classification — its confidentiality model presupposes a verified human identity), RFC 0001 (Core Orchestration Pipeline — the orchestrator `Store` pattern)
 
@@ -246,7 +246,11 @@ order; they need not all ship in one shared version.
 - **MFA / TOTP / WebAuthn.** A hook point is noted (§I); no second
   factor is built.
 - **A web or GUI login.** CLI and REST only. No browser surface, so no
-  cookies, no CSRF, no session-management UI.
+  cookies, no CSRF, no session-management UI. *(**Superseded for the
+  login/session surface** by the [enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md),
+  2026-07-25 — v0.3.12 ships the web-console login this excluded, so the
+  amendment carries the cookie transport, the CSRF assertion, and the XSS
+  posture. Session-**management** UI remains a Non-Goal until Phase 3.)*
 - **Encrypting `accounts.db` at rest.** Credentials are *hashed*
   (passwords) and *hash-only* (session tokens); the database file itself
   is unencrypted, the same posture as `channels.db` and `memory.db`
@@ -386,7 +390,12 @@ this RFC verifies that coverage rather than adding a sink.
 On a successful login the server mints a **256-bit opaque token** from
 `crypto/rand`, base64url-encoded. The raw token is returned to the
 client **once, in the login response body**; the server persists only
-`sha256(token)` as the `sessions` primary key.
+`sha256(token)` as the `sessions` primary key. *(**Amended 2026-07-25**
+— the [enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md)
+§A1 adds a `session_transport` field to login: `"bearer"` (the default)
+keeps this body-token contract byte-for-byte; `"cookie"` returns **no
+body token** and sets an `__Host-` `HttpOnly`/`Secure`/`SameSite=Strict`
+cookie instead, so the console's session never enters JS.)*
 
 A subsequent request presents `Authorization: Bearer <token>`. The
 middleware hashes the supplied token, looks up the session row by
@@ -455,7 +464,13 @@ A new `authMiddleware` is added to `internal/server/`. It is composed
 and **before** the mux, so every route is resolved through it. It
 attaches the resolved identity to the request `context` under an
 unexported `contextKey` — the same key-typing pattern RFC 0002
-established for the request ID.
+established for the request ID. *(**Amended 2026-07-25** — per the
+[enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md):
+identity resolves bearer-first, cookie-second (§A1); a
+**cookie**-resolved identity on a non-`GET`/`HEAD`/`OPTIONS` request
+must pass a same-origin assertion or is `403`-rejected, while
+bearer-resolved requests skip the check (§A2); and the login limiters
+add `429` to the status matrix (§B4).)*
 
 Every route declares one **policy**:
 
@@ -666,6 +681,11 @@ Question #2 of the security review, tracked in §Open Questions).
 
 ### K. REST surface summary
 
+*(**Amended 2026-07-25** — per the
+[enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md):
+`POST /api/v1/auth/login` gains the `session_transport` field (§A1), and
+a throttled login answers `429` with `Retry-After` (§B4).)*
+
 | Method & path | Policy | Phase | Notes |
 |---|---|---|---|
 | `POST /api/v1/auth/login` | `public` | 1 | Verify credential, issue session. |
@@ -722,7 +742,15 @@ workflow / agent / channel routes is assigned route-by-route in Phase 2
 - **Brute force.** Login attempts route through the existing
   `internal/security.RateLimiter` ([RFC 0009 §E](0009-security-sandboxing.md#e-tool-access-control--output-validation)),
   keyed by username + client IP. Sustained failures trip per-account
-  lockout in Phase 3.
+  lockout in Phase 3. ***Corrected 2026-07-25*** — no phase step owned
+  this wiring (Phases 1–2 never listed it; only Phase 3's *lockout* did),
+  so the endpoint would have shipped unthrottled. The
+  [enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md)
+  §B moves **throttling to Phase 1**, with the endpoint, and splits it
+  into per-source and per-username limiters — because §C's fixed-dummy-hash
+  non-disclosure makes every failed login a full Argon2id verification,
+  i.e. an unauthenticated CPU/memory amplification vector that per-account
+  lockout does not address. Lockout stays Phase 3.
 - **Session fixation / replay.** A fresh token is minted per login;
   logout, operator-disable, and a password change or operator-driven
   reset all revoke server-side; the configurable TTL bounds the value of
@@ -738,6 +766,13 @@ workflow / agent / channel routes is assigned route-by-route in Phase 2
 - **CSRF / XSS.** Authentication is bearer-token only — no cookies —
   so CSRF does not apply; there is no browser surface, so XSS does not
   apply. Stated explicitly so a future web UI re-opens both.
+  ***Re-opened 2026-07-25*** — v0.3.12 ships that web UI, so this bullet no
+  longer holds on its own premise. The
+  [enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md)
+  §A supersedes it: an `HttpOnly`/`SameSite=Strict` cookie transport
+  (the token never enters JS), a same-origin assertion on
+  cookie-authenticated writes, a console CSP, and a `{@html}` CI gate —
+  with session-riding-under-XSS recorded as an accepted residual.
 - **No new prompt-injection surface.** Credentials never enter an LLM
   context. The verified `participant_id` (§F) *strengthens* the RFC 0034
   / RFC 0037 prompt-assembly story rather than adding to it.
@@ -782,6 +817,14 @@ deployment depends on it.
    handling.
 10. **Audit** — new event types; emission for login and logout.
 
+*(**Amended 2026-07-25** — per the
+[enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md):
+step 5 gains `session_transport` + the cookie form (§A1); step 6 gains
+the same-origin assertion on cookie-authenticated writes (§A2); step 7
+gains the per-source + per-username login limiters,
+`auth.trusted_proxies`, and the console CSP/security headers (§A3, §B)
+— throttling ships with the endpoint, not in Phase 3.)*
+
 Dependencies: the merged RFC 0002 REST server only.
 
 ### Phase 2: Enforcement and the verified-identity claim (v0.3.x)
@@ -801,6 +844,12 @@ has a gated REST surface.
 5. **CLI** — every command attaches the stored bearer token; a `401`
    prints the `persatrix login` hint.
 6. **Audit** — `authz.denied` emission.
+
+*(**Amended 2026-07-25** — per the
+[enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md)
+§A4: step 5 gains the console login form and the cookie flow —
+`session_transport: "cookie"`, so the browser session rides the
+`HttpOnly` cookie and the token never enters JS.)*
 
 Dependencies: Phase 1.
 
@@ -957,6 +1006,10 @@ blocks on it.
 
 ## Related Documentation
 
+- [Amendment — Enabled-Mode Exposure: the Browser Session Surface & Login
+  Throttling](0039-amendment-enabled-mode-exposure.md) (2026-07-25) — supersedes
+  the *"A web or GUI login"* Non-Goal and the *CSRF / XSS* and *Brute force*
+  Security Considerations for the v0.3.12 shipping scope.
 - [RFC 0002 — REST API Server](0002-rest-api-server.md) — the
   unauthenticated surface this RFC secures; the JSON error envelope,
   middleware composition, and `contextKey` pattern reused here.
