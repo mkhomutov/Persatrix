@@ -69,6 +69,12 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("%w: dm_default_classification=%q (must be one of public|internal|restricted|secret)",
 			ErrInvalidClassification, c.DMDefaultClassification)
 	}
+	// Item-8 dark-window ceiling (RFC 0037, temporary — removed at PR 4; see
+	// [CheckDarkWindowClassification]). A level above `internal` declared
+	// before the §D gate exists is a boundary the fleet cannot honour yet.
+	if err := CheckDarkWindowClassification(c.DMDefaultClassification); err != nil {
+		return fmt.Errorf("dm_default_classification: %w", err)
+	}
 	if len(c.Channels) > c.MaxChannels {
 		return fmt.Errorf("%w: declared=%d cap=%d",
 			ErrChannelCapExceeded, len(c.Channels), c.MaxChannels)
@@ -100,6 +106,14 @@ func (c *Config) Validate() error {
 		if ch.Classification != "" && !ch.Classification.Valid() {
 			return fmt.Errorf("channels[%d=%s]: %w: %q (must be one of public|internal|restricted|secret)",
 				i, ch.Name, ErrInvalidClassification, ch.Classification)
+		}
+		// Item-8 dark-window ceiling (temporary — removed at PR 4). Rejected
+		// here rather than left to documentation: in PR 1 a declared level does
+		// not even reach the store row, so a `restricted` channel would look
+		// classified to the operator while every read path still sees
+		// `internal`.
+		if err := CheckDarkWindowClassification(ch.Classification); err != nil {
+			return fmt.Errorf("channels[%d=%s]: %w", i, ch.Name, err)
 		}
 
 		// Reject a negative RFC 0050 per-channel config revision. Zero/absent is

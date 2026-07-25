@@ -326,6 +326,15 @@ def test_escalation_chair_id_accepts_member_style_ids(chair_id: str):
 # the exact failure mode this file exists to pin (see module docstring).
 # The enum is the fixed §A lattice; the Go loader mirrors the rejection via
 # `ErrInvalidClassification` (config_validate.go).
+#
+# NOTE — schema-valid is deliberately WIDER than loadable during v0.3.12. This
+# enum is the post-Phase-1 contract and accepts all four levels, but the Go
+# loader additionally rejects `restricted`/`secret` (the item-8 dark-window
+# ceiling, `ErrClassificationAboveDarkWindow`) until the §D gate arms at RFC
+# 0037 PR 4. Tightening the enum instead would mean churning it back at PR 4
+# and would make `make validate` disagree with itself across the window, so the
+# temporary ceiling lives on the Go side only. The tests below therefore pin
+# the enum, not the current startup behaviour.
 
 _CLASSIFICATION_LEVELS = ["public", "internal", "restricted", "secret"]
 
