@@ -4,9 +4,23 @@
 This module holds *only* the ``GRANDFATHERED_FILES`` frozenset consumed by
 ``scripts/checks/file_size.py``. It is split out for one structural reason:
 the allowlist is **reference data whose length scales with release history**,
-not authored logic. Every release cycle adds an entry (a plan, a checklist, an
-execution report) with an inline rationale, so the list grows monotonically
-and would eventually push the *checker itself* over its own 500-line code cap.
+not authored logic, so the list grows and would eventually push the *checker
+itself* over its own 500-line code cap.
+
+**Scope (narrowed 2026-07-25).** The two write-once release-evidence
+categories — manual-test execution reports and release checklists — are no
+longer listed here; they are excluded by pattern in ``file_size.py``
+(``_EXTRA_EXCLUDES``). Those files are frozen against a tag and can never
+shrink back under the cap, so each release was adding an entry whose stated
+exit condition ("archive once the tag ships") was unachievable — 19 had
+accumulated across v0.2–v0.3.10 and none was ever retired. Do not add new
+ones back; add the *pattern* if a genuinely new write-once category appears.
+
+What remains here is the honest case for an allowlist: files that are still
+edited, where the cap continues to do useful work and the entry really is
+expected to go away — master plans and release-prep plans (removable once the
+release is archived), living specs/guides (removable once a topic split
+lands), and long-form RFC PR plans (removable at RFC seal).
 
 Separating the data from the logic keeps ``file_size.py`` honestly under the
 code-line cap (it measures complexity, which should not grow just because the
@@ -198,20 +212,17 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # temporarily exceeds the prose limit during the active Unreleased
     # window.
     "CHANGELOG.md",
-    # Per-release manual-test execution reports accumulate evidence across
-    # the PR 1 (initial sweep) and PR 4 (final pre-tag verification)
-    # release-prep passes — every test row carries inline command + output
-    # snippets, per-leg notes, and §"Release-prep regressions fixed"
-    # tables that grow the file past the 3 000-word prose cap. Same
-    # release-cycle-accumulator pattern as `CHANGELOG.md` above: written
-    # against a fixed release, archived once the tag ships. The v0.2.3
-    # report (3 395 words at tag time) set the precedent; the v0.3.0 PR 4
-    # rerun (this addition) brings the report to ~4 600 words.
-    "docs/manual-tests/v0.3.0-execution-report.md",
-    # docs/manual-tests/v0.3.1-execution-report.md — v0.3.1 sibling of the
-    # v0.3.0 report above; same per-release accumulator pattern (~4 250 words
-    # after the PR 1 live pass). Archive once the tag ships.
-    "docs/manual-tests/v0.3.1-execution-report.md",
+    # NOTE: per-release manual-test execution reports
+    # (docs/manual-tests/v*-execution-report.md) and release checklists
+    # (docs/v*-release-checklist.md) are no longer enumerated here. Both are
+    # write-once release evidence that can never shrink back under the cap, so
+    # each release added an entry whose "archive once the tag ships" exit
+    # condition was never achievable; 19 such entries (v0.2-v0.3.10) had
+    # accumulated and none was ever retired. They are now excluded by pattern
+    # in scripts/checks/file_size.py (_EXTRA_EXCLUDES), which is also why new
+    # ones must NOT be added back here. Master plans and release-prep plans
+    # stay enumerated below: those are edited during their cycle, so the cap
+    # still does useful work on them.
     # docs/manual-tests/MT-MEMORY-005-dementia-test.md — the qualitative
     # memory acceptance gate; gains a Test Results row every memory-touching
     # release (v0.3.1 ×2, v0.3.5 ×2), so it sits at the 3 000-word prose cap
@@ -223,141 +234,6 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # verification) folds in a detailed evidence row, so it sits at the 3 000-word
     # prose cap. The ISSUE-0099 PR-2 row tipped it over. Trim only if a row is dropped.
     "docs/manual-tests/MT-CHANNEL-GOV-004.md",
-    # docs/manual-tests/v0.3.2-execution-report.md is the v0.3.2 sibling of
-    # the v0.3.0 / v0.3.1 reports above — identical per-release accumulator
-    # pattern. The release-prep PR 1 sweep (32 tests + wallet acquire+settle
-    # p99 measurement) brought the report past the 3 000-word prose cap:
-    # every test row carries inline outcome + evidence + the F-1 chat-REST
-    # surface failure root-cause trace cross-linked to ISSUE-0065 (the only
-    # ❌ Fail on this pass). Written against the v0.3.2 release; archive
-    # once the tag ships.
-    "docs/manual-tests/v0.3.2-execution-report.md",
-    # docs/manual-tests/v0.3.3-execution-report.md is the v0.3.3 sibling of
-    # the v0.3.0 / v0.3.1 / v0.3.2 reports above — identical per-release
-    # accumulator pattern. The PR 1 sweep (34 rows + automated suites) plus
-    # the release-prep PR 4 § Re-Execution section (full-suite rerun + the
-    # four-behaviour live Docker smoke on the post-version-bump tip) bring
-    # the report past the 3 000-word prose cap. Written against the v0.3.3
-    # release; archive once the tag ships.
-    "docs/manual-tests/v0.3.3-execution-report.md",
-    # docs/manual-tests/v0.3.4-execution-report.md is the v0.3.4 sibling of
-    # the v0.3.0–v0.3.3 reports above — identical per-release accumulator
-    # pattern. The release-prep PR 1 sweep (38 rows = 4 new RFC 0033 MTs +
-    # 34 carried-forward, plus the automated suites) carries inline per-step
-    # evidence tables for the four new MTs (alias routing, the live one-line
-    # provider swap with exact gpt-4o cost math, offline $0, Ollama real
-    # tokens) and the §Follow-ups findings (F-5 OPENAI_API_KEY plumbing,
-    # F-6 CPU-Ollama latency, F-7 1% tail-sampling), pushing it past the
-    # 3 000-word prose cap. Written against the v0.3.4 release; archive once
-    # the tag ships.
-    "docs/manual-tests/v0.3.4-execution-report.md",
-    # docs/manual-tests/v0.3.5-execution-report.md is the v0.3.5 sibling of
-    # the v0.3.0–v0.3.4 reports above — identical per-release accumulator
-    # pattern. The release-prep PR 1 sweep (3 new session/epoch MTs +
-    # the carried-forward v0.3.4 surface) carries the automated-gate results
-    # (20+5 integration / 893 unit / 153 Rust), inline per-step evidence
-    # tables for MT-SESSION-002 / -003 / MT-EPOCH-001, the § Environment &
-    # constraints rationale, and the §Follow-ups findings (F-1/F-2 scope/epoch
-    # tagging, F-3/F-4 environment), past the cap. Archive once the tag ships.
-    "docs/manual-tests/v0.3.5-execution-report.md",
-    # v0.3.6 sibling — same per-release accumulator pattern; archive once tagged.
-    "docs/manual-tests/v0.3.6-execution-report.md",
-    # v0.3.7 sibling — same per-release accumulator pattern (the realism surface:
-    # MT-CHANNEL-RELEVANCE-001 + MT-PERSONA-CONVERSATION-002 + the combined
-    # walkthrough + the carried-forward v0.3.6 surface + the structural-gate
-    # tables), and it carries the live root-cause analysis of the @everyone
-    # broadcast defect (ISSUE-0094) past the cap. Archive once the tag ships.
-    "docs/manual-tests/v0.3.7-execution-report.md",
-    # v0.3.8 sibling — same per-release accumulator pattern (the convergence
-    # surface: MT-CHANNEL-RELEVANCE-002 + MT-CHANNEL-GOV-003/-004 +
-    # MT-INTERACTION-SUMMARY-001 + MT-CHANNEL-CONFIG-001…004 + the combined
-    # convergence walkthrough + the structural-gate tables). The PR 4 final
-    # pre-tag verification appended its live gate table + the two-store
-    # migration upgrade-on-open verification + the Docker-smoke carry-forward,
-    # tipping the report past the 3 000-word cap (~4 280 words). Archive once
-    # the tag ships.
-    "docs/manual-tests/v0.3.8-execution-report.md",
-    # v0.3.9 sibling — same per-release accumulator pattern (the verbatim-recall
-    # surface: MT-PERSONA-RECALL-001 run live on Anthropic + the recall
-    # store/endpoint/tool + ledger + §G window-filter + the two channel-store
-    # migration (v8→v9, v9→v10) structural-gate tables + the F-1/ISSUE-0107
-    # live finding). The PR 4 final pre-tag verification appended its live gate
-    # table + the channel-store upgrade-on-open verification + the Docker-smoke
-    # carry-forward, tipping the report past the 3 000-word cap. Archive once
-    # the tag ships.
-    "docs/manual-tests/v0.3.9-execution-report.md",
-    # v0.3.10 sibling — same per-release accumulator pattern (the reasoning-
-    # before-posting surface: MT-REASON-001 run live on Anthropic + the
-    # off→bid go-live / kill-switch / capability-gate / reconcile / proto-stamp
-    # structural-gate tables + the privacy-wall no-leak + RFC 0034 P3 + the
-    # F-1/F-2 (ISSUE-0108) live findings). The PR 4 final pre-tag verification
-    # appended its live gate table + the offline Docker smoke (no store migrates
-    # this release), tipping the report past the 3 000-word cap. Archive once
-    # the tag ships.
-    "docs/manual-tests/v0.3.10-execution-report.md",
-    # docs/v0.3.3-release-checklist.md crossed the 3 000-word prose cap as a
-    # release-cycle record: the §3.1 Upgrade Notes table (8 rows — event-driven
-    # loop, fire-and-forget channel dispatch, autonomy.timers, scheduled_wakes
-    # cache, salience knobs, wake counters, the vestigial §F guard, and the
-    # breaking MemoryFacade alias removal) and the §6 Known Gaps inventory are
-    # inherently longer for this feature-rich release than the v0.3.2 sibling
-    # (which fit at ~2 900 words); the PR 4 gate evidence is already condensed,
-    # with full detail deferred to the grandfathered execution report. Written
-    # against the v0.3.3 release; archive once the tag ships.
-    "docs/v0.3.3-release-checklist.md",
-    # docs/v0.3.4-release-checklist.md — v0.3.4 sibling of the v0.3.3 checklist
-    # above; identical release-cycle-record pattern. Crossed the cap in
-    # release-prep PR 4 when §1 gate boxes were filled with post-bump re-cert
-    # evidence over the §3.1 Upgrade Notes (7 rows) + §6 Known Gaps. Archive at tag.
-    "docs/v0.3.4-release-checklist.md",
-    # docs/v0.3.5-release-checklist.md — v0.3.5 sibling of the v0.3.3 / v0.3.4
-    # checklists above; identical release-cycle-record pattern. Crossed the cap
-    # in release-prep PR 4 when §1/§2/§7 were filled with post-bump re-cert
-    # evidence (+ the two §4 live hard-block legs) over the §3.1 Upgrade Notes +
-    # §6 Known Gaps. Archive once the tag ships.
-    "docs/v0.3.5-release-checklist.md",
-    # docs/v0.3.6-release-checklist.md — v0.3.6 sibling of the v0.3.3–v0.3.5
-    # checklists above; same release-cycle-record pattern. Crossed the cap in
-    # release-prep PR 4 when §1/§2/§7 were filled with post-bump re-cert evidence
-    # over the §3.1 Upgrade Notes + §6 Known Gaps. Archive once the tag ships.
-    "docs/v0.3.6-release-checklist.md",
-    # docs/v0.3.7-release-checklist.md — v0.3.7 sibling of the v0.3.3–v0.3.6
-    # checklists above; same release-cycle-record pattern. Crossed the cap on
-    # creation (release-prep PR 2) carrying the three §3.1 Upgrade Notes (the
-    # respond_policy→disposition reframe, the addressing-aware directedness fix,
-    # and the v12→v14 person-identity migration) + §6 Known Gaps. Archive once
-    # the tag ships.
-    "docs/v0.3.7-release-checklist.md",
-    # docs/v0.3.8-release-checklist.md — v0.3.8 sibling of the v0.3.3–v0.3.7
-    # checklists above; same release-cycle-record pattern. Crossed the cap on
-    # creation (release-prep PR 2) carrying the convergence-cluster surface
-    # (Tier B + governance Layers 1/2/4 + interaction-summary + RFC 0050), the
-    # §3.1 Upgrade Notes for *both* schema migrations (channel store v6→v8,
-    # persona-memory v14→v15) + the behaviour-active-by-default caveat, and §6
-    # Known Gaps. Archive once the tag ships.
-    "docs/v0.3.8-release-checklist.md",
-    # docs/v0.3.9-release-checklist.md — v0.3.9 sibling of the v0.3.3–v0.3.8
-    # checklists above; same release-cycle-record pattern. Crossed the cap on
-    # creation (release-prep PR 2) carrying the verbatim-recall surface (RFC 0036
-    # recall over the RFC 0035 ledger + the §G conversation-window filter), the
-    # §3.1 Upgrade Notes (the opt-in channels:recall permission, the two
-    # channel-store migrations v8→v9→v10, the conversation-window membership
-    # filter, the two accepted recall limitations) + the behaviour-active-by-default
-    # caveat + the version-skew caution, and §6 Known Gaps. Archive once the tag ships.
-    "docs/v0.3.9-release-checklist.md",
-    # docs/v0.3.10-release-checklist.md — v0.3.10 sibling of the v0.3.3–v0.3.9
-    # checklists above; same release-cycle-record pattern. Crossed the cap on
-    # creation (release-prep PR 2) carrying the reasoning-before-posting surface
-    # (RFC 0051 semantic silence + plan-threaded compose + reflexion, the two
-    # fold-ins RFC 0034 P3 + RFC 0045), the reasoning go-live gate inventory (the
-    # privacy-wall no-leak test, the off→bid flip + kill switch, the deliberation/
-    # reflexion telemetry, the validate capability-gating, the additive-proto-field
-    # wire-compat gate), the §3.1 Upgrade Notes (the off→bid default flip, the
-    # one-flip kill switch, the per-member threshold supersession, the depth:deep
-    # rejection, the revise opt-in gated to mode:plan, the additive wire fields +
-    # orchestrator-first ordering, the no-store-migration note) + §6 Known Gaps.
-    # No store migrates this release. Archive once the tag ships.
-    "docs/v0.3.10-release-checklist.md",
     # docs/v0.3.4-release-prep-plan.md is the v0.3.4 release-prep sequencer —
     # same release-cycle-accumulator pattern as the v0.3.0 / v0.3.1 plans and
     # the v0.3.3 checklist above. It crossed the 3 000-word prose cap when PR 1

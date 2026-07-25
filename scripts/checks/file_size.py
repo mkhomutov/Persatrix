@@ -71,6 +71,26 @@ _EXTRA_EXCLUDES = [
     # as THIRD_PARTY_NOTICES.md and docs/issues/INDEX.md above. This keeps
     # file_size.py itself honestly under the code cap (the logic, not the data).
     "scripts/checks/file_size_allowlist.py",
+    # Per-release manual-test execution reports and release checklists. Both are
+    # written once against a fixed tag and never edited again: their length is
+    # *release evidence* (one row per test, per gate, per upgrade note), not
+    # authored prose, and it scales with how much the release shipped. They can
+    # never shrink back under the cap, so enumerating them one-by-one in
+    # GRANDFATHERED_FILES accumulated a per-release entry carrying a "remove
+    # once the tag ships" exit condition that was never achievable — 19 such
+    # entries had piled up across v0.2–v0.3.10 and none was ever retired.
+    # Excluded by pattern for the same "size scales with data, not prose"
+    # reason as THIRD_PARTY_NOTICES.md and docs/issues/INDEX.md above, so the
+    # allowlist stops growing by one entry per release.
+    #
+    # Deliberately narrow: this matches only the two write-once categories.
+    # Master plans (docs/v*-plan.md) and release-prep plans stay allowlisted
+    # individually, because those are *edited during* their cycle and the cap
+    # still does useful work on them. Permanent acceptance gates that happen to
+    # live under docs/manual-tests/ (MT-MEMORY-005, MT-CHANNEL-GOV-004) are not
+    # per-release reports and are not matched here.
+    "docs/manual-tests/v*-execution-report.md",
+    "docs/v*-release-checklist.md",
 ]
 
 EXCLUDE_PATTERNS = DEFAULT_EXCLUDES + _EXTRA_EXCLUDES
