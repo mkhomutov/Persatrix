@@ -126,8 +126,8 @@ PR 1 (lattice helpers + channel classification: config/schema + store v11 + DM s
 | PR | Step | Branch | Status | GitHub PR | Merged |
 |----|------|--------|--------|-----------|--------|
 | 1 | 1–2a — lattice helpers + channel classification at rest (config/schema + store v11 + DM stamping; dark) | `feature/v0312-rfc0037-lattice-config` | ✅ Merged | [#773](https://github.com/mkhomutov/Persatrix/pull/773) | 2026-07-25 |
-| 2 | 2b — classification on the wire (proto + dispatch + history/catch-up; dark) | `feature/v0312-rfc0037-wire` | 🔀 PR open | _this PR_ | — |
-| 3 | 3 — memory substrate (protection levels + projections table + interaction-open capture; dark) | `feature/v0312-rfc0037-memory-substrate` | ⬜ | — | — |
+| 2 | 2b — classification on the wire (proto + dispatch + history/catch-up; dark) | `feature/v0312-rfc0037-wire` | ✅ Merged | [#774](https://github.com/mkhomutov/Persatrix/pull/774) | 2026-07-25 |
+| 3 | 3 — memory substrate (protection levels + projections table + interaction-open capture; dark) | `feature/v0312-rfc0037-memory-substrate` | 🔀 PR open | _this PR_ | — |
 | 4 | 4 + 3-notes + 6 — §D hard gate + notes leg + tick floor + §B guard (gate live) | `feature/v0312-rfc0037-hard-gate` | ⬜ | — | — |
 | 5 | 5 — §F recall filter + acting-channel param + ISSUE-0106(b) ══ merge gate | `feature/v0312-rfc0037-recall-filter` | ⬜ | — | — |
 | 6 | Phase 2 — declassification projections (cuttable) | `feature/v0312-rfc0037-projections` | ⬜ | — | — |
