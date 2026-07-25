@@ -22,7 +22,7 @@ vote into a DM and Go's ``processEndVote`` counts it toward a quorum.
 
 Python copies are imported and compared directly (stronger than a text
 pin). The Go side has no named constant — [scopeForDM]'s id *builder*
-(``internal/channels/channels.go``) is what mints every DM channel id —
+(``internal/channels/identifiers.go``) is what mints every DM channel id —
 so it is pinned as text, the sibling drift files' posture.
 """
 
@@ -34,7 +34,10 @@ from typing import NoReturn
 
 import pytest
 
-_CHANNELS_GO = Path("internal/channels/channels.go")
+# CanonicalDMID (the id builder parsed below) moved from channels.go to
+# identifiers.go in RFC 0037 PR 2's 500-line-cap carve — the parse rule
+# follows the declaration, per this pin's own contract.
+_CHANNELS_GO = Path("internal/channels/identifiers.go")
 
 # The canonical value, asserted explicitly (not just mutual equality):
 # DM channel ids are persisted (message store, interaction scopes), so

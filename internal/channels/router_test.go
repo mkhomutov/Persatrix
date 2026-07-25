@@ -37,6 +37,10 @@ type dispatchCall struct {
 	// tests can tell an end-vote close NOTIFICATION from ordinary fanout
 	// (the end-vote-close-propagation amendment).
 	closeNotification bool
+	// classification mirrors the envelope's RFC 0037 §B stamp (v0.3.12
+	// PR 2) so the wire tests can assert the channel's §A level reaches
+	// every dispatch path's envelope.
+	classification string
 }
 
 func (d *recordingDispatcher) Dispatch(_ context.Context, env DispatchEnvelope, msg ChannelMessage) error {
@@ -50,6 +54,7 @@ func (d *recordingDispatcher) Dispatch(_ context.Context, env DispatchEnvelope, 
 		threadParentSenderID: env.ThreadParentSenderID,
 		cascadeDepth:         asInt(msg.Metadata["cascade_depth"]),
 		closeNotification:    env.InteractionCloseNotification,
+		classification:       env.Classification,
 	})
 	return d.err
 }

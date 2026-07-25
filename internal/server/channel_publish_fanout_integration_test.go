@@ -231,6 +231,9 @@ func TestChannelPublish_FullChain_RESTToGRPCFanout(t *testing.T) {
 		assert.Equal(t, "group", ev.ChannelType,
 			"channel_type MUST be derived from the id prefix even when the "+
 				"publisher omits it (Python publisher does not send channel_type)")
+		assert.Equal(t, "internal", ev.Classification,
+			"RFC 0037 §B (v0.3.12 PR 2): the dispatched event MUST carry the "+
+				"channels row's §A level — a REST-created channel stamps `internal`")
 		assert.Equal(t, "agent-alice", ev.SenderId,
 			"sender_id MUST propagate verbatim — orchestrator is the trust "+
 				"boundary (proto/task.proto §ChannelMessageEvent.sender_id)")
