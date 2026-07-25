@@ -57,6 +57,18 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("%w: default_max_replies_per_participant=%d (must be >= 0)",
 			ErrInvalidMaxRepliesPerParticipant, c.DefaultMaxRepliesPerParticipant)
 	}
+	// RFC 0037 §B (v0.3.12): the fleet-wide DM-creation classification stamp
+	// must be a §A lattice level. LoadConfig fills the absent case with
+	// `internal` (rule (a)); empty is also accepted here so a hand-built
+	// Config that bypassed LoadConfig validates (zero value = the default,
+	// matching every other knob). Only a non-empty unknown level — an
+	// operator typo — is rejected, loudly, instead of being silently coerced
+	// by a stamp-side [NormalizeForStamp] later. The schema's `enum` catches
+	// it at `make validate`; this is the belt-and-suspenders for skippers.
+	if c.DMDefaultClassification != "" && !c.DMDefaultClassification.Valid() {
+		return fmt.Errorf("%w: dm_default_classification=%q (must be one of public|internal|restricted|secret)",
+			ErrInvalidClassification, c.DMDefaultClassification)
+	}
 	if len(c.Channels) > c.MaxChannels {
 		return fmt.Errorf("%w: declared=%d cap=%d",
 			ErrChannelCapExceeded, len(c.Channels), c.MaxChannels)
@@ -77,6 +89,18 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("channels[%d]: duplicate name %q", i, ch.Name)
 		}
 		seenName[ch.Name] = true
+
+		// RFC 0037 §A (v0.3.12): the per-channel classification must be a
+		// lattice level. Same posture as dm_default_classification above —
+		// empty passes (hand-built Config; LoadConfig fills `internal`),
+		// unknown non-empty is a typo rejected loudly. The field is DARK in
+		// PR 1 (parsed, validated, not yet applied to the store row), but
+		// validation lands with the field so a typo never sits silently in a
+		// config file waiting for PR 2 to make it load-bearing.
+		if ch.Classification != "" && !ch.Classification.Valid() {
+			return fmt.Errorf("channels[%d=%s]: %w: %q (must be one of public|internal|restricted|secret)",
+				i, ch.Name, ErrInvalidClassification, ch.Classification)
+		}
 
 		// Reject a negative RFC 0050 per-channel config revision. Zero/absent is
 		// the legal seed-only sentinel (the revision-gated loader treats it as

@@ -315,3 +315,79 @@ def test_escalation_chair_id_accepts_member_style_ids(chair_id: str):
             ],
         }
     )
+
+
+# ── RFC 0037 (v0.3.12) classification fields ──────────────────────────────
+#
+# The per-channel `classification` and the root `dm_default_classification`
+# knob land together in RFC 0037 PR 1 (channel classification at rest, dark).
+# Both roots are closed (`additionalProperties: false`), so the schema MUST
+# declare them or `make validate` rejects the documented operator config —
+# the exact failure mode this file exists to pin (see module docstring).
+# The enum is the fixed §A lattice; the Go loader mirrors the rejection via
+# `ErrInvalidClassification` (config_validate.go).
+
+_CLASSIFICATION_LEVELS = ["public", "internal", "restricted", "secret"]
+
+
+@pytest.mark.parametrize("level", _CLASSIFICATION_LEVELS)
+def test_channel_classification_accepts_lattice_levels(level: str):
+    """Every §A lattice level validates on a declared group channel."""
+    _validate(
+        {
+            "max_channels": 50,
+            "channels": [
+                {"name": "planning", "classification": level, "members": ["ada"]}
+            ],
+        }
+    )
+
+
+def test_channel_classification_rejects_unknown_level():
+    """An out-of-vocabulary level (`confidential`) is rejected by the enum.
+
+    The §A vocabulary is fixed for v0.3.x (RFC 0037 OQ #1); a typo must
+    surface at `make validate`, not load silently and stamp `internal`.
+    """
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(
+            {
+                "max_channels": 50,
+                "channels": [
+                    {
+                        "name": "planning",
+                        "classification": "confidential",
+                        "members": ["ada"],
+                    }
+                ],
+            }
+        )
+
+
+@pytest.mark.parametrize("level", _CLASSIFICATION_LEVELS)
+def test_dm_default_classification_accepts_lattice_levels(level: str):
+    """The root-level DM stamping knob accepts every §A lattice level."""
+    _validate({"max_channels": 50, "dm_default_classification": level})
+
+
+def test_dm_default_classification_rejects_unknown_level():
+    """Same enum posture for the fleet-wide DM knob."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate({"max_channels": 50, "dm_default_classification": "top-secret"})
+
+
+def test_classification_enums_match_across_both_fields():
+    """The two declaration points encode ONE vocabulary.
+
+    RFC 0037 §A defines a single lattice; the per-channel field and the DM
+    knob must never drift apart. Compared directly (the
+    `escalation_chair_id` pattern-parity precedent above) so a future edit
+    to one enum fails here rather than shipping a config surface where a
+    level is legal on channels but not on DMs.
+    """
+    schema = _root_schema()
+    channel_enum = schema["definitions"]["channel"]["properties"]["classification"][
+        "enum"
+    ]
+    dm_enum = schema["properties"]["dm_default_classification"]["enum"]
+    assert channel_enum == dm_enum == _CLASSIFICATION_LEVELS

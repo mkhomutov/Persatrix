@@ -52,6 +52,8 @@ func applyMigration(db *sql.DB, target int) error {
 		return migrateV8ToV9(db)
 	case 10:
 		return migrateV9ToV10(db)
+	case 11:
+		return migrateV10ToV11(db)
 	default:
 		return fmt.Errorf("no migration registered for v%d", target)
 	}

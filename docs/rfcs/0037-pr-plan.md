@@ -120,6 +120,25 @@ PR 1 (lattice helpers + channel classification: config/schema + store v11 + DM s
 
 ---
 
+## Progress Overview
+
+| PR | Step | Branch | Status |
+|----|------|--------|--------|
+| 1 | 1–2a — lattice helpers + channel classification at rest (config/schema + store v11 + DM stamping; dark) | `feature/v0312-rfc0037-lattice-config` | ✅ Merged |
+| 2 | 2b — classification on the wire (proto + dispatch + history/catch-up; dark) | `feature/v0312-rfc0037-wire` | ⬜ |
+| 3 | 3 — memory substrate (protection levels + projections table + interaction-open capture; dark) | `feature/v0312-rfc0037-memory-substrate` | ⬜ |
+| 4 | 4 + 3-notes + 6 — §D hard gate + notes leg + tick floor + §B guard (gate live) | `feature/v0312-rfc0037-hard-gate` | ⬜ |
+| 5 | 5 — §F recall filter + acting-channel param + ISSUE-0106(b) ══ merge gate | `feature/v0312-rfc0037-recall-filter` | ⬜ |
+| 6 | Phase 2 — declassification projections (cuttable) | `feature/v0312-rfc0037-projections` | ⬜ |
+| 7 | Phase 3 — §G leak tripwire (cuttable) | `feature/v0312-rfc0037-tripwire` | ⬜ |
+| 8 | closeout — docs/diagrams + MT + golden recipe + RFC flips | `feature/v0312-rfc0037-closeout` | ⬜ |
+
+**Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged
+
+**PR 1 note.** Group channels take the migration's `internal` DEFAULT at creation in PR 1; the *declared* `classification` is parsed + validated but threads into the store row with PR 2's `Channel` plumbing (the wire lift reads the same field). Behaviour-identical while the item-8 dark-window rule holds (nothing may be declared above `internal` yet, and `internal` IS the default).
+
+---
+
 ## Test strategy cross-reference
 
 The RFC's [Test Strategy](0037-memory-confidentiality-channel-classification.md#test-strategy) maps: unit lattice/gate/stamping/query/tripwire → PRs 1/4/3/5/7; migration tests → PRs 1/3; integration (restricted→public withhold, projection, tripwire) → PRs 4/6/7; the v0.3.12 review items 5/6/8 → PRs 4/4/8.
