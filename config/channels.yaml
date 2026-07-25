@@ -73,6 +73,19 @@ default_max_replies_per_participant: 0
 # IS its interaction.
 # default_interaction_idle_timeout_seconds: 600
 
+# Confidentiality classification (RFC 0037, v0.3.12) — every channel carries a
+# level from the fixed lattice `public` < `internal` < `restricted` < `secret`.
+# Declare it per group channel with `classification:` (absent means `internal` —
+# a channel nobody classified is confidential-by-default, never public). DMs
+# open on demand and are stamped from the fleet-wide knob below at creation.
+# STATUS: the fields parse, validate, and persist ahead of the enforcement
+# gates landing across v0.3.12, so a level above `internal` is REJECTED AT
+# STARTUP for now (the dark-window rule) — nothing would enforce it yet, and a
+# declaration the gates ignore is worse than none. `restricted`/`secret` open
+# up when the full RFC 0037 Phase-1 set ships in this release; the operator
+# opt-in path is documented then.
+# dm_default_classification: internal
+
 # Governance (RFC 0030, v0.3.8) — fleet-wide knobs that are not per-channel.
 # `exempt_principals: [human]` removes human principals (participant_type
 # "user") from the Layer 2 reply budget, so a human steering the conversation
@@ -117,6 +130,10 @@ governance:
 channels:
   - name: planning
     description: "v0.3.0 demo channel — engineering + product planning discussion"
+    # classification: internal is the default (RFC 0037, v0.3.12); shown for
+    # discoverability. Levels above `internal` are rejected at load until the
+    # full RFC 0037 Phase-1 gate set ships (see the dark-window note above).
+    classification: internal
     # floor_control: true is the resolved default for group channels (v0.3.6);
     # shown here for discoverability. Remove or set false to opt out.
     floor_control: true
