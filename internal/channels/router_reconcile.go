@@ -38,6 +38,17 @@ func (r *ChannelRouter) ReconcileConfig(ctx context.Context, cfg *Config) error 
 	}
 	for _, decl := range cfg.Channels {
 		canonicalID := decl.CanonicalID()
+		// A NON-EMPTY out-of-lattice level can only reach here on a Config
+		// that skipped Validate (a programmatic caller — the YAML path
+		// rejects it with ErrInvalidClassification before reconcile runs).
+		// Both arms below normalize it to `internal` (rule (a)); warn so the
+		// silent rewrite of what is almost certainly a typo stays loud
+		// enough to triage, without reintroducing the whole-reconcile abort.
+		if decl.Classification != "" && !decl.Classification.Valid() {
+			r.logger.Warn("channels: declared classification is not a lattice level; adopting `internal` (§A rule (a))",
+				zap.String("channel_id", canonicalID),
+				zap.String("declared", string(decl.Classification)))
+		}
 		stored, err := r.store.GetChannel(ctx, canonicalID)
 		switch {
 		case err == nil:
@@ -65,8 +76,19 @@ func (r *ChannelRouter) ReconcileConfig(ctx context.Context, cfg *Config) error 
 			// the desired end state, so reconcile converges instead of
 			// halting. A runtime reclassification of a config-declared
 			// channel must be reflected in YAML to survive restart.
-			if stored.Classification != decl.Classification {
-				if cErr := r.store.SetChannelClassification(ctx, canonicalID, decl.Classification); cErr != nil {
+			//
+			// The rule-(a) fill runs in [LoadConfig], NOT in Validate, so a
+			// Config built in code rather than parsed from YAML (a test, a
+			// future runtime apply) reaches here with an empty level.
+			// Normalizing first keeps this arm exactly as tolerant as the
+			// create arm below, whose empty value the store boundary rewrites
+			// the same way: without it an unfilled declaration fails
+			// [ChannelStore.SetChannelClassification]'s strict check and
+			// aborts the whole reconcile — a startup Fatal for a config that
+			// declares no classification at all.
+			declared := NormalizeForStamp(decl.Classification)
+			if stored.Classification != declared {
+				if cErr := r.store.SetChannelClassification(ctx, canonicalID, declared); cErr != nil {
 					return fmt.Errorf("channels: reconcile classification %s: %w", canonicalID, cErr)
 				}
 				// Keep the dispatch cache coherent with the write — the
@@ -74,11 +96,11 @@ func (r *ChannelRouter) ReconcileConfig(ctx context.Context, cfg *Config) error 
 				// classification write path (a no-op at boot, where the
 				// cache is still empty; load-bearing if reconcile ever
 				// runs after dispatches).
-				r.classifications.refresh(canonicalID, string(decl.Classification))
+				r.classifications.refresh(canonicalID, string(declared))
 				r.logger.Info("channels: adopted declared classification",
 					zap.String("channel_id", canonicalID),
 					zap.String("from", string(stored.Classification)),
-					zap.String("to", string(decl.Classification)))
+					zap.String("to", string(declared)))
 			}
 			r.logger.Debug("channels: config channel present in store",
 				zap.String("channel_id", canonicalID))

@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/mkhomutov/persatrix/internal/generated/taskpb"
@@ -212,6 +213,31 @@ func TestReconcileConfig_AdoptsDeclaredClassificationOnExistingRow(t *testing.T)
 		"a config-undeclared channel is preserved untouched (§B coexistence)")
 }
 
+// TestReconcileConfig_UnfilledDeclarationDoesNotAbort pins the adoption arm's
+// tolerance for a Config that never went through [LoadConfig]: the §A rule-(a)
+// fill lives there, not in Validate, so a programmatically built Config (a
+// test, a future runtime apply) arrives with an empty level. The arm must
+// normalize like the create arm does at the store boundary — feeding the empty
+// string to the strict [ChannelStore.SetChannelClassification] would fail the
+// whole reconcile, which the orchestrator turns into a startup Fatal.
+func TestReconcileConfig_UnfilledDeclarationDoesNotAbort(t *testing.T) {
+	router, _, store := newRouterTest(t)
+	ctx := context.Background()
+	mustCreateGroup(t, store, "leadership", "alice")
+
+	require.NoError(t, router.ReconcileConfig(ctx, &Config{
+		MaxChannels: 50,
+		Channels: []ChannelConfig{{
+			Name:    "leadership",
+			Members: []MemberConfig{{ID: "alice", RespondPolicy: RespondWhenMentioned}},
+		}},
+	}), "an unfilled declaration must converge on the rule-(a) default, not abort the reconcile")
+
+	ch, err := store.GetChannel(ctx, "group:leadership")
+	require.NoError(t, err)
+	assert.Equal(t, ClassificationInternal, ch.Classification)
+}
+
 // TestPublish_DispatchEnvelopeCarriesClassification pins the dispatch leg
 // end to end at the envelope: an ordinary fanout on a classified channel
 // stamps the row's level on every recipient's envelope, and a reconcile
@@ -251,4 +277,114 @@ func TestPublish_DispatchEnvelopeCarriesClassification(t *testing.T) {
 	require.Len(t, calls, 2)
 	assert.Equal(t, "secret", calls[1].classification,
 		"a router-side adoption must refresh the dispatch cache")
+}
+
+// TestForgetChannelClassification_DropsStaleEntryOnDeleteRecreate pins the
+// second [classificationCache] coherence hook. DELETE is store-direct
+// (`handleDeleteChannel`), so the router never sees the row go: without the
+// eviction the cached level outlives the channel and rides every dispatch of a
+// re-created id. The dangerous ordering is the one exercised here — a cached
+// `public` over a re-created `internal` row is the cache's only way to
+// UNDER-classify, i.e. to over-inject once the PR 4 gate arms.
+func TestForgetChannelClassification_DropsStaleEntryOnDeleteRecreate(t *testing.T) {
+	router, disp, store := newRouterTest(t)
+	ctx := context.Background()
+	id := mustCreateGroup(t, store, "planning", "alice", "bob")
+	require.NoError(t, store.SetChannelClassification(ctx, id, ClassificationPublic))
+
+	require.NoError(t, router.Publish(ctx, ChannelMessage{
+		ID: uuid.NewString(), ChannelID: id, SenderID: "alice", Content: "x",
+	}, ""))
+	require.Len(t, disp.snapshot(), 1)
+	require.Equal(t, "public", disp.snapshot()[0].classification)
+
+	require.NoError(t, store.DeleteChannel(ctx, id))
+	router.ForgetChannelClassification(id)
+	// Re-created at the create-path stamp — the shape a REST re-create takes.
+	id = mustCreateGroup(t, store, "planning", "alice", "bob")
+
+	require.NoError(t, router.Publish(ctx, ChannelMessage{
+		ID: uuid.NewString(), ChannelID: id, SenderID: "alice", Content: "y",
+	}, ""))
+	calls := disp.snapshot()
+	require.Len(t, calls, 2)
+	assert.Equal(t, "internal", calls[1].classification,
+		"a re-created channel must resolve its own row, not the deleted channel's cached level")
+
+	// Idempotent / nil-tolerant, like PurgeChannelInteraction: forgetting an
+	// unknown channel is a no-op, and the next dispatch read-through-fills.
+	router.ForgetChannelClassification("group:never-existed")
+	router.ForgetChannelClassification(id)
+	require.NoError(t, router.Publish(ctx, ChannelMessage{
+		ID: uuid.NewString(), ChannelID: id, SenderID: "alice", Content: "z",
+	}, ""))
+	calls = disp.snapshot()
+	require.Len(t, calls, 3)
+	assert.Equal(t, "internal", calls[2].classification)
+}
+
+// TestClassificationCache_ForgetDiscardsInFlightRefill pins the gen guard on
+// the read-through fill: a forget (the delete handler's hook) between a miss
+// and its fill must discard the write — the dispatch that read the row before
+// the delete would otherwise re-plant the deleted channel's level for a future
+// re-create, the same stale-under-classify ordering the forget hook closes,
+// through a µs-wide side door. The reconcile adoption's [refresh] stays
+// unconditional (authoritative write-through of its own successful UPDATE).
+func TestClassificationCache_ForgetDiscardsInFlightRefill(t *testing.T) {
+	var c classificationCache
+
+	// The racing interleaving, serialized: miss (gen snapshot) → forget →
+	// late fill with the stale snapshot.
+	_, ok, gen := c.get("group:planning")
+	require.False(t, ok)
+	c.forget("group:planning")
+	c.fill("group:planning", "public", gen)
+	_, ok, _ = c.get("group:planning")
+	assert.False(t, ok, "a fill that lost the race to a forget must be discarded")
+
+	// A clean round (no intervening forget) fills as before.
+	_, ok, gen = c.get("group:planning")
+	require.False(t, ok)
+	c.fill("group:planning", "internal", gen)
+	level, ok, _ := c.get("group:planning")
+	require.True(t, ok)
+	assert.Equal(t, "internal", level)
+
+	// refresh is the authoritative write path and ignores generations.
+	c.forget("group:planning")
+	c.refresh("group:planning", "restricted")
+	level, ok, _ = c.get("group:planning")
+	require.True(t, ok)
+	assert.Equal(t, "restricted", level)
+}
+
+// TestReconcileConfig_OutOfLatticeDeclarationWarnsAndAdoptsInternal pins the
+// loudness half of the adoption arm's tolerance: a NON-EMPTY invalid level
+// (reachable only on a Config that skipped Validate — the YAML path rejects it
+// first) converges on `internal` like the empty case, but leaves a WARN naming
+// the channel and the typo'd value instead of rewriting it in silence.
+func TestReconcileConfig_OutOfLatticeDeclarationWarnsAndAdoptsInternal(t *testing.T) {
+	store := newTestStore(t, SQLiteOptions{})
+	core, logs := observer.New(zap.WarnLevel)
+	router := NewChannelRouter(store, NoopDispatcher{}, zap.New(core), nil)
+	ctx := context.Background()
+	mustCreateGroup(t, store, "leadership", "alice")
+
+	require.NoError(t, router.ReconcileConfig(ctx, &Config{
+		MaxChannels: 50,
+		Channels: []ChannelConfig{{
+			Name:           "leadership",
+			Classification: Classification("restrcted"),
+			Members:        []MemberConfig{{ID: "alice", RespondPolicy: RespondWhenMentioned}},
+		}},
+	}), "an out-of-lattice declaration must converge like the empty case, not abort")
+
+	ch, err := store.GetChannel(ctx, "group:leadership")
+	require.NoError(t, err)
+	assert.Equal(t, ClassificationInternal, ch.Classification)
+
+	warns := logs.FilterMessageSnippet("not a lattice level").All()
+	require.Len(t, warns, 1, "the silent rewrite of a probable typo must be loud")
+	assert.Equal(t, "group:leadership", warns[0].ContextMap()["channel_id"])
+	assert.Equal(t, "restrcted", warns[0].ContextMap()["declared"])
 }

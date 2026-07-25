@@ -44,6 +44,12 @@ func (s *Server) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 	// / no-op if nothing was tracked.
 	if s.channelRouter != nil {
 		s.channelRouter.PurgeChannelInteraction(id)
+		// RFC 0037 §B (v0.3.12 PR 2): same class of leak on the router's
+		// dispatch-time classification cache — a re-created id reuses the
+		// deleted channel's cached level (and an id that stays deleted keeps
+		// its entry forever). Drop it so the next dispatch resolves the row
+		// that actually exists; see [channels.classificationCache].
+		s.channelRouter.ForgetChannelClassification(id)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

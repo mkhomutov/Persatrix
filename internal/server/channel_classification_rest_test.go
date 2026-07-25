@@ -9,12 +9,17 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/mkhomutov/persatrix/internal/channels"
+	"github.com/mkhomutov/persatrix/internal/planner"
+	"github.com/mkhomutov/persatrix/internal/registry"
+	"github.com/mkhomutov/persatrix/internal/state"
 )
 
 // TestChannels_HistoryEnvelopeCarriesClassification pins the history +
@@ -77,4 +82,74 @@ func TestChannels_ChannelObjectCarriesClassification(t *testing.T) {
 	require.NoError(t, json.Unmarshal(listRec.Body.Bytes(), &list))
 	require.Len(t, list.Channels, 1)
 	assert.Equal(t, "internal", list.Channels[0].Classification)
+}
+
+// TestChannels_DeleteEvictsDispatchClassificationCache pins the wiring half of
+// the [channels.classificationCache] delete hook: DELETE is store-direct, so
+// without `handleDeleteChannel`'s ForgetChannelClassification call the router
+// keeps serving the deleted channel's level to every dispatch on a re-created
+// id — a cached `public` over a re-created `internal` row under-classifies the
+// wire, the direction that over-injects once the PR 4 gate arms.
+//
+// Runs the real gRPC dispatcher (like the fanout integration test) because the
+// stale value is only observable on the dispatched event; NoopDispatcher would
+// defeat the point.
+func TestChannels_DeleteEvictsDispatchClassificationCache(t *testing.T) {
+	logger := zap.NewNop()
+	recBob, bobAddr, stopBob := startRecordingAgent(t)
+	defer stopBob()
+
+	reg := registry.NewInMemoryRegistry(logger)
+	require.NoError(t, reg.Register(context.Background(), registry.AgentInfo{
+		ID: "agent-bob", Name: "Bob", Address: bobAddr, Status: registry.StatusHealthy,
+	}))
+
+	store, err := channels.NewSQLiteStore(
+		filepath.Join(t.TempDir(), "channels.db"),
+		channels.SQLiteOptions{MaxChannels: 50, Logger: logger})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	router := channels.NewChannelRouter(store, channels.NewGRPCMessageDispatcher(reg, logger), logger, nil)
+	srv, err := New("127.0.0.1:0", t.TempDir(),
+		state.NewInMemoryStore(logger),
+		reg,
+		planner.NewYAMLPlanner(logger),
+		logger,
+		WithChannels(store, router),
+	)
+	require.NoError(t, err)
+
+	createBody, _ := json.Marshal(createChannelRequest{
+		Name: "planning",
+		Members: []channelMemberRequest{
+			{ID: "agent-alice", Respond: "always"},
+			{ID: "agent-bob", Respond: "always"},
+		},
+	})
+	pubBody, _ := json.Marshal(map[string]any{"sender_id": "agent-alice", "content": "hello"})
+
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", createBody).Code)
+	require.NoError(t, store.SetChannelClassification(
+		context.Background(), "group:planning", channels.ClassificationPublic))
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/group:planning/messages", pubBody).Code)
+	router.WaitForPendingFanout()
+	require.Len(t, recBob.snapshot(), 1)
+	require.Equal(t, "public", recBob.snapshot()[0].Classification,
+		"the first dispatch fills the router's read-through cache")
+
+	require.Equal(t, http.StatusNoContent,
+		doRequest(srv.Handler(), http.MethodDelete, "/api/v1/channels/group:planning", nil).Code)
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels", createBody).Code)
+	require.Equal(t, http.StatusCreated,
+		doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/group:planning/messages", pubBody).Code)
+	router.WaitForPendingFanout()
+
+	events := recBob.snapshot()
+	require.Len(t, events, 2)
+	assert.Equal(t, "internal", events[1].Classification,
+		"the re-created channel must dispatch its own row's level, not the deleted channel's cached one")
 }
