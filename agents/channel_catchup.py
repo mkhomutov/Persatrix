@@ -64,6 +64,7 @@ from urllib.parse import quote
 
 import aiohttp
 
+from .channel_event_classification import seed_channel_classification
 from .channel_history_fetcher import HttpChannelHistoryFetcher
 from .channel_validation import (
     parse_channel_timestamp,
@@ -474,6 +475,12 @@ def _build_replay_event(
     )
     metadata: dict[str, Any] = {"replay_mode": True}
     seed_replay_metadata(metadata, msg.get("metadata"))
+    # RFC 0037 §B (v0.3.12 PR 2): stamp the channel's §A classification from
+    # the channel-list object already threaded here — the REST leg of the
+    # "both delivery paths carry the field" contract, mirroring the live
+    # path's typed-field seed. A pre-v0.3.12 orchestrator's JSON has no such
+    # key and seeds nothing (the read-side `public` floor, §A rule (b)).
+    seed_channel_classification(metadata, channel.get("classification"))
     event_kwargs: dict[str, Any] = {
         "event_type": EventType.CHANNEL_MESSAGE,
         "payload": payload,

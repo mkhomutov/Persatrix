@@ -25,8 +25,11 @@ from agents.convene_timer import (
 )
 
 # CWD-relative repo paths (CI runs pytest from the repo root), mirroring the
-# sibling test_cross_language_convene_wire_drift.py.
-_CHANNELS_GO = Path("internal/channels/channels.go")
+# sibling test_cross_language_convene_wire_drift.py. The id-grammar
+# declarations (channelNamePattern et al.) moved from channels.go to
+# identifiers.go in RFC 0037 PR 2's 500-line-cap carve — the parse rule
+# follows the declaration, per this pin's own contract.
+_CHANNELS_GO = Path("internal/channels/identifiers.go")
 _STANDING_SCHEDULE_GO = Path("internal/channels/standing_schedule.go")
 
 

@@ -57,6 +57,20 @@ type ChannelStore interface {
 	// previous page never duplicates the boundary row. ISSUE-0015.
 	ListChannels(ctx context.Context, limit int, afterID string) ([]Channel, error)
 
+	// SetChannelClassification updates the RFC 0037 §A confidentiality level
+	// on an existing channel row (v0.3.12 PR 2 — the missing
+	// `UPDATE channels SET classification` path the 0037 plan's PR 2 note
+	// calls out: without it a store created before the declaration keeps
+	// `internal` on its group rows forever while the YAML reads as
+	// classified). Two callers by design: the startup reconcile's adoption
+	// step ([ChannelRouter.ReconcileConfig], config-declared group channels)
+	// and the future audited reclassification surface (RFC 0037 §Security).
+	// Rejects an out-of-lattice level with [ErrInvalidClassification] —
+	// unlike the create paths' rule-(a) rewrite, an UPDATE has an explicit
+	// operator-supplied level, so silently normalizing would mask a typo'd
+	// reclassification. Returns [ErrChannelNotFound] when no row matches.
+	SetChannelClassification(ctx context.Context, channelID string, level Classification) error
+
 	// AddMember inserts a `(channel_id, participant_id)` row with the supplied
 	// respond policy. Re-adding the same pair is idempotent and returns the
 	// existing row's `joined_at` unchanged.
