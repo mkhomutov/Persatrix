@@ -31,6 +31,8 @@ from pathlib import Path
 import jsonschema  # type: ignore[import-untyped]
 import pytest
 
+from agents.persona_runtime.classification import CLASSIFICATION_RANKS
+
 _SCHEMA_PATH = Path("schemas/channel.schema.json")
 
 
@@ -315,3 +317,106 @@ def test_escalation_chair_id_accepts_member_style_ids(chair_id: str):
             ],
         }
     )
+
+
+# ── RFC 0037 (v0.3.12) classification fields ──────────────────────────────
+#
+# The per-channel `classification` and the root `dm_default_classification`
+# knob land together in RFC 0037 PR 1 (channel classification at rest, dark).
+# Both roots are closed (`additionalProperties: false`), so the schema MUST
+# declare them or `make validate` rejects the documented operator config —
+# the exact failure mode this file exists to pin (see module docstring).
+# The enum is the fixed §A lattice; the Go loader mirrors the rejection via
+# `ErrInvalidClassification` (config_validate.go).
+#
+# NOTE — schema-valid is deliberately WIDER than loadable during v0.3.12. This
+# enum is the post-Phase-1 contract and accepts all four levels, but the Go
+# loader additionally rejects `restricted`/`secret` (the item-8 dark-window
+# ceiling, `ErrClassificationAboveDarkWindow`) until the §D gate arms at RFC
+# 0037 PR 4. Tightening the enum instead would mean churning it back at PR 4
+# and would make `make validate` disagree with itself across the window, so the
+# temporary ceiling lives on the Go side only. The tests below therefore pin
+# the enum, not the current startup behaviour.
+
+#: The §A lattice in rank order, DERIVED from the runtime module rather than
+#: re-typed as a literal. This is what makes the schema↔runtime link real: the
+#: schema enum, the Python resolver table, and (via its own literal pin) the Go
+#: table are otherwise three independent copies of one vocabulary, and a fourth
+#: level added to `CLASSIFICATION_RANKS` without touching the schema would
+#: previously have sailed past this file. Following the
+#: `test_cross_language_*_drift.py` precedent, which exists because "the two Ns
+#: live in two languages with no automated drift check" was a review finding.
+_CLASSIFICATION_LEVELS = sorted(CLASSIFICATION_RANKS, key=CLASSIFICATION_RANKS.__getitem__)
+
+
+@pytest.mark.parametrize("level", _CLASSIFICATION_LEVELS)
+def test_channel_classification_accepts_lattice_levels(level: str):
+    """Every §A lattice level validates on a declared group channel."""
+    _validate(
+        {
+            "max_channels": 50,
+            "channels": [
+                {"name": "planning", "classification": level, "members": ["ada"]}
+            ],
+        }
+    )
+
+
+def test_channel_classification_rejects_unknown_level():
+    """An out-of-vocabulary level (`confidential`) is rejected by the enum.
+
+    The §A vocabulary is fixed for v0.3.x (RFC 0037 OQ #1); a typo must
+    surface at `make validate`, not load silently and stamp `internal`.
+    """
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(
+            {
+                "max_channels": 50,
+                "channels": [
+                    {
+                        "name": "planning",
+                        "classification": "confidential",
+                        "members": ["ada"],
+                    }
+                ],
+            }
+        )
+
+
+@pytest.mark.parametrize("level", _CLASSIFICATION_LEVELS)
+def test_dm_default_classification_accepts_lattice_levels(level: str):
+    """The root-level DM stamping knob accepts every §A lattice level."""
+    _validate({"max_channels": 50, "dm_default_classification": level})
+
+
+def test_dm_default_classification_rejects_unknown_level():
+    """Same enum posture for the fleet-wide DM knob."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate({"max_channels": 50, "dm_default_classification": "top-secret"})
+
+
+def test_classification_enums_match_across_both_fields():
+    """The two declaration points and the runtime lattice encode ONE vocabulary.
+
+    RFC 0037 §A defines a single lattice; the per-channel field and the DM
+    knob must never drift apart. Compared directly (the
+    `escalation_chair_id` pattern-parity precedent above) so a future edit
+    to one enum fails here rather than shipping a config surface where a
+    level is legal on channels but not on DMs.
+
+    The third leg is the important one: `_CLASSIFICATION_LEVELS` is derived
+    from `CLASSIFICATION_RANKS`, so this also pins schema ↔ runtime. Adding a
+    fifth level to the resolver table (or renaming one) without editing the
+    schema now fails HERE — previously both sides were independent literals
+    and only the Go/Python halves were cross-pinned.
+
+    Order is asserted, not just membership: the enums are deliberately written
+    lowest-to-highest so the schema reads as the lattice for an operator, and
+    `sorted(..., key=rank)` is what the derivation produces.
+    """
+    schema = _root_schema()
+    channel_enum = schema["definitions"]["channel"]["properties"]["classification"][
+        "enum"
+    ]
+    dm_enum = schema["properties"]["dm_default_classification"]["enum"]
+    assert channel_enum == dm_enum == _CLASSIFICATION_LEVELS

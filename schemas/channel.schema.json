@@ -36,6 +36,12 @@
       "default": 600,
       "description": "Fleet-wide interaction idle window in seconds (the RFC 0030 interaction-id producer, IP3), applied to any channel that omits its own `interaction_idle_timeout_seconds`: a publish arriving more than this long after the channel's last one retires the open interaction and mints a fresh one (`interaction_closed{trigger=idle}`). Absent means 600 — RFC 0020 §B's idle default, matching the agent-side `interaction_idle_timeout_sec` so governance and memory boundaries roughly coincide. An explicit 0 disables idle rotation fleet-wide (distinct from absent). Thread channels ignore the resolved value entirely — a thread IS its interaction. Negative is rejected at load time."
     },
+    "dm_default_classification": {
+      "type": "string",
+      "enum": ["public", "internal", "restricted", "secret"],
+      "default": "internal",
+      "description": "RFC 0037 §B (v0.3.12) fleet-wide confidentiality classification stamped onto DM channels at creation. DMs open on demand (`dm:<a>:<b>`) with no per-channel config block, so this knob is their only declaration point; an existing DM is reclassified through the same audited machinery as any channel (a later RFC 0037 PR). Absent means `internal` — §A rule (a): a conversation surface nobody classified is confidential-by-default, never `public`. Operators running sensitive DMs should raise this (or reclassify per-DM) once the full RFC 0037 Phase-1 set ships. Until then the item-8 dark-window rule applies and is ENFORCED by the Go loader: this enum is the post-Phase-1 contract, but `restricted` and `secret` are rejected at startup (`ErrClassificationAboveDarkWindow`) because no gate would honour them yet."
+    },
     "governance": {
       "type": "object",
       "additionalProperties": false,
@@ -66,6 +72,12 @@
           "description": "Group-channel name. Canonical address is `group:<name>`."
         },
         "description": { "type": "string" },
+        "classification": {
+          "type": "string",
+          "enum": ["public", "internal", "restricted", "secret"],
+          "default": "internal",
+          "description": "RFC 0037 §A (v0.3.12) confidentiality classification for this group channel — the fixed four-level lattice (`public` < `internal` < `restricted` < `secret`) the memory confidentiality boundary compares against. Absent means `internal` (§A rule (a): confidential-by-default, never `public`). DARK as of RFC 0037 PR 1: the field parses and validates but is not yet applied to the store row or read by any gate — it becomes load-bearing with the wire lift (PR 2) and the §D hard gate / §F recall filter (PRs 4–5). Item-8 dark-window rule, ENFORCED rather than requested: this enum is the post-Phase-1 contract, but the Go loader rejects a declared `restricted`/`secret` at startup (`ErrClassificationAboveDarkWindow`) until the full Phase-1 set ships in v0.3.12 — a level no gate reads would read as a boundary to the operator while every path still saw `internal`. The operator opt-in path is documented at RFC 0037 PR 8."
+        },
         "revision": {
           "type": "integer",
           "minimum": 0,

@@ -54,11 +54,13 @@ func TestSQLiteStore_SchemaV10_FreshDB_HasMessagesFTS(t *testing.T) {
 	})
 }
 
-// TestSQLiteStore_SchemaV10_Migration_Idempotent pins the schema version at the
-// newest migration. Reopening the same file is a no-op (no duplicate-table /
-// duplicate-trigger error, user_version stable at the latest). Per the
-// convention the v5..v9 migration-test headers document, the literal-version
-// pin lives in the newest migration's idempotent test — here.
+// TestSQLiteStore_SchemaV10_Migration_Idempotent asserts reopening the same
+// file is a no-op (no duplicate-table / duplicate-trigger error, user_version
+// stable at the latest). The literal-version pin moved to the newest
+// migration's test (TestSQLiteStore_SchemaV11_Migration_Idempotent) per the
+// convention the v5..v9 test headers document; this test now only pins the
+// v10 trigger set surviving an idempotent reopen at whatever the latest
+// version is.
 func TestSQLiteStore_SchemaV10_Migration_Idempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "channels.db")
 
@@ -75,8 +77,6 @@ func TestSQLiteStore_SchemaV10_Migration_Idempotent(t *testing.T) {
 		require.NoError(t, db.QueryRow(`PRAGMA user_version`).Scan(&version))
 		assert.Equal(t, channelStoreSchemaVersion, version,
 			"user_version stamped to the latest schema version; reopen is a no-op")
-		assert.Equal(t, 10, channelStoreSchemaVersion,
-			"RFC 0036 PR 1 bumps the channel store to v10")
 
 		// Reopen must not duplicate the triggers (the user_version gate skips
 		// the migration on the second boot).

@@ -82,6 +82,14 @@ type SQLiteOptions struct {
 	// SessionMetrics is optional; nil disables `sessions.writes`
 	// emission. RFC 0031 Phase 1.
 	SessionMetrics *SessionMetrics
+	// DMDefaultClassification is the RFC 0037 §B `dm_default_classification`
+	// knob: the §A confidentiality level [sqliteStore.GetOrCreateDM] stamps
+	// onto a DM channel row at creation (DMs open on demand and have no
+	// config block to declare one). Wired from [Config.DMDefaultClassification]
+	// at startup. Absent or unknown normalizes to `internal` at construction
+	// via [NormalizeForStamp] — §A rule (a), so a store built without the
+	// option behaves exactly as before this knob existed.
+	DMDefaultClassification Classification
 }
 
 // NewSQLiteStore opens (or creates) the channel database at `path` and
@@ -141,6 +149,10 @@ func NewSQLiteStore(path string, opts SQLiteOptions) (ChannelStore, error) {
 		maxMessagesPerChannel: opts.MaxMessagesPerChannel,
 		logger:                logger,
 		sessionMetrics:        opts.SessionMetrics,
+		// §A rule (a) at the construction boundary: the DM stamp value is
+		// normalized once here so GetOrCreateDM writes a known lattice level
+		// unconditionally (absent/unknown → internal, never public).
+		dmDefaultClassification: NormalizeForStamp(opts.DMDefaultClassification),
 	}
 	// RFC 0036: settle `messages_fts` existence once, now that applySchema has
 	// run migration v10. Cached so recall never re-probes `sqlite_master` per
@@ -196,6 +208,12 @@ type sqliteStore struct {
 	// at construction (RFC 0036). Write-once before the store is handed out, then
 	// read-only — so no synchronisation is needed alongside dmMu.
 	ftsAvailable bool
+
+	// dmDefaultClassification is the §A level GetOrCreateDM stamps onto a DM
+	// row at creation (RFC 0037 §B). Normalized to a known lattice level at
+	// construction ([NormalizeForStamp]); write-once then read-only, like
+	// ftsAvailable.
+	dmDefaultClassification Classification
 
 	dmMu sync.Mutex
 }
