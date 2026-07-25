@@ -191,11 +191,21 @@ func ActingRank(level Classification) int {
 
 // EntryRankOrWithhold is rule (c): the rank of a stored ENTRY protection
 // level. A known level ranks as itself; unknown/unparseable returns ok=false
-// — the entry is withheld (treated as above-`secret`) and the caller logs it
-// with the entry's identity. Semantically this is the bare
-// [ClassificationRank], named so gate-side callers state which §A rule they
-// are applying instead of open-coding a lookup-plus-default that would
-// silently pick a direction.
+// — the entry is withheld, treated as above-`secret`, never coerced onto the
+// lattice where it could inject on a corrupted label. Semantically this is
+// the bare [ClassificationRank], named so gate-side callers state which §A
+// rule they are applying instead of open-coding a lookup-plus-default that
+// would silently pick a direction.
+//
+// Pure, and so is the Python twin `entry_rank_or_withhold` — rule (c)'s "and
+// logged" half belongs to the CALLER in both languages, by design rather than
+// by omission. The caller is the only layer holding the entry's identity (a
+// bare `unknown protection_level "xyz"` cannot be triaged), and the §F recall
+// filter calls this once per candidate row, so an in-helper warning would turn
+// one corrupted batch into a log flood — loudest exactly when an operator is
+// trying to read the gate's decisions. The security half is not delegated:
+// withholding rides ok=false and cannot be forgotten without ignoring the
+// result.
 func EntryRankOrWithhold(level Classification) (rank int, ok bool) {
 	return ClassificationRank(level)
 }

@@ -4,10 +4,17 @@ Pins the helper contract where it is defined
 (:mod:`agents.persona_runtime.classification`): the exact (level → rank)
 table, the total order, and the THREE fail-closed directions —
 stamp → ``internal`` (rule (a)), acting → the ``public`` floor (rule
-(b)), entry → withheld-and-logged (rule (c)).  The RFC 0037 PR 4 gate
-tests re-assert the same three directions *through the §D gate*; this
-file is the source-of-truth pin so a helper regression surfaces without
-a gate in the loop.
+(b)), entry → withheld (rule (c)).  The RFC 0037 PR 4 gate tests
+re-assert the same three directions *through the §D gate*; this file is
+the source-of-truth pin so a helper regression surfaces without a gate in
+the loop.
+
+Rule (c) is "withheld **and logged**" in the RFC; only the withhold is
+pinned here, because the log line is the gate-side caller's (it owns the
+entry identity, and the §F recall filter calls the helper per row).  The
+helper's silence is itself pinned — see
+:func:`test_entry_rank_or_withhold_is_none_and_silent` — and PRs 4–5 owe
+the caller-side warning.
 
 Cross-language contract: ``test_rank_table_is_pinned`` duplicates the
 literal table asserted by ``TestClassificationRank_TableIsPinned`` in
@@ -115,17 +122,30 @@ def test_acting_rank_fails_closed_to_public_floor(level: str | None) -> None:
 
 
 @pytest.mark.parametrize("level", UNKNOWN_LEVELS)
-def test_entry_rank_or_withhold_is_none_and_logs(
+def test_entry_rank_or_withhold_is_none_and_silent(
     level: str | None, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Rule (c): an unknown ENTRY protection level is withheld (``None`` —
-    treated as above-``secret``) AND logged, so a corrupted label can never
-    inject and never disappears silently."""
-    with caplog.at_level(logging.WARNING, logger="agents.persona_runtime.classification"):
+    treated as above-``secret``), and the helper stays SILENT doing it.
+
+    The withhold is the security half and rides the return value, so it
+    cannot be forgotten without ignoring the result.  The "and logged" half
+    belongs to the gate-side caller, matching the Go twin exactly — the
+    caller is the only layer holding the entry's identity, and the §F
+    recall filter (PR 5) calls this once per candidate row, so a warning
+    here would turn one corrupted batch into a log flood.
+
+    Silence is pinned rather than merely left untested: this is the
+    property a well-meaning future edit ("shouldn't this warn?") would
+    break, and the resulting flood would only show up under a corrupted
+    batch in production.
+    """
+    with caplog.at_level(logging.DEBUG, logger="agents.persona_runtime.classification"):
         assert entry_rank_or_withhold(level) is None
-    assert any(
-        "withheld" in record.message for record in caplog.records
-    ), "the 'and logged' half of rule (c) lives in the helper"
+    assert caplog.records == [], (
+        "rule (c)'s log line belongs to the caller, which has the entry identity; "
+        "the recall filter calls this per row, so an in-helper warning floods"
+    )
 
 
 def test_fail_directions_disagree_on_unknown() -> None:

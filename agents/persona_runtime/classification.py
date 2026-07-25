@@ -32,14 +32,30 @@ vocabulary, and each rule is owned by exactly one named resolver —
 :func:`rank_for_stamp` / :func:`normalize_for_stamp` (a),
 :func:`acting_rank` (b), :func:`entry_rank_or_withhold` (c).  No caller
 applies its own default.
+
+**Where rule (c)'s "and logged" half lives: the CALLER, in both
+languages.**  Every resolver here is pure — same contract as the Go twin's
+``EntryRankOrWithhold``, deliberately, so the two do not disagree about
+who owns the log line.  Two reasons the obligation sits with the caller
+rather than in the helper:
+
+* *Triage needs identity.*  The helper sees a bare label.  A gate-side
+  ``WARNING`` naming the entry, its channel, and the acting level is
+  actionable; ``unknown protection_level 'xyz'`` on its own is not.
+* *Volume.*  The §F recall filter (RFC 0037 PR 5) evaluates this
+  per candidate row, so an in-helper warning is one line per corrupted
+  row — a single bad batch becomes a log flood, and the flood is loudest
+  exactly when an operator is trying to read the gate's decisions.
+
+The *security* half of rule (c) is not delegated: withholding is carried
+by the ``None`` return and cannot be forgotten without ignoring the
+result.  The log is observability layered on top, and every gate-side
+caller (PRs 4–5) owes it.
 """
 
 from __future__ import annotations
 
-import logging
 from typing import Final
-
-logger = logging.getLogger(__name__)
 
 # The §A lattice, lowest to highest.  The only operations the system needs
 # are the total order and max, both taken over the ranks below.
@@ -127,16 +143,15 @@ def entry_rank_or_withhold(level: str | None) -> int | None:
     """Rule (c): the rank of a stored ENTRY protection level.
 
     A known level ranks as itself; unknown/unparseable returns ``None`` —
-    the entry is withheld (treated as above-``secret``) and a WARNING is
-    emitted here so no gate-side caller can forget the "and logged" half
-    of the rule.  Callers add the entry's identity to their own log line
-    where they have it.
+    the entry is withheld, treated as above-``secret``, never coerced onto
+    the lattice where it could inject on a corrupted label.
+
+    Semantically this is the bare :func:`classification_rank`, named so
+    gate-side callers state which §A rule they are applying instead of
+    open-coding a lookup-plus-default that would silently pick a
+    direction.  Pure, exactly like the Go twin ``EntryRankOrWithhold``:
+    rule (c)'s "and logged" half belongs to the caller, which is the only
+    layer holding the entry's identity — see the module docstring for why,
+    and note the recall filter calls this once per candidate row.
     """
-    rank = classification_rank(level)
-    if rank is None:
-        logger.warning(
-            "classification: unknown entry protection_level %r — entry withheld "
-            "(treated as above-secret; RFC 0037 §A rule (c))",
-            level,
-        )
-    return rank
+    return classification_rank(level)
