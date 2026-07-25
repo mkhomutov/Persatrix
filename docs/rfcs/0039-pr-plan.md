@@ -63,6 +63,8 @@ RFC 0002 REST server (shipped) — the only prerequisite
 
 ## PR 3 — `feature/v0312-rfc0039-rest-middleware` (Phase 1 steps 5–7)
 
+**Gate: a maintainer call resolves the amendment's three [open questions](0039-amendment-enabled-mode-exposure.md#open-questions) before this PR opens** — the cookie-vs-bearer session TTL and the login-limiter cap sizing land here; the bootstrap password-length floor lands in PR 4. The call also ratifies the amendment out of 📋 Proposed (recorded in its front-matter; the ✅ flip itself is PR 6's).
+
 - `internal/server/auth_handlers.go` (new): `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/whoami`.
 - `authMiddleware`: identity resolution + the per-route policy map, present but non-enforcing under the default `auth.mode: disabled` (every request → anonymous `local`, policy check skipped).
 - `config/security.yaml` + `schemas/security.schema.json` `auth:` block; `cmd/orchestrator/main.go` wiring; the non-loopback-bind + `disabled` startup `WARN`.
@@ -89,7 +91,7 @@ RFC 0002 REST server (shipped) — the only prerequisite
 
 - Docs: `docs/guides/web-console.md` (the "beyond localhost requires a reverse proxy" limitation flips to "set `auth.mode: enabled`" — carrying the amendment's browser posture and its [residual risk](0039-amendment-enabled-mode-exposure.md#residual-risk), notably session-riding-under-XSS and the `SameSite=Strict` UX note), README security-posture line, `docs/guides/sessions.md` cross-link (account ≠ session ≠ participant), SECURITY.md note.
 - `MT-AUTH-001` (bootstrap on empty `accounts.db` → login → gated route 403/200 matrix → logout → disabled-mode no-delta) run live, **plus a browser leg**: cookie login, the token unreadable from JS, a cross-site write rejected, logout clearing the cookie.
-- RFC 0039 front-matter → ⚠️ Partially Implemented (P1–2 v0.3.12 ✅; P3 v0.4.0); ROADMAP row flip.
+- RFC 0039 front-matter → ⚠️ Partially Implemented (P1–2 v0.3.12 ✅; P3 v0.4.0); the [enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md) → ✅ Implemented (the [0050-amendment precedent](0050-amendment-interaction-budget-enforcement.md)), naming the PRs that landed it; ROADMAP row flip.
 
 ---
 

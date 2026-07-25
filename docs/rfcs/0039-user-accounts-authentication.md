@@ -390,7 +390,12 @@ this RFC verifies that coverage rather than adding a sink.
 On a successful login the server mints a **256-bit opaque token** from
 `crypto/rand`, base64url-encoded. The raw token is returned to the
 client **once, in the login response body**; the server persists only
-`sha256(token)` as the `sessions` primary key.
+`sha256(token)` as the `sessions` primary key. *(**Amended 2026-07-25**
+— the [enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md)
+§A1 adds a `session_transport` field to login: `"bearer"` (the default)
+keeps this body-token contract byte-for-byte; `"cookie"` returns **no
+body token** and sets an `__Host-` `HttpOnly`/`Secure`/`SameSite=Strict`
+cookie instead, so the console's session never enters JS.)*
 
 A subsequent request presents `Authorization: Bearer <token>`. The
 middleware hashes the supplied token, looks up the session row by
@@ -459,7 +464,13 @@ A new `authMiddleware` is added to `internal/server/`. It is composed
 and **before** the mux, so every route is resolved through it. It
 attaches the resolved identity to the request `context` under an
 unexported `contextKey` — the same key-typing pattern RFC 0002
-established for the request ID.
+established for the request ID. *(**Amended 2026-07-25** — per the
+[enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md):
+identity resolves bearer-first, cookie-second (§A1); a
+**cookie**-resolved identity on a non-`GET`/`HEAD`/`OPTIONS` request
+must pass a same-origin assertion or is `403`-rejected, while
+bearer-resolved requests skip the check (§A2); and the login limiters
+add `429` to the status matrix (§B4).)*
 
 Every route declares one **policy**:
 
@@ -670,6 +681,11 @@ Question #2 of the security review, tracked in §Open Questions).
 
 ### K. REST surface summary
 
+*(**Amended 2026-07-25** — per the
+[enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md):
+`POST /api/v1/auth/login` gains the `session_transport` field (§A1), and
+a throttled login answers `429` with `Retry-After` (§B4).)*
+
 | Method & path | Policy | Phase | Notes |
 |---|---|---|---|
 | `POST /api/v1/auth/login` | `public` | 1 | Verify credential, issue session. |
@@ -801,6 +817,14 @@ deployment depends on it.
    handling.
 10. **Audit** — new event types; emission for login and logout.
 
+*(**Amended 2026-07-25** — per the
+[enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md):
+step 5 gains `session_transport` + the cookie form (§A1); step 6 gains
+the same-origin assertion on cookie-authenticated writes (§A2); step 7
+gains the per-source + per-username login limiters,
+`auth.trusted_proxies`, and the console CSP/security headers (§A3, §B)
+— throttling ships with the endpoint, not in Phase 3.)*
+
 Dependencies: the merged RFC 0002 REST server only.
 
 ### Phase 2: Enforcement and the verified-identity claim (v0.3.x)
@@ -820,6 +844,12 @@ has a gated REST surface.
 5. **CLI** — every command attaches the stored bearer token; a `401`
    prints the `persatrix login` hint.
 6. **Audit** — `authz.denied` emission.
+
+*(**Amended 2026-07-25** — per the
+[enabled-mode exposure amendment](0039-amendment-enabled-mode-exposure.md)
+§A4: step 5 gains the console login form and the cookie flow —
+`session_transport: "cookie"`, so the browser session rides the
+`HttpOnly` cookie and the token never enters JS.)*
 
 Dependencies: Phase 1.
 
