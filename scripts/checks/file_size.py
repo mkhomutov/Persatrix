@@ -78,7 +78,7 @@ _EXTRA_EXCLUDES = [
     # never shrink back under the cap, so enumerating them one-by-one in
     # GRANDFATHERED_FILES accumulated a per-release entry carrying a "remove
     # once the tag ships" exit condition that was never achievable — 19 such
-    # entries had piled up across v0.2–v0.3.10 and none was ever retired.
+    # entries had piled up across v0.3.0–v0.3.10 and none was ever retired.
     # Excluded by pattern for the same "size scales with data, not prose"
     # reason as THIRD_PARTY_NOTICES.md and docs/issues/INDEX.md above, so the
     # allowlist stops growing by one entry per release.
@@ -88,9 +88,12 @@ _EXTRA_EXCLUDES = [
     # individually, because those are *edited during* their cycle and the cap
     # still does useful work on them. Permanent acceptance gates that happen to
     # live under docs/manual-tests/ (MT-MEMORY-005, MT-CHANNEL-GOV-004) are not
-    # per-release reports and are not matched here.
-    "docs/manual-tests/v*-execution-report.md",
-    "docs/v*-release-checklist.md",
+    # per-release reports and are not matched here. The `v[0-9]` prefix keeps
+    # non-version names (verify-*, variants-*) out; note fnmatch's `*` crosses
+    # `/`, so a nested dir named `docs/v0…/` would match too — none exists, and
+    # test_release_evidence_exclusion_stays_narrow pins the rest.
+    "docs/manual-tests/v[0-9]*-execution-report.md",
+    "docs/v[0-9]*-release-checklist.md",
 ]
 
 EXCLUDE_PATTERNS = DEFAULT_EXCLUDES + _EXTRA_EXCLUDES

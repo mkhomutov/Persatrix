@@ -13,7 +13,7 @@ longer listed here; they are excluded by pattern in ``file_size.py``
 (``_EXTRA_EXCLUDES``). Those files are frozen against a tag and can never
 shrink back under the cap, so each release was adding an entry whose stated
 exit condition ("archive once the tag ships") was unachievable — 19 had
-accumulated across v0.2–v0.3.10 and none was ever retired. Do not add new
+accumulated across v0.3.0–v0.3.10 and none was ever retired. Do not add new
 ones back; add the *pattern* if a genuinely new write-once category appears.
 
 What remains here is the honest case for an allowlist: files that are still
@@ -213,11 +213,11 @@ GRANDFATHERED_FILES: frozenset[str] = frozenset({
     # window.
     "CHANGELOG.md",
     # NOTE: per-release manual-test execution reports
-    # (docs/manual-tests/v*-execution-report.md) and release checklists
-    # (docs/v*-release-checklist.md) are no longer enumerated here. Both are
+    # (docs/manual-tests/v[0-9]*-execution-report.md) and release checklists
+    # (docs/v[0-9]*-release-checklist.md) are no longer enumerated here. Both are
     # write-once release evidence that can never shrink back under the cap, so
     # each release added an entry whose "archive once the tag ships" exit
-    # condition was never achievable; 19 such entries (v0.2-v0.3.10) had
+    # condition was never achievable; 19 such entries (v0.3.0–v0.3.10) had
     # accumulated and none was ever retired. They are now excluded by pattern
     # in scripts/checks/file_size.py (_EXTRA_EXCLUDES), which is also why new
     # ones must NOT be added back here. Master plans and release-prep plans

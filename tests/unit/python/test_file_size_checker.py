@@ -179,6 +179,9 @@ def test_release_evidence_exclusion_stays_narrow(tmp_path: Path) -> None:
       happen to share the directory with per-release reports.
     * ``docs/v*-plan.md`` — master plans, which are edited throughout
       their release cycle and where the cap still does useful work.
+    * Non-version names that merely start with ``v`` (``verify-*``,
+      ``variants-*``) — the patterns require a digit after the ``v``
+      (fnmatch ``v[0-9]``), so loosening that back to ``v*`` fails here.
 
     Broadening either pattern silently removes the cap from a live
     document; this test is the tripwire for that.
@@ -188,6 +191,10 @@ def test_release_evidence_exclusion_stays_narrow(tmp_path: Path) -> None:
     _write(tmp_path, "docs/v9.9.9-plan.md", DEFAULT_MAX_DOC_WORDS + 50)
     _write(tmp_path, "docs/v9.9.9-release-prep-plan.md",
            DEFAULT_MAX_DOC_WORDS + 50)
+    _write(tmp_path, "docs/manual-tests/verify-cache-execution-report.md",
+           DEFAULT_MAX_DOC_WORDS + 50)
+    _write(tmp_path, "docs/variants-release-checklist.md",
+           DEFAULT_MAX_DOC_WORDS + 50)
 
     measured = _measured(tmp_path)
     flagged = {w.file for w in _scan_files(tmp_path)[0]}
@@ -196,6 +203,8 @@ def test_release_evidence_exclusion_stays_narrow(tmp_path: Path) -> None:
         "docs/manual-tests/MT-EXAMPLE-001.md",
         "docs/v9.9.9-plan.md",
         "docs/v9.9.9-release-prep-plan.md",
+        "docs/manual-tests/verify-cache-execution-report.md",
+        "docs/variants-release-checklist.md",
     ):
         assert rel in measured, f"{rel} must still be scanned"
         assert rel in flagged, f"{rel} must still be capped"
