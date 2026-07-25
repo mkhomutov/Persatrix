@@ -24,7 +24,7 @@
 // A single blanket `unknown → internal` default would make (c)
 // unimplementable through the helper — a corrupted entry label would rank
 // `internal` and inject cleanly into any `internal` turn. So the core
-// [ClassificationRank] takes only known levels (ok/sentinel return) and each
+// [classificationRank] takes only known levels (ok/sentinel return) and each
 // rule is owned by exactly one named resolver — [RankForStamp] /
 // [NormalizeForStamp] (a), [ActingRank] (b), [EntryRankOrWithhold] (c). No
 // caller applies its own default.
@@ -42,7 +42,7 @@ type Classification string
 
 // The §A lattice, lowest to highest. The only operations the system needs
 // are the total order (`a ≤ b`) and `max`, both taken over the ranks
-// returned by [ClassificationRank].
+// returned by [classificationRank].
 const (
 	// ClassificationPublic — rank 0. No confidentiality expectation; the
 	// safe floor rule (b) resolves an unknown ACTING level to.
@@ -109,11 +109,11 @@ var ErrClassificationAboveDarkWindow = errors.New(
 // without either swallowing the other's error. Callers prefix their own field
 // or channel identity onto the returned error.
 func CheckDarkWindowClassification(level Classification) error {
-	rank, ok := ClassificationRank(level)
+	rank, ok := classificationRank(level)
 	if !ok {
 		return nil
 	}
-	ceiling, _ := ClassificationRank(DarkWindowMaxClassification)
+	ceiling, _ := classificationRank(DarkWindowMaxClassification)
 	if rank <= ceiling {
 		return nil
 	}
@@ -128,6 +128,13 @@ func CheckDarkWindowClassification(level Classification) error {
 // pinned by identical literal tables in classification_test.go and
 // tests/unit/python/test_classification.py, so a drift on either side fails
 // that side's suite.
+//
+// The `schemas/channel.schema.json` enum is the third copy of this vocabulary.
+// It is pinned to the PYTHON table (test_channel_config_schema.py derives its
+// expected level list from `CLASSIFICATION_RANKS` rather than re-typing a
+// literal), so this table's agreement with the schema is transitive: a level
+// added here must be added to the Python table to pass the pin above, and that
+// edit is what trips the schema test.
 var classificationRanks = map[Classification]int{
 	ClassificationPublic:     0,
 	ClassificationInternal:   1,
@@ -135,13 +142,21 @@ var classificationRanks = map[Classification]int{
 	ClassificationSecret:     3,
 }
 
-// ClassificationRank returns the §A lattice ordinal for a KNOWN level, and
+// classificationRank returns the §A lattice ordinal for a KNOWN level, and
 // ok=false for anything else — including the empty string. Deliberately no
 // default of any direction here: the three fail-closed rules disagree on what
 // an unknown level means, so the default belongs to the named resolvers
 // below, never to the core rank lookup (§A, the "restrictive flips direction"
 // rationale in the file header).
-func ClassificationRank(level Classification) (rank int, ok bool) {
+//
+// UNEXPORTED on purpose, so "each rule is owned by exactly one named resolver"
+// is enforced by the compiler rather than by convention. An out-of-package
+// gate author (PRs 4–5) can reach only [RankForStamp]/[NormalizeForStamp],
+// [ActingRank], and [EntryRankOrWithhold] — each of which names the §A rule it
+// applies — and cannot open-code a bare lookup plus a locally chosen default,
+// which is the one mistake this file exists to prevent. Export it only
+// alongside a fourth §A rule that genuinely needs it.
+func classificationRank(level Classification) (rank int, ok bool) {
 	rank, ok = classificationRanks[level]
 	return rank, ok
 }
@@ -170,7 +185,7 @@ func NormalizeForStamp(level Classification) Classification {
 // [NormalizeForStamp](level). Provided so stamp-side comparisons and the
 // stamp-side write share one rule owner.
 func RankForStamp(level Classification) int {
-	rank, _ := ClassificationRank(NormalizeForStamp(level))
+	rank, _ := classificationRank(NormalizeForStamp(level))
 	return rank
 }
 
@@ -182,10 +197,10 @@ func RankForStamp(level Classification) int {
 // must see the least-confidential view, not the `internal` default a
 // stamp-side coercion would grant.
 func ActingRank(level Classification) int {
-	if rank, ok := ClassificationRank(level); ok {
+	if rank, ok := classificationRank(level); ok {
 		return rank
 	}
-	rank, _ := ClassificationRank(ClassificationPublic)
+	rank, _ := classificationRank(ClassificationPublic)
 	return rank
 }
 
@@ -193,7 +208,7 @@ func ActingRank(level Classification) int {
 // level. A known level ranks as itself; unknown/unparseable returns ok=false
 // — the entry is withheld, treated as above-`secret`, never coerced onto the
 // lattice where it could inject on a corrupted label. Semantically this is
-// the bare [ClassificationRank], named so gate-side callers state which §A
+// the bare [classificationRank], named so gate-side callers state which §A
 // rule they are applying instead of open-coding a lookup-plus-default that
 // would silently pick a direction.
 //
@@ -207,5 +222,5 @@ func ActingRank(level Classification) int {
 // withholding rides ok=false and cannot be forgotten without ignoring the
 // result.
 func EntryRankOrWithhold(level Classification) (rank int, ok bool) {
-	return ClassificationRank(level)
+	return classificationRank(level)
 }

@@ -27,11 +27,14 @@ the helper's uses:
 A single blanket ``unknown → internal`` default would make (c)
 unimplementable through the helper — a corrupted entry label would rank
 ``internal`` and inject cleanly into any ``internal`` turn.  So the core
-:func:`classification_rank` returns ``None`` for anything outside the
+:func:`_classification_rank` returns ``None`` for anything outside the
 vocabulary, and each rule is owned by exactly one named resolver —
 :func:`rank_for_stamp` / :func:`normalize_for_stamp` (a),
 :func:`acting_rank` (b), :func:`entry_rank_or_withhold` (c).  No caller
-applies its own default.
+applies its own default — and cannot: the core lookup is private on both
+sides of the twin (``_classification_rank`` here, the unexported
+``classificationRank`` in Go), so the only reachable doors are the three
+that name the rule they apply.
 
 **Where rule (c)'s "and logged" half lives: the CALLER, in both
 languages.**  Every resolver here is pure — same contract as the Go twin's
@@ -74,6 +77,13 @@ DEFAULT_CLASSIFICATION: Final[str] = CLASSIFICATION_INTERNAL
 #: ``tests/unit/python/test_classification.py`` and the Go
 #: ``classification_test.go``, so a drift on either side fails that side's
 #: suite.
+#:
+#: The JSON-schema enum is the third copy of this vocabulary and is pinned to
+#: THIS table, not to a literal of its own:
+#: ``test_channel_config_schema.py`` derives its expected level list from here,
+#: so adding or renaming a level without editing
+#: ``schemas/channel.schema.json`` fails that suite.  Go ↔ schema agreement is
+#: therefore transitive through this dict.
 CLASSIFICATION_RANKS: Final[dict[str, int]] = {
     CLASSIFICATION_PUBLIC: 0,
     CLASSIFICATION_INTERNAL: 1,
@@ -82,7 +92,7 @@ CLASSIFICATION_RANKS: Final[dict[str, int]] = {
 }
 
 
-def classification_rank(level: str | None) -> int | None:
+def _classification_rank(level: str | None) -> int | None:
     """Return the §A lattice ordinal for a KNOWN level, else ``None``.
 
     Deliberately no default of any direction here — including for
@@ -92,6 +102,14 @@ def classification_rank(level: str | None) -> int | None:
     direction" rationale in the module docstring).  Comparison is exact —
     the vocabulary is lowercase and case-sensitive, matching the schema
     enum.
+
+    PRIVATE on purpose, mirroring the Go twin's unexported
+    ``classificationRank``: "each rule is owned by exactly one named
+    resolver" should be a property of the module's surface, not a request
+    in a docstring.  Importers get the three rule-named resolvers and
+    :func:`is_valid_classification`; a gate author (PRs 4–5) has no
+    unnamed lookup to open-code a locally chosen default against.  Only
+    this module's own tests reach past the underscore.
     """
     if level is None:
         return None
@@ -133,7 +151,7 @@ def acting_rank(level: str | None) -> int:
     autonomous tick with no channel) must see the least-confidential view,
     not the ``internal`` default a stamp-side coercion would grant.
     """
-    rank = classification_rank(level)
+    rank = _classification_rank(level)
     if rank is not None:
         return rank
     return CLASSIFICATION_RANKS[CLASSIFICATION_PUBLIC]
@@ -146,7 +164,7 @@ def entry_rank_or_withhold(level: str | None) -> int | None:
     the entry is withheld, treated as above-``secret``, never coerced onto
     the lattice where it could inject on a corrupted label.
 
-    Semantically this is the bare :func:`classification_rank`, named so
+    Semantically this is the bare :func:`_classification_rank`, named so
     gate-side callers state which §A rule they are applying instead of
     open-coding a lookup-plus-default that would silently pick a
     direction.  Pure, exactly like the Go twin ``EntryRankOrWithhold``:
@@ -154,4 +172,4 @@ def entry_rank_or_withhold(level: str | None) -> int | None:
     layer holding the entry's identity — see the module docstring for why,
     and note the recall filter calls this once per candidate row.
     """
-    return classification_rank(level)
+    return _classification_rank(level)

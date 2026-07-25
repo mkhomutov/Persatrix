@@ -45,7 +45,7 @@ func TestClassificationRank_TableIsPinned(t *testing.T) {
 	assert.Len(t, classificationRanks, len(want),
 		"the §A lattice is fixed at four levels for v0.3.x (RFC 0037 OQ #1)")
 	for level, rank := range want {
-		got, ok := ClassificationRank(level)
+		got, ok := classificationRank(level)
 		assert.True(t, ok, "level %q must be known", level)
 		assert.Equal(t, rank, got, "level %q rank", level)
 		assert.True(t, level.Valid())
@@ -62,8 +62,8 @@ func TestClassificationRank_TotalOrder(t *testing.T) {
 		ClassificationSecret,
 	}
 	for i := 1; i < len(ordered); i++ {
-		lo, okLo := ClassificationRank(ordered[i-1])
-		hi, okHi := ClassificationRank(ordered[i])
+		lo, okLo := classificationRank(ordered[i-1])
+		hi, okHi := classificationRank(ordered[i])
 		assert.True(t, okLo)
 		assert.True(t, okHi)
 		assert.Less(t, lo, hi, "%q must rank strictly below %q", ordered[i-1], ordered[i])
@@ -75,7 +75,7 @@ func TestClassificationRank_TotalOrder(t *testing.T) {
 // can accidentally ride a blanket default in either direction.
 func TestClassificationRank_UnknownIsNotOK(t *testing.T) {
 	for _, level := range unknownLevels {
-		_, ok := ClassificationRank(level)
+		_, ok := classificationRank(level)
 		assert.False(t, ok, "level %q must be unknown to the core rank lookup", level)
 		assert.False(t, level.Valid(), "level %q must not validate", level)
 	}
@@ -85,7 +85,7 @@ func TestClassificationRank_UnknownIsNotOK(t *testing.T) {
 // a STAMPING boundary labels `internal` — confidential-by-default, never
 // `public`. Known levels pass through unchanged.
 func TestRankForStamp_FailDirection(t *testing.T) {
-	internalRank, _ := ClassificationRank(ClassificationInternal)
+	internalRank, _ := classificationRank(ClassificationInternal)
 	for _, level := range unknownLevels {
 		assert.Equal(t, internalRank, RankForStamp(level),
 			"unknown %q must stamp-rank as internal (rule (a))", level)
@@ -103,7 +103,7 @@ func TestRankForStamp_FailDirection(t *testing.T) {
 // direction that closes the proto3 "" version-skew window and covers the
 // channel-less autonomous tick.
 func TestActingRank_FailDirection(t *testing.T) {
-	publicRank, _ := ClassificationRank(ClassificationPublic)
+	publicRank, _ := classificationRank(ClassificationPublic)
 	for _, level := range unknownLevels {
 		assert.Equal(t, publicRank, ActingRank(level),
 			"unknown %q must act at the public floor (rule (b))", level)

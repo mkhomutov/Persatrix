@@ -36,8 +36,8 @@ from agents.persona_runtime.classification import (
     CLASSIFICATION_RESTRICTED,
     CLASSIFICATION_SECRET,
     DEFAULT_CLASSIFICATION,
+    _classification_rank,
     acting_rank,
-    classification_rank,
     entry_rank_or_withhold,
     is_valid_classification,
     normalize_for_stamp,
@@ -80,7 +80,7 @@ def test_total_order() -> None:
     ]
     ranks: list[int] = []
     for level in ordered:
-        rank = classification_rank(level)
+        rank = _classification_rank(level)
         assert rank is not None, f"{level!r} must be a known level"
         ranks.append(rank)
     assert ranks == sorted(ranks)
@@ -91,7 +91,7 @@ def test_total_order() -> None:
 def test_classification_rank_unknown_is_none(level: str | None) -> None:
     """The core lookup refuses to default: unknown → ``None``, so no caller
     can accidentally ride a blanket default in either direction."""
-    assert classification_rank(level) is None
+    assert _classification_rank(level) is None
     assert not is_valid_classification(level)
 
 
