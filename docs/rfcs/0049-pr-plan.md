@@ -29,18 +29,23 @@ This plan covers Phase 1 across **5 PRs**:
 ```
 RFC 0037 PR 5 on main (§D gate + §F filter)                       ══ MERGE GATE
    │
-   ├── PR 1 (capture: topic.* predicates + extractor + recall seeding + blast-radius review)
+   ├── PR 1 (capture: topic.* predicates + extractor + recall seeding
+   │     + blast-radius review)
    │       │
-   │       └── PR 2 (L2 fact widening, SHADOW: cross-room fact recall behind the gate
-   │             + shadow-mode evaluation plumbing)
+   │       └── PR 2 (L2 fact widening, SHADOW: cross-room fact recall
+   │             behind the gate + shadow-mode evaluation plumbing)
    │
-   ├── PR 3 (L1 widening, SHADOW: session filter wall → room-first ranking + gated
-   │       cross-room episodic recall mode)          (independent of PRs 1–2; either order)
-   │
-   └── PR 4 (measurement + live flip: golden-trace shadow verdict → promote L1+L2 to the
-           live prompt, or ship shadow-only with the flip criterion documented)
-               │
-               └── PR 5 (closeout: docs + ISSUE-0084 close + gradient docs + RFC flip)
+   └── PR 3 (L1 widening, SHADOW: session filter wall → room-first ranking
+         + gated cross-room episodic recall mode)
+         (independent of PRs 1–2; either order)
+
+        PR 2 ─┐
+        PR 3 ─┴─→ PR 4 (measurement + live flip: golden-trace shadow verdict
+                    → promote L1+L2 to the live prompt, or ship shadow-only
+                      with the flip criterion documented)
+                        │
+                        └── PR 5 (closeout: docs + ISSUE-0084 close
+                              + gradient docs + RFC flip)
 ```
 
 ## PR 1 — `feature/v0312-rfc0049-post-gate-topic-capture` (the 0026 amendment, expanded stub → implementation)
@@ -66,6 +71,8 @@ RFC 0037 PR 5 on main (§D gate + §F filter)                       ══ MERGE
 - Tests: ranking order (same-room first at equal relevance); gate enforcement on cross-room episodic candidates; `EVAL-MEMORY-001` replays green (the continuity tripwire).
 
 ## PR 4 — `feature/v0312-rfc0049-post-gate-promotion` (the measurement gate → live flip)
+
+**Depends on PRs 2 *and* 3** (not on the merge gate alone): it promotes L1+L2 together, so both shadow slices must be on `main` with shadow traces recorded before the verdict can be run.
 
 - Run the shadow verdict: golden-trace evaluation (RFC 0044) of prompt quality under the RFC 0017 injection budget + dementia-test continuity on the room-first goldens.
 - **Green** → flip L1+L2 shadow → live (small, config-flip-shaped diff) + the room-axis integration eval (the L1 amendment's EVAL follow-up).

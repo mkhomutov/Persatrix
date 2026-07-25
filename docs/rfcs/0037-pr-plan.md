@@ -58,11 +58,12 @@ PR 1 (lattice helpers + channel classification: config/schema + store v11 + DM s
 
 ## PR 1 — `feature/v0312-rfc0037-lattice-config` (Phase 1 steps 1–2a: lattice + channel classification at rest)
 
-- `internal/channels/classification.go` (new): `classification_rank` — total order over the §A lattice, **fail-closed** (unknown → `internal` rank for stored levels); `agents/persona_runtime/classification.py` (new): the Python twin. Single source per side, property-tested for agreement on the shared enum.
+- `internal/channels/classification.go` (new): `classification_rank` — total order over the §A lattice; `agents/persona_runtime/classification.py` (new): the Python twin. Single source per side, property-tested for agreement on the shared enum.
+- **No blanket unknown-default on the rank helper.** §A splits fail-closed into three rules *because* "restrictive" flips direction across the helper's uses: (a) stamping/labeling → `internal`; (b) acting level at gate/recall time → the **`public` floor**; (c) an unknown/unparseable *entry* protection level → **withheld and logged** (treated as above-`secret`). A single `unknown → internal` default would make (c) unimplementable through the helper — a corrupted entry label would rank `internal` and inject cleanly into any `internal` turn. So `classification_rank` takes only known levels and the unknown case is explicit: an `ok`/sentinel return (Go `(rank, bool)`; Python `None`), with three named resolvers — `rank_for_stamp` (a), `acting_rank` (b), `entry_rank_or_withhold` (c) — owning one rule each. No caller applies its own default.
 - `config/channels.yaml` + `schemas/channel.schema.json`: per-channel `classification` field + the `dm_default_classification` knob (default `internal`); `make validate` rejects unknown levels.
 - Channel-store migration **v11** (`sqlite_schema.go` version const + history, `sqlite_migrations.go` `migrateV10ToV11`): `channels.classification` column, backfill `internal`.
 - `internal/channels/sqlite_dm.go` (`GetOrCreateDM`): stamp `dm_default_classification` at DM creation; thread replies inherit the parent row's classification by construction (§B — asserted by test, no code path).
-- Tests: rank totality + fail-closed both sides; migration on a populated v10 store; schema validation; DM stamping.
+- Tests: rank totality; **the three §A fail directions asserted here, at the helper** (stamp→`internal`, acting→`public`, entry→withhold) on both sides, so the contract is pinned where it is defined — PR 4 then asserts the same three *through the gate*; migration on a populated v10 store; schema validation; DM stamping.
 - **Dark**: nothing reads `channels.classification` yet.
 
 ## PR 2 — `feature/v0312-rfc0037-wire` (Phase 1 step 2b: classification on the wire)
@@ -115,6 +116,7 @@ PR 1 (lattice helpers + channel classification: config/schema + store v11 + DM s
 - Docs: `docs/guides/persona-agents.md` + `channels.md` + `sessions.md` (classification, protection levels, the two-axis model, the operator opt-in path); `docs/diagrams/memory-architecture.md`.
 - `MT-PERSONA-CONFIDENTIALITY-001` (manual test: learn-restricted / act-public / withheld-or-projected / act-restricted verbatim / tripwire leg) + an RFC 0044 golden-trace recipe for the gate.
 - RFC 0037 front-matter → ✅ Implemented; ROADMAP row flip; catch-up replay stamping test for `secret`-channel episodes (v0.3.12 review item 8) if not landed earlier.
+- **RFC 0038 front-matter → ⚠️ Partially Implemented** (§B single-channel-turn guard shipped v0.3.12 via this plan's PR 4; §C–§E stay v0.4.0) + its ROADMAP/INDEX rows — the §B carve-in is implemented here, so 0038 must not stay 📋 Proposed through the release that ships it.
 
 ---
 
