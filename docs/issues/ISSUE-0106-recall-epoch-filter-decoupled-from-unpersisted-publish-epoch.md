@@ -108,3 +108,13 @@ handler/types/test comments were already corrected in `9ce3a26`.
 > review's honest-docs + tripwire-test fixes landed in `9ce3a26` (no behavior
 > change); this issue tracks the unresolved epoch decoupling itself, which needs
 > the deployment-model decision above.
+
+> 2026-07-25 — **Slotted into v0.3.12, direction (b)**, at the
+> [v0.3.12 plan opening](../v0.3.12-plan.md#scope-decisions-locked-at-plan-authoring-time-2026-07-25).
+> Deployment model confirmed by the maintainer: separate runs/epochs never
+> share a channel-store DB (isolation is physical), so the recall `epoch_id`
+> body override is dropped, RFC 0036 §OQ-6 is amended, and the decoupling
+> tripwire test retires with the axis. Rides
+> [RFC 0037 PR 5](../rfcs/0037-pr-plan.md) — the same PR that reworks the
+> recall endpoint's parameters for the §F classification filter, so the
+> surface changes once.

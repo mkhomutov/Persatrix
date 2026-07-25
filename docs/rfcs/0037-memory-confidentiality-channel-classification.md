@@ -3,7 +3,7 @@ id: RFC-0037
 title: Memory Confidentiality & Channel Classification
 summary: Add an ordered confidentiality classification to every channel and a protection level to every channel-derived persona memory entry, with a deterministic hard gate in the memory-injection layer that withholds verbatim protected memory from any prompt assembled for a lower-classified channel — so a persona can learn from a confidential channel without leaking it.
 type: feature
-status: proposed
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-16
 target: v0.3.12 (cross-channel persona experience; pulled forward from the v0.4.0 on-ramp per 2026-07-15)
@@ -15,7 +15,7 @@ depends_on:
 # RFC 0037 — Memory Confidentiality & Channel Classification
 
 **Type**: feature
-**Status**: 📋 Proposed
+**Status**: 🚧 Implementing — the v0.3.12 keystone (plan opened 2026-07-25; [PR plan](0037-pr-plan.md), [v0.3.12 plan](../v0.3.12-plan.md)); all three phases in scope, Phases 2–3 cuttable
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
 **Target**: v0.3.12 (cross-channel persona experience). **Pulled forward** from the v0.4.0 on-ramp per the 2026-07-15 planning decision — this restores the RFC's own original intent (its Motivation §"Why this is a v0.3.x RFC" argues confidentiality is local and v0.3.x-shippable; the [2026-06-04 amendment](../v0.3.x-sequencing.md#amendment-2026-06-04--re-sequence-the-v03x-tail-for-conversation-realism--usefulness-ahead-of-v040) had deferred it to make room for conversation-realism work, now shipped).

@@ -3,10 +3,10 @@ id: RFC-0039
 title: User Accounts & Authentication
 summary: Human user accounts with password login, opaque revocable sessions, and a coarse operator/user role gate on the REST surface — so the caller's participant_id becomes a verified claim instead of an unverified request parameter, and the unauthenticated REST API (RFC 0002) gains a foundation that IdP federation, MFA, and RFC 0012 organizational clearance extend cleanly.
 type: architecture
-status: proposed
+status: implementing
 author: Maksim Khomutov
 created: 2026-05-16
-target: v0.3.x (Phases 1–2) + v0.4.0 (Phase 3)
+target: v0.3.12 (Phases 1–2) + v0.4.0 (Phase 3)
 depends_on:
   - RFC-0002
   - RFC-0016
@@ -15,10 +15,10 @@ depends_on:
 # RFC 0039 — User Accounts & Authentication
 
 **Type**: architecture
-**Status**: 📋 Proposed
+**Status**: 🚧 Implementing — Phases 1–2 slotted into v0.3.12 as the bundled second workstream (plan opened 2026-07-25; [PR plan](0039-pr-plan.md), [v0.3.12 plan](../v0.3.12-plan.md)); independently shippable and cuttable whole
 **Author**: Maksim Khomutov
 **Date**: 2026-05-16
-**Target**: v0.3.x (Phases 1–2) + v0.4.0 (Phase 3)
+**Target**: v0.3.12 (Phases 1–2) + v0.4.0 (Phase 3)
 **Depends on**: RFC 0002 (REST API Server — the surface this RFC authenticates), RFC 0016 (Human Participant & Chat Interface — the `UserParticipant` an account binds to)
 **Relates to**: RFC 0009 (Agent Identity, Security & Sandboxing — the *agent* identity axis this RFC is the human counterpart of; the `AuditLogger` and `RateLimiter` it reuses), RFC 0012 (Protocols & Organizations — organizational clearance attaches to an account; the §I extension seam), RFC 0037 (Memory Confidentiality & Channel Classification — its confidentiality model presupposes a verified human identity), RFC 0001 (Core Orchestration Pipeline — the orchestrator `Store` pattern)
 
