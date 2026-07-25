@@ -89,6 +89,7 @@ PR 1 (lattice helpers + channel classification: config/schema + store v11 + DM s
 - The **notes leg**, now sound: `agents/memory/notes.py` stamping + gated `recall_notes` (`agents/tools/builtin.py`, `agents/memory/_notes_recall.py`) + `update_note` re-stamp (§C).
 - The **§B single-channel-turn guard** (RFC 0038 §B carve-in): event-aware post-parse check in `_on_event_inner` — a non-tick `SEND_CHANNEL_MESSAGE` whose `channel_id` differs from the acting channel becomes `DO_NOTHING` + WARNING (audit wire-up is a tracked follow-up); tick turns publish anywhere (their injection is already floored `public`).
 - Tests: at/below/above-rank injection matrix; tick floor; notes gating + re-stamp; the guard's positive-list `EventType` → acting-level resolution (v0.3.12 review item 5); the §A three-way fail directions (unknown acting → `public` floor; unknown entry → withheld + logged).
+- **Rule (c)'s "and logged" half is owed HERE, at the gate.** Both lattice helpers (`EntryRankOrWithhold` / `entry_rank_or_withhold`) are deliberately pure and pinned silent from PR 1 — the caller is the only layer holding the entry's identity, and the §F filter evaluates per row, so an in-helper warning floods on a corrupted batch. The gate's WARNING must name the entry, its channel, and the acting level; aggregate per turn rather than emitting per entry.
 - **Gate live** — but no channel is classified above `internal` yet (item-8 rule), so behavior on real deployments is unchanged until operators opt in post-release.
 
 ## PR 5 — `feature/v0312-rfc0037-recall-filter` (Phase 1 step 5 + ISSUE-0106(b)) ══ the merge gate opens here
@@ -120,6 +121,27 @@ PR 1 (lattice helpers + channel classification: config/schema + store v11 + DM s
 
 ---
 
+## Progress Overview
+
+| PR | Step | Branch | Status | GitHub PR | Merged |
+|----|------|--------|--------|-----------|--------|
+| 1 | 1–2a — lattice helpers + channel classification at rest (config/schema + store v11 + DM stamping; dark) | `feature/v0312-rfc0037-lattice-config` | 🔀 PR open | _this PR_ | — |
+| 2 | 2b — classification on the wire (proto + dispatch + history/catch-up; dark) | `feature/v0312-rfc0037-wire` | ⬜ | — | — |
+| 3 | 3 — memory substrate (protection levels + projections table + interaction-open capture; dark) | `feature/v0312-rfc0037-memory-substrate` | ⬜ | — | — |
+| 4 | 4 + 3-notes + 6 — §D hard gate + notes leg + tick floor + §B guard (gate live) | `feature/v0312-rfc0037-hard-gate` | ⬜ | — | — |
+| 5 | 5 — §F recall filter + acting-channel param + ISSUE-0106(b) ══ merge gate | `feature/v0312-rfc0037-recall-filter` | ⬜ | — | — |
+| 6 | Phase 2 — declassification projections (cuttable) | `feature/v0312-rfc0037-projections` | ⬜ | — | — |
+| 7 | Phase 3 — §G leak tripwire (cuttable) | `feature/v0312-rfc0037-tripwire` | ⬜ | — | — |
+| 8 | closeout — docs/diagrams + MT + golden recipe + RFC flips | `feature/v0312-rfc0037-closeout` | ⬜ | — | — |
+
+**Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged
+
+**PR 1 note.** Group channels take the migration's `internal` DEFAULT at creation in PR 1; the *declared* `classification` is parsed + validated but threads into the store row with PR 2's `Channel` plumbing (the wire lift reads the same field). Behaviour-identical while the item-8 dark-window rule holds — and PR 1 makes that rule **enforced**, not documented: `Config.Validate` rejects any declared level above `internal` (`ErrClassificationAboveDarkWindow`) precisely because a declaration that never reaches the store row would read as a boundary to the operator while every path still sees `internal`. **PR 4 must delete that guard** (`CheckDarkWindowClassification` + its two call sites + the guard tests) when the §D gate arms; the schema enum already advertises all four levels, so nothing else changes.
+
+**PR 2 note — existing rows.** Threading the declared `classification` through `CreateChannel` is not sufficient on its own: there is no `UPDATE channels SET classification` path today, and `ReconcileFromYAML` reconciles only `config_overrides_json` under the RFC 0050 revision gate. Any store created at PR 1 or earlier keeps `classification='internal'` on its group rows forever. PR 2 (or PR 4 at the latest, before the gate reads the column) owes an explicit adoption step for pre-existing rows, or a `restricted` declaration will silently under-classify on every upgraded deployment while reading as correct in config.
+
+---
+
 ## Test strategy cross-reference
 
 The RFC's [Test Strategy](0037-memory-confidentiality-channel-classification.md#test-strategy) maps: unit lattice/gate/stamping/query/tripwire → PRs 1/4/3/5/7; migration tests → PRs 1/3; integration (restricted→public withhold, projection, tripwire) → PRs 4/6/7; the v0.3.12 review items 5/6/8 → PRs 4/4/8.
@@ -128,7 +150,7 @@ The RFC's [Test Strategy](0037-memory-confidentiality-channel-classification.md#
 
 | Risk | Mitigation |
 |------|------------|
-| The dark window leaks (a channel classified above `internal` mid-Phase-1). | Item-8 rule: `validate` accepts the field from PR 1, but docs/guides only document the opt-in at PR 8; the window is development-only by construction. |
+| The dark window leaks (a channel classified above `internal` mid-Phase-1). | Enforced, not documented: from PR 1 `Config.Validate` rejects any declared level above `internal` (`ErrClassificationAboveDarkWindow`) on both the per-channel field and the DM knob, so the window cannot be opened by an operator reading the schema ahead of the guides. PR 4 removes the guard as it arms the §D gate. |
 | The §D gate slows every turn (it sits on the injection hot path). | The gate is a rank comparison over already-loaded rows — no new queries; the recall-latency regression gate (RFC 0029 Phase 1) is watched at PR 4/5. |
 | Two schema migrations (channel v11, memory-side) in one release. | Both follow the shipped in-transaction versioned discipline with `internal` backfill; migration tests run on populated stores; the memory-side columns for notes land in PR 3 but stamp only from PR 4 (soundness rule). |
 | ISSUE-0106(b) breaks an unknown caller passing `epoch_id`. | Grep-verified: no non-test caller passes a non-`live` epoch (the ISSUE-0106 evidence chain); the endpoint 4xxes with a pointed message for one release. |

@@ -101,7 +101,20 @@ import (
 //	    NOTE: `content_rowid=rowid` aliases `messages`' implicit rowid, which is
 //	    NOT preserved across an explicit `VACUUM`; no code runs `VACUUM` today,
 //	    but any future compaction must be followed by a `('rebuild')`.
-const channelStoreSchemaVersion = 10
+//	v11 — RFC 0037 PR 1 (v0.3.12, channel classification at rest): adds
+//	    `classification TEXT NOT NULL DEFAULT 'internal'` to `channels` — the
+//	    §A confidentiality lattice level of every conversation surface. The
+//	    `internal` backfill is §A rule (a) applied to every pre-v11 row: a
+//	    channel that predates classification is confidential-by-default,
+//	    never `public`. Writers light up in the same PR (DM creation stamps
+//	    the `dm_default_classification` knob); the column is otherwise DARK
+//	    SUBSTRATE — no reader until the §D hard gate / §F recall filter PRs —
+//	    so a v0.3.11 database behaves byte-identically. A pure addition: no
+//	    existing table, row, or index is touched. No CHECK constraint, per
+//	    the additive-column precedent (v3/v6): the lattice helpers
+//	    (classification.go) own the vocabulary, and the §A rule-(c) read
+//	    posture (unknown label ⇒ withheld) is the corruption net.
+const channelStoreSchemaVersion = 11
 
 // schemaV1SQL is the original schema shipped in PR #231. Applied verbatim
 // when opening a fresh database; the v1→v2 migration below uses

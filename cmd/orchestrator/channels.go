@@ -115,6 +115,9 @@ func initChannels(
 		MaxChannels:    maxCh,
 		Logger:         logger,
 		SessionMetrics: sessionMetrics,
+		// RFC 0037 §B (v0.3.12): the level GetOrCreateDM stamps onto DM rows.
+		// LoadConfig already normalized absent → internal (§A rule (a)).
+		DMDefaultClassification: chanCfg.DMDefaultClassification,
 	})
 	if sErr != nil {
 		logger.Warn("channels: store open failed; channel endpoints will return 503",
