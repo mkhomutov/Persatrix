@@ -23,7 +23,7 @@ Policy:
 
 ## Go dependencies
 
-Collected via `go-licenses report ./cmd/... ./internal/...` (38 packages).
+Collected via `go-licenses report ./cmd/... ./internal/...` (39 packages).
 
 | Package | License | Source |
 | --- | --- | --- |
@@ -53,12 +53,13 @@ Collected via `go-licenses report ./cmd/... ./internal/...` (38 packages).
 | `go.opentelemetry.io/proto/otlp` | Apache-2.0 | [link](https://github.com/open-telemetry/opentelemetry-proto-go/blob/otlp/v1.10.0/otlp/LICENSE) |
 | `go.uber.org/multierr` | MIT | [link](https://github.com/uber-go/multierr/blob/v1.10.0/LICENSE.txt) |
 | `go.uber.org/zap` | MIT | [link](https://github.com/uber-go/zap/blob/v1.27.0/LICENSE) |
-| `golang.org/x/net` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/net/+/v0.55.0:LICENSE) |
-| `golang.org/x/sys/unix` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/sys/+/v0.45.0:LICENSE) |
-| `golang.org/x/text` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/text/+/v0.37.0:LICENSE) |
-| `google.golang.org/genproto/googleapis/api/httpbody` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/9d38bb4040a9/googleapis/api/LICENSE) |
-| `google.golang.org/genproto/googleapis/rpc/status` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/6f92a3bedf2d/googleapis/rpc/LICENSE) |
-| `google.golang.org/grpc` | Apache-2.0 | [link](https://github.com/grpc/grpc-go/blob/v1.80.0/LICENSE) |
+| `golang.org/x/crypto` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/crypto/+/v0.54.0:LICENSE) |
+| `golang.org/x/net` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/net/+/v0.56.0:LICENSE) |
+| `golang.org/x/sys/unix` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/sys/+/v0.47.0:LICENSE) |
+| `golang.org/x/text` | BSD-3-Clause | [link](https://cs.opensource.google/go/x/text/+/v0.40.0:LICENSE) |
+| `google.golang.org/genproto/googleapis/api/httpbody` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/afd174a4e478/googleapis/api/LICENSE) |
+| `google.golang.org/genproto/googleapis/rpc/status` | Apache-2.0 | [link](https://github.com/googleapis/go-genproto/blob/afd174a4e478/googleapis/rpc/LICENSE) |
+| `google.golang.org/grpc` | Apache-2.0 | [link](https://github.com/grpc/grpc-go/blob/v1.82.1/LICENSE) |
 | `google.golang.org/protobuf` | BSD-3-Clause | [link](https://github.com/protocolbuffers/protobuf-go/blob/v1.36.11/LICENSE) |
 | `gopkg.in/yaml.v3` | MIT | [link](https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE) |
 | `modernc.org/libc` | MIT | [link](https://gitlab.com/cznic/libc/blob/v1.72.0/LICENSE-3RD-PARTY.md) |
