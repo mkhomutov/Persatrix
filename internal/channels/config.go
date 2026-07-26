@@ -66,8 +66,8 @@ type Config struct {
 	// is rejected by [Config.Validate] (the schema enum catches it at `make
 	// validate`). Wired to the store via [SQLiteOptions.DMDefaultClassification].
 	// Operators running sensitive DMs should raise this or reclassify
-	// per-DM once the Phase-1 set ships (the item-8 dark-window rule: keep
-	// every channel at ≤ `internal` until then).
+	// per-DM — any §A level is declarable now that the Phase-1 gate set is
+	// live (the item-8 dark-window guard was deleted at RFC 0037 PR 4).
 	DMDefaultClassification Classification `yaml:"dm_default_classification"`
 }
 
@@ -283,13 +283,11 @@ type ChannelConfig struct {
 	// this group channel (v0.3.12). Absent normalizes to `internal` at load
 	// (§A rule (a)); an unknown non-empty level is rejected by
 	// [Config.Validate] (the schema enum catches it at `make validate`).
-	// DARK in RFC 0037 PR 1: parsed and validated so a schema-valid config
-	// keeps loading (the decoder runs `KnownFields(true)`), but not yet
-	// applied to the store row — the declared value is threaded into the
-	// channel-create path with the wire lift (PR 2); until then a created
-	// group row takes the migration's `internal` DEFAULT, which equals this
-	// field's default. Item-8 dark-window rule: do NOT declare a level above
-	// `internal` before the full Phase-1 set ships.
+	// Threaded into the channel-create path and adopted on reconcile since
+	// the PR 2 wire lift; LIVE from RFC 0037 PR 4 — the §D hard gate, the
+	// gated `recall_notes`, and the §B single-channel-turn guard enforce
+	// the declared boundary, so any §A level is declarable (the item-8
+	// dark-window guard that capped this at `internal` was deleted there).
 	Classification Classification `yaml:"classification"`
 }
 

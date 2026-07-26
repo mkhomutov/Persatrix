@@ -11,23 +11,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import shlex
-import uuid as _uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import aiohttp
 
-from ..prompt_loader import load_snippet
-from ..session_id import current_session_id, resolve_session_id_silent
-from .identity_write_through import maybe_write_through_identity
+# Back-compat re-export: the note-tool factory moved to
+# :mod:`agents.tools.memory_tools` (RFC 0037 PR 4 — the §C/§D notes-leg
+# wiring pushed this module past the 500-line cap).  Every existing
+# ``from agents.tools.builtin import create_memory_tools`` keeps working.
+from .memory_tools import check_auto_reflect, create_memory_tools  # noqa: F401
 from .permissions import PermissionGate
-from .registry import ToolDefinition, ToolResult, get_tool, tool
+from .registry import ToolResult, tool
 from .sandbox import PathValidator
-
-if TYPE_CHECKING:
-    from ..memory.episodic import EpisodicMemory
-    from ..memory.relationship import RelationshipMemory
 
 logger = logging.getLogger(__name__)
 
@@ -328,173 +324,5 @@ async def http_request(url: str, method: str = "GET", body: str = "") -> ToolRes
 
 
 # ─── Memory Tools (Agent-Initiated Notes) ──────────────────
-
-
-def create_memory_tools(
-    memory: EpisodicMemory,
-    gate: PermissionGate,
-    *,
-    max_notes: int = 500,
-    auto_reflect_after: int = 0,
-    relationship: RelationshipMemory | None = None,
-) -> list[ToolDefinition]:
-    """Create closure-based memory tools bound to a specific EpisodicMemory instance.
-
-    The ``agent_id`` and DB connection are captured in the closure — they are
-    NOT controllable by the LLM.
-
-    ``relationship`` (RFC 0031 amendment, F-7 Option D, ISSUE-0093 PR D2)
-    wires the person-identity write-through: a ``store_note`` call whose
-    topic is ``contact:<id>`` additionally upserts structured identity
-    (name / role / prefs) onto the cross-room relationship tier so it
-    surfaces in every room for that person, not just the room it was
-    stated in.  ``None`` (the default for non-persona callers and the
-    pre-wiring path) disables the write-through — the note tool behaves
-    exactly as before.
-
-    Returns a list of registered ToolDefinition objects.
-    """
-    tools: list[ToolDefinition] = []
-
-    # RFC 0031 Phase 2 PR 1 — resolve the per-process operator namespace
-    # once at tool-construction time (the env var is fixed for the life of
-    # a persona-runtime process), mirroring the silent construction-time
-    # read the MemoryStore facade does for the episode/relationship write
-    # path.  Captured in the closure as the *fallback*; ISSUE-0081 PR 2
-    # layers a call-time ``session_scope`` override on top at the write
-    # site so a note stored while handling a concurrent conversation is
-    # tagged with that conversation's session, not this snapshot.
-    session_id = resolve_session_id_silent()
-
-    @tool(
-        name="store_note",
-        description="Store a note for future reference",
-        permissions=["memory:write"],
-        tier="builtin",
-    )
-    async def store_note(topic: str, content: str, tags: str = "") -> ToolResult:
-        """Store a note with a topic and content. Tags is a comma-separated string."""
-        if not gate.check("memory:write"):
-            return ToolResult(success=False, error="Permission denied: memory:write")
-        # RFC 0031 amendment (F-7 Option D, ISSUE-0093) PR D3 — a
-        # ``contact:<id>`` note's person identity now lives on the cross-room
-        # relationship tier *only* (D2's dual-write note is retired).  ``True``
-        # means identity was persisted, so skip the note; ``False`` falls
-        # through to the note write below as a safety net (see the helper).
-        if await maybe_write_through_identity(relationship, topic, content):
-            return ToolResult(success=True, data={"topic": topic, "identity_stored": True})
-        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
-        try:
-            note_id = await memory.store_note(
-                topic=topic, content=content, tags=tag_list, max_notes=max_notes,
-                # ISSUE-0081 PR 2: call-time scope wins over the
-                # construction snapshot captured above.
-                session_id=current_session_id() or session_id,
-            )
-        except ValueError as exc:
-            return ToolResult(success=False, error=str(exc), error_type="ValueError")
-        return ToolResult(success=True, data={"note_id": note_id, "topic": topic})
-
-    @tool(
-        name="recall_notes",
-        description="Search stored notes by query",
-        permissions=["memory:read"],
-        tier="builtin",
-    )
-    async def recall_notes(query: str = "", limit: int = 10) -> ToolResult:
-        """Search notes. Empty query returns most recent notes."""
-        if not gate.check("memory:read"):
-            return ToolResult(success=False, error="Permission denied: memory:read")
-        try:
-            notes = await memory.recall_notes(query=query, limit=limit)
-        except ValueError as exc:
-            return ToolResult(success=False, error=str(exc), error_type="ValueError")
-        return ToolResult(
-            success=True,
-            data=[
-                {
-                    "id": n.id,
-                    "topic": n.topic,
-                    "content": n.content,
-                    "tags": n.tags,
-                    "access_count": n.access_count,
-                }
-                for n in notes
-            ],
-        )
-
-    @tool(
-        name="update_note",
-        description="Update the content of an existing note",
-        permissions=["memory:write"],
-        tier="builtin",
-    )
-    async def update_note(note_id: str, content: str) -> ToolResult:
-        """Update a note's content. Topic and tags are preserved."""
-        if not gate.check("memory:write"):
-            return ToolResult(success=False, error="Permission denied: memory:write")
-        try:
-            _uuid.UUID(note_id)
-        except (ValueError, AttributeError):
-            return ToolResult(
-                success=False,
-                error=f"Invalid note_id (expected UUID): {note_id}",
-                error_type="ValueError",
-            )
-        try:
-            found = await memory.update_note(note_id=note_id, content=content)
-        except ValueError as exc:
-            return ToolResult(success=False, error=str(exc), error_type="ValueError")
-        if not found:
-            return ToolResult(success=False, error=f"Note not found: {note_id}")
-        return ToolResult(success=True, data={"note_id": note_id, "updated": True})
-
-    @tool(
-        name="delete_note",
-        description="Delete a stored note",
-        permissions=["memory:write"],
-        tier="builtin",
-    )
-    async def delete_note(note_id: str) -> ToolResult:
-        """Delete a note by ID."""
-        if not gate.check("memory:write"):
-            return ToolResult(success=False, error="Permission denied: memory:write")
-        try:
-            _uuid.UUID(note_id)
-        except (ValueError, AttributeError):
-            return ToolResult(
-                success=False,
-                error=f"Invalid note_id (expected UUID): {note_id}",
-                error_type="ValueError",
-            )
-        found = await memory.delete_note(note_id=note_id)
-        if not found:
-            return ToolResult(success=False, error=f"Note not found: {note_id}")
-        return ToolResult(success=True, data={"note_id": note_id, "deleted": True})
-
-    # Collect registered tool definitions
-    for name in ("store_note", "recall_notes", "update_note", "delete_note"):
-        td = get_tool(name)
-        if td is not None:
-            tools.append(td)
-
-    return tools
-
-
-async def check_auto_reflect(
-    memory: EpisodicMemory,
-    auto_reflect_after: int,
-) -> str | None:
-    """Increment the interaction counter and return a nudge if threshold reached.
-
-    Returns a system prompt nudge string if ``auto_reflect_after > 0`` and the
-    counter has reached the threshold, otherwise ``None``.  Resets the counter
-    after firing.
-    """
-    if auto_reflect_after <= 0:
-        return None
-    count = await memory.increment_interaction_count()
-    if count >= auto_reflect_after:
-        await memory.reset_interaction_count()
-        return load_snippet("reflection-nudge")
-    return None
+# ``create_memory_tools`` / ``check_auto_reflect`` live in
+# :mod:`agents.tools.memory_tools` — re-exported above.

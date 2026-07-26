@@ -110,7 +110,14 @@ def _make_mixin(
     event.channel_id = channel_id
     event.sender_id = sender_id
     event.thread_id = thread_id
-    event.metadata = {}
+    # RFC 0037 §B/§D: the production dispatch path stamps the channel's
+    # classification; the harness mirrors it so channel turns act
+    # ``internal`` and the seeded (``internal``-default) episodes pass
+    # the §D gate instead of flooring to ``public`` (rule (b)).
+    event.metadata = (
+        {"channel_classification": "internal"}
+        if event_type is EventType.CHANNEL_MESSAGE else {}
+    )
     event.payload = {"content": content, "channel_type": channel_type}
     event.timestamp = 0.0
     return mixin, event

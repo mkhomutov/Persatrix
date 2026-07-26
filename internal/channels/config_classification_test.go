@@ -35,16 +35,22 @@ channels:
 // levels load unchanged on both fields (the decoder runs KnownFields(true), so
 // this also pins that a schema-valid config file keeps loading at all).
 //
-// Only levels at or below the dark-window ceiling appear here — `restricted`
-// and `secret` are rejected by [CheckDarkWindowClassification] until the §D
-// gate ships (see TestLoadConfig_ClassificationAboveDarkWindow_Rejected). When
-// that guard is removed at RFC 0037 PR 4, widen this back over the full
-// vocabulary so the parse path keeps its exhaustive pin.
+// Exhaustive over the vocabulary — including `restricted` and `secret`,
+// which the item-8 dark-window guard rejected at load through PRs 1–3.
+// That guard was deleted when the §D gate armed (RFC 0037 PR 4), exactly
+// as its REMOVAL note prescribed; this widened pin is the replacement:
+// every §A level is now a declarable, enforced boundary.
 func TestLoadConfig_ClassificationDeclared_ParsesVerbatim(t *testing.T) {
 	body := `
-dm_default_classification: internal
+dm_default_classification: restricted
 channels:
   - name: leadership
+    classification: secret
+    members: [alice]
+  - name: planning
+    classification: restricted
+    members: [alice]
+  - name: engineering
     classification: internal
     members: [alice]
   - name: townsquare
@@ -53,72 +59,13 @@ channels:
 `
 	cfg, err := LoadConfig(writeYAML(t, body))
 	require.NoError(t, err)
-	assert.Equal(t, ClassificationInternal, cfg.DMDefaultClassification)
-	require.Len(t, cfg.Channels, 2)
-	assert.Equal(t, ClassificationInternal, cfg.Channels[0].Classification)
-	assert.Equal(t, ClassificationPublic, cfg.Channels[1].Classification)
-}
-
-// TestLoadConfig_ClassificationAboveDarkWindow_Rejected pins the item-8
-// dark-window rule as an ENFORCED ceiling, not a documented request: a level
-// above `internal` is refused at load on both declaration surfaces while the
-// §D hard gate (PR 4) and §F recall filter (PR 5) are missing.
-//
-// The failure this closes is worse than an unclassified channel: in PR 1 a
-// declared group classification never reaches the store row at all, so an
-// operator reading the schema and writing `classification: restricted` would
-// get a config that loads clean, a row that still says `internal`, and no gate
-// on either side — a confidentiality boundary that exists only in their head.
-//
-// TEMPORARY: delete this test with the guard at PR 4.
-func TestLoadConfig_ClassificationAboveDarkWindow_Rejected(t *testing.T) {
-	for _, level := range []Classification{ClassificationRestricted, ClassificationSecret} {
-		t.Run("channel/"+string(level), func(t *testing.T) {
-			body := `
-channels:
-  - name: leadership
-    classification: ` + string(level) + `
-    members: [alice]
-`
-			_, err := LoadConfig(writeYAML(t, body))
-			require.Error(t, err)
-			assert.ErrorIs(t, err, ErrClassificationAboveDarkWindow)
-			assert.NotErrorIs(t, err, ErrInvalidClassification,
-				"a lattice-valid level declared too early is a timing error, not a typo")
-			assert.Contains(t, err.Error(), "leadership",
-				"the rejection names the channel for operator triage")
-			assert.Contains(t, err.Error(), string(level))
-		})
-
-		t.Run("dm_default/"+string(level), func(t *testing.T) {
-			body := `
-dm_default_classification: ` + string(level) + `
-channels:
-  - name: planning
-    members: [alice]
-`
-			_, err := LoadConfig(writeYAML(t, body))
-			require.Error(t, err)
-			assert.ErrorIs(t, err, ErrClassificationAboveDarkWindow)
-			assert.Contains(t, err.Error(), "dm_default_classification")
-		})
-	}
-}
-
-// TestCheckDarkWindowClassification_ComposesWithVocabularyCheck: the ceiling
-// and the vocabulary check must not swallow each other. An unknown level is
-// [ErrInvalidClassification]'s alone (the guard passes it through), and the
-// ceiling admits everything at or below `internal` including the absent case.
-func TestCheckDarkWindowClassification_ComposesWithVocabularyCheck(t *testing.T) {
-	assert.NoError(t, CheckDarkWindowClassification(""),
-		"absent is the default, not a declaration")
-	assert.NoError(t, CheckDarkWindowClassification(ClassificationPublic))
-	assert.NoError(t, CheckDarkWindowClassification(DarkWindowMaxClassification))
-	for _, unknown := range unknownLevels {
-		assert.NoError(t, CheckDarkWindowClassification(unknown),
-			"unknown %q belongs to the vocabulary check, not the ceiling", unknown)
-	}
-	assert.Error(t, CheckDarkWindowClassification(ClassificationSecret))
+	assert.Equal(t, ClassificationRestricted, cfg.DMDefaultClassification,
+		"above-internal DM default loads clean now that the §D gate is live")
+	require.Len(t, cfg.Channels, 4)
+	assert.Equal(t, ClassificationSecret, cfg.Channels[0].Classification)
+	assert.Equal(t, ClassificationRestricted, cfg.Channels[1].Classification)
+	assert.Equal(t, ClassificationInternal, cfg.Channels[2].Classification)
+	assert.Equal(t, ClassificationPublic, cfg.Channels[3].Classification)
 }
 
 // TestLoadConfig_UnknownChannelClassification_Rejected: an out-of-vocabulary

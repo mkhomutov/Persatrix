@@ -76,12 +76,15 @@ class TestInjectMemoryContextAdvanced:
         )
         await agent.initialize_memory()
 
-        # Store an episode with a long summary (>200 chars).
+        # Store an episode with a long summary (>200 chars).  ``public``
+        # because a TASK_ASSIGNED turn takes the RFC 0037 §D acting floor
+        # (rule (b)); this test's subject is truncation, not the gate.
         long_summary = "architecture " * 20  # 260 chars
         await agent._episodic_memory.store_episode(
             summary=long_summary,
             context={"topic": "arch"},
             importance=0.8,
+            protection_level="public",
         )
 
         event = AgentEvent(
@@ -108,9 +111,11 @@ class TestInjectMemoryContextAdvanced:
         await agent.initialize_memory()
 
         long_content = "word " * 120  # 600 chars
+        # ``public`` — the TASK_ASSIGNED turn takes the §D acting floor.
         await agent._episodic_memory.store_note(
             topic="verbose",
             content=long_content,
+            protection_level="public",
         )
 
         event = AgentEvent(
@@ -143,9 +148,11 @@ class TestInjectMemoryContextAdvanced:
         await agent.initialize_memory()
 
         # Store a note so inject_memory_context has content to add.
+        # ``public`` — the TASK_ASSIGNED turn takes the §D acting floor.
         await agent._episodic_memory.store_note(
             topic="architecture",
             content="Consider event sourcing for the migration",
+            protection_level="public",
         )
 
         event = AgentEvent(
@@ -183,11 +190,13 @@ class TestInjectMemoryContextAdvanced:
         await agent.initialize_memory()
 
         # 260 chars, no spaces — simulates a hash chain or URL path.
+        # ``public`` — the TASK_ASSIGNED turn takes the §D acting floor.
         no_space_summary = "a" * 260
         await agent._episodic_memory.store_episode(
             summary=no_space_summary,
             context={"topic": "aaaa"},
             importance=0.8,
+            protection_level="public",
         )
 
         event = AgentEvent(
@@ -260,10 +269,13 @@ class TestInjectMemoryContextAdvanced:
         )
         await agent.initialize_memory()
 
+        # ``public`` — the unclassified CHANNEL_MESSAGE below floors to
+        # ``public`` per §A rule (b) (the version-skew posture).
         await agent._episodic_memory.store_episode(
             summary="Architecture discussion with the team",
             context={},
             importance=0.8,
+            protection_level="public",
         )
 
         # Event 1: MESSAGE — FTS5 finds the episode; episodic_recall added.
@@ -302,9 +314,11 @@ class TestInjectMemoryContextAdvanced:
         )
         await agent.initialize_memory()
 
+        # ``public`` — the TASK_ASSIGNED turn takes the §D acting floor.
         await agent._episodic_memory.store_note(
             topic="architecture",
             content="Consider event sourcing for architecture scalability",
+            protection_level="public",
         )
 
         # Event 1: query matches the note — recent_notes section added.
