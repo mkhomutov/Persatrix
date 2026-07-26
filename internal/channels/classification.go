@@ -160,6 +160,37 @@ func ActingRank(level Classification) int {
 	return rank
 }
 
+// InjectableLevels is rules (b) + (c) in the LEVEL-SET domain: the entry/
+// channel classifications servable at the ACTING level `acting` — every
+// vocabulary level whose rank is <= [ActingRank](acting), rank-ascending.
+// The Python twin is `injectable_levels` in
+// agents/persona_runtime/classification.py (the RFC 0037 PR 4 notes-leg
+// shape); here it feeds the §F recall filter's SQL `IN` predicate
+// (sqlite_search.go), realising the §A ordering as a set resolved by THIS
+// helper rather than a fourth rank table copied into SQL. A stored label
+// outside the returned set — including a corrupted one — falls out of the
+// `IN` predicate, which IS rule (c)'s withhold realised in SQL (silent per
+// row by design; see [EntryRankOrWithhold] for why the log belongs to a
+// caller that holds entry identity).
+//
+// Resolution of `acting` is rule (b): unknown/absent floors to `public`,
+// so an unresolved caller's set is {public} — the least-disclosing set,
+// never the stamp default.
+func InjectableLevels(acting Classification) []Classification {
+	bound := ActingRank(acting)
+	out := make([]Classification, 0, bound+1)
+	// Rank-ascending walk keeps the order deterministic without a second
+	// ordered copy of the vocabulary (map iteration order is randomized).
+	for rank := 0; rank <= bound; rank++ {
+		for level, r := range classificationRanks {
+			if r == rank {
+				out = append(out, level)
+			}
+		}
+	}
+	return out
+}
+
 // EntryRankOrWithhold is rule (c): the rank of a stored ENTRY protection
 // level. A known level ranks as itself; unknown/unparseable returns ok=false
 // — the entry is withheld, treated as above-`secret`, never coerced onto the

@@ -40,6 +40,7 @@ from agents.persona_runtime.classification import (
     acting_rank,
     entry_rank_or_withhold,
     is_valid_classification,
+    normalize_acting,
     normalize_for_stamp,
     rank_for_stamp,
 )
@@ -119,6 +120,23 @@ def test_acting_rank_fails_closed_to_public_floor(level: str | None) -> None:
     proto3 ``""`` version-skew window and covers the channel-less
     autonomous tick."""
     assert acting_rank(level) == CLASSIFICATION_RANKS[CLASSIFICATION_PUBLIC] == 0
+
+
+@pytest.mark.parametrize("level", UNKNOWN_LEVELS)
+def test_normalize_acting_fails_closed_to_public_floor(level: str | None) -> None:
+    """Rule (b) in the LEVEL domain (RFC 0037 PR 5): when a caller must
+    transmit the acting level itself — the recall tool binding the endpoint's
+    required ``acting_classification`` — an absent/unknown level resolves to
+    the literal ``public``, the floor, never the stamp default."""
+    assert normalize_acting(level) == CLASSIFICATION_PUBLIC
+
+
+@pytest.mark.parametrize(("level", "rank"), sorted(CLASSIFICATION_RANKS.items()))
+def test_normalize_acting_passes_known_levels_through(level: str, rank: int) -> None:
+    """A known level is never rewritten — the level-domain twin of
+    :func:`acting_rank`'s pass-through, kept in lockstep by construction."""
+    assert normalize_acting(level) == level
+    assert CLASSIFICATION_RANKS[normalize_acting(level)] == acting_rank(level) == rank
 
 
 @pytest.mark.parametrize("level", UNKNOWN_LEVELS)
