@@ -36,6 +36,10 @@ const (
 	// saltLen is the per-account random salt size (§C: 16 bytes from
 	// crypto/rand).
 	saltLen = 16
+	// minSaltLen is the smallest salt decodePHC accepts — the RFC 9106
+	// password-hashing floor. Our encoder always writes saltLen; the
+	// floor guards against a corrupted stored hash degrading the KDF.
+	minSaltLen = 8
 	// keyLen is the derived-key size. Fixed: verification compares
 	// fixed-size derived keys, which is what makes it constant-time.
 	keyLen = 32
@@ -125,7 +129,10 @@ func encodePHC(p Params, salt, key []byte) string {
 
 // decodePHC parses a PHC string produced by [encodePHC] (or any
 // spec-conformant argon2id encoder), returning the embedded parameters,
-// salt, and derived key.
+// salt, and derived key. Parsing is strict: the version and parameter
+// fields must round-trip through the canonical encoding (Sscanf alone
+// would silently ignore trailing garbage), and the salt must meet the
+// RFC 9106 minimum.
 func decodePHC(encoded string) (Params, []byte, []byte, error) {
 	var zero Params
 	parts := strings.Split(encoded, "$")
@@ -137,11 +144,13 @@ func decodePHC(encoded string) (Params, []byte, []byte, error) {
 		return zero, nil, nil, fmt.Errorf("accounts: unsupported hash algorithm %q", parts[1])
 	}
 	var version int
-	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil || version != argon2Version {
+	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil ||
+		fmt.Sprintf("v=%d", version) != parts[2] || version != argon2Version {
 		return zero, nil, nil, fmt.Errorf("accounts: unsupported argon2 version %q", parts[2])
 	}
 	var p Params
-	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &p.MemoryKiB, &p.Iterations, &p.Parallelism); err != nil {
+	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &p.MemoryKiB, &p.Iterations, &p.Parallelism); err != nil ||
+		fmt.Sprintf("m=%d,t=%d,p=%d", p.MemoryKiB, p.Iterations, p.Parallelism) != parts[3] {
 		return zero, nil, nil, fmt.Errorf("accounts: malformed argon2 parameters %q", parts[3])
 	}
 	if err := p.Validate(); err != nil {
@@ -150,6 +159,9 @@ func decodePHC(encoded string) (Params, []byte, []byte, error) {
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
 		return zero, nil, nil, fmt.Errorf("accounts: malformed argon2 salt: %w", err)
+	}
+	if len(salt) < minSaltLen {
+		return zero, nil, nil, fmt.Errorf("accounts: argon2 salt too short (%d bytes, minimum %d)", len(salt), minSaltLen)
 	}
 	key, err := base64.RawStdEncoding.DecodeString(parts[5])
 	if err != nil {

@@ -63,7 +63,9 @@ CREATE INDEX idx_sessions_account ON sessions(account_id);
 func applySchema(db *sql.DB) error {
 	// Defensive PRAGMA — the DSN sets it, but sessions.account_id →
 	// accounts.id must be enforced (not decorative, §B) even for a
-	// future caller wiring a pre-existing *sql.DB through.
+	// future caller wiring a pre-existing *sql.DB through. PRAGMAs are
+	// per-connection, so this (like the DSN pragmas) only fully covers a
+	// pool pinned to a single connection, as [Open] pins it.
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
 		return fmt.Errorf("accounts: enable foreign_keys: %w", err)
 	}

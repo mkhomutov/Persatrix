@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Role values. `role` is an extensible TEXT column validated at the
@@ -129,7 +130,9 @@ func validateUsername(folded string) error {
 		return fmt.Errorf("accounts: username exceeds %d bytes", maxUsernameLen)
 	}
 	for _, r := range folded {
-		if r < 0x21 || r == 0x7f { // control chars, space family, DEL
+		// Unicode-wide, not just ASCII — an inner U+00A0 or a C1
+		// control is as invisible in a login prompt as a plain space.
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
 			return fmt.Errorf("accounts: username must not contain whitespace or control characters")
 		}
 	}

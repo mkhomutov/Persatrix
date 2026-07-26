@@ -109,6 +109,8 @@ func TestCreateAccount_WriteBoundaryValidation(t *testing.T) {
 		"empty username":              func(a *NewAccount) { a.Username = "" },
 		"whitespace-only username":    func(a *NewAccount) { a.Username = "   " },
 		"username with inner space":   func(a *NewAccount) { a.Username = "al ice" },
+		"username with unicode space": func(a *NewAccount) { a.Username = "al\u00a0ice" }, // NBSP survives TrimSpace
+		"username with C1 control":    func(a *NewAccount) { a.Username = "al\u009cice" },
 		"unknown role":                func(a *NewAccount) { a.Role = "superadmin" },
 		"unknown auth_method":         func(a *NewAccount) { a.AuthMethod = "oidc" },
 		"empty participant_id":        func(a *NewAccount) { a.ParticipantID = "" },
@@ -160,6 +162,15 @@ func TestCreateAccount_NonPasswordMethod_StoresNullHash(t *testing.T) {
 	got, err := s.GetAccount(ctx, created.ID)
 	require.NoError(t, err)
 	assert.Empty(t, got.PasswordHash)
+
+	// The update path enforces §B the same way the create path does: a
+	// non-password account can never acquire a hash.
+	err = s.SetPasswordHash(ctx, created.ID, phc)
+	assert.Error(t, err)
+	assert.NotErrorIs(t, err, ErrAccountNotFound, "the account exists; the method is what is wrong")
+	require.NoError(t, s.db.QueryRow(
+		`SELECT password_hash IS NULL FROM accounts WHERE id = ?`, created.ID).Scan(&isNull))
+	assert.True(t, isNull, "the rejected update must not have written a hash")
 }
 
 func TestSetAccountStatus(t *testing.T) {
@@ -194,6 +205,8 @@ func TestSetPasswordHash(t *testing.T) {
 	assert.Equal(t, rehashed, got.PasswordHash)
 
 	assert.Error(t, s.SetPasswordHash(ctx, created.ID, ""))
+	assert.Error(t, s.SetPasswordHash(ctx, created.ID, "not-a-phc-string"),
+		"only a well-formed argon2id PHC string may be stored (§B)")
 	assert.ErrorIs(t, s.SetPasswordHash(ctx, "no-such-id", phc), ErrAccountNotFound)
 }
 

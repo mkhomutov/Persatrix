@@ -184,12 +184,34 @@ func (s *Store) SetAccountStatus(ctx context.Context, id, status string) error {
 }
 
 // SetPasswordHash re-stores the credential — the §C verify-then-rehash
-// write path, and later the Phase 3 password change/reset.
+// write path, and later the Phase 3 password change/reset. The §B write
+// boundary holds on update as it does on create: the hash must be a
+// well-formed argon2id PHC string, and only a password-method account
+// may carry one — the method guard rides in the UPDATE's WHERE clause
+// so it cannot race a concurrent write.
 func (s *Store) SetPasswordHash(ctx context.Context, id, phcHash string) error {
-	if phcHash == "" {
-		return fmt.Errorf("accounts: password hash must be non-empty")
+	if _, _, _, err := decodePHC(phcHash); err != nil {
+		return err
 	}
-	return s.updateField(ctx, id, `password_hash`, phcHash)
+	now := time.Now().UTC().Truncate(time.Second)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE accounts SET password_hash = ?, updated_at = ? WHERE id = ? AND auth_method = ?`,
+		phcHash, now.Unix(), id, AuthMethodPassword)
+	if err != nil {
+		return fmt.Errorf("accounts: update password_hash: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("accounts: update password_hash: %w", err)
+	}
+	if n == 0 {
+		// Distinguish an unknown id from a non-password account.
+		if _, getErr := s.GetAccount(ctx, id); getErr != nil {
+			return getErr
+		}
+		return fmt.Errorf("accounts: auth_method must be %q to carry a password hash (§B)", AuthMethodPassword)
+	}
+	return nil
 }
 
 // selectAccounts is the shared projection; scanAccount is its inverse.

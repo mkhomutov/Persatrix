@@ -86,6 +86,11 @@ func TestVerifyPassword_MalformedHashes(t *testing.T) {
 		"bad salt base64":  "$argon2id$v=19$m=1024,t=1,p=1$!!!$AAAA",
 		"bad key base64":   "$argon2id$v=19$m=1024,t=1,p=1$c2FsdHNhbHRzYWx0c2FsdA$!!!",
 		"empty key":        "$argon2id$v=19$m=1024,t=1,p=1$c2FsdHNhbHRzYWx0c2FsdA$",
+		// Sscanf alone tolerates trailing garbage; the decoder must not.
+		"trailing garbage in version": "$argon2id$v=19x$m=1024,t=1,p=1$c2FsdHNhbHRzYWx0c2FsdA$AAAA",
+		"trailing garbage in params":  "$argon2id$v=19$m=1024,t=1,p=1,x=2$c2FsdHNhbHRzYWx0c2FsdA$AAAA",
+		"empty salt":                  "$argon2id$v=19$m=1024,t=1,p=1$$AAAA",
+		"short salt":                  "$argon2id$v=19$m=1024,t=1,p=1$c2FsdA$AAAA", // 4 bytes < RFC 9106 floor
 	} {
 		t.Run(name, func(t *testing.T) {
 			ok, err := VerifyPassword("pw", encoded)
