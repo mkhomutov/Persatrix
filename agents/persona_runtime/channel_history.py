@@ -203,11 +203,21 @@ def render_channel_history_section(
             prefix = f"[{tag}, {dur}]"
         else:
             prefix = f"[{tag}]"
+        remaining_before = budget.remaining
         admitted = budget.try_add(
             f"- {prefix} {summary}", min_tokens=MIN_TOKENS_CHANNEL_HISTORY,
         )
         if admitted is not None:
             items.append(admitted)
+            # RFC 0037 PR 4 — MQ-11 provenance, previously unwired for
+            # this tier (``KNOWN_TIERS`` reserved the name): the §D
+            # injection manifest reads the registry to label what
+            # actually reached the prompt, so the channel-history tier
+            # now records like the episodic / facts / notes tiers.
+            budget.record_admission(
+                tier="channel_history", item_id=ep.id,
+                tokens_admitted=remaining_before - budget.remaining,
+            )
             # PR #264 review M-2: bump per admitted item so operators
             # can correlate ``agent.temporal.recency.rendered`` (with
             # ``source="channel_history"``) against admitted-token

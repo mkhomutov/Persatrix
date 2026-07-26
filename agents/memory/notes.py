@@ -13,7 +13,7 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import aiosqlite
 
@@ -21,6 +21,7 @@ from ..epoch_id import DEFAULT_EPOCH_ID
 from ..principal_id import DEFAULT_PRINCIPAL_ID
 from ..session_id import LEGACY_SESSION_ID, normalize_session_id
 from ._epoch_filter import resolve_active_epoch
+from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 from ._notes_recall import (
     _FTS5_SPECIAL,
     _recall_notes_fts5,
@@ -30,37 +31,20 @@ from ._notes_recall import (
 from ._principal_filter import resolve_active_principal
 from ._salience import NOTES_APPEND_SALIENCE, emit_for_tier, emit_session_write
 from ._session_filter import _resolve_session_list
+from .note_types import _NOTE_COLS, _NOTE_SELECT, Note  # noqa: F401 — re-export
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # ``_FTS5_SPECIAL`` is re-exported for backward compatibility with tests
 # that import the regex from :mod:`agents.memory.notes` (the parent
 # module is the documented entry point even though the helpers now live
-# in :mod:`agents.memory._notes_recall`).
+# in :mod:`agents.memory._notes_recall`).  ``Note`` / the column constants
+# moved to :mod:`agents.memory.note_types` (RFC 0037 PR 4 — 500-line cap)
+# and are re-exported the same way.
 __all__ = ["Note", "NoteStore", "_FTS5_SPECIAL"]
 
 logger = logging.getLogger(__name__)
-
-
-# ─── Data model ─────────────────────────────────────────────
-
-
-@dataclass
-class Note:
-    """An agent-initiated note persisted via memory tools.
-
-    ``session_id`` (RFC 0031 Phase 2 PR 2) is on the recall projection;
-    defaults to :data:`agents.session_id.LEGACY_SESSION_ID` so a hand-
-    constructed test fixture round-trips without opting in.
-    """
-
-    id: str
-    agent_id: str
-    topic: str
-    content: str
-    tags: list[str] = field(default_factory=list)
-    access_count: int = 0
-    created_at: float = 0.0
-    updated_at: float = 0.0
-    session_id: str = LEGACY_SESSION_ID
 
 
 # Maximum content size for a single note (10 KB).
@@ -69,17 +53,6 @@ _MAX_NOTE_CONTENT_BYTES = 10_240
 # Maximum number of notes returned by recall_notes() to prevent unbounded
 # result sets and resource exhaustion.
 _MAX_RECALL_LIMIT = 100
-
-# Column list for SELECT queries on the notes table.  RFC 0031 Phase 2
-# PR 2: ``session_id`` joined the projection — the dataclass, the
-# projection, and ``_row_to_note`` MUST move together (contract pin at
-# ``test_session_id_notes_migration.TestNotesProjectionContract``).
-_NOTE_COLS = (
-    "id", "agent_id", "topic", "content", "tags_json",
-    "access_count", "created_at", "updated_at",
-    "session_id",
-)
-_NOTE_SELECT = ", ".join(_NOTE_COLS)
 
 
 # ─── NoteStore ──────────────────────────────────────────────
@@ -130,6 +103,7 @@ class NoteStore:
         max_notes: int = 500,
         *,
         session_id: str = LEGACY_SESSION_ID,
+        protection_level: str = PROTECTION_LEVEL_DEFAULT,
     ) -> str:
         """Store a new note. Prunes oldest low-access notes if over cap.
 
@@ -146,6 +120,16 @@ class NoteStore:
         orphan row (NOT NULL accepts ``''``, but neither real-session
         nor legacy-carve-out filters match it).  PR 1 ships no
         recall-side filtering — that lands in a later Phase 2 PR.
+
+        ``protection_level`` (RFC 0037 §C — v16, PR 4) persists VERBATIM:
+        rule-(a) normalization is owned by the persona-side stamp site
+        (the ``store_note`` tool via ``normalize_for_stamp``), which
+        memory must not import.  Omitted (direct/test/operator callers)
+        → the ``internal`` default; a mislabeled row fails closed at
+        read time (§A rule (c)).  ``source_channel_id`` stays NULL for
+        notes — a note is authored during a turn, not derived from one
+        channel; its confidentiality rides the acting-level stamp alone
+        (the §C synthesized-note shape).
         """
         # Validate max_notes: _prune_notes() computes
         # LIMIT MAX(0, count - max_notes + 1), so max_notes=0 would
@@ -189,8 +173,8 @@ class NoteStore:
             INSERT INTO notes
                 (id, agent_id, topic, content, tags_json,
                  access_count, created_at, updated_at, session_id,
-                 principal_id, epoch_id)
-            VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+                 principal_id, epoch_id, protection_level)
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
             """,
             (
                 note_id,
@@ -203,6 +187,7 @@ class NoteStore:
                 session_id,
                 principal_id,
                 epoch_id,
+                protection_level,
             ),
         )
         await self._db.commit()
@@ -227,6 +212,7 @@ class NoteStore:
         limit: int = 10,
         min_score: float | None = None,
         sessions: list[str] | str | None = None,
+        allowed_protection_levels: Sequence[str] | None = None,
     ) -> list[Note]:
         """Retrieve notes matching query, ranked by relevance.
 
@@ -245,6 +231,19 @@ class NoteStore:
             (CLI / debug only); ``[]`` → :class:`ValueError`.  See
             :func:`agents.memory._session_filter.session_in_clause`
             for the SQL shape and the carve-out rationale.
+        allowed_protection_levels:
+            RFC 0037 §D read-surface gating (PR 4) — the entry protection
+            levels injectable at the caller's acting classification, as
+            resolved by ``persona_runtime.classification.injectable_levels``
+            (the memory layer must not import the lattice, so it receives
+            the resolved IN-list as plain data).  A stored label outside
+            the set — including a corrupted one — is excluded, which is
+            §A rule (c)'s withhold realised in SQL.  ``None`` (default)
+            applies no clause: the non-persona operator/CLI surface.  The
+            persona read surfaces (the injection tier and the
+            ``recall_notes`` tool) always pass it; ``[]`` raises, because
+            an empty allowlist means the caller resolved the acting level
+            to *nothing* — a bug, not a filter.
         """
         if limit < 1:
             raise ValueError(f"limit must be >= 1, got {limit}")
@@ -257,6 +256,12 @@ class NoteStore:
             raise ValueError(
                 f"min_score must be in [0.0, 1.0] or None, got {min_score}"
             )
+        # RFC 0037 PR 4: an explicit empty allowlist is a resolution bug
+        # at the caller (``injectable_levels`` never returns fewer than
+        # one level), not a legal "withhold everything" filter — raise at
+        # the boundary like ``sessions=[]``.
+        if allowed_protection_levels is not None and not allowed_protection_levels:
+            raise ValueError("allowed_protection_levels must be None or non-empty")
 
         # Resolve §D session list once at the public boundary so
         # ``sessions=[]`` raises before any SQL runs; the recall helpers
@@ -273,6 +278,7 @@ class NoteStore:
                 limit=limit, min_score=min_score,
                 sessions=session_list, note_cols=_NOTE_COLS,
                 principal_id=active_principal, epoch_id=active_epoch,
+                allowed_protection_levels=allowed_protection_levels,
             )
         elif query:
             rows = await _recall_notes_like(
@@ -280,12 +286,14 @@ class NoteStore:
                 limit=limit, min_score=min_score,
                 sessions=session_list, note_cols=_NOTE_COLS,
                 principal_id=active_principal, epoch_id=active_epoch,
+                allowed_protection_levels=allowed_protection_levels,
             )
         else:
             rows = await _recall_notes_recency(
                 self._db, agent_id=self._agent_id, limit=limit,
                 sessions=session_list, note_cols=_NOTE_COLS,
                 principal_id=active_principal, epoch_id=active_epoch,
+                allowed_protection_levels=allowed_protection_levels,
             )
 
         notes = [self._row_to_note(row) for row in rows]
@@ -304,7 +312,14 @@ class NoteStore:
 
         return notes
 
-    async def update_note(self, note_id: str, content: str) -> bool:
+    async def update_note(
+        self,
+        note_id: str,
+        content: str,
+        *,
+        restamp_protection_level: str | None = None,
+        restamp_below: Sequence[str] = (),
+    ) -> bool:
         """Update note content. Topic and tags preserved. Returns True if found.
 
         RFC 0031 Phase 2 PR 5 / `ISSUE-0077
@@ -312,6 +327,19 @@ class NoteStore:
         scoped to ``(agent_id, session_id IN (active, legacy))`` so a
         ``run-b`` caller cannot mutate a ``run-a`` row; the ``legacy``
         carve-out matches the recall surface (permissive policy).
+
+        RFC 0037 §C re-stamp (PR 4): an edit re-stamps the row to
+        ``max(existing protection_level, acting L)`` — never lowers.  The
+        ``max`` arrives pre-resolved as data (memory must not import the
+        lattice): ``restamp_protection_level`` is the acting level's
+        rule-(a) stamp and ``restamp_below`` the levels ranking strictly
+        below it (``persona_runtime.classification.levels_below_stamp``),
+        so the raise-only rule is one SQL ``CASE`` — rows whose existing
+        level is in ``restamp_below`` take the new stamp, every other row
+        (equal, higher, or corrupted — the latter stays failing closed at
+        read time per rule (c)) keeps its value.  Both omitted (the
+        non-persona operator/CLI surface, and any pre-RFC caller) →
+        content-only update, exactly the prior behaviour.
         """
         if not content or not content.strip():
             raise ValueError("content must not be empty")
@@ -329,14 +357,25 @@ class NoteStore:
         # epoch cannot mutate a prior run's row through the session carve-out.
         principal_id = resolve_active_principal(self._active_principal_id)
         epoch_id = resolve_active_epoch(self._active_epoch_id)
+        restamp_sql = ""
+        restamp_params: tuple[str, ...] = ()
+        if restamp_protection_level is not None and restamp_below:
+            # Raise-only: a ``public`` stamp has an empty ``restamp_below``
+            # and skips the clause entirely (nothing ranks below the floor).
+            placeholders = ",".join("?" for _ in restamp_below)
+            restamp_sql = (
+                f", protection_level = CASE WHEN protection_level "
+                f"IN ({placeholders}) THEN ? ELSE protection_level END"
+            )
+            restamp_params = (*restamp_below, restamp_protection_level)
         cursor = await self._db.execute(
-            "UPDATE notes SET content = ?, updated_at = ? "
+            f"UPDATE notes SET content = ?, updated_at = ?{restamp_sql} "
             "WHERE id = ? AND agent_id = ? "
             "AND session_id IN (?, ?) "
             "AND principal_id = ? "
             "AND epoch_id = ?",
             (
-                content, now, note_id, self._agent_id,
+                content, now, *restamp_params, note_id, self._agent_id,
                 self._active_session_id, LEGACY_SESSION_ID,
                 principal_id, epoch_id,
             ),
@@ -444,4 +483,7 @@ class NoteStore:
             created_at=row[6],
             updated_at=row[7],
             session_id=row[8],
+            # RFC 0037 §C (migration v16): surfaced for the §D gate.
+            protection_level=row[9],
+            source_channel_id=row[10],
         )

@@ -261,6 +261,14 @@ class PersonaRuntimeDriver:
                             metadata={
                                 "chat_session_id": session,
                                 "sender_participant_type": "user",
+                                # RFC 0037 §B (PR 4): mirror the orchestrator's
+                                # dispatch-time classification stamp (DM default
+                                # ``internal``) — without it the turn floors to
+                                # the §D ``public`` acting level (rule (b)) and
+                                # every internal-stamped memory is withheld,
+                                # which is the version-skew posture, not the
+                                # production wire shape this driver replays.
+                                "channel_classification": "internal",
                             },
                         )
                         actions = await agent.on_event(event)

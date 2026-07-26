@@ -249,6 +249,21 @@ class TestStampDefaultDriftPin:
         Go↔Python rank-table pins."""
         assert PROTECTION_LEVEL_DEFAULT == DEFAULT_CLASSIFICATION
 
+    def test_storage_vocabulary_equals_lattice_vocabulary(self) -> None:
+        """Same discipline for the second storage-side spelling (RFC 0037
+        PR 4): the ISSUE-0115(a) notes-backfill flag validates against
+        ``PROTECTION_LEVEL_VOCABULARY``, which must stay lock-step with
+        the lattice table — in the lattice's rank order, since the tuple
+        doubles as documentation of the ordering it cannot rank."""
+        from agents.memory._migration_protection import (
+            PROTECTION_LEVEL_VOCABULARY,
+        )
+        from agents.persona_runtime.classification import (
+            CLASSIFICATION_RANKS,
+        )
+
+        assert PROTECTION_LEVEL_VOCABULARY == tuple(CLASSIFICATION_RANKS)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

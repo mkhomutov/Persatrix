@@ -35,6 +35,7 @@ from .gate_suppress import suppressed_event_actions
 from .llm_call_errors import handle_llm_call_exception_with_cost_close
 from .reflexion import maybe_revise_channel_message
 from .salience_gate import run_salience_gate
+from .single_channel_turn import enforce_single_channel_turn
 from .wallet_cause import lease_attribution_for_event
 
 if TYPE_CHECKING:
@@ -479,6 +480,10 @@ class _ActionLoopMixin:
             cause=lease_cause, agent_id=lease_agent_id,
             interaction_id=lease_interaction_id, max_tokens=max_tokens,
         )
+
+        # 4d. RFC 0038 §B single-channel-turn guard (RFC 0037 PR 4 carve-in)
+        # — see ``single_channel_turn`` for the rule and the tick exemption.
+        actions = enforce_single_channel_turn(event, actions, agent_id=self.agent_id)
 
         # 5. Drain energy per action
         for action in actions:

@@ -118,10 +118,15 @@ class TestEpisodeRecency:
         # Inject the desired ``created_at`` / ``closed_at`` directly via
         # SQL — ``store_episode`` always stamps ``created_at = time.time()``,
         # which would defeat the FrozenClock-based assertions.
+        # ``public`` protection — the TICK turns these tests drive take
+        # the RFC 0037 §D acting floor (rule (b)), which would withhold
+        # the ``internal`` default; this file's subject is recency
+        # rendering, not the gate.
         ep_id = await agent._episodic_memory.store_episode(
             summary=summary,
             context={},
             importance=importance,
+            protection_level="public",
             interaction_id=("int-" + summary[:8]) if turn_count else None,
             started_at=(
                 (_FROZEN_EPOCH + started_at_offset_sec)

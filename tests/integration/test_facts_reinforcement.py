@@ -126,7 +126,8 @@ def _make_event(
     event.channel_id = None
     event.sender_id = sender_id
     event.thread_id = None
-    event.metadata = {}
+    # RFC 0037 §B/§D: the dispatch path's stamp — turns act ``internal``.
+    event.metadata = {"channel_classification": "internal"}
     event.payload = {"content": content}
     event.timestamp = 0.0
     return event

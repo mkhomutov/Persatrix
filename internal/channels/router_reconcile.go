@@ -140,8 +140,8 @@ func (r *ChannelRouter) ReconcileConfig(ctx context.Context, cfg *Config) error 
 				SessionID: r.defaultSessionID,
 				// RFC 0037 §B (v0.3.12 PR 2): thread the PR 1 declaration
 				// into the row — load-filled to `internal` when absent
-				// (§A rule (a)), validated + dark-window-capped by
-				// Config.Validate before reconcile runs.
+				// (§A rule (a)), vocabulary-validated by Config.Validate
+				// before reconcile runs.
 				Classification: decl.Classification,
 			}, members); err != nil {
 				return fmt.Errorf("channels: reconcile create %s: %w", canonicalID, err)

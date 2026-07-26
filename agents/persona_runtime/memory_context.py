@@ -16,7 +16,7 @@ from ..memory.episodic import (
     EpisodicMemory,
 )
 from ..memory.relationship import RelationshipMemory
-from ..memory.working import ContextSection, WorkingMemory, estimate_tokens
+from ..memory.working import WorkingMemory
 from .channel_history import (
     CHANNEL_HISTORY_SECTION_NAME,
     recall_channel_episodes,
@@ -30,14 +30,21 @@ from .facts_section import (
     recall_facts_for_event,
     render_facts_section,
 )
+from .injection_gate import (
+    InjectionManifestEntry,
+    TurnInjectionGate,
+    acting_classification_for_event,
+)
 from .memory_budget import (
-    MAX_NOTE_CONTENT_CHARS,
     MEMORY_BUDGET_TOKENS,
-    MIN_TOKENS_NOTES,
     MemoryBudget,
     _truncate_to_token_limit,
 )
-from .notes_section import recall_notes_for_event
+from .notes_section import (
+    NOTES_SECTION_NAME,
+    recall_notes_for_event,
+    render_notes_section,
+)
 from .relationship_section import (
     RELATIONSHIP_SECTION_NAME,
     recall_relationship_summary,
@@ -88,9 +95,16 @@ class MemoryInjectionResult:
             this event.  Equals ``MEMORY_BUDGET_TOKENS - budget.remaining``
             after the allocate-loop.  Used by PR 5's empty-context TICK
             short-circuit to decide whether to suppress the LLM call.
+        manifest: RFC 0037 §G's per-turn injection manifest (PR 4) — every
+            §D-gated, budget-admitted entry as ``(tier, entry_id,
+            protection_level)``.  Dark until PR 7 threads it to the
+            ``ActionExecutor`` tripwire (which also adds the
+            normalized-span hashes); carried here so the turn that
+            assembled the prompt owns the record of what reached it.
     """
 
     memory_admitted_tokens: int
+    manifest: tuple[InjectionManifestEntry, ...] = ()
 
     def __post_init__(self) -> None:
         # PR 6 — RFC 0017 PR 5 review finding 4: a negative admitted count
@@ -284,7 +298,7 @@ class _MemoryContextMixin:
         # (PR #60 review F-60-R1: stale episodic_recall/recent_notes sections
         # not cleared between events.)
         self._working_memory.remove_section("episodic_recall")
-        self._working_memory.remove_section("recent_notes")
+        self._working_memory.remove_section(NOTES_SECTION_NAME)
         self._working_memory.remove_section(RELATIONSHIP_SECTION_NAME)
         self._working_memory.remove_section(CHANNEL_HISTORY_SECTION_NAME)
         self._working_memory.remove_section(FACTS_SECTION_NAME)
@@ -367,6 +381,25 @@ class _MemoryContextMixin:
             min_score=DEFAULT_NOTES_MIN_SCORE,
         )
 
+        # ── RFC 0037 §D hard gate ──────────────────────────────────────────
+        # Applied to every channel-derived tier BEFORE the RFC 0017 budget,
+        # so a withheld entry never competes for tokens and never reaches
+        # the prompt.  The acting level resolves from the trusted event via
+        # the positive-list class rule (channel-anchored types read the §B
+        # wire stamp; the tick-shaped class floors to ``public`` — §A rule
+        # (b)); withhold-only until the PR 6 projection branch.  The
+        # relationship tier is deliberately ungated (§C write-through rule
+        # + the Non-Goals trust-score carve-out — see ``injection_gate``).
+        gate = TurnInjectionGate(
+            acting=acting_classification_for_event(event),
+            agent_id=self.agent_id,
+        )
+        channel_episodes = gate.filter_entries("channel_history", channel_episodes)
+        episodes = gate.filter_entries("episodic", episodes)
+        facts = gate.filter_entries("facts", facts, id_attr="fact_id")
+        notes = gate.filter_entries("notes", notes)
+        gate.emit_log()
+
         # ── Allocate-loop ──────────────────────────────────────────────────
         # Process tiers in fixed priority order (relationship=8 → episodic=7
         # → notes=6).  Higher-priority tiers consume the budget first.
@@ -434,36 +467,16 @@ class _MemoryContextMixin:
         if ep_section is not None:
             self._working_memory.add_section(ep_section)
 
-        # Notes tier (priority 6).
-        if notes:
-            note_items: list[str] = []
-            for note in notes:
-                content = _truncate_with_ellipsis(
-                    note.content, MAX_NOTE_CONTENT_CHARS,
-                )
-                remaining_before = budget.remaining
-                admitted = budget.try_add(
-                    f"- [{note.topic}] {content}",
-                    min_tokens=MIN_TOKENS_NOTES,
-                )
-                if admitted is not None:
-                    note_items.append(admitted)
-                    # RFC 0026 PR 4 / MQ-11 — uniform per-tier provenance.
-                    budget.record_admission(
-                        tier="notes", item_id=note.id,
-                        tokens_admitted=remaining_before - budget.remaining,
-                    )
-            if note_items:
-                # See episodic tier above re: untracked header overhead.
-                text = "Relevant notes:\n" + "\n".join(note_items)
-                self._working_memory.add_section(ContextSection(
-                    name="recent_notes",
-                    content=text,
-                    priority=6,
-                    # See relationship tier for the accurate=True rationale.
-                    token_count=estimate_tokens(text, accurate=True),
-                    compressible=True,
-                ))
+        # Notes tier (priority 6).  Extracted to
+        # ``notes_section.render_notes_section`` (RFC 0037 PR 4) so the
+        # notes tier matches the other tiers' ``render_*`` shape;
+        # behaviour (line shape, budget admission, MQ-11 provenance) is
+        # preserved there.
+        notes_section = render_notes_section(
+            notes, budget, truncate=_truncate_with_ellipsis,
+        )
+        if notes_section is not None:
+            self._working_memory.add_section(notes_section)
 
         # Channel-roster tier (F-4, priority 9 — highest). Group channels
         # only; structural room context injected outside the recall budget
@@ -479,5 +492,9 @@ class _MemoryContextMixin:
         # Consumed by ``_ActionLoopMixin._on_event_inner`` for the RFC 0017
         # §F empty-context TICK short-circuit (PR 5): a zero value, combined
         # with no active goal and no pending turn, suppresses the LLM call
-        # on autonomous TICK events.
-        return MemoryInjectionResult(memory_admitted_tokens=memory_admitted_tokens)
+        # on autonomous TICK events.  The §G manifest labels the admitted
+        # subset off the MQ-11 registry (RFC 0037 PR 4 — dark until PR 7).
+        return MemoryInjectionResult(
+            memory_admitted_tokens=memory_admitted_tokens,
+            manifest=gate.manifest(budget),
+        )

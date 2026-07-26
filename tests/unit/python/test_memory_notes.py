@@ -69,9 +69,13 @@ class TestNoteInjectionBehavior:
         )
         await agent.initialize_memory()
 
+        # ``public`` — the TASK_ASSIGNED turn takes the RFC 0037 §D
+        # acting floor (rule (b)); this test's subject is the fallback
+        # removal, not the gate (test_injection_gate.py owns that).
         await agent._episodic_memory.store_note(
             topic="architecture",
             content="Consider event sourcing for architecture",
+            protection_level="public",
         )
 
         event = AgentEvent(
@@ -217,6 +221,10 @@ class TestNoteInjectionBehavior:
         event = AgentEvent(
             event_type=EventType.CHANNEL_MESSAGE,
             payload={"content": "pottery glaze"},
+            # RFC 0037 §B: mirror the dispatch path's classification stamp
+            # so the turn acts ``internal`` and the seeded episode passes
+            # the §D gate instead of flooring to ``public`` (rule (b)).
+            metadata={"channel_classification": "internal"},
         )
         with patch.object(
             agent, "_format_event",
