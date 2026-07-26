@@ -58,6 +58,17 @@ type Config struct {
 	// per-channel (§OQ-7). Currently just the exempt-principals list that
 	// removes human principals from the Layer 2 reply budget.
 	Governance GovernanceConfig `yaml:"governance"`
+	// DMDefaultClassification is the RFC 0037 §B (v0.3.12) fleet-wide §A
+	// confidentiality level stamped onto DM channels at creation — DMs open
+	// on demand (`dm:<a>:<b>`) and have no per-channel config block to
+	// declare one. Absent normalizes to `internal` at load (§A rule (a):
+	// confidential-by-default, never `public`); an unknown non-empty level
+	// is rejected by [Config.Validate] (the schema enum catches it at `make
+	// validate`). Wired to the store via [SQLiteOptions.DMDefaultClassification].
+	// Operators running sensitive DMs should raise this or reclassify
+	// per-DM once the Phase-1 set ships (the item-8 dark-window rule: keep
+	// every channel at ≤ `internal` until then).
+	DMDefaultClassification Classification `yaml:"dm_default_classification"`
 }
 
 // DefaultInteractionIdleTimeoutSeconds is the interaction idle window when
@@ -268,6 +279,18 @@ type ChannelConfig struct {
 	// Autonomous is the RFC 0052 (v0.3.11) opt-in human-free convening block (absent
 	// = disabled); definition + validation live in config_autonomous.go.
 	Autonomous AutonomousConfig `yaml:"autonomous"`
+	// Classification is the RFC 0037 §A confidentiality level declared for
+	// this group channel (v0.3.12). Absent normalizes to `internal` at load
+	// (§A rule (a)); an unknown non-empty level is rejected by
+	// [Config.Validate] (the schema enum catches it at `make validate`).
+	// DARK in RFC 0037 PR 1: parsed and validated so a schema-valid config
+	// keeps loading (the decoder runs `KnownFields(true)`), but not yet
+	// applied to the store row — the declared value is threaded into the
+	// channel-create path with the wire lift (PR 2); until then a created
+	// group row takes the migration's `internal` DEFAULT, which equals this
+	// field's default. Item-8 dark-window rule: do NOT declare a level above
+	// `internal` before the full Phase-1 set ships.
+	Classification Classification `yaml:"classification"`
 }
 
 // ResolveMaxRepliesPerParticipant returns the effective RFC 0030 Layer 2 reply
@@ -312,84 +335,6 @@ func (c ChannelConfig) ResolveInteractionIdleTimeoutSeconds(fleetDefault *int) i
 	return DefaultInteractionIdleTimeoutSeconds
 }
 
-// MemberConfig is a `(participant_id, respond_policy)` pair declared in
-// config. Loaders accept either the shorthand string form or the explicit
-// object form per the schema.
-type MemberConfig struct {
-	ID            string
-	RespondPolicy RespondPolicy
-	// Threshold is the per-disposition salience `threshold` for the RFC 0030
-	// Tier B relevance bid (v0.3.8). It is a `*float64` tri-state on purpose:
-	//   - nil   → unset → bias-to-silence (the conservative default)
-	//   - &0..1 → explicit salience bar the bid must clear to reach the turn
-	// A `chair` member with no explicit value picks up [DefaultChairThreshold]
-	// at load (see [MemberConfig.UnmarshalYAML]).
-	//
-	// As of PR 2b the threshold round-trips end-to-end: [ReconcileConfig]
-	// carries it (and [SalienceGated]) onto the store-side [Member], the
-	// `memberships.threshold` column persists it, and the
-	// `ChannelMessageEvent.threshold` wire field delivers it to the agent-side
-	// bid. The PR-1 persistence/wire gap is closed.
-	Threshold *float64
-	// SalienceGated marks this member as a salience-bid participant (RFC 0030
-	// Tier B, v0.3.8). Derived at load by [ResolveSalienceSignal] from the
-	// *declared* disposition (before normalization collapses `participant`/
-	// `chair` to the legacy `always` wire value) together with any explicit
-	// `threshold`: the participant vocabulary opts in, as does a legacy `always`
-	// that carries an explicit threshold. Deriving it before normalization is
-	// what lets the bid-ness survive the collapse that would otherwise make a
-	// `participant` indistinguishable from a bare legacy `always`. Carried by
-	// [ReconcileConfig] onto the store-side [Member.SalienceGated].
-	SalienceGated bool
-}
-
-// UnmarshalYAML accepts either a string shorthand or an explicit
-// `{id, respond}` object form (RFC 0011 §A).
-func (m *MemberConfig) UnmarshalYAML(value *yaml.Node) error {
-	switch value.Kind {
-	case yaml.ScalarNode:
-		var id string
-		if err := value.Decode(&id); err != nil {
-			return err
-		}
-		m.ID = id
-		m.RespondPolicy = RespondWhenMentioned
-		return nil
-	case yaml.MappingNode:
-		var raw struct {
-			ID        string   `yaml:"id"`
-			Respond   string   `yaml:"respond"`
-			Threshold *float64 `yaml:"threshold"`
-		}
-		if err := value.Decode(&raw); err != nil {
-			return err
-		}
-		m.ID = raw.ID
-		if raw.Respond == "" {
-			m.RespondPolicy = RespondWhenMentioned
-			m.Threshold = raw.Threshold
-		} else {
-			// Normalize the disposition vocabulary (RFC 0030 relevance
-			// amendment) to the canonical legacy triple at the load
-			// boundary, so every downstream reader sees only the legacy
-			// values. An unknown value passes through unchanged and is
-			// rejected by Validate via RespondPolicy.Valid.
-			disposition := RespondPolicy(raw.Respond)
-			// Derive the Tier B signals from the *declared* disposition before
-			// it is normalized: `participant`/`chair` opt into the bid, a chair
-			// (or an `always` + explicit threshold) picks up the right bar.
-			// This is the non-validating half of [ResolveMemberPolicy] (which
-			// the store write paths use): rejection is deferred to Validate so
-			// the error carries the channel/member index (RFC 0030 Tier B).
-			m.SalienceGated, m.Threshold = ResolveSalienceSignal(disposition, raw.Threshold)
-			m.RespondPolicy = disposition.Normalize()
-		}
-		return nil
-	default:
-		return fmt.Errorf("channels: members entry must be a string or {id, respond} object (got kind %d)", value.Kind)
-	}
-}
-
 // LoadConfig reads and validates `config/channels.yaml`. Returns a non-nil
 // [Config] on success. An empty / commented-out file produces a [Config]
 // with `MaxChannels = DefaultMaxChannels` and no channels — startup
@@ -412,6 +357,14 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.MaxChannels <= 0 {
 		cfg.MaxChannels = DefaultMaxChannels
+	}
+	// RFC 0037 §A rule (a) at the load boundary: an ABSENT classification
+	// labels `internal` (confidential-by-default). Only the empty case is
+	// filled — a non-empty unknown level is left as-is so Validate rejects
+	// it loudly rather than [NormalizeForStamp] silently coercing an
+	// operator typo (`clasification: secert` must not load as `internal`).
+	if cfg.DMDefaultClassification == "" {
+		cfg.DMDefaultClassification = DefaultClassification
 	}
 	// Normalize the per-channel floor-turn timeout: zero/absent means "use
 	// the default" (mirroring the max_cascade_depth sentinel). Negative
@@ -448,6 +401,12 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.Channels[i].Reasoning = cfg.Channels[i].Reasoning.normalizedForGovernance(cfg.Channels[i].governed())
 		// RFC 0052: fill the zero autonomous max_rounds so Validate sees a complete rung.
 		cfg.Channels[i].Autonomous = cfg.Channels[i].Autonomous.normalized()
+		// RFC 0037 §A rule (a): absent per-channel classification labels
+		// `internal`. Same empty-only fill as dm_default_classification above
+		// — unknown non-empty values are Validate's to reject.
+		if cfg.Channels[i].Classification == "" {
+			cfg.Channels[i].Classification = DefaultClassification
+		}
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err

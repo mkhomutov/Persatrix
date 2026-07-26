@@ -125,12 +125,19 @@ type publishMessageRequest struct {
 
 // channelResponse is the JSON shape returned by GET/POST /api/v1/channels.
 type channelResponse struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name,omitempty"` // empty for DM/thread
-	Type        string           `json:"channel_type"`
-	Description string           `json:"description"`
-	CreatedAt   time.Time        `json:"created_at"`
-	Members     []memberResponse `json:"members,omitempty"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name,omitempty"` // empty for DM/thread
+	Type        string    `json:"channel_type"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	// Classification is the channel's RFC 0037 §A confidentiality level
+	// (v0.3.12 PR 2). Always one of the four lattice values — the store
+	// backfills/normalizes to `internal` — so no omitempty. The catch-up
+	// replay reads it off the channel list it already fetches
+	// (`agents/channel_catchup.py`) to stamp replayed events; the operator
+	// surface reads it back for the RFC 0037 opt-in path (documented PR 8).
+	Classification string           `json:"classification"`
+	Members        []memberResponse `json:"members,omitempty"`
 }
 
 type memberResponse struct {
@@ -177,6 +184,16 @@ type listChannelsResponse struct {
 // and GET /api/v1/channels/{id}/messages/{msg_id}/thread.
 type historyResponse struct {
 	Messages []channelMessageResponse `json:"messages"`
+	// Classification is the channel's RFC 0037 §A confidentiality level
+	// (v0.3.12 PR 2 — §B "both delivery paths carry the field"): the
+	// REST-history leg of the wire contract, so on-startup catch-up replay
+	// can stamp replayed events with the same value live dispatch carries
+	// on `ChannelMessageEvent.classification`. Channel-level (one value
+	// per envelope, never per message — a message's classification IS its
+	// channel's, §H). Populated from the channel row the handlers already
+	// fetch; empty resolves to the `public` acting floor receiver-side
+	// (§A rule (b)).
+	Classification string `json:"classification"`
 }
 
 // membershipIntervalResponse is one stint in the RFC 0035 Phase 2 membership-

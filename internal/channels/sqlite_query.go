@@ -19,19 +19,25 @@ import (
 // GetChannel implements [ChannelStore.GetChannel].
 func (s *sqliteStore) GetChannel(ctx context.Context, id string) (Channel, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, channel_type, description, created_at, session_id
+		`SELECT id, name, channel_type, description, created_at, session_id, classification
 		   FROM channels WHERE id = ?`, id)
 	var ch Channel
-	var typ string
+	var typ, classification string
 	// SF-4: name is nullable post-v2 — DM/thread rows hold NULL.
 	var name sql.NullString
-	if err := row.Scan(&ch.ID, &name, &typ, &ch.Description, &ch.CreatedAt, &ch.SessionID); err != nil {
+	if err := row.Scan(&ch.ID, &name, &typ, &ch.Description, &ch.CreatedAt, &ch.SessionID, &classification); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Channel{}, fmt.Errorf("%w: %s", ErrChannelNotFound, id)
 		}
 		return Channel{}, fmt.Errorf("channels: scan channel: %w", err)
 	}
 	ch.Type = ChannelType(typ)
+	// RFC 0037 (v0.3.12 PR 2): scanned verbatim, no normalization — the v11
+	// column is NOT NULL DEFAULT 'internal' and every writer stamps through
+	// [NormalizeForStamp], so an out-of-lattice value here is store
+	// corruption the §A rule-(b)/(c) resolvers own downstream, not this
+	// scan's to paper over (PR 1's one-resolver-per-rule discipline).
+	ch.Classification = Classification(classification)
 	if name.Valid {
 		ch.Name = name.String
 	}
@@ -49,7 +55,7 @@ func (s *sqliteStore) GetChannel(ctx context.Context, id string) (Channel, error
 // shape for non-paginated callers — the handler always passes a
 // positive limit (and over-cap silently capped at parse time).
 func (s *sqliteStore) ListChannels(ctx context.Context, limit int, afterID string) ([]Channel, error) {
-	const baseQuery = `SELECT id, name, channel_type, description, created_at, session_id
+	const baseQuery = `SELECT id, name, channel_type, description, created_at, session_id, classification
 		   FROM channels`
 
 	var (
@@ -79,12 +85,14 @@ func (s *sqliteStore) ListChannels(ctx context.Context, limit int, afterID strin
 	out := make([]Channel, 0)
 	for rows.Next() {
 		var ch Channel
-		var typ string
+		var typ, classification string
 		var name sql.NullString
-		if err := rows.Scan(&ch.ID, &name, &typ, &ch.Description, &ch.CreatedAt, &ch.SessionID); err != nil {
+		if err := rows.Scan(&ch.ID, &name, &typ, &ch.Description, &ch.CreatedAt, &ch.SessionID, &classification); err != nil {
 			return nil, fmt.Errorf("channels: scan list: %w", err)
 		}
 		ch.Type = ChannelType(typ)
+		// Verbatim scan — see the GetChannel note (RFC 0037 v0.3.12 PR 2).
+		ch.Classification = Classification(classification)
 		if name.Valid {
 			ch.Name = name.String
 		}

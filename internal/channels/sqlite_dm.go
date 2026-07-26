@@ -62,10 +62,21 @@ func (s *sqliteStore) GetOrCreateDM(ctx context.Context, a, b string) (Channel, 
 	// RFC 0031 Phase 1: DM rows created implicitly carry the legacy
 	// carve-out. Operators can promote a DM into a named session via
 	// Phase 3 CLI's `persatrix session use <id>` after the fact.
+	//
+	// RFC 0037 §B: stamp the operator's `dm_default_classification` knob
+	// (normalized to a known §A level at store construction; `internal`
+	// when unset). DMs open on demand with no config block, so creation is
+	// the only stamping point; an existing DM is reclassified through the
+	// same audited machinery as any channel (later RFC 0037 PR). Thread
+	// replies need no stamp: no production path creates a `thread:` channel
+	// row — replies are `messages` rows in the PARENT channel (`thread_id`
+	// FK) and carry its classification by construction (pinned by
+	// TestThreadReplies_NoThreadChannelRow_InheritByConstruction).
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO channels (id, name, channel_type, description, created_at, session_id)
-		 VALUES (?, NULL, ?, '', ?, ?)`,
-		id, string(ChannelTypeDM), now, DefaultSessionID); err != nil {
+		`INSERT INTO channels (id, name, channel_type, description, created_at, session_id, classification)
+		 VALUES (?, NULL, ?, '', ?, ?, ?)`,
+		id, string(ChannelTypeDM), now, DefaultSessionID,
+		string(s.dmDefaultClassification)); err != nil {
 		return Channel{}, fmt.Errorf("channels: create dm: %w", err)
 	}
 	for _, p := range []string{pa, pb} {
@@ -94,5 +105,8 @@ func (s *sqliteStore) GetOrCreateDM(ctx context.Context, a, b string) (Channel, 
 		Type:      ChannelTypeDM,
 		CreatedAt: now,
 		SessionID: DefaultSessionID,
+		// RFC 0037 v0.3.12 PR 2: the struct agrees with the row just
+		// inserted — the same normalized stamp the INSERT above wrote.
+		Classification: s.dmDefaultClassification,
 	}, nil
 }

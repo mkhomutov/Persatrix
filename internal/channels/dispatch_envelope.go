@@ -149,6 +149,18 @@ type DispatchEnvelope struct {
 	// discipline).
 	SynthesisTurn bool
 
+	// Classification (RFC 0037 §B, v0.3.12 PR 2) is the dispatching
+	// channel's §A confidentiality level, resolved from the `channels` row
+	// per dispatch ([ChannelRouter.classificationFor]) and carried on
+	// `ChannelMessageEvent.classification` so the persona runtime can run
+	// the §D injection gate per turn without a channel-metadata roundtrip.
+	// Channel-level (identical across a fanout's recipients), like
+	// ChannelSize. Empty when the row read failed — the receiver resolves
+	// empty to the `public` acting floor (§A rule (b)), so a resolve
+	// failure can only UNDER-inject. Dark in PR 2: no receiver reads it
+	// for gating until the PR 4 gate arms.
+	Classification string
+
 	// FloorMentions (RFC 0030 floor-capable-directedness amendment) is the
 	// subset of the message's mentions naming floor-capable members —
 	// resolved once per publish by [resolveFloorMentions] in
