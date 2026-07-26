@@ -110,7 +110,13 @@ class TestMemoryToolsHappyPath:
         assert "note_id" in result.data
 
     async def test_recall_notes_tool(self, memory, tools):
-        await memory.store_note("testing", "always mock LLM calls")
+        # ``public`` — the tool call runs with no acting-classification
+        # scope bound, so its RFC 0037 §D read predicate floors to
+        # ``public`` (rule (b)); the gating itself is pinned in
+        # test_memory_tools_classification.py.
+        await memory.store_note(
+            "testing", "always mock LLM calls", protection_level="public",
+        )
         td = get_tool("recall_notes")
         result = await td.func(query="mock")
         assert result.success is True

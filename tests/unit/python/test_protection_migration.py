@@ -328,5 +328,83 @@ class TestFactStoreProtectionFields:
             await store.close()
 
 
+# ─── ISSUE-0115(a): the one-time notes-backfill flag (PR 4) ─
+
+
+class TestNotesBackfillFlag:
+    """§C's escape hatch for the notes tier's honest-exception residual:
+    ``PERSATRIX_NOTES_BACKFILL_PROTECTION_LEVEL`` stamps a chosen level
+    onto all pre-migration notes at the v16 migration moment — and only
+    then.  Reuses the populated-upgrade harness's ``_v15_baseline``
+    (delegated, not subclassed, so the inherited test does not re-run).
+    """
+
+    async def _v15_baseline(self) -> aiosqlite.Connection:
+        return await TestPopulatedUpgradeBackfill()._v15_baseline()
+
+    async def test_flag_backfills_notes_at_chosen_level(self, monkeypatch):
+        monkeypatch.setenv(
+            "PERSATRIX_NOTES_BACKFILL_PROTECTION_LEVEL", "restricted",
+        )
+        db = await self._v15_baseline()
+        try:
+            await _apply_migrations(db)  # picks up v16
+            async with db.execute(
+                "SELECT protection_level FROM notes WHERE id = 'n-1'",
+            ) as cursor:
+                assert (await cursor.fetchone()) == ("restricted",)
+            # The flag is NOTES-scoped: the other tiers keep the default.
+            async with db.execute(
+                "SELECT protection_level FROM episodes WHERE id = 'e-1'",
+            ) as cursor:
+                assert (await cursor.fetchone()) == (
+                    PROTECTION_LEVEL_DEFAULT,
+                )
+        finally:
+            await db.close()
+
+    async def test_invalid_flag_fails_migration_loudly(self, monkeypatch):
+        """An out-of-vocabulary value raises — silently falling back to
+        ``internal`` would be exactly the false assurance §C's residual
+        documents (the operator explicitly asked for a boundary)."""
+        monkeypatch.setenv(
+            "PERSATRIX_NOTES_BACKFILL_PROTECTION_LEVEL", "top-secret",
+        )
+        db = await self._v15_baseline()
+        try:
+            with pytest.raises(ValueError, match="top-secret"):
+                await _apply_migrations(db)
+        finally:
+            await db.close()
+
+    async def test_flag_inert_after_v16(self, monkeypatch, caplog):
+        """One-time means one-time: with v16 already applied, a set flag
+        cannot relabel notes written under the PR 4 stamp — it logs a
+        WARNING and changes nothing."""
+        db = await self._v15_baseline()
+        try:
+            await _apply_migrations(db)  # v16 applies, flag unset
+            monkeypatch.setenv(
+                "PERSATRIX_NOTES_BACKFILL_PROTECTION_LEVEL", "secret",
+            )
+            import logging
+
+            with caplog.at_level(
+                logging.WARNING, logger="agents.memory._migration_protection",
+            ):
+                await _apply_migration_16(db)  # idempotent replay
+            assert any(
+                "one-time" in r.getMessage() for r in caplog.records
+            )
+            async with db.execute(
+                "SELECT protection_level FROM notes WHERE id = 'n-1'",
+            ) as cursor:
+                assert (await cursor.fetchone()) == (
+                    PROTECTION_LEVEL_DEFAULT,
+                )
+        finally:
+            await db.close()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

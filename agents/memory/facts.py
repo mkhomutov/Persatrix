@@ -461,4 +461,7 @@ class FactStore:
             last_recalled_at=row[8],
             superseded_by=row[9],
             session_id=row[10],
+            # RFC 0037 §C (migration v16): surfaced for the §D gate.
+            protection_level=row[11],
+            source_channel_id=row[12],
         )

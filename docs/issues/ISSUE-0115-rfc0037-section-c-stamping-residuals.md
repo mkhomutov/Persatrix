@@ -125,3 +125,16 @@ is currently neither ruled in nor ruled out.
 > 2026-07-26 — initial capture during the PR #775 (RFC 0037 PR 3) review.
 > The same review's two fixed findings (`agent_id` on `memory_projections`,
 > the untested wire→capture→stamp seam) landed in that PR.
+
+> 2026-07-26 — **(a) RESOLVED by RFC 0037 PR 4** (the §D hard-gate PR): the
+> one-time flag ships as the `PERSATRIX_NOTES_BACKFILL_PROTECTION_LEVEL`
+> env var, consumed by the v16 handler's notes arm exactly as proposed —
+> honoured only at the moment the notes `protection_level` column is
+> created (every row present then is a pre-migration note), notes-scoped,
+> validated against the §A vocabulary (an invalid value fails the
+> migration loudly rather than silently defaulting), and inert with a
+> WARNING once v16 has applied. Pinned by
+> `tests/unit/python/test_protection_migration.py::TestNotesBackfillFlag`;
+> the vocabulary spelling is drift-pinned to `CLASSIFICATION_RANKS` in
+> `test_protection_stamping.py`. (b) remains PR 8's docs leg; (c) remains
+> an open §C decision.
