@@ -20,15 +20,20 @@ class TestInjectMemoryContext:
         )
         await agent.initialize_memory()
 
-        # Store an episode and a note so recall returns results.
+        # Store an episode and a note so recall returns results.  Stamped
+        # ``public`` because a TASK_ASSIGNED turn takes the RFC 0037 §D
+        # acting floor (rule (b)) — this test's subject is the injection
+        # mechanics, not the gate (test_injection_gate.py owns that).
         await agent._episodic_memory.store_episode(
             summary="Discussed architecture patterns",
             context={"topic": "arch"},
             importance=0.8,
+            protection_level="public",
         )
         await agent._episodic_memory.store_note(
             topic="architecture",
             content="Consider event sourcing for architecture",
+            protection_level="public",
         )
 
         event = AgentEvent(
@@ -239,9 +244,11 @@ class TestInjectMemoryContext:
         await agent.initialize_memory()
 
         long_content = "x" * 1000
+        # ``public`` — the TASK_ASSIGNED turn takes the §D acting floor.
         await agent._episodic_memory.store_note(
             topic="verbose",
             content=long_content,
+            protection_level="public",
         )
 
         event = AgentEvent(

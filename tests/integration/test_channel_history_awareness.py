@@ -152,6 +152,10 @@ async def test_channel_history_tier_surfaces_earlier_token_for_same_scope() -> N
         ),
         channel_id=channel_id,
         sender_id="agent-a",
+        # RFC 0037 §B/§D: mirror the dispatch path's classification stamp
+        # so the internal-default seeded episode passes the §D gate (an
+        # unclassified event floors the turn to ``public`` — rule (b)).
+        metadata={"channel_classification": "internal"},
     ))
 
     sections = {s.name: s for s in agent_b._working_memory._sections}

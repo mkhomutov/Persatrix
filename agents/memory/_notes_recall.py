@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+from typing import TYPE_CHECKING
 
 import aiosqlite
 
@@ -24,11 +25,35 @@ from ._principal_filter import principal_eq_clause
 from ._session_filter import session_in_clause
 from .episodic_queries import resolve_min_score
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 logger = logging.getLogger(__name__)
 
 # FTS5 MATCH operator characters that cause parse errors when present in
 # freeform queries — strip all non-alphanumeric characters except spaces.
 _FTS5_SPECIAL = re.compile(r'[^a-zA-Z0-9\s]+')
+
+
+def _protection_in_clause(
+    levels: Sequence[str] | None, *, column: str,
+) -> tuple[str, tuple[str, ...]]:
+    """RFC 0037 §D (PR 4) — the gated-``recall_notes`` protection predicate.
+
+    ``levels`` is the pre-resolved injectable-level IN-list from
+    ``persona_runtime.classification.injectable_levels`` (this layer must
+    not import the lattice; it receives the resolved set as data).  A row
+    whose stored ``protection_level`` is outside the set — including a
+    corrupted label — falls out of the predicate: §A rule (c)'s withhold
+    realised in SQL, deliberately silent per row (the log-flood
+    rationale; the Python-side gate owns the aggregated WARNING).
+    ``None`` → no clause (the ungated non-persona surface).  Same
+    ``(clause, params)`` shape as :func:`session_in_clause`.
+    """
+    if levels is None:
+        return "", ()
+    placeholders = ",".join("?" for _ in levels)
+    return f" AND {column} IN ({placeholders})", tuple(levels)
 
 
 async def _recall_notes_fts5(
@@ -42,6 +67,7 @@ async def _recall_notes_fts5(
     note_cols: tuple[str, ...],
     principal_id: str = DEFAULT_PRINCIPAL_ID,
     epoch_id: str = DEFAULT_EPOCH_ID,
+    allowed_protection_levels: Sequence[str] | None = None,
 ) -> list[aiosqlite.Row]:
     """FTS5 search across topic, content, and tags.
 
@@ -50,8 +76,9 @@ async def _recall_notes_fts5(
     ``None`` is the ``"*"`` no-filter mode.  ``principal_id``
     (ISSUE-0081 PR 3) / ``epoch_id`` (ISSUE-0085 PR 3) are the resolved
     active tenant + run/test epoch — each unconditional strict equality,
-    no carve-out.  Falls back to LIKE on FTS5 parse failure or empty
-    sanitized query.
+    no carve-out.  ``allowed_protection_levels`` — see
+    :func:`_protection_in_clause`.  Falls back to LIKE on FTS5 parse
+    failure or empty sanitized query.
     """
     sess_clause, sess_params = session_in_clause(
         sessions, column="n.session_id",
@@ -62,12 +89,16 @@ async def _recall_notes_fts5(
     epoch_clause, epoch_params = epoch_eq_clause(
         epoch_id, column="n.epoch_id",
     )
+    prot_clause, prot_params = _protection_in_clause(
+        allowed_protection_levels, column="n.protection_level",
+    )
     safe_query = _FTS5_SPECIAL.sub(" ", query).strip()
     if not safe_query:
         return await _recall_notes_like(
             db, agent_id=agent_id, query=query, limit=limit,
             min_score=min_score, sessions=sessions, note_cols=note_cols,
             principal_id=principal_id, epoch_id=epoch_id,
+            allowed_protection_levels=allowed_protection_levels,
         )
     effective_min_score = resolve_min_score(min_score)
     try:
@@ -90,12 +121,14 @@ async def _recall_notes_fts5(
               {sess_clause}
               {princ_clause}
               {epoch_clause}
+              {prot_clause}
             ORDER BY fts.rank * -1 DESC, n.rowid DESC
             LIMIT ?
             """,
             (
                 safe_query, agent_id, effective_min_score,
-                *sess_params, *princ_params, *epoch_params, limit,
+                *sess_params, *princ_params, *epoch_params, *prot_params,
+                limit,
             ),
         ) as cursor:
             return list(await cursor.fetchall())
@@ -108,6 +141,7 @@ async def _recall_notes_fts5(
             db, agent_id=agent_id, query=query, limit=limit,
             min_score=min_score, sessions=sessions, note_cols=note_cols,
             principal_id=principal_id, epoch_id=epoch_id,
+            allowed_protection_levels=allowed_protection_levels,
         )
 
 
@@ -122,13 +156,14 @@ async def _recall_notes_like(
     note_cols: tuple[str, ...],
     principal_id: str = DEFAULT_PRINCIPAL_ID,
     epoch_id: str = DEFAULT_EPOCH_ID,
+    allowed_protection_levels: Sequence[str] | None = None,
 ) -> list[aiosqlite.Row]:
     """LIKE fallback when FTS5 is unavailable.
 
     ``min_score`` is accepted for signature compatibility but not
     applied: LIKE matching is binary so every match scores ``1.0`` per
-    RFC 0017 Section C.  ``principal_id`` / ``epoch_id`` — see
-    :func:`_recall_notes_fts5`.
+    RFC 0017 Section C.  ``principal_id`` / ``epoch_id`` /
+    ``allowed_protection_levels`` — see :func:`_recall_notes_fts5`.
     """
     sess_clause, sess_params = session_in_clause(
         sessions, column="session_id",
@@ -138,6 +173,9 @@ async def _recall_notes_like(
     )
     epoch_clause, epoch_params = epoch_eq_clause(
         epoch_id, column="epoch_id",
+    )
+    prot_clause, prot_params = _protection_in_clause(
+        allowed_protection_levels, column="protection_level",
     )
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{escaped}%"
@@ -161,12 +199,13 @@ async def _recall_notes_like(
           {sess_clause}
           {princ_clause}
           {epoch_clause}
+          {prot_clause}
         ORDER BY updated_at DESC, rowid DESC
         LIMIT ?
         """,
         (
             agent_id, pattern, pattern, pattern,
-            *sess_params, *princ_params, *epoch_params, limit,
+            *sess_params, *princ_params, *epoch_params, *prot_params, limit,
         ),
     ) as cursor:
         return list(await cursor.fetchall())
@@ -181,10 +220,12 @@ async def _recall_notes_recency(
     note_cols: tuple[str, ...],
     principal_id: str = DEFAULT_PRINCIPAL_ID,
     epoch_id: str = DEFAULT_EPOCH_ID,
+    allowed_protection_levels: Sequence[str] | None = None,
 ) -> list[aiosqlite.Row]:
     """No query — return most recently updated notes.
 
-    ``principal_id`` / ``epoch_id`` — see :func:`_recall_notes_fts5`.
+    ``principal_id`` / ``epoch_id`` / ``allowed_protection_levels`` —
+    see :func:`_recall_notes_fts5`.
     """
     sess_clause, sess_params = session_in_clause(
         sessions, column="session_id",
@@ -194,6 +235,9 @@ async def _recall_notes_recency(
     )
     epoch_clause, epoch_params = epoch_eq_clause(
         epoch_id, column="epoch_id",
+    )
+    prot_clause, prot_params = _protection_in_clause(
+        allowed_protection_levels, column="protection_level",
     )
     note_select = ", ".join(note_cols)
     # Deterministic `rowid` tiebreak — same rationale as `_recall_notes_like`
@@ -207,9 +251,13 @@ async def _recall_notes_recency(
           {sess_clause}
           {princ_clause}
           {epoch_clause}
+          {prot_clause}
         ORDER BY updated_at DESC, rowid DESC
         LIMIT ?
         """,
-        (agent_id, *sess_params, *princ_params, *epoch_params, limit),
+        (
+            agent_id, *sess_params, *princ_params, *epoch_params,
+            *prot_params, limit,
+        ),
     ) as cursor:
         return list(await cursor.fetchall())

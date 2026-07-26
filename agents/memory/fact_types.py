@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ._migration_protection import PROTECTION_LEVEL_DEFAULT
+
 __all__ = ["Fact", "_FACT_COLS", "_FACT_SELECT"]
 
 
@@ -71,6 +73,13 @@ class Fact:
     last_recalled_at: float | None
     superseded_by: str | None
     session_id: str
+    # RFC 0037 §C/§D (migration v16, PR 4): protection columns projected
+    # onto recall so the §D injection gate can rank each candidate fact
+    # (and name its channel in the rule-(c) log).  Defaults match the v16
+    # column DEFAULT so hand-built fixtures round-trip; a corrupted stored
+    # label fails closed at the gate (rule (c)), never here.
+    protection_level: str = PROTECTION_LEVEL_DEFAULT
+    source_channel_id: str | None = None
 
 
 # Column list pinned here so :meth:`FactStore._row_to_fact` stays in
@@ -88,5 +97,8 @@ _FACT_COLS = (
     "last_recalled_at",
     "superseded_by",
     "session_id",
+    # RFC 0037 §C (v16): surfaced to the §D gate.
+    "protection_level",
+    "source_channel_id",
 )
 _FACT_SELECT = ", ".join(_FACT_COLS)

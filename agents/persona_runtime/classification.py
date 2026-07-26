@@ -190,3 +190,52 @@ def entry_rank_or_withhold(level: str | None) -> int | None:
     and note the recall filter calls this once per candidate row.
     """
     return _classification_rank(level)
+
+
+def injectable_levels(acting: str | None) -> tuple[str, ...]:
+    """Rules (b) + (c) in the LEVEL-SET domain: the entry protection levels
+    injectable at the ACTING level ``acting`` — every vocabulary level whose
+    rank is ``<= acting_rank(acting)``, rank-ascending.
+
+    This is the shape the §D read-surface SQL predicates consume (RFC 0037
+    PR 4 — the gated ``recall_notes``): the memory layer must not import
+    this lattice (the import direction is ``persona_runtime → memory``), so
+    the persona-side read surfaces resolve the acting level to this
+    IN-list and pass it down as plain data.  A stored label OUTSIDE the
+    returned set — including a corrupted one — falls out of the ``IN``
+    predicate, which IS rule (c)'s withhold realised in SQL.  The SQL form
+    is deliberately silent per row (the log-flood rationale in the module
+    docstring); the Python-side gate over loaded rows owns the aggregated
+    rule-(c) WARNING.
+
+    Resolution of ``acting`` is rule (b): unknown/absent floors to
+    ``public``, so an unbound turn's IN-list is ``("public",)`` — the
+    least-disclosing set, never the stamp default.
+    """
+    bound = acting_rank(acting)
+    return tuple(
+        level for level, rank in CLASSIFICATION_RANKS.items() if rank <= bound
+    )
+
+
+def levels_below_stamp(level: str | None) -> tuple[str, ...]:
+    """Rule (a) in the LEVEL-SET domain: the levels ranking STRICTLY below
+    ``normalize_for_stamp(level)``, rank-ascending.
+
+    The §C ``update_note`` re-stamp consumes this: an edit re-stamps a note
+    to ``max(existing protection_level, acting L)`` — never lowers — and the
+    memory layer realises that ``max`` as a raise-only SQL ``CASE`` gated on
+    the existing value being IN this set (RFC 0037 PR 4).  A corrupted
+    existing label is not in the set and therefore keeps its value,
+    failing closed at read time per rule (c) rather than being silently
+    laundered onto the lattice by an edit.
+
+    Empty for ``level=None``/unknown-floor cases resolving to a ``public``
+    stamp?  No — resolution here is rule (a) (absent → ``internal``), so the
+    absent case returns ``("public",)``; only an explicit ``public`` acting
+    level returns the empty tuple (nothing ranks below the floor).
+    """
+    bound = rank_for_stamp(level)
+    return tuple(
+        level_ for level_, rank in CLASSIFICATION_RANKS.items() if rank < bound
+    )

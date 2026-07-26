@@ -266,6 +266,10 @@ class TestChannelHistoryRecencyCounter:
                 channel_id="group:planning",
                 sender_id="alice",
                 payload={"content": "hello", "channel_type": "group"},
+                # RFC 0037 §B/§D: mirror the dispatch path's stamp so the
+                # internal-default episodes pass the §D gate (rule (b)
+                # would otherwise floor the turn to ``public``).
+                metadata={"channel_classification": "internal"},
             )
             await agent._inject_memory_context(event, query="hello")
 

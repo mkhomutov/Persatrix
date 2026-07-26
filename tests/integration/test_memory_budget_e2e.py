@@ -167,7 +167,13 @@ def _make_mixin_with_real_episodic(
     event = MagicMock()
     event.event_type = et
     event.sender_id = sender_id
-    event.metadata = {}
+    # RFC 0037 §B/§D: channel events mirror the dispatch path's
+    # classification stamp so internal-default entries pass the §D gate;
+    # non-channel events keep the acting ``public`` floor (rule (b)).
+    event.metadata = (
+        {"channel_classification": "internal"}
+        if et is EventType.CHANNEL_MESSAGE else {}
+    )
     event.payload = {"content": content}
 
     return mixin, event

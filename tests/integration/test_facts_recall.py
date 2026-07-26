@@ -129,7 +129,10 @@ def _make_event(
     event.channel_id = None
     event.sender_id = sender_id
     event.thread_id = None
-    event.metadata = {}
+    # RFC 0037 §B/§D: mirror the dispatch path's classification stamp so
+    # the channel turn acts ``internal`` and internal-default entries pass
+    # the §D gate instead of flooring to ``public`` (rule (b)).
+    event.metadata = {"channel_classification": "internal"}
     event.payload = {"content": content}
     event.timestamp = 0.0
     return event

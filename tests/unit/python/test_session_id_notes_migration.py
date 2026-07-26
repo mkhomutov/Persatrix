@@ -385,10 +385,12 @@ class TestNotesProjectionContract:
             "id", "agent_id", "topic", "content", "tags_json",
             "access_count", "created_at", "updated_at",
             "session_id",
+            # RFC 0037 §C (migration v16, PR 4): the §D gate's projection.
+            "protection_level", "source_channel_id",
         ), (
             "_NOTE_COLS shape change — also update Note dataclass + "
             "NoteStore._row_to_note positional mapping in "
-            "agents/memory/notes.py"
+            "agents/memory/note_types.py / notes.py"
         )
         # _row_to_note indexes row[0..len(_NOTE_COLS)-1] onto the Note
         # dataclass.  Field count must match the projection width so
@@ -438,6 +440,10 @@ class TestNotesProjectionContract:
         # ``memory`` fixture has no PERSATRIX_SESSION_ID set so the
         # store_note default falls through to ``"legacy"``.
         assert note.session_id == "legacy"
+        # RFC 0037 §C (v16): the default stamp round-trips; notes carry
+        # no per-channel provenance (see NoteStore.store_note).
+        assert note.protection_level == "internal"
+        assert note.source_channel_id is None
 
 
 if __name__ == "__main__":
