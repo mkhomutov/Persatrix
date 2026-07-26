@@ -43,11 +43,23 @@ type RecallParams struct {
 	// recency-ordered scoped listing.
 	Query string
 
-	// EpochID hard-filters to one run/test world (§OQ-6 lock) with strict
-	// equality and no carve-out. Empty resolves to [DefaultEpochID] ("live") so
-	// a single-world caller is fail-safe; PR 3 threads the request's resolved
-	// epoch exactly as the publish handler does.
+	// EpochID hard-filters to one run/test world with strict equality and no
+	// carve-out. Empty resolves to [DefaultEpochID] ("live"). Since
+	// ISSUE-0106(b) (RFC 0037 PR 5) the recall ENDPOINT no longer overrides
+	// this — separate runs never share a channel-store DB, so every real row
+	// is "live" and the filter is a vestigial store-level guard (the amended
+	// RFC 0036 §OQ-6), retained because the column and its default remain.
 	EpochID string
+
+	// ActingClassification is the RFC 0037 §F acting-channel level: the
+	// classification of the channel the persona is ACTING in, bound by the
+	// endpoint from its required `acting_classification` parameter. The store
+	// resolves it per §A rule (b) — unknown/absent floors to `public` — into
+	// the [InjectableLevels] set the non-optional classification clause
+	// serves, so a recall result can never be more confidential than the
+	// turn it is injected into. Trusted request context, never LLM-supplied
+	// (the tool binds it from the turn's classification scope).
+	ActingClassification Classification
 
 	// ChannelID, when non-empty, narrows to a single channel.
 	ChannelID string

@@ -66,7 +66,7 @@ func TestRecallMessages_LikeFallback_SameScopeDifferentTextMatch(t *testing.T) {
 		seedMsg(t, db, msgSeed{id: "m-out", channelID: "group:secret", sender: "carol", content: "the budget review", ts: mins(10)})
 	})
 
-	ftsGot, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget"})
+	ftsGot, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "budget"})
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 
@@ -75,7 +75,7 @@ func TestRecallMessages_LikeFallback_SameScopeDifferentTextMatch(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store2.Close() })
 
-	likeGot, err := store2.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget"})
+	likeGot, err := store2.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "budget"})
 	require.NoError(t, err, "recall still works with FTS5 unavailable (LIKE fallback)")
 
 	// Text match diverges (FTS5 token vs LIKE substring, which adds m-plural)...
@@ -120,7 +120,7 @@ func TestRecallMessages_LikeFallback_MultiTermTokenAND(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store2.Close() })
 
-	got, err := store2.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget report"})
+	got, err := store2.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "budget report"})
 	require.NoError(t, err)
 	// Token AND: both terms present (any order, non-adjacent) → match; one term → no.
 	assert.ElementsMatch(t, []string{"m-split", "m-adj"}, idSlice(got),

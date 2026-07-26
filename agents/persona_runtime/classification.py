@@ -157,6 +157,24 @@ def acting_rank(level: str | None) -> int:
     return CLASSIFICATION_RANKS[CLASSIFICATION_PUBLIC]
 
 
+def normalize_acting(level: str | None) -> str:
+    """Rule (b) in the LEVEL domain: the acting classification to SEND when a
+    caller must transmit the acting level itself (not its rank or its set).
+
+    A known level passes through; absent or unknown resolves to
+    :data:`CLASSIFICATION_PUBLIC` — the floor, never the stamp default.  The
+    symmetric sibling of :func:`normalize_for_stamp` on the rule-(b) side,
+    added for the RFC 0037 §F recall binding: the ``recall_channel_messages``
+    tool resolves the turn's contextvar through this before passing the level
+    to the endpoint's REQUIRED ``acting_classification`` parameter, so an
+    unbound turn (an autonomous tick, a pre-classification producer) recalls
+    at the ``public`` floor instead of 400-ing on an absent level.
+    """
+    if level is not None and level in CLASSIFICATION_RANKS:
+        return level
+    return CLASSIFICATION_PUBLIC
+
+
 def acting_at_or_below_internal(level: str | None) -> bool:
     """The §C identity write-through bound: does the ACTING classification
     rank at or below ``internal``?

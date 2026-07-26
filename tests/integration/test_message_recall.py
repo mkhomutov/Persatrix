@@ -101,11 +101,12 @@ class _FakeRecallClient:
         self._result = result
 
     async def recall(
-        self, *, participant_id: str, query: str,
+        self, *, participant_id: str, acting_classification: str, query: str,
         channel_id: str = "", sender: str = "", limit: int = 10,
     ) -> list[dict[str, Any]] | None:
         self.calls.append({
-            "participant_id": participant_id, "query": query,
+            "participant_id": participant_id,
+            "acting_classification": acting_classification, "query": query,
             "channel_id": channel_id, "sender": sender, "limit": limit,
         })
         return self._result
@@ -164,8 +165,12 @@ class TestPersonaRecallThroughDispatch:
         ])
 
         # Scope is closure-bound to the persona — not taken from tool args.
+        # The acting classification resolves to the rule-(b) "public" floor:
+        # this direct _execute_tools call runs outside any event scope, so
+        # the task-local binding is unset (RFC 0037 §F).
         assert client.calls == [{
-            "participant_id": "ember-owl", "query": "ship date",
+            "participant_id": "ember-owl",
+            "acting_classification": "public", "query": "ship date",
             "channel_id": "group:eng", "sender": "", "limit": 10,
         }]
         assert len(results) == 1

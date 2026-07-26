@@ -1,11 +1,14 @@
 package channels
 
-// RFC 0036 PR 2 — the membership-scoped, epoch-filtered verbatim search query.
-// This is the load-bearing access-control PR: the `membership_intervals`
-// `EXISTS` join *is* the recall authorization decision, and the `epoch_id`
-// strict-equality filter is the run-isolation boundary (§OQ-6 lock). Both are
-// server-side, in SQL, and bound from trusted request context — the FTS `MATCH`
-// text is a separate AND-ed predicate that can never reach them.
+// RFC 0036 PR 2 — the membership-scoped verbatim search query. This is the
+// load-bearing access-control file: the `membership_intervals` `EXISTS` join
+// *is* the recall authorization decision, the `epoch_id` strict-equality
+// filter is a vestigial store-level guard (the amended RFC 0036 §OQ-6 —
+// separate runs never share a channel-store DB, ISSUE-0106(b)), and the
+// RFC 0037 §F classification clause ([classificationScope], v0.3.12 PR 5)
+// caps every returned row at the acting channel's confidentiality level. All
+// are server-side, in SQL, and bound from trusted request context — the FTS
+// `MATCH` text is a separate AND-ed predicate that can never reach them.
 //
 // The query has two paths, mirroring the episodic tier's FTS5/LIKE split
 // (agents/memory/episodic_queries.py) though gated differently: an FTS5 MATCH
@@ -71,7 +74,12 @@ const recallMessageColumns = `m.id, m.channel_id, m.sender_id, m.content, m.time
 // when this message was sent, in this epoch?" — the half-open `[joined_at,
 // left_at)` interval test that [InScope] expresses in Go. PR 5's scoped history
 // query reuses this exact fragment so the §C recall predicate and the §G window
-// clause are provably identical and cannot drift.
+// clause are provably identical and cannot drift — on the MEMBERSHIP + EPOCH
+// predicate. The RFC 0037 §F classification clause is deliberately NOT part of
+// this fragment: recall alone appends it in [sqliteStore.RecallMessages]
+// (the specified retrofit point), while the scoped history window stays
+// ungated by §H — it reconstructs only the turn's own channel, which is by
+// definition at the acting level, so gating it would be wrong.
 func membershipEpochScope(participantID, epochID string) (string, []any) {
 	const clause = `m.epoch_id = ?
           AND EXISTS (
@@ -82,6 +90,44 @@ func membershipEpochScope(participantID, epochID string) (string, []any) {
                  AND (mi.left_at IS NULL OR m.timestamp < mi.left_at)
           )`
 	return clause, []any{epochID, participantID}
+}
+
+// classificationScope returns the RFC 0037 §F acting-channel classification
+// clause plus its bound args: a message is servable only when its channel's
+// classification ranks at or below the acting level — the non-optional egress
+// cap that stops a persona acting in a `public` channel from recalling
+// verbatim text out of a `secret` channel it legitimately belongs to (§F —
+// recall reads the channel store, so the §D memory gate never sees it).
+//
+// The §A ordering reaches SQL as an `IN` predicate over the
+// [InjectableLevels] set resolved Go-side — the same lattice→plain-data shape
+// the Python notes leg established in PR 4 (`injectable_levels`) — rather
+// than the RFC's sketched SQL-side `classification_rank` function, so the
+// rank table stays single-sourced per language and no level string is
+// compared in SQL beyond set membership. Fail-closed twice over: a channel
+// row that is missing fails the `EXISTS` (a message whose channel vanished
+// is withheld), and a corrupted/unknown label falls out of the `IN` set —
+// §A rule (c) realised in SQL. Resolution of the acting level is rule (b):
+// unknown/absent floors to `public`, never the stamp default.
+//
+// Assumes the outer query aliases `messages` as `m`; composed AFTER
+// [membershipEpochScope] and never inside it (see that fragment's no-drift
+// note — the §H-exempt history window shares membership+epoch only).
+func classificationScope(acting Classification) (string, []any) {
+	levels := InjectableLevels(acting)
+	args := make([]any, len(levels))
+	placeholders := make([]string, len(levels))
+	for i, level := range levels {
+		args[i] = string(level)
+		placeholders[i] = "?"
+	}
+	clause := `
+          AND EXISTS (
+              SELECT 1 FROM channels c
+               WHERE c.id = m.channel_id
+                 AND c.classification IN (` + strings.Join(placeholders, ", ") + `)
+          )`
+	return clause, args
 }
 
 // recallNarrowing builds the optional `channel_id` / `sender` / `after` /
@@ -124,6 +170,12 @@ func (s *sqliteStore) RecallMessages(ctx context.Context, params RecallParams) (
 
 	limit := params.EffectiveLimit()
 	scope, scopeArgs := membershipEpochScope(params.ParticipantID, params.epochOrDefault())
+	// The RFC 0037 §F clause rides the scope (it IS access control), appended
+	// here — the specified retrofit point — so the shared membership+epoch
+	// fragment stays byte-identical with the §H-exempt history window.
+	class, classArgs := classificationScope(params.ActingClassification)
+	scope += class
+	scopeArgs = append(scopeArgs, classArgs...)
 	narrow, narrowArgs := recallNarrowing(params)
 	match := buildFTS5Match(params.Query)
 

@@ -9,8 +9,8 @@ package server
 //   - the PATH participant id is the scope subject (never a body field), so a
 //     join → leave → rejoin recalls both stints and excludes the removal gap
 //     through the HTTP layer;
-//   - the caller's epoch is resolved from the request body exactly as publish
-//     resolves it, defaulting to "live" — a cross-epoch message is unreachable;
+//   - recall always binds the "live" epoch (the `epoch_id` body override was
+//     removed by ISSUE-0106(b)) — a synthetically cross-epoch row is unreachable;
 //   - the persona-facing response shape (message_id / sender);
 //   - every executed recall emits exactly one server-side `channel.recall` audit
 //     event recording the persona, query, narrowing params, and result COUNT —
@@ -107,7 +107,7 @@ func TestRecallEndpoint_JoinLeaveRejoin_BothStintsGapExcluded(t *testing.T) {
 		recallSeedMsg(t, db, "m-stint2", ch, "bob", "budget stint two", at(300), "")
 	})
 
-	body, _ := json.Marshal(recallRequest{Query: "budget"})
+	body, _ := json.Marshal(recallRequest{ActingClassification: "internal", Query: "budget"})
 	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 
@@ -127,21 +127,16 @@ func TestRecallEndpoint_JoinLeaveRejoin_BothStintsGapExcluded(t *testing.T) {
 	}
 }
 
-// TestRecallEndpoint_CrossEpochExcluded pins the §OQ-6 epoch filter through the
-// endpoint, using SYNTHETICALLY-seeded rows — the only way to get a non-"live"
-// epoch into the store, since the real publish path cannot (it never stamps a
-// non-"live" epoch; see TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable).
-// Two distinct properties:
-//
-//   - default epoch is strict-equality "live": a row seeded under a different
-//     epoch is unreachable through the endpoint (the genuine isolation guard);
-//   - the handler correctly PLUMBS an explicit body `epoch_id` into
-//     RecallParams.EpochID (resolveEpochOverride → EpochOverrideFromContext), so
-//     it selects exactly the seeded rows of that epoch.
-//
-// The second property is plumbing coverage against a synthetic row, NOT proof of
-// a live end-to-end feature: no message published through the real path ever
-// carries a non-"live" epoch, so the explicit-epoch override matches nothing real.
+// TestRecallEndpoint_CrossEpochExcluded pins the store's vestigial epoch guard
+// through the endpoint, using a SYNTHETICALLY-seeded row — the only way to get
+// a non-"live" epoch into the store, since the real publish path cannot (it
+// never stamps a non-"live" epoch). Recall always binds "live" now: the
+// `epoch_id` body override was removed by ISSUE-0106(b) — see
+// TestRecallEndpoint_EpochOverrideRemoved_PointedRejection for the 400 — so
+// the one property left is that a row seeded under a different epoch stays
+// unreachable through the endpoint (the amended RFC 0036 §OQ-6: the store is
+// not epoch-partitioned, and the strict-equality "live" filter is a
+// defensive leftover, not an isolation axis).
 func TestRecallEndpoint_CrossEpochExcluded(t *testing.T) {
 	srv, store, dbPath, _ := recallTestServer(t)
 	ch := "group:planning"
@@ -155,26 +150,14 @@ func TestRecallEndpoint_CrossEpochExcluded(t *testing.T) {
 		recallSeedMsg(t, db, "m-ci", ch, "bob", "budget ci", base.Add(10*time.Minute), "ci-run-7")
 	})
 
-	// No epoch_id in the body → default "live" → only the live row.
-	body, _ := json.Marshal(recallRequest{Query: "budget"})
+	// Recall always binds "live" (no override exists) → only the live row.
+	body, _ := json.Marshal(recallRequest{ActingClassification: "internal", Query: "budget"})
 	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	var resp recallResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Equal(t, []string{"m-live"}, recallRespIDs(resp),
-		"default epoch is strict-equality 'live'; cross-epoch rows excluded through the endpoint")
-
-	// Explicit body epoch_id is plumbed through resolveEpochOverride →
-	// EpochOverrideFromContext → RecallParams.EpochID and selects exactly the rows
-	// of that epoch. This is PLUMBING coverage against a synthetic row (m-ci was
-	// SQL-seeded with epoch_id="ci-run-7") — the real publish path can never write
-	// a non-"live" epoch, so this is not a reachable end-to-end feature.
-	body, _ = json.Marshal(recallRequest{Query: "budget", EpochID: "ci-run-7"})
-	rec = doRequest(srv.Handler(), http.MethodPost, recallPath, body)
-	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.Equal(t, []string{"m-ci"}, recallRespIDs(resp),
-		"body epoch_id is plumbed into RecallParams.EpochID (synthetic-row plumbing coverage, not a live feature)")
+		"the store's strict-equality 'live' filter keeps a synthetic cross-epoch row unreachable")
 }
 
 // TestRecallEndpoint_EmitsAuditEvent_CountNotContent pins the RFC 0036
@@ -198,7 +181,7 @@ func TestRecallEndpoint_EmitsAuditEvent_CountNotContent(t *testing.T) {
 		recallSeedMsg(t, db, "m2", ch, "bob", "budgetzorp uniquecontentmarkerbeta", base.Add(2*time.Minute), "")
 	})
 
-	body, _ := json.Marshal(recallRequest{Query: "budgetzorp", ChannelID: ch, Sender: "bob", Limit: 25})
+	body, _ := json.Marshal(recallRequest{ActingClassification: "internal", Query: "budgetzorp", ChannelID: ch, Sender: "bob", Limit: 25})
 	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	var resp recallResponse
@@ -249,7 +232,7 @@ func TestRecallEndpoint_BareChannelNarrowMatchesCanonical(t *testing.T) {
 	})
 
 	recall := func(channelID string) []string {
-		body, _ := json.Marshal(recallRequest{Query: "deploy", ChannelID: channelID})
+		body, _ := json.Marshal(recallRequest{ActingClassification: "internal", Query: "deploy", ChannelID: channelID})
 		rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
 		require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 		var resp recallResponse
@@ -291,7 +274,7 @@ func TestRecallEndpoint_RealPublishPath_Recallable(t *testing.T) {
 		Content: "recallzorptoken via the real publish path", Timestamp: time.Now().UTC(),
 	}))
 
-	body, _ := json.Marshal(recallRequest{Query: "recallzorptoken"})
+	body, _ := json.Marshal(recallRequest{ActingClassification: "internal", Query: "recallzorptoken"})
 	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	var resp recallResponse
@@ -304,56 +287,16 @@ func TestRecallEndpoint_RealPublishPath_Recallable(t *testing.T) {
 	assert.EqualValues(t, 1, recalls[0].Detail["result_count"])
 }
 
-// TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable pins the ACTUAL
-// epoch contract end-to-end — the honest counterpart to the SQL-seeded
-// TestRecallEndpoint_CrossEpochExcluded. A message PUBLISHED THROUGH THE REAL
-// REST PATH with an explicit `epoch_id` override still lands in the store under
-// the "live" column default: the publish override rides the gRPC dispatch rail
-// and is never stamped on the row (channel_epoch_override.go, ISSUE-0085). So the
-// very message "published into ci-run-7" is UNREACHABLE when recalled under
-// ci-run-7, and reachable only under "live" — publish-epoch and recall-epoch are
-// decoupled.
-//
-// This is the tripwire that flips red the day publish begins persisting a per-run
-// epoch on the channel-store row (resolving the RFC 0036 §OQ-6 / ISSUE-0085
-// tension) — at which point this expectation, and the docs/comments that cite it,
-// must be revisited together.
-func TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable(t *testing.T) {
-	srv, store, _, _ := recallTestServer(t)
-	ctx := context.Background()
-	ch := "group:planning"
-	require.NoError(t, store.CreateChannel(ctx, channels.Channel{ID: ch, Name: "planning", Type: channels.ChannelTypeGroup}))
-	require.NoError(t, store.AddMember(ctx, ch, "alice", channels.RespondWhenMentioned)) // real open interval
-
-	// Publish through the REAL REST path WITH an explicit epoch override. The
-	// override only rides the dispatch rail; the persisted row keeps epoch_id
-	// "live" (ISSUE-0085) — which is the entire point being pinned.
-	pubBody, _ := json.Marshal(publishMessageRequest{
-		SenderID: "alice", Content: "epochzorptoken via the real publish path", EpochID: "ci-run-7",
-	})
-	pub := doRequest(srv.Handler(), http.MethodPost, "/api/v1/channels/group:planning/messages", pubBody)
-	require.Equal(t, http.StatusCreated, pub.Code, "body=%s", pub.Body.String())
-
-	// Recalling under the SAME epoch the message was "published into" finds
-	// nothing — publish never stamped "ci-run-7" onto the row.
-	body, _ := json.Marshal(recallRequest{Query: "epochzorptoken", EpochID: "ci-run-7"})
-	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
-	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
-	var resp recallResponse
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	assert.Empty(t, resp.Messages,
-		"a message published via REST under epoch 'ci-run-7' is NOT recallable under 'ci-run-7' — publish does not persist the override epoch (ISSUE-0085)")
-
-	// It IS recallable under the default ("live") epoch — where the row actually
-	// landed. Proves the empty result above is the epoch filter, not a lost write.
-	body, _ = json.Marshal(recallRequest{Query: "epochzorptoken"})
-	rec = doRequest(srv.Handler(), http.MethodPost, recallPath, body)
-	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
-	resp = recallResponse{}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Len(t, resp.Messages, 1, "the row landed in 'live' and is recallable there")
-	assert.Equal(t, "epochzorptoken via the real publish path", resp.Messages[0].Content)
-}
+// TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable lived here from
+// PR #677 (added in 9ce3a26) until RFC 0037 PR 5: it pinned the ISSUE-0106
+// decoupling — a message "published into ci-run-7" landed under the "live"
+// column default and was unreachable when recalled under ci-run-7 — as the
+// tripwire that would flip red the day publish began persisting a per-run
+// epoch. ISSUE-0106 was resolved in direction (b) instead: the deployment
+// model is physical isolation (separate runs never share a channel-store DB),
+// the recall `epoch_id` body override was REMOVED, and the axis it guarded is
+// gone — so the tripwire retired with it. The rejection of the removed field
+// is pinned by TestRecallEndpoint_EpochOverrideRemoved_PointedRejection.
 
 // TestRecallEndpoint_TimeWindowNarrowing_AuditedAsRFC3339 pins the after
 // (inclusive) / before (exclusive) body params: they narrow the result through
@@ -375,7 +318,7 @@ func TestRecallEndpoint_TimeWindowNarrowing_AuditedAsRFC3339(t *testing.T) {
 	})
 
 	after, before := at(120), at(180) // half-open [120,180) → only m-mid
-	body, _ := json.Marshal(recallRequest{Query: "budget", After: after, Before: before})
+	body, _ := json.Marshal(recallRequest{ActingClassification: "internal", Query: "budget", After: after, Before: before})
 	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	var resp recallResponse
@@ -409,7 +352,7 @@ func TestRecallEndpoint_LimitClampedServerSide(t *testing.T) {
 		}
 	})
 
-	body, _ := json.Marshal(recallRequest{Query: "budget", Limit: 10_000})
+	body, _ := json.Marshal(recallRequest{ActingClassification: "internal", Query: "budget", Limit: 10_000})
 	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	var resp recallResponse
@@ -430,7 +373,7 @@ func TestRecallEndpoint_MalformedBody_BadRequest(t *testing.T) {
 // no channel store wired the endpoint is 503, matching its neighbours.
 func TestRecallEndpoint_503WhenStoreUnset(t *testing.T) {
 	srv, _ := testServer(t) // no WithChannels
-	body, _ := json.Marshal(recallRequest{Query: "budget"})
+	body, _ := json.Marshal(recallRequest{ActingClassification: "internal", Query: "budget"})
 	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
