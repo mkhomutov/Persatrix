@@ -47,7 +47,7 @@ func TestRecallEndpoint_AuditRecordsEffectiveLimit(t *testing.T) {
 
 	// Unset limit → the store applies DefaultRecallLimit; the audit must name it,
 	// not omit it.
-	body, _ := json.Marshal(recallRequest{Query: "budget"})
+	body, _ := json.Marshal(recallRequest{ActingClassification: "internal", Query: "budget"})
 	rec := doRequest(srv.Handler(), http.MethodPost, recallPath, body)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	require.NoError(t, auditor.Flush())
@@ -58,7 +58,7 @@ func TestRecallEndpoint_AuditRecordsEffectiveLimit(t *testing.T) {
 
 	// Over-max limit → the store clamps to MaxRecallLimit; the audit must name the
 	// clamped value, not the larger request.
-	body, _ = json.Marshal(recallRequest{Query: "budget", Limit: 10_000})
+	body, _ = json.Marshal(recallRequest{ActingClassification: "internal", Query: "budget", Limit: 10_000})
 	rec = doRequest(srv.Handler(), http.MethodPost, recallPath, body)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	require.NoError(t, auditor.Flush())

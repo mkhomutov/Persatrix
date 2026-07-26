@@ -731,6 +731,26 @@ and separately reviewable.
      post-`reset` epoch's messages — an isolation breach. This is the
      load-bearing half and should be treated as a correctness
      requirement, not an option.
+
+     > **Amended 2026-07-26 (ISSUE-0106 direction (b), RFC 0037 PR 5).**
+     > The premise above — that `messages.epoch_id` is meaningfully
+     > populated per run — was wrong: publish deliberately never persists
+     > a non-`live` epoch onto the row (ISSUE-0085 keeps the column
+     > default; the override rides the gRPC dispatch rail only), so the
+     > recall filter and the publish rail were decoupled — an explicit
+     > non-`live` epoch recalled nothing through the real path, and the
+     > cross-run isolation this lock was written to enforce was not
+     > delivered by it. The deployment model settles the tension:
+     > **separate runs/epochs never share a channel-store DB** (isolation
+     > is physical — confirmed at the
+     > [v0.3.12 plan opening](../v0.3.12-plan.md#scope-decisions-locked-at-plan-authoring-time-2026-07-25)),
+     > so the channel store is **not epoch-partitioned** and the axis is
+     > moot at the endpoint. The `epoch_id` body override was removed
+     > from `POST /api/v1/personas/{participant_id}/recall` (any presence
+     > is a pointed 400 for one release); the store-level strict-equality
+     > `live` filter remains as a vestigial, forward-looking guard. The
+     > `TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable`
+     > tripwire retired with the axis it guarded.
    - **Session (open).** `session_id` is the room-continuity axis;
      RFC 0031 Phase 2 made persona *episodic-memory* recall
      session-scoped. Whether verbatim recall should match that

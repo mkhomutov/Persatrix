@@ -329,24 +329,33 @@ type autonomousRuntimeResponse struct {
 //   - `limit` is forwarded unmodified; the store clamps it to
 //     [channels.MaxRecallLimit], so the bound holds even for a caller that
 //     bypasses the persona tool.
-//   - `epoch_id` is the optional ISSUE-0085 run-isolation override (§OQ-6 lock),
-//     resolved through the same [Server.resolveEpochOverride] plumbing the publish
-//     handler uses; absent ⇒ "" ⇒ the store's [channels.DefaultEpochID] ("live").
-//     CAVEAT: the channel store is not epoch-partitioned today. The publish path
-//     never stamps a non-"live" epoch on a persisted message — the override rides
-//     the gRPC dispatch rail, not the row (channel_epoch_override.go) — so
-//     `messages.epoch_id` is universally "live" in production. An explicit
-//     non-"live" epoch therefore matches nothing published through the real path;
-//     the filter is a forward-looking defensive guard, not a live isolation axis.
-//     Pinned by TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable.
+//   - `acting_classification` is the RFC 0037 §F acting-channel level —
+//     REQUIRED, and validated against the §A vocabulary (absent or unknown is
+//     a 400). It is the one body field that is access-relevant rather than
+//     narrowing, and it is trusted by the same posture as the rest of this
+//     (currently unauthenticated) surface: the persona tool binds it from the
+//     turn's classification scope — the trusted event/floor resolution, never
+//     an LLM argument — and requiring it keeps a pre-§F caller loudly broken
+//     rather than silently public-floored (an `internal`-default store would
+//     return empty everywhere). See the §D floor for why a channel-less turn
+//     sends the literal `public`.
+//   - `epoch_id` was the ISSUE-0085 run-isolation override, REMOVED by
+//     ISSUE-0106(b) (RFC 0037 PR 5): the channel store is not
+//     epoch-partitioned — publish never stamps a non-"live" epoch on a row —
+//     and separate runs never share a channel-store DB, so the override only
+//     ever selected the empty set. The field is retained for one release
+//     SOLELY to reject: any presence (even "live") is a 400 with a pointed
+//     message, since silent acceptance would imply an isolation axis that
+//     does not exist. The pointer distinguishes present-but-empty from absent.
 type recallRequest struct {
-	Query     string    `json:"query"`
-	ChannelID string    `json:"channel_id,omitempty"`
-	Sender    string    `json:"sender,omitempty"`
-	After     time.Time `json:"after"`
-	Before    time.Time `json:"before"`
-	Limit     int       `json:"limit,omitempty"`
-	EpochID   string    `json:"epoch_id,omitempty"`
+	Query                string    `json:"query"`
+	ChannelID            string    `json:"channel_id,omitempty"`
+	Sender               string    `json:"sender,omitempty"`
+	After                time.Time `json:"after"`
+	Before               time.Time `json:"before"`
+	Limit                int       `json:"limit,omitempty"`
+	ActingClassification string    `json:"acting_classification"`
+	EpochID              *string   `json:"epoch_id,omitempty"`
 }
 
 // recallMessageResponse is one recalled message in the RFC 0036 PR 3 payload.

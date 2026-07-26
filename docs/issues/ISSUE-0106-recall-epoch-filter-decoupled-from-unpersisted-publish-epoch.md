@@ -1,10 +1,11 @@
 ---
 id: ISSUE-0106
 summary: "Recall's `epoch_id` override filters `messages.epoch_id`, but publish never persists a non-'live' epoch (ISSUE-0085 keeps the column default), so an explicit non-'live' epoch recalls nothing through the real path — and RFC 0036 §OQ-6 cross-run isolation is unenforced if separate runs share one channel-store DB"
-status: open
+status: resolved
 severity: medium
 area: channels
 created: 2026-06-19
+closed: 2026-07-26
 refs:
   - docs/rfcs/0036-persona-message-recall.md
   - docs/rfcs/0036-pr-plan.md
@@ -118,3 +119,18 @@ handler/types/test comments were already corrected in `9ce3a26`.
 > [RFC 0037 PR 5](../rfcs/0037-pr-plan.md) — the same PR that reworks the
 > recall endpoint's parameters for the §F classification filter, so the
 > surface changes once.
+
+> 2026-07-26 — **RESOLVED, direction (b), in RFC 0037 PR 5**
+> (`feature/v0312-rfc0037-recall-filter`). The `epoch_id` body field was
+> removed from `POST /api/v1/personas/{participant_id}/recall`; any presence
+> — `"live"` and the empty string included — is a 400 naming this issue
+> (silent acceptance would imply an isolation axis that does not exist),
+> pinned by `TestRecallEndpoint_EpochOverrideRemoved_PointedRejection`. The
+> handler no longer routes through `resolveEpochOverride` /
+> `EpochOverrideFromContext` (publish still does — its dispatch-rail
+> override is untouched); `RecallParams.EpochID` stays as the store-level
+> strict-equality `"live"` filter, now documented as a vestigial guard.
+> `TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable` retired with
+> the axis (a tombstone comment marks it); the stale "recall and publish
+> agree on the epoch axis" claim in `0036-pr-plan.md` and RFC 0036 §OQ-6
+> were both amended.

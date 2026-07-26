@@ -99,7 +99,7 @@ class TestHttpRecallClientHappyPath:
                 aiohttp.ClientSession() as session:
             client = HttpRecallClient(session=session, orchestrator_url=base_url)
             result = await client.recall(
-                participant_id="ember-owl", query="ship",
+                participant_id="ember-owl", acting_classification="internal", query="ship",
             )
         assert result == rows
 
@@ -108,7 +108,7 @@ class TestHttpRecallClientHappyPath:
                 aiohttp.ClientSession() as session:
             client = HttpRecallClient(session=session, orchestrator_url=base_url)
             await client.recall(
-                participant_id="ember-owl", query="budget",
+                participant_id="ember-owl", acting_classification="internal", query="budget",
                 channel_id="g:eng", sender="iron-fox", limit=5,
             )
         assert len(requests) == 1
@@ -117,6 +117,7 @@ class TestHttpRecallClientHappyPath:
         assert requests[0]["path"] == "/api/v1/personas/ember-owl/recall"
         assert requests[0]["body"] == {
             "query": "budget",
+            "acting_classification": "internal",
             "channel_id": "g:eng",
             "sender": "iron-fox",
             "limit": 5,
@@ -130,14 +131,21 @@ class TestHttpRecallClientHappyPath:
         async with _serve(_ok([])) as (base_url, requests), \
                 aiohttp.ClientSession() as session:
             client = HttpRecallClient(session=session, orchestrator_url=base_url)
-            await client.recall(participant_id="team:eng", query="q")
+            await client.recall(
+                participant_id="team:eng", acting_classification="internal",
+                query="q",
+            )
         assert requests[0]["path"] == "/api/v1/personas/team:eng/recall"
 
     async def test_recall_empty_result_returns_empty_list(self):
         async with _serve(_ok([])) as (base_url, _), \
                 aiohttp.ClientSession() as session:
             client = HttpRecallClient(session=session, orchestrator_url=base_url)
-            assert await client.recall(participant_id="ember-owl", query="x") == []
+            result = await client.recall(
+                participant_id="ember-owl", acting_classification="internal",
+                query="x",
+            )
+            assert result == []
 
     async def test_trailing_slash_in_url_is_normalized(self):
         async with _serve(_ok([])) as (base_url, requests), \
@@ -145,7 +153,10 @@ class TestHttpRecallClientHappyPath:
             client = HttpRecallClient(
                 session=session, orchestrator_url=base_url + "/",
             )
-            await client.recall(participant_id="ember-owl", query="x")
+            await client.recall(
+                participant_id="ember-owl", acting_classification="internal",
+                query="x",
+            )
         assert all("//api/v1" not in r["path"] for r in requests)
 
 
@@ -165,7 +176,10 @@ class TestHttpRecallClientDegradation:
         async with _serve(handler) as (base_url, _), \
                 aiohttp.ClientSession() as session:
             client = HttpRecallClient(session=session, orchestrator_url=base_url)
-            assert await client.recall(participant_id="e", query="x") == []
+            result = await client.recall(
+                participant_id="e", acting_classification="internal", query="x",
+            )
+            assert result == []
 
     async def test_non_object_body_degrades_to_empty_list(self):
         async def handler(_request: web.Request) -> web.StreamResponse:
@@ -173,7 +187,10 @@ class TestHttpRecallClientDegradation:
         async with _serve(handler) as (base_url, _), \
                 aiohttp.ClientSession() as session:
             client = HttpRecallClient(session=session, orchestrator_url=base_url)
-            assert await client.recall(participant_id="e", query="x") == []
+            result = await client.recall(
+                participant_id="e", acting_classification="internal", query="x",
+            )
+            assert result == []
 
     async def test_http_5xx_returns_none_and_logs_warning(self, caplog):
         async def boom(_request: web.Request) -> web.StreamResponse:
@@ -182,7 +199,10 @@ class TestHttpRecallClientDegradation:
             async with _serve(boom) as (base_url, _), \
                     aiohttp.ClientSession() as session:
                 client = HttpRecallClient(session=session, orchestrator_url=base_url)
-                result = await client.recall(participant_id="ember-owl", query="x")
+                result = await client.recall(
+                    participant_id="ember-owl",
+                    acting_classification="internal", query="x",
+                )
         assert result is None
         assert any("ember-owl" in r.message and "HTTP 500" in r.message
                    for r in caplog.records)
@@ -193,7 +213,10 @@ class TestHttpRecallClientDegradation:
         async with _serve(not_found) as (base_url, _), \
                 aiohttp.ClientSession() as session:
             client = HttpRecallClient(session=session, orchestrator_url=base_url)
-            assert await client.recall(participant_id="e", query="x") is None
+            result = await client.recall(
+                participant_id="e", acting_classification="internal", query="x",
+            )
+            assert result is None
 
     async def test_transport_failure_returns_none(self, caplog):
         with caplog.at_level("WARNING", logger="agents.tools.recall"):
@@ -203,7 +226,10 @@ class TestHttpRecallClientDegradation:
                     orchestrator_url="http://127.0.0.1:1",
                     timeout=aiohttp.ClientTimeout(total=1.0),
                 )
-                assert await client.recall(participant_id="e", query="x") is None
+                result = await client.recall(
+                participant_id="e", acting_classification="internal", query="x",
+            )
+            assert result is None
         assert any("failed" in r.message for r in caplog.records)
 
 
@@ -227,7 +253,10 @@ class TestHttpRecallClientTimeout:
                     session=session, orchestrator_url=base_url,
                     timeout=aiohttp.ClientTimeout(total=0.05),
                 )
-                assert await client.recall(participant_id="e", query="x") is None
+                result = await client.recall(
+                participant_id="e", acting_classification="internal", query="x",
+            )
+            assert result is None
 
 
 # ─── create_recall_tool ─────────────────────────────────────
@@ -241,11 +270,12 @@ class _FakeRecallClient:
         self._result = result
 
     async def recall(
-        self, *, participant_id: str, query: str,
+        self, *, participant_id: str, acting_classification: str, query: str,
         channel_id: str = "", sender: str = "", limit: int = 10,
     ) -> list[dict[str, Any]] | None:
         self.calls.append({
-            "participant_id": participant_id, "query": query,
+            "participant_id": participant_id,
+            "acting_classification": acting_classification, "query": query,
             "channel_id": channel_id, "sender": sender, "limit": limit,
         })
         return self._result

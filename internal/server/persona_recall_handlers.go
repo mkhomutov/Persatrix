@@ -18,6 +18,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,10 +32,13 @@ import (
 //
 // The scope participant is the PATH segment, bound into RecallParams.ParticipantID
 // — never a body field. The store's `membership_intervals` EXISTS join is the
-// access-control decision (RFC 0036 §C); this handler only binds trusted request
-// context (the path id + the resolved epoch) into it, so a join → leave → rejoin
-// recalls both stints and neither the pre-join period nor the removal gap, and a
-// crafted query body can never widen or redirect the scope.
+// access-control decision (RFC 0036 §C), composed with the RFC 0037 §F
+// classification clause capping results at the required `acting_classification`
+// body level (validated against the §A vocabulary here; the persona tool binds
+// it from the turn's trusted classification scope, never an LLM argument). So a
+// join → leave → rejoin recalls both stints and neither the pre-join period nor
+// the removal gap, a crafted query body can never widen or redirect the scope,
+// and a recall result can never be more confidential than the acting channel.
 //
 // POST, not GET (RFC 0036 §"REST shape"): recall carries a free-text body plus
 // structured narrowing parameters and is audited — semantically a command, not a
@@ -64,30 +68,49 @@ func (s *Server) handleRecallMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ISSUE-0085 PR 5 epoch resolution, sharing the publish handler's plumbing: an
-	// explicit body `epoch_id` rides the request context via resolveEpochOverride,
-	// then EpochOverrideFromContext reads it back to bind RecallParams.EpochID. A
-	// blank value leaves EpochID "" so the store resolves it to DefaultEpochID
-	// ("live"). A wire-illegal epoch is a 400, the same fail-loud posture publish
-	// takes.
-	//
-	// NB: recall and publish share this RESOLUTION but not its EFFECT. Publish's
-	// resolved epoch rides the gRPC dispatch rail and is deliberately NOT persisted
-	// (channel_epoch_override.go) — every stored message keeps the "live" column
-	// default — whereas recall's resolved epoch binds the store's `messages.epoch_id`
-	// filter. So an explicit non-"live" epoch matches nothing the real publish path
-	// ever wrote; the §OQ-6 filter is a forward-looking guard, not a live isolation
-	// boundary today. Pinned by TestRecallEndpoint_RealPublishPath_ExplicitEpochUnreachable.
-	ctx, err := s.resolveEpochOverride(r.Context(), req.EpochID)
-	if err != nil {
-		writeError(w, "BAD_REQUEST", err.Error(), http.StatusBadRequest)
+	// ISSUE-0106(b) (RFC 0037 PR 5): the `epoch_id` body override is REMOVED —
+	// the channel store is not epoch-partitioned (publish never persisted a
+	// non-"live" epoch; separate runs never share a store DB), so the override
+	// only ever selected the empty set. Any presence, even "live", is rejected
+	// with a pointed message rather than ignored: silent acceptance would imply
+	// an isolation axis that does not exist. The store still filters on its
+	// "live" column default (RecallParams.EpochID is left empty).
+	if req.EpochID != nil {
+		writeError(w, "BAD_REQUEST",
+			"epoch_id was removed from recall (ISSUE-0106): the channel store is "+
+				"not epoch-partitioned — runs never share a store DB — so the "+
+				"override matched nothing; remove the field",
+			http.StatusBadRequest)
 		return
 	}
 
+	// RFC 0037 §F: the acting channel's classification is a REQUIRED, vocabulary-
+	// validated parameter. Fail-loud on absence rather than rule-(b) flooring it:
+	// a silent `public` floor would turn every pre-§F caller's recall into an
+	// empty set (channels default `internal`) with no signal. The store then
+	// resolves the validated level into the InjectableLevels IN-set, which
+	// floors defensively should a future caller bypass this validation.
+	acting := channels.Classification(req.ActingClassification)
+	if req.ActingClassification == "" {
+		writeError(w, "BAD_REQUEST",
+			"acting_classification is required (RFC 0037 §F): pass the acting "+
+				"channel's classification, or \"public\" for a channel-less turn",
+			http.StatusBadRequest)
+		return
+	}
+	if !acting.Valid() {
+		writeError(w, "BAD_REQUEST",
+			"invalid acting_classification "+strconv.Quote(req.ActingClassification)+
+				": must be one of public, internal, restricted, secret",
+			http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+
 	params := channels.RecallParams{
-		ParticipantID: participantID,
-		Query:         req.Query,
-		EpochID:       channels.EpochOverrideFromContext(ctx),
+		ParticipantID:        participantID,
+		Query:                req.Query,
+		ActingClassification: acting,
 		// ISSUE-0107: the body `channel_id` narrower is canonicalized to the store's
 		// prefixed id form (a bare `mt-recall-001` → `group:mt-recall-001`), so a
 		// persona/tool that narrows by the human-facing channel name it sees in
@@ -181,7 +204,8 @@ func canonicalNarrowChannelID(id string) string {
 func (s *Server) emitRecallAudit(ctx context.Context, participantID string, p channels.RecallParams, resultCount int) {
 	// The resolved epoch (what the store actually filtered on) — mirror the
 	// store's empty-to-DefaultEpochID resolution so the audit names the world
-	// that was searched, not the unresolved request value.
+	// that was searched. Always "live" since ISSUE-0106(b) removed the body
+	// override; still recorded because it is genuinely what the query bound.
 	epoch := p.EpochID
 	if epoch == "" {
 		epoch = channels.DefaultEpochID
@@ -190,6 +214,10 @@ func (s *Server) emitRecallAudit(ctx context.Context, participantID string, p ch
 		"query":        p.Query,
 		"epoch_id":     epoch,
 		"result_count": resultCount,
+		// The RFC 0037 §F acting level — the access-relevant parameter that
+		// capped the result's confidentiality. Always present (the handler
+		// validated it), so an auditor can read at what level the search ran.
+		"acting_classification": string(p.ActingClassification),
 		// limit is ALWAYS applied (every recall has an effective cap), so unlike the
 		// optional narrowers below it is always recorded — and as the EFFECTIVE value
 		// the store applied, via the same [channels.RecallParams.EffectiveLimit] the
