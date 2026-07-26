@@ -6,6 +6,7 @@ severity: medium
 area: channels
 created: 2026-06-19
 closed: 2026-07-26
+closed_pr: 778
 refs:
   - docs/rfcs/0036-persona-message-recall.md
   - docs/rfcs/0036-pr-plan.md

@@ -132,7 +132,7 @@ PR 1 (lattice helpers + channel classification: config/schema + store v11 + DM s
 | 2 | 2b — classification on the wire (proto + dispatch + history/catch-up; dark) | `feature/v0312-rfc0037-wire` | ✅ Merged | [#774](https://github.com/mkhomutov/Persatrix/pull/774) | 2026-07-25 |
 | 3 | 3 — memory substrate (protection levels + projections table + interaction-open capture; dark) | `feature/v0312-rfc0037-memory-substrate` | ✅ Merged | [#775](https://github.com/mkhomutov/Persatrix/pull/775) | 2026-07-26 |
 | 4 | 4 + 3-notes + 6 — §D hard gate + notes leg + tick floor + §B guard (gate live) | `feature/v0312-rfc0037-hard-gate` | ✅ Merged | [#776](https://github.com/mkhomutov/Persatrix/pull/776) | 2026-07-26 |
-| 5 | 5 — §F recall filter + acting-channel param + ISSUE-0106(b) ══ merge gate | `feature/v0312-rfc0037-recall-filter` | 🔀 PR open | _this PR_ | — |
+| 5 | 5 — §F recall filter + acting-channel param + ISSUE-0106(b) ══ merge gate | `feature/v0312-rfc0037-recall-filter` | 🔀 PR open | [#778](https://github.com/mkhomutov/Persatrix/pull/778) | — |
 | 6 | Phase 2 — declassification projections (cuttable) | `feature/v0312-rfc0037-projections` | ⬜ | — | — |
 | 7 | Phase 3 — §G leak tripwire (cuttable) | `feature/v0312-rfc0037-tripwire` | ⬜ | — | — |
 | 8 | closeout — docs/diagrams + MT + golden recipe + RFC flips | `feature/v0312-rfc0037-closeout` | ⬜ | — | — |
