@@ -7,7 +7,9 @@ Covers:
 * fresh-DB initialisation runs v16: ``protection_level`` /
   ``source_channel_id`` / ``provenance_json`` exist on ``episodes``,
   ``facts``, and ``notes``; ``memory_projections`` exists with its
-  ``(entry_id, entry_tier, level)`` primary key
+  ``(entry_id, entry_tier, level)`` primary key, its NOT NULL
+  ``agent_id`` (the RFC 0008 §H ACL / deletion axis — off the key on
+  purpose), and the ``idx_memory_projections_agent`` index
 * an in-place upgrade from a populated v15 baseline **backfills**
   ``protection_level = 'internal'`` on every pre-existing row (the §C
   backfill — neither silently ``public`` nor silently ``secret``) and
@@ -67,10 +69,41 @@ class TestFreshSchemaMigration:
     ):
         db = memory._ensure_db()
         cols = await _columns(db, "memory_projections")
-        assert cols == {"entry_id", "entry_tier", "level", "text", "created_at"}
+        assert cols == {
+            "agent_id", "entry_id", "entry_tier", "level", "text",
+            "created_at",
+        }
         cursor = await db.execute("PRAGMA table_info(memory_projections)")
         pk = {row[1] for row in await cursor.fetchall() if row[5] > 0}
+        # ``agent_id`` is the RFC 0008 §H ACL / deletion axis, NOT part of
+        # the key: entry ids are uuid4, so keying on the owner too would
+        # admit two owners for one (entry, tier, level).
         assert pk == {"entry_id", "entry_tier", "level"}
+
+    async def test_memory_projections_agent_id_is_not_null(
+        self, memory: EpisodicMemory,
+    ):
+        # The ACL axis is enforced by the schema, not by writer discipline:
+        # PR 6 cannot land an unowned projection that the erasure sweep
+        # would then be unable to scope (FKs are off — the parent row is
+        # already gone by cleanup time, so the owner must be on this row).
+        db = memory._ensure_db()
+        with pytest.raises(aiosqlite.IntegrityError):
+            await db.execute(
+                "INSERT INTO memory_projections "
+                "(entry_id, entry_tier, level, text, created_at) "
+                "VALUES ('e-1', 'episodes', 'public', 'gist', 1000.0)",
+            )
+        await db.rollback()
+
+    async def test_memory_projections_agent_index(
+        self, memory: EpisodicMemory,
+    ):
+        async with memory._ensure_db().execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name='idx_memory_projections_agent'",
+        ) as cursor:
+            assert await cursor.fetchone() is not None
 
     async def test_schema_version_records_v16(self, memory: EpisodicMemory):
         async with memory._ensure_db().execute(

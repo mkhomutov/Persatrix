@@ -33,6 +33,29 @@ Also creates the §E ``memory_projections`` table (used from RFC 0037
 PR 6 on): zero or more lower-level abstracted restatements per protected
 entry, keyed ``(entry_id, entry_tier, level)``.
 
+The projections table carries ``agent_id`` like every other tier, even
+though the natural key alone is unique (entry ids are uuid4).  Two
+reasons, both structural rather than cosmetic:
+
+* **RFC 0008 §H per-agent ACL.**  Personas share one SQLite file (and
+  can share the connection — see ``_facts_erasure.py``'s per-agent
+  DELETE contract), so every tier's reads and deletes are scoped by
+  ``agent_id``.  A projections table without the column would force the
+  PR 6 gate/writer to recover the owner by joining back through
+  ``episodes`` / ``facts``, and would make the ACL a property of the
+  caller's query rather than of the row.
+* **Deletion.** SQLite foreign keys are OFF in this codebase (no
+  ``PRAGMA foreign_keys`` anywhere), so ``ON DELETE CASCADE`` is not
+  available: the eight parent-row delete paths (eviction, retention,
+  ``episodic_crud``, notes pruning, fact supersession/erasure) cannot
+  reach projections implicitly.  **PR 6 owns an explicit cleanup** —
+  most sharply for RFC 0008 §H erasure, where a projection is an
+  abstracted restatement of content the caller asked to erase.  That
+  cleanup runs *after* the parent row is gone, so the owner has to be
+  on the projection row itself; recovering it by join is impossible by
+  then.  Adding the column here costs nothing (the table ships empty)
+  and cannot be added later without a v17.
+
 The stamping vocabulary's rule-(a) owner is
 ``agents/persona_runtime/classification.py`` (``normalize_for_stamp``);
 this module deliberately does NOT import it — the memory package must
@@ -105,10 +128,14 @@ async def _apply_migration_16(db: aiosqlite.Connection) -> None:
     # §E declassification projections (written from PR 6 on; the §D gate
     # reads them from the same PR).  The natural key IS the primary key:
     # one projection per (entry, tier, level) — a re-consolidation
-    # replaces, never accumulates.
+    # replaces, never accumulates.  ``agent_id`` is deliberately NOT in
+    # the key (entry ids are uuid4, so the natural key is already unique
+    # cross-agent; keying on it would admit two owners for one entry) —
+    # it is the RFC 0008 §H ACL / deletion axis, see the module docstring.
     await db.execute(
         """
         CREATE TABLE IF NOT EXISTS memory_projections (
+            agent_id TEXT NOT NULL,
             entry_id TEXT NOT NULL,
             entry_tier TEXT NOT NULL,
             level TEXT NOT NULL,
@@ -117,6 +144,13 @@ async def _apply_migration_16(db: aiosqlite.Connection) -> None:
             PRIMARY KEY (entry_id, entry_tier, level)
         )
         """,
+    )
+    # The per-tier ``idx_<table>_agent`` analogue (v1 episodes / notes /
+    # relationships): the ACL scope is the one axis every PR 6 read and
+    # the erasure sweep filter on.
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_projections_agent "
+        "ON memory_projections(agent_id)",
     )
 
     await db.commit()

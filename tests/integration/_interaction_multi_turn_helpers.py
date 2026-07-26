@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+from agents.channel_event_classification import seed_channel_classification
 from agents.clock import FrozenClock
 from agents.llm_client import LLMClient, LLMResponse, StopReason, Usage
 from agents.persona import create_persona_agent
@@ -155,11 +156,20 @@ def channel_event(
     sender: str = "alex",
     thread_id: str | None = None,
     event_type: EventType = EventType.CHANNEL_MESSAGE,
+    classification: str | None = None,
 ) -> AgentEvent:
     """A CHANNEL_MESSAGE/MENTION event in the post-fanout metadata shape
     ``seed_wire_metadata`` delivers: the orchestrator-minted ``wire_id``
     plus — producer plan OQ 5 — the retired predecessor's id + close
-    trigger pair."""
+    trigger pair.
+
+    ``classification`` (RFC 0037 §B, v0.3.12 PR 2/3) is seeded through the
+    production seam :func:`agents.channel_event_classification
+    .seed_channel_classification` rather than by writing the metadata key
+    here, so a rename of the key cannot leave these suites green against a
+    key nothing reads.  ``None`` seeds nothing — the pre-v0.3.12 producer
+    shape every other suite in this package relies on.
+    """
     metadata: dict = {}
     if wire_id is not None:
         metadata["interaction_id"] = wire_id
@@ -167,6 +177,7 @@ def channel_event(
         metadata["previous_interaction_id"] = prev_id
     if prev_trigger is not None:
         metadata["previous_interaction_close_trigger"] = prev_trigger
+    seed_channel_classification(metadata, classification)
     return AgentEvent(
         event_type=event_type,
         payload={"content": content, "channel_type": channel_type},
@@ -221,7 +232,8 @@ async def all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
     async with db.execute(
         """
         SELECT summary, interaction_id, started_at, closed_at,
-               turn_count, scope, context_json, governance_interaction_id
+               turn_count, scope, context_json, governance_interaction_id,
+               protection_level, source_channel_id
         FROM episodes
         WHERE agent_id = ?
         ORDER BY created_at
@@ -240,6 +252,9 @@ async def all_episodes(agent: _LLMPersonaAgent) -> list[dict]:
             "context_json": r[6],
             # ISSUE-0102 PR 2: the queryable governance-id column (v15).
             "governance_interaction_id": r[7],
+            # RFC 0037 §C (v0.3.12 PR 3): the v16 stamp pair.
+            "protection_level": r[8],
+            "source_channel_id": r[9],
         }
         for r in rows
     ]

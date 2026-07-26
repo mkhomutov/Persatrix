@@ -371,7 +371,9 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     # ``provenance_json`` (the multi-source shape, created now so the
     # RFC 0049 v0.4.0 pump needs no second migration) — to the three
     # channel-derived tiers (``episodes`` / ``facts`` / ``notes``), plus the
-    # §E ``memory_projections`` table (written from RFC 0037 PR 6 on).
+    # §E ``memory_projections`` table (written from RFC 0037 PR 6 on;
+    # ``agent_id`` carried off the key as the RFC 0008 §H ACL / deletion
+    # axis — see :mod:`agents.memory._migration_protection`).
     # Same callable-handler rationale as v7/v9/v10/v12 — ``ALTER TABLE ...
     # ADD COLUMN`` is not idempotent before SQLite 3.35.  Lives in
     # :mod:`agents.memory._migration_protection`.  See
