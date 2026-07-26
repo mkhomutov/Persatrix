@@ -39,10 +39,13 @@ from ._migration_handlers import (
     _apply_migration_13,
     _apply_migration_14,
     _apply_migration_15,
+    _apply_migration_16,
 )
+from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 
 __all__ = [
     "MIGRATIONS",
+    "PROTECTION_LEVEL_DEFAULT",
     "_FTS5_DDL",
     "_MIGRATION_HANDLERS",
     "_NOTES_FTS5_DDL",
@@ -60,6 +63,7 @@ __all__ = [
     "_apply_migration_13",
     "_apply_migration_14",
     "_apply_migration_15",
+    "_apply_migration_16",
     "_apply_migrations",
     "_fts5_available",
 ]
@@ -360,6 +364,25 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         15,
         "ISSUE-0102: governance_interaction_id column on episodes + backfill",
         "",  # handled by _apply_migration_15()
+    ),
+    # Migration 16 (RFC 0037 PR 3) adds the §C protection/provenance columns
+    # — ``protection_level`` (NOT NULL DEFAULT 'internal', which IS the §C
+    # backfill), nullable ``source_channel_id``, and nullable
+    # ``provenance_json`` (the multi-source shape, created now so the
+    # RFC 0049 v0.4.0 pump needs no second migration) — to the three
+    # channel-derived tiers (``episodes`` / ``facts`` / ``notes``), plus the
+    # §E ``memory_projections`` table (written from RFC 0037 PR 6 on;
+    # ``agent_id`` carried off the key as the RFC 0008 §H ACL / deletion
+    # axis — see :mod:`agents.memory._migration_protection`).
+    # Same callable-handler rationale as v7/v9/v10/v12 — ``ALTER TABLE ...
+    # ADD COLUMN`` is not idempotent before SQLite 3.35.  Lives in
+    # :mod:`agents.memory._migration_protection`.  See
+    # docs/rfcs/0037-memory-confidentiality-channel-classification.md §C/§E.
+    (
+        16,
+        "RFC 0037: protection_level/source_channel_id/provenance_json on "
+        "episodes/facts/notes + memory_projections table",
+        "",  # handled by _apply_migration_16()
     ),
 ]
 
