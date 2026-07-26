@@ -77,7 +77,9 @@ class TestMigrations:
         # Option D, ISSUE-0093, PR D4: backfill contact notes onto
         # relationship identity).  14 → 15 alongside migration v15
         # (ISSUE-0102 PR 2: governance_interaction_id column on episodes).
-        assert len(rows) == 15
+        # 15 → 16 alongside migration v16 (RFC 0037 PR 3: protection
+        # level + provenance on episodes/facts/notes + memory_projections).
+        assert len(rows) == 16
         assert rows[0][0] == 1
         assert "Initial schema" in rows[0][1]
         assert rows[1][0] == 2
@@ -129,6 +131,11 @@ class TestMigrations:
         # other migration carries it).
         assert rows[14][0] == 15
         assert "governance" in rows[14][1].lower()
+        # v16 adds the RFC 0037 §C protection/provenance columns —
+        # disambiguated by the ``protection_level`` token (no other
+        # migration carries it).
+        assert rows[15][0] == 16
+        assert "protection_level" in rows[15][1].lower()
 
     async def test_migrations_are_idempotent(self, memory: EpisodicMemory):
         """Re-running migrations does not error or duplicate rows."""
@@ -140,9 +147,11 @@ class TestMigrations:
         # Bumped from 13 → 14 alongside migration v14 (RFC 0031 amendment —
         # F-7 Option D, ISSUE-0093, PR D4: backfill contact notes onto
         # relationship identity).  14 → 15 alongside migration v15 (ISSUE-0102
-        # PR 2: governance_interaction_id column on episodes).
+        # PR 2: governance_interaction_id column on episodes).  15 → 16
+        # alongside migration v16 (RFC 0037 PR 3: protection level +
+        # provenance + memory_projections).
         # Same row-count discipline as ``test_migration_version_recorded``.
-        assert row[0] == 15
+        assert row[0] == 16
 
     async def test_wal_mode_enabled(self):
         """WAL mode is set on file-based databases (not :memory:)."""

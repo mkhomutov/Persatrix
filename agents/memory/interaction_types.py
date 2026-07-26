@@ -89,6 +89,25 @@ class Interaction:
     # at flush time.  Defaults to the ``legacy`` carve-out so a pre-PR-2
     # construction site (or a turn opened with no scope) stays visible.
     session_id: str = LEGACY_SESSION_ID
+    # RFC 0037 §C (v0.3.12 PR 3): the acting channel's wire classification
+    # captured when the interaction *opened*, frozen for its lifetime — the
+    # single point of truth the episodic and facts tiers inherit their
+    # ``protection_level`` from at close (classification is read once per
+    # interaction, never re-derived per episode or per fact).  Held VERBATIM
+    # (``None`` = the opening event carried no classification — a tick /
+    # pre-v0.3.12 producer / non-channel scope): the §A rule-(a) stamping
+    # default is applied by the close-path stamp sites through
+    # ``persona_runtime/classification.py``'s ``normalize_for_stamp``, the
+    # one resolver owning that rule — this memory-side record deliberately
+    # imports no lattice (the import direction is persona_runtime → memory).
+    # Frozen-at-open like ``session_id`` above: a later turn arriving after
+    # an operator reclassifies the channel cannot relabel the open record.
+    classification: str | None = None
+    # RFC 0037 §C: the channel the interaction's content came from, frozen
+    # at open beside ``classification`` — becomes the episode/fact rows'
+    # nullable ``source_channel_id`` (NULL for DM-less/tick scopes whose
+    # opening event carried no channel id).
+    source_channel_id: str | None = None
     # RFC 0052 PR 4b-ii (OQ #6): true iff this interaction was closed by the
     # AUTONOMOUS bounded close (the close notification carried the truthful
     # ``structural``/``cost`` trigger — ``close_notification.py`` sets it

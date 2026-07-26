@@ -39,6 +39,7 @@ from ._facts_erasure import delete_by_subject as _delete_by_subject
 from ._facts_reinforce import mark_recalled_for_agent as _mark_recalled_for_agent
 from ._facts_supersede import apply_supersession as _apply_supersession
 from ._facts_supersede import retract_fact as _retract_fact
+from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 from ._principal_filter import principal_eq_clause, resolve_active_principal
 from ._session_filter import _resolve_session_list, session_in_clause
 from .fact_predicates import canonicalize_subject, validate_predicate
@@ -154,8 +155,21 @@ class FactStore:
         asserted_at: float,
         certainty: float = 1.0,
         session_id: str = "legacy",
+        protection_level: str = PROTECTION_LEVEL_DEFAULT,
+        source_channel_id: str | None = None,
     ) -> str:
         """Persist a new fact tuple.  Returns the generated ``fact_id``.
+
+        ``protection_level`` / ``source_channel_id`` (RFC 0037 §C — v16,
+        PR 3) persist VERBATIM — rule-(a) normalization is owned by the
+        persona-side stamp site (the close-consolidation extractor via
+        ``normalize_for_stamp``), which memory must not import.  Omitted
+        (direct/test/operator callers) → the ``internal`` default, so no
+        path writes a fact without a protection level; a mislabeled row
+        fails closed at read time (§A rule (c)).  Supersession restamps
+        by construction — a superseding assertion is a NEW row stamped
+        from its own source (§C item 3) — and reinforcement never
+        touches the column.
 
         Enforces RFC 0026 §F **symmetric latest-asserted-wins**: only
         one live row per ``(agent_id, subject, predicate)`` survives,
@@ -217,8 +231,8 @@ class FactStore:
                 (fact_id, agent_id, subject, predicate, object,
                  certainty, source_interaction_id, asserted_at,
                  last_recalled_at, superseded_by, session_id, principal_id,
-                 epoch_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
+                 epoch_id, protection_level, source_channel_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
             """,
             (
                 fact_id,
@@ -232,6 +246,8 @@ class FactStore:
                 session_id,
                 principal_id,
                 epoch_id,
+                protection_level,
+                source_channel_id,
             ),
         )
 

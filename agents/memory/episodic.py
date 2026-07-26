@@ -69,6 +69,7 @@ from .interactions import SUMMARY_PENDING_TEXT
 from .migrations import (
     _FTS5_DDL,
     _NOTES_FTS5_DDL,
+    PROTECTION_LEVEL_DEFAULT,
     _apply_migrations,
     _fts5_available,
 )
@@ -83,16 +84,10 @@ logger = logging.getLogger(__name__)
 
 
 # ─── Per-tier min_score defaults (RFC 0017 §C) ────────────────────────────────
-# Calibrated against a representative FTS5 BM25 score distribution:
-# queries with a clear topic match produce |rank| ≈ 1.5–4.0 (normalised ≈ 0.20–0.40);
-# low-signal queries ("hi", empty TICK boilerplate) produce |rank| ≥ 5 or no rows
-# (normalised ≤ 0.17).  Thresholds are conservative to avoid over-filtering;
-# operators can tighten them via caller overrides without API changes.
-#
-# Public API (PR 6 — RFC 0017 PR 4 review finding 1): the persona runtime is
-# already a consumer and RFC 0008's vector tier will be the third.  Public
-# names avoid ``ruff PLC2701`` (``import-private-name``) at consumer sites
-# and signal the cross-module contract.
+# Calibrated against a representative FTS5 BM25 distribution: clear topic
+# matches normalise ≈ 0.20–0.40; low-signal queries ≤ 0.17.  Conservative to
+# avoid over-filtering; callers may tighten via overrides.  Public names (PR 6
+# — RFC 0017 PR 4 finding 1): consumed cross-module, avoids ruff PLC2701.
 DEFAULT_EPISODIC_MIN_SCORE: float = 0.20
 DEFAULT_NOTES_MIN_SCORE: float = 0.20
 
@@ -146,12 +141,9 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
 
         await _apply_migrations(self._db)
 
-        # Verify that ln() is available — the scoring formula in _SCORE_EXPR
-        # uses SQLite's ln() function, which requires SQLITE_ENABLE_MATH_FUNCTIONS
-        # at compile time.  Python's bundled SQLite typically includes this, but
-        # custom builds or Alpine musl-based Docker images may not.  Failing
-        # here with a clear message is better than a cryptic error at recall time
-        # (PR #59 review: ln() startup diagnostic).
+        # ln() startup diagnostic (PR #59): _SCORE_EXPR needs SQLite's
+        # SQLITE_ENABLE_MATH_FUNCTIONS build flag — fail here with a clear
+        # message instead of a cryptic error at recall time.
         try:
             async with self._db.execute("SELECT ln(1)") as cursor:
                 await cursor.fetchone()
@@ -216,6 +208,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         governance_interaction_id: str | None = None,
         session_id: str = "legacy",
         surface: str = "episode",
+        protection_level: str = PROTECTION_LEVEL_DEFAULT,
+        source_channel_id: str | None = None,
     ) -> str:
         """Store a new episode. Returns the generated episode ID.
 
@@ -231,6 +225,12 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
         ``channels.DefaultSessionID``.  Phase 1 ships no recall-side filtering.
 
         ``surface`` (PR 4 F2) tags ``sessions.writes`` only — not persisted.
+
+        ``protection_level`` / ``source_channel_id`` (RFC 0037 §C — v16, PR 3)
+        persist VERBATIM: rule-(a) normalization is owned by the persona-side
+        stamp sites (``normalize_for_stamp``), which memory must not import.
+        Omitted → the ``internal`` default; a mislabeled row fails closed at
+        read time (§A rule (c): unknown entry levels are withheld).
         """
         with _tracer.start_as_current_span(
             EPISODIC_REMEMBER_SPAN,
@@ -239,10 +239,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                 "episode.kind": "episode",
             },
         ) as span:
-            # Mirror the LLM/tool span error contract: validation /
-            # persistence failures must mark the span ERROR before
-            # propagating the exception, otherwise operators searching
-            # traces for failed remembers see them as "successful".
+            # LLM/tool span error contract: mark the span ERROR before
+            # propagating, or failed remembers read as "successful".
             try:
                 db = self._ensure_db()
                 if not summary or not summary.strip():
@@ -266,6 +264,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                     session_id=session_id, scope=scope,
                     governance_interaction_id=governance_interaction_id,
                     principal_id=principal_id, epoch_id=epoch_id,
+                    protection_level=protection_level,
+                    source_channel_id=source_channel_id,
                 )
             except Exception as exc:
                 span.record_exception(exc)
@@ -323,10 +323,8 @@ class EpisodicMemory(_EpisodicNotesAPIMixin):
                 limit, MAX_RECALL_LIMIT,
             )
             limit = MAX_RECALL_LIMIT
-        # Validate min_score range — RFC 0017 §C specifies [0.0, 1.0].
-        # Out-of-range values silently no-op (negative) or filter everything
-        # (>1.0), making misconfiguration hard to debug in production.
-        # Mirrors the existing `limit` guard above (PR #147 review).
+        # RFC 0017 §C range guard (PR #147 review): out-of-range values
+        # silently no-op or filter everything — hard to debug, so raise.
         if min_score is not None and not 0.0 <= min_score <= 1.0:
             raise ValueError(
                 f"min_score must be in [0.0, 1.0] or None, got {min_score}"
