@@ -128,6 +128,35 @@ func TestEntryRankOrWithhold_FailDirection(t *testing.T) {
 	}
 }
 
+// TestInjectableLevels_SetsPinned pins the rules-(b)+(c) LEVEL-SET resolver
+// the §F recall filter binds into its SQL IN predicate (RFC 0037 PR 5):
+// exact, rank-ascending literal sets for every acting level, and the `public`
+// floor for every unknown/absent acting value. The Python twin
+// (`injectable_levels`) is pinned by the same exhaustive literals in
+// tests/unit/python/test_classification.py — the finite enum makes the two
+// literal pins the cross-language agreement property, as with the rank table.
+func TestInjectableLevels_SetsPinned(t *testing.T) {
+	want := map[Classification][]Classification{
+		ClassificationPublic:   {ClassificationPublic},
+		ClassificationInternal: {ClassificationPublic, ClassificationInternal},
+		ClassificationRestricted: {
+			ClassificationPublic, ClassificationInternal, ClassificationRestricted,
+		},
+		ClassificationSecret: {
+			ClassificationPublic, ClassificationInternal,
+			ClassificationRestricted, ClassificationSecret,
+		},
+	}
+	for acting, levels := range want {
+		assert.Equal(t, levels, InjectableLevels(acting),
+			"acting %q serves exactly the ≤-rank set, rank-ascending", acting)
+	}
+	for _, level := range unknownLevels {
+		assert.Equal(t, []Classification{ClassificationPublic}, InjectableLevels(level),
+			"unknown acting %q floors to the public-only set (rule (b))", level)
+	}
+}
+
 // TestFailDirections_DisagreeOnUnknown pins the reason the default is split
 // into three named resolvers at all (§A, revised 2026-07-19): on the SAME
 // unknown input the three rules resolve in three different directions —

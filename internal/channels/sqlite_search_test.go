@@ -92,7 +92,7 @@ func TestRecallMessages_Scope_JoinLeaveRejoin(t *testing.T) {
 		}
 	})
 
-	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget"})
+	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "budget"})
 	require.NoError(t, err)
 	recalled := idSet(got)
 
@@ -132,13 +132,13 @@ func TestRecallMessages_Epoch_HardFilter(t *testing.T) {
 	})
 
 	// Default epoch → only the "live" row, never the other-world rows.
-	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget"})
+	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "budget"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"m-live"}, idSlice(got),
 		"default epoch is strict-equality 'live'; cross-epoch / post-reset rows excluded")
 
 	// An explicit epoch selects its own world and nothing else.
-	got, err = store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget", EpochID: "ci-run-7"})
+	got, err = store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "budget", EpochID: "ci-run-7"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"m-ci"}, idSlice(got), "explicit epoch is also strict-equality")
 }
@@ -162,7 +162,7 @@ func TestRecallMessages_SpansSessions(t *testing.T) {
 		seedMsg(t, db, msgSeed{id: "m-sessB", channelID: ch, sender: "bob", content: "budget beta", ts: mins(20), session: "sess-B"})
 	})
 
-	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget"})
+	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "budget"})
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"m-sessA", "m-sessB"}, idSlice(got),
 		"recall spans sessions within the epoch — not session-scoped")
@@ -189,7 +189,7 @@ func TestRecallMessages_Narrowing(t *testing.T) {
 		seedMsg(t, db, msgSeed{id: "m3", channelID: "group:design", sender: "alice", content: "budget three", ts: mins(180)})
 	})
 
-	base := RecallParams{ParticipantID: "alice", Query: "budget"}
+	base := RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "budget"}
 
 	got, err := store.RecallMessages(ctx, withChannel(base, "group:planning"))
 	require.NoError(t, err)
@@ -239,7 +239,7 @@ func TestRecallMessages_Ranking(t *testing.T) {
 			content: "the quarterly budget was mentioned once among many other unrelated planning words here", ts: mins(20)})
 	})
 
-	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget"})
+	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "budget"})
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	assert.Equal(t, "m-dense", got[0].ID, "the term-dense hit ranks first (BM25-dominant, not recency-dominant)")
@@ -272,7 +272,7 @@ func TestRecallMessages_EmptyQuery_RecencyListing(t *testing.T) {
 
 	// Empty, whitespace-only, and pure-punctuation queries all sanitize to no terms.
 	for _, q := range []string{"", "   ", "!!! …"} {
-		got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: q})
+		got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: q})
 		require.NoErrorf(t, err, "term-less query %q lists rather than errors", q)
 		assert.Equalf(t, []string{"m-new", "m-old"}, idSlice(got),
 			"term-less query %q lists the in-scope set newest-first, excluding the out-of-scope row", q)
@@ -308,7 +308,7 @@ func TestRecallMessages_MatchSafety(t *testing.T) {
 		`"budget NEAR/0 secret -- ;`,     // unbalanced quote, NEAR op, SQL-ish comment
 		`budget AND (secret OR planning`, // unbalanced paren + operators
 	} {
-		got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: q})
+		got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: q})
 		require.NoErrorf(t, err, "query %q must not error the statement", q)
 		assert.NotContainsf(t, idSlice(got), "m-out",
 			"query %q must not escape the membership scope", q)
@@ -316,7 +316,7 @@ func TestRecallMessages_MatchSafety(t *testing.T) {
 
 	// The baseline still functions: the metacharacter-laden form that strips to
 	// "budget" surfaces the in-scope row.
-	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: `budget*()":`})
+	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: `budget*()":`})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"m-in"}, idSlice(got), "sanitized query still matches the in-scope row")
 }
@@ -343,7 +343,7 @@ func TestRecallMessages_NonLatinQuery(t *testing.T) {
 		seedMsg(t, db, msgSeed{id: "m-miss", channelID: ch, sender: "bob", content: "lunch logistics thread", ts: mins(20)})
 	})
 
-	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "бюджет"})
+	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "бюджет"})
 	require.NoError(t, err)
 	// Load-bearing: the term must filter — the non-matching row must not appear
 	// (it would, if the Cyrillic query sanitized away into a match-all listing).
@@ -377,15 +377,15 @@ func TestRecallMessages_LimitClamp(t *testing.T) {
 		}
 	})
 
-	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget", Limit: 10_000})
+	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "budget", Limit: 10_000})
 	require.NoError(t, err)
 	assert.Len(t, got, MaxRecallLimit, "an over-large request is clamped to MaxRecallLimit")
 
-	got, err = store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget", Limit: 0})
+	got, err = store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "budget", Limit: 0})
 	require.NoError(t, err)
 	assert.Len(t, got, DefaultRecallLimit, "a zero limit resolves to DefaultRecallLimit")
 
-	got, err = store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "budget", Limit: 5})
+	got, err = store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "budget", Limit: 5})
 	require.NoError(t, err)
 	assert.Len(t, got, 5, "an explicit in-range limit is honoured")
 }
@@ -410,7 +410,7 @@ func TestRecallMessages_Retention_DeletedMessageGone(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 	}))
 
-	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "recallzorptoken"})
+	got, err := store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "recallzorptoken"})
 	require.NoError(t, err)
 	require.Equal(t, []string{"m-keep"}, idSlice(got), "positive control: the live message is recallable")
 
@@ -419,7 +419,7 @@ func TestRecallMessages_Retention_DeletedMessageGone(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	got, err = store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", Query: "recallzorptoken"})
+	got, err = store.RecallMessages(ctx, RecallParams{ParticipantID: "alice", ActingClassification: ClassificationInternal, Query: "recallzorptoken"})
 	require.NoError(t, err)
 	assert.Empty(t, got, "a hard-deleted message is gone from messages_fts and unrecallable")
 }
