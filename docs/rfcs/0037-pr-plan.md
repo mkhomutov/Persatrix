@@ -79,8 +79,9 @@ PR 1 (lattice helpers + channel classification: config/schema + store v11 + DM s
 - `agents/memory/migrations.py`: `protection_level` / `source_channel_id` / nullable `provenance_json` (the §C multi-source shape, created now so the v0.4.0 pump needs no second migration) on the **episodic and facts** tiers (+ the notes columns created but not yet stamped — see PR 4); the `memory_projections` table (created here, used in PR 6). Backfill `internal`.
 - `agents/memory/interactions.py` + `interaction_types.py`: capture the acting channel's classification at interaction-open (frozen-at-open, in-memory until close — the `session_id` precedent).
 - `agents/memory/episodic.py` + `facts.py`: stamp `protection_level` at close-consolidation; `agents/tools/identity_write_through.py`: the §C ≤-`internal` write-through rule (room-scoped-note fallback above it).
-- Tests: stamping from a `restricted` interaction; migration on populated pre-migration stores; backfill.
+- Tests: stamping from a `restricted` interaction; migration on populated pre-migration stores; backfill; the wire→capture→stamp seam end to end (`tests/integration/test_interaction_classification_capture.py` — the one line joining the PR 2 reader to the stamp sites, which the isolated unit suites leave uncovered).
 - **Dark**: stamped, never read.
+- Review residuals — three §C items surfaced here but owned by later PRs (the notes-backfill operator flag → PR 4; §C's backfill-by-join text vs. the shipped blanket `internal` default → PR 8; the mid-interaction *upward* reclassification under-stamp → a §C decision): see [ISSUE-0115](../issues/ISSUE-0115-rfc0037-section-c-stamping-residuals.md).
 
 ## PR 4 — `feature/v0312-rfc0037-hard-gate` (Phase 1 steps 4 + 3-notes + 6: the gate goes live)
 
