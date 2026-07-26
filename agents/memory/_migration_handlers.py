@@ -52,6 +52,7 @@ from ._migration_identity_backfill import _apply_migration_14
 from ._migration_interactions_session import _apply_migration_10
 from ._migration_notes_session import _apply_migration_9
 from ._migration_principal import _apply_migration_11
+from ._migration_protection import _apply_migration_16
 
 
 async def _apply_migration_4(db: aiosqlite.Connection) -> None:
@@ -473,4 +474,5 @@ _MIGRATION_HANDLERS: dict[int, Callable[[aiosqlite.Connection], Awaitable[None]]
     13: _apply_migration_13,
     14: _apply_migration_14,
     15: _apply_migration_15,
+    16: _apply_migration_16,
 }

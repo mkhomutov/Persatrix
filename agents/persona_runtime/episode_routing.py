@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from ..persona_types import AgentAction, AgentEvent
     from . import MemoryNamespace
 
+from ..channel_event_classification import wire_channel_classification
 from ..channel_wire_metadata import wire_interaction_id
 from ..memory.boundary_detectors import (
     DEFAULT_CLOSING_GRACE_SEC,
@@ -208,11 +209,9 @@ class _EpisodeRoutingMixin:
                 if event.event_type is EventType.TICK
                 else event.event_type.value
             )
-            # ``payload=None`` per PR-215 review (Should-Fix #4): for
-            # single-turn rows the open/close pair runs in one call so
-            # the PR 4 summariser will never read this payload (it will
-            # short-circuit on ``turn_count == 1``).  Passing the
-            # duplicate dict was dead bytes on the hot path.
+            # ``payload=None`` per PR-215 review (Should-Fix #4): the
+            # open/close pair runs in one call, so the summariser never
+            # reads a single-turn payload — the dict was dead bytes.
             self._interaction_tracker.add_turn(
                 scope, payload=None,
                 session_id=self._active_write_session_id,
@@ -333,15 +332,10 @@ class _EpisodeRoutingMixin:
         scope = self._scope_for_multi_turn_event(event)
         if scope is None:
             # PR-216 review (Low / Should-Fix #4): an under-populated
-            # multi-turn event (no ``channel_id`` and no ``sender_id``)
-            # silently falls back to the legacy NULL-interaction shape.
-            # Surface it as a warning so operators can spot malformed
-            # ingress before it manifests as a downstream episode-shape
-            # regression.  Kept as a log line rather than a new
-            # counter to avoid expanding the metrics surface mid-RFC;
-            # PR 5 (channel-aware routing) is the right place for a
-            # dedicated ``agent.interactions.scope_unresolved`` counter
-            # if production data warrants one.
+            # multi-turn event (no ``channel_id`` / ``sender_id``) falls
+            # back to the legacy NULL-interaction shape — warn so
+            # malformed ingress is visible; a dedicated counter stays
+            # deferred until production data warrants one.
             logger.warning(
                 "Agent %s: multi-turn event %s has neither channel_id nor "
                 "sender_id; storing as legacy NULL-interaction episode",
@@ -404,6 +398,12 @@ class _EpisodeRoutingMixin:
         interaction = self._interaction_tracker.add_turn(
             scope, payload=payload,
             session_id=self._active_write_session_id,
+            # RFC 0037 §C (PR 3): the interaction-open capture pair —
+            # verbatim wire classification (the shared drift-pinned reader)
+            # + acting channel id; honoured only when this turn OPENS the
+            # interaction (frozen-at-open, the ``session_id`` rule).
+            classification=wire_channel_classification(event),
+            source_channel_id=event.channel_id or None,
         )
         # Stamp the wire id the interaction was opened under (first turn
         # that carries one wins) plus its known predecessor — the

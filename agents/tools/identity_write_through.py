@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from ..acting_classification import current_acting_classification
 from ..memory.identity_parse import parse_identity_fields
 from ..sender_type import current_sender_type
 
@@ -54,6 +55,10 @@ async def maybe_write_through_identity(
 
     * there is no relationship handle (non-persona callers / pre-wiring),
     * the topic is not a contact note,
+    * the acting classification outranks ``internal`` (RFC 0037 §C —
+      the cross-room identity tier must not learn from a
+      ``restricted``/``secret`` turn; the room-scoped note IS the
+      intended destination, not merely a safety net, on this branch),
     * the content carries no structured identity to store, or
     * the identity upsert raised.
 
@@ -81,6 +86,30 @@ async def maybe_write_through_identity(
     prompt-enforced same-subject contract is what this relies on.
     """
     if relationship is None or not topic.startswith(CONTACT_TOPIC_PREFIX):
+        return False
+    # RFC 0037 §C (v0.3.12 PR 3): the relationship identity tier is
+    # deliberately cross-room and carries no protection level — an ungated
+    # egress surface (a role learned in a ``secret`` channel would render
+    # into *every* room's prompt).  The smallest rule that preserves the
+    # structural guarantee: the write-through proceeds only when the acting
+    # classification ranks ≤ ``internal``; in a ``restricted``/``secret``
+    # turn the ``False`` return routes the content to the room-scoped note
+    # fallback below, which is stamped and gated.  The acting level rides
+    # the task-local :mod:`agents.acting_classification` axis (the
+    # ``sender_type`` precedent); the rank comparison is the named §A
+    # helper, imported lazily because this executor-side module must not
+    # hard-depend on the persona subpackage (the ``persona.py``
+    # ``resolve_session_id_and_log`` cycle-break precedent) — by tool-call
+    # time the persona runtime is fully imported.
+    from ..persona_runtime.classification import acting_at_or_below_internal
+
+    acting = current_acting_classification()
+    if not acting_at_or_below_internal(acting):
+        logger.info(
+            "Identity write-through withheld for topic %s: acting "
+            "classification %r outranks 'internal'; falling back to a "
+            "room-scoped note (RFC 0037 §C)", topic, acting,
+        )
         return False
     other_id = topic[len(CONTACT_TOPIC_PREFIX):].strip()
     fields = parse_identity_fields(content)

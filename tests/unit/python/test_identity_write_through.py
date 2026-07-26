@@ -334,3 +334,86 @@ class TestIdentityWriteThrough:
             "role": "engineer",
             "raw": "Lives in Berlin. Speaks German",
         }
+
+
+# ─── RFC 0037 §C — the ≤-internal write-through bound ───────
+
+
+class TestClassificationBound:
+    """RFC 0037 §C (v0.3.12 PR 3): the cross-room identity tier carries no
+    protection level, so the write-through proceeds only when the acting
+    classification ranks ≤ ``internal``.  In a ``restricted``/``secret``
+    turn the content routes to the room-scoped note instead — the note IS
+    the intended destination there (stamped and gated from PR 4), not
+    merely a safety net."""
+
+    def _bound(self, level: str):
+        from agents.acting_classification import (
+            acting_classification_scope_from_metadata,
+        )
+        from agents.channel_event_classification import (
+            CHANNEL_CLASSIFICATION_METADATA_KEY,
+        )
+
+        return acting_classification_scope_from_metadata(
+            {CHANNEL_CLASSIFICATION_METADATA_KEY: level},
+        )
+
+    @pytest.mark.parametrize("level", ["restricted", "secret"])
+    async def test_above_internal_routes_to_room_scoped_note(
+        self, episodic, relationship, gate_rw, level,
+    ):
+        tools = create_memory_tools(episodic, gate_rw, relationship=relationship)
+        store_note = _store_note(tools)
+        with (
+            sender_type_scope_from_metadata({"sender_participant_type": "user"}),
+            self._bound(level),
+        ):
+            result = await store_note.func(
+                topic="contact:user-alice", content="Name: Alice.",
+            )
+        assert result.success
+        # No cross-room identity was written…
+        assert await relationship.get_identity(
+            "user-alice", other_participant_type="user",
+        ) is None
+        # …the content landed as a room-scoped note instead.
+        notes = await episodic.recall_notes("Alice", limit=10)
+        assert any("Alice" in n.content for n in notes)
+
+    @pytest.mark.parametrize("level", ["public", "internal"])
+    async def test_at_or_below_internal_proceeds(
+        self, episodic, relationship, gate_rw, level,
+    ):
+        tools = create_memory_tools(episodic, gate_rw, relationship=relationship)
+        store_note = _store_note(tools)
+        with (
+            sender_type_scope_from_metadata({"sender_participant_type": "user"}),
+            self._bound(level),
+        ):
+            result = await store_note.func(
+                topic="contact:user-alice", content="Name: Alice.",
+            )
+        assert result.success
+        assert await relationship.get_identity(
+            "user-alice", other_participant_type="user",
+        ) == {"name": "Alice"}
+        assert await episodic.recall_notes("Alice", limit=10) == []
+
+    async def test_unbound_axis_proceeds(
+        self, episodic, relationship, gate_rw,
+    ):
+        # Rule (b): an unbound acting axis (tick / CLI / pre-v0.3.12
+        # producer) floors to ``public`` and the write-through proceeds —
+        # every earlier test in this file runs unbound, so this pin is
+        # the explicit statement of that byte-for-byte compatibility.
+        tools = create_memory_tools(episodic, gate_rw, relationship=relationship)
+        store_note = _store_note(tools)
+        with sender_type_scope_from_metadata({"sender_participant_type": "user"}):
+            result = await store_note.func(
+                topic="contact:user-alice", content="Name: Alice.",
+            )
+        assert result.success
+        assert await relationship.get_identity(
+            "user-alice", other_participant_type="user",
+        ) == {"name": "Alice"}

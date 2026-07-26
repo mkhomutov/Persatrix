@@ -32,6 +32,7 @@ from ._episodic_agent_state import (
     reset_interaction_count,
 )
 from ._epoch_filter import epoch_eq_clause
+from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 from ._principal_filter import principal_eq_clause
 from ._session_filter import session_in_clause
 from .interaction_janitor import SUMMARY_PENDING_TEXT
@@ -408,6 +409,8 @@ async def insert_episode(
     governance_interaction_id: str | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
     epoch_id: str = DEFAULT_EPOCH_ID,
+    protection_level: str = PROTECTION_LEVEL_DEFAULT,
+    source_channel_id: str | None = None,
 ) -> str:
     """INSERT one episode row and COMMIT; return the generated episode id.
 
@@ -416,6 +419,10 @@ async def insert_episode(
     sibling write helper :func:`update_episode_summary` that already
     owns the episode SQL, keeping ``episodic.py`` within the 500-line
     file-size cap.
+
+    ``protection_level`` / ``source_channel_id`` (RFC 0037 §C — v16)
+    persist verbatim; see :meth:`EpisodicMemory.store_episode` for the
+    stamp-site normalization contract.
 
     The INSERT is plain DML — stepped to completion inside ``execute()``
     with no VDBE left active — so a concurrent ``COMMIT`` on the shared
@@ -430,10 +437,12 @@ async def insert_episode(
              importance, access_count, last_accessed_at,
              tags_json, created_at, compressed_at, compression_level,
              interaction_id, started_at, closed_at, turn_count, scope,
-             session_id, principal_id, epoch_id, governance_interaction_id)
+             session_id, principal_id, epoch_id, governance_interaction_id,
+             protection_level, source_channel_id)
         VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, NULL, 0,
                 ?, ?, ?, ?, ?,
-                ?, ?, ?, ?)
+                ?, ?, ?, ?,
+                ?, ?)
         """,
         (
             episode_id,
@@ -453,6 +462,8 @@ async def insert_episode(
             principal_id,
             epoch_id,
             governance_interaction_id,
+            protection_level,
+            source_channel_id,
         ),
     )
     await db.commit()

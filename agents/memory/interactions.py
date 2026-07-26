@@ -221,6 +221,8 @@ class InteractionTracker:
         *,
         now: float | None = None,
         session_id: str | None = None,
+        classification: str | None = None,
+        source_channel_id: str | None = None,
     ) -> Interaction:
         """Open a new interaction in ``scope``.
 
@@ -234,6 +236,13 @@ class InteractionTracker:
         interaction is opened — an already-open scope keeps the session it
         was born under, so a later turn arriving on a different scope
         cannot relabel it.
+
+        ``classification`` / ``source_channel_id`` (RFC 0037 §C, v0.3.12
+        PR 3) are the acting channel's wire classification and channel id,
+        frozen at open under exactly the same only-on-open rule — see
+        :class:`~agents.memory.interaction_types.Interaction` for the
+        verbatim-capture contract (the §A stamping default is applied at
+        the close-path stamp sites, not here).
         """
         existing = self._open.get(scope)
         if existing is not None and existing.is_open:
@@ -244,6 +253,8 @@ class InteractionTracker:
             scope=scope,
             started_at=ts,
             session_id=session_id or LEGACY_SESSION_ID,
+            classification=classification,
+            source_channel_id=source_channel_id,
         )
         self._open[scope] = interaction
         _emit_opened()
@@ -256,6 +267,8 @@ class InteractionTracker:
         *,
         now: float | None = None,
         session_id: str | None = None,
+        classification: str | None = None,
+        source_channel_id: str | None = None,
     ) -> Interaction:
         """Append a turn, opening an interaction in ``scope`` if needed.
 
@@ -270,15 +283,21 @@ class InteractionTracker:
         attributed to ``max_turns`` even when a structural event
         arrives between the cap-th turn and the next event.
 
-        ``session_id`` (ISSUE-0081 PR 2) is forwarded to :meth:`start`
-        and so is captured only when this call *opens* the interaction;
-        a turn appended to an already-open scope ignores it (the session
-        is frozen at open).
+        ``session_id`` (ISSUE-0081 PR 2) — and, by the same only-on-open
+        rule, the RFC 0037 §C ``classification`` /
+        ``source_channel_id`` capture pair (v0.3.12 PR 3) — are
+        forwarded to :meth:`start` and so are captured only when this
+        call *opens* the interaction; a turn appended to an already-open
+        scope ignores them (frozen at open).
         """
         ts = now if now is not None else self._clock()
         interaction = self._open.get(scope)
         if interaction is None or not interaction.is_open:
-            interaction = self.start(scope, now=ts, session_id=session_id)
+            interaction = self.start(
+                scope, now=ts, session_id=session_id,
+                classification=classification,
+                source_channel_id=source_channel_id,
+            )
         interaction.turns.append(Turn(at=ts, payload=payload or {}))
         if (
             self._max_turns is not None
