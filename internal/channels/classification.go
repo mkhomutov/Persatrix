@@ -32,7 +32,6 @@ package channels
 
 import (
 	"errors"
-	"fmt"
 )
 
 // Classification is an RFC 0037 §A confidentiality level. The vocabulary is
@@ -70,57 +69,14 @@ const DefaultClassification = ClassificationInternal
 // resolvers never see the bad value.
 var ErrInvalidClassification = errors.New("channels: invalid classification")
 
-// DarkWindowMaxClassification is the highest level an operator may DECLARE
-// while the RFC 0037 Phase-1 gate set is incomplete — the item-8 dark-window
-// rule, enforced rather than merely documented.
-//
-// The rule exists because the declaration surface lands before the machinery
-// that honours it: from PR 1 the field parses, validates, and (for DMs)
-// persists, but nothing reads it until the §D hard gate (PR 4) and the §F
-// recall filter (PR 5). A `restricted` declaration in that window is worse
-// than no declaration at all — the operator believes a boundary exists, the
-// store row still says `internal` (group rows take the migration DEFAULT
-// until PR 2 threads the declared value through the create path), and no gate
-// would enforce it either way. Rejecting at load is the fail-closed reading:
-// refuse the promise we cannot keep yet, loudly, at the only moment the
-// operator is watching.
-//
-// REMOVAL: delete this const, [ErrClassificationAboveDarkWindow],
-// [CheckDarkWindowClassification], its two call sites in config_validate.go,
-// and the guard tests in config_classification_test.go, in the PR that arms
-// the §D gate (PR 4). The schema enum deliberately still advertises all four
-// levels — it is the post-Phase-1 contract, and churning it twice would make
-// `make validate` disagree with itself across the window.
-const DarkWindowMaxClassification = ClassificationInternal
-
-// ErrClassificationAboveDarkWindow is returned by [Config.Validate] when an
-// operator declares a level above [DarkWindowMaxClassification] before the
-// RFC 0037 Phase-1 enforcement set ships. Distinct from
-// [ErrInvalidClassification]: the level is a perfectly good lattice member,
-// it is the *timing* that is wrong, and the two want different operator
-// guidance.
-var ErrClassificationAboveDarkWindow = errors.New(
-	"channels: classification above the RFC 0037 dark-window ceiling")
-
-// CheckDarkWindowClassification enforces the item-8 dark-window ceiling on one
-// declared level. Empty (absent — the loader fills `internal`) and
-// out-of-vocabulary values both pass: the former is the default, and the
-// latter is [ErrInvalidClassification]'s to reject, so the two checks compose
-// without either swallowing the other's error. Callers prefix their own field
-// or channel identity onto the returned error.
-func CheckDarkWindowClassification(level Classification) error {
-	rank, ok := classificationRank(level)
-	if !ok {
-		return nil
-	}
-	ceiling, _ := classificationRank(DarkWindowMaxClassification)
-	if rank <= ceiling {
-		return nil
-	}
-	return fmt.Errorf("%w: %q (max %q until the RFC 0037 Phase-1 gate set ships in v0.3.12 — "+
-		"the level would not be enforced by any gate yet)",
-		ErrClassificationAboveDarkWindow, level, DarkWindowMaxClassification)
-}
+// The item-8 dark-window guard (DarkWindowMaxClassification /
+// ErrClassificationAboveDarkWindow / CheckDarkWindowClassification) lived
+// here from PR 1 and was DELETED in the PR that armed the §D hard gate
+// (RFC 0037 PR 4), exactly as its REMOVAL note prescribed: with the gate,
+// the gated recall_notes, and the §B single-channel-turn guard live, a
+// declared level above `internal` is now an enforced boundary rather than
+// an unkeepable promise. Operators may classify channels `restricted` /
+// `secret` from v0.3.12 on.
 
 // classificationRanks is the single Go-side source of the §A total order.
 // Kept in lock-step with `CLASSIFICATION_RANKS` in

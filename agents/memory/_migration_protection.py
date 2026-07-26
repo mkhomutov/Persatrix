@@ -20,7 +20,10 @@ Adds the RFC 0037 §C provenance/protection columns to the **episodes**,
   honest exception: they carry no channel provenance at all, so every
   pre-migration note backfills ``internal`` regardless of where it was
   authored — an accepted, documented residual risk, superseded as notes
-  are rewritten under the PR 4 gate.
+  are rewritten under the PR 4 gate.  The §C escape hatch is
+  :data:`NOTES_BACKFILL_ENV_VAR` (PR 4 — ISSUE-0115(a)): a one-time
+  operator flag that stamps a chosen level onto all pre-migration notes
+  at the migration moment instead.
 * ``source_channel_id TEXT`` — nullable; the single channel the entry
   was derived from (NULL for pre-migration rows, synthesized notes, and
   non-channel scopes).
@@ -76,13 +79,40 @@ the projections half replay-safe on its own.
 
 from __future__ import annotations
 
+import logging
+import os
+
 import aiosqlite
+
+logger = logging.getLogger(__name__)
 
 #: The §A rule-(a) stamping default in the storage domain.  Kept in
 #: lock-step with ``agents.persona_runtime.classification
 #: .DEFAULT_CLASSIFICATION`` via the drift-pin test — see the module
 #: docstring for why the value is spelled twice.
 PROTECTION_LEVEL_DEFAULT = "internal"
+
+#: ISSUE-0115(a) / RFC 0037 §C (PR 4): the one-time operator flag for the
+#: notes tier's documented backfill residual.  Notes carry no channel
+#: provenance, so the v16 DEFAULT backfills every pre-migration note
+#: ``internal`` — including notes authored in ``restricted``/``secret``
+#: turns.  §C promises "operators with sensitive histories may use a
+#: one-time flag to backfill all pre-migration notes at a chosen level
+#: instead"; setting this env var to a §A level makes the v16 notes arm
+#: stamp that level onto every existing note at the migration moment.
+#: Inert once v16 has applied (a WARNING says so), so leaving it set
+#: cannot relabel post-migration notes.
+NOTES_BACKFILL_ENV_VAR = "PERSATRIX_NOTES_BACKFILL_PROTECTION_LEVEL"
+
+#: The §A vocabulary in the storage domain — the validation set for the
+#: backfill flag only (nothing here ranks; ranking stays persona-side).
+#: Spelled a second time for the same reason as
+#: :data:`PROTECTION_LEVEL_DEFAULT` (memory must not import the persona
+#: lattice) and pinned to ``CLASSIFICATION_RANKS`` by the same drift-pin
+#: test.
+PROTECTION_LEVEL_VOCABULARY: tuple[str, ...] = (
+    "public", "internal", "restricted", "secret",
+)
 
 #: The three channel-derived tiers gaining the §C columns.  Trusted
 #: internal literals — never user input — so the f-string interpolation
@@ -101,6 +131,7 @@ async def _apply_migration_16(db: aiosqlite.Connection) -> None:
     ``schema_version`` row is written by ``_apply_migrations`` after
     this returns, and the guards make a crash-replay safe.
     """
+    notes_column_added = False
     for table in _PROTECTION_TABLES:
         cursor = await db.execute(
             "SELECT name FROM sqlite_master "
@@ -116,6 +147,8 @@ async def _apply_migration_16(db: aiosqlite.Connection) -> None:
                 f"ALTER TABLE {table} ADD COLUMN protection_level "
                 f"TEXT NOT NULL DEFAULT '{PROTECTION_LEVEL_DEFAULT}'",
             )
+            if table == "notes":
+                notes_column_added = True
         if "source_channel_id" not in existing:
             await db.execute(
                 f"ALTER TABLE {table} ADD COLUMN source_channel_id TEXT",
@@ -123,6 +156,37 @@ async def _apply_migration_16(db: aiosqlite.Connection) -> None:
         if "provenance_json" not in existing:
             await db.execute(
                 f"ALTER TABLE {table} ADD COLUMN provenance_json TEXT",
+            )
+
+    # ISSUE-0115(a): the one-time notes-backfill flag, honoured only at
+    # the moment the notes column is created — every row present then is
+    # by definition a pre-migration note, and no later run can relabel
+    # rows written under the PR 4 stamp.  An out-of-vocabulary value
+    # fails the migration loudly: the operator explicitly asked for a
+    # boundary, and silently falling back to ``internal`` would be the
+    # exact false assurance §C's residual documents.
+    override = os.environ.get(NOTES_BACKFILL_ENV_VAR, "").strip()
+    if override:
+        if not notes_column_added:
+            logger.warning(
+                "%s=%r is set but the notes protection_level column "
+                "already exists — the one-time backfill flag only applies "
+                "at the v16 migration moment; ignoring",
+                NOTES_BACKFILL_ENV_VAR, override,
+            )
+        elif override not in PROTECTION_LEVEL_VOCABULARY:
+            raise ValueError(
+                f"{NOTES_BACKFILL_ENV_VAR}={override!r} is not a "
+                f"classification level (expected one of "
+                f"{'|'.join(PROTECTION_LEVEL_VOCABULARY)})",
+            )
+        else:
+            cursor = await db.execute(
+                "UPDATE notes SET protection_level = ?", (override,),
+            )
+            logger.info(
+                "%s: backfilled %d pre-migration note(s) to %r",
+                NOTES_BACKFILL_ENV_VAR, cursor.rowcount, override,
             )
 
     # §E declassification projections (written from PR 6 on; the §D gate

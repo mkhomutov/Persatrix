@@ -50,12 +50,18 @@ async def seeded_episodic() -> AsyncGenerator[EpisodicMemory, None]:
     mem = EpisodicMemory(agent_id="priority-order-test", db_path=":memory:")
     await mem.initialize()
     try:
+        # All entries stamped ``public`` so both harness events pass the
+        # RFC 0037 §D gate: the TICK turn takes the acting ``public``
+        # floor (rule (b)) and would withhold the ``internal`` default.
+        # The gate itself is pinned in test_injection_gate.py; this file
+        # pins tier ORDER only.
         # Channel-scoped episodes (channel-history tier).
         await mem.store_episode(
             summary="planning channel turn one rollout",
             context={},
             importance=0.9,
             scope="group:planning",
+            protection_level="public",
         )
         # Generic episode that matches the CHANNEL_MESSAGE / TICK query
         # so the episodic-recall tier admits content (no-scope filter).
@@ -63,11 +69,13 @@ async def seeded_episodic() -> AsyncGenerator[EpisodicMemory, None]:
             summary="rollout planning episode general",
             context={},
             importance=0.9,
+            protection_level="public",
         )
         # Note matching the same query so the notes tier also admits.
         await mem.store_note(
             topic="rollout",
             content="rollout planning notes for the team review.",
+            protection_level="public",
         )
         yield mem
     finally:
@@ -159,7 +167,10 @@ def _wire_mixin(
     event.channel_id = "group:planning" if channel else None
     event.sender_id = "agent-a" if channel else None
     event.thread_id = None
-    event.metadata = {}
+    # RFC 0037 §B: the production dispatch path stamps the channel's
+    # classification onto the event; the harness mirrors it so the
+    # channel turn acts ``internal`` (the fact fixture's default level).
+    event.metadata = {"channel_classification": "internal"} if channel else {}
     event.payload = {
         "content": "rollout planning",
         "channel_type": "group" if channel else None,

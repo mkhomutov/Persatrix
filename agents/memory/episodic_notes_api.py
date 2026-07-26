@@ -18,8 +18,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..session_id import LEGACY_SESSION_ID
+from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .notes import Note, NoteStore
 
 
@@ -43,6 +46,7 @@ class _EpisodicNotesAPIMixin:
         max_notes: int = 500,
         *,
         session_id: str = LEGACY_SESSION_ID,
+        protection_level: str = PROTECTION_LEVEL_DEFAULT,
     ) -> str:
         """Store a new note. Prunes oldest low-access notes if over cap.
 
@@ -55,10 +59,13 @@ class _EpisodicNotesAPIMixin:
         tiers' write paths.  Empty / whitespace-only values are
         normalised by :meth:`NoteStore.store_note` at the storage
         boundary — this layer is a pass-through.
+
+        ``protection_level`` (RFC 0037 §C — PR 4) is forwarded verbatim;
+        see :meth:`NoteStore.store_note` for the stamp-site contract.
         """
         return await self._ensure_note_store().store_note(
             topic, content, tags=tags, max_notes=max_notes,
-            session_id=session_id,
+            session_id=session_id, protection_level=protection_level,
         )
 
     async def recall_notes(
@@ -68,6 +75,7 @@ class _EpisodicNotesAPIMixin:
         limit: int = 10,
         min_score: float | None = None,
         sessions: list[str] | str | None = None,
+        allowed_protection_levels: Sequence[str] | None = None,
     ) -> list[Note]:
         """Retrieve notes matching query, ranked by relevance.
 
@@ -83,6 +91,11 @@ class _EpisodicNotesAPIMixin:
             RFC 0031 §D recall filter (Phase 2 PR 2) — forwarded
             verbatim to :meth:`NoteStore.recall_notes`.  See that
             method's docstring for the four-mode contract.
+        allowed_protection_levels:
+            RFC 0037 §D read-surface gating (PR 4) — forwarded verbatim;
+            see :meth:`NoteStore.recall_notes` for the contract.  The
+            persona read surfaces always pass it; ``None`` (default) is
+            the ungated non-persona operator/CLI surface.
         """
         if min_score is not None and not 0.0 <= min_score <= 1.0:
             raise ValueError(
@@ -90,11 +103,27 @@ class _EpisodicNotesAPIMixin:
             )
         return await self._ensure_note_store().recall_notes(
             query, limit=limit, min_score=min_score, sessions=sessions,
+            allowed_protection_levels=allowed_protection_levels,
         )
 
-    async def update_note(self, note_id: str, content: str) -> bool:
-        """Update note content. Topic and tags preserved. Returns True if found."""
-        return await self._ensure_note_store().update_note(note_id, content)
+    async def update_note(
+        self,
+        note_id: str,
+        content: str,
+        *,
+        restamp_protection_level: str | None = None,
+        restamp_below: Sequence[str] = (),
+    ) -> bool:
+        """Update note content. Topic and tags preserved. Returns True if found.
+
+        The RFC 0037 §C re-stamp kwargs (PR 4) are forwarded verbatim —
+        see :meth:`NoteStore.update_note` for the raise-only contract.
+        """
+        return await self._ensure_note_store().update_note(
+            note_id, content,
+            restamp_protection_level=restamp_protection_level,
+            restamp_below=restamp_below,
+        )
 
     async def delete_note(self, note_id: str) -> bool:
         """Delete a note by ID (agent-scoped). Returns True if found."""

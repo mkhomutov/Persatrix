@@ -11,10 +11,10 @@
 //     router's read-through cache — including after a reconcile adoption
 //     refreshed it mid-run.
 //
-// The tests declare levels ABOVE the item-8 dark-window ceiling on purpose:
-// the ceiling is Config.Validate's operator-boundary guard (pinned in
-// config_classification_test.go), while these exercise the plumbing beneath
-// it — the same rows PR 4's gate will read once the guard is deleted.
+// The tests declare levels above `internal` — through PRs 1–3 that meant
+// bypassing the item-8 dark-window ceiling to exercise the plumbing beneath
+// it; the ceiling was deleted when the §D gate armed (RFC 0037 PR 4), so
+// these rows are now exactly what a production config can declare.
 package channels
 
 import (
