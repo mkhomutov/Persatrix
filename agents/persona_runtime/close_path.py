@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..memory.episodic import EpisodicMemory
 from ..memory.interactions import SUMMARY_PENDING_TEXT, Interaction
+from .classification import normalize_for_stamp
 from .finalize_close import finalize_closed_interaction
 
 if TYPE_CHECKING:
@@ -97,7 +98,13 @@ async def persist_closed_interaction(
             # interaction was *born* under, not the scope bound now —
             # ``idle_check`` may be flushing a sibling conversation's stale
             # interaction while a different conversation's event holds the scope.
-            session_id=interaction.session_id)
+            session_id=interaction.session_id,
+            # RFC 0037 §C (PR 3): the episode inherits the interaction's
+            # frozen-at-open capture — ``normalize_for_stamp`` is the §A
+            # rule-(a) owner (absent/unknown → ``internal``, never
+            # ``public``).  Dark until the PR 4 §D gate reads it.
+            protection_level=normalize_for_stamp(interaction.classification),
+            source_channel_id=interaction.source_channel_id)
     except Exception:
         logger.warning(
             "Failed to persist closed interaction for agent %s (scope=%s)",

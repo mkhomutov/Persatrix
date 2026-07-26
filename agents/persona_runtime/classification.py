@@ -157,6 +157,23 @@ def acting_rank(level: str | None) -> int:
     return CLASSIFICATION_RANKS[CLASSIFICATION_PUBLIC]
 
 
+def acting_at_or_below_internal(level: str | None) -> bool:
+    """The §C identity write-through bound: does the ACTING classification
+    rank at or below ``internal``?
+
+    ``True`` → the cross-room relationship write-through may proceed;
+    ``False`` (a ``restricted``/``secret`` turn) → the caller falls back
+    to a room-scoped note, which is stamped and gated.  Resolution is
+    rule (b) — an absent/unknown acting level floors to ``public`` and
+    proceeds, so every pre-classification path (tick, CLI, pre-v0.3.12
+    producer) keeps its exact prior behaviour.  Named here — beside the
+    rule owner it composes — so the one call site
+    (:mod:`agents.tools.identity_write_through`) states the §A rule it
+    applies instead of open-coding a rank comparison.
+    """
+    return acting_rank(level) <= CLASSIFICATION_RANKS[CLASSIFICATION_INTERNAL]
+
+
 def entry_rank_or_withhold(level: str | None) -> int | None:
     """Rule (c): the rank of a stored ENTRY protection level.
 

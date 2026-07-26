@@ -46,6 +46,7 @@ from ..memory.fact_predicates import (
 from ..memory.facts import FactStore
 from ..observability.metrics import current_agent_id, try_get_instruments
 from ..prompt_loader import load_snippet
+from .classification import normalize_for_stamp
 
 # Parser surface lives in ``fact_envelope`` so the storage-dispatch
 # module stays under the 500-line review-friendly cap; re-exported
@@ -171,6 +172,8 @@ async def store_extracted_facts(
     asserted_at: float,
     session_id: str,
     sender_id: str | None = None,
+    protection_level: str | None = None,
+    source_channel_id: str | None = None,
 ) -> int:
     """Persist each parsed fact via :meth:`FactStore.store`.
 
@@ -179,6 +182,13 @@ async def store_extracted_facts(
     subject canonicalization rejection) are caught here and increment
     ``agent.facts.extraction_failed`` — one bad tuple does not drop
     the rest of the batch.
+
+    ``protection_level`` / ``source_channel_id`` (RFC 0037 §C, PR 3) are
+    the source interaction's frozen-at-open capture, stamped identically
+    onto every tuple in the batch — a fact is extracted from exactly one
+    interaction, so its protection level IS that interaction's.  The
+    §A rule-(a) normalization runs HERE (the stamp site), not in the
+    storage layer: ``None``/unknown labels to ``internal``.
 
     Subject canonicalization
     ------------------------
@@ -209,6 +219,9 @@ async def store_extracted_facts(
     canonical_sender = (
         canonicalize_subject(sender_id) if sender_id else None
     )
+    # The extractor stamps unconditionally (§C): normalize once for the
+    # batch — every tuple shares the one source interaction's level.
+    stamped_level = normalize_for_stamp(protection_level)
     stored = 0
     failures = 0
     for raw_fact in facts:
@@ -236,6 +249,8 @@ async def store_extracted_facts(
                 source_interaction_id=source_interaction_id,
                 asserted_at=asserted_at,
                 session_id=session_id,
+                protection_level=stamped_level,
+                source_channel_id=source_channel_id,
             )
         except ValueError as exc:
             failures += 1
@@ -410,6 +425,10 @@ async def dispatch_facts_from_response(
             asserted_at=asserted_at,
             session_id=session_id,
             sender_id=sender_id,
+            # RFC 0037 §C (PR 3): facts inherit the interaction's
+            # frozen-at-open capture, like the Phase-1 episode row.
+            protection_level=interaction.classification,
+            source_channel_id=interaction.source_channel_id,
         )
     except Exception:
         logger.warning(
