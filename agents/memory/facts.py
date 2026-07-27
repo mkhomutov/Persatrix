@@ -25,7 +25,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 
 import aiosqlite
 
@@ -39,11 +39,18 @@ from ._facts_erasure import delete_by_subject as _delete_by_subject
 from ._facts_reinforce import mark_recalled_for_agent as _mark_recalled_for_agent
 from ._facts_supersede import apply_supersession as _apply_supersession
 from ._facts_supersede import retract_fact as _retract_fact
+from ._facts_topics import predicate_in_clause
+from ._facts_topics import topic_subjects_for_agent as _topic_subjects_for_agent
 from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 from ._principal_filter import principal_eq_clause, resolve_active_principal
 from ._session_filter import _resolve_session_list, session_in_clause
-from .fact_predicates import canonicalize_subject, validate_predicate
-from .fact_types import _FACT_COLS, _FACT_SELECT, Fact
+from .fact_predicates import (
+    canonicalize_subject,
+    validate_object,
+    validate_predicate,
+    validate_subject,
+)
+from .fact_types import _FACT_COLS, _FACT_SELECT, Fact, row_to_fact
 from .migrations import _apply_migrations
 
 logger = logging.getLogger(__name__)
@@ -184,17 +191,13 @@ class FactStore:
 
         Subject canonicalisation (PR 5c — PR #341 review L-2)
         -----------------------------------------------------
-        The production write path (PR 2 extractor) canonicalises
-        before calling here, but three classes of direct caller
-        bypass that discipline — test fixtures, operator-seeded
-        facts (RFC 0026 OQ #9), and the future RFC 0013 erasure
-        backfill.  Without canonicalisation at this layer they
-        silently write rows under non-canonical subjects and miss
-        the recall path that PR 3 wired to ``_subject_seeds →
-        canonicalize_subject``, defeating the MT-MEMORY-005
-        dementia-test invariant.  The storage primitive is now
-        authoritative — every persisted row carries the canonical
-        subject regardless of caller discipline.
+        The PR 2 extractor canonicalises before calling here, but
+        direct callers (fixtures, operator-seeded facts per OQ #9, the
+        future RFC 0013 erasure backfill) bypass that discipline and
+        would write rows the ``_subject_seeds → canonicalize_subject``
+        recall path can never reach — defeating the MT-MEMORY-005
+        invariant.  The storage primitive is authoritative instead:
+        every persisted row carries the canonical subject.
         """
         # Cheap value checks first — surfacing "subject must not be
         # empty" or a certainty-range error before the (potentially
@@ -208,11 +211,17 @@ class FactStore:
                 f"certainty must be in [0.0, 1.0], got {certainty}",
             )
         self._predicate_validator(predicate)
+        # Topic-amendment blast-radius bound: object length + RFC 0009
+        # delimiter escape, enforced at the storage boundary so every
+        # write path (extractor, operator-seeded, fixtures) is covered.
+        validate_object(object)
         # Canonicalise after the empty-check so the ValueError text
         # stays familiar; ``canonicalize_subject`` is idempotent so
         # the production write path (extractor pre-canonicalises) is
-        # unaffected.
+        # unaffected.  The blast-radius bound runs on the canonical
+        # form (write boundary only — see ``validate_subject``).
         subject = canonicalize_subject(subject)
+        validate_subject(subject)
         # Normalise session_id at the storage boundary (RFC 0031 Phase 2
         # PR 4 — PR 1 F16 carry-forward).  Symmetric with the other three
         # persona-memory tier write paths.
@@ -311,8 +320,16 @@ class FactStore:
         limit: int = 10,
         include_superseded: bool = False,
         sessions: list[str] | str | None = None,
+        predicates: Collection[str] | None = None,
     ) -> list[Fact]:
         """Return facts about ``subject`` ordered most-recent-first.
+
+        ``predicates`` (RFC 0026 topic amendment) narrows to a
+        predicate class; ``None`` = every class, the person-seed
+        default.  The topic-seed path passes ``TOPIC_PREDICATES`` —
+        the seed set is what bounds which subjects a stimulus can
+        read, so one induced ``("bob", "topic.owned_by", …)`` tuple
+        must not turn ``bob`` into a key for every fact about Bob.
 
         Filters by ``agent_id`` so cross-agent leakage is impossible
         (RFC 0008 §H ACL).  ``superseded_by IS NOT NULL`` rows are
@@ -356,6 +373,7 @@ class FactStore:
             resolve_active_epoch(self._active_epoch_id),
             column="epoch_id",
         )
+        pred_clause, pred_params = predicate_in_clause(predicates)
 
         db = self._ensure_db()
         # Deterministic order (RFC 0044 golden-trace portability): `asserted_at
@@ -373,7 +391,7 @@ class FactStore:
             sql = (
                 f"SELECT {_FACT_SELECT} FROM facts "
                 "WHERE agent_id = ? AND subject = ?"
-                f"{sess_clause}{princ_clause}{epoch_clause} "
+                f"{pred_clause}{sess_clause}{princ_clause}{epoch_clause} "
                 "ORDER BY asserted_at DESC, rowid DESC LIMIT ?"
             )
         else:
@@ -381,21 +399,41 @@ class FactStore:
                 f"SELECT {_FACT_SELECT} FROM facts "
                 "WHERE agent_id = ? AND subject = ? "
                 "AND superseded_by IS NULL"
-                f"{sess_clause}{princ_clause}{epoch_clause} "
+                f"{pred_clause}{sess_clause}{princ_clause}{epoch_clause} "
                 "ORDER BY asserted_at DESC, rowid DESC LIMIT ?"
             )
         async with db.execute(
             sql, (
-                self._agent_id, subject, *sess_params, *princ_params,
-                *epoch_params, limit,
+                self._agent_id, subject, *pred_params, *sess_params,
+                *princ_params, *epoch_params, limit,
             ),
         ) as cursor:
             rows = await cursor.fetchall()
-        return [self._row_to_fact(row) for row in rows]
+        return [row_to_fact(row) for row in rows]
 
     async def mark_recalled(self, fact_ids: Iterable[str], *, at: float | None = None) -> None:
         # RFC 0026 PR 4 — see :mod:`._facts_reinforce` for §G rationale.
         await _mark_recalled_for_agent(self._ensure_db(), self._agent_id, fact_ids, at=at)
+
+    async def topic_subjects(self, *, limit: int = 200) -> list[str]:
+        """Distinct live ``topic.*`` subjects, most-recent-first.
+
+        The recall-seeding enumeration (RFC 0026 topic amendment /
+        RFC 0049 P1) — scoped exactly like :meth:`recall`, adding no
+        scope of its own.  See :mod:`agents.memory._facts_topics`.
+        """
+        return await _topic_subjects_for_agent(
+            self._ensure_db(),
+            agent_id=self._agent_id,
+            limit=min(limit, _MAX_RECALL_LIMIT * 2),
+            session_list=_resolve_session_list(
+                None, self._active_session_id,
+            ),
+            principal_id=resolve_active_principal(
+                self._active_principal_id,
+            ),
+            epoch_id=resolve_active_epoch(self._active_epoch_id),
+        )
 
     # ─── Retraction / cleanup ──────────────────────────────
 
@@ -444,24 +482,4 @@ class FactStore:
         """
         return await _delete_by_subject(
             self._ensure_db(), self._agent_id, subject_id,
-        )
-
-    # ─── Internal helpers ──────────────────────────────────
-
-    def _row_to_fact(self, row: aiosqlite.Row) -> Fact:
-        return Fact(
-            fact_id=row[0],
-            agent_id=row[1],
-            subject=row[2],
-            predicate=row[3],
-            object=row[4],
-            certainty=row[5],
-            source_interaction_id=row[6],
-            asserted_at=row[7],
-            last_recalled_at=row[8],
-            superseded_by=row[9],
-            session_id=row[10],
-            # RFC 0037 §C (migration v16): surfaced for the §D gate.
-            protection_level=row[11],
-            source_channel_id=row[12],
         )

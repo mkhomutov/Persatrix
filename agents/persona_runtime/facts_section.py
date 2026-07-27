@@ -5,12 +5,11 @@ notes tiers in the canonical cross-RFC priority order (RFC 0027 §F
 end-state).  Two helpers:
 
 - :func:`recall_facts_for_event` issues
-  :meth:`agents.memory.facts.FactStore.recall` for each subject derived
-  from *event* (today: the canonicalised ``sender_id``; later RFCs will
-  add mentioned entities to the seed set).  Returns ``[]`` for events
-  with no resolvable subject, for missing / mis-initialised
-  ``FactStore``, and on backend failure (the latter is logged at
-  WARNING so the rest of the budget pipeline keeps running).
+  :meth:`agents.memory.facts.FactStore.recall` per seeded subject —
+  the canonicalised ``sender_id`` + ``self``, plus (RFC 0049 P1) topic
+  subjects the stimulus mentions.  Returns ``[]`` for events with no
+  resolvable subject, for missing / mis-initialised ``FactStore``, and
+  on backend failure (logged at WARNING so the budget pipeline runs).
 
 - :func:`render_facts_section` runs :class:`MemoryBudget` admission and
   builds the ``"facts_context"`` :class:`WorkingMemory` section.  The
@@ -29,12 +28,14 @@ because admission keys on the canonical sender, not on text overlap.
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 from typing import TYPE_CHECKING
 
-from ..memory.fact_predicates import canonicalize_subject
+from ..memory.fact_predicates import TOPIC_PREDICATES, canonicalize_subject
 from ..memory.working import ContextSection, estimate_tokens
 from ..observability.metrics import current_agent_id, try_get_instruments
 from .memory_budget import MemoryBudget
+from .topic_seeds import topic_subject_seeds
 
 if TYPE_CHECKING:
     from ..memory.facts import Fact, FactStore
@@ -133,26 +134,17 @@ def _subject_seeds(event: AgentEvent) -> list[str]:
       guard for zero-admission events.  This is the path the
       ``test_priority_order_..._for_tick`` pin asserts on.
     * Sender-bearing events seed two subjects in admit-priority
-      order:
+      order: ``SELF_SUBJECT`` first — introspective ``self.*`` facts
+      (RFC 0026 OQ #10), which PR 3 wrote but never read because it
+      seeded from ``event.sender_id`` alone, leaving MT-MEMORY-005
+      Leg 5 red — then the canonicalised sender, for facts about the
+      counterparty.
 
-      - ``SELF_SUBJECT`` (``"self"``) first — admits introspective
-        ``self.*`` facts (RFC 0026 OQ #10) so MT-MEMORY-005 Leg 5
-        (self-consistency on the persona's reply to a counterparty)
-        flips green.  PR 3 wrote ``self.*`` rows but seeded only
-        from ``event.sender_id``, leaving self facts write-only;
-        PR 4 unblocks the read by always pairing ``self`` with the
-        sender seed.
-      - The canonicalised ``event.sender_id`` second — facts about
-        the counterparty.
-
-    The "always seed self even when sender is missing" shape was
-    tried in the initial PR 4 cut and reverted under the PR #342
-    review M-2 finding: it issued an unconditional
-    ``fact_store.recall(subject="self")`` on every TICK and
-    defeated the PR-5 empty-context cost guard.  Gating the self
-    seed on sender presence preserves the Leg-5 admit (user-facing
-    legs always carry a sender) without paying the cost on internal
-    events.
+    "Always seed self even when sender is missing" was tried in the
+    initial PR 4 cut and reverted (PR #342 review M-2): it issued an
+    unconditional self-recall on every TICK and defeated the PR-5
+    empty-context cost guard.  Gating the self seed on sender presence
+    keeps the Leg-5 admit without paying the cost on internal events.
 
     Returns canonicalised subjects in admit-priority order (self
     first so introspective rows survive when the per-tier slice is
@@ -172,16 +164,14 @@ def _subject_seeds(event: AgentEvent) -> list[str]:
         # below.  Removing it breaks the self-collapse. (PR #346 N-2)
         canonical = canonicalize_subject(sender_id)
     except ValueError:
-        # Defensive forward-guard (PR #342 third-pass review L-2).
-        # ``canonicalize_subject`` currently raises only on empty /
-        # whitespace-only input, which the truthiness check above
-        # already filters — so this branch is unreachable today.
-        # Retained so that future :data:`PREDICATE_ALLOWLIST`-adjacent
-        # validation in ``canonicalize_subject`` (max-length checks,
-        # codepoint allowlist, etc.) cannot crash the persona's hot
-        # path; the facts tier falls back to the no-seed path,
-        # consistent with the no-sender branch above.
-        return []
+        # Defensive forward-guard (PR #342 third-pass review L-2):
+        # unreachable today — the truthiness check above filters the
+        # only input ``canonicalize_subject`` rejects, and the topic
+        # amendment's bounds live at the WRITE boundary precisely so
+        # read paths stay total.  Keeps the ``self`` seed rather than
+        # dropping the tier, so a malformed sender degrades to
+        # introspective-only recall, not a silent Leg-5 regression.
+        return [SELF_SUBJECT]
     if canonical == SELF_SUBJECT:
         return [SELF_SUBJECT]
     return [SELF_SUBJECT, canonical]
@@ -192,6 +182,7 @@ async def recall_facts_for_event(
     event: AgentEvent,
     *,
     limit: int = FACTS_RECALL_LIMIT,
+    stimulus: str | None = None,
 ) -> list[Fact]:
     """Recall declarative facts for every subject derived from *event*.
 
@@ -205,29 +196,43 @@ async def recall_facts_for_event(
       log-and-continue idiom).
 
     Each subject is recalled independently; duplicate ``fact_id`` rows
-    are de-duplicated in caller order so a fact about the sender that
-    is also about a mentioned entity (future RFC) is rendered once.
+    de-duplicate in caller order, so a fact reachable from two seeds
+    renders once.
 
-    Signature note (PR 5c — PR #341 review N-2)
-    -------------------------------------------
-    The pre-PR-5c signature accepted an ``agent_id`` kwarg used only
-    inside the WARNING log template; :meth:`FactStore.recall` already
-    filters by ``self._agent_id`` (the store is per-agent ACL —
-    RFC 0008 §H), so the kwarg never participated in the SQL filter
-    and falsely implied the helper accepted an agent filter.  PR 5c
-    drops the kwarg and reads :attr:`FactStore.agent_id` off the
-    store at the log site.
+    ``stimulus`` (RFC 0026 topic amendment / RFC 0049 P1) — the
+    turn's memory query; topic subjects mentioned in it join the
+    person seeds via :mod:`.topic_seeds`, BEHIND the person-seed
+    short-circuit so a TICK still issues zero DB round-trips.
+
+    Signature note (PR 5c — PR #341 review N-2): the earlier
+    ``agent_id`` kwarg fed only the WARNING template while
+    ``recall`` already filters by its own agent id (RFC 0008 §H ACL).
     """
     if fact_store is None:
         return []
-    seeds = _subject_seeds(event)
-    if not seeds:
+    person_seeds = _subject_seeds(event)
+    if not person_seeds:
         return []
+    # (subject, predicate filter) pairs.  Person seeds read every
+    # predicate class; topic seeds read ONLY topic rows — the seed set
+    # bounds which subjects a stimulus reaches, so an induced topic
+    # tuple naming a person must not unlock that person's facts.
+    seeds: list[tuple[str, Collection[str] | None]] = [
+        (subject, None) for subject in person_seeds
+    ]
+    seeds += [
+        (subject, TOPIC_PREDICATES)
+        for subject in await topic_subject_seeds(
+            fact_store, stimulus, exclude=set(person_seeds),
+        )
+    ]
     collected: list[Fact] = []
     seen_ids: set[str] = set()
-    for subject in seeds:
+    for subject, predicates in seeds:
         try:
-            rows = await fact_store.recall(subject=subject, limit=limit)
+            rows = await fact_store.recall(
+                subject=subject, limit=limit, predicates=predicates,
+            )
         except Exception:
             logger.warning(
                 "Agent %s: facts recall for subject=%r failed; skipping",
@@ -301,39 +306,30 @@ def render_facts_section(
     banner.
 
     Per-block slice consumption is **sequential, not even** (PR #342
-    review N-5).  The outer loop iterates blocks in
-    ``_subject_seeds``-emit order (``self`` first, sender second);
-    each block drains the slice until either (a) its facts are
-    exhausted or (b) ``facts_tokens_used`` reaches
-    ``facts_budget_tokens``.  Once the slice is exhausted inside one
-    block the next block's outer-loop guard fires and the rest of the
-    section is skipped — there is no per-block share.
+    review N-5).  Blocks iterate in seed-emit order (``self``, sender,
+    then topics); each drains the slice until its facts are exhausted
+    or ``facts_tokens_used`` reaches ``facts_budget_tokens``, at which
+    point the next block's guard fires and the rest of the section is
+    skipped — there is no per-block share.
 
-    The ``self``-first emit order is **load-bearing for Leg 5**.  A
-    chatty sender with many facts ordered first would crowd out the
-    persona's introspective rows when the slice is tight, re-opening
-    the persona-inversion hazard the M-2 review fix is meant to
-    fence off.  Keeping ``self`` first means introspective rows
-    always have first claim on the slice; the sender block competes
-    for the **remainder**, which matches the dementia-test framing
-    (the persona's own claims about itself stay stable across
-    interactions, even when the counterparty's fact set grows).
-    Operators tuning ``memory.facts.budget_tokens`` should size it
-    generously enough that the sender's block has headroom after
-    a typical ``self.*`` load (~3-5 rows) — under-sizing here will
-    show up as missing sender rows under tight budgets, not as
-    missing ``self.*`` rows.
+    The ``self``-first emit order is **load-bearing for Leg 5**.  Any
+    other block ordered first would crowd out the persona's
+    introspective rows when the slice is tight, re-opening the
+    persona-inversion hazard the M-2 fix fences off — which is why
+    ``recall_facts_for_event`` appends topic seeds *after* the person
+    seeds, and why the sender competes for the **remainder**.
+    Operators tuning ``memory.facts.budget_tokens`` should leave
+    headroom past a typical ``self.*`` load (~3-5 rows): under-sizing
+    shows up as missing sender/topic rows, never missing ``self.*``.
 
     Soft-slice overage scales with subject count
     --------------------------------------------
     ``facts_tokens_used`` accumulates item-line tokens only; each
     per-subject header is charged against the global
-    :class:`MemoryBudget` but *not* against the slice.  The real
-    upper bound on the tier's global-budget consumption is therefore
-    ``facts_budget_tokens + N_subjects × header_tokens`` rather than
-    the slice alone.  Today that overage is at most ~10 tokens (two
-    seeds: ``self`` + sender, ~5 tokens each); future RFCs that add
-    mentioned-entity seeds will widen it linearly with seed count.
+    :class:`MemoryBudget` but *not* against the slice, so the tier's
+    real global-budget bound is ``facts_budget_tokens + N_subjects ×
+    header_tokens``.  With topic seeding (RFC 0049 P1) N_subjects is
+    at most ``2 + TOPIC_SEED_LIMIT`` (~5 tokens per header).
     Operators tuning ``memory.facts.budget_tokens`` should account
     for this overhead — the slice is a soft floor on item-line
     tokens, not a hard cap on the tier.
