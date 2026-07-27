@@ -132,9 +132,14 @@ PREDICATE_ALLOWLIST = PREDICATE_ALLOWLIST | TOPIC_PREDICATES
 #   is the persona-inversion guard (facts_section §M-2); an embedded
 #   newline lets one stored object forge a second, fabricated header
 #   block (e.g. a ``self`` block) inside the tier's own framing.
-#   Subjects are immune by construction — ``canonicalize_subject``
-#   collapses all Unicode whitespace via ``str.split()`` — so this is
-#   the object-side twin of that normalization.
+#   Enforced on BOTH fields.  For subjects, ``canonicalize_subject``
+#   already folds the header-forgery subset — every Unicode
+#   *whitespace* control (LF, CR, NEL, LS/PS) collapses via
+#   ``str.split()`` — but the non-whitespace controls (NUL, ESC,
+#   backspace, DEL) survive the fold and would render verbatim in the
+#   ``Known facts about <subject>:`` header and any operator
+#   prompt-dump surface, so ``validate_subject`` rejects the class
+#   too (PR #781 review M-1).
 # * _DELIMITER_ESCAPE_RE — no stored subject/object may open or close
 #   an RFC 0009 ``<external_data>`` envelope when re-rendered into a
 #   prompt (fact lines render OUTSIDE the quarantine envelope, so an
@@ -229,10 +234,15 @@ def validate_subject(subject: str) -> None:
     """Reject an unsafe fact ``subject`` at the **write** boundary.
 
     Topic-amendment blast-radius bounds (see the constants block):
-    over-:data:`MAX_SUBJECT_CHARS` or carrying an RFC 0009
-    ``<external_data>`` delimiter.  Expects the canonical form —
-    :meth:`FactStore.store` canonicalizes first, so the length check
-    is post-normalization and padding cannot dodge it.
+    over-:data:`MAX_SUBJECT_CHARS`, carrying a control character, or
+    carrying an RFC 0009 ``<external_data>`` delimiter.  Expects the
+    canonical form — :meth:`FactStore.store` canonicalizes first, so
+    the length check is post-normalization and padding cannot dodge
+    it.  Canonicalization also collapses every Unicode *whitespace*
+    control, so the control-character check can only fire on the
+    non-whitespace class (NUL, ESC, backspace, DEL) — which survives
+    ``str.split()`` and would otherwise ride verbatim into the
+    ``Known facts about <subject>:`` header (PR #781 review M-1).
 
     Deliberately NOT called from :func:`canonicalize_subject`: read
     paths canonicalize too, and raising there would make a
@@ -244,6 +254,11 @@ def validate_subject(subject: str) -> None:
     if len(subject) > MAX_SUBJECT_CHARS:
         raise ValueError(
             f"subject exceeds {MAX_SUBJECT_CHARS} chars "
+            "(topic amendment blast-radius bound)",
+        )
+    if _CONTROL_CHAR_RE.search(subject):
+        raise ValueError(
+            "subject must not contain control characters "
             "(topic amendment blast-radius bound)",
         )
     if _DELIMITER_ESCAPE_RE.search(subject):

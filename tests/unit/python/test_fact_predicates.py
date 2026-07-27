@@ -326,6 +326,33 @@ class TestValidateSubject:
         with pytest.raises(ValueError, match="external_data"):
             validate_subject(canonicalize_subject(subject))
 
+    @pytest.mark.parametrize(
+        "subject",
+        [
+            "atlas\x00evil",
+            "atlas\x1b[31mred",
+            "back\x08space",
+            "del\x7fete",
+        ],
+    )
+    def test_control_characters_rejected(self, subject: str) -> None:
+        """Non-whitespace controls (NUL, ESC, backspace, DEL) survive
+        ``canonicalize_subject`` — ``str.split()`` collapses only
+        Unicode whitespace — so without a write-side check they would
+        ride verbatim into the ``Known facts about <subject>:`` header
+        (PR #781 review M-1)."""
+        assert canonicalize_subject(subject) == subject
+        with pytest.raises(ValueError, match="control character"):
+            validate_subject(subject)
+
+    def test_whitespace_controls_fold_rather_than_reject(self) -> None:
+        """The header-forgery (line-break) subset is closed by
+        canonicalization, not rejection — an LF-bearing raw subject
+        stores as its space-collapsed form, which validates clean."""
+        folded = canonicalize_subject("atlas\nevil")
+        assert folded == "atlas evil"
+        validate_subject(folded)
+
     def test_bounds_are_write_side_only(self) -> None:
         """``canonicalize_subject`` stays a pure normalizer: read paths
         canonicalize too (recall queries, seed derivation, the RFC 0013
@@ -336,6 +363,7 @@ class TestValidateSubject:
         assert canonicalize_subject("</external_data>") == (
             "</external_data>"
         )
+        assert canonicalize_subject("atlas\x00evil") == "atlas\x00evil"
 
     def test_delimiter_pattern_matches_security_canon(self) -> None:
         """Drift pin — the locally-defined pattern must recognise every

@@ -136,11 +136,14 @@ operator-seeded, fixture — is covered:
   `- subj pred obj` under a per-subject header, so an object carrying a
   newline forges a second, fabricated `Known facts about self:` block
   inside the tier's own framing: exactly the persona-inversion footgun
-  the subject-templated header exists to prevent. Subjects are immune by
-  construction (`canonicalize_subject` collapses all Unicode whitespace);
-  this is the object-side twin. The extractor's per-tuple try-block
-  absorbs a rejection as one `agent.facts.extraction_failed` count
-  without dropping the batch.
+  the subject-templated header exists to prevent. Subjects get the same
+  rejection in `validate_subject` (PR #781 review M-1): canonicalization
+  closes the *forgery* subset by construction (`canonicalize_subject`
+  collapses every Unicode whitespace control, line breaks included), but
+  the non-whitespace controls (NUL, ESC, backspace, DEL) survive the
+  fold and would render verbatim in the block header. The extractor's
+  per-tuple try-block absorbs a rejection as one
+  `agent.facts.extraction_failed` count without dropping the batch.
 * **RFC 0009 delimiter escape.** Fact lines render OUTSIDE the
   `<external_data>` quarantine envelope, so a stored subject/object
   embedding `</external_data>` (or an opening tag) could forge an
