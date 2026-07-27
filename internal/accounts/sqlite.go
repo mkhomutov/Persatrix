@@ -45,7 +45,14 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	s := &Store{db: db}
+	// §D: sweep expired/revoked sessions on open, so the table tracks
+	// live sessions across restarts even if no periodic prune ever runs.
+	if _, err := s.PruneSessions(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return s, nil
 }
 
 // Close releases the underlying database handle.
