@@ -118,6 +118,8 @@ The extractor prompt enumerates a small predicate vocabulary (~25 verbs covering
 
 **Vocabulary discovery from rejected predicates.** The allowlist is the storage-boundary cap on prompt-injection blast radius (§Security Considerations), but it is also the bound on what the LLM can record — a near-miss verb the model emits (e.g. `has_kid_named` vs the allowlisted `has_child_named`) is a quality signal that the vocabulary needs an amendment. The extractor records each distinct rejected verb verbatim, once per process, into the structured-log surface (`persatrix.facts.rejected_predicate` field). This is the operator discovery surface for growing the allowlist from observed workload rather than guessing. Per-process dedup keeps log volume bounded; an in-process cap prevents pathological growth from an adversarial LLM emitting unique-per-call garbage.
 
+**Amendment (2026-07-27) — the `topic.*` predicate class.** The [topic-subject amendment](0026-amendment-topic-subject-predicates.md) (v0.3.12, RFC 0049 Phase 1) adds a closed `topic.*` class (`has_status` / `has_deadline` / `decided` / `owned_by`), widens the extractor prompt to canonical topic subjects, widens recall seeding to stimulus-mentioned topic subjects, and pins new storage-boundary blast-radius bounds (subject/object length caps + RFC 0009 delimiter-escape rejection). §B's person-centric framing above is otherwise unchanged; the amendment records the re-run security review.
+
 ### C. Subject canonicalization
 
 `subject` is a canonical entity key, not a free-form string. The runtime resolves it in this order:

@@ -35,6 +35,7 @@ from ..memory.fact_predicates import canonicalize_subject
 from ..memory.working import ContextSection, estimate_tokens
 from ..observability.metrics import current_agent_id, try_get_instruments
 from .memory_budget import MemoryBudget
+from .topic_seeds import topic_subject_seeds
 
 if TYPE_CHECKING:
     from ..memory.facts import Fact, FactStore
@@ -145,14 +146,11 @@ def _subject_seeds(event: AgentEvent) -> list[str]:
       - The canonicalised ``event.sender_id`` second — facts about
         the counterparty.
 
-    The "always seed self even when sender is missing" shape was
-    tried in the initial PR 4 cut and reverted under the PR #342
-    review M-2 finding: it issued an unconditional
-    ``fact_store.recall(subject="self")`` on every TICK and
-    defeated the PR-5 empty-context cost guard.  Gating the self
-    seed on sender presence preserves the Leg-5 admit (user-facing
-    legs always carry a sender) without paying the cost on internal
-    events.
+    "Always seed self even when sender is missing" was tried in the
+    initial PR 4 cut and reverted (PR #342 review M-2): it issued an
+    unconditional self-recall on every TICK and defeated the PR-5
+    empty-context cost guard.  Gating the self seed on sender presence
+    keeps the Leg-5 admit without paying the cost on internal events.
 
     Returns canonicalised subjects in admit-priority order (self
     first so introspective rows survive when the per-tier slice is
@@ -192,6 +190,7 @@ async def recall_facts_for_event(
     event: AgentEvent,
     *,
     limit: int = FACTS_RECALL_LIMIT,
+    stimulus: str | None = None,
 ) -> list[Fact]:
     """Recall declarative facts for every subject derived from *event*.
 
@@ -206,23 +205,27 @@ async def recall_facts_for_event(
 
     Each subject is recalled independently; duplicate ``fact_id`` rows
     are de-duplicated in caller order so a fact about the sender that
-    is also about a mentioned entity (future RFC) is rendered once.
+    is also a topic subject is rendered once.
 
-    Signature note (PR 5c — PR #341 review N-2)
-    -------------------------------------------
-    The pre-PR-5c signature accepted an ``agent_id`` kwarg used only
-    inside the WARNING log template; :meth:`FactStore.recall` already
-    filters by ``self._agent_id`` (the store is per-agent ACL —
-    RFC 0008 §H), so the kwarg never participated in the SQL filter
-    and falsely implied the helper accepted an agent filter.  PR 5c
-    drops the kwarg and reads :attr:`FactStore.agent_id` off the
-    store at the log site.
+    ``stimulus`` (RFC 0026 topic amendment / RFC 0049 P1) — the
+    formatted event text; when supplied, topic subjects mentioned in
+    it join the person seeds via :mod:`.topic_seeds`.  Gated BEHIND
+    the person-seed short-circuit so sender-less events (TICK) still
+    issue zero DB round-trips.
+
+    Signature note (PR 5c — PR #341 review N-2): the earlier
+    ``agent_id`` kwarg fed only the WARNING template while
+    :meth:`FactStore.recall` already filters by its own agent id (RFC
+    0008 §H ACL), so PR 5c dropped it; logs use ``store.agent_id``.
     """
     if fact_store is None:
         return []
     seeds = _subject_seeds(event)
     if not seeds:
         return []
+    seeds = seeds + await topic_subject_seeds(
+        fact_store, stimulus, exclude=set(seeds),
+    )
     collected: list[Fact] = []
     seen_ids: set[str] = set()
     for subject in seeds:
@@ -328,12 +331,10 @@ def render_facts_section(
     --------------------------------------------
     ``facts_tokens_used`` accumulates item-line tokens only; each
     per-subject header is charged against the global
-    :class:`MemoryBudget` but *not* against the slice.  The real
-    upper bound on the tier's global-budget consumption is therefore
-    ``facts_budget_tokens + N_subjects × header_tokens`` rather than
-    the slice alone.  Today that overage is at most ~10 tokens (two
-    seeds: ``self`` + sender, ~5 tokens each); future RFCs that add
-    mentioned-entity seeds will widen it linearly with seed count.
+    :class:`MemoryBudget` but *not* against the slice, so the tier's
+    real global-budget bound is ``facts_budget_tokens + N_subjects ×
+    header_tokens``.  With topic seeding (RFC 0049 P1) N_subjects is
+    at most ``2 + TOPIC_SEED_LIMIT`` (~5 tokens per header).
     Operators tuning ``memory.facts.budget_tokens`` should account
     for this overhead — the slice is a soft floor on item-line
     tokens, not a hard cap on the tier.

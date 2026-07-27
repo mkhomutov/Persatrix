@@ -24,9 +24,15 @@ on the same ``subject`` column as user-facing ones.
 
 from __future__ import annotations
 
+import re
+
 __all__ = [
+    "MAX_OBJECT_CHARS",
+    "MAX_SUBJECT_CHARS",
     "PREDICATE_ALLOWLIST",
+    "TOPIC_PREDICATES",
     "canonicalize_subject",
+    "validate_object",
     "validate_predicate",
 ]
 
@@ -78,6 +84,47 @@ PREDICATE_ALLOWLIST: frozenset[str] = frozenset({
     "self.committed_to",
     "self.has_attribute",
 })
+
+
+# Topic-subject class (RFC 0026 topic-predicate amendment — RFC 0049
+# Phase 1).  Kept as its own frozenset because the recall-seeding SQL
+# (:meth:`FactStore.topic_subjects`) enumerates exactly this subset;
+# the drift pin in ``test_fact_predicates.py`` asserts it equals the
+# ``topic.``-prefixed slice of the combined allowlist.  Same closed-set
+# discipline: a new topic verb is a deliberate amendment + PR.
+TOPIC_PREDICATES: frozenset[str] = frozenset({
+    "topic.has_status",
+    "topic.has_deadline",
+    "topic.decided",
+    "topic.owned_by",
+})
+
+PREDICATE_ALLOWLIST = PREDICATE_ALLOWLIST | TOPIC_PREDICATES
+
+
+# ─── Blast-radius bounds (topic amendment §Security gate) ───
+#
+# Free-text topic subjects widen what an adversarial channel can induce
+# the extractor to persist, so the amendment re-ran the allowlist
+# blast-radius review and pinned three storage-boundary bounds:
+#
+# * MAX_SUBJECT_CHARS — a subject is a short canonical name, never a
+#   sentence.  120 chars (post-normalization) leaves generous headroom
+#   for person display names, participant ids, and multi-word topic
+#   names while capping what a stored subject can re-inject via the
+#   ``Known facts about <subject>:`` prompt header.
+# * MAX_OBJECT_CHARS — an object is one short phrase.  400 chars caps
+#   the stored payload of a single induced tuple (the prompt-side cost
+#   is already budget-bounded; this bounds the at-rest surface and the
+#   rejected-tuple discovery log).
+# * _DELIMITER_ESCAPE_RE — no stored subject/object may open or close
+#   an RFC 0009 ``<external_data>`` envelope when re-rendered into a
+#   prompt (fact lines render OUTSIDE the quarantine envelope, so an
+#   embedded closing tag could forge an envelope boundary for adjacent
+#   wrapped content).
+MAX_SUBJECT_CHARS: int = 120
+MAX_OBJECT_CHARS: int = 400
+_DELIMITER_ESCAPE_RE = re.compile(r"</?external_data", re.IGNORECASE)
 
 
 def validate_predicate(predicate: str) -> None:
@@ -148,4 +195,46 @@ def canonicalize_subject(raw: str) -> str:
     if not raw or not raw.strip():
         raise ValueError("subject must not be empty")
     normalised = " ".join(raw.strip().casefold().split())
+    # Topic-amendment blast-radius bounds — applied post-normalization
+    # so padding cannot dodge the length check, and applied to EVERY
+    # subject (person and topic share one column; the write path cannot
+    # tell them apart at canonicalization time).  The recall side fails
+    # closed: an over-bound query subject raises here and the callers'
+    # existing defensive branches drop the seed (``_subject_seeds``) or
+    # skip the tier (``recall_facts_for_event``).
+    if len(normalised) > MAX_SUBJECT_CHARS:
+        raise ValueError(
+            f"subject exceeds {MAX_SUBJECT_CHARS} chars "
+            "(topic amendment blast-radius bound)",
+        )
+    if _DELIMITER_ESCAPE_RE.search(normalised):
+        raise ValueError(
+            "subject must not contain an external_data delimiter "
+            "(RFC 0009 envelope escape)",
+        )
     return normalised
+
+
+def validate_object(value: str) -> None:
+    """Reject an unsafe fact ``object`` at the storage boundary.
+
+    Topic-amendment blast-radius bounds (see the constants block):
+    empty / whitespace-only, over-``MAX_OBJECT_CHARS``, and any value
+    carrying an RFC 0009 ``<external_data>`` delimiter all raise
+    ``ValueError``.  Enforced by :meth:`FactStore.store` so every
+    write path — extractor, operator-seeded, test fixture — is bound;
+    the extractor's per-tuple try-block absorbs the rejection as one
+    ``agent.facts.extraction_failed`` count without dropping the batch.
+    """
+    if not value or not value.strip():
+        raise ValueError("object must not be empty")
+    if len(value) > MAX_OBJECT_CHARS:
+        raise ValueError(
+            f"object exceeds {MAX_OBJECT_CHARS} chars "
+            "(topic amendment blast-radius bound)",
+        )
+    if _DELIMITER_ESCAPE_RE.search(value):
+        raise ValueError(
+            "object must not contain an external_data delimiter "
+            "(RFC 0009 envelope escape)",
+        )

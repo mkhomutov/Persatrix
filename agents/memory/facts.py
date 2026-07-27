@@ -39,10 +39,15 @@ from ._facts_erasure import delete_by_subject as _delete_by_subject
 from ._facts_reinforce import mark_recalled_for_agent as _mark_recalled_for_agent
 from ._facts_supersede import apply_supersession as _apply_supersession
 from ._facts_supersede import retract_fact as _retract_fact
+from ._facts_topics import topic_subjects_for_agent as _topic_subjects_for_agent
 from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 from ._principal_filter import principal_eq_clause, resolve_active_principal
 from ._session_filter import _resolve_session_list, session_in_clause
-from .fact_predicates import canonicalize_subject, validate_predicate
+from .fact_predicates import (
+    canonicalize_subject,
+    validate_object,
+    validate_predicate,
+)
 from .fact_types import _FACT_COLS, _FACT_SELECT, Fact
 from .migrations import _apply_migrations
 
@@ -208,6 +213,10 @@ class FactStore:
                 f"certainty must be in [0.0, 1.0], got {certainty}",
             )
         self._predicate_validator(predicate)
+        # Topic-amendment blast-radius bound: object length + RFC 0009
+        # delimiter escape, enforced at the storage boundary so every
+        # write path (extractor, operator-seeded, fixtures) is covered.
+        validate_object(object)
         # Canonicalise after the empty-check so the ValueError text
         # stays familiar; ``canonicalize_subject`` is idempotent so
         # the production write path (extractor pre-canonicalises) is
@@ -396,6 +405,28 @@ class FactStore:
     async def mark_recalled(self, fact_ids: Iterable[str], *, at: float | None = None) -> None:
         # RFC 0026 PR 4 — see :mod:`._facts_reinforce` for §G rationale.
         await _mark_recalled_for_agent(self._ensure_db(), self._agent_id, fact_ids, at=at)
+
+    async def topic_subjects(self, *, limit: int = 200) -> list[str]:
+        """Distinct live ``topic.*`` subjects, most-recent-first.
+
+        The recall-seeding enumeration (RFC 0026 topic amendment /
+        RFC 0049 P1) — scoped exactly like :meth:`recall` (agent +
+        §D-default sessions + principal + epoch) so PR 1 widens
+        capture without pre-widening scope.  See
+        :mod:`agents.memory._facts_topics` for the SQL body.
+        """
+        return await _topic_subjects_for_agent(
+            self._ensure_db(),
+            agent_id=self._agent_id,
+            limit=min(limit, _MAX_RECALL_LIMIT * 2),
+            session_list=_resolve_session_list(
+                None, self._active_session_id,
+            ),
+            principal_id=resolve_active_principal(
+                self._active_principal_id,
+            ),
+            epoch_id=resolve_active_epoch(self._active_epoch_id),
+        )
 
     # ─── Retraction / cleanup ──────────────────────────────
 
