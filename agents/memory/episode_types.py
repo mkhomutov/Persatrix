@@ -70,6 +70,12 @@ class Episode:
     # the gate (rule (c)), never here.
     protection_level: str = PROTECTION_LEVEL_DEFAULT
     source_channel_id: str | None = None
+    # RFC 0049 PR 3 (L1 amendment): the row's room (RFC 0031 v7 column),
+    # projected so the cross-room shadow trace can name each candidate's
+    # provenance and the PR 4 measurement can split same-room vs
+    # cross-room.  Default matches the v7 column DEFAULT ("legacy") so a
+    # hand-built fixture round-trips.
+    session_id: str = "legacy"
 
 
 # Column list for SELECT queries — keeps row_to_episode() positional
@@ -85,6 +91,8 @@ _EPISODE_COLS = (
     "governance_interaction_id",
     # RFC 0037 §C (v16): protection columns surfaced to the §D gate.
     "protection_level", "source_channel_id",
+    # RFC 0049 PR 3: room provenance surfaced to the cross-room shadow.
+    "session_id",
 )
 EPISODE_SELECT = ", ".join(_EPISODE_COLS)
 _EPISODE_SELECT_ALIASED = ", ".join(f"e.{c}" for c in _EPISODE_COLS)
@@ -117,4 +125,6 @@ def row_to_episode(row: aiosqlite.Row) -> Episode:
         # RFC 0037 §C (migration v16): surfaced for the §D gate.
         protection_level=row[18],
         source_channel_id=row[19],
+        # RFC 0049 PR 3: room provenance for the cross-room shadow trace.
+        session_id=row[20],
     )

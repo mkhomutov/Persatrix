@@ -488,6 +488,12 @@
               "minimum": 1,
               "default": 90,
               "description": "Hard-delete compressed episodes older than this many days (per E7.2)"
+            },
+            "cross_room": {
+              "type": "string",
+              "enum": ["off", "shadow"],
+              "default": "shadow",
+              "description": "L1 cross-room episodic recall mode (RFC 0049 P1 / the RFC 0049 L1 amendment). 'shadow' (default) re-runs each channel-anchored turn's episodic recall with the RFC 0031 session wall converted to room-first RANKING (same-room boosted, other-room admissible but demoted), passes the cross-room delta through the RFC 0037 §D gate, and records it as a structured log trace WITHOUT injecting any of it into the prompt — the measurement input for the shadow→live promotion gate. 'off' skips the shadow pass entirely. 'live' arrives with the RFC 0049 PR 4 promotion; until then it is rejected here and at agent construction."
             }
           }
         },

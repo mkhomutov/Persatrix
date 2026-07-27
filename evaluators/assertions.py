@@ -79,11 +79,12 @@ class EvalRun:
     :func:`evaluators.eval_set.evaluate`. Kept deliberately small: the ordered
     assistant outputs, the terminal state map, and the flat event stream.
 
-    ``shadow_traces`` (RFC 0049 PR 2) carries the per-turn L2 cross-room
-    shadow records the driver captured off the runtime's shadow log —
-    opaque dicts here so the pure assertion core stays runtime-free. No
-    assertion vocabulary consumes them; the runner threads them into the
-    report artifact for the PR 4 shadow→live measurement gate.
+    ``shadow_traces`` (RFC 0049 PR 2/PR 3) carries the per-turn
+    cross-room shadow records (L2 facts + L1 episodes, ``tier``-keyed)
+    the driver captured off the runtime's shadow logs — opaque dicts
+    here so the pure assertion core stays runtime-free. No assertion
+    vocabulary consumes them; the runner threads them into the report
+    artifact for the PR 4 shadow→live measurement gate.
     """
 
     turn_outputs: list[str] = field(default_factory=list)

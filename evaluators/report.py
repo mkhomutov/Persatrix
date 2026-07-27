@@ -34,10 +34,11 @@ def report_to_dict(
     ``mode`` may be an ``EvalMode`` member or a string; its ``.value`` is used
     when present so the artifact records the plain mode name (``"replay"``).
 
-    ``shadow_traces`` (RFC 0049 PR 2) are the run's captured L2 cross-room
-    shadow records; included under a ``"shadow_traces"`` key only when
-    non-empty, so single-room recipes' artifacts are byte-identical to the
-    pre-shadow shape. The PR 4 shadow→live measurement gate reads them.
+    ``shadow_traces`` (RFC 0049 PR 2/PR 3) are the run's captured
+    cross-room shadow records (L2 facts + L1 episodes, ``tier``-keyed);
+    included under a ``"shadow_traces"`` key only when non-empty, so
+    single-room recipes' artifacts are byte-identical to the pre-shadow
+    shape. The PR 4 shadow→live measurement gate reads them.
     """
     mode_value = getattr(mode, "value", mode)
     rows = [{"name": r.name, "passed": r.passed, "detail": r.detail} for r in report.results]

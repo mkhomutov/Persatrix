@@ -23,7 +23,8 @@ from .channel_history import (
     render_channel_history_section,
 )
 from .channel_roster import inject_channel_roster
-from .episodic_section import render_episodic_section
+from .episodes_shadow import DEFAULT_EPISODIC_CROSS_ROOM, emit_episodes_shadow
+from .episodic_section import EPISODIC_RECALL_LIMIT, render_episodic_section
 from .facts_section import (
     DEFAULT_FACTS_BUDGET_TOKENS,
     FACTS_SECTION_NAME,
@@ -205,8 +206,9 @@ class _MemoryContextMixin:
     _fact_store: FactStore | None = None
     _facts_enabled: bool = True
     _facts_budget_tokens: int = DEFAULT_FACTS_BUDGET_TOKENS
-    # RFC 0049 PR 2 — ``memory.facts.cross_room`` (off|shadow).
+    # RFC 0049 PR 2/PR 3 — ``memory.{facts,episodic}.cross_room`` (off|shadow).
     _facts_cross_room: str = DEFAULT_FACTS_CROSS_ROOM
+    _episodic_cross_room: str = DEFAULT_EPISODIC_CROSS_ROOM
     # F-4: channel-roster fetcher, wired in ``server_persona`` like the
     # history fetcher. ``None`` (default) → no roster section, so the
     # legacy mixin harnesses and DM-only paths are unaffected.
@@ -285,16 +287,11 @@ class _MemoryContextMixin:
         if query is None:
             query = self._format_event(event)
 
-        # Always remove all three memory sections before (re-)injecting.
-        # WorkingMemory.add_section() overwrites a section by name when the
-        # tier finds results.  But when a tier finds NO results (e.g. no FTS5
-        # matches, or a TICK event that skips episodic recall), add_section()
-        # is never called — so a stale section from the previous event silently
-        # persists and contaminates the next event's LLM system prompt.
-        # Removing unconditionally here makes all three tiers symmetric:
-        # section is absent after the call if and only if no results were found.
-        # (PR #60 review F-60-R1: stale episodic_recall/recent_notes sections
-        # not cleared between events.)
+        # Always remove the memory sections before (re-)injecting: a tier
+        # with NO results never calls add_section(), so a stale section from
+        # the previous event would silently persist into this event's LLM
+        # system prompt.  Unconditional removal keeps the tiers symmetric —
+        # section present iff results found.  (PR #60 review F-60-R1.)
         self._working_memory.remove_section("episodic_recall")
         self._working_memory.remove_section(NOTES_SECTION_NAME)
         self._working_memory.remove_section(RELATIONSHIP_SECTION_NAME)
@@ -302,12 +299,9 @@ class _MemoryContextMixin:
         self._working_memory.remove_section(FACTS_SECTION_NAME)
 
         # ── Query all three tiers ──────────────────────────────────────────
-        # Sequential, not concurrent: all three share the same aiosqlite
-        # connection (same db_path).  aiosqlite serialises operations on a
-        # single connection, so concurrent gather() would not increase
-        # throughput and would add complexity.  If the tiers ever move to
-        # separate DB files, this can be revisited.
-        # (PR #60 review: document why sequential rather than gather().)
+        # Sequential, not concurrent (PR #60 review): the tiers share one
+        # aiosqlite connection, which serialises operations anyway — a
+        # gather() would add complexity for zero throughput gain.
 
         # Tier 1 (priority 8): Relationship context for the event sender.
         # Recall is delegated to ``relationship_section`` which handles
@@ -351,7 +345,7 @@ class _MemoryContextMixin:
             # PR 4: ``sessions=None`` = §D default; ``"*"`` pinned unreachable.
             episodes = await self._episodic_memory.recall(
                 query,
-                limit=5,
+                limit=EPISODIC_RECALL_LIMIT,
                 min_score=DEFAULT_EPISODIC_MIN_SCORE,
                 sessions=None,
             )
@@ -361,6 +355,14 @@ class _MemoryContextMixin:
                 self.agent_id, exc_info=True,
             )
             episodes = []
+        # RFC 0049 P1 PR 3 — L1 cross-room SHADOW (L1 amendment): log what
+        # the room-first-RANKED widened recall would inject; never enters
+        # the prompt/budget (see ``episodes_shadow``).
+        await emit_episodes_shadow(
+            self._episodic_memory, event, query=query,
+            live_episode_ids={e.id for e in episodes},
+            agent_id=self.agent_id, mode=self._episodic_cross_room,
+        )
 
         # Tier 3 (priority 6): Recent notes matching event content — all
         # event types, min_score at the DB layer (recency fallback removed,

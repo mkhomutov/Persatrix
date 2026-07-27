@@ -167,8 +167,10 @@ class _LLMPersonaAgent(
         self._fact_store = fact_store  # RFC 0026 PR 2; optional.
         from .facts_section import resolve_facts_config  # noqa: PLC0415 — RFC 0026 PR 3
         self._facts_enabled, self._facts_budget_tokens = resolve_facts_config(config)
+        from .episodes_shadow import resolve_episodic_cross_room  # noqa: PLC0415 — RFC 0049 PR 3
         from .facts_shadow import resolve_facts_cross_room  # noqa: PLC0415 — RFC 0049 PR 2
         self._facts_cross_room = resolve_facts_cross_room(config)
+        self._episodic_cross_room = resolve_episodic_cross_room(config)
         self._memory_tools = memory_tools
         self._clock, self._timezone = resolve_persona_clock(config, clock)  # RFC 0021 PR 2
         self._memory_ns = MemoryNamespace(
@@ -179,12 +181,10 @@ class _LLMPersonaAgent(
         self._lock = asyncio.Lock()
         # RFC 0020 Phase 2 (PR 2 + PR 3): per-agent in-memory
         # InteractionTracker.  Single-turn paths (TICK + tool-only) call
-        # ``add_turn`` + ``close`` in one shot from ``_on_event_inner``
-        # (``turn_count=1``); multi-turn paths (CHANNEL_MESSAGE /
-        # MENTION) accumulate under a DM-/thread-keyed scope and persist
-        # one episode on close — via session-end metadata or the
-        # :class:`IdleGapDetector` idle timeout.  Per-channel override
-        # path lands in PR 5.
+        # ``add_turn`` + ``close`` in one shot from ``_on_event_inner``;
+        # multi-turn paths (CHANNEL_MESSAGE / MENTION) accumulate under a
+        # DM-/thread-keyed scope and persist one episode on close (session-
+        # end metadata or the :class:`IdleGapDetector` idle timeout).
         memory_cfg = config.get("memory") or {}
         # PR-216 review (Should-Fix #3) + PR-3 review #19: coerce and
         # reject ``<= 0`` in one call so multi-turn aggregation cannot

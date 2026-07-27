@@ -392,3 +392,37 @@ async def test_driver_run_carries_shadow_traces_field(tmp_path: Path) -> None:
     driver = PersonaRuntimeDriver(config_resolver=_resolver())
     run = await driver.run(es, _ScriptFake(list(_REPLIES)))
     assert run.shadow_traces == []
+
+
+# ─── RFC 0049 PR 3: both shadow loggers, one merged stream ───────────────────
+
+
+def test_capture_shadow_traces_merges_both_loggers() -> None:
+    """The capture collects off BOTH shadow loggers — L2 facts and L1
+    episodes — into one stream in emission order (consumers partition on
+    each payload's ``tier`` key), and restores both loggers on exit."""
+    import logging
+
+    from agents.persona_runtime import episodes_shadow, facts_shadow
+    from evaluators.persona_driver import capture_shadow_traces
+
+    facts_logger = logging.getLogger(facts_shadow.SHADOW_LOGGER_NAME)
+    episodes_logger = logging.getLogger(episodes_shadow.SHADOW_LOGGER_NAME)
+    facts_handlers = list(facts_logger.handlers)
+    episodes_handlers = list(episodes_logger.handlers)
+    with capture_shadow_traces() as traces:
+        facts_logger.info(
+            "shadow",
+            extra={facts_shadow.SHADOW_TRACE_ATTR: {"tier": "facts"}},
+        )
+        episodes_logger.info(
+            "shadow",
+            extra={episodes_shadow.SHADOW_TRACE_ATTR: {"tier": "episodic"}},
+        )
+        facts_logger.info(
+            "shadow",
+            extra={facts_shadow.SHADOW_TRACE_ATTR: {"tier": "facts", "n": 2}},
+        )
+    assert [t.get("tier") for t in traces] == ["facts", "episodic", "facts"]
+    assert facts_logger.handlers == facts_handlers
+    assert episodes_logger.handlers == episodes_handlers
