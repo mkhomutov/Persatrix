@@ -216,9 +216,18 @@ async def store_extracted_facts(
     """
     if sender_id is not None:
         sender_id = sender_id.strip() or None
-    canonical_sender = (
-        canonicalize_subject(sender_id) if sender_id else None
-    )
+    try:
+        canonical_sender = (
+            canonicalize_subject(sender_id) if sender_id else None
+        )
+    except ValueError:
+        # Runs BEFORE the per-tuple try-block, so an exception here
+        # would drop the whole batch without even counting it (the
+        # ``extraction_failed`` emit lives at the tail).  The PR #340
+        # S3 strip above forecloses today's only raise path; this
+        # keeps that hazard closed against future normalizer-side
+        # validation by degrading to "no counterparty substitution".
+        canonical_sender = None
     # The extractor stamps unconditionally (§C): normalize once for the
     # batch — every tuple shares the one source interaction's level.
     stamped_level = normalize_for_stamp(protection_level)

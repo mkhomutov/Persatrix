@@ -113,6 +113,20 @@ async def _seed_restricted_memory(agent: _LLMPersonaAgent) -> None:
         content=f"Sunset briefing notes for {_SECRET_TOKEN}",
         protection_level="restricted",
     )
+    # Facts leg (RFC 0049 P1) — reachable ONLY through topic seeding,
+    # which is the first mechanism where an arbitrary stimulus word
+    # pulls facts into a turn's prompt.  Subject is the topic name the
+    # test stimuli mention; the token rides the object.
+    assert agent._fact_store is not None
+    await agent._fact_store.store(
+        subject="redwolf programme",
+        predicate="topic.decided",
+        object=f"sunset {_SECRET_TOKEN} next quarter",
+        source_interaction_id="int-leadership",
+        asserted_at=1000.0,
+        protection_level="restricted",
+        source_channel_id="group:leadership",
+    )
 
 
 def _event(classification: str | None, content: str) -> AgentEvent:
@@ -173,6 +187,41 @@ class TestLearnRestrictedActLower:
             await agent._inject_memory_context(
                 _event("restricted", "any news on the sunset plan?"),
                 query="sunset " + _SECRET_TOKEN,
+            )
+            assert _SECRET_TOKEN in _visible_memory(agent)
+        finally:
+            await agent.close_memory()
+
+    async def test_topic_seeded_fact_withheld_on_lower_turn(self) -> None:
+        """The facts leg of the gate, through the RFC 0049 topic-seed
+        path: naming the topic in a lower-classified room pulls the
+        fact into recall, and the §D gate withholds it before the
+        prompt.  Pins the composition end-to-end — the seeding
+        mechanism is stimulus-driven, so the gate is the only thing
+        standing between a mention and a disclosure."""
+        agent = await _make_agent()
+        try:
+            await _seed_restricted_memory(agent)
+            await agent._inject_memory_context(
+                _event("internal", "where did the redwolf programme land?"),
+                query="where did the redwolf programme land?",
+            )
+            assert _SECRET_TOKEN not in _visible_memory(agent)
+        finally:
+            await agent.close_memory()
+
+    async def test_topic_seeded_fact_visible_on_restricted_turn(
+        self,
+    ) -> None:
+        """The other half — the seed path genuinely reaches the prompt
+        when the acting classification allows it, so the withhold above
+        is the gate acting, not the seeding silently failing."""
+        agent = await _make_agent()
+        try:
+            await _seed_restricted_memory(agent)
+            await agent._inject_memory_context(
+                _event("restricted", "where did the redwolf programme land?"),
+                query="where did the redwolf programme land?",
             )
             assert _SECRET_TOKEN in _visible_memory(agent)
         finally:

@@ -420,7 +420,12 @@ class TestShippedSnippetsByteIdentity:
             "Valid predicates (use ONLY these verbs): {predicate_list}.\n"
             "Use `self` as the subject for introspective tuples about the "
             "agent itself (paired with a `self.*` predicate); use the "
-            "counterparty's display name for tuples about them."
+            "counterparty's display name for tuples about them.\n"
+            "For `topic.*` predicates, use the canonical short name of "
+            "the project, artifact, or initiative discussed as the "
+            "subject (e.g. `atlas`, `q3 roadmap`) — a few words at "
+            "most, never a sentence or a quote. Keep every `object` a "
+            "single short phrase."
         )
         assert load_snippet(
             "fact-extractor-suffix", repo_root=self.PROD_REPO_ROOT,

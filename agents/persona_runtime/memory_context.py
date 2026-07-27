@@ -326,16 +326,16 @@ class _MemoryContextMixin:
             self._episodic_memory, event, agent_id=self.agent_id,
         )
 
-        # Facts tier (RFC 0026 PR 3) — recall declarative facts about
-        # the canonical sender so the dementia-test core invariant
-        # holds (fact stored at N injected at N+1 even when the
-        # follow-up query does not mention the subject string).
-        # ``recall_facts_for_event`` returns ``[]`` when the tier is
-        # disabled via config (``_fact_store is None``), when the
-        # event has no resolvable sender, or when the backend raises;
-        # all three branches are non-fatal here.
+        # Facts tier (RFC 0026 PR 3) — declarative facts about the
+        # canonical sender (dementia-test invariant: stored at N,
+        # injects at N+1 without subject-string overlap) plus topic
+        # subjects ``query`` mentions (RFC 0049 P1 — raw content for
+        # channel messages, formatted otherwise).  Returns ``[]`` when
+        # disabled / sender-less / backend raises — all non-fatal.
         if self._facts_enabled:
-            facts = await recall_facts_for_event(self._fact_store, event)
+            facts = await recall_facts_for_event(
+                self._fact_store, event, stimulus=query,
+            )
         else:
             facts = []
 
