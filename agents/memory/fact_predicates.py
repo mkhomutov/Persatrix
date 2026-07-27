@@ -34,6 +34,7 @@ __all__ = [
     "canonicalize_subject",
     "validate_object",
     "validate_predicate",
+    "validate_subject",
 ]
 
 
@@ -106,7 +107,15 @@ PREDICATE_ALLOWLIST = PREDICATE_ALLOWLIST | TOPIC_PREDICATES
 #
 # Free-text topic subjects widen what an adversarial channel can induce
 # the extractor to persist, so the amendment re-ran the allowlist
-# blast-radius review and pinned three storage-boundary bounds:
+# blast-radius review and pinned these bounds.  They are enforced at
+# the **write** boundary only (:meth:`FactStore.store` calls
+# :func:`validate_subject` / :func:`validate_object`) — deliberately
+# NOT inside :func:`canonicalize_subject`, which stays a pure
+# normalizer.  Read paths canonicalize too (recall queries, seed
+# derivation, the RFC 0013 erasure traversal), and a bound that raised
+# there would turn a pre-amendment over-bound row into an unreadable —
+# and unerasable — row, and would drop the persona's ``self`` seed on
+# the way past.  Writes fail closed; reads stay total.
 #
 # * MAX_SUBJECT_CHARS — a subject is a short canonical name, never a
 #   sentence.  120 chars (post-normalization) leaves generous headroom
@@ -117,14 +126,32 @@ PREDICATE_ALLOWLIST = PREDICATE_ALLOWLIST | TOPIC_PREDICATES
 #   the stored payload of a single induced tuple (the prompt-side cost
 #   is already budget-bounded; this bounds the at-rest surface and the
 #   rejected-tuple discovery log).
+# * _CONTROL_CHAR_RE — a stored value may not carry a line break or
+#   other control character.  Fact lines render as ``- subj pred obj``
+#   inside a section whose per-subject ``Known facts about …:`` header
+#   is the persona-inversion guard (facts_section §M-2); an embedded
+#   newline lets one stored object forge a second, fabricated header
+#   block (e.g. a ``self`` block) inside the tier's own framing.
+#   Subjects are immune by construction — ``canonicalize_subject``
+#   collapses all Unicode whitespace via ``str.split()`` — so this is
+#   the object-side twin of that normalization.
 # * _DELIMITER_ESCAPE_RE — no stored subject/object may open or close
 #   an RFC 0009 ``<external_data>`` envelope when re-rendered into a
 #   prompt (fact lines render OUTSIDE the quarantine envelope, so an
 #   embedded closing tag could forge an envelope boundary for adjacent
-#   wrapped content).
+#   wrapped content).  Whitespace-tolerant on purpose, mirroring
+#   ``agents.security._EXTERNAL_DATA_TAG_RE`` (PR #253 deep-review L1):
+#   strict matching leaves a covert-bypass channel for any tokeniser
+#   more permissive than ``re``, and the subject path makes that worse
+#   — canonicalization folds ``<\t/external_data>`` into a
+#   space-separated variant that a strict pattern would miss.  Defined
+#   locally rather than imported so ``agents.memory`` keeps no
+#   dependency on ``agents.security``; the tag-prefix shape is pinned
+#   against the canonical pattern by a drift test.
 MAX_SUBJECT_CHARS: int = 120
 MAX_OBJECT_CHARS: int = 400
-_DELIMITER_ESCAPE_RE = re.compile(r"</?external_data", re.IGNORECASE)
+_CONTROL_CHAR_RE = re.compile("[\\x00-\\x1f\\x7f\\x85\\u2028\\u2029]")
+_DELIMITER_ESCAPE_RE = re.compile(r"<\s*/?\s*external_data", re.IGNORECASE)
 
 
 def validate_predicate(predicate: str) -> None:
@@ -195,35 +222,48 @@ def canonicalize_subject(raw: str) -> str:
     if not raw or not raw.strip():
         raise ValueError("subject must not be empty")
     normalised = " ".join(raw.strip().casefold().split())
-    # Topic-amendment blast-radius bounds — applied post-normalization
-    # so padding cannot dodge the length check, and applied to EVERY
-    # subject (person and topic share one column; the write path cannot
-    # tell them apart at canonicalization time).  The recall side fails
-    # closed: an over-bound query subject raises here and the callers'
-    # existing defensive branches drop the seed (``_subject_seeds``) or
-    # skip the tier (``recall_facts_for_event``).
-    if len(normalised) > MAX_SUBJECT_CHARS:
+    return normalised
+
+
+def validate_subject(subject: str) -> None:
+    """Reject an unsafe fact ``subject`` at the **write** boundary.
+
+    Topic-amendment blast-radius bounds (see the constants block):
+    over-:data:`MAX_SUBJECT_CHARS` or carrying an RFC 0009
+    ``<external_data>`` delimiter.  Expects the canonical form —
+    :meth:`FactStore.store` canonicalizes first, so the length check
+    is post-normalization and padding cannot dodge it.
+
+    Deliberately NOT called from :func:`canonicalize_subject`: read
+    paths canonicalize too, and raising there would make a
+    pre-amendment over-bound row unreadable (and unerasable via the
+    RFC 0013 subject traversal) while also dropping the persona's
+    ``self`` seed on the way past.  Writes fail closed; reads stay
+    total, and no row that passes here can be written over the bound.
+    """
+    if len(subject) > MAX_SUBJECT_CHARS:
         raise ValueError(
             f"subject exceeds {MAX_SUBJECT_CHARS} chars "
             "(topic amendment blast-radius bound)",
         )
-    if _DELIMITER_ESCAPE_RE.search(normalised):
+    if _DELIMITER_ESCAPE_RE.search(subject):
         raise ValueError(
             "subject must not contain an external_data delimiter "
             "(RFC 0009 envelope escape)",
         )
-    return normalised
 
 
 def validate_object(value: str) -> None:
-    """Reject an unsafe fact ``object`` at the storage boundary.
+    """Reject an unsafe fact ``object`` at the **write** boundary.
 
     Topic-amendment blast-radius bounds (see the constants block):
-    empty / whitespace-only, over-``MAX_OBJECT_CHARS``, and any value
-    carrying an RFC 0009 ``<external_data>`` delimiter all raise
-    ``ValueError``.  Enforced by :meth:`FactStore.store` so every
-    write path — extractor, operator-seeded, test fixture — is bound;
-    the extractor's per-tuple try-block absorbs the rejection as one
+    empty / whitespace-only, over-:data:`MAX_OBJECT_CHARS`, any
+    control character (a newline would let one stored object forge a
+    second ``Known facts about …:`` header block inside the facts
+    tier's own framing), and any RFC 0009 ``<external_data>``
+    delimiter.  Enforced by :meth:`FactStore.store` so every write
+    path — extractor, operator-seeded, test fixture — is bound; the
+    extractor's per-tuple try-block absorbs a rejection as one
     ``agent.facts.extraction_failed`` count without dropping the batch.
     """
     if not value or not value.strip():
@@ -232,6 +272,11 @@ def validate_object(value: str) -> None:
         raise ValueError(
             f"object exceeds {MAX_OBJECT_CHARS} chars "
             "(topic amendment blast-radius bound)",
+        )
+    if _CONTROL_CHAR_RE.search(value):
+        raise ValueError(
+            "object must not contain control characters "
+            "(fabricated-section-header escape)",
         )
     if _DELIMITER_ESCAPE_RE.search(value):
         raise ValueError(

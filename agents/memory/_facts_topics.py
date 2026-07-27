@@ -15,20 +15,32 @@ retrieval leg of the RFC 0049 scenario-2 capture path.
 Scope discipline (PR 1 vs PR 2)
 -------------------------------
 The query applies the SAME agent / session §D-default / principal /
-epoch filters as :meth:`FactStore.recall`.  PR 1 widens *capture* only;
-the cross-room L2 *scope* widening is RFC 0049 PR 2 — until it lands, a
-topic subject taught in another room must not seed here, or the recall
-wall would be bypassed pre-gate.
+epoch filters as :meth:`FactStore.recall` — it adds no scope of its
+own.  Note what this does **not** say: the facts tier has never
+carried a room filter (``source_channel_id`` is provenance, not a
+predicate, on either path), so same-level cross-room fact visibility
+is the pre-existing behaviour governed by the RFC 0037 §D egress gate,
+not something this module opens or closes.  RFC 0049 PR 2 owns the
+explicit L2 widening and its shadow-mode plumbing.
 
 The predicate filter enumerates :data:`TOPIC_PREDICATES` as an IN-list
 (closed allowlist ⇒ equality set, no LIKE pattern) so the SQL cannot
 drift wider than the vocabulary; the drift pin in
 ``test_fact_predicates.py`` holds the frozenset equal to the dotted
 ``topic.`` slice of the combined allowlist.
+
+Cost note: ``limit`` bounds the rows returned (and therefore the
+per-event matching work), NOT the DB-side scan — the ``LIMIT`` applies
+after ``GROUP BY``, and there is no index on ``predicate``, so SQLite
+scans the agent's fact rows once per stimulus-bearing event.  Fine at
+realistic store sizes; a covering ``(agent_id, predicate, asserted_at)``
+index is the follow-up if the tier ever grows hot (it needs a
+migration, so it is not this PR's business).
 """
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import TYPE_CHECKING
 
 from ._epoch_filter import epoch_eq_clause
@@ -39,7 +51,28 @@ from .fact_predicates import TOPIC_PREDICATES
 if TYPE_CHECKING:
     import aiosqlite
 
-__all__ = ["topic_subjects_for_agent"]
+__all__ = ["predicate_in_clause", "topic_subjects_for_agent"]
+
+
+def predicate_in_clause(
+    predicates: Collection[str] | None,
+) -> tuple[str, list[str]]:
+    """Build the ``" AND predicate IN (?, …)"`` fragment + params.
+
+    ``None`` → ``("", [])`` (unfiltered — the person-seed recall path,
+    which must still see every predicate class about a counterparty).
+    A collection → a sorted IN-list, so the same predicate set always
+    renders the same SQL (golden-trace portability) and an empty
+    collection yields ``IN ()``-free ``1 = 0``: an explicitly empty
+    filter matches nothing rather than silently matching everything.
+    """
+    if predicates is None:
+        return "", []
+    ordered = sorted(predicates)
+    if not ordered:
+        return " AND 1 = 0", []
+    placeholders = ", ".join("?" for _ in ordered)
+    return f" AND predicate IN ({placeholders})", ordered
 
 
 async def topic_subjects_for_agent(
@@ -71,11 +104,11 @@ async def topic_subjects_for_agent(
     epoch_clause, epoch_params = epoch_eq_clause(
         epoch_id, column="epoch_id",
     )
-    predicates = sorted(TOPIC_PREDICATES)
-    placeholders = ", ".join("?" for _ in predicates)
+    pred_clause, pred_params = predicate_in_clause(TOPIC_PREDICATES)
     sql = (
         "SELECT subject FROM facts "
-        f"WHERE agent_id = ? AND predicate IN ({placeholders}) "
+        "WHERE agent_id = ?"
+        f"{pred_clause} "
         "AND superseded_by IS NULL"
         f"{sess_clause}{princ_clause}{epoch_clause} "
         "GROUP BY subject "
@@ -83,7 +116,7 @@ async def topic_subjects_for_agent(
     )
     async with db.execute(
         sql, (
-            agent_id, *predicates, *sess_params, *princ_params,
+            agent_id, *pred_params, *sess_params, *princ_params,
             *epoch_params, limit,
         ),
     ) as cursor:

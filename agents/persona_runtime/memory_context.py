@@ -329,8 +329,8 @@ class _MemoryContextMixin:
         # Facts tier (RFC 0026 PR 3) — declarative facts about the
         # canonical sender (dementia-test invariant: stored at N,
         # injects at N+1 without subject-string overlap) plus topic
-        # subjects the stimulus mentions (RFC 0049 P1; ``stimulus=
-        # query`` reuses the formatted event).  Returns ``[]`` when
+        # subjects ``query`` mentions (RFC 0049 P1 — raw content for
+        # channel messages, formatted otherwise).  Returns ``[]`` when
         # disabled / sender-less / backend raises — all non-fatal.
         if self._facts_enabled:
             facts = await recall_facts_for_event(

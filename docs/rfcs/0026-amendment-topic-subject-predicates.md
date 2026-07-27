@@ -75,10 +75,14 @@ makes the scenario reachable.
 
 4. **Scope discipline (PR 1 vs PR 2)** — `topic_subjects()` applies the
    SAME agent / session-§D-default / principal / epoch filters as
-   `FactStore.recall`. This amendment widens *capture* only; the
-   cross-room L2 *scope* widening is RFC 0049 PR 2 and stays behind the
-   RFC 0037 gate. Until PR 2, a topic taught in another room does not
-   seed — the recall wall is not bypassed pre-gate.
+   `FactStore.recall`, and adds no scope of its own. Stated precisely,
+   because the obvious phrasing would be wrong: the facts tier has
+   never carried a *room* filter on either path (`source_channel_id` is
+   provenance, not a predicate), so same-level cross-room fact
+   visibility is pre-existing behaviour governed by the RFC 0037 §D
+   egress gate — this amendment neither opens nor closes it. What it
+   does not do is add the explicit L2 widening or its shadow-mode
+   measurement plumbing; those are RFC 0049 PR 2.
 
 5. **Protection stamping** — unchanged: a topic fact is stamped from its
    source interaction per RFC 0037 §C (`store_extracted_facts` stamps the
@@ -101,46 +105,89 @@ operator-seeded, fixture — is covered:
   closed frozenset; `topic.*` adds four verbs, not a namespace wildcard.
   An adversarial verb still rejects at the storage boundary and feeds the
   existing rejected-predicate discovery log.
+* **The seed set is the real widening — topic seeds are predicate-scoped.**
+  The review's sharpest finding, and it reverses this amendment's first
+  draft (which dismissed subject–predicate pairing as cosmetic). Seeding
+  makes the *subject* an attacker-reachable key: one induced
+  `("bob", "topic.owned_by", "atlas")` tuple — phrasable as "the bob
+  workstream is owned by atlas" — permanently turns the string `bob`
+  into a recall seed, and `FactStore.recall` is not predicate-scoped, so
+  **every** private fact about Bob would then load into any later turn
+  merely mentioning him, from any sender. Pre-amendment those rows
+  entered a turn only when Bob was the counterparty. Fix: a topic seed
+  recalls only `TOPIC_PREDICATES` rows (`FactStore.recall(predicates=…)`);
+  the person-seed path stays unscoped, which is correct — a counterparty's
+  own turn should surface everything about them.
 * **Subject canonicalization limits.** Free-text topic subjects are the
-  new surface: an induced tuple's subject is stored and later re-rendered
-  into prompts via the `Known facts about <subject>:` header.
-  `canonicalize_subject` now enforces `MAX_SUBJECT_CHARS = 120`
-  **post-normalization** (padding cannot dodge the bound) on every
-  subject — person and topic share one column and are indistinguishable
-  at canonicalization time. The read side fails closed: an over-bound
-  query subject raises and the existing defensive branches drop the seed.
-* **Object length bounds.** New `validate_object`: `MAX_OBJECT_CHARS =
-  400`, empty/whitespace rejected. The prompt-side cost was already
-  budget-bounded (RFC 0017 admission); this bounds the at-rest payload of
-  a single induced tuple and the rejected-tuple log surface. The
-  extractor's per-tuple try-block absorbs a rejection as one
-  `agent.facts.extraction_failed` count without dropping the batch.
+  next surface: an induced subject is stored and later re-rendered into
+  prompts via the `Known facts about <subject>:` header. New
+  `validate_subject` enforces `MAX_SUBJECT_CHARS = 120` on the canonical
+  form (padding cannot dodge the bound) for every subject — person and
+  topic share one column and are indistinguishable at write time.
+  Enforced at the **write** boundary only, deliberately: read paths
+  canonicalize too (recall queries, seed derivation, the RFC 0013
+  erasure traversal), and a bound that raised there would make a
+  pre-amendment over-bound row unreadable *and unerasable*, and would
+  drop the persona's `self` seed on the way past. Writes fail closed;
+  reads stay total.
+* **Object length + control characters.** New `validate_object`:
+  `MAX_OBJECT_CHARS = 400`, empty/whitespace rejected, and **no control
+  characters**. The last is not cosmetic — fact lines render as
+  `- subj pred obj` under a per-subject header, so an object carrying a
+  newline forges a second, fabricated `Known facts about self:` block
+  inside the tier's own framing: exactly the persona-inversion footgun
+  the subject-templated header exists to prevent. Subjects are immune by
+  construction (`canonicalize_subject` collapses all Unicode whitespace);
+  this is the object-side twin. The extractor's per-tuple try-block
+  absorbs a rejection as one `agent.facts.extraction_failed` count
+  without dropping the batch.
 * **RFC 0009 delimiter escape.** Fact lines render OUTSIDE the
   `<external_data>` quarantine envelope, so a stored subject/object
   embedding `</external_data>` (or an opening tag) could forge an
-  envelope boundary for adjacent wrapped content. Both fields now reject
-  any value matching `</?external_data` (case-insensitive) at the
-  storage boundary.
+  envelope boundary for adjacent wrapped content. Both fields reject it
+  at the storage boundary, **whitespace-tolerantly**
+  (`<\s*/?\s*external_data`), mirroring `agents.security`'s canonical
+  pattern: a strict pattern leaves a covert-bypass channel for any
+  tokeniser more permissive than `re` (PR #253 deep-review L1), and the
+  subject path makes that worse — canonicalization folds
+  `<\t/external_data>` into a space-separated variant a strict pattern
+  would miss. A drift test pins the local pattern against the canonical
+  one.
 * **Seeding surface.** The read path adds **no** LLM step: matching is a
   bounded string scan (`TOPIC_SUBJECT_SCAN_LIMIT = 200` recent subjects,
   ≤ `TOPIC_SEED_LIMIT = 3` seeds/event, word-boundary so `atlas` does
-  not fire inside `atlases`). A hostile stimulus can at most trigger
-  recall of facts the store already holds for this agent in this scope —
-  and every recalled row still passes the RFC 0037 §D injection gate.
-* **Considered and deferred: subject–predicate namespace pairing.** A
-  tuple like `("self", "topic.decided", …)` is semantically odd but
-  harmless; the shipped `self.*` class has the same property (prompt
-  instructs the pairing, storage does not enforce it). Enforcing pairing
-  is a predicate-registry concern (the future registry the dotted
-  convention reserves), not a blast-radius hole — no new injection power
-  derives from a mismatched pairing.
+  not fire inside `atlases`). Two eligibility rules close a slot-stealing
+  hole the review found: because the scan is most-recently-asserted-first
+  and matching stops at the cap, whoever wrote the newest topic row gets
+  first claim on the seeds — so a subject below `TOPIC_SEED_MIN_CHARS`
+  or in the function-word set (`the`, `you`, …) never seeds, since one
+  induced tuple named `the` would otherwise occupy every slot on every
+  subsequent turn. With those in place a hostile stimulus can at most
+  trigger recall of topic rows the store already holds for this agent in
+  this scope — and every recalled row still passes the RFC 0037 §D
+  injection gate (pinned end-to-end, not just structurally).
+* **Named residual: subjects render unquarantined.** A stored subject
+  reaches the prompt verbatim in its header, so a 120-char subject is
+  120 chars of attacker-chosen text in the system prompt. This
+  **pre-dates** the amendment (the extractor has always stored
+  LLM-proposed person subjects) and is bounded by the length cap, the
+  control-character and delimiter rejections, and the RFC 0009 framing
+  that instructs the persona to treat memory as data. Recorded as a
+  known residual rather than silently inherited — filed as
+  [ISSUE-0116](../issues/ISSUE-0116-fact-subject-renders-unquarantined.md);
+  a subject-side grammar belongs with the future predicate registry.
 
 ## Test strategy (as landed)
 
 `test_fact_predicates.py` (vocabulary + bounds + drift pin),
 `test_topic_seeds.py` (store query scoping/determinism, pure matching,
 seed wiring incl. the preserved TICK short-circuit, §C stamping
-inheritance), byte re-pins for the prompt. The two RFC 0044 goldens
-(`EVAL-MEMORY-001`/`EVAL-WORKING-001`) were re-recorded offline — the
-widened `{predicate_list}` shifts every close-path request hash — and
-replay green, preserving the dementia-continuity tripwire.
+inheritance), plus the facts leg of the §D gate end-to-end in
+`tests/integration/test_confidentiality_gate.py` (a `restricted` topic
+fact named from an `internal` room is withheld; the same turn at
+`restricted` sees it — so the withhold is the gate acting, not the
+seeding silently failing) and byte re-pins for the prompt. Both RFC
+0044 goldens were re-recorded offline and replay green (only
+`EVAL-MEMORY-001` actually shifted — the widened `{predicate_list}`
+moves close-path request hashes, and it is the recipe with close-path
+calls), preserving the dementia-continuity tripwire.

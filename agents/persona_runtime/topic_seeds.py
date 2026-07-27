@@ -23,6 +23,11 @@ Bounds (amendment §Security):
 * at most ``TOPIC_SEED_LIMIT`` topic seeds join the person seeds, so
   the per-seed recall fan-out and the per-subject header overage in
   ``render_facts_section`` stay bounded;
+* a topic seed recalls ONLY topic rows (the caller passes
+  ``TOPIC_PREDICATES``), so an induced ``topic.*`` tuple about a
+  person cannot turn that person's name into a general fact-read key;
+* subjects below ``TOPIC_SEED_MIN_CHARS`` or in the function-word set
+  never seed — see ``_seed_eligible``;
 * matching is word-boundary on the canonical fold, so ``atlas`` does
   not fire inside ``atlases`` (over-seeding burns budget, not safety —
   but bounded is bounded).
@@ -63,6 +68,33 @@ TOPIC_SEED_LIMIT: int = 3
 # most-recently-asserted-first order means the live working set wins.
 TOPIC_SUBJECT_SCAN_LIMIT: int = 200
 
+# Seeding eligibility (amendment §Security).  A subject this short, or
+# one that is nothing but function words, matches almost every message
+# — and because the scan is most-recently-asserted-first, whoever wrote
+# the newest topic row gets first claim on the seed slots.  Together
+# that let one induced tuple named ``the`` occupy every slot on every
+# subsequent turn.  Eligibility is a READ-side rule: such rows still
+# store (they may be legitimate), they just do not seed.
+TOPIC_SEED_MIN_CHARS: int = 3
+
+# Deliberately tiny — the highest-frequency English function words that
+# survive the length floor.  Not a language model: the floor does the
+# heavy lifting, this closes the short-but-ubiquitous tail.
+_STOPWORD_SUBJECTS: frozenset[str] = frozenset({
+    "the", "and", "for", "you", "your", "our", "this", "that", "with",
+    "from", "have", "has", "was", "were", "are", "not", "but", "all",
+    "any", "can", "will", "what", "when", "who", "how", "why", "yes",
+    "one", "out", "get", "got", "new", "now", "day", "way", "let",
+})
+
+
+def _seed_eligible(subject: str) -> bool:
+    """Whether a canonical subject may act as a recall seed."""
+    return (
+        len(subject) >= TOPIC_SEED_MIN_CHARS
+        and subject not in _STOPWORD_SUBJECTS
+    )
+
 
 def match_topic_subjects(
     stimulus: str,
@@ -82,7 +114,7 @@ def match_topic_subjects(
     the store's most-recently-asserted-first enumeration — for
     deterministic, golden-trace-portable output.
     """
-    if not stimulus or not stimulus.strip():
+    if not isinstance(stimulus, str) or not stimulus.strip():
         return []
     folded = " ".join(stimulus.casefold().split())
     matched: list[str] = []
@@ -90,6 +122,8 @@ def match_topic_subjects(
         if len(matched) >= limit:
             break
         if subject in exclude or subject in matched:
+            continue
+        if not _seed_eligible(subject):
             continue
         if re.search(rf"(?<!\w){re.escape(subject)}(?!\w)", folded):
             matched.append(subject)
@@ -111,7 +145,17 @@ async def topic_subject_seeds(
     events never reach here), so the empty-context cost guard for TICK
     events is preserved one layer up.
     """
-    if fact_store is None or not stimulus or not stimulus.strip():
+    if (
+        fact_store is None
+        or not isinstance(stimulus, str)
+        or not stimulus.strip()
+    ):
+        # ``isinstance`` and not truthiness alone: a bridge may hand a
+        # non-str ``content`` through (``channel_ingest`` deliberately
+        # passes malformed wire values unchanged), and this runs
+        # OUTSIDE the tier's try-block — an ``AttributeError`` here
+        # would escape ``_inject_memory_context``'s "never fail the
+        # event" contract and fail the whole turn.
         return []
     try:
         subjects = await fact_store.topic_subjects(

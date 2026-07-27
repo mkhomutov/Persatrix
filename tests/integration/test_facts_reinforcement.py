@@ -141,11 +141,8 @@ class TestReinforcement:
         self, fact_store: FactStore, empty_episodic: EpisodicMemory,
     ) -> None:
         await fact_store.store(
-            subject="bob",
-            predicate="has_child_named",
-            object="Mira",
-            source_interaction_id="i1",
-            asserted_at=1000.0,
+            subject="bob", predicate="has_child_named", object="Mira",
+            source_interaction_id="i1", asserted_at=1000.0,
         )
         rows_before = await fact_store.recall(subject="bob")
         assert rows_before[0].last_recalled_at is None
@@ -340,11 +337,8 @@ class TestMultiSubjectSection:
         self, fact_store: FactStore, empty_episodic: EpisodicMemory,
     ) -> None:
         await fact_store.store(
-            subject="bob",
-            predicate="has_child_named",
-            object="Mira",
-            source_interaction_id="i1",
-            asserted_at=1000.0,
+            subject="bob", predicate="has_child_named", object="Mira",
+            source_interaction_id="i1", asserted_at=1000.0,
         )
         await fact_store.store(
             subject="self",
@@ -437,15 +431,13 @@ class TestTierProvenance:
             fid_1 = await fact_store.store(
                 subject="bob",
                 predicate="has_child_named",
-                object="Mira",
-                source_interaction_id="i1",
+                object="Mira", source_interaction_id="i1",
                 asserted_at=1000.0,
             )
             fid_2 = await fact_store.store(
                 subject="bob",
                 predicate="prefers",
-                object="tea",
-                source_interaction_id="i2",
+                object="tea", source_interaction_id="i2",
                 asserted_at=1001.0,
             )
 
@@ -481,9 +473,12 @@ class TestTickEventDoesNotQueryFactStore:
             object="sci-fi", source_interaction_id="i1",
             asserted_at=1000.0,
         )
-        original_recall = fact_store.recall
-        recall_spy = AsyncMock(side_effect=original_recall)
+        # Both round-trips are spied: topic seeding (RFC 0049 P1) is a
+        # SECOND one, and spying `recall` alone leaves this pin blind.
+        recall_spy = AsyncMock(side_effect=fact_store.recall)
+        topics_spy = AsyncMock(side_effect=fact_store.topic_subjects)
         fact_store.recall = recall_spy  # type: ignore[method-assign]
+        fact_store.topic_subjects = topics_spy  # type: ignore[method-assign]
         mixin = _wire_mixin(
             fact_store=fact_store, episodic=empty_episodic,
             format_query="tick payload",
@@ -494,6 +489,7 @@ class TestTickEventDoesNotQueryFactStore:
         )
         await mixin._inject_memory_context(tick)
         recall_spy.assert_not_called()
+        topics_spy.assert_not_called()
 
 
 if __name__ == "__main__":
