@@ -31,7 +31,7 @@ This plan covers Phase 1 across **5 PRs**:
 | 1 | capture: `topic.*` predicates + extractor + recall seeding + blast-radius review | `feature/v0312-rfc0049-post-gate-topic-capture` | ✅ Merged | [#781](https://github.com/mkhomutov/Persatrix/pull/781) | 2026-07-27 |
 | 2 | L2 fact widening, SHADOW (0031 fact-scope amendment) | `feature/v0312-rfc0049-post-gate-l2-widening` | ✅ Merged | [#782](https://github.com/mkhomutov/Persatrix/pull/782) | 2026-07-27 |
 | 3 | L1 room-first ranking, SHADOW (L1 amendment) | `feature/v0312-rfc0049-post-gate-l1-ranking` | ✅ Merged | [#783](https://github.com/mkhomutov/Persatrix/pull/783) | 2026-07-27 |
-| 4 | measurement gate → live flip (verdict GREEN — both widenings LIVE) | `feature/v0312-rfc0049-post-gate-promotion` | 🔀 PR open | — | — |
+| 4 | measurement gate → live flip (verdict GREEN — both widenings LIVE) | `feature/v0312-rfc0049-post-gate-promotion` | 🔀 PR open | [#784](https://github.com/mkhomutov/Persatrix/pull/784) | — |
 | 5 | closeout: MT + docs + ISSUE-0084 close + RFC flip | `feature/v0312-rfc0049-closeout` | ⬜ | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged
