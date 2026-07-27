@@ -94,10 +94,23 @@ class PersonaDriver(Protocol):
     async def run(self, eval_set: EvalSet, provider: Any) -> EvalRun: ...
 
 
+async def run_eval_observed(
+    eval_set: EvalSet, *, provider: Any, driver: PersonaDriver
+) -> tuple[EvalReport, EvalRun]:
+    """Drive ``eval_set`` and return both the evaluation and the observed run.
+
+    The run rides along so the suite path can thread its captured
+    ``shadow_traces`` (RFC 0049 PR 2) into the report artifact — the
+    PR 4 shadow→live measurement input.
+    """
+    run = await driver.run(eval_set, provider)
+    return evaluate(eval_set, run), run
+
+
 async def run_eval(eval_set: EvalSet, *, provider: Any, driver: PersonaDriver) -> EvalReport:
     """Drive ``eval_set`` through ``driver`` against ``provider`` and evaluate it."""
-    run = await driver.run(eval_set, provider)
-    return evaluate(eval_set, run)
+    report, _run = await run_eval_observed(eval_set, provider=provider, driver=driver)
+    return report
 
 
 # ─── recipe discovery + golden sidecar ───────────────────────────────────────
@@ -188,7 +201,7 @@ async def _run_recipe(
     mode: EvalMode,
     driver: PersonaDriver,
     config_path: str | Path,
-) -> tuple[EvalReport, EvalSet]:
+) -> tuple[EvalReport, EvalSet, EvalRun]:
     """Load one recipe, build the mode's provider, drive it, and evaluate.
 
     In ``record`` mode the captured cassette is written to the sidecar golden
@@ -200,18 +213,18 @@ async def _run_recipe(
 
     if mode is EvalMode.REPLAY:
         provider = build_provider(EvalMode.REPLAY, golden_path=golden)
-        report = await run_eval(eval_set, provider=provider, driver=driver)
-        return report, eval_set
+        report, run = await run_eval_observed(eval_set, provider=provider, driver=driver)
+        return report, eval_set, run
 
     # record / drift resolve the persona config for the live provider.
     from evaluators.persona_driver import default_config_resolver  # noqa: PLC0415
 
     agent_config = default_config_resolver(config_path)(eval_set.setup.persona)
     provider = build_provider(mode, agent_config=agent_config)
-    report = await run_eval(eval_set, provider=provider, driver=driver)
+    report, run = await run_eval_observed(eval_set, provider=provider, driver=driver)
     if mode is EvalMode.RECORD:
         dump_cassette(provider.cassette, golden)
-    return report, eval_set
+    return report, eval_set, run
 
 
 async def run_suite(
@@ -225,10 +238,15 @@ async def run_suite(
     drv = driver if driver is not None else _default_driver(config_path)
     out: list[dict[str, Any]] = []
     for recipe in recipes:
-        report, eval_set = await _run_recipe(
+        report, eval_set, run = await _run_recipe(
             recipe, mode=mode, driver=drv, config_path=config_path
         )
-        out.append(report_to_dict(report, tier=eval_set.tier, mode=mode))
+        out.append(
+            report_to_dict(
+                report, tier=eval_set.tier, mode=mode,
+                shadow_traces=run.shadow_traces,
+            )
+        )
     return out
 
 
