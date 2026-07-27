@@ -51,6 +51,16 @@ from agents.memory.shared_pool import (
 # silently wiring ``"*"``.  CLI / debug surfaces (``persatrix memory
 # recall --all-sessions``, Phase 3) are NOT on this list; they are
 # allowed to pass ``"*"`` explicitly.
+#
+# ``agents/persona_runtime/facts_shadow.py`` (RFC 0049 PR 2) is a
+# deliberate carve-out: it reads ``sessions="*"`` for the L2 cross-room
+# SHADOW pass but is NOT a prompt-context path — nothing it computes
+# touches WorkingMemory, the RFC 0017 budget, the §G manifest, or the
+# reinforcement write (its sole output is a log trace).  The §D pin's
+# F-3 property — no all-sessions content wired into the LLM prompt —
+# is held for that module by
+# ``test_facts_shadow.py::TestShadowNeverEntersPrompt`` instead of by
+# this source scan.
 PROMPT_CONTEXT_RECALL_MODULES = (
     Path("agents/persona_runtime/memory_context.py"),
     Path("agents/persona_runtime/channel_history.py"),
