@@ -12,11 +12,13 @@ working for every existing call site.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 
-__all__ = ["Fact", "_FACT_COLS", "_FACT_SELECT"]
+__all__ = ["Fact", "_FACT_COLS", "_FACT_SELECT", "row_to_fact"]
 
 
 @dataclass(frozen=True)
@@ -102,3 +104,29 @@ _FACT_COLS = (
     "source_channel_id",
 )
 _FACT_SELECT = ", ".join(_FACT_COLS)
+
+
+def row_to_fact(row: Sequence[Any]) -> Fact:
+    """Build a :class:`Fact` from a ``_FACT_SELECT`` row.
+
+    Lives beside :data:`_FACT_COLS` (rather than on ``FactStore``) so
+    the column order and the field mapping cannot drift apart across a
+    module boundary — and so :mod:`agents.memory.facts` stays under the
+    500-line review cap.
+    """
+    return Fact(
+        fact_id=row[0],
+        agent_id=row[1],
+        subject=row[2],
+        predicate=row[3],
+        object=row[4],
+        certainty=row[5],
+        source_interaction_id=row[6],
+        asserted_at=row[7],
+        last_recalled_at=row[8],
+        superseded_by=row[9],
+        session_id=row[10],
+        # RFC 0037 §C (migration v16): surfaced for the §D gate.
+        protection_level=row[11],
+        source_channel_id=row[12],
+    )

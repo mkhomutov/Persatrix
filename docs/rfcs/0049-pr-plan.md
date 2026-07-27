@@ -24,6 +24,18 @@ RFC 0049's v0.3.12 slice is **Phases 0–1**: Phase 0 is the RFC 0037 keystone (
 
 This plan covers Phase 1 across **5 PRs**:
 
+## Progress Overview
+
+| PR | Step | Branch | Status | GitHub PR | Merged |
+|----|------|--------|--------|-----------|--------|
+| 1 | capture: `topic.*` predicates + extractor + recall seeding + blast-radius review | `feature/v0312-rfc0049-post-gate-topic-capture` | 🔀 PR open | — | — |
+| 2 | L2 fact widening, SHADOW (0031 fact-scope amendment) | `feature/v0312-rfc0049-post-gate-l2-widening` | ⬜ | — | — |
+| 3 | L1 room-first ranking, SHADOW (L1 amendment) | `feature/v0312-rfc0049-post-gate-l1-ranking` | ⬜ | — | — |
+| 4 | measurement gate → live flip (or documented shadow-ship) | `feature/v0312-rfc0049-post-gate-promotion` | ⬜ | — | — |
+| 5 | closeout: MT + docs + ISSUE-0084 close + RFC flip | `feature/v0312-rfc0049-closeout` | ⬜ | — | — |
+
+**Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged
+
 ## Dependency Graph
 
 ```
