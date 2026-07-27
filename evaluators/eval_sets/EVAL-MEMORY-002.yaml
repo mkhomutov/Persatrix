@@ -1,0 +1,61 @@
+id: EVAL-MEMORY-002
+title: Cross-room carry, SHADOW posture — the RFC 0049 promotion measurement seed
+description: |
+  The RFC 0049 scenario-2 arc (a fact taught in a DM, asked about in the
+  standup) pinned in the pre-promotion SHADOW posture: `setup.memory` holds
+  both `cross_room` knobs at `shadow`, so the room-B prompt stays walled — the
+  persona cannot answer (the golden pins the walled request bytes; the curated
+  reply hedges accordingly) — while the widened recall records the would-inject
+  cross-room delta as `shadow_traces` in the report artifact.
+
+  Those traces are the RFC 0049 PR 4 measurement input: the promotion verdict
+  (`evaluators/shadow_measurement.py`, run in
+  `tests/integration/test_cross_room_seed_replay.py`) reads them off this
+  recipe's replay. The live-mode twin — same arc, promoted posture, the
+  persona answers — is EVAL-MEMORY-003. Keeping both seeds keeps both
+  postures regression-pinned: `shadow` remains the documented rollback lever.
+
+  Mechanically, `room:` binds each interaction's RFC 0031 memory session
+  (`persatrix_session` metadata — production's per-(agent, channel) session
+  binding), and the 11m gap rotates the DM interaction on the first standup
+  turn, so the close-path extractor stores the Atlas facts stamped with the
+  DM room BEFORE the asking turn runs. The golden is recorded offline
+  (`make eval-record-offline`); a live re-record rides release-prep.
+spawned_from: ../../docs/rfcs/0049-pr-plan.md
+tier: experimental
+
+setup:
+  persona: ember-owl
+  user: sam
+  session_id: EVAL-MEMORY-002-S
+  seed_state:
+    persona:ember-owl:trust.scores.sam: 0.3
+  llm_mode: replay
+  memory:
+    facts: {cross_room: shadow}
+    episodic: {cross_room: shadow}
+
+interactions:
+  # ── teach (room: the DM) ───────────────────────────────────────────────────
+  - id: i1-dm-teach
+    room: dm-sam
+    turns:
+      - user: "Quick heads-up on the Atlas launch: it ships Friday — that's the hard deadline."
+      - assistant: {match: contains, value: "Friday"}
+  # ── switch rooms (11m rotates the DM interaction → facts extract) ──────────
+  - id: i2-standup-bridge
+    room: standup
+    elapsed: 11m
+    turns:
+      - user: "Morning standup — what's on your plate today?"
+  # ── ask (room: the standup; the walled prompt cannot carry the DM fact) ────
+  - id: i3-standup-ask
+    room: standup
+    elapsed: 1m
+    turns:
+      - user: "Standup check: does Atlas have a deadline I should know about?"
+      - assistant: {match: must_not_reference, values: ["Friday"]}
+
+assertions:
+  final_transcript:
+    must_not_reference: ["[error]"]

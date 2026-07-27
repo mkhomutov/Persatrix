@@ -40,6 +40,10 @@
           "enum": ["replay", "live"],
           "default": "replay",
           "description": "`replay` (CI default) plays recorded responses from the golden; `live` calls a real provider (drift detection)."
+        },
+        "memory": {
+          "type": "object",
+          "description": "Optional per-recipe override deep-merged into the resolved persona config's `memory` block (RFC 0049 PR 4). Lets a recipe pin runtime memory knobs — e.g. `{facts: {cross_room: shadow}}` — so its golden stays stable when the shipped default changes. The driver's `:memory:` db_path force always wins over a `db_path` here (golden portability is non-negotiable)."
         }
       }
     },
@@ -61,6 +65,11 @@
           "type": "string",
           "pattern": "^[0-9]+(s|m|h|d)$",
           "description": "Simulated time elapsed since the previous interaction (RFC 0044 §B). Injected into the persona temporal-awareness layer by the runner; never real wall-clock."
+        },
+        "room": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional RFC 0031 memory room for this interaction's turns (RFC 0049 PR 4 — the cross-room seeds). The driver binds the value as the event's `persatrix_session` metadata, mirroring production's per-(agent, channel) session binding, so memory written while it is active stamps this session and default recall walls/ranks against it. Distinct `room` values across interactions = distinct rooms. Omit it everywhere (as the single-room seeds do) and the driver stays on the construction-snapshot session path, byte-identical to the pre-extension behaviour."
         },
         "turns": {
           "type": "array",

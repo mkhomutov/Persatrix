@@ -1,0 +1,28 @@
+2f14ad65badaa04eb354bb4d96205dfe7005cbb3c9424bdd285b2fc1066e8543:
+  stop_reason: end_turn
+  text: Morning! Nothing blocking on my plate — what's up in this standup?
+  usage:
+    input_tokens: 2047
+    output_tokens: 16
+7daab5e21051a8d697988cc7a114d74a8c606472be45a94bea7fe18c8da000c7:
+  stop_reason: end_turn
+  text: '{"summary": "Sam said the Atlas launch ships Friday; ember-owl acknowledged
+    the hard deadline.", "facts": [{"subject": "atlas", "predicate": "topic.has_deadline",
+    "object": "ships Friday", "certainty": 0.9}, {"subject": "sam", "predicate": "committed_to",
+    "object": "shipping Atlas by Friday", "certainty": 0.85}]}'
+  usage:
+    input_tokens: 465
+    output_tokens: 78
+a9138846d00954954ffadeff5c9e0b0f52c379499e39a4a6597a9967ccc5d173:
+  stop_reason: end_turn
+  text: I don't have a deadline on record for Atlas in this room — want me to chase
+    one down?
+  usage:
+    input_tokens: 2051
+    output_tokens: 21
+e93fa5d028b3a0640d45b339b4332fbfe041b4308424b2dfacb9a0fe982a5de2:
+  stop_reason: end_turn
+  text: Noted — the Atlas launch ships Friday. I'll hold us to that deadline.
+  usage:
+    input_tokens: 2056
+    output_tokens: 17

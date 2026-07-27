@@ -11,27 +11,33 @@ boost.  The dementia-test continuity bar is preserved as a *ranking*
 property (same-room first at equal relevance) rather than by the wall.
 
 This is the **gated cross-room episodic recall mode** the amendment
-names.  In v0.3.12 it ships SHADOW-only: the sole caller is
-:mod:`agents.persona_runtime.episodes_shadow`, which §D-gates every
-candidate and logs a trace; the live prompt path keeps ``sessions=None``
-(the wall) until the RFC 0049 PR 4 measurement-gated flip points it here.
+names.  Since the RFC 0049 PR 4 promotion it has two callers: the live
+prompt path (``memory_context``, ``cross_room: live`` — the default),
+which passes ``reinforce=True``, and the shadow pass
+(:mod:`agents.persona_runtime.episodes_shadow`, ``cross_room: shadow``),
+which keeps the default ``reinforce=False`` so the shadow stays a pure
+observer.  Every candidate still passes the RFC 0037 §D gate at the
+caller.
 
 Two deliberate differences from :meth:`EpisodicMemory.recall`:
 
-* **Side-effect-free.**  No ``access_count`` bump and no
-  ``last_accessed_at`` touch.  Load-bearing for the shadow posture: the
-  live composite score includes ``access_count``, so a shadow read that
-  reinforced would perturb the *live* ranking on later turns — the
-  shadow would stop being a pure observer, and the landed RFC 0044
-  goldens (recorded without this pass) would shift request hashes and
-  miss their cassettes.  Whether the PR 4 live flip reinforces is that
-  PR's decision, made where the promotion lands.
+* **Side-effect-free by default.**  No ``access_count`` bump and no
+  ``last_accessed_at`` touch unless ``reinforce=True``.  Load-bearing
+  for the shadow posture: the composite score includes
+  ``access_count``, so a shadow read that reinforced would perturb the
+  *live* ranking on later turns and shift the landed RFC 0044 goldens
+  off their cassettes.  The PR 4 decision (deferred here by PR 3): the
+  **promoted live read reinforces**, preserving the pre-promotion
+  live-recall contract that access strengthens memory — same UPDATE
+  shape as :meth:`EpisodicMemory.recall`, cross-room rows included
+  (a recalled-and-used episode is a used episode wherever it was
+  formed).
 * **Wall → boost.**  ``sessions``/``boost_sessions`` are mutually
-  exclusive at the query helpers; this function owns the contract —
-  it always passes ``sessions=None`` + the resolved room list as
-  ``boost_sessions``.  ``epoch`` and ``principal`` remain strict-equality
-  hard walls on every branch (cross-room is never cross-run or
-  cross-tenant).
+  exclusive — enforced at the query helpers themselves since PR 4
+  (``_reject_wall_and_boost``); this function always passes
+  ``sessions=None`` + the resolved room list as ``boost_sessions``.
+  ``epoch`` and ``principal`` remain strict-equality hard walls on
+  every branch (cross-room is never cross-run or cross-tenant).
 
 Free-function-taking-the-tier shape (the
 :func:`~agents.memory.episodic_procedural.recall_procedures` precedent)
@@ -44,6 +50,7 @@ method surface.  Private-attribute access is package-internal
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING
 
 from ._epoch_filter import resolve_active_epoch
@@ -74,6 +81,7 @@ async def recall_room_ranked(
     limit: int = 10,
     min_importance: float = 0.0,
     min_score: float | None = None,
+    reinforce: bool = False,
 ) -> list[Episode]:
     """Episodic recall with the §D room wall applied as ranking, not scope.
 
@@ -87,8 +95,11 @@ async def recall_room_ranked(
     wins over the construction snapshot, ``legacy`` carve-out included),
     so wall and boost can never drift on what "same room" means.
 
-    Returns rows in boosted-rank order.  Never bumps ``access_count`` —
-    see the module docstring for why that is load-bearing.
+    Returns rows in boosted-rank order.  ``reinforce=False`` (default —
+    the shadow caller) never bumps ``access_count``; ``reinforce=True``
+    (the live prompt path since the PR 4 promotion) applies the same
+    access bump as :meth:`EpisodicMemory.recall` — see the module
+    docstring for why the split is load-bearing.
     """
     if limit < 1:
         raise ValueError(f"limit must be >= 1, got {limit}")
@@ -125,8 +136,25 @@ async def recall_room_ranked(
             principal_id=active_principal, epoch_id=active_epoch,
         )
 
-    return [
+    episodes = [
         ep
         for ep in (row_to_episode(row) for row in rows)
         if ep.summary != SUMMARY_PENDING_TEXT
     ]
+    if reinforce and episodes:
+        # Mirror ``EpisodicMemory.recall``'s bump exactly (UPDATE + the
+        # in-memory object refresh) so the promoted live path keeps the
+        # pre-promotion reinforcement contract byte-for-byte.
+        now = time.time()
+        ids = [e.id for e in episodes]
+        placeholders = ",".join("?" for _ in ids)
+        await db.execute(
+            f"UPDATE episodes SET access_count = access_count + 1, "
+            f"last_accessed_at = ? WHERE id IN ({placeholders})",
+            [now, *ids],
+        )
+        await db.commit()
+        for ep in episodes:
+            ep.access_count += 1
+            ep.last_accessed_at = now
+    return episodes

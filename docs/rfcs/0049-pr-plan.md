@@ -30,8 +30,8 @@ This plan covers Phase 1 across **5 PRs**:
 |----|------|--------|--------|-----------|--------|
 | 1 | capture: `topic.*` predicates + extractor + recall seeding + blast-radius review | `feature/v0312-rfc0049-post-gate-topic-capture` | ✅ Merged | [#781](https://github.com/mkhomutov/Persatrix/pull/781) | 2026-07-27 |
 | 2 | L2 fact widening, SHADOW (0031 fact-scope amendment) | `feature/v0312-rfc0049-post-gate-l2-widening` | ✅ Merged | [#782](https://github.com/mkhomutov/Persatrix/pull/782) | 2026-07-27 |
-| 3 | L1 room-first ranking, SHADOW (L1 amendment) | `feature/v0312-rfc0049-post-gate-l1-ranking` | 🔀 PR open | — | — |
-| 4 | measurement gate → live flip (or documented shadow-ship) | `feature/v0312-rfc0049-post-gate-promotion` | ⬜ | — | — |
+| 3 | L1 room-first ranking, SHADOW (L1 amendment) | `feature/v0312-rfc0049-post-gate-l1-ranking` | ✅ Merged | [#783](https://github.com/mkhomutov/Persatrix/pull/783) | 2026-07-27 |
+| 4 | measurement gate → live flip (verdict GREEN — both widenings LIVE) | `feature/v0312-rfc0049-post-gate-promotion` | 🔀 PR open | — | — |
 | 5 | closeout: MT + docs + ISSUE-0084 close + RFC flip | `feature/v0312-rfc0049-closeout` | ⬜ | — | — |
 
 **Status legend**: ⬜ Not started · 🔄 In progress · 🔀 PR open · ✅ Merged
@@ -89,6 +89,8 @@ RFC 0037 PR 5 on main (§D gate + §F filter)                       ══ MERGE
 - Run the shadow verdict: golden-trace evaluation (RFC 0044) of prompt quality under the RFC 0017 injection budget + dementia-test continuity on the room-first goldens.
 - **Green** → flip L1+L2 shadow → live (small, config-flip-shaped diff) + the room-axis integration eval (the L1 amendment's EVAL follow-up).
 - **Red** → v0.3.12 ships shadow-only; the flip criterion and the failing measurement are documented in the release notes and a tracked issue — the release does not block ([master plan §Risk](../v0.3.12-plan.md#risk-and-mitigations)).
+
+**As-implemented (verdict GREEN — both widenings promoted).** The measurement consumer is `evaluators/shadow_measurement.py` (three criteria over the `tier`-keyed `shadow_traces`, both withhold fields read: `label_integrity` / `bounded_volume` / `continuity`); the measurement seed is `EVAL-MEMORY-002` (the scenario-2 DM→standup arc, shadow-pinned via the new per-recipe `setup.memory` override + per-interaction `room:` driver extension), and the recorded verdict — 2 gate-admitted cross-room candidates, 0 withheld, 0 unknown-label, goldens 4/4 with `EVAL-MEMORY-001` byte-identical un-re-recorded — is re-executed on every CI run by `tests/integration/test_cross_room_seed_replay.py`. The flip: `cross_room: live` default on both knobs (one widened read per turn; live episodic reinforces; wall/boost guard at the query helpers), and the room-axis integration eval is `EVAL-MEMORY-003` (load-bearing via the shadow-pinned-replay cassette-miss strip test). Promotion details live in the two amendments' Promotion sections.
 
 ## PR 5 — `feature/v0312-rfc0049-closeout`
 
