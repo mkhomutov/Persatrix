@@ -152,12 +152,18 @@ def _apply_seed_state(config: dict[str, Any], seed_state: dict[str, Any], *, per
 
 
 class _ShadowTraceHandler(logging.Handler):
-    """Collects the structured payload off each shadow log record."""
+    """Collects the structured payload off each shadow log record.
 
-    def __init__(self, attr: str) -> None:
+    ``traces`` may be shared across handlers (RFC 0049 PR 3: one handler
+    per shadow logger, one merged stream) — records append in emission
+    order, so a run's L2 (facts) and L1 (episodes) traces interleave
+    chronologically; consumers partition on each payload's ``tier`` key.
+    """
+
+    def __init__(self, attr: str, traces: list[dict[str, Any]]) -> None:
         super().__init__(level=logging.INFO)
         self._attr = attr
-        self.traces: list[dict[str, Any]] = []
+        self.traces = traces
 
     def emit(self, record: logging.LogRecord) -> None:
         payload = getattr(record, self._attr, None)
@@ -167,36 +173,43 @@ class _ShadowTraceHandler(logging.Handler):
 
 @contextmanager
 def capture_shadow_traces() -> Iterator[list[dict[str, Any]]]:
-    """Capture RFC 0049 L2 cross-room shadow traces for the block's duration.
+    """Capture RFC 0049 cross-room shadow traces for the block's duration.
 
-    Attaches a collecting handler directly to the runtime's shadow logger
-    (``agents.persona_runtime.facts_shadow``) and — because a handler only
-    sees records the logger's effective level admits — temporarily lowers
-    that logger to ``INFO`` when the ambient config would filter the
-    trace. Both are restored on exit, so the harness never perturbs the
-    process's logging outside the run. Shadow traces are the measurement
-    input for the RFC 0049 PR 4 shadow→live promotion gate; the runner
-    threads the captured list into the report artifact.
+    Attaches a collecting handler directly to each of the runtime's
+    shadow loggers — ``agents.persona_runtime.facts_shadow`` (L2, PR 2)
+    and ``agents.persona_runtime.episodes_shadow`` (L1, PR 3) — and,
+    because a handler only sees records the logger's effective level
+    admits, temporarily lowers each to ``INFO`` when the ambient config
+    would filter the trace. Both are restored on exit, so the harness
+    never perturbs the process's logging outside the run. Shadow traces
+    are the measurement input for the RFC 0049 PR 4 shadow→live
+    promotion gate; the runner threads the captured (merged, ``tier``-
+    keyed) list into the report artifact.
 
-    The runtime import is deferred (module convention: ``agents`` loads
-    only on the driver paths, never from ``import evaluators``).
+    The runtime imports are deferred (module convention: ``agents``
+    loads only on the driver paths, never from ``import evaluators``).
     """
-    from agents.persona_runtime.facts_shadow import (  # noqa: PLC0415
-        SHADOW_LOGGER_NAME,
-        SHADOW_TRACE_ATTR,
+    from agents.persona_runtime import (  # noqa: PLC0415
+        episodes_shadow,
+        facts_shadow,
     )
 
-    shadow_logger = logging.getLogger(SHADOW_LOGGER_NAME)
-    handler = _ShadowTraceHandler(SHADOW_TRACE_ATTR)
-    prev_level = shadow_logger.level
-    shadow_logger.addHandler(handler)
-    if shadow_logger.getEffectiveLevel() > logging.INFO:
-        shadow_logger.setLevel(logging.INFO)
+    traces: list[dict[str, Any]] = []
+    attached: list[tuple[logging.Logger, logging.Handler, int]] = []
     try:
-        yield handler.traces
+        for mod in (facts_shadow, episodes_shadow):
+            shadow_logger = logging.getLogger(mod.SHADOW_LOGGER_NAME)
+            handler = _ShadowTraceHandler(mod.SHADOW_TRACE_ATTR, traces)
+            prev_level = shadow_logger.level
+            shadow_logger.addHandler(handler)
+            if shadow_logger.getEffectiveLevel() > logging.INFO:
+                shadow_logger.setLevel(logging.INFO)
+            attached.append((shadow_logger, handler, prev_level))
+        yield traces
     finally:
-        shadow_logger.removeHandler(handler)
-        shadow_logger.setLevel(prev_level)
+        for attached_logger, attached_handler, level in attached:
+            attached_logger.removeHandler(attached_handler)
+            attached_logger.setLevel(level)
 
 
 def _collect_events() -> list[dict[str, Any]]:
@@ -276,10 +289,11 @@ class PersonaRuntimeDriver:
         # user turn is still delivered (the conversation advances); only asserted
         # replies occupy an output slot.
         last_reply = ""
-        # RFC 0049 PR 2 — capture the runtime's L2 cross-room shadow log for
-        # the run: the traces ride the EvalRun (and the report artifact) as
-        # the PR 4 measurement input. Single-room recipes capture [] — the
-        # shadow pass emits nothing when the cross-room delta is empty.
+        # RFC 0049 PR 2/PR 3 — capture the runtime's cross-room shadow logs
+        # (L2 facts + L1 episodes, ``tier``-keyed) for the run: the traces
+        # ride the EvalRun (and the report artifact) as the PR 4 measurement
+        # input. Single-room recipes capture [] — the shadow passes emit
+        # nothing when the cross-room delta is empty.
         shadow_traces: list[dict[str, Any]] = []
         try:
             await agent.initialize_memory()  # inside the try so a partial init still closes

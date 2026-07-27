@@ -177,6 +177,9 @@ class TestEmitFactsShadow:
         fact_id = await _seed_fact(fact_store)
         await _emit(fact_store, _channel_event())
         (trace,) = _traces(shadow_log)
+        # RFC 0049 PR 3: the merged harness stream is partitioned on the
+        # ``tier`` key — the facts trace must self-identify.
+        assert trace["tier"] == "facts"
         assert [c["fact_id"] for c in trace["candidates"]] == [fact_id]
         candidate = trace["candidates"][0]
         assert candidate["session_id"] == "room-a"

@@ -33,7 +33,7 @@ from ._episodic_agent_state import (
 from ._epoch_filter import epoch_eq_clause
 from ._migration_protection import PROTECTION_LEVEL_DEFAULT
 from ._principal_filter import principal_eq_clause
-from ._session_filter import session_in_clause
+from ._session_filter import session_boost_expr, session_in_clause
 from .episode_types import (
     _EPISODE_SELECT_ALIASED,
     EPISODE_SELECT,
@@ -140,6 +140,7 @@ async def recall_fts5(
     min_score: float | None = None,
     *,
     sessions: list[str] | None = None,
+    boost_sessions: list[str] | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
     epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> list[aiosqlite.Row]:
@@ -150,6 +151,12 @@ async def recall_fts5(
     PR 2) is a resolved list from
     :func:`agents.memory._session_filter._resolve_session_list` — ``None``
     is the ``"*"`` no-filter mode.
+
+    ``boost_sessions`` (RFC 0049 L1 amendment) applies the room-first
+    ranking multiplier (:func:`session_boost_expr`) to the composite
+    score instead of a WHERE wall — pass it with ``sessions=None``; the
+    either-wall-or-boost contract is enforced by
+    :func:`agents.memory.episodic_room_ranked.recall_room_ranked`.
 
     ``principal_id`` (ISSUE-0081 PR 3) is the resolved active tenant; the
     predicate is unconditional strict equality (no carve-out, no
@@ -163,6 +170,9 @@ async def recall_fts5(
     so a single-world direct caller is fail-safe.
     """
     sess_clause, sess_params = session_in_clause(sessions, column="e.session_id")
+    boost_expr, boost_params = session_boost_expr(
+        boost_sessions, column="e.session_id",
+    )
     princ_clause, princ_params = principal_eq_clause(
         principal_id, column="e.principal_id",
     )
@@ -175,6 +185,7 @@ async def recall_fts5(
         # pure recency ranking so the caller still gets relevant rows.
         return await recall_recency(
             db, agent_id, limit, min_importance, sessions=sessions,
+            boost_sessions=boost_sessions,
             principal_id=principal_id, epoch_id=epoch_id,
         )
     effective_min_score = resolve_min_score(min_score)
@@ -193,13 +204,14 @@ async def recall_fts5(
               {epoch_clause}
             ORDER BY
                 (fts.rank * -1)
-                * {_SCORE_EXPR}
+                * {_SCORE_EXPR}{boost_expr}
                 DESC
             LIMIT ?
             """,
             (
                 safe_query, agent_id, min_importance, effective_min_score,
-                *sess_params, *princ_params, *epoch_params, time.time(), limit,
+                *sess_params, *princ_params, *epoch_params, time.time(),
+                *boost_params, limit,
             ),
         ) as cursor:
             return list(await cursor.fetchall())
@@ -209,7 +221,8 @@ async def recall_fts5(
         )
         return await recall_like(
             db, agent_id, query, limit, min_importance, min_score,
-            sessions=sessions, principal_id=principal_id, epoch_id=epoch_id,
+            sessions=sessions, boost_sessions=boost_sessions,
+            principal_id=principal_id, epoch_id=epoch_id,
         )
 
 
@@ -222,6 +235,7 @@ async def recall_like(
     min_score: float | None = None,  # noqa: ARG001 — LIKE matches are binary (score=1.0)
     *,
     sessions: list[str] | None = None,
+    boost_sessions: list[str] | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
     epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> list[aiosqlite.Row]:
@@ -229,10 +243,13 @@ async def recall_like(
 
     Escapes ``%`` / ``_`` so they match literally.  ``min_score`` is
     signature-only — LIKE matches are binary, every match scores ``1.0``
-    per RFC 0017 §C.  ``sessions`` / ``principal_id`` / ``epoch_id`` —
-    see :func:`recall_fts5`.
+    per RFC 0017 §C.  ``sessions`` / ``boost_sessions`` /
+    ``principal_id`` / ``epoch_id`` — see :func:`recall_fts5`.
     """
     sess_clause, sess_params = session_in_clause(sessions, column="session_id")
+    boost_expr, boost_params = session_boost_expr(
+        boost_sessions, column="session_id",
+    )
     princ_clause, princ_params = principal_eq_clause(
         principal_id, column="principal_id",
     )
@@ -252,13 +269,14 @@ async def recall_like(
           {princ_clause}
           {epoch_clause}
         ORDER BY
-            {_SCORE_EXPR_BARE}
+            {_SCORE_EXPR_BARE}{boost_expr}
             DESC
         LIMIT ?
         """,
         (
             agent_id, min_importance, pattern, pattern,
-            *sess_params, *princ_params, *epoch_params, time.time(), limit,
+            *sess_params, *princ_params, *epoch_params, time.time(),
+            *boost_params, limit,
         ),
     ) as cursor:
         return list(await cursor.fetchall())
@@ -271,18 +289,22 @@ async def recall_recency(
     min_importance: float,
     *,
     sessions: list[str] | None = None,
+    boost_sessions: list[str] | None = None,
     principal_id: str = DEFAULT_PRINCIPAL_ID,
     epoch_id: str = DEFAULT_EPOCH_ID,
 ) -> list[aiosqlite.Row]:
     """No query text — rank by importance x access x recency only.
 
-    ``sessions`` / ``principal_id`` / ``epoch_id`` — see
-    :func:`recall_fts5`.  The persona-runtime channel-history tier hits
-    this path with an empty query, so this is the load-bearing path for
-    closing F-3 (and the ISSUE-0081 / ISSUE-0085 cross-axis leaks) on the
-    empty-query surface.
+    ``sessions`` / ``boost_sessions`` / ``principal_id`` / ``epoch_id``
+    — see :func:`recall_fts5`.  The persona-runtime channel-history tier
+    hits this path with an empty query, so this is the load-bearing path
+    for closing F-3 (and the ISSUE-0081 / ISSUE-0085 cross-axis leaks)
+    on the empty-query surface.
     """
     sess_clause, sess_params = session_in_clause(sessions, column="session_id")
+    boost_expr, boost_params = session_boost_expr(
+        boost_sessions, column="session_id",
+    )
     princ_clause, princ_params = principal_eq_clause(
         principal_id, column="principal_id",
     )
@@ -299,13 +321,13 @@ async def recall_recency(
           {princ_clause}
           {epoch_clause}
         ORDER BY
-            {_SCORE_EXPR_BARE}
+            {_SCORE_EXPR_BARE}{boost_expr}
             DESC
         LIMIT ?
         """,
         (
             agent_id, min_importance, *sess_params, *princ_params,
-            *epoch_params, time.time(), limit,
+            *epoch_params, time.time(), *boost_params, limit,
         ),
     ) as cursor:
         return list(await cursor.fetchall())

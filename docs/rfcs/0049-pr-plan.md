@@ -29,8 +29,8 @@ This plan covers Phase 1 across **5 PRs**:
 | PR | Step | Branch | Status | GitHub PR | Merged |
 |----|------|--------|--------|-----------|--------|
 | 1 | capture: `topic.*` predicates + extractor + recall seeding + blast-radius review | `feature/v0312-rfc0049-post-gate-topic-capture` | ✅ Merged | [#781](https://github.com/mkhomutov/Persatrix/pull/781) | 2026-07-27 |
-| 2 | L2 fact widening, SHADOW (0031 fact-scope amendment) | `feature/v0312-rfc0049-post-gate-l2-widening` | 🔀 PR open | — | — |
-| 3 | L1 room-first ranking, SHADOW (L1 amendment) | `feature/v0312-rfc0049-post-gate-l1-ranking` | ⬜ | — | — |
+| 2 | L2 fact widening, SHADOW (0031 fact-scope amendment) | `feature/v0312-rfc0049-post-gate-l2-widening` | ✅ Merged | [#782](https://github.com/mkhomutov/Persatrix/pull/782) | 2026-07-27 |
+| 3 | L1 room-first ranking, SHADOW (L1 amendment) | `feature/v0312-rfc0049-post-gate-l1-ranking` | 🔀 PR open | — | — |
 | 4 | measurement gate → live flip (or documented shadow-ship) | `feature/v0312-rfc0049-post-gate-promotion` | ⬜ | — | — |
 | 5 | closeout: MT + docs + ISSUE-0084 close + RFC flip | `feature/v0312-rfc0049-closeout` | ⬜ | — | — |
 

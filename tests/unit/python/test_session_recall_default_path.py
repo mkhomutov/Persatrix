@@ -61,6 +61,13 @@ from agents.memory.shared_pool import (
 # is held for that module by
 # ``test_facts_shadow.py::TestShadowNeverEntersPrompt`` instead of by
 # this source scan.
+# ``episodes_shadow.py`` + ``episodic_room_ranked.py`` (RFC 0049 PR 3)
+# are the L1 twin of that carve-out: the room-ranked read widens the
+# session axis (no wall, boost-only) for the episodic SHADOW pass,
+# side-effect-free, sole output a log trace — F-3 held by
+# ``test_episodes_shadow.py::TestShadowNeverEntersPrompt``.  The live
+# prompt path in ``memory_context.py`` (on this list) still calls
+# ``recall(sessions=None)`` — the wall — until the PR 4 flip.
 PROMPT_CONTEXT_RECALL_MODULES = (
     Path("agents/persona_runtime/memory_context.py"),
     Path("agents/persona_runtime/channel_history.py"),

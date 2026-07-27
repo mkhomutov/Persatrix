@@ -220,6 +220,11 @@ async def emit_facts_shadow(
         gate = TurnInjectionGate(acting=acting, agent_id=agent_id)
         candidates = gate.filter_entries("facts", delta, id_attr="fact_id")
         trace = {
+            # RFC 0049 PR 3: the harness merges facts + episodes shadow
+            # records into one ``shadow_traces`` stream — the ``tier`` key
+            # is how the PR 4 measurement partitions L2 from L1 (an
+            # all-withheld trace has no candidate keys to tell them apart).
+            "tier": "facts",
             "agent_id": agent_id,
             "acting": acting,
             "candidates": [
