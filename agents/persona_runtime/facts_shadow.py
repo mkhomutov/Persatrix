@@ -112,7 +112,9 @@ def resolve_facts_cross_room(config: dict) -> str:
     raw = facts_cfg.get("cross_room")
     if raw is None:
         return DEFAULT_FACTS_CROSS_ROOM
-    if raw not in CROSS_ROOM_MODES:
+    # ``isinstance`` narrows the untyped config value for mypy AND folds
+    # non-str garbage into the same loud rejection as an unknown mode.
+    if not isinstance(raw, str) or raw not in CROSS_ROOM_MODES:
         raise ValueError(
             f"memory.facts.cross_room must be one of "
             f"{sorted(CROSS_ROOM_MODES)}, got {raw!r}",
